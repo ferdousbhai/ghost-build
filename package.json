@@ -15,6 +15,7 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.63",
     "@cloudflare/ai-chat": "^0.6.2",
     "@cloudflare/shell": "^0.3.6",
     "@cloudflare/think": "^0.5.3",

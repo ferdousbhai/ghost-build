@@ -3,3 +3,12 @@ export type BuilderMessage = {
   title: string
   body: string
 }
+
+export type AgentStreamEvent =
+  | {
+      type: 'status' | 'chunk' | 'error'
+      message: string
+    }
+  | {
+      type: 'done'
+    }
