@@ -32,7 +32,7 @@ web apps.
 - Stripe Projects funded actions are user-owned. Each user connects their own
   Stripe Project, and GhostBuild stores only signed connection metadata and
   approval state.
-- Stripe Projects env: `STRIPE_PROJECTS_CONNECT_URL` and
+- Stripe Projects env: `STRIPE_PROJECTS_HOSTED_CONNECT_URL` and
   `STRIPE_PROJECTS_COOKIE_SECRET` or the shared `CODEX_OAUTH_COOKIE_SECRET` /
   `BETTER_AUTH_SECRET`.
 - Skills: project Cloudflare skill in `.codex/skills/cloudflare`.

@@ -1273,7 +1273,7 @@ describe('Stripe Projects funding connection', () => {
     const response = await createStripeProjectsConnectResponse(
       new Request('https://ghost.test/api/stripe-projects/connect'),
       {
-        connectUrl: 'https://projects.dev/connect',
+        hostedConnectUrl: 'https://projects.dev/connect',
         cookieSecret: 'test-secret',
       },
     )

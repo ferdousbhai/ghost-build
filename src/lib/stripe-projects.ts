@@ -36,7 +36,7 @@ export type StripeProjectsConnection = Extract<
 >
 
 export type StripeProjectsConfig = {
-  connectUrl?: string
+  hostedConnectUrl?: string
   cookieSecret?: string
 }
 
@@ -58,12 +58,12 @@ export async function createStripeProjectsConnectResponse(
   request: Request,
   config = buildStripeProjectsConfig(),
 ) {
-  if (!config.connectUrl) {
+  if (!config.hostedConnectUrl) {
     return Response.json(
       {
         status: 'unconfigured',
         message:
-          'Stripe Projects hosted connection URL is not configured for this deployment.',
+          'Stripe Projects hosted connect URL is not configured for this deployment.',
         defaultProviderSpendLimitUsd,
       } satisfies StripeProjectsConnectionStatus,
       { status: 501 },
@@ -71,7 +71,7 @@ export async function createStripeProjectsConnectResponse(
   }
 
   const state = crypto.randomUUID()
-  const connectUrl = new URL(config.connectUrl)
+  const connectUrl = new URL(config.hostedConnectUrl)
   const origin = new URL(request.url).origin
 
   connectUrl.searchParams.set(
@@ -213,7 +213,9 @@ function buildStripeProjectsConfig(): StripeProjectsConfig {
   const env = process.env as Record<string, string | undefined>
 
   return {
-    connectUrl: env.STRIPE_PROJECTS_CONNECT_URL,
+    hostedConnectUrl:
+      env.STRIPE_PROJECTS_HOSTED_CONNECT_URL ??
+      env.STRIPE_PROJECTS_CONNECT_URL,
     cookieSecret:
       env.STRIPE_PROJECTS_COOKIE_SECRET ??
       env.CODEX_OAUTH_COOKIE_SECRET ??

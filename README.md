@@ -60,6 +60,8 @@ configured in Cloudflare for the deployed Worker.
 
 Stripe Projects funded actions need:
 
-- `STRIPE_PROJECTS_CONNECT_URL`: hosted Stripe Projects connection URL.
+- `STRIPE_PROJECTS_HOSTED_CONNECT_URL`: hosted Stripe Projects onboarding URL
+  for starting the per-user connection flow. This is a shared entrypoint, not a
+  shared Stripe Project.
 - `STRIPE_PROJECTS_COOKIE_SECRET`: signing secret for Stripe Projects cookies.
   If omitted, `CODEX_OAUTH_COOKIE_SECRET` or `BETTER_AUTH_SECRET` is reused.
