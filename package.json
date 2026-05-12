@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.63",
+    "@better-auth/memory-adapter": "^1.6.10",
     "@cloudflare/ai-chat": "^0.6.2",
     "@cloudflare/shell": "^0.3.6",
     "@cloudflare/think": "^0.5.3",
@@ -30,6 +31,7 @@
     "@tanstack/router-plugin": "^1.132.0",
     "agents": "^0.12.3",
     "ai": "^6.0.177",
+    "better-auth": "^1.6.10",
     "lucide-react": "^0.545.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

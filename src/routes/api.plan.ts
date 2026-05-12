@@ -4,12 +4,10 @@ import { RpcTarget } from 'cloudflare:workers'
 import { getAgentByName } from 'agents'
 import { buildAgentPlan, type AgentPlanRequest } from '#/lib/agent'
 import { encodeAgentRunEvent, type AgentRunEvent } from '#/lib/agent-stream'
-import {
-  readCodexAccountFromRequest,
-  readCodexTokenFromRequest,
-} from '#/lib/codex-oauth'
+import { requireAppSession } from '#/lib/app-auth'
 import { GhostBuildAgent, type GhostBuildEnv } from '#/lib/ghost-agent'
 import { resolveModelRuntimeAuth } from '#/lib/model-auth'
+import { readServerOpenAiApiKey } from '#/lib/server-model-auth'
 
 export const Route = createFileRoute('/api/plan')({
   server: {
@@ -20,23 +18,15 @@ export const Route = createFileRoute('/api/plan')({
         > &
           PlanRunCredentials
 
-        const codexAccessToken = await readCodexTokenFromRequest(request)
-        const codexAccount = readCodexAccountFromRequest(request)
+        const auth = await requireAppSession(request)
 
-        if (!codexAccessToken) {
-          return Response.json(
-            {
-              error:
-                'ChatGPT/Codex sign-in is required for Codex model auth.',
-            },
-            { status: 401 },
-          )
+        if (auth.response) {
+          return auth.response
         }
 
         return streamAgentRun({
           ...payload,
-          codexAccessToken,
-          codexAccount,
+          openAiApiKey: readServerOpenAiApiKey(),
         })
       },
     },
@@ -44,8 +34,7 @@ export const Route = createFileRoute('/api/plan')({
 })
 
 type PlanRunCredentials = {
-  codexAccessToken?: string
-  codexAccount?: Parameters<typeof resolveModelRuntimeAuth>[0]['codexAccount']
+  openAiApiKey?: string
 }
 
 function streamAgentRun(payload: Partial<AgentPlanRequest> & PlanRunCredentials) {
@@ -87,8 +76,7 @@ async function runAgentTurn(
   emit: (event: AgentRunEvent) => Promise<void>,
 ) {
   const runtimeAuth = resolveModelRuntimeAuth({
-    codexAccessToken: payload.codexAccessToken,
-    codexAccount: payload.codexAccount,
+    openAiApiKey: payload.openAiApiKey,
   })
 
   await emit({
@@ -106,7 +94,7 @@ async function runAgentTurn(
     message: 'Connected durable GhostBuild agent and workspace.',
   })
 
-  await agent.setCodexOAuthTokenForNextTurn(runtimeAuth.accessToken)
+  await agent.setOpenAiApiKeyForNextTurn(runtimeAuth.apiKey)
   await agent.setReasoningEffortForNextTurn(payload.reasoningEffort ?? 'low')
 
   const callback = new PlanStreamCallback(emit)
@@ -138,7 +126,7 @@ function formatAgentPrompt(input: Partial<AgentPlanRequest>) {
     `Audience: ${request.audience}`,
     `Deployment target: ${request.deploymentTarget}`,
     `Model: ${request.model}`,
-    'Model auth: ChatGPT/Codex OAuth',
+    'Model auth: GhostBuild server-side OpenAI API key',
     `Reasoning effort: ${request.reasoningEffort}`,
     `Goal: ${input.goal?.objective?.trim() || request.idea}`,
     `Success criteria: ${(input.goal?.successCriteria ?? []).join('; ') || 'derive concrete acceptance checks for the Cloudflare web app'}`,

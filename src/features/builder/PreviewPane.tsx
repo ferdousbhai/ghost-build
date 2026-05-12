@@ -12,7 +12,7 @@ import {
 } from '#/lib/cloudflare-status'
 import type { DeployApprovalRecord } from '#/lib/deploy-approval'
 import type { GeneratedWorkerApp } from '#/lib/generated-worker-app'
-import type { CodexAuthState } from '#/lib/model-auth'
+import type { AppAuthState } from '#/lib/model-auth'
 import type { StripeProjectsConnectionStatus } from '#/lib/stripe-projects'
 import {
   defaultCapabilities,
@@ -24,7 +24,7 @@ import {
 type PreviewPaneProps = {
   cloudflareStatus: CloudflareConnectionStatus
   cloudflareMcpStatus?: CloudflareMcpStatus
-  codexAuthState: CodexAuthState
+  appAuthState: AppAuthState
   stripeProjectsStatus?: StripeProjectsConnectionStatus
   checkResult?: BuildCheckResult
   deployApproval?: DeployApprovalRecord
@@ -54,7 +54,7 @@ type PreviewPaneProps = {
 export function PreviewPane({
   cloudflareStatus,
   cloudflareMcpStatus = initialCloudflareMcpStatus,
-  codexAuthState,
+  appAuthState,
   stripeProjectsStatus = initialStripeProjectsStatus,
   checkResult,
   deployApproval,
@@ -100,13 +100,13 @@ export function PreviewPane({
   const [isRequestingAgentPatch, setIsRequestingAgentPatch] = useState(false)
   const [isDeployingWorker, setIsDeployingWorker] = useState(false)
   const readinessItems = buildReadinessItems(
-    codexAuthState,
+    appAuthState,
     Boolean(plan),
     cloudflareStatus,
     deployApproval,
   )
   const executionProgress = buildExecutionProgress({
-    authState: codexAuthState,
+    authState: appAuthState,
     checkResult,
     cloudflareStatus,
     deployApproval,
@@ -367,7 +367,7 @@ export function PreviewPane({
           items={
             plan?.goal.successCriteria ?? [
               'Describe the web app you want GhostBuild to build.',
-              'Connect ChatGPT/Codex before starting the run.',
+              'Sign in to GhostBuild before starting the run.',
             ]
           }
         />
@@ -610,9 +610,9 @@ export function PreviewPane({
         <span>Cloudflare-first ownership model</span>
         <strong>Your goal, your Cloudflare app</strong>
         <p>
-          GhostBuild connects through ChatGPT/Codex OAuth for model access.
-          Each user connects their own Stripe Project for funded Cloudflare
-          actions. GhostBuild stores only connection metadata and approval state.
+          GhostBuild uses server-side OpenAI API billing for model access. Each
+          user connects their own Stripe Project for funded Cloudflare actions.
+          GhostBuild stores only connection metadata and approval state.
         </p>
         <div className="capability-row">
           <StripeProjectsIcon status={stripeProjectsStatus.status} />
@@ -732,15 +732,15 @@ function ChecklistItems({ items }: { items: ReadonlyArray<string> }) {
 }
 
 function buildReadinessItems(
-  authState: CodexAuthState,
+  authState: AppAuthState,
   hasPlan: boolean,
   cloudflareStatus: CloudflareConnectionStatus,
   deployApproval?: DeployApprovalRecord,
 ) {
   return [
     authState.status === 'connected'
-      ? 'ChatGPT/Codex connected'
-      : 'ChatGPT/Codex connection required',
+      ? 'GhostBuild account connected'
+      : 'GhostBuild sign-in required',
     hasPlan ? 'Goal and Cloudflare plan drafted' : 'Goal not planned yet',
     describeCloudflareStatus(cloudflareStatus),
     cloudflareStatus.status === 'connected' &&

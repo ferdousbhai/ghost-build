@@ -15,15 +15,14 @@ web apps.
 - Product strategy: be strictly better than generic Codex for Cloudflare web app
   builders by narrowing the scope to goal-driven web apps on the full
   Cloudflare stack.
-- Auth: ChatGPT/Codex OAuth.
+- Auth: Better Auth with Google and GitHub.
 - Model: GPT-5.5.
 - Reasoning effort: low by default.
-- Model auth: ChatGPT/Codex OAuth for eligible Codex plan allowance.
-- Codex OAuth routes: `/api/codex-auth/start`, `/api/codex-auth/callback`,
-  `/api/codex-auth/status`, `/api/codex-auth/logout`.
-- Codex OAuth env: `CODEX_OAUTH_CLIENT_ID`, `CODEX_OAUTH_CLIENT_SECRET`,
-  `CODEX_OAUTH_AUTHORIZE_URL`, `CODEX_OAUTH_TOKEN_URL`,
-  `CODEX_OAUTH_COOKIE_SECRET` or `BETTER_AUTH_SECRET`.
+- Model auth: GhostBuild server-side `OPENAI_API_KEY`.
+- App auth routes: Better Auth under `/api/auth/*`, plus wrapper status/logout
+  routes under `/api/app-auth/*`.
+- App auth env: `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`,
+  `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`.
 - Runtime request fields keep `model` and `reasoningEffort` separate. Do not add
   API-key fallback paths in the first iteration.
 - MCP: only Cloudflare API MCP at `https://mcp.cloudflare.com/mcp`.
@@ -33,8 +32,7 @@ web apps.
   Stripe Project, and GhostBuild stores only signed connection metadata and
   approval state.
 - Stripe Projects env: `STRIPE_PROJECTS_HOSTED_CONNECT_URL` and
-  `STRIPE_PROJECTS_COOKIE_SECRET` or the shared `CODEX_OAUTH_COOKIE_SECRET` /
-  `BETTER_AUTH_SECRET`.
+  `STRIPE_PROJECTS_COOKIE_SECRET` or the shared `BETTER_AUTH_SECRET`.
 - Skills: project Cloudflare skill in `.codex/skills/cloudflare`.
 - Goal model: every user turn may update the active goal. Keep objective,
   success criteria, status, and next concrete Cloudflare build step aligned.

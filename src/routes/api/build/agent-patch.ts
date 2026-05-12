@@ -1,19 +1,18 @@
 import { createFileRoute } from '@tanstack/react-router'
 import type { BuildCheckResult } from '#/lib/build-checks'
-import { readCodexTokenFromRequest } from '#/lib/codex-oauth'
+import { requireAppSession } from '#/lib/app-auth'
 import { proposeAndApplyGeneratedWorkerPatches } from '#/lib/generated-worker-agent-patch'
 import type { GeneratedWorkerApp } from '#/lib/generated-worker-app'
+import { readServerOpenAiApiKey } from '#/lib/server-model-auth'
 
 export const Route = createFileRoute('/api/build/agent-patch')({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const codexAccessToken = await readCodexTokenFromRequest(request)
+        const auth = await requireAppSession(request)
 
-        if (!codexAccessToken) {
-          return Response.json({ error: 'Codex sign-in is required.' }, {
-            status: 401,
-          })
+        if (auth.response) {
+          return auth.response
         }
 
         const payload = (await request.json().catch(() => ({}))) as {
@@ -33,9 +32,9 @@ export const Route = createFileRoute('/api/build/agent-patch')({
           return Response.json({
             patchResult: await proposeAndApplyGeneratedWorkerPatches({
               checkResult: payload.checkResult,
-              codexAccessToken,
               generatedApp: payload.generatedApp,
               goal: payload.goal,
+              openAiApiKey: readServerOpenAiApiKey(),
             }),
           })
         } catch (error) {

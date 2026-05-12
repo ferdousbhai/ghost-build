@@ -1,13 +1,15 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { env } from 'cloudflare:workers'
 import { getAgentByName } from 'agents'
-import { readCodexTokenFromRequest } from '#/lib/codex-oauth'
+import { requireAppSession } from '#/lib/app-auth'
 import { type CloudflareMcpStatus } from '#/lib/cloudflare-mcp'
 import { GhostBuildAgent, type GhostBuildEnv } from '#/lib/ghost-agent'
 
 export async function handleCloudflareMcpStatus(request: Request) {
-  if (!(await readCodexTokenFromRequest(request))) {
-    return Response.json({ error: 'Codex sign-in is required.' }, { status: 401 })
+  const auth = await requireAppSession(request)
+
+  if (auth.response) {
+    return auth.response
   }
 
   const sessionId = new URL(request.url).searchParams.get('sessionId')

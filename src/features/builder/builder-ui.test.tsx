@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildAgentPlan, type AgentPlanRequest } from '#/lib/agent'
 import type { CloudflareConnectionStatus } from '#/lib/cloudflare-status'
 import type { CloudflareMcpStatus } from '#/lib/cloudflare-mcp'
-import type { CodexAuthState } from '#/lib/model-auth'
+import type { AppAuthState } from '#/lib/model-auth'
 import { initialAgentRequest } from './builderConstants'
 import { IntroPanel } from './IntroPanel'
 import { MessageList } from './MessageList'
@@ -13,18 +13,18 @@ import { PromptComposer } from './PromptComposer'
 
 afterEach(cleanup)
 
-const disconnectedCodexAuth: CodexAuthState = {
-  mode: 'chatgpt-codex-oauth',
+const disconnectedAppAuth: AppAuthState = {
+  mode: 'better-auth',
   status: 'disconnected',
-  recoveryUrl: '/api/codex-auth/start',
+  recoveryUrl: '/api/auth/sign-in/social',
 }
 
-const connectedCodexAuth: CodexAuthState = {
-  mode: 'chatgpt-codex-oauth',
+const connectedAppAuth: AppAuthState = {
+  mode: 'better-auth',
   status: 'connected',
   account: {
     email: 'user@example.com',
-    planType: 'plus',
+    userId: 'user_123',
   },
 }
 
@@ -50,8 +50,8 @@ describe('builder UI gates', () => {
     render(
       <PromptComposer
         canSubmit={false}
-        codexAuthState={disconnectedCodexAuth}
-        hasCodexSignIn={false}
+        appAuthState={disconnectedAppAuth}
+        hasAppSignIn={false}
         hasStarted={false}
         isPending={false}
         model="gpt-5.5"
@@ -66,14 +66,14 @@ describe('builder UI gates', () => {
       'disabled',
       true,
     )
-    expect(screen.getByText(/Connect ChatGPT\/Codex/)).toBeTruthy()
+    expect(screen.getByText(/Sign in to GhostBuild/)).toBeTruthy()
   })
 
   it('disables existing-project import until real intake exists', () => {
     render(
       <IntroPanel
-        codexAuthState={disconnectedCodexAuth}
-        hasCodexSignIn={false}
+        appAuthState={disconnectedAppAuth}
+        hasAppSignIn={false}
         model="gpt-5.5"
         projectSource={initialAgentRequest.projectSource}
         reasoningEffort="low"
@@ -140,7 +140,7 @@ describe('builder UI gates', () => {
           message: 'Set CLOUDFLARE_API_TOKEN to verify Cloudflare account access.',
         }}
         cloudflareMcpStatus={authenticatingCloudflareMcp}
-        codexAuthState={connectedCodexAuth}
+        appAuthState={connectedAppAuth}
         isPending={false}
         plan={buildAgentPlan({ idea: 'A docs portal' })}
         onConnectCloudflareToken={vi.fn()}
@@ -167,7 +167,7 @@ describe('builder UI gates', () => {
       <PreviewPane
         cloudflareStatus={connectedCloudflare}
         cloudflareMcpStatus={authenticatingCloudflareMcp}
-        codexAuthState={connectedCodexAuth}
+        appAuthState={connectedAppAuth}
         isPending={false}
         plan={buildAgentPlan({ idea: 'A docs portal' })}
         onConnectCloudflareToken={vi.fn()}
@@ -194,7 +194,7 @@ describe('builder UI gates', () => {
           permissions: ['Workers Scripts Read'],
           message: 'Connected to Acme Cloudflare.',
         }}
-        codexAuthState={connectedCodexAuth}
+        appAuthState={connectedAppAuth}
         isPending={false}
         plan={buildAgentPlan({ idea: 'A docs portal' })}
         onConnectCloudflareToken={vi.fn()}
@@ -220,7 +220,7 @@ describe('builder UI gates', () => {
     render(
       <PreviewPane
         cloudflareStatus={connectedCloudflare}
-        codexAuthState={connectedCodexAuth}
+        appAuthState={connectedAppAuth}
         isPending={false}
         plan={buildAgentPlan({
           idea: 'A docs portal',
@@ -249,7 +249,7 @@ describe('builder UI gates', () => {
     render(
       <PreviewPane
         cloudflareStatus={connectedCloudflare}
-        codexAuthState={connectedCodexAuth}
+        appAuthState={connectedAppAuth}
         isPending={false}
         plan={buildAgentPlan({ idea: 'A paid docs portal' })}
         stripeProjectsStatus={{
@@ -303,7 +303,7 @@ describe('builder UI gates', () => {
     render(
       <PreviewPane
         cloudflareStatus={connectedCloudflare}
-        codexAuthState={connectedCodexAuth}
+        appAuthState={connectedAppAuth}
         isPending={false}
         plan={buildAgentPlan({ idea: 'A paid docs portal' })}
         onConnectCloudflareToken={vi.fn()}
@@ -336,7 +336,7 @@ describe('builder UI gates', () => {
           permissions: [],
           message: 'Connect a Cloudflare API token.',
         }}
-        codexAuthState={connectedCodexAuth}
+        appAuthState={connectedAppAuth}
         isPending={false}
         onConnectCloudflareToken={onConnectCloudflareToken}
         onGenerateWorkerApp={vi.fn()}
@@ -360,7 +360,7 @@ describe('builder UI gates', () => {
     render(
       <PreviewPane
         cloudflareStatus={connectedCloudflare}
-        codexAuthState={connectedCodexAuth}
+        appAuthState={connectedAppAuth}
         isPending={false}
         plan={buildAgentPlan({ idea: 'A generated portal' })}
         onConnectCloudflareToken={vi.fn()}
@@ -382,7 +382,7 @@ describe('builder UI gates', () => {
     render(
       <PreviewPane
         cloudflareStatus={connectedCloudflare}
-        codexAuthState={connectedCodexAuth}
+        appAuthState={connectedAppAuth}
         isPending={false}
         plan={buildAgentPlan({ idea: 'A pipeline portal' })}
         onConnectCloudflareToken={vi.fn()}
@@ -405,7 +405,7 @@ describe('builder UI gates', () => {
     render(
       <PreviewPane
         cloudflareStatus={connectedCloudflare}
-        codexAuthState={connectedCodexAuth}
+        appAuthState={connectedAppAuth}
         generatedApp={{
           workerName: 'generated-portal',
           summary: 'Generated files',
@@ -444,7 +444,7 @@ describe('builder UI gates', () => {
           ],
         }}
         cloudflareStatus={connectedCloudflare}
-        codexAuthState={connectedCodexAuth}
+        appAuthState={connectedAppAuth}
         generatedApp={{
           workerName: 'generated-portal',
           summary: 'Generated files',
@@ -484,7 +484,7 @@ describe('builder UI gates', () => {
           ],
         }}
         cloudflareStatus={connectedCloudflare}
-        codexAuthState={connectedCodexAuth}
+        appAuthState={connectedAppAuth}
         generatedApp={{
           workerName: 'generated-portal',
           summary: 'Generated files',
@@ -528,7 +528,7 @@ describe('builder UI gates', () => {
           ],
         }}
         cloudflareStatus={connectedCloudflare}
-        codexAuthState={connectedCodexAuth}
+        appAuthState={connectedAppAuth}
         deployApproval={{
           id: 'approval_1',
           presetId: 'deploy',
@@ -579,7 +579,7 @@ describe('builder UI gates', () => {
     render(
       <PreviewPane
         cloudflareStatus={connectedCloudflare}
-        codexAuthState={connectedCodexAuth}
+        appAuthState={connectedAppAuth}
         deployApproval={{
           id: 'approval_1',
           presetId: 'deploy',

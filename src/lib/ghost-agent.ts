@@ -33,7 +33,7 @@ export class GhostBuildAgent extends Think<GhostBuildEnv, GhostBuildState> {
   waitForMcpConnections = { timeout: 10_000 }
   maxSteps = 12
   sendReasoning = false
-  private codexOAuthTokenForNextTurn = ''
+  private openAiApiKeyForNextTurn = ''
   private reasoningEffortForNextTurn: ReasoningEffort = 'low'
 
   async onStart() {
@@ -46,18 +46,18 @@ export class GhostBuildAgent extends Think<GhostBuildEnv, GhostBuildState> {
   }
 
   getModel(): LanguageModel {
-    const accessToken = this.codexOAuthTokenForNextTurn
-    this.codexOAuthTokenForNextTurn = ''
+    const apiKey = this.openAiApiKeyForNextTurn
+    this.openAiApiKeyForNextTurn = ''
 
-    if (!accessToken) {
-      throw new Error('ChatGPT/Codex sign-in is required for this run.')
+    if (!apiKey) {
+      throw new Error('Server-side OpenAI API key is required for this run.')
     }
 
-    return createOpenAI({ apiKey: accessToken })('gpt-5.5')
+    return createOpenAI({ apiKey })('gpt-5.5')
   }
 
-  setCodexOAuthTokenForNextTurn(accessToken: string) {
-    this.codexOAuthTokenForNextTurn = accessToken.trim()
+  setOpenAiApiKeyForNextTurn(apiKey: string) {
+    this.openAiApiKeyForNextTurn = apiKey.trim()
   }
 
   setReasoningEffortForNextTurn(reasoningEffort: ReasoningEffort) {

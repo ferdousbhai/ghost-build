@@ -23,20 +23,20 @@ import type { CloudflareConnectionStatus } from '#/lib/cloudflare-status'
 import type { DeployApprovalRecord } from '#/lib/deploy-approval'
 import type { AgentPatchResult } from '#/lib/generated-worker-agent-patch'
 import type { GeneratedWorkerApp } from '#/lib/generated-worker-app'
-import type { CodexAuthState } from '#/lib/model-auth'
+import type { AppAuthState } from '#/lib/model-auth'
 import {
-  codexAuthChangedEvent,
-  isCodexAuthConnected,
-  readCodexAuthState,
-} from '#/features/auth/localCodexAuth'
+  appAuthChangedEvent,
+  isAppAuthConnected,
+  readAppAuthState,
+} from '#/features/auth/localAppAuth'
 import { runThinkAgent } from './builderApi'
 import { initialAgentRequest } from './builderConstants'
 import type { AgentStreamEvent, BuilderMessage } from './builderTypes'
 
-const initialCodexAuthState: CodexAuthState = {
-  mode: 'chatgpt-codex-oauth',
+const initialAppAuthState: AppAuthState = {
+  mode: 'better-auth',
   status: 'disconnected',
-  recoveryUrl: '/api/codex-auth/start',
+  recoveryUrl: '/api/auth/sign-in/social',
 }
 
 const builderSessionStorageKey = 'ghostbuild.builder-session'
@@ -69,9 +69,9 @@ export function useBuilderSession() {
   const [persistedPlan, setPersistedPlan] = useState<AgentPlan | undefined>(
     () => storedBuilderSession?.plan,
   )
-  const [hasCodexSignIn, setHasCodexSignIn] = useState(false)
-  const [codexAuthState, setCodexAuthState] = useState<CodexAuthState>(
-    initialCodexAuthState,
+  const [hasAppSignIn, setHasAppSignIn] = useState(false)
+  const [appAuthState, setAppAuthState] = useState<AppAuthState>(
+    initialAppAuthState,
   )
   const [submittedPrompt, setSubmittedPrompt] = useState('')
   const [goalTimeline, setGoalTimeline] = useState<Array<BuilderMessage>>([])
@@ -122,24 +122,24 @@ export function useBuilderSession() {
   const hasStarted = Boolean(submittedPrompt || thinkRun.isPending || plan)
   const canSubmit =
     request.idea.trim().length > 0 &&
-    hasCodexSignIn &&
+    hasAppSignIn &&
     !thinkRun.isPending
 
   useEffect(() => {
-    function syncCodexAuthState() {
-      void readCodexAuthState().then((authState) => {
-        setCodexAuthState(authState)
-        setHasCodexSignIn(isCodexAuthConnected(authState))
+    function syncAppAuthState() {
+      void readAppAuthState().then((authState) => {
+        setAppAuthState(authState)
+        setHasAppSignIn(isAppAuthConnected(authState))
       })
     }
 
-    syncCodexAuthState()
-    window.addEventListener(codexAuthChangedEvent, syncCodexAuthState)
-    window.addEventListener('storage', syncCodexAuthState)
+    syncAppAuthState()
+    window.addEventListener(appAuthChangedEvent, syncAppAuthState)
+    window.addEventListener('storage', syncAppAuthState)
 
     return () => {
-      window.removeEventListener(codexAuthChangedEvent, syncCodexAuthState)
-      window.removeEventListener('storage', syncCodexAuthState)
+      window.removeEventListener(appAuthChangedEvent, syncAppAuthState)
+      window.removeEventListener('storage', syncAppAuthState)
     }
   }, [])
 
@@ -148,16 +148,16 @@ export function useBuilderSession() {
   }, [])
 
   useEffect(() => {
-    if (!hasCodexSignIn) {
+    if (!hasAppSignIn) {
       setStripeProjectsStatus(initialStripeProjectsStatus)
       return
     }
 
     void refreshStripeProjectsStatus()
-  }, [hasCodexSignIn])
+  }, [hasAppSignIn])
 
   useEffect(() => {
-    if (!hasCodexSignIn || !plan?.deployment.sessionId) {
+    if (!hasAppSignIn || !plan?.deployment.sessionId) {
       setCloudflareMcpStatus(initialCloudflareMcpStatus)
       return
     }
@@ -173,7 +173,7 @@ export function useBuilderSession() {
     return () => {
       window.removeEventListener('focus', syncCloudflareMcpStatus)
     }
-  }, [hasCodexSignIn, plan?.deployment.sessionId])
+  }, [hasAppSignIn, plan?.deployment.sessionId])
 
   useEffect(() => {
     if (storedBuilderSession) {
@@ -441,8 +441,8 @@ export function useBuilderSession() {
         accountName: cloudflareStatus.accountName,
         bindings: plan.deployment.bindings,
         confirmedBy:
-          codexAuthState.status === 'connected'
-            ? codexAuthState.account?.email || 'Codex account'
+          appAuthState.status === 'connected'
+            ? appAuthState.account?.email || 'GhostBuild user'
             : 'Unknown user',
         estimatedCost: input.estimatedCost,
         hasDestructiveAction: input.hasDestructiveAction,
@@ -1000,11 +1000,11 @@ export function useBuilderSession() {
     checkResult,
     cloudflareStatus,
     cloudflareMcpStatus,
-    codexAuthState,
+    appAuthState,
     deployApproval,
     deployResult,
     generatedApp,
-    hasCodexSignIn,
+    hasAppSignIn,
     hasStarted,
     isPending: thinkRun.isPending,
     messages,

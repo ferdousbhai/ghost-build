@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { readCodexTokenFromRequest } from '#/lib/codex-oauth'
+import { requireAppSession } from '#/lib/app-auth'
 import {
   applyGeneratedWorkerPatches,
   type GeneratedWorkerPatch,
@@ -10,10 +10,10 @@ export const Route = createFileRoute('/api/build/patch')({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        if (!(await readCodexTokenFromRequest(request))) {
-          return Response.json({ error: 'Codex sign-in is required.' }, {
-            status: 401,
-          })
+        const auth = await requireAppSession(request)
+
+        if (auth.response) {
+          return auth.response
         }
 
         const payload = (await request.json().catch(() => ({}))) as {

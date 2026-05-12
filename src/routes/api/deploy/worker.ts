@@ -7,7 +7,7 @@ import {
   readCloudflareTokenFromRequest,
   verifyCloudflareConnectionFromRequest,
 } from '#/lib/cloudflare-auth'
-import { readCodexTokenFromRequest } from '#/lib/codex-oauth'
+import { requireAppSession } from '#/lib/app-auth'
 import type { DeployApprovalRecord } from '#/lib/deploy-approval'
 import type { GeneratedWorkerApp } from '#/lib/generated-worker-app'
 
@@ -15,11 +15,11 @@ export async function handleDeployWorker(
   request: Request,
   fetcher: typeof fetch = fetch,
 ) {
-  if (!(await readCodexTokenFromRequest(request))) {
-    return Response.json({ error: 'Codex sign-in is required.' }, {
-      status: 401,
-    })
-  }
+  const auth = await requireAppSession(request)
+
+        if (auth.response) {
+          return auth.response
+        }
 
   const payload = (await request.json().catch(() => ({}))) as {
     approval?: DeployApprovalRecord

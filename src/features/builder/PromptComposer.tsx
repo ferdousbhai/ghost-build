@@ -1,11 +1,11 @@
 import { ArrowUp, Loader2, LockKeyhole } from 'lucide-react'
 import type { AgentPlanRequest } from '#/lib/agent'
-import type { CodexAuthState } from '#/lib/model-auth'
+import type { AppAuthState } from '#/lib/model-auth'
 
 type PromptComposerProps = {
   canSubmit: boolean
-  codexAuthState: CodexAuthState
-  hasCodexSignIn: boolean
+  appAuthState: AppAuthState
+  hasAppSignIn: boolean
   hasStarted: boolean
   isPending: boolean
   model: AgentPlanRequest['model']
@@ -17,8 +17,8 @@ type PromptComposerProps = {
 
 export function PromptComposer({
   canSubmit,
-  codexAuthState,
-  hasCodexSignIn,
+  appAuthState,
+  hasAppSignIn,
   hasStarted,
   isPending,
   model,
@@ -52,8 +52,8 @@ export function PromptComposer({
             {describeModelAuth(
               model,
               reasoningEffort,
-              codexAuthState,
-              hasCodexSignIn,
+              appAuthState,
+              hasAppSignIn,
             )}
           </div>
           <button
@@ -78,18 +78,14 @@ export function PromptComposer({
 function describeModelAuth(
   model: AgentPlanRequest['model'],
   reasoningEffort: AgentPlanRequest['reasoningEffort'],
-  codexAuthState: CodexAuthState,
-  hasCodexSignIn: boolean,
+  appAuthState: AppAuthState,
+  hasAppSignIn: boolean,
 ) {
-  if (codexAuthState.status === 'unsupported') {
-    return `Reconnect ChatGPT/Codex; account metadata is incomplete for ${model}`
-  }
-
-  return hasCodexSignIn
-    ? `${model} via ${connectedCodexEmail(codexAuthState)}, ${reasoningEffort} reasoning`
-    : `Connect ChatGPT/Codex for ${model}, ${reasoningEffort} reasoning`
+  return hasAppSignIn
+    ? `${model} via GhostBuild API billing for ${connectedAppEmail(appAuthState)}, ${reasoningEffort} reasoning`
+    : `Sign in to GhostBuild for ${model}, ${reasoningEffort} reasoning`
 }
 
-function connectedCodexEmail(authState: CodexAuthState) {
-  return authState.account?.email ?? 'ChatGPT/Codex'
+function connectedAppEmail(authState: AppAuthState) {
+  return authState.account?.email ?? 'signed-in user'
 }

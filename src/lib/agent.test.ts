@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { buildAgentPlan, evaluateGoalStatus } from './agent'
 import {
   encodeAgentRunEvent,
@@ -16,7 +16,7 @@ import { deployGeneratedWorkerApp } from './cloudflare-deploy'
 import {
   getBuilderSessionSnapshot,
   listBuilderSessionSnapshots,
-  ownerIdFromCodexAccount,
+  ownerIdFromAppAccount,
   summarizeBuilderSessionSnapshot,
   upsertBuilderSessionSnapshot,
 } from './builder-session-store'
@@ -36,34 +36,16 @@ import {
   sealCloudflareTokenCookieValue,
 } from './cloudflare-auth'
 import {
-  codexOAuthStateCookie,
-  codexOAuthAccountCookie,
-  codexOAuthTokenCookie,
-  codexOAuthVerifierCookie,
-  createCodexLogout,
-  createOAuthStart,
-  exchangeOAuthCallback,
-  readCodexTokenFromRequest,
-  sealCodexTokenCookieValue,
-} from './codex-oauth'
-import {
   assertDeployActionAllowed,
   createDeployApprovalRecord,
 } from './deploy-approval'
-import {
-  resolveModelRuntimeAuth,
-  summarizeCodexAuthState,
-} from './model-auth'
+import { resolveModelRuntimeAuth, summarizeAppAuthState } from './model-auth'
 import { defaultModel, normalizeReasoningEffort } from './model-catalog'
 import { assertActionAllowed, type ApprovalConfirmation } from './permissions'
 import { assertRuntimeActionAllowed } from './runtime-action-executor'
 import { generateWorkerAppFromPlan } from './generated-worker-app'
 import { proposeAndApplyGeneratedWorkerPatches } from './generated-worker-agent-patch'
 import { applyGeneratedWorkerPatches } from './generated-worker-patch'
-import { handleCodexOAuthCallback } from '../routes/api/codex-auth/callback'
-import { handleCodexOAuthLogout } from '../routes/api/codex-auth/logout'
-import { handleCodexOAuthStart } from '../routes/api/codex-auth/start'
-import { handleCodexOAuthStatus } from '../routes/api/codex-auth/status'
 import { handleCloudflareConnect } from '../routes/api/cloudflare/connect'
 import { handleCloudflareDisconnect } from '../routes/api/cloudflare/disconnect'
 import { handleCloudflareStatus } from '../routes/api/cloudflare/status'
@@ -101,12 +83,12 @@ describe('buildAgentPlan', () => {
       'Create or link a Cloudflare account after user authorization',
     )
     expect(plan.defaults.credentialStorage).toContain(
-      'ChatGPT/Codex token material is encrypted in HttpOnly cookies',
+      'GhostBuild app sessions are managed by Better Auth',
     )
     expect(plan.defaults.paymentFlow).toContain(
       'Cloudflare and Stripe handle payment collection for paid infrastructure',
     )
-    expect(plan.defaults.modelProvider).toContain('ChatGPT/Codex sign-in')
+    expect(plan.defaults.modelProvider).toContain('server-side OpenAI API billing')
     expect(plan.deployment.sessionId).toMatch(/^session_/)
     expect(plan.deployment.projectId).toMatch(/^project_/)
     expect(plan.phases).toHaveLength(7)
@@ -119,7 +101,7 @@ describe('buildAgentPlan', () => {
       title: 'Connect model auth',
       status: 'blocked',
     })
-    expect(plan.phases[1].detail).toContain('Codex plan allowance')
+    expect(plan.phases[1].detail).toContain('server-side OpenAI API billing')
     expect(plan.phases[2]).toMatchObject({
       title: 'Set model policy',
       status: 'ready',
@@ -165,9 +147,9 @@ describe('build execution progress', () => {
     const plan = buildAgentPlan({ idea: 'A docs portal' })
     const progress = buildExecutionProgress({
       authState: {
-        mode: 'chatgpt-codex-oauth',
+        mode: 'better-auth',
         status: 'connected',
-        account: { email: 'user@example.com', planType: 'plus' },
+        account: { email: 'user@example.com', userId: 'user_123' },
       },
       cloudflareStatus: {
         status: 'missing-token',
@@ -192,9 +174,9 @@ describe('build execution progress', () => {
     const checkResult = runGeneratedWorkerChecks(generatedApp)
     const progress = buildExecutionProgress({
       authState: {
-        mode: 'chatgpt-codex-oauth',
+        mode: 'better-auth',
         status: 'connected',
-        account: { email: 'user@example.com', planType: 'plus' },
+        account: { email: 'user@example.com', userId: 'user_123' },
       },
       cloudflareStatus: {
         status: 'connected',
@@ -243,9 +225,9 @@ describe('build execution progress', () => {
     const checkResult = runGeneratedWorkerChecks(generatedApp)
     const progress = buildExecutionProgress({
       authState: {
-        mode: 'chatgpt-codex-oauth',
+        mode: 'better-auth',
         status: 'connected',
-        account: { email: 'user@example.com', planType: 'plus' },
+        account: { email: 'user@example.com', userId: 'user_123' },
       },
       checkResult,
       cloudflareStatus: {
@@ -296,9 +278,9 @@ describe('build execution progress', () => {
     const generatedApp = generateWorkerAppFromPlan(plan)
     const progress = buildExecutionProgress({
       authState: {
-        mode: 'chatgpt-codex-oauth',
+        mode: 'better-auth',
         status: 'connected',
-        account: { email: 'user@example.com', planType: 'plus' },
+        account: { email: 'user@example.com', userId: 'user_123' },
       },
       cloudflareStatus: {
         status: 'connected',
@@ -327,9 +309,9 @@ describe('build execution progress', () => {
     const generatedApp = generateWorkerAppFromPlan(plan)
     const progress = buildExecutionProgress({
       authState: {
-        mode: 'chatgpt-codex-oauth',
+        mode: 'better-auth',
         status: 'connected',
-        account: { email: 'user@example.com', planType: 'plus' },
+        account: { email: 'user@example.com', userId: 'user_123' },
       },
       cloudflareStatus: {
         status: 'connected',
@@ -370,9 +352,9 @@ describe('build execution progress', () => {
     const checkResult = runGeneratedWorkerChecks(generatedApp)
     const progress = buildExecutionProgress({
       authState: {
-        mode: 'chatgpt-codex-oauth',
+        mode: 'better-auth',
         status: 'connected',
-        account: { email: 'user@example.com', planType: 'plus' },
+        account: { email: 'user@example.com', userId: 'user_123' },
       },
       checkResult,
       cloudflareStatus: {
@@ -648,7 +630,7 @@ describe('model catalog', () => {
   it('backs the default model policy from catalog metadata', () => {
     expect(defaultModel.id).toBe('gpt-5.5')
     expect(defaultModel.defaultReasoningEffort).toBe('low')
-    expect(defaultModel.availabilityNotes).toContain('ChatGPT/Codex OAuth')
+    expect(defaultModel.availabilityNotes).toContain('GhostBuild server-side OpenAI API')
   })
 
   it('normalizes unsupported reasoning to the catalog default', () => {
@@ -657,271 +639,49 @@ describe('model catalog', () => {
 })
 
 describe('model auth provider', () => {
-  it('requires Codex OAuth credentials', () => {
+  it('requires the server OpenAI API key', () => {
     expect(() =>
       resolveModelRuntimeAuth({
-        codexAccount: {
-          email: 'user@example.com',
-          planType: 'plus',
-        },
+        openAiApiKey: undefined,
       }),
-    ).toThrow('ChatGPT/Codex OAuth credentials are required.')
+    ).toThrow('Server-side OpenAI API key is required.')
   })
 
-  it('resolves only Codex OAuth runtime credentials', () => {
+  it('resolves server OpenAI API runtime credentials', () => {
     const auth = resolveModelRuntimeAuth({
-      codexAccessToken: 'codex-token',
-      codexAccount: {
-        email: 'user@example.com',
-        planType: 'plus',
-      },
+      openAiApiKey: 'sk-test',
     })
 
     expect(auth).toMatchObject({
-      mode: 'chatgpt-codex-oauth',
-      accessToken: 'codex-token',
+      mode: 'server-openai-api-key',
+      apiKey: 'sk-test',
+      billingSummary: 'GhostBuild server-side OpenAI API billing.',
     })
   })
 
-  it('does not treat missing ChatGPT account metadata as connected', () => {
+  it('does not treat a missing Better Auth user as connected', () => {
     expect(
-      summarizeCodexAuthState({
-        account: { email: 'user@example.com' },
-        hasToken: true,
-      }),
-    ).toMatchObject({ status: 'unsupported' })
+      summarizeAppAuthState(null),
+    ).toMatchObject({ status: 'disconnected' })
   })
 
-  it('shows expired Codex auth as recoverable', () => {
+  it('summarizes a signed-in app account', () => {
     expect(
-      summarizeCodexAuthState({
-        account: {
+      summarizeAppAuthState({
+        user: {
+          id: 'user_123',
           email: 'user@example.com',
-          planType: 'plus',
+          name: 'User',
+          image: null,
         },
-        hasToken: false,
       }),
     ).toMatchObject({
-      status: 'expired',
-      recoveryUrl: '/api/codex-auth/start',
-    })
-  })
-})
-
-describe('Codex OAuth routes', () => {
-  it('reports unconfigured OAuth start without setting local auth state', async () => {
-    const response = await createOAuthStart({
-      redirectUri: 'https://ghost.test/api/codex-auth/callback',
-    })
-
-    expect(response.status).toBe(501)
-    await expect(response.json()).resolves.toMatchObject({
-      error: expect.stringContaining('not configured'),
-    })
-  })
-
-  it('starts PKCE OAuth with state and verifier cookies', async () => {
-    const response = await createOAuthStart({
-      clientId: 'client_123',
-      authorizeUrl: 'https://auth.test/oauth/authorize',
-      redirectUri: 'https://ghost.test/api/codex-auth/callback',
-    })
-    const location = response.headers.get('location')
-    const cookieHeader = response.headers.get('set-cookie') ?? ''
-
-    expect(response.status).toBe(302)
-    expect(location).toContain('https://auth.test/oauth/authorize')
-    expect(location).toContain('code_challenge_method=S256')
-    expect(cookieHeader).toContain(codexOAuthStateCookie)
-    expect(cookieHeader).toContain(codexOAuthVerifierCookie)
-  })
-
-  it('rejects OAuth callbacks with missing or mismatched state', async () => {
-    const response = await exchangeOAuthCallback(
-      new Request('https://ghost.test/api/codex-auth/callback?code=abc&state=bad', {
-        headers: {
-          cookie: `${codexOAuthStateCookie}=expected; ${codexOAuthVerifierCookie}=verifier`,
-        },
-      }),
-      {
-        clientId: 'client_123',
-        tokenUrl: 'https://auth.test/oauth/token',
-        redirectUri: 'https://ghost.test/api/codex-auth/callback',
-        cookieSecret: 'test-secret',
-      },
-    )
-
-    expect(response.status).toBe(400)
-  })
-
-  it('does not treat malformed or expired token cookies as connected', async () => {
-    process.env.CODEX_OAUTH_COOKIE_SECRET = 'test-secret'
-
-    await expect(
-      readCodexTokenFromRequest(
-        new Request('https://ghost.test', {
-          headers: {
-            cookie: `${codexOAuthTokenCookie}=not-a-valid-token`,
-          },
-        }),
-      ),
-    ).resolves.toBeUndefined()
-
-    const expired = await sealCodexTokenCookieValue(
-      {
-        accessToken: 'expired-token',
-        expiresAt: '2026-01-01T00:00:00.000Z',
-      },
-      'test-secret',
-    )
-
-    await expect(
-      readCodexTokenFromRequest(
-        new Request('https://ghost.test', {
-          headers: {
-            cookie: `${codexOAuthTokenCookie}=${expired}`,
-          },
-        }),
-      ),
-    ).resolves.toBeUndefined()
-  })
-
-  it('logout expires Codex OAuth cookies', async () => {
-    const response = await createCodexLogout(new Request('https://ghost.test'), {
-      redirectUri: 'https://ghost.test/api/codex-auth/callback',
-    })
-    const cookieHeader = response.headers.get('set-cookie') ?? ''
-
-    expect(response.status).toBe(302)
-    expect(cookieHeader).toContain(codexOAuthStateCookie)
-    expect(cookieHeader).toContain(codexOAuthTokenCookie)
-    expect(cookieHeader).toContain('Max-Age=0')
-  })
-
-  it('routes OAuth start through deployment env configuration', async () => {
-    const response = await withCodexOAuthEnv(() =>
-      handleCodexOAuthStart(new Request('https://ghost.test/api/codex-auth/start')),
-    )
-    const location = response.headers.get('location') ?? ''
-
-    expect(response.status).toBe(302)
-    expect(location).toContain('https://auth.test/oauth/authorize')
-    expect(location).toContain('client_id=client_123')
-    expect(response.headers.get('set-cookie')).toContain(codexOAuthStateCookie)
-  })
-
-  it('routes OAuth callback through token exchange and sets auth cookies', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      Response.json({
-        access_token: 'codex-token',
-        expires_in: 3600,
-        refresh_token: 'refresh-token',
-        account: {
-          id: 'account_123',
-          plan: 'plus',
-        },
-        user: {
-          email: 'user@example.com',
-          id: 'user_123',
-        },
-      }),
-    )
-    const response = await withCodexOAuthEnv(() =>
-      handleCodexOAuthCallback(
-        new Request(
-          'https://ghost.test/api/codex-auth/callback?code=abc&state=state_123',
-          {
-            headers: {
-              cookie: `${codexOAuthStateCookie}=state_123; ${codexOAuthVerifierCookie}=verifier_123`,
-            },
-          },
-        ),
-      ),
-    )
-    const cookieHeader = response.headers.get('set-cookie') ?? ''
-
-    expect(response.status).toBe(302)
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://auth.test/oauth/token',
-      expect.objectContaining({ method: 'POST' }),
-    )
-    expect(cookieHeader).toContain(codexOAuthAccountCookie)
-    expect(cookieHeader).toContain(codexOAuthTokenCookie)
-    expect(cookieHeader).toContain('Max-Age=2592000')
-    fetchMock.mockRestore()
-  })
-
-  it('routes OAuth status through refresh token recovery', async () => {
-    process.env.CODEX_OAUTH_COOKIE_SECRET = 'test-secret'
-    const expired = await sealCodexTokenCookieValue(
-      {
-        accessToken: 'expired-token',
-        refreshToken: 'refresh-token',
-        expiresAt: '2026-01-01T00:00:00.000Z',
-      },
-      'test-secret',
-    )
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      Response.json({
-        access_token: 'fresh-token',
-        expires_in: 3600,
-      }),
-    )
-    const response = await withCodexOAuthEnv(() =>
-      handleCodexOAuthStatus(
-        new Request('https://ghost.test/api/codex-auth/status', {
-          headers: {
-            cookie: [
-              `${codexOAuthAccountCookie}=${encodeURIComponent(JSON.stringify({ email: 'user@example.com', planType: 'plus' }))}`,
-              `${codexOAuthTokenCookie}=${expired}`,
-            ].join('; '),
-          },
-        }),
-      ),
-    )
-
-    await expect(response.json()).resolves.toMatchObject({
       status: 'connected',
+      account: {
+        userId: 'user_123',
+        email: 'user@example.com',
+      },
     })
-    expect(response.headers.get('set-cookie')).toContain(codexOAuthTokenCookie)
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://auth.test/oauth/token',
-      expect.objectContaining({ method: 'POST' }),
-    )
-    fetchMock.mockRestore()
-  })
-
-  it('routes OAuth status and does not connect malformed cookies', async () => {
-    const response = await withCodexOAuthEnv(() =>
-      handleCodexOAuthStatus(
-        new Request('https://ghost.test/api/codex-auth/status', {
-          headers: {
-            cookie: [
-              `${codexOAuthAccountCookie}=${encodeURIComponent(JSON.stringify({ email: 'user@example.com', planType: 'plus' }))}`,
-              `${codexOAuthTokenCookie}=not-a-valid-token`,
-            ].join('; '),
-          },
-        }),
-      ),
-    )
-
-    await expect(response.json()).resolves.toMatchObject({
-      status: 'expired',
-    })
-  })
-
-  it('routes OAuth logout through cookie expiration', async () => {
-    const response = await withCodexOAuthEnv(() =>
-      handleCodexOAuthLogout(
-        new Request('https://ghost.test/api/codex-auth/logout', {
-          method: 'POST',
-        }),
-      ),
-    )
-
-    expect(response.status).toBe(302)
-    expect(response.headers.get('set-cookie')).toContain(codexOAuthTokenCookie)
-    expect(response.headers.get('set-cookie')).toContain('Max-Age=0')
   })
 })
 
@@ -932,7 +692,7 @@ describe('agent stream events', () => {
       encodeAgentRunEvent({
         type: 'completion',
         plan,
-        billingSummary: 'ChatGPT/Codex OAuth using eligible Codex plan allowance.',
+        billingSummary: 'GhostBuild server-side OpenAI API billing.',
       }),
     )
 
@@ -1080,7 +840,7 @@ describe('Cloudflare connection status', () => {
   })
 
   it('connects, verifies, and disconnects Cloudflare through HTTP route handlers', async () => {
-    process.env.CODEX_OAUTH_COOKIE_SECRET = 'test-secret'
+    process.env.BETTER_AUTH_SECRET = 'test-secret'
     const fetcher = createCloudflareDeployRouteFetcher('route-worker')
     const connectResponse = await handleCloudflareConnect(
       new Request('https://ghost.test/api/cloudflare/connect', {
@@ -1118,7 +878,7 @@ describe('Cloudflare connection status', () => {
   })
 
   it('rejects invalid Cloudflare tokens through the connect route', async () => {
-    process.env.CODEX_OAUTH_COOKIE_SECRET = 'test-secret'
+    process.env.BETTER_AUTH_SECRET = 'test-secret'
     const response = await handleCloudflareConnect(
       new Request('https://ghost.test/api/cloudflare/connect', {
         method: 'POST',
@@ -1498,13 +1258,13 @@ describe('runtime action executor', () => {
   })
 
   it('enforces paid and destructive runtime actions through the HTTP route', async () => {
-    process.env.CODEX_OAUTH_COOKIE_SECRET = 'test-secret'
+    process.env.BETTER_AUTH_SECRET = 'test-secret'
     const blockedResponse = await handleRuntimeAction(
       new Request('https://ghost.test/api/runtime/action', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          cookie: await buildCodexRouteAuthCookieHeader(),
+          'x-ghostbuild-test-user': 'user.com',
         },
         body: JSON.stringify({
           actionRequest: {
@@ -1526,7 +1286,7 @@ describe('runtime action executor', () => {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          cookie: await buildCodexRouteAuthCookieHeader(),
+          'x-ghostbuild-test-user': 'user.com',
         },
         body: JSON.stringify({
           actionRequest: {
@@ -1726,7 +1486,7 @@ describe('Cloudflare Worker deploy executor', () => {
 
 describe('Cloudflare deploy route', () => {
   it('blocks deploy at the HTTP route without matching approval', async () => {
-    process.env.CODEX_OAUTH_COOKIE_SECRET = 'test-secret'
+    process.env.BETTER_AUTH_SECRET = 'test-secret'
     const plan = buildAgentPlan({ idea: 'A route deploy portal' })
     const generatedApp = generateWorkerAppFromPlan(plan)
     const checkResult = runGeneratedWorkerChecks(generatedApp)
@@ -1761,7 +1521,7 @@ describe('Cloudflare deploy route', () => {
   })
 
   it('deploys through the HTTP route after auth, Cloudflare, checks, preview, and approval pass', async () => {
-    process.env.CODEX_OAUTH_COOKIE_SECRET = 'test-secret'
+    process.env.BETTER_AUTH_SECRET = 'test-secret'
     const plan = buildAgentPlan({ idea: 'A route deploy portal' })
     const generatedApp = generateWorkerAppFromPlan(plan)
     const checkResult = runGeneratedWorkerChecks(generatedApp)
@@ -1809,7 +1569,7 @@ describe('Cloudflare deploy route', () => {
 })
 
 describe('Cloudflare build and deploy route', () => {
-  it('blocks the combined HTTP route without Codex auth', async () => {
+  it('blocks the combined HTTP route without GhostBuild sign-in', async () => {
     const response = await handleDeployRun(
       new Request('https://ghost.test/api/deploy/run', {
         method: 'POST',
@@ -1823,12 +1583,12 @@ describe('Cloudflare build and deploy route', () => {
 
     expect(response.status).toBe(401)
     await expect(response.json()).resolves.toMatchObject({
-      error: 'Codex sign-in is required.',
+      error: 'GhostBuild sign-in is required.',
     })
   })
 
   it('runs build, preview, and deploy through the combined HTTP route with approval', async () => {
-    process.env.CODEX_OAUTH_COOKIE_SECRET = 'test-secret'
+    process.env.BETTER_AUTH_SECRET = 'test-secret'
     const plan = buildAgentPlan({ idea: 'A combined route deploy portal' })
     const approval = createDeployApprovalRecord({
       accountId: 'account_123',
@@ -1894,12 +1654,12 @@ describe('builder sessions', () => {
   it('stores owner-scoped session snapshots for return-to-session', () => {
     const store = new Map()
     const plan = buildAgentPlan({ idea: 'A client portal' })
-    const ownerId = ownerIdFromCodexAccount({
+    const ownerId = ownerIdFromAppAccount({
       email: 'user@example.com',
-      planType: 'plus',
+      userId: 'user_123',
     })
 
-    expect(ownerId).toBe('user@example.com')
+    expect(ownerId).toBe('user_123')
     if (!ownerId) {
       throw new Error('owner id missing')
     }
@@ -1951,39 +1711,6 @@ describe('builder sessions', () => {
   })
 })
 
-async function withCodexOAuthEnv<T>(callback: () => T | Promise<T>) {
-  const keys = [
-    'CODEX_OAUTH_AUTHORIZE_URL',
-    'CODEX_OAUTH_CLIENT_ID',
-    'CODEX_OAUTH_CLIENT_SECRET',
-    'CODEX_OAUTH_COOKIE_SECRET',
-    'CODEX_OAUTH_TOKEN_URL',
-  ] as const
-  const previous = Object.fromEntries(
-    keys.map((key) => [key, process.env[key]]),
-  ) as Record<(typeof keys)[number], string | undefined>
-
-  process.env.CODEX_OAUTH_AUTHORIZE_URL = 'https://auth.test/oauth/authorize'
-  process.env.CODEX_OAUTH_CLIENT_ID = 'client_123'
-  process.env.CODEX_OAUTH_CLIENT_SECRET = 'secret_123'
-  process.env.CODEX_OAUTH_COOKIE_SECRET = 'test-secret'
-  process.env.CODEX_OAUTH_TOKEN_URL = 'https://auth.test/oauth/token'
-
-  try {
-    return await callback()
-  } finally {
-    for (const key of keys) {
-      const value = previous[key]
-
-      if (value === undefined) {
-        delete process.env[key]
-      } else {
-        process.env[key] = value
-      }
-    }
-  }
-}
-
 async function buildRouteAuthCookieHeader() {
   const cloudflareToken = await sealCloudflareTokenCookieValue(
     { token: 'cf-token' },
@@ -1991,21 +1718,9 @@ async function buildRouteAuthCookieHeader() {
   )
 
   return [
-    await buildCodexRouteAuthCookieHeader(),
+    'ghostbuild_test_user=user@example.com',
     `${cloudflareTokenCookie}=${cloudflareToken}`,
   ].join('; ')
-}
-
-async function buildCodexRouteAuthCookieHeader() {
-  const codexToken = await sealCodexTokenCookieValue(
-    {
-      accessToken: 'codex-token',
-      expiresAt: '2026-12-31T00:00:00.000Z',
-    },
-    'test-secret',
-  )
-
-  return `${codexOAuthTokenCookie}=${codexToken}`
 }
 
 function createCloudflareDeployRouteFetcher(workerName: string) {

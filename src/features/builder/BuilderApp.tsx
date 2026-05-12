@@ -9,11 +9,11 @@ export function BuilderApp() {
     checkResult,
     cloudflareStatus,
     cloudflareMcpStatus,
-    codexAuthState,
+    appAuthState,
     deployApproval,
     deployResult,
     generatedApp,
-    hasCodexSignIn,
+    hasAppSignIn,
     hasStarted,
     isPending,
     messages,
@@ -50,8 +50,8 @@ export function BuilderApp() {
       <section className="builder">
         <ChatPane
           canSubmit={canSubmit}
-          codexAuthState={codexAuthState}
-          hasCodexSignIn={hasCodexSignIn}
+          appAuthState={appAuthState}
+          hasAppSignIn={hasAppSignIn}
           hasStarted={hasStarted}
           isPending={isPending}
           messages={messages}
@@ -75,7 +75,7 @@ export function BuilderApp() {
         <PreviewPane
           cloudflareStatus={cloudflareStatus}
           cloudflareMcpStatus={cloudflareMcpStatus}
-          codexAuthState={codexAuthState}
+          appAuthState={appAuthState}
           stripeProjectsStatus={stripeProjectsStatus}
           checkResult={checkResult}
           deployApproval={deployApproval}

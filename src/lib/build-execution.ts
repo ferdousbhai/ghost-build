@@ -5,7 +5,7 @@ import type { CloudflareDeployResult } from './cloudflare-deploy'
 import type { CloudflareConnectionStatus } from './cloudflare-status'
 import type { DeployApprovalRecord } from './deploy-approval'
 import type { GeneratedWorkerApp } from './generated-worker-app'
-import type { CodexAuthState } from './model-auth'
+import type { AppAuthState } from './model-auth'
 
 export type BuildExecutionStageStatus =
   | 'completed'
@@ -38,7 +38,7 @@ export function buildExecutionProgress({
   plan,
   preview,
 }: {
-  authState: CodexAuthState
+  authState: AppAuthState
   checkResult?: BuildCheckResult
   cloudflareStatus: CloudflareConnectionStatus
   deployApproval?: DeployApprovalRecord
@@ -52,7 +52,7 @@ export function buildExecutionProgress({
     return {
       title: 'Waiting for a goal',
       detail:
-        'Connect ChatGPT/Codex, describe the Cloudflare web app, then GhostBuild will create the execution path.',
+        'Sign in to GhostBuild, describe the Cloudflare web app, then GhostBuild will create the execution path.',
       stages: [
         {
           id: 'plan',
@@ -157,7 +157,7 @@ function describeCurrentExecutionState({
   }
 
   if (!authReady) {
-    return 'ChatGPT/Codex sign-in is required before the agent can generate code.'
+    return 'GhostBuild sign-in is required before the agent can generate code.'
   }
 
   if (!cloudflareReady) {

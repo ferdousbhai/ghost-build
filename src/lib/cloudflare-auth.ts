@@ -1,5 +1,5 @@
 import { verifyCloudflareConnection } from './cloudflare-status'
-import { parseCookies } from './codex-oauth'
+import { parseCookies } from './http-cookies'
 
 export const cloudflareTokenCookie = 'ghostbuild_cloudflare_token'
 
@@ -89,7 +89,7 @@ export async function sealCloudflareTokenCookieValue(
 ) {
   if (!secret) {
     throw new Error(
-      'CLOUDFLARE_TOKEN_COOKIE_SECRET or CODEX_OAUTH_COOKIE_SECRET is required.',
+      'CLOUDFLARE_TOKEN_COOKIE_SECRET or BETTER_AUTH_SECRET is required.',
     )
   }
 
@@ -115,7 +115,7 @@ async function unsealCloudflareTokenCookieValue(
 ) {
   if (!secret) {
     throw new Error(
-      'CLOUDFLARE_TOKEN_COOKIE_SECRET or CODEX_OAUTH_COOKIE_SECRET is required.',
+      'CLOUDFLARE_TOKEN_COOKIE_SECRET or BETTER_AUTH_SECRET is required.',
     )
   }
 
@@ -142,7 +142,7 @@ function expireCloudflareCookie() {
 function readCloudflareCookieSecret() {
   const env = process.env as Record<string, string | undefined>
 
-  return env.CLOUDFLARE_TOKEN_COOKIE_SECRET ?? env.CODEX_OAUTH_COOKIE_SECRET
+  return env.CLOUDFLARE_TOKEN_COOKIE_SECRET ?? env.BETTER_AUTH_SECRET
 }
 
 async function cloudflareCookieCryptoKey(secret: string) {

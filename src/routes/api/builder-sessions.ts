@@ -2,25 +2,23 @@ import { createFileRoute } from '@tanstack/react-router'
 import { env } from 'cloudflare:workers'
 import { getAgentByName } from 'agents'
 import {
-  readCodexAccountFromRequest,
-  readCodexTokenFromRequest,
-} from '#/lib/codex-oauth'
-import {
-  ownerIdFromCodexAccount,
-  type BuilderSessionSnapshot,
-} from '#/lib/builder-session-store'
+  ownerIdFromAppSession,
+  requireAppSession,
+} from '#/lib/app-auth'
+import type { BuilderSessionSnapshot } from '#/lib/builder-session-store'
 import { GhostBuildAgent, type GhostBuildEnv } from '#/lib/ghost-agent'
 
 export const Route = createFileRoute('/api/builder-sessions')({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const ownerId = await readSessionOwnerId(request)
+        const auth = await requireAppSession(request)
 
-        if (!ownerId) {
-          return Response.json({ error: 'Codex sign-in is required.' }, { status: 401 })
+        if (auth.response) {
+          return auth.response
         }
 
+        const ownerId = ownerIdFromAppSession(auth.session)
         const agent = await getBuilderSessionAgent(ownerId)
         const sessionId = new URL(request.url).searchParams.get('sessionId')
 
@@ -48,12 +46,13 @@ export const Route = createFileRoute('/api/builder-sessions')({
         })
       },
       POST: async ({ request }) => {
-        const ownerId = await readSessionOwnerId(request)
+        const auth = await requireAppSession(request)
 
-        if (!ownerId) {
-          return Response.json({ error: 'Codex sign-in is required.' }, { status: 401 })
+        if (auth.response) {
+          return auth.response
         }
 
+        const ownerId = ownerIdFromAppSession(auth.session)
         const payload = (await request.json().catch(() => ({}))) as Partial<
           BuilderSessionSnapshot
         >
@@ -94,12 +93,4 @@ async function getBuilderSessionAgent(ownerId: string) {
     (env as GhostBuildEnv).GhostBuildAgent,
     `builder-sessions-${ownerId}`,
   )
-}
-
-async function readSessionOwnerId(request: Request) {
-  if (!(await readCodexTokenFromRequest(request))) {
-    return undefined
-  }
-
-  return ownerIdFromCodexAccount(readCodexAccountFromRequest(request))
 }

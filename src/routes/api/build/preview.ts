@@ -1,17 +1,17 @@
 import { createFileRoute } from '@tanstack/react-router'
 import type { BuildCheckResult } from '#/lib/build-checks'
 import { createBuildPreviewResult } from '#/lib/build-preview'
-import { readCodexTokenFromRequest } from '#/lib/codex-oauth'
+import { requireAppSession } from '#/lib/app-auth'
 import type { GeneratedWorkerApp } from '#/lib/generated-worker-app'
 
 export const Route = createFileRoute('/api/build/preview')({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        if (!(await readCodexTokenFromRequest(request))) {
-          return Response.json({ error: 'Codex sign-in is required.' }, {
-            status: 401,
-          })
+        const auth = await requireAppSession(request)
+
+        if (auth.response) {
+          return auth.response
         }
 
         const payload = (await request.json().catch(() => ({}))) as {

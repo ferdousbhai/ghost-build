@@ -38,7 +38,7 @@ export const defaultCapabilities = [
   'Cloudflare Skills loaded by default',
   'Think workspace, memory, and tool loop',
   'GPT-5.5 with low reasoning',
-  'ChatGPT/Codex OAuth for model access',
+  'GhostBuild account with server-side OpenAI API billing',
   'Cloudflare Workers, D1, R2, KV, Queues, AI Gateway',
   'Goal-driven planning for Cloudflare web apps',
 ]
@@ -63,7 +63,7 @@ export const productionSteps = [
 ]
 
 export const ownershipLineItems = [
-  ['Codex access', 'Connected through ChatGPT/Codex OAuth'],
+  ['Model access', 'Handled through GhostBuild server-side OpenAI billing'],
   ['Cloudflare billing', 'Handled by Cloudflare and Stripe hosted payment flows'],
   ['Paid actions', 'Domains and account purchases require explicit approval'],
 ] as const

@@ -215,12 +215,12 @@ export function buildAgentPlan(input: Partial<AgentPlanRequest>): AgentPlan {
     },
     defaults: {
       runtime: '@cloudflare/think on the Cloudflare Agents SDK',
-      modelProvider: 'ChatGPT/Codex sign-in using eligible Codex plan allowance',
+      modelProvider: 'GhostBuild server-side OpenAI API billing',
       model: request.model,
       reasoning: request.reasoningEffort,
       credentialStorage: [
-        'ChatGPT/Codex token material is encrypted in HttpOnly cookies',
-        'GhostBuild uses ChatGPT/Codex OAuth for model access',
+        'GhostBuild app sessions are managed by Better Auth',
+        'OpenAI API credentials stay server-side',
         'Cloudflare authorization uses scoped OAuth or API tokens',
       ],
       paymentFlow: [
@@ -306,7 +306,7 @@ function defaultSuccessCriteria(request: ReturnType<typeof normalizePlanRequest>
 }
 
 function describeModelAuth() {
-  return 'Sign in with ChatGPT/Codex so eligible users can use their existing Codex plan allowance.'
+  return 'Sign in to GhostBuild; model calls use server-side OpenAI API billing.'
 }
 
 function describeProjectSource(source: ProjectSource) {

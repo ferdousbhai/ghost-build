@@ -1,106 +1,67 @@
-export type ChatGptAccountMetadata = {
+export type AppAccountMetadata = {
   email?: string
+  name?: string
   userId?: string
-  accountId?: string
-  planType?: string
-  workspaceState?: 'unknown' | 'personal' | 'workspace' | 'fedramp'
-  fedRamp?: boolean
+  image?: string | null
 }
 
-export type CodexAuthState =
-  {
-    mode: 'chatgpt-codex-oauth'
-    status:
-      | 'disconnected'
-      | 'connecting'
-      | 'connected'
-      | 'expired'
-      | 'refresh-failed'
-      | 'unsupported'
-    account?: ChatGptAccountMetadata
-    recoveryUrl?: string
-    message?: string
-  }
+export type AppAuthState = {
+  mode: 'better-auth'
+  status: 'disconnected' | 'connected'
+  account?: AppAccountMetadata
+  recoveryUrl?: string
+  message?: string
+}
 
 export type ModelRuntimeAuth = {
-  mode: 'chatgpt-codex-oauth'
-  accessToken: string
-  account: ChatGptAccountMetadata
+  mode: 'server-openai-api-key'
+  apiKey: string
   billingSummary: string
 }
 
 export type ModelAuthResolutionInput = {
-  codexAccessToken?: string
-  codexAccount?: ChatGptAccountMetadata
+  openAiApiKey?: string
 }
 
 export function resolveModelRuntimeAuth(
   input: ModelAuthResolutionInput,
 ): ModelRuntimeAuth {
-  if (!input.codexAccessToken) {
-    throw new Error('ChatGPT/Codex OAuth credentials are required.')
-  }
-
-  const account = input.codexAccount
-
-  if (!hasUsableAccountMetadata(account)) {
-    throw new Error('ChatGPT/Codex account metadata is missing or incomplete.')
+  if (!input.openAiApiKey) {
+    throw new Error('Server-side OpenAI API key is required.')
   }
 
   return {
-    mode: 'chatgpt-codex-oauth',
-    accessToken: input.codexAccessToken,
-    account,
-    billingSummary:
-      'ChatGPT/Codex OAuth using eligible Codex plan allowance when available.',
+    mode: 'server-openai-api-key',
+    apiKey: input.openAiApiKey,
+    billingSummary: 'GhostBuild server-side OpenAI API billing.',
   }
 }
 
-export function summarizeCodexAuthState(options: {
-  account?: ChatGptAccountMetadata
-  hasToken?: boolean
-} = {}): CodexAuthState {
-  const { account, hasToken } = options
-
-  if (!account) {
+export function summarizeAppAuthState(session?: {
+  user?: {
+    id?: string
+    email?: string
+    name?: string
+    image?: string | null
+  }
+} | null): AppAuthState {
+  if (!session?.user?.id) {
     return {
-      mode: 'chatgpt-codex-oauth',
+      mode: 'better-auth',
       status: 'disconnected',
-      recoveryUrl: '/api/codex-auth/start',
-      message: 'Connect ChatGPT/Codex before running in Codex mode.',
-    }
-  }
-
-  if (!hasToken) {
-    return {
-      mode: 'chatgpt-codex-oauth',
-      status: 'expired',
-      account,
-      recoveryUrl: '/api/codex-auth/start',
-      message: 'ChatGPT/Codex credentials expired. Reconnect to continue.',
-    }
-  }
-
-  if (!hasUsableAccountMetadata(account)) {
-    return {
-      mode: 'chatgpt-codex-oauth',
-      status: 'unsupported',
-      account,
-      recoveryUrl: '/api/codex-auth/logout',
-      message:
-        'The connected ChatGPT/Codex account did not return enough metadata for billing-safe runs.',
+      recoveryUrl: '/api/auth/sign-in/social',
+      message: 'Sign in to GhostBuild before running the builder.',
     }
   }
 
   return {
-    mode: 'chatgpt-codex-oauth',
+    mode: 'better-auth',
     status: 'connected',
-    account,
+    account: {
+      userId: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+      image: session.user.image,
+    },
   }
-}
-
-export function hasUsableAccountMetadata(
-  account?: ChatGptAccountMetadata,
-): account is ChatGptAccountMetadata {
-  return Boolean(account?.email && account.planType)
 }

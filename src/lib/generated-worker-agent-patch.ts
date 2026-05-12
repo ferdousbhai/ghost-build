@@ -39,15 +39,15 @@ export type AgentPatchResult = GeneratedWorkerPatchResult & {
 
 export async function proposeAndApplyGeneratedWorkerPatches({
   checkResult,
-  codexAccessToken,
   generatedApp,
   goal,
+  openAiApiKey,
   proposer,
 }: {
   checkResult: BuildCheckResult
-  codexAccessToken?: string
   generatedApp: GeneratedWorkerApp
   goal: string
+  openAiApiKey?: string
   proposer?: AgentPatchProposer
 }): Promise<AgentPatchResult> {
   if (checkResult.status !== 'failed') {
@@ -61,9 +61,9 @@ export async function proposeAndApplyGeneratedWorkerPatches({
     ? await proposer({ checkResult, generatedApp, goal })
     : await proposeGeneratedWorkerPatchesWithModel({
         checkResult,
-        codexAccessToken,
         generatedApp,
         goal,
+        openAiApiKey,
       })
   const patchResult = applyGeneratedWorkerPatches(
     generatedApp,
@@ -78,21 +78,21 @@ export async function proposeAndApplyGeneratedWorkerPatches({
 
 async function proposeGeneratedWorkerPatchesWithModel({
   checkResult,
-  codexAccessToken,
   generatedApp,
   goal,
+  openAiApiKey,
 }: {
   checkResult: BuildCheckResult
-  codexAccessToken?: string
   generatedApp: GeneratedWorkerApp
   goal: string
+  openAiApiKey?: string
 }) {
-  if (!codexAccessToken) {
-    throw new Error('Codex model auth is required to propose patches.')
+  if (!openAiApiKey) {
+    throw new Error('Server-side OpenAI API key is required to propose patches.')
   }
 
   const { object } = await generateObject({
-    model: createOpenAI({ apiKey: codexAccessToken })('gpt-5.5'),
+    model: createOpenAI({ apiKey: openAiApiKey })('gpt-5.5'),
     schema: generatedWorkerPatchSchema,
     system: [
       'You are GhostBuild, a Cloudflare-native web app patch agent.',

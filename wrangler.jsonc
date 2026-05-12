@@ -25,6 +25,13 @@
       }
     ]
   },
+  "d1_databases": [
+    {
+      "binding": "AUTH_DB",
+      "database_name": "ghost-build-auth",
+      "database_id": "07c7901d-e292-4b7c-b41b-555e547ee977"
+    }
+  ],
   "migrations": [
     {
       "tag": "v1",

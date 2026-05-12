@@ -1,10 +1,12 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { readCodexTokenFromRequest } from '#/lib/codex-oauth'
+import { requireAppSession } from '#/lib/app-auth'
 import { createStripeProjectsStatus } from '#/lib/stripe-projects'
 
 export async function handleStripeProjectsStatus(request: Request) {
-  if (!(await readCodexTokenFromRequest(request))) {
-    return Response.json({ error: 'Codex sign-in is required.' }, { status: 401 })
+  const auth = await requireAppSession(request)
+
+  if (auth.response) {
+    return auth.response
   }
 
   return Response.json(await createStripeProjectsStatus(request))

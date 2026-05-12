@@ -1,4 +1,4 @@
-import { parseCookies } from './codex-oauth'
+import { parseCookies } from './http-cookies'
 
 export const stripeProjectsConnectionCookie =
   'ghostbuild_stripe_projects_connection'
@@ -218,7 +218,6 @@ function buildStripeProjectsConfig(): StripeProjectsConfig {
       env.STRIPE_PROJECTS_CONNECT_URL,
     cookieSecret:
       env.STRIPE_PROJECTS_COOKIE_SECRET ??
-      env.CODEX_OAUTH_COOKIE_SECRET ??
       env.BETTER_AUTH_SECRET,
   }
 }
@@ -247,7 +246,7 @@ async function signCookieValue(
 ) {
   if (!secret) {
     throw new Error(
-      'STRIPE_PROJECTS_COOKIE_SECRET, CODEX_OAUTH_COOKIE_SECRET, or BETTER_AUTH_SECRET is required.',
+      'STRIPE_PROJECTS_COOKIE_SECRET or BETTER_AUTH_SECRET is required.',
     )
   }
 
@@ -263,7 +262,7 @@ async function verifyCookieValue(
 ) {
   if (!secret) {
     throw new Error(
-      'STRIPE_PROJECTS_COOKIE_SECRET, CODEX_OAUTH_COOKIE_SECRET, or BETTER_AUTH_SECRET is required.',
+      'STRIPE_PROJECTS_COOKIE_SECRET or BETTER_AUTH_SECRET is required.',
     )
   }
 
@@ -306,7 +305,6 @@ function readStripeProjectsCookieSecret() {
 
   return (
     env.STRIPE_PROJECTS_COOKIE_SECRET ??
-    env.CODEX_OAUTH_COOKIE_SECRET ??
     env.BETTER_AUTH_SECRET
   )
 }

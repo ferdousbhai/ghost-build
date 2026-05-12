@@ -3,13 +3,13 @@ import { MessageList } from './MessageList'
 import { PromptComposer } from './PromptComposer'
 import type { AgentPlanRequest } from '#/lib/agent'
 import type { StoredBuilderSessionSummary } from '#/lib/builder-session-store'
-import type { CodexAuthState } from '#/lib/model-auth'
+import type { AppAuthState } from '#/lib/model-auth'
 import type { BuilderMessage } from './builderTypes'
 
 type ChatPaneProps = {
   canSubmit: boolean
-  codexAuthState: CodexAuthState
-  hasCodexSignIn: boolean
+  appAuthState: AppAuthState
+  hasAppSignIn: boolean
   hasStarted: boolean
   isPending: boolean
   messages: Array<BuilderMessage>
@@ -36,8 +36,8 @@ type ChatPaneProps = {
 
 export function ChatPane({
   canSubmit,
-  codexAuthState,
-  hasCodexSignIn,
+  appAuthState,
+  hasAppSignIn,
   hasStarted,
   isPending,
   messages,
@@ -67,8 +67,8 @@ export function ChatPane({
 
       {!hasStarted ? (
         <IntroPanel
-          hasCodexSignIn={hasCodexSignIn}
-          codexAuthState={codexAuthState}
+          hasAppSignIn={hasAppSignIn}
+          appAuthState={appAuthState}
           model={model}
           projectSource={projectSource}
           reasoningEffort={reasoningEffort}
@@ -92,8 +92,8 @@ export function ChatPane({
 
       <PromptComposer
         canSubmit={canSubmit}
-        codexAuthState={codexAuthState}
-        hasCodexSignIn={hasCodexSignIn}
+        appAuthState={appAuthState}
+        hasAppSignIn={hasAppSignIn}
         model={model}
         reasoningEffort={reasoningEffort}
         hasStarted={hasStarted}

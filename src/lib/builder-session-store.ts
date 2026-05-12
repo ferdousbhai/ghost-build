@@ -4,7 +4,7 @@ import type { BuildPreviewResult } from './build-preview'
 import type { CloudflareDeployResult } from './cloudflare-deploy'
 import type { DeployApprovalRecord } from './deploy-approval'
 import type { GeneratedWorkerApp } from './generated-worker-app'
-import type { ChatGptAccountMetadata } from './model-auth'
+import type { AppAccountMetadata } from './model-auth'
 
 export type GoalTimelineEntry = {
   role: 'system'
@@ -37,8 +37,8 @@ export type StoredBuilderSessionSummary = {
 
 const serverSessionStore = new Map<string, BuilderSessionSnapshot>()
 
-export function ownerIdFromCodexAccount(account?: ChatGptAccountMetadata) {
-  return account?.accountId || account?.userId || account?.email
+export function ownerIdFromAppAccount(account?: AppAccountMetadata) {
+  return account?.userId || account?.email
 }
 
 export function upsertBuilderSessionSnapshot(

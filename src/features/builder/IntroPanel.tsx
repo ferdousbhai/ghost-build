@@ -9,13 +9,14 @@ import {
   Sparkles,
 } from 'lucide-react'
 import type { AgentPlanRequest } from '#/lib/agent'
-import type { CodexAuthState } from '#/lib/model-auth'
+import { authClient } from '#/lib/auth-client'
+import type { AppAuthState } from '#/lib/model-auth'
 import { getModelCatalogEntry } from '#/lib/model-catalog'
 import { promptSuggestions } from './builderConstants'
 
 type IntroPanelProps = {
-  codexAuthState: CodexAuthState
-  hasCodexSignIn: boolean
+  appAuthState: AppAuthState
+  hasAppSignIn: boolean
   model: AgentPlanRequest['model']
   projectSource: AgentPlanRequest['projectSource']
   reasoningEffort: AgentPlanRequest['reasoningEffort']
@@ -41,8 +42,8 @@ const officialStarter = {
 } as const
 
 export function IntroPanel({
-  codexAuthState,
-  hasCodexSignIn,
+  appAuthState,
+  hasAppSignIn,
   model,
   projectSource,
   reasoningEffort,
@@ -146,19 +147,40 @@ export function IntroPanel({
         <button
           type="button"
           className="selected"
-          onClick={() => {
-            if (!hasCodexSignIn) {
-              window.location.href = '/api/codex-auth/start'
+          onClick={async () => {
+            if (!hasAppSignIn) {
+              await authClient.signIn.social({
+                provider: 'google',
+                callbackURL: '/',
+              })
             }
           }}
         >
           <LogIn size={20} />
           <span>
-            <b>ChatGPT/Codex sign-in</b>
-            {describeCodexAccount(codexAuthState)}
+            <b>GhostBuild sign-in</b>
+            {describeAppAccount(appAuthState)}
           </span>
-          <em>{hasCodexSignIn ? 'Connected' : 'Connect'}</em>
+          <em>{hasAppSignIn ? 'Connected' : 'Connect'}</em>
         </button>
+        {!hasAppSignIn ? (
+          <button
+            type="button"
+            onClick={() =>
+              authClient.signIn.social({
+                provider: 'github',
+                callbackURL: '/',
+              })
+            }
+          >
+            <Github size={20} />
+            <span>
+              <b>Continue with GitHub</b>
+              Use your GitHub account for GhostBuild.
+            </span>
+            <em>Connect</em>
+          </button>
+        ) : null}
       </div>
 
       <div className="model-policy" aria-label="Model policy">
@@ -200,18 +222,13 @@ export function IntroPanel({
   )
 }
 
-function describeCodexAccount(authState: CodexAuthState) {
+function describeAppAccount(authState: AppAuthState) {
   if (authState.status === 'connected') {
     const email = authState.account?.email ?? 'unknown account'
-    const plan = authState.account?.planType ?? 'unknown plan'
-    return `${email} on ${plan}.`
+    return `${email}.`
   }
 
-  if (authState.status === 'unsupported') {
-    return 'Reconnect; account or plan metadata is missing.'
-  }
-
-  return 'Default. Uses eligible Codex plan allowance after OAuth connection.'
+  return 'Use Google or GitHub to access the builder.'
 }
 
 function describeSource(source: AgentPlanRequest['projectSource']) {

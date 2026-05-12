@@ -16,7 +16,7 @@ export const modelCatalog = [
     defaultReasoningEffort: 'low',
     supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
     availabilityNotes:
-      'Default GhostBuild model. ChatGPT/Codex OAuth uses eligible Codex plan allowance.',
+      'Default GhostBuild model. Requests use GhostBuild server-side OpenAI API billing.',
   },
 ] as const satisfies Array<ModelCatalogEntry>
 
