@@ -1,7 +1,6 @@
 {
   "mcpServers": {
     "cloudflare-api": {
-      "type": "url",
       "url": "https://mcp.cloudflare.com/mcp"
     }
   }
