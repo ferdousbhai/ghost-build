@@ -46,14 +46,14 @@ export class GhostBuildAgent extends Think<GhostBuildEnv, GhostBuildState> {
   }
 
   getModel(): LanguageModel {
-    const apiKey = this.codexOAuthTokenForNextTurn
+    const accessToken = this.codexOAuthTokenForNextTurn
     this.codexOAuthTokenForNextTurn = ''
 
-    if (!apiKey) {
+    if (!accessToken) {
       throw new Error('ChatGPT/Codex sign-in is required for this run.')
     }
 
-    return createOpenAI({ apiKey })('gpt-5.5')
+    return createOpenAI({ apiKey: accessToken })('gpt-5.5')
   }
 
   setCodexOAuthTokenForNextTurn(accessToken: string) {
