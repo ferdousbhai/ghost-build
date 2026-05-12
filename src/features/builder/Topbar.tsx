@@ -1,6 +1,4 @@
 import { Bot, Cloud, Wand2 } from 'lucide-react'
-import { AuthButton } from '#/features/auth/AuthButton'
-import { LocalOpenAIKeyButton } from '#/features/auth/LocalOpenAIKeyButton'
 
 export function Topbar() {
   return (
@@ -9,7 +7,8 @@ export function Topbar() {
         <span className="brand-mark">
           <Wand2 size={18} />
         </span>
-        <span>Ghost Coder</span>
+        <span>GhostBuild</span>
+        <em>Goal-driven Cloudflare web app builder</em>
       </a>
 
       <div className="topbar-actions">
@@ -21,8 +20,6 @@ export function Topbar() {
           <Cloud size={15} />
           Cloudflare Worker
         </span>
-        <LocalOpenAIKeyButton />
-        <AuthButton />
       </div>
     </header>
   )

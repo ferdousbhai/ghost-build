@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "ghost-coder",
+  "name": "ghost-build",
   "compatibility_date": "2026-05-10",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/worker.ts",
@@ -10,19 +10,19 @@
   "durable_objects": {
     "bindings": [
       {
-        "name": "GhostCoderAgent",
-        "class_name": "GhostCoderAgent"
+        "name": "GhostBuildAgent",
+        "class_name": "GhostBuildAgent"
       }
     ]
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["GhostCoderAgent"]
+      "new_sqlite_classes": ["GhostBuildAgent"]
     }
   ],
   "vars": {
-    "APP_NAME": "Ghost Coder",
+    "APP_NAME": "GhostBuild",
     "DEPLOYMENT_TARGET": "cloudflare-workers"
   }
 }

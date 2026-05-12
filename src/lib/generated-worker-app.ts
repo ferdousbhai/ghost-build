@@ -1,0 +1,201 @@
+import type { AgentPlan } from './agent'
+
+export type GeneratedWorkerFile = {
+  path: string
+  content: string
+}
+
+export type GeneratedWorkerApp = {
+  workerName: string
+  summary: string
+  files: Array<GeneratedWorkerFile>
+  generatedAt: string
+}
+
+export function generateWorkerAppFromPlan(plan: AgentPlan): GeneratedWorkerApp {
+  const appTitle = titleFromWorkerName(plan.deployment.workerName)
+  const generatedAt = new Date().toISOString()
+
+  return {
+    workerName: plan.deployment.workerName,
+    summary: `Generated ${plan.deployment.workerName} as a Cloudflare Worker app scaffold.`,
+    generatedAt,
+    files: [
+      {
+        path: 'worker.js',
+        content: createDeployableWorkerModule({
+          generatedAt,
+          goal: plan.goal.objective,
+          title: appTitle,
+          workerName: plan.deployment.workerName,
+        }),
+      },
+      {
+        path: 'package.json',
+        content: JSON.stringify(
+          {
+            scripts: {
+              build: 'vite build',
+              deploy: 'wrangler deploy',
+              dev: 'vite dev',
+              typecheck: 'tsc --noEmit',
+            },
+            dependencies: {
+              '@cloudflare/vite-plugin': '^1.26.0',
+              '@tanstack/react-router': 'latest',
+              '@tanstack/react-start': 'latest',
+              '@vitejs/plugin-react': '^6.0.1',
+              typescript: '^6.0.2',
+              vite: '^8.0.0',
+              wrangler: '^4.70.0',
+            },
+            devDependencies: {},
+          },
+          null,
+          2,
+        ),
+      },
+      {
+        path: 'wrangler.jsonc',
+        content: JSON.stringify(
+          {
+            name: plan.deployment.workerName,
+            compatibility_date: '2026-05-12',
+            main: './dist/server/index.js',
+            assets: {
+              directory: './dist/client',
+              binding: 'ASSETS',
+            },
+          },
+          null,
+          2,
+        ),
+      },
+      {
+        path: 'src/routes/index.tsx',
+        content: [
+          "import { createFileRoute } from '@tanstack/react-router'",
+          '',
+          "export const Route = createFileRoute('/')({",
+          '  component: Home,',
+          '})',
+          '',
+          'function Home() {',
+          '  return (',
+          '    <main>',
+          `      <h1>${appTitle}</h1>`,
+          `      <p>${plan.goal.objective}</p>`,
+          '    </main>',
+          '  )',
+          '}',
+          '',
+        ].join('\n'),
+      },
+      {
+        path: 'src/routes/api/health.ts',
+        content: [
+          "import { createFileRoute } from '@tanstack/react-router'",
+          '',
+          "export const Route = createFileRoute('/api/health')({",
+          '  server: {',
+          '    handlers: {',
+          "      GET: async () => Response.json({ status: 'ok' }),",
+          '    },',
+          '  },',
+          '})',
+          '',
+        ].join('\n'),
+      },
+      {
+        path: 'README.md',
+        content: [
+          `# ${appTitle}`,
+          '',
+          plan.goal.objective,
+          '',
+          '## Success Criteria',
+          '',
+          ...plan.goal.successCriteria.map((criterion) => `- ${criterion}`),
+          '',
+          '## Cloudflare',
+          '',
+          `- Worker: ${plan.deployment.workerName}`,
+          `- Route: ${plan.deployment.route}`,
+          `- Bindings: ${plan.deployment.bindings.join(', ') || 'None'}`,
+          '',
+        ].join('\n'),
+      },
+    ],
+  }
+}
+
+function titleFromWorkerName(workerName: string) {
+  return workerName
+    .split('-')
+    .filter(Boolean)
+    .map((word) => `${word[0]?.toUpperCase() ?? ''}${word.slice(1)}`)
+    .join(' ')
+}
+
+function createDeployableWorkerModule({
+  generatedAt,
+  goal,
+  title,
+  workerName,
+}: {
+  generatedAt: string
+  goal: string
+  title: string
+  workerName: string
+}) {
+  return `export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+
+    if (url.pathname === "/api/health") {
+      return Response.json({
+        status: "ok",
+        worker: ${JSON.stringify(workerName)},
+        generatedAt: ${JSON.stringify(generatedAt)}
+      });
+    }
+
+    return new Response(${JSON.stringify(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${escapeHtml(title)}</title>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; background: #f8fafc; color: #111827; }
+      main { max-width: 760px; margin: 0 auto; padding: 64px 24px; }
+      h1 { font-size: 40px; line-height: 1.1; margin: 0 0 16px; }
+      p { font-size: 18px; line-height: 1.6; color: #374151; }
+      code { background: #e5e7eb; border-radius: 6px; padding: 2px 6px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>${escapeHtml(title)}</h1>
+      <p>${escapeHtml(goal)}</p>
+      <p><code>${escapeHtml(workerName)}</code> was generated by GhostBuild for Cloudflare Workers.</p>
+    </main>
+  </body>
+</html>`)}, {
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "x-ghostbuild-worker": ${JSON.stringify(workerName)}
+      }
+    });
+  }
+};`
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}

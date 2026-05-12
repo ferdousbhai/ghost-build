@@ -1,4 +1,5 @@
 import type { AgentPlan, AgentPlanRequest } from '#/lib/agent'
+import { parseAgentRunEvent } from '#/lib/agent-stream'
 import type { AgentStreamEvent } from './builderTypes'
 
 export async function runThinkAgent(
@@ -14,7 +15,7 @@ export async function runThinkAgent(
   })
 
   if (!response.ok) {
-    throw new Error('Unable to start the Think agent')
+    throw new Error(await readErrorMessage(response))
   }
 
   if (!response.body) {
@@ -38,15 +39,18 @@ export async function runThinkAgent(
     buffer = events.pop() ?? ''
 
     for (const event of events) {
-      const data = parseServerSentEvent(event)
+      const data = parseAgentRunEvent(event)
 
       if (!data) {
         continue
       }
 
-      if (isDoneEvent(data)) {
+      if (data.type === 'completion') {
         plan = data.plan
-        onEvent?.({ type: 'done' })
+        onEvent?.({
+          type: 'completion',
+          billingSummary: data.billingSummary,
+        })
         continue
       }
 
@@ -65,27 +69,13 @@ export async function runThinkAgent(
   return plan
 }
 
-type PlanResponseEvent =
-  | AgentStreamEvent
-  | {
-      type: 'done'
-      plan: AgentPlan
-    }
+async function readErrorMessage(response: Response) {
+  const fallback = 'Unable to start the Think agent'
 
-function parseServerSentEvent(event: string): PlanResponseEvent | null {
-  const dataLine = event
-    .split('\n')
-    .find((line) => line.startsWith('data: '))
-
-  if (!dataLine) {
-    return null
+  try {
+    const data = (await response.json()) as { error?: string }
+    return data.error || fallback
+  } catch {
+    return fallback
   }
-
-  return JSON.parse(dataLine.slice('data: '.length)) as PlanResponseEvent
-}
-
-function isDoneEvent(
-  event: PlanResponseEvent,
-): event is { type: 'done'; plan: AgentPlan } {
-  return event.type === 'done' && 'plan' in event
 }

@@ -10,12 +10,37 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PreviewWorkerNameRouteImport } from './routes/preview/$workerName'
 import { Route as ApiPlanRouteImport } from './routes/api.plan'
-import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiBuilderSessionsRouteImport } from './routes/api/builder-sessions'
+import { Route as ApiRuntimeActionRouteImport } from './routes/api/runtime/action'
+import { Route as ApiDeployWorkerRouteImport } from './routes/api/deploy/worker'
+import { Route as ApiDeployRunRouteImport } from './routes/api/deploy/run'
+import { Route as ApiDeployApprovalRouteImport } from './routes/api/deploy/approval'
+import { Route as ApiCodexAuthStatusRouteImport } from './routes/api/codex-auth/status'
+import { Route as ApiCodexAuthStartRouteImport } from './routes/api/codex-auth/start'
+import { Route as ApiCodexAuthLogoutRouteImport } from './routes/api/codex-auth/logout'
+import { Route as ApiCodexAuthCallbackRouteImport } from './routes/api/codex-auth/callback'
+import { Route as ApiCloudflareStatusRouteImport } from './routes/api/cloudflare/status'
+import { Route as ApiCloudflareDisconnectRouteImport } from './routes/api/cloudflare/disconnect'
+import { Route as ApiCloudflareConnectRouteImport } from './routes/api/cloudflare/connect'
+import { Route as ApiBuildRunRouteImport } from './routes/api/build/run'
+import { Route as ApiBuildRepairRouteImport } from './routes/api/build/repair'
+import { Route as ApiBuildPreviewRouteImport } from './routes/api/build/preview'
+import { Route as ApiBuildPatchRouteImport } from './routes/api/build/patch'
+import { Route as ApiBuildGenerateRouteImport } from './routes/api/build/generate'
+import { Route as ApiBuildChecksRouteImport } from './routes/api/build/checks'
+import { Route as ApiBuildAgentPatchRouteImport } from './routes/api/build/agent-patch'
+import { Route as PreviewWorkerNameApiHealthRouteImport } from './routes/preview/$workerName/api/health'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PreviewWorkerNameRoute = PreviewWorkerNameRouteImport.update({
+  id: '/preview/$workerName',
+  path: '/preview/$workerName',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPlanRoute = ApiPlanRouteImport.update({
@@ -23,40 +48,285 @@ const ApiPlanRoute = ApiPlanRouteImport.update({
   path: '/api/plan',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
-  id: '/api/auth/$',
-  path: '/api/auth/$',
+const ApiBuilderSessionsRoute = ApiBuilderSessionsRouteImport.update({
+  id: '/api/builder-sessions',
+  path: '/api/builder-sessions',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiRuntimeActionRoute = ApiRuntimeActionRouteImport.update({
+  id: '/api/runtime/action',
+  path: '/api/runtime/action',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDeployWorkerRoute = ApiDeployWorkerRouteImport.update({
+  id: '/api/deploy/worker',
+  path: '/api/deploy/worker',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDeployRunRoute = ApiDeployRunRouteImport.update({
+  id: '/api/deploy/run',
+  path: '/api/deploy/run',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDeployApprovalRoute = ApiDeployApprovalRouteImport.update({
+  id: '/api/deploy/approval',
+  path: '/api/deploy/approval',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCodexAuthStatusRoute = ApiCodexAuthStatusRouteImport.update({
+  id: '/api/codex-auth/status',
+  path: '/api/codex-auth/status',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCodexAuthStartRoute = ApiCodexAuthStartRouteImport.update({
+  id: '/api/codex-auth/start',
+  path: '/api/codex-auth/start',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCodexAuthLogoutRoute = ApiCodexAuthLogoutRouteImport.update({
+  id: '/api/codex-auth/logout',
+  path: '/api/codex-auth/logout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCodexAuthCallbackRoute = ApiCodexAuthCallbackRouteImport.update({
+  id: '/api/codex-auth/callback',
+  path: '/api/codex-auth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCloudflareStatusRoute = ApiCloudflareStatusRouteImport.update({
+  id: '/api/cloudflare/status',
+  path: '/api/cloudflare/status',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCloudflareDisconnectRoute = ApiCloudflareDisconnectRouteImport.update({
+  id: '/api/cloudflare/disconnect',
+  path: '/api/cloudflare/disconnect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCloudflareConnectRoute = ApiCloudflareConnectRouteImport.update({
+  id: '/api/cloudflare/connect',
+  path: '/api/cloudflare/connect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBuildRunRoute = ApiBuildRunRouteImport.update({
+  id: '/api/build/run',
+  path: '/api/build/run',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBuildRepairRoute = ApiBuildRepairRouteImport.update({
+  id: '/api/build/repair',
+  path: '/api/build/repair',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBuildPreviewRoute = ApiBuildPreviewRouteImport.update({
+  id: '/api/build/preview',
+  path: '/api/build/preview',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBuildPatchRoute = ApiBuildPatchRouteImport.update({
+  id: '/api/build/patch',
+  path: '/api/build/patch',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBuildGenerateRoute = ApiBuildGenerateRouteImport.update({
+  id: '/api/build/generate',
+  path: '/api/build/generate',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBuildChecksRoute = ApiBuildChecksRouteImport.update({
+  id: '/api/build/checks',
+  path: '/api/build/checks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBuildAgentPatchRoute = ApiBuildAgentPatchRouteImport.update({
+  id: '/api/build/agent-patch',
+  path: '/api/build/agent-patch',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PreviewWorkerNameApiHealthRoute =
+  PreviewWorkerNameApiHealthRouteImport.update({
+    id: '/api/health',
+    path: '/api/health',
+    getParentRoute: () => PreviewWorkerNameRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/builder-sessions': typeof ApiBuilderSessionsRoute
   '/api/plan': typeof ApiPlanRoute
-  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/preview/$workerName': typeof PreviewWorkerNameRouteWithChildren
+  '/api/build/agent-patch': typeof ApiBuildAgentPatchRoute
+  '/api/build/checks': typeof ApiBuildChecksRoute
+  '/api/build/generate': typeof ApiBuildGenerateRoute
+  '/api/build/patch': typeof ApiBuildPatchRoute
+  '/api/build/preview': typeof ApiBuildPreviewRoute
+  '/api/build/repair': typeof ApiBuildRepairRoute
+  '/api/build/run': typeof ApiBuildRunRoute
+  '/api/cloudflare/connect': typeof ApiCloudflareConnectRoute
+  '/api/cloudflare/disconnect': typeof ApiCloudflareDisconnectRoute
+  '/api/cloudflare/status': typeof ApiCloudflareStatusRoute
+  '/api/codex-auth/callback': typeof ApiCodexAuthCallbackRoute
+  '/api/codex-auth/logout': typeof ApiCodexAuthLogoutRoute
+  '/api/codex-auth/start': typeof ApiCodexAuthStartRoute
+  '/api/codex-auth/status': typeof ApiCodexAuthStatusRoute
+  '/api/deploy/approval': typeof ApiDeployApprovalRoute
+  '/api/deploy/run': typeof ApiDeployRunRoute
+  '/api/deploy/worker': typeof ApiDeployWorkerRoute
+  '/api/runtime/action': typeof ApiRuntimeActionRoute
+  '/preview/$workerName/api/health': typeof PreviewWorkerNameApiHealthRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/builder-sessions': typeof ApiBuilderSessionsRoute
   '/api/plan': typeof ApiPlanRoute
-  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/preview/$workerName': typeof PreviewWorkerNameRouteWithChildren
+  '/api/build/agent-patch': typeof ApiBuildAgentPatchRoute
+  '/api/build/checks': typeof ApiBuildChecksRoute
+  '/api/build/generate': typeof ApiBuildGenerateRoute
+  '/api/build/patch': typeof ApiBuildPatchRoute
+  '/api/build/preview': typeof ApiBuildPreviewRoute
+  '/api/build/repair': typeof ApiBuildRepairRoute
+  '/api/build/run': typeof ApiBuildRunRoute
+  '/api/cloudflare/connect': typeof ApiCloudflareConnectRoute
+  '/api/cloudflare/disconnect': typeof ApiCloudflareDisconnectRoute
+  '/api/cloudflare/status': typeof ApiCloudflareStatusRoute
+  '/api/codex-auth/callback': typeof ApiCodexAuthCallbackRoute
+  '/api/codex-auth/logout': typeof ApiCodexAuthLogoutRoute
+  '/api/codex-auth/start': typeof ApiCodexAuthStartRoute
+  '/api/codex-auth/status': typeof ApiCodexAuthStatusRoute
+  '/api/deploy/approval': typeof ApiDeployApprovalRoute
+  '/api/deploy/run': typeof ApiDeployRunRoute
+  '/api/deploy/worker': typeof ApiDeployWorkerRoute
+  '/api/runtime/action': typeof ApiRuntimeActionRoute
+  '/preview/$workerName/api/health': typeof PreviewWorkerNameApiHealthRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api/builder-sessions': typeof ApiBuilderSessionsRoute
   '/api/plan': typeof ApiPlanRoute
-  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/preview/$workerName': typeof PreviewWorkerNameRouteWithChildren
+  '/api/build/agent-patch': typeof ApiBuildAgentPatchRoute
+  '/api/build/checks': typeof ApiBuildChecksRoute
+  '/api/build/generate': typeof ApiBuildGenerateRoute
+  '/api/build/patch': typeof ApiBuildPatchRoute
+  '/api/build/preview': typeof ApiBuildPreviewRoute
+  '/api/build/repair': typeof ApiBuildRepairRoute
+  '/api/build/run': typeof ApiBuildRunRoute
+  '/api/cloudflare/connect': typeof ApiCloudflareConnectRoute
+  '/api/cloudflare/disconnect': typeof ApiCloudflareDisconnectRoute
+  '/api/cloudflare/status': typeof ApiCloudflareStatusRoute
+  '/api/codex-auth/callback': typeof ApiCodexAuthCallbackRoute
+  '/api/codex-auth/logout': typeof ApiCodexAuthLogoutRoute
+  '/api/codex-auth/start': typeof ApiCodexAuthStartRoute
+  '/api/codex-auth/status': typeof ApiCodexAuthStatusRoute
+  '/api/deploy/approval': typeof ApiDeployApprovalRoute
+  '/api/deploy/run': typeof ApiDeployRunRoute
+  '/api/deploy/worker': typeof ApiDeployWorkerRoute
+  '/api/runtime/action': typeof ApiRuntimeActionRoute
+  '/preview/$workerName/api/health': typeof PreviewWorkerNameApiHealthRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/plan' | '/api/auth/$'
+  fullPaths:
+    | '/'
+    | '/api/builder-sessions'
+    | '/api/plan'
+    | '/preview/$workerName'
+    | '/api/build/agent-patch'
+    | '/api/build/checks'
+    | '/api/build/generate'
+    | '/api/build/patch'
+    | '/api/build/preview'
+    | '/api/build/repair'
+    | '/api/build/run'
+    | '/api/cloudflare/connect'
+    | '/api/cloudflare/disconnect'
+    | '/api/cloudflare/status'
+    | '/api/codex-auth/callback'
+    | '/api/codex-auth/logout'
+    | '/api/codex-auth/start'
+    | '/api/codex-auth/status'
+    | '/api/deploy/approval'
+    | '/api/deploy/run'
+    | '/api/deploy/worker'
+    | '/api/runtime/action'
+    | '/preview/$workerName/api/health'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/plan' | '/api/auth/$'
-  id: '__root__' | '/' | '/api/plan' | '/api/auth/$'
+  to:
+    | '/'
+    | '/api/builder-sessions'
+    | '/api/plan'
+    | '/preview/$workerName'
+    | '/api/build/agent-patch'
+    | '/api/build/checks'
+    | '/api/build/generate'
+    | '/api/build/patch'
+    | '/api/build/preview'
+    | '/api/build/repair'
+    | '/api/build/run'
+    | '/api/cloudflare/connect'
+    | '/api/cloudflare/disconnect'
+    | '/api/cloudflare/status'
+    | '/api/codex-auth/callback'
+    | '/api/codex-auth/logout'
+    | '/api/codex-auth/start'
+    | '/api/codex-auth/status'
+    | '/api/deploy/approval'
+    | '/api/deploy/run'
+    | '/api/deploy/worker'
+    | '/api/runtime/action'
+    | '/preview/$workerName/api/health'
+  id:
+    | '__root__'
+    | '/'
+    | '/api/builder-sessions'
+    | '/api/plan'
+    | '/preview/$workerName'
+    | '/api/build/agent-patch'
+    | '/api/build/checks'
+    | '/api/build/generate'
+    | '/api/build/patch'
+    | '/api/build/preview'
+    | '/api/build/repair'
+    | '/api/build/run'
+    | '/api/cloudflare/connect'
+    | '/api/cloudflare/disconnect'
+    | '/api/cloudflare/status'
+    | '/api/codex-auth/callback'
+    | '/api/codex-auth/logout'
+    | '/api/codex-auth/start'
+    | '/api/codex-auth/status'
+    | '/api/deploy/approval'
+    | '/api/deploy/run'
+    | '/api/deploy/worker'
+    | '/api/runtime/action'
+    | '/preview/$workerName/api/health'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiBuilderSessionsRoute: typeof ApiBuilderSessionsRoute
   ApiPlanRoute: typeof ApiPlanRoute
-  ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  PreviewWorkerNameRoute: typeof PreviewWorkerNameRouteWithChildren
+  ApiBuildAgentPatchRoute: typeof ApiBuildAgentPatchRoute
+  ApiBuildChecksRoute: typeof ApiBuildChecksRoute
+  ApiBuildGenerateRoute: typeof ApiBuildGenerateRoute
+  ApiBuildPatchRoute: typeof ApiBuildPatchRoute
+  ApiBuildPreviewRoute: typeof ApiBuildPreviewRoute
+  ApiBuildRepairRoute: typeof ApiBuildRepairRoute
+  ApiBuildRunRoute: typeof ApiBuildRunRoute
+  ApiCloudflareConnectRoute: typeof ApiCloudflareConnectRoute
+  ApiCloudflareDisconnectRoute: typeof ApiCloudflareDisconnectRoute
+  ApiCloudflareStatusRoute: typeof ApiCloudflareStatusRoute
+  ApiCodexAuthCallbackRoute: typeof ApiCodexAuthCallbackRoute
+  ApiCodexAuthLogoutRoute: typeof ApiCodexAuthLogoutRoute
+  ApiCodexAuthStartRoute: typeof ApiCodexAuthStartRoute
+  ApiCodexAuthStatusRoute: typeof ApiCodexAuthStatusRoute
+  ApiDeployApprovalRoute: typeof ApiDeployApprovalRoute
+  ApiDeployRunRoute: typeof ApiDeployRunRoute
+  ApiDeployWorkerRoute: typeof ApiDeployWorkerRoute
+  ApiRuntimeActionRoute: typeof ApiRuntimeActionRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -68,6 +338,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/preview/$workerName': {
+      id: '/preview/$workerName'
+      path: '/preview/$workerName'
+      fullPath: '/preview/$workerName'
+      preLoaderRoute: typeof PreviewWorkerNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/plan': {
       id: '/api/plan'
       path: '/api/plan'
@@ -75,20 +352,183 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPlanRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/auth/$': {
-      id: '/api/auth/$'
-      path: '/api/auth/$'
-      fullPath: '/api/auth/$'
-      preLoaderRoute: typeof ApiAuthSplatRouteImport
+    '/api/builder-sessions': {
+      id: '/api/builder-sessions'
+      path: '/api/builder-sessions'
+      fullPath: '/api/builder-sessions'
+      preLoaderRoute: typeof ApiBuilderSessionsRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/api/runtime/action': {
+      id: '/api/runtime/action'
+      path: '/api/runtime/action'
+      fullPath: '/api/runtime/action'
+      preLoaderRoute: typeof ApiRuntimeActionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/deploy/worker': {
+      id: '/api/deploy/worker'
+      path: '/api/deploy/worker'
+      fullPath: '/api/deploy/worker'
+      preLoaderRoute: typeof ApiDeployWorkerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/deploy/run': {
+      id: '/api/deploy/run'
+      path: '/api/deploy/run'
+      fullPath: '/api/deploy/run'
+      preLoaderRoute: typeof ApiDeployRunRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/deploy/approval': {
+      id: '/api/deploy/approval'
+      path: '/api/deploy/approval'
+      fullPath: '/api/deploy/approval'
+      preLoaderRoute: typeof ApiDeployApprovalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/codex-auth/status': {
+      id: '/api/codex-auth/status'
+      path: '/api/codex-auth/status'
+      fullPath: '/api/codex-auth/status'
+      preLoaderRoute: typeof ApiCodexAuthStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/codex-auth/start': {
+      id: '/api/codex-auth/start'
+      path: '/api/codex-auth/start'
+      fullPath: '/api/codex-auth/start'
+      preLoaderRoute: typeof ApiCodexAuthStartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/codex-auth/logout': {
+      id: '/api/codex-auth/logout'
+      path: '/api/codex-auth/logout'
+      fullPath: '/api/codex-auth/logout'
+      preLoaderRoute: typeof ApiCodexAuthLogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/codex-auth/callback': {
+      id: '/api/codex-auth/callback'
+      path: '/api/codex-auth/callback'
+      fullPath: '/api/codex-auth/callback'
+      preLoaderRoute: typeof ApiCodexAuthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/cloudflare/status': {
+      id: '/api/cloudflare/status'
+      path: '/api/cloudflare/status'
+      fullPath: '/api/cloudflare/status'
+      preLoaderRoute: typeof ApiCloudflareStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/cloudflare/disconnect': {
+      id: '/api/cloudflare/disconnect'
+      path: '/api/cloudflare/disconnect'
+      fullPath: '/api/cloudflare/disconnect'
+      preLoaderRoute: typeof ApiCloudflareDisconnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/cloudflare/connect': {
+      id: '/api/cloudflare/connect'
+      path: '/api/cloudflare/connect'
+      fullPath: '/api/cloudflare/connect'
+      preLoaderRoute: typeof ApiCloudflareConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/build/run': {
+      id: '/api/build/run'
+      path: '/api/build/run'
+      fullPath: '/api/build/run'
+      preLoaderRoute: typeof ApiBuildRunRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/build/repair': {
+      id: '/api/build/repair'
+      path: '/api/build/repair'
+      fullPath: '/api/build/repair'
+      preLoaderRoute: typeof ApiBuildRepairRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/build/preview': {
+      id: '/api/build/preview'
+      path: '/api/build/preview'
+      fullPath: '/api/build/preview'
+      preLoaderRoute: typeof ApiBuildPreviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/build/patch': {
+      id: '/api/build/patch'
+      path: '/api/build/patch'
+      fullPath: '/api/build/patch'
+      preLoaderRoute: typeof ApiBuildPatchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/build/generate': {
+      id: '/api/build/generate'
+      path: '/api/build/generate'
+      fullPath: '/api/build/generate'
+      preLoaderRoute: typeof ApiBuildGenerateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/build/checks': {
+      id: '/api/build/checks'
+      path: '/api/build/checks'
+      fullPath: '/api/build/checks'
+      preLoaderRoute: typeof ApiBuildChecksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/build/agent-patch': {
+      id: '/api/build/agent-patch'
+      path: '/api/build/agent-patch'
+      fullPath: '/api/build/agent-patch'
+      preLoaderRoute: typeof ApiBuildAgentPatchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/preview/$workerName/api/health': {
+      id: '/preview/$workerName/api/health'
+      path: '/api/health'
+      fullPath: '/preview/$workerName/api/health'
+      preLoaderRoute: typeof PreviewWorkerNameApiHealthRouteImport
+      parentRoute: typeof PreviewWorkerNameRoute
     }
   }
 }
 
+interface PreviewWorkerNameRouteChildren {
+  PreviewWorkerNameApiHealthRoute: typeof PreviewWorkerNameApiHealthRoute
+}
+
+const PreviewWorkerNameRouteChildren: PreviewWorkerNameRouteChildren = {
+  PreviewWorkerNameApiHealthRoute: PreviewWorkerNameApiHealthRoute,
+}
+
+const PreviewWorkerNameRouteWithChildren =
+  PreviewWorkerNameRoute._addFileChildren(PreviewWorkerNameRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiBuilderSessionsRoute: ApiBuilderSessionsRoute,
   ApiPlanRoute: ApiPlanRoute,
-  ApiAuthSplatRoute: ApiAuthSplatRoute,
+  PreviewWorkerNameRoute: PreviewWorkerNameRouteWithChildren,
+  ApiBuildAgentPatchRoute: ApiBuildAgentPatchRoute,
+  ApiBuildChecksRoute: ApiBuildChecksRoute,
+  ApiBuildGenerateRoute: ApiBuildGenerateRoute,
+  ApiBuildPatchRoute: ApiBuildPatchRoute,
+  ApiBuildPreviewRoute: ApiBuildPreviewRoute,
+  ApiBuildRepairRoute: ApiBuildRepairRoute,
+  ApiBuildRunRoute: ApiBuildRunRoute,
+  ApiCloudflareConnectRoute: ApiCloudflareConnectRoute,
+  ApiCloudflareDisconnectRoute: ApiCloudflareDisconnectRoute,
+  ApiCloudflareStatusRoute: ApiCloudflareStatusRoute,
+  ApiCodexAuthCallbackRoute: ApiCodexAuthCallbackRoute,
+  ApiCodexAuthLogoutRoute: ApiCodexAuthLogoutRoute,
+  ApiCodexAuthStartRoute: ApiCodexAuthStartRoute,
+  ApiCodexAuthStatusRoute: ApiCodexAuthStatusRoute,
+  ApiDeployApprovalRoute: ApiDeployApprovalRoute,
+  ApiDeployRunRoute: ApiDeployRunRoute,
+  ApiDeployWorkerRoute: ApiDeployWorkerRoute,
+  ApiRuntimeActionRoute: ApiRuntimeActionRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

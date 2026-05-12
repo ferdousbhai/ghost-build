@@ -3,7 +3,13 @@ import { env } from 'cloudflare:workers'
 import { RpcTarget } from 'cloudflare:workers'
 import { getAgentByName } from 'agents'
 import { buildAgentPlan, type AgentPlanRequest } from '#/lib/agent'
-import { GhostCoderAgent, type GhostCoderEnv } from '#/lib/ghost-agent'
+import { encodeAgentRunEvent, type AgentRunEvent } from '#/lib/agent-stream'
+import {
+  readCodexAccountFromRequest,
+  readCodexTokenFromRequest,
+} from '#/lib/codex-oauth'
+import { GhostBuildAgent, type GhostBuildEnv } from '#/lib/ghost-agent'
+import { resolveModelRuntimeAuth } from '#/lib/model-auth'
 
 export const Route = createFileRoute('/api/plan')({
   server: {
@@ -11,50 +17,57 @@ export const Route = createFileRoute('/api/plan')({
       POST: async ({ request }) => {
         const payload = (await request.json().catch(() => ({}))) as Partial<
           AgentPlanRequest
-        >
-        return streamAgentRun(payload)
+        > &
+          PlanRunCredentials
+
+        const codexAccessToken = await readCodexTokenFromRequest(request)
+        const codexAccount = readCodexAccountFromRequest(request)
+
+        if (!codexAccessToken) {
+          return Response.json(
+            {
+              error:
+                'ChatGPT/Codex sign-in is required for Codex model auth.',
+            },
+            { status: 401 },
+          )
+        }
+
+        return streamAgentRun({
+          ...payload,
+          codexAccessToken,
+          codexAccount,
+        })
       },
     },
   },
 })
 
-type PlanStreamEvent =
-  | {
-      type: 'status'
-      message: string
-    }
-  | {
-      type: 'chunk'
-      message: string
-    }
-  | {
-      type: 'done'
-      plan: ReturnType<typeof buildAgentPlan>
-    }
-  | {
-      type: 'error'
-      message: string
-    }
+type PlanRunCredentials = {
+  codexAccessToken?: string
+  codexAccount?: Parameters<typeof resolveModelRuntimeAuth>[0]['codexAccount']
+}
 
-function streamAgentRun(payload: Partial<AgentPlanRequest>) {
+function streamAgentRun(payload: Partial<AgentPlanRequest> & PlanRunCredentials) {
   const plan = buildAgentPlan(payload)
   const encoder = new TextEncoder()
   const stream = new TransformStream<Uint8Array, Uint8Array>()
   const writer = stream.writable.getWriter()
 
   void runAgentTurn(payload, plan, (event) =>
-    writer.write(encoder.encode(`data: ${JSON.stringify(event)}\n\n`)),
+    writer.write(encoder.encode(encodeAgentRunEvent(event))),
   )
     .catch((error: unknown) =>
       writer.write(
         encoder.encode(
-          `data: ${JSON.stringify({
+          encodeAgentRunEvent({
             type: 'error',
             message:
               error instanceof Error
                 ? error.message
                 : 'The Think agent failed to start.',
-          } satisfies PlanStreamEvent)}\n\n`,
+            terminal: true,
+          }),
         ),
       ),
     )
@@ -69,24 +82,32 @@ function streamAgentRun(payload: Partial<AgentPlanRequest>) {
 }
 
 async function runAgentTurn(
-  payload: Partial<AgentPlanRequest>,
+  payload: Partial<AgentPlanRequest> & PlanRunCredentials,
   plan: ReturnType<typeof buildAgentPlan>,
-  emit: (event: PlanStreamEvent) => Promise<void>,
+  emit: (event: AgentRunEvent) => Promise<void>,
 ) {
+  const runtimeAuth = resolveModelRuntimeAuth({
+    codexAccessToken: payload.codexAccessToken,
+    codexAccount: payload.codexAccount,
+  })
+
   await emit({
     type: 'status',
     message: 'Starting Cloudflare Think agent run.',
   })
 
-  const agent = await getAgentByName<GhostCoderEnv, GhostCoderAgent>(
-    (env as GhostCoderEnv).GhostCoderAgent,
-    plan.deployment.workerName,
+  const agent = await getAgentByName<GhostBuildEnv, GhostBuildAgent>(
+    (env as GhostBuildEnv).GhostBuildAgent,
+    plan.deployment.sessionId,
   )
 
   await emit({
     type: 'status',
-    message: 'Connected durable Ghost Coder agent and workspace.',
+    message: 'Connected durable GhostBuild agent and workspace.',
   })
+
+  await agent.setCodexOAuthTokenForNextTurn(runtimeAuth.accessToken)
+  await agent.setReasoningEffortForNextTurn(payload.reasoningEffort ?? 'low')
 
   const callback = new PlanStreamCallback(emit)
   await agent.chat(formatAgentPrompt(payload), callback)
@@ -96,8 +117,9 @@ async function runAgentTurn(
   }
 
   await emit({
-    type: 'done',
+    type: 'completion',
     plan,
+    billingSummary: runtimeAuth.billingSummary,
   })
 }
 
@@ -107,12 +129,19 @@ function formatAgentPrompt(input: Partial<AgentPlanRequest>) {
     audience: input.audience?.trim() || 'non-technical founder',
     deploymentTarget:
       input.deploymentTarget?.trim() || 'Cloudflare Worker',
+    model: input.model ?? 'gpt-5.5',
+    reasoningEffort: input.reasoningEffort ?? 'low',
   }
 
   return [
     `Product idea: ${request.idea}`,
     `Audience: ${request.audience}`,
     `Deployment target: ${request.deploymentTarget}`,
+    `Model: ${request.model}`,
+    'Model auth: ChatGPT/Codex OAuth',
+    `Reasoning effort: ${request.reasoningEffort}`,
+    `Goal: ${input.goal?.objective?.trim() || request.idea}`,
+    `Success criteria: ${(input.goal?.successCriteria ?? []).join('; ') || 'derive concrete acceptance checks for the Cloudflare web app'}`,
     '',
     'Create a concise implementation plan for the app.',
     'Use the Cloudflare API MCP server and Cloudflare Skills as available context.',
@@ -123,13 +152,13 @@ function formatAgentPrompt(input: Partial<AgentPlanRequest>) {
 class PlanStreamCallback extends RpcTarget {
   failed = false
 
-  constructor(private readonly emit: (event: PlanStreamEvent) => Promise<void>) {
+  constructor(private readonly emit: (event: AgentRunEvent) => Promise<void>) {
     super()
   }
 
   async onEvent(json: string) {
     await this.emit({
-      type: 'chunk',
+      type: 'transcript_delta',
       message: json,
     })
   }
@@ -146,6 +175,7 @@ class PlanStreamCallback extends RpcTarget {
     await this.emit({
       type: 'error',
       message: error,
+      terminal: true,
     })
   }
 }

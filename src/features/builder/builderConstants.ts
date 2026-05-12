@@ -4,6 +4,20 @@ export const initialAgentRequest: AgentPlanRequest = {
   idea: '',
   audience: 'non-technical founder',
   deploymentTarget: 'Cloudflare Worker with a custom domain',
+  projectSource: {
+    type: 'new',
+    starter: 'TanStack Start on Cloudflare Workers',
+    command:
+      'pnpm create cloudflare@latest my-tanstack-start-app --framework=tanstack-start',
+    sourceUrl:
+      'https://developers.cloudflare.com/workers/framework-guides/web-apps/tanstack-start/',
+  },
+  model: 'gpt-5.5',
+  reasoningEffort: 'low',
+  goal: {
+    objective: '',
+    successCriteria: [],
+  },
 }
 
 export const promptSuggestions = [
@@ -24,22 +38,32 @@ export const defaultCapabilities = [
   'Cloudflare Skills loaded by default',
   'Think workspace, memory, and tool loop',
   'GPT-5.5 with low reasoning',
-  'User-provided OpenAI key',
-  'Create or link Cloudflare accounts',
-  'Cloudflare/Stripe handles paid infrastructure',
+  'ChatGPT/Codex OAuth for model access',
+  'Cloudflare Workers, D1, R2, KV, Queues, AI Gateway',
+  'Goal-driven planning for Cloudflare web apps',
+]
+
+export const cloudflareStackReadiness = [
+  'Workers',
+  'D1',
+  'R2',
+  'KV',
+  'Queues',
+  'AI Gateway',
+  'MCP',
 ]
 
 export const productionSteps = [
-  'Discover Cloudflare services',
-  'Authorize or create account',
-  'Collect payment through Cloudflare/Stripe',
-  'Issue scoped API token',
-  'Register approved domain',
-  'Deploy Worker to production',
+  'Confirm the active goal and success criteria',
+  'Plan the Cloudflare architecture',
+  'Generate the TanStack Start Worker app',
+  'Run checks and preview the Worker',
+  'Request approval for paid or destructive actions',
+  'Deploy to Cloudflare when approvals are complete',
 ]
 
 export const ownershipLineItems = [
-  ['OpenAI key', 'Stored in this browser and used for GPT-5.5 model calls'],
+  ['Codex access', 'Connected through ChatGPT/Codex OAuth'],
   ['Cloudflare billing', 'Handled by Cloudflare and Stripe hosted payment flows'],
   ['Paid actions', 'Domains and account purchases require explicit approval'],
 ] as const

@@ -1,16 +1,121 @@
-import { CheckCircle2, Globe2, Rocket } from 'lucide-react'
+import { CheckCircle2, Globe2, Loader2, LockKeyhole, Rocket, Square } from 'lucide-react'
+import { useState } from 'react'
 import type { AgentPlan } from '#/lib/agent'
+import type { BuildCheckResult } from '#/lib/build-checks'
+import type { BuildPreviewResult } from '#/lib/build-preview'
+import type { CloudflareDeployResult } from '#/lib/cloudflare-deploy'
+import { buildExecutionProgress, type BuildExecutionStageStatus } from '#/lib/build-execution'
+import {
+  hasWorkersWritePermission,
+  type CloudflareConnectionStatus,
+} from '#/lib/cloudflare-status'
+import type { DeployApprovalRecord } from '#/lib/deploy-approval'
+import type { GeneratedWorkerApp } from '#/lib/generated-worker-app'
+import type { CodexAuthState } from '#/lib/model-auth'
 import {
   defaultCapabilities,
+  cloudflareStackReadiness,
   ownershipLineItems,
   productionSteps,
 } from './builderConstants'
 
 type PreviewPaneProps = {
+  cloudflareStatus: CloudflareConnectionStatus
+  codexAuthState: CodexAuthState
+  checkResult?: BuildCheckResult
+  deployApproval?: DeployApprovalRecord
+  deployResult?: CloudflareDeployResult
+  generatedApp?: GeneratedWorkerApp
+  isPending: boolean
   plan?: AgentPlan
+  preview?: BuildPreviewResult
+  onConnectCloudflareToken: (token: string) => Promise<void>
+  onDeployWorkerApp?: () => Promise<void>
+  onGenerateWorkerApp: () => Promise<void>
+  onPrepareBuildPreview: () => Promise<void>
+  onRequestAgentPatch?: () => Promise<void>
+  onRequestDeployApproval: (input: {
+    estimatedCost?: string
+    hasDestructiveAction: boolean
+    hasPaidAction: boolean
+  }) => Promise<void>
+  onRepairGeneratedApp?: () => Promise<void>
+  onRunBuildDeployPipeline?: () => Promise<void>
+  onRunBuildPipeline?: () => Promise<void>
+  onRunBuildChecks: () => Promise<void>
 }
 
-export function PreviewPane({ plan }: PreviewPaneProps) {
+export function PreviewPane({
+  cloudflareStatus,
+  codexAuthState,
+  checkResult,
+  deployApproval,
+  deployResult,
+  generatedApp,
+  isPending,
+  plan,
+  preview,
+  onConnectCloudflareToken,
+  onDeployWorkerApp = async () => undefined,
+  onGenerateWorkerApp,
+  onPrepareBuildPreview,
+  onRequestAgentPatch = async () => undefined,
+  onRequestDeployApproval,
+  onRepairGeneratedApp = async () => undefined,
+  onRunBuildDeployPipeline = async () => undefined,
+  onRunBuildPipeline = async () => undefined,
+  onRunBuildChecks,
+}: PreviewPaneProps) {
+  const [deployApprovalRequested, setDeployApprovalRequested] = useState(false)
+  const [isApprovingDeploy, setIsApprovingDeploy] = useState(false)
+  const [cloudflareToken, setCloudflareToken] = useState('')
+  const [cloudflareConnectError, setCloudflareConnectError] = useState('')
+  const [isConnectingCloudflare, setIsConnectingCloudflare] = useState(false)
+  const [estimatedCost, setEstimatedCost] = useState(
+    'No additional Cloudflare cost expected',
+  )
+  const [hasPaidAction, setHasPaidAction] = useState(false)
+  const [hasDestructiveAction, setHasDestructiveAction] = useState(false)
+  const [isGeneratingWorker, setIsGeneratingWorker] = useState(false)
+  const [isRunningChecks, setIsRunningChecks] = useState(false)
+  const [isRepairingWorker, setIsRepairingWorker] = useState(false)
+  const [isRunningPipeline, setIsRunningPipeline] = useState(false)
+  const [isRunningDeployPipeline, setIsRunningDeployPipeline] = useState(false)
+  const [isPreparingPreview, setIsPreparingPreview] = useState(false)
+  const [isRequestingAgentPatch, setIsRequestingAgentPatch] = useState(false)
+  const [isDeployingWorker, setIsDeployingWorker] = useState(false)
+  const readinessItems = buildReadinessItems(
+    codexAuthState,
+    Boolean(plan),
+    cloudflareStatus,
+    deployApproval,
+  )
+  const executionProgress = buildExecutionProgress({
+    authState: codexAuthState,
+    checkResult,
+    cloudflareStatus,
+    deployApproval,
+    deployResult,
+    generatedApp,
+    isPending,
+    plan,
+    preview,
+  })
+  const canApproveDeploy =
+    Boolean(plan) &&
+    cloudflareStatus.status === 'connected' &&
+    Boolean(cloudflareStatus.accountId) &&
+    hasWorkersWritePermission(cloudflareStatus.permissions)
+  const canDeployWorker =
+    canApproveDeploy &&
+    Boolean(deployApproval) &&
+    Boolean(generatedApp) &&
+    checkResult?.status === 'passed' &&
+    preview?.status === 'ready' &&
+    !deployResult
+  const canRunBuildDeployPipeline =
+    canApproveDeploy && Boolean(deployApproval) && !deployResult
+
   return (
     <aside className="workbench" aria-label="Build preview">
       <div className="workbench-header">
@@ -18,9 +123,13 @@ export function PreviewPane({ plan }: PreviewPaneProps) {
           <span>Preview</span>
           <strong>{plan?.deployment.workerName ?? 'New Worker app'}</strong>
         </div>
-        <button type="button">
+        <button
+          type="button"
+          disabled={!plan}
+          onClick={() => setDeployApprovalRequested(true)}
+        >
           <Globe2 size={16} />
-          Deploy
+          Deploy gated
         </button>
       </div>
 
@@ -29,28 +138,371 @@ export function PreviewPane({ plan }: PreviewPaneProps) {
           <span />
           <span />
           <span />
-          <p>{plan?.deployment.domain ?? 'preview.ghost-coder.local'}</p>
+          <p>{plan?.deployment.domain ?? 'preview.ghostbuild.dev'}</p>
         </div>
         <div className="preview-content">
           <div className="preview-hero">
             <Rocket size={28} />
-            <h2>{plan?.deployment.workerName ?? 'Your app preview'}</h2>
-            <p>
-              {plan
-                ? 'The generated product preview will stream here while Think builds, checks, and deploys the Worker.'
-                : 'After you send a prompt, the live app preview appears here. No code view required.'}
-            </p>
+            <h2>{executionProgress.title}</h2>
+            <p>{executionProgress.detail}</p>
           </div>
           <div className="preview-list">
-            {(plan?.phases ?? []).map((phase) => (
-              <div key={phase.title}>
-                <CheckCircle2 size={16} />
-                <span>{phase.title}</span>
+            {executionProgress.stages.map((stage) => (
+              <div key={stage.id}>
+                <BuildStageIcon status={stage.status} />
+                <span>
+                  <b>{stage.title}</b>
+                  {stage.detail}
+                </span>
               </div>
             ))}
           </div>
+          {plan && !generatedApp ? (
+            <div className="build-action-row">
+              <button
+                type="button"
+                className="generate-worker-button"
+                disabled={isRunningPipeline || isPending}
+                onClick={async () => {
+                  setIsRunningPipeline(true)
+                  try {
+                    await onRunBuildPipeline()
+                  } finally {
+                    setIsRunningPipeline(false)
+                  }
+                }}
+              >
+                {isRunningPipeline ? (
+                  <Loader2 className="animate-spin" size={15} />
+                ) : (
+                  <Rocket size={15} />
+                )}
+                Run build pipeline
+              </button>
+              <button
+                type="button"
+                className="generate-worker-button secondary"
+                disabled={isGeneratingWorker || isPending}
+                onClick={async () => {
+                  setIsGeneratingWorker(true)
+                  try {
+                    await onGenerateWorkerApp()
+                  } finally {
+                    setIsGeneratingWorker(false)
+                  }
+                }}
+              >
+                {isGeneratingWorker ? (
+                  <Loader2 className="animate-spin" size={15} />
+                ) : (
+                  <Rocket size={15} />
+                )}
+                Generate Worker files
+              </button>
+            </div>
+          ) : null}
+          {generatedApp ? (
+            <div className="generated-files">
+              <span>Generated files</span>
+              {generatedApp.files.map((file) => (
+                <code key={file.path}>{file.path}</code>
+              ))}
+            </div>
+          ) : null}
+          {generatedApp && !checkResult ? (
+            <button
+              type="button"
+              className="generate-worker-button"
+              disabled={isRunningChecks}
+              onClick={async () => {
+                setIsRunningChecks(true)
+                try {
+                  await onRunBuildChecks()
+                } finally {
+                  setIsRunningChecks(false)
+                }
+              }}
+            >
+              {isRunningChecks ? (
+                <Loader2 className="animate-spin" size={15} />
+              ) : (
+                <CheckCircle2 size={15} />
+              )}
+              Run artifact checks
+            </button>
+          ) : null}
+          {checkResult ? (
+            <div className="generated-files">
+              <span>Artifact checks {checkResult.status}</span>
+              {checkResult.checks.map((check) => (
+                <code key={check.name}>{check.name}: {check.status}</code>
+              ))}
+            </div>
+          ) : null}
+          {checkResult?.status === 'failed' ? (
+            <div className="build-action-row">
+              <button
+                type="button"
+                className="generate-worker-button"
+                disabled={isRequestingAgentPatch}
+                onClick={async () => {
+                  setIsRequestingAgentPatch(true)
+                  try {
+                    await onRequestAgentPatch()
+                  } finally {
+                    setIsRequestingAgentPatch(false)
+                  }
+                }}
+              >
+                {isRequestingAgentPatch ? (
+                  <Loader2 className="animate-spin" size={15} />
+                ) : (
+                  <Rocket size={15} />
+                )}
+                Ask agent to patch
+              </button>
+              <button
+                type="button"
+                className="generate-worker-button secondary"
+                disabled={isRepairingWorker}
+                onClick={async () => {
+                  setIsRepairingWorker(true)
+                  try {
+                    await onRepairGeneratedApp()
+                  } finally {
+                    setIsRepairingWorker(false)
+                  }
+                }}
+              >
+                {isRepairingWorker ? (
+                  <Loader2 className="animate-spin" size={15} />
+                ) : (
+                  <Rocket size={15} />
+                )}
+                Repair generated files
+              </button>
+            </div>
+          ) : null}
+          {checkResult?.status === 'passed' && !preview ? (
+            <button
+              type="button"
+              className="generate-worker-button"
+              disabled={isPreparingPreview}
+              onClick={async () => {
+                setIsPreparingPreview(true)
+                try {
+                  await onPrepareBuildPreview()
+                } finally {
+                  setIsPreparingPreview(false)
+                }
+              }}
+            >
+              {isPreparingPreview ? (
+                <Loader2 className="animate-spin" size={15} />
+              ) : (
+                <Globe2 size={15} />
+              )}
+              Prepare preview
+            </button>
+          ) : null}
+          {preview ? (
+            <div className="generated-files">
+              <span>Preview ready</span>
+              <a href={preview.url}>{preview.url}</a>
+              <a href={preview.healthUrl}>{preview.healthUrl}</a>
+            </div>
+          ) : null}
+          {canDeployWorker ? (
+            <button
+              type="button"
+              className="generate-worker-button"
+              disabled={isDeployingWorker}
+              onClick={async () => {
+                setIsDeployingWorker(true)
+                try {
+                  await onDeployWorkerApp()
+                } finally {
+                  setIsDeployingWorker(false)
+                }
+              }}
+            >
+              {isDeployingWorker ? (
+                <Loader2 className="animate-spin" size={15} />
+              ) : (
+                <Globe2 size={15} />
+              )}
+              Deploy Worker
+            </button>
+          ) : null}
+          {deployResult ? (
+            <div className="generated-files">
+              <span>Deployed Worker</span>
+              <a href={deployResult.dashboardUrl}>{deployResult.dashboardUrl}</a>
+            </div>
+          ) : null}
         </div>
       </div>
+
+      <div className="deploy-card">
+        <span>{plan ? `Goal ${plan.goal.status}` : 'Active goal'}</span>
+        <strong>{plan?.goal.objective ?? 'No goal yet'}</strong>
+        <ChecklistItems
+          items={
+            plan?.goal.successCriteria ?? [
+              'Describe the web app you want GhostBuild to build.',
+              'Connect ChatGPT/Codex before starting the run.',
+            ]
+          }
+        />
+      </div>
+
+      <div className="deploy-card">
+        <span>Cloudflare readiness</span>
+        <ChecklistItems items={readinessItems} />
+        {cloudflareStatus.status !== 'connected' ? (
+          <div className="cloudflare-connect-form">
+            <input
+              type="password"
+              value={cloudflareToken}
+              placeholder="Cloudflare API token"
+              onChange={(event) => setCloudflareToken(event.target.value)}
+            />
+            <button
+              type="button"
+              disabled={!cloudflareToken.trim() || isConnectingCloudflare}
+              onClick={async () => {
+                setIsConnectingCloudflare(true)
+                setCloudflareConnectError('')
+                try {
+                  await onConnectCloudflareToken(cloudflareToken)
+                  setCloudflareToken('')
+                } catch (error) {
+                  setCloudflareConnectError(
+                    error instanceof Error
+                      ? error.message
+                      : 'Unable to connect Cloudflare.',
+                  )
+                } finally {
+                  setIsConnectingCloudflare(false)
+                }
+              }}
+            >
+              Connect
+            </button>
+            {cloudflareConnectError ? <p>{cloudflareConnectError}</p> : null}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="deploy-card">
+        <span>Cloudflare stack</span>
+        <div className="stack-readiness-strip">
+          {cloudflareStackReadiness.map((item) => (
+            <span key={item}>
+              <CheckCircle2 size={14} />
+              {item}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {deployApprovalRequested ? (
+        <div className="deploy-card approval-card">
+          <span>{deployApproval ? 'Approval recorded' : 'Approval required'}</span>
+          <strong>{plan?.deployment.workerName ?? 'Deploy Worker'}</strong>
+          <p>
+            {deployApproval
+              ? `${deployApproval.id} confirms ${deployApproval.workerName} for ${deployApproval.accountName ?? deployApproval.accountId}.`
+              : 'Deployment is blocked until the user confirms the target account, Worker name, bindings, and any paid infrastructure changes.'}
+          </p>
+          {plan ? (
+            <div className="approval-details">
+              <div>
+                <b>Account</b>
+                {cloudflareStatus.accountName ?? cloudflareStatus.accountId ?? 'Not connected'}
+              </div>
+              <div>
+                <b>Worker</b>
+                {plan.deployment.workerName}
+              </div>
+              <div>
+                <b>Bindings</b>
+                {plan.deployment.bindings.join(', ') || 'None'}
+              </div>
+              <label>
+                <b>Estimated cost</b>
+                <input
+                  value={deployApproval?.estimatedCost ?? estimatedCost}
+                  disabled={Boolean(deployApproval)}
+                  onChange={(event) => setEstimatedCost(event.target.value)}
+                />
+              </label>
+              <label className="approval-check">
+                <input
+                  type="checkbox"
+                  checked={deployApproval?.hasPaidAction ?? hasPaidAction}
+                  disabled={Boolean(deployApproval)}
+                  onChange={(event) => setHasPaidAction(event.target.checked)}
+                />
+                Includes paid Cloudflare action
+              </label>
+              <label className="approval-check">
+                <input
+                  type="checkbox"
+                  checked={
+                    deployApproval?.hasDestructiveAction ?? hasDestructiveAction
+                  }
+                  disabled={Boolean(deployApproval)}
+                  onChange={(event) =>
+                    setHasDestructiveAction(event.target.checked)
+                  }
+                />
+                Includes destructive Cloudflare action
+              </label>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            disabled={!canApproveDeploy || isApprovingDeploy || Boolean(deployApproval)}
+            onClick={async () => {
+              setIsApprovingDeploy(true)
+              try {
+                await onRequestDeployApproval({
+                  estimatedCost,
+                  hasDestructiveAction,
+                  hasPaidAction,
+                })
+              } finally {
+                setIsApprovingDeploy(false)
+              }
+            }}
+          >
+            <LockKeyhole size={15} />
+            {deployApproval ? 'Confirmed' : 'Confirm deploy'}
+          </button>
+          {canRunBuildDeployPipeline ? (
+            <button
+              type="button"
+              disabled={isRunningDeployPipeline}
+              onClick={async () => {
+                setIsRunningDeployPipeline(true)
+                try {
+                  await onRunBuildDeployPipeline()
+                } finally {
+                  setIsRunningDeployPipeline(false)
+                }
+              }}
+            >
+              {isRunningDeployPipeline ? (
+                <Loader2 className="animate-spin" size={15} />
+              ) : (
+                <Globe2 size={15} />
+              )}
+              Build and deploy
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="deploy-card">
         <span>Default capabilities</span>
@@ -63,12 +515,12 @@ export function PreviewPane({ plan }: PreviewPaneProps) {
       </div>
 
       <div className="deploy-card wallet-card">
-        <span>Open-source ownership model</span>
-        <strong>Your keys, your cloud</strong>
+        <span>Cloudflare-first ownership model</span>
+        <strong>Your goal, your Cloudflare app</strong>
         <p>
-          Ghost Coder is open source. Users bring their own OpenAI key for
-          model calls, while Cloudflare and Stripe handle payment for accounts,
-          domains, Workers, storage, and other paid infrastructure actions.
+          GhostBuild connects through ChatGPT/Codex OAuth for model access.
+          Cloudflare and Stripe handle payment for accounts, domains, Workers,
+          storage, and other paid infrastructure actions.
         </p>
         {ownershipLineItems.map(([label, detail]) => (
           <div className="capability-row" key={label}>
@@ -84,6 +536,18 @@ export function PreviewPane({ plan }: PreviewPaneProps) {
   )
 }
 
+function BuildStageIcon({ status }: { status: BuildExecutionStageStatus }) {
+  if (status === 'running') {
+    return <Loader2 className="animate-spin" size={16} />
+  }
+
+  if (status === 'completed' || status === 'ready') {
+    return <CheckCircle2 size={16} />
+  }
+
+  return <Square size={14} />
+}
+
 function ChecklistItems({ items }: { items: ReadonlyArray<string> }) {
   return items.map((item) => (
     <div className="capability-row" key={item}>
@@ -91,4 +555,36 @@ function ChecklistItems({ items }: { items: ReadonlyArray<string> }) {
       <p>{item}</p>
     </div>
   ))
+}
+
+function buildReadinessItems(
+  authState: CodexAuthState,
+  hasPlan: boolean,
+  cloudflareStatus: CloudflareConnectionStatus,
+  deployApproval?: DeployApprovalRecord,
+) {
+  return [
+    authState.status === 'connected'
+      ? 'ChatGPT/Codex connected'
+      : 'ChatGPT/Codex connection required',
+    hasPlan ? 'Goal and Cloudflare plan drafted' : 'Goal not planned yet',
+    describeCloudflareStatus(cloudflareStatus),
+    cloudflareStatus.status === 'connected' &&
+    hasWorkersWritePermission(cloudflareStatus.permissions)
+      ? 'Workers write permission verified'
+      : 'Workers write permission required before deploy',
+    deployApproval
+      ? `Deploy approval recorded for ${deployApproval.workerName}`
+      : 'Deploy approval required before publishing',
+  ]
+}
+
+function describeCloudflareStatus(status: CloudflareConnectionStatus) {
+  if (status.status === 'connected') {
+    return status.accountName
+      ? `Cloudflare account connected: ${status.accountName}`
+      : 'Cloudflare token verified'
+  }
+
+  return status.message
 }

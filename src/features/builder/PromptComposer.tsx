@@ -1,9 +1,15 @@
 import { ArrowUp, Loader2, LockKeyhole } from 'lucide-react'
+import type { AgentPlanRequest } from '#/lib/agent'
+import type { CodexAuthState } from '#/lib/model-auth'
 
 type PromptComposerProps = {
   canSubmit: boolean
+  codexAuthState: CodexAuthState
+  hasCodexSignIn: boolean
   hasStarted: boolean
   isPending: boolean
+  model: AgentPlanRequest['model']
+  reasoningEffort: AgentPlanRequest['reasoningEffort']
   prompt: string
   onPromptChange: (prompt: string) => void
   onSubmit: () => void
@@ -11,8 +17,12 @@ type PromptComposerProps = {
 
 export function PromptComposer({
   canSubmit,
+  codexAuthState,
+  hasCodexSignIn,
   hasStarted,
   isPending,
+  model,
+  reasoningEffort,
   prompt,
   onPromptChange,
   onSubmit,
@@ -39,10 +49,15 @@ export function PromptComposer({
         <div className="composer-footer">
           <div className="composer-meta">
             <LockKeyhole size={14} />
-            Cloudflare account actions require approval
+            {describeModelAuth(
+              model,
+              reasoningEffort,
+              codexAuthState,
+              hasCodexSignIn,
+            )}
           </div>
           <button
-            aria-label="Run Ghost Coder"
+            aria-label="Run GhostBuild"
             className="send-button"
             type="button"
             disabled={!canSubmit}
@@ -58,4 +73,23 @@ export function PromptComposer({
       </div>
     </div>
   )
+}
+
+function describeModelAuth(
+  model: AgentPlanRequest['model'],
+  reasoningEffort: AgentPlanRequest['reasoningEffort'],
+  codexAuthState: CodexAuthState,
+  hasCodexSignIn: boolean,
+) {
+  if (codexAuthState.status === 'unsupported') {
+    return `Reconnect ChatGPT/Codex; account metadata is incomplete for ${model}`
+  }
+
+  return hasCodexSignIn
+    ? `${model} via ${connectedCodexEmail(codexAuthState)}, ${reasoningEffort} reasoning`
+    : `Connect ChatGPT/Codex for ${model}, ${reasoningEffort} reasoning`
+}
+
+function connectedCodexEmail(authState: CodexAuthState) {
+  return authState.account?.email ?? 'ChatGPT/Codex'
 }
