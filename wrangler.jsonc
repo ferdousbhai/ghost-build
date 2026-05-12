@@ -7,6 +7,16 @@
   "observability": {
     "enabled": true
   },
+  "routes": [
+    {
+      "pattern": "ghostbuild.dev",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.ghostbuild.dev",
+      "custom_domain": true
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {
