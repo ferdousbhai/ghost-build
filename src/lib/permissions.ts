@@ -54,13 +54,25 @@ export const permissionPresets = [
     id: 'paid-cloudflare-action',
     label: 'Paid Cloudflare Action',
     requiresConfirmation: true,
-    allowedActions: ['buy_domain', 'fund_account', 'enable_paid_service'],
+    allowedActions: [
+      'create_account',
+      'buy_domain',
+      'fund_account',
+      'enable_paid_service',
+      'change_billing_limit',
+    ],
   },
   {
     id: 'destructive-cloudflare-action',
     label: 'Destructive Cloudflare Action',
     requiresConfirmation: true,
-    allowedActions: ['delete_worker', 'delete_resource', 'remove_dns_record'],
+    allowedActions: [
+      'delete_worker',
+      'delete_resource',
+      'remove_dns_record',
+      'mutate_dns_record',
+      'overwrite_deploy',
+    ],
   },
   {
     id: 'github-writes',

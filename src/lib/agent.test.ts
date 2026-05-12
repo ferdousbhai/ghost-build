@@ -960,6 +960,35 @@ describe('permission presets', () => {
     ).toThrow('requires explicit confirmation')
   })
 
+  it('requires confirmation for paid and destructive Cloudflare action categories', () => {
+    const paidActions = [
+      'create_account',
+      'buy_domain',
+      'fund_account',
+      'enable_paid_service',
+      'change_billing_limit',
+    ]
+    const destructiveActions = [
+      'delete_worker',
+      'delete_resource',
+      'remove_dns_record',
+      'mutate_dns_record',
+      'overwrite_deploy',
+    ]
+
+    for (const action of paidActions) {
+      expect(() =>
+        assertActionAllowed('paid-cloudflare-action', action),
+      ).toThrow('requires explicit confirmation')
+    }
+
+    for (const action of destructiveActions) {
+      expect(() =>
+        assertActionAllowed('destructive-cloudflare-action', action),
+      ).toThrow('requires explicit confirmation')
+    }
+  })
+
   it('accepts auditable confirmation for paid actions', () => {
     expect(() =>
       assertActionAllowed('paid-cloudflare-action', 'buy_domain', {
@@ -1410,6 +1439,62 @@ describe('runtime action executor', () => {
         resource: 'old-worker',
       }),
     ).toThrow('requires explicit confirmation')
+  })
+
+  it('allows explicit confirmations for DNS mutation, deploy overwrite, and billing changes', () => {
+    const confirmedAt = new Date('2026-05-12T00:00:00Z').toISOString()
+
+    expect(
+      assertRuntimeActionAllowed({
+        type: 'paid_cloudflare_action',
+        action: 'change_billing_limit',
+        resource: 'Cloudflare provider budget',
+        confirmation: {
+          id: 'approval_billing_1',
+          presetId: 'paid-cloudflare-action',
+          action: 'change_billing_limit',
+          resource: 'Cloudflare provider budget',
+          risk: 'high',
+          estimatedCost: '$250/month provider limit',
+          confirmedAt,
+          confirmedBy: 'user@example.com',
+        },
+      }),
+    ).toMatchObject({ status: 'allowed', action: 'change_billing_limit' })
+
+    expect(
+      assertRuntimeActionAllowed({
+        type: 'destructive_cloudflare_action',
+        action: 'mutate_dns_record',
+        resource: 'www.example.com CNAME',
+        confirmation: {
+          id: 'approval_dns_1',
+          presetId: 'destructive-cloudflare-action',
+          action: 'mutate_dns_record',
+          resource: 'www.example.com CNAME',
+          risk: 'high',
+          confirmedAt,
+          confirmedBy: 'user@example.com',
+        },
+      }),
+    ).toMatchObject({ status: 'allowed', action: 'mutate_dns_record' })
+
+    expect(
+      assertRuntimeActionAllowed({
+        type: 'destructive_cloudflare_action',
+        action: 'overwrite_deploy',
+        resource: 'ghost-build',
+        confirmation: {
+          id: 'approval_overwrite_1',
+          presetId: 'destructive-cloudflare-action',
+          action: 'overwrite_deploy',
+          resource: 'ghost-build',
+          risk: 'high',
+          confirmedAt,
+          confirmedBy: 'user@example.com',
+        },
+      }),
+    ).toMatchObject({ status: 'allowed', action: 'overwrite_deploy' })
   })
 
   it('enforces paid and destructive runtime actions through the HTTP route', async () => {

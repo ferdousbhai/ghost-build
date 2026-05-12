@@ -277,6 +277,17 @@ describe('builder UI gates', () => {
     fireEvent.click(
       screen.getByLabelText('Includes destructive Cloudflare action'),
     )
+
+    expect(screen.getByText('High')).toBeTruthy()
+    expect(
+      screen.getByText(
+        /Account creation, domain purchase, paid service usage, and billing-affecting changes/,
+      ),
+    ).toBeTruthy()
+    expect(
+      screen.getByText(/Deletes, DNS mutations, and deploy overwrites/),
+    ).toBeTruthy()
+
     fireEvent.click(screen.getByRole('button', { name: /Confirm deploy/ }))
 
     expect(onRequestDeployApproval).toHaveBeenCalledWith({

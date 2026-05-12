@@ -490,6 +490,17 @@ export function PreviewPane({
                 <b>Bindings</b>
                 {plan.deployment.bindings.join(', ') || 'None'}
               </div>
+              <div>
+                <b>Action</b>
+                Deploy or overwrite the Cloudflare Worker
+              </div>
+              <div>
+                <b>Risk</b>
+                {(deployApproval?.hasPaidAction ?? hasPaidAction) ||
+                (deployApproval?.hasDestructiveAction ?? hasDestructiveAction)
+                  ? 'High'
+                  : 'Medium'}
+              </div>
               <label>
                 <b>Estimated cost</b>
                 <input
@@ -507,6 +518,13 @@ export function PreviewPane({
                 />
                 Includes paid Cloudflare action
               </label>
+              {(deployApproval?.hasPaidAction ?? hasPaidAction) ? (
+                <div>
+                  <b>Paid coverage</b>
+                  Account creation, domain purchase, paid service usage, and
+                  billing-affecting changes
+                </div>
+              ) : null}
               <label className="approval-check">
                 <input
                   type="checkbox"
@@ -520,6 +538,12 @@ export function PreviewPane({
                 />
                 Includes destructive Cloudflare action
               </label>
+              {(deployApproval?.hasDestructiveAction ?? hasDestructiveAction) ? (
+                <div>
+                  <b>Destructive coverage</b>
+                  Deletes, DNS mutations, and deploy overwrites
+                </div>
+              ) : null}
             </div>
           ) : null}
           <button

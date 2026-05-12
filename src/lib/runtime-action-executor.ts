@@ -1,6 +1,9 @@
 import type { AgentPlan } from './agent'
 import type { CloudflareConnectionStatus } from './cloudflare-status'
-import { assertDeployActionAllowed, type DeployApprovalRecord } from './deploy-approval'
+import {
+  assertDeployActionAllowed,
+  type DeployApprovalRecord,
+} from './deploy-approval'
 import { assertActionAllowed, type ApprovalConfirmation } from './permissions'
 
 export type RuntimeActionRequest =
@@ -12,13 +15,23 @@ export type RuntimeActionRequest =
     }
   | {
       type: 'paid_cloudflare_action'
-      action: 'buy_domain' | 'fund_account' | 'enable_paid_service'
+      action:
+        | 'create_account'
+        | 'buy_domain'
+        | 'fund_account'
+        | 'enable_paid_service'
+        | 'change_billing_limit'
       resource: string
       confirmation?: ApprovalConfirmation
     }
   | {
       type: 'destructive_cloudflare_action'
-      action: 'delete_worker' | 'delete_resource' | 'remove_dns_record'
+      action:
+        | 'delete_worker'
+        | 'delete_resource'
+        | 'remove_dns_record'
+        | 'mutate_dns_record'
+        | 'overwrite_deploy'
       resource: string
       confirmation?: ApprovalConfirmation
     }
