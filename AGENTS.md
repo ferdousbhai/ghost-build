@@ -27,6 +27,8 @@ web apps.
 - Runtime request fields keep `model` and `reasoningEffort` separate. Do not add
   API-key fallback paths in the first iteration.
 - MCP: only Cloudflare API MCP at `https://mcp.cloudflare.com/mcp`.
+- Cloudflare API MCP OAuth is authorized per active builder session so the same
+  Durable Object that runs Think turns owns the MCP tokens.
 - Skills: project Cloudflare skill in `.codex/skills/cloudflare`.
 - Goal model: every user turn may update the active goal. Keep objective,
   success criteria, status, and next concrete Cloudflare build step aligned.

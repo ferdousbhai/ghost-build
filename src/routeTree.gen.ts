@@ -24,6 +24,8 @@ import { Route as ApiCodexAuthCallbackRouteImport } from './routes/api/codex-aut
 import { Route as ApiCloudflareStatusRouteImport } from './routes/api/cloudflare/status'
 import { Route as ApiCloudflareDisconnectRouteImport } from './routes/api/cloudflare/disconnect'
 import { Route as ApiCloudflareConnectRouteImport } from './routes/api/cloudflare/connect'
+import { Route as ApiCloudflareMcpStatusRouteImport } from './routes/api/cloudflare-mcp/status'
+import { Route as ApiCloudflareMcpConnectRouteImport } from './routes/api/cloudflare-mcp/connect'
 import { Route as ApiBuildRunRouteImport } from './routes/api/build/run'
 import { Route as ApiBuildRepairRouteImport } from './routes/api/build/repair'
 import { Route as ApiBuildPreviewRouteImport } from './routes/api/build/preview'
@@ -108,6 +110,16 @@ const ApiCloudflareConnectRoute = ApiCloudflareConnectRouteImport.update({
   path: '/api/cloudflare/connect',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCloudflareMcpStatusRoute = ApiCloudflareMcpStatusRouteImport.update({
+  id: '/api/cloudflare-mcp/status',
+  path: '/api/cloudflare-mcp/status',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCloudflareMcpConnectRoute = ApiCloudflareMcpConnectRouteImport.update({
+  id: '/api/cloudflare-mcp/connect',
+  path: '/api/cloudflare-mcp/connect',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiBuildRunRoute = ApiBuildRunRouteImport.update({
   id: '/api/build/run',
   path: '/api/build/run',
@@ -162,6 +174,8 @@ export interface FileRoutesByFullPath {
   '/api/build/preview': typeof ApiBuildPreviewRoute
   '/api/build/repair': typeof ApiBuildRepairRoute
   '/api/build/run': typeof ApiBuildRunRoute
+  '/api/cloudflare-mcp/connect': typeof ApiCloudflareMcpConnectRoute
+  '/api/cloudflare-mcp/status': typeof ApiCloudflareMcpStatusRoute
   '/api/cloudflare/connect': typeof ApiCloudflareConnectRoute
   '/api/cloudflare/disconnect': typeof ApiCloudflareDisconnectRoute
   '/api/cloudflare/status': typeof ApiCloudflareStatusRoute
@@ -187,6 +201,8 @@ export interface FileRoutesByTo {
   '/api/build/preview': typeof ApiBuildPreviewRoute
   '/api/build/repair': typeof ApiBuildRepairRoute
   '/api/build/run': typeof ApiBuildRunRoute
+  '/api/cloudflare-mcp/connect': typeof ApiCloudflareMcpConnectRoute
+  '/api/cloudflare-mcp/status': typeof ApiCloudflareMcpStatusRoute
   '/api/cloudflare/connect': typeof ApiCloudflareConnectRoute
   '/api/cloudflare/disconnect': typeof ApiCloudflareDisconnectRoute
   '/api/cloudflare/status': typeof ApiCloudflareStatusRoute
@@ -213,6 +229,8 @@ export interface FileRoutesById {
   '/api/build/preview': typeof ApiBuildPreviewRoute
   '/api/build/repair': typeof ApiBuildRepairRoute
   '/api/build/run': typeof ApiBuildRunRoute
+  '/api/cloudflare-mcp/connect': typeof ApiCloudflareMcpConnectRoute
+  '/api/cloudflare-mcp/status': typeof ApiCloudflareMcpStatusRoute
   '/api/cloudflare/connect': typeof ApiCloudflareConnectRoute
   '/api/cloudflare/disconnect': typeof ApiCloudflareDisconnectRoute
   '/api/cloudflare/status': typeof ApiCloudflareStatusRoute
@@ -240,6 +258,8 @@ export interface FileRouteTypes {
     | '/api/build/preview'
     | '/api/build/repair'
     | '/api/build/run'
+    | '/api/cloudflare-mcp/connect'
+    | '/api/cloudflare-mcp/status'
     | '/api/cloudflare/connect'
     | '/api/cloudflare/disconnect'
     | '/api/cloudflare/status'
@@ -265,6 +285,8 @@ export interface FileRouteTypes {
     | '/api/build/preview'
     | '/api/build/repair'
     | '/api/build/run'
+    | '/api/cloudflare-mcp/connect'
+    | '/api/cloudflare-mcp/status'
     | '/api/cloudflare/connect'
     | '/api/cloudflare/disconnect'
     | '/api/cloudflare/status'
@@ -290,6 +312,8 @@ export interface FileRouteTypes {
     | '/api/build/preview'
     | '/api/build/repair'
     | '/api/build/run'
+    | '/api/cloudflare-mcp/connect'
+    | '/api/cloudflare-mcp/status'
     | '/api/cloudflare/connect'
     | '/api/cloudflare/disconnect'
     | '/api/cloudflare/status'
@@ -316,6 +340,8 @@ export interface RootRouteChildren {
   ApiBuildPreviewRoute: typeof ApiBuildPreviewRoute
   ApiBuildRepairRoute: typeof ApiBuildRepairRoute
   ApiBuildRunRoute: typeof ApiBuildRunRoute
+  ApiCloudflareMcpConnectRoute: typeof ApiCloudflareMcpConnectRoute
+  ApiCloudflareMcpStatusRoute: typeof ApiCloudflareMcpStatusRoute
   ApiCloudflareConnectRoute: typeof ApiCloudflareConnectRoute
   ApiCloudflareDisconnectRoute: typeof ApiCloudflareDisconnectRoute
   ApiCloudflareStatusRoute: typeof ApiCloudflareStatusRoute
@@ -436,6 +462,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCloudflareConnectRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/cloudflare-mcp/status': {
+      id: '/api/cloudflare-mcp/status'
+      path: '/api/cloudflare-mcp/status'
+      fullPath: '/api/cloudflare-mcp/status'
+      preLoaderRoute: typeof ApiCloudflareMcpStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/cloudflare-mcp/connect': {
+      id: '/api/cloudflare-mcp/connect'
+      path: '/api/cloudflare-mcp/connect'
+      fullPath: '/api/cloudflare-mcp/connect'
+      preLoaderRoute: typeof ApiCloudflareMcpConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/build/run': {
       id: '/api/build/run'
       path: '/api/build/run'
@@ -518,6 +558,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiBuildPreviewRoute: ApiBuildPreviewRoute,
   ApiBuildRepairRoute: ApiBuildRepairRoute,
   ApiBuildRunRoute: ApiBuildRunRoute,
+  ApiCloudflareMcpConnectRoute: ApiCloudflareMcpConnectRoute,
+  ApiCloudflareMcpStatusRoute: ApiCloudflareMcpStatusRoute,
   ApiCloudflareConnectRoute: ApiCloudflareConnectRoute,
   ApiCloudflareDisconnectRoute: ApiCloudflareDisconnectRoute,
   ApiCloudflareStatusRoute: ApiCloudflareStatusRoute,

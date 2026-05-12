@@ -4,6 +4,7 @@ import type { AgentPlan } from '#/lib/agent'
 import type { BuildCheckResult } from '#/lib/build-checks'
 import type { BuildPreviewResult } from '#/lib/build-preview'
 import type { CloudflareDeployResult } from '#/lib/cloudflare-deploy'
+import type { CloudflareMcpStatus } from '#/lib/cloudflare-mcp'
 import { buildExecutionProgress, type BuildExecutionStageStatus } from '#/lib/build-execution'
 import {
   hasWorkersWritePermission,
@@ -21,6 +22,7 @@ import {
 
 type PreviewPaneProps = {
   cloudflareStatus: CloudflareConnectionStatus
+  cloudflareMcpStatus?: CloudflareMcpStatus
   codexAuthState: CodexAuthState
   checkResult?: BuildCheckResult
   deployApproval?: DeployApprovalRecord
@@ -30,6 +32,7 @@ type PreviewPaneProps = {
   plan?: AgentPlan
   preview?: BuildPreviewResult
   onConnectCloudflareToken: (token: string) => Promise<void>
+  onConnectCloudflareMcp?: () => Promise<void>
   onDeployWorkerApp?: () => Promise<void>
   onGenerateWorkerApp: () => Promise<void>
   onPrepareBuildPreview: () => Promise<void>
@@ -47,6 +50,7 @@ type PreviewPaneProps = {
 
 export function PreviewPane({
   cloudflareStatus,
+  cloudflareMcpStatus = initialCloudflareMcpStatus,
   codexAuthState,
   checkResult,
   deployApproval,
@@ -56,6 +60,7 @@ export function PreviewPane({
   plan,
   preview,
   onConnectCloudflareToken,
+  onConnectCloudflareMcp = async () => undefined,
   onDeployWorkerApp = async () => undefined,
   onGenerateWorkerApp,
   onPrepareBuildPreview,
@@ -71,6 +76,8 @@ export function PreviewPane({
   const [cloudflareToken, setCloudflareToken] = useState('')
   const [cloudflareConnectError, setCloudflareConnectError] = useState('')
   const [isConnectingCloudflare, setIsConnectingCloudflare] = useState(false)
+  const [isConnectingCloudflareMcp, setIsConnectingCloudflareMcp] = useState(false)
+  const [cloudflareMcpError, setCloudflareMcpError] = useState('')
   const [estimatedCost, setEstimatedCost] = useState(
     'No additional Cloudflare cost expected',
   )
@@ -395,6 +402,50 @@ export function PreviewPane({
       </div>
 
       <div className="deploy-card">
+        <span>Cloudflare API MCP</span>
+        <strong>{describeCloudflareMcpTitle(cloudflareMcpStatus)}</strong>
+        <p>{cloudflareMcpStatus.message}</p>
+        {cloudflareMcpStatus.status === 'ready' ? (
+          <div className="capability-row">
+            <CheckCircle2 size={16} />
+            <p>{cloudflareMcpStatus.toolsCount} Cloudflare tools available</p>
+          </div>
+        ) : null}
+        {cloudflareMcpStatus.status === 'failed' && cloudflareMcpStatus.error ? (
+          <p>{cloudflareMcpStatus.error}</p>
+        ) : null}
+        {cloudflareMcpError ? <p>{cloudflareMcpError}</p> : null}
+        <button
+          type="button"
+          disabled={!plan || isConnectingCloudflareMcp}
+          onClick={async () => {
+            setIsConnectingCloudflareMcp(true)
+            setCloudflareMcpError('')
+            try {
+              await onConnectCloudflareMcp()
+            } catch (error) {
+              setCloudflareMcpError(
+                error instanceof Error
+                  ? error.message
+                  : 'Unable to connect Cloudflare API MCP.',
+              )
+            } finally {
+              setIsConnectingCloudflareMcp(false)
+            }
+          }}
+        >
+          {isConnectingCloudflareMcp ? (
+            <Loader2 className="animate-spin" size={15} />
+          ) : (
+            <CloudMcpIcon status={cloudflareMcpStatus.status} />
+          )}
+          {cloudflareMcpStatus.status === 'authenticating'
+            ? 'Open authorization'
+            : 'Connect MCP'}
+        </button>
+      </div>
+
+      <div className="deploy-card">
         <span>Cloudflare stack</span>
         <div className="stack-readiness-strip">
           {cloudflareStackReadiness.map((item) => (
@@ -536,6 +587,14 @@ export function PreviewPane({
   )
 }
 
+const initialCloudflareMcpStatus: CloudflareMcpStatus = {
+  status: 'not-started',
+  message: 'Create a builder session before authorizing Cloudflare API MCP.',
+  serverName: 'cloudflare-api',
+  serverUrl: 'https://mcp.cloudflare.com/mcp',
+  toolsCount: 0,
+}
+
 function BuildStageIcon({ status }: { status: BuildExecutionStageStatus }) {
   if (status === 'running') {
     return <Loader2 className="animate-spin" size={16} />
@@ -546,6 +605,10 @@ function BuildStageIcon({ status }: { status: BuildExecutionStageStatus }) {
   }
 
   return <Square size={14} />
+}
+
+function CloudMcpIcon({ status }: { status: CloudflareMcpStatus['status'] }) {
+  return status === 'ready' ? <CheckCircle2 size={15} /> : <LockKeyhole size={15} />
 }
 
 function ChecklistItems({ items }: { items: ReadonlyArray<string> }) {
@@ -587,4 +650,20 @@ function describeCloudflareStatus(status: CloudflareConnectionStatus) {
   }
 
   return status.message
+}
+
+function describeCloudflareMcpTitle(status: CloudflareMcpStatus) {
+  if (status.status === 'ready') {
+    return 'Authorized'
+  }
+
+  if (status.status === 'authenticating') {
+    return 'Authorization required'
+  }
+
+  if (status.status === 'failed') {
+    return 'Connection failed'
+  }
+
+  return 'Optional for planning'
 }

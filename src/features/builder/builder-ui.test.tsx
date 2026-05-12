@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildAgentPlan, type AgentPlanRequest } from '#/lib/agent'
 import type { CloudflareConnectionStatus } from '#/lib/cloudflare-status'
+import type { CloudflareMcpStatus } from '#/lib/cloudflare-mcp'
 import type { CodexAuthState } from '#/lib/model-auth'
 import { initialAgentRequest } from './builderConstants'
 import { IntroPanel } from './IntroPanel'
@@ -33,6 +34,15 @@ const connectedCloudflare: CloudflareConnectionStatus = {
   accountName: 'Acme Cloudflare',
   permissions: ['Workers Scripts Write'],
   message: 'Connected to Acme Cloudflare.',
+}
+
+const authenticatingCloudflareMcp: CloudflareMcpStatus = {
+  status: 'authenticating',
+  message: 'Authorize Cloudflare API MCP to make Cloudflare tools available.',
+  serverName: 'cloudflare-api',
+  serverUrl: 'https://mcp.cloudflare.com/mcp',
+  authUrl: 'https://dash.cloudflare.com/oauth/authorize',
+  toolsCount: 0,
 }
 
 describe('builder UI gates', () => {
@@ -129,10 +139,12 @@ describe('builder UI gates', () => {
           permissions: [],
           message: 'Set CLOUDFLARE_API_TOKEN to verify Cloudflare account access.',
         }}
+        cloudflareMcpStatus={authenticatingCloudflareMcp}
         codexAuthState={connectedCodexAuth}
         isPending={false}
         plan={buildAgentPlan({ idea: 'A docs portal' })}
         onConnectCloudflareToken={vi.fn()}
+        onConnectCloudflareMcp={vi.fn()}
         onGenerateWorkerApp={vi.fn()}
         onPrepareBuildPreview={vi.fn()}
         onRequestDeployApproval={vi.fn()}
@@ -146,6 +158,30 @@ describe('builder UI gates', () => {
       'disabled',
       true,
     )
+  })
+
+  it('surfaces Cloudflare MCP authorization without blocking the plan UI', () => {
+    const onConnectCloudflareMcp = vi.fn()
+
+    render(
+      <PreviewPane
+        cloudflareStatus={connectedCloudflare}
+        cloudflareMcpStatus={authenticatingCloudflareMcp}
+        codexAuthState={connectedCodexAuth}
+        isPending={false}
+        plan={buildAgentPlan({ idea: 'A docs portal' })}
+        onConnectCloudflareToken={vi.fn()}
+        onConnectCloudflareMcp={onConnectCloudflareMcp}
+        onGenerateWorkerApp={vi.fn()}
+        onPrepareBuildPreview={vi.fn()}
+        onRequestDeployApproval={vi.fn()}
+        onRunBuildChecks={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Authorization required')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Open authorization/ }))
+    expect(onConnectCloudflareMcp).toHaveBeenCalled()
   })
 
   it('keeps deploy confirmation disabled until Workers write permission is verified', () => {

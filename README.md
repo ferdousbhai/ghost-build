@@ -7,6 +7,8 @@ Workers.
 ## Business Logic
 
 - Users sign in with ChatGPT/Codex OAuth.
+- The product shell is TanStack Start with TanStack Query for workflow state and
+  async client/server actions.
 - The default model is GPT-5.5 with low reasoning for planning and coding work.
 - Eligible runs use the user's existing Codex plan allowance.
 - Every user turn can update the active goal. The agent keeps an objective,
@@ -25,6 +27,9 @@ Workers.
   plan are persisted as non-secret browser state so users can return to the
   previous builder session.
 - The Ghost has Cloudflare Skills and the Cloudflare API MCP server available by default.
+- Cloudflare API MCP authorization is session-scoped. After a builder session
+  exists, the UI can open Cloudflare OAuth and the Agents SDK stores MCP tokens
+  in the session agent's Durable Object storage.
 - GhostBuild is intentionally narrower than Codex: web apps only, Cloudflare
   stack first, preview/deploy workflow built in.
 - The app avoids product-specific MCP servers; Cloudflare platform actions route through the Cloudflare API MCP server.

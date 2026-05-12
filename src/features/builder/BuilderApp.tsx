@@ -8,6 +8,7 @@ export function BuilderApp() {
     canSubmit,
     checkResult,
     cloudflareStatus,
+    cloudflareMcpStatus,
     codexAuthState,
     deployApproval,
     deployResult,
@@ -21,6 +22,7 @@ export function BuilderApp() {
     request,
     sessionSummaries,
     connectCloudflareToken,
+    connectCloudflareMcp,
     deployWorkerApp,
     generateWorkerApp,
     loadBuilderSession,
@@ -70,6 +72,7 @@ export function BuilderApp() {
 
         <PreviewPane
           cloudflareStatus={cloudflareStatus}
+          cloudflareMcpStatus={cloudflareMcpStatus}
           codexAuthState={codexAuthState}
           checkResult={checkResult}
           deployApproval={deployApproval}
@@ -79,6 +82,7 @@ export function BuilderApp() {
           plan={plan}
           preview={preview}
           onConnectCloudflareToken={connectCloudflareToken}
+          onConnectCloudflareMcp={connectCloudflareMcp}
           onDeployWorkerApp={deployWorkerApp}
           onGenerateWorkerApp={generateWorkerApp}
           onPrepareBuildPreview={prepareBuildPreview}

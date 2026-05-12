@@ -12,6 +12,7 @@ import type { BuildPipelineResult } from '#/lib/build-pipeline'
 import type { BuildPreviewResult } from '#/lib/build-preview'
 import type { BuildRepairResult } from '#/lib/build-repair'
 import type { CloudflareDeployResult } from '#/lib/cloudflare-deploy'
+import type { CloudflareMcpStatus } from '#/lib/cloudflare-mcp'
 import type {
   BuilderSessionSnapshot,
   GoalTimelineEntry,
@@ -45,6 +46,14 @@ const initialCloudflareStatus: CloudflareConnectionStatus = {
   message: 'Cloudflare account access has not been verified yet.',
 }
 
+const initialCloudflareMcpStatus: CloudflareMcpStatus = {
+  status: 'not-started',
+  message: 'Create a builder session before authorizing Cloudflare API MCP.',
+  serverName: 'cloudflare-api',
+  serverUrl: 'https://mcp.cloudflare.com/mcp',
+  toolsCount: 0,
+}
+
 export function useBuilderSession() {
   const [storedBuilderSession] = useState(readStoredBuilderSession)
   const [request, setRequest] = useState<AgentPlanRequest>(
@@ -64,6 +73,8 @@ export function useBuilderSession() {
   >([])
   const [cloudflareStatus, setCloudflareStatus] =
     useState<CloudflareConnectionStatus>(initialCloudflareStatus)
+  const [cloudflareMcpStatus, setCloudflareMcpStatus] =
+    useState<CloudflareMcpStatus>(initialCloudflareMcpStatus)
   const [deployApproval, setDeployApproval] = useState<
     DeployApprovalRecord | undefined
   >()
@@ -98,6 +109,13 @@ export function useBuilderSession() {
     },
   })
 
+  const plan = persistedPlan ?? thinkRun.data
+  const hasStarted = Boolean(submittedPrompt || thinkRun.isPending || plan)
+  const canSubmit =
+    request.idea.trim().length > 0 &&
+    hasCodexSignIn &&
+    !thinkRun.isPending
+
   useEffect(() => {
     function syncCodexAuthState() {
       void readCodexAuthState().then((authState) => {
@@ -121,19 +139,31 @@ export function useBuilderSession() {
   }, [])
 
   useEffect(() => {
+    if (!hasCodexSignIn || !plan?.deployment.sessionId) {
+      setCloudflareMcpStatus(initialCloudflareMcpStatus)
+      return
+    }
+
+    const sessionId = plan.deployment.sessionId
+    const syncCloudflareMcpStatus = () => {
+      void refreshCloudflareMcpStatus(sessionId)
+    }
+
+    syncCloudflareMcpStatus()
+    window.addEventListener('focus', syncCloudflareMcpStatus)
+
+    return () => {
+      window.removeEventListener('focus', syncCloudflareMcpStatus)
+    }
+  }, [hasCodexSignIn, plan?.deployment.sessionId])
+
+  useEffect(() => {
     if (storedBuilderSession) {
       return
     }
 
     void loadLatestServerBuilderSession()
   }, [storedBuilderSession])
-
-  const plan = persistedPlan ?? thinkRun.data
-  const hasStarted = Boolean(submittedPrompt || thinkRun.isPending || plan)
-  const canSubmit =
-    request.idea.trim().length > 0 &&
-    hasCodexSignIn &&
-    !thinkRun.isPending
 
   const messages = useMemo<Array<BuilderMessage>>(() => {
     if (!hasStarted) {
@@ -274,6 +304,61 @@ export function useBuilderSession() {
     }
 
     setCloudflareStatus(data.status)
+  }
+
+  async function refreshCloudflareMcpStatus(sessionId = plan?.deployment.sessionId) {
+    if (!sessionId) {
+      setCloudflareMcpStatus(initialCloudflareMcpStatus)
+      return
+    }
+
+    try {
+      const response = await fetch(
+        `/api/cloudflare-mcp/status?sessionId=${encodeURIComponent(sessionId)}`,
+      )
+
+      if (!response.ok) {
+        return
+      }
+
+      setCloudflareMcpStatus((await response.json()) as CloudflareMcpStatus)
+    } catch {
+      setCloudflareMcpStatus({
+        status: 'failed',
+        message: 'Unable to verify Cloudflare API MCP connection.',
+        serverName: 'cloudflare-api',
+        serverUrl: 'https://mcp.cloudflare.com/mcp',
+        toolsCount: 0,
+      })
+    }
+  }
+
+  async function connectCloudflareMcp() {
+    if (!plan?.deployment.sessionId) {
+      return
+    }
+
+    const response = await fetch('/api/cloudflare-mcp/connect', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ sessionId: plan.deployment.sessionId }),
+    })
+    const data = (await response.json()) as {
+      connection?: CloudflareMcpStatus
+      error?: string
+    }
+
+    if (!response.ok || !data.connection) {
+      throw new Error(data.error || 'Unable to connect Cloudflare API MCP.')
+    }
+
+    setCloudflareMcpStatus(data.connection)
+
+    if (data.connection.status === 'authenticating') {
+      window.open(data.connection.authUrl, '_blank', 'width=720,height=820')
+    }
   }
 
   async function requestDeployApproval(input: {
@@ -853,6 +938,7 @@ export function useBuilderSession() {
     canSubmit,
     checkResult,
     cloudflareStatus,
+    cloudflareMcpStatus,
     codexAuthState,
     deployApproval,
     deployResult,
@@ -866,6 +952,7 @@ export function useBuilderSession() {
     request,
     sessionSummaries,
     connectCloudflareToken,
+    connectCloudflareMcp,
     deployWorkerApp,
     generateWorkerApp,
     prepareBuildPreview,
@@ -874,6 +961,7 @@ export function useBuilderSession() {
     requestAgentPatch,
     repairGeneratedApp,
     refreshCloudflareStatus,
+    refreshCloudflareMcpStatus,
     runBuildDeployPipeline,
     runBuildPipeline,
     runBuildChecks,

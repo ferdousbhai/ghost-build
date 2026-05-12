@@ -21,6 +21,7 @@ import {
   upsertBuilderSessionSnapshot,
 } from './builder-session-store'
 import { verifyCloudflareConnection } from './cloudflare-status'
+import { summarizeCloudflareMcpState } from './cloudflare-mcp'
 import {
   cloudflareTokenCookie,
   readCloudflareTokenFromRequest,
@@ -1104,6 +1105,53 @@ describe('Cloudflare connection status', () => {
         status: 'invalid-token',
         message: 'invalid token',
       },
+    })
+  })
+})
+
+describe('Cloudflare API MCP connection', () => {
+  it('surfaces OAuth authorization and ready states without blocking planning', () => {
+    expect(
+      summarizeCloudflareMcpState({
+        servers: {},
+        tools: [],
+      }),
+    ).toMatchObject({
+      status: 'not-started',
+      serverName: 'cloudflare-api',
+    })
+
+    expect(
+      summarizeCloudflareMcpState({
+        servers: {
+          mcp_1: {
+            name: 'cloudflare-api',
+            server_url: 'https://mcp.cloudflare.com/mcp',
+            state: 'authenticating',
+            auth_url: 'https://dash.cloudflare.com/oauth/authorize',
+          },
+        },
+        tools: [],
+      }),
+    ).toMatchObject({
+      status: 'authenticating',
+      authUrl: 'https://dash.cloudflare.com/oauth/authorize',
+    })
+
+    expect(
+      summarizeCloudflareMcpState({
+        servers: {
+          mcp_1: {
+            name: 'cloudflare-api',
+            server_url: 'https://mcp.cloudflare.com/mcp',
+            state: 'ready',
+          },
+        },
+        tools: [{ serverId: 'mcp_1' }, { serverId: 'mcp_1' }],
+      }),
+    ).toMatchObject({
+      status: 'ready',
+      toolsCount: 2,
     })
   })
 })

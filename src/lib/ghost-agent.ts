@@ -3,6 +3,11 @@ import { createOpenAI } from '@ai-sdk/openai'
 import type { LanguageModel } from 'ai'
 import type { ReasoningEffort } from './agent'
 import {
+  cloudflareApiMcpServer,
+  summarizeCloudflareMcpState,
+  type CloudflareMcpStatus,
+} from './cloudflare-mcp'
+import {
   getBuilderSessionSnapshot,
   listBuilderSessionSnapshots,
   summarizeBuilderSessionSnapshot,
@@ -11,10 +16,7 @@ import {
   type StoredBuilderSessionSummary,
 } from './builder-session-store'
 
-export const cloudflareApiMcp = {
-  name: 'cloudflare-api',
-  url: 'https://mcp.cloudflare.com/mcp',
-} as const
+export const cloudflareApiMcp = cloudflareApiMcpServer
 
 export type GhostBuildEnv = Cloudflare.Env & {
   GhostBuildAgent: DurableObjectNamespace<GhostBuildAgent>
@@ -35,24 +37,12 @@ export class GhostBuildAgent extends Think<GhostBuildEnv, GhostBuildState> {
   private reasoningEffortForNextTurn: ReasoningEffort = 'low'
 
   async onStart() {
-    const servers = this.getMcpServers().servers
-    const hasCloudflareApi = Object.values(servers).some(
-      (server) =>
-        server.name === cloudflareApiMcp.name &&
-        server.server_url === cloudflareApiMcp.url,
-    )
-
-    if (hasCloudflareApi) {
-      return
-    }
-
-    try {
-      await this.addMcpServer(cloudflareApiMcp.name, cloudflareApiMcp.url, {
-        transport: { type: 'streamable-http' },
-      })
-    } catch (error) {
-      console.warn('Cloudflare API MCP connection is not ready yet.', error)
-    }
+    this.mcp.configureOAuthCallback({
+      customHandler: () =>
+        new Response('<script>window.close();</script>', {
+          headers: { 'content-type': 'text/html' },
+        }),
+    })
   }
 
   getModel(): LanguageModel {
@@ -72,6 +62,48 @@ export class GhostBuildAgent extends Think<GhostBuildEnv, GhostBuildState> {
 
   setReasoningEffortForNextTurn(reasoningEffort: ReasoningEffort) {
     this.reasoningEffortForNextTurn = reasoningEffort
+  }
+
+  async connectCloudflareApiMcp(callbackHost: string): Promise<CloudflareMcpStatus> {
+    try {
+      const result = await this.addMcpServer(
+        cloudflareApiMcp.name,
+        cloudflareApiMcp.url,
+        {
+          callbackHost,
+          transport: { type: 'streamable-http' },
+        },
+      )
+
+      if (result.state === 'authenticating') {
+        return {
+          status: 'authenticating',
+          message: 'Authorize Cloudflare API MCP to make Cloudflare tools available.',
+          serverName: cloudflareApiMcp.name,
+          serverUrl: cloudflareApiMcp.url,
+          authUrl: result.authUrl,
+          toolsCount: 0,
+        }
+      }
+
+      return this.getCloudflareApiMcpStatus()
+    } catch (error) {
+      return {
+        status: 'failed',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Cloudflare API MCP connection failed.',
+        serverName: cloudflareApiMcp.name,
+        serverUrl: cloudflareApiMcp.url,
+        error: error instanceof Error ? error.message : undefined,
+        toolsCount: 0,
+      }
+    }
+  }
+
+  getCloudflareApiMcpStatus(): CloudflareMcpStatus {
+    return summarizeCloudflareMcpState(this.getMcpServers())
   }
 
   saveBuilderSessionSnapshot(snapshot: BuilderSessionSnapshot) {
