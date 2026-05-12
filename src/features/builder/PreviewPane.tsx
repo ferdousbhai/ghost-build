@@ -13,6 +13,7 @@ import {
 import type { DeployApprovalRecord } from '#/lib/deploy-approval'
 import type { GeneratedWorkerApp } from '#/lib/generated-worker-app'
 import type { CodexAuthState } from '#/lib/model-auth'
+import type { StripeProjectsConnectionStatus } from '#/lib/stripe-projects'
 import {
   defaultCapabilities,
   cloudflareStackReadiness,
@@ -24,6 +25,7 @@ type PreviewPaneProps = {
   cloudflareStatus: CloudflareConnectionStatus
   cloudflareMcpStatus?: CloudflareMcpStatus
   codexAuthState: CodexAuthState
+  stripeProjectsStatus?: StripeProjectsConnectionStatus
   checkResult?: BuildCheckResult
   deployApproval?: DeployApprovalRecord
   deployResult?: CloudflareDeployResult
@@ -33,6 +35,7 @@ type PreviewPaneProps = {
   preview?: BuildPreviewResult
   onConnectCloudflareToken: (token: string) => Promise<void>
   onConnectCloudflareMcp?: () => Promise<void>
+  onConnectStripeProjects?: () => Promise<void>
   onDeployWorkerApp?: () => Promise<void>
   onGenerateWorkerApp: () => Promise<void>
   onPrepareBuildPreview: () => Promise<void>
@@ -52,6 +55,7 @@ export function PreviewPane({
   cloudflareStatus,
   cloudflareMcpStatus = initialCloudflareMcpStatus,
   codexAuthState,
+  stripeProjectsStatus = initialStripeProjectsStatus,
   checkResult,
   deployApproval,
   deployResult,
@@ -61,6 +65,7 @@ export function PreviewPane({
   preview,
   onConnectCloudflareToken,
   onConnectCloudflareMcp = async () => undefined,
+  onConnectStripeProjects = async () => undefined,
   onDeployWorkerApp = async () => undefined,
   onGenerateWorkerApp,
   onPrepareBuildPreview,
@@ -78,6 +83,9 @@ export function PreviewPane({
   const [isConnectingCloudflare, setIsConnectingCloudflare] = useState(false)
   const [isConnectingCloudflareMcp, setIsConnectingCloudflareMcp] = useState(false)
   const [cloudflareMcpError, setCloudflareMcpError] = useState('')
+  const [isConnectingStripeProjects, setIsConnectingStripeProjects] =
+    useState(false)
+  const [stripeProjectsError, setStripeProjectsError] = useState('')
   const [estimatedCost, setEstimatedCost] = useState(
     'No additional Cloudflare cost expected',
   )
@@ -122,6 +130,8 @@ export function PreviewPane({
     !deployResult
   const canRunBuildDeployPipeline =
     canApproveDeploy && Boolean(deployApproval) && !deployResult
+  const paidActionFundingReady =
+    !hasPaidAction || stripeProjectsStatus.status === 'connected'
 
   return (
     <aside className="workbench" aria-label="Build preview">
@@ -518,6 +528,13 @@ export function PreviewPane({
             onClick={async () => {
               setIsApprovingDeploy(true)
               try {
+                if (!paidActionFundingReady) {
+                  setStripeProjectsError(
+                    'Connect your own Stripe Project before approving paid Cloudflare actions.',
+                  )
+                  return
+                }
+
                 await onRequestDeployApproval({
                   estimatedCost,
                   hasDestructiveAction,
@@ -570,9 +587,61 @@ export function PreviewPane({
         <strong>Your goal, your Cloudflare app</strong>
         <p>
           GhostBuild connects through ChatGPT/Codex OAuth for model access.
-          Cloudflare and Stripe handle payment for accounts, domains, Workers,
-          storage, and other paid infrastructure actions.
+          Each user connects their own Stripe Project for funded Cloudflare
+          actions. GhostBuild stores only connection metadata and approval state.
         </p>
+        <div className="capability-row">
+          <StripeProjectsIcon status={stripeProjectsStatus.status} />
+          <p>
+            <b>{describeStripeProjectsTitle(stripeProjectsStatus)}</b>
+            {stripeProjectsStatus.message}
+          </p>
+        </div>
+        {stripeProjectsStatus.status === 'connected' ? (
+          <div className="capability-row">
+            <CheckCircle2 size={16} />
+            <p>
+              <b>Stripe Project</b>
+              {stripeProjectsStatus.stripeProjectId}
+            </p>
+          </div>
+        ) : null}
+        <div className="capability-row">
+          <CheckCircle2 size={16} />
+          <p>
+            <b>Provider spend limit</b>
+            Default ${stripeProjectsStatus.defaultProviderSpendLimitUsd}/month
+            per provider; raise it from the user's Cloudflare account when
+            needed.
+          </p>
+        </div>
+        {stripeProjectsError ? <p>{stripeProjectsError}</p> : null}
+        <button
+          type="button"
+          disabled={isConnectingStripeProjects}
+          onClick={async () => {
+            setIsConnectingStripeProjects(true)
+            setStripeProjectsError('')
+            try {
+              await onConnectStripeProjects()
+            } catch (error) {
+              setStripeProjectsError(
+                error instanceof Error
+                  ? error.message
+                  : 'Unable to connect Stripe Projects.',
+              )
+            } finally {
+              setIsConnectingStripeProjects(false)
+            }
+          }}
+        >
+          {isConnectingStripeProjects ? (
+            <Loader2 className="animate-spin" size={15} />
+          ) : (
+            <StripeProjectsIcon status={stripeProjectsStatus.status} />
+          )}
+          Connect Stripe Project
+        </button>
         {ownershipLineItems.map(([label, detail]) => (
           <div className="capability-row" key={label}>
             <CheckCircle2 size={16} />
@@ -595,6 +664,12 @@ const initialCloudflareMcpStatus: CloudflareMcpStatus = {
   toolsCount: 0,
 }
 
+const initialStripeProjectsStatus: StripeProjectsConnectionStatus = {
+  status: 'disconnected',
+  message: 'Connect your own Stripe Project before paid Cloudflare actions.',
+  defaultProviderSpendLimitUsd: 100,
+}
+
 function BuildStageIcon({ status }: { status: BuildExecutionStageStatus }) {
   if (status === 'running') {
     return <Loader2 className="animate-spin" size={16} />
@@ -609,6 +684,18 @@ function BuildStageIcon({ status }: { status: BuildExecutionStageStatus }) {
 
 function CloudMcpIcon({ status }: { status: CloudflareMcpStatus['status'] }) {
   return status === 'ready' ? <CheckCircle2 size={15} /> : <LockKeyhole size={15} />
+}
+
+function StripeProjectsIcon({
+  status,
+}: {
+  status: StripeProjectsConnectionStatus['status']
+}) {
+  return status === 'connected' ? (
+    <CheckCircle2 size={15} />
+  ) : (
+    <LockKeyhole size={15} />
+  )
 }
 
 function ChecklistItems({ items }: { items: ReadonlyArray<string> }) {
@@ -666,4 +753,20 @@ function describeCloudflareMcpTitle(status: CloudflareMcpStatus) {
   }
 
   return 'Optional for planning'
+}
+
+function describeStripeProjectsTitle(status: StripeProjectsConnectionStatus) {
+  if (status.status === 'connected') {
+    return 'User funding connected'
+  }
+
+  if (status.status === 'unconfigured') {
+    return 'Stripe Projects URL missing'
+  }
+
+  if (status.status === 'connecting') {
+    return 'Finish Stripe Projects authorization'
+  }
+
+  return 'User funding required'
 }

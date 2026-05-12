@@ -13,6 +13,10 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as PreviewWorkerNameRouteImport } from './routes/preview/$workerName'
 import { Route as ApiPlanRouteImport } from './routes/api.plan'
 import { Route as ApiBuilderSessionsRouteImport } from './routes/api/builder-sessions'
+import { Route as ApiStripeProjectsStatusRouteImport } from './routes/api/stripe-projects/status'
+import { Route as ApiStripeProjectsDisconnectRouteImport } from './routes/api/stripe-projects/disconnect'
+import { Route as ApiStripeProjectsConnectRouteImport } from './routes/api/stripe-projects/connect'
+import { Route as ApiStripeProjectsCallbackRouteImport } from './routes/api/stripe-projects/callback'
 import { Route as ApiRuntimeActionRouteImport } from './routes/api/runtime/action'
 import { Route as ApiDeployWorkerRouteImport } from './routes/api/deploy/worker'
 import { Route as ApiDeployRunRouteImport } from './routes/api/deploy/run'
@@ -55,6 +59,29 @@ const ApiBuilderSessionsRoute = ApiBuilderSessionsRouteImport.update({
   path: '/api/builder-sessions',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiStripeProjectsStatusRoute = ApiStripeProjectsStatusRouteImport.update({
+  id: '/api/stripe-projects/status',
+  path: '/api/stripe-projects/status',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiStripeProjectsDisconnectRoute =
+  ApiStripeProjectsDisconnectRouteImport.update({
+    id: '/api/stripe-projects/disconnect',
+    path: '/api/stripe-projects/disconnect',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiStripeProjectsConnectRoute =
+  ApiStripeProjectsConnectRouteImport.update({
+    id: '/api/stripe-projects/connect',
+    path: '/api/stripe-projects/connect',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiStripeProjectsCallbackRoute =
+  ApiStripeProjectsCallbackRouteImport.update({
+    id: '/api/stripe-projects/callback',
+    path: '/api/stripe-projects/callback',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiRuntimeActionRoute = ApiRuntimeActionRouteImport.update({
   id: '/api/runtime/action',
   path: '/api/runtime/action',
@@ -187,6 +214,10 @@ export interface FileRoutesByFullPath {
   '/api/deploy/run': typeof ApiDeployRunRoute
   '/api/deploy/worker': typeof ApiDeployWorkerRoute
   '/api/runtime/action': typeof ApiRuntimeActionRoute
+  '/api/stripe-projects/callback': typeof ApiStripeProjectsCallbackRoute
+  '/api/stripe-projects/connect': typeof ApiStripeProjectsConnectRoute
+  '/api/stripe-projects/disconnect': typeof ApiStripeProjectsDisconnectRoute
+  '/api/stripe-projects/status': typeof ApiStripeProjectsStatusRoute
   '/preview/$workerName/api/health': typeof PreviewWorkerNameApiHealthRoute
 }
 export interface FileRoutesByTo {
@@ -214,6 +245,10 @@ export interface FileRoutesByTo {
   '/api/deploy/run': typeof ApiDeployRunRoute
   '/api/deploy/worker': typeof ApiDeployWorkerRoute
   '/api/runtime/action': typeof ApiRuntimeActionRoute
+  '/api/stripe-projects/callback': typeof ApiStripeProjectsCallbackRoute
+  '/api/stripe-projects/connect': typeof ApiStripeProjectsConnectRoute
+  '/api/stripe-projects/disconnect': typeof ApiStripeProjectsDisconnectRoute
+  '/api/stripe-projects/status': typeof ApiStripeProjectsStatusRoute
   '/preview/$workerName/api/health': typeof PreviewWorkerNameApiHealthRoute
 }
 export interface FileRoutesById {
@@ -242,6 +277,10 @@ export interface FileRoutesById {
   '/api/deploy/run': typeof ApiDeployRunRoute
   '/api/deploy/worker': typeof ApiDeployWorkerRoute
   '/api/runtime/action': typeof ApiRuntimeActionRoute
+  '/api/stripe-projects/callback': typeof ApiStripeProjectsCallbackRoute
+  '/api/stripe-projects/connect': typeof ApiStripeProjectsConnectRoute
+  '/api/stripe-projects/disconnect': typeof ApiStripeProjectsDisconnectRoute
+  '/api/stripe-projects/status': typeof ApiStripeProjectsStatusRoute
   '/preview/$workerName/api/health': typeof PreviewWorkerNameApiHealthRoute
 }
 export interface FileRouteTypes {
@@ -271,6 +310,10 @@ export interface FileRouteTypes {
     | '/api/deploy/run'
     | '/api/deploy/worker'
     | '/api/runtime/action'
+    | '/api/stripe-projects/callback'
+    | '/api/stripe-projects/connect'
+    | '/api/stripe-projects/disconnect'
+    | '/api/stripe-projects/status'
     | '/preview/$workerName/api/health'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -298,6 +341,10 @@ export interface FileRouteTypes {
     | '/api/deploy/run'
     | '/api/deploy/worker'
     | '/api/runtime/action'
+    | '/api/stripe-projects/callback'
+    | '/api/stripe-projects/connect'
+    | '/api/stripe-projects/disconnect'
+    | '/api/stripe-projects/status'
     | '/preview/$workerName/api/health'
   id:
     | '__root__'
@@ -325,6 +372,10 @@ export interface FileRouteTypes {
     | '/api/deploy/run'
     | '/api/deploy/worker'
     | '/api/runtime/action'
+    | '/api/stripe-projects/callback'
+    | '/api/stripe-projects/connect'
+    | '/api/stripe-projects/disconnect'
+    | '/api/stripe-projects/status'
     | '/preview/$workerName/api/health'
   fileRoutesById: FileRoutesById
 }
@@ -353,6 +404,10 @@ export interface RootRouteChildren {
   ApiDeployRunRoute: typeof ApiDeployRunRoute
   ApiDeployWorkerRoute: typeof ApiDeployWorkerRoute
   ApiRuntimeActionRoute: typeof ApiRuntimeActionRoute
+  ApiStripeProjectsCallbackRoute: typeof ApiStripeProjectsCallbackRoute
+  ApiStripeProjectsConnectRoute: typeof ApiStripeProjectsConnectRoute
+  ApiStripeProjectsDisconnectRoute: typeof ApiStripeProjectsDisconnectRoute
+  ApiStripeProjectsStatusRoute: typeof ApiStripeProjectsStatusRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -383,6 +438,34 @@ declare module '@tanstack/react-router' {
       path: '/api/builder-sessions'
       fullPath: '/api/builder-sessions'
       preLoaderRoute: typeof ApiBuilderSessionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/stripe-projects/status': {
+      id: '/api/stripe-projects/status'
+      path: '/api/stripe-projects/status'
+      fullPath: '/api/stripe-projects/status'
+      preLoaderRoute: typeof ApiStripeProjectsStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/stripe-projects/disconnect': {
+      id: '/api/stripe-projects/disconnect'
+      path: '/api/stripe-projects/disconnect'
+      fullPath: '/api/stripe-projects/disconnect'
+      preLoaderRoute: typeof ApiStripeProjectsDisconnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/stripe-projects/connect': {
+      id: '/api/stripe-projects/connect'
+      path: '/api/stripe-projects/connect'
+      fullPath: '/api/stripe-projects/connect'
+      preLoaderRoute: typeof ApiStripeProjectsConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/stripe-projects/callback': {
+      id: '/api/stripe-projects/callback'
+      path: '/api/stripe-projects/callback'
+      fullPath: '/api/stripe-projects/callback'
+      preLoaderRoute: typeof ApiStripeProjectsCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/runtime/action': {
@@ -571,6 +654,10 @@ const rootRouteChildren: RootRouteChildren = {
   ApiDeployRunRoute: ApiDeployRunRoute,
   ApiDeployWorkerRoute: ApiDeployWorkerRoute,
   ApiRuntimeActionRoute: ApiRuntimeActionRoute,
+  ApiStripeProjectsCallbackRoute: ApiStripeProjectsCallbackRoute,
+  ApiStripeProjectsConnectRoute: ApiStripeProjectsConnectRoute,
+  ApiStripeProjectsDisconnectRoute: ApiStripeProjectsDisconnectRoute,
+  ApiStripeProjectsStatusRoute: ApiStripeProjectsStatusRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

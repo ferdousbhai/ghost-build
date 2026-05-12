@@ -252,6 +252,13 @@ describe('builder UI gates', () => {
         codexAuthState={connectedCodexAuth}
         isPending={false}
         plan={buildAgentPlan({ idea: 'A paid docs portal' })}
+        stripeProjectsStatus={{
+          status: 'connected',
+          message: 'Stripe Project connected for user-funded Cloudflare actions.',
+          stripeProjectId: 'proj_123',
+          connectedAt: '2026-05-12T00:00:00.000Z',
+          defaultProviderSpendLimitUsd: 100,
+        }}
         onConnectCloudflareToken={vi.fn()}
         onGenerateWorkerApp={vi.fn()}
         onPrepareBuildPreview={vi.fn()}
@@ -277,6 +284,35 @@ describe('builder UI gates', () => {
       hasDestructiveAction: true,
       hasPaidAction: true,
     })
+  })
+
+  it('blocks paid deploy approval until Stripe Projects is connected', () => {
+    const onRequestDeployApproval = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <PreviewPane
+        cloudflareStatus={connectedCloudflare}
+        codexAuthState={connectedCodexAuth}
+        isPending={false}
+        plan={buildAgentPlan({ idea: 'A paid docs portal' })}
+        onConnectCloudflareToken={vi.fn()}
+        onGenerateWorkerApp={vi.fn()}
+        onPrepareBuildPreview={vi.fn()}
+        onRequestDeployApproval={onRequestDeployApproval}
+        onRunBuildChecks={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Deploy gated/ }))
+    fireEvent.click(screen.getByLabelText('Includes paid Cloudflare action'))
+    fireEvent.click(screen.getByRole('button', { name: /Confirm deploy/ }))
+
+    expect(onRequestDeployApproval).not.toHaveBeenCalled()
+    expect(
+      screen.getByText(
+        'Connect your own Stripe Project before approving paid Cloudflare actions.',
+      ),
+    ).toBeTruthy()
   })
 
   it('shows a Cloudflare token connection form when no account is connected', () => {

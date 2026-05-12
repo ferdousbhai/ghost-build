@@ -29,6 +29,12 @@ web apps.
 - MCP: only Cloudflare API MCP at `https://mcp.cloudflare.com/mcp`.
 - Cloudflare API MCP OAuth is authorized per active builder session so the same
   Durable Object that runs Think turns owns the MCP tokens.
+- Stripe Projects funded actions are user-owned. Each user connects their own
+  Stripe Project, and GhostBuild stores only signed connection metadata and
+  approval state.
+- Stripe Projects env: `STRIPE_PROJECTS_CONNECT_URL` and
+  `STRIPE_PROJECTS_COOKIE_SECRET` or the shared `CODEX_OAUTH_COOKIE_SECRET` /
+  `BETTER_AUTH_SECRET`.
 - Skills: project Cloudflare skill in `.codex/skills/cloudflare`.
 - Goal model: every user turn may update the active goal. Keep objective,
   success criteria, status, and next concrete Cloudflare build step aligned.

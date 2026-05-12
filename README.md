@@ -35,6 +35,9 @@ Workers.
 - The app avoids product-specific MCP servers; Cloudflare platform actions route through the Cloudflare API MCP server.
 - Generated apps deploy to Cloudflare Workers.
 - Paid infrastructure is handled through Cloudflare/Stripe agent flows, including account setup, domains, and Cloudflare usage.
+- Each user connects their own Stripe Project before paid Cloudflare actions.
+  GhostBuild stores only signed connection metadata and approval state; raw
+  payment card data and payment tokens stay out of the app.
 - GhostBuild never stores raw payment card data.
 - Paid or destructive Cloudflare actions require auditable confirmation records
   before the matching action preset can execute.
@@ -54,3 +57,9 @@ Runtime OAuth secrets such as `CODEX_OAUTH_CLIENT_ID`,
 `CODEX_OAUTH_CLIENT_SECRET`, `CODEX_OAUTH_AUTHORIZE_URL`,
 `CODEX_OAUTH_TOKEN_URL`, and `CODEX_OAUTH_COOKIE_SECRET` still need to be
 configured in Cloudflare for the deployed Worker.
+
+Stripe Projects funded actions need:
+
+- `STRIPE_PROJECTS_CONNECT_URL`: hosted Stripe Projects connection URL.
+- `STRIPE_PROJECTS_COOKIE_SECRET`: signing secret for Stripe Projects cookies.
+  If omitted, `CODEX_OAUTH_COOKIE_SECRET` or `BETTER_AUTH_SECRET` is reused.

@@ -21,8 +21,10 @@ export function BuilderApp() {
     preview,
     request,
     sessionSummaries,
+    stripeProjectsStatus,
     connectCloudflareToken,
     connectCloudflareMcp,
+    connectStripeProjects,
     deployWorkerApp,
     generateWorkerApp,
     loadBuilderSession,
@@ -74,6 +76,7 @@ export function BuilderApp() {
           cloudflareStatus={cloudflareStatus}
           cloudflareMcpStatus={cloudflareMcpStatus}
           codexAuthState={codexAuthState}
+          stripeProjectsStatus={stripeProjectsStatus}
           checkResult={checkResult}
           deployApproval={deployApproval}
           deployResult={deployResult}
@@ -83,6 +86,7 @@ export function BuilderApp() {
           preview={preview}
           onConnectCloudflareToken={connectCloudflareToken}
           onConnectCloudflareMcp={connectCloudflareMcp}
+          onConnectStripeProjects={connectStripeProjects}
           onDeployWorkerApp={deployWorkerApp}
           onGenerateWorkerApp={generateWorkerApp}
           onPrepareBuildPreview={prepareBuildPreview}

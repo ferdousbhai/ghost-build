@@ -13,6 +13,7 @@ import type { BuildPreviewResult } from '#/lib/build-preview'
 import type { BuildRepairResult } from '#/lib/build-repair'
 import type { CloudflareDeployResult } from '#/lib/cloudflare-deploy'
 import type { CloudflareMcpStatus } from '#/lib/cloudflare-mcp'
+import type { StripeProjectsConnectionStatus } from '#/lib/stripe-projects'
 import type {
   BuilderSessionSnapshot,
   GoalTimelineEntry,
@@ -54,6 +55,12 @@ const initialCloudflareMcpStatus: CloudflareMcpStatus = {
   toolsCount: 0,
 }
 
+const initialStripeProjectsStatus: StripeProjectsConnectionStatus = {
+  status: 'disconnected',
+  message: 'Connect your own Stripe Project before paid Cloudflare actions.',
+  defaultProviderSpendLimitUsd: 100,
+}
+
 export function useBuilderSession() {
   const [storedBuilderSession] = useState(readStoredBuilderSession)
   const [request, setRequest] = useState<AgentPlanRequest>(
@@ -75,6 +82,8 @@ export function useBuilderSession() {
     useState<CloudflareConnectionStatus>(initialCloudflareStatus)
   const [cloudflareMcpStatus, setCloudflareMcpStatus] =
     useState<CloudflareMcpStatus>(initialCloudflareMcpStatus)
+  const [stripeProjectsStatus, setStripeProjectsStatus] =
+    useState<StripeProjectsConnectionStatus>(initialStripeProjectsStatus)
   const [deployApproval, setDeployApproval] = useState<
     DeployApprovalRecord | undefined
   >()
@@ -137,6 +146,15 @@ export function useBuilderSession() {
   useEffect(() => {
     void refreshCloudflareStatus()
   }, [])
+
+  useEffect(() => {
+    if (!hasCodexSignIn) {
+      setStripeProjectsStatus(initialStripeProjectsStatus)
+      return
+    }
+
+    void refreshStripeProjectsStatus()
+  }, [hasCodexSignIn])
 
   useEffect(() => {
     if (!hasCodexSignIn || !plan?.deployment.sessionId) {
@@ -358,6 +376,49 @@ export function useBuilderSession() {
 
     if (data.connection.status === 'authenticating') {
       window.open(data.connection.authUrl, '_blank', 'width=720,height=820')
+    }
+  }
+
+  async function refreshStripeProjectsStatus() {
+    try {
+      const response = await fetch('/api/stripe-projects/status')
+
+      if (!response.ok) {
+        return
+      }
+
+      setStripeProjectsStatus(
+        (await response.json()) as StripeProjectsConnectionStatus,
+      )
+    } catch {
+      setStripeProjectsStatus({
+        status: 'disconnected',
+        message: 'Unable to verify Stripe Projects connection.',
+        defaultProviderSpendLimitUsd: 100,
+      })
+    }
+  }
+
+  async function connectStripeProjects() {
+    const response = await fetch('/api/stripe-projects/connect', {
+      method: 'POST',
+    })
+    const data = (await response.json()) as
+      | StripeProjectsConnectionStatus
+      | { error?: string }
+
+    if (!response.ok || !('status' in data)) {
+      throw new Error(
+        'error' in data && data.error
+          ? data.error
+          : 'Unable to start Stripe Projects connection.',
+      )
+    }
+
+    setStripeProjectsStatus(data)
+
+    if (data.status === 'connecting') {
+      window.location.href = data.connectUrl
     }
   }
 
@@ -951,8 +1012,10 @@ export function useBuilderSession() {
     preview,
     request,
     sessionSummaries,
+    stripeProjectsStatus,
     connectCloudflareToken,
     connectCloudflareMcp,
+    connectStripeProjects,
     deployWorkerApp,
     generateWorkerApp,
     prepareBuildPreview,
@@ -962,6 +1025,7 @@ export function useBuilderSession() {
     repairGeneratedApp,
     refreshCloudflareStatus,
     refreshCloudflareMcpStatus,
+    refreshStripeProjectsStatus,
     runBuildDeployPipeline,
     runBuildPipeline,
     runBuildChecks,

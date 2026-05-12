@@ -23,6 +23,14 @@ import {
 import { verifyCloudflareConnection } from './cloudflare-status'
 import { summarizeCloudflareMcpState } from './cloudflare-mcp'
 import {
+  createStripeProjectsCallbackResponse,
+  createStripeProjectsConnectResponse,
+  signStripeProjectsConnectionForTest,
+  signStripeProjectsStateForTest,
+  stripeProjectsConnectionCookie,
+  stripeProjectsStateCookie,
+} from './stripe-projects'
+import {
   cloudflareTokenCookie,
   readCloudflareTokenFromRequest,
   sealCloudflareTokenCookieValue,
@@ -60,6 +68,7 @@ import { handleCloudflareConnect } from '../routes/api/cloudflare/connect'
 import { handleCloudflareDisconnect } from '../routes/api/cloudflare/disconnect'
 import { handleCloudflareStatus } from '../routes/api/cloudflare/status'
 import { handleDeployRun } from '../routes/api/deploy/run'
+import { handleDeployApproval } from '../routes/api/deploy/approval'
 import { handleDeployWorker } from '../routes/api/deploy/worker'
 import { handleRuntimeAction } from '../routes/api/runtime/action'
 
@@ -1195,6 +1204,113 @@ describe('deploy approvals', () => {
       hasPaidAction: true,
       risk: 'high',
     })
+  })
+
+  it('blocks paid Cloudflare approval until the user connects Stripe Projects', async () => {
+    process.env.STRIPE_PROJECTS_COOKIE_SECRET = 'test-secret'
+
+    const blocked = await handleDeployApproval(
+      new Request('https://ghost.test/api/deploy/approval', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          accountId: 'account_123',
+          bindings: [],
+          confirmedBy: 'user@example.com',
+          estimatedCost: '$12/year domain',
+          hasDestructiveAction: false,
+          hasPaidAction: true,
+          workerName: 'paid-worker',
+        }),
+      }),
+    )
+
+    expect(blocked.status).toBe(402)
+    await expect(blocked.json()).resolves.toMatchObject({
+      fundingRequired: true,
+    })
+
+    const connection = await signStripeProjectsConnectionForTest({
+      status: 'connected',
+      message: 'Stripe Project connected for user-funded Cloudflare actions.',
+      stripeProjectId: 'proj_123',
+      cloudflareAccountId: 'account_123',
+      connectedAt: '2026-05-12T00:00:00.000Z',
+      defaultProviderSpendLimitUsd: 100,
+    })
+    const allowed = await handleDeployApproval(
+      new Request('https://ghost.test/api/deploy/approval', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: `${stripeProjectsConnectionCookie}=${connection}`,
+        },
+        body: JSON.stringify({
+          accountId: 'account_123',
+          bindings: [],
+          confirmedBy: 'user@example.com',
+          estimatedCost: '$12/year domain',
+          hasDestructiveAction: false,
+          hasPaidAction: true,
+          workerName: 'paid-worker',
+        }),
+      }),
+    )
+
+    expect(allowed.status).toBe(200)
+    await expect(allowed.json()).resolves.toMatchObject({
+      approval: {
+        hasPaidAction: true,
+        workerName: 'paid-worker',
+      },
+    })
+  })
+})
+
+describe('Stripe Projects funding connection', () => {
+  it('starts hosted connection without storing payment details', async () => {
+    process.env.STRIPE_PROJECTS_COOKIE_SECRET = 'test-secret'
+    const response = await createStripeProjectsConnectResponse(
+      new Request('https://ghost.test/api/stripe-projects/connect'),
+      {
+        connectUrl: 'https://projects.dev/connect',
+        cookieSecret: 'test-secret',
+      },
+    )
+    const data = (await response.json()) as {
+      connectUrl: string
+      status: string
+    }
+
+    expect(data.status).toBe('connecting')
+    expect(data.connectUrl).toContain('return_url=')
+    expect(data.connectUrl).toContain('provider=cloudflare')
+    expect(response.headers.get('set-cookie')).toContain(stripeProjectsStateCookie)
+    expect(response.headers.get('set-cookie')).not.toContain('card')
+  })
+
+  it('records only signed Stripe Project metadata after callback validation', async () => {
+    process.env.STRIPE_PROJECTS_COOKIE_SECRET = 'test-secret'
+    const state = await signStripeProjectsStateForTest('state_123', 'test-secret')
+    const response = await createStripeProjectsCallbackResponse(
+      new Request(
+        'https://ghost.test/api/stripe-projects/callback?state=state_123&project_id=proj_123&cloudflare_account_id=account_123',
+        {
+          headers: {
+            cookie: `${stripeProjectsStateCookie}=${state}`,
+          },
+        },
+      ),
+      {
+        cookieSecret: 'test-secret',
+      },
+    )
+
+    expect(response.status).toBe(302)
+    expect(response.headers.get('set-cookie')).toContain(
+      stripeProjectsConnectionCookie,
+    )
+    expect(response.headers.get('set-cookie')).not.toContain('payment')
   })
 })
 
