@@ -1,5 +1,13 @@
 # GhostBuild
 
+GhostBuild has been consolidated into SummonGhost Code. The production feature
+now lives in the SummonGhost repository at `summonghost.com/code` and
+`code.summonghost.com`, reusing SummonGhost auth, sessions, user accounts, model
+runtime, Cloudflare MCP authorization, and approval boundaries.
+
+This repository is retired. It no longer has custom-domain routes or an
+automatic production deploy workflow.
+
 GhostBuild is an open-source, goal-driven coding agent for developers who want
 to build web apps on the full Cloudflare stack and deploy them as Cloudflare
 Workers.
@@ -44,9 +52,11 @@ The core product flow is prompt -> plan -> agent actions -> preview -> deploy.
 
 ## Deployment
 
-Pushes to `main` deploy the `ghost-build` Worker through GitHub Actions using
-Cloudflare's official Wrangler action. Configure these repository secrets before
-the first automated deploy:
+This repository no longer deploys to production. The remaining GitHub Actions
+workflow is manual-only and runs tests/builds as an archival check.
+
+Historical deploys used Cloudflare's official Wrangler action with these
+repository secrets:
 
 - `CLOUDFLARE_API_TOKEN`: Cloudflare API token with Workers deploy access.
 - `CLOUDFLARE_ACCOUNT_ID`: Cloudflare account ID for the target account.

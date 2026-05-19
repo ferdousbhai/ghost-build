@@ -11,7 +11,7 @@
     "build": "vite build && tsc --noEmit",
     "preview": "vite preview",
     "test": "vitest run",
-    "deploy": "pnpm build && wrangler deploy",
+    "deploy": "echo \"GhostBuild is retired; deploy SummonGhost Code from ../summon-ghost instead.\" && exit 1",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
