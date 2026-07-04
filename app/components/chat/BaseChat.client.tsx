@@ -21,6 +21,7 @@ import { SubchatLimitNudge } from './SubchatLimitNudge';
 import { useMutation } from '~/lib/cloudflare/data-hooks';
 import { api } from '~/lib/cloudflare/data-api';
 import { subchatIndexStore, useIsSubchatLoaded } from '~/lib/stores/subchats';
+import { CheckCircledIcon, CodeIcon, CubeIcon, LightningBoltIcon, RocketIcon, RowsIcon } from '@radix-ui/react-icons';
 
 const MIN_MESSAGES_FOR_SUBCHAT_NUDGE = 12;
 const Workbench = lazy(() =>
@@ -128,30 +129,78 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
           <div className="flex w-full grow flex-col lg:flex-row">
             <div
               className={classNames(styles.Chat, 'flex flex-col flex-grow lg:min-w-[var(--chat-min-width)] h-full', {
-                'items-center px-4 sm:px-8 lg:px-12': !chatStarted,
+                'items-stretch px-4 sm:px-6 lg:px-8': !chatStarted,
                 'pt-4': chatStarted,
               })}
             >
-              {!chatStarted && (
-                <div id="intro" className="mx-auto mb-7 mt-10 max-w-4xl px-4 text-center md:mt-14 lg:px-0">
-                  <p className="text-content-tertiary animate-fadeInFromLoading mb-4 text-sm font-semibold uppercase">
-                    Prompt-to-app for the Cloudflare stack
-                  </p>
-                  <h1 className="animate-fadeInFromLoading text-content-primary mx-auto mb-4 max-w-3xl font-display text-4xl font-black leading-tight md:text-6xl">
-                    Build Cloudflare apps from a plain-English brief
-                  </h1>
-                  <p className="animate-fadeInFromLoading text-content-secondary mx-auto max-w-2xl text-balance font-display text-base font-medium leading-7 [animation-delay:200ms] [animation-fill-mode:backwards] md:text-xl">
-                    Generate TanStack Start projects with Workers AI, D1, R2, and Agents already treated as first-class
-                    parts of the app.
-                  </p>
-                </div>
-              )}
               <div
                 className={classNames('w-full', {
                   'h-full flex flex-col': chatStarted,
                 })}
               >
-                {chatStarted ? (
+                {!chatStarted ? (
+                  <div className="mx-auto grid w-full max-w-7xl grow gap-6 py-6 lg:grid-cols-[minmax(0,1fr)_23rem] lg:py-8">
+                    <section className="min-w-0">
+                      <div id="intro" className="mb-5 max-w-3xl">
+                        <div className="text-content-tertiary mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold uppercase">
+                          <span>New app</span>
+                          <span className="bg-content-tertiary size-1 rounded-full opacity-40" />
+                          <span>Cloudflare native</span>
+                        </div>
+                        <h1 className="text-content-primary max-w-3xl font-display text-4xl font-black leading-tight md:text-6xl">
+                          Build the first version from a single brief.
+                        </h1>
+                      </div>
+
+                      <div className="max-w-3xl">
+                        {actionAlert && (
+                          <div className="bg-background-secondary mb-4">
+                            <ChatAlert
+                              alert={actionAlert}
+                              clearAlert={clearAlert}
+                              postMessage={(message) => {
+                                onSend(message);
+                                clearAlert();
+                              }}
+                            />
+                          </div>
+                        )}
+                        <MessageInput
+                          chatStarted={chatStarted}
+                          isStreaming={isStreaming}
+                          sendMessageInProgress={sendMessageInProgress}
+                          disabled={disableChatMessage !== null}
+                          onStop={onStop}
+                          onSend={onSend}
+                          numMessages={messages.length}
+                        />
+                        <AnimatePresence>
+                          {disableChatMessage && (
+                            <motion.div
+                              initial={{ translateY: '-100%', opacity: 0 }}
+                              animate={{ translateY: '0%', opacity: 1 }}
+                              exit={{ translateY: '-100%', opacity: 0 }}
+                              transition={{ duration: 0.15 }}
+                            >
+                              <Sheet className="animate-fadeInFromLoading bg-util-accent/10 -mt-2 flex w-full flex-col gap-3 rounded-lg rounded-t-none p-4 shadow backdrop-blur-lg">
+                                {disableChatMessage}
+                              </Sheet>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                        <SuggestionButtons
+                          disabled={disableChatMessage !== null}
+                          chatStarted={chatStarted}
+                          onSuggestionClick={(suggestion) => {
+                            messageInputStore.set(suggestion);
+                          }}
+                        />
+                      </div>
+                    </section>
+
+                    <BuilderContextPanel />
+                  </div>
+                ) : (
                   <>
                     <SubchatBar
                       subchats={subchats}
@@ -188,81 +237,72 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                       </AnimatePresence>
                     )}
                   </>
-                ) : null}
-                <div
-                  className={classNames('flex flex-col w-full max-w-chat mx-auto z-prompt relative', {
-                    'sticky bottom-four': chatStarted,
-                  })}
-                >
-                  {actionAlert && (
-                    <div className="bg-background-secondary mb-4">
-                      <ChatAlert
-                        alert={actionAlert}
-                        clearAlert={clearAlert}
-                        postMessage={(message) => {
-                          onSend(message);
-                          clearAlert();
-                        }}
-                      />
-                    </div>
-                  )}
-                  {(!subchats || (currentSubchatIndex >= subchats.length - 1 && isSubchatLoaded)) && (
-                    <>
-                      {shouldShowNudge && sessionId && (
-                        <div className="mb-4">
-                          <SubchatLimitNudge messageCount={messages.length} handleCreateSubchat={handleCreateSubchat} />
-                        </div>
-                      )}
-
-                      {/* StreamingIndicator is now a normal block above the input */}
-                      {!disableChatMessage && !shouldShowNudge && (
-                        <StreamingIndicator
-                          streamStatus={streamStatus}
-                          numMessages={messages.length}
-                          numSubchats={subchats?.length ?? 1}
-                          toolStatus={toolStatus}
-                          isRecovering={isRecovering}
-                          currentError={currentError}
-                          resendMessage={resendMessage}
+                )}
+                {chatStarted && (
+                  <div className="z-prompt bottom-four sticky mx-auto flex w-full max-w-chat flex-col">
+                    {actionAlert && (
+                      <div className="bg-background-secondary mb-4">
+                        <ChatAlert
+                          alert={actionAlert}
+                          clearAlert={clearAlert}
+                          postMessage={(message) => {
+                            onSend(message);
+                            clearAlert();
+                          }}
                         />
-                      )}
-
-                      {!shouldShowNudge && (
-                        <MessageInput
-                          chatStarted={chatStarted}
-                          isStreaming={isStreaming}
-                          sendMessageInProgress={sendMessageInProgress}
-                          disabled={disableChatMessage !== null}
-                          onStop={onStop}
-                          onSend={onSend}
-                          numMessages={messages.length}
-                        />
-                      )}
-                    </>
-                  )}
-                  <AnimatePresence>
-                    {disableChatMessage && (
-                      <motion.div
-                        initial={{ translateY: '-100%', opacity: 0 }}
-                        animate={{ translateY: '0%', opacity: 1 }}
-                        exit={{ translateY: '-100%', opacity: 0 }}
-                        transition={{ duration: 0.15 }}
-                      >
-                        <Sheet className="animate-fadeInFromLoading bg-util-accent/10 -mt-2 flex w-full flex-col gap-3 rounded-xl rounded-t-none p-4 shadow backdrop-blur-lg">
-                          {disableChatMessage}
-                        </Sheet>
-                      </motion.div>
+                      </div>
                     )}
-                  </AnimatePresence>
-                </div>
-                {!chatStarted && (
-                  <SuggestionButtons
-                    disabled={disableChatMessage !== null}
-                    chatStarted={chatStarted}
-                    onSuggestionClick={(suggestion) => {
-                      messageInputStore.set(suggestion);
-                    }}
-                  />
+                    {(!subchats || (currentSubchatIndex >= subchats.length - 1 && isSubchatLoaded)) && (
+                      <>
+                        {shouldShowNudge && sessionId && (
+                          <div className="mb-4">
+                            <SubchatLimitNudge
+                              messageCount={messages.length}
+                              handleCreateSubchat={handleCreateSubchat}
+                            />
+                          </div>
+                        )}
+
+                        {!disableChatMessage && !shouldShowNudge && (
+                          <StreamingIndicator
+                            streamStatus={streamStatus}
+                            numMessages={messages.length}
+                            numSubchats={subchats?.length ?? 1}
+                            toolStatus={toolStatus}
+                            isRecovering={isRecovering}
+                            currentError={currentError}
+                            resendMessage={resendMessage}
+                          />
+                        )}
+
+                        {!shouldShowNudge && (
+                          <MessageInput
+                            chatStarted={chatStarted}
+                            isStreaming={isStreaming}
+                            sendMessageInProgress={sendMessageInProgress}
+                            disabled={disableChatMessage !== null}
+                            onStop={onStop}
+                            onSend={onSend}
+                            numMessages={messages.length}
+                          />
+                        )}
+                      </>
+                    )}
+                    <AnimatePresence>
+                      {disableChatMessage && (
+                        <motion.div
+                          initial={{ translateY: '-100%', opacity: 0 }}
+                          animate={{ translateY: '0%', opacity: 1 }}
+                          exit={{ translateY: '-100%', opacity: 0 }}
+                          transition={{ duration: 0.15 }}
+                        >
+                          <Sheet className="animate-fadeInFromLoading bg-util-accent/10 -mt-2 flex w-full flex-col gap-3 rounded-lg rounded-t-none p-4 shadow backdrop-blur-lg">
+                            {disableChatMessage}
+                          </Sheet>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 )}
               </div>
             </div>
@@ -320,3 +360,58 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
   },
 );
 BaseChat.displayName = 'BaseChat';
+
+function BuilderContextPanel() {
+  return (
+    <aside className="border-neutral-3 bg-background-secondary/80 h-fit rounded-lg border p-4 shadow-sm backdrop-blur">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-content-primary text-sm font-semibold">Build context</p>
+          <p className="text-content-tertiary mt-1 text-xs">Ready for app generation</p>
+        </div>
+        <div className="bg-util-accent/15 text-content-primary flex size-9 items-center justify-center rounded-md">
+          <RocketIcon className="size-4" />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <ContextRow icon={<LightningBoltIcon />} label="Workers AI" value="generation" />
+        <ContextRow icon={<RowsIcon />} label="D1" value="data" />
+        <ContextRow icon={<CubeIcon />} label="R2" value="uploads" />
+        <ContextRow icon={<CheckCircledIcon />} label="Agents" value="runtime" />
+        <ContextRow icon={<CodeIcon />} label="TanStack Start" value="frontend" />
+      </div>
+
+      <div className="border-neutral-3 mt-5 border-t pt-4">
+        <p className="text-content-tertiary mb-3 text-xs font-semibold uppercase">Build plan</p>
+        <div className="space-y-3">
+          <PlanStep index="01" title="Scaffold routes" />
+          <PlanStep index="02" title="Wire data and storage" />
+          <PlanStep index="03" title="Generate the UI" />
+          <PlanStep index="04" title="Preview and iterate" />
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function ContextRow({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+  return (
+    <div className="border-neutral-3 bg-background-primary/60 flex items-center gap-3 rounded-md border px-3 py-2">
+      <div className="text-content-tertiary flex size-7 items-center justify-center rounded-md">{icon}</div>
+      <div className="min-w-0 flex-1">
+        <p className="text-content-primary truncate text-sm font-medium">{label}</p>
+      </div>
+      <span className="text-content-tertiary text-xs">{value}</span>
+    </div>
+  );
+}
+
+function PlanStep({ index, title }: { index: string; title: string }) {
+  return (
+    <div className="grid grid-cols-[2.25rem_1fr] gap-3">
+      <span className="text-content-tertiary font-mono text-xs">{index}</span>
+      <p className="text-content-secondary text-sm">{title}</p>
+    </div>
+  );
+}

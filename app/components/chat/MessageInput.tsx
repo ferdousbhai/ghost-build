@@ -208,21 +208,42 @@ export const MessageInput = memo(function MessageInput({
   );
 
   return (
-    <div className="relative z-20 mx-auto w-full max-w-chat rounded-xl shadow transition-all duration-200">
-      <div className="bg-background-primary/75 rounded-xl backdrop-blur-md">
-        <div className="has-[textarea:focus]:border-border-selected rounded-t-xl border transition-all">
+    <div
+      className={classNames(
+        'relative z-20 mx-auto w-full shadow-sm transition-all duration-200',
+        chatStarted ? 'max-w-chat rounded-lg' : 'max-w-none rounded-lg border border-neutral-3 bg-background-primary',
+      )}
+    >
+      <div className={classNames('bg-background-primary/85 rounded-lg backdrop-blur-md', !chatStarted ? 'p-2' : '')}>
+        {!chatStarted && (
+          <div className="flex items-center justify-between gap-3 px-2 pb-2 pt-1">
+            <div>
+              <p className="text-content-primary text-sm font-semibold">Prompt</p>
+              <p className="text-content-tertiary text-xs">App brief</p>
+            </div>
+            <div className="border-neutral-3 bg-background-secondary/80 text-content-secondary rounded-md border px-2 py-1 text-xs">
+              Cloudflare stack
+            </div>
+          </div>
+        )}
+        <div
+          className={classNames(
+            'has-[textarea:focus]:border-border-selected border transition-all',
+            chatStarted ? 'rounded-t-lg' : 'rounded-md',
+          )}
+        >
           <TextareaWithHighlights
             onKeyDown={handleKeyDown}
             onChange={handleChange}
             value={input}
-            minHeight={100}
+            minHeight={chatStarted ? 100 : 156}
             maxHeight={chatStarted ? 400 : 200}
             placeholder={
               chatStarted
                 ? numMessages !== undefined && numMessages > 0
                   ? 'Request changes by sending another message…'
                   : 'Send a prompt for a new feature…'
-                : 'What app do you want to serve?'
+                : 'Describe the app, workflow, and data you want to build…'
             }
             disabled={disabled}
             highlights={HIGHLIGHTS}
@@ -230,7 +251,8 @@ export const MessageInput = memo(function MessageInput({
         </div>
         <div
           className={classNames(
-            'flex items-center gap-2 border rounded-b-xl border-t-0 bg-background-secondary/80 p-1.5 text-sm flex-wrap',
+            'flex flex-wrap items-center gap-2 border border-t-0 bg-background-secondary/80 p-1.5 text-sm',
+            chatStarted ? 'rounded-b-lg' : 'rounded-b-md',
           )}
         >
           {input.length > 3 && input.length <= PROMPT_LENGTH_WARNING_THRESHOLD && <NewLineShortcut />}
@@ -305,7 +327,7 @@ export const MessageInput = memo(function MessageInput({
               tip={ghostbuildAuthState.kind === 'unauthenticated' ? 'Please sign in to continue' : undefined}
               onClick={handleClickButton}
               size="xs"
-              className="ml-2 h-[1.625rem]"
+              className="ml-2 h-[1.625rem] min-w-8"
               aria-label={isStreaming ? 'Stop' : 'Send'}
               icon={
                 sendMessageInProgress ? (

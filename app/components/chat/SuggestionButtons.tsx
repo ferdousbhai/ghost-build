@@ -14,13 +14,17 @@ export const SuggestionButtons = ({ chatStarted, onSuggestionClick, disabled }: 
   }
 
   return (
-    <div id="suggestions">
-      <div className="mt-6 flex flex-wrap justify-center gap-4">
+    <div id="suggestions" className="mt-5">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="text-content-primary text-sm font-semibold">Blueprints</p>
+        <p className="text-content-tertiary text-xs">Starter briefs</p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
         {SUGGESTIONS.map((suggestion) => (
           <Button
             key={suggestion.title}
             onClick={() => onSuggestionClick?.(suggestion.prompt)}
-            className="rounded-full px-3 shadow-sm"
+            className="h-11 justify-start rounded-md px-3 text-left shadow-sm"
             variant="neutral"
             disabled={disabled}
             icon={<ArrowUpIcon className="size-4" />}
