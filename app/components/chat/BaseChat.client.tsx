@@ -13,7 +13,6 @@ import { classNames } from '~/utils/classNames';
 import styles from './BaseChat.module.css';
 import ChatAlert from './ChatAlert';
 import StreamingIndicator from './StreamingIndicator';
-import { SuggestionButtons } from './SuggestionButtons';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useStore } from '@nanostores/react';
 import { SubchatBar } from './SubchatBar';
@@ -21,7 +20,6 @@ import { SubchatLimitNudge } from './SubchatLimitNudge';
 import { useMutation } from '~/lib/cloudflare/data-hooks';
 import { api } from '~/lib/cloudflare/data-api';
 import { subchatIndexStore, useIsSubchatLoaded } from '~/lib/stores/subchats';
-import { CheckCircledIcon, CodeIcon, CubeIcon, LightningBoltIcon, RocketIcon, RowsIcon } from '@radix-ui/react-icons';
 
 const MIN_MESSAGES_FOR_SUBCHAT_NUDGE = 12;
 const Workbench = lazy(() =>
@@ -139,14 +137,9 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                 })}
               >
                 {!chatStarted ? (
-                  <div className="mx-auto grid w-full max-w-7xl grow gap-6 py-5 lg:grid-cols-[minmax(0,1fr)_22rem] lg:py-7">
+                  <div className="mx-auto w-full max-w-4xl grow py-5 lg:py-7">
                     <section className="min-w-0">
                       <div id="intro" className="mb-5 max-w-3xl">
-                        <div className="text-content-tertiary mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold uppercase">
-                          <span>New app</span>
-                          <span className="bg-content-tertiary size-1 rounded-full opacity-40" />
-                          <span>Cloudflare native</span>
-                        </div>
                         <h1 className="text-content-primary max-w-3xl font-display text-3xl font-black leading-tight sm:text-4xl lg:text-5xl">
                           Build the first version from a single brief.
                         </h1>
@@ -188,17 +181,8 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                             </motion.div>
                           )}
                         </AnimatePresence>
-                        <SuggestionButtons
-                          disabled={disableChatMessage !== null}
-                          chatStarted={chatStarted}
-                          onSuggestionClick={(suggestion) => {
-                            messageInputStore.set(suggestion);
-                          }}
-                        />
                       </div>
                     </section>
-
-                    <BuilderContextPanel />
                   </div>
                 ) : (
                   <>
@@ -316,42 +300,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
               </Suspense>
             )}
           </div>
-          {!chatStarted && (
-            <footer
-              id="footer"
-              className="text-content-tertiary flex w-full flex-col items-center justify-between gap-2 px-4 py-5 text-sm transition-opacity sm:flex-row"
-            >
-              <a
-                href="https://developers.cloudflare.com/workers-ai/"
-                className="hover:text-content-primary font-display font-medium transition-colors"
-              >
-                Built on Cloudflare Workers AI
-              </a>
-              <div className="flex items-center gap-3 font-display font-medium">
-                <p className="flex items-center">
-                  For&nbsp;
-                  <a
-                    href="https://developers.cloudflare.com/"
-                    className="hover:text-content-primary transition-colors"
-                    aria-label="Cloudflare Developers"
-                  >
-                    Cloudflare Developers
-                  </a>
-                </p>
-                <hr className="bg-content-tertiary h-5 w-0.5 opacity-20" />
-                <p className="flex items-center">
-                  Ships&nbsp;with&nbsp;
-                  <a
-                    href="https://tanstack.com/start"
-                    className="hover:text-content-primary transition-colors"
-                    aria-label="TanStack Start"
-                  >
-                    TanStack Start
-                  </a>
-                </p>
-              </div>
-            </footer>
-          )}
         </div>
       </div>
     );
@@ -360,60 +308,3 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
   },
 );
 BaseChat.displayName = 'BaseChat';
-
-function BuilderContextPanel() {
-  return (
-    <aside className="border-bolt-elements-borderColor h-fit rounded-lg border bg-bolt-elements-background-depth-1 p-4 shadow-sm">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <p className="text-content-primary text-sm font-semibold">Build context</p>
-          <p className="text-content-tertiary mt-1 text-xs">Ready for app generation</p>
-        </div>
-        <div className="text-content-primary flex size-9 items-center justify-center rounded-md bg-bolt-elements-background-depth-3">
-          <RocketIcon className="size-4" />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <ContextRow icon={<LightningBoltIcon />} label="Workers AI" value="generation" />
-        <ContextRow icon={<RowsIcon />} label="D1" value="data" />
-        <ContextRow icon={<CubeIcon />} label="R2" value="uploads" />
-        <ContextRow icon={<CheckCircledIcon />} label="Agents" value="runtime" />
-        <ContextRow icon={<CodeIcon />} label="TanStack Start" value="frontend" />
-      </div>
-
-      <div className="border-bolt-elements-borderColor mt-5 border-t pt-4">
-        <p className="text-content-tertiary mb-3 text-xs font-semibold uppercase">Build plan</p>
-        <div className="space-y-3">
-          <PlanStep index="01" title="Scaffold routes" />
-          <PlanStep index="02" title="Wire data and storage" />
-          <PlanStep index="03" title="Generate the UI" />
-          <PlanStep index="04" title="Preview and iterate" />
-        </div>
-      </div>
-    </aside>
-  );
-}
-
-function ContextRow({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
-  return (
-    <div className="border-bolt-elements-borderColor flex items-center gap-3 rounded-md border bg-bolt-elements-background-depth-2 px-3 py-2">
-      <div className="text-content-tertiary flex size-7 items-center justify-center rounded-md bg-bolt-elements-background-depth-1">
-        {icon}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-content-primary truncate text-sm font-medium">{label}</p>
-      </div>
-      <span className="text-content-tertiary text-xs">{value}</span>
-    </div>
-  );
-}
-
-function PlanStep({ index, title }: { index: string; title: string }) {
-  return (
-    <div className="grid grid-cols-[2.25rem_1fr] gap-3">
-      <span className="text-content-tertiary font-mono text-xs">{index}</span>
-      <p className="text-content-secondary text-sm">{title}</p>
-    </div>
-  );
-}

@@ -217,17 +217,6 @@ export const MessageInput = memo(function MessageInput({
       )}
     >
       <div className={classNames('rounded-lg bg-bolt-elements-background-depth-1', !chatStarted ? 'p-2' : '')}>
-        {!chatStarted && (
-          <div className="flex items-center justify-between gap-3 px-2 pb-2 pt-1">
-            <div>
-              <p className="text-content-primary text-sm font-semibold">Prompt</p>
-              <p className="text-content-tertiary text-xs">App brief</p>
-            </div>
-            <div className="border-bolt-elements-borderColor text-content-secondary rounded-md border bg-bolt-elements-background-depth-2 px-2 py-1 text-xs">
-              Cloudflare stack
-            </div>
-          </div>
-        )}
         <div
           className={classNames(
             'has-[textarea:focus]:border-border-selected border-bolt-elements-borderColor border transition-all',
