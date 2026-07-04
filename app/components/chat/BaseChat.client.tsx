@@ -139,7 +139,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                 })}
               >
                 {!chatStarted ? (
-                  <div className="mx-auto grid w-full max-w-7xl grow gap-6 py-6 lg:grid-cols-[minmax(0,1fr)_23rem] lg:py-8">
+                  <div className="mx-auto grid w-full max-w-7xl grow gap-6 py-5 lg:grid-cols-[minmax(0,1fr)_22rem] lg:py-7">
                     <section className="min-w-0">
                       <div id="intro" className="mb-5 max-w-3xl">
                         <div className="text-content-tertiary mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold uppercase">
@@ -147,12 +147,12 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                           <span className="bg-content-tertiary size-1 rounded-full opacity-40" />
                           <span>Cloudflare native</span>
                         </div>
-                        <h1 className="text-content-primary max-w-3xl font-display text-4xl font-black leading-tight md:text-6xl">
+                        <h1 className="text-content-primary max-w-3xl font-display text-3xl font-black leading-tight sm:text-4xl lg:text-5xl">
                           Build the first version from a single brief.
                         </h1>
                       </div>
 
-                      <div className="max-w-3xl">
+                      <div className="max-w-4xl">
                         {actionAlert && (
                           <div className="bg-background-secondary mb-4">
                             <ChatAlert
@@ -363,13 +363,13 @@ BaseChat.displayName = 'BaseChat';
 
 function BuilderContextPanel() {
   return (
-    <aside className="border-neutral-3 bg-background-secondary/80 h-fit rounded-lg border p-4 shadow-sm backdrop-blur">
+    <aside className="border-bolt-elements-borderColor h-fit rounded-lg border bg-bolt-elements-background-depth-1 p-4 shadow-sm">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <p className="text-content-primary text-sm font-semibold">Build context</p>
           <p className="text-content-tertiary mt-1 text-xs">Ready for app generation</p>
         </div>
-        <div className="bg-util-accent/15 text-content-primary flex size-9 items-center justify-center rounded-md">
+        <div className="text-content-primary flex size-9 items-center justify-center rounded-md bg-bolt-elements-background-depth-3">
           <RocketIcon className="size-4" />
         </div>
       </div>
@@ -382,7 +382,7 @@ function BuilderContextPanel() {
         <ContextRow icon={<CodeIcon />} label="TanStack Start" value="frontend" />
       </div>
 
-      <div className="border-neutral-3 mt-5 border-t pt-4">
+      <div className="border-bolt-elements-borderColor mt-5 border-t pt-4">
         <p className="text-content-tertiary mb-3 text-xs font-semibold uppercase">Build plan</p>
         <div className="space-y-3">
           <PlanStep index="01" title="Scaffold routes" />
@@ -397,8 +397,10 @@ function BuilderContextPanel() {
 
 function ContextRow({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
-    <div className="border-neutral-3 bg-background-primary/60 flex items-center gap-3 rounded-md border px-3 py-2">
-      <div className="text-content-tertiary flex size-7 items-center justify-center rounded-md">{icon}</div>
+    <div className="border-bolt-elements-borderColor flex items-center gap-3 rounded-md border bg-bolt-elements-background-depth-2 px-3 py-2">
+      <div className="text-content-tertiary flex size-7 items-center justify-center rounded-md bg-bolt-elements-background-depth-1">
+        {icon}
+      </div>
       <div className="min-w-0 flex-1">
         <p className="text-content-primary truncate text-sm font-medium">{label}</p>
       </div>

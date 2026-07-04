@@ -211,24 +211,26 @@ export const MessageInput = memo(function MessageInput({
     <div
       className={classNames(
         'relative z-20 mx-auto w-full shadow-sm transition-all duration-200',
-        chatStarted ? 'max-w-chat rounded-lg' : 'max-w-none rounded-lg border border-neutral-3 bg-background-primary',
+        chatStarted
+          ? 'max-w-chat rounded-lg'
+          : 'border-bolt-elements-borderColor max-w-none rounded-lg border bg-bolt-elements-background-depth-1 shadow-lg',
       )}
     >
-      <div className={classNames('bg-background-primary/85 rounded-lg backdrop-blur-md', !chatStarted ? 'p-2' : '')}>
+      <div className={classNames('rounded-lg bg-bolt-elements-background-depth-1', !chatStarted ? 'p-2' : '')}>
         {!chatStarted && (
           <div className="flex items-center justify-between gap-3 px-2 pb-2 pt-1">
             <div>
               <p className="text-content-primary text-sm font-semibold">Prompt</p>
               <p className="text-content-tertiary text-xs">App brief</p>
             </div>
-            <div className="border-neutral-3 bg-background-secondary/80 text-content-secondary rounded-md border px-2 py-1 text-xs">
+            <div className="border-bolt-elements-borderColor text-content-secondary rounded-md border bg-bolt-elements-background-depth-2 px-2 py-1 text-xs">
               Cloudflare stack
             </div>
           </div>
         )}
         <div
           className={classNames(
-            'has-[textarea:focus]:border-border-selected border transition-all',
+            'has-[textarea:focus]:border-border-selected border-bolt-elements-borderColor border transition-all',
             chatStarted ? 'rounded-t-lg' : 'rounded-md',
           )}
         >
@@ -251,7 +253,7 @@ export const MessageInput = memo(function MessageInput({
         </div>
         <div
           className={classNames(
-            'flex flex-wrap items-center gap-2 border border-t-0 bg-background-secondary/80 p-1.5 text-sm',
+            'border-bolt-elements-borderColor flex flex-wrap items-center gap-2 border border-t-0 bg-bolt-elements-background-depth-2 p-1.5 text-sm',
             chatStarted ? 'rounded-b-lg' : 'rounded-b-md',
           )}
         >

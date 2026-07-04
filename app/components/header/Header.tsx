@@ -47,9 +47,12 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
             }}
           />
         )}
-        <a href="/">
-          {/* The logo is shifted up slightly, to visually align it with the hamburger icon. */}
-          <img src="/ghostbuild.svg" alt="Ghostbuild logo" width={180} height={42} className="relative -top-1" />
+        <a href="/" aria-label="Ghostbuild home" className="flex items-center gap-2 rounded-md">
+          <img src="/favicon.svg" alt="" className="size-8 shrink-0" />
+          <span className="flex flex-col leading-none">
+            <span className="text-content-primary text-base font-bold">Ghostbuild</span>
+            <span className="text-content-tertiary mt-1 text-xs font-medium">Cloudflare builder</span>
+          </span>
         </a>
       </div>
       {chat.started && (
