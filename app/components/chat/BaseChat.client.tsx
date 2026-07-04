@@ -27,9 +27,6 @@ const Workbench = lazy(() =>
   import('~/components/workbench/Workbench.client').then((module) => ({ default: module.Workbench })),
 );
 const Messages = lazy(() => import('./Messages.client').then((module) => ({ default: module.Messages })));
-const CompatibilityWarnings = lazy(() =>
-  import('~/components/CompatibilityWarnings.client').then((module) => ({ default: module.CompatibilityWarnings })),
-);
 
 interface BaseChatProps {
   // Refs
@@ -257,9 +254,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                       </motion.div>
                     )}
                   </AnimatePresence>
-                  <Suspense fallback={null}>
-                    <CompatibilityWarnings />
-                  </Suspense>
                 </div>
                 {!chatStarted && (
                   <SuggestionButtons
