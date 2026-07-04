@@ -1,0 +1,32 @@
+name: Manual Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_verification:
+        description: 'Run verification'
+        type: boolean
+        default: true
+        required: false
+
+jobs:
+  verify:
+    name: Verification
+    runs-on: ubuntu-latest
+    if: inputs.run_verification
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup and Build
+        uses: ./.github/actions/setup-and-build
+
+      - name: Run Ghostbuild verification
+        run: |
+          pnpm run verify:stack
+          pnpm run verify:template
+          pnpm run typecheck
+          pnpm run test
+          pnpm run build
+          pnpm run lint
+          pnpm run knip

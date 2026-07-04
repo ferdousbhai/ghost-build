@@ -1,0 +1,39 @@
+name: Setup and Build
+description: Generic setup action
+inputs:
+  pnpm-version:
+    required: false
+    type: string
+    default: '9.5.0'
+  node-version:
+    required: false
+    type: string
+    default: '26.3.0'
+  run-build:
+    required: false
+    type: string
+    default: 'true'
+
+runs:
+  using: composite
+
+  steps:
+    - uses: pnpm/action-setup@v4
+      with:
+        version: ${{ inputs.pnpm-version }}
+        run_install: false
+
+    - name: Set Node.js version to ${{ inputs.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile
+
+    - name: Build project
+      if: ${{ inputs.run-build == 'true' }}
+      shell: bash
+      run: pnpm run build

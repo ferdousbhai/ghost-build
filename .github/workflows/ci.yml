@@ -1,0 +1,37 @@
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  merge_group:
+
+jobs:
+  test:
+    name: Typecheck and Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup and Build
+        uses: ./.github/actions/setup-and-build
+
+      - name: Run type check
+        run: pnpm run typecheck
+
+      - name: Verify stack alignment
+        run: pnpm run verify:stack
+
+      - name: Verify generated app template
+        run: pnpm run verify:template
+
+      - name: Run lint
+        run: pnpm run lint
+
+      - name: Run tests
+        run: pnpm run test
+
+      - name: Run dependency checks
+        run: pnpm run knip

@@ -1,0 +1,26 @@
+{
+  "name": "ghostbuild-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "ai": "^6.0.219",
+    "path-browserify": "^1.0.1",
+    "typescript": "^6.0.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "@types/path-browserify": "^1.0.3",
+    "vitest": "^2.1.9"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "packageManager": "pnpm@9.5.0"
+}

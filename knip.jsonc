@@ -1,0 +1,44 @@
+{
+  "ignoreExportsUsedInFile": {
+    "interface": true,
+  },
+  "workspaces": {
+    ".": {
+      "entry": [
+        "app/router.tsx",
+        "parse-compressed-messages.mjs",
+        // manual build processes
+        "buildSystemPrompts.ts",
+        "proxy/proxy.cjs",
+        "iframe-worker/build.cjs",
+        "iframe-worker/worker.mts",
+        "iframe-worker/worker.bundled.mjs",
+      ],
+      "project": ["**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!"],
+      "ignore": ["template/**"],
+    },
+    "ghostbuild-agent": {
+      "entry": ["**/*.test.ts", "**/*.spec.ts"],
+      "project": ["**/*.{ts,mts}"],
+    },
+  },
+
+  "ignoreDependencies": [
+    // these are used by local UI compatibility components and optimized by Vite
+    "classnames",
+    "react-fast-compare",
+    "warning",
+    "fuzzy",
+
+    // these get shimmed in in vite.config.ts
+    "buffer",
+    "events",
+
+    // satisfies the Cloudflare Agents decorator transform peer dependency
+    "@babel/core",
+    "@babel/plugin-proposal-decorators",
+
+    // virtual module provided by the Cloudflare Workers runtime
+    "cloudflare",
+  ],
+}

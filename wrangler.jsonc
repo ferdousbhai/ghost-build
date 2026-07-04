@@ -1,0 +1,55 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ghostbuild",
+  "compatibility_date": "2026-06-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "app/server.ts",
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 0.6,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.05,
+    },
+  },
+  "upload_source_maps": true,
+  "ai": {
+    "binding": "AI",
+  },
+  // Configure all production string bindings in Cloudflare, not local env files.
+  // Deployment credentials are supplied by the CI environment, not as Worker runtime secrets.
+  // Optional dashboard-managed bindings: AXIOM_API_TOKEN, AXIOM_API_URL,
+  // AXIOM_DATASET_NAME, Better Auth/Google auth secrets, PostHog/Sentry
+  // config, site URL, and commit SHA metadata.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ghostbuild",
+      "database_id": "ecad935d-17df-453a-99eb-f3d025c917a4",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "APP_STORAGE",
+      "bucket_name": "ghostbuild-app-storage",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BuilderAgent",
+        "class_name": "BuilderAgent",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["BuilderAgent"],
+    },
+  ],
+}
