@@ -47,7 +47,11 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
             }}
           />
         )}
-        <a href="/" aria-label="Ghostbuild home" className="flex items-center gap-2 rounded-md">
+        <a
+          href="/"
+          aria-label="Ghostbuild home"
+          className="text-content-primary hover:text-content-primary flex items-center gap-2 rounded-md no-underline hover:no-underline"
+        >
           <img src="/favicon.svg" alt="" className="size-8 shrink-0" />
           <span className="flex flex-col leading-none">
             <span className="text-content-primary text-base font-bold">Ghostbuild</span>
