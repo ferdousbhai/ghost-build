@@ -4,12 +4,14 @@ import { chatStore } from '~/lib/stores/chatId';
 import { HeaderActionButtons } from './HeaderActionButtons.client';
 import { ChatDescription } from '~/components/header/ChatDescription.client';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
-import { HamburgerMenuIcon, PersonIcon, GearIcon, ExitIcon } from '@radix-ui/react-icons';
+import { HamburgerMenuIcon, PersonIcon, GearIcon, ExitIcon, Share2Icon } from '@radix-ui/react-icons';
 import { LoggedOutHeaderButtons } from './LoggedOutHeaderButtons';
 import { profileStore, setProfile } from '~/lib/stores/profile';
 import { Menu as MenuComponent, MenuItem as MenuItemComponent } from '@ui/Menu';
 import { FeedbackButton } from './FeedbackButton';
-import { signOutOfGhostbuild } from '~/lib/auth-client';
+import { signInWithGoogle, signOutOfGhostbuild } from '~/lib/auth-client';
+import { isGuestSessionId } from '~/lib/guest-session';
+import { Button } from '@ui/Button';
 
 const DownloadButton = lazy(() => import('./DownloadButton').then((module) => ({ default: module.DownloadButton })));
 const ShareButton = lazy(() => import('./ShareButton').then((module) => ({ default: module.ShareButton })));
@@ -20,8 +22,8 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const sessionId = useSessionIdOrNullOrLoading();
-  const isLoggedIn = sessionId !== null;
-  const showSidebarIcon = !hideSidebarIcon && isLoggedIn;
+  const isAccountSession = typeof sessionId === 'string' && !isGuestSessionId(sessionId);
+  const showSidebarIcon = !hideSidebarIcon && isAccountSession;
 
   const profile = useStore(profileStore);
 
@@ -51,13 +53,11 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
           href="/"
           aria-label="Ghostbuild home"
           className="text-content-primary hover:text-content-primary flex items-center gap-2 rounded-md no-underline hover:no-underline"
-          style={{ color: 'var(--content-primary)' }}
         >
-          <img src="/favicon.svg" alt="" className="size-8 shrink-0" />
-          <span className="flex flex-col leading-none">
-            <span className="text-content-primary text-base font-bold">Ghostbuild</span>
-            <span className="text-content-tertiary mt-1 text-xs font-medium">Cloudflare builder</span>
+          <span aria-hidden className="shrink-0 text-xl leading-none">
+            👻
           </span>
+          <span className="text-content-primary font-display text-lg font-black leading-none">Ghostbuild</span>
         </a>
       </div>
       {chat.started && (
@@ -66,13 +66,27 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
         </span>
       )}
       <div className="ml-auto flex items-center gap-2">
-        {!isLoggedIn && <LoggedOutHeaderButtons />}
+        {!isAccountSession && <LoggedOutHeaderButtons />}
 
         {chat.started && (
           <>
             <Suspense fallback={null}>
               <DownloadButton />
-              <ShareButton />
+              {isAccountSession ? (
+                <ShareButton />
+              ) : (
+                <Button
+                  variant="neutral"
+                  size="xs"
+                  title="Sign in to share"
+                  onClick={() => {
+                    void signInWithGoogle();
+                  }}
+                >
+                  <Share2Icon />
+                  <span>Share</span>
+                </Button>
+              )}
             </Suspense>
             <div className="mr-1">
               <HeaderActionButtons />

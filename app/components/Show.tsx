@@ -33,7 +33,11 @@ const CodeShow: FC<CodeShowProps> = ({ code, ...props }) => {
 };
 
 const ShowInner: FC<ShowInnerProps> = ({ share, className }) => {
-  const ghostbuildIcon = <img src="/favicon.svg" alt="" className="size-5" />;
+  const ghostbuildIcon = (
+    <span aria-hidden className="text-base leading-none">
+      👻
+    </span>
+  );
 
   return (
     <div className={classNames('mx-auto flex w-full flex-col gap-2 p-4 md:max-w-3xl min-h-screen', className)}>

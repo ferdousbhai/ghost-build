@@ -1,0 +1,157 @@
+:root,
+html.light {
+  --ghost-home-bg: rgb(249, 247, 238);
+  --ghost-home-surface: rgba(253, 252, 250, 0.9);
+  --ghost-home-input: rgba(255, 255, 255, 0.78);
+  --ghost-home-ink: rgb(24, 25, 28);
+  --ghost-home-muted: rgb(73, 76, 84);
+  --ghost-home-border: rgba(33, 34, 30, 0.16);
+  --ghost-home-accent: rgb(48, 106, 207);
+  --ghost-home-shadow: 0 26px 90px rgba(57, 60, 66, 0.16);
+}
+
+html.dark {
+  --ghost-home-bg: rgb(30, 28, 26);
+  --ghost-home-surface: rgba(42, 40, 37, 0.88);
+  --ghost-home-input: rgba(24, 25, 28, 0.58);
+  --ghost-home-ink: rgb(253, 252, 250);
+  --ghost-home-muted: rgb(204, 206, 211);
+  --ghost-home-border: rgba(225, 215, 205, 0.18);
+  --ghost-home-accent: rgb(99, 168, 248);
+  --ghost-home-shadow: 0 26px 90px rgba(0, 0, 0, 0.36);
+}
+
+.ghost-home-shell {
+  min-height: 100%;
+  background: var(--ghost-home-bg);
+}
+
+.ghost-home-grid {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+}
+
+.ghost-home-copy {
+  padding-top: 22px;
+}
+
+.ghost-home-eyebrow {
+  display: inline-block;
+  margin-bottom: 18px;
+  border: 1px solid var(--ghost-home-border);
+  border-radius: 8px;
+  background: var(--ghost-home-surface);
+  color: var(--ghost-home-muted);
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.ghost-home-title {
+  max-width: 760px;
+  color: var(--ghost-home-ink);
+  font-family: 'GT America', ui-sans-serif, system-ui, sans-serif;
+  font-size: 56px;
+  font-weight: 900;
+  line-height: 0.98;
+  letter-spacing: 0;
+}
+
+.ghost-home-lede {
+  max-width: 660px;
+  margin-top: 18px;
+  color: var(--ghost-home-muted);
+  font-size: 18px;
+  line-height: 1.55;
+}
+
+.ghost-home-composer-stack {
+  margin-top: 28px;
+}
+
+.ghost-message-input--home {
+  border: 1px solid var(--ghost-home-border);
+  border-radius: 8px;
+  background: var(--ghost-home-surface);
+  box-shadow: var(--ghost-home-shadow);
+}
+
+.ghost-message-input--home .ghost-message-input__surface {
+  background: transparent;
+}
+
+.ghost-message-input--home .ghost-message-input__editor {
+  border-color: var(--ghost-home-border);
+  background: var(--ghost-home-input);
+}
+
+.ghost-message-input--home .ghost-message-input__editor:focus-within {
+  border-color: color-mix(in srgb, var(--ghost-home-accent) 66%, var(--ghost-home-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ghost-home-accent) 14%, transparent);
+}
+
+.ghost-message-input--home textarea {
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.ghost-message-input--home .ghost-message-input__footer {
+  border-color: var(--ghost-home-border);
+  background: color-mix(in srgb, var(--ghost-home-surface) 82%, transparent);
+}
+
+.ghost-message-input__send {
+  min-height: 34px;
+  min-width: 38px;
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--ghost-home-accent) 24%, transparent);
+}
+
+.ghost-home-reveal {
+  animation: ghost-home-rise 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes ghost-home-rise {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 960px) {
+  .ghost-home-title {
+    font-size: 48px;
+  }
+}
+
+@media (max-width: 720px) {
+  .ghost-home-shell {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .ghost-home-copy {
+    padding-top: 8px;
+  }
+
+  .ghost-home-title {
+    font-size: 36px;
+  }
+
+  .ghost-home-lede {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ghost-home-reveal {
+    animation: none;
+  }
+}

@@ -20,6 +20,7 @@ import { viewParameters } from 'ghostbuild-agent/tools/view';
 import { themeStore } from '~/lib/stores/theme';
 import { path } from 'ghostbuild-agent/utils/path';
 import { editToolParameters } from 'ghostbuild-agent/tools/edit';
+import { writeFileParameters } from 'ghostbuild-agent/tools/writeFile';
 import { npmInstallToolParameters } from 'ghostbuild-agent/tools/npmInstall';
 import { loggingSafeParse } from 'ghostbuild-agent/utils/zodUtil';
 import { deployToolParameters } from 'ghostbuild-agent/tools/deploy';
@@ -33,6 +34,12 @@ import { getCodeHighlighter, normalizeCodeLanguage } from '~/lib/shiki.client';
 
 const ToolOutputTerminal = lazy(() =>
   import('./ToolOutputTerminal').then((module) => ({ default: module.ToolOutputTerminal })),
+);
+const GHOSTBUILD_PREVIEW_VALIDATION_COMPLETE = 'Ghostbuild preview validation complete.';
+const ghostbuildIcon = (
+  <span aria-hidden className="mr-1 text-base leading-none">
+    👻
+  </span>
 );
 
 export const ToolCall = memo(function ToolCall({ partId, toolCallId }: { partId: PartId; toolCallId: string }) {
@@ -147,6 +154,9 @@ const ToolUseContents = memo(function ToolUseContents({
     }
     case 'edit': {
       return <EditTool invocation={invocation} />;
+    }
+    case 'writeFile': {
+      return <WriteFileTool invocation={invocation} />;
     }
     case 'lookupDocs': {
       return <LookupDocsTool invocation={invocation} />;
@@ -340,8 +350,20 @@ function viewTitle(invocation: GhostbuildToolInvocation, resultText: string) {
 function editTitle(invocation: GhostbuildToolInvocation) {
   const args = loggingSafeParse(editToolParameters, invocation.args);
   return titleRow(
-    `Edited ${args.success ? args.data.path : 'a file'}`,
+    `Edited ${args.success ? getRelativePath(args.data.path) || args.data.path : 'a file'}`,
     <Pencil1Icon className="text-content-secondary" />,
+  );
+}
+
+function writeFileTitle(invocation: GhostbuildToolInvocation) {
+  if (isToolInvocationInProgress(invocation)) {
+    return titleRow('Writing a file...', <FileIcon className="text-content-secondary" />);
+  }
+
+  const args = writeFileParameters.safeParse(invocation.args);
+  return titleRow(
+    `Wrote ${args.success ? getRelativePath(args.data.path) || args.data.path : 'a file'}`,
+    <FileIcon className="text-content-secondary" />,
   );
 }
 
@@ -371,7 +393,7 @@ function toolTitle(invocation: GhostbuildToolInvocation): React.ReactNode {
     case 'deploy': {
       if (isToolInvocationInProgress(invocation)) {
         return titleRow(
-          'Running TypeScript checks...',
+          'Checking the app...',
           <img className="mr-1 size-4" height="16" width="16" src="/icons/TypeScript.svg" alt="TypeScript" />,
         );
       }
@@ -380,13 +402,17 @@ function toolTitle(invocation: GhostbuildToolInvocation): React.ReactNode {
         return deployFailureTitle(resultText);
       }
 
-      return titleRow(
-        'Deployed Cloudflare Worker',
-        <img className="mr-1 size-4" height="16" width="16" src="/favicon.svg" alt="" />,
-      );
+      if (resultText.includes(GHOSTBUILD_PREVIEW_VALIDATION_COMPLETE)) {
+        return titleRow('App validated for preview', ghostbuildIcon);
+      }
+
+      return titleRow('Deployed Cloudflare Worker', ghostbuildIcon);
     }
     case 'edit': {
       return editTitle(invocation);
+    }
+    case 'writeFile': {
+      return writeFileTitle(invocation);
     }
     case 'lookupDocs': {
       const args = loggingSafeParse(lookupDocsParameters, invocation.args);
@@ -546,6 +572,26 @@ function EditTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
             <pre className="text-bolt-elements-icon-success">{args.data.new}</pre>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function WriteFileTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
+  if (invocation.toolName !== 'writeFile') {
+    throw new Error('WriteFile tool can only be used for the writeFile tool');
+  }
+  if (invocation.state === 'partial-call') {
+    return null;
+  }
+  const args = loggingSafeParse(writeFileParameters, invocation.args);
+  if (!args.success) {
+    return null;
+  }
+  return (
+    <div className="text-content-primary overflow-hidden rounded-lg border bg-bolt-elements-background-depth-1 font-mono text-sm">
+      <div className="max-h-[400px] overflow-auto p-4">
+        <pre>{args.data.content}</pre>
       </div>
     </div>
   );

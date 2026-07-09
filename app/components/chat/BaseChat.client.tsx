@@ -1,4 +1,3 @@
-import { Sheet } from '@ui/Sheet';
 import React, { lazy, Suspense, type ReactNode, type RefCallback, useCallback, useMemo } from 'react';
 import { messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { isStreamStatusActive, type StreamStatus, type ToolStatus } from '~/lib/common/types';
@@ -11,7 +10,9 @@ import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import type { ActionAlert } from '~/types/actions';
 import { classNames } from '~/utils/classNames';
 import styles from './BaseChat.module.css';
-import ChatAlert from './ChatAlert';
+import { ChatActionAlert } from './ChatActionAlert';
+import { DisabledChatMessageSheet } from './DisabledChatMessageSheet';
+import { HomeIntro } from './HomeIntro.client';
 import StreamingIndicator from './StreamingIndicator';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useStore } from '@nanostores/react';
@@ -48,7 +49,7 @@ interface BaseChatProps {
   toolStatus: ToolStatus;
   messages: GhostbuildMessage[];
   terminalInitializationOptions: TerminalInitializationOptions | undefined;
-  disableChatMessage: ReactNode | string | null;
+  disableChatMessage: ReactNode | null;
 
   // Alert related props
   actionAlert: ActionAlert | undefined;
@@ -127,7 +128,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
           <div className="flex w-full grow flex-col lg:flex-row">
             <div
               className={classNames(styles.Chat, 'flex flex-col flex-grow lg:min-w-[var(--chat-min-width)] h-full', {
-                'items-stretch px-4 sm:px-6 lg:px-8': !chatStarted,
+                'items-stretch': !chatStarted,
                 'pt-4': chatStarted,
               })}
             >
@@ -137,53 +138,16 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                 })}
               >
                 {!chatStarted ? (
-                  <div className="mx-auto w-full max-w-4xl grow py-5 lg:py-7">
-                    <section className="min-w-0">
-                      <div id="intro" className="mb-5 max-w-3xl">
-                        <h1 className="text-content-primary max-w-3xl font-display text-3xl font-black leading-tight sm:text-4xl lg:text-5xl">
-                          Build the first version from a single brief.
-                        </h1>
-                      </div>
-
-                      <div className="max-w-4xl">
-                        {actionAlert && (
-                          <div className="bg-background-secondary mb-4">
-                            <ChatAlert
-                              alert={actionAlert}
-                              clearAlert={clearAlert}
-                              postMessage={(message) => {
-                                onSend(message);
-                                clearAlert();
-                              }}
-                            />
-                          </div>
-                        )}
-                        <MessageInput
-                          chatStarted={chatStarted}
-                          isStreaming={isStreaming}
-                          sendMessageInProgress={sendMessageInProgress}
-                          disabled={disableChatMessage !== null}
-                          onStop={onStop}
-                          onSend={onSend}
-                          numMessages={messages.length}
-                        />
-                        <AnimatePresence>
-                          {disableChatMessage && (
-                            <motion.div
-                              initial={{ translateY: '-100%', opacity: 0 }}
-                              animate={{ translateY: '0%', opacity: 1 }}
-                              exit={{ translateY: '-100%', opacity: 0 }}
-                              transition={{ duration: 0.15 }}
-                            >
-                              <Sheet className="animate-fadeInFromLoading bg-util-accent/10 -mt-2 flex w-full flex-col gap-3 rounded-lg rounded-t-none p-4 shadow backdrop-blur-lg">
-                                {disableChatMessage}
-                              </Sheet>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    </section>
-                  </div>
+                  <HomeIntro
+                    actionAlert={actionAlert}
+                    clearAlert={clearAlert}
+                    disableChatMessage={disableChatMessage}
+                    isStreaming={isStreaming}
+                    messagesLength={messages.length}
+                    onSend={onSend}
+                    onStop={onStop}
+                    sendMessageInProgress={sendMessageInProgress}
+                  />
                 ) : (
                   <>
                     <SubchatBar
@@ -224,18 +188,12 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                 )}
                 {chatStarted && (
                   <div className="z-prompt bottom-four sticky mx-auto flex w-full max-w-chat flex-col">
-                    {actionAlert && (
-                      <div className="bg-background-secondary mb-4">
-                        <ChatAlert
-                          alert={actionAlert}
-                          clearAlert={clearAlert}
-                          postMessage={(message) => {
-                            onSend(message);
-                            clearAlert();
-                          }}
-                        />
-                      </div>
-                    )}
+                    <ChatActionAlert
+                      alert={actionAlert}
+                      clearAlert={clearAlert}
+                      onSend={onSend}
+                      className="bg-background-secondary mb-4"
+                    />
                     {(!subchats || (currentSubchatIndex >= subchats.length - 1 && isSubchatLoaded)) && (
                       <>
                         {shouldShowNudge && sessionId && (
@@ -272,20 +230,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                         )}
                       </>
                     )}
-                    <AnimatePresence>
-                      {disableChatMessage && (
-                        <motion.div
-                          initial={{ translateY: '-100%', opacity: 0 }}
-                          animate={{ translateY: '0%', opacity: 1 }}
-                          exit={{ translateY: '-100%', opacity: 0 }}
-                          transition={{ duration: 0.15 }}
-                        >
-                          <Sheet className="animate-fadeInFromLoading bg-util-accent/10 -mt-2 flex w-full flex-col gap-3 rounded-lg rounded-t-none p-4 shadow backdrop-blur-lg">
-                            {disableChatMessage}
-                          </Sheet>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                    <DisabledChatMessageSheet message={disableChatMessage} />
                   </div>
                 )}
               </div>
