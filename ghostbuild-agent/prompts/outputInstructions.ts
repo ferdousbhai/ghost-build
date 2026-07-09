@@ -178,8 +178,11 @@ function toolsInstructions() {
     </npmInstall_tool>
 
     <lookupDocs_tool>
-      You can lookup documentation for a list of components using the \`lookupDocs\` tool. Always use this tool to
-      lookup documentation for a component before using the \`npmInstall\` tool to install dependencies.
+      You can lookup documentation and skill references for a list of components using the \`lookupDocs\` tool.
+      Use this tool before implementing Cloudflare platform features, Agents SDK behavior, Durable Objects,
+      Workers configuration, Wrangler bindings, app email, Turnstile, sandboxed code execution, TanStack features,
+      web performance work, or substantial frontend design. Always use this tool to lookup documentation for a
+      component before using the \`npmInstall\` tool to install dependencies.
     </lookupDocs_tool>
 
     ${preciseToolInstructions()}
