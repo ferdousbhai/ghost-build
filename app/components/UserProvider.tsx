@@ -12,9 +12,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const chatId = useChatId();
 
   useEffect(() => {
-    if (sessionId) {
-      setTelemetryExtra('sessionId', sessionId);
-    }
+    setTelemetryExtra('sessionId', sessionId ?? undefined);
   }, [sessionId]);
 
   useEffect(() => {
@@ -23,12 +21,14 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!user) {
+      setTelemetryUser(undefined);
+      setProfile(null);
       return;
     }
 
     const username = user.name ?? '';
     setTelemetryUser({
-      id: sessionId ?? '',
+      id: user.id,
       username,
       email: user.email ?? undefined,
     });
@@ -38,7 +38,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       avatar: user.image ?? '',
       id: user.id ?? '',
     });
-  }, [user, sessionId]);
+  }, [user]);
 
   return children;
 }

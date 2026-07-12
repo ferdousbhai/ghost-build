@@ -1,46 +1,53 @@
-import { existsSync, promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import { exec as execCallback } from 'child_process';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { execFile as execFileCallback } from 'node:child_process';
 import { snapshot } from '@webcontainer/snapshot';
-import { promisify } from 'util';
+import { promisify } from 'node:util';
 import * as lz4 from 'lz4-wasm-nodejs';
-import { createHash } from 'crypto';
+import { createHash } from 'node:crypto';
+import { listTemplateSourceFiles, templateSourceDigest } from './scripts/template-source.mjs';
 
-const exec = promisify(execCallback);
+const execFile = promisify(execFileCallback);
 
 async function main() {
   const inputDir = 'template';
   const absoluteInputDir = path.resolve(inputDir);
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'webcontainer-snapshot-'));
   console.log('Temp directory:', tempDir);
+  try {
+    console.log('Listing tracked and untracked unignored template files...');
+    const files = listTemplateSourceFiles(process.cwd());
+    console.log(`Copying ${files.length} files to temp directory...`);
+    await copyFilesToTemp(files, absoluteInputDir, tempDir);
+    console.log('Verifying the standalone pnpm lockfile...');
+    await execFile('pnpm', ['install', '--lockfile-only', '--frozen-lockfile'], { cwd: tempDir });
+    console.log('Creating snapshot...');
+    const buffer = await snapshot(tempDir);
+    const compressed = lz4.compress(buffer);
+    const sha256 = createHash('sha256').update(compressed).digest('hex').slice(0, 8);
+    const filename = `template-snapshot-${sha256}.bin`;
+    console.log(`Writing snapshot (${compressed.length} bytes) to ${filename}...`);
+    await fs.writeFile(`public/${filename}`, compressed);
+    await fs.writeFile(
+      'public/template-snapshot-manifest.json',
+      `${JSON.stringify({ snapshot: filename, sourceSha256: templateSourceDigest(process.cwd(), files) }, null, 2)}\n`,
+    );
 
-  console.log('Using git to list tracked and untracked unignored template files...');
-  const files = await getSnapshotFiles(absoluteInputDir);
-  console.log(`Copying ${files.length} files to temp directory...`);
-  await copyFilesToTemp(files, absoluteInputDir, tempDir);
-  console.log('Generating standalone pnpm lockfile...');
-  await exec('pnpm install --lockfile-only', { cwd: tempDir });
-  console.log('Creating snapshot...');
-  const buffer = await snapshot(tempDir);
-  const compressed = lz4.compress(buffer);
-  const sha256 = createHash('sha256').update(compressed).digest('hex').slice(0, 8);
-  const filename = `template-snapshot-${sha256}.bin`;
-  console.log(`Writing snapshot (${compressed.length} bytes) to ${filename}...`);
-  await fs.writeFile(`public/${filename}`, compressed);
-  await removeStaleSnapshots(filename);
-
-  // Update TEMPLATE_URL in useContainerSetup.ts
-  console.log('Updating TEMPLATE_URL in useContainerSetup.ts...');
-  const setupFilePath = 'app/lib/stores/startup/useContainerSetup.ts';
-  let setupFileContent = await fs.readFile(setupFilePath, 'utf8');
-  setupFileContent = setupFileContent.replace(
-    /const TEMPLATE_URL = ['"]\/template-snapshot-[a-f0-9]+\.bin['"];/,
-    `const TEMPLATE_URL = '/${filename}';`,
-  );
-  await fs.writeFile(setupFilePath, setupFileContent);
-
-  console.log('Done!');
+    console.log('Updating TEMPLATE_URL in useContainerSetup.ts...');
+    const setupFilePath = 'app/lib/stores/startup/useContainerSetup.ts';
+    const setupFileContent = await fs.readFile(setupFilePath, 'utf8');
+    const templateUrlPattern = /const TEMPLATE_URL = ['"]\/template-snapshot-[a-f0-9]+\.bin['"];/;
+    if (!templateUrlPattern.test(setupFileContent)) {
+      throw new Error(`${setupFilePath} does not contain a replaceable TEMPLATE_URL declaration.`);
+    }
+    const nextSetupFileContent = setupFileContent.replace(templateUrlPattern, `const TEMPLATE_URL = '/${filename}';`);
+    await fs.writeFile(setupFilePath, nextSetupFileContent);
+    await removeStaleSnapshots(filename);
+    console.log('Done!');
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 }
 
 async function removeStaleSnapshots(currentFilename) {
@@ -54,32 +61,12 @@ async function removeStaleSnapshots(currentFilename) {
   );
 }
 
-async function getSnapshotFiles(dir) {
-  try {
-    const { stdout } = await exec('git ls-files --cached --others --exclude-standard', {
-      cwd: dir,
-      encoding: 'utf8',
-    });
-    if (!stdout) {
-      throw new Error('No output from git ls-files');
-    }
-    const unignoredFiles = stdout
-      .trim()
-      .split('\n')
-      .filter((file) => file.length > 0)
-      .filter((file) => existsSync(path.join(dir, file)));
-    return unignoredFiles;
-  } catch (error) {
-    console.error('Error using git to list files', error);
-    process.exit(1);
-  }
-}
-
 async function copyFilesToTemp(files, sourceDir, targetDir) {
   for (const file of files) {
-    console.log('Copying', file);
-    const sourcePath = path.join(sourceDir, file);
-    const targetPath = path.join(targetDir, file);
+    const relativePath = path.relative(sourceDir, file);
+    console.log('Copying', relativePath);
+    const sourcePath = file;
+    const targetPath = path.join(targetDir, relativePath);
 
     // Create parent directories if they don't exist
     await fs.mkdir(path.dirname(targetPath), { recursive: true });
@@ -89,4 +76,7 @@ async function copyFilesToTemp(files, sourceDir, targetDir) {
   }
 }
 
-main();
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});

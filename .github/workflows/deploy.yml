@@ -29,30 +29,15 @@ jobs:
 
       - name: Setup dependencies
         uses: ./.github/actions/setup-and-build
-        with:
-          run-build: 'false'
 
-      - name: Verify stack alignment
-        run: pnpm run verify:stack
-
-      - name: Verify generated app template
-        run: pnpm run verify:template
-
-      - name: Typecheck Cloudflare Worker
-        run: pnpm run typecheck
+      - name: Validate repository
+        run: pnpm run validate
 
       - name: Provision production Cloudflare resources
         run: pnpm run provision:production
 
       - name: Verify production Cloudflare config
         run: pnpm run verify:production-config
-
-      - name: Verify production bundle
-        run: |
-          pnpm run build
-          pnpm run lint
-          pnpm run test
-          pnpm run knip
 
       - name: Apply production D1 migrations
         run: pnpm run d1:migrations:apply:production

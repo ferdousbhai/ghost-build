@@ -77,6 +77,8 @@ html.light {
   --gb-border-transparent: rgba(33, 34, 30, 0.14);
   --gb-border-selected: rgb(30, 28, 25);
   --background-primary: var(--gb-background-primary);
+  --background-primary-rgb: 243 240 237;
+  --background-secondary-rgb: 253 252 250;
   --content-primary: var(--gb-content-primary);
   --content-primary-rgb: 24 25 28;
   --content-secondary: var(--gb-content-secondary);
@@ -112,6 +114,8 @@ html.dark {
   --gb-border-transparent: rgba(163, 156, 148, 0.3);
   --gb-border-selected: rgb(225, 215, 205);
   --background-primary: var(--gb-background-primary);
+  --background-primary-rgb: 30 28 26;
+  --background-secondary-rgb: 42 40 37;
   --content-primary: var(--gb-content-primary);
   --content-primary-rgb: 253 252 250;
   --content-secondary: var(--gb-content-secondary);

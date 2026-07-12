@@ -21,7 +21,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup and Build
+      - name: Setup dependencies
         uses: ./.github/actions/setup-and-build
 
       - name: Build System Prompts
@@ -31,7 +31,7 @@ jobs:
 
       - name: Create Release
         id: create_release
-        uses: rymndhng/release-on-push-action@master
+        uses: rymndhng/release-on-push-action@aebba2bbce07a9474bf95e8710e5ee8a9e922fe2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

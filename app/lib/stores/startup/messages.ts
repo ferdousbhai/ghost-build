@@ -1,5 +1,4 @@
 import { atom } from 'nanostores';
-import { getCloudflareSiteUrl } from '~/lib/cloudflareSiteUrl';
 import { getKnownUrlId, setKnownInitialId, setKnownUrlId } from '~/lib/stores/chatId';
 import { executeDataOperation } from '~/lib/cloudflare/client';
 import { api } from '~/lib/cloudflare/data-api';
@@ -43,8 +42,7 @@ export function prepareMessageHistory(args: {
 } {
   const { chatId, sessionId, completeMessageInfo, persistedMessageInfo } = args;
   const { messageIndex, partIndex, allMessages } = completeMessageInfo;
-  const siteUrl = getCloudflareSiteUrl();
-  const url = new URL(`${siteUrl}/store_chat`);
+  const url = new URL('/api/chats/store', window.location.origin);
 
   url.searchParams.set('chatId', chatId);
   url.searchParams.set('sessionId', sessionId);
@@ -81,14 +79,19 @@ export async function handleUrlHintAndDescription(
   }
 }
 
-export function waitForNewMessages(messageIndex: number, partIndex: number, alertOnNextPartStart: boolean) {
+export function waitForNewMessages(
+  messageIndex: number,
+  partIndex: number,
+  alertOnNextPartStart: boolean,
+  signal?: AbortSignal,
+) {
   const hasNewMessages = (lastCompleteMessageInfo: CompleteMessageInfo | null) =>
     lastCompleteMessageInfo !== null &&
     (lastCompleteMessageInfo.messageIndex !== messageIndex ||
       lastCompleteMessageInfo.partIndex !== partIndex ||
       (alertOnNextPartStart && lastCompleteMessageInfo.hasNextPart));
 
-  return waitForStoreCondition(lastCompleteMessageInfoStore, hasNewMessages);
+  return waitForStoreCondition(lastCompleteMessageInfoStore, hasNewMessages, { signal });
 }
 
 function extractUrlHintAndDescription(messages: GhostbuildMessage[]) {

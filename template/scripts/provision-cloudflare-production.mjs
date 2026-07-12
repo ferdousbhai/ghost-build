@@ -4,7 +4,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { applyEdits, modify, parse, printParseErrorCode } from "jsonc-parser";
 
-const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const rootDir = process.env.GHOSTBUILD_PROVISION_ROOT
+  ? resolve(process.env.GHOSTBUILD_PROVISION_ROOT)
+  : resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const configPath = resolve(rootDir, "wrangler.jsonc");
 const PLACEHOLDER_D1_ID = "00000000-0000-0000-0000-000000000000";
 const isDryRun = process.argv.includes("--dry-run");
@@ -89,13 +91,75 @@ export function parseJsonOutput(stdout, command) {
   try {
     return JSON.parse(trimmed);
   } catch {
-    const start = trimmed.indexOf("[");
-    const end = trimmed.lastIndexOf("]");
-    if (start !== -1 && end !== -1 && end > start) {
-      return JSON.parse(trimmed.slice(start, end + 1));
+    const parsed = parseEmbeddedJson(trimmed);
+    if (parsed !== undefined) {
+      return parsed;
     }
     fail(`${command} did not return parseable JSON.`);
   }
+}
+
+function parseEmbeddedJson(output) {
+  for (let start = 0; start < output.length; start++) {
+    const first = output[start];
+    if (first !== "[" && first !== "{") {
+      continue;
+    }
+    if (!startsAtJsonLine(output, start)) {
+      continue;
+    }
+
+    const last = first === "[" ? "]" : "}";
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = start; index < output.length; index++) {
+      const char = output[index];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === '"') {
+        inString = true;
+      } else if (char === first) {
+        depth++;
+      } else if (char === last) {
+        depth--;
+        if (depth === 0) {
+          try {
+            return JSON.parse(output.slice(start, index + 1));
+          } catch {
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function startsAtJsonLine(output, start) {
+  for (let index = start - 1; index >= 0; index--) {
+    const char = output[index];
+    if (char === "\n" || char === "\r") {
+      return true;
+    }
+    if (char !== " " && char !== "\t") {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export function d1DatabaseId(database) {

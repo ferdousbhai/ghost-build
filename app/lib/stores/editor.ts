@@ -2,15 +2,12 @@ import { atom, computed, map, type MapStore, type WritableAtom } from 'nanostore
 import type { EditorDocument, ScrollPosition } from 'ghostbuild-agent/types';
 import type { AbsolutePath } from 'ghostbuild-agent/utils/workDir';
 import type { FileMap } from 'ghostbuild-agent/types';
-import type { FilesStore } from '~/lib/stores/files';
 
 type EditorDocuments = Record<string, EditorDocument>;
 
 type SelectedFile = WritableAtom<string | undefined>;
 
 export class EditorStore {
-  #filesStore: FilesStore;
-
   selectedFile: SelectedFile = import.meta.hot?.data.selectedFile ?? atom<AbsolutePath | undefined>();
   documents: MapStore<EditorDocuments> = import.meta.hot?.data.documents ?? map({});
   followingStreamedCode = atom<boolean>(true);
@@ -19,16 +16,14 @@ export class EditorStore {
     selectedFile ? documents[selectedFile] : undefined,
   );
 
-  constructor(filesStore: FilesStore) {
-    this.#filesStore = filesStore;
-
+  constructor() {
     if (import.meta.hot) {
       import.meta.hot.data.documents = this.documents;
       import.meta.hot.data.selectedFile = this.selectedFile;
     }
   }
 
-  setDocuments(files: FileMap) {
+  setDocuments(files: FileMap, unsavedFiles: ReadonlySet<string> = new Set()) {
     const previousDocuments = this.documents.value;
     const documents: EditorDocuments = {};
 
@@ -40,7 +35,7 @@ export class EditorStore {
       const absolutePath = filePath as AbsolutePath;
 
       documents[filePath] = {
-        value: dirent.content,
+        value: unsavedFiles.has(filePath) ? (previousDocuments?.[filePath]?.value ?? dirent.content) : dirent.content,
         isBinary: dirent.isBinary,
         filePath: absolutePath,
         scroll: previousDocuments?.[filePath]?.scroll,

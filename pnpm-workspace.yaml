@@ -1,4 +1,15 @@
 packages:
   - 'ghostbuild-agent'
-  # You can add more workspace packages here later if needed
-  # - "packages/*"
+  - 'template'
+overrides:
+  '@typescript-eslint/utils': ^8.0.0-alpha.30
+onlyBuiltDependencies:
+  - core-js-pure
+  - esbuild
+  - sharp
+  - workerd
+allowBuilds:
+  core-js-pure: true
+  esbuild: true
+  sharp: true
+  workerd: true

@@ -8,8 +8,6 @@ export interface ArtifactData {
   type?: string | undefined;
 }
 
-export type ActionType = 'file' | 'toolUse';
-
 export interface FileAction {
   type: 'file';
   filePath: RelativePath;
@@ -21,7 +19,6 @@ interface ToolUseAction {
   type: 'toolUse';
   toolName: string;
   parsedContent: GhostbuildToolInvocation;
-  // Serialized content to use for de-duping
   content: string;
 }
 
@@ -53,9 +50,12 @@ export type GhostbuildToolSet = {
   deploy: Tool;
   npmInstall: Tool;
   lookupDocs: Tool;
-  view?: Tool;
-  edit?: Tool;
+  view: Tool;
+  edit: Tool;
+  writeFile: Tool;
 };
+
+export type GhostbuildToolName = keyof GhostbuildToolSet;
 
 export type Dirent = File | Folder;
 

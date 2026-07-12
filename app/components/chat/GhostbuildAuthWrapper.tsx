@@ -1,10 +1,15 @@
-import { createContext, useContext, useEffect } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect } from 'react';
 
 import { authClient, signInWithGoogle } from '~/lib/auth-client';
 import { sessionIdStore, useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
+import { executeDataOperation } from '~/lib/cloudflare/client';
+import { api } from '~/lib/cloudflare/data-api';
+import { getOrCreateGuestSessionId, getStoredGuestSessionId, isGuestSessionId } from '~/lib/guest-session';
 
 const logger = createScopedLogger('GhostbuildAuth');
+const claimedGuestSessionIds = new Set<string>();
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 type GhostbuildAuthState =
   | {
@@ -12,6 +17,10 @@ type GhostbuildAuthState =
     }
   | {
       kind: 'unauthenticated';
+    }
+  | {
+      kind: 'guest';
+      sessionId: string;
     }
   | {
       kind: 'fullyLoggedIn';
@@ -33,30 +42,49 @@ export function useGhostbuildAuth() {
 export const GhostbuildAuthProvider = ({
   children,
   redirectIfUnauthenticated,
+  allowGuest = false,
 }: {
   children: React.ReactNode;
   redirectIfUnauthenticated: boolean;
+  allowGuest?: boolean;
 }) => {
   const sessionId = useSessionIdOrNullOrLoading();
   const { data: authSession, isPending } = authClient.useSession();
   const userId = authSession?.user.id ?? null;
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (isPending) {
-      sessionIdStore.set(undefined);
+      sessionIdStore.set(allowGuest ? getOrCreateGuestSessionId() : undefined);
       return;
     }
 
-    sessionIdStore.set(userId);
-  }, [isPending, userId]);
+    if (userId) {
+      const guestSessionId = getStoredGuestSessionId();
+      sessionIdStore.set(userId);
+      if (guestSessionId && !claimedGuestSessionIds.has(guestSessionId)) {
+        claimedGuestSessionIds.add(guestSessionId);
+        void executeDataOperation(api.messages.claimGuestSession, {
+          guestSessionId,
+          sessionId: userId,
+        }).catch((error) => {
+          claimedGuestSessionIds.delete(guestSessionId);
+          logger.warn('Failed to claim guest session', error);
+        });
+      }
+      return;
+    }
 
-  const isAuthLoading = sessionId === undefined || isPending;
-  const isUnauthenticated = sessionId === null || !userId;
+    sessionIdStore.set(allowGuest ? getOrCreateGuestSessionId() : null);
+  }, [allowGuest, isPending, userId]);
+
+  const isAuthLoading = sessionId === undefined || (!allowGuest && isPending);
   const state: GhostbuildAuthState = isAuthLoading
     ? { kind: 'loading' }
-    : isUnauthenticated
-      ? { kind: 'unauthenticated' }
-      : { kind: 'fullyLoggedIn', sessionId: sessionId as string };
+    : userId
+      ? { kind: 'fullyLoggedIn', sessionId: userId }
+      : allowGuest && isGuestSessionId(sessionId)
+        ? { kind: 'guest', sessionId }
+        : { kind: 'unauthenticated' };
 
   useEffect(() => {
     if (redirectIfUnauthenticated && state.kind === 'unauthenticated') {

@@ -56,7 +56,6 @@ Ghostbuild defaults:
 - Add Durable Object bindings and new_sqlite_classes migrations in wrangler.jsonc.
 - Use @callable methods for client-invoked Agent actions and this.setState for durable state updates.
 - Keep the Agent transcript durable, but prune model context with pruneMessages before calling streamText.
-- Set maxPersistedMessages to bound SQLite transcript storage independently from model context.
 - Set messageConcurrency = "queue" for deterministic chat turn ordering unless the product intentionally needs latest/merge/drop/debounce semantics.
 - Set waitForMcpConnections = { timeout: 10_000 } when an Agent may use MCP tools so startup waits are explicit instead of relying on package defaults.
 - Set static override options = { sendIdentityOnConnect: false } when Agent instance names can contain chat IDs, user IDs, or session IDs, and use state updates rather than agent.identified for readiness.

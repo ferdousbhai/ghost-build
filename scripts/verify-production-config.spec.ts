@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   findForbiddenWorkflowCommandErrors,
@@ -147,5 +148,14 @@ describe('production config workflow verification helpers', () => {
       '.github/workflows/ci.yaml',
       '.github/workflows/deploy.yml',
     ]);
+  });
+
+  it('keeps Cloudflare type generation bounded in browser containers', () => {
+    const script = readFileSync('template/scripts/cf-typegen.mjs', 'utf8');
+
+    expect(script).toContain('timeout: WRANGLER_TYPES_TIMEOUT_MS');
+    expect(script).toContain('experimental_generateTypes');
+    expect(script).toContain('includeRuntime: false');
+    expect(script).toContain('withPackagedRuntimeTypes');
   });
 });

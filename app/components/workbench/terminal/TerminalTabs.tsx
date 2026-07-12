@@ -1,6 +1,6 @@
 import { useStore } from '@nanostores/react';
 import type { Terminal as XTerm } from '@xterm/xterm';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef } from 'react';
 import { Panel, type ImperativePanelHandle } from 'react-resizable-panels';
 import { IconButton } from '~/components/ui/IconButton';
 import { themeStore } from '~/lib/stores/theme';
@@ -15,28 +15,23 @@ import {
   WORKER_BUILD_TAB_INDEX,
 } from '~/lib/stores/terminalTabs';
 import { CommandLineIcon } from '@heroicons/react/24/outline';
-import { CaretDownIcon, PlusIcon } from '@radix-ui/react-icons';
+import { CaretDownIcon } from '@radix-ui/react-icons';
 import { DEFAULT_TERMINAL_SIZE } from './constants';
 
-const MAX_TERMINAL_INDEX = 5;
+const TERMINAL_INDEXES = [APP_SHELL_TAB_INDEX, WORKER_BUILD_TAB_INDEX, 2] as const;
 
-export const TerminalTabs = memo(function TerminalTabs(terminalInitializationOptions?: TerminalInitializationOptions) {
+export const TerminalTabs = memo(function TerminalTabs({
+  isReload,
+  previewCommand,
+  shouldRunWorkerBuild,
+  startPreviewServer,
+}: TerminalInitializationOptions) {
   const showTerminal = useStore(workbenchStore.showTerminal);
 
   const terminalPanelRef = useRef<ImperativePanelHandle>(null);
 
   const activeTerminal = useStore(activeTerminalTabStore);
-  const [lastTerminalIndex, setLastTerminalIndex] = useState(2);
-
   const isWorkerBuildTerminalVisible = useStore(isWorkerBuildTerminalVisibleStore);
-
-  const addTerminal = () => {
-    const nextTerminalIndex = lastTerminalIndex + 1;
-    if (nextTerminalIndex <= MAX_TERMINAL_INDEX) {
-      setLastTerminalIndex(nextTerminalIndex);
-      activeTerminalTabStore.set(nextTerminalIndex);
-    }
-  };
 
   useEffect(() => {
     const { current: terminal } = terminalPanelRef;
@@ -57,8 +52,6 @@ export const TerminalTabs = memo(function TerminalTabs(terminalInitializationOpt
     }
   }, [showTerminal]);
 
-  const terminalIndexes = Array.from({ length: lastTerminalIndex + 1 }, (_, index) => index);
-
   return (
     <Panel
       ref={terminalPanelRef}
@@ -75,7 +68,7 @@ export const TerminalTabs = memo(function TerminalTabs(terminalInitializationOpt
       <div className="h-full">
         <div className="flex h-full flex-col bg-bolt-elements-terminals-background">
           <div className="flex min-h-[34px] items-center gap-1.5 border-y bg-bolt-elements-background-depth-2 p-2">
-            {terminalIndexes.map((index) => {
+            {TERMINAL_INDEXES.map((index) => {
               const isActive = activeTerminal === index;
 
               if (index === WORKER_BUILD_TAB_INDEX && !isWorkerBuildTerminalVisible) {
@@ -100,9 +93,6 @@ export const TerminalTabs = memo(function TerminalTabs(terminalInitializationOpt
                 </button>
               );
             })}
-            {lastTerminalIndex < MAX_TERMINAL_INDEX && (
-              <IconButton icon={<PlusIcon />} size="md" onClick={addTerminal} />
-            )}
             <IconButton
               className="ml-auto"
               icon={<CaretDownIcon />}
@@ -111,13 +101,15 @@ export const TerminalTabs = memo(function TerminalTabs(terminalInitializationOpt
               onClick={() => workbenchStore.toggleTerminal(false)}
             />
           </div>
-          {terminalIndexes.map((index) => (
+          {TERMINAL_INDEXES.map((index) => (
             <TerminalWrapper
               key={index}
               index={index}
               activeTerminal={activeTerminal}
-              isReload={terminalInitializationOptions?.isReload}
-              shouldRunWorkerBuild={terminalInitializationOptions?.shouldRunWorkerBuild}
+              isReload={isReload}
+              shouldRunWorkerBuild={shouldRunWorkerBuild}
+              startPreviewServer={startPreviewServer}
+              previewCommand={previewCommand}
             />
           ))}
         </div>
@@ -128,12 +120,12 @@ export const TerminalTabs = memo(function TerminalTabs(terminalInitializationOpt
 
 function terminalTabLabel(index: number) {
   if (index === APP_SHELL_TAB_INDEX) {
-    return 'App Shell';
+    return 'Preview logs';
   }
   if (index === WORKER_BUILD_TAB_INDEX) {
-    return 'Worker Build';
+    return 'Build logs';
   }
-  return `Terminal ${index - 1}`;
+  return 'Shell';
 }
 
 function TerminalWrapper({
@@ -141,18 +133,25 @@ function TerminalWrapper({
   activeTerminal,
   isReload,
   shouldRunWorkerBuild,
+  startPreviewServer,
+  previewCommand,
 }: {
   index: number;
   activeTerminal: number;
   isReload?: boolean;
   shouldRunWorkerBuild?: boolean;
+  startPreviewServer?: boolean;
+  previewCommand?: string;
 }) {
   const theme = useStore(themeStore);
 
   const onTerminalReady = useCallback(
     (terminal: XTerm) => {
       if (index === APP_SHELL_TAB_INDEX) {
-        workbenchStore.attachAppShellTerminal(terminal);
+        workbenchStore.attachAppShellTerminal(terminal, {
+          startPreviewServer,
+          previewCommand,
+        });
         return;
       }
 
@@ -166,7 +165,7 @@ function TerminalWrapper({
 
       workbenchStore.attachTerminal(terminal);
     },
-    [index, isReload, shouldRunWorkerBuild],
+    [index, isReload, shouldRunWorkerBuild, startPreviewServer, previewCommand],
   );
 
   const onTerminalResize = useCallback((cols: number, rows: number) => {

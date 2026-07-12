@@ -16,6 +16,7 @@ import { Button } from '@ui/Button';
 import { TextInput } from '@ui/TextInput';
 import { PlusIcon } from '@radix-ui/react-icons';
 import { removeChatHistoryItem, useChatHistory } from '~/lib/cloudflare/chat-history-db';
+import { isGuestSessionId } from '~/lib/guest-session';
 
 const menuVariants = {
   closed: {
@@ -46,7 +47,8 @@ interface MenuProps {
 export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const sessionId = useSessionIdOrNullOrLoading();
-  const list = useChatHistory(sessionId);
+  const accountSessionId = typeof sessionId === 'string' && !isGuestSessionId(sessionId) ? sessionId : null;
+  const list = useChatHistory(accountSessionId);
   const [deleteTarget, setDeleteTarget] = useState<ChatHistorySummary | null>(null);
 
   const { filteredItems: filteredList, handleSearchChange } = useSearchFilter({
@@ -55,12 +57,12 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
   });
 
   const deleteItem = async (item: ChatHistorySummary) => {
-    if (!sessionId) {
+    if (!accountSessionId) {
       return;
     }
 
     try {
-      await removeChatHistoryItem(sessionId, item.id);
+      await removeChatHistoryItem(accountSessionId, item.id);
       if (getKnownInitialId() === item.initialId) {
         // hard page navigation to clear the stores
         window.location.pathname = '/';
@@ -103,12 +105,13 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
   };
 
   // Don't show the menu at all when logged out
-  if (sessionId === null) {
+  if (!accountSessionId) {
     return null;
   }
 
   return (
     <motion.div
+      id="project-sidebar"
       ref={menuRef}
       initial="closed"
       animate={isOpen ? 'open' : 'closed'}
@@ -121,8 +124,7 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
         'z-30',
       )}
     >
-      <div className="flex h-[var(--header-height)] items-center justify-between border-b px-4"></div>
-
+      <div aria-hidden className="h-[var(--header-height)] shrink-0 border-b" />
       <div className="flex size-full flex-1 flex-col overflow-hidden">
         <div className="space-y-3 p-4">
           <Button className="w-fit" href="/" icon={<PlusIcon />}>
@@ -162,14 +164,14 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
               onClose={closeDialog}
               confirmText="Delete"
               onConfirm={() => {
-                deleteItem(deleteTarget);
+                void deleteItem(deleteTarget);
                 closeDialog();
               }}
               dialogTitle="Delete Chat"
               dialogBody={
                 <p>
                   You are about to delete{' '}
-                  <span className="text-content-primary font-medium">{deleteTarget.description || 'New chat...'}</span>
+                  <span className="font-medium text-content-primary">{deleteTarget.description || 'New chat...'}</span>
                 </p>
               }
             />

@@ -1,27 +1,41 @@
-import { AIChatAgent, type ChatRecoveryContext, type ChatRecoveryOptions } from '@cloudflare/ai-chat';
-import { callable, type Connection } from 'agents';
+import {
+  AIChatAgent,
+  type ChatRecoveryContext,
+  type ChatRecoveryOptions,
+  type ChatResponseResult,
+} from '@cloudflare/ai-chat';
+import { callable } from 'agents';
 import { createChatResponseFromBody, type ChatRequestBody } from '~/lib/.server/chat';
-import { CLOUDFLARE_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
+import { ROLE_SYSTEM_PROMPT, generalSystemPrompt } from 'ghostbuild-agent/prompts/system';
+import {
+  BuilderTurnStore,
+  completeBuilderTurn,
+  createBuilderTurn,
+  createRecoveryTurn,
+  type BuilderTurnState,
+  type BuilderTurnStatus,
+} from './builder-turn-store';
+import {
+  contextScopeForSubchat,
+  DurableObjectContextCompactionRepository,
+} from '~/lib/.server/llm/context-compaction-store';
+import { ContextWindowManager } from '~/lib/.server/llm/context-window-manager';
+import { summarizeBuilderContext } from '~/lib/.server/llm/workers-ai-text';
+import { chatTurnContextSchema, type ChatTurnContext } from 'ghostbuild-agent/turn-context';
+import { getWorkersAiToolContext } from '~/lib/.server/llm/workers-ai-tools';
 
 const logger = createScopedLogger('BuilderAgent');
+const STALE_CHAT_RECOVERY_MS = 15 * 60 * 1000;
+const MAX_SUBCHAT_INDEX = 10_000;
 
 export type BuilderAgentState = {
-  lastPrompt?: string;
-  lastSummary?: string;
-  promptCount: number;
+  activeTurn?: BuilderTurnState | null;
+  lastCompletedTurn?: BuilderTurnState | null;
   updatedAt?: string;
 };
 
 type ChatBody = Partial<ChatRequestBody>;
-
-type PromptHistoryRow = {
-  id: string;
-  prompt: string;
-  created_at: string;
-};
-
-type UnknownRecord = Record<string, unknown>;
 
 export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState> {
   static override options = {
@@ -29,10 +43,9 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState> {
   };
 
   initialState: BuilderAgentState = {
-    promptCount: 0,
+    activeTurn: null,
+    lastCompletedTurn: null,
   };
-
-  override maxPersistedMessages = 200;
 
   override messageConcurrency = 'queue' as const;
 
@@ -40,170 +53,197 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState> {
 
   override chatRecovery = {
     maxAttempts: 6,
+    noProgressTimeoutMs: 5 * 60 * 1000,
     terminalMessage: 'The builder was interrupted. Please send your message again.',
   };
 
-  override chatStreamStallTimeoutMs = 60_000;
+  override chatStreamStallTimeoutMs = 5 * 60 * 1000;
+
+  private readonly turnStore = new BuilderTurnStore(this);
+  private readonly contextWindow = new ContextWindowManager({
+    repository: new DurableObjectContextCompactionRepository(this),
+    summarize: (prompt) => summarizeBuilderContext(this.env, prompt),
+    systemPrompts: () => [ROLE_SYSTEM_PROMPT, generalSystemPrompt(), getWorkersAiToolContext()],
+    logger,
+  });
 
   async onStart() {
-    const _promptHistoryTable = this.sql`
-      CREATE TABLE IF NOT EXISTS prompt_history (
-        id TEXT PRIMARY KEY,
-        prompt TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      )
-    `;
-
-    const _stateUpdatesTable = this.sql`
-      CREATE TABLE IF NOT EXISTS agent_state_updates (
-        id TEXT PRIMARY KEY,
-        prompt_count INTEGER NOT NULL,
-        source TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `;
+    this.turnStore.initialize();
+    this.contextWindow.initialize();
   }
 
   override async onChatRecovery(ctx: ChatRecoveryContext): Promise<ChatRecoveryOptions> {
+    const ageMs = Date.now() - ctx.createdAt;
+    const nextTurn = createRecoveryTurn(ctx, this.state.activeTurn);
+    this.setState({
+      ...this.state,
+      activeTurn: nextTurn,
+      updatedAt: nextTurn.updatedAt,
+    });
+    this.turnStore.record(nextTurn);
+
     logger.warn('Recovering interrupted Ghostbuild chat turn', {
+      incidentId: ctx.incidentId,
+      recoveryKind: ctx.recoveryKind,
       requestId: ctx.requestId,
       attempt: ctx.attempt,
+      ageMs,
+      partialTextLength: ctx.partialText.length,
+      recoveryData: ctx.recoveryData,
     });
+
+    if (ageMs > STALE_CHAT_RECOVERY_MS) {
+      logger.warn('Skipping automatic continuation for stale Ghostbuild chat turn', {
+        incidentId: ctx.incidentId,
+        ageMs,
+      });
+      return { persist: true, continue: false };
+    }
+
     return {};
   }
 
   override async onChatMessage(
     _onFinish?: unknown,
-    options?: { body?: Record<string, unknown>; continuation?: boolean; abortSignal?: AbortSignal },
+    options?: { requestId?: string; body?: Record<string, unknown>; continuation?: boolean; abortSignal?: AbortSignal },
   ) {
     const body = (options?.body ?? {}) as ChatBody;
     const messages = this.messages as NonNullable<ChatRequestBody['messages']>;
-    const preparedMessages =
-      !options?.continuation && Array.isArray(body.preparedMessages) ? body.preparedMessages : undefined;
     const chatInitialId = typeof body.chatInitialId === 'string' ? body.chatInitialId : 'agent-chat';
-
-    return createChatResponseFromBody({
-      env: this.env,
-      abortSignal: options?.abortSignal,
-      body: {
-        messages,
-        preparedMessages,
-        firstUserMessage: options?.continuation
-          ? false
-          : typeof body.firstUserMessage === 'boolean'
-            ? body.firstUserMessage
-            : messages.filter((message: { role?: string }) => message.role === 'user').length === 1,
-        chatInitialId,
-        shouldDisableTools: body.shouldDisableTools === true,
-        collapsedMessages: body.collapsedMessages === true,
-        promptCharacterCounts: body.promptCharacterCounts,
-      },
+    const subchatIndex = parseSubchatIndex(body.subchatIndex);
+    const contextScope = contextScopeForSubchat(subchatIndex);
+    const turnContext = parseTurnContext(body.turnContext);
+    const firstUserMessage =
+      !options?.continuation && messages.filter((message: { role?: string }) => message.role === 'user').length === 1;
+    const turn = createBuilderTurn({
+      requestId: options?.requestId,
+      chatInitialId,
+      continuation: options?.continuation === true,
+      firstUserMessage,
+      messages,
     });
+    console.info({
+      event: 'builder_chat_turn_started',
+      requestId: options?.requestId,
+      chatInitialId,
+      continuation: options?.continuation === true,
+      firstUserMessage,
+      messageCount: messages.length,
+    });
+    this.setState({
+      ...this.state,
+      activeTurn: turn,
+      updatedAt: turn.updatedAt,
+    });
+    this.turnStore.record(turn);
+
+    try {
+      const preparedContext = await this.contextWindow.prepare(messages, contextScope, turnContext);
+      console.info({
+        event: 'builder_context_prepared',
+        requestId: options?.requestId,
+        chatInitialId,
+        contextReduced: preparedContext.contextReduced,
+        messageCount: preparedContext.messages.length,
+      });
+      this.stashTurn(turn, preparedContext.contextReduced);
+      return await createChatResponseFromBody({
+        env: this.env,
+        abortSignal: options?.abortSignal,
+        firstUserMessage,
+        preparedMessages: preparedContext.messages,
+        contextReduced: preparedContext.contextReduced,
+        body: {
+          messages,
+          chatInitialId,
+          shouldDisableTools: body.shouldDisableTools === true,
+        },
+      });
+    } catch (error) {
+      this.finishTurn(turn, {
+        status: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
-  onStateChanged(state: BuilderAgentState | undefined, source: Connection | 'server') {
-    if (!state?.updatedAt) {
+  protected override onChatResponse(result: ChatResponseResult) {
+    const currentTurn = this.state.activeTurn;
+    if (!currentTurn) {
       return;
     }
 
-    const _stateUpdateRows = this.sql`
-      INSERT OR REPLACE INTO agent_state_updates (id, prompt_count, source, updated_at)
-      VALUES ('latest', ${state.promptCount}, ${source === 'server' ? 'server' : 'client'}, ${state.updatedAt})
-    `;
-  }
-
-  @callable()
-  async rememberPrompt(prompt: string) {
-    if (typeof prompt !== 'string') {
-      return { ok: false, updatedAt: this.state.updatedAt };
-    }
-
-    const cleanPrompt = prompt.trim();
-    if (!cleanPrompt) {
-      return { ok: false, updatedAt: this.state.updatedAt };
-    }
-
-    const updatedAt = new Date().toISOString();
-    const promptCount = this.state.promptCount + 1;
-
-    const _promptHistoryRows = this.sql`
-      INSERT INTO prompt_history (id, prompt, created_at)
-      VALUES (${crypto.randomUUID()}, ${cleanPrompt}, ${updatedAt})
-    `;
-
-    this.setState({ ...this.state, lastPrompt: cleanPrompt, promptCount, updatedAt });
-    return { ok: true, promptCount, updatedAt };
-  }
-
-  @callable()
-  async summarizeLastPrompt() {
-    if (!this.state.lastPrompt) {
-      return { summary: '' };
-    }
-
-    const result = await this.env.AI.run(CLOUDFLARE_WORKERS_AI_MODEL, {
-      messages: [
-        {
-          role: 'system',
-          content: 'Summarize this app-builder prompt in one concise sentence.',
-        },
-        {
-          role: 'user',
-          content: this.state.lastPrompt,
-        },
-      ],
+    const status: BuilderTurnStatus =
+      result.status === 'completed' ? 'completed' : result.status === 'aborted' ? 'aborted' : 'error';
+    this.finishTurn(currentTurn, {
+      requestId: result.requestId,
+      status,
+      error: result.error,
     });
-    const summary = extractAiText(result);
-    const updatedAt = new Date().toISOString();
-    this.setState({ ...this.state, lastSummary: summary, updatedAt });
-
-    return { summary };
   }
 
   @callable()
-  getPromptHistory(limit = 20) {
-    const numericLimit = Number.isFinite(limit) ? limit : 20;
-    const boundedLimit = Math.min(Math.max(Math.trunc(numericLimit), 1), 50);
-    return this.sql<PromptHistoryRow>`
-      SELECT id, prompt, created_at
-      FROM prompt_history
-      ORDER BY created_at DESC
-      LIMIT ${boundedLimit}
-    `;
-  }
-}
-
-function extractAiText(value: unknown): string {
-  if (typeof value === 'string') {
-    return value;
+  getTurnHistory(limit = 20) {
+    return this.turnStore.getHistory(limit);
   }
 
-  if (!isRecord(value)) {
-    return '';
+  @callable()
+  getContextStatus(subchatIndex = 0) {
+    return this.contextWindow.getStatus(contextScopeForSubchat(parseSubchatIndex(subchatIndex)));
   }
 
-  const directText = getStringProperty(value, 'response') ?? getStringProperty(value, 'output_text');
-  if (directText !== undefined) {
-    return directText;
-  }
-
-  const firstChoice = Array.isArray(value.choices) ? value.choices[0] : undefined;
-  if (isRecord(firstChoice)) {
-    const messageText = isRecord(firstChoice.message) ? getStringProperty(firstChoice.message, 'content') : undefined;
-    const choiceText = messageText ?? getStringProperty(firstChoice, 'text');
-    if (choiceText !== undefined) {
-      return choiceText;
+  private stashTurn(turn: BuilderTurnState, contextReduced: boolean) {
+    try {
+      this.stash({
+        kind: 'ghostbuild-chat-turn',
+        turn,
+        recoveryPlan: {
+          onRecovery: 'Persist partial output and continue only when the turn is recent.',
+          staleRecoveryMs: STALE_CHAT_RECOVERY_MS,
+          contextSource: 'durable AIChatAgent transcript plus this turn checkpoint',
+        },
+        contextReduced,
+      });
+    } catch (error) {
+      logger.warn('Unable to stash Ghostbuild chat turn recovery context', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
-  return JSON.stringify(value);
+  private finishTurn(
+    turn: BuilderTurnState,
+    result: { status: BuilderTurnStatus; requestId?: string; error?: string },
+  ) {
+    const finishedTurn = completeBuilderTurn(turn, result);
+    this.setState({
+      ...this.state,
+      activeTurn: null,
+      lastCompletedTurn: finishedTurn,
+      updatedAt: finishedTurn.updatedAt,
+    });
+    this.turnStore.record(finishedTurn);
+  }
 }
 
-function getStringProperty(record: UnknownRecord, key: string): string | undefined {
-  const value = record[key];
-  return typeof value === 'string' ? value : undefined;
+function parseSubchatIndex(value: unknown): number {
+  if (value === undefined) {
+    return 0;
+  }
+  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > MAX_SUBCHAT_INDEX) {
+    throw new Response('Invalid subchat index', { status: 400 });
+  }
+  return value as number;
 }
 
-function isRecord(value: unknown): value is UnknownRecord {
-  return typeof value === 'object' && value !== null;
+function parseTurnContext(value: unknown): ChatTurnContext | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const result = chatTurnContextSchema.safeParse(value);
+  if (!result.success) {
+    throw new Response('Invalid turn context', { status: 400 });
+  }
+  return result.data;
 }

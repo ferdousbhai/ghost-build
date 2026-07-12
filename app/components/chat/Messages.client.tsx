@@ -11,6 +11,7 @@ import { Modal } from '@ui/Modal';
 import { useEarliestRewindableMessageRank } from '~/lib/hooks/useEarliestRewindableMessageRank';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import styles from './BaseChat.module.css';
 
 interface MessagesProps {
   id?: string;
@@ -92,15 +93,13 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messa
           return (
             <div
               key={index}
-              className={classNames(
-                'flex gap-4 p-4 w-full rounded-[calc(0.75rem-1px)] relative border border-neutral-200 dark:border-neutral-700',
-                {
-                  'bg-bolt-elements-messages-background': isUserMessage,
-                },
-              )}
+              className={classNames(styles.Message, 'relative flex w-full gap-3', {
+                [styles.UserMessage]: isUserMessage,
+                [styles.AssistantMessage]: !isUserMessage,
+              })}
             >
               {isUserMessage && (
-                <div className="flex size-[40px] shrink-0 items-center justify-center self-start overflow-hidden rounded-full bg-white text-gray-600 dark:bg-gray-800 dark:text-gray-500">
+                <div className="flex size-8 shrink-0 items-center justify-center self-start overflow-hidden rounded-full border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 text-content-secondary">
                   {profile?.avatar ? (
                     <img
                       src={profile.avatar}
@@ -110,7 +109,7 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messa
                       decoding="sync"
                     />
                   ) : (
-                    <PersonIcon className="size-4" />
+                    <PersonIcon className="size-3.5" />
                   )}
                 </div>
               )}

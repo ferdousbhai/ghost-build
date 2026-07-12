@@ -1,93 +1,41 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse, printParseErrorCode } from "jsonc-parser";
+import {
+  findMissingCommandSteps,
+  findWorkerObservabilityErrors,
+  findWorkerRuntimeSecretErrors,
+  loadsLocalEnvFiles,
+  startsLocalDevServer,
+  targetsStaging,
+} from "./lib/project-policy.mjs";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const errors = [];
 const allowUnprovisioned = process.argv.includes("--allow-unprovisioned");
-const REQUIRED_COMPATIBILITY_DATE = "2026-06-30";
-const PLACEHOLDER_D1_ID = "00000000-0000-0000-0000-000000000000";
-const REQUIRED_LOGS_SAMPLING_RATE = 0.6;
-const REQUIRED_TRACES_SAMPLING_RATE = 0.05;
-const FORBIDDEN_PRODUCTION_SCRIPT_NAMES = new Set([
-  "dev",
-  "start",
-  "preview",
-  "deploy:local",
-  "deploy:staging",
-  "dev:local",
-  "start:local",
-  "start:staging",
+const placeholderDatabaseId = "00000000-0000-0000-0000-000000000000";
+const previewScripts = new Map([
+  ["dev", "vite dev --host 0.0.0.0"],
+  ["preview", "vite preview --host 0.0.0.0"],
 ]);
-const STAGING_PATTERN = /\bstaging\b/i;
-const LOCAL_ENV_FILE_PATTERN =
-  /(?:^|\s)--env-file(?:[=\s]|$)|(?:^|[\s"'`])(?:\.env(?:\.[\w.-]+)?|\.dev\.vars(?:\.[\w.-]+)?)(?=$|[\s"'`])/;
-const LOCAL_DEV_SERVER_COMMAND_PATTERNS = [
-  /\bwrangler\s+dev\b/,
-  /\bvite\s+(?:--host|dev)\b/,
-];
-const REQUIRED_PROVISION_SCRIPT_PATTERNS = [
-  {
-    pattern: /\[["']d1["'],\s*["']list["'],\s*["']--json["']\]/s,
-    description: "list Cloudflare D1 databases",
-  },
-  {
-    pattern: /\[["']d1["'],\s*["']create["'],\s*databaseName\]/s,
-    description: "create the production D1 database when missing",
-  },
-  {
-    pattern: /\[["']d1_databases["'],\s*d1Index,\s*["']database_id["']/s,
-    description: "write the non-secret D1 database_id into wrangler.jsonc",
-  },
-  {
-    pattern: /\[["']r2["'],\s*["']bucket["'],\s*["']list["']\]/s,
-    description: "list Cloudflare R2 buckets",
-  },
-  {
-    pattern:
-      /\[["']r2["'],\s*["']bucket["'],\s*["']create["'],\s*bucketName\]/s,
-    description: "create the production R2 bucket when missing",
-  },
-];
 
-function readJsoncConfig(path, label) {
-  const raw = readFileSync(resolve(rootDir, path), "utf8");
+function readConfig(errors) {
   const parseErrors = [];
-  const config = parse(raw, parseErrors, { allowTrailingComma: true });
-
+  const config = parse(
+    readFileSync(resolve(rootDir, "wrangler.jsonc"), "utf8"),
+    parseErrors,
+    { allowTrailingComma: true },
+  );
   for (const error of parseErrors) {
     errors.push(
-      `${label} has invalid JSONC: ${printParseErrorCode(error.error)} at offset ${error.offset}.`,
+      `wrangler.jsonc has invalid JSONC: ${printParseErrorCode(error.error)} at offset ${error.offset}.`,
     );
   }
-
   return config;
 }
 
-function readJsonConfig(path, label) {
-  try {
-    return JSON.parse(readFileSync(resolve(rootDir, path), "utf8"));
-  } catch (error) {
-    errors.push(
-      `${label} must be valid JSON: ${error instanceof Error ? error.message : String(error)}.`,
-    );
-    return undefined;
-  }
-}
-
-function readTextConfig(path, label) {
-  try {
-    return readFileSync(resolve(rootDir, path), "utf8");
-  } catch (error) {
-    errors.push(
-      `${label} must exist: ${error instanceof Error ? error.message : String(error)}.`,
-    );
-    return undefined;
-  }
-}
-
-function requireEqual(label, actual, expected) {
+function requireEqual(errors, label, actual, expected) {
   if (actual !== expected) {
     errors.push(
       `${label} must be ${JSON.stringify(expected)}; found ${JSON.stringify(actual)}.`,
@@ -95,284 +43,181 @@ function requireEqual(label, actual, expected) {
   }
 }
 
-function requireArrayIncludes(label, values, expected) {
-  if (!Array.isArray(values) || !values.includes(expected)) {
-    errors.push(`${label} must include ${JSON.stringify(expected)}.`);
-  }
-}
-
-function findBinding(collection, binding) {
-  return Array.isArray(collection)
-    ? collection.find((item) => item?.binding === binding)
-    : undefined;
-}
-
-function requireBinding(collection, binding, missingMessage) {
-  const bindingConfig = findBinding(collection, binding);
-  if (!bindingConfig) {
-    errors.push(missingMessage);
-  }
-  return bindingConfig;
-}
-
-function findMissingProvisionScriptPatternErrors(content, label) {
-  return REQUIRED_PROVISION_SCRIPT_PATTERNS.filter(
-    ({ pattern }) => !pattern.test(content),
-  ).map(({ description }) => `${label} must ${description}.`);
-}
-
-function startsLocalDevServer(content) {
-  return LOCAL_DEV_SERVER_COMMAND_PATTERNS.some((pattern) =>
-    pattern.test(content),
-  );
-}
-
-function targetsStaging(...values) {
-  return values.some((value) => STAGING_PATTERN.test(value));
-}
-
-function loadsLocalEnvFiles(content) {
-  return LOCAL_ENV_FILE_PATTERN.test(content);
-}
-
-function findWorkerObservabilityErrors(config, label) {
-  const observability = config?.observability;
-  const requirements = [
-    ["observability.enabled", observability?.enabled, true],
-    ["observability.logs.enabled", observability?.logs?.enabled, true],
-    [
-      "observability.logs.head_sampling_rate",
-      observability?.logs?.head_sampling_rate,
-      REQUIRED_LOGS_SAMPLING_RATE,
-    ],
-    ["observability.traces.enabled", observability?.traces?.enabled, true],
-    [
-      "observability.traces.head_sampling_rate",
-      observability?.traces?.head_sampling_rate,
-      REQUIRED_TRACES_SAMPLING_RATE,
-    ],
-  ];
-
-  return requirements
-    .filter(([, actual, expected]) => actual !== expected)
-    .map(
-      ([path, actual, expected]) =>
-        `${label} ${path} must be ${JSON.stringify(expected)}; found ${JSON.stringify(actual)}.`,
-    );
-}
-
-function verifyWorkerConfig(config) {
-  requireEqual("wrangler.jsonc main", config?.main, "src/server.ts");
+function verifyWorker(errors, config) {
   requireEqual(
+    errors,
+    "wrangler.jsonc name",
+    config?.name,
+    "ghostbuild-cloudflare-app",
+  );
+  requireEqual(errors, "wrangler.jsonc main", config?.main, "src/server.ts");
+  requireEqual(
+    errors,
     "wrangler.jsonc compatibility_date",
     config?.compatibility_date,
-    REQUIRED_COMPATIBILITY_DATE,
+    "2026-07-08",
   );
-  requireArrayIncludes(
-    "wrangler.jsonc compatibility_flags",
-    config?.compatibility_flags,
-    "nodejs_compat",
-  );
-  errors.push(...findWorkerObservabilityErrors(config, "wrangler.jsonc"));
   requireEqual(
+    errors,
     "wrangler.jsonc upload_source_maps",
     config?.upload_source_maps,
     true,
   );
-  requireEqual("wrangler.jsonc ai.binding", config?.ai?.binding, "AI");
-
-  if (config?.secrets) {
+  requireEqual(errors, "wrangler.jsonc ai.binding", config?.ai?.binding, "AI");
+  if (!config?.compatibility_flags?.includes("nodejs_compat")) {
     errors.push(
-      "wrangler.jsonc must not declare Worker runtime secrets; configure runtime values as Cloudflare bindings.",
+      'wrangler.jsonc compatibility_flags must include "nodejs_compat".',
     );
   }
-
-  const d1 = requireBinding(
-    config?.d1_databases,
-    "DB",
-    "wrangler.jsonc must bind D1 as DB.",
+  errors.push(
+    ...findWorkerObservabilityErrors(config, "wrangler.jsonc"),
+    ...findWorkerRuntimeSecretErrors(
+      config,
+      "wrangler.jsonc",
+      "configure values as Cloudflare bindings",
+    ),
   );
-  if (d1) {
-    if (!d1.database_name) {
-      errors.push("wrangler.jsonc D1 database_name must be configured.");
-    }
+
+  const d1 = config?.d1_databases?.find((item) => item?.binding === "DB");
+  if (!d1) {
+    errors.push("wrangler.jsonc must bind D1 as DB.");
+  } else {
     requireEqual(
+      errors,
+      "wrangler.jsonc D1 database_name",
+      d1.database_name,
+      "ghostbuild-cloudflare-app",
+    );
+    requireEqual(
+      errors,
       "wrangler.jsonc D1 migrations_dir",
       d1.migrations_dir,
       "migrations",
     );
     if (
       !allowUnprovisioned &&
-      (!d1.database_id || d1.database_id === PLACEHOLDER_D1_ID)
+      (!d1.database_id || d1.database_id === placeholderDatabaseId)
     ) {
-      errors.push(
-        "Replace the placeholder D1 database_id in wrangler.jsonc before production deploy.",
-      );
+      errors.push("wrangler.jsonc must contain a provisioned D1 database_id.");
     }
   }
 
-  const r2 = requireBinding(
-    config?.r2_buckets,
-    "APP_STORAGE",
-    "wrangler.jsonc must bind R2 as APP_STORAGE.",
+  const r2 = config?.r2_buckets?.find(
+    (item) => item?.binding === "APP_STORAGE",
   );
-  if (r2 && !r2.bucket_name) {
-    errors.push("wrangler.jsonc R2 bucket_name must be configured.");
-  }
-
-  const durableObject = config?.durable_objects?.bindings?.find(
-    (item) => item?.name === "AppAgent",
+  requireEqual(
+    errors,
+    "wrangler.jsonc R2 bucket_name",
+    r2?.bucket_name,
+    "ghostbuild-cloudflare-app-storage",
   );
-  if (!durableObject) {
+  if (
+    !config?.durable_objects?.bindings?.some(
+      (item) => item?.class_name === "AppAgent",
+    )
+  ) {
     errors.push("wrangler.jsonc must bind the AppAgent Durable Object.");
-  } else {
-    requireEqual(
-      "wrangler.jsonc AppAgent class_name",
-      durableObject.class_name,
-      "AppAgent",
-    );
   }
-
-  const hasDurableObjectMigration = Array.isArray(config?.migrations)
-    ? config.migrations.some((migration) =>
-        migration?.new_sqlite_classes?.includes("AppAgent"),
-      )
-    : false;
-  if (!hasDurableObjectMigration) {
+  if (
+    !config?.migrations?.some((item) =>
+      item?.new_sqlite_classes?.includes("AppAgent"),
+    )
+  ) {
     errors.push(
-      "wrangler.jsonc must include a SQLite Durable Object migration for AppAgent.",
+      "wrangler.jsonc must migrate the AppAgent SQLite Durable Object.",
     );
   }
 }
 
-function verifyNoLocalOrStagingScripts(label, scripts) {
-  if (!scripts || typeof scripts !== "object") {
-    errors.push(`${label} scripts must be configured.`);
-    return;
-  }
-
-  for (const name of FORBIDDEN_PRODUCTION_SCRIPT_NAMES) {
-    if (scripts[name]) {
-      errors.push(
-        `${label} must not define ${JSON.stringify(name)}; deploy directly to production Cloudflare.`,
-      );
+function verifyPackage(errors) {
+  const pkg = JSON.parse(
+    readFileSync(resolve(rootDir, "package.json"), "utf8"),
+  );
+  const scripts = pkg.scripts ?? {};
+  for (const name of [
+    "build",
+    "cf-typegen",
+    "deploy",
+    "lint",
+    "provision:production",
+    "typecheck",
+    "verify:production-config",
+    "verify:stack",
+  ]) {
+    if (typeof scripts[name] !== "string") {
+      errors.push(`package.json must define scripts.${name}.`);
     }
   }
-
+  errors.push(
+    ...findMissingCommandSteps(scripts.deploy, "package.json scripts.deploy", [
+      "verify:stack",
+      "typecheck",
+      "provision:production",
+      "verify:production-config",
+      "build",
+      "lint",
+      "d1:migrations:apply:production",
+      "wrangler deploy",
+    ]),
+  );
   for (const [name, command] of Object.entries(scripts)) {
     if (typeof command !== "string") {
       continue;
     }
-    if (startsLocalDevServer(command)) {
+    const allowedPreview = previewScripts.get(name) === command;
+    if (!allowedPreview && startsLocalDevServer(command)) {
       errors.push(
-        `${label} script ${JSON.stringify(name)} must not start a local dev server.`,
+        `package.json script ${JSON.stringify(name)} must not start a local dev server.`,
       );
     }
     if (targetsStaging(name, command)) {
       errors.push(
-        `${label} script ${JSON.stringify(name)} must not target staging.`,
+        `package.json script ${JSON.stringify(name)} must not target staging.`,
       );
     }
     if (loadsLocalEnvFiles(command)) {
       errors.push(
-        `${label} script ${JSON.stringify(name)} must not load local env files.`,
+        `package.json script ${JSON.stringify(name)} must not load local env files.`,
       );
     }
   }
 }
 
-function verifyPackageConfig(config) {
-  requireEqual(
-    "package.json scripts.deploy",
-    config?.scripts?.deploy,
-    "pnpm run verify:stack && pnpm run typecheck && pnpm run provision:production && pnpm run verify:production-config && pnpm run build && pnpm run lint && pnpm run d1:migrations:apply:production && wrangler deploy",
+function verifyProvisioner(errors) {
+  const result = spawnSync(
+    process.execPath || process.argv0 || "node",
+    [
+      resolve(rootDir, "scripts/provision-cloudflare-production.mjs"),
+      "--dry-run",
+    ],
+    { cwd: rootDir, encoding: "utf8" },
   );
-  requireEqual(
-    "package.json scripts.typecheck",
-    config?.scripts?.typecheck,
-    "pnpm run generate-routes && pnpm run cf-typegen && tsc -p . --noEmit --pretty false",
-  );
-  requireEqual(
-    "package.json scripts.d1:migrations:apply:production",
-    config?.scripts?.["d1:migrations:apply:production"],
-    "wrangler d1 migrations apply ghostbuild-cloudflare-app --remote",
-  );
-  requireEqual(
-    "package.json scripts.provision:production",
-    config?.scripts?.["provision:production"],
-    "node scripts/provision-cloudflare-production.mjs",
-  );
-  requireEqual(
-    "package.json scripts.verify:stack",
-    config?.scripts?.["verify:stack"],
-    "node scripts/verify-stack-alignment.mjs",
-  );
-  requireEqual(
-    "package.json scripts.verify:production-config",
-    config?.scripts?.["verify:production-config"],
-    "node scripts/verify-production-config.mjs",
-  );
-  requireEqual(
-    "package.json scripts.lint",
-    config?.scripts?.lint,
-    "eslint src vite.config.ts --max-warnings=0",
-  );
-  if (!config?.devDependencies?.["jsonc-parser"]) {
+  if (result.status !== 0) {
     errors.push(
-      "package.json must include jsonc-parser for production config verification.",
-    );
-  }
-  if (!config?.devDependencies?.["eslint"]) {
-    errors.push("package.json must include eslint for production linting.");
-  }
-  if (!config?.devDependencies?.["typescript-eslint"]) {
-    errors.push(
-      "package.json must include typescript-eslint for production linting.",
-    );
-  }
-  verifyNoLocalOrStagingScripts("package.json", config?.scripts);
-}
-
-function verifyProvisionScript() {
-  const content = readTextConfig(
-    "scripts/provision-cloudflare-production.mjs",
-    "scripts/provision-cloudflare-production.mjs",
-  );
-  if (!content) {
-    return;
-  }
-
-  errors.push(
-    ...findMissingProvisionScriptPatternErrors(
-      content,
-      "scripts/provision-cloudflare-production.mjs",
-    ),
-  );
-
-  if (startsLocalDevServer(content)) {
-    errors.push(
-      "scripts/provision-cloudflare-production.mjs must not start local dev servers.",
-    );
-  }
-
-  if (targetsStaging(content)) {
-    errors.push(
-      "scripts/provision-cloudflare-production.mjs must not target staging.",
-    );
-  }
-
-  if (loadsLocalEnvFiles(content)) {
-    errors.push(
-      "scripts/provision-cloudflare-production.mjs must not load local env files.",
+      `provision:production --dry-run must succeed: ${(result.stderr || result.stdout).trim()}.`,
     );
   }
 }
 
-verifyWorkerConfig(readJsoncConfig("wrangler.jsonc", "wrangler.jsonc"));
-verifyPackageConfig(readJsonConfig("package.json", "package.json"));
-verifyProvisionScript();
+export function verifyProductionConfig() {
+  const errors = [];
+  verifyWorker(errors, readConfig(errors));
+  verifyPackage(errors);
+  verifyProvisioner(errors);
+  return errors;
+}
 
-if (errors.length > 0) {
-  console.error(errors.map((error) => `- ${error}`).join("\n"));
-  process.exit(1);
+export function main() {
+  const errors = verifyProductionConfig();
+  if (errors.length > 0) {
+    console.error(errors.map((error) => `- ${error}`).join("\n"));
+    process.exitCode = 1;
+  }
+}
+
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  main();
 }

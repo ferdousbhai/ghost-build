@@ -1,7 +1,6 @@
 import { useStore } from '@nanostores/react';
 import { lazy, Suspense, useState } from 'react';
 import { chatStore } from '~/lib/stores/chatId';
-import { HeaderActionButtons } from './HeaderActionButtons.client';
 import { ChatDescription } from '~/components/header/ChatDescription.client';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { HamburgerMenuIcon, PersonIcon, GearIcon, ExitIcon, Share2Icon } from '@radix-ui/react-icons';
@@ -10,12 +9,16 @@ import { profileStore, setProfile } from '~/lib/stores/profile';
 import { Menu as MenuComponent, MenuItem as MenuItemComponent } from '@ui/Menu';
 import { FeedbackButton } from './FeedbackButton';
 import { signInWithGoogle, signOutOfGhostbuild } from '~/lib/auth-client';
+import { BrandLink } from '~/components/BrandLink';
 import { isGuestSessionId } from '~/lib/guest-session';
 import { Button } from '@ui/Button';
 
 const DownloadButton = lazy(() => import('./DownloadButton').then((module) => ({ default: module.DownloadButton })));
 const ShareButton = lazy(() => import('./ShareButton').then((module) => ({ default: module.ShareButton })));
 const SidebarMenu = lazy(() => import('~/components/sidebar/Menu.client').then((module) => ({ default: module.Menu })));
+const HeaderActionButtons = lazy(() =>
+  import('./HeaderActionButtons.client').then((module) => ({ default: module.HeaderActionButtons })),
+);
 
 export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean }) {
   const chat = useStore(chatStore);
@@ -37,31 +40,35 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
   };
 
   return (
-    <header className={'flex h-[var(--header-height)] items-center overflow-x-auto overflow-y-hidden border-b p-5'}>
-      <div className="text-content-primary z-40 flex cursor-pointer items-center gap-4">
+    <header
+      className="ghostbuild-header box-border flex h-[var(--header-height)] items-center overflow-x-auto overflow-y-hidden border-b px-5 py-3"
+      data-chat-started={chat.started}
+    >
+      <div className="z-40 flex items-center gap-3 text-content-primary">
         {showSidebarIcon && (
-          <HamburgerMenuIcon
-            className="shrink-0"
+          <button
+            type="button"
+            className="ghostbuild-header__menu-button"
             data-hamburger-menu
+            aria-label={isMenuOpen ? 'Close project menu' : 'Open project menu'}
+            aria-expanded={isMenuOpen}
+            aria-controls="project-sidebar"
             onClick={(e) => {
               e.stopPropagation();
-              setIsMenuOpen(!isMenuOpen);
+              setIsMenuOpen((open) => !open);
             }}
-          />
+          >
+            <HamburgerMenuIcon aria-hidden />
+          </button>
         )}
-        <a
-          href="/"
-          aria-label="Ghostbuild home"
-          className="text-content-primary hover:text-content-primary flex items-center gap-2 rounded-md no-underline hover:no-underline"
-        >
-          <span aria-hidden className="shrink-0 text-xl leading-none">
-            👻
-          </span>
-          <span className="text-content-primary font-display text-lg font-black leading-none">Ghostbuild</span>
-        </a>
+        <BrandLink
+          variant="header"
+          className="flex items-center gap-2 rounded-md text-content-primary no-underline hover:text-content-primary hover:no-underline"
+          nameClassName="ghostbuild-brand-name font-display text-lg font-black leading-none text-content-primary"
+        />
       </div>
       {chat.started && (
-        <span className="text-content-primary flex-1 truncate px-4 text-center">
+        <span className="hidden flex-1 truncate px-4 text-center text-content-primary lg:block">
           <ChatDescription />
         </span>
       )}
@@ -79,23 +86,25 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
                   variant="neutral"
                   size="xs"
                   title="Sign in to share"
+                  aria-label="Sign in to share"
                   onClick={() => {
                     void signInWithGoogle();
                   }}
                 >
                   <Share2Icon />
-                  <span>Share</span>
+                  <span className="hidden md:inline">Share</span>
                 </Button>
               )}
             </Suspense>
-            <div className="mr-1">
-              <HeaderActionButtons />
-            </div>
+            <Suspense fallback={null}>
+              <div className="mr-1">
+                <HeaderActionButtons />
+              </div>
+            </Suspense>
           </>
         )}
         {profile && (
           <MenuComponent
-            placement="top-start"
             buttonProps={{
               variant: 'neutral',
               title: 'User menu',
@@ -104,12 +113,13 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
               icon: profile.avatar ? (
                 <img
                   src={profile.avatar}
+                  alt={profile.username ? `${profile.username} profile` : 'User profile'}
                   className="size-8 min-w-8 rounded-full object-cover"
                   loading="eager"
                   decoding="sync"
                 />
               ) : (
-                <PersonIcon className="text-content-secondary size-8 min-w-8 rounded-full border" />
+                <PersonIcon className="size-8 min-w-8 rounded-full border text-content-secondary" />
               ),
             }}
           >

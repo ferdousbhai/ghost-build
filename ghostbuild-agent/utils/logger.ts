@@ -11,7 +11,7 @@ interface Logger {
   error: LoggerFunction;
 }
 
-let currentLevel: DebugLevel = 'warn';
+const currentLevel: DebugLevel = 'warn';
 
 export const logger: Logger = {
   trace: (...messages: unknown[]) => log('trace', undefined, messages),

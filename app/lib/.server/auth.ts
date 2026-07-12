@@ -12,11 +12,7 @@ function requireBinding(env: Env, name: 'BETTER_AUTH_SECRET' | 'GOOGLE_CLIENT_ID
 }
 
 function getBaseURL(env: Env, request?: Request) {
-  return (
-    getOptionalBinding(env, 'BETTER_AUTH_URL') ??
-    getOptionalBinding(env, 'CLOUDFLARE_SITE_URL') ??
-    (request ? new URL(request.url).origin : undefined)
-  );
+  return getOptionalBinding(env, 'BETTER_AUTH_URL') ?? (request ? new URL(request.url).origin : undefined);
 }
 
 export function getAuth(env: Env, request?: Request) {

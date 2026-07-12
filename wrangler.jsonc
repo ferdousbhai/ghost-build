@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ghostbuild",
-  "compatibility_date": "2026-06-30",
+  "compatibility_date": "2026-07-08",
   "compatibility_flags": ["nodejs_compat"],
   "main": "app/server.ts",
   "observability": {
@@ -21,9 +21,8 @@
   },
   // Configure all production string bindings in Cloudflare, not local env files.
   // Deployment credentials are supplied by the CI environment, not as Worker runtime secrets.
-  // Optional dashboard-managed bindings: AXIOM_API_TOKEN, AXIOM_API_URL,
-  // AXIOM_DATASET_NAME, Better Auth/Google auth secrets, PostHog/Sentry
-  // config, site URL, and commit SHA metadata.
+  // Optional dashboard-managed bindings: Better Auth/Google auth secrets
+  // and commit SHA metadata.
   "d1_databases": [
     {
       "binding": "DB",

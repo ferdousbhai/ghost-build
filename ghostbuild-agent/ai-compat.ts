@@ -24,6 +24,10 @@ type AiSdkToolPartRecord = {
 
 export type GhostbuildPart = UIMessagePart<UIDataTypes, UITools> | StoredToolInvocationPart;
 
+type GhostbuildToolPart = GhostbuildPart & {
+  type: 'tool-invocation' | 'dynamic-tool' | `tool-${string}`;
+};
+
 export type GhostbuildMessage = Omit<UIMessage, 'parts'> & {
   parts: GhostbuildPart[];
   content?: string;
@@ -31,7 +35,7 @@ export type GhostbuildMessage = Omit<UIMessage, 'parts'> & {
 };
 
 export function messageText(message: Pick<GhostbuildMessage, 'content' | 'parts'>): string {
-  if (typeof message.content === 'string') {
+  if (typeof message.content === 'string' && message.content.length > 0) {
     return message.content;
   }
   return message.parts.map((part) => (part.type === 'text' ? part.text : '')).join('');
@@ -53,11 +57,7 @@ export function createdAtMillis(message: Pick<GhostbuildMessage, 'createdAt'>): 
 }
 
 export function cachedPromptTokens(metadata?: unknown): number {
-  return findNumericCacheRead(metadata);
-}
-
-export function toAiSdkMessageParts(parts: GhostbuildPart[]): UIMessage['parts'] {
-  return parts as unknown as UIMessage['parts'];
+  return findNumericCacheRead(metadata, new WeakSet());
 }
 
 export function languageModelId(model: unknown, fallback: string): string {
@@ -65,10 +65,15 @@ export function languageModelId(model: unknown, fallback: string): string {
   return typeof modelId === 'string' && modelId.length > 0 ? modelId : fallback;
 }
 
-function findNumericCacheRead(value: unknown): number {
+function findNumericCacheRead(value: unknown, seen: WeakSet<object>): number {
   if (!value || typeof value !== 'object') {
     return 0;
   }
+
+  if (seen.has(value)) {
+    return 0;
+  }
+  seen.add(value);
 
   const record = value as Record<string, unknown>;
   for (const key of ['cachedPromptTokens', 'cachedInputTokens', 'cacheReadInputTokens', 'cacheRead']) {
@@ -87,7 +92,7 @@ function findNumericCacheRead(value: unknown): number {
   }
 
   for (const candidate of Object.values(record)) {
-    const nested = findNumericCacheRead(candidate);
+    const nested = findNumericCacheRead(candidate, seen);
     if (nested > 0) {
       return nested;
     }
@@ -100,8 +105,15 @@ function isStoredToolInvocationPart(part: GhostbuildPart): part is StoredToolInv
   return part.type === 'tool-invocation';
 }
 
-export function isToolPart(part: GhostbuildPart): boolean {
-  return isStoredToolInvocationPart(part) || part.type === 'dynamic-tool' || part.type.startsWith('tool-');
+export function isToolPart(part: GhostbuildPart): part is GhostbuildToolPart {
+  return (
+    !isMisparsedArtifactToolPart(part) &&
+    (isStoredToolInvocationPart(part) || part.type === 'dynamic-tool' || part.type.startsWith('tool-'))
+  );
+}
+
+export function isMisparsedArtifactToolPart(part: GhostbuildPart): boolean {
+  return typeof part.type === 'string' && part.type.startsWith('tool-boltArtifact');
 }
 
 export function getToolInvocation(part: GhostbuildPart): GhostbuildToolInvocation | null {

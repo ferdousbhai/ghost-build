@@ -1,37 +1,46 @@
-import React from 'react';
+import { ExclamationTriangleIcon, ReloadIcon } from '@radix-ui/react-icons';
+import { Button } from '@ui/Button';
+import { BrandLink } from '~/components/BrandLink';
 
 interface ErrorDisplayProps {
   error: Error | unknown;
   resetErrorBoundary?: () => void;
 }
 
-export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({ error, resetErrorBoundary }) => {
+export function ErrorDisplay({ error, resetErrorBoundary }: ErrorDisplayProps) {
   const isError = error instanceof Error;
+  const message = isError ? error.message : String(error);
+  const retry = resetErrorBoundary ?? (() => window.location.reload());
 
   return (
-    <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-      <div className="mb-4">
-        <h2 className="text-xl font-bold text-red-800">An error occurred</h2>
-        <div className="mt-2 text-red-700">{isError ? error.message : String(error)}</div>
-      </div>
-
-      {isError && error.stack && (
-        <div className="mt-4">
-          <h3 className="text-lg font-semibold text-red-800">Stack trace:</h3>
-          <pre className="mt-2 overflow-auto rounded bg-gray-100 p-3 font-mono text-xs text-gray-800">
-            {error.stack}
-          </pre>
+    <main className="app-page-shell flex min-h-svh items-center px-4 py-10" role="alert" aria-live="assertive">
+      <div className="app-error-card app-card mx-auto">
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <BrandLink />
+          <span className="app-status-badge">Recovery mode</span>
         </div>
-      )}
 
-      {resetErrorBoundary && (
-        <button
-          onClick={resetErrorBoundary}
-          className="mt-4 rounded bg-red-600 px-4 py-2 text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500/50"
-        >
-          Try again
-        </button>
-      )}
-    </div>
+        <ExclamationTriangleIcon className="mb-4 size-7 text-[var(--gb-content-warning)]" aria-hidden />
+        <p className="app-page-eyebrow">Something interrupted the build</p>
+        <h1 className="app-page-title !text-[clamp(34px,6vw,52px)]">This page could not load.</h1>
+        <p className="app-page-lede break-words">{message || 'Ghostbuild encountered an unexpected error.'}</p>
+
+        <div className="mt-7 flex flex-wrap gap-3">
+          <Button onClick={retry} icon={<ReloadIcon aria-hidden />}>
+            Try again
+          </Button>
+          <Button href="/" variant="neutral">
+            Back to Ghostbuild
+          </Button>
+        </div>
+
+        {import.meta.env.DEV && isError && error.stack && (
+          <details className="mt-8 text-sm text-content-secondary">
+            <summary className="cursor-pointer font-semibold">Technical details</summary>
+            <pre className="app-error-code mt-3">{error.stack}</pre>
+          </details>
+        )}
+      </div>
+    </main>
   );
-};
+}

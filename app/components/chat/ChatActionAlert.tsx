@@ -4,7 +4,7 @@ import ChatAlert from './ChatAlert';
 interface ChatActionAlertProps {
   alert: ActionAlert | undefined;
   clearAlert: () => void;
-  onSend: (messageInput: string) => Promise<void>;
+  onSend: (messageInput: string) => Promise<boolean>;
   className?: string;
 }
 
@@ -19,8 +19,11 @@ export function ChatActionAlert({ alert, clearAlert, onSend, className = 'mb-4' 
         alert={alert}
         clearAlert={clearAlert}
         postMessage={(message) => {
-          onSend(message);
-          clearAlert();
+          void onSend(message).then((accepted) => {
+            if (accepted) {
+              clearAlert();
+            }
+          });
         }}
       />
     </div>

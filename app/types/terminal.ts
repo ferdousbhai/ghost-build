@@ -11,4 +11,6 @@ export interface ITerminal {
 export type TerminalInitializationOptions = {
   isReload?: boolean;
   shouldRunWorkerBuild?: boolean;
+  startPreviewServer?: boolean;
+  previewCommand?: string;
 };

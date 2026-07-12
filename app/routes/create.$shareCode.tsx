@@ -7,6 +7,7 @@ import { Toaster } from '~/components/ui/Toaster';
 import { GhostbuildAuthProvider, useGhostbuildAuth } from '~/components/chat/GhostbuildAuthWrapper';
 import { Loading } from '~/components/Loading';
 import { Button } from '@ui/Button';
+import { BrandLink } from '~/components/BrandLink';
 import { Sheet } from '@ui/Sheet';
 import { signInWithGoogle } from '~/lib/auth-client';
 
@@ -57,51 +58,89 @@ function ShareProjectContent() {
   };
 
   if (ghostbuildAuthState.kind === 'loading') {
-    return <Loading />;
+    return (
+      <div className="app-page-shell">
+        <Loading message="Checking the shared project…" />
+      </div>
+    );
   }
 
   if (ghostbuildAuthState.kind !== 'fullyLoggedIn') {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center p-4">
-        <div className="w-full max-w-md space-y-6 rounded-xl border bg-white p-8">
-          <div className="space-y-2 text-center">
-            <h1 className="text-center text-3xl font-bold">Sign in to Ghostbuild</h1>
-            <p className="text-base text-gray-500">
-              Please sign in to Ghostbuild to clone this project
+      <ShareProjectShell>
+        <div className="mx-auto max-w-2xl text-center">
+          <p className="app-page-eyebrow">Shared Ghostbuild project</p>
+          <h1 className="app-page-title mx-auto">Bring this build into your workspace.</h1>
+          <p className="app-page-lede mx-auto">
+            Sign in to create an editable copy, inspect the generated code, and continue building.
+          </p>
+        </div>
+        <Sheet className="app-card mx-auto mt-8 w-full max-w-lg p-6 sm:p-8">
+          <span className="app-status-badge">Account required</span>
+          <div className="mt-5">
+            <h2 className="app-card-title">Sign in to clone this project</h2>
+            <p className="app-card-copy mt-2">
+              Ghostbuild will add a private copy to your project history
               {getShareDescription?.description ? (
                 <>
-                  : <span className="font-bold">{getShareDescription.description}</span>
+                  : <strong className="text-content-primary"> {getShareDescription.description}</strong>
                 </>
               ) : (
-                ''
+                '.'
               )}
             </p>
           </div>
 
           <Button
+            className="mt-6 w-full"
+            size="lg"
             onClick={() => {
               void signInWithGoogle();
             }}
           >
-            Sign in
+            Sign in with Google
           </Button>
-        </div>
-      </div>
+        </Sheet>
+      </ShareProjectShell>
     );
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-4">
-      <Sheet className="w-full max-w-md space-y-6 border p-8">
-        <div className="space-y-2 text-center">
-          <h1 className="text-center font-semibold">Clone Project</h1>
-          {getShareDescription?.description && <p className="text-base">{getShareDescription.description}</p>}
+    <ShareProjectShell>
+      <div className="mx-auto max-w-2xl text-center">
+        <p className="app-page-eyebrow">Ready to clone</p>
+        <h1 className="app-page-title mx-auto">Make this project yours.</h1>
+        <p className="app-page-lede mx-auto">
+          Create an editable copy and continue the conversation from your workspace.
+        </p>
+      </div>
+      <Sheet className="app-card mx-auto mt-8 w-full max-w-lg p-6 sm:p-8">
+        <span className="app-status-badge">Shared build found</span>
+        <div className="mt-5">
+          <h2 className="app-card-title">Clone project</h2>
+          {getShareDescription?.description && <p className="app-card-copy mt-2">{getShareDescription.description}</p>}
         </div>
 
-        <Button className="flex w-full items-center justify-center gap-2 px-6 py-3" onClick={handleCloneChat}>
-          Clone Project
+        <Button className="mt-6 w-full" size="lg" onClick={handleCloneChat}>
+          Clone into Ghostbuild
         </Button>
       </Sheet>
+    </ShareProjectShell>
+  );
+}
+
+function ShareProjectShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="app-page-shell">
+      <div className="app-page-container">
+        <nav className="app-page-nav" aria-label="Shared project navigation">
+          <BrandLink />
+          <Button href="/" variant="neutral" size="sm">
+            <span>Back to builder</span>
+          </Button>
+        </nav>
+        {children}
+      </div>
     </div>
   );
 }

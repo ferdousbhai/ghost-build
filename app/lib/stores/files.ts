@@ -1,34 +1,21 @@
-import type { WebContainer, PathWatcherEvent } from '@webcontainer/api';
-import { getEncoding } from 'istextorbinary';
+import type { WebContainer } from '@webcontainer/api';
 import { map, type MapStore } from 'nanostores';
-import { Buffer } from 'node:buffer';
 import { path } from 'ghostbuild-agent/utils/path';
 import { bufferWatchEvents } from '~/utils/buffer';
 import { WORK_DIR } from 'ghostbuild-agent/constants.js';
-import { computeFileModifications } from '~/utils/diff';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { unreachable } from 'ghostbuild-agent/utils/unreachable';
-import { incrementFileUpdateCounter } from './fileUpdateCounter';
 import { getAbsolutePath, type AbsolutePath } from 'ghostbuild-agent/utils/workDir';
 import type { File, FileMap } from 'ghostbuild-agent/types';
-import { assertNotLocalSecretFilePath, isLocalSecretFilePath } from '~/utils/secretFiles';
+import { assertNotLocalSecretFilePath } from '~/utils/secretFiles';
 import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifest';
+import { applyFileWatchEvents, ensureParentFolders, prewarmFileMap } from './file-map-operations';
 
 const logger = createScopedLogger('FilesStore');
 
-const utf8TextDecoder = new TextDecoder('utf8', { fatal: true });
-
-type WebContainerInternalSearch = {
-  fileSearch(patterns: string[], root: string, options: { excludes: string[] }): Promise<string[]>;
-};
-
 export class FilesStore {
   #webcontainer: Promise<WebContainer>;
-
-  /**
-   * Tracks the number of files without folders.
-   */
-  #size = 0;
+  #watchEvents = bufferWatchEvents(FILE_EVENTS_DEBOUNCE_MS, this.#processEventBuffer.bind(this));
 
   /**
    * @note Keeps track all modified files with their original content since the last user message.
@@ -42,10 +29,6 @@ export class FilesStore {
    */
   files: MapStore<FileMap> = import.meta.hot?.data.files ?? map({});
   userWrites: Map<AbsolutePath, number> = import.meta.hot?.data.userWrites ?? new Map();
-
-  get filesCount() {
-    return this.#size;
-  }
 
   constructor(webcontainerPromise: Promise<WebContainer>) {
     this.#webcontainer = webcontainerPromise;
@@ -69,9 +52,6 @@ export class FilesStore {
     return dirent;
   }
 
-  getFileModifications() {
-    return computeFileModifications(this.files.get(), this.#modifiedFiles);
-  }
   getModifiedFiles() {
     const modifiedFiles: { [path: string]: File } = {};
     let hasModifiedFiles = false;
@@ -96,6 +76,12 @@ export class FilesStore {
 
   resetFileModifications() {
     this.#modifiedFiles.clear();
+  }
+
+  setGeneratedFile(filePath: AbsolutePath, content: string) {
+    ensureParentFolders(this.files, filePath);
+
+    this.files.setKey(filePath, { type: 'file', content, isBinary: false });
   }
 
   async saveFile(filePath: AbsolutePath, content: string) {
@@ -139,116 +125,22 @@ export class FilesStore {
     const webcontainer = await this.#webcontainer;
     webcontainer.internal.watchPaths(
       { include: [`${WORK_DIR}/**`], exclude: ['**/node_modules', '.git'], includeContent: true },
-      bufferWatchEvents(FILE_EVENTS_DEBOUNCE_MS, this.#processEventBuffer.bind(this)),
+      this.#watchEvents,
     );
   }
 
   async prewarmWorkdir(container: WebContainer) {
-    const internal = container.internal as unknown as WebContainerInternalSearch;
-    const absFilePaths = await internal.fileSearch([], WORK_DIR, {
-      excludes: ['.gitignore', 'node_modules'],
-    });
-    const dirs = new Set<string>();
-    for (const absPath of absFilePaths) {
-      if (isLocalSecretFilePath(absPath)) {
-        continue;
-      }
-      const dir = path.dirname(absPath);
-      const relativePath = path.relative(container.workdir, absPath);
-      if (!relativePath) {
-        continue;
-      }
-      dirs.add(dir);
-    }
-    for (const dir of Array.from(dirs).sort()) {
-      const sanitizedPath = dir.replace(/\/+$/g, '');
-      this.files.setKey(getAbsolutePath(sanitizedPath), { type: 'folder' });
-    }
-
-    const loadFile = async (absPath: string) => {
-      if (isLocalSecretFilePath(absPath)) {
-        return;
-      }
-      const relativePath = path.relative(container.workdir, absPath);
-      if (!relativePath) {
-        return;
-      }
-      const buffer = await container.fs.readFile(relativePath);
-      const isBinary = isBinaryFile(buffer);
-      let content = '';
-      if (!isBinary) {
-        content = this.#decodeFileContent(buffer);
-      }
-      this.files.setKey(getAbsolutePath(absPath), { type: 'file', content, isBinary });
-    };
-    await Promise.all(absFilePaths.map(loadFile));
+    await prewarmFileMap(container, this.files);
   }
 
-  #processEventBuffer(events: Array<[events: PathWatcherEvent[]]>) {
-    const watchEvents = events.flat(2);
+  flushFileEvents() {
+    return this.#watchEvents.flush();
+  }
 
-    for (const { type, path, buffer } of watchEvents) {
-      // remove any trailing slashes
-      const sanitizedPath = path.replace(/\/+$/g, '');
-      incrementFileUpdateCounter(sanitizedPath);
-
-      if (isLocalSecretFilePath(sanitizedPath)) {
-        void this.#removeLocalSecretFile(sanitizedPath);
-        continue;
-      }
-
-      switch (type) {
-        case 'add_dir': {
-          // we intentionally add a trailing slash so we can distinguish files from folders in the file tree
-          this.files.setKey(getAbsolutePath(sanitizedPath), { type: 'folder' });
-          break;
-        }
-        case 'remove_dir': {
-          this.files.setKey(getAbsolutePath(sanitizedPath), undefined);
-
-          const childPathPrefix = `${sanitizedPath}/`;
-          for (const [direntPath] of Object.entries(this.files.get())) {
-            if (direntPath.startsWith(childPathPrefix)) {
-              this.files.setKey(getAbsolutePath(direntPath), undefined);
-            }
-          }
-          break;
-        }
-        case 'add_file':
-        case 'change': {
-          if (type === 'add_file') {
-            this.#size++;
-          }
-
-          let content = '';
-
-          /**
-           * @note This check is purely for the editor. The way we detect this is not
-           * bullet-proof and it's a best guess so there might be false-positives.
-           * The reason we do this is because we don't want to display binary files
-           * in the editor nor allow to edit them.
-           */
-          const isBinary = isBinaryFile(buffer);
-
-          if (!isBinary) {
-            content = this.#decodeFileContent(buffer);
-          }
-
-          this.files.setKey(getAbsolutePath(sanitizedPath), { type: 'file', content, isBinary });
-
-          break;
-        }
-        case 'remove_file': {
-          this.#size--;
-          this.files.setKey(getAbsolutePath(sanitizedPath), undefined);
-          break;
-        }
-        case 'update_directory': {
-          // we don't care about these events
-          break;
-        }
-      }
-    }
+  #processEventBuffer(events: Parameters<typeof applyFileWatchEvents>[0]) {
+    applyFileWatchEvents(events, this.files, (filePath) => {
+      void this.#removeLocalSecretFile(filePath);
+    });
   }
 
   async #removeLocalSecretFile(filePath: string) {
@@ -269,37 +161,6 @@ export class FilesStore {
       logger.error('Failed to remove local secret file\n\n', error);
     }
   }
-
-  #decodeFileContent(buffer?: Uint8Array) {
-    if (!buffer || buffer.byteLength === 0) {
-      return '';
-    }
-
-    try {
-      return utf8TextDecoder.decode(buffer);
-    } catch (error) {
-      logger.debug('Failed to decode file content as UTF-8', error);
-      return '';
-    }
-  }
 }
 
-function isBinaryFile(buffer: Uint8Array | undefined) {
-  if (buffer === undefined) {
-    return false;
-  }
-
-  return getEncoding(convertToBuffer(buffer), { chunkLength: 100 }) === 'binary';
-}
-
-/**
- * Converts a `Uint8Array` into a Node.js `Buffer` by copying the prototype.
- * The goal is to  avoid expensive copies. It does create a new typed array
- * but that's generally cheap as long as it uses the same underlying
- * array buffer.
- */
-function convertToBuffer(view: Uint8Array): Buffer {
-  return Buffer.from(view.buffer, view.byteOffset, view.byteLength);
-}
-
-export const FILE_EVENTS_DEBOUNCE_MS = 100;
+const FILE_EVENTS_DEBOUNCE_MS = 100;

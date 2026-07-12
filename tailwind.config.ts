@@ -29,12 +29,52 @@ export default {
           'Segoe UI Emoji',
           'Segoe UI Symbol',
           'Noto Color Emoji',
-          'sans-serif',
         ],
       },
       colors: {
+        accent: {
+          500: 'var(--gb-accent)',
+          600: 'color-mix(in srgb, var(--gb-accent) 82%, black)',
+        },
+        background: {
+          primary: 'rgb(var(--background-primary-rgb) / <alpha-value>)',
+          secondary: 'rgb(var(--background-secondary-rgb) / <alpha-value>)',
+          tertiary: 'var(--gb-background-tertiary)',
+          highlight: 'var(--gb-background-highlight)',
+          success: 'var(--gb-background-success)',
+          warning: 'var(--gb-background-warning)',
+          error: 'var(--gb-background-error)',
+          depth: {
+            1: 'var(--bolt-elements-bg-depth-1)',
+            2: 'var(--bolt-elements-bg-depth-2)',
+            3: 'var(--bolt-elements-bg-depth-3)',
+            4: 'var(--bolt-elements-bg-depth-4)',
+          },
+        },
+        border: {
+          transparent: 'var(--gb-border-transparent)',
+          selected: 'var(--gb-border-selected)',
+        },
+        content: {
+          primary: 'rgb(var(--content-primary-rgb) / <alpha-value>)',
+          secondary: 'rgb(var(--content-secondary-rgb) / <alpha-value>)',
+          tertiary: 'rgb(var(--content-tertiary-rgb) / <alpha-value>)',
+          accent: 'var(--gb-content-accent)',
+          success: 'var(--gb-content-success)',
+          warning: 'var(--gb-content-warning)',
+          error: 'var(--gb-content-error)',
+          link: 'var(--gb-content-link)',
+        },
+        util: {
+          accent: 'rgb(38 135 246 / <alpha-value>)',
+          info: 'rgb(7 191 232 / <alpha-value>)',
+          success: 'rgb(79 176 20 / <alpha-value>)',
+          danger: 'rgb(238 52 47 / <alpha-value>)',
+          warning: 'rgb(243 176 28 / <alpha-value>)',
+        },
         bolt: {
           elements: {
+            borderColor: 'var(--gb-border-transparent)',
             background: {
               depth: {
                 1: 'var(--bolt-elements-bg-depth-1)',

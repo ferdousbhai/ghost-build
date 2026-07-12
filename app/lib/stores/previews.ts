@@ -1,4 +1,4 @@
-import type { WebContainer } from '@webcontainer/api';
+import type { WebContainer, WebContainerProcess } from '@webcontainer/api';
 import { atom } from 'nanostores';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { withResolvers } from '~/utils/promises';
@@ -11,6 +11,9 @@ export interface PreviewInfo {
 }
 
 const PROXY_PORT_RANGE_START = 0xc4ef;
+const PROXY_START_TIMEOUT_MS = 10_000;
+const SCREENSHOT_RESPONSE_TIMEOUT_MS = 10_000;
+const PREVIEW_CHANNEL = 'preview-updates';
 const logger = createScopedLogger('PreviewsStore');
 
 // This is a separate codebase.
@@ -20,27 +23,33 @@ import PROXY_SERVER_SOURCE from '../../../proxy/proxy.bundled.cjs?raw';
 type ProxyState = { start: (arg: { proxyUrl: string }) => void; stop: () => void };
 
 export class PreviewsStore {
-  #availablePreviews = new Map<number, PreviewInfo>();
   #webcontainer: Promise<WebContainer>;
+  #nextProxyPort = PROXY_PORT_RANGE_START;
 
   previews = atom<PreviewInfo[]>([]);
 
   #proxies = new Map<number, ProxyState>();
+  #externalPreviewChannels = new Map<number, BroadcastChannel>();
 
   constructor(webcontainerPromise: Promise<WebContainer>) {
     this.#webcontainer = webcontainerPromise;
-    this.#init();
+    void this.#init().catch((error) => logger.error('Failed to initialize preview listeners', error));
   }
 
   async #init() {
     const webcontainer = await this.#webcontainer;
 
-    // Listen for server ready events
     webcontainer.on('server-ready', (port, url) => {
       logger.debug('Server ready on port', port, url);
+
+      if (this.#proxies.has(port)) {
+        this.#proxies.get(port)?.start({ proxyUrl: url });
+        return;
+      }
+
+      this.#upsertPreview(port, true, url);
     });
 
-    // Listen for port events
     webcontainer.on('port', (port, type, url) => {
       if (this.#proxies.has(port)) {
         if (type === 'open') {
@@ -49,27 +58,22 @@ export class PreviewsStore {
         return;
       }
 
-      let previewInfo = this.#availablePreviews.get(port);
-
-      if (type === 'close' && previewInfo) {
-        this.#availablePreviews.delete(port);
+      if (type === 'close' && this.previews.get().some((preview) => preview.port === port)) {
         this.previews.set(this.previews.get().filter((preview) => preview.port !== port));
-        return;
       }
-
-      const previews = this.previews.get();
-
-      if (!previewInfo) {
-        previewInfo = { port, ready: type === 'open', baseUrl: url, iframe: null };
-        this.#availablePreviews.set(port, previewInfo);
-        previews.push(previewInfo);
-      }
-
-      previewInfo.ready = type === 'open';
-      previewInfo.baseUrl = url;
-
-      this.previews.set([...previews]);
     });
+  }
+
+  #upsertPreview(port: number, ready: boolean, url: string) {
+    const previews = this.previews.get();
+    const previewIndex = previews.findIndex((preview) => preview.port === port);
+    if (previewIndex === -1) {
+      this.previews.set([...previews, { port, ready, baseUrl: url, iframe: null }]);
+      return;
+    }
+    this.previews.set(
+      previews.map((preview, index) => (index === previewIndex ? { ...preview, ready, baseUrl: url } : preview)),
+    );
   }
 
   /**
@@ -80,7 +84,7 @@ export class PreviewsStore {
    * auth with multiple users.
    */
   async startProxy(sourcePort: number): Promise<{ proxyPort: number; proxyUrl: string }> {
-    const targetPort = PROXY_PORT_RANGE_START + this.#proxies.size;
+    const targetPort = this.#nextProxyPort++;
     const { promise: onStart, resolve: start } = withResolvers<{ proxyUrl: string }>();
 
     const proxyLogger = createScopedLogger(`Proxy ${targetPort} → ${sourcePort}`);
@@ -96,39 +100,64 @@ export class PreviewsStore {
     };
     this.#proxies.set(targetPort, proxyState);
 
-    // Start the HTTP + HMR WebSocket proxy
-    const webcontainer = await this.#webcontainer;
+    let proxyProcess: WebContainerProcess | undefined;
+    try {
+      // Start the HTTP + HMR WebSocket proxy
+      const webcontainer = await this.#webcontainer;
 
-    const proxyScriptLocation = '/tmp/previewProxy.cjs';
-    // webcontainer.writeFile seems incapable of writing to /tmp/foo
-    // so use sh instead. It's important that this string has no
-    // single quote characters ' in it so this naive escaping works.
-    const writeProxyProcess = await webcontainer.spawn('sh', [
-      '-c',
-      `echo '${PROXY_SERVER_SOURCE}' > ${proxyScriptLocation}`,
-    ]);
-    await writeProxyProcess.exit;
-    const proxyProcess = await webcontainer.spawn('node', [
-      proxyScriptLocation,
-      sourcePort.toString(),
-      targetPort.toString(),
-    ]);
+      const proxyScriptLocation = '/tmp/previewProxy.cjs';
+      // webcontainer.writeFile seems incapable of writing to /tmp/foo
+      // so use sh instead. It's important that this string has no
+      // single quote characters ' in it so this naive escaping works.
+      const writeProxyProcess = await webcontainer.spawn('sh', [
+        '-c',
+        `echo '${PROXY_SERVER_SOURCE}' > ${proxyScriptLocation}`,
+      ]);
+      const writeExitCode = await writeProxyProcess.exit;
+      if (writeExitCode !== 0) {
+        throw new Error(`Failed to write preview proxy script (exit code ${writeExitCode})`);
+      }
+      proxyProcess = await webcontainer.spawn('node', [
+        proxyScriptLocation,
+        sourcePort.toString(),
+        targetPort.toString(),
+      ]);
+      const startedProxyProcess = proxyProcess;
 
-    proxyState.stop = () => {
-      proxyLogger.info('Stopping proxy');
-      proxyProcess.kill();
-    };
+      proxyState.stop = () => {
+        proxyLogger.info('Stopping proxy');
+        startedProxyProcess.kill();
+      };
 
-    proxyProcess.output.pipeTo(
-      new WritableStream({
-        write(data) {
-          proxyLogger.info(data);
-        },
-      }),
-    );
+      void startedProxyProcess.output
+        .pipeTo(
+          new WritableStream({
+            write(data) {
+              proxyLogger.info(data);
+            },
+          }),
+        )
+        .catch((error) => proxyLogger.debug('Proxy output stream closed', error));
 
-    const { proxyUrl } = await onStart;
-    return { proxyPort: targetPort, proxyUrl };
+      const proxyExit = startedProxyProcess.exit.then((exitCode) => {
+        if (this.#proxies.get(targetPort) === proxyState) {
+          this.#proxies.delete(targetPort);
+        }
+        this.#externalPreviewChannels.get(targetPort)?.close();
+        this.#externalPreviewChannels.delete(targetPort);
+        throw new Error(`Preview proxy exited before becoming ready (exit code ${exitCode})`);
+      });
+      const { proxyUrl } = await withTimeout(
+        Promise.race([onStart, proxyExit]),
+        PROXY_START_TIMEOUT_MS,
+        'Preview proxy start timed out',
+      );
+      return { proxyPort: targetPort, proxyUrl };
+    } catch (error) {
+      proxyProcess?.kill();
+      this.#proxies.delete(targetPort);
+      throw error;
+    }
   }
 
   /**
@@ -137,63 +166,123 @@ export class PreviewsStore {
   stopProxy(proxyPort: number) {
     const proxy = this.#proxies.get(proxyPort);
     if (!proxy) {
-      throw new Error(`Proxy for port ${proxyPort} not found`);
+      return;
     }
 
     proxy.stop();
+    this.#proxies.delete(proxyPort);
+    this.#externalPreviewChannels.get(proxyPort)?.close();
+    this.#externalPreviewChannels.delete(proxyPort);
+  }
+
+  trackExternalPreview(proxyPort: number, previewId: string) {
+    const channel = new BroadcastChannel(PREVIEW_CHANNEL);
+    channel.addEventListener('message', (event) => {
+      if (event.data?.type === 'preview-closed' && event.data.previewId === previewId) {
+        this.stopProxy(proxyPort);
+      }
+    });
+    this.#externalPreviewChannels.set(proxyPort, channel);
   }
 
   async requestAnyScreenshot(timeout = 30000): Promise<string> {
-    const t0 = performance.now();
-    let previewIndex;
-    do {
-      previewIndex = this.previews.get().findIndex((preview) => preview.iframe);
+    const deadline = Date.now() + Math.max(0, timeout);
+    while (true) {
+      const previewIndex = this.previews.get().findIndex((preview) => preview.iframe?.contentWindow);
       if (previewIndex !== -1) {
-        break;
+        return this.requestScreenshot(previewIndex, Math.max(1, deadline - Date.now()));
       }
-      await new Promise((r) => setTimeout(r, 1000));
-    } while (performance.now() < t0 + timeout);
-
-    return this.requestScreenshot(previewIndex);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new Error('No preview became available before the screenshot timeout');
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(100, remaining)));
+    }
   }
 
-  async requestScreenshot(previewIndex: number): Promise<string> {
-    const iframe = this.previews.get()[previewIndex].iframe;
+  async requestScreenshot(previewIndex: number, timeoutMs = SCREENSHOT_RESPONSE_TIMEOUT_MS): Promise<string> {
+    const iframe = this.previews.get()[previewIndex]?.iframe;
     if (!iframe) {
       throw new Error('No preview yet');
     }
-    if (!iframe.contentWindow) {
+    const contentWindow = iframe.contentWindow;
+    if (!contentWindow) {
       throw new Error('No preview yet');
     }
 
     const targetOrigin = new URL(iframe.src).origin;
-    let cleanup: (() => void) | undefined;
+    const requestId = crypto.randomUUID();
+    return new Promise<string>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timeout);
+        window.removeEventListener('message', handleMessage);
+      };
+      const handleMessage = (event: MessageEvent) => {
+        if (
+          event.origin !== targetOrigin ||
+          event.source !== contentWindow ||
+          !isPreviewResponse(event.data, requestId)
+        ) {
+          return;
+        }
+        cleanup();
+        if (event.data.type === 'ghostbuildPreviewError') {
+          reject(new Error(event.data.message));
+          return;
+        }
+        resolve(event.data.data);
+      };
+      const timeout = window.setTimeout(() => {
+        cleanup();
+        reject(new Error('Screenshot timeout'));
+      }, timeoutMs);
+      window.addEventListener('message', handleMessage);
+      try {
+        contentWindow.postMessage(
+          {
+            type: 'ghostbuildPreviewRequest',
+            request: 'screenshot',
+            requestId,
+          },
+          targetOrigin,
+        );
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    });
+  }
+}
 
-    const getScreenshotData = (): Promise<string> =>
-      new Promise<string>((resolve) => {
-        const handleMessage = (e: MessageEvent) => {
-          if (e.origin !== targetOrigin || !('type' in e.data) || e.data.type !== 'screenshot') {
-            return;
-          }
-          resolve(e.data.data as string);
-        };
-        window.addEventListener('message', handleMessage);
-        cleanup = () => window.removeEventListener('message', handleMessage);
-      });
-    try {
-      iframe.contentWindow.postMessage(
-        {
-          type: 'ghostbuildPreviewRequest',
-          request: 'screenshot',
-        },
-        targetOrigin,
-      );
-      return await Promise.race([
-        getScreenshotData(),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Screenshot timeout')), 1000)),
-      ]);
-    } finally {
-      cleanup?.();
+type PreviewResponse =
+  | { type: 'screenshot'; requestId: string; data: string }
+  | { type: 'ghostbuildPreviewError'; requestId: string; message: string };
+
+function isPreviewResponse(value: unknown, requestId: string): value is PreviewResponse {
+  if (typeof value !== 'object' || value === null || !('type' in value) || !('requestId' in value)) {
+    return false;
+  }
+  if (value.requestId !== requestId) {
+    return false;
+  }
+  if (value.type === 'screenshot') {
+    return 'data' in value && typeof value.data === 'string';
+  }
+  return value.type === 'ghostbuildPreviewError' && 'message' in value && typeof value.message === 'string';
+}
+
+async function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), milliseconds);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
     }
   }
 }

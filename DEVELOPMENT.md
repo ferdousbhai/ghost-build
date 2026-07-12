@@ -7,7 +7,7 @@ Ghostbuild is developed as a TanStack Start app deployed to Cloudflare Workers.
 ```bash
 nvm install
 nvm use
-npm install -g pnpm
+npm install -g pnpm@9.5.0
 pnpm install
 ```
 
@@ -25,7 +25,7 @@ Configure all runtime secrets and variables as Cloudflare Worker bindings. Do no
 
 Workers AI uses the `AI` binding directly. Use Wrangler OAuth for local production deploys. `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are CI deploy credentials only; configure them as GitHub Actions secrets for Wrangler authentication, not as Worker runtime secrets.
 
-Optional bindings include `AXIOM_API_TOKEN`, `AXIOM_API_URL`, `AXIOM_DATASET_NAME`, `CLOUDFLARE_SITE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `POSTHOG_KEY`, `POSTHOG_HOST`, `SENTRY_DSN`, and commit SHA metadata.
+Optional bindings include `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and commit SHA metadata.
 
 The app tracks the latest AI SDK v6 peer line because the current Cloudflare Agents SDK and `workers-ai-provider` releases declare v6 as their supported AI SDK integration surface.
 
@@ -36,17 +36,10 @@ Build tooling targets Node.js 26+.
 
 ## Verification
 
-Run these before opening a pull request:
+Run the same validation pipeline used by CI before opening a pull request:
 
 ```bash
-pnpm run generate-routes
-pnpm run cf-typegen
-pnpm run verify:stack
-pnpm run verify:template
-pnpm run typecheck
-pnpm run build
-pnpm run test
-pnpm run lint
+pnpm run validate
 ```
 
 ## Deployment
@@ -57,7 +50,7 @@ Production deploys run from the `Production Deploy` GitHub Actions workflow on p
 pnpm run deploy
 ```
 
-The deploy command first verifies stack alignment, regenerates TanStack routes and Cloudflare binding types, typechecks the Worker, provisions required Cloudflare resources, verifies production Cloudflare config, builds with Vite/TanStack Start, runs lint/tests/dependency checks, applies production D1 migrations with `wrangler d1 migrations apply ghostbuild --remote`, and publishes the Worker with Wrangler. Provisioning uses the active Wrangler auth session locally and CI-provided Cloudflare secrets in GitHub Actions.
+The deploy command runs the complete validation pipeline, provisions required Cloudflare resources, verifies production Cloudflare config, applies production D1 migrations with `wrangler d1 migrations apply ghostbuild --remote`, and publishes the Worker with Wrangler. Provisioning uses the active Wrangler auth session locally and CI-provided Cloudflare secrets in GitHub Actions.
 
 ## Template Work
 

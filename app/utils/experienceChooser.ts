@@ -9,7 +9,7 @@ import { UAParser } from 'ua-parser-js';
  *
  * For now we're not even trying on Safari.
  */
-type Experience =
+export type Experience =
   // This mobile device WILL NOT WORK, force marketing page
   | 'marketing-page-only-for-mobile'
   // Safari has not worked reliably with the WebContainer runtime.

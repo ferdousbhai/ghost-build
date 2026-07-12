@@ -16,6 +16,68 @@
 
 .Chat {
   opacity: 1;
+  background:
+    radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--gb-content-accent) 7%, transparent), transparent 28rem),
+    var(--gb-background-primary);
+}
+
+.ChatScroller {
+  scroll-padding-block: 5rem 10rem;
+}
+
+.Conversation {
+  padding-top: 0.25rem;
+}
+
+.ComposerDock {
+  isolation: isolate;
+}
+
+.ComposerDock::before {
+  position: absolute;
+  z-index: -1;
+  inset: -3rem -1rem 0;
+  content: '';
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--gb-background-primary) 3rem);
+}
+
+.Message {
+  animation: message-enter 220ms ease-out both;
+}
+
+.UserMessage {
+  align-self: flex-end;
+  width: min(92%, 34rem);
+  padding: 0.875rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--gb-content-accent) 22%, var(--gb-border-transparent));
+  border-radius: 1.125rem 1.125rem 0.375rem 1.125rem;
+  background: color-mix(in srgb, var(--gb-background-secondary) 94%, var(--gb-content-accent));
+  box-shadow: 0 8px 24px rgb(0 0 0 / 8%);
+}
+
+.AssistantMessage {
+  padding: 0.85rem 0.25rem 1.15rem;
+  color: var(--gb-content-primary);
+}
+
+@keyframes message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (max-width: 639px) {
+  .Conversation {
+    padding-top: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .Message {
+    animation: none;
+  }
 }
 
 .PromptEffectContainer {

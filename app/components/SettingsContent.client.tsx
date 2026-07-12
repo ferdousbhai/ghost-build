@@ -3,20 +3,30 @@ import { ThemeCard } from '~/components/settings/ThemeCard';
 import { ProfileCard } from '~/components/settings/ProfileCard';
 import { Toaster } from '~/components/ui/Toaster';
 import { UserProvider } from '~/components/UserProvider';
+import { Button } from '@ui/Button';
+import { BrandLink } from '~/components/BrandLink';
 
 export function SettingsContent() {
   return (
     <UserProvider>
-      <div className="min-h-screen bg-bolt-elements-background-depth-2">
-        <div className="mx-auto max-w-4xl px-4 py-8">
-          <div className="mb-8 flex items-center gap-4">
-            <a href="/" className="inline-flex" title="Back to Chat">
-              <ArrowLeftIcon />
-            </a>
-            <h1 className="text-content-primary text-3xl font-bold">Settings</h1>
-          </div>
+      <div className="app-page-shell">
+        <div className="app-page-container">
+          <nav className="app-page-nav" aria-label="Settings navigation">
+            <BrandLink />
+            <Button href="/" variant="neutral" size="sm" icon={<ArrowLeftIcon aria-hidden />}>
+              <span>Back to builder</span>
+            </Button>
+          </nav>
 
-          <div className="space-y-6">
+          <header>
+            <p className="app-page-eyebrow">Workspace preferences</p>
+            <h1 className="app-page-title">Make Ghostbuild feel like yours.</h1>
+            <p className="app-page-lede">
+              Manage your account and choose the interface theme you want across the builder.
+            </p>
+          </header>
+
+          <div className="app-page-content grid gap-5">
             <ProfileCard />
             <ThemeCard />
           </div>

@@ -2,14 +2,14 @@
 
 Ghostbuild is an AI app builder for generating TanStack Start applications that run on the Cloudflare developer platform.
 
-The root app runs as a TanStack Start app on Cloudflare Workers. Generated apps are built from the `template/` snapshot and use the same stack: TanStack Start, TanStack Router, TanStack Query, TanStack DB, Cloudflare Workers, D1, R2, Workers AI, and Cloudflare Agents.
+The root app runs as a TanStack Start app on Cloudflare Workers and uses TanStack Query and TanStack DB for client data. Generated apps start from a smaller `template/` snapshot with TanStack Start, TanStack Router, Cloudflare Workers, D1, R2, Workers AI, and Cloudflare Agents; the builder adds feature-specific client data libraries when needed.
 
 ## Getting Started
 
 ### Requirements
 
 - Node.js 26+
-- pnpm 9+
+- pnpm 9.5.0 (the version pinned by `packageManager` and CI)
 - A Cloudflare account with Workers AI enabled
 - Wrangler OAuth for local production deploys, or Cloudflare deploy credentials configured as CI secrets
 
@@ -47,7 +47,7 @@ Only Workers AI models are supported. The coding-agent model is:
 @cf/zai-org/glm-5.2
 ```
 
-The app uses the Cloudflare `AI` binding at runtime and does not need model-provider API keys. Use Wrangler OAuth for local production deploys, or configure `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as GitHub Actions deploy secrets for CI authentication. Optional runtime values such as Axiom, Better Auth/Google auth secrets, public PostHog/Sentry config, site URL, and commit SHA metadata should be configured as Cloudflare bindings. The app does not support non-Workers-AI provider keys.
+The app uses the Cloudflare `AI` binding at runtime and does not need model-provider API keys. Use Wrangler OAuth for local production deploys, or configure `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as GitHub Actions deploy secrets for CI authentication. Better Auth/Google secrets and optional commit metadata should be configured as Cloudflare bindings. The app does not support non-Workers-AI provider keys.
 
 The app tracks the latest AI SDK v6 peer line because the current Cloudflare Agents SDK, `@cloudflare/ai-chat`, and `workers-ai-provider` releases declare AI SDK v6 as their supported integration surface.
 
@@ -62,18 +62,13 @@ pnpm run rebuild-template
 ## Useful Commands
 
 ```bash
-pnpm run generate-routes
-pnpm run cf-typegen
-pnpm run verify:stack
-pnpm run verify:template
-pnpm run typecheck
-pnpm run build
-pnpm run test
+pnpm run validate
 pnpm run deploy
 ```
 
 ## Repository Layout
 
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) documents module boundaries, dependency direction, and the agent context flow.
 - `app/` contains the TanStack Start app, Worker entry, routes, components, and Cloudflare data handlers.
 - `app/agents/` contains Cloudflare Agents integration.
 - `app/lib/cloudflare/` contains the local data client and Worker persistence bridge.

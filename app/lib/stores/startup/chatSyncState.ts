@@ -1,6 +1,7 @@
 import { atom } from 'nanostores';
 
 export const chatSyncState = atom<BackupSyncState>({
+  chatId: null,
   lastSync: 0,
   numFailures: 0,
   started: false,
@@ -10,6 +11,7 @@ export const chatSyncState = atom<BackupSyncState>({
 });
 
 export type BackupSyncState = {
+  chatId: string | null;
   lastSync: number;
   numFailures: number;
   started: boolean;
@@ -19,6 +21,7 @@ export type BackupSyncState = {
 };
 
 export type InitialBackupSyncState = {
+  chatId: string;
   lastSync: number;
   numFailures: number;
   started: boolean;

@@ -1,18 +1,18 @@
 import { Button } from '@ui/Button';
 import { ArrowLeftIcon, ArrowRightIcon, PlusIcon, ResetIcon } from '@radix-ui/react-icons';
 import { useCallback, useState } from 'react';
-import { Modal } from '@ui/Modal';
 import { Combobox } from '@ui/Combobox';
-import { TimestampDistance } from '~/components/ui/TimestampDistance';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { Spinner } from '@ui/Spinner';
 import { useAreFilesSaving } from '~/lib/stores/fileUpdateCounter';
+import { SubchatDialogs } from './SubchatDialogs';
+import { createSubchatOptions, getSubchatNavigation, type SubchatSummary } from './subchat-model';
 
 interface SubchatBarProps {
-  subchats?: { subchatIndex: number; updatedAt: number; description?: string }[];
+  subchats?: SubchatSummary[];
   currentSubchatIndex: number;
   isStreaming: boolean;
-  disableChatMessage: boolean;
+  chatDisabled: boolean;
   sessionId: string | null;
   handleCreateSubchat: () => void;
   onRewind?: (subchatIndex?: number, messageIndex?: number) => void;
@@ -23,7 +23,7 @@ export function SubchatBar({
   subchats,
   currentSubchatIndex,
   isStreaming,
-  disableChatMessage,
+  chatDisabled,
   sessionId,
   onRewind,
   handleCreateSubchat,
@@ -34,12 +34,11 @@ export function SubchatBar({
   const areFilesSaving = useAreFilesSaving();
 
   const subchatCount = subchats?.length ?? 1;
-  const latestSubchatIndex = subchatCount - 1;
-  const hasMultipleSubchats = subchatCount > 1;
-  const isLatestSubchat = currentSubchatIndex >= latestSubchatIndex;
-  const canNavigatePrev = hasMultipleSubchats && currentSubchatIndex > 0;
-  const canNavigateNext = hasMultipleSubchats && currentSubchatIndex < latestSubchatIndex;
-  const canCreateSubchat = isLatestSubchat && sessionId !== null;
+  const { hasMultipleSubchats, canNavigatePrev, canNavigateNext, canCreateSubchat } = getSubchatNavigation(
+    subchatCount,
+    currentSubchatIndex,
+    sessionId !== null,
+  );
 
   const handleNavigateToSubchat = useCallback(
     (index: number) => {
@@ -55,114 +54,35 @@ export function SubchatBar({
     [hasMultipleSubchats, subchatCount],
   );
 
-  const handleRewind = useCallback(
-    (subchatIndex?: number) => {
-      onRewind?.(subchatIndex, undefined);
-    },
-    [onRewind],
-  );
-
-  const getSubchatDisplayName = useCallback(
-    (subchat: { subchatIndex: number; description?: string }, arrayIndex: number) => {
-      if (subchat.description) {
-        return subchat.description;
-      }
-      return arrayIndex === 0 ? 'Initial chat' : `Feature #${arrayIndex}`;
-    },
-    [],
-  );
-
-  const subchatOptions =
-    subchats?.map((subchat, arrayIndex) => ({
-      label: getSubchatDisplayName(subchat, arrayIndex),
-      value: subchat.subchatIndex,
-      subchat,
-      arrayIndex,
-    })) ?? [];
+  const persistedSubchatOptions = createSubchatOptions(subchats);
+  const subchatOptions = persistedSubchatOptions.some((option) => option.value === currentSubchatIndex)
+    ? persistedSubchatOptions
+    : [
+        ...persistedSubchatOptions,
+        {
+          label: currentSubchatIndex === 0 ? 'Initial chat' : `Feature #${currentSubchatIndex}`,
+          value: currentSubchatIndex,
+        },
+      ];
   const visibleSubchatOptions = [...subchatOptions].reverse();
 
   return (
-    <div className="sticky top-0 z-[2] mx-auto mb-4 w-full max-w-chat pt-4">
-      {isRewindModalOpen && (
-        <Modal
-          onClose={() => {
-            setIsRewindModalOpen(false);
-          }}
-          title={<div className="sr-only">Rewind to previous chat</div>}
-        >
-          <div className="flex flex-col gap-2">
-            <h2>Rewind to previous chat</h2>
-            <p className="text-content-primary text-sm">
-              This will undo all changes after this chat. Your current work will be lost and cannot be recovered.
-            </p>
-            <p className="text-content-primary text-sm">
-              Your stored app data will be unaffected, so you may need to either clear or migrate your data in order to
-              use this previous version.
-            </p>
-            <p className="text-content-primary text-sm">Are you sure you want to continue?</p>
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="neutral"
-                onClick={() => {
-                  setIsRewindModalOpen(false);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="danger"
-                onClick={() => {
-                  setIsRewindModalOpen(false);
-                  handleRewind(currentSubchatIndex);
-                }}
-              >
-                Rewind
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-      {isAddChatModalOpen && (
-        <Modal
-          onClose={() => {
-            setIsAddChatModalOpen(false);
-          }}
-          title="Create new chat"
-        >
-          <div className="flex flex-col gap-2">
-            <p className="text-content-primary text-sm">
-              This will create a new chat with fresh context. This can be useful for starting work on a new feature of
-              your app, or fixing a bug unrelated to your recent changes. You can always navigate back to previous chats
-              using{' '}
-              <ArrowLeftIcon className="border-content-secondary/20 bg-background-secondary inline size-5 rounded border p-0.5" />{' '}
-              <ArrowRightIcon className="border-content-secondary/20 bg-background-secondary inline size-5 rounded border p-0.5" />{' '}
-              to view your chat history, but you won&apos;t be able to send more messages in previous chats.
-            </p>
-            <p className="text-content-primary text-sm">Are you sure you want to continue?</p>
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="neutral"
-                onClick={() => {
-                  setIsAddChatModalOpen(false);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() => {
-                  setIsAddChatModalOpen(false);
-                  handleCreateSubchat();
-                }}
-              >
-                Create Chat
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      <div className="border-content-secondary/20 bg-background-secondary/90 flex items-center justify-between gap-2 rounded-lg border px-4 py-2 backdrop-blur-sm">
+    <div className="sticky top-0 z-[2] mx-auto mb-5 w-full max-w-chat px-3 pt-4 sm:px-0">
+      <SubchatDialogs
+        rewindOpen={isRewindModalOpen}
+        createOpen={isAddChatModalOpen}
+        closeRewind={() => setIsRewindModalOpen(false)}
+        closeCreate={() => setIsAddChatModalOpen(false)}
+        confirmRewind={() => {
+          setIsRewindModalOpen(false);
+          onRewind?.(currentSubchatIndex, undefined);
+        }}
+        confirmCreate={() => {
+          setIsAddChatModalOpen(false);
+          handleCreateSubchat();
+        }}
+      />
+      <div className="border-content-secondary/15 bg-background-secondary/85 flex items-center justify-between gap-2 rounded-xl border px-2.5 py-2 shadow-sm backdrop-blur-xl">
         <div className="flex min-w-0 grow items-center gap-2">
           <div className="bg-background-secondary flex rounded-lg border">
             <Button
@@ -221,37 +141,6 @@ export function SubchatBar({
                   handleNavigateToSubchat(subchatIndex);
                 }
               }}
-              Option={({ value, inButton }) => {
-                let option = subchatOptions.find((opt) => opt.value === value);
-                // We optimistically add the current subchat if it hasn't been persisted yet
-                if (!option && value === currentSubchatIndex) {
-                  option = {
-                    label: value === 0 ? 'Initial chat' : `Feature #${value}`,
-                    value: currentSubchatIndex,
-                    subchat: {
-                      subchatIndex: currentSubchatIndex,
-                      updatedAt: Date.now(),
-                    },
-                    arrayIndex: currentSubchatIndex,
-                  };
-                }
-                if (!option) {
-                  return null;
-                }
-
-                const { subchat } = option;
-
-                return (
-                  <div className="flex max-w-96 flex-col gap-1 truncate">
-                    <div className="truncate text-sm">{option.label}</div>
-                    {!inButton && (
-                      <div className="text-left">
-                        <TimestampDistance date={new Date(subchat.updatedAt)} />
-                      </div>
-                    )}
-                  </div>
-                );
-              }}
             />
             {!isSubchatLoaded && <Spinner />}
           </div>
@@ -263,7 +152,7 @@ export function SubchatBar({
               variant="neutral"
               className="bg-background-secondary flex rounded-lg border"
               icon={<PlusIcon className="my-px" />}
-              disabled={disableChatMessage || isStreaming || !isSubchatLoaded || areFilesSaving}
+              disabled={chatDisabled || isStreaming || !isSubchatLoaded || areFilesSaving}
               inline
               tip={
                 isStreaming

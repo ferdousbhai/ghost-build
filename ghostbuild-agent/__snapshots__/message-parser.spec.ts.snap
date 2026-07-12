@@ -1,29 +1,5 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`StreamingMessageParser > valid artifacts with actions > should correctly parse chunks and strip out bolt artifacts (0) > onActionClose 1`] = `
-{
-  "action": {
-    "content": "pnpm install",
-    "type": "shell",
-  },
-  "actionId": "0",
-  "artifactId": "artifact_1",
-  "partId": "message_1-0",
-}
-`;
-
-exports[`StreamingMessageParser > valid artifacts with actions > should correctly parse chunks and strip out bolt artifacts (0) > onActionOpen 1`] = `
-{
-  "action": {
-    "content": "",
-    "type": "shell",
-  },
-  "actionId": "0",
-  "artifactId": "artifact_1",
-  "partId": "message_1-0",
-}
-`;
-
 exports[`StreamingMessageParser > valid artifacts with actions > should correctly parse chunks and strip out bolt artifacts (0) > onArtifactClose 1`] = `
 {
   "id": "artifact_1",
@@ -45,24 +21,12 @@ exports[`StreamingMessageParser > valid artifacts with actions > should correctl
 exports[`StreamingMessageParser > valid artifacts with actions > should correctly parse chunks and strip out bolt artifacts (1) > onActionClose 1`] = `
 {
   "action": {
-    "content": "pnpm install",
-    "type": "shell",
-  },
-  "actionId": "0",
-  "artifactId": "artifact_1",
-  "partId": "message_1-0",
-}
-`;
-
-exports[`StreamingMessageParser > valid artifacts with actions > should correctly parse chunks and strip out bolt artifacts (1) > onActionClose 2`] = `
-{
-  "action": {
     "content": "some content
 ",
     "filePath": "index.js",
     "type": "file",
   },
-  "actionId": "1",
+  "actionId": "0",
   "artifactId": "artifact_1",
   "partId": "message_1-0",
 }
@@ -72,22 +36,10 @@ exports[`StreamingMessageParser > valid artifacts with actions > should correctl
 {
   "action": {
     "content": "",
-    "type": "shell",
-  },
-  "actionId": "0",
-  "artifactId": "artifact_1",
-  "partId": "message_1-0",
-}
-`;
-
-exports[`StreamingMessageParser > valid artifacts with actions > should correctly parse chunks and strip out bolt artifacts (1) > onActionOpen 2`] = `
-{
-  "action": {
-    "content": "",
     "filePath": "index.js",
     "type": "file",
   },
-  "actionId": "1",
+  "actionId": "0",
   "artifactId": "artifact_1",
   "partId": "message_1-0",
 }

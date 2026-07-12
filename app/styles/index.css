@@ -7,6 +7,7 @@
 @import 'components/code.css';
 @import 'components/editor.css';
 @import 'home.css';
+@import 'app-shell.css';
 @tailwind utilities;
 
 html,
@@ -33,9 +34,7 @@ html.dark {
   .bolt-ease-cubic-bezier {
     @apply ease-[cubic-bezier(0.4,0,0.2,1)];
   }
-}
 
-@layer utilities {
   /* Alias for .bottom-4 to avoid false positives with easylist_cookie */
   .bottom-four {
     @apply bottom-4;

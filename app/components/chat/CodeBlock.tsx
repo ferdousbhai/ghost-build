@@ -1,8 +1,9 @@
-import { memo, useEffect, useState } from 'react';
+import { Fragment, memo, useEffect, useState } from 'react';
 import { classNames } from '~/utils/classNames';
 import { CheckIcon, ClipboardIcon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
-import { getCodeHighlighter, normalizeCodeLanguage, type CodeTheme, type HighlightLanguage } from '~/lib/shiki.client';
+import type { CodeTheme } from '~/lib/shiki.client';
+import { highlightTokenStyle, useHighlightedCode } from './useHighlightedCode';
 
 interface CodeBlockProps {
   className?: string;
@@ -19,40 +20,28 @@ export const CodeBlock = memo(function CodeBlock({
   theme = 'dark-plus',
   disableCopy = false,
 }: CodeBlockProps) {
-  const [html, setHTML] = useState<string | undefined>(undefined);
   const [copied, setCopied] = useState(false);
+  const highlighted = useHighlightedCode(code, language, theme);
 
-  const copyToClipboard = () => {
+  const copyToClipboard = async () => {
     if (copied) {
       return;
     }
-
-    navigator.clipboard.writeText(code);
-
-    setCopied(true);
-
-    setTimeout(() => {
-      setCopied(false);
-    }, 1000);
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+    } catch {
+      // Clipboard access can be denied by browser permissions.
+    }
   };
 
   useEffect(() => {
-    const normalizedLanguage = normalizeCodeLanguage(language);
-    let active = true;
-
-    getCodeHighlighter({
-      langs: isLoadableLanguage(normalizedLanguage) ? [normalizedLanguage] : [],
-      themes: [theme],
-    }).then((highlighter) => {
-      if (active) {
-        setHTML(highlighter.codeToHtml(code, { lang: normalizedLanguage, theme }));
-      }
-    });
-
-    return () => {
-      active = false;
-    };
-  }, [code, language, theme]);
+    if (!copied) {
+      return undefined;
+    }
+    const timeout = window.setTimeout(() => setCopied(false), 1000);
+    return () => window.clearTimeout(timeout);
+  }, [copied]);
 
   return (
     <div className={classNames('relative group', className)}>
@@ -65,16 +54,25 @@ export const CodeBlock = memo(function CodeBlock({
           <Button
             variant="neutral"
             icon={copied ? <CheckIcon className="text-util-success" /> : <ClipboardIcon />}
-            onClick={() => copyToClipboard()}
+            onClick={() => void copyToClipboard()}
             tip="Copy Code"
           />
         )}
       </div>
-      <div dangerouslySetInnerHTML={{ __html: html ?? '' }}></div>
+      <pre className="shiki" style={{ backgroundColor: highlighted?.bg, color: highlighted?.fg }}>
+        <code>
+          {highlighted?.tokens.map((line, lineIndex) => (
+            <Fragment key={lineIndex}>
+              {line.map((token, tokenIndex) => (
+                <span key={tokenIndex} style={highlightTokenStyle(token)}>
+                  {token.content}
+                </span>
+              ))}
+              {lineIndex < highlighted.tokens.length - 1 ? '\n' : null}
+            </Fragment>
+          )) ?? code}
+        </code>
+      </pre>
     </div>
   );
 });
-
-function isLoadableLanguage(language: HighlightLanguage): language is Exclude<HighlightLanguage, 'plaintext' | 'text'> {
-  return language !== 'plaintext' && language !== 'text';
-}

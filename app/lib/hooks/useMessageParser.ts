@@ -4,7 +4,13 @@ import { workbenchStore } from '~/lib/stores/workbench.client';
 import { makePartId, type PartId } from 'ghostbuild-agent/partId';
 import type { ArtifactAction } from 'ghostbuild-agent/types';
 import { EXCLUDED_FILE_PATHS } from 'ghostbuild-agent/constants';
-import { getToolInvocation, isToolPart, type GhostbuildMessage, type GhostbuildPart } from 'ghostbuild-agent/ai-compat';
+import {
+  getToolInvocation,
+  isMisparsedArtifactToolPart,
+  isToolPart,
+  type GhostbuildMessage,
+  type GhostbuildPart,
+} from 'ghostbuild-agent/ai-compat';
 
 export const messageParser = new StreamingMessageParser({
   callbacks: {
@@ -60,26 +66,7 @@ function processToolInvocationPart(partId: PartId, part: Part): Part | null {
   if (!toolInvocation) {
     return null;
   }
-  workbenchStore.addArtifact({
-    id: partId,
-    partId,
-    title: 'Editing files...',
-  });
-  const data = {
-    artifactId: partId,
-    partId,
-    actionId: toolInvocation.toolCallId,
-    action: {
-      type: 'toolUse' as const,
-      toolName: toolInvocation.toolName,
-      parsedContent: toolInvocation,
-      content: JSON.stringify(toolInvocation),
-    },
-  };
-  workbenchStore.addAction(data);
-  if (toolInvocation.state === 'call' || toolInvocation.state === 'result') {
-    workbenchStore.runAction(data);
-  }
+  workbenchStore.scheduleToolInvocation(toolInvocation, partId);
   return {
     type: 'tool-invocation',
     toolInvocation,
@@ -122,6 +109,13 @@ export function processMessage(
         break;
       }
       default: {
+        if (isMisparsedArtifactToolPart(part)) {
+          newPart = {
+            type: 'text' as const,
+            text: 'The builder returned an unsupported file-write block, so the changes were not applied. Please retry the request.',
+          };
+          break;
+        }
         if (isToolPart(part)) {
           newPart = processToolInvocationPart(partId, part) ?? part;
           break;

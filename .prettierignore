@@ -6,3 +6,4 @@ app/routeTree.gen.ts
 template/src/routeTree.gen.ts
 worker-configuration.d.ts
 template/worker-configuration.d.ts
+vite.config.ts.timestamp-*.mjs

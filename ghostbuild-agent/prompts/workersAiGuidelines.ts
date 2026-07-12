@@ -10,8 +10,7 @@ export function workersAiGuidelines() {
     For chat UI, use \`useAgentChat\` from \`@cloudflare/ai-chat/react\` against that Agent instead of
     adding custom \`/api/ai\` fetch endpoints. Keep the Agent transcript durable, but call
     \`pruneMessages\` on model messages before \`streamText\` so old reasoning/tool context does not grow without bound.
-    Set \`maxPersistedMessages\` on \`AIChatAgent\` classes to bound SQLite transcript storage, and pass
-    \`options?.abortSignal\` through to \`streamText\` so stopped chat requests cancel Workers AI calls.
+    Pass \`options?.abortSignal\` through to \`streamText\` so stopped chat requests cancel Workers AI calls.
     Set \`messageConcurrency = "queue"\` for deterministic chat turn ordering unless the app intentionally needs latest,
     merge, drop, or debounce behavior. Set \`waitForMcpConnections = { timeout: 10_000 }\` when an Agent may use MCP tools
     so startup waits are explicit instead of relying on package defaults.

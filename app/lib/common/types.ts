@@ -1,7 +1,4 @@
-import type { ActionStatus } from '~/lib/runtime/action-runner';
-import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
-
-export type GhostbuildToolName = keyof GhostbuildToolSet;
+import type { ActionStatus } from '~/lib/runtime/action-runner/types';
 
 export type ToolStatus = Record<string, ActionStatus>;
 

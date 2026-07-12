@@ -25,8 +25,8 @@ export function getFileUpdateCounter() {
   return fileUpdateCounter.get();
 }
 
-export function waitForFileUpdateCounterChanged(counter: number) {
-  return waitForStoreCondition(fileUpdateCounter, (newCounter) => newCounter !== counter);
+export function waitForFileUpdateCounterChanged(counter: number, signal?: AbortSignal) {
+  return waitForStoreCondition(fileUpdateCounter, (newCounter) => newCounter !== counter, { signal });
 }
 
 export function incrementFileUpdateCounter(path: string) {

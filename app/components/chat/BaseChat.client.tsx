@@ -1,10 +1,9 @@
-import React, { lazy, Suspense, type ReactNode, type RefCallback, useCallback, useMemo } from 'react';
+import React, { lazy, Suspense, type ReactNode, type RefCallback, useCallback } from 'react';
 import { messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { isStreamStatusActive, type StreamStatus, type ToolStatus } from '~/lib/common/types';
 import type { TerminalInitializationOptions } from '~/types/terminal';
 import { MessageInput } from './MessageInput';
 import { useChatId } from '~/lib/stores/chatId';
-import { getCloudflareSiteUrl } from '~/lib/cloudflareSiteUrl';
 import { messageInputStore } from '~/lib/stores/messageInput';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import type { ActionAlert } from '~/types/actions';
@@ -39,7 +38,7 @@ interface BaseChatProps {
 
   // Chat user interactions
   onStop: () => void;
-  onSend: (messageInput: string) => Promise<void>;
+  onSend: (messageInput: string) => Promise<boolean>;
   sendMessageInProgress: boolean;
 
   // Current chat history props
@@ -49,7 +48,7 @@ interface BaseChatProps {
   toolStatus: ToolStatus;
   messages: GhostbuildMessage[];
   terminalInitializationOptions: TerminalInitializationOptions | undefined;
-  disableChatMessage: ReactNode | null;
+  disabledReason: ReactNode | null;
 
   // Alert related props
   actionAlert: ActionAlert | undefined;
@@ -80,7 +79,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       clearAlert,
       toolStatus,
       terminalInitializationOptions,
-      disableChatMessage,
+      disabledReason,
       onRewindToMessage,
       subchats,
     },
@@ -94,14 +93,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
 
     const chatId = useChatId();
     const sessionId = useSessionIdOrNullOrLoading();
-    const dataForEvals = useMemo(() => {
-      return JSON.stringify({
-        chatId,
-        sessionId,
-        workerSiteUrl: getCloudflareSiteUrl(),
-      });
-    }, [chatId, sessionId]);
-
     const handleCreateSubchat = useCallback(async () => {
       if (!sessionId) {
         return;
@@ -117,19 +108,17 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
         await onSend(messageText(lastUserMessage));
       }
     }, [lastUserMessage, onSend]);
-    const baseChat = (
+    return (
       <div
         ref={ref}
         className={classNames(styles.BaseChat, 'relative flex h-full w-full overflow-hidden')}
         data-chat-visible={showChat}
-        data-messages-for-evals={dataForEvals}
       >
-        <div ref={scrollRef} className="flex size-full flex-col overflow-y-auto">
+        <div ref={scrollRef} className={classNames(styles.ChatScroller, 'flex size-full flex-col overflow-y-auto')}>
           <div className="flex w-full grow flex-col lg:flex-row">
             <div
               className={classNames(styles.Chat, 'flex flex-col flex-grow lg:min-w-[var(--chat-min-width)] h-full', {
                 'items-stretch': !chatStarted,
-                'pt-4': chatStarted,
               })}
             >
               <div
@@ -141,7 +130,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                   <HomeIntro
                     actionAlert={actionAlert}
                     clearAlert={clearAlert}
-                    disableChatMessage={disableChatMessage}
+                    disabledReason={disabledReason}
                     isStreaming={isStreaming}
                     messagesLength={messages.length}
                     onSend={onSend}
@@ -154,7 +143,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                       subchats={subchats}
                       currentSubchatIndex={currentSubchatIndex}
                       isStreaming={isStreaming}
-                      disableChatMessage={disableChatMessage !== null || messages.length === 0}
+                      chatDisabled={disabledReason !== null || messages.length === 0}
                       sessionId={sessionId ?? null}
                       onRewind={onRewindToMessage}
                       handleCreateSubchat={handleCreateSubchat}
@@ -169,12 +158,12 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: -20 }}
                           transition={{ duration: 0.3, ease: 'easeInOut' }}
-                          className="mx-auto flex w-full max-w-chat flex-1 flex-col"
+                          className={classNames(styles.Conversation, 'mx-auto flex w-full max-w-chat flex-1 flex-col')}
                         >
                           <Suspense fallback={null}>
                             <Messages
                               ref={messageRef}
-                              className="z-[1] mx-auto flex w-full max-w-chat flex-1 flex-col gap-4 pb-6"
+                              className="z-[1] mx-auto flex w-full max-w-chat flex-1 flex-col gap-3 px-3 pb-8 sm:px-0"
                               messages={messages}
                               isStreaming={isStreaming}
                               onRewindToMessage={onRewindToMessage}
@@ -187,12 +176,17 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                   </>
                 )}
                 {chatStarted && (
-                  <div className="z-prompt bottom-four sticky mx-auto flex w-full max-w-chat flex-col">
+                  <div
+                    className={classNames(
+                      styles.ComposerDock,
+                      'z-prompt sticky bottom-0 mx-auto flex w-full max-w-chat flex-col px-3 pb-3 sm:px-0 sm:pb-4',
+                    )}
+                  >
                     <ChatActionAlert
                       alert={actionAlert}
                       clearAlert={clearAlert}
                       onSend={onSend}
-                      className="bg-background-secondary mb-4"
+                      className="mb-4 bg-background-secondary"
                     />
                     {(!subchats || (currentSubchatIndex >= subchats.length - 1 && isSubchatLoaded)) && (
                       <>
@@ -205,7 +199,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                           </div>
                         )}
 
-                        {!disableChatMessage && !shouldShowNudge && (
+                        {!disabledReason && (
                           <StreamingIndicator
                             streamStatus={streamStatus}
                             numMessages={messages.length}
@@ -217,20 +211,18 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                           />
                         )}
 
-                        {!shouldShowNudge && (
-                          <MessageInput
-                            chatStarted={chatStarted}
-                            isStreaming={isStreaming}
-                            sendMessageInProgress={sendMessageInProgress}
-                            disabled={disableChatMessage !== null}
-                            onStop={onStop}
-                            onSend={onSend}
-                            numMessages={messages.length}
-                          />
-                        )}
+                        <MessageInput
+                          chatStarted={chatStarted}
+                          isStreaming={isStreaming}
+                          sendMessageInProgress={sendMessageInProgress}
+                          disabled={disabledReason !== null}
+                          onStop={onStop}
+                          onSend={onSend}
+                          numMessages={messages.length}
+                        />
                       </>
                     )}
-                    <DisabledChatMessageSheet message={disableChatMessage} />
+                    <DisabledChatMessageSheet message={disabledReason} />
                   </div>
                 )}
               </div>
@@ -248,8 +240,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
         </div>
       </div>
     );
-
-    return baseChat;
   },
 );
 BaseChat.displayName = 'BaseChat';

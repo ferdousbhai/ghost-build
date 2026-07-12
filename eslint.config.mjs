@@ -1,5 +1,4 @@
 import blitzPlugin from '@blitz/eslint-plugin';
-import { jsFileExtensions } from '@blitz/eslint-plugin/dist/configs/javascript.js';
 import { getNamingConventionRule, tsFileExtensions } from '@blitz/eslint-plugin/dist/configs/typescript.js';
 import tailwindcss from 'eslint-plugin-tailwindcss';
 import reactPlugin from 'eslint-plugin-react';
@@ -42,13 +41,14 @@ export default [
       '**/.wrangler',
       '**/bolt/build',
       '**/.history',
+      'scripts/fixtures/**',
       'template/**',
       '**/*.bundled.*',
     ],
   },
   ...blitzPlugin.configs.recommended(),
   {
-    files: [...tsFileExtensions, ...jsFileExtensions],
+    files: [...tsFileExtensions],
     plugins: {
       react: reactPlugin,
       'react-hooks': reactHooksPlugin,
@@ -65,13 +65,9 @@ export default [
 
       'react/prop-types': 'off',
       'import/order': 'off',
-      '@blitz/lines-around-comment': 'off',
-      '@blitz/newline-before-return': 'off',
-      '@blitz/catch-error-name': 'off',
       '@typescript-eslint/no-this-alias': 'off',
       '@typescript-eslint/no-empty-object-type': 'off',
       '@typescript-eslint/naming-convention': 'off',
-      // turn off all five custom rules
       '@blitz/catch-error-name': 'off',
       '@blitz/comment-syntax': 'off',
       '@blitz/block-scope-case': 'off',
@@ -88,8 +84,6 @@ export default [
       'no-eval': ['error'],
       'linebreak-style': ['error', 'unix'],
       'arrow-spacing': ['error', { before: true, after: true }],
-      'multiline-comment-style': 'off',
-      'padding-line-between-statements': 'off',
       '@typescript-eslint/no-unused-vars': [
         'error', // or 'warn' if you prefer
         {
@@ -111,7 +105,6 @@ export default [
           allowNamedFunctions: true,
         },
       ],
-      'tailwindcss/classnames-order': 'off',
       'no-restricted-syntax': [
         'error',
         {
@@ -141,7 +134,7 @@ export default [
     },
   },
   {
-    files: [...tsFileExtensions, ...jsFileExtensions, '**/*.tsx'],
+    files: ['app/**/*.{js,jsx,ts,tsx}'],
     ignores: ['functions/*'],
     rules: {
       'no-restricted-imports': [
@@ -166,6 +159,11 @@ export default [
   },
   ...tailwindcss.configs['flat/recommended'],
   {
+    rules: {
+      'tailwindcss/classnames-order': 'off',
+    },
+  },
+  {
     files: ['**/*.tsx'],
     plugins: {
       tailwindcss,
@@ -185,6 +183,27 @@ export default [
     },
     rules: {
       'custom/no-global-fetch': 'error',
+    },
+  },
+  {
+    files: [
+      'scripts/**/*.{cjs,js,mjs}',
+      'iframe-worker/build.cjs',
+      'proxy/build.cjs',
+      'make-bootstrap-snapshot.js',
+      'parse-compressed-messages.mjs',
+    ],
+    rules: {
+      '@blitz/block-scope-case': 'off',
+      '@blitz/catch-error-name': 'off',
+      '@blitz/comment-syntax': 'off',
+      '@blitz/lines-around-comment': 'off',
+      '@blitz/newline-before-return': 'off',
+      'consistent-return': 'off',
+      'import/order': 'off',
+      'multiline-comment-style': 'off',
+      'padding-line-between-statements': 'off',
+      'unicorn/prefer-node-protocol': 'off',
     },
   },
 ];

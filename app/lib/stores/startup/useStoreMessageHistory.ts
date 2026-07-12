@@ -9,9 +9,8 @@ import type { StreamStatus } from '~/lib/common/types';
  *
  * The `chatSyncWorker` reads from this state and persists it to the database.
  *
- * Additionally, this adds a `beforeunload` listener that triggers whenever the
- * messages it's observed (including incomplete parts) is beyond the persisted
- * state to prevent the user from closing the tab too early.
+ * The startup history hook owns the related `beforeunload` protection so this
+ * callback remains a pure store update.
  */
 export function useStoreMessageHistory() {
   return useCallback((messages: GhostbuildMessage[], streamStatus: StreamStatus) => {

@@ -1,5 +1,5 @@
 import type { PartId } from './partId.js';
-import type { ActionType, ArtifactAction, ArtifactData, FileAction } from './types.js';
+import type { ArtifactAction, ArtifactData, FileAction } from './types.js';
 import { createScopedLogger } from './utils/logger.js';
 import { getRelativePath } from './utils/workDir.js';
 import { unreachable } from './utils/unreachable.js';
@@ -49,35 +49,16 @@ interface MessageState {
   insideArtifact: boolean;
   insideAction: boolean;
   currentArtifact?: ArtifactData;
-  currentAction: ArtifactAction | null;
+  currentAction: FileAction | null;
   actionId: number;
   hasCreatedArtifact: boolean;
 }
 
-export class StreamingMessageParser {
+/** Compatibility parser for file actions stored in pre-tool-call chat transcripts. */
+export class LegacyBoltMessageParser {
   #messages = new Map<string, MessageState>();
 
-  constructor(private _options: StreamingMessageParserOptions = {}) {}
-
-  static stripArtifacts(content: string) {
-    let i = 0;
-    let output = '';
-
-    while (i < content.length) {
-      const startIndex = content.indexOf(ARTIFACT_TAG_OPEN, i);
-      if (startIndex === -1) {
-        output += content.slice(i);
-        break;
-      }
-      output += content.slice(i, startIndex);
-      const endIndex = content.indexOf(ARTIFACT_TAG_CLOSE, startIndex);
-      if (endIndex === -1) {
-        break;
-      }
-      i = endIndex + ARTIFACT_TAG_CLOSE.length;
-    }
-    return output;
-  }
+  constructor(private readonly options: StreamingMessageParserOptions = {}) {}
 
   parse(partId: PartId, input: string) {
     let state = this.#messages.get(partId);
@@ -108,32 +89,34 @@ export class StreamingMessageParser {
         }
 
         if (state.insideAction) {
-          if (!state.currentAction) {
-            unreachable('Action not initialized');
-          }
-
           const closeIndex = input.indexOf(ARTIFACT_ACTION_TAG_CLOSE, i);
-
           const currentAction = state.currentAction;
+
+          if (!currentAction) {
+            if (closeIndex === -1) {
+              break;
+            }
+            state.insideAction = false;
+            i = closeIndex + ARTIFACT_ACTION_TAG_CLOSE.length;
+            continue;
+          }
 
           if (closeIndex !== -1) {
             const actionContent = input.slice(i, closeIndex);
 
             let content = actionContent.trim();
 
-            if (currentAction && currentAction.type === 'file') {
-              // Remove markdown code block syntax if present and file is not markdown
-              if (!currentAction.filePath.endsWith('.md')) {
-                content = cleanoutMarkdownSyntax(content);
-                content = cleanEscapedTags(content);
-              }
-
-              content += '\n';
+            // Remove markdown code block syntax if present and file is not markdown
+            if (!currentAction.filePath.endsWith('.md')) {
+              content = stripMarkdownFence(content);
+              content = cleanEscapedTags(content);
             }
+
+            content += '\n';
 
             currentAction.content = content;
 
-            this._options.callbacks?.onActionClose?.({
+            this.options.callbacks?.onActionClose?.({
               artifactId: currentArtifact.id,
               partId,
 
@@ -144,7 +127,7 @@ export class StreamingMessageParser {
                */
               actionId: String(state.actionId - 1),
 
-              action: currentAction as ArtifactAction,
+              action: currentAction,
             });
 
             state.insideAction = false;
@@ -152,25 +135,19 @@ export class StreamingMessageParser {
 
             i = closeIndex + ARTIFACT_ACTION_TAG_CLOSE.length;
           } else {
-            if (currentAction && currentAction.type === 'file') {
-              let content = input.slice(i);
+            let content = input.slice(i);
 
-              if (!currentAction.filePath.endsWith('.md')) {
-                content = cleanoutMarkdownSyntax(content);
-                content = cleanEscapedTags(content);
-              }
-
-              this._options.callbacks?.onActionStream?.({
-                artifactId: currentArtifact.id,
-                partId,
-                actionId: String(state.actionId - 1),
-                action: {
-                  ...(currentAction as FileAction),
-                  content,
-                  filePath: currentAction.filePath,
-                },
-              });
+            if (!currentAction.filePath.endsWith('.md')) {
+              content = stripMarkdownFence(content);
+              content = cleanEscapedTags(content);
             }
+
+            this.options.callbacks?.onActionStream?.({
+              artifactId: currentArtifact.id,
+              partId,
+              actionId: String(state.actionId - 1),
+              action: { ...currentAction, content },
+            });
 
             break;
           }
@@ -184,21 +161,23 @@ export class StreamingMessageParser {
             if (actionEndIndex !== -1) {
               state.insideAction = true;
 
-              state.currentAction = this.#parseActionTag(input, actionOpenIndex, actionEndIndex);
+              state.currentAction = parseFileActionTag(input.slice(actionOpenIndex, actionEndIndex + 1));
 
-              this._options.callbacks?.onActionOpen?.({
-                artifactId: currentArtifact.id,
-                partId,
-                actionId: String(state.actionId++),
-                action: state.currentAction as ArtifactAction,
-              });
+              if (state.currentAction) {
+                this.options.callbacks?.onActionOpen?.({
+                  artifactId: currentArtifact.id,
+                  partId,
+                  actionId: String(state.actionId++),
+                  action: state.currentAction,
+                });
+              }
 
               i = actionEndIndex + 1;
             } else {
               break;
             }
           } else if (artifactCloseIndex !== -1) {
-            this._options.callbacks?.onArtifactClose?.({ partId, ...currentArtifact });
+            this.options.callbacks?.onArtifactClose?.({ partId, ...currentArtifact });
 
             state.insideArtifact = false;
             state.currentArtifact = undefined;
@@ -228,10 +207,10 @@ export class StreamingMessageParser {
 
             if (openTagEnd !== -1) {
               const artifactTag = input.slice(i, openTagEnd + 1);
-
-              const artifactTitle = this.#extractAttribute(artifactTag, 'title') as string;
-              const type = this.#extractAttribute(artifactTag, 'type') as string;
-              const artifactId = this.#extractAttribute(artifactTag, 'id') as string;
+              const attributes = parseTagAttributes(artifactTag);
+              const artifactTitle = attributes.title ?? '';
+              const type = attributes.type;
+              const artifactId = attributes.id ?? '';
 
               if (!artifactTitle) {
                 logger.warn('Artifact title missing');
@@ -251,13 +230,13 @@ export class StreamingMessageParser {
 
               state.currentArtifact = currentArtifact;
 
-              this._options.callbacks?.onArtifactOpen?.({ partId, ...currentArtifact });
+              this.options.callbacks?.onArtifactOpen?.({ partId, ...currentArtifact });
 
               // Sometimes the agent creates multiple artifacts in a single part,
               // which we don't want. In order to prevent these rendering multiple times,
               // we'll only add the element for the artifact once.
               if (!state.hasCreatedArtifact) {
-                const artifactFactory = this._options.artifactElement ?? createArtifactElement;
+                const artifactFactory = this.options.artifactElement ?? createArtifactElement;
 
                 output += artifactFactory({ partId });
                 state.hasCreatedArtifact = true;
@@ -299,37 +278,10 @@ export class StreamingMessageParser {
   reset() {
     this.#messages.clear();
   }
-
-  #parseActionTag(input: string, actionOpenIndex: number, actionEndIndex: number) {
-    const actionTag = input.slice(actionOpenIndex, actionEndIndex + 1);
-
-    const actionType = this.#extractAttribute(actionTag, 'type') as ActionType;
-
-    const actionAttributes = {
-      type: actionType,
-      content: '',
-    };
-
-    if (actionType === 'file') {
-      const filePath = this.#extractAttribute(actionTag, 'filePath') as string;
-
-      if (!filePath) {
-        logger.debug('File path not specified');
-      }
-
-      (actionAttributes as FileAction).filePath = getRelativePath(filePath);
-    } else {
-      logger.warn(`Unknown action type '${actionType}'`);
-    }
-
-    return actionAttributes as FileAction;
-  }
-
-  #extractAttribute(tag: string, attributeName: string): string | undefined {
-    const match = tag.match(new RegExp(`${attributeName}="([^"]*)"`, 'i'));
-    return match ? match[1] : undefined;
-  }
 }
+
+/** @deprecated New responses use AI SDK tool parts; retained for old transcripts. */
+export { LegacyBoltMessageParser as StreamingMessageParser };
 
 const createArtifactElement: ElementFactory = (props) => {
   const elementProps = [
@@ -346,7 +298,7 @@ function camelToDashCase(input: string) {
   return input.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
 }
 
-function cleanoutMarkdownSyntax(content: string) {
+function stripMarkdownFence(content: string) {
   const codeBlockRegex = /^\s*```\w*\n([\s\S]*?)\n\s*```\s*$/;
   const match = content.match(codeBlockRegex);
 
@@ -355,6 +307,27 @@ function cleanoutMarkdownSyntax(content: string) {
   }
 
   return content;
+}
+
+function parseFileActionTag(tag: string): FileAction | null {
+  const attributes = parseTagAttributes(tag);
+  if (attributes.type !== 'file') {
+    logger.debug(`Ignoring unsupported legacy action type '${attributes.type ?? 'missing'}'`);
+    return null;
+  }
+  if (!attributes.filePath) {
+    logger.warn('Ignoring legacy file action without a path');
+    return null;
+  }
+  return {
+    type: 'file',
+    filePath: getRelativePath(attributes.filePath),
+    content: '',
+  };
+}
+
+function parseTagAttributes(tag: string): Record<string, string> {
+  return Object.fromEntries(Array.from(tag.matchAll(/([\w:-]+)="([^"]*)"/g), ([, key, value]) => [key, value]));
 }
 
 function cleanEscapedTags(content: string) {

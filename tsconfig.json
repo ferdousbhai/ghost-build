@@ -19,7 +19,7 @@
     "baseUrl": ".",
     "paths": {
       "~/*": ["./app/*"],
-      "@ui/*": ["./app/components/ui-system/*"]
+      "@ui/*": ["./app/components/ui/primitives/*"]
     },
 
     // vite takes care of building everything, not tsc

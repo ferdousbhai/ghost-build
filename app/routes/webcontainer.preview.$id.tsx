@@ -43,6 +43,9 @@ function WebContainerPreview() {
         timestamp: Date.now(),
       });
     };
+    const notifyPreviewClosed = () => {
+      channel.postMessage({ type: 'preview-closed', previewId });
+    };
 
     // Listen for preview updates
     channel.onmessage = (event) => {
@@ -61,9 +64,11 @@ function WebContainerPreview() {
 
     // Notify other tabs that this preview is ready
     notifyPreviewReady();
+    window.addEventListener('pagehide', notifyPreviewClosed, { once: true });
 
     // Cleanup
     return () => {
+      window.removeEventListener('pagehide', notifyPreviewClosed);
       channel.close();
       broadcastChannelRef.current = null;
     };

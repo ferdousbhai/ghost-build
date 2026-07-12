@@ -8,6 +8,7 @@ import { optimizeCssModules } from 'vite-plugin-optimize-css-modules';
 import wasm from 'vite-plugin-wasm';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { fileURLToPath } from 'node:url';
+import { rm } from 'node:fs/promises';
 
 const fromRoot = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
@@ -21,7 +22,7 @@ export default defineConfig((config) => {
       // our source isn't very secret, but this does make it very important not to harcode secrets:
       // sourcemaps may include backend code!
       sourcemap: true,
-      rollupOptions: {
+      rolldownOptions: {
         output: {
           format: 'esm',
         },
@@ -64,6 +65,13 @@ export default defineConfig((config) => {
               map: null,
             };
           }
+        },
+      },
+      {
+        name: 'ghostbuild-strip-local-dev-vars',
+        apply: 'build',
+        async closeBundle() {
+          await rm(fromRoot('./dist/server/.dev.vars'), { force: true });
         },
       },
 

@@ -49,7 +49,7 @@ app/commit.json
 .cursorrules
 
 package-lock.json
-template/pnpm-lock.yaml
+vite.config.ts.timestamp-*.mjs
 
 # Sentry Config File
 .env.sentry-build-plugin

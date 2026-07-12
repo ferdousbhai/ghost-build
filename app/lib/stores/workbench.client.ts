@@ -1,92 +1,64 @@
 import { atom, map, type ReadableAtom, type WritableAtom } from 'nanostores';
 import type { EditorDocument, ScrollPosition } from 'ghostbuild-agent/types';
-import { ActionRunner } from '~/lib/runtime/action-runner';
 import type { ActionCallbackData, ArtifactCallbackData } from 'ghostbuild-agent/message-parser';
 import { webcontainer } from '~/lib/webcontainer';
 import type { ITerminal, TerminalInitializationOptions } from '~/types/terminal';
-import { unreachable } from 'ghostbuild-agent/utils/unreachable';
 import { EditorStore } from './editor';
 import { FilesStore } from './files';
 import type { FileMap } from 'ghostbuild-agent/types';
+import type { GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import type { AbsolutePath } from 'ghostbuild-agent/utils/workDir';
-import { getAbsolutePath, getRelativePath } from 'ghostbuild-agent/utils/workDir';
+import { getAbsolutePath } from 'ghostbuild-agent/utils/workDir';
 import { PreviewsStore } from './previews';
 import { TerminalStore } from './terminal';
-import { path } from 'ghostbuild-agent/utils/path';
 import { description } from './description';
-import { createSampler } from '~/utils/sampler';
-import type { ActionAlert } from '~/types/actions';
 import type { WebContainer } from '@webcontainer/api';
-import { withResolvers } from '~/utils/promises';
 import type { Artifacts } from './artifacts';
-import { WORK_DIR } from 'ghostbuild-agent/constants';
-import { parsePartId, type PartId, type MessageId } from 'ghostbuild-agent/partId.js';
-import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { generateReadmeContent } from '~/lib/download/readmeContent';
-import { cursorRulesContent } from '~/lib/download/cursorRulesContent';
-import type { GhostbuildToolName } from '~/lib/common/types';
-import { isLocalSecretFilePath } from '~/utils/secretFiles';
-import { isActionStatusActive } from '~/lib/runtime/action-runner';
+import type { PartId } from 'ghostbuild-agent/partId.js';
+import { WorkbenchArtifactStore, type ArtifactState } from './workbench-artifacts';
+import { downloadProject } from '~/lib/download/download-project';
+import { isWorkerBuildTriggerPath } from './worker-build-trigger';
+import { workbenchActionAlert, workbenchCurrentView } from './workbench-ui-state';
 
-const logger = createScopedLogger('WorkbenchStore');
-const ACTION_STREAM_SAMPLE_MS = 100;
-const WORKER_BUILD_TRIGGER_FILES = new Set([
-  path.join(WORK_DIR, 'wrangler.jsonc'),
-  path.join(WORK_DIR, 'src/server.ts'),
-  path.join(WORK_DIR, 'src/workers-ai.shared.ts'),
-]);
-const WORKER_BUILD_TRIGGER_AGENT_DIR = path.join(WORK_DIR, 'src/agents');
-
-function isWorkerBuildTriggerPath(filePath: string) {
-  return (
-    WORKER_BUILD_TRIGGER_FILES.has(filePath) ||
-    filePath === WORKER_BUILD_TRIGGER_AGENT_DIR ||
-    filePath.startsWith(`${WORKER_BUILD_TRIGGER_AGENT_DIR}/`)
-  );
-}
-
-export interface ArtifactState {
-  id: string;
-  title: string;
-  type?: string;
-  closed: boolean;
-  runner: ActionRunner;
-}
-
-type ArtifactUpdateState = Pick<ArtifactState, 'title' | 'closed'>;
-
-export type WorkbenchViewType = 'code' | 'diff' | 'preview';
+export type { WorkbenchViewType } from './workbench-ui-state';
 
 class WorkbenchStore {
   #previewsStore = new PreviewsStore(webcontainer);
   #filesStore = new FilesStore(webcontainer);
-  #editorStore = new EditorStore(this.#filesStore);
+  #editorStore = new EditorStore();
   #terminalStore = new TerminalStore(webcontainer);
-  #toolCalls: Map<string, PromiseWithResolvers<{ result: string }> & { done: boolean }> = new Map();
-
   #reloadedParts = import.meta.hot?.data.reloadedParts ?? new Set<string>();
+  #artifactStore: WorkbenchArtifactStore;
 
   artifacts: Artifacts = import.meta.hot?.data.artifacts ?? map({});
 
-  _lastChangedFile: number = 0;
-
   showWorkbench: WritableAtom<boolean> = import.meta.hot?.data.showWorkbench ?? atom(false);
-  currentView: WritableAtom<WorkbenchViewType> = import.meta.hot?.data.currentView ?? atom('code');
+  currentView = workbenchCurrentView;
   unsavedFiles: WritableAtom<Set<AbsolutePath>> = import.meta.hot?.data.unsavedFiles ?? atom(new Set<AbsolutePath>());
-  actionAlert: WritableAtom<ActionAlert | undefined> =
-    import.meta.hot?.data.actionAlert ?? atom<ActionAlert | undefined>(undefined);
-  partIdList: PartId[] = [];
-  #globalExecutionQueue = Promise.resolve();
-  _toolCallResults: Map<MessageId, Array<{ partId: PartId; kind: 'success' | 'error'; toolName: GhostbuildToolName }>> =
-    new Map();
+  actionAlert = workbenchActionAlert;
 
   constructor() {
+    this.#artifactStore = new WorkbenchArtifactStore(
+      webcontainer,
+      this.artifacts,
+      this.actionAlert,
+      this.#reloadedParts,
+      {
+        getFiles: () => this.#filesStore.files.get(),
+        getSelectedFile: () => this.#editorStore.selectedFile.get(),
+        getCurrentView: () => this.currentView.get(),
+        isFollowingStreamedCode: () => this.#editorStore.followingStreamedCode.get(),
+        setSelectedFile: (filePath) => this.setSelectedFile(filePath),
+        getEditorDocument: (filePath) => this.#editorStore.documents.get()[filePath],
+        updateEditorFile: (filePath, content) => this.#editorStore.updateFile(filePath, content),
+        resetFileModifications: () => this.resetAllFileModifications(),
+        setGeneratedFileContent: (filePath, content) => this.setGeneratedFileContent(filePath, content),
+      },
+    );
     if (import.meta.hot) {
       import.meta.hot.data.artifacts = this.artifacts;
       import.meta.hot.data.unsavedFiles = this.unsavedFiles;
       import.meta.hot.data.showWorkbench = this.showWorkbench;
-      import.meta.hot.data.currentView = this.currentView;
-      import.meta.hot.data.actionAlert = this.actionAlert;
       import.meta.hot.data.reloadedParts = this.#reloadedParts;
     }
   }
@@ -102,19 +74,6 @@ class WorkbenchStore {
     if (following) {
       this.#editorStore.followingStreamedCode.set(false);
     }
-  }
-
-  get justChangedFiles(): boolean {
-    const now = Date.now();
-    const close = 300;
-    return now - this._lastChangedFile < close;
-  }
-  setLastChangedFile(): void {
-    this._lastChangedFile = Date.now();
-  }
-
-  addToExecutionQueue(callback: () => void | Promise<void>) {
-    this.#globalExecutionQueue = this.#globalExecutionQueue.then(() => callback());
   }
 
   get previews() {
@@ -145,16 +104,8 @@ class WorkbenchStore {
     return this.#previewsStore.stopProxy(proxyPort);
   }
 
-  #getOrCreateToolCall(toolCallId: string) {
-    let resolvers = this.#toolCalls.get(toolCallId);
-    if (!resolvers) {
-      resolvers = {
-        ...withResolvers<{ result: string }>(),
-        done: false,
-      };
-      this.#toolCalls.set(toolCallId, resolvers);
-    }
-    return resolvers;
+  trackExternalPreview(proxyPort: number, previewId: string) {
+    this.#previewsStore.trackExternalPreview(proxyPort, previewId);
   }
 
   get files() {
@@ -169,8 +120,20 @@ class WorkbenchStore {
     return this.#filesStore.prewarmWorkdir(container);
   }
 
+  flushFileEvents() {
+    return this.#filesStore.flushFileEvents();
+  }
+
   waitOnToolCall(toolCallId: string): Promise<{ result: string }> {
-    return this.#getOrCreateToolCall(toolCallId).promise;
+    return this.#artifactStore.waitOnToolCall(toolCallId);
+  }
+
+  runToolInvocation(toolInvocation: GhostbuildToolInvocation): Promise<{ result: string }> {
+    return this.#artifactStore.runToolInvocation(toolInvocation);
+  }
+
+  scheduleToolInvocation(toolInvocation: GhostbuildToolInvocation, partId?: PartId): void {
+    this.#artifactStore.scheduleToolInvocation(toolInvocation, partId);
   }
 
   get currentDocument(): ReadableAtom<EditorDocument | undefined> {
@@ -181,21 +144,9 @@ class WorkbenchStore {
     return this.#editorStore.selectedFile;
   }
 
-  get firstArtifact(): ArtifactState | undefined {
-    return this.#getArtifact(this.partIdList[0]);
-  }
-
-  get filesCount(): number {
-    return this.#filesStore.filesCount;
-  }
-
   get showTerminal() {
     return this.#terminalStore.showTerminal;
   }
-  get appShellTerminal() {
-    return this.#terminalStore.appShellTerminal;
-  }
-
   get alert() {
     return this.actionAlert;
   }
@@ -210,8 +161,14 @@ class WorkbenchStore {
   attachTerminal(terminal: ITerminal) {
     this.#terminalStore.attachTerminal(terminal);
   }
-  attachAppShellTerminal(terminal: ITerminal) {
-    this.#terminalStore.attachAppShellTerminal(terminal);
+  attachAppShellTerminal(terminal: ITerminal, options?: TerminalInitializationOptions) {
+    this.#terminalStore.attachAppShellTerminal(terminal, options);
+  }
+  stopAppPreviewServer() {
+    return this.#terminalStore.stopAppPreviewServer();
+  }
+  restartAppPreviewServer(command?: string) {
+    return this.#terminalStore.restartAppPreviewServer(command);
   }
   attachDeployTerminal(terminal: ITerminal, options?: TerminalInitializationOptions) {
     this.#terminalStore.attachDeployTerminal(terminal, options);
@@ -222,9 +179,9 @@ class WorkbenchStore {
   }
 
   setDocuments(files: FileMap) {
-    this.#editorStore.setDocuments(files);
+    this.#editorStore.setDocuments(files, this.unsavedFiles.get());
 
-    if (this.#filesStore.filesCount > 0 && this.currentDocument.get() === undefined) {
+    if (this.currentDocument.get() === undefined) {
       const preferredFiles = ['/home/project/src/routes/index.tsx', '/home/project/package.json'];
       const preferredFile = preferredFiles.find((filePath) => files[filePath as AbsolutePath]?.type === 'file');
       if (preferredFile) {
@@ -241,10 +198,6 @@ class WorkbenchStore {
         }
       }
     }
-  }
-
-  setShowWorkbench(show: boolean) {
-    this.showWorkbench.set(show);
   }
 
   setCurrentDocumentContent(newContent: string) {
@@ -273,6 +226,13 @@ class WorkbenchStore {
     this.unsavedFiles.set(newUnsavedFiles);
   }
 
+  setGeneratedFileContent(filePath: string, content: string) {
+    const absPath = getAbsolutePath(filePath);
+
+    this.#filesStore.setGeneratedFile(absPath, content);
+    this.#editorStore.setDocuments(this.#filesStore.files.get(), this.unsavedFiles.get());
+  }
+
   setCurrentDocumentScrollPosition(position: ScrollPosition) {
     const editorDocument = this.currentDocument.get();
 
@@ -286,7 +246,6 @@ class WorkbenchStore {
   }
 
   setSelectedFile(filePath: AbsolutePath | undefined) {
-    this.setLastChangedFile();
     this.#editorStore.setSelectedFile(filePath);
   }
 
@@ -337,12 +296,6 @@ class WorkbenchStore {
     this.setCurrentDocumentContent(file.content);
   }
 
-  async saveAllFiles() {
-    for (const filePath of this.unsavedFiles.get()) {
-      await this.saveFile(filePath);
-    }
-  }
-
   getModifiedFiles() {
     return this.#filesStore.getModifiedFiles();
   }
@@ -352,219 +305,35 @@ class WorkbenchStore {
   }
 
   abortAllActions() {
-    // Update all running tools to aborted status
-    const artifacts = this.artifacts.get();
-    for (const artifact of Object.values(artifacts)) {
-      const actions = artifact.runner.actions.get();
-      for (const [actionId, action] of Object.entries(actions)) {
-        if (isActionStatusActive(action.status)) {
-          artifact.runner.updateAction(actionId, {
-            ...action,
-            status: 'aborted',
-          });
-        }
-      }
-    }
+    this.#artifactStore.abortAllActions();
+  }
+
+  startActionTurn() {
+    this.#artifactStore.startActionTurn();
   }
 
   addReloadedPart(partId: PartId) {
-    this.#reloadedParts.add(partId);
+    this.#artifactStore.addReloadedPart(partId);
   }
 
-  isReloadedPart(partId: PartId) {
-    return this.#reloadedParts.has(partId);
+  addArtifact(data: ArtifactCallbackData) {
+    this.#artifactStore.addArtifact(data);
   }
 
-  addArtifact({ partId, title, id, type }: ArtifactCallbackData) {
-    const messageId = parsePartId(partId).messageId;
-    if (!this._toolCallResults.has(messageId)) {
-      this._toolCallResults.set(messageId, []);
-    }
-    const artifact = this.#getArtifact(partId);
-
-    if (artifact) {
-      return;
-    }
-
-    if (!this.partIdList.includes(partId)) {
-      this.partIdList.push(partId);
-    }
-
-    this.artifacts.setKey(partId, {
-      id,
-      title,
-      closed: false,
-      type,
-      runner: new ActionRunner(webcontainer, {
-        onAlert: (alert) => {
-          if (this.#reloadedParts.has(partId)) {
-            return;
-          }
-
-          this.actionAlert.set(alert);
-        },
-        onToolCallComplete: ({ kind, result, toolCallId, toolName }) => {
-          const toolCallPromise = this.#toolCalls.get(toolCallId);
-          if (!toolCallPromise) {
-            logger.error('Tool call promise not found');
-            return;
-          }
-          const messageId = parsePartId(partId).messageId;
-          const toolCallResults = this._toolCallResults.get(messageId);
-          if (!toolCallResults) {
-            logger.error('Tool call results not found');
-            toolCallPromise.resolve({ result });
-            return;
-          }
-          toolCallResults.push({ partId, kind, toolName });
-          toolCallPromise.resolve({ result });
-        },
-      }),
-    });
+  updateArtifact(data: ArtifactCallbackData, state: Partial<Pick<ArtifactState, 'title' | 'closed'>>) {
+    this.#artifactStore.updateArtifact(data, state);
   }
 
-  updateArtifact({ partId }: ArtifactCallbackData, state: Partial<ArtifactUpdateState>) {
-    const artifact = this.#getArtifact(partId);
-
-    if (!artifact) {
-      return;
-    }
-
-    this.artifacts.setKey(partId, { ...artifact, ...state });
-  }
   addAction(data: ActionCallbackData) {
-    this.addToExecutionQueue(() => this._addAction(data));
-  }
-  _addAction(data: ActionCallbackData) {
-    const { partId } = data;
-
-    const artifact = this.#getArtifact(partId);
-
-    if (!artifact) {
-      unreachable('Artifact not found');
-    }
-
-    return artifact.runner.addAction(data);
+    this.#artifactStore.addAction(data);
   }
 
   runAction(data: ActionCallbackData, isStreaming: boolean = false) {
-    if (isStreaming) {
-      this.actionStreamSampler(data, isStreaming);
-      return;
-    }
-
-    this.addToExecutionQueue(() => this._runAction(data, isStreaming));
-  }
-  async _runAction(data: ActionCallbackData, isStreaming: boolean = false) {
-    const { partId } = data;
-
-    const artifact = this.#getArtifact(partId);
-
-    if (!artifact) {
-      unreachable('Artifact not found');
-    }
-
-    const action = artifact.runner.actions.get()[data.actionId];
-
-    // Skip running actions if they are part of a reloaded message
-    if (this.isReloadedPart(partId)) {
-      artifact.runner.updateAction(data.actionId, { executed: true, status: 'complete' });
-      return;
-    }
-
-    if (!action || action.executed) {
-      return;
-    }
-
-    if (data.action.type === 'file') {
-      const wc = await webcontainer;
-      const fullPath = path.join(wc.workdir, data.action.filePath);
-
-      if (this.selectedFile.value !== fullPath) {
-        // Consider focusing the streaming tab so user can see code flowing in.
-        const selectedView = workbenchStore.currentView.value;
-        const followingStreamedCode = workbenchStore.followingStreamedCode.get();
-        if (selectedView === 'code' && followingStreamedCode) {
-          this.setSelectedFile(fullPath as AbsolutePath);
-        }
-      }
-
-      const doc = this.#editorStore.documents.get()[fullPath];
-
-      if (!doc) {
-        await artifact.runner.runAction(data, { isStreaming: !!isStreaming });
-      }
-
-      // Where does this initial newline come from? The tool parsing incorrectly?
-      const newContent = data.action.content.trimStart();
-
-      this.#editorStore.updateFile(fullPath, newContent);
-
-      if (!isStreaming) {
-        await artifact.runner.runAction(data, { isStreaming: !!isStreaming });
-        this.resetAllFileModifications();
-      }
-
-      return;
-    }
-
-    if (data.action.type === 'toolUse') {
-      this.#getOrCreateToolCall(data.action.parsedContent.toolCallId);
-    }
-
-    await artifact.runner.runAction(data, { isStreaming: !!isStreaming });
-  }
-
-  actionStreamSampler = createSampler(
-    (data: ActionCallbackData, isStreaming: boolean = false) => this._runAction(data, isStreaming),
-    ACTION_STREAM_SAMPLE_MS,
-  );
-
-  #getArtifact(partId: PartId): ArtifactState | undefined {
-    const artifacts = this.artifacts.get();
-    return artifacts[partId];
+    this.#artifactStore.runAction(data, isStreaming);
   }
 
   async downloadZip() {
-    const [{ default: JSZip }, { default: fileSaver }] = await Promise.all([import('jszip'), import('file-saver')]);
-    const zip = new JSZip();
-    const files = this.files.get();
-
-    // Get the project name from the description input, or use a default name
-    const projectName = (description.value ?? 'project').toLocaleLowerCase().split(' ').join('_');
-
-    let hasReadme = false;
-    let hasCursorRules = false;
-
-    for (const [filePath, dirent] of Object.entries(files)) {
-      if (dirent?.type === 'file' && !dirent.isBinary) {
-        const relativePath = getRelativePath(filePath);
-        if (isLocalSecretFilePath(relativePath)) {
-          continue;
-        }
-
-        zip.file(relativePath, dirent.content, { createFolders: true });
-        hasReadme ||= relativePath.toLowerCase() === 'readme.md';
-        hasCursorRules ||= relativePath === '.cursor/rules/cloudflare_rules.mdc';
-      }
-    }
-
-    // Add a README.md file specific to Ghostbuild here, but don't clobber an existing one
-    const readmeContent = generateReadmeContent(description.value ?? 'project');
-    const readmePath = hasReadme ? `GHOSTBUILD_README.md` : 'README.md';
-    zip.file(readmePath, readmeContent);
-    if (!hasCursorRules) {
-      zip.file('.cursor/rules/cloudflare_rules.mdc', cursorRulesContent);
-    }
-    // Generate the zip file and save it
-    const content = await zip.generateAsync({ type: 'blob' });
-    fileSaver.saveAs(content, `${projectName}.zip`);
-  }
-
-  isDefaultPreviewRunning() {
-    const DEFAULT_PREVIEW_PORT = 5173;
-    const previews = this.previews.get();
-    return previews.some((preview) => preview.port === DEFAULT_PREVIEW_PORT);
+    await downloadProject(this.files.get(), description.value ?? 'project');
   }
 }
 

@@ -41,6 +41,7 @@ export type SocialShare = {
 };
 
 type DataOperationResults = {
+  'messages.claimGuestSession': null;
   'messages.earliestRewindableMessageRank': number | null;
   'messages.get': ChatSummary | null;
   'messages.getAll': ChatHistorySummary[];
@@ -67,6 +68,7 @@ type DataApiNamespace = Record<string, DataOperationPath>;
 
 export const api = {
   messages: {
+    claimGuestSession: 'messages.claimGuestSession',
     earliestRewindableMessageRank: 'messages.earliestRewindableMessageRank',
     get: 'messages.get',
     getAll: 'messages.getAll',

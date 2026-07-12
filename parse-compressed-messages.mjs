@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { readFileSync } from 'node:fs';
 import * as lz4 from 'lz4-wasm-nodejs';
 
 // Usage `node parse-compressed-messages.mjs <path-to-file> | jq`
@@ -13,20 +13,11 @@ if (process.argv.length < 3) {
 const filePath = process.argv[2];
 
 try {
-  // Read the compressed file
-  const compressedData = fs.readFileSync(filePath);
-
-  // Decompress the data
+  const compressedData = readFileSync(filePath);
   const decompressedBuffer = lz4.decompress(compressedData);
-
-  // Parse the JSON
   const jsonData = JSON.parse(new TextDecoder().decode(decompressedBuffer));
-
-  // Output the parsed JSON
   console.log(JSON.stringify(jsonData, null, 2));
 } catch (error) {
-  // Log the decompressed data in case it's useful
-  console.log(new TextDecoder().decode(decompressedBuffer));
-  console.error('Error processing file:', error.message);
+  console.error('Error processing file:', error instanceof Error ? error.message : String(error));
   process.exit(1);
 }

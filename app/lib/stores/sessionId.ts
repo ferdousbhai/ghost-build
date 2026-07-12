@@ -34,10 +34,6 @@ export async function waitForSessionId(caller?: string): Promise<GhostbuildSessi
 
 export const sessionIdStore = atom<GhostbuildSessionId | null | undefined>(undefined);
 
-/**
- * Better Auth uses same-origin cookies for requests. This synchronous guard keeps
- * non-hook request builders from sending work before the user id is available.
- */
 export function getAuthToken(): string | null {
   return sessionIdStore.get() ?? null;
 }

@@ -145,14 +145,14 @@ describe('StreamingMessageParser', () => {
         'Before <boltArtifact title="Some title" id="artifact_1"><boltAction type="shell">pnpm install</boltAction></boltArtifact> After',
         {
           output: 'Before  After',
-          callbacks: { onArtifactOpen: 1, onArtifactClose: 1, onActionOpen: 1, onActionClose: 1 },
+          callbacks: { onArtifactOpen: 1, onArtifactClose: 1, onActionOpen: 0, onActionClose: 0 },
         },
       ],
       [
         'Before <boltArtifact title="Some title" id="artifact_1"><boltAction type="shell">pnpm install</boltAction><boltAction type="file" filePath="index.js">some content</boltAction></boltArtifact> After',
         {
           output: 'Before  After',
-          callbacks: { onArtifactOpen: 1, onArtifactClose: 1, onActionOpen: 2, onActionClose: 2 },
+          callbacks: { onArtifactOpen: 1, onArtifactClose: 1, onActionOpen: 1, onActionClose: 1 },
         },
       ],
     ])('should correctly parse chunks and strip out bolt artifacts (%#)', (input, expected) => {

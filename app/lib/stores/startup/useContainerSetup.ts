@@ -1,5 +1,10 @@
 import { useEffect } from 'react';
-import { ContainerBootState, setContainerBootState, waitForBootStepCompleted } from '~/lib/stores/containerBootState';
+import {
+  ContainerBootState,
+  isUnsupportedRuntimeError,
+  setContainerBootState,
+  waitForBootStepCompleted,
+} from '~/lib/stores/containerBootState';
 import { webcontainer } from '~/lib/webcontainer';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { api } from '~/lib/cloudflare/data-api';
@@ -11,10 +16,9 @@ import { toast } from 'sonner';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { getFileUpdateCounter } from '~/lib/stores/fileUpdateCounter';
 import { chatSyncState } from './chatSyncState';
-import { FILE_EVENTS_DEBOUNCE_MS } from '~/lib/stores/files';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 
-const TEMPLATE_URL = '/template-snapshot-276d1c57.bin';
+const TEMPLATE_URL = '/template-snapshot-b108e040.bin';
 const logger = createScopedLogger('ContainerSetup');
 const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)));
 
@@ -25,6 +29,9 @@ export function useNewChatContainerSetup() {
         await waitForBootStepCompleted(ContainerBootState.STARTING);
         await setupContainer({ snapshotUrl: TEMPLATE_URL, allowPnpmInstallFailure: false });
       } catch (error) {
+        if (isUnsupportedRuntimeError(error)) {
+          return;
+        }
         toast.error('Failed to setup Ghostbuild environment. Try reloading the page.');
         setContainerBootState(ContainerBootState.ERROR, toError(error));
       }
@@ -52,6 +59,9 @@ export function useExistingChatContainerSetup(loadedChatId: string | undefined) 
         }
         await setupContainer({ snapshotUrl, allowPnpmInstallFailure: true });
       } catch (error) {
+        if (isUnsupportedRuntimeError(error)) {
+          return;
+        }
         toast.error('Failed to setup Ghostbuild environment. Try reloading the page.');
         setContainerBootState(ContainerBootState.ERROR, toError(error));
       }
@@ -98,10 +108,7 @@ async function setupContainer(options: { snapshotUrl: string; allowPnpmInstallFa
 }
 
 async function initializeFileSystemBackup() {
-  // This is a bit racy, but we need to flush the current file events before
-  // deciding that we're synced up to the current update counter. Sleep for
-  // twice the batching interval.
-  await new Promise((resolve) => setTimeout(resolve, FILE_EVENTS_DEBOUNCE_MS * 2));
+  await workbenchStore.flushFileEvents();
   const currentChatSyncState = chatSyncState.get();
   if (currentChatSyncState.savedFileUpdateCounter === null) {
     const fileUpdateCounter = getFileUpdateCounter();

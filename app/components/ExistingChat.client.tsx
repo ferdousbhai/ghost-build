@@ -9,6 +9,7 @@ import { useReloadMessages } from '~/lib/stores/startup/reloadMessages';
 import { UserProvider } from '~/components/UserProvider';
 import { Toaster } from '~/components/ui/Toaster';
 import { getToolInvocation } from 'ghostbuild-agent/ai-compat';
+import { UnsupportedRuntimeScreen } from '~/components/UnsupportedRuntime';
 
 export function ExistingChat({ chatId }: { chatId: string }) {
   // Fill in the chatID store from props early in app initialization. If this
@@ -18,7 +19,7 @@ export function ExistingChat({ chatId }: { chatId: string }) {
 
   return (
     <>
-      <GhostbuildAuthProvider redirectIfUnauthenticated={true}>
+      <GhostbuildAuthProvider redirectIfUnauthenticated={false} allowGuest>
         <UserProvider>
           <ExistingChatWrapper chatId={chatId} />
         </UserProvider>
@@ -39,9 +40,9 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
     return <NotFound />;
   }
 
-  // First, we need to be logged in and have a session ID.
+  // First, we need an account or guest session ID.
   if (!sessionId) {
-    return <Loading message="Logging in..." />;
+    return <Loading message="Starting session..." />;
   }
   // Then, we need to download the chat messages from the server.
   if (initialMessages === undefined) {
@@ -62,8 +63,11 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
   if (bootState.state === ContainerBootState.STARTING_BACKUP) {
     return <Loading message="Starting backup..." />;
   }
+  if (bootState.state === ContainerBootState.UNSUPPORTED) {
+    return <UnsupportedRuntimeScreen experience={bootState.unsupportedExperience} />;
+  }
   if (bootState.state !== ContainerBootState.READY) {
-    return <Loading message="Loading Ghostbuild environment..." />;
+    return <Loading message="Preparing workspace..." />;
   }
 
   const hadSuccessfulDeploy = initialMessages.some(
@@ -80,6 +84,7 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
       isReload={true}
       hadSuccessfulDeploy={hadSuccessfulDeploy}
       subchats={subchats}
+      allowGuest
     />
   );
 }

@@ -8,15 +8,19 @@
  * @param sampleInterval How often to sample calls (in ms)
  * @returns The sampled function
  */
+type SampledFunction<Args extends unknown[]> = ((...args: Args) => void) & {
+  cancel(): void;
+};
+
 export function createSampler<Args extends unknown[]>(
   fn: (...args: Args) => unknown,
   sampleInterval: number,
-): (...args: Args) => void {
+): SampledFunction<Args> {
   let lastArgs: Args | null = null;
-  let lastTime = 0;
+  let lastTime = Number.NEGATIVE_INFINITY;
   let timeout: ReturnType<typeof setTimeout> | null = null;
 
-  return function sampled(...args: Args) {
+  const sampled = function (...args: Args) {
     const now = Date.now();
     lastArgs = args;
 
@@ -43,4 +47,15 @@ export function createSampler<Args extends unknown[]>(
     fn(...args);
     lastArgs = null;
   };
+
+  sampled.cancel = () => {
+    if (timeout) {
+      clearTimeout(timeout);
+      timeout = null;
+    }
+    lastArgs = null;
+    lastTime = Number.NEGATIVE_INFINITY;
+  };
+
+  return sampled;
 }

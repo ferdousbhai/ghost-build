@@ -8,9 +8,12 @@ import {
   findForbiddenRuntimeEnvAccess,
   findCloudflareAiPeerCompatibilityErrors,
   findMissingDependencies,
+  findMissingCommandSteps,
   findPackageVersionAlignmentErrors,
   findRuntimePinErrors,
+  findRootMigrationErrors,
   findTemplateSnapshotErrors,
+  findTemplateSnapshotManifestErrors,
   packageDependencyVersion,
 } from './verify-stack-alignment.mjs';
 
@@ -153,6 +156,64 @@ describe('stack alignment verification helpers', () => {
     ).toEqual(['template-snapshot-1234abcd.bin hash must match its compressed snapshot content; expected deadbeef.']);
   });
 
+  it('requires chat persistence uniqueness migrations', () => {
+    const requiredTables = [
+      'chats',
+      'chat_message_states',
+      'shares',
+      'social_shares',
+      'object_gc_candidates',
+      'user',
+      'session',
+      'account',
+      'verification',
+    ]
+      .map((table) => `CREATE TABLE IF NOT EXISTS ${table} (id TEXT);`)
+      .join('\n');
+
+    expect(findRootMigrationErrors(requiredTables)).toContain(
+      'root migrations must enforce one chat message state per chat, subchat, and message rank.',
+    );
+    expect(findRootMigrationErrors(requiredTables)).toContain(
+      'root migrations must enforce one active chat per creator and initial id.',
+    );
+    expect(findRootMigrationErrors(requiredTables)).toContain(
+      'root migrations must enforce one social share per chat.',
+    );
+    expect(findRootMigrationErrors(requiredTables)).toContain(
+      'root migrations must defer cleanup of displaced R2 object keys.',
+    );
+    expect(
+      findRootMigrationErrors(
+        `${requiredTables}
+         CREATE UNIQUE INDEX states_rank ON chat_message_states(chat_id, subchat_index, last_message_rank);
+         CREATE UNIQUE INDEX active_chat ON chats(creator_id, initial_id) WHERE is_deleted = 0;
+         CREATE UNIQUE INDEX social_chat ON social_shares(chat_id);
+         INSERT OR IGNORE INTO object_gc_candidates (storage_key, not_before) VALUES ('key', 1);`,
+      ),
+    ).toEqual([]);
+  });
+
+  it('requires the template snapshot manifest to match the artifact and current source', () => {
+    expect(
+      findTemplateSnapshotManifestErrors(
+        { snapshot: 'template-snapshot-1234abcd.bin', sourceSha256: 'source-hash' },
+        'template-snapshot-1234abcd.bin',
+        'source-hash',
+      ),
+    ).toEqual([]);
+    expect(
+      findTemplateSnapshotManifestErrors(
+        { snapshot: 'template-snapshot-old.bin', sourceSha256: 'old-source' },
+        'template-snapshot-1234abcd.bin',
+        'source-hash',
+      ),
+    ).toEqual([
+      'public/template-snapshot-manifest.json must reference template-snapshot-1234abcd.bin.',
+      'public/template-snapshot-manifest.json is stale; run pnpm run rebuild-template.',
+    ]);
+  });
+
   it('rejects forbidden framework and provider imports', () => {
     const errors = findForbiddenImports([new URL('./fixtures/forbidden-stack-imports.txt', import.meta.url).pathname]);
 
@@ -183,6 +244,19 @@ describe('stack alignment verification helpers', () => {
       ),
     ).toEqual([
       `${fixture}:1 must read runtime config from Cloudflare Worker bindings, not process.env or import.meta.env.`,
+    ]);
+  });
+
+  it('validates command contracts without coupling to one exact command string', () => {
+    expect(
+      findMissingCommandSteps('pnpm run verify:stack && pnpm run typecheck && pnpm run build', 'scripts.validate', [
+        'verify:stack',
+        'typecheck',
+        'build',
+      ]),
+    ).toEqual([]);
+    expect(findMissingCommandSteps('pnpm run build', 'scripts.validate', ['typecheck', 'build'])).toEqual([
+      'scripts.validate must run "typecheck" in order.',
     ]);
   });
 });

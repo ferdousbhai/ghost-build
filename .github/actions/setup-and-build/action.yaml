@@ -1,5 +1,5 @@
-name: Setup and Build
-description: Generic setup action
+name: Setup dependencies
+description: Install the repository's pinned Node and pnpm toolchain and dependencies
 inputs:
   pnpm-version:
     required: false
@@ -9,10 +9,6 @@ inputs:
     required: false
     type: string
     default: '26.3.0'
-  run-build:
-    required: false
-    type: string
-    default: 'true'
 
 runs:
   using: composite
@@ -32,8 +28,3 @@ runs:
     - name: Install dependencies
       shell: bash
       run: pnpm install --frozen-lockfile
-
-    - name: Build project
-      if: ${{ inputs.run-build == 'true' }}
-      shell: bash
-      run: pnpm run build

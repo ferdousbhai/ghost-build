@@ -3,7 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { memo, useEffect, useRef } from 'react';
 import type { GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
-import type { ArtifactState } from '~/lib/stores/workbench.client';
+import type { ArtifactState } from '~/lib/stores/workbench-artifacts';
 import { themeStore } from '~/lib/stores/theme';
 import { getTerminalTheme } from '~/components/workbench/terminal/theme';
 

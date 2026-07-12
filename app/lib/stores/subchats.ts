@@ -12,6 +12,6 @@ export function useIsSubchatLoaded() {
   return syncState.subchatIndex === subchatIndex;
 }
 
-export function waitForSubchatIndexChanged(subchatIndex: number) {
-  return waitForStoreCondition(subchatIndexStore, (newSubchatIndex) => newSubchatIndex !== subchatIndex);
+export function waitForSubchatIndexChanged(subchatIndex: number, signal?: AbortSignal) {
+  return waitForStoreCondition(subchatIndexStore, (newSubchatIndex) => newSubchatIndex !== subchatIndex, { signal });
 }

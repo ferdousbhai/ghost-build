@@ -55,9 +55,7 @@ export default function useVersionNotificationBanner() {
 }
 
 const versionFetcher = async (url: string): Promise<{ sha?: string | null }> => {
-  const res = await fetch(url, {
-    method: 'POST',
-  });
+  const res = await fetch(url);
 
   if (!res.ok) {
     try {

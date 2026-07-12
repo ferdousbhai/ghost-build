@@ -9,6 +9,7 @@ import {
   type GhostbuildPart,
 } from 'ghostbuild-agent/ai-compat';
 import { captureMessage } from '~/lib/telemetry.client';
+import { isHiddenAssistantPart } from './assistant-message-parts';
 
 interface AssistantMessageProps {
   message: GhostbuildMessage;
@@ -44,7 +45,7 @@ function AssistantMessagePart({ part, partId }: { part: GhostbuildPart; partId: 
     return <Markdown html>{part.text}</Markdown>;
   }
 
-  if (part.type === 'step-start') {
+  if (isHiddenAssistantPart(part)) {
     return null;
   }
 

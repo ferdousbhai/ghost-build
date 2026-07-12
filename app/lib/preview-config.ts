@@ -1,0 +1,1 @@
+export const GHOSTBUILD_PREVIEW_COMMAND = 'GHOSTBUILD_PREVIEW=1 pnpm run dev';

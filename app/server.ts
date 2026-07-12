@@ -5,64 +5,72 @@ import {
   initialMessagesAction,
   storageObjectAction,
   storeChatAction,
-  uploadSnapshotAction,
   uploadThumbnailAction,
 } from '~/lib/cloudflare/data.server';
 import { getAuth } from './lib/.server/auth';
 import { enhancePromptAction } from './server-handlers/enhance-prompt';
 import { healthAction } from './server-handlers/health';
-import { publicConfigAction } from './server-handlers/public-config';
 import { scriptsAction } from './server-handlers/scripts';
 import { versionAction } from './server-handlers/version';
+import { clientTelemetryAction } from './server-handlers/client-telemetry';
 
 export { BuilderAgent } from './agents/builder-agent';
 
-function methodNotAllowed() {
-  return Response.json({ error: 'Method not allowed' }, { status: 405 });
+function methodNotAllowed(allowedMethod: string) {
+  return Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: allowedMethod } });
 }
 
 function requireMethod(request: Request, method: string, handler: () => Response | Promise<Response>) {
-  return request.method === method ? handler() : methodNotAllowed();
+  return request.method === method ? handler() : methodNotAllowed(method);
+}
+
+function withCrossOriginIsolationHeaders(response: Response) {
+  const headers = new Headers(response.headers);
+  headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+  headers.set('Cross-Origin-Embedder-Policy', 'credentialless');
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 type ServerRoute = {
-  method?: string;
+  method: 'GET' | 'POST';
   handler: (request: Request, env: Env) => Response | Promise<Response>;
 };
 
 const exactRoutes: Record<string, ServerRoute> = {
   '/api/health': {
-    handler: () => healthAction(),
-  },
-  '/api/public-config': {
     method: 'GET',
-    handler: (request, env) => publicConfigAction({ request, env }),
+    handler: () => healthAction(),
   },
   '/api/enhance-prompt': {
     method: 'POST',
     handler: (request, env) => enhancePromptAction({ request, env }),
+  },
+  '/api/client-telemetry': {
+    method: 'POST',
+    handler: (request) => clientTelemetryAction(request),
   },
   '/api/data': {
     method: 'POST',
     handler: (request, env) => dataAction({ request, env }),
   },
   '/api/version': {
-    method: 'POST',
+    method: 'GET',
     handler: (_request, env) => versionAction({ env }),
   },
-  '/store_chat': {
+  '/api/chats/store': {
     method: 'POST',
     handler: (request, env) => storeChatAction({ request, env }),
   },
-  '/initial_messages': {
+  '/api/chats/messages': {
     method: 'POST',
     handler: (request, env) => initialMessagesAction({ request, env }),
   },
-  '/upload_snapshot': {
-    method: 'POST',
-    handler: (request, env) => uploadSnapshotAction({ request, env }),
-  },
-  '/upload_thumbnail': {
+  '/api/thumbnails': {
     method: 'POST',
     handler: (request, env) => uploadThumbnailAction({ request, env }),
   },
@@ -82,8 +90,7 @@ export default {
 
     const route = exactRoutes[url.pathname];
     if (route) {
-      const runRoute = () => route.handler(request, env);
-      return route.method ? requireMethod(request, route.method, runRoute) : runRoute();
+      return requireMethod(request, route.method, () => route.handler(request, env));
     }
 
     if (url.pathname.startsWith('/api/storage/')) {
@@ -94,6 +101,7 @@ export default {
       return scriptsAction(url.pathname.slice('/scripts/'.length));
     }
 
-    return handler.fetch(request);
+    const appResponse = await handler.fetch(request);
+    return withCrossOriginIsolationHeaders(appResponse);
   },
 } satisfies ExportedHandler<Env>;

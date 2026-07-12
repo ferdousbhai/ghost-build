@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import type { z } from 'zod';
 import { createScopedLogger } from './logger.js';
 
 const previouslySeen = new WeakSet<object>();

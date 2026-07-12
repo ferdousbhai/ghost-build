@@ -46,6 +46,12 @@ describe('Cloudflare production provisioning helpers', () => {
     expect(parseJsonOutput(output, 'wrangler d1 list --json')).toEqual([{ name: 'ghostbuild', uuid: databaseId }]);
   });
 
+  it('ignores pnpm engine warnings before Wrangler JSON output', () => {
+    const output = `[WARN] Unsupported engine: wanted: {"node":">=26.0.0"} (current: {"node":"v24.14.0"})\n[\n  {"name":"ghostbuild","uuid":"${databaseId}"}\n]\n`;
+
+    expect(parseJsonOutput(output, 'wrangler d1 list --json')).toEqual([{ name: 'ghostbuild', uuid: databaseId }]);
+  });
+
   it('recognizes supported D1 list field variants', () => {
     expect(d1DatabaseId({ uuid: databaseId })).toBe(databaseId);
     expect(d1DatabaseId({ database_id: databaseId })).toBe(databaseId);

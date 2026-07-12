@@ -7,20 +7,22 @@ import { useState } from 'react';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { useQuery } from '~/lib/cloudflare/data-hooks';
 import { api } from '~/lib/cloudflare/data-api';
+import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+
+const EMPTY_INITIAL_MESSAGES: GhostbuildMessage[] = [];
 
 export function useChatHomepage(chatId: string) {
   const [chatInitialized, setChatInitialized] = useState(false);
   const initializeChat = useHomepageInitializeChat(chatId, setChatInitialized);
   const storeMessageHistory = useStoreMessageHistory();
   useNewChatContainerSetup();
-  const initialMessages = useInitialMessages(chatInitialized ? chatId : undefined);
-  useBackupSyncState(chatId, initialMessages?.loadedSubchatIndex, initialMessages?.deserialized);
+  useBackupSyncState(chatId, chatInitialized ? 0 : undefined, chatInitialized ? EMPTY_INITIAL_MESSAGES : undefined);
   const subchats = useSubchats(chatId, chatInitialized);
 
   return {
     initializeChat,
     storeMessageHistory,
-    initialMessages: initialMessages ? initialMessages.deserialized : initialMessages,
+    initialMessages: EMPTY_INITIAL_MESSAGES,
     subchats,
   };
 }

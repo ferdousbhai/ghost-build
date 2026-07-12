@@ -1,11 +1,14 @@
 import { z } from 'zod';
+import { GUEST_SESSION_ID_PATTERN } from '~/lib/guest-session';
 
+const guestSessionIdSchema = z.string().regex(GUEST_SESSION_ID_PATTERN);
 const sessionIdArgsSchema = z.object({ sessionId: z.string() });
 const chatIdentityArgsSchema = z.object({ sessionId: z.string(), id: z.string() });
 const chatArgsSchema = z.object({ sessionId: z.string(), chatId: z.string() });
 const codeArgsSchema = z.object({ code: z.string() });
 
 export const dataOperationArgSchemas = {
+  'messages.claimGuestSession': z.object({ guestSessionId: guestSessionIdSchema, sessionId: z.string() }),
   'messages.initializeChat': chatIdentityArgsSchema,
   'messages.get': chatIdentityArgsSchema,
   'messages.getAll': sessionIdArgsSchema,

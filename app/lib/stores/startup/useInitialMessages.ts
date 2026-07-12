@@ -6,7 +6,6 @@ import { setKnownInitialId, setKnownUrlId } from '~/lib/stores/chatId';
 import { description } from '~/lib/stores/description';
 import { toast } from 'sonner';
 import { decompressWithLz4 } from '~/lib/compression';
-import { getCloudflareSiteUrl } from '~/lib/cloudflareSiteUrl';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { useStore } from '@nanostores/react';
 import {
@@ -37,17 +36,20 @@ export function useInitialMessages(chatId: string | undefined):
   useEffect(() => {
     if (!chatId) {
       setInitialMessages(undefined);
-      return;
+      return undefined;
     }
 
+    const controller = new AbortController();
+    setInitialMessages(undefined);
     const loadInitialMessages = async () => {
-      const sessionId = await waitForSessionId('loadInitialMessages');
       try {
-        const siteUrl = getCloudflareSiteUrl();
+        const sessionId = await waitForSessionId('loadInitialMessages');
+        controller.signal.throwIfAborted();
         const chatInfo = await executeDataOperation(api.messages.get, {
           id: chatId,
           sessionId,
         });
+        controller.signal.throwIfAborted();
         if (chatInfo === null) {
           setInitialMessages(null);
           return;
@@ -62,13 +64,14 @@ export function useInitialMessages(chatId: string | undefined):
         if (chatInfo.urlId) {
           setKnownUrlId(chatInfo.urlId);
         }
-        const initialMessagesResponse = await fetch(`${siteUrl}/initial_messages`, {
+        const initialMessagesResponse = await fetch('/api/chats/messages', {
           method: 'POST',
           body: JSON.stringify({
             chatId,
             sessionId,
             subchatIndex,
           }),
+          signal: controller.signal,
         });
         if (!initialMessagesResponse.ok) {
           throw new Error('Failed to fetch initial messages');
@@ -116,6 +119,7 @@ export function useInitialMessages(chatId: string | undefined):
         });
 
         const deserializedMessages = transformedMessages.map(deserializeMessageFromStorage);
+        controller.signal.throwIfAborted();
         setInitialMessages({
           loadedChatId: chatInfo.urlId ?? chatInfo.initialId,
           deserialized: deserializedMessages,
@@ -123,11 +127,15 @@ export function useInitialMessages(chatId: string | undefined):
         });
         description.set(chatInfo.description);
       } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
         toast.error('Failed to load chat messages from storage. Try reloading the page.');
         logger.error('Error fetching initial messages:', error);
       }
     };
     void loadInitialMessages();
+    return () => controller.abort();
   }, [chatId, subchatIndex]);
 
   return initialMessages;

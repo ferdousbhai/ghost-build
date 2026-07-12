@@ -1,53 +1,59 @@
-import { Chat } from './chat/Chat';
+import { lazy, Suspense, useCallback, useState } from 'react';
 import { GhostbuildAuthProvider } from './chat/GhostbuildAuthWrapper';
-import { useRef } from 'react';
-import { useChatHomepage } from '~/lib/stores/startup';
+import { HomeIntro } from './chat/HomeIntro.client';
 import { Toaster } from '~/components/ui/Toaster';
-import { setPageLoadChatId } from '~/lib/stores/chatId';
-import type { PartCache } from '~/lib/hooks/useMessageParser';
+import { getPageLoadChatId, setPageLoadChatId } from '~/lib/stores/chatId';
 import { UserProvider } from '~/components/UserProvider';
-import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 
-let homepageInitialId: string | undefined;
+const HomepageChat = lazy(() => import('./HomepageChat.client').then((module) => ({ default: module.HomepageChat })));
 
-function getHomepageInitialId() {
-  homepageInitialId ??= crypto.randomUUID();
-  return homepageInitialId;
+function getOrCreateHomepageInitialId() {
+  const existingId = getPageLoadChatId();
+  if (existingId) {
+    return existingId;
+  }
+
+  const initialId = crypto.randomUUID();
+  setPageLoadChatId(initialId);
+
+  return initialId;
 }
 
 export function Homepage() {
-  // Set up a temporary chat ID early in app initialization. We'll
-  // eventually replace this with a slug once we receive the first
-  // artifact from the model if the user submits a prompt.
-  const initialId = getHomepageInitialId();
-  setPageLoadChatId(initialId);
-  // NB: On this path, we render `ChatImpl` immediately.
+  const initialId = getOrCreateHomepageInitialId();
+  const [initialPrompt, setInitialPrompt] = useState<string | null>(null);
+  const startChat = useCallback(async (prompt: string) => {
+    setInitialPrompt(prompt);
+    return true;
+  }, []);
+
+  const homeIntro = (
+    <HomeIntro
+      actionAlert={undefined}
+      clearAlert={() => undefined}
+      disabledReason={null}
+      isStreaming={false}
+      messagesLength={0}
+      onSend={startChat}
+      onStop={() => undefined}
+      sendMessageInProgress={initialPrompt !== null}
+    />
+  );
+
   return (
     <>
-      <GhostbuildAuthProvider redirectIfUnauthenticated={false}>
+      <GhostbuildAuthProvider redirectIfUnauthenticated={false} allowGuest>
         <UserProvider>
-          <ChatWrapper initialId={initialId} />
+          {initialPrompt === null ? (
+            homeIntro
+          ) : (
+            <Suspense fallback={homeIntro}>
+              <HomepageChat initialId={initialId} initialPrompt={initialPrompt} />
+            </Suspense>
+          )}
         </UserProvider>
       </GhostbuildAuthProvider>
       <Toaster />
     </>
   );
 }
-
-const ChatWrapper = ({ initialId }: { initialId: string }) => {
-  const partCache = useRef<PartCache>(new Map());
-  const { storeMessageHistory, initializeChat, initialMessages, subchats } = useChatHomepage(initialId);
-  return (
-    <Chat
-      initialMessages={initialMessages ?? emptyList}
-      partCache={partCache.current}
-      storeMessageHistory={storeMessageHistory}
-      initializeChat={initializeChat}
-      isReload={false}
-      hadSuccessfulDeploy={false}
-      subchats={subchats}
-    />
-  );
-};
-
-const emptyList: GhostbuildMessage[] = [];

@@ -3,7 +3,7 @@ import { atom, type WritableAtom } from 'nanostores';
 import type { ITerminal, TerminalInitializationOptions } from '~/types/terminal';
 import { newGhostbuildShellProcess, newShellProcess } from '~/utils/shell';
 import { coloredText } from '~/utils/terminal';
-import { workbenchStore } from './workbench.client';
+import { workbenchCurrentView } from './workbench-ui-state';
 import {
   activeTerminalTabStore,
   APP_SHELL_TAB_INDEX,
@@ -11,7 +11,7 @@ import {
   WORKER_BUILD_TAB_INDEX,
 } from './terminalTabs';
 import { toast } from 'sonner';
-import { ContainerBootState, waitForBootStepCompleted } from './containerBootState';
+import { ContainerBootState, waitForBootStepCompleted, waitForContainerBootState } from './containerBootState';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 
 const logger = createScopedLogger('TerminalStore');
@@ -22,7 +22,9 @@ export class TerminalStore {
   #terminals: WebContainerProcess[] = [];
   #appShellTerminal = newGhostbuildShellProcess();
   #deployTerminal = newGhostbuildShellProcess();
-  showTerminal: WritableAtom<boolean> = import.meta.hot?.data.showTerminal ?? atom(true);
+  #appPreviewServerStarted = false;
+  #appPreviewCommand = 'pnpm run dev';
+  showTerminal: WritableAtom<boolean> = import.meta.hot?.data.showTerminal ?? atom(false);
 
   constructor(webcontainerPromise: Promise<WebContainer>) {
     this.#webcontainer = webcontainerPromise;
@@ -31,23 +33,56 @@ export class TerminalStore {
       import.meta.hot.data.showTerminal = this.showTerminal;
     }
   }
-  get appShellTerminal() {
-    return this.#appShellTerminal;
-  }
-
   toggleTerminal(value?: boolean) {
     this.showTerminal.set(value !== undefined ? value : !this.showTerminal.get());
   }
 
-  async attachAppShellTerminal(terminal: ITerminal) {
+  async attachAppShellTerminal(terminal: ITerminal, options?: TerminalInitializationOptions) {
     try {
       const wc = await this.#webcontainer;
       await this.#appShellTerminal.init(wc, terminal);
+      if (options?.startPreviewServer) {
+        await this.startAppPreviewServer(options.previewCommand);
+      }
     } catch (error) {
       logger.error('Failed to initialize app shell terminal:', error);
       terminal.write(coloredText.red('Failed to spawn terminal shell\n\n') + errorMessage(error));
       return;
     }
+  }
+
+  async startAppPreviewServer(command = 'pnpm run dev') {
+    if (this.#appPreviewServerStarted) {
+      return;
+    }
+
+    this.#appPreviewCommand = command;
+    this.#appPreviewServerStarted = true;
+
+    try {
+      await waitForContainerBootState(ContainerBootState.READY);
+      await this.#appShellTerminal.startCommand(command, { allowLocalDevServer: true });
+    } catch (error) {
+      this.#appPreviewServerStarted = false;
+      throw error;
+    }
+  }
+
+  async stopAppPreviewServer() {
+    if (!this.#appPreviewServerStarted) {
+      return false;
+    }
+
+    await this.#appShellTerminal.interrupt();
+    this.#appPreviewServerStarted = false;
+
+    return true;
+  }
+
+  async restartAppPreviewServer(command = this.#appPreviewCommand) {
+    await this.#appShellTerminal.interrupt();
+    this.#appPreviewServerStarted = false;
+    await this.startAppPreviewServer(command);
   }
 
   async buildWorker(shouldRunWorkerBuild: boolean) {
@@ -64,8 +99,8 @@ export class TerminalStore {
     const result = await this.#deployTerminal.executeCommand('pnpm run build');
 
     if (result.exitCode !== 0) {
-      toast.error('Failed to build the Cloudflare Worker. Check the terminal for more details.');
-      workbenchStore.currentView.set('code');
+      toast.error('Failed to build the Cloudflare Worker. Check the build logs for details.');
+      workbenchCurrentView.set('code');
       activeTerminalTabStore.set(WORKER_BUILD_TAB_INDEX);
       return;
     }

@@ -8,7 +8,7 @@ interface BaseIconButtonProps {
   className?: string;
   iconClassName?: string;
   disabledClassName?: string;
-  title?: string;
+  title: string;
   disabled?: boolean;
   onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
 }
@@ -53,12 +53,14 @@ export const IconButton = memo(
         <button
           ref={ref}
           className={classNames(
-            'flex items-center text-content-primary bg-transparent enabled:hover:text-bolt-elements-item-contentActive rounded-md p-1 enabled:hover:bg-bolt-elements-item-backgroundActive disabled:cursor-not-allowed',
+            'gb-icon-button flex items-center text-content-primary bg-transparent enabled:hover:text-bolt-elements-item-contentActive rounded-md p-1 enabled:hover:bg-bolt-elements-item-backgroundActive disabled:cursor-not-allowed',
             {
               [classNames('opacity-30', disabledClassName)]: disabled,
             },
             className,
           )}
+          type="button"
+          aria-label={title}
           title={title}
           disabled={disabled}
           onClick={onClick}

@@ -2,8 +2,12 @@ import { WebContainer } from '@webcontainer/api';
 import { WORK_DIR_NAME } from 'ghostbuild-agent/constants';
 import { cleanStackTrace } from '~/utils/stacktrace';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { setContainerBootState, ContainerBootState } from '~/lib/stores/containerBootState';
-import { workbenchStore } from '~/lib/stores/workbench.client';
+import {
+  setContainerBootState,
+  setUnsupportedContainerBootState,
+  ContainerBootState,
+} from '~/lib/stores/containerBootState';
+import { workbenchActionAlert } from '~/lib/stores/workbench-ui-state';
 import { chooseExperience } from '~/utils/experienceChooser';
 
 export let webcontainer: Promise<WebContainer> = new Promise(() => {
@@ -18,7 +22,8 @@ if (!import.meta.env.SSR) {
 
   shouldBootWebcontainer = experience === 'the-real-thing' || experience === 'mobile-warning';
   if (!shouldBootWebcontainer) {
-    logger.warn('Not attempting to boot webcontainer because window.crossOriginIsolated is not true');
+    logger.warn(`Not attempting to boot webcontainer for experience: ${experience}`);
+    setUnsupportedContainerBootState(experience);
   }
 }
 
@@ -34,7 +39,7 @@ if (shouldBootWebcontainer) {
           // Handle both uncaught exceptions and unhandled promise rejections
           if (message.type === 'PREVIEW_UNCAUGHT_EXCEPTION' || message.type === 'PREVIEW_UNHANDLED_REJECTION') {
             const isPromise = message.type === 'PREVIEW_UNHANDLED_REJECTION';
-            workbenchStore.actionAlert.set({
+            workbenchActionAlert.set({
               type: 'preview',
               title: isPromise ? 'Unhandled Promise Rejection' : 'Uncaught Exception',
               description: message.message,
