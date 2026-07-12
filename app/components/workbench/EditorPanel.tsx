@@ -67,9 +67,9 @@ export const EditorPanel = memo(function EditorPanel({
 
   return (
     <PanelGroup direction="vertical">
-      <Panel defaultSize={showTerminal ? DEFAULT_EDITOR_SIZE : 100} minSize={20}>
+      <Panel id="editor-workspace" order={1} defaultSize={showTerminal ? DEFAULT_EDITOR_SIZE : 100} minSize={20}>
         <PanelGroup direction="horizontal">
-          <Panel defaultSize={20} minSize={10} collapsible>
+          <Panel id="file-tree" order={1} defaultSize={20} minSize={10} collapsible>
             <div className="flex h-full flex-col border-r">
               <PanelHeader>Files</PanelHeader>
               <FileTree
@@ -84,7 +84,7 @@ export const EditorPanel = memo(function EditorPanel({
             </div>
           </Panel>
           <PanelResizeHandle />
-          <Panel className="flex flex-col" defaultSize={80} minSize={20}>
+          <Panel id="code-editor" order={2} className="flex flex-col" defaultSize={80} minSize={20}>
             <PanelHeader className="overflow-x-auto">
               {(activeFileSegments?.length ?? 0) > 0 && (
                 <div className="flex flex-1 items-center text-sm">
@@ -129,5 +129,13 @@ export const EditorPanel = memo(function EditorPanel({
 });
 
 function TerminalPanelFallback({ showTerminal }: { showTerminal: boolean }) {
-  return <Panel defaultSize={showTerminal ? DEFAULT_TERMINAL_SIZE : 0} minSize={10} collapsible />;
+  return (
+    <Panel
+      id="terminal-panel"
+      order={2}
+      defaultSize={showTerminal ? DEFAULT_TERMINAL_SIZE : 0}
+      minSize={10}
+      collapsible
+    />
+  );
 }

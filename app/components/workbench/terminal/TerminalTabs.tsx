@@ -54,6 +54,8 @@ export const TerminalTabs = memo(function TerminalTabs({
 
   return (
     <Panel
+      id="terminal-panel"
+      order={2}
       ref={terminalPanelRef}
       defaultSize={showTerminal ? DEFAULT_TERMINAL_SIZE : 0}
       minSize={10}
@@ -182,6 +184,7 @@ function TerminalWrapper({
       onTerminalResize={onTerminalResize}
       theme={theme}
       readonly={index === WORKER_BUILD_TAB_INDEX}
+      visible={activeTerminal === index}
     />
   );
 }

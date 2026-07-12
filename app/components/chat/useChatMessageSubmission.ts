@@ -69,7 +69,7 @@ export function useChatMessageSubmission(args: {
       if (!(await args.initializeChat())) {
         return false;
       }
-      void args.onStartChat();
+      await args.onStartChat();
       await submitMessage(args.messages, args.contextManager, messageInput, args.chatStarted, args.sendChatMessage);
       return true;
     } catch (error) {
