@@ -188,11 +188,18 @@ const AuthenticatedChat = memo(
         return;
       }
 
-      await Promise.all([
-        animate('#suggestions', { opacity: 0, display: 'none' }, { duration: 0.1 }),
-        animate('#intro', { opacity: 0, flex: 1 }, { duration: 0.2, ease: cubicEasingFn }),
-        animate('#footer', { opacity: 0, display: 'none' }, { duration: 0.2 }),
-      ]);
+      const scope = animationScope.current;
+      const animations = [
+        ['#suggestions', { opacity: 0, display: 'none' }, { duration: 0.1 }],
+        ['#intro', { opacity: 0, flex: 1 }, { duration: 0.2, ease: cubicEasingFn }],
+        ['#footer', { opacity: 0, display: 'none' }, { duration: 0.2 }],
+      ] as const;
+      await Promise.all(
+        animations.map(([selector, keyframes, options]) => {
+          const element = scope?.querySelector(selector);
+          return element ? animate(element, keyframes, options) : Promise.resolve();
+        }),
+      );
 
       chatStore.setKey('started', true);
 

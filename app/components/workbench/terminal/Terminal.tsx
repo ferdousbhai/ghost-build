@@ -14,6 +14,7 @@ export const Terminal = memo(function Terminal({
   className,
   theme,
   readonly,
+  visible,
   id,
   onTerminalReady,
   onTerminalResize,
@@ -21,12 +22,14 @@ export const Terminal = memo(function Terminal({
   className?: string;
   theme: Theme;
   readonly?: boolean;
+  visible: boolean;
   id: string;
   onTerminalReady?: (terminal: XTerm) => void;
   onTerminalResize?: (cols: number, rows: number) => void;
 }) {
   const terminalElementRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTerm | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
 
   useEffect(() => {
     const element = terminalElementRef.current;
@@ -47,27 +50,65 @@ export const Terminal = memo(function Terminal({
     });
 
     terminalRef.current = terminal;
+    fitAddonRef.current = fitAddon;
 
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
     terminal.open(element);
-
-    const resizeObserver = new ResizeObserver(() => {
-      fitAddon.fit();
-      onTerminalResize?.(terminal.cols, terminal.rows);
-    });
-
-    resizeObserver.observe(element);
 
     logger.debug(`Attach [${id}]`);
 
     onTerminalReady?.(terminal);
 
     return () => {
-      resizeObserver.disconnect();
       terminal.dispose();
+      terminalRef.current = null;
+      fitAddonRef.current = null;
     };
   }, [id, onTerminalReady, onTerminalResize, readonly]);
+
+  useEffect(() => {
+    const element = terminalElementRef.current;
+    const terminal = terminalRef.current;
+    const fitAddon = fitAddonRef.current;
+    if (!visible || !element || !terminal || !fitAddon) {
+      return undefined;
+    }
+
+    let animationFrame: number | undefined;
+    let lastColumns = -1;
+    let lastRows = -1;
+
+    const fit = () => {
+      animationFrame = undefined;
+      const { width, height } = element.getBoundingClientRect();
+      if (width <= 0 || height <= 0) {
+        return;
+      }
+      fitAddon.fit();
+      if (terminal.cols === lastColumns && terminal.rows === lastRows) {
+        return;
+      }
+      lastColumns = terminal.cols;
+      lastRows = terminal.rows;
+      onTerminalResize?.(terminal.cols, terminal.rows);
+    };
+    const scheduleFit = () => {
+      if (animationFrame === undefined) {
+        animationFrame = requestAnimationFrame(fit);
+      }
+    };
+    const resizeObserver = new ResizeObserver(scheduleFit);
+    resizeObserver.observe(element);
+    scheduleFit();
+
+    return () => {
+      resizeObserver.disconnect();
+      if (animationFrame !== undefined) {
+        cancelAnimationFrame(animationFrame);
+      }
+    };
+  }, [visible, onTerminalResize]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
