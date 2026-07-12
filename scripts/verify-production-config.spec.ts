@@ -22,7 +22,7 @@ describe('production config workflow verification helpers', () => {
     const workflow = `
       run: pnpm run typecheck
       run: pnpm run verify:stack
-      uses: cloudflare/wrangler-action@v3
+      uses: cloudflare/wrangler-action@v4
       command: deploy
     `;
 
@@ -30,7 +30,7 @@ describe('production config workflow verification helpers', () => {
       findWorkflowSequenceErrors(workflow, '.github/workflows/deploy.yml', [
         'pnpm run verify:stack',
         'pnpm run typecheck',
-        'uses: cloudflare/wrangler-action@v3',
+        'uses: cloudflare/wrangler-action@v4',
         'command: deploy',
       ]),
     ).toEqual(['.github/workflows/deploy.yml must run "pnpm run typecheck" in the production deploy sequence.']);
@@ -39,7 +39,7 @@ describe('production config workflow verification helpers', () => {
   it('requires the official Cloudflare Wrangler action for production deploys', () => {
     const workflow = `
       name: Production Deploy
-      uses: cloudflare/wrangler-action@v3
+      uses: cloudflare/wrangler-action@v4
       with:
         apiToken: \${{ secrets.CLOUDFLARE_API_TOKEN }}
         accountId: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -49,7 +49,7 @@ describe('production config workflow verification helpers', () => {
 
     expect(
       findMissingWorkflowTextErrors(workflow, '.github/workflows/deploy.yml', [
-        'uses: cloudflare/wrangler-action@v3',
+        'uses: cloudflare/wrangler-action@v4',
         'apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}',
         'accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}',
         'packageManager: pnpm',
@@ -59,9 +59,9 @@ describe('production config workflow verification helpers', () => {
 
     expect(
       findMissingWorkflowTextErrors('run: pnpm wrangler deploy', '.github/workflows/deploy.yml', [
-        'uses: cloudflare/wrangler-action@v3',
+        'uses: cloudflare/wrangler-action@v4',
       ]),
-    ).toEqual(['.github/workflows/deploy.yml must contain "uses: cloudflare/wrangler-action@v3".']);
+    ).toEqual(['.github/workflows/deploy.yml must contain "uses: cloudflare/wrangler-action@v4".']);
   });
 
   it('rejects staging and local dev commands in workflows', () => {

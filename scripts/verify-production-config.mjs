@@ -196,7 +196,7 @@ function verifyWorkflows(errors) {
       'name: production',
       'CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}',
       'CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}',
-      'uses: cloudflare/wrangler-action@v3',
+      'uses: cloudflare/wrangler-action@v4',
       'apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}',
       'accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}',
       'packageManager: pnpm',
@@ -207,7 +207,7 @@ function verifyWorkflows(errors) {
       'pnpm run provision:production',
       'pnpm run verify:production-config',
       'pnpm run d1:migrations:apply:production',
-      'uses: cloudflare/wrangler-action@v3',
+      'uses: cloudflare/wrangler-action@v4',
       'command: deploy',
     ]),
   );
