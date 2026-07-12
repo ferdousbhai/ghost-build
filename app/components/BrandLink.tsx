@@ -16,8 +16,7 @@ export function BrandLink({
       aria-label="Ghostbuild home"
     >
       <span className="ghostbuild-brand-mark" aria-hidden>
-        <span className="ghostbuild-brand-mark__glyph">G</span>
-        <span className="ghostbuild-brand-mark__spark" />
+        <span className="ghostbuild-brand-mark__glyph">👻</span>
       </span>
       <span className={nameClassName}>Ghostbuild</span>
     </a>

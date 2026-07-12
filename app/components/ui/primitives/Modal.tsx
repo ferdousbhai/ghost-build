@@ -22,7 +22,7 @@ export function Modal({
     >
       <div
         className={classNames(
-          'max-h-[90vh] w-full overflow-auto rounded-md bg-bolt-elements-background-depth-1 p-4 shadow-xl',
+          'max-h-[90vh] w-full overflow-auto rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-5 shadow-xl',
           size === 'lg' ? 'max-w-4xl' : 'max-w-lg',
         )}
       >
@@ -31,7 +31,7 @@ export function Modal({
           {onClose && (
             <button
               type="button"
-              className="gb-icon-button text-content-secondary hover:text-content-primary"
+              className="gb-icon-button flex size-8 items-center justify-center text-content-secondary hover:text-content-primary"
               aria-label="Close dialog"
               onClick={onClose}
             >

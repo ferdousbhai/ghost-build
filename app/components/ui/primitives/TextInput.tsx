@@ -9,7 +9,7 @@ export const TextInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLIn
     <input
       ref={ref}
       className={classNames(
-        'min-h-8 rounded-md border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-2 py-1 text-sm text-content-primary outline-none focus:border-accent-500',
+        'min-h-9 rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3 py-1.5 text-sm text-content-primary outline-none transition-shadow focus:border-accent-500 focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--ghost-home-accent)_12%,transparent)]',
         className,
       )}
       {...props}

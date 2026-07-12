@@ -60,7 +60,7 @@ export const Button = forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonPr
   ref,
 ) {
   const classes = classNames(
-    'gb-button inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:opacity-50',
+    'gb-button inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:opacity-50',
     inline ? 'w-auto' : '',
     variantClasses[variant] ?? variantClasses.neutral,
     sizeClasses[size] ?? sizeClasses.md,

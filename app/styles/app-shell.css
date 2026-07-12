@@ -25,6 +25,14 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+body,
+button,
+input,
+textarea,
+select {
+  letter-spacing: -0.01em;
+}
+
 button,
 input,
 textarea,
@@ -48,8 +56,39 @@ button,
 }
 
 :where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--gb-content-accent);
+  outline: 3px solid color-mix(in srgb, var(--ghost-home-accent) 72%, transparent);
   outline-offset: 3px;
+}
+
+.gb-button {
+  border-radius: 999px;
+  font-weight: 750;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+.gb-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.gb-button.bg-accent-500 {
+  background: linear-gradient(135deg, var(--ghost-home-accent-2), var(--ghost-home-accent));
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--ghost-home-accent) 24%, transparent);
+}
+
+.gb-icon-button {
+  border-radius: 999px;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease,
+    transform 160ms ease;
+}
+
+.gb-icon-button:hover {
+  background: color-mix(in srgb, var(--ghost-home-accent) 10%, transparent);
+  transform: scale(1.04);
 }
 
 .skip-link {
@@ -94,7 +133,7 @@ button,
   align-items: center;
   justify-content: center;
   border: 1px solid var(--gb-border-transparent);
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--gb-background-secondary);
   color: var(--gb-content-primary);
   transition:
@@ -117,31 +156,8 @@ button,
   min-height: 100svh;
   overflow: hidden;
   isolation: isolate;
-  background:
-    radial-gradient(circle at 88% 8%, color-mix(in srgb, var(--ghost-home-accent-2) 13%, transparent), transparent 30%),
-    radial-gradient(circle at 8% 78%, color-mix(in srgb, var(--ghost-home-accent) 12%, transparent), transparent 34%),
-    linear-gradient(180deg, var(--ghost-home-bg-top), var(--ghost-home-bg));
+  background: var(--ghost-home-bg);
   color: var(--ghost-home-ink);
-}
-
-.app-page-shell::before {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  content: '';
-  background:
-    repeating-linear-gradient(
-      0deg,
-      color-mix(in srgb, var(--ghost-home-ink) 4%, transparent) 0 1px,
-      transparent 1px 56px
-    ),
-    repeating-linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--ghost-home-ink) 4%, transparent) 0 1px,
-      transparent 1px 56px
-    );
-  mask-image: linear-gradient(180deg, black, transparent 92%);
 }
 
 .app-page-container {
@@ -205,13 +221,9 @@ button,
 
 .app-card {
   border: 1px solid var(--ghost-home-border);
-  border-radius: 10px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--ghost-home-accent) 6%, transparent), transparent 40%),
-    color-mix(in srgb, var(--ghost-home-surface) 94%, transparent);
-  box-shadow:
-    0 22px 60px color-mix(in srgb, var(--ghost-home-panel) 14%, transparent),
-    inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--ghost-home-surface) 96%, transparent);
+  box-shadow: 0 16px 44px color-mix(in srgb, var(--ghost-home-accent-2) 10%, transparent);
   backdrop-filter: blur(18px);
 }
 
@@ -262,8 +274,8 @@ button,
   height: 48px;
   place-items: center;
   border: 1px solid var(--ghost-home-border);
-  border-radius: 10px;
-  background: var(--ghost-home-panel);
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--ghost-home-accent-2), var(--ghost-home-accent));
   color: var(--ghost-home-panel-ink);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.2);
 }
@@ -277,7 +289,7 @@ button,
   max-height: 220px;
   overflow: auto;
   border: 1px solid var(--ghost-home-border);
-  border-radius: 8px;
+  border-radius: 14px;
   background: color-mix(in srgb, var(--ghost-home-panel) 92%, transparent);
   color: var(--ghost-home-panel-ink);
   padding: 14px;

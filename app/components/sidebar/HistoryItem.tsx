@@ -29,8 +29,8 @@ export function HistoryItem({ item, handleDeleteClick }: HistoryItemProps) {
   return (
     <div
       className={classNames(
-        'group rounded text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-[var(--bolt-elements-sidebar-active-item-background)] overflow-hidden flex justify-between items-center px-3 py-2 transition-colors',
-        { 'text-gray-900 dark:text-white bg-[var(--bolt-elements-sidebar-active-item-background)]': isActiveChat },
+        'group rounded-xl text-sm text-content-secondary hover:text-content-primary hover:bg-[var(--bolt-elements-sidebar-active-item-background)] overflow-hidden flex justify-between items-center px-3 py-2.5 transition-colors',
+        { 'text-content-primary bg-[var(--bolt-elements-sidebar-active-item-background)]': isActiveChat },
       )}
     >
       {editing ? (
@@ -58,7 +58,7 @@ export function HistoryItem({ item, handleDeleteClick }: HistoryItemProps) {
               'absolute right-0 top-0 bottom-0 flex items-center group-hover:bg-[var(--bolt-elements-sidebar-active-item-background)] px-2 transition-colors',
             )}
           >
-            <div className="flex items-center gap-2.5 text-gray-400 opacity-0 transition-opacity group-hover:opacity-100 dark:text-gray-500">
+            <div className="flex items-center gap-2.5 text-content-tertiary opacity-0 transition-opacity group-hover:opacity-100">
               <ChatActionButton
                 toolTipContent="Rename"
                 icon={<Pencil1Icon />}

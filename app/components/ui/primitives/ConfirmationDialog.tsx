@@ -20,7 +20,7 @@ export function ConfirmationDialog({
       role="dialog"
       aria-modal="true"
     >
-      <div className="w-full max-w-md rounded-md bg-bolt-elements-background-depth-1 p-4 shadow-xl">
+      <div className="w-full max-w-md rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-5 shadow-xl">
         <h2 className="mb-2 text-base font-semibold">{dialogTitle}</h2>
         <div className="text-content-secondary text-sm">{dialogBody}</div>
         <div className="mt-4 flex justify-end gap-2">

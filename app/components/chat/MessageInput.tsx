@@ -48,14 +48,14 @@ export const MessageInput = memo(function MessageInput({
     >
       <div
         className={classNames(
-          'ghost-message-input__surface rounded-xl bg-bolt-elements-background-depth-1 shadow-[0_12px_36px_rgba(0,0,0,0.16)]',
+          'ghost-message-input__surface rounded-2xl bg-bolt-elements-background-depth-1 shadow-[0_12px_36px_color-mix(in_srgb,var(--ghost-home-accent-2)_10%,transparent)]',
           !chatStarted ? 'p-2' : '',
         )}
       >
         <div
           className={classNames(
             'ghost-message-input__editor has-[textarea:focus]:border-border-selected border border-bolt-elements-borderColor transition-all',
-            chatStarted ? 'rounded-t-xl' : 'rounded-md',
+            chatStarted ? 'rounded-t-2xl' : 'rounded-xl',
           )}
         >
           <TextareaWithHighlights
@@ -72,7 +72,7 @@ export const MessageInput = memo(function MessageInput({
         <div
           className={classNames(
             'ghost-message-input__footer flex flex-wrap items-center gap-2 border border-t-0 border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-1.5 text-sm',
-            chatStarted ? 'rounded-b-xl' : 'rounded-b-md',
+            chatStarted ? 'rounded-b-2xl' : 'rounded-b-xl',
           )}
         >
           {input.length > 3 && input.length <= PROMPT_LENGTH_WARNING_THRESHOLD && <NewLineShortcut />}
@@ -105,7 +105,7 @@ export const MessageInput = memo(function MessageInput({
               tip={authState.kind === 'unauthenticated' ? 'Please sign in to continue' : undefined}
               onClick={controller.handleButtonClick}
               size="xs"
-              className={classNames('ml-1 h-8 min-w-8 rounded-lg', !chatStarted ? 'ghost-message-input__send' : '')}
+              className={classNames('ml-1 h-8 min-w-8 rounded-full', !chatStarted ? 'ghost-message-input__send' : '')}
               aria-label={isStreaming ? 'Stop' : 'Send'}
               icon={
                 sendMessageInProgress && !isStreaming ? (

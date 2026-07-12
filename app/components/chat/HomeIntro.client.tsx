@@ -8,10 +8,9 @@ const DisabledChatMessageSheet = lazy(() =>
 );
 
 const buildSignals = [
-  { label: 'Routes', value: 'TanStack Start' },
-  { label: 'Data', value: 'D1 / R2 / DB' },
-  { label: 'Runtime', value: 'Cloudflare Workers' },
-  { label: 'Agents', value: 'Workers AI' },
+  { emoji: '💡', value: 'Describe it' },
+  { emoji: '✨', value: 'Watch it build' },
+  { emoji: '🚀', value: 'Share it live' },
 ];
 
 interface HomeIntroProps {
@@ -37,31 +36,28 @@ export function HomeIntro({
 }: HomeIntroProps) {
   return (
     <div className="ghost-home-shell grow p-4 sm:px-6 lg:px-8 lg:py-5">
-      <div className="ghost-home-backdrop" aria-hidden />
       <div className="ghost-home-grid">
         <section className="ghost-home-copy min-w-0" aria-labelledby="intro">
           <div className="ghost-home-reveal">
             <div className="ghost-home-kicker-row">
               <span className="ghost-home-mark" aria-hidden>
-                <span className="ghost-home-mark__glyph">G</span>
-                <span className="ghost-home-mark__spark" />
+                <span className="ghost-home-mark__glyph">👻</span>
               </span>
               <div className="ghost-home-kicker-copy">
-                <div className="ghost-home-eyebrow">Cloudflare-native app builder</div>
-                <div className="ghost-home-subeyebrow">Agents, data, previews, and deploys in one loop</div>
+                <div className="ghost-home-eyebrow">Ghostbuild</div>
+                <div className="ghost-home-subeyebrow">Your idea, live on the internet</div>
               </div>
             </div>
             <h1 id="intro" className="ghost-home-title">
-              Summon a deployed app from one precise brief.
+              Dream it. <span>Type it.</span>
+              <br />
+              We’ll build it. ✨
             </h1>
-            <p className="ghost-home-lede">
-              Ghostbuild turns product intent into routes, data models, agent workflows, previews, and deployable Worker
-              projects without leaving the builder.
-            </p>
-            <ul className="ghost-home-signal-grid" aria-label="Generated app stack">
+            <p className="ghost-home-lede">Turn a simple prompt into a real, shareable app—no coding required.</p>
+            <ul className="ghost-home-signal-grid" aria-label="How Ghostbuild works">
               {buildSignals.map((signal) => (
-                <li className="ghost-home-signal" key={signal.label}>
-                  <span>{signal.label}</span>
+                <li className="ghost-home-signal" key={signal.value}>
+                  <span aria-hidden>{signal.emoji}</span>
                   <strong>{signal.value}</strong>
                 </li>
               ))}
@@ -88,20 +84,6 @@ export function HomeIntro({
                 <DisabledChatMessageSheet message={disabledReason} />
               </Suspense>
             )}
-          </div>
-
-          <div className="ghost-home-preview ghost-home-reveal" aria-label="Ghostbuild generated workspace preview">
-            <div className="ghost-home-preview__bar">
-              <span className="ghost-home-preview__status" aria-hidden />
-              <span>Generated workspace</span>
-              <span className="ghost-home-preview__meta">Database / Logs / Preview</span>
-            </div>
-            <img
-              src="/landing/data.png"
-              alt="Generated app database workspace with tables and records"
-              loading="eager"
-              decoding="async"
-            />
           </div>
         </section>
       </div>

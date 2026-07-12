@@ -44,7 +44,7 @@
   --gb-neutral-10: rgb(57, 60, 66);
   --gb-neutral-11: rgb(41, 43, 48);
   --gb-neutral-12: rgb(24, 25, 28);
-  --gb-accent: rgb(63, 82, 149);
+  --gb-accent: rgb(188, 65, 142);
   --gb-info: rgb(7, 191, 232);
   --gb-util-accent: rgb(38, 135, 246);
   --gb-util-info: rgb(7, 191, 232);
@@ -56,75 +56,75 @@
 /* Ghostbuild Tokens Light Theme */
 :root,
 html.light {
-  --gb-background-brand: rgb(249, 247, 238);
-  --gb-background-primary: rgb(243, 240, 237);
-  --gb-background-secondary: rgb(253, 252, 250);
-  --gb-background-tertiary: rgb(240, 238, 235);
-  --gb-background-highlight: rgb(254, 252, 232);
+  --gb-background-brand: rgb(255, 249, 252);
+  --gb-background-primary: rgb(250, 246, 252);
+  --gb-background-secondary: rgb(255, 255, 255);
+  --gb-background-tertiary: rgb(245, 237, 249);
+  --gb-background-highlight: rgb(255, 242, 248);
   --gb-background-success: rgb(203, 237, 182);
   --gb-background-warning: rgb(250, 228, 171);
   --gb-background-error: rgb(252, 215, 203);
   --gb-background-error-secondary: rgb(255, 202, 193);
-  --gb-content-primary: rgb(24, 25, 28);
-  --gb-content-secondary: rgb(73, 76, 84);
-  --gb-content-tertiary: rgb(103, 106, 116);
-  --gb-content-accent: rgb(48, 106, 207);
+  --gb-content-primary: rgb(35, 24, 43);
+  --gb-content-secondary: rgb(91, 72, 100);
+  --gb-content-tertiary: rgb(126, 104, 136);
+  --gb-content-accent: rgb(156, 47, 125);
   --gb-content-success: rgb(34, 137, 9);
   --gb-content-warning: rgb(109, 82, 23);
   --gb-content-error: rgb(168, 21, 21);
   --gb-content-error-secondary: rgb(238, 52, 47);
-  --gb-content-link: rgb(33, 34, 181);
-  --gb-border-transparent: rgba(33, 34, 30, 0.14);
-  --gb-border-selected: rgb(30, 28, 25);
+  --gb-content-link: rgb(137, 42, 126);
+  --gb-border-transparent: rgba(105, 75, 117, 0.16);
+  --gb-border-selected: rgb(156, 47, 125);
   --background-primary: var(--gb-background-primary);
-  --background-primary-rgb: 243 240 237;
-  --background-secondary-rgb: 253 252 250;
+  --background-primary-rgb: 250 246 252;
+  --background-secondary-rgb: 255 255 255;
   --content-primary: var(--gb-content-primary);
-  --content-primary-rgb: 24 25 28;
+  --content-primary-rgb: 35 24 43;
   --content-secondary: var(--gb-content-secondary);
-  --content-secondary-rgb: 73 76 84;
+  --content-secondary-rgb: 91 72 100;
   --content-tertiary: var(--gb-content-tertiary);
-  --content-tertiary-rgb: 103 106 116;
+  --content-tertiary-rgb: 126 104 136;
   --content-link: var(--gb-content-link);
   --border-transparent: var(--gb-border-transparent);
-  --border-transparent-rgb: 33 34 30 / 0.14;
+  --border-transparent-rgb: 105 75 117 / 0.16;
 }
 
 /* Ghostbuild Tokens Dark Theme */
 :root,
 html.dark {
-  --gb-background-brand: rgb(30, 28, 26);
-  --gb-background-primary: rgb(30, 28, 26);
-  --gb-background-secondary: rgb(42, 40, 37);
-  --gb-background-tertiary: rgb(60, 58, 65);
-  --gb-background-highlight: rgb(109, 82, 23);
+  --gb-background-brand: rgb(24, 16, 30);
+  --gb-background-primary: rgb(24, 16, 30);
+  --gb-background-secondary: rgb(38, 26, 46);
+  --gb-background-tertiary: rgb(55, 37, 65);
+  --gb-background-highlight: rgb(72, 38, 67);
   --gb-background-success: rgb(44, 83, 20);
   --gb-background-warning: rgb(109, 82, 23);
   --gb-background-error: rgb(107, 33, 31);
   --gb-background-error-secondary: rgb(168, 21, 21);
-  --gb-content-primary: rgb(253, 252, 250);
-  --gb-content-secondary: rgb(204, 206, 211);
-  --gb-content-tertiary: rgb(151, 154, 164);
-  --gb-content-accent: rgb(99, 168, 248);
+  --gb-content-primary: rgb(255, 247, 252);
+  --gb-content-secondary: rgb(218, 195, 225);
+  --gb-content-tertiary: rgb(177, 146, 187);
+  --gb-content-accent: rgb(255, 132, 181);
   --gb-content-success: rgb(180, 236, 146);
   --gb-content-warning: rgb(230, 226, 168);
   --gb-content-error: rgb(255, 202, 193);
   --gb-content-error-secondary: rgb(253, 76, 65);
-  --gb-content-link: rgb(177, 202, 240);
-  --gb-border-transparent: rgba(163, 156, 148, 0.3);
-  --gb-border-selected: rgb(225, 215, 205);
+  --gb-content-link: rgb(244, 157, 217);
+  --gb-border-transparent: rgba(255, 220, 242, 0.16);
+  --gb-border-selected: rgb(255, 132, 181);
   --background-primary: var(--gb-background-primary);
-  --background-primary-rgb: 30 28 26;
-  --background-secondary-rgb: 42 40 37;
+  --background-primary-rgb: 24 16 30;
+  --background-secondary-rgb: 38 26 46;
   --content-primary: var(--gb-content-primary);
-  --content-primary-rgb: 253 252 250;
+  --content-primary-rgb: 255 247 252;
   --content-secondary: var(--gb-content-secondary);
-  --content-secondary-rgb: 204 206 211;
+  --content-secondary-rgb: 218 195 225;
   --content-tertiary: var(--gb-content-tertiary);
-  --content-tertiary-rgb: 151 154 164;
+  --content-tertiary-rgb: 177 146 187;
   --content-link: var(--gb-content-link);
   --border-transparent: var(--gb-border-transparent);
-  --border-transparent-rgb: 163 156 148 / 0.3;
+  --border-transparent-rgb: 255 220 242 / 0.16;
 }
 
 /* Color Tokens */

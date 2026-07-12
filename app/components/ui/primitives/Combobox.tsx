@@ -31,7 +31,7 @@ export function Combobox<Value extends OptionValue>({
       {!labelHidden && <span className="text-content-secondary text-xs">{label}</span>}
       <select
         className={classNames(
-          'min-h-8 rounded-md border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-2 py-1 text-content-primary',
+          'min-h-9 rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3 py-1.5 text-content-primary',
           buttonClasses,
         )}
         aria-label={label}

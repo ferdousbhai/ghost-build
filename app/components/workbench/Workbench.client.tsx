@@ -84,8 +84,8 @@ export const Workbench = memo(function Workbench({
           )}
         >
           <div className="absolute inset-0 px-2 lg:px-6">
-            <div className="flex h-full flex-col overflow-hidden rounded-lg border bg-bolt-elements-background-depth-2 shadow">
-              <div className="flex items-center border-b px-3 py-2">
+            <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border-transparent bg-bolt-elements-background-depth-2 shadow-[0_20px_60px_color-mix(in_srgb,var(--ghost-home-accent-2)_10%,transparent)]">
+              <div className="flex items-center border-b border-border-transparent px-3 py-2.5">
                 <Slider
                   selected={controller.selectedView}
                   options={sliderOptions}
