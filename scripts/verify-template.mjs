@@ -31,6 +31,7 @@ export async function verifyTemplate() {
       filter: (path) => path === sourceDir || !ignoredNames.has(basename(path)),
     });
     run(tempDir, ['install', '--frozen-lockfile']);
+    run(tempDir, ['run', 'cf-typegen']);
     run(tempDir, ['run', 'verify:stack']);
     run(tempDir, ['run', 'verify:production-config', '--', '--allow-unprovisioned']);
     run(tempDir, ['run', 'typecheck']);
