@@ -7,12 +7,6 @@ const DisabledChatMessageSheet = lazy(() =>
   import('./DisabledChatMessageSheet').then((module) => ({ default: module.DisabledChatMessageSheet })),
 );
 
-const buildSignals = [
-  { emoji: '💡', value: 'Describe it' },
-  { emoji: '✨', value: 'Watch it build' },
-  { emoji: '🚀', value: 'Share it live' },
-];
-
 interface HomeIntroProps {
   actionAlert: ActionAlert | undefined;
   clearAlert: () => void;
@@ -49,19 +43,11 @@ export function HomeIntro({
               </div>
             </div>
             <h1 id="intro" className="ghost-home-title">
-              Dream it. <span>Type it.</span>
+              If you can dream it,
               <br />
-              We’ll build it. ✨
+              <span>the ghost will build it. ✨</span>
             </h1>
             <p className="ghost-home-lede">Turn a simple prompt into a real, shareable app—no coding required.</p>
-            <ul className="ghost-home-signal-grid" aria-label="How Ghostbuild works">
-              {buildSignals.map((signal) => (
-                <li className="ghost-home-signal" key={signal.value}>
-                  <span aria-hidden>{signal.emoji}</span>
-                  <strong>{signal.value}</strong>
-                </li>
-              ))}
-            </ul>
           </div>
 
           <div className="ghost-home-reveal ghost-home-composer-stack">

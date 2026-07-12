@@ -62,7 +62,7 @@ export const MessageInput = memo(function MessageInput({
             onKeyDown={controller.handleKeyDown}
             onChange={controller.handleChange}
             value={input}
-            minHeight={72}
+            minHeight={chatStarted ? 72 : 44}
             maxHeight={chatStarted ? 400 : 180}
             placeholder={placeholder}
             disabled={disabled}
@@ -75,10 +75,10 @@ export const MessageInput = memo(function MessageInput({
             chatStarted ? 'rounded-b-2xl' : 'rounded-b-xl',
           )}
         >
-          {input.length > 3 && input.length <= PROMPT_LENGTH_WARNING_THRESHOLD && <NewLineShortcut />}
-          {input.length > PROMPT_LENGTH_WARNING_THRESHOLD && <CharacterWarning />}
+          {chatStarted && input.length > 3 && input.length <= PROMPT_LENGTH_WARNING_THRESHOLD && <NewLineShortcut />}
+          {chatStarted && input.length > PROMPT_LENGTH_WARNING_THRESHOLD && <CharacterWarning />}
           <div className="ml-auto flex items-center gap-1">
-            {authState.kind === 'unauthenticated' && (
+            {chatStarted && authState.kind === 'unauthenticated' && (
               <Button
                 variant="neutral"
                 onClick={() => void controller.signIn()}
@@ -88,7 +88,7 @@ export const MessageInput = memo(function MessageInput({
                 <span>Sign in</span>
               </Button>
             )}
-            {hasActiveSession && (
+            {chatStarted && hasActiveSession && (
               <EnhancePromptButton
                 isEnhancing={controller.isEnhancing}
                 disabled={disabled || input.length === 0}
@@ -103,7 +103,11 @@ export const MessageInput = memo(function MessageInput({
                 disabled
               }
               tip={authState.kind === 'unauthenticated' ? 'Please sign in to continue' : undefined}
-              onClick={controller.handleButtonClick}
+              onClick={
+                !chatStarted && authState.kind === 'unauthenticated'
+                  ? () => void controller.signIn()
+                  : controller.handleButtonClick
+              }
               size="xs"
               className={classNames('ml-1 h-8 min-w-8 rounded-full', !chatStarted ? 'ghost-message-input__send' : '')}
               aria-label={isStreaming ? 'Stop' : 'Send'}

@@ -1,0 +1,78 @@
+import { z } from 'zod';
+import { getAuth } from '~/lib/.server/auth';
+import { getOptionalBinding } from '~/lib/.server/env';
+
+const MAX_SUBMISSIONS_PER_HOUR = 5;
+const ONE_HOUR_MS = 60 * 60 * 1000;
+
+const feedbackRequestSchema = z.object({
+  category: z.enum(['bug', 'idea', 'ux', 'other']),
+  message: z.string().trim().min(3).max(4_000),
+  pagePath: z.string().trim().max(1_000).optional(),
+});
+
+export async function feedbackAction({ request, env }: { request: Request; env: Env }): Promise<Response> {
+  const parsed = feedbackRequestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
+    return Response.json({ error: 'Please provide valid feedback.' }, { status: 400 });
+  }
+
+  try {
+    const userId = await getOptionalUserId(env, request);
+    const sourceKey = userId ? `user:${userId}` : `guest:${await hashSource(request)}`;
+    const now = Date.now();
+    const recent = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM feedback WHERE source_key = ? AND created_at >= ?',
+    )
+      .bind(sourceKey, now - ONE_HOUR_MS)
+      .first<{ count: number }>();
+
+    if ((recent?.count ?? 0) >= MAX_SUBMISSIONS_PER_HOUR) {
+      return Response.json({ error: 'Too many submissions. Please try again later.' }, { status: 429 });
+    }
+
+    const id = crypto.randomUUID();
+    const appVersion =
+      getOptionalBinding(env, 'WORKERS_CI_COMMIT_SHA') ??
+      getOptionalBinding(env, 'COMMIT_SHA') ??
+      getOptionalBinding(env, 'GITHUB_SHA') ??
+      null;
+
+    await env.DB.prepare(
+      `INSERT INTO feedback
+        (id, user_id, category, message, page_path, app_version, status, source_key, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?)`,
+    )
+      .bind(
+        id,
+        userId,
+        parsed.data.category,
+        parsed.data.message,
+        parsed.data.pagePath ?? null,
+        appVersion,
+        sourceKey,
+        now,
+      )
+      .run();
+
+    return Response.json({ id }, { status: 201 });
+  } catch (error) {
+    console.error('Unable to save feedback', error);
+    return Response.json({ error: 'Unable to save feedback right now.' }, { status: 500 });
+  }
+}
+
+async function getOptionalUserId(env: Env, request: Request): Promise<string | null> {
+  try {
+    const session = await getAuth(env, request).api.getSession({ headers: request.headers });
+    return session?.user.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function hashSource(request: Request): Promise<string> {
+  const source = request.headers.get('CF-Connecting-IP') ?? request.headers.get('x-forwarded-for') ?? 'unknown';
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`ghostbuild-feedback:${source}`));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}

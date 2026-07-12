@@ -149,38 +149,6 @@ html.dark {
   line-height: 1.5;
 }
 
-.ghost-home-signal-grid {
-  display: flex;
-  margin-top: 24px;
-  padding: 0;
-  flex-wrap: wrap;
-  gap: 9px;
-  list-style: none;
-}
-
-.ghost-home-signal {
-  border: 1px solid var(--ghost-home-border);
-  border-radius: 999px;
-  background: var(--ghost-home-surface);
-  padding: 9px 14px;
-  box-shadow: 0 7px 20px color-mix(in srgb, var(--ghost-home-accent-2) 8%, transparent);
-}
-
-.ghost-home-signal span,
-.ghost-home-signal strong {
-  display: inline;
-}
-
-.ghost-home-signal span {
-  margin-right: 7px;
-}
-
-.ghost-home-signal strong {
-  color: var(--ghost-home-ink);
-  font-size: 13px;
-  font-weight: 800;
-}
-
 .ghost-home-composer-stack {
   max-width: 800px;
   margin-top: 28px;
@@ -214,10 +182,15 @@ html.dark {
 }
 
 .ghost-message-input--home .ghost-message-input__surface {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   background: transparent;
 }
 
 .ghost-message-input--home .ghost-message-input__editor {
+  min-width: 0;
+  flex: 1;
   border-color: var(--ghost-home-border);
   background: var(--ghost-home-input);
 }
@@ -240,13 +213,16 @@ html.dark {
 }
 
 .ghost-message-input--home .ghost-message-input__footer {
-  border-color: var(--ghost-home-border);
-  background: color-mix(in srgb, var(--ghost-home-surface) 92%, transparent);
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
 }
 
 .ghost-message-input--home .ghost-message-input__send {
-  min-height: 34px;
-  min-width: 38px;
+  min-height: 44px;
+  min-width: 44px;
+  margin-left: 0;
   background: linear-gradient(135deg, var(--ghost-home-accent-2), var(--ghost-home-accent));
   box-shadow: 0 10px 24px color-mix(in srgb, var(--ghost-home-accent) 30%, transparent);
 }
@@ -300,10 +276,6 @@ html.dark {
   .ghost-home-lede {
     font-size: 16px;
   }
-
-  .ghost-home-signal {
-    padding: 8px 11px;
-  }
 }
 
 @media (max-width: 460px) {
@@ -314,10 +286,6 @@ html.dark {
 
   .ghost-home-title {
     font-size: 40px;
-  }
-
-  .ghost-home-signal strong {
-    font-size: 12px;
   }
 }
 

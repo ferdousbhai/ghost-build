@@ -13,6 +13,7 @@ import { healthAction } from './server-handlers/health';
 import { scriptsAction } from './server-handlers/scripts';
 import { versionAction } from './server-handlers/version';
 import { clientTelemetryAction } from './server-handlers/client-telemetry';
+import { feedbackAction } from './server-handlers/feedback';
 
 export { BuilderAgent } from './agents/builder-agent';
 
@@ -53,6 +54,10 @@ const exactRoutes: Record<string, ServerRoute> = {
   '/api/client-telemetry': {
     method: 'POST',
     handler: (request) => clientTelemetryAction(request),
+  },
+  '/api/feedback': {
+    method: 'POST',
+    handler: (request, env) => feedbackAction({ request, env }),
   },
   '/api/data': {
     method: 'POST',
