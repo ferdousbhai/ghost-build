@@ -1,8 +1,6 @@
 packages:
   - 'ghostbuild-agent'
   - 'template'
-overrides:
-  '@typescript-eslint/utils': ^8.0.0-alpha.30
 onlyBuiltDependencies:
   - core-js-pure
   - esbuild
