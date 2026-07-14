@@ -106,7 +106,7 @@ describe('cloudflareConnectionStatusAction', () => {
   });
 
   it('encrypts the provider credential and prevents callback replay', async () => {
-    getSession.mockResolvedValue({ user: { id: 'user-1', email: 'person@example.com' } });
+    getSession.mockResolvedValue(null);
     const database = integrationDatabase();
     const state = '00000000-0000-4000-8000-000000000001';
     database.sessions.set(state, {
@@ -116,20 +116,26 @@ describe('cloudflareConnectionStatusAction', () => {
       status: 'pending',
       expiresAt: Date.now() + 60_000,
     });
-    const request = new Request(`https://ghostbuild.dev/api/cloudflare/complete?state=${state}`);
+    const callbackRequest = () =>
+      new Request('https://ghostbuild.dev/api/cloudflare/complete', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ state, code: 'authorization-code' }),
+      });
     const response = await completeCloudflareConnectionAction({
-      request,
+      request: callbackRequest(),
       env: database.env,
       orchestrator: fakeOrchestrator(),
     });
     expect(response.status).toBe(303);
     expect(response.headers.get('location')).toBe('https://ghostbuild.dev/settings?cloudflare=connected');
+    expect(getSession).not.toHaveBeenCalled();
     expect(database.connection).toMatchObject({ status: 'active', account_id: 'account-1', ai_billing_enabled: 1 });
     expect(JSON.stringify([...database.credentials.values()])).not.toContain('provider-access-token');
     expect(database.sessions.get(state)?.status).toBe('completed');
 
     const replay = await completeCloudflareConnectionAction({
-      request,
+      request: callbackRequest(),
       env: database.env,
       orchestrator: fakeOrchestrator(),
     });
@@ -178,8 +184,12 @@ function integrationDatabase() {
         }
         if (sql.includes('FROM cloudflare_connection_sessions')) {
           const session = sessions.get(values[0] as string);
-          return session && session.userId === values[1] && session.status === 'pending'
-            ? { provider_session_id: session.providerSessionId, expires_at: session.expiresAt }
+          return session && session.status === 'pending'
+            ? {
+                user_id: session.userId,
+                provider_session_id: session.providerSessionId,
+                expires_at: session.expiresAt,
+              }
             : null;
         }
         return null;

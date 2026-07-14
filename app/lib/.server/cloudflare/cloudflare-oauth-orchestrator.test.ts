@@ -19,6 +19,7 @@ describe('CloudflareOAuthOrchestrator', () => {
     });
     const url = new URL(result.authorizationUrl);
     expect(url.origin + url.pathname).toBe('https://dash.cloudflare.com/oauth2/auth');
+    expect(url.searchParams.get('response_mode')).toBe('form_post');
     expect(url.searchParams.get('state')).toBe('00000000-0000-4000-8000-000000000001');
     expect(url.searchParams.get('redirect_uri')).toBe('https://ghostbuild.dev/api/cloudflare/connection/callback');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');

@@ -48,6 +48,7 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
     );
     const authorizationUrl = new URL(AUTHORIZE_URL);
     authorizationUrl.searchParams.set('response_type', 'code');
+    authorizationUrl.searchParams.set('response_mode', 'form_post');
     authorizationUrl.searchParams.set('client_id', this.config.clientId);
     authorizationUrl.searchParams.set('redirect_uri', returnUrl.toString());
     authorizationUrl.searchParams.set('scope', this.config.scopes);

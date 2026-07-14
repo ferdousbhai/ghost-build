@@ -12,7 +12,15 @@ import {
 } from '~/lib/.server/cloudflare/cloudflare-orchestrator';
 
 const requestedCapabilities = ['workers', 'd1', 'r2', 'durable_objects', 'workers_ai'] as const;
-const callbackQuerySchema = z.object({ state: z.string().uuid() });
+const callbackPayloadSchema = z
+  .object({
+    state: z.string().uuid(),
+    code: z.string().min(1).optional(),
+    error: z.string().min(1).optional(),
+    error_description: z.string().optional(),
+    scope: z.string().optional(),
+  })
+  .refine((payload) => Boolean(payload.code || payload.error), 'An OAuth code or error is required.');
 const challengeSchema = z.object({
   sessionId: z.string().min(1),
   authorizationUrl: z
@@ -110,18 +118,14 @@ export async function completeCloudflareConnectionAction(args: {
   orchestrator?: CloudflareOrchestrator;
 }): Promise<Response> {
   try {
-    const session = await getAuth(args.env, args.request).api.getSession({ headers: args.request.headers });
-    if (!session) {
-      return Response.json({ error: 'Authentication required.' }, { status: 401 });
-    }
-    const { state } = callbackQuerySchema.parse(Object.fromEntries(new URL(args.request.url).searchParams));
+    const { state, callbackUrl } = await readCloudflareCallback(args.request);
     const connectionSession = await args.env.DB.prepare(
-      `SELECT provider_session_id, expires_at
+      `SELECT user_id, provider_session_id, expires_at
        FROM cloudflare_connection_sessions
-       WHERE id = ? AND user_id = ? AND status = 'pending'`,
+       WHERE id = ? AND status = 'pending'`,
     )
-      .bind(state, session.user.id)
-      .first<{ provider_session_id: string; expires_at: number }>();
+      .bind(state)
+      .first<{ user_id: string; provider_session_id: string; expires_at: number }>();
     if (!connectionSession) {
       return Response.json({ error: 'Cloudflare connection session not found.' }, { status: 404 });
     }
@@ -142,10 +146,10 @@ export async function completeCloudflareConnectionAction(args: {
     const result = connectionResultSchema.parse(
       await orchestrator.completeConnection({
         providerSessionId: connectionSession.provider_session_id,
-        callbackUrl: args.request.url,
+        callbackUrl,
       }),
     );
-    const previous = await findCloudflareConnectionForUser(args.env.DB, session.user.id);
+    const previous = await findCloudflareConnectionForUser(args.env.DB, connectionSession.user_id);
     const vault = D1CloudflareCredentialVault.fromEnv(args.env);
     const credentialHandle = result.refreshToken
       ? await vault.storeOAuthCredential({
@@ -157,7 +161,7 @@ export async function completeCloudflareConnectionAction(args: {
     try {
       await activateCloudflareConnection({
         db: args.env.DB,
-        userId: session.user.id,
+        userId: connectionSession.user_id,
         accountId: result.accountId,
         accountName: result.accountName,
         credentialHandle,
@@ -168,7 +172,7 @@ export async function completeCloudflareConnectionAction(args: {
         `UPDATE cloudflare_connection_sessions SET status = 'completed', updated_at = ?
          WHERE id = ? AND user_id = ? AND status = 'pending'`,
       )
-        .bind(Date.now(), state, session.user.id)
+        .bind(Date.now(), state, connectionSession.user_id)
         .run();
     } catch (error) {
       await vault.delete(credentialHandle).catch(() => undefined);
@@ -181,6 +185,21 @@ export async function completeCloudflareConnectionAction(args: {
   } catch (error) {
     return cloudflareIntegrationErrorResponse(error);
   }
+}
+
+async function readCloudflareCallback(request: Request): Promise<{ state: string; callbackUrl: string }> {
+  const requestUrl = new URL(request.url);
+  const params =
+    request.method === 'POST' ? new URLSearchParams(await request.text()) : new URLSearchParams(requestUrl.search);
+  const payload = callbackPayloadSchema.parse(Object.fromEntries(params));
+  const callbackUrl = new URL(requestUrl.pathname, requestUrl.origin);
+  for (const key of ['state', 'code', 'error', 'error_description', 'scope'] as const) {
+    const value = payload[key];
+    if (value) {
+      callbackUrl.searchParams.set(key, value);
+    }
+  }
+  return { state: payload.state, callbackUrl: callbackUrl.toString() };
 }
 
 function cloudflareIntegrationErrorResponse(error: unknown): Response {
