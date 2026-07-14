@@ -16,7 +16,6 @@ export const REQUIRED_CLOUDFLARE_OAUTH_SCOPES = [
   'd1.write',
   'workers-r2.write',
   'ai.read',
-  'offline_access',
 ] as const;
 
 type OAuthSession = {

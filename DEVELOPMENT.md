@@ -30,12 +30,14 @@ Optional bindings include `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIEN
 User-account connection uses Cloudflare's public OAuth Authorization Code flow with PKCE. Create a server-side OAuth
 client in **Manage Account → OAuth clients**, register
 `https://<ghostbuild-origin>/api/cloudflare/connection/callback`, verify the client domain, and make the client public.
-Configure response type **Code**, grant type **Authorization Code**, and token authentication method **Client Secret
-Basic**. Select only the account permissions needed by the generated stack: Account Settings Read, Workers Scripts
+Configure response type **Code**, grant types **Authorization Code** and **Refresh Token**, and token authentication
+method **Client Secret Basic**. Select only the account permissions needed by the generated stack: Account Settings Read, Workers Scripts
 Write, D1 Write, Workers R2 Storage Write, and Workers AI Read. Cloudflare's live OAuth scope catalog currently assigns
-these IDs: `account-settings.read`, `workers-scripts.write`, `d1.write`, `workers-r2.write`, and `ai.read`. Configure those
-identifiers plus `offline_access` as a space-delimited binding. Ghostbuild fails closed without offline access because a
-short-lived access token that cannot be refreshed would eventually break deployments and connected-account inference.
+these IDs: `account-settings.read`, `workers-scripts.write`, `d1.write`, `workers-r2.write`, and `ai.read`. Configure only
+those identifiers as a space-delimited binding. Cloudflare manages the protocol-level `offline_access` scope from the
+client's Refresh Token grant type; do not include it in the requested resource-scope binding. Ghostbuild fails closed
+when the token response does not include a refresh token because an expiring access token would eventually break
+deployments and connected-account inference.
 
 Cloudflare creates OAuth clients as private. Before promoting the client, add a logo and a `ghostbuild.dev` client URL,
 then complete Cloudflare's DNS TXT ownership verification for that domain. Promotion to public is permanent, so confirm

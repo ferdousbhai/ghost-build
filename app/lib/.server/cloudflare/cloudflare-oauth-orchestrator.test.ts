@@ -23,13 +23,14 @@ describe('CloudflareOAuthOrchestrator', () => {
     expect(url.searchParams.get('redirect_uri')).toBe('https://ghostbuild.dev/api/cloudflare/connection/callback');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
     expect(url.searchParams.get('scope')).toBe(scopes);
+    expect(url.searchParams.get('scope')).not.toContain('offline_access');
     expect(result.authorizationUrl).not.toContain('client-secret');
     expect(JSON.parse(result.sessionId)).toMatchObject({
       redirectUri: 'https://ghostbuild.dev/api/cloudflare/connection/callback',
     });
   });
 
-  test('fails closed when a required deployment or refresh scope is not configured', async () => {
+  test('fails closed when a required resource scope is not configured', async () => {
     const orchestrator = new CloudflareOAuthOrchestrator({
       ...config,
       scopes: REQUIRED_CLOUDFLARE_OAUTH_SCOPES.filter((scope) => scope !== 'workers-r2.write').join(' '),
