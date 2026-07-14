@@ -14,7 +14,10 @@ vi.mock('~/lib/stores/sessionId', () => ({
   getAuthToken: vi.fn(() => null),
 }));
 
+vi.mock('~/lib/stores/chatId', () => ({ chatIdStore: { get: vi.fn(() => 'chat-1') } }));
+
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.clearAllMocks();
   vi.useRealTimers();
 });
@@ -42,7 +45,7 @@ describe('runDeploy guest app check', () => {
     expect(result).toContain('Sign in to deploy this app to Cloudflare production');
   });
 
-  test('waits for container readiness before a signed-in production deploy', async () => {
+  test('waits for container readiness before signed-in production validation', async () => {
     vi.mocked(getAuthToken).mockReturnValue('user-session');
     const readFile = vi.fn();
     const spawn = vi.fn().mockRejectedValue(new Error('no deploy in unit test'));
@@ -61,7 +64,62 @@ describe('runDeploy guest app check', () => {
 
     expect(waitForContainerBootState).toHaveBeenCalledOnce();
     expect(readFile).not.toHaveBeenCalled();
-    expect(spawn).toHaveBeenCalledWith('pnpm', ['run', 'deploy'], undefined);
+    expect(spawn).toHaveBeenCalledWith('pnpm', ['run', 'verify:stack'], undefined);
+  });
+
+  test('uploads an immutable snapshot for approval instead of running Wrangler in the browser', async () => {
+    vi.mocked(getAuthToken).mockReturnValue('user-session');
+    const spawn = vi.fn(async (_command: string, _args: string[]) => successfulProcess());
+    const readFile = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]));
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      Response.json(
+        {
+          deployment: {
+            id: 'deployment-1',
+            planDigest: 'a'.repeat(64),
+            plan: { resources: [{ type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-app' }] },
+          },
+        },
+        { status: 201 },
+      ),
+    );
+
+    const result = await runDeploy({
+      container: { fs: { readFile }, spawn } as unknown as WebContainer,
+      abortSignal: new AbortController().signal,
+      onOutput: vi.fn(),
+      workspace: { hasFile: vi.fn(), setGeneratedFileContent: vi.fn() },
+    });
+
+    expect(spawn.mock.calls.map((call) => call[1])).toEqual([
+      ['run', 'verify:stack'],
+      ['run', 'typecheck'],
+      ['run', 'build'],
+      ['run', 'lint'],
+      [
+        '-czf',
+        '/tmp/ghostbuild-deployment.tar.gz',
+        '--exclude=./node_modules',
+        '--exclude=./dist',
+        '--exclude=./.output',
+        '--exclude=./.tanstack',
+        '--exclude=./.wrangler',
+        '--exclude=./.env',
+        '--exclude=./.env.*',
+        '--exclude=./.dev.vars',
+        '--exclude=./.dev.vars.*',
+        '--exclude=./.envrc',
+        '.',
+      ],
+    ]);
+    expect(readFile).toHaveBeenCalledWith('/tmp/ghostbuild-deployment.tar.gz');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/deployments/plan?chatId=chat-1',
+      expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
+    );
+    expect(result).toContain('Deployment plan ready for your approval');
+    expect(result).toContain('GHOSTBUILD_DEPLOYMENT_PLAN:');
+    expect(result).not.toContain('wrangler deploy');
   });
 
   test('rejects a guest deploy when the starter app was not replaced', async () => {
@@ -85,6 +143,19 @@ describe('runDeploy guest app check', () => {
     ).rejects.toThrow('Generated app route still matches the starter template');
   });
 });
+
+function successfulProcess(): WebContainerProcess {
+  return {
+    output: new ReadableStream({
+      start(controller) {
+        controller.enqueue('ok');
+        controller.close();
+      },
+    }),
+    exit: Promise.resolve(0),
+    kill: vi.fn(),
+  } as unknown as WebContainerProcess;
+}
 
 describe('runCommand cancellation', () => {
   test('does not spawn when the signal is already aborted', async () => {

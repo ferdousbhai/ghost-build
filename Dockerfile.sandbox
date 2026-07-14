@@ -1,0 +1,5 @@
+FROM docker.io/cloudflare/sandbox:0.12.3
+
+RUN corepack enable \
+  && corepack prepare pnpm@9.5.0 --activate \
+  && npm install --global wrangler@4.107.1

@@ -4,6 +4,8 @@ import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { ContainerBootState, waitForContainerBootState } from '~/lib/stores/containerBootState';
 import { getAuthToken } from '~/lib/stores/sessionId';
 import { isGuestSessionId } from '~/lib/guest-session';
+import { chatIdStore } from '~/lib/stores/chatId';
+import { DEPLOYMENT_PLAN_MARKER } from '~/lib/deployment-plan-marker';
 import { streamOutput } from '~/utils/process';
 import { ActionCommandTimeoutError } from './errors';
 import type { ActionRunnerWorkspace } from './types';
@@ -12,6 +14,7 @@ const logger = createScopedLogger('ActionRunner.Deploy');
 const GUEST_APP_CHECK_COMPLETE = 'Ghostbuild app check complete. Sign in to deploy this app to Cloudflare production.';
 const GENERATED_ROUTE_PATH = 'src/routes/index.tsx';
 const STARTER_ROUTE_MARKERS = ['Ghostbuild on Cloudflare', 'Start with a durable AI agent.', 'App Agent'] as const;
+const DEPLOYMENT_ARCHIVE_PATH = '/tmp/ghostbuild-deployment.tar.gz';
 
 export async function runDeploy(args: {
   container: WebContainer;
@@ -40,12 +43,75 @@ export async function runDeploy(args: {
     result += GUEST_APP_CHECK_COMPLETE;
   } else {
     await waitForContainerBootState(ContainerBootState.READY);
-    result += await run(['pnpm', 'run', 'deploy']);
+    result += await run(['pnpm', 'run', 'verify:stack']);
+    result += await run(['pnpm', 'run', 'typecheck']);
+    result += await run(['pnpm', 'run', 'build']);
+    result += await run(['pnpm', 'run', 'lint']);
+    result += await run([
+      'tar',
+      '-czf',
+      DEPLOYMENT_ARCHIVE_PATH,
+      '--exclude=./node_modules',
+      '--exclude=./dist',
+      '--exclude=./.output',
+      '--exclude=./.tanstack',
+      '--exclude=./.wrangler',
+      '--exclude=./.env',
+      '--exclude=./.env.*',
+      '--exclude=./.dev.vars',
+      '--exclude=./.dev.vars.*',
+      '--exclude=./.envrc',
+      '.',
+    ]);
+    result += await prepareProductionDeployment(args.container, args.abortSignal);
   }
 
   logger.info('deploy action finished in', performance.now() - startedAt);
   return result;
 }
+
+async function prepareProductionDeployment(container: WebContainer, abortSignal: AbortSignal): Promise<string> {
+  abortSignal.throwIfAborted();
+  const snapshot = await container.fs.readFile(DEPLOYMENT_ARCHIVE_PATH);
+  abortSignal.throwIfAborted();
+  const ownedSnapshot = new Uint8Array(snapshot.byteLength);
+  ownedSnapshot.set(snapshot);
+  const formData = new FormData();
+  formData.append('snapshot', new Blob([ownedSnapshot.buffer], { type: 'application/octet-stream' }));
+  const chatId = chatIdStore.get();
+  const response = await fetch(`/api/deployments/plan?chatId=${encodeURIComponent(chatId)}`, {
+    method: 'POST',
+    body: formData,
+    signal: abortSignal,
+  });
+  const payload = (await response.json().catch(() => null)) as DeploymentPlanResponse | { error?: string } | null;
+  if (!response.ok || !payload || !('deployment' in payload)) {
+    const message = payload && 'error' in payload ? payload.error : undefined;
+    throw new Error(message || `Unable to prepare production deployment (${response.status}).`);
+  }
+  const marker = JSON.stringify({
+    id: payload.deployment.id,
+    planDigest: payload.deployment.planDigest,
+    resources: payload.deployment.plan.resources,
+  });
+  return [
+    'Ghostbuild production validation complete.',
+    'Deployment plan ready for your approval. Cloudflare will bill your connected account for infrastructure and Workers AI.',
+    'Workers Paid will never be enabled without separate authorization.',
+    `${DEPLOYMENT_PLAN_MARKER}${marker}`,
+    '',
+  ].join('\n');
+}
+
+type DeploymentPlanResponse = {
+  deployment: {
+    id: string;
+    planDigest: string;
+    plan: {
+      resources: Array<{ type: string; logicalName: string; proposedName: string }>;
+    };
+  };
+};
 
 async function validateGuestGeneratedApp(container: WebContainer): Promise<void> {
   let routeContent: string;

@@ -32,12 +32,29 @@ The Worker runtime uses the bindings declared in `wrangler.jsonc`:
 - `APP_STORAGE` for R2 snapshots, chat history, and share thumbnails
 - `BuilderAgent` for Cloudflare Agents
 
-The production provisioning step creates or reuses the configured D1 database and R2 bucket, then writes the non-secret D1 database id into `wrangler.jsonc`. Configure secret and variable values in Cloudflare Worker bindings, not local env files. Ghostbuild blocks generated-project writes to `.env`, `.env.*`, `.envrc`, `.dev.vars`, and `.dev.vars.*` files. The D1 database name is `ghostbuild`; production migrations use that stable database name instead of the `DB` binding name.
+The production provisioning step creates or reuses the configured D1 database and R2 bucket, then writes the non-secret D1 database id into `wrangler.jsonc`. Configure secret and variable values in Cloudflare Worker bindings, not local env files. User Cloudflare credentials are encrypted with AES-GCM before persistence; configure a base64-encoded 32-byte `CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY` as a Worker secret before enabling account connections. Ghostbuild blocks generated-project writes to `.env`, `.env.*`, `.envrc`, `.dev.vars`, and `.dev.vars.*` files. The D1 database name is `ghostbuild`; production migrations use that stable database name instead of the `DB` binding name.
 
 Worker observability is configured in `wrangler.jsonc` with persisted logs sampled at 60% and traces sampled at 5%, matching Cloudflare's current sampling guidance for production volume control.
 Cloudflare Agents emit structured diagnostics-channel events for RPC, chat, recovery, state, schedule, workflow, and MCP operations. Attach a Tail Worker in production when those Agent events need to be collected separately from normal Worker logs and traces.
 
 The production deploy preflight fails until provisioning has replaced the placeholder D1 id. Local production deploys can use Wrangler OAuth, while CI deploys should provide `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as GitHub Actions secrets.
+
+### Generated App Deployment And Billing
+
+Ghostbuild's own deployment credentials are never used to publish a user's generated application. For signed-in users,
+the browser validates the generated app, uploads an immutable secret-excluding tar.gz snapshot, and asks the root Worker to prepare
+an exact Cloudflare resource plan. The plan always identifies the user's connected Cloudflare account as the billing
+source for the Worker, D1, R2, Durable Object, and Workers AI. The user must approve the plan digest in the chat before
+server-side provisioning can begin. A changed snapshot, plan, owner, or Cloudflare connection invalidates that approval.
+Build and publish commands run in pinned, egress-restricted Cloudflare Sandboxes. The decrypted user credential remains
+in Ghostbuild's Worker and is never placed in generated code, the browser, or a sandbox.
+
+Workers Paid is a separate consent boundary. Exhausting a free Workers AI allocation must prompt for authorization and
+must never cause an automatic plan upgrade. Existing Cloudflare users connect through Cloudflare's public OAuth
+Authorization Code + PKCE flow; access and refresh tokens are encrypted and remain server-side. The adapter fails closed
+when Ghostbuild's OAuth client is not configured. The unpublished Cloudflare/Stripe Orchestrator remains an optional
+future onboarding path for users without an existing account; Ghostbuild does not use Tenant API resale or collect broad
+user-supplied API tokens.
 
 ### Workers AI
 

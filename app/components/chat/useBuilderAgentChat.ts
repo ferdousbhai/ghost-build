@@ -17,6 +17,9 @@ import { recordChatFailure, resetChatRetryState } from './chat-retry';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { buildBuilderAgentRequest } from './builder-agent-request';
 import { waitForAgentSocketOpen } from './agent-connection';
+import { deliverToolOutput } from './tool-output-delivery';
+import { toast } from 'sonner';
+import { WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
 
 const logger = createScopedLogger('BuilderAgentChat');
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
@@ -27,6 +30,7 @@ export function useBuilderAgentChat(args: {
   resetMessagesOnSubchatChange: boolean;
 }) {
   const syncState = useStore(chatSyncState);
+  const stopRef = useRef<() => void>(() => undefined);
   const contextManager = useRef(
     new ChatContextManager(
       () => workbenchStore.currentDocument.get(),
@@ -67,14 +71,24 @@ export function useBuilderAgentChat(args: {
         };
         try {
           const { result } = await workbenchStore.runToolInvocation(invocation);
-          addToolOutput({ toolCallId: toolCall.toolCallId, output: result });
+          deliverToolOutput({
+            deliver: addToolOutput,
+            output: { toolCallId: toolCall.toolCallId, output: result },
+            onFailure: (deliveryError) =>
+              handleToolOutputDeliveryFailure(deliveryError, toolCall.toolName, stopRef.current),
+          });
         } catch (error) {
           if (error instanceof ToolCallAbortedError) {
             logger.debug('Tool call waiter aborted', toolCall.toolCallId);
             return;
           }
           const message = error instanceof Error ? error.message : String(error);
-          addToolOutput({ toolCallId: toolCall.toolCallId, state: 'output-error', errorText: message });
+          deliverToolOutput({
+            deliver: addToolOutput,
+            output: { toolCallId: toolCall.toolCallId, state: 'output-error', errorText: message },
+            onFailure: (deliveryError) =>
+              handleToolOutputDeliveryFailure(deliveryError, toolCall.toolName, stopRef.current),
+          });
           captureMessage('Builder client tool call failed', {
             level: 'error',
             extra: { error, toolCallId: toolCall.toolCallId, toolName: toolCall.toolName },
@@ -91,14 +105,29 @@ export function useBuilderAgentChat(args: {
       logger.error('Chat request failed', error);
       recordChatFailure(error.message.includes(STATUS_MESSAGES.error));
       workbenchStore.abortAllActions();
+      if (error.message.includes(WORKERS_PAID_REQUIRED_MARKER)) {
+        toast.warning(
+          'Your Cloudflare Workers AI free allocation is exhausted. Ghostbuild did not change your plan; authorize Workers Paid in Cloudflare if you want to continue.',
+          {
+            action: {
+              label: 'Review Workers Paid',
+              onClick: () =>
+                window.open('https://dash.cloudflare.com/?to=/:account/workers/plans', '_blank', 'noopener'),
+            },
+          },
+        );
+      }
+      void showAiAllowanceReminder();
     },
     onFinish: ({ finishReason }) => {
       if (finishReason === 'stop') {
         resetChatRetryState();
       }
       logger.debug('Finished streaming');
+      void showAiAllowanceReminder();
     },
   });
+  stopRef.current = chat.stop;
   const sendMessage = useCallback(
     async (...sendArgs: Parameters<typeof chat.sendMessage>) => {
       try {
@@ -135,4 +164,61 @@ export function useBuilderAgentChat(args: {
     contextManager: contextManager.current,
     streamStatus: chat.isRecovering ? ('submitted' as const) : chat.isStreaming ? ('streaming' as const) : chat.status,
   };
+}
+
+type AiAllowanceResponse = {
+  usageDate: string;
+  usedPercent: number;
+  exhausted: boolean;
+  reminder: 0 | 50 | 90;
+};
+
+async function showAiAllowanceReminder(): Promise<void> {
+  try {
+    const response = await fetch('/api/ai/allowance');
+    if (!response.ok) {
+      return;
+    }
+    const allowance = (await response.json()) as AiAllowanceResponse;
+    if (allowance.reminder === 0) {
+      return;
+    }
+    const key = `ghostbuild.ai-allowance-reminder:${allowance.usageDate}:${allowance.reminder}`;
+    if (sessionStorage.getItem(key)) {
+      return;
+    }
+    sessionStorage.setItem(key, 'shown');
+    if (allowance.reminder === 90) {
+      toast.warning(
+        allowance.exhausted
+          ? "Today's free AI allowance is used. Connect Cloudflare to continue building."
+          : "You have used over 90% of today's free AI allowance. Connect Cloudflare to avoid interruption.",
+        connectCloudflareToastAction,
+      );
+      return;
+    }
+    toast.info(
+      "You have used over half of today's free AI allowance. Connect Cloudflare to keep building.",
+      connectCloudflareToastAction,
+    );
+  } catch (error) {
+    logger.debug('Unable to load AI allowance status', error);
+  }
+}
+
+const connectCloudflareToastAction = {
+  action: {
+    label: 'Connect Cloudflare',
+    onClick: () => window.location.assign('/settings#cloudflare'),
+  },
+};
+
+function handleToolOutputDeliveryFailure(error: unknown, toolName: string, stop: () => void): void {
+  logger.error('Failed to deliver tool output for continuation', error);
+  captureMessage('Failed to deliver Builder tool output for continuation', {
+    level: 'error',
+    extra: { error, toolName },
+  });
+  workbenchStore.abortAllActions();
+  stop();
 }

@@ -198,7 +198,9 @@ function deployTitle(invocation: GhostbuildToolInvocation, resultText: string): 
   }
   return resultText.includes(GUEST_APP_CHECK_COMPLETE)
     ? titleRow('App ready for preview', ghostbuildIcon)
-    : titleRow('Deployed Cloudflare Worker', ghostbuildIcon);
+    : resultText.includes('Deployment plan ready for your approval')
+      ? titleRow('Deployment ready for approval', ghostbuildIcon)
+      : titleRow('Deployed Cloudflare Worker', ghostbuildIcon);
 }
 
 function editTitle(invocation: GhostbuildToolInvocation): ReactNode {

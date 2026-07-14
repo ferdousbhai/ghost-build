@@ -5,6 +5,7 @@ import { Toaster } from '~/components/ui/Toaster';
 import { UserProvider } from '~/components/UserProvider';
 import { Button } from '@ui/Button';
 import { BrandLink } from '~/components/BrandLink';
+import { CloudflareCard } from '~/components/settings/CloudflareCard.client';
 
 export function SettingsContent() {
   return (
@@ -28,6 +29,7 @@ export function SettingsContent() {
 
           <div className="app-page-content grid gap-5">
             <ProfileCard />
+            <CloudflareCard />
             <ThemeCard />
           </div>
         </div>

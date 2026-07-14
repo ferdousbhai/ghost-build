@@ -1,0 +1,24 @@
+import type { WorkersAiAccountCredentials } from '~/lib/.server/llm/provider';
+import { D1CloudflareCredentialVault } from './cloudflare-credential-vault';
+import { findCloudflareConnectionForUser } from './cloudflare-connection-repository';
+
+export async function getUserWorkersAiCredentials(
+  env: Env,
+  userId: string | undefined,
+): Promise<WorkersAiAccountCredentials | undefined> {
+  if (!userId) {
+    return undefined;
+  }
+  const connection = await findCloudflareConnectionForUser(env.DB, userId);
+  if (!connection || connection.status !== 'active' || !connection.aiBillingEnabled) {
+    return undefined;
+  }
+  if (!connection.credentialHandle) {
+    throw new Error('Connected Cloudflare account has no credential handle.');
+  }
+  const vault = D1CloudflareCredentialVault.fromEnv(env);
+  return {
+    accountId: connection.accountId,
+    apiKey: await vault.resolve(connection.credentialHandle),
+  };
+}

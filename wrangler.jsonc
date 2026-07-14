@@ -21,8 +21,8 @@
   },
   // Configure all production string bindings in Cloudflare, not local env files.
   // Deployment credentials are supplied by the CI environment, not as Worker runtime secrets.
-  // Optional dashboard-managed bindings: Better Auth/Google auth secrets
-  // and commit SHA metadata.
+  // Optional dashboard-managed bindings: Better Auth/Google auth secrets,
+  // CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY, and commit SHA metadata.
   "d1_databases": [
     {
       "binding": "DB",
@@ -37,11 +37,30 @@
       "bucket_name": "ghostbuild-app-storage",
     },
   ],
+  "containers": [
+    {
+      "class_name": "DeploymentSandbox",
+      "image": "./Dockerfile.sandbox",
+      "instance_type": "lite",
+      "max_instances": 2,
+    },
+  ],
+  "workflows": [
+    {
+      "name": "ghostbuild-deployments",
+      "binding": "DeploymentWorkflow",
+      "class_name": "DeploymentWorkflow",
+    },
+  ],
   "durable_objects": {
     "bindings": [
       {
         "name": "BuilderAgent",
         "class_name": "BuilderAgent",
+      },
+      {
+        "name": "DeploymentSandbox",
+        "class_name": "DeploymentSandbox",
       },
     ],
   },
@@ -50,5 +69,12 @@
       "tag": "v1",
       "new_sqlite_classes": ["BuilderAgent"],
     },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["DeploymentSandbox"],
+    },
   ],
+  "vars": {
+    "SANDBOX_TRANSPORT": "rpc",
+  },
 }

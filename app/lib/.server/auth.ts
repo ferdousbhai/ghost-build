@@ -2,6 +2,7 @@ import { betterAuth } from 'better-auth';
 import { tanstackStartCookies } from 'better-auth/tanstack-start';
 
 import { getOptionalBinding } from './env';
+import { getAuthTrustedOrigins } from './auth-origins';
 
 function requireBinding(env: Env, name: 'BETTER_AUTH_SECRET' | 'GOOGLE_CLIENT_ID' | 'GOOGLE_CLIENT_SECRET') {
   const value = getOptionalBinding(env, name);
@@ -20,9 +21,11 @@ export function getAuth(env: Env, request?: Request) {
     throw new Error('Cloudflare D1 binding DB is not configured');
   }
 
+  const baseURL = getBaseURL(env, request);
   return betterAuth({
     appName: 'Ghostbuild',
-    baseURL: getBaseURL(env, request),
+    baseURL,
+    trustedOrigins: getAuthTrustedOrigins(baseURL, request),
     secret: requireBinding(env, 'BETTER_AUTH_SECRET'),
     onAPIError: {
       onError(error) {

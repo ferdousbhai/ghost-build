@@ -1,11 +1,11 @@
 import { createUIMessageStream, streamText, type UIMessage, type UIMessageChunk } from 'ai';
-import { languageModelId, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import { cachedPromptTokens, languageModelId, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { PromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
 import { ROLE_SYSTEM_PROMPT, generalSystemPrompt } from 'ghostbuild-agent/prompts/system';
 import { logger } from 'ghostbuild-agent/utils/logger';
 import { CLOUDFLARE_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';
 import { asAiSdkTools, asOriginalMessages } from './message-conversion';
-import { getProvider } from './provider';
+import { getProvider, type WorkersAiAccountCredentials } from './provider';
 import { prepareBoundedModelInput } from './model-input-budget';
 import { normalizeTextPartBoundaries } from './workers-ai-stream';
 import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
@@ -16,6 +16,13 @@ import {
   getWorkersAiToolSettings,
   type AgentToolSettings,
 } from './workers-ai-tools';
+import { glm52CostNanodollars } from '~/lib/.server/billing/ai-allowance-policy';
+import {
+  releaseAiAllowance,
+  reserveAiAllowance,
+  settleAiAllowance,
+} from '~/lib/.server/billing/ai-allowance-repository';
+import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
 
 type Messages = GhostbuildMessage[];
 const WORKERS_AI_CALL_TIMEOUT_MS = 180_000;
@@ -30,6 +37,8 @@ interface WorkersAiAgentOptions {
   shouldDisableTools: boolean;
   contextReduced: boolean;
   promptCharacterCounts: PromptCharacterCounts;
+  billingSubjectKey: string;
+  accountCredentials?: WorkersAiAccountCredentials;
 }
 
 export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<ReadableStream<UIMessageChunk>> {
@@ -43,11 +52,13 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     shouldDisableTools,
     contextReduced,
     promptCharacterCounts,
+    billingSubjectKey,
+    accountCredentials,
   } = options;
   logger.debug('Starting Workers AI agent');
   const startedAt = Date.now();
   let recordedFirstResponse = false;
-  const provider = getProvider(env);
+  const provider = getProvider(env, accountCredentials);
   const tools = createWorkersAiTools();
   const validatedBuildCompletion = shouldDisableTools ? undefined : getValidatedBuildCompletion(messages);
   if (validatedBuildCompletion) {
@@ -69,43 +80,101 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     toolChoice: toolSettings.toolChoice,
     activeTools: toolSettings.activeTools,
   });
+  const reservation = accountCredentials
+    ? undefined
+    : await reserveAiAllowance(
+        env.DB,
+        billingSubjectKey,
+        glm52CostNanodollars({
+          inputTokens: modelInput.estimatedTokens,
+          outputTokens: provider.maxTokens,
+        }),
+      );
+  let reservationFinalized = false;
+  const releaseReservation = async () => {
+    if (reservationFinalized) {
+      return;
+    }
+    reservationFinalized = true;
+    if (reservation) {
+      await releaseAiAllowance(env.DB, reservation.id);
+    }
+  };
 
-  const result = streamText({
-    model: provider.model,
-    abortSignal,
-    timeout: WORKERS_AI_CALL_TIMEOUT_MS,
-    maxOutputTokens: provider.maxTokens,
-    messages: modelInput.messages,
-    tools: asAiSdkTools(tools),
-    toolChoice: toolSettings.toolChoice,
-    activeTools: toolSettings.activeTools,
-    onChunk: () => {
-      if (!recordedFirstResponse) {
-        recordedFirstResponse = true;
-        recordFirstWorkersAiResponse(chatInitialId, startedAt);
-      }
-    },
-    onFinish: (finishResult) => {
-      recordWorkersAiFinish({
-        result: finishResult,
-        chatInitialId,
-        firstUserMessage,
-        toolsDisabledFromRepeatedErrors: shouldDisableTools,
-        contextReduced: contextReduced || modelInput.reduced,
-        estimatedContextTokens: modelInput.estimatedTokens,
-        modelInputDroppedMessageCount: modelInput.droppedMessageCount,
-        promptCharacterCounts,
-        providerModel: languageModelId(provider.model, CLOUDFLARE_WORKERS_AI_MODEL),
-      });
-    },
-    onError: ({ error }) => logger.error(error),
-  });
+  let result;
+  try {
+    result = streamText({
+      model: provider.model,
+      abortSignal,
+      timeout: WORKERS_AI_CALL_TIMEOUT_MS,
+      maxOutputTokens: provider.maxTokens,
+      messages: modelInput.messages,
+      tools: asAiSdkTools(tools),
+      toolChoice: toolSettings.toolChoice,
+      activeTools: toolSettings.activeTools,
+      onChunk: () => {
+        if (!recordedFirstResponse) {
+          recordedFirstResponse = true;
+          recordFirstWorkersAiResponse(chatInitialId, startedAt);
+        }
+      },
+      onFinish: async (finishResult) => {
+        recordWorkersAiFinish({
+          result: finishResult,
+          chatInitialId,
+          firstUserMessage,
+          toolsDisabledFromRepeatedErrors: shouldDisableTools,
+          contextReduced: contextReduced || modelInput.reduced,
+          estimatedContextTokens: modelInput.estimatedTokens,
+          modelInputDroppedMessageCount: modelInput.droppedMessageCount,
+          promptCharacterCounts,
+          providerModel: languageModelId(provider.model, CLOUDFLARE_WORKERS_AI_MODEL),
+        });
+        if (reservationFinalized || !reservation) {
+          return;
+        }
+        reservationFinalized = true;
+        const inputTokens = normalizeTokenUsage(finishResult.totalUsage.inputTokens);
+        const outputTokens = normalizeTokenUsage(finishResult.totalUsage.outputTokens);
+        const cachedInputTokens = Math.min(inputTokens, cachedPromptTokens(finishResult.providerMetadata));
+        const allowance = await settleAiAllowance(
+          env.DB,
+          reservation.id,
+          glm52CostNanodollars({ inputTokens, cachedInputTokens, outputTokens }),
+          { inputTokens, cachedInputTokens, outputTokens },
+        );
+        if (allowance?.reminder) {
+          console.info({
+            event: 'ghostbuild_ai_allowance_threshold_reached',
+            threshold: allowance.reminder,
+            usedPercent: allowance.usedPercent,
+          });
+        }
+      },
+      onError: async ({ error }) => {
+        logger.error(error);
+        await releaseReservation();
+      },
+    });
+  } catch (error) {
+    await releaseReservation();
+    throw error;
+  }
 
   const stream = result.toUIMessageStream({
     originalMessages: asOriginalMessages(messages),
-    onError: (error) => (error instanceof Error ? error.message : 'An error occurred.'),
+    onError: (error) => {
+      if (accountCredentials && isWorkersAiFreeAllocationError(error)) {
+        return workersPaidRequiredMessage();
+      }
+      return error instanceof Error ? error.message : 'An error occurred.';
+    },
   }) as ReadableStream<UIMessageChunk>;
   return normalizeTextPartBoundaries(stream);
+}
+
+function normalizeTokenUsage(value: number | undefined): number {
+  return value === undefined || !Number.isSafeInteger(value) || value < 0 ? 0 : value;
 }
 
 function createValidatedBuildCompletionStream(messages: Messages, text: string): ReadableStream<UIMessageChunk> {

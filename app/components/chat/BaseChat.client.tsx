@@ -20,6 +20,7 @@ import { SubchatLimitNudge } from './SubchatLimitNudge';
 import { useMutation } from '~/lib/cloudflare/data-hooks';
 import { api } from '~/lib/cloudflare/data-api';
 import { subchatIndexStore, useIsSubchatLoaded } from '~/lib/stores/subchats';
+import type { BuildProgress } from './build-progress';
 
 const MIN_MESSAGES_FOR_SUBCHAT_NUDGE = 12;
 const Workbench = lazy(() =>
@@ -46,6 +47,7 @@ interface BaseChatProps {
   isRecovering: boolean;
   currentError: Error | undefined;
   toolStatus: ToolStatus;
+  buildProgress: BuildProgress | null;
   messages: GhostbuildMessage[];
   terminalInitializationOptions: TerminalInitializationOptions | undefined;
   disabledReason: ReactNode | null;
@@ -78,6 +80,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       actionAlert,
       clearAlert,
       toolStatus,
+      buildProgress,
       terminalInitializationOptions,
       disabledReason,
       onRewindToMessage,
@@ -207,6 +210,8 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                             toolStatus={toolStatus}
                             isRecovering={isRecovering}
                             currentError={currentError}
+                            buildProgress={buildProgress}
+                            onStop={onStop}
                             resendMessage={resendMessage}
                           />
                         )}

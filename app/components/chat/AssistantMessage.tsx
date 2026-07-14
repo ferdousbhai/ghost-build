@@ -13,9 +13,10 @@ import { isHiddenAssistantPart } from './assistant-message-parts';
 
 interface AssistantMessageProps {
   message: GhostbuildMessage;
+  isStreaming?: boolean;
 }
 
-export const AssistantMessage = memo(function AssistantMessage({ message }: AssistantMessageProps) {
+export const AssistantMessage = memo(function AssistantMessage({ message, isStreaming }: AssistantMessageProps) {
   if (!message.parts) {
     return (
       <div className="w-full overflow-hidden">
@@ -28,17 +29,30 @@ export const AssistantMessage = memo(function AssistantMessage({ message }: Assi
     <div className="w-full overflow-hidden text-sm">
       <div className="flex flex-col gap-2">
         {message.parts.map((part, index) => (
-          <AssistantMessagePart key={index} part={part} partId={makePartId(message.id, index)} />
+          <AssistantMessagePart
+            key={index}
+            part={part}
+            partId={makePartId(message.id, index)}
+            hideToolCalls={isStreaming === true}
+          />
         ))}
       </div>
     </div>
   );
 });
 
-function AssistantMessagePart({ part, partId }: { part: GhostbuildPart; partId: PartId }) {
+function AssistantMessagePart({
+  part,
+  partId,
+  hideToolCalls,
+}: {
+  part: GhostbuildPart;
+  partId: PartId;
+  hideToolCalls: boolean;
+}) {
   const toolInvocation = getToolInvocation(part);
   if (toolInvocation) {
-    return <ToolCall partId={partId} toolCallId={toolInvocation.toolCallId} />;
+    return hideToolCalls ? null : <ToolCall partId={partId} toolCallId={toolInvocation.toolCallId} />;
   }
 
   if (part.type === 'text') {

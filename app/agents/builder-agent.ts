@@ -24,9 +24,12 @@ import { ContextWindowManager } from '~/lib/.server/llm/context-window-manager';
 import { summarizeBuilderContext } from '~/lib/.server/llm/workers-ai-text';
 import { chatTurnContextSchema, type ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { getWorkersAiToolContext } from '~/lib/.server/llm/workers-ai-tools';
+import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
 
 const logger = createScopedLogger('BuilderAgent');
 const STALE_CHAT_RECOVERY_MS = 15 * 60 * 1000;
+const MAX_CHAT_RECOVERY_ATTEMPTS = 2;
+const CHAT_NO_PROGRESS_TIMEOUT_MS = 3 * 60 * 1000;
 const MAX_SUBCHAT_INDEX = 10_000;
 
 export type BuilderAgentState = {
@@ -37,7 +40,13 @@ export type BuilderAgentState = {
 
 type ChatBody = Partial<ChatRequestBody>;
 
-export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState> {
+type BuilderAgentProps = {
+  billingSubjectKey: string;
+  ownerId: string;
+  userId?: string;
+};
+
+export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAgentProps> {
   static override options = {
     sendIdentityOnConnect: false,
   };
@@ -52,22 +61,32 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState> {
   override waitForMcpConnections = { timeout: 10_000 };
 
   override chatRecovery = {
-    maxAttempts: 6,
-    noProgressTimeoutMs: 5 * 60 * 1000,
+    maxAttempts: MAX_CHAT_RECOVERY_ATTEMPTS,
+    noProgressTimeoutMs: CHAT_NO_PROGRESS_TIMEOUT_MS,
     terminalMessage: 'The builder was interrupted. Please send your message again.',
   };
 
-  override chatStreamStallTimeoutMs = 5 * 60 * 1000;
+  override chatStreamStallTimeoutMs = CHAT_NO_PROGRESS_TIMEOUT_MS;
 
   private readonly turnStore = new BuilderTurnStore(this);
+  private billingSubjectKey: string | null = null;
+  private userId: string | undefined;
   private readonly contextWindow = new ContextWindowManager({
     repository: new DurableObjectContextCompactionRepository(this),
-    summarize: (prompt) => summarizeBuilderContext(this.env, prompt),
+    summarize: async (prompt) =>
+      summarizeBuilderContext(
+        this.env,
+        prompt,
+        await getUserWorkersAiCredentials(this.env, this.userId),
+        this.billingSubjectKey ?? undefined,
+      ),
     systemPrompts: () => [ROLE_SYSTEM_PROMPT, generalSystemPrompt(), getWorkersAiToolContext()],
     logger,
   });
 
-  async onStart() {
+  async onStart(props?: BuilderAgentProps) {
+    this.billingSubjectKey = props?.billingSubjectKey ?? null;
+    this.userId = props?.userId;
     this.turnStore.initialize();
     this.contextWindow.initialize();
   }
@@ -107,6 +126,9 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState> {
     _onFinish?: unknown,
     options?: { requestId?: string; body?: Record<string, unknown>; continuation?: boolean; abortSignal?: AbortSignal },
   ) {
+    if (!this.billingSubjectKey) {
+      throw new Response('Agent authentication is required.', { status: 401 });
+    }
     const body = (options?.body ?? {}) as ChatBody;
     const messages = this.messages as NonNullable<ChatRequestBody['messages']>;
     const chatInitialId = typeof body.chatInitialId === 'string' ? body.chatInitialId : 'agent-chat';
@@ -139,6 +161,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState> {
 
     try {
       const preparedContext = await this.contextWindow.prepare(messages, contextScope, turnContext);
+      const accountCredentials = await getUserWorkersAiCredentials(this.env, this.userId);
       console.info({
         event: 'builder_context_prepared',
         requestId: options?.requestId,
@@ -152,6 +175,8 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState> {
         abortSignal: options?.abortSignal,
         firstUserMessage,
         preparedMessages: preparedContext.messages,
+        billingSubjectKey: this.billingSubjectKey,
+        accountCredentials,
         contextReduced: preparedContext.contextReduced,
         body: {
           messages,

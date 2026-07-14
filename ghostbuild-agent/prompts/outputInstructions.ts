@@ -26,12 +26,15 @@ export function outputInstructions() {
     <completion>
       Any filesystem mutation must be followed by deploy validation in the same response. Treat a failed result as a
       bug report: inspect the failure, make the smallest sound repair, and validate again. Continue until the result
-      confirms either "Ghostbuild app check complete" or a production Wrangler deployment. Stop only after
+      confirms either "Ghostbuild app check complete", a deployment plan ready for user approval, or a successful
+      production deployment. Stop only after
       several distinct repair attempts leave the same external blocker unresolved.
 
       Guest sessions check the generated app and keep production deployment locked behind sign-in. Say the app is ready
-      for preview and that sign-in is required for production. Say "deployed" only when the result explicitly confirms
-      a production deployment. Before validation finishes, describe the action as checking or validating.
+      for preview and that sign-in is required for production. When a result says a deployment plan is ready, explain
+      that the app passed production checks and is awaiting the user's billing approval; do not call it deployed.
+      Say "deployed" only when the result explicitly confirms a production deployment. Before validation finishes,
+      describe the action as checking or validating.
     </completion>
 
     <supporting_tools>

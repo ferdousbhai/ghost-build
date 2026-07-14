@@ -7,6 +7,7 @@ import { ExclamationTriangleIcon, CheckCircledIcon, ResetIcon } from '@radix-ui/
 import { Button } from '@ui/Button';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { isActionStatusActive } from '~/lib/runtime/action-runner';
+import type { BuildProgress } from './build-progress';
 
 const logger = createScopedLogger('StreamingIndicator');
 
@@ -17,6 +18,8 @@ interface StreamingIndicatorProps {
   toolStatus?: ToolStatus;
   isRecovering?: boolean;
   currentError?: Error;
+  buildProgress: BuildProgress | null;
+  onStop: () => void;
   resendMessage: () => void;
 }
 
@@ -77,8 +80,9 @@ export default function StreamingIndicator(props: StreamingIndicatorProps) {
     switch (streamStatus) {
       case 'submitted':
       case 'streaming':
-        icon = <LoadingIcon />;
-        message = props.isRecovering ? STATUS_MESSAGES.recovering : STATUS_MESSAGES.building;
+        icon = props.buildProgress?.stalled ? <WarningIcon /> : <LoadingIcon />;
+        message =
+          props.buildProgress?.message ?? (props.isRecovering ? STATUS_MESSAGES.recovering : STATUS_MESSAGES.building);
         break;
       case 'error':
         icon = <WarningIcon />;
@@ -104,6 +108,8 @@ export default function StreamingIndicator(props: StreamingIndicatorProps) {
       <div
         data-streaming-indicator-stream-status={streamStatus}
         className="z-prompt relative mx-auto w-full max-w-chat"
+        role="status"
+        aria-live="polite"
       >
         <div className="text-content-secondary flex px-1 py-1.5">
           <div className="flex-1">
@@ -113,6 +119,16 @@ export default function StreamingIndicator(props: StreamingIndicatorProps) {
                   <div>{icon}</div>
                   {message}
                   <div className="min-h-6 grow" />
+                  {props.buildProgress?.stalled && streamStatus === 'streaming' && (
+                    <Button type="button" className="ml-2 h-auto" onClick={props.onStop}>
+                      Stop
+                    </Button>
+                  )}
+                  {aborted && streamStatus === 'ready' && (
+                    <Button type="button" className="ml-2 h-auto" onClick={props.resendMessage} icon={<ResetIcon />}>
+                      Try again
+                    </Button>
+                  )}
                   {streamStatus === 'error' && (
                     <Button type="button" className="ml-2 h-auto" onClick={props.resendMessage} icon={<ResetIcon />}>
                       Resend
