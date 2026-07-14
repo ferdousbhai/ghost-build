@@ -52,7 +52,8 @@ export class UserCloudflareAccountApi {
   }
 
   private async call<T>(path: string, init: RequestInit): Promise<T> {
-    const response = await this.request(`${API_ROOT}/accounts/${encodeURIComponent(this.accountId)}${path}`, {
+    const execute = this.request;
+    const response = await execute(`${API_ROOT}/accounts/${encodeURIComponent(this.accountId)}${path}`, {
       ...init,
       headers: {
         authorization: `Bearer ${this.accessToken}`,

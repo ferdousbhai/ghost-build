@@ -73,6 +73,7 @@ describe('D1CloudflareCredentialVault', () => {
         headers: expect.objectContaining({ authorization: `Basic ${btoa('client-1:client-secret')}` }),
       }),
     );
+    expect(request.mock.contexts).toEqual([undefined]);
     expect(JSON.stringify(rows.get(handle))).not.toBe(before);
     expect(JSON.stringify(rows.get(handle))).not.toContain('fresh-access');
   });

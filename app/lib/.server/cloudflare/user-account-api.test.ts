@@ -49,6 +49,7 @@ describe('UserCloudflareAccountApi', () => {
       'https://api.cloudflare.com/client/v4/accounts/account-1/r2/buckets',
       expect.objectContaining({ body: JSON.stringify({ name: 'ghostbuild-deployment-1-storage' }) }),
     );
+    expect(request.mock.contexts).toEqual([undefined, undefined, undefined]);
   });
 
   test('fails closed when Cloudflare returns a different resource or the plan is malformed', async () => {

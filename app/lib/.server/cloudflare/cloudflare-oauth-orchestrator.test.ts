@@ -87,6 +87,7 @@ describe('CloudflareOAuthOrchestrator', () => {
       'https://api.cloudflare.com/client/v4/accounts?per_page=2',
       expect.objectContaining({ headers: { authorization: 'Bearer oauth-access-token' } }),
     );
+    expect(request.mock.contexts).toEqual([undefined, undefined]);
   });
 
   test('rejects multiple-account grants instead of guessing which account pays', async () => {

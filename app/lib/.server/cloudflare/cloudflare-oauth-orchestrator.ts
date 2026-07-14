@@ -66,6 +66,7 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
   }
 
   async completeConnection(request: CloudflareConnectionCompletionRequest): Promise<CloudflareConnectionResult> {
+    const execute = this.request;
     const session = parseSession(request.providerSessionId);
     const callback = new URL(request.callbackUrl);
     const providerError = callback.searchParams.get('error');
@@ -83,7 +84,7 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
       redirect_uri: session.redirectUri,
       code_verifier: session.verifier,
     });
-    const tokenResponse = await this.request(TOKEN_URL, {
+    const tokenResponse = await execute(TOKEN_URL, {
       method: 'POST',
       headers: {
         authorization: `Basic ${btoa(`${this.config.clientId}:${this.config.clientSecret}`)}`,
@@ -104,7 +105,7 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
         'Cloudflare did not issue a refresh token. Reconnect with offline access enabled.',
       );
     }
-    const accountsResponse = await this.request(ACCOUNTS_URL, {
+    const accountsResponse = await execute(ACCOUNTS_URL, {
       headers: { authorization: `Bearer ${token.access_token}` },
     });
     const accountsPayload = (await accountsResponse.json().catch(() => null)) as {

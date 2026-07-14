@@ -88,7 +88,8 @@ export class D1CloudflareCredentialVault implements CloudflareCredentialResolver
     if (!this.oauth) {
       throw new Error('Cloudflare authorization expired; reconnect Cloudflare.');
     }
-    const response = await (this.oauth.request ?? fetch)('https://dash.cloudflare.com/oauth2/token', {
+    const execute = this.oauth.request ?? fetch;
+    const response = await execute('https://dash.cloudflare.com/oauth2/token', {
       method: 'POST',
       headers: {
         authorization: `Basic ${btoa(`${this.oauth.clientId}:${this.oauth.clientSecret}`)}`,
