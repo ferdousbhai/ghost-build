@@ -117,7 +117,7 @@ describe('cloudflareConnectionStatusAction', () => {
       expiresAt: Date.now() + 60_000,
     });
     const callbackRequest = () =>
-      new Request('https://ghostbuild.dev/api/cloudflare/complete', {
+      new Request('https://ghostbuild.dev/connect/return', {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ state, code: 'authorization-code' }),

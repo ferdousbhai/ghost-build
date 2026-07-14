@@ -81,7 +81,7 @@ const exactRoutes: Record<string, ServerRoute> = {
     method: 'GET',
     handler: (request, env) => completeCloudflareConnectionAction({ request, env }),
   },
-  '/api/cloudflare/complete': {
+  '/connect/return': {
     method: 'POST',
     handler: (request, env) => completeCloudflareConnectionAction({ request, env }),
   },

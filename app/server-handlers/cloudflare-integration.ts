@@ -81,7 +81,7 @@ export async function startCloudflareConnectionAction(args: {
 
     const state = crypto.randomUUID();
     const requestUrl = new URL(args.request.url);
-    const returnUrl = new URL('/api/cloudflare/complete', requestUrl.origin);
+    const returnUrl = new URL('/connect/return', requestUrl.origin);
     returnUrl.searchParams.set('state', state);
     const orchestrator = args.orchestrator ?? (await createCloudflareOrchestrator(args.env));
     const challenge = challengeSchema.parse(
