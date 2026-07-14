@@ -116,7 +116,7 @@ describe('cloudflareConnectionStatusAction', () => {
       status: 'pending',
       expiresAt: Date.now() + 60_000,
     });
-    const request = new Request(`https://ghostbuild.dev/api/cloudflare/connection/callback?state=${state}`);
+    const request = new Request(`https://ghostbuild.dev/api/cloudflare/complete?state=${state}`);
     const response = await completeCloudflareConnectionAction({
       request,
       env: database.env,

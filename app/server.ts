@@ -81,6 +81,10 @@ const exactRoutes: Record<string, ServerRoute> = {
     method: 'GET',
     handler: (request, env) => completeCloudflareConnectionAction({ request, env }),
   },
+  '/api/cloudflare/complete': {
+    method: 'GET',
+    handler: (request, env) => completeCloudflareConnectionAction({ request, env }),
+  },
   '/api/ai/allowance': {
     method: 'GET',
     handler: (request, env) => aiAllowanceStatusAction({ request, env }),

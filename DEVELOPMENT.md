@@ -29,7 +29,7 @@ Optional bindings include `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIEN
 
 User-account connection uses Cloudflare's public OAuth Authorization Code flow with PKCE. Create a server-side OAuth
 client in **Manage Account → OAuth clients**, register
-`https://<ghostbuild-origin>/api/cloudflare/connection/callback`, verify the client domain, and make the client public.
+`https://<ghostbuild-origin>/api/cloudflare/complete`, verify the client domain, and make the client public.
 Configure response type **Code**, grant types **Authorization Code** and **Refresh Token**, and token authentication
 method **Client Secret Basic**. Select only the account permissions needed by the generated stack: Account Settings Read, Workers Scripts
 Write, D1 Write, Workers R2 Storage Write, and Workers AI Read. Cloudflare's live OAuth scope catalog currently assigns
