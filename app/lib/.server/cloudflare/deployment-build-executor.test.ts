@@ -10,7 +10,7 @@ const sandbox = vi.hoisted(() => ({
 
 vi.mock('@cloudflare/sandbox', () => ({ getSandbox: vi.fn(() => sandbox) }));
 
-import { buildDeploymentSnapshot, DeploymentBuildError } from './deployment-build-executor';
+import { buildDeploymentSnapshot } from './deployment-build-executor';
 
 describe('buildDeploymentSnapshot', () => {
   beforeEach(() => {
@@ -65,7 +65,29 @@ describe('buildDeploymentSnapshot', () => {
 
     await expect(
       buildDeploymentSnapshot({ env, deploymentId: 'deployment-1', snapshotKey: 'snapshots/1' }),
-    ).rejects.toBeInstanceOf(DeploymentBuildError);
+    ).rejects.toThrow('failed during source extraction: Production build command failed (1): invalid archive');
+    expect(sandbox.destroy).toHaveBeenCalledOnce();
+  });
+
+  test('records the failing build stage and nested Sandbox transport error', async () => {
+    sandbox.exec
+      .mockResolvedValueOnce({ success: true, exitCode: 0, stdout: '', stderr: '', command: 'unzip' })
+      .mockResolvedValueOnce({ success: true, exitCode: 0, stdout: '', stderr: '', command: 'copy' })
+      .mockRejectedValueOnce(
+        new Error('Sandbox RPC connection closed.', {
+          cause: new Error('Command timed out after 600000ms.'),
+        }),
+      );
+    const env = {
+      DeploymentSandbox: {},
+      APP_STORAGE: { get: vi.fn(async () => ({ body: stream([1]) })) },
+    } as unknown as Env;
+
+    await expect(
+      buildDeploymentSnapshot({ env, deploymentId: 'deployment-1', snapshotKey: 'snapshots/1' }),
+    ).rejects.toThrow(
+      'failed during dependency installation: Sandbox RPC connection closed. Caused by: Command timed out after 600000ms.',
+    );
     expect(sandbox.destroy).toHaveBeenCalledOnce();
   });
 });

@@ -41,7 +41,10 @@
     {
       "class_name": "DeploymentSandbox",
       "image": "./Dockerfile.sandbox",
-      "instance_type": "lite",
+      // Generated projects install and compile close to 1 GB of dependencies.
+      // The lite tier only has 256 MiB RAM and 1/16 vCPU, which is not a
+      // production-capable build environment for the supported stack.
+      "instance_type": "basic",
       "max_instances": 2,
     },
   ],

@@ -6,6 +6,16 @@ const SOURCE_DIR = '/workspace/source';
 const SOURCE_ARCHIVE = '/workspace/source.zip';
 const BUILD_ARCHIVE = '/workspace/build.tar.gz';
 const MAX_ERROR_OUTPUT = 4_000;
+type BuildStage =
+  | 'sandbox initialization'
+  | 'source extraction'
+  | 'dependency installation'
+  | 'stack verification'
+  | 'type checking'
+  | 'application build'
+  | 'linting'
+  | 'build packaging'
+  | 'build download';
 
 export async function buildDeploymentSnapshot(args: {
   env: Env;
@@ -26,10 +36,12 @@ export async function buildDeploymentSnapshot(args: {
     enableDefaultSession: false,
     normalizeId: true,
   });
+  let stage: BuildStage = 'sandbox initialization';
   try {
     await sandbox.mkdir(PROJECT_DIR, { recursive: true });
     await sandbox.mkdir(SOURCE_DIR, { recursive: true });
     await sandbox.writeFile(SOURCE_ARCHIVE, source.body);
+    stage = 'source extraction';
     await requireSuccess(await sandbox.exec(`unzip -q ${SOURCE_ARCHIVE} -d ${SOURCE_DIR}`));
     await requireSuccess(
       await sandbox.exec(
@@ -38,32 +50,60 @@ export async function buildDeploymentSnapshot(args: {
           `else echo "Deployment snapshot does not contain package.json" >&2; exit 1; fi`,
       ),
     );
+    stage = 'dependency installation';
     await requireSuccess(
       await sandbox.exec('pnpm install --frozen-lockfile --ignore-scripts=false', {
         cwd: PROJECT_DIR,
         timeout: 10 * 60 * 1000,
       }),
     );
-    for (const script of ['verify:stack', 'typecheck', 'build', 'lint']) {
+    for (const [script, scriptStage] of [
+      ['verify:stack', 'stack verification'],
+      ['typecheck', 'type checking'],
+      ['build', 'application build'],
+      ['lint', 'linting'],
+    ] as const) {
+      stage = scriptStage;
       await requireSuccess(await sandbox.exec(`pnpm run ${script}`, { cwd: PROJECT_DIR, timeout: 10 * 60 * 1000 }));
     }
+    stage = 'build packaging';
     await requireSuccess(
       await sandbox.exec(`tar -czf ${BUILD_ARCHIVE} -C ${PROJECT_DIR} dist migrations package.json pnpm-lock.yaml`, {
         timeout: 2 * 60 * 1000,
       }),
     );
+    stage = 'build download';
     const build = await new Response(await sandbox.readFileStream(BUILD_ARCHIVE)).arrayBuffer();
     return new Uint8Array(build);
   } catch (error) {
-    throw error instanceof DeploymentBuildError
-      ? error
-      : new DeploymentBuildError('The isolated production build failed.', { cause: error });
+    throw new DeploymentBuildError(
+      `The isolated production build failed during ${stage}: ${deploymentBuildErrorDetail(error)}`.slice(
+        0,
+        MAX_ERROR_OUTPUT,
+      ),
+      { cause: error },
+    );
   } finally {
     await sandbox.destroy().catch((error) => console.error('Unable to destroy deployment build sandbox', error));
   }
 }
 
-export class DeploymentBuildError extends Error {
+function deploymentBuildErrorDetail(error: unknown): string {
+  const messages: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current) && messages.length < 4) {
+    seen.add(current);
+    const message = current.message.trim();
+    if (message && messages.at(-1) !== message) {
+      messages.push(message);
+    }
+    current = current.cause;
+  }
+  return messages.join(' Caused by: ') || 'Unknown Sandbox error.';
+}
+
+class DeploymentBuildError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'DeploymentBuildError';
