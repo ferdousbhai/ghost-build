@@ -12,6 +12,7 @@ import { signInWithGoogle, signOutOfGhostbuild } from '~/lib/auth-client';
 import { BrandLink } from '~/components/BrandLink';
 import { isGuestSessionId } from '~/lib/guest-session';
 import { Button } from '@ui/Button';
+import { ThemeSwitch } from '~/components/ui/ThemeSwitch';
 
 const DownloadButton = lazy(() => import('./DownloadButton').then((module) => ({ default: module.DownloadButton })));
 const ShareButton = lazy(() => import('./ShareButton').then((module) => ({ default: module.ShareButton })));
@@ -103,6 +104,7 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
             </Suspense>
           </>
         )}
+        <ThemeSwitch />
         {profile && (
           <MenuComponent
             buttonProps={{

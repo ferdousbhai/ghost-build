@@ -1,6 +1,6 @@
 import { useStore } from '@nanostores/react';
 import { profileStore } from '~/lib/stores/profile';
-import { ExitIcon, ExternalLinkIcon, PersonIcon } from '@radix-ui/react-icons';
+import { ExitIcon, PersonIcon } from '@radix-ui/react-icons';
 import { signOutOfGhostbuild } from '~/lib/auth-client';
 import { Button } from '@ui/Button';
 
@@ -34,16 +34,6 @@ export function ProfileCard() {
           {profile.email && <p className="mt-1 truncate text-sm text-content-secondary">{profile.email}</p>}
         </div>
         <div className="flex flex-col gap-2 sm:items-end">
-          <Button
-            href="https://myaccount.google.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            variant="neutral"
-            size="sm"
-            icon={<ExternalLinkIcon aria-hidden />}
-          >
-            Google account
-          </Button>
           <Button variant="danger" size="sm" onClick={handleLogout} icon={<ExitIcon aria-hidden />}>
             Log out
           </Button>

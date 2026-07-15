@@ -2,7 +2,6 @@ import { motion, type Variants } from 'framer-motion';
 import { memo, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ConfirmationDialog } from '@ui/ConfirmationDialog';
-import { ThemeSwitch } from '~/components/ui/ThemeSwitch';
 import type { ChatHistorySummary } from '~/lib/cloudflare/data-api';
 import { cubicEasingFn } from '~/utils/easings';
 import { logger } from 'ghostbuild-agent/utils/logger';
@@ -176,9 +175,6 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
               }
             />
           )}
-        </div>
-        <div className="flex items-center justify-between border-t border-border-transparent px-4 py-3">
-          <ThemeSwitch />
         </div>
       </div>
     </motion.div>
