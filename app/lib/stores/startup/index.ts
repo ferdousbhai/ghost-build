@@ -15,7 +15,7 @@ export function useChatHomepage(chatId: string) {
   const [chatInitialized, setChatInitialized] = useState(false);
   const initializeChat = useHomepageInitializeChat(chatId, setChatInitialized);
   const storeMessageHistory = useStoreMessageHistory();
-  useNewChatContainerSetup();
+  useNewChatContainerSetup(chatInitialized);
   useBackupSyncState(chatId, chatInitialized ? 0 : undefined, chatInitialized ? EMPTY_INITIAL_MESSAGES : undefined);
   const subchats = useSubchats(chatId, chatInitialized);
 

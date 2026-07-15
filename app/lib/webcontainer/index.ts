@@ -10,8 +10,16 @@ import {
 import { workbenchActionAlert } from '~/lib/stores/workbench-ui-state';
 import { chooseExperience } from '~/utils/experienceChooser';
 
-export let webcontainer: Promise<WebContainer> = new Promise(() => {
-  // noop for ssr
+let resolveWebcontainer: (container: WebContainer) => void = () => undefined;
+let rejectWebcontainer: (error: unknown) => void = () => undefined;
+
+// Stores import this promise during module initialization. Keep its identity
+// stable, then resolve it only when a chat surface explicitly starts the
+// browser runtime. This prevents the homepage's first-message handoff from
+// competing with WebContainer boot before the Cloudflare Agent request starts.
+export const webcontainer: Promise<WebContainer> = new Promise((resolve, reject) => {
+  resolveWebcontainer = resolve;
+  rejectWebcontainer = reject;
 });
 
 const logger = createScopedLogger('webcontainer');
@@ -27,40 +35,46 @@ if (!import.meta.env.SSR) {
   }
 }
 
-if (shouldBootWebcontainer) {
-  webcontainer =
-    import.meta.hot?.data.webcontainer ??
-    bootWebcontainer()
-      .then((webcontainer) => {
-        // Listen for preview errors
-        webcontainer.on('preview-message', (message) => {
-          logger.info('WebContainer preview message:', JSON.stringify(message));
+let webcontainerBootStarted = false;
 
-          // Handle both uncaught exceptions and unhandled promise rejections
-          if (message.type === 'PREVIEW_UNCAUGHT_EXCEPTION' || message.type === 'PREVIEW_UNHANDLED_REJECTION') {
-            const isPromise = message.type === 'PREVIEW_UNHANDLED_REJECTION';
-            workbenchActionAlert.set({
-              type: 'preview',
-              title: isPromise ? 'Unhandled Promise Rejection' : 'Uncaught Exception',
-              description: message.message,
-              content: `Error occurred at ${message.pathname}${message.search}${message.hash}\nPort: ${message.port}\n\nStack trace:\n${cleanStackTrace(message.stack || '')}`,
-              source: 'preview',
-            });
-          }
-        });
-        // Set the container boot state to LOADING_SNAPSHOT to hand off control
-        // to the container setup code.
-        setContainerBootState(ContainerBootState.LOADING_SNAPSHOT);
-        return webcontainer;
-      })
-      .catch((error) => {
-        setContainerBootState(ContainerBootState.ERROR, error);
-        throw error;
-      });
-
-  if (import.meta.hot) {
-    import.meta.hot.data.webcontainer = webcontainer;
+export function startWebcontainer(): Promise<WebContainer> {
+  if (!shouldBootWebcontainer || webcontainerBootStarted) {
+    return webcontainer;
   }
+  webcontainerBootStarted = true;
+  const boot: Promise<WebContainer> = import.meta.hot?.data.webcontainer ?? bootWebcontainer();
+  if (import.meta.hot) {
+    import.meta.hot.data.webcontainer = boot;
+  }
+  void boot
+    .then((container) => {
+      // Listen for preview errors
+      container.on('preview-message', (message) => {
+        logger.info('WebContainer preview message:', JSON.stringify(message));
+
+        // Handle both uncaught exceptions and unhandled promise rejections
+        if (message.type === 'PREVIEW_UNCAUGHT_EXCEPTION' || message.type === 'PREVIEW_UNHANDLED_REJECTION') {
+          const isPromise = message.type === 'PREVIEW_UNHANDLED_REJECTION';
+          workbenchActionAlert.set({
+            type: 'preview',
+            title: isPromise ? 'Unhandled Promise Rejection' : 'Uncaught Exception',
+            description: message.message,
+            content: `Error occurred at ${message.pathname}${message.search}${message.hash}\nPort: ${message.port}\n\nStack trace:\n${cleanStackTrace(message.stack || '')}`,
+            source: 'preview',
+          });
+        }
+      });
+      // Set the container boot state to LOADING_SNAPSHOT to hand off control
+      // to the container setup code.
+      setContainerBootState(ContainerBootState.LOADING_SNAPSHOT);
+      resolveWebcontainer(container);
+    })
+    .catch((error: unknown) => {
+      const bootError = error instanceof Error ? error : new Error(String(error));
+      setContainerBootState(ContainerBootState.ERROR, bootError);
+      rejectWebcontainer(error);
+    });
+  return webcontainer;
 }
 
 function bootWebcontainer() {
