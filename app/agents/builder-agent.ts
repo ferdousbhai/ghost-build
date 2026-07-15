@@ -139,7 +139,18 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         requestId: options.requestId,
       });
       return createUIMessageStreamResponse({
-        stream: createUIMessageStream({ execute: () => undefined }),
+        stream: createUIMessageStream({
+          execute: ({ writer }) => {
+            const id = 'deployment-approval-ready';
+            writer.write({ type: 'text-start', id });
+            writer.write({
+              type: 'text-delta',
+              id,
+              delta: 'The production plan is ready. Review the Cloudflare resources and approve billing below.',
+            });
+            writer.write({ type: 'text-end', id });
+          },
+        }),
       });
     }
     const chatInitialId = typeof body.chatInitialId === 'string' ? body.chatInitialId : 'agent-chat';
