@@ -2,6 +2,7 @@ import { getSandbox, type ExecResult } from '@cloudflare/sandbox';
 import type { DeploymentSandbox } from './deployment-sandbox';
 
 const PROJECT_DIR = '/workspace/project';
+const SOURCE_DIR = '/workspace/source';
 const SOURCE_ARCHIVE = '/workspace/source.zip';
 const BUILD_ARCHIVE = '/workspace/build.tar.gz';
 const MAX_ERROR_OUTPUT = 4_000;
@@ -27,8 +28,16 @@ export async function buildDeploymentSnapshot(args: {
   });
   try {
     await sandbox.mkdir(PROJECT_DIR, { recursive: true });
+    await sandbox.mkdir(SOURCE_DIR, { recursive: true });
     await sandbox.writeFile(SOURCE_ARCHIVE, source.body);
-    await requireSuccess(await sandbox.exec(`unzip -q ${SOURCE_ARCHIVE} -d ${PROJECT_DIR}`));
+    await requireSuccess(await sandbox.exec(`unzip -q ${SOURCE_ARCHIVE} -d ${SOURCE_DIR}`));
+    await requireSuccess(
+      await sandbox.exec(
+        `if [ -f ${SOURCE_DIR}/package.json ]; then cp -a ${SOURCE_DIR}/. ${PROJECT_DIR}/; ` +
+          `elif [ -f ${SOURCE_DIR}/project/package.json ]; then cp -a ${SOURCE_DIR}/project/. ${PROJECT_DIR}/; ` +
+          `else echo "Deployment snapshot does not contain package.json" >&2; exit 1; fi`,
+      ),
+    );
     await requireSuccess(
       await sandbox.exec('pnpm install --frozen-lockfile --ignore-scripts=false', {
         cwd: PROJECT_DIR,
