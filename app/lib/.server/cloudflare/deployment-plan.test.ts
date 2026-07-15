@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDeploymentPlan } from './deployment-plan';
+import { buildDeploymentPlan, buildDeploymentPlanFromSource } from './deployment-plan';
 
 describe('buildDeploymentPlan', () => {
   it('binds the user-account billing policy and source digest into an immutable plan', async () => {
@@ -28,5 +28,16 @@ describe('buildDeploymentPlan', () => {
     const first = await buildDeploymentPlan({ deploymentId: 'deployment-1', snapshot: new Blob(['one']) });
     const second = await buildDeploymentPlan({ deploymentId: 'deployment-1', snapshot: new Blob(['two']) });
     expect(first.digest).not.toBe(second.digest);
+  });
+
+  it('rebuilds a fresh resource plan from an already verified source digest', async () => {
+    const sourceSha256 = 'b'.repeat(64);
+    const result = await buildDeploymentPlanFromSource({ deploymentId: 'deployment-2', sourceSha256 });
+
+    expect(result.plan).toMatchObject({ deploymentId: 'deployment-2', sourceSha256 });
+    expect(result.plan.resources[0]?.proposedName).toBe('ghostbuild-deployment-2');
+    await expect(
+      buildDeploymentPlanFromSource({ deploymentId: 'deployment-3', sourceSha256: 'invalid' }),
+    ).rejects.toThrow('Deployment source digest is invalid.');
   });
 });

@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   resolveIdentity: vi.fn(),
   findConnection: vi.fn(),
   buildPlan: vi.fn(),
+  buildPlanFromSource: vi.fn(),
   createDeployment: vi.fn(),
   approveDeployment: vi.fn(),
   requireDeployment: vi.fn(),
@@ -17,7 +18,10 @@ vi.mock('~/lib/.server/agent-request-identity', () => ({
 vi.mock('~/lib/.server/cloudflare/cloudflare-connection-repository', () => ({
   findCloudflareConnectionForUser: mocks.findConnection,
 }));
-vi.mock('~/lib/.server/cloudflare/deployment-plan', () => ({ buildDeploymentPlan: mocks.buildPlan }));
+vi.mock('~/lib/.server/cloudflare/deployment-plan', () => ({
+  buildDeploymentPlan: mocks.buildPlan,
+  buildDeploymentPlanFromSource: mocks.buildPlanFromSource,
+}));
 vi.mock('~/lib/.server/cloudflare/deployment-repository', async (importOriginal) => ({
   ...(await importOriginal()),
   createDeployment: mocks.createDeployment,
@@ -60,6 +64,7 @@ function deployment(status = 'awaiting_approval') {
     chatId: 'chat-primary',
     userId: 'user-1',
     connectionId: 'connection-1',
+    snapshotKey: 'deployment-snapshots/key',
     status,
     plan,
     planDigest: 'a'.repeat(64),
@@ -79,6 +84,7 @@ describe('deployment handlers', () => {
     mocks.resolveIdentity.mockResolvedValue({ userId: 'user-1', ownerId: 'user-1', billingSubjectKey: 'user:user-1' });
     mocks.findConnection.mockResolvedValue({ id: 'connection-1', status: 'active' });
     mocks.buildPlan.mockResolvedValue({ plan, digest: 'a'.repeat(64) });
+    mocks.buildPlanFromSource.mockResolvedValue({ plan, digest: 'a'.repeat(64) });
     mocks.putObject.mockResolvedValue('deployment-snapshots/key');
     mocks.createDeployment.mockResolvedValue(deployment());
     mocks.approveDeployment.mockResolvedValue(deployment('approved'));
@@ -171,6 +177,34 @@ describe('deployment handlers', () => {
         params: { deploymentId: 'deployment-1', userId: 'user-1', connectionId: 'connection-1' },
       },
     ]);
+  });
+
+  it('prepares a fresh unapproved plan from the immutable source after a failed deployment', async () => {
+    mocks.requireDeployment.mockResolvedValue({
+      ...deployment('failed'),
+      errorCode: 'isolated_build_failed',
+      errorMessage: 'Build failed.',
+    });
+    const response = await deploymentAction({
+      request: new Request('https://ghostbuild.dev/api/deployments/deployment-1/retry', { method: 'POST' }),
+      env: env(),
+      deploymentId: 'deployment-1',
+      operation: 'retry',
+    });
+
+    expect(response.status).toBe(201);
+    expect(mocks.buildPlanFromSource).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceSha256: plan.sourceSha256 }),
+    );
+    expect(mocks.createDeployment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: 'chat-primary',
+        userId: 'user-1',
+        connectionId: 'connection-1',
+        snapshotKey: 'deployment-snapshots/key',
+      }),
+    );
+    expect(await response.json()).toMatchObject({ deployment: { status: 'awaiting_approval' } });
   });
 });
 

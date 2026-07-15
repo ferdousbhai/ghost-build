@@ -168,16 +168,23 @@ export default {
 
 function matchDeploymentRoute(pathname: string): {
   deploymentId: string;
-  operation: 'get' | 'approve' | 'execute';
+  operation: 'get' | 'approve' | 'execute' | 'retry';
 } | null {
-  const match = /^\/api\/deployments\/([^/]+)(?:\/(approve|execute))?$/.exec(pathname);
+  const match = /^\/api\/deployments\/([^/]+)(?:\/(approve|execute|retry))?$/.exec(pathname);
   if (!match) {
     return null;
   }
   try {
     return {
       deploymentId: decodeURIComponent(match[1]),
-      operation: match[2] === 'approve' ? 'approve' : match[2] === 'execute' ? 'execute' : 'get',
+      operation:
+        match[2] === 'approve'
+          ? 'approve'
+          : match[2] === 'execute'
+            ? 'execute'
+            : match[2] === 'retry'
+              ? 'retry'
+              : 'get',
     };
   } catch {
     return null;

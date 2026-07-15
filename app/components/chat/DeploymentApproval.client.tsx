@@ -4,15 +4,17 @@ import { Checkbox } from '~/components/ui/primitives/Checkbox';
 import type { PendingDeploymentApproval } from './deployment-approval';
 
 export function DeploymentApproval({ deployment }: { deployment: PendingDeploymentApproval }) {
+  const [activeDeployment, setActiveDeployment] = useState(deployment);
   const [billingApproved, setBillingApproved] = useState(false);
   const [paidPolicyUnderstood, setPaidPolicyUnderstood] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'submitting' | 'deploying' | 'deployed' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'submitting' | 'retrying' | 'deploying' | 'deployed' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [canRetry, setCanRetry] = useState(false);
   const [productionUrl, setProductionUrl] = useState<string | null>(null);
 
   useEffect(() => {
     const abort = new AbortController();
-    void resumeDeployment(deployment.id, abort.signal, () => setStatus('deploying'))
+    void resumeDeployment(activeDeployment.id, abort.signal, () => setStatus('deploying'))
       .then((current) => {
         if (abort.signal.aborted || !current) {
           return;
@@ -24,21 +26,23 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
         if (abort.signal.aborted) {
           return;
         }
+        setCanRetry(resumeError instanceof DeploymentTerminalError);
         setError(resumeError instanceof Error ? resumeError.message : 'Unable to read production deployment status.');
         setStatus('error');
       });
     return () => abort.abort();
-  }, [deployment.id]);
+  }, [activeDeployment.id]);
 
   const approve = async () => {
     setStatus('submitting');
     setError(null);
+    setCanRetry(false);
     try {
-      const response = await fetch(`/api/deployments/${encodeURIComponent(deployment.id)}/approve`, {
+      const response = await fetch(`/api/deployments/${encodeURIComponent(activeDeployment.id)}/approve`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          planDigest: deployment.planDigest,
+          planDigest: activeDeployment.planDigest,
           confirmCloudflareBilling: billingApproved,
           confirmWorkersPaidNotAutomatic: paidPolicyUnderstood,
         }),
@@ -51,7 +55,7 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
         throw new Error(payload?.error || 'Unable to approve the deployment.');
       }
       setStatus('deploying');
-      const executionResponse = await fetch(`/api/deployments/${encodeURIComponent(deployment.id)}/execute`, {
+      const executionResponse = await fetch(`/api/deployments/${encodeURIComponent(activeDeployment.id)}/execute`, {
         method: 'POST',
       });
       const executionPayload = (await executionResponse.json().catch(() => null)) as {
@@ -61,11 +65,44 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
       if (!executionResponse.ok || !executionPayload?.deployment) {
         throw new Error(executionPayload?.error || 'Unable to start the production deployment.');
       }
-      const completed = await waitForDeployment(deployment.id);
+      const completed = await waitForDeployment(activeDeployment.id);
       setProductionUrl(completed.productionUrl ?? null);
       setStatus('deployed');
     } catch (approvalError) {
+      setCanRetry(approvalError instanceof DeploymentTerminalError);
       setError(approvalError instanceof Error ? approvalError.message : 'Unable to approve the deployment.');
+      setStatus('error');
+    }
+  };
+
+  const retry = async () => {
+    setStatus('retrying');
+    setError(null);
+    try {
+      const response = await fetch(`/api/deployments/${encodeURIComponent(activeDeployment.id)}/retry`, {
+        method: 'POST',
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        deployment?: {
+          id?: string;
+          planDigest?: string;
+          plan?: { resources?: PendingDeploymentApproval['resources'] };
+        };
+        error?: string;
+      } | null;
+      const next = payload?.deployment;
+      if (!response.ok || !next?.id || !next.planDigest || !next.plan?.resources) {
+        throw new Error(payload?.error || 'Unable to prepare a deployment retry.');
+      }
+      setBillingApproved(false);
+      setPaidPolicyUnderstood(false);
+      setProductionUrl(null);
+      setCanRetry(false);
+      setActiveDeployment({ id: next.id, planDigest: next.planDigest, resources: next.plan.resources });
+      setStatus('idle');
+    } catch (retryError) {
+      setCanRetry(true);
+      setError(retryError instanceof Error ? retryError.message : 'Unable to prepare a deployment retry.');
       setStatus('error');
     }
   };
@@ -75,13 +112,13 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
       <div>
         <h3 className="text-content-primary font-medium">Approve production deployment</h3>
         <p className="text-content-secondary mt-1">
-          {deployment.resources.length} Cloudflare resources will be provisioned in your connected account.
+          {activeDeployment.resources.length} Cloudflare resources will be provisioned in your connected account.
         </p>
       </div>
       <label className="text-content-primary flex items-start gap-2">
         <Checkbox
           checked={billingApproved}
-          disabled={status === 'submitting' || status === 'deploying' || status === 'deployed'}
+          disabled={status === 'submitting' || status === 'retrying' || status === 'deploying' || status === 'deployed'}
           onChange={(event) => setBillingApproved(event.target.checked)}
         />
         <span>I approve Cloudflare billing my account for this app&apos;s infrastructure and inference.</span>
@@ -89,7 +126,7 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
       <label className="text-content-primary flex items-start gap-2">
         <Checkbox
           checked={paidPolicyUnderstood}
-          disabled={status === 'submitting' || status === 'deploying' || status === 'deployed'}
+          disabled={status === 'submitting' || status === 'retrying' || status === 'deploying' || status === 'deployed'}
           onChange={(event) => setPaidPolicyUnderstood(event.target.checked)}
         />
         <span>I understand Workers Paid will require separate authorization and is not enabled automatically.</span>
@@ -105,6 +142,12 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
         </p>
       ) : status === 'deploying' ? (
         <p className="text-content-secondary">Provisioning and deploying in your Cloudflare account…</p>
+      ) : status === 'retrying' ? (
+        <p className="text-content-secondary">Preparing a fresh plan from the same immutable source…</p>
+      ) : status === 'error' && canRetry ? (
+        <Button size="sm" onClick={() => void retry()}>
+          Prepare retry
+        </Button>
       ) : (
         <Button
           size="sm"
@@ -140,7 +183,7 @@ async function resumeDeployment(
     return current;
   }
   if (current.status === 'failed' || current.status === 'canceled') {
-    throw new Error(current.error?.message || 'Production deployment failed.');
+    throw new DeploymentTerminalError(current.error?.message || 'Production deployment failed.');
   }
   onRunning();
   if (current.status === 'approved') {
@@ -164,11 +207,15 @@ async function pollDeployment(deploymentId: string, signal?: AbortSignal): Promi
       return current;
     }
     if (current.status === 'failed' || current.status === 'canceled') {
-      throw new Error(current.error?.message || 'Production deployment failed.');
+      throw new DeploymentTerminalError(current.error?.message || 'Production deployment failed.');
     }
     await abortableDelay(DEPLOYMENT_POLL_INTERVAL_MS, signal);
   }
   throw new Error('Production deployment is still running. Check its status again shortly.');
+}
+
+class DeploymentTerminalError extends Error {
+  override name = 'DeploymentTerminalError';
 }
 
 type DeploymentStatusPayload = {

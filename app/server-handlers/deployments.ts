@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { resolveAgentRequestIdentity } from '~/lib/.server/agent-request-identity';
 import { findCloudflareConnectionForUser } from '~/lib/.server/cloudflare/cloudflare-connection-repository';
-import { buildDeploymentPlan } from '~/lib/.server/cloudflare/deployment-plan';
+import { buildDeploymentPlan, buildDeploymentPlanFromSource } from '~/lib/.server/cloudflare/deployment-plan';
 import {
   approveDeployment,
   createDeployment,
@@ -81,7 +81,7 @@ export async function deploymentAction(args: {
   request: Request;
   env: Env;
   deploymentId: string;
-  operation: 'get' | 'approve' | 'execute';
+  operation: 'get' | 'approve' | 'execute' | 'retry';
 }): Promise<Response> {
   try {
     const userId = await requireSignedInUser(args.request, args.env);
@@ -93,6 +93,31 @@ export async function deploymentAction(args: {
     const connection = await findCloudflareConnectionForUser(args.env.DB, userId);
     if (!connection || connection.status !== 'active') {
       return Response.json({ error: 'Reconnect Cloudflare before approving this deployment.' }, { status: 409 });
+    }
+    if (args.operation === 'retry') {
+      const previous = await requireDeploymentForUser(args.env.DB, args.deploymentId, userId);
+      if (!['failed', 'canceled'].includes(previous.status) || !previous.snapshotKey) {
+        throw new DeploymentStateConflictError(previous.status);
+      }
+      if (previous.connectionId !== connection.id) {
+        throw new DeploymentConnectionChangedError();
+      }
+      const deploymentId = crypto.randomUUID();
+      const { plan, digest } = await buildDeploymentPlanFromSource({
+        deploymentId,
+        sourceSha256: previous.plan.sourceSha256,
+      });
+      const retry = await createDeployment({
+        db: args.env.DB,
+        id: deploymentId,
+        chatId: previous.chatId,
+        userId,
+        connectionId: connection.id,
+        snapshotKey: previous.snapshotKey,
+        plan,
+        planDigest: digest,
+      });
+      return Response.json({ deployment: publicDeployment(retry) }, { status: 201 });
     }
     if (args.operation === 'execute') {
       if (!args.env.DeploymentWorkflow) {

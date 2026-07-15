@@ -23,11 +23,21 @@ export async function buildDeploymentPlan(args: {
   snapshot: Blob;
 }): Promise<{ plan: DeploymentPlan; digest: string }> {
   const sourceSha256 = await sha256Hex(await args.snapshot.arrayBuffer());
+  return buildDeploymentPlanFromSource({ deploymentId: args.deploymentId, sourceSha256 });
+}
+
+export async function buildDeploymentPlanFromSource(args: {
+  deploymentId: string;
+  sourceSha256: string;
+}): Promise<{ plan: DeploymentPlan; digest: string }> {
+  if (!/^[a-f0-9]{64}$/.test(args.sourceSha256)) {
+    throw new Error('Deployment source digest is invalid.');
+  }
   const baseName = `ghostbuild-${args.deploymentId}`;
   const plan: DeploymentPlan = {
     version: DEPLOYMENT_PLAN_VERSION,
     deploymentId: args.deploymentId,
-    sourceSha256,
+    sourceSha256: args.sourceSha256,
     billing: {
       infrastructure: 'user_cloudflare_account',
       workersAi: 'user_cloudflare_account',
