@@ -39,6 +39,12 @@ export function getAuth(env: Env, request?: Request) {
       },
     },
     database: env.DB,
+    account: {
+      // OAuth initiation must not depend on a D1 write completing. Better Auth
+      // encrypts and authenticates this short-lived state cookie with the app
+      // secret, while still enforcing the state-cookie check on callback.
+      storeStateStrategy: 'cookie',
+    },
     socialProviders: {
       google: {
         clientId: requireBinding(env, 'GOOGLE_CLIENT_ID'),
