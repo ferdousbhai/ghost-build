@@ -1,7 +1,7 @@
 import { forwardRef, type AnchorHTMLAttributes, type ButtonHTMLAttributes, type ReactNode, type Ref } from 'react';
 import { classNames } from '~/utils/classNames';
 
-export type ButtonVisualProps = {
+type ButtonVisualProps = {
   children?: ReactNode;
   className?: string;
   icon?: ReactNode;
