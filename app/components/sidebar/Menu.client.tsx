@@ -115,9 +115,9 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
       initial="closed"
       animate={isOpen ? 'open' : 'closed'}
       variants={menuVariants}
-      style={{ width: 'min(360px, 100vw)' }}
+      style={{ width: 'min(352px, calc(100vw - 12px))' }}
       className={classNames(
-        'side-menu fixed top-0 box-border flex h-full max-w-full flex-col',
+        'side-menu fixed top-0 box-border flex h-full max-w-full flex-col overflow-hidden rounded-r-2xl',
         'bg-[var(--bolt-elements-sidebar-background)] border-r border-border-transparent',
         'shadow-[12px_0_36px_color-mix(in_srgb,var(--ghost-home-accent-2)_8%,transparent)] text-sm',
         'z-30',
@@ -125,9 +125,13 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
     >
       <div aria-hidden className="h-[var(--header-height)] shrink-0 border-b" />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="min-w-0 space-y-3 p-4">
-          <Button className="box-border w-full max-w-full" href="/" icon={<PlusIcon />}>
-            Start new project
+        <div className="min-w-0 space-y-3 px-3 pb-4 pt-3 sm:px-4">
+          <Button
+            className="box-border min-h-11 w-full max-w-full overflow-hidden px-4 no-underline"
+            href="/"
+            icon={<PlusIcon className="size-4 shrink-0" />}
+          >
+            <span className="truncate">Start new project</span>
           </Button>
           <div className="relative min-w-0">
             <TextInput
@@ -140,26 +144,26 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
             />
           </div>
         </div>
-        <div className="px-4 pb-2 pt-1 text-xs font-bold tracking-wide text-content-tertiary uppercase">
+        <div className="px-4 pb-2 pt-1 text-[11px] font-bold tracking-[0.12em] text-content-tertiary uppercase">
           Your projects
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+        <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-4 sm:px-3">
           {filteredList.length === 0 && (
             <div className="px-4 text-sm text-gray-500 dark:text-gray-400">
               {list.length === 0 ? 'No previous projects' : 'No matches found'}
             </div>
           )}
           {binDates(filteredList).map(({ category, items }) => (
-            <div key={category} className="mt-2 space-y-1 first:mt-0">
-              <div className="sticky top-0 z-10 bg-[var(--bolt-elements-sidebar-background)] px-3 py-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+            <section key={category} aria-label={category} className="mt-3 space-y-1.5 first:mt-0">
+              <div className="sticky top-0 z-10 bg-[var(--bolt-elements-sidebar-background)] px-2 py-1.5 text-[11px] font-semibold tracking-wide text-content-tertiary">
                 {category}
               </div>
-              <div className="space-y-0.5 pr-1">
+              <div className="space-y-1.5">
                 {items.map((item) => (
                   <HistoryItem key={item.initialId} item={item} handleDeleteClick={handleDeleteClick} />
                 ))}
               </div>
-            </div>
+            </section>
           ))}
           {deleteTarget && (
             <ConfirmationDialog

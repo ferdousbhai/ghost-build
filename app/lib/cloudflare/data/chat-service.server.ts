@@ -31,10 +31,28 @@ export async function getChat(db: D1Database, args: { id: string; sessionId: str
 export async function getAllChats(db: D1Database, args: { sessionId: string }) {
   const { results } = await db
     .prepare(
-      `SELECT initial_id, url_id, description, timestamp
+      `SELECT
+         chats.initial_id,
+         chats.url_id,
+         COALESCE(
+           NULLIF(TRIM(chats.description), ''),
+           (
+             SELECT NULLIF(TRIM(chat_message_states.description), '')
+             FROM chat_message_states
+             WHERE chat_message_states.chat_id = chats.id
+               AND chat_message_states.description IS NOT NULL
+               AND TRIM(chat_message_states.description) <> ''
+             ORDER BY
+               chat_message_states.subchat_index ASC,
+               chat_message_states.last_message_rank ASC,
+               chat_message_states.part_index ASC
+             LIMIT 1
+           )
+         ) AS description,
+         chats.timestamp
        FROM chats
-       WHERE creator_id = ? AND is_deleted = 0
-       ORDER BY timestamp DESC`,
+       WHERE chats.creator_id = ? AND chats.is_deleted = 0
+       ORDER BY chats.timestamp DESC`,
     )
     .bind(args.sessionId)
     .all<{ initial_id: string; url_id: string | null; description: string | null; timestamp: string }>();

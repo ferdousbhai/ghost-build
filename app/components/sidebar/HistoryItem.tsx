@@ -2,7 +2,7 @@ import { useParams } from '@tanstack/react-router';
 import { classNames } from '~/utils/classNames';
 import type { ChatHistorySummary } from '~/lib/cloudflare/data-api';
 import { useEditChatDescription } from '~/lib/hooks/useEditChatDescription';
-import { CheckIcon, Pencil1Icon, TrashIcon } from '@radix-ui/react-icons';
+import { CheckIcon, FileTextIcon, Pencil1Icon, TrashIcon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
 import { TextInput } from '@ui/TextInput';
 import { format } from 'date-fns';
@@ -31,12 +31,15 @@ export function HistoryItem({ item, handleDeleteClick }: HistoryItemProps) {
   return (
     <div
       className={classNames(
-        'group rounded-xl text-sm text-content-secondary hover:text-content-primary hover:bg-[var(--bolt-elements-sidebar-active-item-background)] overflow-hidden flex justify-between items-center px-3 py-2.5 transition-colors',
-        { 'text-content-primary bg-[var(--bolt-elements-sidebar-active-item-background)]': isActiveChat },
+        'group relative flex min-w-0 items-center gap-1 overflow-hidden rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-1.5 text-sm text-content-secondary transition-[border-color,background-color,box-shadow]',
+        'hover:border-accent-500/40 hover:bg-[var(--bolt-elements-sidebar-active-item-background)] hover:shadow-sm',
+        {
+          'border-accent-500/60 bg-[var(--bolt-elements-sidebar-active-item-background)] shadow-sm': isActiveChat,
+        },
       )}
     >
       {editing ? (
-        <form onSubmit={handleSubmit} className="flex flex-1 items-center gap-2">
+        <form onSubmit={handleSubmit} className="flex min-w-0 flex-1 items-center gap-2">
           <TextInput
             id="description"
             className="-ml-1.5 -mt-1.5"
@@ -49,44 +52,35 @@ export function HistoryItem({ item, handleDeleteClick }: HistoryItemProps) {
           <Button type="submit" variant="neutral" icon={<CheckIcon />} size="xs" inline onClick={handleSubmit} />
         </form>
       ) : (
-        <a
-          href={`/chat/${item.urlId ?? item.initialId}`}
-          className="relative flex min-w-0 w-full flex-col pr-20"
-          aria-label={`${description}, ${projectTime}`}
-        >
-          <span className="truncate font-medium text-content-primary">{description}</span>
-          <span className="mt-0.5 text-xs text-content-tertiary">{projectTime}</span>
-          <div
-            className={classNames(
-              {
-                'bg-[var(--bolt-elements-sidebar-active-item-background)]': isActiveChat,
-                'bg-[var(--bolt-elements-sidebar-background)]': !isActiveChat,
-              },
-              'absolute -right-2 top-0 bottom-0 flex items-center group-hover:bg-[var(--bolt-elements-sidebar-active-item-background)] px-2 transition-colors',
-            )}
+        <>
+          <a
+            href={`/chat/${item.urlId ?? item.initialId}`}
+            className="flex min-w-0 flex-1 items-start gap-2.5 rounded-lg p-2 text-content-primary no-underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500"
+            aria-label={`${description}, ${projectTime}`}
           >
-            <div className="flex items-center gap-2.5 text-content-tertiary opacity-0 transition-opacity group-hover:opacity-100">
-              <ChatActionButton
-                toolTipContent="Rename"
-                icon={<Pencil1Icon />}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  toggleEditMode();
-                }}
-              />
-              <ChatActionButton
-                toolTipContent="Delete"
-                icon={<TrashIcon />}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  handleDeleteClick(item);
-                }}
-              />
-            </div>
+            <FileTextIcon className="mt-0.5 size-4 shrink-0 text-content-tertiary" aria-hidden />
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate font-semibold leading-5 text-content-primary">{description}</span>
+              <span className="mt-0.5 text-xs leading-4 text-content-tertiary">{projectTime}</span>
+            </span>
+          </a>
+          <div className="flex shrink-0 items-center gap-0.5 text-content-tertiary opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+            <ChatActionButton
+              toolTipContent="Rename"
+              icon={<Pencil1Icon />}
+              onClick={() => {
+                toggleEditMode();
+              }}
+            />
+            <ChatActionButton
+              toolTipContent="Delete"
+              icon={<TrashIcon />}
+              onClick={() => {
+                handleDeleteClick(item);
+              }}
+            />
           </div>
-        </a>
+        </>
       )}
     </div>
   );
@@ -101,7 +95,7 @@ const ChatActionButton = ({
   toolTipContent: string;
   icon: React.ReactNode;
   className?: string;
-  onClick: (e: React.MouseEvent) => void;
+  onClick: () => void;
 }) => {
   return (
     <Button
