@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { executeDataOperation } from '~/lib/cloudflare/client';
-import { waitForSessionId } from '~/lib/stores/sessionId';
+import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { api } from '~/lib/cloudflare/data-api';
 import { setKnownInitialId, setKnownUrlId } from '~/lib/stores/chatId';
 import { description } from '~/lib/stores/description';
@@ -32,9 +32,10 @@ export function useInitialMessages(chatId: string | undefined):
   | undefined {
   const [initialMessages, setInitialMessages] = useState<InitialMessages | null | undefined>();
   const subchatIndex = useStore(subchatIndexStore);
+  const sessionId = useSessionIdOrNullOrLoading();
 
   useEffect(() => {
-    if (!chatId) {
+    if (!chatId || !sessionId) {
       setInitialMessages(undefined);
       return undefined;
     }
@@ -43,7 +44,6 @@ export function useInitialMessages(chatId: string | undefined):
     setInitialMessages(undefined);
     const loadInitialMessages = async () => {
       try {
-        const sessionId = await waitForSessionId('loadInitialMessages');
         controller.signal.throwIfAborted();
         const chatInfo = await executeDataOperation(api.messages.get, {
           id: chatId,
@@ -136,7 +136,7 @@ export function useInitialMessages(chatId: string | undefined):
     };
     void loadInitialMessages();
     return () => controller.abort();
-  }, [chatId, subchatIndex]);
+  }, [chatId, sessionId, subchatIndex]);
 
   return initialMessages;
 }
