@@ -115,9 +115,9 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
       initial="closed"
       animate={isOpen ? 'open' : 'closed'}
       variants={menuVariants}
-      style={{ width: 'min(352px, calc(100vw - 12px))' }}
+      style={{ width: 'min(320px, calc(100dvw - 24px))' }}
       className={classNames(
-        'side-menu fixed top-0 box-border flex h-full max-w-full flex-col overflow-hidden rounded-r-2xl',
+        'side-menu fixed top-0 box-border flex h-full max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-r-3xl',
         'bg-[var(--bolt-elements-sidebar-background)] border-r border-border-transparent',
         'shadow-[12px_0_36px_color-mix(in_srgb,var(--ghost-home-accent-2)_8%,transparent)] text-sm',
         'z-30',
@@ -125,9 +125,9 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
     >
       <div aria-hidden className="h-[var(--header-height)] shrink-0 border-b" />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="min-w-0 space-y-3 px-3 pb-4 pt-3 sm:px-4">
+        <div className="min-w-0 space-y-3 px-4 pb-5 pt-4">
           <Button
-            className="box-border min-h-11 w-full max-w-full overflow-hidden px-4 no-underline"
+            className="box-border min-h-11 w-full min-w-0 max-w-full overflow-hidden rounded-xl px-4 no-underline"
             href="/"
             icon={<PlusIcon className="size-4 shrink-0" />}
           >
@@ -136,7 +136,7 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
           <div className="relative min-w-0">
             <TextInput
               id="search-projects"
-              className="box-border w-full"
+              className="box-border w-full min-w-0 max-w-full"
               type="search"
               placeholder="Search projects..."
               onChange={handleSearchChange}
@@ -144,19 +144,23 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
             />
           </div>
         </div>
-        <div className="px-4 pb-2 pt-1 text-[11px] font-bold tracking-[0.12em] text-content-tertiary uppercase">
-          Your projects
+        <div className="flex items-baseline justify-between gap-3 px-4 pb-2 pt-1">
+          <h2 className="text-xs font-black tracking-widest text-content-secondary uppercase">Projects</h2>
+          <span className="text-xs tabular-nums text-content-tertiary">
+            {list.length} {list.length === 1 ? 'project' : 'projects'}
+          </span>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-4 sm:px-3">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-5">
           {filteredList.length === 0 && (
             <div className="px-4 text-sm text-gray-500 dark:text-gray-400">
               {list.length === 0 ? 'No previous projects' : 'No matches found'}
             </div>
           )}
           {binDates(filteredList).map(({ category, items }) => (
-            <section key={category} aria-label={category} className="mt-3 space-y-1.5 first:mt-0">
-              <div className="sticky top-0 z-10 bg-[var(--bolt-elements-sidebar-background)] px-2 py-1.5 text-[11px] font-semibold tracking-wide text-content-tertiary">
-                {category}
+            <section key={category} aria-label={category} className="mt-4 space-y-2 first:mt-0">
+              <div className="sticky top-0 z-10 flex items-center gap-2 bg-[var(--bolt-elements-sidebar-background)] px-1 py-1.5 text-[11px] font-bold tracking-[0.06em] text-content-tertiary uppercase">
+                <span>{category}</span>
+                <span aria-hidden className="h-px flex-1 bg-border-transparent" />
               </div>
               <div className="space-y-1.5">
                 {items.map((item) => (
