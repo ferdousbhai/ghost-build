@@ -5,6 +5,7 @@ import { useEditChatDescription } from '~/lib/hooks/useEditChatDescription';
 import { CheckIcon, Pencil1Icon, TrashIcon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
 import { TextInput } from '@ui/TextInput';
+import { format } from 'date-fns';
 
 interface HistoryItemProps {
   item: ChatHistorySummary;
@@ -22,9 +23,10 @@ export function HistoryItem({ item, handleDeleteClick }: HistoryItemProps) {
       syncWithGlobalStore: isActiveChat,
     });
 
-  // Chats get a description from the first message, so have a fallback so
-  // they render reasonably
-  const description = currentDescription ?? 'New chat…';
+  // New projects can be persisted before their first prompt supplies a title.
+  // Keep those rows visible and distinguishable by showing their creation time.
+  const description = currentDescription.trim() || 'Untitled project';
+  const projectTime = format(new Date(item.timestamp), 'p');
 
   return (
     <div
@@ -47,15 +49,20 @@ export function HistoryItem({ item, handleDeleteClick }: HistoryItemProps) {
           <Button type="submit" variant="neutral" icon={<CheckIcon />} size="xs" inline onClick={handleSubmit} />
         </form>
       ) : (
-        <a href={`/chat/${item.urlId ?? item.initialId}`} className="relative flex w-full truncate">
-          <span className="truncate pr-24">{description}</span>
+        <a
+          href={`/chat/${item.urlId ?? item.initialId}`}
+          className="relative flex min-w-0 w-full flex-col pr-20"
+          aria-label={`${description}, ${projectTime}`}
+        >
+          <span className="truncate font-medium text-content-primary">{description}</span>
+          <span className="mt-0.5 text-xs text-content-tertiary">{projectTime}</span>
           <div
             className={classNames(
               {
                 'bg-[var(--bolt-elements-sidebar-active-item-background)]': isActiveChat,
                 'bg-[var(--bolt-elements-sidebar-background)]': !isActiveChat,
               },
-              'absolute right-0 top-0 bottom-0 flex items-center group-hover:bg-[var(--bolt-elements-sidebar-active-item-background)] px-2 transition-colors',
+              'absolute -right-2 top-0 bottom-0 flex items-center group-hover:bg-[var(--bolt-elements-sidebar-active-item-background)] px-2 transition-colors',
             )}
           >
             <div className="flex items-center gap-2.5 text-content-tertiary opacity-0 transition-opacity group-hover:opacity-100">

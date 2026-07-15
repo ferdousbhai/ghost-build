@@ -115,23 +115,24 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
       initial="closed"
       animate={isOpen ? 'open' : 'closed'}
       variants={menuVariants}
-      style={{ width: '340px' }}
+      style={{ width: 'min(360px, 100vw)' }}
       className={classNames(
-        'flex flex-col side-menu fixed top-0 h-full',
+        'side-menu fixed top-0 box-border flex h-full max-w-full flex-col',
         'bg-[var(--bolt-elements-sidebar-background)] border-r border-border-transparent',
         'shadow-[12px_0_36px_color-mix(in_srgb,var(--ghost-home-accent-2)_8%,transparent)] text-sm',
         'z-30',
       )}
     >
       <div aria-hidden className="h-[var(--header-height)] shrink-0 border-b" />
-      <div className="flex size-full flex-1 flex-col overflow-hidden">
-        <div className="space-y-3 p-4">
-          <Button className="w-full" href="/" icon={<PlusIcon />}>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="min-w-0 space-y-3 p-4">
+          <Button className="box-border w-full max-w-full" href="/" icon={<PlusIcon />}>
             Start new project
           </Button>
-          <div className="relative w-full">
+          <div className="relative min-w-0">
             <TextInput
               id="search-projects"
+              className="box-border w-full"
               type="search"
               placeholder="Search projects..."
               onChange={handleSearchChange}
@@ -139,8 +140,10 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
             />
           </div>
         </div>
-        <div className="px-4 py-2 text-xs font-bold tracking-wide text-content-tertiary uppercase">Your projects</div>
-        <div className="flex-1 overflow-auto px-3 pb-3">
+        <div className="px-4 pb-2 pt-1 text-xs font-bold tracking-wide text-content-tertiary uppercase">
+          Your projects
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
           {filteredList.length === 0 && (
             <div className="px-4 text-sm text-gray-500 dark:text-gray-400">
               {list.length === 0 ? 'No previous projects' : 'No matches found'}
