@@ -25,6 +25,8 @@ import { summarizeBuilderContext } from '~/lib/.server/llm/workers-ai-text';
 import { chatTurnContextSchema, type ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { getWorkersAiToolContext } from '~/lib/.server/llm/workers-ai-tools';
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
+import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
+import { latestMessageHasPendingDeploymentPlan } from './deployment-continuation';
 
 const logger = createScopedLogger('BuilderAgent');
 const STALE_CHAT_RECOVERY_MS = 15 * 60 * 1000;
@@ -131,6 +133,15 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
     const body = (options?.body ?? {}) as ChatBody;
     const messages = this.messages as NonNullable<ChatRequestBody['messages']>;
+    if (options?.continuation && latestMessageHasPendingDeploymentPlan(messages)) {
+      console.info({
+        event: 'builder_deployment_plan_continuation_stopped',
+        requestId: options.requestId,
+      });
+      return createUIMessageStreamResponse({
+        stream: createUIMessageStream({ execute: () => undefined }),
+      });
+    }
     const chatInitialId = typeof body.chatInitialId === 'string' ? body.chatInitialId : 'agent-chat';
     const subchatIndex = parseSubchatIndex(body.subchatIndex);
     const contextScope = contextScopeForSubchat(subchatIndex);
