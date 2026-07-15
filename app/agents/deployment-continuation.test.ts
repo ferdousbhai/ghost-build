@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { DEPLOYMENT_PLAN_MARKER } from '~/lib/deployment-plan-marker';
-import { latestMessageHasPendingDeploymentPlan } from './deployment-continuation';
+import { latestMessageHasPendingDeploymentPlan, latestPendingDeploymentPlanMarker } from './deployment-continuation';
 
 describe('latestMessageHasPendingDeploymentPlan', () => {
   test('stops the automatic continuation after a deploy plan result', () => {
@@ -22,6 +22,7 @@ describe('latestMessageHasPendingDeploymentPlan', () => {
     ];
 
     expect(latestMessageHasPendingDeploymentPlan(messages)).toBe(true);
+    expect(latestPendingDeploymentPlanMarker(messages)).toBe(`${DEPLOYMENT_PLAN_MARKER}{"id":"deployment-1"}`);
   });
 
   test('does not stop a later user-requested turn', () => {
@@ -43,5 +44,6 @@ describe('latestMessageHasPendingDeploymentPlan', () => {
     ];
 
     expect(latestMessageHasPendingDeploymentPlan(messages)).toBe(false);
+    expect(latestPendingDeploymentPlanMarker(messages)).toBeNull();
   });
 });

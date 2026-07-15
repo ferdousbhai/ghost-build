@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEPLOYMENT_PLAN_MARKER } from '~/lib/deployment-plan-marker';
-import { parsePendingDeploymentApproval } from './deployment-approval';
+import { parsePendingDeploymentApproval, stripPendingDeploymentApprovalMarker } from './deployment-approval';
 
 describe('parsePendingDeploymentApproval', () => {
   it('extracts a server-issued deployment plan marker', () => {
@@ -19,5 +19,10 @@ describe('parsePendingDeploymentApproval', () => {
     expect(
       parsePendingDeploymentApproval(`${DEPLOYMENT_PLAN_MARKER}${JSON.stringify({ id: 'deployment-1' })}`),
     ).toBeNull();
+  });
+
+  it('removes the machine marker from assistant-visible text', () => {
+    const text = `Review and approve below.\n\n${DEPLOYMENT_PLAN_MARKER}{"id":"deployment-1"}`;
+    expect(stripPendingDeploymentApprovalMarker(text)).toBe('Review and approve below.');
   });
 });

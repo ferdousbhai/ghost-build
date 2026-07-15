@@ -32,6 +32,14 @@ export function parsePendingDeploymentApproval(result: unknown): PendingDeployme
   }
 }
 
+export function stripPendingDeploymentApprovalMarker(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !line.startsWith(DEPLOYMENT_PLAN_MARKER))
+    .join('\n')
+    .trim();
+}
+
 function isResource(value: unknown): value is PendingDeploymentApproval['resources'][number] {
   return (
     isRecord(value) &&

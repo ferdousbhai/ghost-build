@@ -26,7 +26,7 @@ import { chatTurnContextSchema, type ChatTurnContext } from 'ghostbuild-agent/tu
 import { getWorkersAiToolContext } from '~/lib/.server/llm/workers-ai-tools';
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
-import { latestMessageHasPendingDeploymentPlan } from './deployment-continuation';
+import { latestPendingDeploymentPlanMarker } from './deployment-continuation';
 
 const logger = createScopedLogger('BuilderAgent');
 const STALE_CHAT_RECOVERY_MS = 15 * 60 * 1000;
@@ -133,10 +133,11 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
     const body = (options?.body ?? {}) as ChatBody;
     const messages = this.messages as NonNullable<ChatRequestBody['messages']>;
-    if (options?.continuation && latestMessageHasPendingDeploymentPlan(messages)) {
+    const pendingDeploymentPlanMarker = options?.continuation ? latestPendingDeploymentPlanMarker(messages) : null;
+    if (pendingDeploymentPlanMarker) {
       console.info({
         event: 'builder_deployment_plan_continuation_stopped',
-        requestId: options.requestId,
+        requestId: options?.requestId,
       });
       return createUIMessageStreamResponse({
         stream: createUIMessageStream({
@@ -146,7 +147,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
             writer.write({
               type: 'text-delta',
               id,
-              delta: 'The production plan is ready. Review the Cloudflare resources and approve billing below.',
+              delta: `The production plan is ready. Review the Cloudflare resources and approve billing below.\n\n${pendingDeploymentPlanMarker}`,
             });
             writer.write({ type: 'text-end', id });
           },
