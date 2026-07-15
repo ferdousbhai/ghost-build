@@ -105,6 +105,36 @@ describe('cloudflareConnectionStatusAction', () => {
     expect(returnUrl.searchParams.get('state')).toBe(session?.id);
   });
 
+  it('allows an active connection to be replaced without revoking it before OAuth succeeds', async () => {
+    getSession.mockResolvedValue({ user: { id: 'user-1', email: 'person@example.com' } });
+    const database = integrationDatabase();
+    database.setConnection({
+      id: 'connection-1',
+      user_id: 'user-1',
+      account_id: 'account-1',
+      account_name: 'User Cloudflare',
+      status: 'active',
+      credential_handle: 'credential-1',
+      granted_scopes_json: '["workers_ai"]',
+      ai_billing_enabled: 1,
+      connected_at: 123,
+      updated_at: 123,
+    });
+
+    const response = await startCloudflareConnectionAction({
+      request: new Request('https://ghostbuild.dev/api/cloudflare/connection/start', { method: 'POST' }),
+      env: database.env,
+      orchestrator: fakeOrchestrator(),
+    });
+
+    expect(response.status).toBe(201);
+    expect(database.connection).toMatchObject({
+      status: 'active',
+      credential_handle: 'credential-1',
+    });
+    expect(database.sessions.size).toBe(1);
+  });
+
   it('encrypts the provider credential and prevents callback replay', async () => {
     getSession.mockResolvedValue(null);
     const database = integrationDatabase();
@@ -245,6 +275,9 @@ function integrationDatabase() {
     credentials,
     get connection() {
       return state.connection;
+    },
+    setConnection(connection: Record<string, unknown>) {
+      state.connection = connection;
     },
   };
 }

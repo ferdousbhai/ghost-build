@@ -81,9 +81,14 @@ export function CloudflareCard() {
             </p>
           )}
         </div>
-        {!loading && !connection?.connected ? (
-          <Button size="sm" loading={connecting} onClick={() => void connect()}>
-            Connect Cloudflare
+        {!loading ? (
+          <Button
+            size="sm"
+            variant={connection?.connected ? 'neutral' : 'primary'}
+            loading={connecting}
+            onClick={() => void connect()}
+          >
+            {connection?.connected ? 'Reconnect Cloudflare' : 'Connect Cloudflare'}
           </Button>
         ) : null}
       </div>

@@ -9,7 +9,8 @@ import { DeploymentSandbox } from './deployment-sandbox';
 
 describe('DeploymentSandbox', () => {
   test('routes package downloads through the HTTPS host allowlist without enabling unrestricted internet', () => {
-    const sandbox = new DeploymentSandbox();
+    const TestDeploymentSandbox = DeploymentSandbox as unknown as new () => DeploymentSandbox;
+    const sandbox = new TestDeploymentSandbox();
 
     expect(sandbox.enableInternet).toBe(false);
     expect(sandbox.interceptHttps).toBe(true);

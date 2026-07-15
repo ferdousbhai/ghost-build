@@ -74,11 +74,6 @@ export async function startCloudflareConnectionAction(args: {
     if (!session) {
       return Response.json({ error: 'Authentication required.' }, { status: 401 });
     }
-    const current = await findCloudflareConnectionForUser(args.env.DB, session.user.id);
-    if (current?.status === 'active') {
-      return Response.json({ error: 'Cloudflare is already connected.' }, { status: 409 });
-    }
-
     const state = crypto.randomUUID();
     const requestUrl = new URL(args.request.url);
     const returnUrl = new URL('/connect/return', requestUrl.origin);
