@@ -9,6 +9,9 @@ export { ContainerProxy };
  */
 export class DeploymentSandbox extends Sandbox<Env> {
   enableInternet = false;
+  // Package managers use HTTPS. Intercept it so allowedHosts is enforced and
+  // the Sandbox SDK installs its Cloudflare interception CA in the container.
+  interceptHttps = true;
   allowedHosts = ['registry.npmjs.org', 'api.cloudflare.com'];
   sleepAfter = '10m';
 }
