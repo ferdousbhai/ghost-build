@@ -37,10 +37,10 @@ Configure response type **Code**, grant types **Authorization Code** and **Refre
 method **Client Secret Basic**. Select only the account permissions needed by the generated stack: Account Settings Read, Workers Scripts
 Write, D1 Write, Workers R2 Storage Write, and Workers AI Read. Cloudflare's live OAuth scope catalog currently assigns
 these IDs: `account-settings.read`, `workers-scripts.write`, `d1.write`, `workers-r2.write`, and `ai.read`. Configure only
-those identifiers as a space-delimited binding. Cloudflare manages the protocol-level `offline_access` scope from the
-client's Refresh Token grant type; do not include it in the requested resource-scope binding. Ghostbuild fails closed
-when the token response does not include a refresh token because an expiring access token would eventually break
-deployments and connected-account inference.
+those identifiers as a space-delimited binding. Cloudflare adds the protocol-level `offline_access` scope to clients
+that enable the Refresh Token grant. Do not include it in the resource-scope binding; Ghostbuild appends it to each
+authorization request so Cloudflare issues a refresh token. Ghostbuild fails closed when the token response does not
+include one because an expiring access token would eventually break deployments and connected-account inference.
 
 Cloudflare creates OAuth clients as private. Before promoting the client, add a logo and a `ghostbuild.dev` client URL,
 then complete Cloudflare's DNS TXT ownership verification for that domain. Promotion to public is permanent, so confirm

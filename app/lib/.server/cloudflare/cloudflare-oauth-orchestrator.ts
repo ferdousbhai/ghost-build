@@ -51,7 +51,7 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
     authorizationUrl.searchParams.set('response_mode', 'form_post');
     authorizationUrl.searchParams.set('client_id', this.config.clientId);
     authorizationUrl.searchParams.set('redirect_uri', returnUrl.toString());
-    authorizationUrl.searchParams.set('scope', this.config.scopes);
+    authorizationUrl.searchParams.set('scope', [...configuredScopes, 'offline_access'].join(' '));
     authorizationUrl.searchParams.set('state', state);
     authorizationUrl.searchParams.set('code_challenge', challenge);
     authorizationUrl.searchParams.set('code_challenge_method', 'S256');

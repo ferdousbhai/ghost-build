@@ -23,8 +23,7 @@ describe('CloudflareOAuthOrchestrator', () => {
     expect(url.searchParams.get('state')).toBe('00000000-0000-4000-8000-000000000001');
     expect(url.searchParams.get('redirect_uri')).toBe('https://ghostbuild.dev/api/cloudflare/connection/callback');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-    expect(url.searchParams.get('scope')).toBe(scopes);
-    expect(url.searchParams.get('scope')).not.toContain('offline_access');
+    expect(url.searchParams.get('scope')).toBe(`${scopes} offline_access`);
     expect(result.authorizationUrl).not.toContain('client-secret');
     expect(JSON.parse(result.sessionId)).toMatchObject({
       redirectUri: 'https://ghostbuild.dev/api/cloudflare/connection/callback',
