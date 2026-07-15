@@ -45,7 +45,7 @@ describe('runDeploy guest app check', () => {
     expect(result).toContain('Sign in to deploy this app to Cloudflare production');
   });
 
-  test('waits for container readiness before signed-in production validation', async () => {
+  test('waits for container readiness before capturing the signed-in production snapshot', async () => {
     vi.mocked(getAuthToken).mockReturnValue('user-session');
     const readFile = vi.fn();
     const spawn = vi.fn().mockRejectedValue(new Error('no deploy in unit test'));
@@ -64,7 +64,11 @@ describe('runDeploy guest app check', () => {
 
     expect(waitForContainerBootState).toHaveBeenCalledOnce();
     expect(readFile).not.toHaveBeenCalled();
-    expect(spawn).toHaveBeenCalledWith('pnpm', ['run', 'verify:stack'], undefined);
+    expect(spawn).toHaveBeenCalledWith(
+      'tar',
+      expect.arrayContaining(['-czf', '/tmp/ghostbuild-deployment.tar.gz']),
+      undefined,
+    );
   });
 
   test('uploads an immutable snapshot for approval instead of running Wrangler in the browser', async () => {
@@ -92,10 +96,6 @@ describe('runDeploy guest app check', () => {
     });
 
     expect(spawn.mock.calls.map((call) => call[1])).toEqual([
-      ['run', 'verify:stack'],
-      ['run', 'typecheck'],
-      ['run', 'build'],
-      ['run', 'lint'],
       [
         '-czf',
         '/tmp/ghostbuild-deployment.tar.gz',
@@ -118,6 +118,7 @@ describe('runDeploy guest app check', () => {
       expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
     );
     expect(result).toContain('Deployment plan ready for your approval');
+    expect(result).toContain('isolated deployment sandbox will verify');
     expect(result).toContain('GHOSTBUILD_DEPLOYMENT_PLAN:');
     expect(result).not.toContain('wrangler deploy');
   });

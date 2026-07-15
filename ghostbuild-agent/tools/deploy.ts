@@ -2,11 +2,12 @@ import type { Tool } from 'ai';
 import { z } from 'zod';
 
 const deployToolDescription = `
-Generate TanStack Start routes, generate Cloudflare binding types, typecheck the app,
-verify the TanStack + Cloudflare stack, build the Cloudflare Worker, and run production linting.
-For signed-in users, upload an immutable source snapshot and prepare an exact production resource
-plan for explicit user approval. Ghostbuild's server-side deployment executor provisions and deploys
-only after approval, using the user's connected Cloudflare account so Cloudflare bills that user.
+For signed-in users, capture and upload an immutable source snapshot and prepare an exact production
+resource plan for explicit user approval. After approval, Ghostbuild's isolated server-side deployment
+executor verifies the TanStack + Cloudflare stack, typechecks, builds, and lints before provisioning
+anything. It then provisions and deploys using the user's connected Cloudflare account so Cloudflare
+bills that user. Do not run production validation commands in the browser; the isolated executor owns
+that work so the builder stays responsive.
 In guest Ghostbuild preview sessions, this checks that generated source replaced the starter
 app without running Cloudflare production deployment. The workbench preview server handles live
 preview separately. Production deployment requires a signed-in account and connected Cloudflare account.

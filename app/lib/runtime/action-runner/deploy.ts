@@ -22,18 +22,6 @@ export async function runDeploy(args: {
   onOutput: (output: string) => void;
   workspace: ActionRunnerWorkspace;
 }): Promise<string> {
-  const commandErroredController = new AbortController();
-  const abortSignal = AbortSignal.any([args.abortSignal, commandErroredController.signal]);
-  const run = (command: string[], options?: RunCommandOptions) =>
-    runCommand({
-      container: args.container,
-      command,
-      abortSignal,
-      commandErroredController,
-      onOutput: args.onOutput,
-      ...options,
-    });
-
   const startedAt = performance.now();
   const sessionId = getAuthToken();
   let result = '';
@@ -43,26 +31,28 @@ export async function runDeploy(args: {
     result += GUEST_APP_CHECK_COMPLETE;
   } else {
     await waitForContainerBootState(ContainerBootState.READY);
-    result += await run(['pnpm', 'run', 'verify:stack']);
-    result += await run(['pnpm', 'run', 'typecheck']);
-    result += await run(['pnpm', 'run', 'build']);
-    result += await run(['pnpm', 'run', 'lint']);
-    result += await run([
-      'tar',
-      '-czf',
-      DEPLOYMENT_ARCHIVE_PATH,
-      '--exclude=./node_modules',
-      '--exclude=./dist',
-      '--exclude=./.output',
-      '--exclude=./.tanstack',
-      '--exclude=./.wrangler',
-      '--exclude=./.env',
-      '--exclude=./.env.*',
-      '--exclude=./.dev.vars',
-      '--exclude=./.dev.vars.*',
-      '--exclude=./.envrc',
-      '.',
-    ]);
+    result += await runCommand({
+      container: args.container,
+      command: [
+        'tar',
+        '-czf',
+        DEPLOYMENT_ARCHIVE_PATH,
+        '--exclude=./node_modules',
+        '--exclude=./dist',
+        '--exclude=./.output',
+        '--exclude=./.tanstack',
+        '--exclude=./.wrangler',
+        '--exclude=./.env',
+        '--exclude=./.env.*',
+        '--exclude=./.dev.vars',
+        '--exclude=./.dev.vars.*',
+        '--exclude=./.envrc',
+        '.',
+      ],
+      abortSignal: args.abortSignal,
+      commandErroredController: new AbortController(),
+      onOutput: args.onOutput,
+    });
     result += await prepareProductionDeployment(args.container, args.abortSignal);
   }
 
@@ -95,7 +85,8 @@ async function prepareProductionDeployment(container: WebContainer, abortSignal:
     resources: payload.deployment.plan.resources,
   });
   return [
-    'Ghostbuild production validation complete.',
+    'Ghostbuild production source snapshot captured.',
+    'After approval, the isolated deployment sandbox will verify the stack, typecheck, build, and lint before provisioning any resources.',
     'Deployment plan ready for your approval. Cloudflare will bill your connected account for infrastructure and Workers AI.',
     'Workers Paid will never be enabled without separate authorization.',
     `${DEPLOYMENT_PLAN_MARKER}${marker}`,
@@ -129,11 +120,6 @@ async function validateGuestGeneratedApp(container: WebContainer): Promise<void>
     throw new Error(`Generated app route still matches the starter template: ${GENERATED_ROUTE_PATH}`);
   }
 }
-
-type RunCommandOptions = {
-  env?: Record<string, string | number | boolean>;
-  timeoutMs?: number;
-};
 
 export async function runCommand(args: {
   container: WebContainer;
