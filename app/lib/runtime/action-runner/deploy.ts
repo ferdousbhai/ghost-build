@@ -14,7 +14,18 @@ const logger = createScopedLogger('ActionRunner.Deploy');
 const GUEST_APP_CHECK_COMPLETE = 'Ghostbuild app check complete. Sign in to deploy this app to Cloudflare production.';
 const GENERATED_ROUTE_PATH = 'src/routes/index.tsx';
 const STARTER_ROUTE_MARKERS = ['Ghostbuild on Cloudflare', 'Start with a durable AI agent.', 'App Agent'] as const;
-const DEPLOYMENT_ARCHIVE_PATH = '/tmp/ghostbuild-deployment.tar.gz';
+const DEPLOYMENT_EXPORT_EXCLUDES = [
+  'node_modules/**',
+  'dist/**',
+  '.output/**',
+  '.tanstack/**',
+  '.wrangler/**',
+  '.env',
+  '.env.*',
+  '.dev.vars',
+  '.dev.vars.*',
+  '.envrc',
+];
 
 export async function runDeploy(args: {
   container: WebContainer;
@@ -31,43 +42,24 @@ export async function runDeploy(args: {
     result += GUEST_APP_CHECK_COMPLETE;
   } else {
     await waitForContainerBootState(ContainerBootState.READY);
-    result += await runCommand({
-      container: args.container,
-      command: [
-        'tar',
-        '-czf',
-        DEPLOYMENT_ARCHIVE_PATH,
-        '--exclude=./node_modules',
-        '--exclude=./dist',
-        '--exclude=./.output',
-        '--exclude=./.tanstack',
-        '--exclude=./.wrangler',
-        '--exclude=./.env',
-        '--exclude=./.env.*',
-        '--exclude=./.dev.vars',
-        '--exclude=./.dev.vars.*',
-        '--exclude=./.envrc',
-        '.',
-      ],
-      abortSignal: args.abortSignal,
-      commandErroredController: new AbortController(),
-      onOutput: args.onOutput,
+    args.abortSignal.throwIfAborted();
+    const snapshot = await args.container.export('.', {
+      format: 'zip',
+      excludes: DEPLOYMENT_EXPORT_EXCLUDES,
     });
-    result += await prepareProductionDeployment(args.container, args.abortSignal);
+    result += await prepareProductionDeployment(snapshot, args.abortSignal);
   }
 
   logger.info('deploy action finished in', performance.now() - startedAt);
   return result;
 }
 
-async function prepareProductionDeployment(container: WebContainer, abortSignal: AbortSignal): Promise<string> {
-  abortSignal.throwIfAborted();
-  const snapshot = await container.fs.readFile(DEPLOYMENT_ARCHIVE_PATH);
+async function prepareProductionDeployment(snapshot: Uint8Array, abortSignal: AbortSignal): Promise<string> {
   abortSignal.throwIfAborted();
   const ownedSnapshot = new Uint8Array(snapshot.byteLength);
   ownedSnapshot.set(snapshot);
   const formData = new FormData();
-  formData.append('snapshot', new Blob([ownedSnapshot.buffer], { type: 'application/octet-stream' }));
+  formData.append('snapshot', new Blob([ownedSnapshot.buffer], { type: 'application/zip' }));
   const chatId = chatIdStore.get();
   const response = await fetch(`/api/deployments/plan?chatId=${encodeURIComponent(chatId)}`, {
     method: 'POST',

@@ -33,9 +33,9 @@ describe('buildDeploymentSnapshot', () => {
       buildDeploymentSnapshot({ env, deploymentId: 'deployment-1', snapshotKey: 'snapshots/1' }),
     ).resolves.toEqual(new Uint8Array([9, 8, 7]));
 
-    expect(sandbox.writeFile).toHaveBeenCalledWith('/workspace/source.tar.gz', sourceBody);
+    expect(sandbox.writeFile).toHaveBeenCalledWith('/workspace/source.zip', sourceBody);
     expect(sandbox.exec.mock.calls.map((call) => call[0])).toEqual([
-      'tar -xzf /workspace/source.tar.gz -C /workspace/project',
+      'unzip -q /workspace/source.zip -d /workspace/project',
       'pnpm install --frozen-lockfile --ignore-scripts=false',
       'pnpm run verify:stack',
       'pnpm run typecheck',

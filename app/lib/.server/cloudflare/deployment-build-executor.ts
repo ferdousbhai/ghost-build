@@ -2,7 +2,7 @@ import { getSandbox, type ExecResult } from '@cloudflare/sandbox';
 import type { DeploymentSandbox } from './deployment-sandbox';
 
 const PROJECT_DIR = '/workspace/project';
-const SOURCE_ARCHIVE = '/workspace/source.tar.gz';
+const SOURCE_ARCHIVE = '/workspace/source.zip';
 const BUILD_ARCHIVE = '/workspace/build.tar.gz';
 const MAX_ERROR_OUTPUT = 4_000;
 
@@ -28,7 +28,7 @@ export async function buildDeploymentSnapshot(args: {
   try {
     await sandbox.mkdir(PROJECT_DIR, { recursive: true });
     await sandbox.writeFile(SOURCE_ARCHIVE, source.body);
-    await requireSuccess(await sandbox.exec(`tar -xzf ${SOURCE_ARCHIVE} -C ${PROJECT_DIR}`));
+    await requireSuccess(await sandbox.exec(`unzip -q ${SOURCE_ARCHIVE} -d ${PROJECT_DIR}`));
     await requireSuccess(
       await sandbox.exec('pnpm install --frozen-lockfile --ignore-scripts=false', {
         cwd: PROJECT_DIR,

@@ -48,11 +48,11 @@ describe('runDeploy guest app check', () => {
   test('waits for container readiness before capturing the signed-in production snapshot', async () => {
     vi.mocked(getAuthToken).mockReturnValue('user-session');
     const readFile = vi.fn();
-    const spawn = vi.fn().mockRejectedValue(new Error('no deploy in unit test'));
+    const exportSnapshot = vi.fn().mockRejectedValue(new Error('no deploy in unit test'));
 
     await expect(
       runDeploy({
-        container: { fs: { readFile }, spawn } as unknown as WebContainer,
+        container: { fs: { readFile }, export: exportSnapshot } as unknown as WebContainer,
         abortSignal: new AbortController().signal,
         onOutput: vi.fn(),
         workspace: {
@@ -64,17 +64,15 @@ describe('runDeploy guest app check', () => {
 
     expect(waitForContainerBootState).toHaveBeenCalledOnce();
     expect(readFile).not.toHaveBeenCalled();
-    expect(spawn).toHaveBeenCalledWith(
-      'tar',
-      expect.arrayContaining(['-czf', '/tmp/ghostbuild-deployment.tar.gz']),
-      undefined,
-    );
+    expect(exportSnapshot).toHaveBeenCalledWith('.', {
+      format: 'zip',
+      excludes: expect.arrayContaining(['node_modules/**', '.env', '.dev.vars']),
+    });
   });
 
   test('uploads an immutable snapshot for approval instead of running Wrangler in the browser', async () => {
     vi.mocked(getAuthToken).mockReturnValue('user-session');
-    const spawn = vi.fn(async (_command: string, _args: string[]) => successfulProcess());
-    const readFile = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]));
+    const exportSnapshot = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]));
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       Response.json(
         {
@@ -89,30 +87,16 @@ describe('runDeploy guest app check', () => {
     );
 
     const result = await runDeploy({
-      container: { fs: { readFile }, spawn } as unknown as WebContainer,
+      container: { fs: { readFile: vi.fn() }, export: exportSnapshot } as unknown as WebContainer,
       abortSignal: new AbortController().signal,
       onOutput: vi.fn(),
       workspace: { hasFile: vi.fn(), setGeneratedFileContent: vi.fn() },
     });
 
-    expect(spawn.mock.calls.map((call) => call[1])).toEqual([
-      [
-        '-czf',
-        '/tmp/ghostbuild-deployment.tar.gz',
-        '--exclude=./node_modules',
-        '--exclude=./dist',
-        '--exclude=./.output',
-        '--exclude=./.tanstack',
-        '--exclude=./.wrangler',
-        '--exclude=./.env',
-        '--exclude=./.env.*',
-        '--exclude=./.dev.vars',
-        '--exclude=./.dev.vars.*',
-        '--exclude=./.envrc',
-        '.',
-      ],
-    ]);
-    expect(readFile).toHaveBeenCalledWith('/tmp/ghostbuild-deployment.tar.gz');
+    expect(exportSnapshot).toHaveBeenCalledWith('.', {
+      format: 'zip',
+      excludes: expect.arrayContaining(['node_modules/**', 'dist/**', '.env', '.dev.vars']),
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/deployments/plan?chatId=chat-1',
       expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
@@ -144,19 +128,6 @@ describe('runDeploy guest app check', () => {
     ).rejects.toThrow('Generated app route still matches the starter template');
   });
 });
-
-function successfulProcess(): WebContainerProcess {
-  return {
-    output: new ReadableStream({
-      start(controller) {
-        controller.enqueue('ok');
-        controller.close();
-      },
-    }),
-    exit: Promise.resolve(0),
-    kill: vi.fn(),
-  } as unknown as WebContainerProcess;
-}
 
 describe('runCommand cancellation', () => {
   test('does not spawn when the signal is already aborted', async () => {
