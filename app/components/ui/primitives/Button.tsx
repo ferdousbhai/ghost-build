@@ -1,7 +1,7 @@
 import { forwardRef, type AnchorHTMLAttributes, type ButtonHTMLAttributes, type ReactNode, type Ref } from 'react';
 import { classNames } from '~/utils/classNames';
 
-type ButtonVisualProps = {
+export type ButtonVisualProps = {
   children?: ReactNode;
   className?: string;
   icon?: ReactNode;
@@ -41,6 +41,23 @@ const sizeClasses: Record<string, string> = {
   lg: 'min-h-10 px-4 py-2 text-base',
 };
 
+export function buttonClassNames({
+  className,
+  variant = 'primary',
+  size = 'md',
+  inline,
+  focused,
+}: Pick<ButtonVisualProps, 'className' | 'variant' | 'size' | 'inline' | 'focused'>) {
+  return classNames(
+    'gb-button inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:opacity-50',
+    inline ? 'w-auto' : '',
+    variantClasses[variant] ?? variantClasses.neutral,
+    sizeClasses[size] ?? sizeClasses.md,
+    focused ? 'ring-2 ring-accent-500' : '',
+    className,
+  );
+}
+
 export const Button = forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonProps>(function Button(
   {
     children,
@@ -59,14 +76,7 @@ export const Button = forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonPr
   },
   ref,
 ) {
-  const classes = classNames(
-    'gb-button inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:opacity-50',
-    inline ? 'w-auto' : '',
-    variantClasses[variant] ?? variantClasses.neutral,
-    sizeClasses[size] ?? sizeClasses.md,
-    focused ? 'ring-2 ring-accent-500' : '',
-    className,
-  );
+  const classes = buttonClassNames({ className, variant, size, inline, focused });
   const content = (
     <>
       {loading ? (
