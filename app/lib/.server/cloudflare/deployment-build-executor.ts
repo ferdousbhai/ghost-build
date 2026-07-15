@@ -57,9 +57,13 @@ export async function buildDeploymentSnapshot(args: {
         timeout: 10 * 60 * 1000,
       }),
     );
+    // Type checking regenerates deployment-owned artifacts such as
+    // worker-configuration.d.ts and src/routeTree.gen.ts. A browser export may
+    // legitimately omit either generated file, so prepare them before the
+    // stack verifier enforces the complete production contract.
     for (const [script, scriptStage] of [
-      ['verify:stack', 'stack verification'],
       ['typecheck', 'type checking'],
+      ['verify:stack', 'stack verification'],
       ['build', 'application build'],
       ['lint', 'linting'],
     ] as const) {
