@@ -76,6 +76,12 @@ export const APP_REQUIRED_PACKAGES = [
   "zod",
 ];
 
+export const WORKER_REQUIRED_PACKAGES = ["typescript", "wrangler"];
+
+export function projectType(pkg) {
+  return pkg?.ghostbuild?.projectType === "worker" ? "worker" : "web_app";
+}
+
 export const APPROVED_BUILD_DEPENDENCIES = [
   "core-js-pure",
   "esbuild",

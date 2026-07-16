@@ -8,11 +8,22 @@ type Provider = {
   model: LanguageModel;
 };
 
-export function getProvider(env: Env): Provider {
-  const cloudflare = createWorkersAI({ binding: env.AI });
+export type WorkersAiAccountCredentials = {
+  accountId: string;
+  apiKey: string;
+};
+
+export function getProvider(
+  env: Env,
+  accountCredentials?: WorkersAiAccountCredentials,
+  modelId = CLOUDFLARE_WORKERS_AI_MODEL,
+): Provider {
+  const cloudflare = accountCredentials
+    ? createWorkersAI({ accountId: accountCredentials.accountId, apiKey: accountCredentials.apiKey })
+    : createWorkersAI({ binding: env.AI });
 
   return {
-    model: cloudflare(CLOUDFLARE_WORKERS_AI_MODEL),
+    model: cloudflare(modelId),
     maxTokens: MODEL_MAX_OUTPUT_TOKENS,
   };
 }

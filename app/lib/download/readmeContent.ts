@@ -1,11 +1,11 @@
 export function generateReadmeContent(description: string) {
   return `# ${description}
 
-This project was built with Ghostbuild using TanStack Start on Cloudflare Workers.
+This project was built with Ghostbuild for Cloudflare Workers. TanStack Start is the default framework for full web applications; focused Worker handlers can run directly without framework abstractions.
 
 ## Stack
 
-- TanStack Start and TanStack Router
+- TanStack Start and TanStack Router for browser application routes and SSR
 - React
 - Cloudflare Workers
 - Cloudflare D1

@@ -3,6 +3,8 @@ import { useStore } from '@nanostores/react';
 import { useSearch } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEventHandler, type KeyboardEventHandler } from 'react';
 import { toast } from 'sonner';
+import { WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
+import { showWorkersPaidRequiredToast } from '~/lib/workers-paid.client';
 import { captureException } from '~/lib/telemetry.client';
 import { signInWithGoogle } from '~/lib/auth-client';
 import { messageInputStore } from '~/lib/stores/messageInput';
@@ -87,7 +89,24 @@ export function useMessageInputController({
         body: JSON.stringify({ prompt: input.trim() }),
       });
       if (!response.ok) {
-        throw new Error('Failed to enhance prompt. Please try again.');
+        const payload = (await response.json().catch(() => null)) as {
+          code?: 'ghostbuild_allowance_exhausted' | 'workers_paid_required';
+          error?: string;
+        } | null;
+        if (payload?.code === 'workers_paid_required' || payload?.error?.includes(WORKERS_PAID_REQUIRED_MARKER)) {
+          showWorkersPaidRequiredToast();
+          return;
+        }
+        if (payload?.code === 'ghostbuild_allowance_exhausted') {
+          toast.warning(payload.error ?? "Today's free Ghostbuild AI allowance has been used.", {
+            action: {
+              label: 'Connect Cloudflare',
+              onClick: () => window.location.assign('/settings#cloudflare'),
+            },
+          });
+          return;
+        }
+        throw new Error(payload?.error || 'Failed to enhance prompt. Please try again.');
       }
       const data = (await response.json()) as { enhancedPrompt?: string };
       if (data.enhancedPrompt) {

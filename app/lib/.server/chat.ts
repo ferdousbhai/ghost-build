@@ -6,6 +6,8 @@ import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { ROLE_SYSTEM_PROMPT, generalSystemPrompt } from 'ghostbuild-agent/prompts/system';
 import { ModelInputBudgetExceededError } from './llm/model-input-budget';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
+import { AiAllowanceExceededError } from './billing/ai-allowance-repository';
+import type { WorkersAiAccountCredentials } from './llm/provider';
 
 type Messages = GhostbuildMessage[];
 
@@ -26,6 +28,8 @@ export async function createChatResponseFromBody({
   env,
   firstUserMessage,
   preparedMessages,
+  billingSubjectKey,
+  accountCredentials,
 }: {
   abortSignal?: AbortSignal;
   body: Pick<ChatRequestBody, 'messages' | 'chatInitialId' | 'shouldDisableTools'>;
@@ -33,6 +37,8 @@ export async function createChatResponseFromBody({
   env: Env;
   firstUserMessage: boolean;
   preparedMessages: Messages;
+  billingSubjectKey: string;
+  accountCredentials?: WorkersAiAccountCredentials;
 }) {
   const { messages, chatInitialId } = body;
   const transcriptMessages = messages ?? [];
@@ -53,6 +59,8 @@ export async function createChatResponseFromBody({
       shouldDisableTools: body.shouldDisableTools,
       contextReduced,
       promptCharacterCounts,
+      billingSubjectKey,
+      accountCredentials,
     });
 
     return createUIMessageStreamResponse({ stream: dataStream });
@@ -63,6 +71,13 @@ export async function createChatResponseFromBody({
       throw new Response(error.message, {
         status: 413,
         statusText: 'Current request is too large',
+      });
+    }
+
+    if (error instanceof AiAllowanceExceededError) {
+      throw new Response(error.message, {
+        status: 429,
+        statusText: 'Daily AI allowance used',
       });
     }
 

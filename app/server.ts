@@ -14,8 +14,19 @@ import { scriptsAction } from './server-handlers/scripts';
 import { versionAction } from './server-handlers/version';
 import { clientTelemetryAction } from './server-handlers/client-telemetry';
 import { feedbackAction } from './server-handlers/feedback';
+import {
+  CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
+  cloudflareConnectionStatusAction,
+  completeCloudflareConnectionAction,
+  startCloudflareConnectionAction,
+} from './server-handlers/cloudflare-integration';
+import { authorizeAgentRequest } from './lib/.server/agent-request-identity';
+import { aiAllowanceStatusAction } from './server-handlers/ai-allowance';
+import { createDeploymentPlanAction, deploymentAction } from './server-handlers/deployments';
 
 export { BuilderAgent } from './agents/builder-agent';
+export { ContainerProxy, DeploymentSandbox } from './lib/.server/cloudflare/deployment-sandbox';
+export { DeploymentWorkflow } from './lib/.server/cloudflare/deployment-workflow';
 
 function methodNotAllowed(allowedMethod: string) {
   return Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: allowedMethod } });
@@ -59,6 +70,26 @@ const exactRoutes: Record<string, ServerRoute> = {
     method: 'POST',
     handler: (request, env) => feedbackAction({ request, env }),
   },
+  '/api/cloudflare/connection': {
+    method: 'GET',
+    handler: (request, env) => cloudflareConnectionStatusAction({ request, env }),
+  },
+  '/api/cloudflare/connection/start': {
+    method: 'POST',
+    handler: (request, env) => startCloudflareConnectionAction({ request, env }),
+  },
+  '/connect/return': {
+    method: CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
+    handler: (request, env) => completeCloudflareConnectionAction({ request, env }),
+  },
+  '/api/ai/allowance': {
+    method: 'GET',
+    handler: (request, env) => aiAllowanceStatusAction({ request, env }),
+  },
+  '/api/deployments/plan': {
+    method: 'POST',
+    handler: (request, env) => createDeploymentPlanAction({ request, env }),
+  },
   '/api/data': {
     method: 'POST',
     handler: (request, env) => dataAction({ request, env }),
@@ -83,12 +114,20 @@ const exactRoutes: Record<string, ServerRoute> = {
 
 export default {
   async fetch(request: Request, env: Env) {
-    const agentResponse = await routeAgentRequest(request, env);
+    const url = new URL(request.url);
+    let agentProps;
+    if (url.pathname.startsWith('/agents/')) {
+      const authorization = await authorizeAgentRequest(request, env);
+      if ('response' in authorization) {
+        return authorization.response;
+      }
+      agentProps = authorization.identity;
+    }
+    const agentResponse = await routeAgentRequest(request, env, { props: agentProps });
     if (agentResponse) {
       return agentResponse;
     }
 
-    const url = new URL(request.url);
     if (url.pathname === '/api/auth' || url.pathname.startsWith('/api/auth/')) {
       return getAuth(env, request).handler(request);
     }
@@ -96,6 +135,19 @@ export default {
     const route = exactRoutes[url.pathname];
     if (route) {
       return requireMethod(request, route.method, () => route.handler(request, env));
+    }
+
+    const deploymentRoute = matchDeploymentRoute(url.pathname);
+    if (deploymentRoute) {
+      const method = deploymentRoute.operation === 'get' ? 'GET' : 'POST';
+      return requireMethod(request, method, () =>
+        deploymentAction({
+          request,
+          env,
+          deploymentId: deploymentRoute.deploymentId,
+          operation: deploymentRoute.operation,
+        }),
+      );
     }
 
     if (url.pathname.startsWith('/api/storage/')) {
@@ -110,3 +162,22 @@ export default {
     return withCrossOriginIsolationHeaders(appResponse);
   },
 } satisfies ExportedHandler<Env>;
+
+function matchDeploymentRoute(pathname: string): {
+  deploymentId: string;
+  operation: 'get' | 'approve' | 'execute' | 'retry';
+} | null {
+  const match = /^\/api\/deployments\/([^/]+)(?:\/(approve|execute|retry))?$/.exec(pathname);
+  if (!match) {
+    return null;
+  }
+  try {
+    const operation = match[2] as 'approve' | 'execute' | 'retry' | undefined;
+    return {
+      deploymentId: decodeURIComponent(match[1]),
+      operation: operation ?? 'get',
+    };
+  } catch {
+    return null;
+  }
+}

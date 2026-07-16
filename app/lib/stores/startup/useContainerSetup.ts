@@ -5,7 +5,7 @@ import {
   setContainerBootState,
   waitForBootStepCompleted,
 } from '~/lib/stores/containerBootState';
-import { webcontainer } from '~/lib/webcontainer';
+import { startWebcontainer } from '~/lib/webcontainer';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { api } from '~/lib/cloudflare/data-api';
 import { executeDataOperation } from '~/lib/cloudflare/client';
@@ -18,14 +18,18 @@ import { getFileUpdateCounter } from '~/lib/stores/fileUpdateCounter';
 import { chatSyncState } from './chatSyncState';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 
-const TEMPLATE_URL = '/template-snapshot-b108e040.bin';
+const TEMPLATE_URL = '/template-snapshot-d409e423.bin';
 const logger = createScopedLogger('ContainerSetup');
 const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)));
 
-export function useNewChatContainerSetup() {
+export function useNewChatContainerSetup(enabled: boolean) {
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     const runSetup = async () => {
       try {
+        void startWebcontainer();
         await waitForBootStepCompleted(ContainerBootState.STARTING);
         await setupContainer({ snapshotUrl: TEMPLATE_URL, allowPnpmInstallFailure: false });
       } catch (error) {
@@ -37,7 +41,7 @@ export function useNewChatContainerSetup() {
       }
     };
     void runSetup();
-  }, []);
+  }, [enabled]);
 }
 
 export function useExistingChatContainerSetup(loadedChatId: string | undefined) {
@@ -51,6 +55,7 @@ export function useExistingChatContainerSetup(loadedChatId: string | undefined) 
     }
     const runSetup = async () => {
       try {
+        void startWebcontainer();
         await waitForBootStepCompleted(ContainerBootState.STARTING);
         let snapshotUrl = await executeDataOperation(api.snapshot.getSnapshotUrl, { chatId: loadedChatId, sessionId });
         if (!snapshotUrl) {
@@ -73,12 +78,12 @@ export function useExistingChatContainerSetup(loadedChatId: string | undefined) 
 async function setupContainer(options: { snapshotUrl: string; allowPnpmInstallFailure: boolean }) {
   const resp = await fetch(options.snapshotUrl);
   if (!resp.ok) {
-    throw new Error(`Failed to download snapshot (${resp.statusText}): ${resp.statusText}`);
+    throw new Error(`Failed to download snapshot (${resp.status}): ${resp.statusText}`);
   }
   const compressed = await resp.arrayBuffer();
   const decompressed = decompressWithLz4(new Uint8Array(compressed));
 
-  const container = await webcontainer;
+  const container = await startWebcontainer();
   await container.mount(decompressed);
 
   // After loading the snapshot, we need to load the files into the FilesStore since

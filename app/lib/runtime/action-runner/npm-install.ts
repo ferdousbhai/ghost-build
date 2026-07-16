@@ -17,7 +17,11 @@ export async function runNpmInstall(args: {
     args.abortSignal.throwIfAborted();
     await waitForContainerBootState(ContainerBootState.READY);
     args.abortSignal.throwIfAborted();
-    const installProcess = await args.container.spawn('pnpm', ['add', ...splitPackageSpecs(input.packages)]);
+    const syncLockfile = input.mode === 'sync-lockfile';
+    const commandArgs = syncLockfile
+      ? ['install', '--lockfile-only']
+      : ['add', ...splitPackageSpecs(input.packages ?? '')];
+    const installProcess = await args.container.spawn('pnpm', commandArgs);
     const killInstall = () => installProcess.kill();
     args.abortSignal.addEventListener('abort', killInstall, { once: true });
     try {
@@ -31,7 +35,9 @@ export async function runNpmInstall(args: {
       });
       const cleanedOutput = cleanBuildOutput(output);
       if (exitCode !== 0) {
-        throw new Error(`pnpm add failed with exit code ${exitCode}: ${cleanedOutput}`);
+        throw new Error(
+          `${syncLockfile ? 'pnpm install --lockfile-only' : 'pnpm add'} failed with exit code ${exitCode}: ${cleanedOutput}`,
+        );
       }
       return cleanedOutput;
     } finally {

@@ -15,7 +15,7 @@ import { writeFileParameters } from 'ghostbuild-agent/tools/writeFile';
 import { getRelativePath } from 'ghostbuild-agent/utils/workDir';
 import { loggingSafeParse } from 'ghostbuild-agent/utils/zodUtil';
 
-const GUEST_APP_CHECK_COMPLETE = 'Ghostbuild app check complete.';
+const GUEST_PROJECT_CHECK_COMPLETE = 'Ghostbuild project check complete.';
 const ghostbuildIcon = (
   <span aria-hidden className="mr-1 text-base leading-none">
     👻
@@ -171,7 +171,9 @@ function packageTitle(invocation: GhostbuildToolInvocation): ReactNode {
   }
   const args = loggingSafeParse(npmInstallToolParameters, invocation.args);
   return args.success ? (
-    <span className="font-mono text-sm">{`pnpm add ${args.data.packages}`}</span>
+    <span className="font-mono text-sm">
+      {args.data.mode === 'sync-lockfile' ? 'pnpm install --lockfile-only' : `pnpm add ${args.data.packages}`}
+    </span>
   ) : (
     'Failed to install dependencies'
   );
@@ -180,7 +182,7 @@ function packageTitle(invocation: GhostbuildToolInvocation): ReactNode {
 function deployTitle(invocation: GhostbuildToolInvocation, resultText: string): ReactNode {
   if (isToolInvocationInProgress(invocation)) {
     return titleRow(
-      'Checking the app...',
+      'Checking the project...',
       <img className="mr-1 size-4" height="16" width="16" src="/icons/TypeScript.svg" alt="TypeScript" />,
     );
   }
@@ -196,9 +198,11 @@ function deployTitle(invocation: GhostbuildToolInvocation, resultText: string): 
     }
     return titleRow('Cloudflare deploy failed');
   }
-  return resultText.includes(GUEST_APP_CHECK_COMPLETE)
-    ? titleRow('App ready for preview', ghostbuildIcon)
-    : titleRow('Deployed Cloudflare Worker', ghostbuildIcon);
+  return resultText.includes(GUEST_PROJECT_CHECK_COMPLETE)
+    ? titleRow('Project ready for preview', ghostbuildIcon)
+    : resultText.includes('Deployment plan ready for your approval')
+      ? titleRow('Deployment ready for approval', ghostbuildIcon)
+      : titleRow('Deployed Cloudflare Worker', ghostbuildIcon);
 }
 
 function editTitle(invocation: GhostbuildToolInvocation): ReactNode {

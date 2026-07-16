@@ -27,7 +27,80 @@ Workers AI uses the `AI` binding directly. Use Wrangler OAuth for local producti
 
 Optional bindings include `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and commit SHA metadata.
 
+User-account connection uses Cloudflare's public OAuth Authorization Code flow with PKCE. Create a server-side OAuth
+client in **Manage Account → OAuth clients**, register
+`https://<ghostbuild-origin>/connect/return`, verify the client domain, and make the client public. Ghostbuild uses the
+standard top-level GET authorization-code callback. The callback requires the authenticated
+Ghostbuild session that initiated the connection and verifies that it owns the one-time server-side state before
+exchanging the code with the PKCE verifier. This identity binding prevents a Cloudflare authorization completed in a
+different browser session from being attached to the wrong Ghostbuild account.
+Configure response type **Code**, grant types **Authorization Code** and **Refresh Token**, and token authentication
+method **Client Secret Basic**. Select only the account permissions needed by the generated stack: Account Settings Read, Workers Scripts
+Write, D1 Write, Workers R2 Storage Write, and Workers AI Read. Cloudflare's live OAuth scope catalog currently assigns
+these IDs: `account-settings.read`, `workers-scripts.write`, `d1.write`, `workers-r2.write`, and `ai.read`. Configure only
+those identifiers as a space-delimited binding. Cloudflare adds the protocol-level `offline_access` scope to clients
+that enable the Refresh Token grant. Do not include it in the resource-scope binding; Ghostbuild appends it to each
+authorization request so Cloudflare issues a refresh token. Ghostbuild fails closed when the token response does not
+include one because an expiring access token would eventually break deployments and connected-account inference.
+
+Cloudflare creates OAuth clients as private. Before promoting the client, add a logo and a `ghostbuild.dev` client URL,
+then complete Cloudflare's DNS TXT ownership verification for that domain. Promotion to public is permanent, so confirm
+the production callback, client URL, metadata, and least-privilege scopes before changing visibility:
+
+- `CLOUDFLARE_OAUTH_CLIENT_ID`
+- `CLOUDFLARE_OAUTH_SCOPES`
+- `CLOUDFLARE_OAUTH_CLIENT_SECRET` (Worker secret)
+
+Access and refresh tokens are encrypted before D1 persistence. Expired access tokens are refreshed server-side and
+rotated in the encrypted credential record.
+
+Cloudflare account connections also require `CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY`. Generate and configure the
+32-byte key as a production Worker secret; never write it into the repository or a local env file:
+
+```bash
+openssl rand -base64 32 | wrangler secret put CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY
+```
+
+The deployment egress proxy uses an independent HMAC secret. Its short-lived token identifies an approved plan; it is
+not a Cloudflare credential and cannot expand the plan's permissions:
+
+```bash
+openssl rand -base64 32 | wrangler secret put DEPLOYMENT_PROXY_JWT_SECRET
+```
+
+The deployment sandbox image is pinned in `Dockerfile.sandbox`. Building or dry-running a container update requires a
+running Docker-compatible daemon. The sandbox denies internet access by default and never receives the decrypted user
+Cloudflare credential.
+
+Approved deployments are started through the `ghostbuild-deployments` Workflow binding. The HTTP request returns after
+durable execution is queued and the browser polls the deployment record, so closing the tab cannot terminate a build or
+strand it solely because the initiating request disconnected. The Workflow does not automatically retry external
+provisioning or publish side effects.
+
 The app tracks the latest AI SDK v6 peer line because the current Cloudflare Agents SDK and `workers-ai-provider` releases declare v6 as their supported AI SDK integration surface.
+
+## User Cloudflare Integration
+
+Generated applications use a server-owned deployment workflow:
+
+1. The browser uploads an immutable ZIP source snapshot to `POST /api/deployments/plan`, excluding dependencies, build output, and
+   all supported secret-file names.
+2. The Worker derives the resource plan and stores its SHA-256 digest in D1.
+3. The signed-in owner explicitly approves that digest through `POST /api/deployments/:id/approve`.
+4. The server installs, verifies, type-checks, lints, and builds in an egress-restricted Cloudflare Sandbox. A fresh
+   publish sandbox then uses a short-lived,
+   plan-bound proxy token while the real Cloudflare credential remains in the Worker.
+5. The generated Worker, D1, R2, Durable Object, and Workers AI binding are created in the OAuth-selected user account,
+   so Cloudflare meters them directly to that account.
+
+The approval endpoint requires an unchanged active Cloudflare connection and explicit acknowledgement that Cloudflare
+bills the user for infrastructure and inference. It also records that Workers Paid is not automatically enabled. Never
+route generated-app deployment through Ghostbuild's root Wrangler credentials.
+
+The default adapter remains fail-closed when the OAuth client bindings are absent. The unpublished Cloudflare/Stripe
+Orchestrator transport is optional future work for users who do not already have a Cloudflare account; it is not needed
+for direct billing to an OAuth-connected account. Temporary Wrangler claim deployments are not a production substitute
+because they are time-limited and do not support the full generated-app stack.
 
 Worker observability is explicit in `wrangler.jsonc`: persisted logs are sampled at 60% and traces at 5% unless production volume requires a deliberate change.
 Agent-specific diagnostics are emitted through Cloudflare Agents diagnostics-channel events. Attach a Tail Worker in production when structured Agent RPC, chat, recovery, state, schedule, workflow, or MCP events need to be collected.

@@ -3,8 +3,14 @@ import type { PartId } from '~/lib/stores/artifacts';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import type { ActionState, ActionStatus } from '~/lib/runtime/action-runner';
 
-export function useCurrentToolStatus(): Record<string, ActionStatus> {
+export function useCurrentToolStatus(): {
+  toolStatus: Record<string, ActionStatus>;
+  activeToolNames: string[];
+  activityRevision: number;
+} {
   const [toolStatus, setToolStatus] = useState<Record<string, ActionStatus>>({});
+  const [activityRevision, setActivityRevision] = useState(0);
+  const [activeToolNames, setActiveToolNames] = useState<string[]>([]);
 
   useEffect(() => {
     const partSubscriptions = new Map<PartId, () => void>();
@@ -23,10 +29,17 @@ export function useCurrentToolStatus(): Record<string, ActionStatus> {
         }
         partSubscriptions.set(
           typedPartId,
-          artifactState.runner.actions.subscribe(() => setToolStatus(collectToolStatus())),
+          artifactState.runner.actions.subscribe(() => {
+            const activity = collectToolActivity();
+            setToolStatus(activity.status);
+            setActiveToolNames(activity.activeToolNames);
+            setActivityRevision((revision) => revision + 1);
+          }),
         );
       }
-      setToolStatus(collectToolStatus());
+      const activity = collectToolActivity();
+      setToolStatus(activity.status);
+      setActiveToolNames(activity.activeToolNames);
     });
 
     return () => {
@@ -35,15 +48,23 @@ export function useCurrentToolStatus(): Record<string, ActionStatus> {
     };
   }, []);
 
-  return toolStatus;
+  return { toolStatus, activeToolNames, activityRevision };
 }
 
-function collectToolStatus(): Record<string, ActionStatus> {
+function collectToolActivity(): { status: Record<string, ActionStatus>; activeToolNames: string[] } {
   const status: Record<string, ActionStatus> = {};
+  const activeToolNames = new Set<string>();
   for (const artifact of Object.values(workbenchStore.artifacts.get())) {
     for (const [id, action] of Object.entries(artifact.runner.actions.get()) as Array<[string, ActionState]>) {
       status[id] = action.status;
+      if (
+        (action.status === 'pending' || action.status === 'running') &&
+        action.type === 'toolUse' &&
+        action.parsedContent.toolName
+      ) {
+        activeToolNames.add(action.parsedContent.toolName);
+      }
     }
   }
-  return status;
+  return { status, activeToolNames: [...activeToolNames] };
 }

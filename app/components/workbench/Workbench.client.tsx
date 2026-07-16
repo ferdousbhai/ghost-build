@@ -1,5 +1,5 @@
 import { motion, type HTMLMotionProps, type Variants } from 'framer-motion';
-import { lazy, memo, Suspense, type ReactElement } from 'react';
+import { lazy, memo, Suspense, type ReactElement, type ReactNode } from 'react';
 import { IconButton } from '~/components/ui/IconButton';
 import { PanelHeaderButton } from '~/components/ui/PanelHeaderButton';
 import { Slider, type SliderOptions } from '~/components/ui/Slider';
@@ -16,6 +16,7 @@ import { useWorkbenchController } from './useWorkbenchController';
 import { useStore } from '@nanostores/react';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { activeTerminalTabStore } from '~/lib/stores/terminalTabs';
+import useViewport from '~/lib/hooks/useViewport';
 
 interface WorkbenchProps {
   chatStarted?: boolean;
@@ -61,98 +62,161 @@ export const Workbench = memo(function Workbench({
   terminalInitializationOptions,
 }: WorkbenchProps) {
   renderLogger.trace('Workbench');
-  const controller = useWorkbenchController(isStreaming);
+  const showWorkbench = useStore(workbenchStore.showWorkbench);
+
+  if (!chatStarted) {
+    return null;
+  }
+
+  if (isStreaming || !showWorkbench) {
+    return <StreamingWorkbench showWorkbench={showWorkbench} />;
+  }
+
+  return <ReadyWorkbench terminalInitializationOptions={terminalInitializationOptions} />;
+});
+
+function ReadyWorkbench({ terminalInitializationOptions }: Pick<WorkbenchProps, 'terminalInitializationOptions'>) {
+  const controller = useWorkbenchController(false);
   const showTerminal = useStore(workbenchStore.showTerminal);
 
   return (
-    chatStarted && (
-      <motion.div
-        initial="closed"
-        animate={controller.showWorkbench ? 'open' : 'closed'}
-        variants={workbenchVariants}
-        className="z-workbench"
-      >
+    <WorkbenchFrame
+      visible={controller.showWorkbench}
+      selectedView={controller.selectedView}
+      setSelectedView={controller.setSelectedView}
+      isSmallViewport={controller.isSmallViewport}
+      onClose={controller.close}
+      headerActions={
+        controller.selectedView === 'code' ? (
+          <div className="flex overflow-y-auto">
+            <BackupStatusIndicator />
+            <div className="w-4" />
+            <PanelHeaderButton
+              className="mr-1 text-sm"
+              onClick={() => {
+                if (!showTerminal) {
+                  activeTerminalTabStore.set(2);
+                }
+                controller.toggleTerminal();
+              }}
+            >
+              <CommandLineIcon className="size-4" />
+              {showTerminal ? 'Hide shell' : 'Open shell'}
+            </PanelHeaderButton>
+          </div>
+        ) : null
+      }
+    >
+      <>
+        <View {...slidingPosition({ view: 'code', selectedView: controller.selectedView })}>
+          <EditorPanel
+            editorDocument={controller.currentDocument}
+            isStreaming={false}
+            scrollToDocAppend={controller.scrollToDocAppend}
+            selectedFile={controller.selectedFile}
+            files={controller.files}
+            unsavedFiles={controller.unsavedFiles}
+            onFileSelect={controller.onFileSelect}
+            onEditorScroll={controller.onEditorScroll}
+            onEditorWheel={controller.onEditorWheel}
+            onEditorChange={controller.onEditorChange}
+            onFileSave={controller.onFileSave}
+            onFileReset={controller.onFileReset}
+            terminalInitializationOptions={terminalInitializationOptions}
+          />
+        </View>
+        <View {...slidingPosition({ view: 'preview', selectedView: controller.selectedView })}>
+          {controller.hasLoadedPreview ? (
+            <Suspense fallback={null}>
+              <Preview />
+            </Suspense>
+          ) : (
+            <div />
+          )}
+        </View>
+      </>
+    </WorkbenchFrame>
+  );
+}
+
+function StreamingWorkbench({ showWorkbench }: { showWorkbench: boolean }) {
+  const selectedView = useStore(workbenchStore.currentView);
+  const isSmallViewport = useViewport(1024);
+
+  return (
+    <WorkbenchFrame
+      visible={showWorkbench}
+      selectedView={selectedView}
+      setSelectedView={(view) => workbenchStore.currentView.set(view)}
+      isSmallViewport={isSmallViewport}
+      onClose={() => workbenchStore.showWorkbench.set(false)}
+    >
+      <div className="text-content-secondary flex size-full items-center justify-center px-6 text-center text-sm">
+        The {selectedView} will be available as soon as the current build step finishes.
+      </div>
+    </WorkbenchFrame>
+  );
+}
+
+function WorkbenchFrame({
+  visible,
+  selectedView,
+  setSelectedView,
+  isSmallViewport,
+  onClose,
+  headerActions,
+  children,
+}: {
+  visible: boolean;
+  selectedView: WorkbenchViewType;
+  setSelectedView: (view: WorkbenchViewType) => void;
+  isSmallViewport: boolean;
+  onClose: () => void;
+  headerActions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <motion.div
+      initial="closed"
+      animate={visible ? 'open' : 'closed'}
+      variants={workbenchVariants}
+      className={classNames('z-workbench', { 'pointer-events-none': !visible })}
+      aria-hidden={!visible}
+      inert={!visible}
+    >
+      {visible ? (
         <div
           className={classNames(
             'fixed top-[calc(var(--header-height)+1rem)] bottom-four w-[var(--workbench-inner-width)] z-0 transition-[left,width] duration-200 bolt-ease-cubic-bezier',
             {
-              'w-full': controller.isSmallViewport,
-              'left-0': controller.showWorkbench && controller.isSmallViewport,
-              'left-[var(--workbench-left)]': controller.showWorkbench && !controller.isSmallViewport,
-              'left-[100%]': !controller.showWorkbench,
+              'w-full': isSmallViewport,
+              'left-0': isSmallViewport,
+              'left-[var(--workbench-left)]': !isSmallViewport,
             },
           )}
         >
           <div className="absolute inset-0 px-2 lg:px-6">
             <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border-transparent bg-bolt-elements-background-depth-2 shadow-[0_20px_60px_color-mix(in_srgb,var(--ghost-home-accent-2)_10%,transparent)]">
               <div className="flex items-center border-b border-border-transparent px-3 py-2.5">
-                <Slider
-                  selected={controller.selectedView}
-                  options={sliderOptions}
-                  setSelected={controller.setSelectedView}
-                />
+                <Slider selected={selectedView} options={sliderOptions} setSelected={setSelectedView} />
                 <div className="ml-auto" />
-                {controller.selectedView === 'code' && (
-                  <div className="flex overflow-y-auto">
-                    <BackupStatusIndicator />
-                    <div className="w-4" />
-                    <PanelHeaderButton
-                      className="mr-1 text-sm"
-                      onClick={() => {
-                        if (!showTerminal) {
-                          activeTerminalTabStore.set(2);
-                        }
-                        controller.toggleTerminal();
-                      }}
-                    >
-                      <CommandLineIcon className="size-4" />
-                      {showTerminal ? 'Hide shell' : 'Open shell'}
-                    </PanelHeaderButton>
-                  </div>
-                )}
+                {headerActions}
                 <IconButton
                   icon={<Cross2Icon />}
                   className="-mr-1"
                   size="xl"
                   title="Close workbench"
-                  onClick={controller.close}
+                  onClick={onClose}
                 />
               </div>
-              <div className="relative flex-1 overflow-hidden">
-                <View {...slidingPosition({ view: 'code', selectedView: controller.selectedView })}>
-                  <EditorPanel
-                    editorDocument={controller.currentDocument}
-                    isStreaming={isStreaming}
-                    scrollToDocAppend={controller.scrollToDocAppend}
-                    selectedFile={controller.selectedFile}
-                    files={controller.files}
-                    unsavedFiles={controller.unsavedFiles}
-                    onFileSelect={controller.onFileSelect}
-                    onEditorScroll={controller.onEditorScroll}
-                    onEditorWheel={controller.onEditorWheel}
-                    onEditorChange={controller.onEditorChange}
-                    onFileSave={controller.onFileSave}
-                    onFileReset={controller.onFileReset}
-                    terminalInitializationOptions={terminalInitializationOptions}
-                  />
-                </View>
-                <View {...slidingPosition({ view: 'preview', selectedView: controller.selectedView })}>
-                  {controller.hasLoadedPreview ? (
-                    <Suspense fallback={null}>
-                      <Preview />
-                    </Suspense>
-                  ) : (
-                    <div />
-                  )}
-                </View>
-              </div>
+              <div className="relative flex-1 overflow-hidden">{children}</div>
             </div>
           </div>
         </div>
-      </motion.div>
-    )
+      ) : null}
+    </motion.div>
   );
-});
+}
 
 // View component for rendering content with motion transitions
 interface ViewProps extends HTMLMotionProps<'div'> {

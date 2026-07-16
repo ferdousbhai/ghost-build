@@ -4,7 +4,6 @@ import { AssistantMessage } from './AssistantMessage';
 import { UserMessage } from './UserMessage';
 import { useStore } from '@nanostores/react';
 import { profileStore } from '~/lib/stores/profile';
-import { SpinnerThreeDots } from '~/components/ui/SpinnerThreeDots';
 import { ChatBubbleIcon, PersonIcon, ResetIcon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
 import { Modal } from '@ui/Modal';
@@ -16,14 +15,14 @@ import styles from './BaseChat.module.css';
 interface MessagesProps {
   id?: string;
   className?: string;
-  isStreaming?: boolean;
   messages?: GhostbuildMessage[];
+  isStreaming?: boolean;
   subchatsLength?: number;
   onRewindToMessage?: (subchatIndex?: number, messageIndex?: number) => void;
 }
 
 export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messages(
-  { id, isStreaming = false, messages = [], className, onRewindToMessage, subchatsLength }: MessagesProps,
+  { id, messages = [], className, isStreaming, onRewindToMessage, subchatsLength }: MessagesProps,
   ref: ForwardedRef<HTMLDivElement> | undefined,
 ) {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -113,7 +112,11 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messa
                   )}
                 </div>
               )}
-              {isUserMessage ? <UserMessage content={messageText(message)} /> : <AssistantMessage message={message} />}
+              {isUserMessage ? (
+                <UserMessage content={messageText(message)} />
+              ) : (
+                <AssistantMessage message={message} isStreaming={isStreaming && index === messages.length - 1} />
+              )}
               {canRewindToMessage && (
                 <Button
                   className="absolute bottom-[-5px] right-[-5px] bg-bolt-elements-background-depth-2 hover:bg-bolt-elements-background-depth-3"
@@ -142,12 +145,6 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messa
             Ready to build a new feature or fix a bug?
           </h3>
           <p className="text-content-secondary max-w-md">Send a message below to start on your next task!</p>
-        </div>
-      )}
-
-      {isStreaming && (
-        <div className="text-content-secondary flex w-full justify-center">
-          <SpinnerThreeDots className="size-9" />
         </div>
       )}
     </div>

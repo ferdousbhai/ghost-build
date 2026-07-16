@@ -5,11 +5,14 @@ import { isForbiddenStackDependencyPackageName, packageNameFromInstallSpec } fro
 export { packageNameFromInstallSpec } from '../utils/stackPolicy.js';
 
 const npmInstallToolDescription = `
-Install additional dependencies for the project with pnpm.
+Install additional dependencies or synchronize the lockfile for the project with pnpm.
 
 Choose high quality, flexible libraries that are well-maintained and have
 significant adoption. Always use libraries that have TypeScript definitions.
-Keep runtime, data, and AI dependencies inside the TanStack + Cloudflare stack:
+After directly editing dependency fields in package.json, use mode \`sync-lockfile\`
+so pnpm-lock.yaml remains consistent. Do not pass package names in that mode.
+Keep runtime, data, and AI dependencies inside the Cloudflare platform stack. TanStack Start is the
+default for full web applications, but focused Worker scripts do not need an application framework:
 do not install Convex, Remix, OpenAI, Anthropic, Gemini, xAI, Groq, Mistral,
 or other non-Workers-AI provider SDKs.
 `;
@@ -37,32 +40,50 @@ function findInvalidNpmInstallSpecs(packages: string) {
   return splitPackageSpecs(packages).filter((spec) => spec.startsWith('-'));
 }
 
-export const npmInstallToolParameters = z.object({
-  packages: z
-    .string()
-    .trim()
-    .min(1)
-    .superRefine((packages, ctx) => {
-      const invalidSpecs = findInvalidNpmInstallSpecs(packages);
-      if (invalidSpecs.length > 0) {
+export const npmInstallToolParameters = z
+  .object({
+    mode: z.enum(['add', 'sync-lockfile']).optional(),
+    packages: z.string().trim().optional().describe(packagesDescription),
+  })
+  .superRefine((input, ctx) => {
+    const mode = input.mode ?? 'add';
+    if (mode === 'sync-lockfile') {
+      if (input.packages) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `pnpm flags are not allowed in npmInstall packages: ${invalidSpecs.join(', ')}`,
+          path: ['packages'],
+          message: 'Package names are not allowed when synchronizing the lockfile.',
         });
       }
+      return;
+    }
+    if (!input.packages) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['packages'],
+        message: 'At least one package is required in add mode.',
+      });
+      return;
+    }
+    const packages = input.packages;
+    const invalidSpecs = findInvalidNpmInstallSpecs(packages);
+    if (invalidSpecs.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `pnpm flags are not allowed in npmInstall packages: ${invalidSpecs.join(', ')}`,
+      });
+    }
 
-      const forbiddenPackages = findForbiddenNpmInstallPackages(packages);
-      if (forbiddenPackages.length > 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Unsupported package(s): ${forbiddenPackages
-            .map(({ spec }) => spec)
-            .join(', ')}. Use Cloudflare Workers AI and TanStack/Cloudflare APIs instead.`,
-        });
-      }
-    })
-    .describe(packagesDescription),
-});
+    const forbiddenPackages = findForbiddenNpmInstallPackages(packages);
+    if (forbiddenPackages.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Unsupported package(s): ${forbiddenPackages
+          .map(({ spec }) => spec)
+          .join(', ')}. Use Cloudflare Workers AI and TanStack/Cloudflare APIs instead.`,
+      });
+    }
+  });
 
 export const npmInstallTool: Tool = {
   description: npmInstallToolDescription,

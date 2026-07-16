@@ -13,6 +13,8 @@ import { themeStore } from '~/lib/stores/theme';
 import { normalizeCodeLanguage, type CodeTheme } from '~/lib/shiki.client';
 import { Markdown } from './Markdown';
 import { highlightTokenStyle, useHighlightedCode } from './useHighlightedCode';
+import { DeploymentApproval } from './DeploymentApproval.client';
+import { parsePendingDeploymentApproval } from './deployment-approval';
 
 const ToolOutputTerminal = lazy(() =>
   import('./ToolOutputTerminal').then((module) => ({ default: module.ToolOutputTerminal })),
@@ -27,7 +29,12 @@ export const ToolUseContents = memo(function ToolUseContents({
 }) {
   switch (invocation.toolName) {
     case 'deploy':
-      return <TerminalTool artifact={artifact} invocation={invocation} toolName="deploy" />;
+      return (
+        <>
+          <TerminalTool artifact={artifact} invocation={invocation} toolName="deploy" />
+          <DeploymentApprovalForResult result={invocation.result} />
+        </>
+      );
     case 'npmInstall':
       return <TerminalTool artifact={artifact} invocation={invocation} toolName="npmInstall" />;
     case 'view':
@@ -42,6 +49,11 @@ export const ToolUseContents = memo(function ToolUseContents({
       return <pre className="overflow-x-auto whitespace-pre-wrap">{JSON.stringify(invocation, null, 2)}</pre>;
   }
 });
+
+function DeploymentApprovalForResult({ result }: { result: unknown }) {
+  const deployment = parsePendingDeploymentApproval(result);
+  return deployment ? <DeploymentApproval deployment={deployment} /> : null;
+}
 
 function TerminalTool({
   artifact,

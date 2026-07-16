@@ -41,6 +41,7 @@ export function UnauthenticatedChat({
       chatStarted={chatStarted}
       onStop={() => undefined}
       streamStatus="ready"
+      buildProgress={null}
       isRecovering={false}
       currentError={undefined}
       toolStatus={{}}

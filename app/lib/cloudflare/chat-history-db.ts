@@ -52,3 +52,7 @@ export async function removeChatHistoryItem(sessionId: string, itemId: string) {
   });
   await tx.isPersisted.promise;
 }
+
+export function refreshChatHistory(sessionId: string) {
+  return queryClient.invalidateQueries({ queryKey: ['ghostbuild-data', 'messages.getAll', { sessionId }] });
+}

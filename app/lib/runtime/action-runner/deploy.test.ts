@@ -14,12 +14,15 @@ vi.mock('~/lib/stores/sessionId', () => ({
   getAuthToken: vi.fn(() => null),
 }));
 
+vi.mock('~/lib/stores/chatId', () => ({ chatIdStore: { get: vi.fn(() => 'chat-1') } }));
+
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.clearAllMocks();
   vi.useRealTimers();
 });
 
-describe('runDeploy guest app check', () => {
+describe('runDeploy guest project check', () => {
   test('checks generated source without spawning browser-heavy validation commands for guests', async () => {
     vi.mocked(getAuthToken).mockReturnValue('guest_00000000-0000-4000-8000-000000000000');
     const spawn = vi.fn();
@@ -37,19 +40,42 @@ describe('runDeploy guest app check', () => {
 
     expect(waitForContainerBootState).not.toHaveBeenCalled();
     expect(readFile).toHaveBeenCalledWith('src/routes/index.tsx', 'utf-8');
+    expect(readFile).toHaveBeenCalledWith('src/server.ts', 'utf-8');
     expect(spawn).not.toHaveBeenCalled();
-    expect(result).toContain('Ghostbuild app check complete');
-    expect(result).toContain('Sign in to deploy this app to Cloudflare production');
+    expect(result).toContain('Ghostbuild project check complete');
+    expect(result).toContain('Sign in to deploy this project to Cloudflare production');
   });
 
-  test('waits for container readiness before a signed-in production deploy', async () => {
+  test('accepts a Worker-only project without requiring a generated browser route', async () => {
+    vi.mocked(getAuthToken).mockReturnValue('guest_00000000-0000-4000-8000-000000000000');
+    const readFile = vi.fn(async (path: string) => {
+      if (path === 'src/routes/index.tsx') {
+        return '<p>Ghostbuild on Cloudflare</p><h1>Start with a durable AI agent.</h1><h2>App Agent</h2>';
+      }
+      return 'export default { async fetch() { return new Response("ok"); } } satisfies ExportedHandler<Env>;';
+    });
+
+    const result = await runDeploy({
+      container: { fs: { readFile }, spawn: vi.fn() } as unknown as WebContainer,
+      abortSignal: new AbortController().signal,
+      onOutput: vi.fn(),
+      workspace: {
+        hasFile: vi.fn(),
+        setGeneratedFileContent: vi.fn(),
+      },
+    });
+
+    expect(result).toContain('Ghostbuild project check complete');
+  });
+
+  test('waits for container readiness before capturing the signed-in production snapshot', async () => {
     vi.mocked(getAuthToken).mockReturnValue('user-session');
     const readFile = vi.fn();
-    const spawn = vi.fn().mockRejectedValue(new Error('no deploy in unit test'));
+    const exportSnapshot = vi.fn().mockRejectedValue(new Error('no deploy in unit test'));
 
     await expect(
       runDeploy({
-        container: { fs: { readFile }, spawn } as unknown as WebContainer,
+        container: { fs: { readFile }, export: exportSnapshot } as unknown as WebContainer,
         abortSignal: new AbortController().signal,
         onOutput: vi.fn(),
         workspace: {
@@ -61,16 +87,74 @@ describe('runDeploy guest app check', () => {
 
     expect(waitForContainerBootState).toHaveBeenCalledOnce();
     expect(readFile).not.toHaveBeenCalled();
-    expect(spawn).toHaveBeenCalledWith('pnpm', ['run', 'deploy'], undefined);
+    expect(exportSnapshot).toHaveBeenCalledWith('.', {
+      format: 'zip',
+      excludes: expect.arrayContaining(['node_modules/**', '.env', '.dev.vars']),
+    });
   });
 
-  test('rejects a guest deploy when the starter app was not replaced', async () => {
+  test('uploads an immutable snapshot for approval instead of running Wrangler in the browser', async () => {
+    vi.mocked(getAuthToken).mockReturnValue('user-session');
+    const exportSnapshot = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]));
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      Response.json(
+        {
+          deployment: {
+            id: 'deployment-1',
+            planDigest: 'a'.repeat(64),
+            plan: { resources: [{ type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-app' }] },
+          },
+        },
+        { status: 201 },
+      ),
+    );
+
+    const result = await runDeploy({
+      container: { fs: { readFile: vi.fn() }, export: exportSnapshot } as unknown as WebContainer,
+      abortSignal: new AbortController().signal,
+      onOutput: vi.fn(),
+      workspace: { hasFile: vi.fn(), setGeneratedFileContent: vi.fn() },
+    });
+
+    expect(exportSnapshot).toHaveBeenCalledWith('.', {
+      format: 'zip',
+      excludes: expect.arrayContaining(['node_modules/**', 'dist/**', '.env', '.dev.vars']),
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/deployments/plan?chatId=chat-1',
+      expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
+    );
+    expect(result).toContain('Deployment plan ready for your approval');
+    expect(result).toContain('isolated deployment sandbox will verify');
+    expect(result).toContain('GHOSTBUILD_DEPLOYMENT_PLAN:');
+    expect(result).not.toContain('wrangler deploy');
+  });
+
+  test('rejects a guest deploy when neither the starter app nor Worker was replaced', async () => {
     vi.mocked(getAuthToken).mockReturnValue('guest_00000000-0000-4000-8000-000000000000');
-    const readFile = vi.fn().mockResolvedValue(`
-      <p>Ghostbuild on Cloudflare</p>
-      <h1>Start with a durable AI agent.</h1>
-      <h2>App Agent</h2>
-    `);
+    const readFile = vi.fn(async (path: string) =>
+      path === 'src/routes/index.tsx'
+        ? `
+          <p>Ghostbuild on Cloudflare</p>
+          <h1>Start with a durable AI agent.</h1>
+          <h2>App Agent</h2>
+        `
+        : `import handler from "@tanstack/react-start/server-entry";
+import { routeAgentRequest } from "agents";
+
+export { AppAgent } from "./agents/app-agent";
+
+export default {
+  async fetch(request: Request, env: Env) {
+    const agentResponse = await routeAgentRequest(request, env);
+    if (agentResponse) {
+      return agentResponse;
+    }
+
+    return handler.fetch(request);
+  },
+} satisfies ExportedHandler<Env>;`,
+    );
 
     await expect(
       runDeploy({
@@ -82,7 +166,7 @@ describe('runDeploy guest app check', () => {
           setGeneratedFileContent: vi.fn(),
         },
       }),
-    ).rejects.toThrow('Generated app route still matches the starter template');
+    ).rejects.toThrow('Generated project still matches the starter template');
   });
 });
 

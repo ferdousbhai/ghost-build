@@ -31,8 +31,8 @@ function dateCategory(date: Date) {
   }
 
   if (isThisWeek(date)) {
-    // e.g., "Mon" instead of "Monday"
-    return format(date, 'EEE');
+    // Include the date so weekday headings cannot be mistaken for project names.
+    return format(date, 'EEEE, MMM d');
   }
 
   const thirtyDaysAgo = subDays(new Date(), 30);
@@ -42,10 +42,8 @@ function dateCategory(date: Date) {
   }
 
   if (isThisYear(date)) {
-    // e.g., "Jan" instead of "January"
-    return format(date, 'LLL');
+    return format(date, 'MMMM');
   }
 
-  // e.g., "Jan 2023" instead of "January 2023"
-  return format(date, 'LLL yyyy');
+  return format(date, 'MMMM yyyy');
 }

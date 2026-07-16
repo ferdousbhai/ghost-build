@@ -2,7 +2,6 @@ import { motion, type Variants } from 'framer-motion';
 import { memo, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ConfirmationDialog } from '@ui/ConfirmationDialog';
-import { ThemeSwitch } from '~/components/ui/ThemeSwitch';
 import type { ChatHistorySummary } from '~/lib/cloudflare/data-api';
 import { cubicEasingFn } from '~/utils/easings';
 import { logger } from 'ghostbuild-agent/utils/logger';
@@ -116,23 +115,28 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
       initial="closed"
       animate={isOpen ? 'open' : 'closed'}
       variants={menuVariants}
-      style={{ width: '340px' }}
+      style={{ width: 'min(320px, calc(100dvw - 24px))' }}
       className={classNames(
-        'flex flex-col side-menu fixed top-0 h-full',
+        'side-menu fixed top-0 box-border flex h-full max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-r-3xl',
         'bg-[var(--bolt-elements-sidebar-background)] border-r border-border-transparent',
         'shadow-[12px_0_36px_color-mix(in_srgb,var(--ghost-home-accent-2)_8%,transparent)] text-sm',
         'z-30',
       )}
     >
       <div aria-hidden className="h-[var(--header-height)] shrink-0 border-b" />
-      <div className="flex size-full flex-1 flex-col overflow-hidden">
-        <div className="space-y-3 p-4">
-          <Button className="w-full" href="/" icon={<PlusIcon />}>
-            Start new project
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="min-w-0 space-y-3 px-4 pb-5 pt-4">
+          <Button
+            className="box-border min-h-11 w-full min-w-0 max-w-full overflow-hidden rounded-xl px-4 no-underline"
+            href="/"
+            icon={<PlusIcon className="size-4 shrink-0" />}
+          >
+            <span className="truncate">Start new project</span>
           </Button>
-          <div className="relative w-full">
+          <div className="relative min-w-0">
             <TextInput
               id="search-projects"
+              className="box-border w-full min-w-0 max-w-full"
               type="search"
               placeholder="Search projects..."
               onChange={handleSearchChange}
@@ -140,24 +144,30 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
             />
           </div>
         </div>
-        <div className="px-4 py-2 text-xs font-bold tracking-wide text-content-tertiary uppercase">Your projects</div>
-        <div className="flex-1 overflow-auto px-3 pb-3">
+        <div className="flex items-baseline justify-between gap-3 px-4 pb-2 pt-1">
+          <h2 className="text-xs font-black tracking-widest text-content-secondary uppercase">Projects</h2>
+          <span className="text-xs tabular-nums text-content-tertiary">
+            {list.length} {list.length === 1 ? 'project' : 'projects'}
+          </span>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-5">
           {filteredList.length === 0 && (
             <div className="px-4 text-sm text-gray-500 dark:text-gray-400">
               {list.length === 0 ? 'No previous projects' : 'No matches found'}
             </div>
           )}
           {binDates(filteredList).map(({ category, items }) => (
-            <div key={category} className="mt-2 space-y-1 first:mt-0">
-              <div className="sticky top-0 z-10 bg-[var(--bolt-elements-sidebar-background)] px-3 py-1 text-xs font-medium text-gray-500 dark:text-gray-400">
-                {category}
+            <section key={category} aria-label={category} className="mt-4 space-y-2 first:mt-0">
+              <div className="sticky top-0 z-10 flex items-center gap-2 bg-[var(--bolt-elements-sidebar-background)] px-1 py-1.5 text-[11px] font-bold tracking-[0.06em] text-content-tertiary uppercase">
+                <span>{category}</span>
+                <span aria-hidden className="h-px flex-1 bg-border-transparent" />
               </div>
-              <div className="space-y-0.5 pr-1">
+              <div className="space-y-1.5">
                 {items.map((item) => (
                   <HistoryItem key={item.initialId} item={item} handleDeleteClick={handleDeleteClick} />
                 ))}
               </div>
-            </div>
+            </section>
           ))}
           {deleteTarget && (
             <ConfirmationDialog
@@ -167,18 +177,17 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
                 void deleteItem(deleteTarget);
                 closeDialog();
               }}
-              dialogTitle="Delete Chat"
+              dialogTitle="Delete project"
               dialogBody={
                 <p>
                   You are about to delete{' '}
-                  <span className="font-medium text-content-primary">{deleteTarget.description || 'New chat...'}</span>
+                  <span className="font-medium text-content-primary">
+                    {deleteTarget.description || 'Untitled project'}
+                  </span>
                 </p>
               }
             />
           )}
-        </div>
-        <div className="flex items-center justify-between border-t border-border-transparent px-4 py-3">
-          <ThemeSwitch />
         </div>
       </div>
     </motion.div>

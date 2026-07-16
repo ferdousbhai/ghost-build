@@ -1,0 +1,3 @@
+FROM docker.io/cloudflare/sandbox:0.12.3
+
+RUN npm install --global pnpm@9.5.0 wrangler@4.107.1

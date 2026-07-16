@@ -18,6 +18,12 @@ describe('lookupDocs tool parameters', () => {
     expect(Object.keys(docDescriptions)).toEqual([...docKeys]);
   });
 
+  it('uses the Cloudflare platform skill to distinguish apps from focused Workers', () => {
+    expect(docs.cloudflarePlatform).toContain('github.com/cloudflare/skills/tree/main/skills/cloudflare');
+    expect(docs.cloudflarePlatform).toContain('a direct Worker handler without an application framework');
+    expect(docs.cloudflarePlatform).toContain('Worker scheduled handler with Cron Triggers');
+  });
+
   it('rejects removed aliases', () => {
     expect(lookupDocsParameters.safeParse({ docs: ['agents'] }).success).toBe(false);
   });

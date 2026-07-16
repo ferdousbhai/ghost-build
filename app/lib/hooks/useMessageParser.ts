@@ -35,11 +35,9 @@ export const messageParser = new StreamingMessageParser({
         workbenchStore.runAction(data);
       }
     },
-    onActionStream: (data) => {
-      if (isValidAction(data.action)) {
-        workbenchStore.runAction(data, true);
-      }
-    },
+    // Do not apply partial file payloads here. Rewriting and re-indexing a growing
+    // document for every streamed chunk can monopolize the browser. The complete
+    // action is applied once in onActionClose instead.
   },
 });
 

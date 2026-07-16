@@ -14,7 +14,15 @@ const categories = [
 
 type FeedbackCategory = (typeof categories)[number]['value'];
 
-export function FeedbackButton({ showInMenu }: { showInMenu: boolean }) {
+export function FeedbackButton({
+  showInMenu,
+  className = 'hidden sm:flex',
+  variant = 'neutral',
+}: {
+  showInMenu: boolean;
+  className?: string;
+  variant?: 'neutral' | 'ghost';
+}) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -26,9 +34,9 @@ export function FeedbackButton({ showInMenu }: { showInMenu: boolean }) {
         </MenuItem>
       ) : (
         <Button
-          variant="neutral"
+          variant={variant}
           size="xs"
-          className="hidden sm:flex"
+          className={className}
           onClick={() => setIsOpen(true)}
           icon={<ChatBubbleIcon />}
         >

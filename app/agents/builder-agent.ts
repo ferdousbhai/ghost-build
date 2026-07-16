@@ -24,9 +24,17 @@ import { ContextWindowManager } from '~/lib/.server/llm/context-window-manager';
 import { summarizeBuilderContext } from '~/lib/.server/llm/workers-ai-text';
 import { chatTurnContextSchema, type ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { getWorkersAiToolContext } from '~/lib/.server/llm/workers-ai-tools';
+import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
+import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
+import { latestPendingDeploymentPlanMarker } from './deployment-continuation';
+import { generateProjectTitle } from '~/lib/.server/llm/project-title';
+import { setGeneratedDescriptionIfMissing } from '~/lib/cloudflare/data/chat-service.server';
+import { messageText } from 'ghostbuild-agent/ai-compat';
 
 const logger = createScopedLogger('BuilderAgent');
 const STALE_CHAT_RECOVERY_MS = 15 * 60 * 1000;
+const MAX_CHAT_RECOVERY_ATTEMPTS = 2;
+const CHAT_NO_PROGRESS_TIMEOUT_MS = 3 * 60 * 1000;
 const MAX_SUBCHAT_INDEX = 10_000;
 
 export type BuilderAgentState = {
@@ -37,7 +45,13 @@ export type BuilderAgentState = {
 
 type ChatBody = Partial<ChatRequestBody>;
 
-export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState> {
+type BuilderAgentProps = {
+  billingSubjectKey: string;
+  ownerId: string;
+  userId?: string;
+};
+
+export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAgentProps> {
   static override options = {
     sendIdentityOnConnect: false,
   };
@@ -52,22 +66,34 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState> {
   override waitForMcpConnections = { timeout: 10_000 };
 
   override chatRecovery = {
-    maxAttempts: 6,
-    noProgressTimeoutMs: 5 * 60 * 1000,
+    maxAttempts: MAX_CHAT_RECOVERY_ATTEMPTS,
+    noProgressTimeoutMs: CHAT_NO_PROGRESS_TIMEOUT_MS,
     terminalMessage: 'The builder was interrupted. Please send your message again.',
   };
 
-  override chatStreamStallTimeoutMs = 5 * 60 * 1000;
+  override chatStreamStallTimeoutMs = CHAT_NO_PROGRESS_TIMEOUT_MS;
 
   private readonly turnStore = new BuilderTurnStore(this);
+  private billingSubjectKey: string | null = null;
+  private ownerId: string | null = null;
+  private userId: string | undefined;
   private readonly contextWindow = new ContextWindowManager({
     repository: new DurableObjectContextCompactionRepository(this),
-    summarize: (prompt) => summarizeBuilderContext(this.env, prompt),
+    summarize: async (prompt) =>
+      summarizeBuilderContext(
+        this.env,
+        prompt,
+        await getUserWorkersAiCredentials(this.env, this.userId),
+        this.billingSubjectKey ?? undefined,
+      ),
     systemPrompts: () => [ROLE_SYSTEM_PROMPT, generalSystemPrompt(), getWorkersAiToolContext()],
     logger,
   });
 
-  async onStart() {
+  async onStart(props?: BuilderAgentProps) {
+    this.billingSubjectKey = props?.billingSubjectKey ?? null;
+    this.ownerId = props?.ownerId ?? null;
+    this.userId = props?.userId;
     this.turnStore.initialize();
     this.contextWindow.initialize();
   }
@@ -107,14 +133,39 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState> {
     _onFinish?: unknown,
     options?: { requestId?: string; body?: Record<string, unknown>; continuation?: boolean; abortSignal?: AbortSignal },
   ) {
+    if (!this.billingSubjectKey) {
+      throw new Response('Agent authentication is required.', { status: 401 });
+    }
     const body = (options?.body ?? {}) as ChatBody;
     const messages = this.messages as NonNullable<ChatRequestBody['messages']>;
+    const pendingDeploymentPlanMarker = options?.continuation ? latestPendingDeploymentPlanMarker(messages) : null;
+    if (pendingDeploymentPlanMarker) {
+      console.info({
+        event: 'builder_deployment_plan_continuation_stopped',
+        requestId: options?.requestId,
+      });
+      return createUIMessageStreamResponse({
+        stream: createUIMessageStream({
+          execute: ({ writer }) => {
+            const id = 'deployment-approval-ready';
+            writer.write({ type: 'text-start', id });
+            writer.write({
+              type: 'text-delta',
+              id,
+              delta: `The production plan is ready. Review the Cloudflare resources and approve billing below.\n\n${pendingDeploymentPlanMarker}`,
+            });
+            writer.write({ type: 'text-end', id });
+          },
+        }),
+      });
+    }
     const chatInitialId = typeof body.chatInitialId === 'string' ? body.chatInitialId : 'agent-chat';
     const subchatIndex = parseSubchatIndex(body.subchatIndex);
     const contextScope = contextScopeForSubchat(subchatIndex);
     const turnContext = parseTurnContext(body.turnContext);
     const firstUserMessage =
       !options?.continuation && messages.filter((message: { role?: string }) => message.role === 'user').length === 1;
+    const firstPrompt = firstUserMessage ? messages.find((message) => message.role === 'user') : undefined;
     const turn = createBuilderTurn({
       requestId: options?.requestId,
       chatInitialId,
@@ -139,6 +190,17 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState> {
 
     try {
       const preparedContext = await this.contextWindow.prepare(messages, contextScope, turnContext);
+      const accountCredentials = await getUserWorkersAiCredentials(this.env, this.userId);
+      if (firstPrompt) {
+        this.ctx.waitUntil(
+          this.generateInitialProjectTitle(
+            chatInitialId,
+            messageText(firstPrompt),
+            accountCredentials,
+            this.billingSubjectKey,
+          ),
+        );
+      }
       console.info({
         event: 'builder_context_prepared',
         requestId: options?.requestId,
@@ -152,6 +214,8 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState> {
         abortSignal: options?.abortSignal,
         firstUserMessage,
         preparedMessages: preparedContext.messages,
+        billingSubjectKey: this.billingSubjectKey,
+        accountCredentials,
         contextReduced: preparedContext.contextReduced,
         body: {
           messages,
@@ -207,6 +271,34 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState> {
       });
     } catch (error) {
       logger.warn('Unable to stash Ghostbuild chat turn recovery context', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async generateInitialProjectTitle(
+    chatInitialId: string,
+    firstPrompt: string,
+    accountCredentials: Awaited<ReturnType<typeof getUserWorkersAiCredentials>>,
+    billingSubjectKey: string,
+  ): Promise<void> {
+    if (!this.ownerId) {
+      return;
+    }
+    try {
+      const title = await generateProjectTitle(this.env, firstPrompt, accountCredentials, billingSubjectKey);
+      if (!title) {
+        return;
+      }
+      const saved = await setGeneratedDescriptionIfMissing(this.env.DB, {
+        sessionId: this.ownerId,
+        id: chatInitialId,
+        description: title,
+      });
+      logger.info(saved ? 'Generated initial project title' : 'Kept existing project title', { chatInitialId });
+    } catch (error) {
+      logger.warn('Project title generation failed; keeping first-prompt fallback', {
+        chatInitialId,
         error: error instanceof Error ? error.message : String(error),
       });
     }

@@ -22,6 +22,7 @@ import { useBuilderAgentChat } from './useBuilderAgentChat';
 import { createTerminalInitializationOptions } from './terminal-initialization';
 import { useChatHistoryProcessing } from './useChatHistoryProcessing';
 import { useCurrentToolStatus } from './useCurrentToolStatus';
+import { useBuildProgress } from './useBuildProgress';
 import { useChatMessageSubmission } from './useChatMessageSubmission';
 
 const logger = createScopedLogger('Chat');
@@ -181,7 +182,14 @@ const AuthenticatedChat = memo(
       workbenchStore.abortAllActions();
     };
 
-    const toolStatus = useCurrentToolStatus();
+    const { toolStatus, activeToolNames, activityRevision } = useCurrentToolStatus();
+    const buildProgress = useBuildProgress({
+      streamStatus,
+      isRecovering,
+      activeToolNames,
+      toolActivityRevision: activityRevision,
+      messages,
+    });
 
     const runAnimation = async () => {
       if (chatStarted) {
@@ -235,6 +243,7 @@ const AuthenticatedChat = memo(
         isRecovering={isRecovering}
         currentError={error}
         toolStatus={toolStatus}
+        buildProgress={buildProgress}
         messages={parsedMessages /* Note that parsedMessages are throttled. */}
         actionAlert={actionAlert}
         clearAlert={() => workbenchStore.clearAlert()}

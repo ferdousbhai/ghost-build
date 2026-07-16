@@ -9,7 +9,11 @@ Retrieval-first rule:
 - When docs and local snippets disagree, trust the current docs.
 
 Decision guide:
-- Serverless edge app -> Workers or TanStack Start on Workers.
+- Full browser application with routes, SSR, and server functions -> TanStack Start on Workers by default when the user does not specify a framework.
+- HTTP API, webhook, middleware, or small custom edge script -> a direct Worker handler without an application framework.
+- Scheduled task -> a Worker scheduled handler with Cron Triggers.
+- Asynchronous event processing -> a Queue consumer or Workflow, depending on whether the work is message-driven or a durable multi-step job.
+- Lightweight response rewriting at the edge -> Snippets when its product limits fit; otherwise a Worker.
 - Relational data -> D1, or Hyperdrive for an existing external SQL database.
 - Object/file storage -> R2.
 - Key/value config, low-write settings, or sessions -> KV.
@@ -18,6 +22,7 @@ Decision guide:
 - Stateful coordination, per-room/per-user state, WebSockets, or strong consistency -> Durable Objects or Agents SDK.
 - LLM inference -> Workers AI binding when available.
 - App-level AI agent behavior -> Agents SDK and AIChatAgent.
+- Do not provision a product or introduce a framework merely because it exists in the starter template.
 `;
 
 export const cloudflareStorage = `
