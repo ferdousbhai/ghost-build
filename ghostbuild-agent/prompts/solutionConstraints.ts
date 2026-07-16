@@ -29,9 +29,16 @@ export function solutionConstraints() {
       good fit. If the user explicitly requests a compatible framework or approach, follow that request.
 
       Do not add routes, React UI, SSR, or TanStack abstractions to a focused Worker request that does not need a full
-      web application. APIs, webhooks, middleware, scheduled jobs, queue consumers, email handlers, Tail Workers, and
-      similar scripts should use the appropriate Worker handler directly in src/server.ts and the matching
-      wrangler.jsonc configuration. A Worker may expose a small HTML response without becoming a TanStack app.
+      web application. HTTP APIs, webhooks, middleware, and similar fetch-handler scripts should use the Worker
+      handler directly in src/server.ts. Automatic production deployment currently supports fetch-handler Workers;
+      explain that scheduled, queue, email, and Tail handlers need deployment support before generating them. A Worker
+      may expose a small HTML response without becoming a TanStack app. For
+      a Worker-only project, set package.json ghostbuild.projectType to "worker", remove unused TanStack/React
+      dependencies and route-generation steps, set its build script to a Wrangler dry-run targeting dist/worker, and
+      set dev and preview to "wrangler dev", remove web-only provisioning and migration steps from deploy, and remove
+      unused bindings from wrangler.jsonc. Then call npmInstall with mode "sync-lockfile" to synchronize
+      pnpm-lock.yaml. Keep the marker absent (or set it to "web_app") for a TanStack
+      browser application.
 
       Use only Cloudflare platform primitives for backend capabilities: Workers AI,
       Agents/Durable Objects, D1, R2, KV, Queues, Vectorize, and Cloudflare Email where appropriate. Do not introduce

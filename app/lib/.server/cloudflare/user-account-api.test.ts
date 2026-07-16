@@ -64,6 +64,26 @@ describe('UserCloudflareAccountApi', () => {
     ).rejects.toBeInstanceOf(CloudflareAccountApiError);
   });
 
+  test('reuses already provisioned plan resources after an interrupted deployment', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ uuid: 'existing-d1', name: 'ghostbuild-deployment-1' }] }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: { name: 'ghostbuild-deployment-1-storage' } }));
+    const api = new UserCloudflareAccountApi('account-1', 'token', request);
+    await expect(api.ensureD1ForPlan(plan)).resolves.toEqual({
+      id: 'existing-d1',
+      name: 'ghostbuild-deployment-1',
+    });
+    await expect(api.ensureR2ForPlan(plan)).resolves.toEqual({
+      id: 'ghostbuild-deployment-1-storage',
+      name: 'ghostbuild-deployment-1-storage',
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls.every((call) => call[1]?.method === 'GET')).toBe(true);
+  });
+
   test('does not leak the connected token through provider errors', async () => {
     const request = vi
       .fn<typeof fetch>()

@@ -41,6 +41,12 @@ describe('publishDeploymentBuild', () => {
       account_id: 'account-1',
       no_bundle: true,
       ai: { binding: 'AI' },
+      observability: {
+        enabled: true,
+        logs: { enabled: true, head_sampling_rate: 0.6 },
+        traces: { enabled: true, head_sampling_rate: 0.05 },
+      },
+      upload_source_maps: true,
     });
     expect(JSON.stringify(config)).not.toContain('real-user-token');
 
@@ -53,9 +59,11 @@ describe('publishDeploymentBuild', () => {
   });
 
   test('destroys the publish sandbox when Wrangler fails', async () => {
-    sandbox.exec
-      .mockResolvedValueOnce({ success: true, exitCode: 0, stdout: '', stderr: '', command: 'tar' })
-      .mockResolvedValueOnce({ success: false, exitCode: 1, stdout: '', stderr: 'denied', command: 'wrangler' });
+    sandbox.exec.mockImplementation(async (command: string) =>
+      command === 'wrangler deploy --config wrangler.json'
+        ? { success: false, exitCode: 1, stdout: '', stderr: 'denied', command }
+        : { success: true, exitCode: 0, stdout: '', stderr: '', command },
+    );
     await expect(
       publishDeploymentBuild({
         env: {
@@ -71,6 +79,34 @@ describe('publishDeploymentBuild', () => {
     ).rejects.toThrow('denied');
     expect(sandbox.destroy).toHaveBeenCalledOnce();
   });
+
+  test('publishes a Worker-only build without TanStack assets or unused bindings', async () => {
+    const workerDeployment = deployment();
+    workerDeployment.plan.project = {
+      type: 'worker',
+      bindings: { ai: false, d1: false, r2: false, appAgent: false },
+    };
+    workerDeployment.plan.resources = workerDeployment.plan.resources.filter((resource) => resource.type === 'worker');
+    await publishDeploymentBuild({
+      env: {
+        DeploymentSandbox: {},
+        DEPLOYMENT_PROXY_JWT_SECRET: btoa('0123456789abcdef0123456789abcdef'),
+      } as unknown as Env,
+      deployment: workerDeployment,
+      connection: connection(),
+      build: new Uint8Array([1]),
+    });
+    const configCall = sandbox.writeFile.mock.calls.find((call) => call[0] === '/workspace/publish/wrangler.json');
+    const config = JSON.parse(configCall?.[1] as string) as Record<string, unknown>;
+    expect(config).toMatchObject({ main: 'dist/worker/server.js', no_bundle: true });
+    expect(config).not.toHaveProperty('assets');
+    expect(config).not.toHaveProperty('d1_databases');
+    expect(config).not.toHaveProperty('r2_buckets');
+    expect(config).not.toHaveProperty('durable_objects');
+    expect(sandbox.exec.mock.calls.map((call) => call[0])).not.toContain(
+      'wrangler d1 migrations apply DB --remote --config wrangler.json --yes',
+    );
+  });
 });
 
 function deployment(): Deployment {
@@ -79,12 +115,17 @@ function deployment(): Deployment {
     chatId: 'chat-1',
     userId: 'user-1',
     connectionId: 'connection-1',
+    connectionGeneration: 1,
     snapshotKey: 'snapshot-1',
     status: 'deploying',
     plan: {
       version: 1,
       deploymentId: 'deployment-1',
       sourceSha256: 'a'.repeat(64),
+      project: {
+        type: 'web_app',
+        bindings: { ai: true, d1: true, r2: true, appAgent: true },
+      },
       billing: {
         infrastructure: 'user_cloudflare_account',
         workersAi: 'user_cloudflare_account',
@@ -94,6 +135,8 @@ function deployment(): Deployment {
         { type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-deployment-1' },
         { type: 'd1', logicalName: 'DB', proposedName: 'ghostbuild-deployment-1' },
         { type: 'r2', logicalName: 'APP_STORAGE', proposedName: 'ghostbuild-deployment-1-storage' },
+        { type: 'durable_object', logicalName: 'AppAgent', proposedName: 'AppAgent' },
+        { type: 'workers_ai', logicalName: 'AI', proposedName: 'AI' },
       ],
     },
     planDigest: 'a'.repeat(64),
@@ -119,5 +162,6 @@ function connection(): CloudflareConnection {
     aiBillingEnabled: true,
     connectedAt: 1,
     updatedAt: 1,
+    generation: 1,
   };
 }

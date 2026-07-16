@@ -11,6 +11,7 @@ vi.mock('~/lib/.server/auth', () => ({
 }));
 
 import {
+  CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
   cloudflareConnectionStatusAction,
   completeCloudflareConnectionAction,
   startCloudflareConnectionAction,
@@ -28,6 +29,10 @@ function envWithConnection(row: Record<string, unknown> | null) {
 
 describe('cloudflareConnectionStatusAction', () => {
   beforeEach(() => getSession.mockReset());
+
+  it('uses a top-level GET callback so the initiating Ghostbuild session cookie is available', () => {
+    expect(CLOUDFLARE_CONNECTION_CALLBACK_METHOD).toBe('GET');
+  });
 
   it('requires a Ghostbuild identity', async () => {
     getSession.mockResolvedValue(null);
@@ -151,7 +156,7 @@ describe('cloudflareConnectionStatusAction', () => {
   });
 
   it('encrypts the provider credential and prevents callback replay', async () => {
-    getSession.mockResolvedValue(null);
+    getSession.mockResolvedValue({ user: { id: 'user-1' } });
     const database = integrationDatabase();
     const state = '00000000-0000-4000-8000-000000000001';
     database.sessions.set(state, {
@@ -162,11 +167,7 @@ describe('cloudflareConnectionStatusAction', () => {
       expiresAt: Date.now() + 60_000,
     });
     const callbackRequest = () =>
-      new Request('https://ghostbuild.dev/connect/return', {
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ state, code: 'authorization-code' }),
-      });
+      new Request(`https://ghostbuild.dev/connect/return?state=${state}&code=authorization-code`);
     const response = await completeCloudflareConnectionAction({
       request: callbackRequest(),
       env: database.env,
@@ -174,7 +175,7 @@ describe('cloudflareConnectionStatusAction', () => {
     });
     expect(response.status).toBe(303);
     expect(response.headers.get('location')).toBe('https://ghostbuild.dev/settings?cloudflare=connected');
-    expect(getSession).not.toHaveBeenCalled();
+    expect(getSession).toHaveBeenCalled();
     expect(database.connection).toMatchObject({ status: 'active', account_id: 'account-1', ai_billing_enabled: 1 });
     expect(JSON.stringify([...database.credentials.values()])).not.toContain('provider-access-token');
     expect(database.sessions.get(state)?.status).toBe('completed');
@@ -185,6 +186,30 @@ describe('cloudflareConnectionStatusAction', () => {
       orchestrator: fakeOrchestrator(),
     });
     expect(replay.status).toBe(404);
+  });
+
+  it('does not bind a Cloudflare callback to a different Ghostbuild user', async () => {
+    getSession.mockResolvedValue({ user: { id: 'victim-user' } });
+    const database = integrationDatabase();
+    const state = '00000000-0000-4000-8000-000000000001';
+    database.sessions.set(state, {
+      id: state,
+      userId: 'attacker-user',
+      providerSessionId: 'provider-session',
+      status: 'pending',
+      expiresAt: Date.now() + 60_000,
+    });
+    const orchestrator = fakeOrchestrator();
+    const response = await completeCloudflareConnectionAction({
+      request: new Request(`https://ghostbuild.dev/connect/return?state=${state}&code=victim-code`),
+      env: database.env,
+      orchestrator,
+    });
+
+    expect(response.status).toBe(404);
+    expect(orchestrator.completeConnection).not.toHaveBeenCalled();
+    expect(database.connection).toBeNull();
+    expect(database.credentials.size).toBe(0);
   });
 });
 

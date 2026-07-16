@@ -5,7 +5,12 @@ const PROJECT_DIR = '/workspace/project';
 const SOURCE_DIR = '/workspace/source';
 const SOURCE_ARCHIVE = '/workspace/source.zip';
 const BUILD_ARCHIVE = '/workspace/build.tar.gz';
+const PACKAGE_DIR = '/workspace/package';
 const MAX_ERROR_OUTPUT = 4_000;
+const MAX_EXPANDED_KIB = 250 * 1024;
+const MAX_EXPANDED_BYTES = MAX_EXPANDED_KIB * 1024;
+const MAX_BUILD_PACKAGE_KIB = 300 * 1024;
+const MAX_BUILD_ARCHIVE_BYTES = 50 * 1024 * 1024;
 type BuildStage =
   | 'sandbox initialization'
   | 'source extraction'
@@ -21,6 +26,7 @@ export async function buildDeploymentSnapshot(args: {
   env: Env;
   deploymentId: string;
   snapshotKey: string;
+  expectedSourceSha256: string;
 }): Promise<Uint8Array<ArrayBuffer>> {
   if (!args.env.DeploymentSandbox) {
     throw new DeploymentBuildError('Deployment Sandbox binding is unavailable.');
@@ -28,6 +34,9 @@ export async function buildDeploymentSnapshot(args: {
   const source = await args.env.APP_STORAGE.get(args.snapshotKey);
   if (!source) {
     throw new DeploymentBuildError('Deployment source snapshot is unavailable.');
+  }
+  if (!/^[a-f0-9]{64}$/.test(args.expectedSourceSha256)) {
+    throw new DeploymentBuildError('Approved deployment source digest is invalid.');
   }
 
   const sandboxId = `build-${args.deploymentId}`.toLowerCase();
@@ -42,7 +51,24 @@ export async function buildDeploymentSnapshot(args: {
     await sandbox.mkdir(SOURCE_DIR, { recursive: true });
     await sandbox.writeFile(SOURCE_ARCHIVE, source.body);
     stage = 'source extraction';
-    await requireSuccess(await sandbox.exec(`unzip -q ${SOURCE_ARCHIVE} -d ${SOURCE_DIR}`));
+    await requireSuccess(
+      await sandbox.exec(`test "$(sha256sum ${SOURCE_ARCHIVE} | cut -d ' ' -f1)" = "${args.expectedSourceSha256}"`, {
+        timeout: 30 * 1000,
+      }),
+    );
+    await requireSuccess(
+      await sandbox.exec(
+        `test "$(unzip -p ${SOURCE_ARCHIVE} | head -c ${MAX_EXPANDED_BYTES + 1} | wc -c | tr -d ' ')" ` +
+          `-le ${MAX_EXPANDED_BYTES}`,
+        { timeout: 2 * 60 * 1000 },
+      ),
+    );
+    await requireSuccess(await sandbox.exec(`unzip -q ${SOURCE_ARCHIVE} -d ${SOURCE_DIR}`, { timeout: 2 * 60 * 1000 }));
+    await requireSuccess(
+      await sandbox.exec(`test "$(du -sk ${SOURCE_DIR} | cut -f1)" -le ${MAX_EXPANDED_KIB}`, {
+        timeout: 30 * 1000,
+      }),
+    );
     await requireSuccess(
       await sandbox.exec(
         `if [ -f ${SOURCE_DIR}/package.json ]; then cp -a ${SOURCE_DIR}/. ${PROJECT_DIR}/; ` +
@@ -61,19 +87,37 @@ export async function buildDeploymentSnapshot(args: {
     // worker-configuration.d.ts and src/routeTree.gen.ts. A browser export may
     // legitimately omit either generated file, so prepare them before the
     // stack verifier enforces the complete production contract.
-    for (const [script, scriptStage] of [
-      ['typecheck', 'type checking'],
-      ['verify:stack', 'stack verification'],
-      ['build', 'application build'],
-      ['lint', 'linting'],
+    for (const [command, scriptStage] of [
+      ['run typecheck', 'type checking'],
+      ['run verify:stack', 'stack verification'],
+      ['run build', 'application build'],
+      ['run lint', 'linting'],
     ] as const) {
       stage = scriptStage;
-      await requireSuccess(await sandbox.exec(`pnpm run ${script}`, { cwd: PROJECT_DIR, timeout: 10 * 60 * 1000 }));
+      await requireSuccess(await sandbox.exec(`pnpm ${command}`, { cwd: PROJECT_DIR, timeout: 10 * 60 * 1000 }));
     }
     stage = 'build packaging';
+    await sandbox.mkdir(PACKAGE_DIR, { recursive: true });
     await requireSuccess(
-      await sandbox.exec(`tar -czf ${BUILD_ARCHIVE} -C ${PROJECT_DIR} dist migrations package.json pnpm-lock.yaml`, {
-        timeout: 2 * 60 * 1000,
+      await sandbox.exec(
+        `cp -a ${PROJECT_DIR}/dist ${PROJECT_DIR}/package.json ${PROJECT_DIR}/pnpm-lock.yaml ${PACKAGE_DIR}/ && ` +
+          `if [ -d ${PROJECT_DIR}/migrations ]; then cp -a ${PROJECT_DIR}/migrations ${PACKAGE_DIR}/; fi`,
+        { timeout: 2 * 60 * 1000 },
+      ),
+    );
+    await requireSuccess(
+      await sandbox.exec(
+        `test "$(du -sk --apparent-size ${PACKAGE_DIR} | cut -f1)" -le ${MAX_BUILD_PACKAGE_KIB} && ` +
+          `test -z "$(find ${PACKAGE_DIR} -type l -print -quit)"`,
+        { timeout: 30 * 1000 },
+      ),
+    );
+    await requireSuccess(
+      await sandbox.exec(`tar -czf ${BUILD_ARCHIVE} -C ${PACKAGE_DIR} .`, { timeout: 2 * 60 * 1000 }),
+    );
+    await requireSuccess(
+      await sandbox.exec(`test "$(stat -c %s ${BUILD_ARCHIVE})" -le ${MAX_BUILD_ARCHIVE_BYTES}`, {
+        timeout: 30 * 1000,
       }),
     );
     stage = 'build download';

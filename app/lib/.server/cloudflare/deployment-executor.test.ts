@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import type { Deployment } from './deployment-repository';
 
 const mocks = vi.hoisted(() => ({
   claim: vi.fn(),
@@ -7,33 +8,39 @@ const mocks = vi.hoisted(() => ({
   transition: vi.fn(),
   requireConnection: vi.fn(),
   resolve: vi.fn(),
-  createD1: vi.fn(),
-  createR2: vi.fn(),
+  ensureD1: vi.fn(),
+  ensureR2: vi.fn(),
   getSubdomain: vi.fn(),
   build: vi.fn(),
   publish: vi.fn(),
+  clearSnapshot: vi.fn(),
+  deleteObject: vi.fn(),
 }));
 
 vi.mock('./deployment-repository', () => ({
+  DeploymentConcurrencyLimitError: class DeploymentConcurrencyLimitError extends Error {},
   claimApprovedDeployment: mocks.claim,
   recordDeploymentResource: mocks.record,
   requireDeployment: mocks.requireDeployment,
   transitionDeployment: mocks.transition,
+  clearDeploymentSnapshot: mocks.clearSnapshot,
 }));
+vi.mock('~/lib/cloudflare/data/object-storage.server', () => ({ deleteObject: mocks.deleteObject }));
 vi.mock('./cloudflare-connection-repository', () => ({ requireActiveCloudflareConnection: mocks.requireConnection }));
 vi.mock('./cloudflare-credential-vault', () => ({
   D1CloudflareCredentialVault: { fromEnv: () => ({ resolve: mocks.resolve }) },
 }));
 vi.mock('./user-account-api', () => ({
   UserCloudflareAccountApi: class {
-    createD1ForPlan = mocks.createD1;
-    createR2ForPlan = mocks.createR2;
+    ensureD1ForPlan = mocks.ensureD1;
+    ensureR2ForPlan = mocks.ensureR2;
     getWorkersSubdomain = mocks.getSubdomain;
   },
 }));
 vi.mock('./deployment-build-executor', () => ({ buildDeploymentSnapshot: mocks.build }));
 vi.mock('./deployment-publish-executor', () => ({ publishDeploymentBuild: mocks.publish }));
 
+import { DeploymentConcurrencyLimitError } from './deployment-repository';
 import { executeApprovedDeployment } from './deployment-executor';
 
 describe('executeApprovedDeployment', () => {
@@ -52,10 +59,11 @@ describe('executeApprovedDeployment', () => {
       accountId: 'account-1',
       credentialHandle: 'credential-1',
       status: 'active',
+      generation: 1,
     });
     mocks.resolve.mockResolvedValue('real-user-token');
-    mocks.createD1.mockResolvedValue({ id: 'd1-id', name: 'ghostbuild-deployment-1' });
-    mocks.createR2.mockResolvedValue({
+    mocks.ensureD1.mockResolvedValue({ id: 'd1-id', name: 'ghostbuild-deployment-1' });
+    mocks.ensureR2.mockResolvedValue({
       id: 'ghostbuild-deployment-1-storage',
       name: 'ghostbuild-deployment-1-storage',
     });
@@ -64,6 +72,8 @@ describe('executeApprovedDeployment', () => {
     mocks.publish.mockResolvedValue(undefined);
     mocks.record.mockResolvedValue(undefined);
     mocks.transition.mockResolvedValue(undefined);
+    mocks.clearSnapshot.mockResolvedValue(true);
+    mocks.deleteObject.mockResolvedValue(undefined);
   });
 
   test('moves an approved digest through user-account provisioning, isolated build, and publish', async () => {
@@ -80,11 +90,15 @@ describe('executeApprovedDeployment', () => {
     expect(mocks.claim).toHaveBeenCalledWith(
       expect.objectContaining({ deploymentId: 'deployment-1', userId: 'user-1', connectionId: 'connection-1' }),
     );
-    expect(mocks.build.mock.invocationCallOrder[0]).toBeLessThan(mocks.createD1.mock.invocationCallOrder[0]);
-    expect(mocks.createD1).toHaveBeenCalledOnce();
-    expect(mocks.createR2).toHaveBeenCalledOnce();
+    expect(mocks.build.mock.invocationCallOrder[0]).toBeLessThan(mocks.ensureD1.mock.invocationCallOrder[0]);
+    expect(mocks.ensureD1).toHaveBeenCalledOnce();
+    expect(mocks.ensureR2).toHaveBeenCalledOnce();
     expect(mocks.build).toHaveBeenCalledWith(
-      expect.objectContaining({ deploymentId: 'deployment-1', snapshotKey: 'snapshot-1' }),
+      expect.objectContaining({
+        deploymentId: 'deployment-1',
+        snapshotKey: 'snapshot-1',
+        expectedSourceSha256: 'a'.repeat(64),
+      }),
     );
     expect(mocks.publish).toHaveBeenCalledWith(
       expect.objectContaining({ d1DatabaseId: 'd1-id', r2BucketName: 'ghostbuild-deployment-1-storage' }),
@@ -108,8 +122,8 @@ describe('executeApprovedDeployment', () => {
         connectionId: 'connection-1',
       }),
     ).rejects.toThrow('build failed');
-    expect(mocks.createD1).not.toHaveBeenCalled();
-    expect(mocks.createR2).not.toHaveBeenCalled();
+    expect(mocks.ensureD1).not.toHaveBeenCalled();
+    expect(mocks.ensureR2).not.toHaveBeenCalled();
     expect(mocks.publish).not.toHaveBeenCalled();
     expect(mocks.transition).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -119,14 +133,63 @@ describe('executeApprovedDeployment', () => {
       }),
     );
   });
+
+  test('does not provision unused storage for a Worker-only deployment', async () => {
+    const worker = deployment('provisioning');
+    worker.plan.project = {
+      type: 'worker',
+      bindings: { ai: false, d1: false, r2: false, appAgent: false },
+    };
+    worker.plan.resources = worker.plan.resources.filter((resource) => resource.type === 'worker');
+    mocks.claim.mockResolvedValue(worker);
+    mocks.requireDeployment
+      .mockReset()
+      .mockResolvedValueOnce({ ...worker, status: 'deploying' })
+      .mockResolvedValueOnce({
+        ...worker,
+        status: 'succeeded',
+        productionUrl: 'https://ghostbuild-deployment-1.user-subdomain.workers.dev',
+      });
+    await executeApprovedDeployment({
+      env: { DB: {}, CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY: 'configured' } as unknown as Env,
+      deploymentId: 'deployment-1',
+      userId: 'user-1',
+      connectionId: 'connection-1',
+    });
+    expect(mocks.ensureD1).not.toHaveBeenCalled();
+    expect(mocks.ensureR2).not.toHaveBeenCalled();
+    expect(mocks.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ d1DatabaseId: undefined, r2BucketName: undefined }),
+    );
+  });
+
+  test('persists a retryable failure when another deployment owns the user concurrency slot', async () => {
+    mocks.claim.mockRejectedValue(new DeploymentConcurrencyLimitError());
+    await expect(
+      executeApprovedDeployment({
+        env: { DB: {} } as Env,
+        deploymentId: 'deployment-1',
+        userId: 'user-1',
+        connectionId: 'connection-1',
+      }),
+    ).rejects.toBeInstanceOf(DeploymentConcurrencyLimitError);
+    expect(mocks.transition).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedStatus: 'approved',
+        nextStatus: 'failed',
+        errorCode: 'deployment_concurrency_limited',
+      }),
+    );
+  });
 });
 
-function deployment(status: string) {
+function deployment(status: Deployment['status']): Deployment {
   return {
     id: 'deployment-1',
     chatId: 'chat-1',
     userId: 'user-1',
     connectionId: 'connection-1',
+    connectionGeneration: 1,
     snapshotKey: 'snapshot-1',
     status,
     plan: {

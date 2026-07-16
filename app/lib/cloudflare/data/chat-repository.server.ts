@@ -260,7 +260,9 @@ function prepareInsertChat(
       `INSERT INTO chats (
         id, creator_id, initial_id, url_id, description, timestamp, snapshot_key,
         last_message_rank, last_subchat_index, is_deleted
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE NOT EXISTS (SELECT 1 FROM chats WHERE initial_id = ?)
       ${ignoreActiveInitialConflict ? 'ON CONFLICT DO NOTHING' : ''}`,
     )
     .bind(
@@ -274,6 +276,7 @@ function prepareInsertChat(
       null,
       args.lastSubchatIndex ?? 0,
       0,
+      args.initialId,
     );
 }
 

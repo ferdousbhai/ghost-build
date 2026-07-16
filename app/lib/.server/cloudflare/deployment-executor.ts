@@ -1,9 +1,13 @@
+import { deleteObject } from '~/lib/cloudflare/data/object-storage.server';
 import { buildDeploymentSnapshot } from './deployment-build-executor';
 import { requireActiveCloudflareConnection } from './cloudflare-connection-repository';
 import { D1CloudflareCredentialVault } from './cloudflare-credential-vault';
 import { publishDeploymentBuild } from './deployment-publish-executor';
+import { deploymentPlanResourceName } from './deployment-plan';
 import {
   claimApprovedDeployment,
+  clearDeploymentSnapshot,
+  DeploymentConcurrencyLimitError,
   recordDeploymentResource,
   requireDeployment,
   transitionDeployment,
@@ -25,11 +29,13 @@ export async function executeApprovedDeployment(args: {
       deploymentId: args.deploymentId,
       userId: args.userId,
       connectionId: args.connectionId,
+      connectionGeneration: (await requireActiveCloudflareConnection(args.env.DB, args.connectionId)).generation,
     });
     phase = 'provisioning';
     if (!deployment.snapshotKey) {
       throw new Error('Deployment source snapshot is unavailable.');
     }
+    const snapshotKey = deployment.snapshotKey;
     await transitionDeployment({
       db: args.env.DB,
       deploymentId: deployment.id,
@@ -40,7 +46,8 @@ export async function executeApprovedDeployment(args: {
     const build = await buildDeploymentSnapshot({
       env: args.env,
       deploymentId: deployment.id,
-      snapshotKey: deployment.snapshotKey,
+      snapshotKey,
+      expectedSourceSha256: deployment.plan.sourceSha256,
     });
 
     await transitionDeployment({
@@ -54,27 +61,39 @@ export async function executeApprovedDeployment(args: {
       throw new Error('Cloudflare credential encryption is not configured.');
     }
     const connection = await requireActiveCloudflareConnection(args.env.DB, deployment.connectionId);
-    if (connection.userId !== args.userId || !connection.credentialHandle) {
+    if (
+      connection.userId !== args.userId ||
+      connection.generation !== deployment.connectionGeneration ||
+      !connection.credentialHandle
+    ) {
       throw new Error('Cloudflare connection is unavailable.');
     }
     const accessToken = await D1CloudflareCredentialVault.fromEnv(args.env).resolve(connection.credentialHandle);
     const accountApi = new UserCloudflareAccountApi(connection.accountId, accessToken);
-    const d1 = await accountApi.createD1ForPlan(deployment.plan);
-    await recordDeploymentResource({
-      db: args.env.DB,
-      deploymentId: deployment.id,
-      resourceType: 'd1',
-      logicalName: 'DB',
-      providerResourceId: d1.id,
-    });
-    const r2 = await accountApi.createR2ForPlan(deployment.plan);
-    await recordDeploymentResource({
-      db: args.env.DB,
-      deploymentId: deployment.id,
-      resourceType: 'r2',
-      logicalName: 'APP_STORAGE',
-      providerResourceId: r2.id,
-    });
+    const d1 = deploymentPlanResourceName(deployment.plan, 'd1', 'DB')
+      ? await accountApi.ensureD1ForPlan(deployment.plan)
+      : null;
+    if (d1) {
+      await recordDeploymentResource({
+        db: args.env.DB,
+        deploymentId: deployment.id,
+        resourceType: 'd1',
+        logicalName: 'DB',
+        providerResourceId: d1.id,
+      });
+    }
+    const r2 = deploymentPlanResourceName(deployment.plan, 'r2', 'APP_STORAGE')
+      ? await accountApi.ensureR2ForPlan(deployment.plan)
+      : null;
+    if (r2) {
+      await recordDeploymentResource({
+        db: args.env.DB,
+        deploymentId: deployment.id,
+        resourceType: 'r2',
+        logicalName: 'APP_STORAGE',
+        providerResourceId: r2.id,
+      });
+    }
     const workersSubdomain = await accountApi.getWorkersSubdomain();
 
     await transitionDeployment({
@@ -90,8 +109,8 @@ export async function executeApprovedDeployment(args: {
       deployment,
       connection,
       build,
-      d1DatabaseId: d1.id,
-      r2BucketName: r2.name,
+      d1DatabaseId: d1?.id,
+      r2BucketName: r2?.name,
     });
     const workerName = deployment.plan.resources.find(
       (resource) => resource.type === 'worker' && resource.logicalName === 'app',
@@ -113,8 +132,28 @@ export async function executeApprovedDeployment(args: {
       nextStatus: 'succeeded',
       productionUrl: `https://${workerName}.${workersSubdomain}.workers.dev`,
     });
+    try {
+      await deleteObject(args.env, snapshotKey);
+      await clearDeploymentSnapshot({
+        db: args.env.DB,
+        deploymentId: deployment.id,
+        snapshotKey,
+      });
+    } catch (error) {
+      console.error('Unable to release successful deployment snapshot', deployment.id, error);
+    }
     return requireDeployment(args.env.DB, deployment.id);
   } catch (error) {
+    if (phase === 'approved' && error instanceof DeploymentConcurrencyLimitError) {
+      await transitionDeployment({
+        db: args.env.DB,
+        deploymentId: args.deploymentId,
+        expectedStatus: 'approved',
+        nextStatus: 'failed',
+        errorCode: 'deployment_concurrency_limited',
+        errorMessage: error.message,
+      }).catch((transitionError) => console.error('Unable to persist deployment concurrency failure', transitionError));
+    }
     if (phase !== 'approved') {
       await transitionDeployment({
         db: args.env.DB,

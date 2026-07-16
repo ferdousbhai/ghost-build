@@ -13,6 +13,7 @@ import {
 } from '~/lib/.server/cloudflare/cloudflare-orchestrator';
 
 const requestedCapabilities = ['workers', 'd1', 'r2', 'durable_objects', 'workers_ai'] as const;
+export const CLOUDFLARE_CONNECTION_CALLBACK_METHOD = 'GET' as const;
 const callbackPayloadSchema = z
   .object({
     state: z.string().uuid(),
@@ -114,6 +115,10 @@ export async function completeCloudflareConnectionAction(args: {
   orchestrator?: CloudflareOrchestrator;
 }): Promise<Response> {
   try {
+    const authSession = await getAuth(args.env, args.request).api.getSession({ headers: args.request.headers });
+    if (!authSession) {
+      return Response.json({ error: 'Authentication required.' }, { status: 401 });
+    }
     const { state, callbackUrl } = await readCloudflareCallback(args.request);
     const connectionSession = await args.env.DB.prepare(
       `SELECT user_id, provider_session_id, expires_at
@@ -123,6 +128,9 @@ export async function completeCloudflareConnectionAction(args: {
       .bind(state)
       .first<{ user_id: string; provider_session_id: string; expires_at: number }>();
     if (!connectionSession) {
+      return Response.json({ error: 'Cloudflare connection session not found.' }, { status: 404 });
+    }
+    if (connectionSession.user_id !== authSession.user.id) {
       return Response.json({ error: 'Cloudflare connection session not found.' }, { status: 404 });
     }
     if (connectionSession.expires_at <= Date.now()) {

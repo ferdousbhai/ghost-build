@@ -52,7 +52,7 @@ describe('runDeploy guest project check', () => {
       if (path === 'src/routes/index.tsx') {
         return '<p>Ghostbuild on Cloudflare</p><h1>Start with a durable AI agent.</h1><h2>App Agent</h2>';
       }
-      return 'export default { async scheduled() { console.log("tick"); } } satisfies ExportedHandler<Env>;';
+      return 'export default { async fetch() { return new Response("ok"); } } satisfies ExportedHandler<Env>;';
     });
 
     const result = await runDeploy({

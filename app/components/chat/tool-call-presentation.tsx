@@ -171,7 +171,9 @@ function packageTitle(invocation: GhostbuildToolInvocation): ReactNode {
   }
   const args = loggingSafeParse(npmInstallToolParameters, invocation.args);
   return args.success ? (
-    <span className="font-mono text-sm">{`pnpm add ${args.data.packages}`}</span>
+    <span className="font-mono text-sm">
+      {args.data.mode === 'sync-lockfile' ? 'pnpm install --lockfile-only' : `pnpm add ${args.data.packages}`}
+    </span>
   ) : (
     'Failed to install dependencies'
   );

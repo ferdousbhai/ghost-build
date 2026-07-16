@@ -18,7 +18,7 @@ import { getFileUpdateCounter } from '~/lib/stores/fileUpdateCounter';
 import { chatSyncState } from './chatSyncState';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 
-const TEMPLATE_URL = '/template-snapshot-b108e040.bin';
+const TEMPLATE_URL = '/template-snapshot-d409e423.bin';
 const logger = createScopedLogger('ContainerSetup');
 const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)));
 

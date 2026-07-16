@@ -53,6 +53,12 @@ describe('npmInstall tool parameters', () => {
     expect(parsed.error?.issues[0]?.message).toBe('pnpm flags are not allowed in npmInstall packages: -D');
   });
 
+  it('allows the agent to synchronize a lockfile without accepting arbitrary pnpm flags', () => {
+    expect(npmInstallToolParameters.parse({ mode: 'sync-lockfile' })).toEqual({ mode: 'sync-lockfile' });
+    expect(npmInstallToolParameters.safeParse({ mode: 'sync-lockfile', packages: 'date-fns' }).success).toBe(false);
+    expect(npmInstallToolParameters.safeParse({ mode: 'add' }).success).toBe(false);
+  });
+
   it('splits package specs by whitespace', () => {
     expect(splitPackageSpecs('  clsx\nlucide-react\tdate-fns  ')).toEqual(['clsx', 'lucide-react', 'date-fns']);
   });

@@ -29,10 +29,11 @@ Optional bindings include `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIEN
 
 User-account connection uses Cloudflare's public OAuth Authorization Code flow with PKCE. Create a server-side OAuth
 client in **Manage Account → OAuth clients**, register
-`https://<ghostbuild-origin>/connect/return`, verify the client domain, and make the client public.
-Ghostbuild requests Cloudflare's supported `form_post` response mode so authorization codes are delivered in the POST
-body rather than exposed in browser URLs. Callback completion is bound to the one-time server-side state and PKCE
-verifier, so it does not depend on a cross-site browser session cookie.
+`https://<ghostbuild-origin>/connect/return`, verify the client domain, and make the client public. Ghostbuild uses the
+standard top-level GET authorization-code callback. The callback requires the authenticated
+Ghostbuild session that initiated the connection and verifies that it owns the one-time server-side state before
+exchanging the code with the PKCE verifier. This identity binding prevents a Cloudflare authorization completed in a
+different browser session from being attached to the wrong Ghostbuild account.
 Configure response type **Code**, grant types **Authorization Code** and **Refresh Token**, and token authentication
 method **Client Secret Basic**. Select only the account permissions needed by the generated stack: Account Settings Read, Workers Scripts
 Write, D1 Write, Workers R2 Storage Write, and Workers AI Read. Cloudflare's live OAuth scope catalog currently assigns

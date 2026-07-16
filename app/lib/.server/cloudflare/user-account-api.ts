@@ -31,6 +31,16 @@ export class UserCloudflareAccountApi {
     return { id: result.uuid, name: result.name };
   }
 
+  async ensureD1ForPlan(plan: DeploymentPlan): Promise<{ id: string; name: string }> {
+    const resourceName = requirePlanResourceName(plan, 'd1', 'DB');
+    const databases = await this.call<Array<{ uuid?: string; name?: string }>>(
+      `/d1/database?name=${encodeURIComponent(resourceName)}`,
+      { method: 'GET' },
+    );
+    const existing = databases.find((database) => database.name === resourceName && database.uuid);
+    return existing?.uuid ? { id: existing.uuid, name: resourceName } : this.createD1ForPlan(plan);
+  }
+
   async createR2ForPlan(plan: DeploymentPlan): Promise<{ id: string; name: string }> {
     const resourceName = requirePlanResourceName(plan, 'r2', 'APP_STORAGE');
     const result = await this.call<{ name?: string }>('/r2/buckets', {
@@ -43,6 +53,14 @@ export class UserCloudflareAccountApi {
     return { id: result.name, name: result.name };
   }
 
+  async ensureR2ForPlan(plan: DeploymentPlan): Promise<{ id: string; name: string }> {
+    const resourceName = requirePlanResourceName(plan, 'r2', 'APP_STORAGE');
+    const existing = await this.callOptional<{ name?: string }>(`/r2/buckets/${encodeURIComponent(resourceName)}`, {
+      method: 'GET',
+    });
+    return existing?.name === resourceName ? { id: resourceName, name: resourceName } : this.createR2ForPlan(plan);
+  }
+
   async getWorkersSubdomain(): Promise<string> {
     const result = await this.call<{ subdomain?: string }>('/workers/subdomain', { method: 'GET' });
     if (!result.subdomain || !/^[a-z0-9-]+$/.test(result.subdomain)) {
@@ -52,6 +70,14 @@ export class UserCloudflareAccountApi {
   }
 
   private async call<T>(path: string, init: RequestInit): Promise<T> {
+    const result = await this.callOptional<T>(path, init);
+    if (result === null) {
+      throw new CloudflareAccountApiError('Cloudflare resource was not found.');
+    }
+    return result;
+  }
+
+  private async callOptional<T>(path: string, init: RequestInit): Promise<T | null> {
     const execute = this.request;
     const response = await execute(`${API_ROOT}/accounts/${encodeURIComponent(this.accountId)}${path}`, {
       ...init,
@@ -62,6 +88,9 @@ export class UserCloudflareAccountApi {
       },
     });
     const payload = (await response.json().catch(() => null)) as CloudflareEnvelope<T> | null;
+    if (response.status === 404) {
+      return null;
+    }
     if (!response.ok || payload?.success !== true || payload.result === undefined) {
       const providerMessage = payload?.errors?.find((error) => error.message)?.message;
       throw new CloudflareAccountApiError(providerMessage || `Cloudflare API request failed (${response.status}).`);

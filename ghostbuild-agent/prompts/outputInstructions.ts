@@ -18,7 +18,7 @@ export function outputInstructions() {
         content, or overwrite a file with empty content unless the user explicitly requests an empty file.
       - For a new browser app, site, page, visual tool, game, tracker, or dashboard, the primary user-facing surface is
         /home/project/src/routes/index.tsx. Replace that route with the requested experience before validation.
-      - For a Worker-only request, implement the requested fetch, scheduled, queue, email, tail, or other handler in
+      - For a supported Worker-only request, implement the requested fetch handler in
         /home/project/src/server.ts and its Cloudflare configuration. Do not invent a browser UI just to modify a route.
       - Never create placeholder, check, marker, or .ghost-* files to satisfy filesystem work.
       - Consider the affected routes, dependencies, configuration, data flow, and existing conventions before writing.

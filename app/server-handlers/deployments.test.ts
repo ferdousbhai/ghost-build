@@ -4,12 +4,16 @@ const mocks = vi.hoisted(() => ({
   resolveIdentity: vi.fn(),
   findConnection: vi.fn(),
   buildPlan: vi.fn(),
-  buildPlanFromSource: vi.fn(),
   createDeployment: vi.fn(),
+  prepareRetry: vi.fn(),
   approveDeployment: vi.fn(),
   requireDeployment: vi.fn(),
   putObject: vi.fn(),
   deleteObject: vi.fn(),
+  listExpiredSnapshots: vi.fn(),
+  clearSnapshot: vi.fn(),
+  claimOldestReplaceableSnapshot: vi.fn(),
+  claimSnapshotForRelease: vi.fn(),
 }));
 
 vi.mock('~/lib/.server/agent-request-identity', () => ({
@@ -20,13 +24,17 @@ vi.mock('~/lib/.server/cloudflare/cloudflare-connection-repository', () => ({
 }));
 vi.mock('~/lib/.server/cloudflare/deployment-plan', () => ({
   buildDeploymentPlan: mocks.buildPlan,
-  buildDeploymentPlanFromSource: mocks.buildPlanFromSource,
 }));
 vi.mock('~/lib/.server/cloudflare/deployment-repository', async (importOriginal) => ({
   ...(await importOriginal()),
   createDeployment: mocks.createDeployment,
+  prepareDeploymentRetry: mocks.prepareRetry,
   approveDeployment: mocks.approveDeployment,
   requireDeploymentForUser: mocks.requireDeployment,
+  listExpiredDeploymentSnapshots: mocks.listExpiredSnapshots,
+  clearDeploymentSnapshot: mocks.clearSnapshot,
+  claimOldestReplaceableDeploymentSnapshot: mocks.claimOldestReplaceableSnapshot,
+  claimDeploymentSnapshotForRelease: mocks.claimSnapshotForRelease,
 }));
 vi.mock('~/lib/cloudflare/data/object-storage.server', () => ({
   putObject: mocks.putObject,
@@ -64,6 +72,7 @@ function deployment(status = 'awaiting_approval') {
     chatId: 'chat-primary',
     userId: 'user-1',
     connectionId: 'connection-1',
+    connectionGeneration: 1,
     snapshotKey: 'deployment-snapshots/key',
     status,
     plan,
@@ -82,11 +91,14 @@ describe('deployment handlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.resolveIdentity.mockResolvedValue({ userId: 'user-1', ownerId: 'user-1', billingSubjectKey: 'user:user-1' });
-    mocks.findConnection.mockResolvedValue({ id: 'connection-1', status: 'active' });
+    mocks.findConnection.mockResolvedValue({ id: 'connection-1', status: 'active', generation: 1 });
+    mocks.listExpiredSnapshots.mockResolvedValue([]);
+    mocks.claimOldestReplaceableSnapshot.mockResolvedValue(null);
+    mocks.claimSnapshotForRelease.mockImplementation(async (snapshot) => snapshot);
     mocks.buildPlan.mockResolvedValue({ plan, digest: 'a'.repeat(64) });
-    mocks.buildPlanFromSource.mockResolvedValue({ plan, digest: 'a'.repeat(64) });
     mocks.putObject.mockResolvedValue('deployment-snapshots/key');
     mocks.createDeployment.mockResolvedValue(deployment());
+    mocks.prepareRetry.mockResolvedValue(deployment());
     mocks.approveDeployment.mockResolvedValue(deployment('approved'));
   });
 
@@ -118,6 +130,17 @@ describe('deployment handlers', () => {
     expect(await response.json()).toMatchObject({
       deployment: { status: 'awaiting_approval', planDigest: 'a'.repeat(64) },
     });
+  });
+
+  it('supersedes the oldest retained failure so a corrected fourth plan is accepted', async () => {
+    mocks.claimOldestReplaceableSnapshot.mockResolvedValue({
+      deploymentId: 'failed-deployment-1',
+      snapshotKey: 'deployment-snapshots/failed-1',
+    });
+    const response = await createDeploymentPlanAction({ request: createRequest(), env: env() });
+    expect(response.status).toBe(201);
+    expect(mocks.deleteObject).toHaveBeenCalledWith(expect.anything(), 'deployment-snapshots/failed-1');
+    expect(mocks.clearSnapshot).toHaveBeenCalledWith(expect.objectContaining({ deploymentId: 'failed-deployment-1' }));
   });
 
   it('requires explicit billing and no-auto-upgrade confirmations when approving', async () => {
@@ -161,25 +184,48 @@ describe('deployment handlers', () => {
     );
   });
 
-  it('starts approved execution as an idempotent background Workflow', async () => {
+  it('deduplicates repeated execution requests within one approved Workflow attempt', async () => {
     const testEnv = env();
-    mocks.requireDeployment.mockResolvedValue(deployment('approved'));
+    mocks.requireDeployment.mockResolvedValue({ ...deployment('approved'), approvedAt: 123 });
+    const execute = () =>
+      deploymentAction({
+        request: new Request('https://ghostbuild.dev/api/deployments/deployment-1/execute', { method: 'POST' }),
+        env: testEnv,
+        deploymentId: 'deployment-1',
+        operation: 'execute',
+      });
+    await expect(execute()).resolves.toMatchObject({ status: 202 });
+    await expect(execute()).resolves.toMatchObject({ status: 202 });
+    const expectedBatch = [
+      {
+        id: 'deployment-1-123',
+        params: { deploymentId: 'deployment-1', userId: 'user-1', connectionId: 'connection-1' },
+      },
+    ];
+    expect(testEnv.DeploymentWorkflow?.createBatch).toHaveBeenNthCalledWith(1, expectedBatch);
+    expect(testEnv.DeploymentWorkflow?.createBatch).toHaveBeenNthCalledWith(2, expectedBatch);
+  });
+
+  it('invalidates approval when reconnecting to a different Cloudflare account', async () => {
+    const testEnv = env();
+    mocks.requireDeployment.mockResolvedValue({ ...deployment('approved'), approvedAt: 123 });
+    mocks.findConnection.mockResolvedValue({
+      id: 'connection-1',
+      accountId: 'account-2',
+      status: 'active',
+      generation: 2,
+    });
     const response = await deploymentAction({
       request: new Request('https://ghostbuild.dev/api/deployments/deployment-1/execute', { method: 'POST' }),
       env: testEnv,
       deploymentId: 'deployment-1',
       operation: 'execute',
     });
-    expect(response.status).toBe(202);
-    expect(testEnv.DeploymentWorkflow?.createBatch).toHaveBeenCalledWith([
-      {
-        id: 'deployment-1',
-        params: { deploymentId: 'deployment-1', userId: 'user-1', connectionId: 'connection-1' },
-      },
-    ]);
+    expect(response.status).toBe(409);
+    expect(testEnv.DeploymentWorkflow?.createBatch).not.toHaveBeenCalled();
   });
 
-  it('prepares a fresh unapproved plan from the immutable source after a failed deployment', async () => {
+  it('reuses the immutable plan and resource names after a failed deployment', async () => {
     mocks.requireDeployment.mockResolvedValue({
       ...deployment('failed'),
       errorCode: 'isolated_build_failed',
@@ -193,17 +239,14 @@ describe('deployment handlers', () => {
     });
 
     expect(response.status).toBe(201);
-    expect(mocks.buildPlanFromSource).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceSha256: plan.sourceSha256 }),
-    );
-    expect(mocks.createDeployment).toHaveBeenCalledWith(
+    expect(mocks.prepareRetry).toHaveBeenCalledWith(
       expect.objectContaining({
-        chatId: 'chat-primary',
+        deploymentId: 'deployment-1',
         userId: 'user-1',
         connectionId: 'connection-1',
-        snapshotKey: 'deployment-snapshots/key',
       }),
     );
+    expect(mocks.createDeployment).not.toHaveBeenCalled();
     expect(await response.json()).toMatchObject({ deployment: { status: 'awaiting_approval' } });
   });
 });

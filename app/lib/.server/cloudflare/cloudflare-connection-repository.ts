@@ -11,6 +11,7 @@ export type CloudflareConnection = {
   aiBillingEnabled: boolean;
   connectedAt: number | null;
   updatedAt: number;
+  generation: number;
 };
 
 type CloudflareConnectionRow = {
@@ -24,6 +25,7 @@ type CloudflareConnectionRow = {
   ai_billing_enabled: number;
   connected_at: number | null;
   updated_at: number;
+  connection_generation: number;
 };
 
 export async function findCloudflareConnectionForUser(
@@ -33,7 +35,7 @@ export async function findCloudflareConnectionForUser(
   const row = await db
     .prepare(
       `SELECT id, user_id, account_id, account_name, status, credential_handle,
-              granted_scopes_json, ai_billing_enabled, connected_at, updated_at
+              granted_scopes_json, ai_billing_enabled, connected_at, updated_at, connection_generation
        FROM cloudflare_connections
        WHERE user_id = ?`,
     )
@@ -49,7 +51,7 @@ export async function requireActiveCloudflareConnection(
   const row = await db
     .prepare(
       `SELECT id, user_id, account_id, account_name, status, credential_handle,
-              granted_scopes_json, ai_billing_enabled, connected_at, updated_at
+              granted_scopes_json, ai_billing_enabled, connected_at, updated_at, connection_generation
        FROM cloudflare_connections
        WHERE id = ? AND status = 'active'`,
     )
@@ -87,6 +89,7 @@ export async function activateCloudflareConnection(args: {
         granted_scopes_json = excluded.granted_scopes_json,
         ai_billing_enabled = excluded.ai_billing_enabled,
         connected_at = excluded.connected_at,
+        connection_generation = cloudflare_connections.connection_generation + 1,
         updated_at = excluded.updated_at`,
     )
     .bind(
@@ -121,6 +124,7 @@ function connectionFromRow(row: CloudflareConnectionRow): CloudflareConnection {
     aiBillingEnabled: row.ai_billing_enabled === 1,
     connectedAt: row.connected_at,
     updatedAt: row.updated_at,
+    generation: row.connection_generation,
   };
 }
 

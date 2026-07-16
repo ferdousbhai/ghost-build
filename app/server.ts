@@ -15,6 +15,7 @@ import { versionAction } from './server-handlers/version';
 import { clientTelemetryAction } from './server-handlers/client-telemetry';
 import { feedbackAction } from './server-handlers/feedback';
 import {
+  CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
   cloudflareConnectionStatusAction,
   completeCloudflareConnectionAction,
   startCloudflareConnectionAction,
@@ -77,12 +78,8 @@ const exactRoutes: Record<string, ServerRoute> = {
     method: 'POST',
     handler: (request, env) => startCloudflareConnectionAction({ request, env }),
   },
-  '/api/cloudflare/connection/callback': {
-    method: 'GET',
-    handler: (request, env) => completeCloudflareConnectionAction({ request, env }),
-  },
   '/connect/return': {
-    method: 'POST',
+    method: CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
     handler: (request, env) => completeCloudflareConnectionAction({ request, env }),
   },
   '/api/ai/allowance': {
