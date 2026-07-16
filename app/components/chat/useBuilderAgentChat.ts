@@ -213,7 +213,7 @@ async function showAiAllowanceReminder(): Promise<void> {
   }
 }
 
-async function refreshProjectMetadata(): Promise<void> {
+async function refreshProjectMetadata(attempt = 0): Promise<void> {
   const sessionId = sessionIdStore.get();
   const chatId = chatIdStore.get();
   if (typeof sessionId !== 'string' || !chatId) {
@@ -226,6 +226,8 @@ async function refreshProjectMetadata(): Promise<void> {
     ]);
     if (chat?.description) {
       descriptionStore.set(chat.description);
+    } else if (attempt < 2) {
+      window.setTimeout(() => void refreshProjectMetadata(attempt + 1), (attempt + 1) * 1_000);
     }
   } catch (error) {
     logger.debug('Unable to refresh generated project title', error);

@@ -192,11 +192,13 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       const preparedContext = await this.contextWindow.prepare(messages, contextScope, turnContext);
       const accountCredentials = await getUserWorkersAiCredentials(this.env, this.userId);
       if (firstPrompt) {
-        await this.generateInitialProjectTitle(
-          chatInitialId,
-          messageText(firstPrompt),
-          accountCredentials,
-          this.billingSubjectKey,
+        this.ctx.waitUntil(
+          this.generateInitialProjectTitle(
+            chatInitialId,
+            messageText(firstPrompt),
+            accountCredentials,
+            this.billingSubjectKey,
+          ),
         );
       }
       console.info({
