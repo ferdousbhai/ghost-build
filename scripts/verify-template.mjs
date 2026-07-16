@@ -67,12 +67,16 @@ export async function verifyWorkerTemplateProfile() {
     const stalePackage = JSON.parse(await readFile(stalePackagePath, 'utf8'));
     stalePackage.ghostbuild = { projectType: 'worker' };
     await writeFile(stalePackagePath, `${JSON.stringify(stalePackage, null, 2)}\n`);
+    // Isolate this assertion to stale web scripts; production typecheck generates
+    // the real binding declarations before stack verification.
+    await writeFile(join(tempDir, 'worker-configuration.d.ts'), 'interface Env {}\n');
     requireFailure(tempDir, ['run', 'verify:stack']);
+    await rm(join(tempDir, 'worker-configuration.d.ts'), { force: true });
     await convertToWorkerProfile(tempDir);
     run(tempDir, ['install', '--lockfile-only']);
     run(tempDir, ['install', '--frozen-lockfile']);
-    run(tempDir, ['run', 'verify:stack']);
     run(tempDir, ['run', 'typecheck']);
+    run(tempDir, ['run', 'verify:stack']);
     run(tempDir, ['run', 'lint']);
     run(tempDir, ['run', 'build']);
     if (!existsSync(join(tempDir, 'dist/worker/server.js'))) {
