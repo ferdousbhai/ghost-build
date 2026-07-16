@@ -27,6 +27,9 @@ import { getWorkersAiToolContext } from '~/lib/.server/llm/workers-ai-tools';
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import { latestPendingDeploymentPlanMarker } from './deployment-continuation';
+import { generateProjectTitle } from '~/lib/.server/llm/project-title';
+import { setGeneratedDescriptionIfMissing } from '~/lib/cloudflare/data/chat-service.server';
+import { messageText } from 'ghostbuild-agent/ai-compat';
 
 const logger = createScopedLogger('BuilderAgent');
 const STALE_CHAT_RECOVERY_MS = 15 * 60 * 1000;
@@ -72,6 +75,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
 
   private readonly turnStore = new BuilderTurnStore(this);
   private billingSubjectKey: string | null = null;
+  private ownerId: string | null = null;
   private userId: string | undefined;
   private readonly contextWindow = new ContextWindowManager({
     repository: new DurableObjectContextCompactionRepository(this),
@@ -88,6 +92,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
 
   async onStart(props?: BuilderAgentProps) {
     this.billingSubjectKey = props?.billingSubjectKey ?? null;
+    this.ownerId = props?.ownerId ?? null;
     this.userId = props?.userId;
     this.turnStore.initialize();
     this.contextWindow.initialize();
@@ -160,6 +165,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     const turnContext = parseTurnContext(body.turnContext);
     const firstUserMessage =
       !options?.continuation && messages.filter((message: { role?: string }) => message.role === 'user').length === 1;
+    const firstPrompt = firstUserMessage ? messages.find((message) => message.role === 'user') : undefined;
     const turn = createBuilderTurn({
       requestId: options?.requestId,
       chatInitialId,
@@ -185,6 +191,14 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     try {
       const preparedContext = await this.contextWindow.prepare(messages, contextScope, turnContext);
       const accountCredentials = await getUserWorkersAiCredentials(this.env, this.userId);
+      if (firstPrompt) {
+        await this.generateInitialProjectTitle(
+          chatInitialId,
+          messageText(firstPrompt),
+          accountCredentials,
+          this.billingSubjectKey,
+        );
+      }
       console.info({
         event: 'builder_context_prepared',
         requestId: options?.requestId,
@@ -255,6 +269,34 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       });
     } catch (error) {
       logger.warn('Unable to stash Ghostbuild chat turn recovery context', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async generateInitialProjectTitle(
+    chatInitialId: string,
+    firstPrompt: string,
+    accountCredentials: Awaited<ReturnType<typeof getUserWorkersAiCredentials>>,
+    billingSubjectKey: string,
+  ): Promise<void> {
+    if (!this.ownerId) {
+      return;
+    }
+    try {
+      const title = await generateProjectTitle(this.env, firstPrompt, accountCredentials, billingSubjectKey);
+      if (!title) {
+        return;
+      }
+      const saved = await setGeneratedDescriptionIfMissing(this.env.DB, {
+        sessionId: this.ownerId,
+        id: chatInitialId,
+        description: title,
+      });
+      logger.info(saved ? 'Generated initial project title' : 'Kept existing project title', { chatInitialId });
+    } catch (error) {
+      logger.warn('Project title generation failed; keeping first-prompt fallback', {
+        chatInitialId,
         error: error instanceof Error ? error.message : String(error),
       });
     }

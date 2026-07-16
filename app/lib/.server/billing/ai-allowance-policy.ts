@@ -24,6 +24,10 @@ const GLM_5_2_NANODOLLARS_PER_INPUT_TOKEN = 1_400;
 const GLM_5_2_NANODOLLARS_PER_CACHED_INPUT_TOKEN = 260;
 const GLM_5_2_NANODOLLARS_PER_OUTPUT_TOKEN = 4_400;
 
+// @cf/meta/llama-3.2-1b-instruct prices as of 2026-07-16.
+const LLAMA_3_2_1B_NANODOLLARS_PER_INPUT_TOKEN = 27;
+const LLAMA_3_2_1B_NANODOLLARS_PER_OUTPUT_TOKEN = 201;
+
 export function glm52CostNanodollars(usage: WorkersAiTokenUsage): number {
   const inputTokens = nonnegativeInteger(usage.inputTokens, 'inputTokens');
   const cachedInputTokens = Math.min(
@@ -37,6 +41,14 @@ export function glm52CostNanodollars(usage: WorkersAiTokenUsage): number {
     uncachedInputTokens * GLM_5_2_NANODOLLARS_PER_INPUT_TOKEN +
     cachedInputTokens * GLM_5_2_NANODOLLARS_PER_CACHED_INPUT_TOKEN +
     outputTokens * GLM_5_2_NANODOLLARS_PER_OUTPUT_TOKEN
+  );
+}
+
+export function llama32_1bCostNanodollars(usage: WorkersAiTokenUsage): number {
+  const inputTokens = nonnegativeInteger(usage.inputTokens, 'inputTokens');
+  const outputTokens = nonnegativeInteger(usage.outputTokens, 'outputTokens');
+  return (
+    inputTokens * LLAMA_3_2_1B_NANODOLLARS_PER_INPUT_TOKEN + outputTokens * LLAMA_3_2_1B_NANODOLLARS_PER_OUTPUT_TOKEN
   );
 }
 

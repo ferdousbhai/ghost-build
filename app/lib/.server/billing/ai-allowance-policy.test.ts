@@ -3,6 +3,7 @@ import {
   GHOSTBUILD_DAILY_AI_ALLOWANCE_NANODOLLARS,
   aiAllowanceStatus,
   glm52CostNanodollars,
+  llama32_1bCostNanodollars,
   nextAiAllowanceReminder,
 } from './ai-allowance-policy';
 
@@ -15,6 +16,10 @@ describe('AI allowance policy', () => {
 
   it('caps cached input at total input usage', () => {
     expect(glm52CostNanodollars({ inputTokens: 10, cachedInputTokens: 20, outputTokens: 0 })).toBe(10 * 260);
+  });
+
+  it('prices the small project-title model separately from the builder model', () => {
+    expect(llama32_1bCostNanodollars({ inputTokens: 1_000, outputTokens: 100 })).toBe(1_000 * 27 + 100 * 201);
   });
 
   it('encourages Cloudflare connection at 50% and reminds again at 90%', () => {

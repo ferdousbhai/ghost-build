@@ -90,6 +90,22 @@ export async function setDescription(
   return null;
 }
 
+export async function setGeneratedDescriptionIfMissing(
+  db: D1Database,
+  args: { sessionId: string; id: string; description: string },
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE chats
+       SET description = ?
+       WHERE creator_id = ? AND (initial_id = ? OR url_id = ?) AND is_deleted = 0
+         AND NULLIF(TRIM(description), '') IS NULL`,
+    )
+    .bind(args.description, args.sessionId, args.id, args.id)
+    .run();
+  return result.meta.changes > 0;
+}
+
 export async function removeChat(db: D1Database, args: { sessionId: string; id: string }) {
   const chat = await findChat(db, { id: args.id, sessionId: args.sessionId });
   if (chat) {

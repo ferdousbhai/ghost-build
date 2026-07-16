@@ -7,7 +7,7 @@ import type { BuilderAgent, BuilderAgentState } from '~/agents/builder-agent';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { ToolCallAbortedError } from '~/lib/stores/workbench-artifacts';
 import { chatSyncState } from '~/lib/stores/startup/chatSyncState';
-import { getAuthToken } from '~/lib/stores/sessionId';
+import { getAuthToken, sessionIdStore } from '~/lib/stores/sessionId';
 import { captureMessage } from '~/lib/telemetry.client';
 import { ChatContextManager } from 'ghostbuild-agent/ChatContextManager';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
@@ -20,6 +20,11 @@ import { waitForAgentSocketOpen } from './agent-connection';
 import { deliverToolOutput } from './tool-output-delivery';
 import { toast } from 'sonner';
 import { WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
+import { refreshChatHistory } from '~/lib/cloudflare/chat-history-db';
+import { chatIdStore } from '~/lib/stores/chatId';
+import { executeDataOperation } from '~/lib/cloudflare/client';
+import { api } from '~/lib/cloudflare/data-api';
+import { description as descriptionStore } from '~/lib/stores/description';
 
 const logger = createScopedLogger('BuilderAgentChat');
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
@@ -118,6 +123,7 @@ export function useBuilderAgentChat(args: {
         );
       }
       void showAiAllowanceReminder();
+      void refreshProjectMetadata();
     },
     onFinish: ({ finishReason }) => {
       if (finishReason === 'stop') {
@@ -125,6 +131,7 @@ export function useBuilderAgentChat(args: {
       }
       logger.debug('Finished streaming');
       void showAiAllowanceReminder();
+      void refreshProjectMetadata();
     },
   });
   stopRef.current = chat.stop;
@@ -203,6 +210,25 @@ async function showAiAllowanceReminder(): Promise<void> {
     );
   } catch (error) {
     logger.debug('Unable to load AI allowance status', error);
+  }
+}
+
+async function refreshProjectMetadata(): Promise<void> {
+  const sessionId = sessionIdStore.get();
+  const chatId = chatIdStore.get();
+  if (typeof sessionId !== 'string' || !chatId) {
+    return;
+  }
+  try {
+    const [, chat] = await Promise.all([
+      refreshChatHistory(sessionId),
+      executeDataOperation(api.messages.get, { id: chatId, sessionId }),
+    ]);
+    if (chat?.description) {
+      descriptionStore.set(chat.description);
+    }
+  } catch (error) {
+    logger.debug('Unable to refresh generated project title', error);
   }
 }
 
