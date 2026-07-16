@@ -86,30 +86,6 @@ html.dark {
   padding-top: clamp(24px, 7vh, 72px);
 }
 
-.ghost-home-kicker-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  margin-bottom: 30px;
-}
-
-.ghost-home-kicker-line {
-  width: 28px;
-  height: 3px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--ghost-home-accent-2), var(--ghost-home-accent));
-}
-
-.ghost-home-subeyebrow {
-  color: var(--ghost-home-soft);
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1.2;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
 .ghost-home-title {
   max-width: 780px;
   color: var(--ghost-home-ink);
@@ -236,10 +212,6 @@ html.dark {
 
   .ghost-home-copy {
     padding-top: 6px;
-  }
-
-  .ghost-home-kicker-row {
-    margin-bottom: 18px;
   }
 
   .ghost-home-title {

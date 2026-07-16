@@ -78,7 +78,7 @@ export function Menu({ children, buttonProps }: MenuProps) {
             role="menu"
             aria-label={triggerLabel ?? triggerTitle}
             className={classNames(
-              'fixed top-[calc(var(--header-height)+0.5rem)] right-5 z-50 min-w-56 rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-2 text-content-primary shadow-xl outline-none',
+              'fixed top-[calc(var(--header-height)+0.5rem)] right-4 z-50 min-w-52 overflow-hidden rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-1.5 text-content-primary shadow-[0_18px_50px_rgba(0,0,0,0.28)] outline-none backdrop-blur-xl sm:right-5',
               isOpen ? 'block' : 'hidden',
             )}
             onClick={() => setIsOpen(false)}
@@ -96,7 +96,7 @@ export function MenuItem({ children, action }: { children: ReactNode; action?: (
     <button
       type="button"
       role="menuitem"
-      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm outline-none hover:bg-bolt-elements-background-depth-2 focus-visible:bg-bolt-elements-background-depth-2"
+      className="flex min-h-10 w-full items-center gap-2.5 rounded-xl border-0 bg-transparent px-3 py-2 text-left text-sm font-medium text-content-primary outline-none transition-colors hover:bg-bolt-elements-background-depth-2 focus-visible:bg-bolt-elements-background-depth-2"
       onClick={action}
     >
       {children}

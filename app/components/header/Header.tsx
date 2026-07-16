@@ -107,36 +107,45 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
           )}
           <ThemeSwitch />
           {profile && (
-            <MenuComponent
-              buttonProps={{
-                variant: 'neutral',
-                title: 'User menu',
-                inline: true,
-                className: 'rounded-full',
-                icon: profile.avatar ? (
-                  <img
-                    src={profile.avatar}
-                    alt={profile.username ? `${profile.username} profile` : 'User profile'}
-                    className="size-8 min-w-8 rounded-full object-cover"
-                    loading="eager"
-                    decoding="sync"
-                  />
-                ) : (
-                  <PersonIcon className="size-8 min-w-8 rounded-full border text-content-secondary" />
-                ),
-              }}
-            >
-              <FeedbackButton showInMenu={true} />
-              <hr />
-              <MenuItemComponent action={handleSettingsClick}>
-                <GearIcon className="text-content-secondary" />
-                Settings
-              </MenuItemComponent>
-              <MenuItemComponent action={handleLogout}>
-                <ExitIcon className="text-content-secondary" />
-                Log out
-              </MenuItemComponent>
-            </MenuComponent>
+            <>
+              <div className="hidden items-center gap-1 lg:flex">
+                <FeedbackButton showInMenu={false} variant="ghost" className="flex" />
+                <Button variant="ghost" size="xs" onClick={handleSettingsClick} icon={<GearIcon />}>
+                  Settings
+                </Button>
+                <Button variant="ghost" size="xs" onClick={handleLogout} icon={<ExitIcon />}>
+                  Log out
+                </Button>
+                <span
+                  className="ml-1 inline-flex rounded-full ring-1 ring-bolt-elements-borderColor"
+                  title={profile.username ?? 'Signed-in user'}
+                >
+                  <ProfileAvatar avatar={profile.avatar} username={profile.username} />
+                </span>
+              </div>
+              <div className="lg:hidden">
+                <MenuComponent
+                  buttonProps={{
+                    variant: 'neutral',
+                    title: 'User menu',
+                    inline: true,
+                    className: 'rounded-full',
+                    icon: <ProfileAvatar avatar={profile.avatar} username={profile.username} />,
+                  }}
+                >
+                  <FeedbackButton showInMenu={true} />
+                  <hr className="my-1 border-bolt-elements-borderColor" />
+                  <MenuItemComponent action={handleSettingsClick}>
+                    <GearIcon className="text-content-secondary" />
+                    Settings
+                  </MenuItemComponent>
+                  <MenuItemComponent action={handleLogout}>
+                    <ExitIcon className="text-content-secondary" />
+                    Log out
+                  </MenuItemComponent>
+                </MenuComponent>
+              </div>
+            </>
           )}
         </div>
       </header>
@@ -146,5 +155,19 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
         </Suspense>
       )}
     </>
+  );
+}
+
+function ProfileAvatar({ avatar, username }: { avatar?: string | null; username?: string | null }) {
+  return avatar ? (
+    <img
+      src={avatar}
+      alt={username ? `${username} profile` : 'User profile'}
+      className="size-8 min-w-8 rounded-full object-cover"
+      loading="eager"
+      decoding="sync"
+    />
+  ) : (
+    <PersonIcon className="size-8 min-w-8 rounded-full border text-content-secondary" />
   );
 }

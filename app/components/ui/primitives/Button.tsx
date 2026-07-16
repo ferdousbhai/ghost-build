@@ -32,6 +32,8 @@ const variantClasses: Record<string, string> = {
   danger: 'bg-red-600 text-white hover:bg-red-700',
   neutral:
     'border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 text-content-primary hover:bg-bolt-elements-background-depth-3',
+  ghost:
+    'border border-transparent bg-transparent text-content-secondary hover:bg-bolt-elements-background-depth-2 hover:text-content-primary',
 };
 
 const sizeClasses: Record<string, string> = {
