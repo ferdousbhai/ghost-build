@@ -5,18 +5,17 @@ import { describe, expect, test } from 'vitest';
 import { Menu, MenuItem } from './Menu';
 
 describe('Menu', () => {
-  test('uses the summary itself as the accessible trigger and keeps the dropdown outside normal flow', () => {
+  test('uses an accessible menu button instead of a clipped native details element', () => {
     document.body.innerHTML = renderToStaticMarkup(
       <Menu buttonProps={{ title: 'User menu', variant: 'neutral', icon: <span>Avatar</span> }}>
         <MenuItem>Settings</MenuItem>
       </Menu>,
     );
 
-    const summary = document.querySelector('summary');
-    const dropdown = document.querySelector('details > div');
+    const trigger = document.querySelector('button[aria-label="User menu"]');
 
-    expect(summary?.getAttribute('aria-label')).toBe('User menu');
-    expect(summary?.querySelector('button')).toBeNull();
-    expect(dropdown?.classList.contains('fixed')).toBe(true);
+    expect(trigger?.getAttribute('aria-haspopup')).toBe('menu');
+    expect(trigger?.textContent).toContain('Avatar');
+    expect(document.querySelector('details')).toBeNull();
   });
 });

@@ -39,8 +39,7 @@ html.dark {
   backdrop-filter: blur(18px);
 }
 
-.ghostbuild-brand-mark,
-.ghost-home-mark {
+.ghostbuild-brand-mark {
   position: relative;
   display: inline-flex;
   flex-shrink: 0;
@@ -59,24 +58,13 @@ html.dark {
   height: 32px;
 }
 
-.ghost-home-mark {
-  width: 54px;
-  height: 54px;
-  transform: rotate(-5deg);
-}
-
-.ghostbuild-brand-mark__glyph,
-.ghost-home-mark__glyph {
+.ghostbuild-brand-mark__glyph {
   font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
   line-height: 1;
 }
 
 .ghostbuild-brand-mark__glyph {
   font-size: 21px;
-}
-
-.ghost-home-mark__glyph {
-  font-size: 35px;
 }
 
 .ghost-home-shell {
@@ -99,30 +87,27 @@ html.dark {
 }
 
 .ghost-home-kicker-row {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   min-width: 0;
   margin-bottom: 30px;
 }
 
-.ghost-home-kicker-copy {
-  min-width: 0;
-}
-
-.ghost-home-eyebrow {
-  font-size: 14px;
-  font-weight: 900;
-  line-height: 1;
-  letter-spacing: 0;
+.ghost-home-kicker-line {
+  width: 28px;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--ghost-home-accent-2), var(--ghost-home-accent));
 }
 
 .ghost-home-subeyebrow {
-  margin-top: 5px;
   color: var(--ghost-home-soft);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 800;
   line-height: 1.2;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .ghost-home-title {
@@ -254,18 +239,7 @@ html.dark {
   }
 
   .ghost-home-kicker-row {
-    align-items: flex-start;
-    gap: 12px;
     margin-bottom: 18px;
-  }
-
-  .ghost-home-mark {
-    width: 46px;
-    height: 46px;
-  }
-
-  .ghost-home-mark__glyph {
-    font-size: 28px;
   }
 
   .ghost-home-title {

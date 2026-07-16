@@ -34,13 +34,8 @@ export function HomeIntro({
         <section className="ghost-home-copy min-w-0" aria-labelledby="intro">
           <div className="ghost-home-reveal">
             <div className="ghost-home-kicker-row">
-              <span className="ghost-home-mark" aria-hidden>
-                <span className="ghost-home-mark__glyph">👻</span>
-              </span>
-              <div className="ghost-home-kicker-copy">
-                <div className="ghost-home-eyebrow">Ghostbuild</div>
-                <div className="ghost-home-subeyebrow">Your idea, live on the internet</div>
-              </div>
+              <span className="ghost-home-kicker-line" aria-hidden />
+              <p className="ghost-home-subeyebrow">Your idea, live on the internet</p>
             </div>
             <h1 id="intro" className="ghost-home-title">
               If you can dream it,
