@@ -1,4 +1,6 @@
-import { DEPLOYMENT_PLAN_MARKER } from '~/lib/deployment-plan-marker';
+import { isGhostbuildToolResult } from 'ghostbuild-agent/tool-result';
+
+export const DEPLOYMENT_PLAN_MARKER = 'GHOSTBUILD_DEPLOYMENT_PLAN:';
 
 export type PendingDeploymentApproval = {
   id: string;
@@ -7,6 +9,12 @@ export type PendingDeploymentApproval = {
 };
 
 export function parsePendingDeploymentApproval(result: unknown): PendingDeploymentApproval | null {
+  if (isGhostbuildToolResult(result) && result.ok && isRecord(result.data)) {
+    if (result.data.state === 'awaiting-approval') {
+      return parseDeployment(result.data.deployment);
+    }
+    return null;
+  }
   if (typeof result !== 'string') {
     return null;
   }
@@ -15,21 +23,14 @@ export function parsePendingDeploymentApproval(result: unknown): PendingDeployme
     return null;
   }
   try {
-    const value: unknown = JSON.parse(markerLine.slice(DEPLOYMENT_PLAN_MARKER.length));
-    if (!isRecord(value) || typeof value.id !== 'string' || !/^[a-f0-9]{64}$/.test(String(value.planDigest))) {
-      return null;
-    }
-    if (!Array.isArray(value.resources) || !value.resources.every(isResource)) {
-      return null;
-    }
-    return {
-      id: value.id,
-      planDigest: String(value.planDigest),
-      resources: value.resources,
-    };
+    return parseDeployment(JSON.parse(markerLine.slice(DEPLOYMENT_PLAN_MARKER.length)));
   } catch {
     return null;
   }
+}
+
+export function deploymentApprovalMarker(deployment: PendingDeploymentApproval): string {
+  return `${DEPLOYMENT_PLAN_MARKER}${JSON.stringify(deployment)}`;
 }
 
 export function stripPendingDeploymentApprovalMarker(text: string): string {
@@ -38,6 +39,20 @@ export function stripPendingDeploymentApprovalMarker(text: string): string {
     .filter((line) => !line.startsWith(DEPLOYMENT_PLAN_MARKER))
     .join('\n')
     .trim();
+}
+
+function parseDeployment(value: unknown): PendingDeploymentApproval | null {
+  if (!isRecord(value) || typeof value.id !== 'string' || !/^[a-f0-9]{64}$/.test(String(value.planDigest))) {
+    return null;
+  }
+  if (!Array.isArray(value.resources) || !value.resources.every(isResource)) {
+    return null;
+  }
+  return {
+    id: value.id,
+    planDigest: String(value.planDigest),
+    resources: value.resources,
+  };
 }
 
 function isResource(value: unknown): value is PendingDeploymentApproval['resources'][number] {

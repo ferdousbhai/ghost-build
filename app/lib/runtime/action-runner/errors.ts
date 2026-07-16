@@ -1,5 +1,3 @@
-import { z } from 'zod';
-
 export class ActionCommandError extends Error {
   constructor(
     readonly header: string,
@@ -22,12 +20,18 @@ export class ActionCommandTimeoutError extends Error {
   }
 }
 
-export function packageInstallErrorMessage(error: unknown): string {
-  if (error instanceof z.ZodError) {
-    return `Error: Invalid package install arguments.  ${error}`;
+export class ActionCommandExecutionError extends Error {
+  constructor(
+    command: string,
+    readonly exitCode: number,
+    readonly output: string,
+  ) {
+    super(`${command} failed with exit code ${exitCode}.`);
+    this.name = 'ActionCommandExecutionError';
   }
-  if (error instanceof Error) {
-    return `Error: ${error.message}`;
-  }
-  return 'Error: An unknown error occurred during package install';
+}
+
+export function boundedErrorMessage(error: unknown, oversizedMessage: string, maximumCharacters = 2_000): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.length <= maximumCharacters ? message : oversizedMessage;
 }

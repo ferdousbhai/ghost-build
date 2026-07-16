@@ -11,7 +11,7 @@ import {
 import { captureMessage } from '~/lib/telemetry.client';
 import { isHiddenAssistantPart } from './assistant-message-parts';
 import { DeploymentApproval } from './DeploymentApproval.client';
-import { parsePendingDeploymentApproval, stripPendingDeploymentApprovalMarker } from './deployment-approval';
+import { parsePendingDeploymentApproval, stripPendingDeploymentApprovalMarker } from '~/lib/deployment-approval';
 
 interface AssistantMessageProps {
   message: GhostbuildMessage;

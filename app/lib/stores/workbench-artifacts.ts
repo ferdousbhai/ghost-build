@@ -12,6 +12,9 @@ import { withResolvers } from '~/utils/promises';
 import { createSampler } from '~/utils/sampler';
 import type { ActionAlert } from '~/types/actions';
 import { ActionRunner, isActionStatusActive } from '~/lib/runtime/action-runner';
+import type { GhostbuildToolResult } from 'ghostbuild-agent/tool-result';
+import { ToolExecutionScheduler } from '~/lib/runtime/action-runner/tool-execution-scheduler';
+import { DiagnosticsStore } from '~/lib/runtime/action-runner/diagnostics-store';
 
 const logger = createScopedLogger('WorkbenchArtifacts');
 const ACTION_STREAM_SAMPLE_MS = 100;
@@ -25,7 +28,7 @@ export interface ArtifactState {
 }
 
 type ArtifactUpdateState = Pick<ArtifactState, 'title' | 'closed'>;
-type ToolCallResolver = PromiseWithResolvers<{ result: string }>;
+type ToolCallResolver = PromiseWithResolvers<{ result: GhostbuildToolResult }>;
 type ActionStreamSampler = ((data: ActionCallbackData, isStreaming: boolean, generation: number) => void) & {
   cancel(): void;
 };
@@ -39,6 +42,7 @@ export class ToolCallAbortedError extends Error {
 
 export interface ArtifactWorkspace {
   getFiles(): FileMap;
+  getPreviewPort(): number | undefined;
   getSelectedFile(): string | undefined;
   getCurrentView(): 'code' | 'preview';
   isFollowingStreamedCode(): boolean;
@@ -56,6 +60,8 @@ export class WorkbenchArtifactStore {
   #turnActive = true;
   #toolCallPartIds = new Map<string, PartId>();
   #actionStreamSampler: ActionStreamSampler;
+  #diagnostics = new DiagnosticsStore();
+  #toolScheduler = new ToolExecutionScheduler();
 
   constructor(
     private readonly webcontainer: Promise<WebContainer>,
@@ -71,7 +77,7 @@ export class WorkbenchArtifactStore {
     }, ACTION_STREAM_SAMPLE_MS);
   }
 
-  waitOnToolCall(toolCallId: string): Promise<{ result: string }> {
+  waitOnToolCall(toolCallId: string): Promise<{ result: GhostbuildToolResult }> {
     if (!this.#turnActive) {
       return Promise.reject(new ToolCallAbortedError(toolCallId));
     }
@@ -83,7 +89,7 @@ export class WorkbenchArtifactStore {
     });
   }
 
-  runToolInvocation(toolInvocation: GhostbuildToolInvocation): Promise<{ result: string }> {
+  runToolInvocation(toolInvocation: GhostbuildToolInvocation): Promise<{ result: GhostbuildToolResult }> {
     this.scheduleToolInvocation(toolInvocation);
     return this.waitOnToolCall(toolInvocation.toolCallId);
   }
@@ -120,6 +126,7 @@ export class WorkbenchArtifactStore {
   startActionTurn(): void {
     this.#turnActive = true;
     this.#toolCallPartIds.clear();
+    this.#diagnostics.clear();
   }
 
   abortAllActions(): void {
@@ -166,9 +173,13 @@ export class WorkbenchArtifactStore {
         },
         onToolCallComplete: (completion) => this.#completeToolCall(completion),
         workspace: {
+          getFiles: () => this.workspace.getFiles(),
+          getPreviewPort: () => this.workspace.getPreviewPort(),
           hasFile: (filePath) => Boolean(this.workspace.getFiles()[filePath as AbsolutePath]),
           setGeneratedFileContent: (filePath, content) => this.workspace.setGeneratedFileContent(filePath, content),
         },
+        diagnostics: this.#diagnostics,
+        scheduler: this.#toolScheduler,
       }),
     });
   }
@@ -196,6 +207,10 @@ export class WorkbenchArtifactStore {
       this.#actionStreamSampler(data, isStreaming, generation);
       return;
     }
+    if (data.action.type === 'toolUse') {
+      this.#enqueueDetached(() => this.#runAction(data, isStreaming, generation), generation);
+      return;
+    }
     this.#enqueue(() => this.#runAction(data, isStreaming, generation), generation);
   }
 
@@ -212,6 +227,18 @@ export class WorkbenchArtifactStore {
     });
     this.#executionQueue = execution.catch((error) => {
       logger.error('Artifact action failed', error);
+    });
+  }
+
+  #enqueueDetached(callback: () => Promise<void>, generation: number): void {
+    const started = this.#executionQueue.then(() => {
+      if (generation !== this.#actionGeneration) {
+        return;
+      }
+      void callback().catch((error) => logger.error('Detached tool action failed', error));
+    });
+    this.#executionQueue = started.catch((error) => {
+      logger.error('Failed to start tool action', error);
     });
   }
 
@@ -286,7 +313,7 @@ export class WorkbenchArtifactStore {
     }
   }
 
-  #completeToolCall(completion: { result: string; toolCallId: string }): void {
+  #completeToolCall(completion: { result: GhostbuildToolResult; toolCallId: string }): void {
     const resolver = this.#toolCalls.get(completion.toolCallId);
     if (!resolver) {
       logger.error('Tool call promise not found');
@@ -298,7 +325,7 @@ export class WorkbenchArtifactStore {
   #getOrCreateToolCall(toolCallId: string): ToolCallResolver {
     let resolver = this.#toolCalls.get(toolCallId);
     if (!resolver) {
-      resolver = withResolvers<{ result: string }>();
+      resolver = withResolvers<{ result: GhostbuildToolResult }>();
       void resolver.promise.catch(() => undefined);
       this.#toolCalls.set(toolCallId, resolver);
     }

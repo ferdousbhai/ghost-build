@@ -13,7 +13,11 @@ export function outputInstructions() {
     <filesystem_work>
       Use the filesystem tools instead of emitting Bolt artifact or action XML.
       - Inspect existing files before making targeted edits.
-      - Use edit for small exact replacements and writeFile for new files, large changes, or complete rewrites.
+      - Use listFiles and searchText for discovery, view for explicit ranges, edit for one or more exact replacements,
+        and writeFile for new files, large changes, or complete rewrites.
+      - Tool pages report exact coverage. When coverage.complete is false, call the same read tool again with the same
+        arguments and exact nextCursor. For validation or install failures, use getDiagnostics with diagnosticsId and
+        the exact nextCursor before assuming you have seen every diagnostic.
       - writeFile content must be the entire final file. Never use placeholders, omit unchanged sections, truncate
         content, or overwrite a file with empty content unless the user explicitly requests an empty file.
       - For a new browser app, site, page, visual tool, game, tracker, or dashboard, the primary user-facing surface is
@@ -26,13 +30,13 @@ export function outputInstructions() {
     </filesystem_work>
 
     <completion>
-      Any filesystem mutation must be followed by deploy validation in the same response. Treat a failed result as a
-      bug report: inspect the failure, make the smallest sound repair, and validate again. Continue until the result
-      confirms either "Ghostbuild project check complete", a deployment plan ready for user approval, or a successful
-      production deployment. Stop only after
+      Any filesystem or dependency mutation must be followed by validateProject in the same response. Treat a failed
+      check as a bug report: read all relevant structured diagnostics, make the smallest sound repair, and validate again.
+      A successful validation is tied to the current workspace revision; any later mutation invalidates it. Continue until
+      validation succeeds, then call deploy only when validateProject says nextAction is "prepare-deployment". Stop only after
       several distinct repair attempts leave the same external blocker unresolved.
 
-      Guest sessions check the generated project and keep production deployment locked behind sign-in. Say the project is ready
+      Guest sessions validate the generated project and keep production deployment locked behind sign-in. Say the project is ready
       for preview and that sign-in is required for production. When a result says a deployment plan is ready, explain
       that the project passed production checks and is awaiting the user's billing approval; do not call it deployed.
       Say "deployed" only when the result explicitly confirms a production deployment. Before validation finishes,

@@ -1,4 +1,5 @@
 import { convertToModelMessages, type ModelMessage, type ToolSet, type UIMessage } from 'ai';
+import { isGhostbuildToolResult, toolResultSucceeded } from 'ghostbuild-agent/tool-result';
 import {
   getToolInvocation,
   messageText,
@@ -73,13 +74,19 @@ function cleanMessage(message: string) {
 }
 
 export function summarizeToolInvocationForPrompt(invocation: NonNullable<ReturnType<typeof getToolInvocation>>) {
-  const result = typeof invocation.result === 'string' ? invocation.result : JSON.stringify(invocation.result);
-  const status = result?.startsWith('Error:') ? 'failed' : 'completed';
+  const result =
+    typeof invocation.result === 'string'
+      ? invocation.result
+      : (JSON.stringify(invocation.result) ?? String(invocation.result));
+  const status = toolResultSucceeded(invocation.result) ? 'completed' : 'failed';
   const argsSummary = summarizeToolArgs(invocation.toolName, invocation.args);
-  const resultExcerpt = excerptText(result, TOOL_RESULT_EXCERPT_CHARS, TOOL_RESULT_HEAD_CHARS);
+  const structured = isGhostbuildToolResult(invocation.result);
+  const resultExcerpt = structured
+    ? result
+    : excerptLegacyToolResult(result, TOOL_RESULT_EXCERPT_CHARS, TOOL_RESULT_HEAD_CHARS);
   return [
     `The assistant called ${invocation.toolName} with ${argsSummary} and it ${status}.`,
-    resultExcerpt ? `Result excerpt:\n${resultExcerpt}` : null,
+    resultExcerpt ? `${structured ? 'Result' : 'Legacy result excerpt'}:\n${resultExcerpt}` : null,
   ]
     .filter(Boolean)
     .join('\n');
@@ -100,25 +107,42 @@ function summarizeToolArgs(toolName: string, args: unknown) {
       });
     }
     case 'edit': {
-      const oldText = typeof record.old === 'string' ? record.old : '';
-      const newText = typeof record.new === 'string' ? record.new : '';
+      const edits = Array.isArray(record.edits) ? record.edits : [];
       return JSON.stringify({
         path: typeof record.path === 'string' ? record.path : undefined,
-        oldLength: oldText.length,
-        newLength: newText.length,
+        replacements: edits.length || (typeof record.old === 'string' && typeof record.new === 'string' ? 1 : 0),
       });
     }
     case 'view':
-      return JSON.stringify({ path: typeof record.path === 'string' ? record.path : undefined });
+      return JSON.stringify({
+        path: typeof record.path === 'string' ? record.path : undefined,
+        viewRange: record.view_range,
+        cursor: record.cursor,
+      });
     case 'deploy':
-      return '{}';
+      return JSON.stringify({ validatedRevision: record.validatedRevision });
     case 'npmInstall':
       return JSON.stringify({ packageSpecs: record.packageSpecs ?? record.packages });
     case 'lookupDocs':
-      return JSON.stringify({ components: record.components ?? record.keys ?? record.docs });
+      return JSON.stringify({
+        docs: record.components ?? record.keys ?? record.docs,
+        section: record.section,
+        query: record.query,
+        cursor: record.cursor,
+      });
     default:
       return excerptText(JSON.stringify(args), TOOL_ARGS_EXCERPT_CHARS);
   }
+}
+
+function excerptLegacyToolResult(value: string, maxChars: number, headChars: number) {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return [
+    'Legacy tool result exceeded the current bounded-result contract.',
+    excerptText(value, maxChars, headChars),
+  ].join('\n');
 }
 
 function excerptText(value: string | undefined, maxChars: number, headChars = Math.floor(maxChars / 3)) {

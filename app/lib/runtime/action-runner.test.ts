@@ -4,6 +4,7 @@ import type { ActionCallbackData } from 'ghostbuild-agent/message-parser';
 import { makePartId } from 'ghostbuild-agent/partId';
 import { executeTool } from './action-runner/tool-executor';
 import { ActionRunner } from './action-runner';
+import { toolSuccess } from 'ghostbuild-agent/tool-result';
 
 vi.mock('./action-runner/tool-executor', () => ({ executeTool: vi.fn() }));
 
@@ -15,7 +16,7 @@ describe('ActionRunner duplicate tool calls', () => {
   });
 
   test('marks a consecutive duplicate as failed and reports a tool result', async () => {
-    executeToolMock.mockResolvedValue('ok');
+    executeToolMock.mockResolvedValue(toolSuccess('ok'));
     const onToolCallComplete = vi.fn();
     const runner = createRunner(onToolCallComplete);
     const first = toolAction('first', 'call-1', 'view', { path: 'src/app.ts' });
@@ -33,13 +34,16 @@ describe('ActionRunner duplicate tool calls', () => {
       error: 'This exact action was already executed. Please try a different approach.',
     });
     expect(onToolCallComplete).toHaveBeenLastCalledWith({
-      result: 'Error: This exact action was already executed. Please try a different approach.',
+      result: expect.objectContaining({
+        ok: false,
+        summary: 'This exact action was already executed. Please try a different approach.',
+      }),
       toolCallId: 'call-2',
     });
   });
 
   test('allows the same call after another successful call', async () => {
-    executeToolMock.mockResolvedValue('ok');
+    executeToolMock.mockResolvedValue(toolSuccess('ok'));
     const onToolCallComplete = vi.fn();
     const runner = createRunner(onToolCallComplete);
     const actions = [
@@ -58,7 +62,7 @@ describe('ActionRunner duplicate tool calls', () => {
   });
 
   test('allows an identical retry when the previous execution failed', async () => {
-    executeToolMock.mockRejectedValueOnce(new Error('temporary failure')).mockResolvedValueOnce('ok');
+    executeToolMock.mockRejectedValueOnce(new Error('temporary failure')).mockResolvedValueOnce(toolSuccess('ok'));
     const runner = createRunner(vi.fn());
     const first = toolAction('first', 'call-1', 'view', { path: 'src/app.ts' });
     const retry = toolAction('retry', 'call-2', 'view', { path: 'src/app.ts' });
@@ -80,10 +84,10 @@ describe('ActionRunner abort lifecycle', () => {
   });
 
   test('does not execute an action aborted while queued', async () => {
-    let resolveFirst!: (value: string) => void;
+    let resolveFirst!: (value: ReturnType<typeof toolSuccess>) => void;
     executeToolMock.mockImplementationOnce(
       () =>
-        new Promise<string>((resolve) => {
+        new Promise<ReturnType<typeof toolSuccess>>((resolve) => {
           resolveFirst = resolve;
         }),
     );
@@ -97,7 +101,7 @@ describe('ActionRunner abort lifecycle', () => {
     runner.addAction(queued);
     const queuedRun = runner.runAction(queued, { isStreaming: false });
     runner.actions.get().queued.abort();
-    resolveFirst('ok');
+    resolveFirst(toolSuccess('ok'));
     await Promise.all([firstRun, queuedRun]);
 
     expect(executeToolMock).toHaveBeenCalledOnce();
@@ -107,7 +111,7 @@ describe('ActionRunner abort lifecycle', () => {
   test('propagates abort to a running tool and preserves aborted status', async () => {
     executeToolMock.mockImplementation(
       ({ abortSignal }) =>
-        new Promise<string>((_resolve, reject) => {
+        new Promise<ReturnType<typeof toolSuccess>>((_resolve, reject) => {
           abortSignal.addEventListener(
             'abort',
             () => reject(abortSignal.reason ?? new DOMException('The operation was aborted', 'AbortError')),
@@ -135,6 +139,8 @@ function createRunner(onToolCallComplete: ReturnType<typeof vi.fn>) {
   return new ActionRunner(Promise.resolve({} as WebContainer), {
     onToolCallComplete,
     workspace: {
+      getFiles: () => ({}),
+      getPreviewPort: () => undefined,
       hasFile: () => false,
       setGeneratedFileContent: vi.fn(),
     },

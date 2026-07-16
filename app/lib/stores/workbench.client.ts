@@ -45,6 +45,7 @@ class WorkbenchStore {
       this.#reloadedParts,
       {
         getFiles: () => this.#filesStore.files.get(),
+        getPreviewPort: () => this.#previewsStore.previews.get().find((preview) => preview.ready)?.port,
         getSelectedFile: () => this.#editorStore.selectedFile.get(),
         getCurrentView: () => this.currentView.get(),
         isFollowingStreamedCode: () => this.#editorStore.followingStreamedCode.get(),
@@ -124,11 +125,11 @@ class WorkbenchStore {
     return this.#filesStore.flushFileEvents();
   }
 
-  waitOnToolCall(toolCallId: string): Promise<{ result: string }> {
+  waitOnToolCall(toolCallId: string) {
     return this.#artifactStore.waitOnToolCall(toolCallId);
   }
 
-  runToolInvocation(toolInvocation: GhostbuildToolInvocation): Promise<{ result: string }> {
+  runToolInvocation(toolInvocation: GhostbuildToolInvocation) {
     return this.#artifactStore.runToolInvocation(toolInvocation);
   }
 

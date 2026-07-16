@@ -48,14 +48,30 @@ interface Folder {
 
 export type GhostbuildToolSet = {
   deploy: Tool;
-  npmInstall: Tool;
-  lookupDocs: Tool;
-  view: Tool;
   edit: Tool;
+  listFiles: Tool;
+  lookupDocs: Tool;
+  npmInstall: Tool;
+  getDiagnostics: Tool;
+  searchText: Tool;
+  validateProject: Tool;
+  view: Tool;
   writeFile: Tool;
 };
 
 export type GhostbuildToolName = keyof GhostbuildToolSet;
+
+export const READ_ONLY_TOOL_NAMES = [
+  'view',
+  'listFiles',
+  'searchText',
+  'lookupDocs',
+  'getDiagnostics',
+] as const satisfies readonly GhostbuildToolName[];
+
+export function isReadOnlyToolName(toolName: string): boolean {
+  return (READ_ONLY_TOOL_NAMES as readonly string[]).includes(toolName);
+}
 
 export type Dirent = File | Folder;
 

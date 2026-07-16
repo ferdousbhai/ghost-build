@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
 import {
   getBuildToolChoice,
   getValidatedBuildCompletion,
@@ -15,7 +16,7 @@ function userMessage(text: string): GhostbuildMessage {
   };
 }
 
-function toolResult(toolName: string, result: string, args: Record<string, unknown> = {}): GhostbuildMessage {
+function toolResult(toolName: string, result: unknown, args: Record<string, unknown> = {}): GhostbuildMessage {
   return {
     id: `${toolName}-result`,
     role: 'assistant',
@@ -32,6 +33,10 @@ function toolResult(toolName: string, result: string, args: Record<string, unkno
       },
     ],
   };
+}
+
+function validationResult(nextAction: 'sign-in-required' | 'prepare-deployment', revision = 'a'.repeat(64)) {
+  return toolSuccess('validated', { level: 'full', revision, nextAction });
 }
 
 describe('getBuildToolChoice', () => {
@@ -54,7 +59,7 @@ describe('getBuildToolChoice', () => {
     });
   });
 
-  it('requires deploy after a file change', () => {
+  it('requires validation after a file change', () => {
     expect(
       getBuildToolChoice([
         userMessage('Build a habit tracker app'),
@@ -62,7 +67,7 @@ describe('getBuildToolChoice', () => {
       ]),
     ).toEqual({
       type: 'tool',
-      toolName: 'deploy',
+      toolName: 'validateProject',
     });
   });
 
@@ -85,15 +90,15 @@ describe('getBuildToolChoice', () => {
         toolResult('writeFile', 'Wrote src/routes/index.tsx', { path: '/home/project/src/routes/index.tsx' }),
         { ...userMessage('Is it ready?'), id: 'user-2' },
       ]),
-    ).toEqual({ type: 'tool', toolName: 'deploy' });
+    ).toEqual({ type: 'tool', toolName: 'validateProject' });
   });
 
-  it('requires continued tool work after a failed deploy without prescribing the repair tool', () => {
+  it('requires continued tool work after failed validation without prescribing the repair tool', () => {
     expect(
       getBuildToolChoice([
         userMessage('Build a habit tracker app'),
         toolResult('writeFile', 'Wrote src/routes/index.tsx', { path: '/home/project/src/routes/index.tsx' }),
-        toolResult('deploy', 'Error: Preview validation failed'),
+        toolResult('validateProject', toolFailure('Preview validation failed')),
       ]),
     ).toBe('required');
   });
@@ -111,12 +116,12 @@ describe('getBuildToolChoice', () => {
     });
   });
 
-  it('forces a write after repeated read-only tools follow a failed deploy', () => {
+  it('forces a write after repeated read-only tools follow failed validation', () => {
     expect(
       getBuildToolChoice([
         userMessage('Build a habit tracker app'),
         toolResult('writeFile', 'Wrote src/routes/index.tsx', { path: '/home/project/src/routes/index.tsx' }),
-        toolResult('deploy', 'Error: Preview validation failed'),
+        toolResult('validateProject', toolFailure('Preview validation failed')),
         toolResult('view', 'src/routes/index.tsx contents'),
         toolResult('lookupDocs', 'Cloudflare docs excerpt'),
         toolResult('view', 'package.json contents'),
@@ -127,12 +132,15 @@ describe('getBuildToolChoice', () => {
     });
   });
 
-  it('disables tools after deploy validation succeeds', () => {
+  it('disables tools after a signed-in deployment plan succeeds', () => {
     expect(
       getBuildToolChoice([
         userMessage('Build a habit tracker app'),
         toolResult('writeFile', 'Wrote src/routes/index.tsx', { path: '/home/project/src/routes/index.tsx' }),
-        toolResult('deploy', 'Ghostbuild preview validation complete'),
+        toolResult('validateProject', validationResult('prepare-deployment')),
+        toolResult('deploy', toolSuccess('ready', { state: 'awaiting-approval', revision: 'a'.repeat(64) }), {
+          validatedRevision: 'a'.repeat(64),
+        }),
       ]),
     ).toBe('none');
   });
@@ -142,7 +150,7 @@ describe('getBuildToolChoice', () => {
       getBuildToolChoice([
         userMessage('Build a habit tracker app'),
         toolResult('writeFile', 'Wrote src/routes/index.tsx', { path: '/home/project/src/routes/index.tsx' }),
-        toolResult('deploy', 'Ghostbuild app check complete. Sign in to deploy this app to Cloudflare production.'),
+        toolResult('validateProject', validationResult('sign-in-required')),
       ]),
     ).toBe('none');
   });
@@ -152,10 +160,10 @@ describe('getBuildToolChoice', () => {
       getValidatedBuildCompletion([
         userMessage('Build a habit tracker app'),
         toolResult('writeFile', 'Wrote src/routes/index.tsx', { path: '/home/project/src/routes/index.tsx' }),
-        toolResult('deploy', 'Ghostbuild app check complete. Sign in to deploy this app to Cloudflare production.'),
+        toolResult('validateProject', validationResult('sign-in-required')),
       ]),
     ).toBe(
-      'Done. I built and checked the app, and it is ready to preview here. Sign in when you are ready to deploy it to Cloudflare production.',
+      'Done. I built and validated the app, including a clean preview smoke check, and it is ready to preview here. Sign in when you are ready to deploy it to Cloudflare production.',
     );
   });
 
@@ -180,7 +188,7 @@ describe('getBuildToolChoice', () => {
         toolResult('writeFile', 'Wrote src/routes/index.tsx', { path: '/home/project/src/routes/index.tsx' }),
       ]),
     ).toEqual({
-      activeTools: ['deploy'],
+      activeTools: ['validateProject'],
       toolChoice: 'required',
     });
 
@@ -188,7 +196,7 @@ describe('getBuildToolChoice', () => {
       getWorkersAiToolSettings([
         userMessage('Build a habit tracker app'),
         toolResult('writeFile', 'Wrote src/routes/index.tsx', { path: '/home/project/src/routes/index.tsx' }),
-        toolResult('deploy', 'Ghostbuild app check complete. Sign in to deploy this app to Cloudflare production.'),
+        toolResult('validateProject', validationResult('sign-in-required')),
       ]),
     ).toEqual({
       toolChoice: 'none',
