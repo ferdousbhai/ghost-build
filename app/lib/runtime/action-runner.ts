@@ -6,10 +6,13 @@ import { unreachable } from 'ghostbuild-agent/utils/unreachable';
 import type { ActionCallbackData } from 'ghostbuild-agent/message-parser';
 import type { GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { getAbsolutePath } from 'ghostbuild-agent/utils/workDir';
-import { ActionCommandError } from './action-runner/errors';
-import { isFileMutationTool, runArtifactFileAction } from './action-runner/file-tools';
+import { ActionCommandError, boundedErrorMessage } from './action-runner/errors';
+import { isFileMutationTool, runStreamedFileAction } from './action-runner/file-tools';
 import { executeTool } from './action-runner/tool-executor';
 import type { ActionRunnerWorkspace, ActionsMap, ActionState, ActionStateUpdate } from './action-runner/types';
+import { toolFailure, type GhostbuildToolResult } from 'ghostbuild-agent/tool-result';
+import { ToolExecutionScheduler } from './action-runner/tool-execution-scheduler';
+import { DiagnosticsStore } from './action-runner/diagnostics-store';
 
 export { isActionStatusActive } from './action-runner/types';
 export type { ActionState, ActionStatus } from './action-runner/types';
@@ -17,13 +20,17 @@ export type { ActionState, ActionStatus } from './action-runner/types';
 const logger = createScopedLogger('ActionRunner');
 
 type ToolCompletion = {
-  result: string;
+  result: GhostbuildToolResult;
   toolCallId: string;
 };
+
+class ToolReportedFailure extends Error {}
 
 export class ActionRunner {
   #currentExecution: Promise<void> = Promise.resolve();
   #lastSuccessfulToolCallKey: string | null = null;
+  readonly #diagnostics: DiagnosticsStore;
+  readonly #scheduler: ToolExecutionScheduler;
 
   readonly actions: ActionsMap = map({});
   readonly terminalOutput: WritableAtom<string> = atom('');
@@ -34,8 +41,13 @@ export class ActionRunner {
       onAlert?: (alert: ActionAlert) => void;
       onToolCallComplete: (args: ToolCompletion) => void;
       workspace: ActionRunnerWorkspace;
+      diagnostics?: DiagnosticsStore;
+      scheduler?: ToolExecutionScheduler;
     },
-  ) {}
+  ) {
+    this.#diagnostics = callbacks.diagnostics ?? new DiagnosticsStore();
+    this.#scheduler = callbacks.scheduler ?? new ToolExecutionScheduler();
+  }
 
   addAction(data: ActionCallbackData): void {
     const { actionId } = data;
@@ -97,7 +109,7 @@ export class ActionRunner {
     const error = 'This exact action was already executed. Please try a different approach.';
     this.updateAction(actionId, { executed: true, status: 'failed', error });
     this.callbacks.onToolCallComplete({
-      result: `Error: ${error}`,
+      result: toolFailure(error),
       toolCallId: invocation.toolCallId,
     });
     return true;
@@ -113,7 +125,7 @@ export class ActionRunner {
 
     try {
       if (action.type === 'file') {
-        await runArtifactFileAction(action, await this.webcontainer, this.callbacks.workspace);
+        await runStreamedFileAction(action, await this.webcontainer, this.callbacks.workspace);
         this.#lastSuccessfulToolCallKey = null;
       } else if (action.type === 'toolUse') {
         await this.runToolUseAction(action);
@@ -156,13 +168,16 @@ export class ActionRunner {
     }
 
     try {
-      const result = await executeTool({
-        invocation,
-        container: await this.webcontainer,
-        abortSignal: action.abortSignal,
-        onOutput: (output) => this.terminalOutput.set(output),
-        workspace: this.callbacks.workspace,
-      });
+      const result = await this.#scheduler.run(invocation.toolName, async () =>
+        executeTool({
+          invocation,
+          container: await this.webcontainer,
+          abortSignal: action.abortSignal,
+          onOutput: (output) => this.terminalOutput.set(output),
+          workspace: this.callbacks.workspace,
+          diagnostics: this.#diagnostics,
+        }),
+      );
       action.abortSignal.throwIfAborted();
       if (shouldSendResult) {
         this.callbacks.onToolCallComplete({
@@ -170,16 +185,21 @@ export class ActionRunner {
           toolCallId: invocation.toolCallId,
         });
       }
-      if (invocation.state === 'call') {
+      if (invocation.state === 'call' && result.ok) {
         this.#lastSuccessfulToolCallKey = toolCallKey(invocation);
+      }
+      if (!result.ok) {
+        throw new ToolReportedFailure(result.summary);
       }
     } catch (error) {
       if (action.abortSignal.aborted) {
         throw error;
       }
+      if (error instanceof ToolReportedFailure) {
+        throw error;
+      }
       logger.error('Error on tool call', error);
-      const text = String(error);
-      const result = text.startsWith('Error:') ? text : `Error: ${text}`;
+      const result = toolFailure(boundedUnexpectedError(error, invocation.toolName));
       if (shouldSendResult) {
         this.callbacks.onToolCallComplete({
           result,
@@ -189,6 +209,13 @@ export class ActionRunner {
       throw error;
     }
   }
+}
+
+function boundedUnexpectedError(error: unknown, toolName: string): string {
+  return boundedErrorMessage(
+    error,
+    `${toolName} failed with an unusually large internal error. The complete error was retained in developer logs.`,
+  );
 }
 
 function toolCallKey(invocation: Pick<GhostbuildToolInvocation, 'toolName' | 'args'>): string {

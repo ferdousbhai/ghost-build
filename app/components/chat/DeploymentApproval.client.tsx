@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '~/components/ui/primitives/Button';
 import { Checkbox } from '~/components/ui/primitives/Checkbox';
-import type { PendingDeploymentApproval } from './deployment-approval';
+import type { PendingDeploymentApproval } from '~/lib/deployment-approval';
 
 export function DeploymentApproval({ deployment }: { deployment: PendingDeploymentApproval }) {
   const [activeDeployment, setActiveDeployment] = useState(deployment);

@@ -36,6 +36,7 @@ describe('WorkbenchArtifactStore abort lifecycle', () => {
       new Set(),
       {
         getFiles: () => ({}) as FileMap,
+        getPreviewPort: () => undefined,
         getSelectedFile: () => undefined,
         getCurrentView: () => 'code',
         isFollowingStreamedCode: () => false,
@@ -139,6 +140,7 @@ function createStore(
 ) {
   const workspace: ArtifactWorkspace = {
     getFiles: () => ({}) as FileMap,
+    getPreviewPort: () => undefined,
     getSelectedFile: () => undefined,
     getCurrentView: () => 'code',
     isFollowingStreamedCode: () => false,

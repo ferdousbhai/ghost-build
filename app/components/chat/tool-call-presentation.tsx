@@ -1,21 +1,31 @@
 import type { ReactNode } from 'react';
 import { CheckIcon, CircleIcon, Cross2Icon, FileIcon, Pencil1Icon } from '@radix-ui/react-icons';
 import { FolderIcon } from '@heroicons/react/24/outline';
-import type { ZodError } from 'zod';
+import type { ZodError, ZodType } from 'zod';
 import { Spinner } from '@ui/Spinner';
 import type { ActionState } from '~/lib/runtime/action-runner';
 import { classNames } from '~/utils/classNames';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
-import { deployToolParameters } from 'ghostbuild-agent/tools/deploy';
-import { editToolParameters } from 'ghostbuild-agent/tools/edit';
+import { deployToolInputParameters } from 'ghostbuild-agent/tools/deploy';
+import { editToolInputParameters } from 'ghostbuild-agent/tools/edit';
 import { lookupDocsParameters } from 'ghostbuild-agent/tools/lookupDocs';
 import { npmInstallToolParameters } from 'ghostbuild-agent/tools/npmInstall';
-import { viewParameters } from 'ghostbuild-agent/tools/view';
+import { viewToolInputParameters } from 'ghostbuild-agent/tools/view';
 import { writeFileParameters } from 'ghostbuild-agent/tools/writeFile';
 import { getRelativePath } from 'ghostbuild-agent/utils/workDir';
 import { loggingSafeParse } from 'ghostbuild-agent/utils/zodUtil';
+import { listFilesParameters } from 'ghostbuild-agent/tools/listFiles';
+import { searchTextParameters } from 'ghostbuild-agent/tools/searchText';
+import { getDiagnosticsParameters } from 'ghostbuild-agent/tools/getDiagnostics';
+import { validateProjectParameters } from 'ghostbuild-agent/tools/validateProject';
+import type { GhostbuildToolName } from 'ghostbuild-agent/types';
+import {
+  isGhostbuildToolResult,
+  toolFailure,
+  toolResultSucceeded,
+  toolResultSummary,
+} from 'ghostbuild-agent/tool-result';
 
-const GUEST_PROJECT_CHECK_COMPLETE = 'Ghostbuild project check complete.';
 const ghostbuildIcon = (
   <span aria-hidden className="mr-1 text-base leading-none">
     👻
@@ -29,6 +39,19 @@ const emptyInvocation: GhostbuildToolInvocation = {
   args: {},
 };
 
+const TOOL_INPUT_SCHEMAS: Record<GhostbuildToolName, ZodType> = {
+  deploy: deployToolInputParameters,
+  edit: editToolInputParameters,
+  getDiagnostics: getDiagnosticsParameters,
+  listFiles: listFilesParameters,
+  lookupDocs: lookupDocsParameters,
+  npmInstall: npmInstallToolParameters,
+  searchText: searchTextParameters,
+  validateProject: validateProjectParameters,
+  view: viewToolInputParameters,
+  writeFile: writeFileParameters,
+};
+
 export function parseToolInvocation(content: string | undefined): GhostbuildToolInvocation {
   if (!content) {
     return emptyInvocation;
@@ -40,14 +63,12 @@ export function parseToolInvocation(content: string | undefined): GhostbuildTool
     return emptyInvocation;
   }
 
-  const resultText = typeof invocation.result === 'string' ? invocation.result : '';
-  if (invocation.state !== 'result' || resultText.startsWith('Error:')) {
+  if (invocation.state !== 'result' || isErrorResult(invocation)) {
     return invocation;
   }
   const error = toolArgumentError(invocation);
   if (error) {
-    const errorMessage = `Error: Could not parse arguments: ${error.message}`;
-    return { ...invocation, result: errorMessage };
+    return { ...invocation, result: toolFailure(`Could not parse arguments: ${error.message}`) };
   }
   return invocation;
 }
@@ -73,10 +94,10 @@ export function statusIcon(status: ActionState['status'], invocation: Ghostbuild
 }
 
 export function toolTitle(invocation: GhostbuildToolInvocation): ReactNode {
-  const resultText = typeof invocation.result === 'string' ? invocation.result : '';
+  const resultText = toolResultSummary(invocation.result);
   switch (invocation.toolName) {
     case 'view':
-      return viewTitle(invocation, resultText);
+      return viewTitle(invocation);
     case 'npmInstall':
       return packageTitle(invocation);
     case 'deploy':
@@ -91,40 +112,43 @@ export function toolTitle(invocation: GhostbuildToolInvocation): ReactNode {
         ? titleRow(`Looked up documentation for: ${args.data.docs.join(', ')}`, <FileIcon />)
         : 'Looking up documentation...';
     }
+    case 'listFiles': {
+      const args = loggingSafeParse(listFilesParameters, invocation.args);
+      return titleRow(
+        `Listed ${args.success ? getRelativePath(args.data.path ?? '/home/project') || '/home/project' : 'project files'}`,
+        <FolderIcon className="size-4" />,
+      );
+    }
+    case 'searchText': {
+      const args = loggingSafeParse(searchTextParameters, invocation.args);
+      return titleRow(
+        args.success ? `Searched for ${JSON.stringify(args.data.query)}` : 'Searched project text',
+        <FileIcon />,
+      );
+    }
+    case 'getDiagnostics':
+      return titleRow('Read operation diagnostics', <FileIcon />);
+    case 'validateProject':
+      return titleRow(
+        isToolInvocationInProgress(invocation)
+          ? 'Validating the project...'
+          : isErrorResult(invocation)
+            ? 'Project validation failed'
+            : 'Project validation passed',
+        <img className="mr-1 size-4" height="16" width="16" src="/icons/TypeScript.svg" alt="TypeScript" />,
+      );
     default:
       return invocation.toolName;
   }
 }
 
 function toolArgumentError(invocation: GhostbuildToolInvocation): ZodError | null {
-  switch (invocation.toolName) {
-    case 'deploy': {
-      const result = loggingSafeParse(deployToolParameters, invocation.args);
-      return result.success ? null : result.error;
-    }
-    case 'edit': {
-      const result = loggingSafeParse(editToolParameters, invocation.args);
-      return result.success ? null : result.error;
-    }
-    case 'npmInstall': {
-      const result = loggingSafeParse(npmInstallToolParameters, invocation.args);
-      return result.success ? null : result.error;
-    }
-    case 'view': {
-      const result = loggingSafeParse(viewParameters, invocation.args);
-      return result.success ? null : result.error;
-    }
-    case 'writeFile': {
-      const result = loggingSafeParse(writeFileParameters, invocation.args);
-      return result.success ? null : result.error;
-    }
-    case 'lookupDocs': {
-      const result = loggingSafeParse(lookupDocsParameters, invocation.args);
-      return result.success ? null : result.error;
-    }
-    default:
-      return null;
+  const schema = TOOL_INPUT_SCHEMAS[invocation.toolName as GhostbuildToolName];
+  if (!schema) {
+    return null;
   }
+  const result = loggingSafeParse(schema, invocation.args);
+  return result.success ? null : result.error;
 }
 
 function icon(content: ReactNode, color: string): ReactNode {
@@ -132,9 +156,7 @@ function icon(content: ReactNode, color: string): ReactNode {
 }
 
 function isErrorResult(invocation: GhostbuildToolInvocation): boolean {
-  return (
-    invocation.state === 'result' && typeof invocation.result === 'string' && invocation.result.startsWith('Error:')
-  );
+  return invocation.state === 'result' && !toolResultSucceeded(invocation.result);
 }
 
 function titleRow(children: ReactNode, iconContent?: ReactNode): ReactNode {
@@ -146,19 +168,16 @@ function titleRow(children: ReactNode, iconContent?: ReactNode): ReactNode {
   );
 }
 
-function viewTitle(invocation: GhostbuildToolInvocation, resultText: string): ReactNode {
-  const args = loggingSafeParse(viewParameters, invocation.args);
-  const isDirectory = invocation.state === 'result' && resultText.startsWith('Directory:');
-  const renderedPath = args.success
-    ? getRelativePath(args.data.path) || '/home/project'
-    : isDirectory
-      ? 'a directory'
-      : 'a file';
+function viewTitle(invocation: GhostbuildToolInvocation): ReactNode {
+  const args = loggingSafeParse(viewToolInputParameters, invocation.args);
+  const renderedPath = args.success ? getRelativePath(args.data.path) || '/home/project' : 'a file';
   const range = args.success ? args.data.view_range : undefined;
   const extra = range ? ` (lines ${range[0]} - ${range[1] === -1 ? 'end' : range[1]})` : '';
   return titleRow(
-    `${isDirectory ? 'List' : 'Read'} ${renderedPath}${extra}`,
-    <div className="text-content-secondary">{isDirectory ? <FolderIcon className="size-4" /> : <FileIcon />}</div>,
+    `Read ${renderedPath}${extra}`,
+    <div className="text-content-secondary">
+      <FileIcon />
+    </div>,
   );
 }
 
@@ -186,7 +205,7 @@ function deployTitle(invocation: GhostbuildToolInvocation, resultText: string): 
       <img className="mr-1 size-4" height="16" width="16" src="/icons/TypeScript.svg" alt="TypeScript" />,
     );
   }
-  if (resultText.startsWith('Error:')) {
+  if (isErrorResult(invocation)) {
     if (/preview|render|vite|server rendering|smoke/i.test(resultText)) {
       return titleRow('Preview validation failed', ghostbuildIcon);
     }
@@ -198,15 +217,17 @@ function deployTitle(invocation: GhostbuildToolInvocation, resultText: string): 
     }
     return titleRow('Cloudflare deploy failed');
   }
-  return resultText.includes(GUEST_PROJECT_CHECK_COMPLETE)
-    ? titleRow('Project ready for preview', ghostbuildIcon)
-    : resultText.includes('Deployment plan ready for your approval')
-      ? titleRow('Deployment ready for approval', ghostbuildIcon)
-      : titleRow('Deployed Cloudflare Worker', ghostbuildIcon);
+  const state =
+    isGhostbuildToolResult(invocation.result) && typeof invocation.result.data === 'object' && invocation.result.data
+      ? (invocation.result.data as { state?: unknown }).state
+      : undefined;
+  return state === 'awaiting-approval' || resultText.includes('Deployment plan ready for your approval')
+    ? titleRow('Deployment ready for approval', ghostbuildIcon)
+    : titleRow('Deployed Cloudflare Worker', ghostbuildIcon);
 }
 
 function editTitle(invocation: GhostbuildToolInvocation): ReactNode {
-  const args = loggingSafeParse(editToolParameters, invocation.args);
+  const args = loggingSafeParse(editToolInputParameters, invocation.args);
   return titleRow(
     `Edited ${args.success ? getRelativePath(args.data.path) || args.data.path : 'a file'}`,
     <Pencil1Icon className="text-content-secondary" />,

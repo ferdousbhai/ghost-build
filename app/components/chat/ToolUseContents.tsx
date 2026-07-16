@@ -3,8 +3,8 @@ import { useStore } from '@nanostores/react';
 import { FileIcon } from '@radix-ui/react-icons';
 import { FolderIcon } from '@heroicons/react/24/outline';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
-import { editToolParameters } from 'ghostbuild-agent/tools/edit';
-import { viewParameters } from 'ghostbuild-agent/tools/view';
+import { editToolInputParameters } from 'ghostbuild-agent/tools/edit';
+import { viewToolInputParameters } from 'ghostbuild-agent/tools/view';
 import { writeFileParameters } from 'ghostbuild-agent/tools/writeFile';
 import { path } from 'ghostbuild-agent/utils/path';
 import { loggingSafeParse } from 'ghostbuild-agent/utils/zodUtil';
@@ -14,7 +14,8 @@ import { normalizeCodeLanguage, type CodeTheme } from '~/lib/shiki.client';
 import { Markdown } from './Markdown';
 import { highlightTokenStyle, useHighlightedCode } from './useHighlightedCode';
 import { DeploymentApproval } from './DeploymentApproval.client';
-import { parsePendingDeploymentApproval } from './deployment-approval';
+import { parsePendingDeploymentApproval } from '~/lib/deployment-approval';
+import { isGhostbuildToolResult, toolResultSummary } from 'ghostbuild-agent/tool-result';
 
 const ToolOutputTerminal = lazy(() =>
   import('./ToolOutputTerminal').then((module) => ({ default: module.ToolOutputTerminal })),
@@ -37,6 +38,13 @@ export const ToolUseContents = memo(function ToolUseContents({
       );
     case 'npmInstall':
       return <TerminalTool artifact={artifact} invocation={invocation} toolName="npmInstall" />;
+    case 'validateProject':
+      return (
+        <>
+          <TerminalTool artifact={artifact} invocation={invocation} toolName="validateProject" />
+          <StructuredResultTool invocation={invocation} />
+        </>
+      );
     case 'view':
       return <ViewTool invocation={invocation} />;
     case 'edit':
@@ -45,6 +53,10 @@ export const ToolUseContents = memo(function ToolUseContents({
       return <WriteFileTool invocation={invocation} />;
     case 'lookupDocs':
       return <LookupDocsTool invocation={invocation} />;
+    case 'listFiles':
+    case 'searchText':
+    case 'getDiagnostics':
+      return <StructuredResultTool invocation={invocation} />;
     default:
       return <pre className="overflow-x-auto whitespace-pre-wrap">{JSON.stringify(invocation, null, 2)}</pre>;
   }
@@ -62,16 +74,16 @@ function TerminalTool({
 }: {
   artifact: ArtifactState;
   invocation: GhostbuildToolInvocation;
-  toolName: 'deploy' | 'npmInstall';
+  toolName: 'deploy' | 'npmInstall' | 'validateProject';
 }) {
   if (invocation.toolName !== toolName) {
     throw new Error(`Terminal expected ${toolName}, received ${invocation.toolName}`);
   }
-  const resultText = typeof invocation.result === 'string' ? invocation.result : '';
+  const succeeded = !isGhostbuildToolResult(invocation.result) || invocation.result.ok;
   const visible =
     invocation.state === 'call' ||
     (toolName === 'deploy' && invocation.state === 'result') ||
-    (toolName === 'npmInstall' && invocation.state === 'result' && resultText.startsWith('Error:'));
+    ((toolName === 'npmInstall' || toolName === 'validateProject') && invocation.state === 'result' && !succeeded);
   return visible ? (
     <Suspense fallback={null}>
       <ToolOutputTerminal artifact={artifact} invocation={invocation} />
@@ -86,7 +98,8 @@ function ViewTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
   if (isToolInvocationInProgress(invocation)) {
     return null;
   }
-  const resultText = typeof invocation.result === 'string' ? invocation.result : '';
+  const structured = structuredContent(invocation.result);
+  const resultText = structured ?? (typeof invocation.result === 'string' ? invocation.result : '');
   if (resultText.startsWith('Error:')) {
     return <ResultFrame>{resultText}</ResultFrame>;
   }
@@ -110,10 +123,21 @@ function ViewTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
     );
   }
 
-  const lines = resultText.split('\n').map((line) => line.split(':').slice(1).join(':'));
-  const args = loggingSafeParse(viewParameters, invocation.args);
+  const lines = structured
+    ? structured.split('\n')
+    : resultText.split('\n').map((line) => line.split(':').slice(1).join(':'));
+  const args = loggingSafeParse(viewToolInputParameters, invocation.args);
   const language = args.success ? normalizeCodeLanguage(path.extname(args.data.path)) : 'typescript';
-  const startLine = args.success && args.data.view_range ? args.data.view_range[0] : 1;
+  const structuredStartLine =
+    isGhostbuildToolResult(invocation.result) && typeof invocation.result.data === 'object' && invocation.result.data
+      ? (invocation.result.data as { pageLineStart?: unknown }).pageLineStart
+      : undefined;
+  const startLine =
+    typeof structuredStartLine === 'number'
+      ? structuredStartLine
+      : args.success && args.data.view_range
+        ? args.data.view_range[0]
+        : 1;
   return <LineNumberViewer lines={lines} startLineNumber={startLine} language={language} />;
 }
 
@@ -165,7 +189,7 @@ function EditTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
   if (invocation.toolName !== 'edit' || invocation.state === 'partial-call') {
     return null;
   }
-  const args = loggingSafeParse(editToolParameters, invocation.args);
+  const args = loggingSafeParse(editToolInputParameters, invocation.args);
   if (!args.success) {
     return null;
   }
@@ -173,12 +197,12 @@ function EditTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
     <div className="text-content-primary overflow-hidden rounded-lg border bg-bolt-elements-background-depth-1 font-mono text-sm">
       <div className="space-y-4 p-4">
         <div className="space-y-2 overflow-x-auto">
-          <div className="flex items-center gap-2">
-            <pre className="text-bolt-elements-icon-error">{args.data.old}</pre>
-          </div>
-          <div className="flex items-center gap-2">
-            <pre className="text-bolt-elements-icon-success">{args.data.new}</pre>
-          </div>
+          {args.data.edits.map((edit, index) => (
+            <div key={index} className="space-y-2">
+              <pre className="text-bolt-elements-icon-error">{edit.old}</pre>
+              <pre className="text-bolt-elements-icon-success">{edit.new}</pre>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -201,7 +225,8 @@ function LookupDocsTool({ invocation }: { invocation: GhostbuildToolInvocation }
   if (invocation.toolName !== 'lookupDocs' || isToolInvocationInProgress(invocation)) {
     return null;
   }
-  const resultText = typeof invocation.result === 'string' ? invocation.result : '';
+  const resultText =
+    structuredContent(invocation.result) ?? (typeof invocation.result === 'string' ? invocation.result : '');
   if (resultText.startsWith('Error:')) {
     return (
       <div className="text-content-primary overflow-hidden rounded-lg border bg-bolt-elements-background-depth-1 font-mono text-sm">
@@ -214,6 +239,36 @@ function LookupDocsTool({ invocation }: { invocation: GhostbuildToolInvocation }
       <Markdown html>{resultText}</Markdown>
     </ResultFrame>
   );
+}
+
+function StructuredResultTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
+  if (isToolInvocationInProgress(invocation)) {
+    return null;
+  }
+  if (!isGhostbuildToolResult(invocation.result)) {
+    return <ResultFrame>{toolResultSummary(invocation.result)}</ResultFrame>;
+  }
+  return (
+    <ResultFrame>
+      <div className="space-y-2">
+        <div>{invocation.result.summary}</div>
+        {invocation.result.coverage ? (
+          <pre className="whitespace-pre-wrap">{JSON.stringify(invocation.result.coverage, null, 2)}</pre>
+        ) : null}
+        {invocation.result.data ? (
+          <pre className="whitespace-pre-wrap">{JSON.stringify(invocation.result.data, null, 2)}</pre>
+        ) : null}
+      </div>
+    </ResultFrame>
+  );
+}
+
+function structuredContent(result: unknown): string | undefined {
+  if (!isGhostbuildToolResult(result) || typeof result.data !== 'object' || result.data === null) {
+    return undefined;
+  }
+  const content = (result.data as { content?: unknown }).content;
+  return typeof content === 'string' ? content : undefined;
 }
 
 function ResultFrame({ children }: { children: ReactNode }) {

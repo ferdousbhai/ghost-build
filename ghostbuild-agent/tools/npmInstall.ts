@@ -43,7 +43,7 @@ function findInvalidNpmInstallSpecs(packages: string) {
 export const npmInstallToolParameters = z
   .object({
     mode: z.enum(['add', 'sync-lockfile']).optional(),
-    packages: z.string().trim().optional().describe(packagesDescription),
+    packages: z.string().trim().max(2_000).optional().describe(packagesDescription),
   })
   .superRefine((input, ctx) => {
     const mode = input.mode ?? 'add';
@@ -66,6 +66,13 @@ export const npmInstallToolParameters = z
       return;
     }
     const packages = input.packages;
+    if (splitPackageSpecs(packages).length > 50) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['packages'],
+        message: 'Install at most 50 packages in one npmInstall call.',
+      });
+    }
     const invalidSpecs = findInvalidNpmInstallSpecs(packages);
     if (invalidSpecs.length > 0) {
       ctx.addIssue({

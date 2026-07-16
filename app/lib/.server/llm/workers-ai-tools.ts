@@ -5,8 +5,13 @@ import { lookupDocsTool } from 'ghostbuild-agent/tools/lookupDocs';
 import { npmInstallTool } from 'ghostbuild-agent/tools/npmInstall';
 import { viewTool } from 'ghostbuild-agent/tools/view';
 import { writeFileTool } from 'ghostbuild-agent/tools/writeFile';
-import type { GhostbuildToolName, GhostbuildToolSet } from 'ghostbuild-agent/types';
+import { listFilesTool } from 'ghostbuild-agent/tools/listFiles';
+import { searchTextTool } from 'ghostbuild-agent/tools/searchText';
+import { getDiagnosticsTool } from 'ghostbuild-agent/tools/getDiagnostics';
+import { validateProjectTool } from 'ghostbuild-agent/tools/validateProject';
+import { isReadOnlyToolName, type GhostbuildToolName, type GhostbuildToolSet } from 'ghostbuild-agent/types';
 import { z, type ZodType } from 'zod';
+import { isGhostbuildToolResult, toolResultSucceeded } from 'ghostbuild-agent/tool-result';
 
 export type AgentToolChoice = 'auto' | 'none' | 'required' | { type: 'tool'; toolName: GhostbuildToolName };
 export type AgentToolSettings = {
@@ -19,8 +24,12 @@ export function createWorkersAiTools(): GhostbuildToolSet {
   return {
     deploy: deployTool,
     edit: editTool,
+    listFiles: listFilesTool,
     lookupDocs: lookupDocsTool(),
     npmInstall: npmInstallTool,
+    getDiagnostics: getDiagnosticsTool,
+    searchText: searchTextTool,
+    validateProject: validateProjectTool,
     view: viewTool,
     writeFile: writeFileTool,
   };
@@ -62,56 +71,66 @@ export function getBuildToolChoice(messages: GhostbuildMessage[]): AgentToolChoi
   const lastAppRouteMutationAfterUserIndex = toolResultsAfterLastUser.findLastIndex(isAppRouteMutation);
 
   if (requiresAppRouteMutation) {
-    const lastStarterTemplateDeployAfterRouteIndex = toolResultsAfterLastUser.findLastIndex(
-      ({ toolName, result }, index) =>
-        toolName === 'deploy' && index > lastAppRouteMutationAfterUserIndex && isStarterTemplateDeployFailure(result),
-    );
-    if (lastAppRouteMutationAfterUserIndex === -1 || lastStarterTemplateDeployAfterRouteIndex !== -1) {
+    if (lastAppRouteMutationAfterUserIndex === -1) {
       return { type: 'tool', toolName: 'writeFile' };
     }
   }
 
-  const lastMutationAfterUserIndex = toolResultsAfterLastUser.findLastIndex(
-    ({ toolName }) => toolName === 'writeFile' || toolName === 'edit',
-  );
+  const lastMutationAfterUserIndex = toolResultsAfterLastUser.findLastIndex(isMutationResult);
 
   if (lastMutationAfterUserIndex !== -1) {
-    const lastDeployAfterMutationIndex = toolResultsAfterLastUser.findLastIndex(
-      ({ toolName }, index) => toolName === 'deploy' && index > lastMutationAfterUserIndex,
-    );
-    if (lastDeployAfterMutationIndex === -1) {
-      return { type: 'tool', toolName: 'deploy' };
+    return getPostMutationToolChoice(toolResultsAfterLastUser, lastMutationAfterUserIndex) ?? 'none';
+  }
+
+  const lastMutationIndex = toolResults.findLastIndex(isMutationResult);
+  if (lastMutationIndex !== -1) {
+    const unfinishedPriorBuild = getPostMutationToolChoice(toolResults, lastMutationIndex);
+    if (unfinishedPriorBuild !== undefined) {
+      return unfinishedPriorBuild;
     }
-    const deployResult = toolResultsAfterLastUser[lastDeployAfterMutationIndex].result;
-    if (isSuccessfulDeployResult(deployResult)) {
-      return 'none';
-    }
-    return hasReadOnlyLoopAfterDeployFailure(toolResultsAfterLastUser, lastDeployAfterMutationIndex)
-      ? { type: 'tool', toolName: 'writeFile' }
-      : 'required';
+  }
+
+  if (toolResultsAfterLastUser.some(({ result }) => !toolResultSucceeded(result))) {
+    return 'required';
   }
 
   if (looksLikeBuildRequest) {
     return { type: 'tool', toolName: 'writeFile' };
   }
 
-  const lastMutationIndex = toolResults.findLastIndex(
-    ({ toolName }) => toolName === 'writeFile' || toolName === 'edit',
-  );
-  if (lastMutationIndex === -1) {
-    return 'auto';
-  }
+  return 'auto';
+}
 
-  const lastDeployIndex = toolResults.findLastIndex(({ toolName }) => toolName === 'deploy');
-  if (lastDeployIndex < lastMutationIndex) {
+function getPostMutationToolChoice(
+  toolResults: Array<{ toolName: string; result: unknown }>,
+  mutationIndex: number,
+): AgentToolChoice | undefined {
+  const lastValidationIndex = toolResults.findLastIndex(
+    ({ toolName }, index) => toolName === 'validateProject' && index > mutationIndex,
+  );
+  if (lastValidationIndex === -1) {
+    return { type: 'tool', toolName: 'validateProject' };
+  }
+  const validationResult = toolResults[lastValidationIndex].result;
+  if (!isSuccessfulValidationResult(validationResult)) {
+    if (validationLevel(validationResult) === 'fast' && toolResultSucceeded(validationResult)) {
+      return { type: 'tool', toolName: 'validateProject' };
+    }
+    return hasReadOnlyLoopAfterFailure(toolResults, lastValidationIndex)
+      ? { type: 'tool', toolName: 'writeFile' }
+      : 'required';
+  }
+  if (validationNextAction(validationResult) !== 'prepare-deployment') {
+    return undefined;
+  }
+  const lastDeployIndex = toolResults.findLastIndex(
+    ({ toolName }, index) => toolName === 'deploy' && index > lastValidationIndex,
+  );
+  if (lastDeployIndex === -1) {
     return { type: 'tool', toolName: 'deploy' };
   }
-  const deployResult = toolResults[lastDeployIndex].result;
-  if (isSuccessfulDeployResult(deployResult)) {
-    return 'none';
-  }
-  return hasReadOnlyLoopAfterDeployFailure(toolResults, lastDeployIndex)
-    ? { type: 'tool', toolName: 'writeFile' }
+  return isSuccessfulDeployResult(toolResults[lastDeployIndex].result, validationRevision(validationResult))
+    ? undefined
     : 'required';
 }
 
@@ -123,7 +142,37 @@ export function getWorkersAiToolSettings(messages: GhostbuildMessage[]): AgentTo
       toolChoice: 'required',
     };
   }
+  if (toolChoice === 'auto') {
+    const activeTools: GhostbuildToolName[] = [
+      'view',
+      'listFiles',
+      'searchText',
+      'edit',
+      'writeFile',
+      'lookupDocs',
+      'npmInstall',
+    ];
+    if (hasIncompleteDiagnostics(messages)) {
+      activeTools.push('getDiagnostics');
+    }
+    return { activeTools, toolChoice };
+  }
   return { toolChoice };
+}
+
+function hasIncompleteDiagnostics(messages: GhostbuildMessage[]): boolean {
+  const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
+  const incompleteById = new Map<string, boolean>();
+  for (const { messageIndex, result } of collectToolResults(messages)) {
+    if (messageIndex <= lastUserIndex || !isGhostbuildToolResult(result) || !isRecord(result.data)) {
+      continue;
+    }
+    const diagnosticsId = result.data.diagnosticsId;
+    if (typeof diagnosticsId === 'string') {
+      incompleteById.set(diagnosticsId, result.coverage?.complete === false && Boolean(result.coverage.nextCursor));
+    }
+  }
+  return [...incompleteById.values()].some(Boolean);
 }
 
 export function getValidatedBuildCompletion(messages: GhostbuildMessage[]): string | undefined {
@@ -135,30 +184,34 @@ export function getValidatedBuildCompletion(messages: GhostbuildMessage[]): stri
   const toolResultsAfterLastUser = collectToolResults(messages).filter(
     ({ messageIndex }) => messageIndex > lastUserIndex,
   );
-  const lastMutationAfterUserIndex = toolResultsAfterLastUser.findLastIndex(
-    ({ toolName }) => toolName === 'writeFile' || toolName === 'edit',
-  );
+  const lastMutationAfterUserIndex = toolResultsAfterLastUser.findLastIndex(isMutationResult);
   if (lastMutationAfterUserIndex === -1) {
     return undefined;
   }
 
-  const successfulDeployResult = toolResultsAfterLastUser.findLast(
+  const validationIndex = toolResultsAfterLastUser.findLastIndex(
     ({ toolName, result }, index) =>
-      toolName === 'deploy' && index > lastMutationAfterUserIndex && isSuccessfulDeployResult(result),
-  )?.result;
-  if (!successfulDeployResult) {
+      toolName === 'validateProject' && index > lastMutationAfterUserIndex && isSuccessfulValidationResult(result),
+  );
+  if (validationIndex === -1) {
     return undefined;
   }
-
-  if (isGuestAppCheckResult(successfulDeployResult)) {
-    return 'Done. I built and checked the app, and it is ready to preview here. Sign in when you are ready to deploy it to Cloudflare production.';
+  const validationResult = toolResultsAfterLastUser[validationIndex].result;
+  if (validationNextAction(validationResult) === 'sign-in-required') {
+    return 'Done. I built and validated the app, including a clean preview smoke check, and it is ready to preview here. Sign in when you are ready to deploy it to Cloudflare production.';
   }
-
-  if (isProductionDeployResult(successfulDeployResult)) {
-    return 'Done. I built, validated, and deployed the app to Cloudflare production.';
+  const deployResult = toolResultsAfterLastUser.findLast(
+    ({ toolName, result }, index) =>
+      toolName === 'deploy' &&
+      index > validationIndex &&
+      isSuccessfulDeployResult(result, validationRevision(validationResult)),
+  )?.result;
+  if (!deployResult) {
+    return undefined;
   }
-
-  return 'Done. I built and validated the app, and it is ready to preview.';
+  return isProductionDeployResult(deployResult)
+    ? 'Done. I built, validated, and deployed the app to Cloudflare production.'
+    : 'Done. I built and validated the app. The production deployment plan is ready for your approval.';
 }
 
 export function getWorkersAiBuildGuidance(messages: GhostbuildMessage[]): string | undefined {
@@ -188,14 +241,14 @@ export function getWorkersAiBuildGuidance(messages: GhostbuildMessage[]): string
     `The user asked for a new app, and the primary app route has not been replaced yet.${attemptedPaths}`,
     `Your next filesystem action must write the complete requested app to ${GENERATED_APP_ROUTE}.`,
     'Do not write .ghost-* files, check files, marker files, placeholder files, or only src/routes/__root.tsx.',
-    'Do not call deploy until the requested experience is implemented in src/routes/index.tsx.',
+    'Do not call validateProject or deploy until the requested experience is implemented in src/routes/index.tsx.',
   ].join('\n');
 }
 
 function collectToolResults(messages: GhostbuildMessage[]): Array<{
   messageIndex: number;
   toolName: string;
-  result: string;
+  result: unknown;
   path?: string;
 }> {
   return messages.flatMap((message, messageIndex) =>
@@ -208,7 +261,7 @@ function collectToolResults(messages: GhostbuildMessage[]): Array<{
         {
           messageIndex,
           toolName: invocation.toolName,
-          result: typeof invocation.result === 'string' ? invocation.result : JSON.stringify(invocation.result),
+          result: invocation.result,
           path: getToolInvocationPath(invocation.args, invocation.result),
         },
       ];
@@ -234,12 +287,12 @@ function isUserFacingRoutePath(path: string | undefined): boolean {
   return /^src\/routes\/(?!__root\.tsx$).+\.(?:[cm]?[jt]sx?)$/i.test(path ?? '');
 }
 
-function hasReadOnlyLoopAfterDeployFailure(toolResults: Array<{ toolName: string }>, deployIndex: number): boolean {
-  const toolResultsAfterDeploy = toolResults.slice(deployIndex + 1);
-  if (toolResultsAfterDeploy.some(({ toolName }) => toolName === 'writeFile' || toolName === 'edit')) {
+function hasReadOnlyLoopAfterFailure(toolResults: Array<{ toolName: string }>, failureIndex: number): boolean {
+  const toolResultsAfterFailure = toolResults.slice(failureIndex + 1);
+  if (toolResultsAfterFailure.some(isMutationResult)) {
     return false;
   }
-  return toolResultsAfterDeploy.filter(({ toolName }) => toolName === 'view' || toolName === 'lookupDocs').length >= 3;
+  return toolResultsAfterFailure.filter(({ toolName }) => isReadOnlyToolName(toolName)).length >= 3;
 }
 
 function getToolInvocationPath(args: unknown, result: unknown): string | undefined {
@@ -278,26 +331,65 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isStarterTemplateDeployFailure(result: string): boolean {
-  const normalized = result.toLowerCase();
+function isMutationResult(result: { toolName: string; result?: unknown }): boolean {
   return (
-    normalized.includes('generated app route still matches the starter template') ||
-    (normalized.includes('starter template') && normalized.includes('route'))
+    (result.toolName === 'writeFile' || result.toolName === 'edit' || result.toolName === 'npmInstall') &&
+    toolResultSucceeded(result.result)
   );
 }
 
-function isSuccessfulDeployResult(result: string): boolean {
+function isSuccessfulValidationResult(result: unknown): boolean {
   return (
-    isGuestAppCheckResult(result) ||
-    result.includes('Ghostbuild preview validation complete') ||
-    isProductionDeployResult(result)
+    isGhostbuildToolResult(result) &&
+    result.ok &&
+    isRecord(result.data) &&
+    result.data.level === 'full' &&
+    validationRevision(result) !== undefined
   );
 }
 
-function isGuestAppCheckResult(result: string): boolean {
-  return result.includes('Ghostbuild app check complete');
+function validationRevision(result: unknown): string | undefined {
+  if (!isGhostbuildToolResult(result) || !isRecord(result.data)) {
+    return undefined;
+  }
+  return typeof result.data.revision === 'string' ? result.data.revision : undefined;
 }
 
-function isProductionDeployResult(result: string): boolean {
-  return result.includes('Uploaded ghostbuild') || result.includes('Deployed ghostbuild');
+function validationLevel(result: unknown): 'fast' | 'full' | undefined {
+  if (!isGhostbuildToolResult(result) || !isRecord(result.data)) {
+    return undefined;
+  }
+  return result.data.level === 'fast' || result.data.level === 'full' ? result.data.level : undefined;
+}
+
+function validationNextAction(result: unknown): 'sign-in-required' | 'prepare-deployment' | undefined {
+  if (!isGhostbuildToolResult(result) || !isRecord(result.data)) {
+    return undefined;
+  }
+  const nextAction = result.data.nextAction;
+  return nextAction === 'sign-in-required' || nextAction === 'prepare-deployment' ? nextAction : undefined;
+}
+
+function isSuccessfulDeployResult(result: unknown, expectedRevision?: string): boolean {
+  if (isGhostbuildToolResult(result)) {
+    return (
+      result.ok &&
+      isRecord(result.data) &&
+      result.data.state === 'awaiting-approval' &&
+      (expectedRevision === undefined || result.data.revision === expectedRevision)
+    );
+  }
+  return (
+    typeof result === 'string' &&
+    (result.includes('Deployment plan ready for your approval') || isProductionDeployResult(result))
+  );
+}
+
+function isProductionDeployResult(result: unknown): boolean {
+  if (isGhostbuildToolResult(result)) {
+    return result.ok && isRecord(result.data) && result.data.state === 'deployed';
+  }
+  return (
+    typeof result === 'string' && (result.includes('Uploaded ghostbuild') || result.includes('Deployed ghostbuild'))
+  );
 }

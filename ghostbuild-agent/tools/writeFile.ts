@@ -12,7 +12,7 @@ unchanged sections.
 `;
 
 export const writeFileParameters = z.object({
-  path: z.string().describe('The absolute path to the file to write.'),
+  path: z.string().max(1_024).describe('The absolute path to the file to write.'),
   content: z.string().describe('The complete file contents to write.'),
 });
 

@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import type { WebContainer, WebContainerProcess } from '@webcontainer/api';
-import { ActionCommandTimeoutError } from './errors';
+import type { WebContainer } from '@webcontainer/api';
 import { getAuthToken } from '~/lib/stores/sessionId';
 import { waitForContainerBootState } from '~/lib/stores/containerBootState';
-import { runCommand, runDeploy } from './deploy';
+import { runDeploy } from './deploy';
 
 vi.mock('~/lib/stores/containerBootState', () => ({
   ContainerBootState: { READY: 'ready' },
@@ -16,56 +15,33 @@ vi.mock('~/lib/stores/sessionId', () => ({
 
 vi.mock('~/lib/stores/chatId', () => ({ chatIdStore: { get: vi.fn(() => 'chat-1') } }));
 
+const EMPTY_WORKSPACE_REVISION = '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945';
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
-  vi.useRealTimers();
 });
 
-describe('runDeploy guest project check', () => {
-  test('checks generated source without spawning browser-heavy validation commands for guests', async () => {
+describe('runDeploy production plan preparation', () => {
+  test('keeps guest sessions behind sign-in without treating deployment as validation', async () => {
     vi.mocked(getAuthToken).mockReturnValue('guest_00000000-0000-4000-8000-000000000000');
-    const spawn = vi.fn();
-    const readFile = vi.fn().mockResolvedValue('export function HabitTracker() { return <main>Habit tracker</main>; }');
+    const exportSnapshot = vi.fn();
 
     const result = await runDeploy({
-      container: { fs: { readFile }, spawn } as unknown as WebContainer,
+      invocation: deployInvocation(),
+      container: { export: exportSnapshot } as unknown as WebContainer,
       abortSignal: new AbortController().signal,
-      onOutput: vi.fn(),
       workspace: {
+        getFiles: () => ({}),
+        getPreviewPort: () => undefined,
         hasFile: vi.fn(),
         setGeneratedFileContent: vi.fn(),
       },
     });
 
     expect(waitForContainerBootState).not.toHaveBeenCalled();
-    expect(readFile).toHaveBeenCalledWith('src/routes/index.tsx', 'utf-8');
-    expect(readFile).toHaveBeenCalledWith('src/server.ts', 'utf-8');
-    expect(spawn).not.toHaveBeenCalled();
-    expect(result).toContain('Ghostbuild project check complete');
-    expect(result).toContain('Sign in to deploy this project to Cloudflare production');
-  });
-
-  test('accepts a Worker-only project without requiring a generated browser route', async () => {
-    vi.mocked(getAuthToken).mockReturnValue('guest_00000000-0000-4000-8000-000000000000');
-    const readFile = vi.fn(async (path: string) => {
-      if (path === 'src/routes/index.tsx') {
-        return '<p>Ghostbuild on Cloudflare</p><h1>Start with a durable AI agent.</h1><h2>App Agent</h2>';
-      }
-      return 'export default { async fetch() { return new Response("ok"); } } satisfies ExportedHandler<Env>;';
-    });
-
-    const result = await runDeploy({
-      container: { fs: { readFile }, spawn: vi.fn() } as unknown as WebContainer,
-      abortSignal: new AbortController().signal,
-      onOutput: vi.fn(),
-      workspace: {
-        hasFile: vi.fn(),
-        setGeneratedFileContent: vi.fn(),
-      },
-    });
-
-    expect(result).toContain('Ghostbuild project check complete');
+    expect(exportSnapshot).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: false, data: { state: 'sign-in-required' } });
   });
 
   test('waits for container readiness before capturing the signed-in production snapshot', async () => {
@@ -75,10 +51,12 @@ describe('runDeploy guest project check', () => {
 
     await expect(
       runDeploy({
+        invocation: deployInvocation(),
         container: { fs: { readFile }, export: exportSnapshot } as unknown as WebContainer,
         abortSignal: new AbortController().signal,
-        onOutput: vi.fn(),
         workspace: {
+          getFiles: () => ({}),
+          getPreviewPort: () => undefined,
           hasFile: vi.fn(),
           setGeneratedFileContent: vi.fn(),
         },
@@ -110,10 +88,15 @@ describe('runDeploy guest project check', () => {
     );
 
     const result = await runDeploy({
+      invocation: deployInvocation(),
       container: { fs: { readFile: vi.fn() }, export: exportSnapshot } as unknown as WebContainer,
       abortSignal: new AbortController().signal,
-      onOutput: vi.fn(),
-      workspace: { hasFile: vi.fn(), setGeneratedFileContent: vi.fn() },
+      workspace: {
+        getFiles: () => ({}),
+        getPreviewPort: () => undefined,
+        hasFile: vi.fn(),
+        setGeneratedFileContent: vi.fn(),
+      },
     });
 
     expect(exportSnapshot).toHaveBeenCalledWith('.', {
@@ -124,96 +107,44 @@ describe('runDeploy guest project check', () => {
       '/api/deployments/plan?chatId=chat-1',
       expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
     );
-    expect(result).toContain('Deployment plan ready for your approval');
-    expect(result).toContain('isolated deployment sandbox will verify');
-    expect(result).toContain('GHOSTBUILD_DEPLOYMENT_PLAN:');
-    expect(result).not.toContain('wrangler deploy');
-  });
-
-  test('rejects a guest deploy when neither the starter app nor Worker was replaced', async () => {
-    vi.mocked(getAuthToken).mockReturnValue('guest_00000000-0000-4000-8000-000000000000');
-    const readFile = vi.fn(async (path: string) =>
-      path === 'src/routes/index.tsx'
-        ? `
-          <p>Ghostbuild on Cloudflare</p>
-          <h1>Start with a durable AI agent.</h1>
-          <h2>App Agent</h2>
-        `
-        : `import handler from "@tanstack/react-start/server-entry";
-import { routeAgentRequest } from "agents";
-
-export { AppAgent } from "./agents/app-agent";
-
-export default {
-  async fetch(request: Request, env: Env) {
-    const agentResponse = await routeAgentRequest(request, env);
-    if (agentResponse) {
-      return agentResponse;
-    }
-
-    return handler.fetch(request);
-  },
-} satisfies ExportedHandler<Env>;`,
-    );
-
-    await expect(
-      runDeploy({
-        container: { fs: { readFile }, spawn: vi.fn() } as unknown as WebContainer,
-        abortSignal: new AbortController().signal,
-        onOutput: vi.fn(),
-        workspace: {
-          hasFile: vi.fn(),
-          setGeneratedFileContent: vi.fn(),
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        state: 'awaiting-approval',
+        revision: EMPTY_WORKSPACE_REVISION,
+        deployment: {
+          id: 'deployment-1',
+          planDigest: 'a'.repeat(64),
+          resources: [{ type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-app' }],
         },
-      }),
-    ).rejects.toThrow('Generated project still matches the starter template');
-  });
-});
-
-describe('runCommand cancellation', () => {
-  test('does not spawn when the signal is already aborted', async () => {
-    const controller = new AbortController();
-    controller.abort();
-    const spawn = vi.fn();
-
-    await expect(
-      runCommand({
-        container: { spawn } as unknown as WebContainer,
-        command: ['pnpm', 'run', 'build'],
-        abortSignal: controller.signal,
-        commandErroredController: new AbortController(),
-        onOutput: vi.fn(),
-      }),
-    ).rejects.toMatchObject({ name: 'AbortError' });
-
-    expect(spawn).not.toHaveBeenCalled();
-  });
-
-  test('kills a process that resolves after the spawn timeout', async () => {
-    vi.useFakeTimers();
-    let resolveSpawn!: (process: WebContainerProcess) => void;
-    const spawnPromise = new Promise<WebContainerProcess>((resolve) => {
-      resolveSpawn = resolve;
+      },
     });
-    const spawn = vi.fn(() => spawnPromise);
-    const process = { kill: vi.fn() } as unknown as WebContainerProcess;
+  });
 
-    const command = runCommand({
-      container: { spawn } as unknown as WebContainer,
-      command: ['pnpm', 'run', 'build'],
+  test('refuses to snapshot a workspace revision that was not validated', async () => {
+    vi.mocked(getAuthToken).mockReturnValue('user-session');
+    const exportSnapshot = vi.fn();
+    const result = await runDeploy({
+      invocation: deployInvocation('a'.repeat(64)),
+      container: { export: exportSnapshot } as unknown as WebContainer,
       abortSignal: new AbortController().signal,
-      commandErroredController: new AbortController(),
-      onOutput: vi.fn(),
-      timeoutMs: 100,
+      workspace: {
+        getFiles: () => ({}),
+        getPreviewPort: () => undefined,
+        hasFile: vi.fn(),
+        setGeneratedFileContent: vi.fn(),
+      },
     });
-    const rejection = expect(command).rejects.toBeInstanceOf(ActionCommandTimeoutError);
-
-    await vi.advanceTimersByTimeAsync(100);
-    await rejection;
-    resolveSpawn(process);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(process.kill).toHaveBeenCalledOnce();
+    expect(exportSnapshot).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: false, data: { state: 'validation-stale' } });
   });
 });
+
+function deployInvocation(validatedRevision = EMPTY_WORKSPACE_REVISION) {
+  return {
+    state: 'call' as const,
+    toolCallId: 'deploy-1',
+    toolName: 'deploy',
+    args: { validatedRevision },
+  };
+}

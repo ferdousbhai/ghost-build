@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { toolSuccess } from 'ghostbuild-agent/tool-result';
 import { summarizeToolInvocationForPrompt } from './message-conversion';
 
 describe('summarizeToolInvocationForPrompt', () => {
@@ -33,5 +34,18 @@ describe('summarizeToolInvocationForPrompt', () => {
     expect(summary).toContain('"contentLength":20000');
     expect(summary).not.toContain('x'.repeat(1_000));
     expect(summary).toContain('Ghostbuild preview validation complete');
+  });
+
+  it('preserves complete bounded structured results without taking another excerpt', () => {
+    const content = `${'x'.repeat(10_000)}complete-tail`;
+    const summary = summarizeToolInvocationForPrompt({
+      toolCallId: 'view-1',
+      toolName: 'view',
+      args: { path: '/home/project/src/app.ts', view_range: [1, 201] },
+      state: 'result',
+      result: toolSuccess('bounded page', { content }),
+    });
+    expect(summary).toContain(content);
+    expect(summary).not.toContain('truncated');
   });
 });

@@ -2,8 +2,8 @@ import { createdAtMillis, getToolInvocation, type GhostbuildMessage } from './ai
 import { PREWARM_PATHS, WORK_DIR } from './constants.js';
 import { LegacyBoltMessageParser } from './message-parser.js';
 import { makePartId, type PartId } from './partId.js';
-import { editToolParameters } from './tools/edit.js';
-import { viewParameters } from './tools/view.js';
+import { editToolInputParameters } from './tools/edit.js';
+import { viewToolInputParameters } from './tools/view.js';
 import { writeFileParameters } from './tools/writeFile.js';
 import type { EditorDocument, FileMap } from './types.js';
 import { path } from './utils/path.js';
@@ -122,11 +122,11 @@ export class RelevantFilesContext {
 function invocationFilePath(invocation: NonNullable<ReturnType<typeof getToolInvocation>>): string | undefined {
   switch (invocation.toolName) {
     case 'view': {
-      const args = loggingSafeParse(viewParameters, invocation.args);
+      const args = loggingSafeParse(viewToolInputParameters, invocation.args);
       return args.success ? args.data.path : undefined;
     }
     case 'edit': {
-      const args = loggingSafeParse(editToolParameters, invocation.args);
+      const args = loggingSafeParse(editToolInputParameters, invocation.args);
       return args.success ? args.data.path : undefined;
     }
     case 'writeFile': {

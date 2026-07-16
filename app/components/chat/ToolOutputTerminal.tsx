@@ -8,6 +8,7 @@ import { themeStore } from '~/lib/stores/theme';
 import { getTerminalTheme } from '~/components/workbench/terminal/theme';
 
 import '@xterm/xterm/css/xterm.css';
+import { toolResultSummary } from 'ghostbuild-agent/tool-result';
 
 export const ToolOutputTerminal = memo(function ToolOutputTerminal({
   artifact,
@@ -19,8 +20,8 @@ export const ToolOutputTerminal = memo(function ToolOutputTerminal({
   const theme = useStore(themeStore);
   let terminalOutput = useStore(artifact.runner.terminalOutput);
 
-  if (!terminalOutput && invocation.state === 'result' && typeof invocation.result === 'string') {
-    terminalOutput = invocation.result;
+  if (!terminalOutput && invocation.state === 'result') {
+    terminalOutput = toolResultSummary(invocation.result);
   }
 
   const terminalElementRef = useRef<HTMLDivElement>(null);

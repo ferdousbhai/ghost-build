@@ -1,5 +1,6 @@
 import type { MapStore } from 'nanostores';
 import type { ArtifactAction } from 'ghostbuild-agent/types';
+import type { FileMap } from 'ghostbuild-agent/types';
 
 export type ActionStatus = 'pending' | 'running' | 'complete' | 'aborted' | 'failed';
 
@@ -30,6 +31,8 @@ export type ActionStateUpdate =
 export type ActionsMap = MapStore<Record<string, ActionState>>;
 
 export type ActionRunnerWorkspace = {
+  getFiles(): FileMap;
+  getPreviewPort(): number | undefined;
   hasFile(path: string): boolean;
   setGeneratedFileContent(path: string, content: string): void;
 };

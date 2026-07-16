@@ -3,7 +3,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
-import { DEPLOYMENT_PLAN_MARKER } from '~/lib/deployment-plan-marker';
+import { DEPLOYMENT_PLAN_MARKER } from '~/lib/deployment-approval';
 import { AssistantMessage } from './AssistantMessage';
 
 vi.mock('./ToolCall', () => ({ ToolCall: () => null }));
