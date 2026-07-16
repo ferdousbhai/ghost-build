@@ -1,8 +1,10 @@
 # Ghostbuild
 
-Ghostbuild is an AI app builder for generating TanStack Start applications that run on the Cloudflare developer platform.
+Ghostbuild is an AI builder for projects that run on the Cloudflare developer platform. Full web applications default
+to TanStack Start when the user does not request a framework; focused Workers, APIs, event handlers, and scripts use the
+simplest Cloudflare-native execution surface that fits the request.
 
-The root app runs as a TanStack Start app on Cloudflare Workers and uses TanStack Query and TanStack DB for client data. Generated apps start from a smaller `template/` snapshot with TanStack Start, TanStack Router, Cloudflare Workers, D1, R2, Workers AI, and Cloudflare Agents; the builder adds feature-specific client data libraries when needed.
+The root app runs as a TanStack Start app on Cloudflare Workers and uses TanStack Query and TanStack DB for client data. Generated projects start from a smaller `template/` snapshot with TanStack Start, TanStack Router, Cloudflare Workers, D1, R2, Workers AI, and Cloudflare Agents. The builder keeps TanStack for full browser applications and works directly in the Worker entrypoint for requests that do not benefit from a web framework; it adds feature-specific libraries and Cloudflare primitives only when needed.
 
 ## Getting Started
 
@@ -41,12 +43,12 @@ The production deploy preflight fails until provisioning has replaced the placeh
 
 ### Generated App Deployment And Billing
 
-Ghostbuild's own deployment credentials are never used to publish a user's generated application. For signed-in users,
-the browser validates the generated app, uploads an immutable secret-excluding tar.gz snapshot, and asks the root Worker to prepare
+Ghostbuild's own deployment credentials are never used to publish a user's generated project. For signed-in users,
+the browser uploads an immutable secret-excluding ZIP source snapshot and asks the root Worker to prepare
 an exact Cloudflare resource plan. The plan always identifies the user's connected Cloudflare account as the billing
 source for the Worker, D1, R2, Durable Object, and Workers AI. The user must approve the plan digest in the chat before
 server-side provisioning can begin. A changed snapshot, plan, owner, or Cloudflare connection invalidates that approval.
-Build and publish commands run in pinned, egress-restricted Cloudflare Sandboxes. The decrypted user credential remains
+Validation, build, and publish commands run in pinned, egress-restricted Cloudflare Sandboxes. The decrypted user credential remains
 in Ghostbuild's Worker and is never placed in generated code, the browser, or a sandbox.
 
 Workers Paid is a separate consent boundary. Exhausting a free Workers AI allocation must prompt for authorization and

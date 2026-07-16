@@ -1,12 +1,17 @@
-import { useEffect, useId, useRef, useState, type ComponentProps, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { buttonClassNames } from './Button';
-import type { Button } from './Button';
+import { buttonClassNames, type ButtonVisualProps } from './Button';
 import { classNames } from '~/utils/classNames';
 
 type MenuProps = {
   children: ReactNode;
-  buttonProps?: ComponentProps<typeof Button>;
+  buttonProps?: Pick<
+    ButtonVisualProps,
+    'children' | 'className' | 'focused' | 'icon' | 'inline' | 'size' | 'tip' | 'variant'
+  > & {
+    'aria-label'?: string;
+    title?: string;
+  };
 };
 
 export function Menu({ children, buttonProps }: MenuProps) {

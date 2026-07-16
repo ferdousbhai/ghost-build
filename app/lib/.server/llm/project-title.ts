@@ -1,5 +1,4 @@
 import { generateText } from 'ai';
-import { cachedPromptTokens } from 'ghostbuild-agent/ai-compat';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { llama32_1bCostNanodollars } from '~/lib/.server/billing/ai-allowance-policy';
 import {
@@ -7,6 +6,7 @@ import {
   reserveAiAllowance,
   settleAiAllowance,
 } from '~/lib/.server/billing/ai-allowance-repository';
+import { normalizeWorkersAiUsage } from '~/lib/.server/billing/workers-ai-usage';
 import { CLOUDFLARE_PROJECT_TITLE_MODEL } from '~/lib/workers-ai-model';
 import { getProvider, type WorkersAiAccountCredentials } from './provider';
 
@@ -49,14 +49,8 @@ export async function generateProjectTitle(
     });
 
     if (reservation) {
-      const inputTokens = normalizeTokenUsage(result.totalUsage.inputTokens);
-      const outputTokens = normalizeTokenUsage(result.totalUsage.outputTokens);
-      const cachedInputTokens = Math.min(inputTokens, cachedPromptTokens(result.providerMetadata));
-      await settleAiAllowance(env.DB, reservation.id, llama32_1bCostNanodollars({ inputTokens, outputTokens }), {
-        inputTokens,
-        cachedInputTokens,
-        outputTokens,
-      });
+      const usage = normalizeWorkersAiUsage(result.totalUsage, result.providerMetadata);
+      await settleAiAllowance(env.DB, reservation.id, llama32_1bCostNanodollars(usage), usage);
     }
 
     return cleanProjectTitle(result.text);
@@ -88,8 +82,4 @@ export function cleanProjectTitle(value: string): string | null {
   const shortened = cleaned.slice(0, PROJECT_TITLE_MAX_CHARACTERS + 1);
   const lastSpace = shortened.lastIndexOf(' ');
   return (lastSpace >= 20 ? shortened.slice(0, lastSpace) : cleaned.slice(0, PROJECT_TITLE_MAX_CHARACTERS)).trim();
-}
-
-function normalizeTokenUsage(value: number | undefined): number {
-  return value === undefined || !Number.isSafeInteger(value) || value < 0 ? 0 : value;
 }

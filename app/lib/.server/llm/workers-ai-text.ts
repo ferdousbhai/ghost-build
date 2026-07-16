@@ -1,6 +1,5 @@
 import { generateText } from 'ai';
 import { getProvider, type WorkersAiAccountCredentials } from './provider';
-import { cachedPromptTokens } from 'ghostbuild-agent/ai-compat';
 import { glm52CostNanodollars } from '~/lib/.server/billing/ai-allowance-policy';
 import {
   AiAllowanceExceededError,
@@ -8,6 +7,7 @@ import {
   reserveAiAllowance,
   settleAiAllowance,
 } from '~/lib/.server/billing/ai-allowance-repository';
+import { normalizeWorkersAiUsage } from '~/lib/.server/billing/workers-ai-usage';
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
 
 const CONTEXT_SUMMARY_MAX_TOKENS = 4_000;
@@ -48,15 +48,8 @@ async function generateWorkersAiText(
       temperature: options.temperature,
     });
     if (reservation) {
-      const inputTokens = normalizeTokenUsage(result.totalUsage.inputTokens);
-      const outputTokens = normalizeTokenUsage(result.totalUsage.outputTokens);
-      const cachedInputTokens = Math.min(inputTokens, cachedPromptTokens(result.providerMetadata));
-      await settleAiAllowance(
-        env.DB,
-        reservation.id,
-        glm52CostNanodollars({ inputTokens, cachedInputTokens, outputTokens }),
-        { inputTokens, cachedInputTokens, outputTokens },
-      );
+      const usage = normalizeWorkersAiUsage(result.totalUsage, result.providerMetadata);
+      await settleAiAllowance(env.DB, reservation.id, glm52CostNanodollars(usage), usage);
     }
     const text = result.text.trim();
     if (!text) {
@@ -98,8 +91,4 @@ export async function summarizeBuilderContext(
     }
     throw new Error('Context compaction generation failed.');
   }
-}
-
-function normalizeTokenUsage(value: number | undefined): number {
-  return value === undefined || !Number.isSafeInteger(value) || value < 0 ? 0 : value;
 }

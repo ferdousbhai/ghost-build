@@ -2,6 +2,12 @@ export const DEPLOYMENT_PLAN_VERSION = 1 as const;
 
 export type DeploymentResourceType = 'worker' | 'd1' | 'r2' | 'durable_object' | 'workers_ai';
 
+export type DeploymentPlanResource = {
+  type: DeploymentResourceType;
+  logicalName: string;
+  proposedName: string;
+};
+
 export type DeploymentPlan = {
   version: typeof DEPLOYMENT_PLAN_VERSION;
   deploymentId: string;
@@ -11,11 +17,7 @@ export type DeploymentPlan = {
     workersAi: 'user_cloudflare_account';
     workersPaidUpgrade: 'explicit_user_authorization_required';
   };
-  resources: Array<{
-    type: DeploymentResourceType;
-    logicalName: string;
-    proposedName: string;
-  }>;
+  resources: DeploymentPlanResource[];
 };
 
 export async function buildDeploymentPlan(args: {
@@ -53,6 +55,16 @@ export async function buildDeploymentPlanFromSource(args: {
   };
   const digest = await sha256Hex(new TextEncoder().encode(JSON.stringify(plan)));
   return { plan, digest };
+}
+
+export function deploymentPlanResourceName(
+  plan: DeploymentPlan,
+  type: DeploymentResourceType,
+  logicalName: string,
+): string | null {
+  const matches = plan.resources.filter((resource) => resource.type === type && resource.logicalName === logicalName);
+  const name = matches.length === 1 ? matches[0].proposedName : '';
+  return /^[a-z0-9][a-z0-9-]{2,63}$/.test(name) ? name : null;
 }
 
 async function sha256Hex(value: ArrayBuffer | Uint8Array): Promise<string> {

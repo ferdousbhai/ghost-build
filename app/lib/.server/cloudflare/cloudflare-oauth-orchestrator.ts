@@ -1,10 +1,13 @@
-import type {
-  CloudflareConnectionChallenge,
-  CloudflareConnectionCompletionRequest,
-  CloudflareConnectionRequest,
-  CloudflareConnectionResult,
-  CloudflareOrchestrator,
+import {
+  CloudflareOAuthError,
+  type CloudflareConnectionChallenge,
+  type CloudflareConnectionCompletionRequest,
+  type CloudflareConnectionRequest,
+  type CloudflareConnectionResult,
+  type CloudflareOrchestrator,
 } from './cloudflare-orchestrator';
+
+export { CloudflareOAuthError } from './cloudflare-orchestrator';
 
 const AUTHORIZE_URL = 'https://dash.cloudflare.com/oauth2/auth';
 const TOKEN_URL = 'https://dash.cloudflare.com/oauth2/token';
@@ -130,13 +133,6 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
         typeof token.expires_in === 'number' ? Date.now() + Math.max(0, token.expires_in) * 1_000 : undefined,
       grantedCapabilities: session.capabilities,
     };
-  }
-}
-
-export class CloudflareOAuthError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'CloudflareOAuthError';
   }
 }
 

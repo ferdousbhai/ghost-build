@@ -63,9 +63,9 @@ function buildPhase(args: {
 function phaseMessage(phase: BuildProgressPhase): string {
   switch (phase) {
     case 'planning':
-      return 'Planning your app…';
+      return 'Planning your project…';
     case 'creating':
-      return 'Creating your app…';
+      return 'Creating your project…';
     case 'saving':
       return 'Saving changes…';
     case 'installing':
@@ -75,15 +75,15 @@ function phaseMessage(phase: BuildProgressPhase): string {
     case 'recovering':
       return 'Recovering the interrupted build…';
   }
-  return 'Building your app…';
+  return 'Building your project…';
 }
 
 function activityLabel(phase: BuildProgressPhase): string {
   switch (phase) {
     case 'planning':
-      return 'planning your app';
+      return 'planning your project';
     case 'creating':
-      return 'creating your app';
+      return 'creating your project';
     case 'saving':
       return 'saving changes';
     case 'installing':
@@ -93,5 +93,5 @@ function activityLabel(phase: BuildProgressPhase): string {
     case 'recovering':
       return 'recovering the build';
   }
-  return 'building your app';
+  return 'building your project';
 }

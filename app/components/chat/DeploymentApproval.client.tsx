@@ -11,6 +11,8 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
   const [error, setError] = useState<string | null>(null);
   const [canRetry, setCanRetry] = useState(false);
   const [productionUrl, setProductionUrl] = useState<string | null>(null);
+  const controlsDisabled =
+    status === 'submitting' || status === 'retrying' || status === 'deploying' || status === 'deployed';
 
   useEffect(() => {
     const abort = new AbortController();
@@ -33,6 +35,25 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
     return () => abort.abort();
   }, [activeDeployment.id]);
 
+  const continueDeployment = async () => {
+    setStatus('deploying');
+    setError(null);
+    setCanRetry(false);
+    try {
+      const completed = await resumeDeployment(activeDeployment.id, undefined, () => setStatus('deploying'));
+      if (!completed) {
+        setStatus('idle');
+        return;
+      }
+      setProductionUrl(completed.productionUrl ?? null);
+      setStatus('deployed');
+    } catch (deploymentError) {
+      setCanRetry(deploymentError instanceof DeploymentTerminalError);
+      setError(deploymentError instanceof Error ? deploymentError.message : 'Unable to resume the deployment.');
+      setStatus('error');
+    }
+  };
+
   const approve = async () => {
     setStatus('submitting');
     setError(null);
@@ -54,20 +75,7 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
       if (!response.ok || payload?.deployment?.status !== 'approved') {
         throw new Error(payload?.error || 'Unable to approve the deployment.');
       }
-      setStatus('deploying');
-      const executionResponse = await fetch(`/api/deployments/${encodeURIComponent(activeDeployment.id)}/execute`, {
-        method: 'POST',
-      });
-      const executionPayload = (await executionResponse.json().catch(() => null)) as {
-        deployment?: { status?: string; productionUrl?: string | null };
-        error?: string;
-      } | null;
-      if (!executionResponse.ok || !executionPayload?.deployment) {
-        throw new Error(executionPayload?.error || 'Unable to start the production deployment.');
-      }
-      const completed = await waitForDeployment(activeDeployment.id);
-      setProductionUrl(completed.productionUrl ?? null);
-      setStatus('deployed');
+      await continueDeployment();
     } catch (approvalError) {
       setCanRetry(approvalError instanceof DeploymentTerminalError);
       setError(approvalError instanceof Error ? approvalError.message : 'Unable to approve the deployment.');
@@ -118,15 +126,15 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
       <label className="text-content-primary flex items-start gap-2">
         <Checkbox
           checked={billingApproved}
-          disabled={status === 'submitting' || status === 'retrying' || status === 'deploying' || status === 'deployed'}
+          disabled={controlsDisabled}
           onChange={(event) => setBillingApproved(event.target.checked)}
         />
-        <span>I approve Cloudflare billing my account for this app&apos;s infrastructure and inference.</span>
+        <span>I approve Cloudflare billing my account for this project&apos;s infrastructure and inference.</span>
       </label>
       <label className="text-content-primary flex items-start gap-2">
         <Checkbox
           checked={paidPolicyUnderstood}
-          disabled={status === 'submitting' || status === 'retrying' || status === 'deploying' || status === 'deployed'}
+          disabled={controlsDisabled}
           onChange={(event) => setPaidPolicyUnderstood(event.target.checked)}
         />
         <span>I understand Workers Paid will require separate authorization and is not enabled automatically.</span>
@@ -136,7 +144,7 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
           Deployed to your Cloudflare account.
           {productionUrl ? (
             <a className="ml-1 underline" href={productionUrl} target="_blank" rel="noreferrer">
-              Open app
+              Open deployment
             </a>
           ) : null}
         </p>
@@ -147,6 +155,10 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
       ) : status === 'error' && canRetry ? (
         <Button size="sm" onClick={() => void retry()}>
           Prepare retry
+        </Button>
+      ) : status === 'error' ? (
+        <Button size="sm" onClick={() => void continueDeployment()}>
+          Resume deployment
         </Button>
       ) : (
         <Button
@@ -166,13 +178,9 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
 const DEPLOYMENT_POLL_INTERVAL_MS = 1_500;
 const DEPLOYMENT_POLL_TIMEOUT_MS = 30 * 60 * 1_000;
 
-async function waitForDeployment(deploymentId: string): Promise<{ productionUrl?: string | null }> {
-  return pollDeployment(deploymentId);
-}
-
 async function resumeDeployment(
   deploymentId: string,
-  signal: AbortSignal,
+  signal: AbortSignal | undefined,
   onRunning: () => void,
 ): Promise<{ productionUrl?: string | null } | null> {
   const current = await getDeployment(deploymentId, signal);

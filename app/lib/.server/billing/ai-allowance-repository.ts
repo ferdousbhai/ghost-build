@@ -172,7 +172,10 @@ export async function settleAiAllowance(
              cached_input_tokens = cached_input_tokens + ?,
              output_tokens = output_tokens + ?,
              updated_at = ?
-         WHERE subject_key = ? AND usage_date = ?`,
+         WHERE subject_key = ? AND usage_date = ?
+           AND EXISTS (
+             SELECT 1 FROM ai_usage_reservations WHERE id = ? AND status = 'active'
+           )`,
       )
       .bind(
         reservation.reserved_cost_nanodollars,
@@ -183,6 +186,7 @@ export async function settleAiAllowance(
         settledAt,
         reservation.subject_key,
         reservation.usage_date,
+        reservationId,
       ),
     db
       .prepare(
@@ -215,7 +219,7 @@ export async function releaseAiAllowance(db: D1Database, reservationId: string, 
   }
   const releasedAt = now.getTime();
   await db.batch([
-    removeReservedCostStatement(db, reservation, releasedAt),
+    removeActiveReservedCostStatement(db, reservation, reservationId, releasedAt),
     db
       .prepare(
         `UPDATE ai_usage_reservations SET status = 'released', settled_at = ?
@@ -270,6 +274,30 @@ function removeReservedCostStatement(db: D1Database, reservation: ReservationRow
        WHERE subject_key = ? AND usage_date = ?`,
     )
     .bind(reservation.reserved_cost_nanodollars, updatedAt, reservation.subject_key, reservation.usage_date);
+}
+
+function removeActiveReservedCostStatement(
+  db: D1Database,
+  reservation: ReservationRow,
+  reservationId: string,
+  updatedAt: number,
+) {
+  return db
+    .prepare(
+      `UPDATE ai_daily_usage
+       SET reserved_cost_nanodollars = MAX(0, reserved_cost_nanodollars - ?), updated_at = ?
+       WHERE subject_key = ? AND usage_date = ?
+         AND EXISTS (
+           SELECT 1 FROM ai_usage_reservations WHERE id = ? AND status = 'active'
+         )`,
+    )
+    .bind(
+      reservation.reserved_cost_nanodollars,
+      updatedAt,
+      reservation.subject_key,
+      reservation.usage_date,
+      reservationId,
+    );
 }
 
 function validateSettlement(actualCostNanodollars: number, usage: TokenUsage): void {

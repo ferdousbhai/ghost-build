@@ -6,6 +6,7 @@ import {
 } from '~/lib/.server/cloudflare/cloudflare-connection-repository';
 import { D1CloudflareCredentialVault } from '~/lib/.server/cloudflare/cloudflare-credential-vault';
 import {
+  CloudflareOAuthError,
   CloudflareOrchestratorUnavailableError,
   createCloudflareOrchestrator,
   type CloudflareOrchestrator,
@@ -201,12 +202,12 @@ function cloudflareIntegrationErrorResponse(error: unknown): Response {
   if (error instanceof CloudflareOrchestratorUnavailableError) {
     return Response.json({ error: 'Cloudflare OAuth is not configured for this environment.' }, { status: 503 });
   }
+  if (error instanceof CloudflareOAuthError) {
+    return Response.json({ error: error.message }, { status: 400 });
+  }
   if (error instanceof z.ZodError) {
     return Response.json({ error: 'Invalid Cloudflare connection response.' }, { status: 502 });
   }
   console.error('Cloudflare connection failed', error);
-  return Response.json(
-    { error: error instanceof Error ? error.message : 'Cloudflare connection failed.' },
-    { status: 500 },
-  );
+  return Response.json({ error: 'Cloudflare connection failed.' }, { status: 500 });
 }

@@ -280,7 +280,7 @@ export class DeploymentConnectionChangedError extends Error {
 
 export class DeploymentStateConflictError extends Error {
   constructor(readonly status: DeploymentStatus) {
-    super(`Deployment cannot be approved from status ${status}.`);
+    super(`Deployment cannot continue from status ${status}.`);
     this.name = 'DeploymentStateConflictError';
   }
 }

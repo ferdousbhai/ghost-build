@@ -9,7 +9,8 @@ Install additional dependencies for the project with pnpm.
 
 Choose high quality, flexible libraries that are well-maintained and have
 significant adoption. Always use libraries that have TypeScript definitions.
-Keep runtime, data, and AI dependencies inside the TanStack + Cloudflare stack:
+Keep runtime, data, and AI dependencies inside the Cloudflare platform stack. TanStack Start is the
+default for full web applications, but focused Worker scripts do not need an application framework:
 do not install Convex, Remix, OpenAI, Anthropic, Gemini, xAI, Groq, Mistral,
 or other non-Workers-AI provider SDKs.
 `;

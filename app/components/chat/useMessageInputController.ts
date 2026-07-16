@@ -4,6 +4,7 @@ import { useSearch } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, type ChangeEventHandler, type KeyboardEventHandler } from 'react';
 import { toast } from 'sonner';
 import { WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
+import { showWorkersPaidRequiredToast } from '~/lib/workers-paid.client';
 import { captureException } from '~/lib/telemetry.client';
 import { signInWithGoogle } from '~/lib/auth-client';
 import { messageInputStore } from '~/lib/stores/messageInput';
@@ -93,16 +94,7 @@ export function useMessageInputController({
           error?: string;
         } | null;
         if (payload?.code === 'workers_paid_required' || payload?.error?.includes(WORKERS_PAID_REQUIRED_MARKER)) {
-          toast.warning(
-            'Your Cloudflare Workers AI free allocation is exhausted. Ghostbuild did not change your plan; authorize Workers Paid in Cloudflare if you want to continue.',
-            {
-              action: {
-                label: 'Review Workers Paid',
-                onClick: () =>
-                  window.open('https://dash.cloudflare.com/?to=/:account/workers/plans', '_blank', 'noopener'),
-              },
-            },
-          );
+          showWorkersPaidRequiredToast();
           return;
         }
         if (payload?.code === 'ghostbuild_allowance_exhausted') {

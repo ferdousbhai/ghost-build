@@ -1,6 +1,7 @@
 export const cursorRulesContent = `# Ghostbuild Cloudflare App Rules
 
-- Use TanStack Start and TanStack Router for routes and SSR.
+- For a full web application, use TanStack Start and TanStack Router for routes and SSR unless the user requested a compatible alternative.
+- For APIs, webhooks, scheduled jobs, event handlers, and other focused Worker scripts, use the direct Worker handler and do not invent routes, React UI, or SSR.
 - Add TanStack Query or TanStack DB only when the product needs client-side server-state caching or live collections.
 - Keep pnpm run dev and pnpm run preview available for local/WebContainer preview.
 - Keep Worker entrypoint code in src/server.ts.

@@ -30,6 +30,13 @@ export interface CloudflareOrchestrator {
   completeConnection(request: CloudflareConnectionCompletionRequest): Promise<CloudflareConnectionResult>;
 }
 
+export class CloudflareOAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CloudflareOAuthError';
+  }
+}
+
 export class CloudflareOrchestratorUnavailableError extends Error {
   constructor() {
     super('Cloudflare account provisioning is not configured for this environment.');

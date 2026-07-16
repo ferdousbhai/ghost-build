@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDeploymentPlan, buildDeploymentPlanFromSource } from './deployment-plan';
+import { buildDeploymentPlan, buildDeploymentPlanFromSource, deploymentPlanResourceName } from './deployment-plan';
 
 describe('buildDeploymentPlan', () => {
   it('binds the user-account billing policy and source digest into an immutable plan', async () => {
@@ -39,5 +39,20 @@ describe('buildDeploymentPlan', () => {
     await expect(
       buildDeploymentPlanFromSource({ deploymentId: 'deployment-3', sourceSha256: 'invalid' }),
     ).rejects.toThrow('Deployment source digest is invalid.');
+  });
+
+  it('returns only one valid resource name for trusted provisioning', async () => {
+    const { plan } = await buildDeploymentPlanFromSource({
+      deploymentId: 'deployment-2',
+      sourceSha256: 'b'.repeat(64),
+    });
+    expect(deploymentPlanResourceName(plan, 'worker', 'app')).toBe('ghostbuild-deployment-2');
+    expect(
+      deploymentPlanResourceName(
+        { ...plan, resources: [...plan.resources, { ...plan.resources[0]! }] },
+        'worker',
+        'app',
+      ),
+    ).toBeNull();
   });
 });

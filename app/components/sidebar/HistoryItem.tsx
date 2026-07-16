@@ -49,7 +49,15 @@ export function HistoryItem({ item, handleDeleteClick }: HistoryItemProps) {
             onBlur={handleBlur}
             onKeyDown={handleKeyDown}
           />
-          <Button type="submit" variant="neutral" icon={<CheckIcon />} size="xs" inline onClick={handleSubmit} />
+          <Button
+            type="submit"
+            variant="neutral"
+            icon={<CheckIcon />}
+            size="xs"
+            inline
+            tip="Save project name"
+            aria-label="Save project name"
+          />
         </form>
       ) : (
         <>
@@ -108,6 +116,7 @@ const ChatActionButton = ({
       inline
       size="xs"
       tip={toolTipContent}
+      aria-label={toolTipContent}
       className={className}
       onClick={onClick}
     />

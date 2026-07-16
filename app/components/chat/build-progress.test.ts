@@ -5,10 +5,10 @@ describe('getBuildProgress', () => {
   it('shows a meaningful phase instead of an unexplained loader', () => {
     expect(
       getBuildProgress({ streamStatus: 'submitted', isRecovering: false, activeToolNames: [], inactiveForMs: 0 }),
-    ).toMatchObject({ phase: 'planning', message: 'Planning your app…', delayed: false, stalled: false });
+    ).toMatchObject({ phase: 'planning', message: 'Planning your project…', delayed: false, stalled: false });
     expect(
       getBuildProgress({ streamStatus: 'streaming', isRecovering: false, activeToolNames: [], inactiveForMs: 0 }),
-    ).toMatchObject({ phase: 'creating', message: 'Creating your app…' });
+    ).toMatchObject({ phase: 'creating', message: 'Creating your project…' });
   });
 
   it.each([

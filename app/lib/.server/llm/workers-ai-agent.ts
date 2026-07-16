@@ -1,5 +1,5 @@
 import { createUIMessageStream, streamText, type UIMessage, type UIMessageChunk } from 'ai';
-import { cachedPromptTokens, languageModelId, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import { languageModelId, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { PromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
 import { ROLE_SYSTEM_PROMPT, generalSystemPrompt } from 'ghostbuild-agent/prompts/system';
 import { logger } from 'ghostbuild-agent/utils/logger';
@@ -22,6 +22,7 @@ import {
   reserveAiAllowance,
   settleAiAllowance,
 } from '~/lib/.server/billing/ai-allowance-repository';
+import { normalizeWorkersAiUsage } from '~/lib/.server/billing/workers-ai-usage';
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
 
 type Messages = GhostbuildMessage[];
@@ -134,15 +135,8 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
           return;
         }
         reservationFinalized = true;
-        const inputTokens = normalizeTokenUsage(finishResult.totalUsage.inputTokens);
-        const outputTokens = normalizeTokenUsage(finishResult.totalUsage.outputTokens);
-        const cachedInputTokens = Math.min(inputTokens, cachedPromptTokens(finishResult.providerMetadata));
-        const allowance = await settleAiAllowance(
-          env.DB,
-          reservation.id,
-          glm52CostNanodollars({ inputTokens, cachedInputTokens, outputTokens }),
-          { inputTokens, cachedInputTokens, outputTokens },
-        );
+        const usage = normalizeWorkersAiUsage(finishResult.totalUsage, finishResult.providerMetadata);
+        const allowance = await settleAiAllowance(env.DB, reservation.id, glm52CostNanodollars(usage), usage);
         if (allowance?.reminder) {
           console.info({
             event: 'ghostbuild_ai_allowance_threshold_reached',
@@ -171,10 +165,6 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     },
   }) as ReadableStream<UIMessageChunk>;
   return normalizeTextPartBoundaries(stream);
-}
-
-function normalizeTokenUsage(value: number | undefined): number {
-  return value === undefined || !Number.isSafeInteger(value) || value < 0 ? 0 : value;
 }
 
 function createValidatedBuildCompletionStream(messages: Messages, text: string): ReadableStream<UIMessageChunk> {

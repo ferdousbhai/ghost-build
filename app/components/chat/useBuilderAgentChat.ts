@@ -20,6 +20,7 @@ import { waitForAgentSocketOpen } from './agent-connection';
 import { deliverToolOutput } from './tool-output-delivery';
 import { toast } from 'sonner';
 import { WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
+import { showWorkersPaidRequiredToast } from '~/lib/workers-paid.client';
 import { refreshChatHistory } from '~/lib/cloudflare/chat-history-db';
 import { chatIdStore } from '~/lib/stores/chatId';
 import { executeDataOperation } from '~/lib/cloudflare/client';
@@ -111,16 +112,7 @@ export function useBuilderAgentChat(args: {
       recordChatFailure(error.message.includes(STATUS_MESSAGES.error));
       workbenchStore.abortAllActions();
       if (error.message.includes(WORKERS_PAID_REQUIRED_MARKER)) {
-        toast.warning(
-          'Your Cloudflare Workers AI free allocation is exhausted. Ghostbuild did not change your plan; authorize Workers Paid in Cloudflare if you want to continue.',
-          {
-            action: {
-              label: 'Review Workers Paid',
-              onClick: () =>
-                window.open('https://dash.cloudflare.com/?to=/:account/workers/plans', '_blank', 'noopener'),
-            },
-          },
-        );
+        showWorkersPaidRequiredToast();
       }
       void showAiAllowanceReminder();
       void refreshProjectMetadata();

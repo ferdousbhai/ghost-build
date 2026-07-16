@@ -82,14 +82,14 @@ The app tracks the latest AI SDK v6 peer line because the current Cloudflare Age
 
 Generated applications use a server-owned deployment workflow:
 
-1. The browser runs stack verification, type checking, build, and lint without invoking Wrangler production deployment.
-2. It uploads an immutable tar.gz snapshot to `POST /api/deployments/plan`, excluding dependencies, build output, and
+1. The browser uploads an immutable ZIP source snapshot to `POST /api/deployments/plan`, excluding dependencies, build output, and
    all supported secret-file names.
-3. The Worker derives the resource plan and stores its SHA-256 digest in D1.
-4. The signed-in owner explicitly approves that digest through `POST /api/deployments/:id/approve`.
-5. The server rebuilds in an egress-restricted Cloudflare Sandbox, then a fresh publish sandbox uses a short-lived,
+2. The Worker derives the resource plan and stores its SHA-256 digest in D1.
+3. The signed-in owner explicitly approves that digest through `POST /api/deployments/:id/approve`.
+4. The server installs, verifies, type-checks, lints, and builds in an egress-restricted Cloudflare Sandbox. A fresh
+   publish sandbox then uses a short-lived,
    plan-bound proxy token while the real Cloudflare credential remains in the Worker.
-6. The generated Worker, D1, R2, Durable Object, and Workers AI binding are created in the OAuth-selected user account,
+5. The generated Worker, D1, R2, Durable Object, and Workers AI binding are created in the OAuth-selected user account,
    so Cloudflare meters them directly to that account.
 
 The approval endpoint requires an unchanged active Cloudflare connection and explicit acknowledgement that Cloudflare

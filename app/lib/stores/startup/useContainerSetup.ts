@@ -78,7 +78,7 @@ export function useExistingChatContainerSetup(loadedChatId: string | undefined) 
 async function setupContainer(options: { snapshotUrl: string; allowPnpmInstallFailure: boolean }) {
   const resp = await fetch(options.snapshotUrl);
   if (!resp.ok) {
-    throw new Error(`Failed to download snapshot (${resp.statusText}): ${resp.statusText}`);
+    throw new Error(`Failed to download snapshot (${resp.status}): ${resp.statusText}`);
   }
   const compressed = await resp.arrayBuffer();
   const decompressed = decompressWithLz4(new Uint8Array(compressed));

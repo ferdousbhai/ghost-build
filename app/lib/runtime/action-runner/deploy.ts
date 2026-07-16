@@ -11,9 +11,26 @@ import { ActionCommandTimeoutError } from './errors';
 import type { ActionRunnerWorkspace } from './types';
 
 const logger = createScopedLogger('ActionRunner.Deploy');
-const GUEST_APP_CHECK_COMPLETE = 'Ghostbuild app check complete. Sign in to deploy this app to Cloudflare production.';
+const GUEST_PROJECT_CHECK_COMPLETE =
+  'Ghostbuild project check complete. Sign in to deploy this project to Cloudflare production.';
 const GENERATED_ROUTE_PATH = 'src/routes/index.tsx';
+const GENERATED_WORKER_PATH = 'src/server.ts';
 const STARTER_ROUTE_MARKERS = ['Ghostbuild on Cloudflare', 'Start with a durable AI agent.', 'App Agent'] as const;
+const STARTER_WORKER_SOURCE = `import handler from "@tanstack/react-start/server-entry";
+import { routeAgentRequest } from "agents";
+
+export { AppAgent } from "./agents/app-agent";
+
+export default {
+  async fetch(request: Request, env: Env) {
+    const agentResponse = await routeAgentRequest(request, env);
+    if (agentResponse) {
+      return agentResponse;
+    }
+
+    return handler.fetch(request);
+  },
+} satisfies ExportedHandler<Env>;`;
 const DEPLOYMENT_EXPORT_EXCLUDES = [
   'node_modules/**',
   'dist/**',
@@ -38,8 +55,8 @@ export async function runDeploy(args: {
   let result = '';
 
   if (!sessionId || isGuestSessionId(sessionId)) {
-    await validateGuestGeneratedApp(args.container);
-    result += GUEST_APP_CHECK_COMPLETE;
+    await validateGuestGeneratedProject(args.container);
+    result += GUEST_PROJECT_CHECK_COMPLETE;
   } else {
     await waitForContainerBootState(ContainerBootState.READY);
     args.abortSignal.throwIfAborted();
@@ -96,20 +113,30 @@ type DeploymentPlanResponse = {
   };
 };
 
-async function validateGuestGeneratedApp(container: WebContainer): Promise<void> {
-  let routeContent: string;
+async function validateGuestGeneratedProject(container: WebContainer): Promise<void> {
+  const [routeContent, workerContent] = await Promise.all([
+    readOptionalProjectFile(container, GENERATED_ROUTE_PATH),
+    readOptionalProjectFile(container, GENERATED_WORKER_PATH),
+  ]);
+  const generatedBrowserSurface =
+    routeContent !== null &&
+    routeContent.trim().length > 0 &&
+    !STARTER_ROUTE_MARKERS.every((marker) => routeContent.includes(marker));
+  const generatedWorkerSurface =
+    workerContent !== null && workerContent.trim().length > 0 && workerContent.trim() !== STARTER_WORKER_SOURCE;
+
+  if (!generatedBrowserSurface && !generatedWorkerSurface) {
+    throw new Error(
+      `Generated project still matches the starter template: update ${GENERATED_ROUTE_PATH} for a browser app or ${GENERATED_WORKER_PATH} for a Worker-only project.`,
+    );
+  }
+}
+
+async function readOptionalProjectFile(container: WebContainer, path: string): Promise<string | null> {
   try {
-    routeContent = await container.fs.readFile(GENERATED_ROUTE_PATH, 'utf-8');
-  } catch (error) {
-    throw new Error(`Generated app route is missing: ${GENERATED_ROUTE_PATH}`, { cause: error });
-  }
-
-  if (routeContent.trim().length === 0) {
-    throw new Error(`Generated app route is empty: ${GENERATED_ROUTE_PATH}`);
-  }
-
-  if (STARTER_ROUTE_MARKERS.every((marker) => routeContent.includes(marker))) {
-    throw new Error(`Generated app route still matches the starter template: ${GENERATED_ROUTE_PATH}`);
+    return await container.fs.readFile(path, 'utf-8');
+  } catch {
+    return null;
   }
 }
 

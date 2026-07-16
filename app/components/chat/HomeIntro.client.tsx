@@ -38,7 +38,7 @@ export function HomeIntro({
               <br />
               <span>the ghost will build it. ✨</span>
             </h1>
-            <p className="ghost-home-lede">Turn a simple prompt into a real, shareable app.</p>
+            <p className="ghost-home-lede">Turn a simple prompt into a real, shareable Cloudflare project.</p>
           </div>
 
           <div className="ghost-home-reveal ghost-home-composer-stack">

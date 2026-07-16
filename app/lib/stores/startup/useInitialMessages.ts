@@ -64,6 +64,7 @@ export function useInitialMessages(chatId: string | undefined):
         if (chatInfo.urlId) {
           setKnownUrlId(chatInfo.urlId);
         }
+        description.set(chatInfo.description);
         const initialMessagesResponse = await fetch('/api/chats/messages', {
           method: 'POST',
           body: JSON.stringify({
@@ -125,7 +126,6 @@ export function useInitialMessages(chatId: string | undefined):
           deserialized: deserializedMessages,
           loadedSubchatIndex: subchatIndex,
         });
-        description.set(chatInfo.description);
       } catch (error) {
         if (controller.signal.aborted) {
           return;

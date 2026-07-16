@@ -1,6 +1,7 @@
 import { getSandbox, type ExecResult } from '@cloudflare/sandbox';
 import type { CloudflareConnection } from './cloudflare-connection-repository';
 import { createDeploymentProxyToken } from './deployment-proxy-token';
+import { deploymentPlanResourceName, type DeploymentResourceType } from './deployment-plan';
 import type { Deployment } from './deployment-repository';
 import type { DeploymentSandbox } from './deployment-sandbox';
 
@@ -110,14 +111,12 @@ function trustedPublishConfig(args: {
   };
 }
 
-function requireResourceName(deployment: Deployment, type: string, logicalName: string): string {
-  const matches = deployment.plan.resources.filter(
-    (resource) => resource.type === type && resource.logicalName === logicalName,
-  );
-  if (matches.length !== 1 || !/^[a-z0-9][a-z0-9-]{2,63}$/.test(matches[0].proposedName)) {
+function requireResourceName(deployment: Deployment, type: DeploymentResourceType, logicalName: string): string {
+  const name = deploymentPlanResourceName(deployment.plan, type, logicalName);
+  if (!name) {
     throw new DeploymentPublishError(`Approved deployment plan has an invalid ${type} resource.`);
   }
-  return matches[0].proposedName;
+  return name;
 }
 
 async function requireSuccess(result: ExecResult): Promise<void> {

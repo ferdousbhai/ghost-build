@@ -1,13 +1,16 @@
 import { forwardRef, type AnchorHTMLAttributes, type ButtonHTMLAttributes, type ReactNode, type Ref } from 'react';
 import { classNames } from '~/utils/classNames';
 
-type ButtonVisualProps = {
+export type ButtonVariant = 'primary' | 'neutral' | 'danger' | 'ghost';
+export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg';
+
+export type ButtonVisualProps = {
   children?: ReactNode;
   className?: string;
   icon?: ReactNode;
   tip?: string;
-  variant?: 'primary' | 'neutral' | 'danger' | string;
-  size?: 'xs' | 'sm' | 'md' | 'lg' | string;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
   inline?: boolean;
   focused?: boolean;
   loading?: boolean;
@@ -27,7 +30,7 @@ type NativeButtonProps = ButtonVisualProps &
 
 type ButtonProps = AnchorButtonProps | NativeButtonProps;
 
-const variantClasses: Record<string, string> = {
+const variantClasses: Record<ButtonVariant, string> = {
   primary: 'bg-accent-500 text-white hover:bg-accent-600',
   danger: 'bg-red-600 text-white hover:bg-red-700',
   neutral:
@@ -36,7 +39,7 @@ const variantClasses: Record<string, string> = {
     'border border-transparent bg-transparent text-content-secondary hover:bg-bolt-elements-background-depth-2 hover:text-content-primary',
 };
 
-const sizeClasses: Record<string, string> = {
+const sizeClasses: Record<ButtonSize, string> = {
   xs: 'min-h-7 px-2 py-1 text-xs',
   sm: 'min-h-8 px-2.5 py-1.5 text-sm',
   md: 'min-h-9 px-3 py-2 text-sm',
@@ -53,8 +56,8 @@ export function buttonClassNames({
   return classNames(
     'gb-button inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:opacity-50',
     inline ? 'w-auto' : '',
-    variantClasses[variant] ?? variantClasses.neutral,
-    sizeClasses[size] ?? sizeClasses.md,
+    variantClasses[variant],
+    sizeClasses[size],
     focused ? 'ring-2 ring-accent-500' : '',
     className,
   );

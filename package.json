@@ -1,6 +1,6 @@
 {
   "name": "ghostbuild",
-  "description": "AI app builder for TanStack Start apps on Cloudflare",
+  "description": "AI project builder for Cloudflare with TanStack Start as the default web framework",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",

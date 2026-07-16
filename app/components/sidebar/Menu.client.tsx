@@ -177,11 +177,13 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
                 void deleteItem(deleteTarget);
                 closeDialog();
               }}
-              dialogTitle="Delete Chat"
+              dialogTitle="Delete project"
               dialogBody={
                 <p>
                   You are about to delete{' '}
-                  <span className="font-medium text-content-primary">{deleteTarget.description || 'New chat...'}</span>
+                  <span className="font-medium text-content-primary">
+                    {deleteTarget.description || 'Untitled project'}
+                  </span>
                 </p>
               }
             />

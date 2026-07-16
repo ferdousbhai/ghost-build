@@ -1,4 +1,4 @@
-import type { DeploymentPlan, DeploymentResourceType } from './deployment-plan';
+import { deploymentPlanResourceName, type DeploymentPlan, type DeploymentResourceType } from './deployment-plan';
 
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
 
@@ -20,24 +20,24 @@ export class UserCloudflareAccountApi {
   }
 
   async createD1ForPlan(plan: DeploymentPlan): Promise<{ id: string; name: string }> {
-    const resource = requirePlanResource(plan, 'd1', 'DB');
+    const resourceName = requirePlanResourceName(plan, 'd1', 'DB');
     const result = await this.call<{ uuid?: string; name?: string }>('/d1/database', {
       method: 'POST',
-      body: JSON.stringify({ name: resource.proposedName }),
+      body: JSON.stringify({ name: resourceName }),
     });
-    if (!result.uuid || result.name !== resource.proposedName) {
+    if (!result.uuid || result.name !== resourceName) {
       throw new CloudflareAccountApiError('Cloudflare returned an invalid D1 resource.');
     }
     return { id: result.uuid, name: result.name };
   }
 
   async createR2ForPlan(plan: DeploymentPlan): Promise<{ id: string; name: string }> {
-    const resource = requirePlanResource(plan, 'r2', 'APP_STORAGE');
+    const resourceName = requirePlanResourceName(plan, 'r2', 'APP_STORAGE');
     const result = await this.call<{ name?: string }>('/r2/buckets', {
       method: 'POST',
-      body: JSON.stringify({ name: resource.proposedName }),
+      body: JSON.stringify({ name: resourceName }),
     });
-    if (result.name !== resource.proposedName) {
+    if (result.name !== resourceName) {
       throw new CloudflareAccountApiError('Cloudflare returned an invalid R2 resource.');
     }
     return { id: result.name, name: result.name };
@@ -77,10 +77,10 @@ export class CloudflareAccountApiError extends Error {
   }
 }
 
-function requirePlanResource(plan: DeploymentPlan, type: DeploymentResourceType, logicalName: string) {
-  const matches = plan.resources.filter((resource) => resource.type === type && resource.logicalName === logicalName);
-  if (matches.length !== 1 || !/^[a-z0-9][a-z0-9-]{2,63}$/.test(matches[0].proposedName)) {
+function requirePlanResourceName(plan: DeploymentPlan, type: DeploymentResourceType, logicalName: string): string {
+  const name = deploymentPlanResourceName(plan, type, logicalName);
+  if (!name) {
     throw new CloudflareAccountApiError(`Approved deployment plan has an invalid ${type} resource.`);
   }
-  return matches[0];
+  return name;
 }

@@ -46,6 +46,8 @@ html.dark {
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  width: 32px;
+  height: 32px;
   border: 0;
   border-radius: 14px;
   background: linear-gradient(135deg, var(--ghost-home-accent-2), var(--ghost-home-accent), var(--ghost-home-accent-3));
@@ -53,17 +55,9 @@ html.dark {
   box-shadow: 0 10px 28px color-mix(in srgb, var(--ghost-home-accent) 28%, transparent);
 }
 
-.ghostbuild-brand-mark {
-  width: 32px;
-  height: 32px;
-}
-
 .ghostbuild-brand-mark__glyph {
   font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
   line-height: 1;
-}
-
-.ghostbuild-brand-mark__glyph {
   font-size: 21px;
 }
 

@@ -135,6 +135,21 @@ describe('cloudflareConnectionStatusAction', () => {
     expect(database.sessions.size).toBe(1);
   });
 
+  it('does not expose unexpected internal connection errors', async () => {
+    getSession.mockResolvedValue({ user: { id: 'user-1', email: 'person@example.com' } });
+    const orchestrator = fakeOrchestrator();
+    vi.mocked(orchestrator.startConnection).mockRejectedValue(new Error('sensitive provider detail'));
+
+    const response = await startCloudflareConnectionAction({
+      request: new Request('https://ghostbuild.dev/api/cloudflare/connection/start', { method: 'POST' }),
+      env: envWithConnection(null),
+      orchestrator,
+    });
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Cloudflare connection failed.' });
+  });
+
   it('encrypts the provider credential and prevents callback replay', async () => {
     getSession.mockResolvedValue(null);
     const database = integrationDatabase();

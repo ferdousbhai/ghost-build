@@ -175,16 +175,10 @@ function matchDeploymentRoute(pathname: string): {
     return null;
   }
   try {
+    const operation = match[2] as 'approve' | 'execute' | 'retry' | undefined;
     return {
       deploymentId: decodeURIComponent(match[1]),
-      operation:
-        match[2] === 'approve'
-          ? 'approve'
-          : match[2] === 'execute'
-            ? 'execute'
-            : match[2] === 'retry'
-              ? 'retry'
-              : 'get',
+      operation: operation ?? 'get',
     };
   } catch {
     return null;

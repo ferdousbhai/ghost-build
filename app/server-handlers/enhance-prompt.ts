@@ -5,7 +5,6 @@ import { getProvider } from '~/lib/.server/llm/provider';
 import { ENHANCE_PROMPT_SYSTEM_PROMPT } from './enhance-prompt-prompt';
 import { resolveAgentRequestIdentity } from '~/lib/.server/agent-request-identity';
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
-import { cachedPromptTokens } from 'ghostbuild-agent/ai-compat';
 import { glm52CostNanodollars } from '~/lib/.server/billing/ai-allowance-policy';
 import {
   AiAllowanceExceededError,
@@ -13,6 +12,7 @@ import {
   reserveAiAllowance,
   settleAiAllowance,
 } from '~/lib/.server/billing/ai-allowance-repository';
+import { normalizeWorkersAiUsage } from '~/lib/.server/billing/workers-ai-usage';
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
 
 const logger = createScopedLogger('EnhancePrompt');
@@ -57,15 +57,8 @@ export async function enhancePromptAction({ request, env }: { request: Request; 
     });
 
     if (reservationId) {
-      const inputTokens = normalizeTokenUsage(completion.totalUsage.inputTokens);
-      const outputTokens = normalizeTokenUsage(completion.totalUsage.outputTokens);
-      const cachedInputTokens = Math.min(inputTokens, cachedPromptTokens(completion.providerMetadata));
-      await settleAiAllowance(
-        env.DB,
-        reservationId,
-        glm52CostNanodollars({ inputTokens, cachedInputTokens, outputTokens }),
-        { inputTokens, cachedInputTokens, outputTokens },
-      );
+      const usage = normalizeWorkersAiUsage(completion.totalUsage, completion.providerMetadata);
+      await settleAiAllowance(env.DB, reservationId, glm52CostNanodollars(usage), usage);
       reservationId = undefined;
     }
 
@@ -85,8 +78,4 @@ export async function enhancePromptAction({ request, env }: { request: Request; 
     logger.error('Error enhancing prompt:', error);
     return Response.json({ error: 'Error enhancing prompt' }, { status: 500 });
   }
-}
-
-function normalizeTokenUsage(value: number | undefined): number {
-  return value === undefined || !Number.isSafeInteger(value) || value < 0 ? 0 : value;
 }

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionIdStore } from '~/lib/stores/sessionId';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { useInitialMessages } from './useInitialMessages';
+import { description } from '~/lib/stores/description';
 
 const executeDataOperationMock = vi.hoisted(() => vi.fn());
 
@@ -32,6 +33,7 @@ describe('useInitialMessages', () => {
     vi.unstubAllGlobals();
     sessionIdStore.set(undefined);
     subchatIndexStore.set(undefined);
+    description.set(undefined);
     document.body.replaceChildren();
   });
 
@@ -75,6 +77,7 @@ describe('useInitialMessages', () => {
     expect(seen).toContain('missing');
     expect(seen.at(-1)).toBe('ready');
     expect(executeDataOperationMock).toHaveBeenCalledTimes(2);
+    expect(description.get()).toBe('Project');
 
     await act(async () => root.unmount());
   });
