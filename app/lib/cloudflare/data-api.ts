@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import type { dataOperationArgSchemas } from './data-operation-schemas';
+import type { TranscriptIdentity } from 'ghostbuild-agent/transcript';
 
 type ChatSummary = {
   initialId: string;
@@ -8,6 +9,7 @@ type ChatSummary = {
   timestamp: string;
   snapshotId?: string;
   subchatIndex: number;
+  transcript: TranscriptIdentity;
 };
 
 export type ChatHistorySummary = {
@@ -22,10 +24,11 @@ export type ChatHistorySummary = {
   timestamp: string;
 };
 
-type SubchatSummary = {
+export type SubchatSummary = {
   subchatIndex: number;
   description?: string;
   updatedAt: number;
+  transcript: TranscriptIdentity;
 };
 
 export type CurrentSocialShare = {

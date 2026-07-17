@@ -26,11 +26,17 @@ export async function executeTool(args: {
 
   switch (args.invocation.toolName) {
     case 'listFiles':
-      return runListFiles({ input: args.invocation.args, files: args.workspace.getFiles() });
+      return runListFiles({
+        input: args.invocation.args,
+        files: args.workspace.getFiles(),
+        abortSignal: args.abortSignal,
+      });
     case 'searchText':
       return runSearchText({
         input: args.invocation.args,
         files: args.workspace.getFiles(),
+        recentFileWrites: args.workspace.getRecentFileWrites?.(),
+        abortSignal: args.abortSignal,
       });
     case 'getDiagnostics': {
       const input = getDiagnosticsParameters.parse(args.invocation.args);

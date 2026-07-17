@@ -19,6 +19,7 @@ beforeEach(() => {
     numFailures: 0,
     started: false,
     persistedMessageInfo: null,
+    persistedTranscriptCheckpoint: null,
     savedFileUpdateCounter: null,
     subchatIndex: 0,
   });
@@ -64,6 +65,7 @@ describe('initializeBackupPosition', () => {
       partIndex: 0,
       allMessages: secondChatMessages,
       hasNextPart: false,
+      transcriptCheckpoint: null,
     });
   });
 

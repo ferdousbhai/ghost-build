@@ -21,6 +21,7 @@ import { useMutation } from '~/lib/cloudflare/data-hooks';
 import { api } from '~/lib/cloudflare/data-api';
 import { subchatIndexStore, useIsSubchatLoaded } from '~/lib/stores/subchats';
 import type { BuildProgress } from './build-progress';
+import type { SubchatSummary } from './subchat-model';
 
 const MIN_MESSAGES_FOR_SUBCHAT_NUDGE = 12;
 const Workbench = lazy(() =>
@@ -60,7 +61,7 @@ interface BaseChatProps {
   onRewindToMessage?: (subchatIndex?: number, messageIndex?: number) => void;
 
   // Subchat navigation props
-  subchats?: { subchatIndex: number; updatedAt: number; description?: string }[];
+  subchats?: SubchatSummary[];
 }
 
 export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(

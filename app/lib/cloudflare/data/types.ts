@@ -21,6 +21,25 @@ export type ChatMessageStateRow = {
   snapshot_key: string | null;
   description: string | null;
   created_at: number;
+  transcript_generation: number;
+  transcript_revision: number;
+  transcript_digest: string | null;
+};
+
+export type ChatTranscriptRow = {
+  chat_id: string;
+  subchat_index: number;
+  generation: number;
+  agent_name: string;
+  head_revision: number;
+  head_digest: string | null;
+  head_message_count: number;
+  parent_subchat_index: number | null;
+  parent_generation: number | null;
+  parent_revision: number | null;
+  transition_token: string;
+  created_at: number;
+  updated_at: number;
 };
 
 export type ShareRow = {

@@ -6,7 +6,6 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { BuilderAgent, BuilderAgentState } from '~/agents/builder-agent';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { ToolCallAbortedError } from '~/lib/stores/workbench-artifacts';
-import { chatSyncState } from '~/lib/stores/startup/chatSyncState';
 import { getAuthToken, sessionIdStore } from '~/lib/stores/sessionId';
 import { captureMessage } from '~/lib/telemetry.client';
 import { ChatContextManager } from 'ghostbuild-agent/ChatContextManager';
@@ -26,6 +25,14 @@ import { chatIdStore } from '~/lib/stores/chatId';
 import { executeDataOperation } from '~/lib/cloudflare/client';
 import { api } from '~/lib/cloudflare/data-api';
 import { description as descriptionStore } from '~/lib/stores/description';
+import {
+  transcriptCheckpointMatchesMessages,
+  transcriptCheckpointSchema,
+  transcriptIdentitiesEqual,
+  stripTranscriptBaseMetadata,
+  TRANSCRIPT_BASE_METADATA_KEY,
+  type TranscriptIdentity,
+} from 'ghostbuild-agent/transcript';
 
 const logger = createScopedLogger('BuilderAgentChat');
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
@@ -33,9 +40,10 @@ const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
 export function useBuilderAgentChat(args: {
   chatInitialId: string;
   initialMessages: GhostbuildMessage[];
-  resetMessagesOnSubchatChange: boolean;
+  transcript: TranscriptIdentity;
+  seedTranscript: boolean;
 }) {
-  const syncState = useStore(chatSyncState);
+  const currentSubchatIndex = useStore(subchatIndexStore);
   const stopRef = useRef<() => void>(() => undefined);
   const contextManager = useRef(
     new ChatContextManager(
@@ -46,12 +54,13 @@ export function useBuilderAgentChat(args: {
   );
   const builderAgent = useAgent<BuilderAgent, BuilderAgentState>({
     agent: 'BuilderAgent',
-    name: args.chatInitialId,
+    name: args.transcript.agentName,
   });
   const chat = useAgentChat<BuilderAgentState, UIMessage>({
     agent: builderAgent,
     getInitialMessages: null,
     messages: args.initialMessages as UIMessage[],
+    syncMessagesToServer: false,
     experimental_throttle: 100,
     prepareSendMessagesRequest: ({ messages, body }) => {
       const ghostMessages = messages as GhostbuildMessage[];
@@ -63,6 +72,7 @@ export function useBuilderAgentChat(args: {
         body,
         chatInitialId: args.chatInitialId,
         subchatIndex: subchatIndexStore.get() ?? 0,
+        transcript: args.transcript,
       });
       return { body: requestBody };
     },
@@ -127,8 +137,62 @@ export function useBuilderAgentChat(args: {
     },
   });
   stopRef.current = chat.stop;
+  const setMessagesRef = useRef(chat.setMessages);
+  const initialMessagesRef = useRef(args.initialMessages);
+  setMessagesRef.current = chat.setMessages;
+  initialMessagesRef.current = args.initialMessages;
+  const seedKey = args.seedTranscript
+    ? `${args.transcript.agentName}:${args.transcript.generation}:${args.transcript.subchatIndex}`
+    : null;
+  const seedGateRef = useRef<{
+    key: string | null;
+    promise: Promise<void>;
+    resolve: () => void;
+    error: unknown;
+    started: boolean;
+  }>({ key: null, promise: Promise.resolve(), resolve: () => undefined, error: null, started: false });
+  if (seedGateRef.current.key !== seedKey) {
+    let resolve: () => void = () => undefined;
+    const promise = seedKey
+      ? new Promise<void>((complete) => {
+          resolve = complete;
+        })
+      : Promise.resolve();
+    seedGateRef.current = { key: seedKey, promise, resolve, error: null, started: false };
+  }
+
+  useEffect(() => {
+    if (!seedKey) {
+      return;
+    }
+    const gate = seedGateRef.current;
+    if (gate.started) {
+      return;
+    }
+    gate.started = true;
+    void (async () => {
+      try {
+        await waitForAgentSocketOpen(builderAgent, AGENT_SEND_READY_TIMEOUT_MS, { requireIdentity: false });
+        await builderAgent.call('seedTranscript', [args.transcript, args.initialMessages]);
+        if (seedGateRef.current === gate) {
+          setMessagesRef.current(initialMessagesRef.current as UIMessage[]);
+        }
+      } catch (error) {
+        gate.error = error;
+        logger.error('Failed to seed materialized transcript history', error);
+      } finally {
+        gate.resolve();
+      }
+    })();
+  }, [args.initialMessages, args.transcript, builderAgent, seedKey]);
+
   const sendMessage = useCallback(
     async (...sendArgs: Parameters<typeof chat.sendMessage>) => {
+      const gate = seedGateRef.current;
+      await gate.promise;
+      if (gate.error) {
+        throw gate.error;
+      }
       try {
         await waitForAgentSocketOpen(builderAgent, AGENT_SEND_READY_TIMEOUT_MS, { requireIdentity: false });
       } catch (error) {
@@ -139,22 +203,47 @@ export function useBuilderAgentChat(args: {
         });
         throw error;
       }
+      const [message, options] = sendArgs;
+      if (message && typeof message === 'object') {
+        const checkpointResult = transcriptCheckpointSchema
+          .nullable()
+          .safeParse(await builderAgent.call('getTranscriptCheckpoint', [args.transcript]));
+        if (!checkpointResult.success) {
+          throw new Error('The agent returned an invalid transcript checkpoint. Reload and try again.');
+        }
+        const checkpoint = checkpointResult.data;
+        const localMessages = chat.messages as GhostbuildMessage[];
+        if (!(await transcriptCheckpointMatchesMessages(checkpoint, localMessages))) {
+          throw new Error('This chat changed in another session. Reload the latest messages before sending.');
+        }
+        const metadata =
+          'metadata' in message &&
+          message.metadata &&
+          typeof message.metadata === 'object' &&
+          !Array.isArray(message.metadata)
+            ? message.metadata
+            : {};
+        try {
+          return await chat.sendMessage(
+            {
+              ...message,
+              metadata: { ...metadata, [TRANSCRIPT_BASE_METADATA_KEY]: checkpoint },
+            },
+            options,
+          );
+        } finally {
+          setMessagesRef.current((messages) => messages.map(stripTranscriptBaseMetadata));
+        }
+      }
       return chat.sendMessage(...sendArgs);
     },
-    [builderAgent, chat],
+    [args.transcript, builderAgent, chat],
   );
-  const setMessagesRef = useRef(chat.setMessages);
-  const initialMessagesRef = useRef(args.initialMessages);
-  setMessagesRef.current = chat.setMessages;
-  initialMessagesRef.current = args.initialMessages;
 
   useEffect(() => {
-    if (!args.resetMessagesOnSubchatChange) {
-      return;
-    }
     setMessagesRef.current(initialMessagesRef.current as UIMessage[]);
     contextManager.current.reset();
-  }, [args.resetMessagesOnSubchatChange, syncState.subchatIndex]);
+  }, [currentSubchatIndex]);
 
   return {
     ...chat,
@@ -162,6 +251,10 @@ export function useBuilderAgentChat(args: {
     messages: chat.messages as GhostbuildMessage[],
     contextManager: contextManager.current,
     streamStatus: chat.isRecovering ? ('submitted' as const) : chat.isStreaming ? ('streaming' as const) : chat.status,
+    transcriptCheckpoint:
+      builderAgent.state?.transcript && transcriptIdentitiesEqual(builderAgent.state.transcript, args.transcript)
+        ? builderAgent.state.transcript
+        : null,
   };
 }
 

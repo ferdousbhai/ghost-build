@@ -1,7 +1,9 @@
-import { cachedPromptTokens } from 'ghostbuild-agent/ai-compat';
+import { cachedPromptTokenCount } from 'ghostbuild-agent/ai-compat';
 import type { PromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
 import { logger } from 'ghostbuild-agent/utils/logger';
 import type { OnFinishEvent, ToolSet } from 'ai';
+import { glm52CostNanodollars } from '~/lib/.server/billing/ai-allowance-policy';
+import type { WorkersAiPromptCacheStatus } from './workers-ai-prompt-cache';
 
 interface FinishTelemetryOptions {
   result: OnFinishEvent<ToolSet>;
@@ -10,9 +12,11 @@ interface FinishTelemetryOptions {
   toolsDisabledFromRepeatedErrors: boolean;
   contextReduced: boolean;
   estimatedContextTokens?: number;
-  modelInputDroppedMessageCount?: number;
   promptCharacterCounts: PromptCharacterCounts;
   providerModel: string;
+  promptCacheAttempted: boolean;
+  modelInputFingerprint: string;
+  startedAt: number;
 }
 
 export function recordWorkersAiFinish(options: FinishTelemetryOptions): void {
@@ -23,6 +27,7 @@ export function recordWorkersAiFinish(options: FinishTelemetryOptions): void {
     inputTokens: normalizeUsage(finalUsage.inputTokens),
     totalTokens: normalizeUsage(finalUsage.totalTokens),
   };
+  const cache = workersAiPromptCacheTelemetry(result.providerMetadata, options.promptCacheAttempted, usage.inputTokens);
   const event = {
     event: 'workers_ai_finished',
     chatInitialId: options.chatInitialId,
@@ -32,15 +37,40 @@ export function recordWorkersAiFinish(options: FinishTelemetryOptions): void {
     usage,
     contextReduced: options.contextReduced,
     estimatedContextTokens: options.estimatedContextTokens,
-    modelInputDroppedMessageCount: options.modelInputDroppedMessageCount ?? 0,
     promptCharacterCounts: options.promptCharacterCounts,
-    cachedPromptTokens: cachedPromptTokens(result.providerMetadata),
+    durationMs: Date.now() - options.startedAt,
+    modelInputFingerprint: options.modelInputFingerprint,
+    promptCache: cache,
     toolsDisabledFromRepeatedErrors: options.toolsDisabledFromRepeatedErrors,
   };
   console.info(event);
   if (options.toolsDisabledFromRepeatedErrors) {
     logger.warn('Tools disabled because of repeated errors');
   }
+}
+
+export function workersAiPromptCacheTelemetry(
+  providerMetadata: unknown,
+  attempted: boolean,
+  inputTokens: number,
+): {
+  attempted: boolean;
+  status: WorkersAiPromptCacheStatus;
+  cachedInputTokens: number;
+  estimatedSavingsNanodollars: number;
+} {
+  const reportedCachedTokens = cachedPromptTokenCount(providerMetadata);
+  const cachedInputTokens = Math.min(inputTokens, reportedCachedTokens ?? 0);
+  const status: WorkersAiPromptCacheStatus =
+    reportedCachedTokens === undefined ? 'unavailable' : cachedInputTokens > 0 ? 'hit' : 'miss';
+  const uncachedCost = glm52CostNanodollars({ inputTokens, cachedInputTokens: 0, outputTokens: 0 });
+  const actualCost = glm52CostNanodollars({ inputTokens, cachedInputTokens, outputTokens: 0 });
+  return {
+    attempted,
+    status,
+    cachedInputTokens,
+    estimatedSavingsNanodollars: uncachedCost - actualCost,
+  };
 }
 
 export function recordFirstWorkersAiResponse(chatInitialId: string, startedAt: number): void {

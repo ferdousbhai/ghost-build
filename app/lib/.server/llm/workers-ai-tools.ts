@@ -35,24 +35,22 @@ export function createWorkersAiTools(): GhostbuildToolSet {
   };
 }
 
-let serializedToolDefinitions: string | undefined;
-
-/** Serialized form approximating the tool definitions included in the model request. */
-export function getWorkersAiToolContext(): string {
-  serializedToolDefinitions ??= serializeWorkersAiToolDefinitions(createWorkersAiTools());
-  return serializedToolDefinitions;
-}
-
-export function serializeWorkersAiToolDefinitions(tools: GhostbuildToolSet): string {
+export function serializeWorkersAiToolDefinitions(
+  tools: GhostbuildToolSet,
+  activeTools?: GhostbuildToolName[],
+): string {
+  const activeToolNames = activeTools ? new Set(activeTools) : null;
   return JSON.stringify(
     Object.fromEntries(
-      Object.entries(tools).map(([name, tool]) => [
-        name,
-        {
-          description: tool.description,
-          inputSchema: z.toJSONSchema(tool.inputSchema as ZodType),
-        },
-      ]),
+      Object.entries(tools)
+        .filter(([name]) => !activeToolNames || activeToolNames.has(name as GhostbuildToolName))
+        .map(([name, tool]) => [
+          name,
+          {
+            description: tool.description,
+            inputSchema: z.toJSONSchema(tool.inputSchema as ZodType),
+          },
+        ]),
     ),
   );
 }

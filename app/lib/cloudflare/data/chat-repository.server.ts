@@ -1,5 +1,11 @@
+import type { TranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 import type { ChatMessageStateRow, ChatRow } from './types';
 import { prepareObjectGcCandidateStatements } from './object-gc.server';
+import {
+  checkpointMatchesIdentity,
+  prepareInsertChatTranscript,
+  requireChatTranscript,
+} from './transcript-repository.server';
 
 const MAX_STORAGE_UPDATE_CAS_ATTEMPTS = 8;
 
@@ -21,13 +27,10 @@ type ChatMessageStateInsertArgs = {
   partIndex: number;
   snapshotKey?: string | null;
   description?: string | null;
+  transcriptGeneration?: number;
+  transcriptRevision?: number;
+  transcriptDigest?: string | null;
 };
-
-export async function insertChatMessageState(db: D1Database, args: ChatMessageStateInsertArgs): Promise<string> {
-  const id = args.id ?? crypto.randomUUID();
-  await prepareInsertChatMessageState(db, { ...args, id }).run();
-  return id;
-}
 
 export async function insertChatWithState(
   db: D1Database,
@@ -37,6 +40,14 @@ export async function insertChatWithState(
   const stateId = state.id ?? crypto.randomUUID();
   await db.batch([
     prepareInsertChat(db, chat),
+    prepareInsertChatTranscript(db, {
+      chatId: chat.id,
+      initialId: chat.initialId,
+      subchatIndex: state.subchatIndex,
+      generation: state.transcriptGeneration,
+      headRevision: state.transcriptRevision,
+      headDigest: state.transcriptDigest,
+    }),
     prepareInsertChatMessageState(db, { ...state, id: stateId, chatId: chat.id }),
   ]);
   return stateId;
@@ -51,6 +62,19 @@ export async function ensureInitialChat(
     prepareInsertChat(db, args, true),
     db
       .prepare(
+        `INSERT INTO chat_transcripts (
+          chat_id, subchat_index, generation, agent_name, head_revision, head_digest,
+          head_message_count, parent_subchat_index, parent_generation, parent_revision, transition_token,
+          created_at, updated_at
+        )
+        SELECT chats.id, 0, 0, chats.initial_id, 0, NULL, 0, NULL, NULL, NULL, ?, ?, ?
+        FROM chats
+        WHERE chats.id = ? AND chats.creator_id = ? AND chats.initial_id = ? AND chats.is_deleted = 0
+        ON CONFLICT(chat_id, subchat_index) DO NOTHING`,
+      )
+      .bind(crypto.randomUUID(), createdAt, createdAt, args.id, args.creatorId, args.initialId),
+    db
+      .prepare(
         `INSERT INTO chat_message_states (
           id, chat_id, storage_key, subchat_index, last_message_rank, part_index,
           snapshot_key, description, created_at
@@ -58,7 +82,7 @@ export async function ensureInitialChat(
         SELECT ?, chats.id, NULL, 0, -1, -1, NULL, NULL, ?
         FROM chats
         WHERE chats.id = ? AND chats.creator_id = ? AND chats.initial_id = ? AND chats.is_deleted = 0
-        ON CONFLICT(chat_id, subchat_index, last_message_rank) DO NOTHING`,
+        ON CONFLICT(chat_id, subchat_index, transcript_generation, last_message_rank) DO NOTHING`,
       )
       .bind(crypto.randomUUID(), createdAt, args.id, args.creatorId, args.initialId),
   ]);
@@ -108,25 +132,37 @@ export function getLatestStorageState(
   db: D1Database,
   args: { chatId: string; subchatIndex: number; lastMessageRank?: number },
 ): Promise<ChatMessageStateRow | null> {
+  return requireChatTranscript(db, args).then((transcript) =>
+    getLatestStorageStateForGeneration(db, {
+      ...args,
+      generation: transcript.generation,
+    }),
+  );
+}
+
+export function getLatestStorageStateForGeneration(
+  db: D1Database,
+  args: { chatId: string; subchatIndex: number; generation: number; lastMessageRank?: number },
+): Promise<ChatMessageStateRow | null> {
   if (args.lastMessageRank === undefined) {
     return db
       .prepare(
         `SELECT * FROM chat_message_states
-         WHERE chat_id = ? AND subchat_index = ?
+         WHERE chat_id = ? AND subchat_index = ? AND transcript_generation = ?
          ORDER BY last_message_rank DESC, part_index DESC
          LIMIT 1`,
       )
-      .bind(args.chatId, args.subchatIndex)
+      .bind(args.chatId, args.subchatIndex, args.generation)
       .first<ChatMessageStateRow>();
   }
   return db
     .prepare(
       `SELECT * FROM chat_message_states
-       WHERE chat_id = ? AND subchat_index = ? AND last_message_rank <= ?
+       WHERE chat_id = ? AND subchat_index = ? AND transcript_generation = ? AND last_message_rank <= ?
        ORDER BY last_message_rank DESC, part_index DESC
        LIMIT 1`,
     )
-    .bind(args.chatId, args.subchatIndex, args.lastMessageRank)
+    .bind(args.chatId, args.subchatIndex, args.generation, args.lastMessageRank)
     .first<ChatMessageStateRow>();
 }
 
@@ -141,29 +177,52 @@ export async function updateStorageState(
     subchatIndex: number;
     partIndex: number;
     initialDescription?: string | null;
+    checkpoint: TranscriptCheckpoint;
   },
 ): Promise<{
+  accepted: boolean;
   retainedStorageKey: boolean;
   retainedSnapshotKey: boolean;
   displacedKeys: string[];
 }> {
   const chat = await requireChat(db, { id: args.chatId, sessionId: args.sessionId });
+  const transcript = await requireChatTranscript(db, { chatId: chat.id, subchatIndex: args.subchatIndex });
+  if (!checkpointMatchesIdentity(args.checkpoint, transcript)) {
+    return rejectedStorageUpdate();
+  }
+  if (
+    transcript.head_revision > args.checkpoint.revision ||
+    (transcript.head_revision === args.checkpoint.revision &&
+      transcript.head_digest !== null &&
+      transcript.head_digest !== args.checkpoint.digest)
+  ) {
+    return rejectedStorageUpdate();
+  }
   for (let attempt = 0; attempt < MAX_STORAGE_UPDATE_CAS_ATTEMPTS; attempt++) {
-    const previous = await getLatestStorageState(db, { chatId: chat.id, subchatIndex: args.subchatIndex });
+    const previous = await getLatestStorageStateForGeneration(db, {
+      chatId: chat.id,
+      subchatIndex: args.subchatIndex,
+      generation: transcript.generation,
+    });
     if (!previous) {
       throw new Error('Chat messages storage state not found');
     }
-    if (previous.last_message_rank > args.lastMessageRank) {
+    if (previous.transcript_revision > args.checkpoint.revision || previous.last_message_rank > args.lastMessageRank) {
       return rejectedStorageUpdate();
     }
     if (previous.last_message_rank === args.lastMessageRank && previous.part_index > args.partIndex) {
-      await db
-        .prepare('UPDATE chat_message_states SET description = COALESCE(description, ?) WHERE id = ?')
-        .bind(args.initialDescription ?? null, previous.id)
-        .run();
       return rejectedStorageUpdate();
     }
-    if (previous.last_message_rank === args.lastMessageRank && previous.part_index === args.partIndex) {
+    if (
+      previous.transcript_revision === args.checkpoint.revision &&
+      (previous.last_message_rank !== args.lastMessageRank ||
+        previous.part_index !== args.partIndex ||
+        (previous.transcript_digest !== null && previous.transcript_digest !== args.checkpoint.digest))
+    ) {
+      return rejectedStorageUpdate();
+    }
+    const samePosition = previous.last_message_rank === args.lastMessageRank && previous.part_index === args.partIndex;
+    if (samePosition && previous.transcript_revision === args.checkpoint.revision) {
       await db
         .prepare(
           `UPDATE chat_message_states
@@ -174,6 +233,7 @@ export async function updateStorageState(
         .run();
       const current = await getStorageStateById(db, previous.id);
       return {
+        accepted: true,
         retainedStorageKey: false,
         retainedSnapshotKey: args.snapshotKey !== null && current?.snapshot_key === args.snapshotKey,
         displacedKeys: [],
@@ -181,47 +241,64 @@ export async function updateStorageState(
     }
     if (previous.last_message_rank === args.lastMessageRank) {
       const displaced = displacedKeys(previous, args);
-      const [update] = await db.batch([
+      const results = await db.batch([
+        prepareAdvanceTranscriptStatement(db, chat.id, args.checkpoint),
         db
           .prepare(
             `UPDATE chat_message_states
-           SET storage_key = COALESCE(?, storage_key), part_index = ?,
-               snapshot_key = COALESCE(?, snapshot_key), description = COALESCE(description, ?)
-           WHERE id = ? AND last_message_rank = ? AND part_index = ?
-             AND storage_key IS ? AND snapshot_key IS ?`,
+             SET storage_key = COALESCE(?, storage_key), part_index = ?,
+                 snapshot_key = COALESCE(?, snapshot_key), description = COALESCE(description, ?),
+                 transcript_revision = ?, transcript_digest = ?
+             WHERE id = ? AND last_message_rank = ? AND part_index = ? AND transcript_revision = ?
+               AND storage_key IS ? AND snapshot_key IS ?
+               AND EXISTS (
+                 SELECT 1 FROM chat_transcripts
+                 WHERE chat_id = ? AND subchat_index = ? AND generation = ? AND agent_name = ?
+                   AND head_revision = ? AND head_digest = ?
+               )`,
           )
           .bind(
             args.storageKey,
             args.partIndex,
             args.snapshotKey,
             args.initialDescription ?? null,
+            args.checkpoint.revision,
+            args.checkpoint.digest,
             previous.id,
             previous.last_message_rank,
             previous.part_index,
+            previous.transcript_revision,
             previous.storage_key,
             previous.snapshot_key,
+            chat.id,
+            args.checkpoint.subchatIndex,
+            args.checkpoint.generation,
+            args.checkpoint.agentName,
+            args.checkpoint.revision,
+            args.checkpoint.digest,
           ),
         ...prepareObjectGcCandidateStatements(db, displaced),
       ]);
-      if (update.meta.changes === 0) {
+      if (results[0].meta.changes === 0 || results[1].meta.changes === 0) {
         continue;
       }
-      return {
-        retainedStorageKey: args.storageKey !== null,
-        retainedSnapshotKey: args.snapshotKey !== null,
-        displacedKeys: displaced,
-      };
+      return acceptedStorageUpdate(args, displaced);
     }
 
     const stateId = crypto.randomUUID();
     const results = await db.batch([
+      prepareAdvanceTranscriptStatement(db, chat.id, args.checkpoint),
       db
         .prepare(
           `INSERT INTO chat_message_states (
             id, chat_id, storage_key, subchat_index, last_message_rank, part_index,
-            snapshot_key, description, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(chat_id, subchat_index, last_message_rank) DO NOTHING`,
+            snapshot_key, description, created_at, transcript_generation, transcript_revision, transcript_digest
+          )
+          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          FROM chat_transcripts
+          WHERE chat_id = ? AND subchat_index = ? AND generation = ? AND agent_name = ?
+            AND head_revision = ? AND head_digest = ?
+          ON CONFLICT DO NOTHING`,
         )
         .bind(
           stateId,
@@ -233,21 +310,56 @@ export async function updateStorageState(
           args.snapshotKey ?? previous.snapshot_key,
           previous.description ?? args.initialDescription ?? null,
           Date.now(),
+          args.checkpoint.generation,
+          args.checkpoint.revision,
+          args.checkpoint.digest,
+          chat.id,
+          args.checkpoint.subchatIndex,
+          args.checkpoint.generation,
+          args.checkpoint.agentName,
+          args.checkpoint.revision,
+          args.checkpoint.digest,
         ),
       db
-        .prepare('UPDATE chats SET last_message_rank = NULL, last_subchat_index = ? WHERE id = ?')
-        .bind(args.subchatIndex, chat.id),
+        .prepare(
+          `UPDATE chats SET last_message_rank = NULL, last_subchat_index = ?
+           WHERE id = ? AND EXISTS (SELECT 1 FROM chat_message_states WHERE id = ?)`,
+        )
+        .bind(args.subchatIndex, chat.id, stateId),
     ]);
-    if (results[0].meta.changes === 0) {
+    if (results[0].meta.changes === 0 || results[1].meta.changes === 0) {
       continue;
     }
-    return {
-      retainedStorageKey: args.storageKey !== null,
-      retainedSnapshotKey: args.snapshotKey !== null,
-      displacedKeys: [],
-    };
+    return acceptedStorageUpdate(args);
   }
   throw new Error('Chat storage state changed too many times; retry the save');
+}
+
+function prepareAdvanceTranscriptStatement(
+  db: D1Database,
+  chatId: string,
+  checkpoint: TranscriptCheckpoint,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE chat_transcripts
+       SET head_revision = ?, head_digest = ?, head_message_count = ?, updated_at = ?
+       WHERE chat_id = ? AND subchat_index = ? AND generation = ?
+         AND head_revision <= ?
+         AND (head_revision < ? OR head_digest IS NULL OR head_digest = ?)`,
+    )
+    .bind(
+      checkpoint.revision,
+      checkpoint.digest,
+      checkpoint.messageCount,
+      Date.now(),
+      chatId,
+      checkpoint.subchatIndex,
+      checkpoint.generation,
+      checkpoint.revision,
+      checkpoint.revision,
+      checkpoint.digest,
+    );
 }
 
 function prepareInsertChat(
@@ -284,8 +396,9 @@ function prepareInsertChatMessageState(db: D1Database, args: ChatMessageStateIns
   return db
     .prepare(
       `INSERT INTO chat_message_states (
-        id, chat_id, storage_key, subchat_index, last_message_rank, part_index, snapshot_key, description, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, chat_id, storage_key, subchat_index, last_message_rank, part_index, snapshot_key, description, created_at,
+        transcript_generation, transcript_revision, transcript_digest
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       args.id ?? crypto.randomUUID(),
@@ -297,6 +410,9 @@ function prepareInsertChatMessageState(db: D1Database, args: ChatMessageStateIns
       args.snapshotKey ?? null,
       args.description ?? null,
       Date.now(),
+      args.transcriptGeneration ?? 0,
+      args.transcriptRevision ?? 0,
+      args.transcriptDigest ?? null,
     );
 }
 
@@ -306,9 +422,22 @@ function getStorageStateById(db: D1Database, id: string): Promise<ChatMessageSta
 
 function rejectedStorageUpdate() {
   return {
+    accepted: false,
     retainedStorageKey: false,
     retainedSnapshotKey: false,
     displacedKeys: [],
+  };
+}
+
+function acceptedStorageUpdate(
+  args: Pick<Parameters<typeof updateStorageState>[1], 'storageKey' | 'snapshotKey'>,
+  displacedKeys: string[] = [],
+) {
+  return {
+    accepted: true,
+    retainedStorageKey: args.storageKey !== null,
+    retainedSnapshotKey: args.snapshotKey !== null,
+    displacedKeys,
   };
 }
 

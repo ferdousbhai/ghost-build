@@ -38,7 +38,8 @@ export const Chat = memo(
     subchats,
     allowGuest = false,
     initialPrompt,
-    resetMessagesOnSubchatChange = true,
+    transcript,
+    seedTranscript,
   }: ChatProps) => {
     const [pendingGuestMessage, setPendingGuestMessage] = useState<string | null>(initialPrompt ?? null);
     const startGuestSessionWithMessage = useCallback((message: string) => {
@@ -72,7 +73,8 @@ export const Chat = memo(
         subchats={subchats}
         pendingGuestMessage={pendingGuestMessage}
         clearPendingGuestMessage={clearPendingGuestMessage}
-        resetMessagesOnSubchatChange={resetMessagesOnSubchatChange}
+        transcript={transcript}
+        seedTranscript={seedTranscript}
       />
     );
   },
@@ -90,7 +92,8 @@ const AuthenticatedChat = memo(
     subchats,
     pendingGuestMessage,
     clearPendingGuestMessage,
-    resetMessagesOnSubchatChange = true,
+    transcript,
+    seedTranscript,
   }: ChatProps & { pendingGuestMessage: string | null; clearPendingGuestMessage: () => void }) => {
     const sessionId = useSessionIdOrNullOrLoading();
     const chatInitialId = useStore(initialIdStore);
@@ -159,10 +162,12 @@ const AuthenticatedChat = memo(
       isRecovering,
       streamStatus,
       contextManager,
+      transcriptCheckpoint,
     } = useBuilderAgentChat({
       chatInitialId,
       initialMessages,
-      resetMessagesOnSubchatChange,
+      transcript,
+      seedTranscript,
     });
     const parsedMessages = useChatHistoryProcessing({
       messages,
@@ -170,6 +175,7 @@ const AuthenticatedChat = memo(
       partCache,
       streamStatus,
       storeMessageHistory,
+      transcriptCheckpoint,
     });
 
     useEffect(() => {

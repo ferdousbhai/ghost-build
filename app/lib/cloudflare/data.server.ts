@@ -3,7 +3,7 @@ import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import type { DataOperationPath } from './data-api';
 import { dataOperationArgSchemas } from './data-operation-schemas';
 import { claimGuestSession, getSessionId, requireMatchingSession } from './data/auth.server';
-import { findChat, getLatestStorageState, updateStorageState } from './data/chat-repository.server';
+import { findChat, getLatestStorageStateForGeneration, updateStorageState } from './data/chat-repository.server';
 import {
   createSubchat,
   earliestRewindableMessageRank,
@@ -29,6 +29,15 @@ import {
   saveThumbnail,
   upsertSocialShare,
 } from './data/share-service.server';
+import {
+  transcriptCheckpointsEqual,
+  transcriptIdentitiesEqual,
+  type TranscriptCheckpoint,
+  type TranscriptIdentity,
+} from 'ghostbuild-agent/transcript';
+import { requireChatTranscript, transcriptIdentity } from './data/transcript-repository.server';
+import type { BuilderAgent } from '~/agents/builder-agent';
+import type { ChatTranscriptRow } from './data/types';
 
 const dataOperationPathSchema = z.enum(
   Object.keys(dataOperationArgSchemas) as [DataOperationPath, ...DataOperationPath[]],
@@ -45,6 +54,11 @@ const storeChatRequestSchema = chatRequestSchema.extend({
   lastMessageRank: z.coerce.number().int().nonnegative(),
   lastSubchatIndex: z.coerce.number().int().nonnegative().default(0),
   partIndex: z.coerce.number().int().nonnegative(),
+  transcriptAgentName: z.string().min(1).max(512),
+  transcriptGeneration: z.coerce.number().int().nonnegative(),
+  transcriptRevision: z.coerce.number().int().nonnegative(),
+  transcriptDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  transcriptMessageCount: z.coerce.number().int().nonnegative(),
 });
 const initialMessagesRequestSchema = chatRequestSchema.extend({
   subchatIndex: z.number().int().nonnegative().optional(),
@@ -72,8 +86,30 @@ export async function storeChatAction({ request, env }: { request: Request; env:
       lastMessageRank,
       lastSubchatIndex: subchatIndex,
       partIndex,
+      transcriptAgentName,
+      transcriptGeneration,
+      transcriptRevision,
+      transcriptDigest,
+      transcriptMessageCount,
     } = parseRequestQuery(request, storeChatRequestSchema);
     await requireMatchingSession(env, request, sessionId);
+    const checkpoint: TranscriptCheckpoint = {
+      agentName: transcriptAgentName,
+      generation: transcriptGeneration,
+      revision: transcriptRevision,
+      digest: transcriptDigest,
+      messageCount: transcriptMessageCount,
+      subchatIndex,
+    };
+    const chat = await findChat(env.DB, { id: chatId, sessionId });
+    if (!chat) {
+      return Response.json({ error: 'Chat not found' }, { status: 404 });
+    }
+    const transcript = await requireChatTranscript(env.DB, { chatId: chat.id, subchatIndex });
+    const durableBeforeUpload = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript));
+    if (!transcriptCheckpointsEqual(checkpoint, durableBeforeUpload.checkpoint)) {
+      return transcriptConflictResponse();
+    }
     const formData = await request.formData();
     const messageBlob = formData.get('messages');
     const snapshotBlob = formData.get('snapshot');
@@ -89,6 +125,12 @@ export async function storeChatAction({ request, env }: { request: Request; env:
       throw error;
     }
 
+    const durableAfterUpload = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript));
+    if (!transcriptCheckpointsEqual(checkpoint, durableAfterUpload.checkpoint)) {
+      await deleteObjectsBestEffort(env, [storageKey, snapshotKey]);
+      return transcriptConflictResponse();
+    }
+
     let update;
     try {
       update = await updateStorageState(env.DB, {
@@ -100,10 +142,15 @@ export async function storeChatAction({ request, env }: { request: Request; env:
         subchatIndex,
         partIndex,
         initialDescription,
+        checkpoint,
       });
     } catch (error) {
       await deleteObjectsBestEffort(env, [storageKey, snapshotKey]);
       throw error;
+    }
+    if (!update.accepted) {
+      await deleteObjectsBestEffort(env, [storageKey, snapshotKey]);
+      return transcriptConflictResponse();
     }
     await deleteObjectsBestEffort(env, [
       update.retainedStorageKey ? null : storageKey,
@@ -114,6 +161,21 @@ export async function storeChatAction({ request, env }: { request: Request; env:
   } catch (error) {
     return internalErrorResponse(error, 'Unknown chat storage error');
   }
+}
+
+function transcriptConflictResponse(): Response {
+  return Response.json(
+    { error: 'The agent transcript advanced before this backup was saved. Retry with the latest transcript.' },
+    { status: 409 },
+  );
+}
+
+function getBuilderTranscriptSnapshot(
+  env: Env,
+  identity: TranscriptIdentity,
+): ReturnType<BuilderAgent['getTranscriptSnapshot']> {
+  const stub = env.BuilderAgent.getByName(identity.agentName) as unknown as Pick<BuilderAgent, 'getTranscriptSnapshot'>;
+  return stub.getTranscriptSnapshot(identity);
 }
 
 async function deleteObjectsBestEffort(env: Env, keys: Array<string | null>): Promise<void> {
@@ -141,15 +203,57 @@ export async function initialMessagesAction({ request, env }: { request: Request
     if (!chat) {
       return new Response(`Chat not found: ${body.chatId}`, { status: 404 });
     }
-    const state = await getLatestStorageState(env.DB, {
+    const transcript = await requireChatTranscript(env.DB, {
       chatId: chat.id,
       subchatIndex: body.subchatIndex ?? 0,
+    });
+    const state = await getLatestStorageStateForGeneration(env.DB, {
+      chatId: chat.id,
+      subchatIndex: transcript.subchat_index,
+      generation: transcript.generation,
       lastMessageRank: chat.last_message_rank ?? undefined,
     });
-    return state?.storage_key ? objectResponse(env, state.storage_key) : new Response(null, { status: 204 });
+    const durable = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript));
+    if (
+      durable.checkpoint &&
+      transcriptIdentitiesEqual(durable.checkpoint, transcriptIdentity(transcript)) &&
+      durable.checkpoint.revision > 0
+    ) {
+      return Response.json(
+        {
+          version: 2,
+          transcript: durable.checkpoint,
+          messages: durable.messages,
+        },
+        { headers: transcriptResponseHeaders(transcript, 'durable') },
+      );
+    }
+    if (!state?.storage_key) {
+      return new Response(null, { status: 204, headers: transcriptResponseHeaders(transcript, 'empty') });
+    }
+    const materialized = await objectResponse(env, state.storage_key);
+    const headers = transcriptResponseHeaders(transcript, 'materialized', materialized.headers);
+    return new Response(materialized.body, {
+      status: materialized.status,
+      statusText: materialized.statusText,
+      headers,
+    });
   } catch (error) {
     return internalErrorResponse(error, 'Unknown initial messages error');
   }
+}
+
+function transcriptResponseHeaders(
+  transcript: ChatTranscriptRow,
+  source: 'durable' | 'materialized' | 'empty',
+  initial?: HeadersInit,
+): Headers {
+  const headers = new Headers(initial);
+  headers.set('X-Ghostbuild-Transcript-Source', source);
+  headers.set('X-Ghostbuild-Transcript-Agent', transcript.agent_name);
+  headers.set('X-Ghostbuild-Transcript-Generation', transcript.generation.toString());
+  headers.set('X-Ghostbuild-Transcript-Subchat', transcript.subchat_index.toString());
+  return headers;
 }
 
 export async function uploadThumbnailAction({ request, env }: { request: Request; env: Env }): Promise<Response> {

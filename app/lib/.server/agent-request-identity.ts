@@ -23,11 +23,12 @@ export async function authorizeAgentRequest(
   }
   const chat = await env.DB.prepare(
     `SELECT COUNT(*) AS match_count,
-            MAX(CASE WHEN is_deleted <> 0 OR creator_id <> ? THEN 1 ELSE 0 END) AS has_conflict
+            MAX(CASE WHEN chats.is_deleted <> 0 OR chats.creator_id <> ? THEN 1 ELSE 0 END) AS has_conflict
      FROM chats
-     WHERE initial_id = ?`,
+     LEFT JOIN chat_transcripts ON chat_transcripts.chat_id = chats.id
+     WHERE chats.initial_id = ? OR chat_transcripts.agent_name = ?`,
   )
-    .bind(identity.ownerId, agentName)
+    .bind(identity.ownerId, agentName, agentName)
     .first<{ match_count: number; has_conflict: number | null }>();
   if (chat && chat.match_count > 0 && chat.has_conflict !== 0) {
     return { response: Response.json({ error: 'Agent not found.' }, { status: 404 }) };

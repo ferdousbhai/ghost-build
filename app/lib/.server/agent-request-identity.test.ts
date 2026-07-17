@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const getSession = vi.fn();
+const getSession = vi.hoisted(() => vi.fn());
 
 vi.mock('./auth', () => ({
   getAuth: () => ({ api: { getSession } }),
@@ -108,4 +108,43 @@ describe('Agent request identity', () => {
     );
     expect('response' in result && result.response.status).toBe(404);
   });
+
+  it('authorizes a generation-specific transcript owned by the session', async () => {
+    getSession.mockResolvedValue({ user: { id: 'owner-1' } });
+    const database = databaseReturning({ match_count: 1, has_conflict: 0 });
+
+    const result = await authorizeAgentRequest(
+      new Request('https://ghostbuild.dev/agents/builder-agent/chat--transcript-2-1'),
+      { DB: database.db } as Env,
+    );
+
+    expect(result).toEqual({
+      identity: { billingSubjectKey: 'user:owner-1', ownerId: 'owner-1', userId: 'owner-1' },
+    });
+    expect(database.query).toContain('LEFT JOIN chat_transcripts');
+    expect(database.values).toEqual(['owner-1', 'chat--transcript-2-1', 'chat--transcript-2-1']);
+  });
 });
+
+function databaseReturning(row: { match_count: number; has_conflict: number }) {
+  const state = { query: '', values: [] as unknown[] };
+  return {
+    get query() {
+      return state.query;
+    },
+    get values() {
+      return state.values;
+    },
+    db: {
+      prepare(query: string) {
+        state.query = query;
+        return {
+          bind(...values: unknown[]) {
+            state.values = values;
+            return { first: async () => row };
+          },
+        };
+      },
+    } as unknown as D1Database,
+  };
+}

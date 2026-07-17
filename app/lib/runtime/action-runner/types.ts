@@ -32,6 +32,7 @@ export type ActionsMap = MapStore<Record<string, ActionState>>;
 
 export type ActionRunnerWorkspace = {
   getFiles(): FileMap;
+  getRecentFileWrites?(): ReadonlyMap<string, number>;
   getPreviewPort(): number | undefined;
   hasFile(path: string): boolean;
   setGeneratedFileContent(path: string, content: string): void;

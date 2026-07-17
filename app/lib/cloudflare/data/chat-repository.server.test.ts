@@ -22,6 +22,20 @@ describe('updateStorageState object ownership', () => {
     const result = await updateStorageState(database.db, updateArgs({ lastMessageRank: 4, partIndex: 2 }));
 
     expect(result).toEqual({
+      accepted: false,
+      retainedStorageKey: false,
+      retainedSnapshotKey: false,
+      displacedKeys: [],
+    });
+  });
+
+  test('rejects a checkpoint from an obsolete transcript generation', async () => {
+    const database = new StorageStateDatabase(storageState({ transcript_generation: 1 }));
+
+    const result = await updateStorageState(database.db, updateArgs());
+
+    expect(result).toEqual({
+      accepted: false,
       retainedStorageKey: false,
       retainedSnapshotKey: false,
       displacedKeys: [],
@@ -30,12 +44,19 @@ describe('updateStorageState object ownership', () => {
 
   test('retains only a snapshot that atomically fills an empty slot on a duplicate write', async () => {
     const database = new StorageStateDatabase(
-      storageState({ last_message_rank: 5, part_index: 2, snapshot_key: null }),
+      storageState({
+        last_message_rank: 5,
+        part_index: 2,
+        snapshot_key: null,
+        transcript_revision: 1,
+        transcript_digest: 'a'.repeat(64),
+      }),
     );
 
     const result = await updateStorageState(database.db, updateArgs({ lastMessageRank: 5, partIndex: 2 }));
 
     expect(result).toEqual({
+      accepted: true,
       retainedStorageKey: false,
       retainedSnapshotKey: true,
       displacedKeys: [],
@@ -102,7 +123,7 @@ describe('insertChatWithState', () => {
     ).rejects.toThrow('atomic batch failed');
 
     expect(batch).toHaveBeenCalledOnce();
-    expect(batch.mock.calls[0][0]).toHaveLength(2);
+    expect(batch.mock.calls[0][0]).toHaveLength(3);
     expect(run).not.toHaveBeenCalled();
   });
 });
@@ -143,7 +164,9 @@ describe('ensureInitialChat', () => {
   });
 });
 
-function updateArgs(overrides: Partial<Parameters<typeof updateStorageState>[1]> = {}) {
+function updateArgs(
+  overrides: Partial<Parameters<typeof updateStorageState>[1]> = {},
+): Parameters<typeof updateStorageState>[1] {
   return {
     sessionId: 'session',
     chatId: 'chat',
@@ -154,6 +177,14 @@ function updateArgs(overrides: Partial<Parameters<typeof updateStorageState>[1]>
     partIndex: 2,
     initialDescription: null,
     ...overrides,
+    checkpoint: overrides.checkpoint ?? {
+      agentName: 'chat',
+      generation: 0,
+      subchatIndex: 0,
+      revision: 1,
+      digest: 'a'.repeat(64),
+      messageCount: 6,
+    },
   };
 }
 
@@ -168,6 +199,9 @@ function storageState(overrides: Partial<ChatMessageStateRow> = {}): ChatMessage
     snapshot_key: 'snapshot-old',
     description: null,
     created_at: 0,
+    transcript_generation: 0,
+    transcript_revision: 0,
+    transcript_digest: null,
     ...overrides,
   };
 }
@@ -196,6 +230,23 @@ class StorageStateDatabase {
   } as unknown as D1Database;
 
   private first(query: string, values: unknown[]) {
+    if (query.includes('FROM chat_transcripts')) {
+      return {
+        chat_id: chat.id,
+        subchat_index: 0,
+        generation: this.state.transcript_generation,
+        agent_name:
+          this.state.transcript_generation === 0 ? 'chat' : `chat--transcript-0-${this.state.transcript_generation}`,
+        head_revision: this.state.transcript_revision,
+        head_digest: this.state.transcript_digest,
+        head_message_count: 0,
+        parent_subchat_index: null,
+        parent_generation: null,
+        parent_revision: null,
+        created_at: 0,
+        updated_at: 0,
+      };
+    }
     if (query.includes('FROM chats')) {
       return { ...chat };
     }
@@ -210,6 +261,9 @@ class StorageStateDatabase {
       this.gcCandidates.push(values[0] as string);
       return changed(1);
     }
+    if (query.includes('UPDATE chat_transcripts')) {
+      return changed(1);
+    }
     if (query.includes('AND storage_key IS ?')) {
       if (this.reverseFirstCasPair && this.#casRuns++ === 0) {
         await new Promise<void>((resolve) => {
@@ -218,11 +272,11 @@ class StorageStateDatabase {
       } else if (this.reverseFirstCasPair && this.#firstCas) {
         const release = this.#firstCas;
         this.#firstCas = null;
-        const result = this.applyCas(values);
+        const result = this.applyCas(query, values);
         release();
         return result;
       }
-      return this.applyCas(values);
+      return this.applyCas(query, values);
     }
     if (query.includes('SET snapshot_key = COALESCE(snapshot_key, ?)')) {
       this.state.snapshot_key ??= values[0] as string | null;
@@ -232,31 +286,45 @@ class StorageStateDatabase {
     return changed(1);
   }
 
-  private applyCas(values: unknown[]) {
+  private applyCas(query: string, values: unknown[]) {
     if (this.failNextCas) {
       this.failNextCas = false;
       throw new Error('database unavailable');
     }
-    const expected = {
-      id: values[4],
-      rank: values[5],
-      part: values[6],
-      storage: values[7],
-      snapshot: values[8],
-    };
+    const samePosition = !query.includes('part_index = ?');
+    const expected = samePosition
+      ? {
+          id: values[5],
+          rank: this.state.last_message_rank,
+          part: this.state.part_index,
+          revision: values[6],
+          storage: values[7],
+          snapshot: values[8],
+        }
+      : {
+          id: values[6],
+          rank: values[7],
+          part: values[8],
+          revision: values[9],
+          storage: values[10],
+          snapshot: values[11],
+        };
     if (
       expected.id !== this.state.id ||
       expected.rank !== this.state.last_message_rank ||
       expected.part !== this.state.part_index ||
+      expected.revision !== this.state.transcript_revision ||
       expected.storage !== this.state.storage_key ||
       expected.snapshot !== this.state.snapshot_key
     ) {
       return changed(0);
     }
     this.state.storage_key = (values[0] as string | null) ?? this.state.storage_key;
-    this.state.part_index = values[1] as number;
-    this.state.snapshot_key = (values[2] as string | null) ?? this.state.snapshot_key;
-    this.state.description ??= values[3] as string | null;
+    this.state.part_index = samePosition ? this.state.part_index : (values[1] as number);
+    this.state.snapshot_key = (values[samePosition ? 1 : 2] as string | null) ?? this.state.snapshot_key;
+    this.state.description ??= values[samePosition ? 2 : 3] as string | null;
+    this.state.transcript_revision = values[samePosition ? 3 : 4] as number;
+    this.state.transcript_digest = values[samePosition ? 4 : 5] as string;
     return changed(1);
   }
 }

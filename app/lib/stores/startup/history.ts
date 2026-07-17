@@ -11,6 +11,7 @@ import { workbenchStore } from '~/lib/stores/workbench.client';
 import { chatSyncWorker, hasPendingBackupWork, initializeBackupPosition } from './backup-sync-worker';
 import { chatSyncState } from './chatSyncState';
 import { lastCompleteMessageInfoStore } from './messages';
+import type { TranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 
 const logger = createScopedLogger('BackupSyncState');
 
@@ -18,6 +19,7 @@ export function useBackupSyncState(
   chatId: string,
   loadedSubchatIndex?: number,
   initialMessages?: GhostbuildMessage[],
+  checkpoint?: TranscriptCheckpoint | null,
 ): void {
   const subchatIndex = useStore(subchatIndexStore);
   const sessionId = useSessionIdOrNullOrLoading();
@@ -28,9 +30,9 @@ export function useBackupSyncState(
       subchatIndexStore.set(loadedSubchatIndex);
     }
     if (initialMessages !== undefined && loadedSubchatIndex !== undefined) {
-      initializeBackupPosition(chatId, initialMessages, loadedSubchatIndex);
+      initializeBackupPosition(chatId, initialMessages, loadedSubchatIndex, checkpoint ?? null);
     }
-  }, [chatId, initialMessages, loadedSubchatIndex]);
+  }, [chatId, checkpoint, initialMessages, loadedSubchatIndex]);
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {

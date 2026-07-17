@@ -45,6 +45,7 @@ class WorkbenchStore {
       this.#reloadedParts,
       {
         getFiles: () => this.#filesStore.files.get(),
+        getRecentFileWrites: () => this.#filesStore.userWrites,
         getPreviewPort: () => this.#previewsStore.previews.get().find((preview) => preview.ready)?.port,
         getSelectedFile: () => this.#editorStore.selectedFile.get(),
         getCurrentView: () => this.currentView.get(),

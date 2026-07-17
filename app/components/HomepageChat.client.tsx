@@ -8,7 +8,8 @@ const EMPTY_MESSAGES: GhostbuildMessage[] = [];
 
 export function HomepageChat({ initialId, initialPrompt }: { initialId: string; initialPrompt: string }) {
   const partCache = useRef<PartCache>(new Map());
-  const { storeMessageHistory, initializeChat, initialMessages, subchats } = useChatHomepage(initialId);
+  const { storeMessageHistory, initializeChat, initialMessages, subchats, transcript, seedTranscript } =
+    useChatHomepage(initialId);
 
   return (
     <Chat
@@ -21,7 +22,8 @@ export function HomepageChat({ initialId, initialPrompt }: { initialId: string; 
       subchats={subchats}
       allowGuest
       initialPrompt={initialPrompt}
-      resetMessagesOnSubchatChange={false}
+      transcript={transcript}
+      seedTranscript={seedTranscript}
     />
   );
 }

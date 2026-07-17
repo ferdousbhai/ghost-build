@@ -16,6 +16,13 @@ import {
 } from 'ghostbuild-agent/ai-compat';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import type { SerializedMessage } from './messages';
+import {
+  transcriptCheckpointSchema,
+  transcriptIdentitiesEqual,
+  transcriptIdentitySchema,
+  type TranscriptCheckpoint,
+  type TranscriptIdentity,
+} from 'ghostbuild-agent/transcript';
 
 const logger = createScopedLogger('InitialMessages');
 const textDecoder = new TextDecoder();
@@ -24,6 +31,9 @@ interface InitialMessages {
   loadedChatId: string;
   deserialized: GhostbuildMessage[];
   loadedSubchatIndex: number;
+  transcript: TranscriptIdentity;
+  checkpoint: TranscriptCheckpoint | null;
+  seedTranscript: boolean;
 }
 
 export function useInitialMessages(chatId: string | undefined):
@@ -48,6 +58,7 @@ export function useInitialMessages(chatId: string | undefined):
         const chatInfo = await executeDataOperation(api.messages.get, {
           id: chatId,
           sessionId,
+          ...(subchatIndex === undefined ? {} : { subchatIndex }),
         });
         controller.signal.throwIfAborted();
         if (chatInfo === null) {
@@ -77,17 +88,24 @@ export function useInitialMessages(chatId: string | undefined):
         if (!initialMessagesResponse.ok) {
           throw new Error('Failed to fetch initial messages');
         }
+        const responseTranscript =
+          transcriptIdentityFromHeaders(initialMessagesResponse.headers) ?? chatInfo.transcript;
 
         if (initialMessagesResponse.status === 204) {
           setInitialMessages({
             loadedChatId: chatInfo.urlId ?? chatInfo.initialId,
             deserialized: [],
             loadedSubchatIndex: subchatIndex,
+            transcript: responseTranscript,
+            checkpoint: null,
+            seedTranscript: false,
           });
           return;
         }
-        const content = await initialMessagesResponse.arrayBuffer();
-        const initialMessages = decompressMessages(new Uint8Array(content));
+        const history = initialMessagesResponse.headers.get('content-type')?.includes('application/json')
+          ? parseMessageHistory(await initialMessagesResponse.json())
+          : decompressMessages(new Uint8Array(await initialMessagesResponse.arrayBuffer()));
+        const initialMessages = history.messages;
 
         // Transform messages to convert partial-call states to failed states
         const transformedMessages = initialMessages.map((message) => {
@@ -125,6 +143,14 @@ export function useInitialMessages(chatId: string | undefined):
           loadedChatId: chatInfo.urlId ?? chatInfo.initialId,
           deserialized: deserializedMessages,
           loadedSubchatIndex: subchatIndex,
+          transcript: responseTranscript,
+          checkpoint:
+            history.checkpoint && transcriptIdentitiesEqual(history.checkpoint, responseTranscript)
+              ? history.checkpoint
+              : null,
+          seedTranscript:
+            initialMessagesResponse.headers.get('X-Ghostbuild-Transcript-Source') === 'materialized' &&
+            deserializedMessages.length > 0,
         });
       } catch (error) {
         if (controller.signal.aborted) {
@@ -138,7 +164,22 @@ export function useInitialMessages(chatId: string | undefined):
     return () => controller.abort();
   }, [chatId, sessionId, subchatIndex]);
 
+  if (initialMessages && subchatIndex !== undefined && initialMessages.loadedSubchatIndex !== subchatIndex) {
+    return undefined;
+  }
+
   return initialMessages;
+}
+
+function transcriptIdentityFromHeaders(headers: Headers): TranscriptIdentity | null {
+  const generation = headers.get('X-Ghostbuild-Transcript-Generation');
+  const subchatIndex = headers.get('X-Ghostbuild-Transcript-Subchat');
+  const result = transcriptIdentitySchema.safeParse({
+    agentName: headers.get('X-Ghostbuild-Transcript-Agent'),
+    generation: generation === null ? Number.NaN : Number(generation),
+    subchatIndex: subchatIndex === null ? Number.NaN : Number(subchatIndex),
+  });
+  return result.success ? result.data : null;
 }
 
 function deserializeMessageFromStorage(message: SerializedMessage): GhostbuildMessage {
@@ -151,11 +192,26 @@ function deserializeMessageFromStorage(message: SerializedMessage): GhostbuildMe
   };
 }
 
-function decompressMessages(compressed: Uint8Array): SerializedMessage[] {
+function decompressMessages(compressed: Uint8Array): {
+  messages: SerializedMessage[];
+  checkpoint: TranscriptCheckpoint | null;
+} {
   const decompressed = decompressWithLz4(compressed);
   const deserialized = JSON.parse(textDecoder.decode(decompressed));
+  return parseMessageHistory(deserialized);
+}
+
+function parseMessageHistory(deserialized: unknown): {
+  messages: SerializedMessage[];
+  checkpoint: TranscriptCheckpoint | null;
+} {
   if (!Array.isArray(deserialized)) {
-    throw new Error('Unexpected state -- decompressed data is not an array');
+    const history = deserialized as Record<string, unknown> | null;
+    if (history !== null && history.version === 2 && Array.isArray(history.messages)) {
+      const checkpoint = transcriptCheckpointSchema.parse(history.transcript);
+      return { messages: history.messages as SerializedMessage[], checkpoint };
+    }
+    throw new Error('Unexpected state -- decompressed data is not a message history');
   }
-  return deserialized;
+  return { messages: deserialized as SerializedMessage[], checkpoint: null };
 }

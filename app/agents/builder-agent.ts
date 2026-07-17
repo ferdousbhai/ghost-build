@@ -7,7 +7,6 @@ import {
 import { callable } from 'agents';
 import { createChatResponseFromBody, type ChatRequestBody } from '~/lib/.server/chat';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { ROLE_SYSTEM_PROMPT, generalSystemPrompt } from 'ghostbuild-agent/prompts/system';
 import {
   BuilderTurnStore,
   completeBuilderTurn,
@@ -16,20 +15,27 @@ import {
   type BuilderTurnState,
   type BuilderTurnStatus,
 } from './builder-turn-store';
-import {
-  contextScopeForSubchat,
-  DurableObjectContextCompactionRepository,
-} from '~/lib/.server/llm/context-compaction-store';
-import { ContextWindowManager } from '~/lib/.server/llm/context-window-manager';
+import { DurableObjectContextCompactionRepository } from '~/lib/.server/llm/context-compaction-store';
 import { summarizeBuilderContext } from '~/lib/.server/llm/workers-ai-text';
 import { chatTurnContextSchema, type ChatTurnContext } from 'ghostbuild-agent/turn-context';
-import { getWorkersAiToolContext } from '~/lib/.server/llm/workers-ai-tools';
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
-import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
+import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from 'ai';
 import { latestPendingDeploymentPlanMarker } from './deployment-continuation';
 import { generateProjectTitle } from '~/lib/.server/llm/project-title';
 import { setGeneratedDescriptionIfMissing } from '~/lib/cloudflare/data/chat-service.server';
 import { messageText } from 'ghostbuild-agent/ai-compat';
+import {
+  transcriptIdentitySchema,
+  transcriptCheckpointSchema,
+  transcriptCheckpointsEqual,
+  transcriptMessagesEqual,
+  stripTranscriptBaseMetadata,
+  advanceTranscriptCheckpoint,
+  TRANSCRIPT_BASE_METADATA_KEY,
+  type TranscriptCheckpoint,
+  type TranscriptIdentity,
+} from 'ghostbuild-agent/transcript';
+import { createWorkersAiSessionAffinity } from '~/lib/.server/llm/workers-ai-prompt-cache';
 
 const logger = createScopedLogger('BuilderAgent');
 const STALE_CHAT_RECOVERY_MS = 15 * 60 * 1000;
@@ -41,9 +47,10 @@ export type BuilderAgentState = {
   activeTurn?: BuilderTurnState | null;
   lastCompletedTurn?: BuilderTurnState | null;
   updatedAt?: string;
+  transcript?: TranscriptCheckpoint | null;
 };
 
-type ChatBody = Partial<ChatRequestBody>;
+type ChatBody = Partial<ChatRequestBody> & { transcript?: unknown };
 
 type BuilderAgentProps = {
   billingSubjectKey: string;
@@ -59,6 +66,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   initialState: BuilderAgentState = {
     activeTurn: null,
     lastCompletedTurn: null,
+    transcript: null,
   };
 
   override messageConcurrency = 'queue' as const;
@@ -74,31 +82,22 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   override chatStreamStallTimeoutMs = CHAT_NO_PROGRESS_TIMEOUT_MS;
 
   private readonly turnStore = new BuilderTurnStore(this);
+  private readonly contextCompaction = new DurableObjectContextCompactionRepository(this);
   private billingSubjectKey: string | null = null;
   private ownerId: string | null = null;
   private userId: string | undefined;
-  private readonly contextWindow = new ContextWindowManager({
-    repository: new DurableObjectContextCompactionRepository(this),
-    summarize: async (prompt) =>
-      summarizeBuilderContext(
-        this.env,
-        prompt,
-        await getUserWorkersAiCredentials(this.env, this.userId),
-        this.billingSubjectKey ?? undefined,
-      ),
-    systemPrompts: () => [ROLE_SYSTEM_PROMPT, generalSystemPrompt(), getWorkersAiToolContext()],
-    logger,
-  });
-
   async onStart(props?: BuilderAgentProps) {
     this.billingSubjectKey = props?.billingSubjectKey ?? null;
     this.ownerId = props?.ownerId ?? null;
     this.userId = props?.userId;
     this.turnStore.initialize();
-    this.contextWindow.initialize();
+    this.contextCompaction.initialize();
   }
 
   override async onChatRecovery(ctx: ChatRecoveryContext): Promise<ChatRecoveryOptions> {
+    if (this.state.transcript) {
+      await this.advanceTranscriptCheckpoint(this.state.transcript);
+    }
     const ageMs = Date.now() - ctx.createdAt;
     const nextTurn = createRecoveryTurn(ctx, this.state.activeTurn);
     this.setState({
@@ -161,7 +160,9 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
     const chatInitialId = typeof body.chatInitialId === 'string' ? body.chatInitialId : 'agent-chat';
     const subchatIndex = parseSubchatIndex(body.subchatIndex);
-    const contextScope = contextScopeForSubchat(subchatIndex);
+    const transcript = this.requireTranscriptIdentity(body.transcript, subchatIndex);
+    await this.advanceTranscriptCheckpoint(transcript);
+    this.contextCompaction.migrateLegacySubchat(subchatIndex);
     const turnContext = parseTurnContext(body.turnContext);
     const firstUserMessage =
       !options?.continuation && messages.filter((message: { role?: string }) => message.role === 'user').length === 1;
@@ -189,7 +190,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.turnStore.record(turn);
 
     try {
-      const preparedContext = await this.contextWindow.prepare(messages, contextScope, turnContext);
       const accountCredentials = await getUserWorkersAiCredentials(this.env, this.userId);
       if (firstPrompt) {
         this.ctx.waitUntil(
@@ -201,22 +201,21 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
           ),
         );
       }
-      console.info({
-        event: 'builder_context_prepared',
-        requestId: options?.requestId,
-        chatInitialId,
-        contextReduced: preparedContext.contextReduced,
-        messageCount: preparedContext.messages.length,
-      });
-      this.stashTurn(turn, preparedContext.contextReduced);
+      this.stashTurn(turn);
       return await createChatResponseFromBody({
         env: this.env,
         abortSignal: options?.abortSignal,
         firstUserMessage,
-        preparedMessages: preparedContext.messages,
+        turnContext,
         billingSubjectKey: this.billingSubjectKey,
         accountCredentials,
-        contextReduced: preparedContext.contextReduced,
+        sessionAffinity: await createWorkersAiSessionAffinity(transcript),
+        compaction: {
+          current: this.contextCompaction.getCompaction(),
+          summarize: (prompt) =>
+            summarizeBuilderContext(this.env, prompt, accountCredentials, this.billingSubjectKey ?? undefined),
+          save: (compaction) => this.contextCompaction.saveCompaction(compaction),
+        },
         body: {
           messages,
           chatInitialId,
@@ -232,7 +231,10 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
   }
 
-  protected override onChatResponse(result: ChatResponseResult) {
+  protected override async onChatResponse(result: ChatResponseResult) {
+    if (this.state.transcript) {
+      await this.advanceTranscriptCheckpoint(this.state.transcript);
+    }
     const currentTurn = this.state.activeTurn;
     if (!currentTurn) {
       return;
@@ -253,11 +255,83 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   @callable()
-  getContextStatus(subchatIndex = 0) {
-    return this.contextWindow.getStatus(contextScopeForSubchat(parseSubchatIndex(subchatIndex)));
+  async getTranscriptSnapshot(identityValue?: unknown): Promise<{
+    checkpoint: TranscriptCheckpoint | null;
+    messages: NonNullable<ChatRequestBody['messages']>;
+  }> {
+    const checkpoint =
+      identityValue === undefined ? (this.state.transcript ?? null) : await this.getTranscriptCheckpoint(identityValue);
+    return {
+      checkpoint,
+      messages: this.messages as NonNullable<ChatRequestBody['messages']>,
+    };
   }
 
-  private stashTurn(turn: BuilderTurnState, contextReduced: boolean) {
+  @callable()
+  async getTranscriptCheckpoint(identityValue: unknown): Promise<TranscriptCheckpoint | null> {
+    const identity = this.requireTranscriptIdentity(identityValue);
+    if (!this.state.transcript && this.messages.length > 0) {
+      return this.advanceTranscriptCheckpoint(identity);
+    }
+    return this.state.transcript ?? null;
+  }
+
+  @callable()
+  async seedTranscript(identityValue: unknown, messagesValue: unknown): Promise<TranscriptCheckpoint> {
+    const identity = this.requireTranscriptIdentity(identityValue);
+    if (!Array.isArray(messagesValue)) {
+      throw new Response('Invalid transcript messages', { status: 400 });
+    }
+    const messages = messagesValue as NonNullable<ChatRequestBody['messages']>;
+    if (this.state.transcript || this.messages.length > 0) {
+      return this.advanceTranscriptCheckpoint(identity);
+    }
+    await this.persistMessages(messages as unknown as UIMessage[]);
+    return this.advanceTranscriptCheckpoint(identity);
+  }
+
+  protected override sanitizeMessageForPersistence(message: UIMessage): UIMessage {
+    const metadata = isRecord(message.metadata) ? message.metadata : null;
+    if (!metadata || !Object.hasOwn(metadata, TRANSCRIPT_BASE_METADATA_KEY)) {
+      return message;
+    }
+    const sanitized = stripTranscriptBaseMetadata(message);
+    const existing = this.messages.find((candidate) => candidate.id === message.id);
+    if (existing && transcriptMessagesEqual(existing, message)) {
+      return sanitized;
+    }
+    const parsed = transcriptCheckpointSchema.nullable().safeParse(metadata[TRANSCRIPT_BASE_METADATA_KEY]);
+    if (!parsed.success || !transcriptCheckpointsEqual(this.state.transcript ?? null, parsed.data)) {
+      throw new Error('This transcript changed in another session. Reload the latest messages before sending.');
+    }
+    return sanitized;
+  }
+
+  private requireTranscriptIdentity(value: unknown, subchatIndex?: number): TranscriptIdentity {
+    const result = transcriptIdentitySchema.safeParse(value);
+    if (!result.success) {
+      throw new Response('Invalid transcript identity', { status: 400 });
+    }
+    if (result.data.agentName !== this.name) {
+      throw new Response('Transcript identity does not match this agent', { status: 409 });
+    }
+    if (subchatIndex !== undefined && result.data.subchatIndex !== subchatIndex) {
+      throw new Response('Transcript identity does not match the selected subchat', { status: 409 });
+    }
+    return result.data;
+  }
+
+  private async advanceTranscriptCheckpoint(identity: TranscriptIdentity): Promise<TranscriptCheckpoint> {
+    const previous = this.state.transcript;
+    const checkpoint = await advanceTranscriptCheckpoint(previous ?? null, identity, this.messages);
+    if (checkpoint === previous) {
+      return previous;
+    }
+    this.setState({ ...this.state, transcript: checkpoint, updatedAt: new Date().toISOString() });
+    return checkpoint;
+  }
+
+  private stashTurn(turn: BuilderTurnState) {
     try {
       this.stash({
         kind: 'ghostbuild-chat-turn',
@@ -267,7 +341,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
           staleRecoveryMs: STALE_CHAT_RECOVERY_MS,
           contextSource: 'durable AIChatAgent transcript plus this turn checkpoint',
         },
-        contextReduced,
       });
     } catch (error) {
       logger.warn('Unable to stash Ghostbuild chat turn recovery context', {
@@ -338,4 +411,8 @@ function parseTurnContext(value: unknown): ChatTurnContext | undefined {
     throw new Response('Invalid turn context', { status: 400 });
   }
   return result.data;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -1,4 +1,5 @@
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import { transcriptCheckpointsEqual, type TranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { toast } from 'sonner';
 import { compressWithLz4 } from '~/lib/compression';
@@ -34,6 +35,7 @@ export function initializeBackupPosition(
   chatId: string,
   initialMessages: GhostbuildMessage[],
   loadedSubchatIndex: number,
+  checkpoint: TranscriptCheckpoint | null = null,
 ): void {
   const lastMessage = initialMessages[initialMessages.length - 1];
   const initialMessageInfo = {
@@ -48,8 +50,17 @@ export function initializeBackupPosition(
   chatSyncState.set({
     ...currentState,
     chatId,
-    ...(chatChanged ? { lastSync: 0, numFailures: 0, savedFileUpdateCounter: null, started: false } : {}),
+    ...(chatChanged
+      ? {
+          lastSync: 0,
+          numFailures: 0,
+          savedFileUpdateCounter: null,
+          started: false,
+          persistedTranscriptCheckpoint: null,
+        }
+      : {}),
     persistedMessageInfo: initialMessageInfo,
+    persistedTranscriptCheckpoint: checkpoint,
     subchatIndex: loadedSubchatIndex,
   });
   const currentCompleteInfo = lastCompleteMessageInfoStore.get();
@@ -58,6 +69,7 @@ export function initializeBackupPosition(
       ...initialMessageInfo,
       allMessages: initialMessages,
       hasNextPart: false,
+      transcriptCheckpoint: checkpoint,
     });
   }
 }
@@ -69,7 +81,10 @@ export function hasPendingBackupWork(
 ): boolean {
   return (
     hasPendingMessageBackup(currentState, completeMessageInfo) ||
-    (currentState.savedFileUpdateCounter !== null && currentState.savedFileUpdateCounter !== fileUpdateCounter)
+    (completeMessageInfo?.transcriptCheckpoint !== null &&
+      completeMessageInfo?.transcriptCheckpoint !== undefined &&
+      currentState.savedFileUpdateCounter !== null &&
+      currentState.savedFileUpdateCounter !== fileUpdateCounter)
   );
 }
 
@@ -146,7 +161,8 @@ function hasPendingMessageBackup(
     completeMessageInfo !== null &&
     (currentState.persistedMessageInfo.messageIndex !== completeMessageInfo.messageIndex ||
       currentState.persistedMessageInfo.partIndex !== completeMessageInfo.partIndex ||
-      completeMessageInfo.hasNextPart)
+      completeMessageInfo.hasNextPart ||
+      !transcriptCheckpointsEqual(currentState.persistedTranscriptCheckpoint, completeMessageInfo.transcriptCheckpoint))
   );
 }
 
@@ -162,6 +178,7 @@ async function syncBackup(
     sessionId,
     completeMessageInfo,
     persistedMessageInfo: currentState.persistedMessageInfo,
+    persistedTranscriptCheckpoint: currentState.persistedTranscriptCheckpoint,
     subchatIndex: currentState.subchatIndex,
   });
   const nextSavedUpdateCounter = getFileUpdateCounter();
@@ -217,6 +234,9 @@ async function syncBackup(
     numFailures: 0,
     savedFileUpdateCounter: nextSavedUpdateCounter,
     ...(update ? { persistedMessageInfo: { messageIndex: update.messageIndex, partIndex: update.partIndex } } : {}),
+    ...(completeMessageInfo.transcriptCheckpoint
+      ? { persistedTranscriptCheckpoint: completeMessageInfo.transcriptCheckpoint }
+      : {}),
   });
 }
 

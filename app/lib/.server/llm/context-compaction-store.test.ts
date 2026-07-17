@@ -6,13 +6,6 @@ type Row = {
   summary: string | null;
   from_message_id: string | null;
   to_message_id: string | null;
-  generation: number;
-  last_attempt_tokens: number;
-  last_attempt_message_count: number;
-  last_result_tokens: number;
-  last_attempt_status: 'idle' | 'running' | 'compacted' | 'noop' | 'error';
-  last_error: string | null;
-  updated_at: string;
 };
 
 class TestSqlProvider implements SqlProvider {
@@ -26,64 +19,74 @@ class TestSqlProvider implements SqlProvider {
     if (query.startsWith('CREATE TABLE IF NOT EXISTS builder_context_state')) {
       return [];
     }
-    if (query.startsWith('INSERT OR IGNORE INTO builder_context_state')) {
-      this.rows.set('active', this.rows.get('active') ?? emptyRow(String(values.at(-1))));
-      return [];
-    }
     if (query.startsWith('SELECT summary')) {
       const row = this.rows.get(String(values[0]));
       return (row ? [row] : []) as T[];
     }
     if (query.startsWith('INSERT INTO builder_context_state')) {
-      const [scope, summary, from, to, generation, tokens, count, resultTokens] = values;
-      this.rows.set(String(scope), {
+      const [id, summary, from, to] = values;
+      this.rows.set(String(id), {
         summary: summary === null ? null : String(summary),
         from_message_id: from === null ? null : String(from),
         to_message_id: to === null ? null : String(to),
-        generation: Number(generation),
-        last_attempt_tokens: Number(tokens),
-        last_attempt_message_count: Number(count),
-        last_result_tokens: Number(resultTokens),
-        last_attempt_status: query.includes("'compacted', NULL") ? 'compacted' : 'idle',
-        last_error: null,
-        updated_at: String(values.at(-1)),
       });
+      return [];
+    }
+    if (query.startsWith('DELETE FROM builder_context_state')) {
+      this.rows.delete(String(values[0]));
       return [];
     }
     throw new Error(`Unhandled test SQL: ${query}`);
   }
 }
 
-function emptyRow(updatedAt: string): Row {
-  return {
-    summary: null,
-    from_message_id: null,
-    to_message_id: null,
-    generation: 0,
-    last_attempt_tokens: 0,
-    last_attempt_message_count: 0,
-    last_result_tokens: 0,
-    last_attempt_status: 'idle',
-    last_error: null,
-    updated_at: updatedAt,
-  };
-}
-
 describe('DurableObjectContextCompactionRepository', () => {
-  test('round-trips summary-only compaction state', () => {
-    const repository = new DurableObjectContextCompactionRepository(new TestSqlProvider());
-    repository.initialize();
-    repository.saveCompaction(
-      'subchat:2',
-      { summary: 'summary', fromMessageId: 'm-3', toMessageId: 'm-9', generation: 4 },
-      { attemptedTokens: 120_000, attemptedMessageCount: 30, resultTokens: 20_000 },
-    );
+  test('does not write an empty record during Agent startup', () => {
+    const db = new TestSqlProvider();
+    const repository = new DurableObjectContextCompactionRepository(db);
 
-    expect(repository.getState('subchat:2').compaction).toEqual({
+    repository.initialize();
+
+    expect(db.rows.size).toBe(0);
+    expect(repository.getCompaction()).toBeNull();
+  });
+
+  test('round-trips the Agent-owned summary overlay', () => {
+    const repository = new DurableObjectContextCompactionRepository(new TestSqlProvider());
+    repository.saveCompaction({
       summary: 'summary',
       fromMessageId: 'm-3',
       toMessageId: 'm-9',
-      generation: 4,
     });
+
+    expect(repository.getCompaction()).toEqual({
+      summary: 'summary',
+      fromMessageId: 'm-3',
+      toMessageId: 'm-9',
+    });
+  });
+
+  test('lazily moves a deployed scoped summary to the canonical Agent record', () => {
+    const db = new TestSqlProvider();
+    db.rows.set('active', {
+      summary: 'older summary',
+      from_message_id: 'm-1',
+      to_message_id: 'm-3',
+    });
+    db.rows.set('subchat:2', {
+      summary: 'legacy summary',
+      from_message_id: 'm-1',
+      to_message_id: 'm-5',
+    });
+    const repository = new DurableObjectContextCompactionRepository(db);
+
+    repository.migrateLegacySubchat(2);
+
+    expect(repository.getCompaction()).toEqual({
+      summary: 'legacy summary',
+      fromMessageId: 'm-1',
+      toMessageId: 'm-5',
+    });
+    expect(db.rows.has('subchat:2')).toBe(false);
   });
 });

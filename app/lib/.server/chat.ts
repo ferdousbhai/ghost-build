@@ -1,13 +1,12 @@
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { workersAiAgent } from '~/lib/.server/llm/workers-ai-agent';
 import { createUIMessageStreamResponse } from 'ai';
-import { calculatePromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
-import { ROLE_SYSTEM_PROMPT, generalSystemPrompt } from 'ghostbuild-agent/prompts/system';
-import { ModelInputBudgetExceededError } from './llm/model-input-budget';
+import { ContextCompactionUnavailableError, ModelInputBudgetExceededError } from './llm/model-input';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { AiAllowanceExceededError } from './billing/ai-allowance-repository';
 import type { WorkersAiAccountCredentials } from './llm/provider';
+import type { ContextCompaction } from './llm/context-compaction';
 
 type Messages = GhostbuildMessage[];
 
@@ -24,27 +23,30 @@ export type ChatRequestBody = {
 export async function createChatResponseFromBody({
   abortSignal,
   body,
-  contextReduced,
+  compaction,
   env,
   firstUserMessage,
-  preparedMessages,
+  turnContext,
   billingSubjectKey,
   accountCredentials,
+  sessionAffinity,
 }: {
   abortSignal?: AbortSignal;
   body: Pick<ChatRequestBody, 'messages' | 'chatInitialId' | 'shouldDisableTools'>;
-  contextReduced: boolean;
+  compaction: {
+    current: ContextCompaction | null;
+    summarize: (prompt: string) => Promise<string>;
+    save: (compaction: ContextCompaction) => void;
+  };
   env: Env;
   firstUserMessage: boolean;
-  preparedMessages: Messages;
+  turnContext?: ChatTurnContext;
   billingSubjectKey: string;
   accountCredentials?: WorkersAiAccountCredentials;
+  sessionAffinity: string;
 }) {
   const { messages, chatInitialId } = body;
   const transcriptMessages = messages ?? [];
-  const modelMessages = preparedMessages;
-  const systemPrompts = [ROLE_SYSTEM_PROMPT, generalSystemPrompt()];
-  const promptCharacterCounts = calculatePromptCharacterCounts(modelMessages, systemPrompts);
 
   logger.info('Using Cloudflare Workers AI');
 
@@ -55,12 +57,12 @@ export async function createChatResponseFromBody({
       chatInitialId,
       firstUserMessage,
       messages: transcriptMessages,
-      promptMessages: modelMessages,
+      turnContext,
       shouldDisableTools: body.shouldDisableTools,
-      contextReduced,
-      promptCharacterCounts,
+      compaction,
       billingSubjectKey,
       accountCredentials,
+      sessionAffinity,
     });
 
     return createUIMessageStreamResponse({ stream: dataStream });
@@ -71,6 +73,13 @@ export async function createChatResponseFromBody({
       throw new Response(error.message, {
         status: 413,
         statusText: 'Current request is too large',
+      });
+    }
+
+    if (error instanceof ContextCompactionUnavailableError) {
+      throw new Response(error.message, {
+        status: 503,
+        statusText: 'Context compaction unavailable',
       });
     }
 

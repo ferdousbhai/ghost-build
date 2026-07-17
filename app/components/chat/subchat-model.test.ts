@@ -5,8 +5,8 @@ describe('subchat model', () => {
   it('creates stable fallback labels', () => {
     expect(
       createSubchatOptions([
-        { subchatIndex: 0, updatedAt: 1 },
-        { subchatIndex: 1, updatedAt: 2, description: 'Billing' },
+        { subchatIndex: 0, updatedAt: 1, transcript: transcript(0) },
+        { subchatIndex: 1, updatedAt: 2, description: 'Billing', transcript: transcript(1) },
       ]).map(({ label }) => label),
     ).toEqual(['Initial chat', 'Billing']);
   });
@@ -20,3 +20,7 @@ describe('subchat model', () => {
     expect(getSubchatNavigation(3, 2, true).canCreateSubchat).toBe(true);
   });
 });
+
+function transcript(subchatIndex: number) {
+  return { agentName: `chat-${subchatIndex}`, generation: 0, subchatIndex };
+}

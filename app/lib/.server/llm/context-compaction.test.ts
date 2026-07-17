@@ -1,12 +1,8 @@
 import { describe, expect, test, vi } from 'vitest';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import {
-  AUTO_COMPACTION_TOKEN_THRESHOLD,
   assembleCompactedContext,
   compactContext,
-  createEmergencyContext,
-  estimateContextTokens,
-  shouldCompactContext,
   toSessionMessages,
   type ContextCompaction,
 } from './context-compaction';
@@ -22,18 +18,12 @@ function longConversation(count = 24): GhostbuildMessage[] {
 }
 
 describe('Cloudflare-native context compaction', () => {
-  test('triggers compaction only when the estimated token threshold is exceeded', () => {
-    expect(shouldCompactContext(AUTO_COMPACTION_TOKEN_THRESHOLD + 1)).toBe(true);
-    expect(shouldCompactContext(AUTO_COMPACTION_TOKEN_THRESHOLD)).toBe(false);
-  });
-
   test('applies a summary as a non-destructive read-time overlay', () => {
     const messages = Array.from({ length: 8 }, (_, index) => textMessage(`m-${index}`, 'user', `turn ${index}`));
     const compaction: ContextCompaction = {
       summary: '## Current State\nThe app shell is complete.',
       fromMessageId: 'm-2',
       toMessageId: 'm-5',
-      generation: 1,
     };
 
     const assembled = assembleCompactedContext(messages, compaction);
@@ -43,7 +33,7 @@ describe('Cloudflare-native context compaction', () => {
     expect(assembled.messages.map((message) => message.id)).toEqual([
       'm-0',
       'm-1',
-      'compaction_ghostbuild_1',
+      'compaction_ghostbuild_m-5',
       'm-6',
       'm-7',
     ]);
@@ -56,7 +46,6 @@ describe('Cloudflare-native context compaction', () => {
       summary: 'Summary from a later branch',
       fromMessageId: 'm-1',
       toMessageId: 'm-9',
-      generation: 2,
     });
 
     expect(assembled.overlayApplied).toBe(false);
@@ -74,7 +63,6 @@ describe('Cloudflare-native context compaction', () => {
     });
 
     expect(first).not.toBeNull();
-    expect(first?.generation).toBe(1);
     expect(firstSummarize).toHaveBeenCalledOnce();
     expect(firstSummarize.mock.calls[0][0]).toContain('## Open Items');
 
@@ -94,7 +82,6 @@ describe('Cloudflare-native context compaction', () => {
     });
 
     expect(second).not.toBeNull();
-    expect(second?.generation).toBe(2);
     expect(second?.fromMessageId).toBe(first?.fromMessageId);
     expect(secondSummarize.mock.calls[0][0]).toContain('PREVIOUS SUMMARY');
     expect(secondSummarize.mock.calls[0][0]).toContain(first?.summary);
@@ -121,7 +108,6 @@ describe('Cloudflare-native context compaction', () => {
         current,
         summarize: async () => `Generation ${generation} summary preserving ${markers.join(', ')}.`,
       });
-      expect(next?.generation).toBe(generation);
       current = next;
       const assembled = assembleCompactedContext(messages, current).messages;
       const rendered = JSON.stringify(assembled);
@@ -174,17 +160,5 @@ describe('Cloudflare-native context compaction', () => {
       toolName: 'view',
       output: expect.any(String),
     });
-    expect(estimateContextTokens(messages)).toBeGreaterThan(900);
-  });
-
-  test('keeps protected head and recent tail when summary generation is unavailable', () => {
-    const messages = longConversation(40);
-    const emergency = createEmergencyContext(messages);
-
-    expect(emergency.length).toBeLessThan(messages.length);
-    expect(emergency.slice(0, 3).map((message) => message.id)).toEqual(['m-0', 'm-1', 'm-2']);
-    expect(emergency.at(-1)?.id).toBe(messages.at(-1)?.id);
-    expect(emergency.some((message) => message.id === 'compaction_ghostbuild_emergency')).toBe(true);
-    expect(messages).toHaveLength(40);
   });
 });

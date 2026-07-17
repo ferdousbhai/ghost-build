@@ -29,4 +29,20 @@ describe('serializeMessageForStorage', () => {
       text: 'some content',
     });
   });
+
+  test('removes the ephemeral stale-send checkpoint from materialized history', () => {
+    const message = {
+      id: 'test',
+      role: 'user',
+      parts: [{ type: 'text', text: 'some content' }],
+      metadata: {
+        ghostbuildTranscriptBase: { revision: 2 },
+        retained: 'value',
+      },
+    } as GhostbuildMessage;
+
+    const serialized = serializeMessageForStorage(message);
+
+    expect(serialized.metadata).toEqual({ retained: 'value' });
+  });
 });

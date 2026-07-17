@@ -17,13 +17,14 @@ export function getProvider(
   env: Env,
   accountCredentials?: WorkersAiAccountCredentials,
   modelId = CLOUDFLARE_WORKERS_AI_MODEL,
+  settings?: { sessionAffinity?: string },
 ): Provider {
   const cloudflare = accountCredentials
     ? createWorkersAI({ accountId: accountCredentials.accountId, apiKey: accountCredentials.apiKey })
     : createWorkersAI({ binding: env.AI });
 
   return {
-    model: cloudflare(modelId),
+    model: cloudflare(modelId, { sessionAffinity: settings?.sessionAffinity }),
     maxTokens: MODEL_MAX_OUTPUT_TOKENS,
   };
 }

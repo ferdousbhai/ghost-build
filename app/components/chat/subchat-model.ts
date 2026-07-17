@@ -1,8 +1,6 @@
-export interface SubchatSummary {
-  subchatIndex: number;
-  updatedAt: number;
-  description?: string;
-}
+import type { SubchatSummary } from '~/lib/cloudflare/data-api';
+
+export type { SubchatSummary };
 
 export interface SubchatOption {
   label: string;

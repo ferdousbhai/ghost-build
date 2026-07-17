@@ -115,9 +115,35 @@ Run the same validation pipeline used by CI before opening a pull request:
 pnpm run validate
 ```
 
+Read-only sub-agents are intentionally absent from the production runtime because the paired evaluation did not show a
+quality gain worth the added latency and tokens. To reproduce the fixed explorer/verifier comparison, start its isolated
+remote-dev Worker and POST once to the local URL it prints:
+
+```bash
+pnpm exec wrangler dev --remote --config scripts/evaluations/read-only-subagents.wrangler.jsonc
+curl --request POST 'http://localhost:8787?case=0'
+```
+
+The response reports exact-match success, end-to-end latency, token usage, and model-price cost for the single-agent
+baseline and the child-assisted path. Run cases `0` through `3`; evaluating one case per request stays below remote-preview
+request timeouts. Do not add production delegation based only on unit tests.
+
+To reproduce the Workers AI prefix-cache benchmark:
+
+```bash
+pnpm exec wrangler dev --remote --config scripts/evaluations/prompt-cache.wrangler.jsonc
+curl --request POST http://localhost:8787
+```
+
+This benchmark changes the final user suffix after warming a large stable prefix and verifies the new answer. Treat only
+a positive provider-reported cached-token count as a cache hit; latency alone is not hit evidence. The measured result
+and current limitation are recorded in `scripts/evaluations/prompt-cache-2026-07-16.md`.
+
 ## Deployment
 
 Production deploys run from the `Production Deploy` GitHub Actions workflow on pushes to `main` and manual `workflow_dispatch` runs. Configure `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as GitHub Actions secrets for deploy authentication, and keep runtime values configured as Cloudflare Worker bindings. The final publish step uses Cloudflare's official Wrangler GitHub Action.
+
+The canonical production origin is `https://ghostbuild.dev`. Its Wrangler route is a Custom Domain and `workers_dev` stays disabled. App navigation responses must preserve `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless`; without both, `window.crossOriginIsolated` is false and WebContainer boot is intentionally skipped.
 
 ```bash
 pnpm run deploy

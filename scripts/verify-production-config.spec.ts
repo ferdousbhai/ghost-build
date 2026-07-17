@@ -5,11 +5,34 @@ import {
   findMissingProvisionScriptPatternErrors,
   findMissingWorkflowTextErrors,
   findWorkerObservabilityErrors,
+  findWorkerRoutingErrors,
   findWorkerRuntimeSecretErrors,
   findWorkflowSequenceErrors,
   verifyProductionConfig,
   workflowPathsFromDirectoryEntries,
 } from './verify-production-config.mjs';
+
+describe('findWorkerRoutingErrors', () => {
+  it('accepts the production custom domain with workers.dev disabled', () => {
+    expect(
+      findWorkerRoutingErrors(
+        {
+          workers_dev: false,
+          routes: [{ pattern: 'ghostbuild.dev', custom_domain: true }],
+        },
+        'wrangler.jsonc',
+        'ghostbuild.dev',
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects a missing custom domain and public workers.dev endpoint', () => {
+    expect(findWorkerRoutingErrors({}, 'wrangler.jsonc', 'ghostbuild.dev')).toEqual([
+      'wrangler.jsonc workers_dev must be false so production is served only from the custom domain.',
+      'wrangler.jsonc must configure "ghostbuild.dev" as a custom domain.',
+    ]);
+  });
+});
 
 describe('production config workflow verification helpers', () => {
   it('reports missing required workflow text', () => {

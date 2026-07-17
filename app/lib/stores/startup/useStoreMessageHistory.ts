@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { lastCompleteMessageInfoStore } from '~/lib/stores/startup/messages';
 import { isToolPart, isToolResult, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { StreamStatus } from '~/lib/common/types';
+import { digestTranscriptMessages, type TranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 
 /**
  * This returns a function that takes in `messages` and `streamStatus` and updates
@@ -13,30 +14,43 @@ import type { StreamStatus } from '~/lib/common/types';
  * callback remains a pure store update.
  */
 export function useStoreMessageHistory() {
-  return useCallback((messages: GhostbuildMessage[], streamStatus: StreamStatus) => {
-    if (messages.length === 0) {
-      return;
-    }
+  return useCallback(
+    async (
+      messages: GhostbuildMessage[],
+      streamStatus: StreamStatus,
+      transcriptCheckpoint: TranscriptCheckpoint | null,
+    ) => {
+      if (messages.length === 0 || transcriptCheckpoint === null || streamStatus === 'streaming') {
+        return;
+      }
 
-    const lastCompleteMessageInfo = getLastCompletePart(messages, streamStatus);
-    if (lastCompleteMessageInfo === null) {
-      return;
-    }
-    const currentLastCompleteMessageInfo = lastCompleteMessageInfoStore.get();
-    if (
-      currentLastCompleteMessageInfo !== null &&
-      lastCompleteMessageInfo.messageIndex === currentLastCompleteMessageInfo.messageIndex &&
-      lastCompleteMessageInfo.partIndex === currentLastCompleteMessageInfo.partIndex
-    ) {
-      return;
-    }
-    lastCompleteMessageInfoStore.set({
-      messageIndex: lastCompleteMessageInfo.messageIndex,
-      partIndex: lastCompleteMessageInfo.partIndex,
-      allMessages: messages,
-      hasNextPart: lastCompleteMessageInfo.hasNextPart,
-    });
-  }, []);
+      const lastCompleteMessageInfo = getLastCompletePart(messages, streamStatus);
+      if (lastCompleteMessageInfo === null) {
+        return;
+      }
+      if (transcriptCheckpoint.digest !== (await digestTranscriptMessages(messages))) {
+        return;
+      }
+      const currentLastCompleteMessageInfo = lastCompleteMessageInfoStore.get();
+      if (
+        currentLastCompleteMessageInfo !== null &&
+        lastCompleteMessageInfo.messageIndex === currentLastCompleteMessageInfo.messageIndex &&
+        lastCompleteMessageInfo.partIndex === currentLastCompleteMessageInfo.partIndex &&
+        transcriptCheckpoint.revision === currentLastCompleteMessageInfo.transcriptCheckpoint?.revision &&
+        transcriptCheckpoint.digest === currentLastCompleteMessageInfo.transcriptCheckpoint?.digest
+      ) {
+        return;
+      }
+      lastCompleteMessageInfoStore.set({
+        messageIndex: lastCompleteMessageInfo.messageIndex,
+        partIndex: lastCompleteMessageInfo.partIndex,
+        allMessages: messages,
+        hasNextPart: lastCompleteMessageInfo.hasNextPart,
+        transcriptCheckpoint,
+      });
+    },
+    [],
+  );
 }
 
 function getPrecedingPart(

@@ -7,6 +7,12 @@ import { compressWithLz4 } from '~/lib/compression';
 import { waitForStoreCondition } from '~/lib/stores/waitForStore';
 import { stripMetadata } from '~/components/chat/UserMessage';
 import { createdAtMillis, messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import {
+  TRANSCRIPT_HISTORY_FORMAT_VERSION,
+  stripTranscriptBaseMetadata,
+  transcriptCheckpointsEqual,
+  type TranscriptCheckpoint,
+} from 'ghostbuild-agent/transcript';
 
 const textEncoder = new TextEncoder();
 
@@ -15,11 +21,18 @@ export type CompleteMessageInfo = {
   partIndex: number;
   hasNextPart: boolean;
   allMessages: GhostbuildMessage[];
+  transcriptCheckpoint: TranscriptCheckpoint | null;
 };
 
 export type SerializedMessage = Omit<GhostbuildMessage, 'createdAt' | 'content'> & {
   createdAt: number | undefined;
   content?: string;
+};
+
+type StoredMessageHistory = {
+  version: typeof TRANSCRIPT_HISTORY_FORMAT_VERSION;
+  transcript: TranscriptCheckpoint;
+  messages: SerializedMessage[];
 };
 
 export const lastCompleteMessageInfoStore = atom<CompleteMessageInfo | null>(null);
@@ -29,6 +42,7 @@ export function prepareMessageHistory(args: {
   sessionId: string;
   completeMessageInfo: CompleteMessageInfo;
   persistedMessageInfo: { messageIndex: number; partIndex: number };
+  persistedTranscriptCheckpoint: TranscriptCheckpoint | null;
   subchatIndex: number;
 }): {
   url: URL;
@@ -50,13 +64,26 @@ export function prepareMessageHistory(args: {
   url.searchParams.set('partIndex', partIndex.toString());
   url.searchParams.set('lastSubchatIndex', args.subchatIndex.toString());
   const firstMessage = allMessages.length > 0 ? stripMetadata(messageText(allMessages[0])) : undefined;
-  if (messageIndex === persistedMessageInfo.messageIndex && partIndex === persistedMessageInfo.partIndex) {
+  if (!completeMessageInfo.transcriptCheckpoint) {
+    return { url, update: null };
+  }
+  const checkpoint = completeMessageInfo.transcriptCheckpoint;
+  url.searchParams.set('transcriptAgentName', checkpoint.agentName);
+  url.searchParams.set('transcriptGeneration', checkpoint.generation.toString());
+  url.searchParams.set('transcriptRevision', checkpoint.revision.toString());
+  url.searchParams.set('transcriptDigest', checkpoint.digest);
+  url.searchParams.set('transcriptMessageCount', checkpoint.messageCount.toString());
+  if (
+    messageIndex === persistedMessageInfo.messageIndex &&
+    partIndex === persistedMessageInfo.partIndex &&
+    transcriptCheckpointsEqual(checkpoint, args.persistedTranscriptCheckpoint)
+  ) {
     // No changes
     return { url, update: null };
   }
 
   const urlHintAndDescription = getKnownUrlId() === undefined ? extractUrlHintAndDescription(allMessages) : undefined;
-  const compressed = compressMessages(allMessages, messageIndex, partIndex);
+  const compressed = compressMessages(allMessages, messageIndex, partIndex, checkpoint);
   return { url, update: { compressed, urlHintAndDescription, messageIndex, partIndex, firstMessage } };
 }
 
@@ -122,7 +149,10 @@ export function serializeMessageForStorage(message: GhostbuildMessage) {
     annotations: _annotations,
     parts,
     ...rest
-  } = message as GhostbuildMessage & { annotations?: unknown[]; toolInvocations?: unknown[] };
+  } = stripTranscriptBaseMetadata(message) as GhostbuildMessage & {
+    annotations?: unknown[];
+    toolInvocations?: unknown[];
+  };
 
   return {
     ...rest,
@@ -131,7 +161,12 @@ export function serializeMessageForStorage(message: GhostbuildMessage) {
   };
 }
 
-function compressMessages(messages: GhostbuildMessage[], lastMessageRank: number, partIndex: number): Uint8Array {
+function compressMessages(
+  messages: GhostbuildMessage[],
+  lastMessageRank: number,
+  partIndex: number,
+  transcript: TranscriptCheckpoint,
+): Uint8Array {
   const slicedMessages = messages.slice(0, lastMessageRank + 1);
   const lastMessage = slicedMessages.at(-1);
   if (lastMessage) {
@@ -141,6 +176,11 @@ function compressMessages(messages: GhostbuildMessage[], lastMessageRank: number
     };
   }
   const serialized = slicedMessages.map(serializeMessageForStorage);
-  const uint8Array = textEncoder.encode(JSON.stringify(serialized));
+  const history: StoredMessageHistory = {
+    version: TRANSCRIPT_HISTORY_FORMAT_VERSION,
+    transcript,
+    messages: serialized,
+  };
+  const uint8Array = textEncoder.encode(JSON.stringify(history));
   return compressWithLz4(uint8Array);
 }

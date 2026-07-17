@@ -39,6 +39,7 @@ const workerTargets = [
     databaseName: 'ghostbuild',
     bucketName: 'ghostbuild-app-storage',
     durableObject: 'BuilderAgent',
+    customDomain: 'ghostbuild.dev',
     allowPlaceholderDatabase: false,
   },
 ];
@@ -71,6 +72,20 @@ function findBinding(collection, binding) {
   return Array.isArray(collection) ? collection.find((item) => item?.binding === binding) : undefined;
 }
 
+export function findWorkerRoutingErrors(config, label, customDomain) {
+  const errors = [];
+  if (config?.workers_dev !== false) {
+    errors.push(`${label} workers_dev must be false so production is served only from the custom domain.`);
+  }
+  const customRoute = Array.isArray(config?.routes)
+    ? config.routes.find((route) => route?.pattern === customDomain && route?.custom_domain === true)
+    : undefined;
+  if (!customRoute) {
+    errors.push(`${label} must configure ${JSON.stringify(customDomain)} as a custom domain.`);
+  }
+  return errors;
+}
+
 function verifyWorker(errors, config, target) {
   const label = target.path;
   requireEqual(errors, `${label} name`, config?.name, target.name);
@@ -83,6 +98,7 @@ function verifyWorker(errors, config, target) {
   requireEqual(errors, `${label} ai.binding`, config?.ai?.binding, 'AI');
   errors.push(
     ...findWorkerObservabilityErrors(config, label),
+    ...findWorkerRoutingErrors(config, label, target.customDomain),
     ...findWorkerRuntimeSecretErrors(config, label, 'configure values as Cloudflare bindings'),
   );
 

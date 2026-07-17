@@ -1,12 +1,14 @@
 import { createUIMessageStream, streamText, type UIMessage, type UIMessageChunk } from 'ai';
 import { languageModelId, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
-import type { PromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
+import { calculatePromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
 import { ROLE_SYSTEM_PROMPT, generalSystemPrompt } from 'ghostbuild-agent/prompts/system';
+import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { logger } from 'ghostbuild-agent/utils/logger';
 import { CLOUDFLARE_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';
 import { asAiSdkTools, asOriginalMessages } from './message-conversion';
 import { getProvider, type WorkersAiAccountCredentials } from './provider';
-import { prepareBoundedModelInput } from './model-input-budget';
+import { prepareModelInput } from './model-input';
+import type { ContextCompaction } from './context-compaction';
 import { normalizeTextPartBoundaries } from './workers-ai-stream';
 import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
 import {
@@ -14,6 +16,7 @@ import {
   getValidatedBuildCompletion,
   getWorkersAiBuildGuidance,
   getWorkersAiToolSettings,
+  serializeWorkersAiToolDefinitions,
   type AgentToolSettings,
 } from './workers-ai-tools';
 import { glm52CostNanodollars } from '~/lib/.server/billing/ai-allowance-policy';
@@ -24,6 +27,7 @@ import {
 } from '~/lib/.server/billing/ai-allowance-repository';
 import { normalizeWorkersAiUsage } from '~/lib/.server/billing/workers-ai-usage';
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
+import { fingerprintWorkersAiModelInput } from './workers-ai-prompt-cache';
 
 type Messages = GhostbuildMessage[];
 const WORKERS_AI_CALL_TIMEOUT_MS = 180_000;
@@ -34,12 +38,16 @@ interface WorkersAiAgentOptions {
   chatInitialId: string;
   firstUserMessage: boolean;
   messages: Messages;
-  promptMessages: Messages;
+  turnContext?: ChatTurnContext;
   shouldDisableTools: boolean;
-  contextReduced: boolean;
-  promptCharacterCounts: PromptCharacterCounts;
+  compaction: {
+    current: ContextCompaction | null;
+    summarize: (prompt: string) => Promise<string>;
+    save: (compaction: ContextCompaction) => void;
+  };
   billingSubjectKey: string;
   accountCredentials?: WorkersAiAccountCredentials;
+  sessionAffinity: string;
 }
 
 export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<ReadableStream<UIMessageChunk>> {
@@ -49,17 +57,17 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     chatInitialId,
     firstUserMessage,
     messages,
-    promptMessages,
+    turnContext,
     shouldDisableTools,
-    contextReduced,
-    promptCharacterCounts,
+    compaction,
     billingSubjectKey,
     accountCredentials,
+    sessionAffinity,
   } = options;
   logger.debug('Starting Workers AI agent');
   const startedAt = Date.now();
   let recordedFirstResponse = false;
-  const provider = getProvider(env, accountCredentials);
+  const provider = getProvider(env, accountCredentials, CLOUDFLARE_WORKERS_AI_MODEL, { sessionAffinity });
   const tools = createWorkersAiTools();
   const validatedBuildCompletion = shouldDisableTools ? undefined : getValidatedBuildCompletion(messages);
   if (validatedBuildCompletion) {
@@ -74,12 +82,30 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
   const systemPrompts = [ROLE_SYSTEM_PROMPT, generalSystemPrompt(), buildGuidance].filter((prompt): prompt is string =>
     Boolean(prompt),
   );
-  const modelInput = await prepareBoundedModelInput({
-    uiMessages: promptMessages,
+  const modelInput = await prepareModelInput({
+    messages,
+    turnContext,
+    currentCompaction: compaction.current,
+    summarize: compaction.summarize,
     systemPrompts,
     tools,
     toolChoice: toolSettings.toolChoice,
     activeTools: toolSettings.activeTools,
+    logger,
+  });
+  if (modelInput.nextCompaction) {
+    compaction.save(modelInput.nextCompaction);
+  }
+  const promptCharacterCounts = calculatePromptCharacterCounts(modelInput.promptMessages, systemPrompts);
+  const providerModel = languageModelId(provider.model, CLOUDFLARE_WORKERS_AI_MODEL);
+  const serializedTools = serializeWorkersAiToolDefinitions(tools, toolSettings.activeTools);
+  const modelInputFingerprint = await fingerprintWorkersAiModelInput({
+    privacySalt: sessionAffinity,
+    model: providerModel,
+    messages: modelInput.messages,
+    tools: serializedTools,
+    activeTools: toolSettings.activeTools,
+    toolChoice: toolSettings.toolChoice,
   });
   const reservation = accountCredentials
     ? undefined
@@ -125,11 +151,13 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
           chatInitialId,
           firstUserMessage,
           toolsDisabledFromRepeatedErrors: shouldDisableTools,
-          contextReduced: contextReduced || modelInput.reduced,
+          contextReduced: modelInput.contextCompacted,
           estimatedContextTokens: modelInput.estimatedTokens,
-          modelInputDroppedMessageCount: modelInput.droppedMessageCount,
           promptCharacterCounts,
-          providerModel: languageModelId(provider.model, CLOUDFLARE_WORKERS_AI_MODEL),
+          providerModel,
+          promptCacheAttempted: true,
+          modelInputFingerprint,
+          startedAt,
         });
         if (reservationFinalized || !reservation) {
           return;

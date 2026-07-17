@@ -5,6 +5,7 @@ import { createSampler } from '~/utils/sampler';
 import { useMessageParser, type PartCache } from '~/lib/hooks/useMessageParser';
 import type { StreamStatus } from '~/lib/common/types';
 import type { StoreMessageHistory } from './chat-types';
+import type { TranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 
 interface ProcessMessagesOptions {
   messages: GhostbuildMessage[];
@@ -12,6 +13,7 @@ interface ProcessMessagesOptions {
   parseMessages: (messages: GhostbuildMessage[]) => void;
   streamStatus: StreamStatus;
   storeMessageHistory: StoreMessageHistory;
+  transcriptCheckpoint: TranscriptCheckpoint | null;
 }
 
 export function useChatHistoryProcessing(args: {
@@ -20,6 +22,7 @@ export function useChatHistoryProcessing(args: {
   partCache: PartCache;
   streamStatus: StreamStatus;
   storeMessageHistory: StoreMessageHistory;
+  transcriptCheckpoint: TranscriptCheckpoint | null;
 }) {
   const { parsedMessages, parseMessages } = useMessageParser(args.partCache);
   const { messages, initialMessages, streamStatus, storeMessageHistory } = args;
@@ -28,17 +31,32 @@ export function useChatHistoryProcessing(args: {
       createSampler((options: ProcessMessagesOptions) => {
         options.parseMessages(options.messages);
         if (options.messages.length >= options.initialMessages.length) {
-          Promise.resolve(options.storeMessageHistory(options.messages, options.streamStatus)).catch((error) =>
-            toast.error(error instanceof Error ? error.message : 'Failed to save message history'),
-          );
+          Promise.resolve(
+            options.storeMessageHistory(options.messages, options.streamStatus, options.transcriptCheckpoint),
+          ).catch((error) => toast.error(error instanceof Error ? error.message : 'Failed to save message history'));
         }
       }, 50),
     [],
   );
 
   useEffect(() => {
-    processSampledMessages({ messages, initialMessages, streamStatus, storeMessageHistory, parseMessages });
-  }, [initialMessages, messages, parseMessages, processSampledMessages, storeMessageHistory, streamStatus]);
+    processSampledMessages({
+      messages,
+      initialMessages,
+      streamStatus,
+      storeMessageHistory,
+      parseMessages,
+      transcriptCheckpoint: args.transcriptCheckpoint,
+    });
+  }, [
+    args.transcriptCheckpoint,
+    initialMessages,
+    messages,
+    parseMessages,
+    processSampledMessages,
+    storeMessageHistory,
+    streamStatus,
+  ]);
 
   useEffect(() => () => processSampledMessages.cancel(), [processSampledMessages]);
 

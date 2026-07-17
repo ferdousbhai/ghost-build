@@ -10,7 +10,7 @@ const codeArgsSchema = z.object({ code: z.string() });
 export const dataOperationArgSchemas = {
   'messages.claimGuestSession': z.object({ guestSessionId: guestSessionIdSchema, sessionId: z.string() }),
   'messages.initializeChat': chatIdentityArgsSchema,
-  'messages.get': chatIdentityArgsSchema,
+  'messages.get': chatIdentityArgsSchema.extend({ subchatIndex: z.number().int().nonnegative().optional() }),
   'messages.getAll': sessionIdArgsSchema,
   'messages.setUrlId': z.object({
     sessionId: z.string(),

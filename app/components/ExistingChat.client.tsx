@@ -31,7 +31,8 @@ export function ExistingChat({ chatId }: { chatId: string }) {
 
 function ExistingChatWrapper({ chatId }: { chatId: string }) {
   const sessionId = useSessionIdOrNullOrLoading();
-  const { initialMessages, storeMessageHistory, initializeChat, subchats } = useExistingChat(chatId);
+  const { initialMessages, storeMessageHistory, initializeChat, subchats, transcript, seedTranscript } =
+    useExistingChat(chatId);
 
   const reloadState = useReloadMessages(initialMessages ?? undefined);
   const bootState = useContainerBootState();
@@ -47,6 +48,9 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
   // Then, we need to download the chat messages from the server.
   if (initialMessages === undefined) {
     return <Loading message="Loading chat messages..." />;
+  }
+  if (!transcript) {
+    return <Loading message="Loading transcript..." />;
   }
   // Once we have the chat messages, we can populate the workbench state.
   // Note that this doesn't actually run any actions.
@@ -85,6 +89,8 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
       hadSuccessfulDeploy={hadSuccessfulDeploy}
       subchats={subchats}
       allowGuest
+      transcript={transcript}
+      seedTranscript={seedTranscript}
     />
   );
 }

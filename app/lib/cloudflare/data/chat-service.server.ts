@@ -4,20 +4,23 @@ import {
   ensureInitialChat,
   findChat,
   getLatestStorageState,
-  insertChatMessageState,
   requireChat,
 } from './chat-repository.server';
+import { transcriptAgentName } from 'ghostbuild-agent/transcript';
+import { prepareInsertChatTranscript, requireChatTranscript, transcriptIdentity } from './transcript-repository.server';
 
 export async function initializeChat(db: D1Database, args: { sessionId: string; id: string }): Promise<null> {
   await ensureInitialChat(db, { id: crypto.randomUUID(), creatorId: args.sessionId, initialId: args.id });
   return null;
 }
 
-export async function getChat(db: D1Database, args: { id: string; sessionId: string }) {
+export async function getChat(db: D1Database, args: { id: string; sessionId: string; subchatIndex?: number }) {
   const chat = await findChat(db, args);
   if (!chat) {
     return null;
   }
+  const selectedSubchatIndex = args.subchatIndex ?? chat.last_subchat_index;
+  const transcript = await requireChatTranscript(db, { chatId: chat.id, subchatIndex: selectedSubchatIndex });
   return {
     initialId: chat.initial_id,
     urlId: chat.url_id ?? undefined,
@@ -25,6 +28,7 @@ export async function getChat(db: D1Database, args: { id: string; sessionId: str
     timestamp: chat.timestamp,
     snapshotId: chat.snapshot_key ?? undefined,
     subchatIndex: chat.last_subchat_index,
+    transcript: transcriptIdentity(transcript),
   };
 }
 
@@ -147,10 +151,70 @@ export async function rewindChat(
   if (!state?.storage_key) {
     throw new Error('Cannot rewind to a chat with no messages saved');
   }
-  await db
-    .prepare('UPDATE chats SET last_subchat_index = ?, last_message_rank = ? WHERE id = ?')
-    .bind(subchatIndex, state.last_message_rank, chat.id)
-    .run();
+  const transcript = await requireChatTranscript(db, { chatId: chat.id, subchatIndex });
+  const nextGeneration = transcript.generation + 1;
+  const now = Date.now();
+  const transitionToken = crypto.randomUUID();
+  const results = await db.batch([
+    db
+      .prepare(
+        `UPDATE chat_transcripts
+         SET generation = ?, agent_name = ?, head_revision = 0, head_digest = NULL, head_message_count = 0,
+             parent_subchat_index = ?, parent_generation = ?, parent_revision = ?, transition_token = ?, updated_at = ?
+         WHERE chat_id = ? AND subchat_index = ? AND generation = ?`,
+      )
+      .bind(
+        nextGeneration,
+        transcriptAgentName(chat.initial_id, subchatIndex, nextGeneration),
+        subchatIndex,
+        transcript.generation,
+        state.transcript_revision,
+        transitionToken,
+        now,
+        chat.id,
+        subchatIndex,
+        transcript.generation,
+      ),
+    db
+      .prepare(
+        `INSERT INTO chat_message_states (
+          id, chat_id, storage_key, subchat_index, last_message_rank, part_index,
+          snapshot_key, description, created_at, transcript_generation, transcript_revision, transcript_digest
+        )
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL
+        FROM chat_transcripts
+        WHERE chat_id = ? AND subchat_index = ? AND generation = ? AND transition_token = ?`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        chat.id,
+        state.storage_key,
+        subchatIndex,
+        state.last_message_rank,
+        state.part_index,
+        state.snapshot_key,
+        state.description,
+        now,
+        nextGeneration,
+        chat.id,
+        subchatIndex,
+        nextGeneration,
+        transitionToken,
+      ),
+    db
+      .prepare(
+        `UPDATE chats
+         SET last_subchat_index = ?, last_message_rank = ?
+         WHERE id = ? AND EXISTS (
+           SELECT 1 FROM chat_transcripts
+           WHERE chat_id = ? AND subchat_index = ? AND generation = ? AND transition_token = ?
+         )`,
+      )
+      .bind(subchatIndex, state.last_message_rank, chat.id, chat.id, subchatIndex, nextGeneration, transitionToken),
+  ]);
+  if (results[0].meta.changes === 0 || results[1].meta.changes === 0) {
+    throw new Error('Chat transcript changed while rewinding; retry the rewind');
+  }
   return null;
 }
 
@@ -158,33 +222,66 @@ export async function getSubchats(db: D1Database, args: { sessionId: string; cha
   const chat = await requireChat(db, { id: args.chatId, sessionId: args.sessionId });
   const { results } = await db
     .prepare(
-      `SELECT subchat_index, description, MAX(created_at) AS updated_at
-       FROM chat_message_states
-       WHERE chat_id = ?
-       GROUP BY subchat_index
-       ORDER BY subchat_index ASC`,
+      `SELECT states.subchat_index, states.description, MAX(states.created_at) AS updated_at,
+              transcripts.generation, transcripts.agent_name
+       FROM chat_message_states AS states
+       JOIN chat_transcripts AS transcripts
+         ON transcripts.chat_id = states.chat_id AND transcripts.subchat_index = states.subchat_index
+       WHERE states.chat_id = ? AND states.transcript_generation = transcripts.generation
+       GROUP BY states.subchat_index, transcripts.generation, transcripts.agent_name
+       ORDER BY states.subchat_index ASC`,
     )
     .bind(chat.id)
-    .all<{ subchat_index: number; description: string | null; updated_at: number }>();
+    .all<{
+      subchat_index: number;
+      description: string | null;
+      updated_at: number;
+      generation: number;
+      agent_name: string;
+    }>();
   return results.map((row) => ({
     subchatIndex: row.subchat_index,
     description: row.description ?? undefined,
     updatedAt: row.updated_at,
+    transcript: {
+      agentName: row.agent_name,
+      generation: row.generation,
+      subchatIndex: row.subchat_index,
+    },
   }));
 }
 
-export async function createSubchat(db: D1Database, args: { sessionId: string; chatId: string }): Promise<number> {
+export async function createSubchat(db: D1Database, args: { sessionId: string; chatId: string }) {
   const chat = await requireChat(db, { id: args.chatId, sessionId: args.sessionId });
   const newSubchatIndex = chat.last_subchat_index + 1;
   const latestState = await getLatestStorageState(db, { chatId: chat.id, subchatIndex: chat.last_subchat_index });
-  await insertChatMessageState(db, {
+  const parentTranscript = await requireChatTranscript(db, {
     chatId: chat.id,
-    subchatIndex: newSubchatIndex,
-    lastMessageRank: -1,
-    partIndex: -1,
-    snapshotKey: latestState?.snapshot_key,
+    subchatIndex: chat.last_subchat_index,
   });
-  await db.prepare('UPDATE chats SET last_subchat_index = ? WHERE id = ?').bind(newSubchatIndex, chat.id).run();
+  const now = Date.now();
+  await db.batch([
+    prepareInsertChatTranscript(db, {
+      chatId: chat.id,
+      initialId: chat.initial_id,
+      subchatIndex: newSubchatIndex,
+      parent: {
+        subchatIndex: parentTranscript.subchat_index,
+        generation: parentTranscript.generation,
+        revision: latestState?.transcript_revision ?? parentTranscript.head_revision,
+      },
+      now,
+    }),
+    db
+      .prepare(
+        `INSERT INTO chat_message_states (
+          id, chat_id, storage_key, subchat_index, last_message_rank, part_index,
+          snapshot_key, description, created_at, transcript_generation, transcript_revision, transcript_digest
+        ) VALUES (?, ?, NULL, ?, -1, -1, ?, NULL, ?, 0, 0, NULL)`,
+      )
+      .bind(crypto.randomUUID(), chat.id, newSubchatIndex, latestState?.snapshot_key ?? null, now),
+    db.prepare('UPDATE chats SET last_subchat_index = ? WHERE id = ?').bind(newSubchatIndex, chat.id),
+  ]);
   return newSubchatIndex;
 }
 

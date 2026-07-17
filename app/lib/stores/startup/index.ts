@@ -8,6 +8,9 @@ import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { useQuery } from '~/lib/cloudflare/data-hooks';
 import { api } from '~/lib/cloudflare/data-api';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import { subchatIndexStore } from '~/lib/stores/subchats';
+import { useStore } from '@nanostores/react';
+import { transcriptAgentName } from 'ghostbuild-agent/transcript';
 
 const EMPTY_INITIAL_MESSAGES: GhostbuildMessage[] = [];
 
@@ -16,21 +19,40 @@ export function useChatHomepage(chatId: string) {
   const initializeChat = useHomepageInitializeChat(chatId, setChatInitialized);
   const storeMessageHistory = useStoreMessageHistory();
   useNewChatContainerSetup(chatInitialized);
-  useBackupSyncState(chatId, chatInitialized ? 0 : undefined, chatInitialized ? EMPTY_INITIAL_MESSAGES : undefined);
+  const loaded = useInitialMessages(chatInitialized ? chatId : undefined);
+  useBackupSyncState(
+    chatId,
+    loaded?.loadedSubchatIndex ?? (chatInitialized ? 0 : undefined),
+    loaded?.deserialized ?? (chatInitialized ? EMPTY_INITIAL_MESSAGES : undefined),
+    loaded?.checkpoint,
+  );
   const subchats = useSubchats(chatId, chatInitialized);
+  const subchatIndex = useStore(subchatIndexStore) ?? 0;
+  const loadedTranscript = loaded?.loadedSubchatIndex === subchatIndex ? loaded.transcript : undefined;
+  const transcript =
+    loadedTranscript ??
+    subchats?.find((subchat) => subchat.subchatIndex === subchatIndex)?.transcript ??
+    ({ agentName: transcriptAgentName(chatId, subchatIndex, 0), generation: 0, subchatIndex } as const);
 
   return {
     initializeChat,
     storeMessageHistory,
-    initialMessages: EMPTY_INITIAL_MESSAGES,
+    initialMessages: loaded?.deserialized ?? EMPTY_INITIAL_MESSAGES,
     subchats,
+    transcript,
+    seedTranscript: loaded?.seedTranscript ?? false,
   };
 }
 
 export function useExistingChat(chatId: string) {
   const initializeChat = useExistingInitializeChat(chatId);
   const initialMessages = useInitialMessages(chatId);
-  useBackupSyncState(chatId, initialMessages?.loadedSubchatIndex, initialMessages?.deserialized);
+  useBackupSyncState(
+    chatId,
+    initialMessages?.loadedSubchatIndex,
+    initialMessages?.deserialized,
+    initialMessages?.checkpoint,
+  );
   const storeMessageHistory = useStoreMessageHistory();
   useExistingChatContainerSetup(initialMessages?.loadedChatId);
   const subchats = useSubchats(chatId);
@@ -40,6 +62,8 @@ export function useExistingChat(chatId: string) {
     initializeChat,
     storeMessageHistory,
     subchats,
+    transcript: initialMessages?.transcript,
+    seedTranscript: initialMessages?.seedTranscript ?? false,
   };
 }
 

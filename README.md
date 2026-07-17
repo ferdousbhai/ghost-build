@@ -27,6 +27,8 @@ pnpm run deploy
 The deploy command verifies stack alignment, regenerates TanStack routes and Cloudflare binding types, typechecks the Worker, provisions required production Cloudflare resources, verifies the production Cloudflare config, builds the TanStack Start app, runs lint/tests/dependency checks, applies D1 migrations to the production `ghostbuild` database, and publishes the production Worker with Wrangler.
 Pushing to `main` also runs the production deploy workflow, which verifies the app and publishes directly to the production Cloudflare Worker through Cloudflare's official Wrangler GitHub Action.
 
+Production is served from `https://ghostbuild.dev`; the temporary `workers.dev` endpoint is disabled. The Worker sends `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` on app navigation responses so supported desktop browsers can start the WebContainer runtime.
+
 The Worker runtime uses the bindings declared in `wrangler.jsonc`:
 
 - `AI` for Workers AI

@@ -42,6 +42,7 @@ export class ToolCallAbortedError extends Error {
 
 export interface ArtifactWorkspace {
   getFiles(): FileMap;
+  getRecentFileWrites?(): ReadonlyMap<string, number>;
   getPreviewPort(): number | undefined;
   getSelectedFile(): string | undefined;
   getCurrentView(): 'code' | 'preview';
@@ -174,6 +175,7 @@ export class WorkbenchArtifactStore {
         onToolCallComplete: (completion) => this.#completeToolCall(completion),
         workspace: {
           getFiles: () => this.workspace.getFiles(),
+          getRecentFileWrites: () => this.workspace.getRecentFileWrites?.() ?? new Map(),
           getPreviewPort: () => this.workspace.getPreviewPort(),
           hasFile: (filePath) => Boolean(this.workspace.getFiles()[filePath as AbsolutePath]),
           setGeneratedFileContent: (filePath, content) => this.workspace.setGeneratedFileContent(filePath, content),

@@ -10,11 +10,16 @@ export const searchTextParameters = z.object({
     .max(12)
     .optional()
     .describe("Optional extensions such as ['ts', 'tsx', 'css']."),
+  context: z
+    .string()
+    .max(500)
+    .optional()
+    .describe('Optional keywords from the current request used only to rank matching files and excerpts.'),
   cursor: z.string().max(64).optional().describe('Exact nextCursor returned by the preceding searchText page.'),
 });
 
 export const searchTextTool: Tool = {
   description:
-    'Search project text without executing shell commands. Results are stable bounded records with exact totals and a revision-bound nextCursor for additional matches.',
+    'Search searchable project text without executing shell commands. Results are relevance-ranked using request context, definitions/imports, and recent edits; each match includes its file revision. Binary, generated, vendor, dependency, and build-output files are excluded. Results are stable bounded records with exact totals and a revision-bound nextCursor for additional matches.',
   inputSchema: searchTextParameters,
 };

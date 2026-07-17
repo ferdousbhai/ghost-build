@@ -57,6 +57,10 @@ export function createdAtMillis(message: Pick<GhostbuildMessage, 'createdAt'>): 
 }
 
 export function cachedPromptTokens(metadata?: unknown): number {
+  return cachedPromptTokenCount(metadata) ?? 0;
+}
+
+export function cachedPromptTokenCount(metadata?: unknown): number | undefined {
   return findNumericCacheRead(metadata, new WeakSet());
 }
 
@@ -65,40 +69,48 @@ export function languageModelId(model: unknown, fallback: string): string {
   return typeof modelId === 'string' && modelId.length > 0 ? modelId : fallback;
 }
 
-function findNumericCacheRead(value: unknown, seen: WeakSet<object>): number {
+function findNumericCacheRead(value: unknown, seen: WeakSet<object>): number | undefined {
   if (!value || typeof value !== 'object') {
-    return 0;
+    return undefined;
   }
 
   if (seen.has(value)) {
-    return 0;
+    return undefined;
   }
   seen.add(value);
 
   const record = value as Record<string, unknown>;
+  let observedZero = false;
   for (const key of ['cachedPromptTokens', 'cachedInputTokens', 'cacheReadInputTokens', 'cacheRead']) {
     const candidate = record[key];
-    if (typeof candidate === 'number') {
+    if (isPositiveSafeInteger(candidate)) {
       return candidate;
     }
+    observedZero ||= candidate === 0;
   }
 
   const promptTokenDetails = record.prompt_tokens_details;
   if (promptTokenDetails && typeof promptTokenDetails === 'object') {
     const cachedTokens = (promptTokenDetails as Record<string, unknown>).cached_tokens;
-    if (typeof cachedTokens === 'number') {
+    if (isPositiveSafeInteger(cachedTokens)) {
       return cachedTokens;
     }
+    observedZero ||= cachedTokens === 0;
   }
 
   for (const candidate of Object.values(record)) {
     const nested = findNumericCacheRead(candidate, seen);
-    if (nested > 0) {
+    if (nested !== undefined && nested > 0) {
       return nested;
     }
+    observedZero ||= nested === 0;
   }
 
-  return 0;
+  return observedZero ? 0 : undefined;
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
 
 function isStoredToolInvocationPart(part: GhostbuildPart): part is StoredToolInvocationPart {
