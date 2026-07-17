@@ -95,6 +95,7 @@ function verifyWorker(errors, config, target) {
     errors.push(`${label} compatibility_flags must include "nodejs_compat".`);
   }
   requireEqual(errors, `${label} upload_source_maps`, config?.upload_source_maps, true);
+  requireEqual(errors, `${label} version_metadata.binding`, config?.version_metadata?.binding, 'CF_VERSION_METADATA');
   errors.push(
     ...findWorkerObservabilityErrors(config, label),
     ...findWorkerRoutingErrors(config, label, target.customDomain),
@@ -216,9 +217,11 @@ function verifyWorkflows(errors) {
       'accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}',
       'packageManager: pnpm',
       'command: deploy --var COMMIT_SHA:${{ github.sha }}',
-      'name: Verify live deployment version',
+      'name: Verify live deployment stabilization',
+      'node scripts/verify-live-deployment.mjs local',
+      'name: Verify deployment from multiple regions',
+      'node scripts/verify-live-deployment.mjs global',
       'EXPECTED_SHA: ${{ github.sha }}',
-      'https://ghostbuild.dev/api/version',
     ]),
     ...findWorkflowSequenceErrors(deploy, '.github/workflows/deploy.yml', [
       'pnpm run validate',
@@ -227,7 +230,10 @@ function verifyWorkflows(errors) {
       'pnpm run d1:migrations:apply:production',
       'uses: cloudflare/wrangler-action@v4',
       'command: deploy --var COMMIT_SHA:${{ github.sha }}',
-      'name: Verify live deployment version',
+      'name: Verify live deployment stabilization',
+      'node scripts/verify-live-deployment.mjs local',
+      'name: Verify deployment from multiple regions',
+      'node scripts/verify-live-deployment.mjs global',
     ]),
   );
   errors.push(

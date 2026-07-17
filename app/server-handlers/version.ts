@@ -6,6 +6,7 @@ export function versionAction({ env }: { env: Env }) {
     getOptionalBinding(env, 'COMMIT_SHA') ??
     getOptionalBinding(env, 'GITHUB_SHA') ??
     null;
+  const versionId = env.CF_VERSION_METADATA?.id ?? null;
 
-  return Response.json({ sha }, { status: 200 });
+  return Response.json({ sha, versionId }, { status: 200, headers: { 'Cache-Control': 'no-store' } });
 }

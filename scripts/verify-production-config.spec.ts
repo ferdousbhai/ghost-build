@@ -47,7 +47,10 @@ describe('production config workflow verification helpers', () => {
       run: pnpm run verify:stack
       uses: cloudflare/wrangler-action@v4
       command: deploy --var COMMIT_SHA:\${{ github.sha }}
-      name: Verify live deployment version
+      name: Verify live deployment stabilization
+      run: node scripts/verify-live-deployment.mjs local
+      name: Verify deployment from multiple regions
+      run: node scripts/verify-live-deployment.mjs global
     `;
 
     expect(
@@ -56,7 +59,10 @@ describe('production config workflow verification helpers', () => {
         'pnpm run typecheck',
         'uses: cloudflare/wrangler-action@v4',
         'command: deploy --var COMMIT_SHA:${{ github.sha }}',
-        'name: Verify live deployment version',
+        'name: Verify live deployment stabilization',
+        'node scripts/verify-live-deployment.mjs local',
+        'name: Verify deployment from multiple regions',
+        'node scripts/verify-live-deployment.mjs global',
       ]),
     ).toEqual(['.github/workflows/deploy.yml must run "pnpm run typecheck" in the production deploy sequence.']);
   });
@@ -70,10 +76,12 @@ describe('production config workflow verification helpers', () => {
         accountId: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         packageManager: pnpm
         command: deploy --var COMMIT_SHA:\${{ github.sha }}
-      name: Verify live deployment version
+      name: Verify live deployment stabilization
       env:
         EXPECTED_SHA: \${{ github.sha }}
-      run: curl https://ghostbuild.dev/api/version
+      run: node scripts/verify-live-deployment.mjs local
+      name: Verify deployment from multiple regions
+      run: node scripts/verify-live-deployment.mjs global
     `;
 
     expect(
@@ -83,9 +91,11 @@ describe('production config workflow verification helpers', () => {
         'accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}',
         'packageManager: pnpm',
         'command: deploy --var COMMIT_SHA:${{ github.sha }}',
-        'name: Verify live deployment version',
+        'name: Verify live deployment stabilization',
+        'node scripts/verify-live-deployment.mjs local',
+        'name: Verify deployment from multiple regions',
+        'node scripts/verify-live-deployment.mjs global',
         'EXPECTED_SHA: ${{ github.sha }}',
-        'https://ghostbuild.dev/api/version',
       ]),
     ).toEqual([]);
 

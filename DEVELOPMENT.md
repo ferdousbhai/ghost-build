@@ -142,7 +142,7 @@ and current limitation are recorded in `scripts/evaluations/prompt-cache-2026-07
 
 ## Deployment
 
-Production deploys run from the `Production Deploy` GitHub Actions workflow on pushes to `main` and manual `workflow_dispatch` runs. Configure `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as GitHub Actions secrets for deploy authentication, and keep runtime values configured as Cloudflare Worker bindings. The final publish step uses Cloudflare's official Wrangler GitHub Action.
+Production deploys run from the `Production Deploy` GitHub Actions workflow on pushes to `main` and manual `workflow_dispatch` runs. Configure `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as GitHub Actions secrets for deploy authentication, and keep runtime values configured as Cloudflare Worker bindings. The final publish step uses Cloudflare's official Wrangler GitHub Action and injects the Git commit SHA into that Worker version. After a stabilization window, CI requires consecutive version checks from its runner and matching checks from Globalping probes in the United States, Germany, and Japan. Each check records the Cloudflare Ray ID and verifies the native Worker version ID, commit SHA, and non-cacheable response policy.
 
 The canonical production origin is `https://ghostbuild.dev`. Its Wrangler route is a Custom Domain and `workers_dev` stays disabled. App navigation responses must preserve `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless`; without both, `window.crossOriginIsolated` is false and WebContainer boot is intentionally skipped.
 
