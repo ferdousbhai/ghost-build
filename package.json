@@ -83,7 +83,6 @@
     "@xterm/xterm": "^5.5.0",
     "agents": "^0.17.3",
     "ai": "^6.0.219",
-    "better-auth": "^1.6.23",
     "classnames": "^2.5.1",
     "date-fns": "^3.6.0",
     "file-saver": "^2.0.5",

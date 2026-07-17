@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button } from '~/components/ui/primitives/Button';
+import { signInWithCloudflare } from '~/lib/auth-client';
 
 type ConnectionStatus = {
   connected: boolean;
@@ -47,12 +48,7 @@ export function CloudflareCard() {
     setConnecting(true);
     setError(null);
     try {
-      const response = await fetch('/api/cloudflare/connection/start', { method: 'POST' });
-      const payload = (await response.json().catch(() => null)) as { authorizationUrl?: string; error?: string } | null;
-      if (!response.ok || !payload?.authorizationUrl) {
-        throw new Error(payload?.error || 'Unable to start Cloudflare connection.');
-      }
-      window.location.assign(payload.authorizationUrl);
+      await signInWithCloudflare(window.location.href);
     } catch (connectionError) {
       setError(connectionError instanceof Error ? connectionError.message : 'Unable to connect Cloudflare.');
       setConnecting(false);
@@ -61,7 +57,7 @@ export function CloudflareCard() {
 
   return (
     <section id="cloudflare" className="app-card w-full p-5 sm:p-6" aria-labelledby="cloudflare-heading">
-      <p className="app-page-eyebrow">Infrastructure billing</p>
+      <p className="app-page-eyebrow">Authentication and billing</p>
       <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 id="cloudflare-heading" className="app-card-title">
@@ -88,7 +84,7 @@ export function CloudflareCard() {
             loading={connecting}
             onClick={() => void connect()}
           >
-            {connection?.connected ? 'Reconnect Cloudflare' : 'Connect Cloudflare'}
+            {connection?.connected ? 'Reauthorize Cloudflare' : 'Connect Cloudflare'}
           </Button>
         ) : null}
       </div>

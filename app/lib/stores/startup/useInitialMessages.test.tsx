@@ -39,7 +39,7 @@ describe('useInitialMessages', () => {
 
   it('reloads a project when authentication replaces a temporary guest session', async () => {
     executeDataOperationMock.mockImplementation(async (_operation: unknown, args: { sessionId: string }) => {
-      if (args.sessionId === 'guest-session') {
+      if (args.sessionId === 'stale-session') {
         return null;
       }
       return {
@@ -67,7 +67,7 @@ describe('useInitialMessages', () => {
 
     await act(async () => {
       root.render(<Harness />);
-      sessionIdStore.set('guest-session');
+      sessionIdStore.set('stale-session');
     });
     expect(container.textContent).toBe('missing');
 

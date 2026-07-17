@@ -9,7 +9,7 @@ import { Loading } from '~/components/Loading';
 import { Button } from '@ui/Button';
 import { BrandLink } from '~/components/BrandLink';
 import { Sheet } from '@ui/Sheet';
-import { signInWithGoogle } from '~/lib/auth-client';
+import { signInWithCloudflare } from '~/lib/auth-client';
 
 export const Route = createFileRoute('/create/$shareCode')({
   head: () => ({
@@ -95,10 +95,10 @@ function ShareProjectContent() {
             className="mt-6 w-full"
             size="lg"
             onClick={() => {
-              void signInWithGoogle();
+              void signInWithCloudflare();
             }}
           >
-            Sign in with Google
+            Connect Cloudflare
           </Button>
         </Sheet>
       </ShareProjectShell>

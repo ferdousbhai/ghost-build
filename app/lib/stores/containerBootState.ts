@@ -40,6 +40,10 @@ export function useContainerBootState() {
   return useStore(containerBootStore);
 }
 
+export function getContainerBootState() {
+  return containerBootStore.get();
+}
+
 export function setContainerBootState(state: ContainerBootState, error?: Error) {
   const existing = containerBootStore.get();
   const msg = `Container boot [${(Date.now() - existing.startTime).toFixed(2)}ms]`;

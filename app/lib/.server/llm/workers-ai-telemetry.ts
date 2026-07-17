@@ -2,8 +2,10 @@ import { cachedPromptTokenCount } from 'ghostbuild-agent/ai-compat';
 import type { PromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
 import { logger } from 'ghostbuild-agent/utils/logger';
 import type { OnFinishEvent, ToolSet } from 'ai';
-import { glm52CostNanodollars } from '~/lib/.server/billing/ai-allowance-policy';
 import type { WorkersAiPromptCacheStatus } from './workers-ai-prompt-cache';
+
+const GLM_5_2_NANODOLLARS_PER_INPUT_TOKEN = 1_400;
+const GLM_5_2_NANODOLLARS_PER_CACHED_INPUT_TOKEN = 260;
 
 interface FinishTelemetryOptions {
   result: OnFinishEvent<ToolSet>;
@@ -63,8 +65,10 @@ export function workersAiPromptCacheTelemetry(
   const cachedInputTokens = Math.min(inputTokens, reportedCachedTokens ?? 0);
   const status: WorkersAiPromptCacheStatus =
     reportedCachedTokens === undefined ? 'unavailable' : cachedInputTokens > 0 ? 'hit' : 'miss';
-  const uncachedCost = glm52CostNanodollars({ inputTokens, cachedInputTokens: 0, outputTokens: 0 });
-  const actualCost = glm52CostNanodollars({ inputTokens, cachedInputTokens, outputTokens: 0 });
+  const uncachedCost = inputTokens * GLM_5_2_NANODOLLARS_PER_INPUT_TOKEN;
+  const actualCost =
+    (inputTokens - cachedInputTokens) * GLM_5_2_NANODOLLARS_PER_INPUT_TOKEN +
+    cachedInputTokens * GLM_5_2_NANODOLLARS_PER_CACHED_INPUT_TOKEN;
   return {
     attempted,
     status,

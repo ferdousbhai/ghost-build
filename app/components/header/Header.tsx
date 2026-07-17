@@ -8,9 +8,8 @@ import { LoggedOutHeaderButtons } from './LoggedOutHeaderButtons';
 import { profileStore, setProfile } from '~/lib/stores/profile';
 import { Menu as MenuComponent, MenuItem as MenuItemComponent } from '@ui/Menu';
 import { FeedbackButton } from './FeedbackButton';
-import { signInWithGoogle, signOutOfGhostbuild } from '~/lib/auth-client';
+import { signInWithCloudflare, signOutOfGhostbuild } from '~/lib/auth-client';
 import { BrandLink } from '~/components/BrandLink';
-import { isGuestSessionId } from '~/lib/guest-session';
 import { Button } from '@ui/Button';
 import { ThemeSwitch } from '~/components/ui/ThemeSwitch';
 
@@ -26,7 +25,7 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const sessionId = useSessionIdOrNullOrLoading();
-  const isAccountSession = typeof sessionId === 'string' && !isGuestSessionId(sessionId);
+  const isAccountSession = typeof sessionId === 'string';
   const showSidebarIcon = !hideSidebarIcon && isAccountSession;
 
   const profile = useStore(profileStore);
@@ -87,10 +86,10 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
                   <Button
                     variant="neutral"
                     size="xs"
-                    title="Sign in to share"
-                    aria-label="Sign in to share"
+                    title="Connect Cloudflare to share"
+                    aria-label="Connect Cloudflare to share"
                     onClick={() => {
-                      void signInWithGoogle();
+                      void signInWithCloudflare();
                     }}
                   >
                     <Share2Icon />

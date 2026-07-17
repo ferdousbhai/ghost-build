@@ -95,7 +95,6 @@ function verifyWorker(errors, config, target) {
     errors.push(`${label} compatibility_flags must include "nodejs_compat".`);
   }
   requireEqual(errors, `${label} upload_source_maps`, config?.upload_source_maps, true);
-  requireEqual(errors, `${label} ai.binding`, config?.ai?.binding, 'AI');
   errors.push(
     ...findWorkerObservabilityErrors(config, label),
     ...findWorkerRoutingErrors(config, label, target.customDomain),

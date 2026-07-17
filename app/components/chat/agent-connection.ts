@@ -25,12 +25,8 @@ export async function waitForAgentSocketOpen(
   const startedAt = Date.now();
   const remainingTimeoutMs = () => Math.max(0, timeoutMs - (Date.now() - startedAt));
 
-  if (!requireIdentity || isAgentIdentified(agent)) {
-    return;
-  }
-
   if (typeof agent.readyState !== 'number') {
-    if (requireIdentity) {
+    if (requireIdentity && !isAgentIdentified(agent)) {
       await waitForAgentIdentity(agent, remainingTimeoutMs());
     }
     return;
@@ -108,5 +104,9 @@ function waitForSocketOpen(agent: AgentSocketLike, timeoutMs: number): Promise<v
     agent.addEventListener?.('open', onOpen);
     agent.addEventListener?.('close', onClose);
     agent.addEventListener?.('error', onError);
+    const openReadyState = typeof agent.OPEN === 'number' ? agent.OPEN : 1;
+    if (agent.readyState === openReadyState) {
+      onOpen();
+    }
   });
 }

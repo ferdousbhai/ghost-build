@@ -1,16 +1,7 @@
 import { generateText } from 'ai';
-import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { llama32_1bCostNanodollars } from '~/lib/.server/billing/ai-allowance-policy';
-import {
-  releaseAiAllowance,
-  reserveAiAllowance,
-  settleAiAllowance,
-} from '~/lib/.server/billing/ai-allowance-repository';
-import { normalizeWorkersAiUsage } from '~/lib/.server/billing/workers-ai-usage';
 import { CLOUDFLARE_PROJECT_TITLE_MODEL } from '~/lib/workers-ai-model';
 import { getProvider, type WorkersAiAccountCredentials } from './provider';
 
-const logger = createScopedLogger('ProjectTitle');
 const PROJECT_TITLE_MAX_OUTPUT_TOKENS = 24;
 const PROJECT_TITLE_MAX_CHARACTERS = 60;
 const PROJECT_TITLE_MAX_PROMPT_CHARACTERS = 4_000;
@@ -22,46 +13,21 @@ Use the same language as the request when practical. Describe the product, not t
 export async function generateProjectTitle(
   env: Env,
   prompt: string,
-  accountCredentials?: WorkersAiAccountCredentials,
-  billingSubjectKey?: string,
+  accountCredentials: WorkersAiAccountCredentials,
 ): Promise<string | null> {
   const normalizedPrompt = prompt.trim().slice(0, PROJECT_TITLE_MAX_PROMPT_CHARACTERS);
   if (!normalizedPrompt) {
     return null;
   }
 
-  const estimate = llama32_1bCostNanodollars({
-    inputTokens: new TextEncoder().encode(PROJECT_TITLE_SYSTEM_PROMPT + normalizedPrompt).byteLength,
-    outputTokens: PROJECT_TITLE_MAX_OUTPUT_TOKENS,
+  const result = await generateText({
+    model: getProvider(env, accountCredentials, CLOUDFLARE_PROJECT_TITLE_MODEL).model,
+    system: PROJECT_TITLE_SYSTEM_PROMPT,
+    prompt: normalizedPrompt,
+    maxOutputTokens: PROJECT_TITLE_MAX_OUTPUT_TOKENS,
+    temperature: 0.2,
   });
-  const reservation =
-    !accountCredentials && billingSubjectKey
-      ? await reserveAiAllowance(env.DB, billingSubjectKey, estimate)
-      : undefined;
-
-  try {
-    const result = await generateText({
-      model: getProvider(env, accountCredentials, CLOUDFLARE_PROJECT_TITLE_MODEL).model,
-      system: PROJECT_TITLE_SYSTEM_PROMPT,
-      prompt: normalizedPrompt,
-      maxOutputTokens: PROJECT_TITLE_MAX_OUTPUT_TOKENS,
-      temperature: 0.2,
-    });
-
-    if (reservation) {
-      const usage = normalizeWorkersAiUsage(result.totalUsage, result.providerMetadata);
-      await settleAiAllowance(env.DB, reservation.id, llama32_1bCostNanodollars(usage), usage);
-    }
-
-    return cleanProjectTitle(result.text);
-  } catch (error) {
-    if (reservation) {
-      await releaseAiAllowance(env.DB, reservation.id).catch((releaseError) =>
-        logger.error('Unable to release project-title allowance:', releaseError),
-      );
-    }
-    throw error;
-  }
+  return cleanProjectTitle(result.text);
 }
 
 export function cleanProjectTitle(value: string): string | null {

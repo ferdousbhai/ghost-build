@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createSubchat, rewindChat, setGeneratedDescriptionIfMissing } from './chat-service.server';
+import {
+  createSubchat,
+  discardEmptyChat,
+  getAllChats,
+  rewindChat,
+  setGeneratedDescriptionIfMissing,
+} from './chat-service.server';
 import type { ChatMessageStateRow, ChatRow, ChatTranscriptRow } from './types';
 
 describe('setGeneratedDescriptionIfMissing', () => {
@@ -33,6 +39,32 @@ describe('setGeneratedDescriptionIfMissing', () => {
         description: 'Generated title',
       }),
     ).resolves.toBe(false);
+  });
+});
+
+describe('empty chat lifecycle', () => {
+  it('keeps drafts without persisted messages out of project history', async () => {
+    const all = vi.fn().mockResolvedValue({ results: [] });
+    const bind = vi.fn(() => ({ all }));
+    const prepare = vi.fn(() => ({ bind }));
+
+    await expect(getAllChats({ prepare } as unknown as D1Database, { sessionId: 'user-1' })).resolves.toEqual([]);
+
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('chat_message_states.last_message_rank >= 0'));
+    expect(bind).toHaveBeenCalledWith('user-1');
+  });
+
+  it('discards only an owner-scoped chat that is still empty', async () => {
+    const run = vi.fn().mockResolvedValue({ meta: { changes: 1 } });
+    const bind = vi.fn(() => ({ run }));
+    const prepare = vi.fn(() => ({ bind }));
+
+    await expect(
+      discardEmptyChat({ prepare } as unknown as D1Database, { sessionId: 'user-1', id: 'chat-1' }),
+    ).resolves.toBeNull();
+
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('chat_message_states.last_message_rank >= 0'));
+    expect(bind).toHaveBeenCalledWith('user-1', 'chat-1', 'chat-1');
   });
 });
 

@@ -90,7 +90,7 @@ function deployment(status = 'awaiting_approval') {
 describe('deployment handlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.resolveIdentity.mockResolvedValue({ userId: 'user-1', ownerId: 'user-1', billingSubjectKey: 'user:user-1' });
+    mocks.resolveIdentity.mockResolvedValue({ userId: 'user-1', ownerId: 'user-1' });
     mocks.findConnection.mockResolvedValue({ id: 'connection-1', status: 'active', generation: 1 });
     mocks.listExpiredSnapshots.mockResolvedValue([]);
     mocks.claimOldestReplaceableSnapshot.mockResolvedValue(null);
@@ -102,8 +102,8 @@ describe('deployment handlers', () => {
     mocks.approveDeployment.mockResolvedValue(deployment('approved'));
   });
 
-  it('requires sign-in rather than accepting a guest deployment', async () => {
-    mocks.resolveIdentity.mockResolvedValue({ ownerId: 'guest-1', billingSubjectKey: 'guest:guest-1' });
+  it('requires Cloudflare authentication', async () => {
+    mocks.resolveIdentity.mockResolvedValue(null);
     const response = await createDeploymentPlanAction({ request: createRequest(), env: env() });
     expect(response.status).toBe(401);
     expect(mocks.putObject).not.toHaveBeenCalled();

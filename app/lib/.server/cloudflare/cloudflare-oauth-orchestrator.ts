@@ -11,9 +11,13 @@ export { CloudflareOAuthError } from './cloudflare-orchestrator';
 
 const AUTHORIZE_URL = 'https://dash.cloudflare.com/oauth2/auth';
 const TOKEN_URL = 'https://dash.cloudflare.com/oauth2/token';
+const USERINFO_URL = 'https://dash.cloudflare.com/oauth2/userinfo';
 const ACCOUNTS_URL = 'https://api.cloudflare.com/client/v4/accounts?per_page=2';
 const SESSION_LIFETIME_MS = 10 * 60 * 1000;
 export const REQUIRED_CLOUDFLARE_OAUTH_SCOPES = [
+  'openid',
+  'profile',
+  'email',
   'account-settings.read',
   'workers-scripts.write',
   'd1.write',
@@ -108,6 +112,20 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
         'Cloudflare did not issue a refresh token. Reconnect with offline access enabled.',
       );
     }
+    const userInfoResponse = await execute(USERINFO_URL, {
+      headers: { authorization: `Bearer ${token.access_token}` },
+    });
+    const userInfo = (await userInfoResponse.json().catch(() => null)) as {
+      sub?: string;
+      email?: string;
+      name?: string;
+      preferred_username?: string;
+      picture?: string;
+      email_verified?: boolean;
+    } | null;
+    if (!userInfoResponse.ok || !userInfo?.sub) {
+      throw new CloudflareOAuthError('Cloudflare did not return an authenticated user identity.');
+    }
     const accountsResponse = await execute(ACCOUNTS_URL, {
       headers: { authorization: `Bearer ${token.access_token}` },
     });
@@ -124,6 +142,12 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
       throw new CloudflareOAuthError('Cloudflare did not return an authorized account.');
     }
     return {
+      user: {
+        subject: userInfo.sub,
+        email: userInfo.email_verified === false ? null : (userInfo.email ?? null),
+        name: userInfo.name ?? userInfo.preferred_username ?? null,
+        picture: userInfo.picture ?? null,
+      },
       accountId: account.id,
       accountName: account.name ?? null,
       accessToken: token.access_token,

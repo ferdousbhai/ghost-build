@@ -17,7 +17,6 @@ import { subchatIndexStore } from '~/lib/stores/subchats';
 import { buildBuilderAgentRequest } from './builder-agent-request';
 import { waitForAgentSocketOpen } from './agent-connection';
 import { deliverToolOutput } from './tool-output-delivery';
-import { toast } from 'sonner';
 import { WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
 import { showWorkersPaidRequiredToast } from '~/lib/workers-paid.client';
 import { refreshChatHistory } from '~/lib/cloudflare/chat-history-db';
@@ -124,7 +123,6 @@ export function useBuilderAgentChat(args: {
       if (error.message.includes(WORKERS_PAID_REQUIRED_MARKER)) {
         showWorkersPaidRequiredToast();
       }
-      void showAiAllowanceReminder();
       void refreshProjectMetadata();
     },
     onFinish: ({ finishReason }) => {
@@ -132,7 +130,6 @@ export function useBuilderAgentChat(args: {
         resetChatRetryState();
       }
       logger.debug('Finished streaming');
-      void showAiAllowanceReminder();
       void refreshProjectMetadata();
     },
   });
@@ -187,7 +184,11 @@ export function useBuilderAgentChat(args: {
   }, [args.initialMessages, args.transcript, builderAgent, seedKey]);
 
   const sendMessage = useCallback(
-    async (...sendArgs: Parameters<typeof chat.sendMessage>) => {
+    async (
+      message: Parameters<typeof chat.sendMessage>[0],
+      options?: Parameters<typeof chat.sendMessage>[1],
+      onRequestStart?: () => void,
+    ) => {
       const gate = seedGateRef.current;
       await gate.promise;
       if (gate.error) {
@@ -203,11 +204,12 @@ export function useBuilderAgentChat(args: {
         });
         throw error;
       }
-      const [message, options] = sendArgs;
       if (message && typeof message === 'object') {
-        const checkpointResult = transcriptCheckpointSchema
-          .nullable()
-          .safeParse(await builderAgent.call('getTranscriptCheckpoint', [args.transcript]));
+        const checkpointResult = transcriptCheckpointSchema.nullable().safeParse(
+          await builderAgent.call('getTranscriptCheckpoint', [args.transcript], {
+            timeout: AGENT_SEND_READY_TIMEOUT_MS,
+          }),
+        );
         if (!checkpointResult.success) {
           throw new Error('The agent returned an invalid transcript checkpoint. Reload and try again.');
         }
@@ -224,18 +226,22 @@ export function useBuilderAgentChat(args: {
             ? message.metadata
             : {};
         try {
-          return await chat.sendMessage(
+          const request = chat.sendMessage(
             {
               ...message,
               metadata: { ...metadata, [TRANSCRIPT_BASE_METADATA_KEY]: checkpoint },
             },
             options,
           );
+          onRequestStart?.();
+          return await request;
         } finally {
           setMessagesRef.current((messages) => messages.map(stripTranscriptBaseMetadata));
         }
       }
-      return chat.sendMessage(...sendArgs);
+      const request = chat.sendMessage(message, options);
+      onRequestStart?.();
+      return request;
     },
     [args.transcript, builderAgent, chat],
   );
@@ -258,46 +264,6 @@ export function useBuilderAgentChat(args: {
   };
 }
 
-type AiAllowanceResponse = {
-  usageDate: string;
-  usedPercent: number;
-  exhausted: boolean;
-  reminder: 0 | 50 | 90;
-};
-
-async function showAiAllowanceReminder(): Promise<void> {
-  try {
-    const response = await fetch('/api/ai/allowance');
-    if (!response.ok) {
-      return;
-    }
-    const allowance = (await response.json()) as AiAllowanceResponse;
-    if (allowance.reminder === 0) {
-      return;
-    }
-    const key = `ghostbuild.ai-allowance-reminder:${allowance.usageDate}:${allowance.reminder}`;
-    if (sessionStorage.getItem(key)) {
-      return;
-    }
-    sessionStorage.setItem(key, 'shown');
-    if (allowance.reminder === 90) {
-      toast.warning(
-        allowance.exhausted
-          ? "Today's free AI allowance is used. Connect Cloudflare to continue building."
-          : "You have used over 90% of today's free AI allowance. Connect Cloudflare to avoid interruption.",
-        connectCloudflareToastAction,
-      );
-      return;
-    }
-    toast.info(
-      "You have used over half of today's free AI allowance. Connect Cloudflare to keep building.",
-      connectCloudflareToastAction,
-    );
-  } catch (error) {
-    logger.debug('Unable to load AI allowance status', error);
-  }
-}
-
 async function refreshProjectMetadata(attempt = 0): Promise<void> {
   const sessionId = sessionIdStore.get();
   const chatId = chatIdStore.get();
@@ -318,13 +284,6 @@ async function refreshProjectMetadata(attempt = 0): Promise<void> {
     logger.debug('Unable to refresh generated project title', error);
   }
 }
-
-const connectCloudflareToastAction = {
-  action: {
-    label: 'Connect Cloudflare',
-    onClick: () => window.location.assign('/settings#cloudflare'),
-  },
-};
 
 function handleToolOutputDeliveryFailure(error: unknown, toolName: string, stop: () => void): void {
   logger.error('Failed to deliver tool output for continuation', error);

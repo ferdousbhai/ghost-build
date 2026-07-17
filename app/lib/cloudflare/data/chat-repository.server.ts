@@ -56,9 +56,9 @@ export async function insertChatWithState(
 export async function ensureInitialChat(
   db: D1Database,
   args: { id: string; creatorId: string; initialId: string },
-): Promise<ChatRow> {
+): Promise<ChatRow & { created: boolean }> {
   const createdAt = Date.now();
-  await db.batch([
+  const results = await db.batch([
     prepareInsertChat(db, args, true),
     db
       .prepare(
@@ -98,7 +98,7 @@ export async function ensureInitialChat(
   if (!chat) {
     throw new Error('Unable to initialize chat');
   }
-  return chat;
+  return { ...chat, created: results[0].meta.changes > 0 };
 }
 
 export function findChat(db: D1Database, args: { id: string; sessionId: string }): Promise<ChatRow | null> {
@@ -374,7 +374,7 @@ function prepareInsertChat(
         last_message_rank, last_subchat_index, is_deleted
       )
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-      WHERE NOT EXISTS (SELECT 1 FROM chats WHERE initial_id = ?)
+      WHERE NOT EXISTS (SELECT 1 FROM chats WHERE initial_id = ? AND is_deleted = 0)
       ${ignoreActiveInitialConflict ? 'ON CONFLICT DO NOTHING' : ''}`,
     )
     .bind(

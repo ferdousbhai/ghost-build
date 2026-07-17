@@ -25,9 +25,28 @@ describe('waitForAgentSocketOpen', () => {
   it('resolves immediately when the agent is already identified', async () => {
     const agent = new FakeAgentSocket();
     agent.identified = true;
+    agent.readyState = agent.OPEN;
     agent.ready = new Promise(() => undefined);
 
     await expect(waitForAgentSocketOpen(agent, 10)).resolves.toBeUndefined();
+  });
+
+  it('still waits for a new socket when a previous connection was identified', async () => {
+    const agent = new FakeAgentSocket();
+    agent.identified = true;
+    const ready = waitForAgentSocketOpen(agent, 100);
+    let resolved = false;
+    ready.then(() => {
+      resolved = true;
+    });
+
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    agent.readyState = agent.OPEN;
+    agent.dispatchEvent(new Event('open'));
+
+    await expect(ready).resolves.toBeUndefined();
   });
 
   it('waits for the socket open event when socket state is available', async () => {
@@ -68,6 +87,35 @@ describe('waitForAgentSocketOpen', () => {
     agent.ready = new Promise(() => undefined);
 
     await expect(waitForAgentSocketOpen(agent, 10, { requireIdentity: false })).resolves.toBeUndefined();
+  });
+
+  it('still waits for the socket to open when identity is not required', async () => {
+    const agent = new FakeAgentSocket();
+    agent.ready = new Promise(() => undefined);
+    const ready = waitForAgentSocketOpen(agent, 100, { requireIdentity: false });
+    let resolved = false;
+    ready.then(() => {
+      resolved = true;
+    });
+
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    agent.readyState = agent.OPEN;
+    agent.dispatchEvent(new Event('open'));
+
+    await expect(ready).resolves.toBeUndefined();
+  });
+
+  it('times out on a closed socket even when identity is not required', async () => {
+    vi.useFakeTimers();
+    const agent = new FakeAgentSocket();
+    const ready = waitForAgentSocketOpen(agent, 100, { requireIdentity: false });
+    const rejection = expect(ready).rejects.toThrow('Ghostbuild could not connect to the builder');
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    await rejection;
   });
 
   it('rejects if a known socket never opens', async () => {

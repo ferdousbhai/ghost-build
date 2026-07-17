@@ -42,7 +42,7 @@ export function Homepage() {
 
   return (
     <>
-      <GhostbuildAuthProvider redirectIfUnauthenticated={false} allowGuest>
+      <GhostbuildAuthProvider redirectIfUnauthenticated={false}>
         <UserProvider>
           {initialPrompt === null ? (
             homeIntro

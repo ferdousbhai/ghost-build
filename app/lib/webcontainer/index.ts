@@ -4,6 +4,7 @@ import { cleanStackTrace } from '~/utils/stacktrace';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import {
   setContainerBootState,
+  getContainerBootState,
   setUnsupportedContainerBootState,
   ContainerBootState,
 } from '~/lib/stores/containerBootState';
@@ -64,9 +65,11 @@ export function startWebcontainer(): Promise<WebContainer> {
           });
         }
       });
-      // Set the container boot state to LOADING_SNAPSHOT to hand off control
-      // to the container setup code.
-      setContainerBootState(ContainerBootState.LOADING_SNAPSHOT);
+      // A timed-out boot may finish later. Keep the actionable error state
+      // instead of returning the UI to an endless loading sequence.
+      if (getContainerBootState().state !== ContainerBootState.ERROR) {
+        setContainerBootState(ContainerBootState.LOADING_SNAPSHOT);
+      }
       resolveWebcontainer(container);
     })
     .catch((error: unknown) => {

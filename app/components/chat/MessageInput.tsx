@@ -32,7 +32,7 @@ export const MessageInput = memo(function MessageInput({
 }: MessageInputProps) {
   const controller = useMessageInputController({ isStreaming, onStop, onSend, prefillEnabled: !chatStarted });
   const { authState, input } = controller;
-  const hasActiveSession = authState.kind === 'guest' || authState.kind === 'fullyLoggedIn';
+  const hasActiveSession = authState.kind === 'fullyLoggedIn';
   const placeholder = chatStarted
     ? numMessages !== undefined && numMessages > 0
       ? 'Request changes by sending another message…'
@@ -85,7 +85,7 @@ export const MessageInput = memo(function MessageInput({
                 size="xs"
                 className="text-xs font-normal"
               >
-                <span>Sign in</span>
+                <span>Connect Cloudflare</span>
               </Button>
             )}
             {chatStarted && hasActiveSession && (
@@ -102,7 +102,7 @@ export const MessageInput = memo(function MessageInput({
                 (sendMessageInProgress && !isStreaming) ||
                 disabled
               }
-              tip={authState.kind === 'unauthenticated' ? 'Please sign in to continue' : undefined}
+              tip={authState.kind === 'unauthenticated' ? 'Connect Cloudflare to continue' : undefined}
               onClick={
                 !chatStarted && authState.kind === 'unauthenticated'
                   ? () => void controller.signIn()

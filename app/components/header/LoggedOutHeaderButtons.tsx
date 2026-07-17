@@ -1,6 +1,6 @@
 import { FeedbackButton } from './FeedbackButton';
 import { Button } from '@ui/Button';
-import { signInWithGoogle } from '~/lib/auth-client';
+import { signInWithCloudflare } from '~/lib/auth-client';
 
 export function LoggedOutHeaderButtons() {
   return (
@@ -10,10 +10,10 @@ export function LoggedOutHeaderButtons() {
         variant="neutral"
         size="xs"
         onClick={() => {
-          void signInWithGoogle();
+          void signInWithCloudflare();
         }}
       >
-        <span>Sign in</span>
+        <span>Connect Cloudflare</span>
       </Button>
     </>
   );

@@ -1,20 +1,17 @@
 import { useStore } from '@nanostores/react';
-import { useAnimate } from 'framer-motion';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSnapScroll } from '~/lib/hooks/useSnapScroll';
 import { chatStore } from '~/lib/stores/chatId';
 import { workbenchStore } from '~/lib/stores/workbench.client';
-import { cubicEasingFn } from '~/utils/easings';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { BaseChat } from './BaseChat.client';
 import { toast } from 'sonner';
 import { chatIdStore, initialIdStore } from '~/lib/stores/chatId';
 import { executeDataOperation } from '~/lib/cloudflare/client';
 import { api } from '~/lib/cloudflare/data-api';
-import { sessionIdStore, useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
-import { getOrCreateGuestSessionId } from '~/lib/guest-session';
+import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { ContainerBootState, useContainerBootState } from '~/lib/stores/containerBootState';
-import { UnsupportedRuntimeNotice } from '~/components/UnsupportedRuntime';
+import { UnsupportedRuntimeNotice, WorkspaceSetupErrorNotice } from '~/components/UnsupportedRuntime';
 import type { ChatProps } from './chat-types';
 import { useChatSessionId } from './useChatSessionId';
 import { UnauthenticatedChat } from './UnauthenticatedChat';
@@ -33,21 +30,18 @@ export const Chat = memo(
     partCache,
     storeMessageHistory,
     initializeChat,
+    discardEmptyChat,
+    onBuilderRequestStart,
     isReload,
     hadSuccessfulDeploy,
     subchats,
-    allowGuest = false,
     initialPrompt,
     transcript,
     seedTranscript,
   }: ChatProps) => {
-    const [pendingGuestMessage, setPendingGuestMessage] = useState<string | null>(initialPrompt ?? null);
-    const startGuestSessionWithMessage = useCallback((message: string) => {
-      sessionIdStore.set(getOrCreateGuestSessionId());
-      setPendingGuestMessage(message);
-    }, []);
-    const clearPendingGuestMessage = useCallback(() => setPendingGuestMessage(null), []);
-    const sessionId = useChatSessionId(allowGuest);
+    const [pendingInitialMessage, setPendingInitialMessage] = useState<string | null>(initialPrompt ?? null);
+    const clearPendingInitialMessage = useCallback(() => setPendingInitialMessage(null), []);
+    const sessionId = useChatSessionId();
     if (typeof sessionId !== 'string') {
       return (
         <UnauthenticatedChat
@@ -56,8 +50,6 @@ export const Chat = memo(
           hadSuccessfulDeploy={hadSuccessfulDeploy}
           subchats={subchats}
           authLoading={sessionId === undefined}
-          allowGuest={allowGuest}
-          onGuestSend={startGuestSessionWithMessage}
         />
       );
     }
@@ -68,11 +60,13 @@ export const Chat = memo(
         partCache={partCache}
         storeMessageHistory={storeMessageHistory}
         initializeChat={initializeChat}
+        discardEmptyChat={discardEmptyChat}
+        onBuilderRequestStart={onBuilderRequestStart}
         isReload={isReload}
         hadSuccessfulDeploy={hadSuccessfulDeploy}
         subchats={subchats}
-        pendingGuestMessage={pendingGuestMessage}
-        clearPendingGuestMessage={clearPendingGuestMessage}
+        pendingInitialMessage={pendingInitialMessage}
+        clearPendingInitialMessage={clearPendingInitialMessage}
         transcript={transcript}
         seedTranscript={seedTranscript}
       />
@@ -87,23 +81,27 @@ const AuthenticatedChat = memo(
     partCache,
     storeMessageHistory,
     initializeChat,
+    discardEmptyChat,
+    onBuilderRequestStart,
     isReload,
     hadSuccessfulDeploy,
     subchats,
-    pendingGuestMessage,
-    clearPendingGuestMessage,
+    pendingInitialMessage,
+    clearPendingInitialMessage,
     transcript,
     seedTranscript,
-  }: ChatProps & { pendingGuestMessage: string | null; clearPendingGuestMessage: () => void }) => {
+  }: ChatProps & { pendingInitialMessage: string | null; clearPendingInitialMessage: () => void }) => {
     const sessionId = useSessionIdOrNullOrLoading();
     const chatInitialId = useStore(initialIdStore);
     const hasMultipleSubchats = (subchats?.length ?? 0) > 1;
     const [chatStarted, setChatStarted] = useState(initialMessages.length > 0 || hasMultipleSubchats);
     const actionAlert = useStore(workbenchStore.alert);
     const bootState = useContainerBootState();
-    const unsupportedRuntimeNotice =
+    const disabledReason =
       bootState.state === ContainerBootState.UNSUPPORTED ? (
         <UnsupportedRuntimeNotice experience={bootState.unsupportedExperience} framed={false} />
+      ) : bootState.state === ContainerBootState.ERROR ? (
+        <WorkspaceSetupErrorNotice framed={false} />
       ) : null;
 
     const rewindToMessage = async (subchatIndex?: number, messageIndex?: number) => {
@@ -135,8 +133,6 @@ const AuthenticatedChat = memo(
       }
     };
     const { showChat } = useStore(chatStore);
-
-    const [animationScope, animate] = useAnimate();
 
     const terminalInitializationOptions = useMemo(
       () =>
@@ -197,26 +193,11 @@ const AuthenticatedChat = memo(
       messages,
     });
 
-    const runAnimation = async () => {
+    const startChat = () => {
       if (chatStarted) {
         return;
       }
-
-      const scope = animationScope.current;
-      const animations = [
-        ['#suggestions', { opacity: 0, display: 'none' }, { duration: 0.1 }],
-        ['#intro', { opacity: 0, flex: 1 }, { duration: 0.2, ease: cubicEasingFn }],
-        ['#footer', { opacity: 0, display: 'none' }, { duration: 0.2 }],
-      ] as const;
-      await Promise.all(
-        animations.map(([selector, keyframes, options]) => {
-          const element = scope?.querySelector(selector);
-          return element ? animate(element, keyframes, options) : Promise.resolve();
-        }),
-      );
-
       chatStore.setKey('started', true);
-
       setChatStarted(true);
     };
 
@@ -226,19 +207,21 @@ const AuthenticatedChat = memo(
       contextManager,
       chatStarted,
       streamStatus,
-      runtimeSupported: bootState.state !== ContainerBootState.UNSUPPORTED,
+      runtimeSupported:
+        bootState.state !== ContainerBootState.UNSUPPORTED && bootState.state !== ContainerBootState.ERROR,
       initializeChat,
+      discardEmptyChat,
       sendChatMessage,
       enableAutoScroll,
       onAbort: abort,
-      onStartChat: runAnimation,
-      pendingMessage: pendingGuestMessage,
-      clearPendingMessage: clearPendingGuestMessage,
+      onStartChat: startChat,
+      onBuilderRequestStart,
+      pendingMessage: pendingInitialMessage,
+      clearPendingMessage: clearPendingInitialMessage,
     });
 
     return (
       <BaseChat
-        ref={animationScope}
         messageRef={messageRef}
         scrollRef={scrollRef}
         showChat={showChat}
@@ -254,7 +237,7 @@ const AuthenticatedChat = memo(
         actionAlert={actionAlert}
         clearAlert={() => workbenchStore.clearAlert()}
         terminalInitializationOptions={terminalInitializationOptions}
-        disabledReason={unsupportedRuntimeNotice}
+        disabledReason={disabledReason}
         sendMessageInProgress={sendMessageInProgress}
         onRewindToMessage={rewindToMessage}
         subchats={subchats}

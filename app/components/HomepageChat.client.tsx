@@ -8,8 +8,16 @@ const EMPTY_MESSAGES: GhostbuildMessage[] = [];
 
 export function HomepageChat({ initialId, initialPrompt }: { initialId: string; initialPrompt: string }) {
   const partCache = useRef<PartCache>(new Map());
-  const { storeMessageHistory, initializeChat, initialMessages, subchats, transcript, seedTranscript } =
-    useChatHomepage(initialId);
+  const {
+    storeMessageHistory,
+    initializeChat,
+    discardEmptyChat,
+    onBuilderRequestStart,
+    initialMessages,
+    subchats,
+    transcript,
+    seedTranscript,
+  } = useChatHomepage(initialId);
 
   return (
     <Chat
@@ -17,10 +25,11 @@ export function HomepageChat({ initialId, initialPrompt }: { initialId: string; 
       partCache={partCache.current}
       storeMessageHistory={storeMessageHistory}
       initializeChat={initializeChat}
+      discardEmptyChat={discardEmptyChat}
+      onBuilderRequestStart={onBuilderRequestStart}
       isReload={false}
       hadSuccessfulDeploy={false}
       subchats={subchats}
-      allowGuest
       initialPrompt={initialPrompt}
       transcript={transcript}
       seedTranscript={seedTranscript}

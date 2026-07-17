@@ -4,7 +4,6 @@ import { createUIMessageStreamResponse } from 'ai';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { ContextCompactionUnavailableError, ModelInputBudgetExceededError } from './llm/model-input';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
-import { AiAllowanceExceededError } from './billing/ai-allowance-repository';
 import type { WorkersAiAccountCredentials } from './llm/provider';
 import type { ContextCompaction } from './llm/context-compaction';
 
@@ -27,7 +26,6 @@ export async function createChatResponseFromBody({
   env,
   firstUserMessage,
   turnContext,
-  billingSubjectKey,
   accountCredentials,
   sessionAffinity,
 }: {
@@ -41,8 +39,7 @@ export async function createChatResponseFromBody({
   env: Env;
   firstUserMessage: boolean;
   turnContext?: ChatTurnContext;
-  billingSubjectKey: string;
-  accountCredentials?: WorkersAiAccountCredentials;
+  accountCredentials: WorkersAiAccountCredentials;
   sessionAffinity: string;
 }) {
   const { messages, chatInitialId } = body;
@@ -60,7 +57,6 @@ export async function createChatResponseFromBody({
       turnContext,
       shouldDisableTools: body.shouldDisableTools,
       compaction,
-      billingSubjectKey,
       accountCredentials,
       sessionAffinity,
     });
@@ -80,13 +76,6 @@ export async function createChatResponseFromBody({
       throw new Response(error.message, {
         status: 503,
         statusText: 'Context compaction unavailable',
-      });
-    }
-
-    if (error instanceof AiAllowanceExceededError) {
-      throw new Response(error.message, {
-        status: 429,
-        statusText: 'Daily AI allowance used',
       });
     }
 

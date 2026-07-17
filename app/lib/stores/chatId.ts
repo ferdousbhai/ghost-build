@@ -41,9 +41,6 @@ export function getKnownInitialId() {
 }
 
 export function setKnownInitialId(initialId: string) {
-  if (!knownInitialId.get() && !knownUrlId.get()) {
-    navigateChat(initialId);
-  }
   knownInitialId.set(initialId);
 }
 
@@ -102,6 +99,10 @@ function navigateChat(chatId: string) {
   const url = new URL(window.location.href);
   url.pathname = `/chat/${chatId}`;
   window.history.replaceState({}, '', url);
+}
+
+export function navigateToChat(chatId: string) {
+  navigateChat(chatId);
 }
 
 export const chatStore = map({

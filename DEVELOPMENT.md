@@ -23,22 +23,23 @@ The provision step creates or reuses the configured D1 database and R2 bucket, t
 
 Configure all runtime secrets and variables as Cloudflare Worker bindings. Do not store secret values in local env files. Generated-project writes to `.env`, `.env.*`, `.envrc`, `.dev.vars`, and `.dev.vars.*` files are blocked.
 
-Workers AI uses the `AI` binding directly. Use Wrangler OAuth for local production deploys. `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are CI deploy credentials only; configure them as GitHub Actions secrets for Wrangler authentication, not as Worker runtime secrets.
-
-Optional bindings include `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and commit SHA metadata.
+Builder inference uses only the OAuth-selected user's Cloudflare account. The root Worker intentionally has no `AI`
+binding or operator-funded inference fallback. Use Wrangler OAuth for local production deploys.
+`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are CI deploy credentials only; configure them as GitHub Actions
+secrets for Wrangler authentication, not as Worker runtime secrets.
 
 User-account connection uses Cloudflare's public OAuth Authorization Code flow with PKCE. Create a server-side OAuth
 client in **Manage Account → OAuth clients**, register
 `https://<ghostbuild-origin>/connect/return`, verify the client domain, and make the client public. Ghostbuild uses the
-standard top-level GET authorization-code callback. The callback requires the authenticated
-Ghostbuild session that initiated the connection and verifies that it owns the one-time server-side state before
-exchanging the code with the PKCE verifier. This identity binding prevents a Cloudflare authorization completed in a
-different browser session from being attached to the wrong Ghostbuild account.
+standard top-level GET authorization-code callback. The one-time server-side state and PKCE verifier bind the callback
+to its authorization attempt. After Cloudflare returns the user identity and exactly one selected account, Ghostbuild
+creates the local opaque session and encrypted account connection together. Cloudflare OAuth is the only login path.
 Configure response type **Code**, grant types **Authorization Code** and **Refresh Token**, and token authentication
-method **Client Secret Basic**. Select only the account permissions needed by the generated stack: Account Settings Read, Workers Scripts
+method **Client Secret Basic**. Enable the OpenID, Profile, and Email identity scopes, then select only the account permissions needed by the generated stack: Account Settings Read, Workers Scripts
 Write, D1 Write, Workers R2 Storage Write, and Workers AI Read. Cloudflare's live OAuth scope catalog currently assigns
-these IDs: `account-settings.read`, `workers-scripts.write`, `d1.write`, `workers-r2.write`, and `ai.read`. Configure only
-those identifiers as a space-delimited binding. Cloudflare adds the protocol-level `offline_access` scope to clients
+these IDs: `account-settings.read`, `workers-scripts.write`, `d1.write`, `workers-r2.write`, and `ai.read`. Configure
+`openid profile email account-settings.read workers-scripts.write d1.write workers-r2.write ai.read` as the
+space-delimited binding. Cloudflare adds the protocol-level `offline_access` scope to clients
 that enable the Refresh Token grant. Do not include it in the resource-scope binding; Ghostbuild appends it to each
 authorization request so Cloudflare issues a refresh token. Ghostbuild fails closed when the token response does not
 include one because an expiring access token would eventually break deployments and connected-account inference.

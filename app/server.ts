@@ -7,7 +7,6 @@ import {
   storeChatAction,
   uploadThumbnailAction,
 } from '~/lib/cloudflare/data.server';
-import { getAuth } from './lib/.server/auth';
 import { enhancePromptAction } from './server-handlers/enhance-prompt';
 import { healthAction } from './server-handlers/health';
 import { scriptsAction } from './server-handlers/scripts';
@@ -21,8 +20,8 @@ import {
   startCloudflareConnectionAction,
 } from './server-handlers/cloudflare-integration';
 import { authorizeAgentRequest } from './lib/.server/agent-request-identity';
-import { aiAllowanceStatusAction } from './server-handlers/ai-allowance';
 import { createDeploymentPlanAction, deploymentAction } from './server-handlers/deployments';
+import { authSessionAction, signOutAction } from './server-handlers/auth';
 
 export { BuilderAgent } from './agents/builder-agent';
 export { ContainerProxy, DeploymentSandbox } from './lib/.server/cloudflare/deployment-sandbox';
@@ -58,6 +57,14 @@ const exactRoutes: Record<string, ServerRoute> = {
     method: 'GET',
     handler: () => healthAction(),
   },
+  '/api/auth/session': {
+    method: 'GET',
+    handler: (request, env) => authSessionAction({ request, env }),
+  },
+  '/api/auth/sign-out': {
+    method: 'POST',
+    handler: (request, env) => signOutAction({ request, env }),
+  },
   '/api/enhance-prompt': {
     method: 'POST',
     handler: (request, env) => enhancePromptAction({ request, env }),
@@ -81,10 +88,6 @@ const exactRoutes: Record<string, ServerRoute> = {
   '/connect/return': {
     method: CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
     handler: (request, env) => completeCloudflareConnectionAction({ request, env }),
-  },
-  '/api/ai/allowance': {
-    method: 'GET',
-    handler: (request, env) => aiAllowanceStatusAction({ request, env }),
   },
   '/api/deployments/plan': {
     method: 'POST',
@@ -126,10 +129,6 @@ export default {
     const agentResponse = await routeAgentRequest(request, env, { props: agentProps });
     if (agentResponse) {
       return agentResponse;
-    }
-
-    if (url.pathname === '/api/auth' || url.pathname.startsWith('/api/auth/')) {
-      return getAuth(env, request).handler(request);
     }
 
     const route = exactRoutes[url.pathname];

@@ -16,7 +16,6 @@ import { Route as ShareCodeRouteImport } from './routes/share.$code';
 import { Route as CreateShareCodeRouteImport } from './routes/create.$shareCode';
 import { Route as ChatIdRouteImport } from './routes/chat.$id';
 import { Route as WebcontainerPreviewIdRouteImport } from './routes/webcontainer.preview.$id';
-import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$';
 
 const ShareRoute = ShareRouteImport.update({
   id: '/share',
@@ -53,11 +52,6 @@ const WebcontainerPreviewIdRoute = WebcontainerPreviewIdRouteImport.update({
   path: '/webcontainer/preview/$id',
   getParentRoute: () => rootRouteImport,
 } as any);
-const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
-  id: '/api/auth/$',
-  path: '/api/auth/$',
-  getParentRoute: () => rootRouteImport,
-} as any);
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute;
@@ -66,7 +60,6 @@ export interface FileRoutesByFullPath {
   '/chat/$id': typeof ChatIdRoute;
   '/create/$shareCode': typeof CreateShareCodeRoute;
   '/share/$code': typeof ShareCodeRoute;
-  '/api/auth/$': typeof ApiAuthSplatRoute;
   '/webcontainer/preview/$id': typeof WebcontainerPreviewIdRoute;
 }
 export interface FileRoutesByTo {
@@ -76,7 +69,6 @@ export interface FileRoutesByTo {
   '/chat/$id': typeof ChatIdRoute;
   '/create/$shareCode': typeof CreateShareCodeRoute;
   '/share/$code': typeof ShareCodeRoute;
-  '/api/auth/$': typeof ApiAuthSplatRoute;
   '/webcontainer/preview/$id': typeof WebcontainerPreviewIdRoute;
 }
 export interface FileRoutesById {
@@ -87,7 +79,6 @@ export interface FileRoutesById {
   '/chat/$id': typeof ChatIdRoute;
   '/create/$shareCode': typeof CreateShareCodeRoute;
   '/share/$code': typeof ShareCodeRoute;
-  '/api/auth/$': typeof ApiAuthSplatRoute;
   '/webcontainer/preview/$id': typeof WebcontainerPreviewIdRoute;
 }
 export interface FileRouteTypes {
@@ -99,7 +90,6 @@ export interface FileRouteTypes {
     | '/chat/$id'
     | '/create/$shareCode'
     | '/share/$code'
-    | '/api/auth/$'
     | '/webcontainer/preview/$id';
   fileRoutesByTo: FileRoutesByTo;
   to:
@@ -109,7 +99,6 @@ export interface FileRouteTypes {
     | '/chat/$id'
     | '/create/$shareCode'
     | '/share/$code'
-    | '/api/auth/$'
     | '/webcontainer/preview/$id';
   id:
     | '__root__'
@@ -119,7 +108,6 @@ export interface FileRouteTypes {
     | '/chat/$id'
     | '/create/$shareCode'
     | '/share/$code'
-    | '/api/auth/$'
     | '/webcontainer/preview/$id';
   fileRoutesById: FileRoutesById;
 }
@@ -129,7 +117,6 @@ export interface RootRouteChildren {
   ShareRoute: typeof ShareRouteWithChildren;
   ChatIdRoute: typeof ChatIdRoute;
   CreateShareCodeRoute: typeof CreateShareCodeRoute;
-  ApiAuthSplatRoute: typeof ApiAuthSplatRoute;
   WebcontainerPreviewIdRoute: typeof WebcontainerPreviewIdRoute;
 }
 
@@ -184,13 +171,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WebcontainerPreviewIdRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    '/api/auth/$': {
-      id: '/api/auth/$';
-      path: '/api/auth/$';
-      fullPath: '/api/auth/$';
-      preLoaderRoute: typeof ApiAuthSplatRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
   }
 }
 
@@ -210,7 +190,6 @@ const rootRouteChildren: RootRouteChildren = {
   ShareRoute: ShareRouteWithChildren,
   ChatIdRoute: ChatIdRoute,
   CreateShareCodeRoute: CreateShareCodeRoute,
-  ApiAuthSplatRoute: ApiAuthSplatRoute,
   WebcontainerPreviewIdRoute: WebcontainerPreviewIdRoute,
 };
 export const routeTree = rootRouteImport

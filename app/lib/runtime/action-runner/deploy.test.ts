@@ -23,8 +23,8 @@ afterEach(() => {
 });
 
 describe('runDeploy production plan preparation', () => {
-  test('keeps guest sessions behind sign-in without treating deployment as validation', async () => {
-    vi.mocked(getAuthToken).mockReturnValue('guest_00000000-0000-4000-8000-000000000000');
+  test('keeps unauthenticated sessions behind Cloudflare authorization without treating deployment as validation', async () => {
+    vi.mocked(getAuthToken).mockReturnValue(null);
     const exportSnapshot = vi.fn();
 
     const result = await runDeploy({

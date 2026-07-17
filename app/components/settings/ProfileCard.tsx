@@ -27,7 +27,7 @@ export function ProfileCard() {
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="app-page-eyebrow">Signed-in account</p>
+          <p className="app-page-eyebrow">Cloudflare identity</p>
           <h2 id="profile-heading" className="app-card-title mt-2 truncate">
             {profile.username || 'Ghostbuild user'}
           </h2>

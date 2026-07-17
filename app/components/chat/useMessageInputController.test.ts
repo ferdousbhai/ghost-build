@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
-import { submitMessageInput } from './useMessageInputController';
+import Cookies from 'js-cookie';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { preservePromptForAuthentication, submitMessageInput } from './useMessageInputController';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('submitMessageInput', () => {
   it('keeps the prompt when submission is rejected', async () => {
@@ -19,5 +24,15 @@ describe('submitMessageInput', () => {
     await expect(submitMessageInput('send this', onSend, onAccepted)).resolves.toBe(true);
 
     expect(onAccepted).toHaveBeenCalledOnce();
+  });
+});
+
+describe('preservePromptForAuthentication', () => {
+  it('writes the current prompt synchronously before OAuth navigation', () => {
+    const setCookie = vi.spyOn(Cookies, 'set').mockReturnValue('');
+
+    preservePromptForAuthentication('  A todo app  ');
+
+    expect(setCookie).toHaveBeenCalledWith('cachedPrompt', 'A todo app', { expires: 30 });
   });
 });

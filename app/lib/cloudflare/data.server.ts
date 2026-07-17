@@ -2,10 +2,11 @@ import { z } from 'zod';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import type { DataOperationPath } from './data-api';
 import { dataOperationArgSchemas } from './data-operation-schemas';
-import { claimGuestSession, getSessionId, requireMatchingSession } from './data/auth.server';
+import { getSessionId, requireMatchingSession } from './data/auth.server';
 import { findChat, getLatestStorageStateForGeneration, updateStorageState } from './data/chat-repository.server';
 import {
   createSubchat,
+  discardEmptyChat,
   earliestRewindableMessageRank,
   getAllChats,
   getChat,
@@ -277,12 +278,12 @@ export function storageObjectAction({ key, env }: { key: string; env: Env }): Pr
   return objectResponse(env, decodeURIComponent(key));
 }
 
-function runKnownDataOperation(env: Env, path: DataOperationPath, rawArgs: unknown, request: Request): unknown {
+function runKnownDataOperation(env: Env, path: DataOperationPath, rawArgs: unknown, _request: Request): unknown {
   switch (path) {
-    case 'messages.claimGuestSession':
-      return claimGuestSession(env, dataOperationArgSchemas[path].parse(rawArgs), request);
     case 'messages.initializeChat':
       return initializeChat(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
+    case 'messages.discardEmptyChat':
+      return discardEmptyChat(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'messages.get':
       return getChat(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'messages.getAll':

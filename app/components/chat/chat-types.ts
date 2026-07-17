@@ -14,11 +14,12 @@ export interface ChatProps {
   initialMessages: GhostbuildMessage[];
   partCache: PartCache;
   storeMessageHistory: StoreMessageHistory;
-  initializeChat: () => Promise<boolean>;
+  initializeChat: () => Promise<{ created: boolean }>;
+  discardEmptyChat: () => Promise<void>;
+  onBuilderRequestStart: () => void;
   isReload: boolean;
   hadSuccessfulDeploy: boolean;
   subchats?: SubchatSummary[];
-  allowGuest?: boolean;
   initialPrompt?: string;
   transcript: TranscriptIdentity;
   seedTranscript: boolean;

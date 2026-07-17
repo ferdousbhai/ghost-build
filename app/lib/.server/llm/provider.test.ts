@@ -1,20 +1,17 @@
-import { generateText } from 'ai';
-import { describe, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
+
+const createWorkersAI = vi.hoisted(() => vi.fn(() => vi.fn(() => ({ modelId: 'workers-ai-model' }))));
+vi.mock('workers-ai-provider', () => ({ createWorkersAI }));
+
 import { getProvider } from './provider';
 
 describe('Workers AI provider', () => {
-  test('forwards opaque session affinity through the binding', async () => {
-    const run = vi.fn().mockResolvedValue({
-      choices: [{ finish_reason: 'stop', message: { content: 'ok' } }],
-      usage: { prompt_tokens: 1, completion_tokens: 1 },
-    });
-    const env = { AI: { run } } as unknown as Env;
-    const provider = getProvider(env, undefined, '@cf/zai-org/glm-5.2', { sessionAffinity: 'gb-opaque' });
+  beforeEach(() => vi.clearAllMocks());
 
-    await generateText({ model: provider.model, prompt: 'hello' });
+  test('always uses the connected account credential rather than an AI binding', () => {
+    const credentials = { accountId: 'account-1', apiKey: 'oauth-token' };
+    getProvider({} as Env, credentials, '@cf/zai-org/glm-5.2', { sessionAffinity: 'gb-opaque' });
 
-    expect(run.mock.calls[0]?.[2]).toMatchObject({
-      extraHeaders: { 'x-session-affinity': 'gb-opaque' },
-    });
+    expect(createWorkersAI).toHaveBeenCalledWith(credentials);
   });
 });

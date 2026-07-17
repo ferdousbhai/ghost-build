@@ -138,11 +138,12 @@ describe('ensureInitialChat', () => {
     ]);
 
     expect(first.id).toBe(second.id);
+    expect([first.created, second.created].sort()).toEqual([false, true]);
     expect(database.activeChats).toHaveLength(1);
     expect(database.states).toEqual([{ chatId: first.id, lastMessageRank: -1, partIndex: -1 }]);
   });
 
-  test('does not reuse a globally named BuilderAgent after its chat was soft-deleted', async () => {
+  test('can retry an initial ID after its empty chat was soft-deleted', async () => {
     const database = new InitialChatDatabase();
     const previous = await ensureInitialChat(database.db, {
       id: 'chat-row-a',
@@ -151,16 +152,15 @@ describe('ensureInitialChat', () => {
     });
     database.softDelete(previous.id);
 
-    await expect(
-      ensureInitialChat(database.db, {
-        id: 'chat-row-b',
-        creatorId: 'session',
-        initialId: 'chat',
-      }),
-    ).rejects.toThrow('Unable to initialize chat');
+    const retried = await ensureInitialChat(database.db, {
+      id: 'chat-row-b',
+      creatorId: 'session',
+      initialId: 'chat',
+    });
 
-    expect(database.activeChats).toHaveLength(0);
-    expect(database.states).toHaveLength(1);
+    expect(retried).toMatchObject({ id: 'chat-row-b', created: true });
+    expect(database.activeChats).toHaveLength(1);
+    expect(database.states).toHaveLength(2);
   });
 });
 
@@ -375,7 +375,7 @@ class InitialChatDatabase {
   private run(query: string, values: unknown[]) {
     if (query.includes('INSERT INTO chats')) {
       const [id, creatorId, initialId] = values as [string, string, string];
-      const exists = this.chats.some((candidate) => candidate.initial_id === initialId);
+      const exists = this.chats.some((candidate) => candidate.initial_id === initialId && candidate.is_deleted === 0);
       if (exists) {
         return changed(0);
       }

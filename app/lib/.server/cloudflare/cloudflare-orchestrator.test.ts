@@ -6,8 +6,6 @@ describe('UnavailableCloudflareOrchestrator', () => {
     const orchestrator = new UnavailableCloudflareOrchestrator();
     await expect(
       orchestrator.startConnection({
-        userId: 'user-1',
-        userEmail: 'person@example.com',
         returnUrl: 'https://ghostbuild.dev/cloudflare/callback',
         requestedCapabilities: ['workers', 'd1', 'r2', 'durable_objects', 'workers_ai'],
       }),

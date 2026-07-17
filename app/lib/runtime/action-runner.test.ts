@@ -135,9 +135,52 @@ describe('ActionRunner abort lifecycle', () => {
   });
 });
 
-function createRunner(onToolCallComplete: ReturnType<typeof vi.fn>) {
+test('waits for the workspace before executing a tool', async () => {
+  executeToolMock.mockReset();
+  executeToolMock.mockResolvedValue(toolSuccess('ok'));
+  let markWorkspaceReady!: () => void;
+  const waitForWorkspaceReady = new Promise<void>((resolve) => {
+    markWorkspaceReady = resolve;
+  });
+  const runner = createRunner(vi.fn(), () => waitForWorkspaceReady);
+  const action = toolAction('waiting', 'call-1', 'view', { path: 'src/app.ts' });
+
+  runner.addAction(action);
+  const run = runner.runAction(action, { isStreaming: false });
+  await Promise.resolve();
+  expect(executeToolMock).not.toHaveBeenCalled();
+
+  markWorkspaceReady();
+  await run;
+
+  expect(executeToolMock).toHaveBeenCalledOnce();
+});
+
+test('reports a tool failure when workspace setup fails', async () => {
+  executeToolMock.mockReset();
+  const onToolCallComplete = vi.fn();
+  const runner = createRunner(onToolCallComplete, async () => {
+    throw new Error('Workspace setup stopped');
+  });
+  const action = toolAction('blocked', 'call-1', 'view', { path: 'src/app.ts' });
+
+  runner.addAction(action);
+  await runner.runAction(action, { isStreaming: false });
+
+  expect(executeToolMock).not.toHaveBeenCalled();
+  expect(onToolCallComplete).toHaveBeenCalledWith({
+    result: expect.objectContaining({ ok: false, summary: expect.stringContaining('Workspace setup stopped') }),
+    toolCallId: 'call-1',
+  });
+});
+
+function createRunner(
+  onToolCallComplete: ReturnType<typeof vi.fn>,
+  waitForWorkspaceReady: () => Promise<unknown> = async () => undefined,
+) {
   return new ActionRunner(Promise.resolve({} as WebContainer), {
     onToolCallComplete,
+    waitForWorkspaceReady,
     workspace: {
       getFiles: () => ({}),
       getPreviewPort: () => undefined,

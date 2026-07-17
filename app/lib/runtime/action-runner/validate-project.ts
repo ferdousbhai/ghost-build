@@ -4,7 +4,6 @@ import { validateProjectParameters } from 'ghostbuild-agent/tools/validateProjec
 import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
 import { ContainerBootState, waitForContainerBootState } from '~/lib/stores/containerBootState';
 import { getAuthToken } from '~/lib/stores/sessionId';
-import { isGuestSessionId } from '~/lib/guest-session';
 import { streamOutput } from '~/utils/process';
 import { createPreviewSmokeCheckScript } from './preview-smoke-check';
 import { runCommand } from './command';
@@ -104,7 +103,7 @@ export async function runValidateProject(args: {
     );
   }
   const sessionId = getAuthToken();
-  const nextAction = !sessionId || isGuestSessionId(sessionId) ? 'sign-in-required' : 'prepare-deployment';
+  const nextAction = !sessionId ? 'sign-in-required' : 'prepare-deployment';
   return toolSuccess(
     `Project validation passed at workspace revision ${revision}: ${checks.map((check) => check.name).join(', ')}.`,
     { ...data, nextAction },

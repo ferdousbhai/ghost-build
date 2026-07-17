@@ -9,8 +9,29 @@ import {
 import { transcriptAgentName } from 'ghostbuild-agent/transcript';
 import { prepareInsertChatTranscript, requireChatTranscript, transcriptIdentity } from './transcript-repository.server';
 
-export async function initializeChat(db: D1Database, args: { sessionId: string; id: string }): Promise<null> {
-  await ensureInitialChat(db, { id: crypto.randomUUID(), creatorId: args.sessionId, initialId: args.id });
+export async function initializeChat(
+  db: D1Database,
+  args: { sessionId: string; id: string },
+): Promise<{ created: boolean }> {
+  const chat = await ensureInitialChat(db, { id: crypto.randomUUID(), creatorId: args.sessionId, initialId: args.id });
+  return { created: chat.created };
+}
+
+export async function discardEmptyChat(db: D1Database, args: { sessionId: string; id: string }): Promise<null> {
+  await db
+    .prepare(
+      `UPDATE chats
+       SET is_deleted = 1
+       WHERE creator_id = ? AND (initial_id = ? OR url_id = ?) AND is_deleted = 0
+         AND url_id IS NULL AND NULLIF(TRIM(description), '') IS NULL AND snapshot_key IS NULL
+         AND (last_message_rank IS NULL OR last_message_rank < 0)
+         AND NOT EXISTS (
+           SELECT 1 FROM chat_message_states
+           WHERE chat_message_states.chat_id = chats.id AND chat_message_states.last_message_rank >= 0
+         )`,
+    )
+    .bind(args.sessionId, args.id, args.id)
+    .run();
   return null;
 }
 
@@ -56,6 +77,10 @@ export async function getAllChats(db: D1Database, args: { sessionId: string }) {
          chats.timestamp
        FROM chats
        WHERE chats.creator_id = ? AND chats.is_deleted = 0
+         AND EXISTS (
+           SELECT 1 FROM chat_message_states
+           WHERE chat_message_states.chat_id = chats.id AND chat_message_states.last_message_rank >= 0
+         )
        ORDER BY chats.timestamp DESC`,
     )
     .bind(args.sessionId)

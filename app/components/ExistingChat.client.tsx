@@ -9,7 +9,7 @@ import { useReloadMessages } from '~/lib/stores/startup/reloadMessages';
 import { UserProvider } from '~/components/UserProvider';
 import { Toaster } from '~/components/ui/Toaster';
 import { getToolInvocation } from 'ghostbuild-agent/ai-compat';
-import { UnsupportedRuntimeScreen } from '~/components/UnsupportedRuntime';
+import { UnsupportedRuntimeScreen, WorkspaceSetupErrorScreen } from '~/components/UnsupportedRuntime';
 
 export function ExistingChat({ chatId }: { chatId: string }) {
   // Fill in the chatID store from props early in app initialization. If this
@@ -19,7 +19,7 @@ export function ExistingChat({ chatId }: { chatId: string }) {
 
   return (
     <>
-      <GhostbuildAuthProvider redirectIfUnauthenticated={false} allowGuest>
+      <GhostbuildAuthProvider redirectIfUnauthenticated={false}>
         <UserProvider>
           <ExistingChatWrapper chatId={chatId} />
         </UserProvider>
@@ -31,8 +31,17 @@ export function ExistingChat({ chatId }: { chatId: string }) {
 
 function ExistingChatWrapper({ chatId }: { chatId: string }) {
   const sessionId = useSessionIdOrNullOrLoading();
-  const { initialMessages, storeMessageHistory, initializeChat, subchats, transcript, seedTranscript } =
-    useExistingChat(chatId);
+  const {
+    initialMessages,
+    storeMessageHistory,
+    initializeChat,
+    discardEmptyChat,
+    onBuilderRequestStart,
+    requiresInitialContainer,
+    subchats,
+    transcript,
+    seedTranscript,
+  } = useExistingChat(chatId);
 
   const reloadState = useReloadMessages(initialMessages ?? undefined);
   const bootState = useContainerBootState();
@@ -41,7 +50,7 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
     return <NotFound />;
   }
 
-  // First, we need an account or guest session ID.
+  // First, we need a Cloudflare-backed account session ID.
   if (!sessionId) {
     return <Loading message="Starting session..." />;
   }
@@ -58,19 +67,22 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
     return <Loading message="Parsing chat messages..." />;
   }
   // Once we've loaded chat messages, let's wait on setting up the container.
-  if (bootState.state === ContainerBootState.LOADING_SNAPSHOT) {
+  if (requiresInitialContainer && bootState.state === ContainerBootState.LOADING_SNAPSHOT) {
     return <Loading message="Loading snapshot..." />;
   }
-  if (bootState.state === ContainerBootState.DOWNLOADING_DEPENDENCIES) {
+  if (requiresInitialContainer && bootState.state === ContainerBootState.DOWNLOADING_DEPENDENCIES) {
     return <Loading message="Downloading dependencies..." />;
   }
-  if (bootState.state === ContainerBootState.STARTING_BACKUP) {
+  if (requiresInitialContainer && bootState.state === ContainerBootState.STARTING_BACKUP) {
     return <Loading message="Starting backup..." />;
   }
   if (bootState.state === ContainerBootState.UNSUPPORTED) {
     return <UnsupportedRuntimeScreen experience={bootState.unsupportedExperience} />;
   }
-  if (bootState.state !== ContainerBootState.READY) {
+  if (requiresInitialContainer && bootState.state === ContainerBootState.ERROR) {
+    return <WorkspaceSetupErrorScreen />;
+  }
+  if (requiresInitialContainer && bootState.state !== ContainerBootState.READY) {
     return <Loading message="Preparing workspace..." />;
   }
 
@@ -85,10 +97,11 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
       partCache={reloadState.partCache}
       storeMessageHistory={storeMessageHistory}
       initializeChat={initializeChat}
+      discardEmptyChat={discardEmptyChat}
+      onBuilderRequestStart={onBuilderRequestStart}
       isReload={true}
       hadSuccessfulDeploy={hadSuccessfulDeploy}
       subchats={subchats}
-      allowGuest
       transcript={transcript}
       seedTranscript={seedTranscript}
     />

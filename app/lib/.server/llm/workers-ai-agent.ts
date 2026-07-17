@@ -19,13 +19,6 @@ import {
   serializeWorkersAiToolDefinitions,
   type AgentToolSettings,
 } from './workers-ai-tools';
-import { glm52CostNanodollars } from '~/lib/.server/billing/ai-allowance-policy';
-import {
-  releaseAiAllowance,
-  reserveAiAllowance,
-  settleAiAllowance,
-} from '~/lib/.server/billing/ai-allowance-repository';
-import { normalizeWorkersAiUsage } from '~/lib/.server/billing/workers-ai-usage';
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
 import { fingerprintWorkersAiModelInput } from './workers-ai-prompt-cache';
 
@@ -45,8 +38,7 @@ interface WorkersAiAgentOptions {
     summarize: (prompt: string) => Promise<string>;
     save: (compaction: ContextCompaction) => void;
   };
-  billingSubjectKey: string;
-  accountCredentials?: WorkersAiAccountCredentials;
+  accountCredentials: WorkersAiAccountCredentials;
   sessionAffinity: string;
 }
 
@@ -60,7 +52,6 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     turnContext,
     shouldDisableTools,
     compaction,
-    billingSubjectKey,
     accountCredentials,
     sessionAffinity,
   } = options;
@@ -107,27 +98,6 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     activeTools: toolSettings.activeTools,
     toolChoice: toolSettings.toolChoice,
   });
-  const reservation = accountCredentials
-    ? undefined
-    : await reserveAiAllowance(
-        env.DB,
-        billingSubjectKey,
-        glm52CostNanodollars({
-          inputTokens: modelInput.estimatedTokens,
-          outputTokens: provider.maxTokens,
-        }),
-      );
-  let reservationFinalized = false;
-  const releaseReservation = async () => {
-    if (reservationFinalized) {
-      return;
-    }
-    reservationFinalized = true;
-    if (reservation) {
-      await releaseAiAllowance(env.DB, reservation.id);
-    }
-  };
-
   let result;
   try {
     result = streamText({
@@ -145,7 +115,7 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
           recordFirstWorkersAiResponse(chatInitialId, startedAt);
         }
       },
-      onFinish: async (finishResult) => {
+      onFinish: (finishResult) => {
         recordWorkersAiFinish({
           result: finishResult,
           chatInitialId,
@@ -159,34 +129,19 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
           modelInputFingerprint,
           startedAt,
         });
-        if (reservationFinalized || !reservation) {
-          return;
-        }
-        reservationFinalized = true;
-        const usage = normalizeWorkersAiUsage(finishResult.totalUsage, finishResult.providerMetadata);
-        const allowance = await settleAiAllowance(env.DB, reservation.id, glm52CostNanodollars(usage), usage);
-        if (allowance?.reminder) {
-          console.info({
-            event: 'ghostbuild_ai_allowance_threshold_reached',
-            threshold: allowance.reminder,
-            usedPercent: allowance.usedPercent,
-          });
-        }
       },
-      onError: async ({ error }) => {
+      onError: ({ error }) => {
         logger.error(error);
-        await releaseReservation();
       },
     });
   } catch (error) {
-    await releaseReservation();
     throw error;
   }
 
   const stream = result.toUIMessageStream({
     originalMessages: asOriginalMessages(messages),
     onError: (error) => {
-      if (accountCredentials && isWorkersAiFreeAllocationError(error)) {
+      if (isWorkersAiFreeAllocationError(error)) {
         return workersPaidRequiredMessage();
       }
       return error instanceof Error ? error.message : 'An error occurred.';

@@ -19,7 +19,7 @@ const runCommandMock = vi.mocked(runCommand);
 describe('runValidateProject', () => {
   beforeEach(() => {
     runCommandMock.mockReset();
-    vi.mocked(getAuthToken).mockReturnValue('guest_00000000-0000-4000-8000-000000000000');
+    vi.mocked(getAuthToken).mockReturnValue(null);
   });
 
   test('returns a successful result tied to the current source revision', async () => {

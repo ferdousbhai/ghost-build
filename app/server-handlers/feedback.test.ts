@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const getSession = vi.fn();
+const getAuthSession = vi.hoisted(() => vi.fn());
 
 vi.mock('~/lib/.server/auth', () => ({
-  getAuth: () => ({ api: { getSession } }),
+  getAuthSession,
 }));
 
 import { feedbackAction } from './feedback';
@@ -42,8 +42,8 @@ function request(body: unknown) {
 
 describe('feedbackAction', () => {
   beforeEach(() => {
-    getSession.mockReset();
-    getSession.mockResolvedValue(null);
+    getAuthSession.mockReset();
+    getAuthSession.mockResolvedValue(null);
   });
 
   it('rejects invalid feedback', async () => {
@@ -55,7 +55,7 @@ describe('feedbackAction', () => {
   });
 
   it('stores valid feedback with private context', async () => {
-    getSession.mockResolvedValue({ user: { id: 'user-123' } });
+    getAuthSession.mockResolvedValue({ user: { id: 'user-123' } });
     const { env, statements } = createEnv();
     const response = await feedbackAction({
       request: request({ category: 'ux', message: 'Make the preview easier to find.', pagePath: '/chat/example' }),

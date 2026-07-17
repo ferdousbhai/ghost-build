@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   ContainerBootState,
   isUnsupportedRuntimeError,
@@ -21,16 +21,29 @@ import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 const TEMPLATE_URL = '/template-snapshot-d409e423.bin';
 const logger = createScopedLogger('ContainerSetup');
 const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)));
+const WEBCONTAINER_BOOT_TIMEOUT_MS = 60_000;
+const SNAPSHOT_DOWNLOAD_TIMEOUT_MS = 30_000;
+const DEPENDENCY_INSTALL_TIMEOUT_MS = 120_000;
+const WORKSPACE_STEP_TIMEOUT_MS = 30_000;
 
 export function useNewChatContainerSetup(enabled: boolean) {
+  const setupStarted = useRef(false);
   useEffect(() => {
     if (!enabled) {
       return;
     }
+    if (setupStarted.current) {
+      return;
+    }
+    setupStarted.current = true;
     const runSetup = async () => {
       try {
         void startWebcontainer();
-        await waitForBootStepCompleted(ContainerBootState.STARTING);
+        await withTimeout(
+          waitForBootStepCompleted(ContainerBootState.STARTING),
+          WEBCONTAINER_BOOT_TIMEOUT_MS,
+          'The browser workspace took too long to start.',
+        );
         await setupContainer({ snapshotUrl: TEMPLATE_URL, allowPnpmInstallFailure: false });
       } catch (error) {
         if (isUnsupportedRuntimeError(error)) {
@@ -46,6 +59,7 @@ export function useNewChatContainerSetup(enabled: boolean) {
 
 export function useExistingChatContainerSetup(loadedChatId: string | undefined) {
   const sessionId = useSessionIdOrNullOrLoading();
+  const setupStarted = useRef(false);
   useEffect(() => {
     if (!sessionId) {
       return;
@@ -53,11 +67,23 @@ export function useExistingChatContainerSetup(loadedChatId: string | undefined) 
     if (!loadedChatId) {
       return;
     }
+    if (setupStarted.current) {
+      return;
+    }
+    setupStarted.current = true;
     const runSetup = async () => {
       try {
         void startWebcontainer();
-        await waitForBootStepCompleted(ContainerBootState.STARTING);
-        let snapshotUrl = await executeDataOperation(api.snapshot.getSnapshotUrl, { chatId: loadedChatId, sessionId });
+        await withTimeout(
+          waitForBootStepCompleted(ContainerBootState.STARTING),
+          WEBCONTAINER_BOOT_TIMEOUT_MS,
+          'The browser workspace took too long to start.',
+        );
+        let snapshotUrl = await withTimeout(
+          executeDataOperation(api.snapshot.getSnapshotUrl, { chatId: loadedChatId, sessionId }),
+          WORKSPACE_STEP_TIMEOUT_MS,
+          'Ghostbuild took too long to locate the project snapshot.',
+        );
         if (!snapshotUrl) {
           logger.warn(`Existing chat ${loadedChatId} has no snapshot. Loading the base template.`);
           snapshotUrl = TEMPLATE_URL;
@@ -76,23 +102,52 @@ export function useExistingChatContainerSetup(loadedChatId: string | undefined) 
 }
 
 async function setupContainer(options: { snapshotUrl: string; allowPnpmInstallFailure: boolean }) {
-  const resp = await fetch(options.snapshotUrl);
+  const controller = new AbortController();
+  const downloadTimeout = setTimeout(() => controller.abort(), SNAPSHOT_DOWNLOAD_TIMEOUT_MS);
+  let resp: Response;
+  try {
+    resp = await fetch(options.snapshotUrl, { signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error('The project snapshot took too long to download.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(downloadTimeout);
+  }
   if (!resp.ok) {
     throw new Error(`Failed to download snapshot (${resp.status}): ${resp.statusText}`);
   }
   const compressed = await resp.arrayBuffer();
   const decompressed = decompressWithLz4(new Uint8Array(compressed));
 
-  const container = await startWebcontainer();
-  await container.mount(decompressed);
+  const container = await withTimeout(
+    startWebcontainer(),
+    WORKSPACE_STEP_TIMEOUT_MS,
+    'The browser workspace stopped responding.',
+  );
+  await withTimeout(
+    container.mount(decompressed),
+    WORKSPACE_STEP_TIMEOUT_MS,
+    'The project snapshot took too long to load.',
+  );
 
   // After loading the snapshot, we need to load the files into the FilesStore since
   // we won't receive file events for snapshot files.
-  await workbenchStore.prewarmWorkdir(container);
+  await withTimeout(
+    workbenchStore.prewarmWorkdir(container),
+    WORKSPACE_STEP_TIMEOUT_MS,
+    'Ghostbuild took too long to index the project files.',
+  );
 
   setContainerBootState(ContainerBootState.DOWNLOADING_DEPENDENCIES);
-  const pnpm = await container.spawn('pnpm', ['install', '--no-frozen-lockfile']);
-  const { output, exitCode } = await streamOutput(pnpm);
+  let { output, exitCode } = await runPnpmInstall(container, ['install', '--frozen-lockfile']);
+  if (exitCode !== 0 && options.allowPnpmInstallFailure) {
+    logger.warn('Frozen dependency install failed; retrying while repairing the generated lockfile.');
+    const repaired = await runPnpmInstall(container, ['install', '--no-frozen-lockfile']);
+    output = `${output}\n${repaired.output}`;
+    exitCode = repaired.exitCode;
+  }
   logger.debug('pnpm install output', cleanTerminalOutput(output));
 
   if (exitCode !== 0) {
@@ -107,9 +162,50 @@ async function setupContainer(options: { snapshotUrl: string; allowPnpmInstallFa
   }
 
   setContainerBootState(ContainerBootState.STARTING_BACKUP);
-  await initializeFileSystemBackup();
+  await withTimeout(
+    initializeFileSystemBackup(),
+    WORKSPACE_STEP_TIMEOUT_MS,
+    'Ghostbuild took too long to start project backup.',
+  );
 
   setContainerBootState(ContainerBootState.READY);
+}
+
+async function runPnpmInstall(
+  container: Awaited<ReturnType<typeof startWebcontainer>>,
+  args: string[],
+): Promise<{ output: string; exitCode: number }> {
+  const pnpm = await withTimeout(
+    container.spawn('pnpm', args),
+    WORKSPACE_STEP_TIMEOUT_MS,
+    'Ghostbuild could not start dependency installation.',
+  );
+  try {
+    return await withTimeout(
+      streamOutput(pnpm),
+      DEPENDENCY_INSTALL_TIMEOUT_MS,
+      'Dependency installation took too long.',
+    );
+  } catch (error) {
+    pnpm.kill();
+    throw error;
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      },
+    );
+  });
 }
 
 async function initializeFileSystemBackup() {

@@ -1,11 +1,6 @@
 interface Env {
   DB: D1Database;
   APP_STORAGE: R2Bucket;
-  AI: Ai;
-  BETTER_AUTH_SECRET?: string;
-  BETTER_AUTH_URL?: string;
-  GOOGLE_CLIENT_ID?: string;
-  GOOGLE_CLIENT_SECRET?: string;
   CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY?: string;
   CLOUDFLARE_OAUTH_CLIENT_ID?: string;
   CLOUDFLARE_OAUTH_CLIENT_SECRET?: string;

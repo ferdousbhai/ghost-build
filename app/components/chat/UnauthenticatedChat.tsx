@@ -13,12 +13,8 @@ export function UnauthenticatedChat({
   hadSuccessfulDeploy,
   subchats,
   authLoading,
-  allowGuest,
-  onGuestSend,
 }: Pick<ChatProps, 'initialMessages' | 'isReload' | 'hadSuccessfulDeploy' | 'subchats'> & {
   authLoading: boolean;
-  allowGuest: boolean;
-  onGuestSend: (message: string) => void;
 }) {
   const hasMultipleSubchats = (subchats?.length ?? 0) > 1;
   const chatStarted = initialMessages.length > 0 || hasMultipleSubchats;
@@ -52,14 +48,9 @@ export function UnauthenticatedChat({
       disabledReason={authLoading ? 'Loading account...' : null}
       sendMessageInProgress={false}
       subchats={subchats}
-      onSend={async (message) => {
-        if (allowGuest) {
-          onGuestSend(message);
-          return true;
-        } else {
-          toast.info('Please sign in to continue.');
-          return false;
-        }
+      onSend={async () => {
+        toast.info('Connect Cloudflare to chat or build.');
+        return false;
       }}
     />
   );

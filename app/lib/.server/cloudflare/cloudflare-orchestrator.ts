@@ -1,6 +1,4 @@
 export type CloudflareConnectionRequest = {
-  userId: string;
-  userEmail: string;
   returnUrl: string;
   requestedCapabilities: Array<'workers' | 'd1' | 'r2' | 'durable_objects' | 'workers_ai'>;
 };
@@ -17,6 +15,12 @@ export type CloudflareConnectionCompletionRequest = {
 };
 
 export type CloudflareConnectionResult = {
+  user: {
+    subject: string;
+    email: string | null;
+    name: string | null;
+    picture: string | null;
+  };
   accountId: string;
   accountName: string | null;
   accessToken: string;

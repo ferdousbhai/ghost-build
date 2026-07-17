@@ -2,7 +2,6 @@ import type { WebContainer } from '@webcontainer/api';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { ContainerBootState, waitForContainerBootState } from '~/lib/stores/containerBootState';
 import { getAuthToken } from '~/lib/stores/sessionId';
-import { isGuestSessionId } from '~/lib/guest-session';
 import { chatIdStore } from '~/lib/stores/chatId';
 import type { ActionRunnerWorkspace } from './types';
 import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
@@ -32,8 +31,8 @@ export async function runDeploy(args: {
 }) {
   const startedAt = performance.now();
   const sessionId = getAuthToken();
-  if (!sessionId || isGuestSessionId(sessionId)) {
-    return toolFailure('Production deployment requires sign-in. The validated project remains ready for preview.', {
+  if (!sessionId) {
+    return toolFailure('Production deployment requires Cloudflare. The validated project remains ready for preview.', {
       state: 'sign-in-required',
     });
   }

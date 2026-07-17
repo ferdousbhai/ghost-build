@@ -1,11 +1,8 @@
-import { getGuestSessionIdFromCookie } from '~/lib/guest-session';
-import { getAuth } from './auth';
-import { getOptionalBinding } from './env';
+import { getAuthSession } from './auth';
 
 type AgentRequestIdentity = {
-  billingSubjectKey: string;
   ownerId: string;
-  userId?: string;
+  userId: string;
 };
 
 export async function authorizeAgentRequest(
@@ -37,35 +34,14 @@ export async function authorizeAgentRequest(
 }
 
 export async function resolveAgentRequestIdentity(request: Request, env: Env): Promise<AgentRequestIdentity | null> {
-  const session = await getAuth(env, request).api.getSession({ headers: request.headers });
-  if (session) {
-    return {
-      billingSubjectKey: `user:${session.user.id}`,
-      ownerId: session.user.id,
-      userId: session.user.id,
-    };
+  const session = await getAuthSession(env, request);
+  if (!session) {
+    return null;
   }
-
-  const guestId = getGuestSessionIdFromCookie(request.headers.get('cookie'));
-  return guestId ? { billingSubjectKey: await guestBillingSubjectKey(request, env), ownerId: guestId } : null;
-}
-
-async function guestBillingSubjectKey(request: Request, env: Env): Promise<string> {
-  const secret = getOptionalBinding(env, 'BETTER_AUTH_SECRET');
-  if (!secret) {
-    throw new Error('Cloudflare binding BETTER_AUTH_SECRET is not configured');
-  }
-  const source = request.headers.get('CF-Connecting-IP') ?? 'unknown';
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  const digest = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`ghostbuild-ai:${source}`));
-  const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-  return `guest:${hash}`;
+  return {
+    ownerId: session.user.id,
+    userId: session.user.id,
+  };
 }
 
 function builderAgentName(url: URL): string | null {

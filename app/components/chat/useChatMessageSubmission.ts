@@ -23,14 +23,17 @@ export function useChatMessageSubmission(args: {
   chatStarted: boolean;
   streamStatus: StreamStatus;
   runtimeSupported: boolean;
-  initializeChat: () => Promise<boolean>;
+  initializeChat: () => Promise<{ created: boolean }>;
+  discardEmptyChat: () => Promise<void>;
   sendChatMessage: (
     message: { text: string },
     options?: { body?: { turnContext?: ChatTurnContext } },
+    onRequestStart?: () => void,
   ) => Promise<unknown>;
   enableAutoScroll: () => void;
   onAbort: () => void;
   onStartChat: () => void | Promise<void>;
+  onBuilderRequestStart: () => void;
   pendingMessage: string | null;
   clearPendingMessage: () => void;
 }) {
@@ -66,11 +69,21 @@ export function useChatMessageSubmission(args: {
     try {
       setSendMessageInProgress(true);
       args.enableAutoScroll();
-      if (!(await args.initializeChat())) {
-        return false;
-      }
-      await args.onStartChat();
-      await submitMessage(args.messages, args.contextManager, messageInput, args.chatStarted, args.sendChatMessage);
+      await runChatSubmissionLifecycle({
+        initializeChat: args.initializeChat,
+        discardEmptyChat: args.discardEmptyChat,
+        onStartChat: args.onStartChat,
+        onBuilderRequestStart: args.onBuilderRequestStart,
+        submit: (onRequestStart) =>
+          submitMessage(
+            args.messages,
+            args.contextManager,
+            messageInput,
+            args.chatStarted,
+            args.sendChatMessage,
+            onRequestStart,
+          ),
+      });
       return true;
     } catch (error) {
       logger.error('Failed to submit chat message', error);
@@ -92,25 +105,64 @@ export function useChatMessageSubmission(args: {
   const { pendingMessage, clearPendingMessage } = args;
 
   useEffect(() => {
+    let active = true;
+    const cleanup = () => {
+      active = false;
+    };
     if (!pendingMessage) {
       pendingMessageStarted.current = false;
-      return;
+      return cleanup;
     }
     if (pendingMessageStarted.current) {
-      return;
+      return cleanup;
     }
     pendingMessageStarted.current = true;
-    messageInputStore.set('');
+    if (!messageInputStore.get()) {
+      messageInputStore.set(pendingMessage);
+    }
     void (async () => {
       const sent = await sendMessageRef.current(pendingMessage);
+      if (!active) {
+        return;
+      }
       clearPendingMessage();
-      if (!sent) {
+      if (sent && messageInputStore.get() === pendingMessage) {
+        messageInputStore.set('');
+      } else if (!sent) {
         messageInputStore.set(pendingMessage);
       }
     })();
+    return cleanup;
   }, [clearPendingMessage, pendingMessage]);
 
   return { sendMessage, sendMessageInProgress };
+}
+
+export async function runChatSubmissionLifecycle(args: {
+  initializeChat: () => Promise<{ created: boolean }>;
+  discardEmptyChat: () => Promise<void>;
+  onStartChat: () => void | Promise<void>;
+  onBuilderRequestStart: () => void;
+  submit: (onRequestStart: () => void) => Promise<void>;
+}): Promise<void> {
+  const initializedChat = await args.initializeChat();
+  let builderRequestStarted = false;
+  void args.onStartChat();
+  try {
+    await args.submit(() => {
+      builderRequestStarted = true;
+      args.onBuilderRequestStart();
+    });
+  } catch (error) {
+    if (initializedChat.created && !builderRequestStarted) {
+      try {
+        await args.discardEmptyChat();
+      } catch (discardError) {
+        logger.warn('Failed to discard an empty chat after submission failed', discardError);
+      }
+    }
+    throw error;
+  }
 }
 
 async function submitMessage(
@@ -121,7 +173,9 @@ async function submitMessage(
   sendChatMessage: (
     message: { text: string },
     options?: { body?: { turnContext?: ChatTurnContext } },
+    onRequestStart?: () => void,
   ) => Promise<unknown>,
+  onRequestStart: () => void,
 ): Promise<void> {
   const id = `${Date.now()}`;
   const modifiedFiles = chatStarted ? workbenchStore.getModifiedFiles() : undefined;
@@ -134,7 +188,7 @@ async function submitMessage(
 
   workbenchStore.startActionTurn();
   chatStore.setKey('aborted', false);
-  await sendChatMessage({ text: messageInput }, { body: { turnContext } });
+  await sendChatMessage({ text: messageInput }, { body: { turnContext } }, onRequestStart);
   if (modifiedFiles) {
     workbenchStore.resetAllFileModifications();
   }

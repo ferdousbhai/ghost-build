@@ -44,11 +44,11 @@ export type SocialShare = {
 };
 
 type DataOperationResults = {
-  'messages.claimGuestSession': null;
   'messages.earliestRewindableMessageRank': number | null;
   'messages.get': ChatSummary | null;
   'messages.getAll': ChatHistorySummary[];
-  'messages.initializeChat': null;
+  'messages.initializeChat': { created: boolean };
+  'messages.discardEmptyChat': null;
   'messages.remove': { kind: 'success' };
   'messages.rewindChat': null;
   'messages.setDescription': null;
@@ -71,11 +71,11 @@ type DataApiNamespace = Record<string, DataOperationPath>;
 
 export const api = {
   messages: {
-    claimGuestSession: 'messages.claimGuestSession',
     earliestRewindableMessageRank: 'messages.earliestRewindableMessageRank',
     get: 'messages.get',
     getAll: 'messages.getAll',
     initializeChat: 'messages.initializeChat',
+    discardEmptyChat: 'messages.discardEmptyChat',
     remove: 'messages.remove',
     rewindChat: 'messages.rewindChat',
     setDescription: 'messages.setDescription',

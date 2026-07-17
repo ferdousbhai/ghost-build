@@ -12,8 +12,6 @@ describe('CloudflareOAuthOrchestrator', () => {
   test('starts authorization code + PKCE with server-owned state and no secret in the browser URL', async () => {
     const orchestrator = new CloudflareOAuthOrchestrator(config);
     const result = await orchestrator.startConnection({
-      userId: 'user-1',
-      userEmail: 'person@example.com',
       returnUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001',
       requestedCapabilities: ['workers', 'd1', 'r2', 'durable_objects', 'workers_ai'],
     });
@@ -37,8 +35,6 @@ describe('CloudflareOAuthOrchestrator', () => {
     });
     await expect(
       orchestrator.startConnection({
-        userId: 'user-1',
-        userEmail: 'person@example.com',
         returnUrl:
           'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001',
         requestedCapabilities: ['workers'],
@@ -52,11 +48,17 @@ describe('CloudflareOAuthOrchestrator', () => {
       .mockResolvedValueOnce(
         Response.json({ access_token: 'oauth-access-token', refresh_token: 'oauth-refresh-token', expires_in: 3600 }),
       )
+      .mockResolvedValueOnce(
+        Response.json({
+          sub: 'cf-user-1',
+          email: 'person@example.com',
+          name: 'Person',
+          picture: 'https://example.com/p.png',
+        }),
+      )
       .mockResolvedValueOnce(Response.json({ success: true, result: [{ id: 'account-1', name: 'User account' }] }));
     const orchestrator = new CloudflareOAuthOrchestrator(config, request);
     const challenge = await orchestrator.startConnection({
-      userId: 'user-1',
-      userEmail: 'person@example.com',
       returnUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001',
       requestedCapabilities: ['workers', 'd1', 'r2', 'durable_objects', 'workers_ai'],
     });
@@ -67,6 +69,12 @@ describe('CloudflareOAuthOrchestrator', () => {
           'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001&code=code-1',
       }),
     ).resolves.toEqual({
+      user: {
+        subject: 'cf-user-1',
+        email: 'person@example.com',
+        name: 'Person',
+        picture: 'https://example.com/p.png',
+      },
       accountId: 'account-1',
       accountName: 'User account',
       accessToken: 'oauth-access-token',
@@ -83,11 +91,11 @@ describe('CloudflareOAuthOrchestrator', () => {
       }),
     );
     expect(request).toHaveBeenNthCalledWith(
-      2,
+      3,
       'https://api.cloudflare.com/client/v4/accounts?per_page=2',
       expect.objectContaining({ headers: { authorization: 'Bearer oauth-access-token' } }),
     );
-    expect(request.mock.contexts).toEqual([undefined, undefined]);
+    expect(request.mock.contexts).toEqual([undefined, undefined, undefined]);
   });
 
   test('rejects multiple-account grants instead of guessing which account pays', async () => {
@@ -96,11 +104,10 @@ describe('CloudflareOAuthOrchestrator', () => {
       .mockResolvedValueOnce(
         Response.json({ access_token: 'oauth-access-token', refresh_token: 'oauth-refresh-token' }),
       )
+      .mockResolvedValueOnce(Response.json({ sub: 'cf-user-1' }))
       .mockResolvedValueOnce(Response.json({ success: true, result: [{ id: 'one' }, { id: 'two' }] }));
     const orchestrator = new CloudflareOAuthOrchestrator(config, request);
     const challenge = await orchestrator.startConnection({
-      userId: 'user-1',
-      userEmail: 'person@example.com',
       returnUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001',
       requestedCapabilities: ['workers'],
     });
@@ -116,8 +123,6 @@ describe('CloudflareOAuthOrchestrator', () => {
     const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ access_token: 'oauth-access-token' }));
     const orchestrator = new CloudflareOAuthOrchestrator(config, request);
     const challenge = await orchestrator.startConnection({
-      userId: 'user-1',
-      userEmail: 'person@example.com',
       returnUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001',
       requestedCapabilities: ['workers'],
     });
@@ -127,5 +132,29 @@ describe('CloudflareOAuthOrchestrator', () => {
         callbackUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?code=code-1',
       }),
     ).rejects.toThrow('refresh token');
+  });
+
+  test('does not use an explicitly unverified provider email for account adoption', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({ access_token: 'oauth-access-token', refresh_token: 'oauth-refresh-token' }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ sub: 'cf-user-1', email: 'unverified@example.com', email_verified: false }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ id: 'account-1' }] }));
+    const orchestrator = new CloudflareOAuthOrchestrator(config, request);
+    const challenge = await orchestrator.startConnection({
+      returnUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001',
+      requestedCapabilities: ['workers'],
+    });
+
+    await expect(
+      orchestrator.completeConnection({
+        providerSessionId: challenge.sessionId,
+        callbackUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?code=code-1',
+      }),
+    ).resolves.toMatchObject({ user: { email: null } });
   });
 });

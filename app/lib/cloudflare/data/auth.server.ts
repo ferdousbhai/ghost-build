@@ -1,5 +1,4 @@
-import { getAuth } from '~/lib/.server/auth';
-import { getGuestSessionIdFromCookie, isGuestSessionId } from '~/lib/guest-session';
+import { getAuthSession } from '~/lib/.server/auth';
 
 export class UnauthorizedError extends Error {
   constructor() {
@@ -16,41 +15,10 @@ export function getSessionId(args: unknown): string | null {
 
 export async function requireMatchingSession(env: Env, request: Request, sessionId: string | null): Promise<void> {
   if (!sessionId) {
-    return;
+    throw new UnauthorizedError();
   }
-  if (isGuestSessionId(sessionId)) {
-    requireMatchingGuestSession(request, sessionId);
-    return;
-  }
-
-  const session = await getAuth(env, request).api.getSession({ headers: request.headers });
+  const session = await getAuthSession(env, request);
   if (!session || session.user.id !== sessionId) {
-    throw new UnauthorizedError();
-  }
-}
-
-export async function claimGuestSession(
-  env: Env,
-  args: { guestSessionId: string; sessionId: string },
-  request: Request,
-): Promise<null> {
-  if (!isGuestSessionId(args.guestSessionId)) {
-    throw new UnauthorizedError();
-  }
-  requireMatchingGuestSession(request, args.guestSessionId);
-  if (args.guestSessionId === args.sessionId) {
-    return null;
-  }
-
-  await env.DB.prepare('UPDATE chats SET creator_id = ? WHERE creator_id = ?')
-    .bind(args.sessionId, args.guestSessionId)
-    .run();
-  return null;
-}
-
-function requireMatchingGuestSession(request: Request, sessionId: string): void {
-  const cookieSessionId = getGuestSessionIdFromCookie(request.headers.get('cookie'));
-  if (cookieSessionId !== sessionId) {
     throw new UnauthorizedError();
   }
 }

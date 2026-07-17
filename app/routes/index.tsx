@@ -24,7 +24,7 @@ export const Route = createFileRoute('/')({
   component: Index,
 });
 
-// Home page that lets the user start from a guest session and provide an initial prompt. After
+// The home page preserves the initial prompt while Cloudflare authentication is established. After
 // starting the chat, all of the globals' in-memory state is preserved as it
 // switches to the chat view (we do *not* do a full page reload and go to the
 // chat route). This route is optimized for making the initial experience

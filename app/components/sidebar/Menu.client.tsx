@@ -15,7 +15,6 @@ import { Button } from '@ui/Button';
 import { TextInput } from '@ui/TextInput';
 import { PlusIcon } from '@radix-ui/react-icons';
 import { removeChatHistoryItem, useChatHistory } from '~/lib/cloudflare/chat-history-db';
-import { isGuestSessionId } from '~/lib/guest-session';
 
 const menuVariants = {
   closed: {
@@ -46,7 +45,7 @@ interface MenuProps {
 export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const sessionId = useSessionIdOrNullOrLoading();
-  const accountSessionId = typeof sessionId === 'string' && !isGuestSessionId(sessionId) ? sessionId : null;
+  const accountSessionId = typeof sessionId === 'string' ? sessionId : null;
   const list = useChatHistory(accountSessionId);
   const [deleteTarget, setDeleteTarget] = useState<ChatHistorySummary | null>(null);
 

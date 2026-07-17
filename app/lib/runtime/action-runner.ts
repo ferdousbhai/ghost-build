@@ -13,6 +13,7 @@ import type { ActionRunnerWorkspace, ActionsMap, ActionState, ActionStateUpdate 
 import { toolFailure, type GhostbuildToolResult } from 'ghostbuild-agent/tool-result';
 import { ToolExecutionScheduler } from './action-runner/tool-execution-scheduler';
 import { DiagnosticsStore } from './action-runner/diagnostics-store';
+import { ContainerBootState, waitForContainerBootState } from '~/lib/stores/containerBootState';
 
 export { isActionStatusActive } from './action-runner/types';
 export type { ActionState, ActionStatus } from './action-runner/types';
@@ -43,6 +44,7 @@ export class ActionRunner {
       workspace: ActionRunnerWorkspace;
       diagnostics?: DiagnosticsStore;
       scheduler?: ToolExecutionScheduler;
+      waitForWorkspaceReady?: () => Promise<unknown>;
     },
   ) {
     this.#diagnostics = callbacks.diagnostics ?? new DiagnosticsStore();
@@ -125,6 +127,7 @@ export class ActionRunner {
 
     try {
       if (action.type === 'file') {
+        await this.waitForWorkspaceReady();
         await runStreamedFileAction(action, await this.webcontainer, this.callbacks.workspace);
         this.#lastSuccessfulToolCallKey = null;
       } else if (action.type === 'toolUse') {
@@ -168,6 +171,7 @@ export class ActionRunner {
     }
 
     try {
+      await this.waitForWorkspaceReady();
       const result = await this.#scheduler.run(invocation.toolName, async () =>
         executeTool({
           invocation,
@@ -208,6 +212,10 @@ export class ActionRunner {
       }
       throw error;
     }
+  }
+
+  private waitForWorkspaceReady(): Promise<unknown> {
+    return this.callbacks.waitForWorkspaceReady?.() ?? waitForContainerBootState(ContainerBootState.READY);
   }
 }
 

@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
 import { showWorkersPaidRequiredToast } from '~/lib/workers-paid.client';
 import { captureException } from '~/lib/telemetry.client';
-import { signInWithGoogle } from '~/lib/auth-client';
+import { signInWithCloudflare } from '~/lib/auth-client';
 import { messageInputStore } from '~/lib/stores/messageInput';
 import { getAuthToken } from '~/lib/stores/sessionId';
 import { debounce } from '~/utils/debounce';
@@ -90,20 +90,11 @@ export function useMessageInputController({
       });
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as {
-          code?: 'ghostbuild_allowance_exhausted' | 'workers_paid_required';
+          code?: 'workers_paid_required';
           error?: string;
         } | null;
         if (payload?.code === 'workers_paid_required' || payload?.error?.includes(WORKERS_PAID_REQUIRED_MARKER)) {
           showWorkersPaidRequiredToast();
-          return;
-        }
-        if (payload?.code === 'ghostbuild_allowance_exhausted') {
-          toast.warning(payload.error ?? "Today's free Ghostbuild AI allowance has been used.", {
-            action: {
-              label: 'Connect Cloudflare',
-              onClick: () => window.location.assign('/settings#cloudflare'),
-            },
-          });
           return;
         }
         throw new Error(payload?.error || 'Failed to enhance prompt. Please try again.');
@@ -120,6 +111,11 @@ export function useMessageInputController({
     }
   }, [input]);
 
+  const signIn = useCallback(async () => {
+    preservePromptForAuthentication(input);
+    await signInWithCloudflare();
+  }, [input]);
+
   return {
     authState,
     enhancePrompt,
@@ -128,13 +124,21 @@ export function useMessageInputController({
     handleKeyDown,
     input,
     isEnhancing,
-    signIn: signInWithGoogle,
+    signIn,
   };
 }
 
 const cachePrompt = debounce(function cachePrompt(prompt: string) {
   Cookies.set(PROMPT_COOKIE_KEY, prompt.trim(), { expires: 30 });
 }, 1000);
+
+export function preservePromptForAuthentication(input: string): void {
+  cachePrompt.cancel();
+  const prompt = input.trim();
+  if (prompt) {
+    Cookies.set(PROMPT_COOKIE_KEY, prompt, { expires: 30 });
+  }
+}
 
 export async function submitMessageInput(
   input: string,

@@ -29,9 +29,8 @@ Pushing to `main` also runs the production deploy workflow, which verifies the a
 
 Production is served from `https://ghostbuild.dev`; the temporary `workers.dev` endpoint is disabled. The Worker sends `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` on app navigation responses so supported desktop browsers can start the WebContainer runtime.
 
-The Worker runtime uses the bindings declared in `wrangler.jsonc`:
+The Ghostbuild Worker runtime uses the bindings declared in `wrangler.jsonc`:
 
-- `AI` for Workers AI
 - `DB` for D1 persistence
 - `APP_STORAGE` for R2 snapshots, chat history, and share thumbnails
 - `BuilderAgent` for Cloudflare Agents
@@ -45,7 +44,9 @@ The production deploy preflight fails until provisioning has replaced the placeh
 
 ### Generated App Deployment And Billing
 
-Ghostbuild's own deployment credentials are never used to publish a user's generated project. For signed-in users,
+Cloudflare OAuth is the only Ghostbuild authentication method. Users must authorize exactly one Cloudflare account
+before chat, prompt enhancement, workspace startup, or deployment can begin. Ghostbuild's own deployment credentials
+are never used to publish a user's generated project. For authenticated users,
 the browser uploads an immutable secret-excluding ZIP source snapshot and asks the root Worker to prepare
 an exact Cloudflare resource plan. The plan always identifies the user's connected Cloudflare account as the billing
 source for the Worker, D1, R2, Durable Object, and Workers AI. The user must approve the plan digest in the chat before
@@ -68,7 +69,10 @@ Only Workers AI models are supported. The coding-agent model is:
 @cf/zai-org/glm-5.2
 ```
 
-The app uses the Cloudflare `AI` binding at runtime and does not need model-provider API keys. Use Wrangler OAuth for local production deploys, or configure `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as GitHub Actions deploy secrets for CI authentication. Better Auth/Google secrets and optional commit metadata should be configured as Cloudflare bindings. The app does not support non-Workers-AI provider keys.
+Builder inference uses the OAuth-selected user's Cloudflare account through the Workers AI REST API. The root Worker has
+no Workers AI binding and there is no Ghostbuild-funded inference fallback. Use Wrangler OAuth for local production
+deploys, or configure `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as GitHub Actions deploy secrets for CI
+authentication. The app does not support Google login, Better Auth, or non-Workers-AI provider keys.
 
 The app tracks the latest AI SDK v6 peer line because the current Cloudflare Agents SDK, `@cloudflare/ai-chat`, and `workers-ai-provider` releases declare AI SDK v6 as their supported integration surface.
 

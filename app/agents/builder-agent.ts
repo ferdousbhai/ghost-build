@@ -53,9 +53,8 @@ export type BuilderAgentState = {
 type ChatBody = Partial<ChatRequestBody> & { transcript?: unknown };
 
 type BuilderAgentProps = {
-  billingSubjectKey: string;
   ownerId: string;
-  userId?: string;
+  userId: string;
 };
 
 export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAgentProps> {
@@ -83,13 +82,11 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
 
   private readonly turnStore = new BuilderTurnStore(this);
   private readonly contextCompaction = new DurableObjectContextCompactionRepository(this);
-  private billingSubjectKey: string | null = null;
   private ownerId: string | null = null;
-  private userId: string | undefined;
+  private userId: string | null = null;
   async onStart(props?: BuilderAgentProps) {
-    this.billingSubjectKey = props?.billingSubjectKey ?? null;
     this.ownerId = props?.ownerId ?? null;
-    this.userId = props?.userId;
+    this.userId = props?.userId ?? null;
     this.turnStore.initialize();
     this.contextCompaction.initialize();
   }
@@ -132,7 +129,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     _onFinish?: unknown,
     options?: { requestId?: string; body?: Record<string, unknown>; continuation?: boolean; abortSignal?: AbortSignal },
   ) {
-    if (!this.billingSubjectKey) {
+    if (!this.ownerId || !this.userId) {
       throw new Response('Agent authentication is required.', { status: 401 });
     }
     const body = (options?.body ?? {}) as ChatBody;
@@ -193,12 +190,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       const accountCredentials = await getUserWorkersAiCredentials(this.env, this.userId);
       if (firstPrompt) {
         this.ctx.waitUntil(
-          this.generateInitialProjectTitle(
-            chatInitialId,
-            messageText(firstPrompt),
-            accountCredentials,
-            this.billingSubjectKey,
-          ),
+          this.generateInitialProjectTitle(chatInitialId, messageText(firstPrompt), accountCredentials),
         );
       }
       this.stashTurn(turn);
@@ -207,13 +199,11 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         abortSignal: options?.abortSignal,
         firstUserMessage,
         turnContext,
-        billingSubjectKey: this.billingSubjectKey,
         accountCredentials,
         sessionAffinity: await createWorkersAiSessionAffinity(transcript),
         compaction: {
           current: this.contextCompaction.getCompaction(),
-          summarize: (prompt) =>
-            summarizeBuilderContext(this.env, prompt, accountCredentials, this.billingSubjectKey ?? undefined),
+          summarize: (prompt) => summarizeBuilderContext(this.env, prompt, accountCredentials),
           save: (compaction) => this.contextCompaction.saveCompaction(compaction),
         },
         body: {
@@ -353,13 +343,12 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     chatInitialId: string,
     firstPrompt: string,
     accountCredentials: Awaited<ReturnType<typeof getUserWorkersAiCredentials>>,
-    billingSubjectKey: string,
   ): Promise<void> {
     if (!this.ownerId) {
       return;
     }
     try {
-      const title = await generateProjectTitle(this.env, firstPrompt, accountCredentials, billingSubjectKey);
+      const title = await generateProjectTitle(this.env, firstPrompt, accountCredentials);
       if (!title) {
         return;
       }

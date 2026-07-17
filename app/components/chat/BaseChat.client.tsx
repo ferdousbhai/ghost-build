@@ -212,6 +212,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                             isRecovering={isRecovering}
                             currentError={currentError}
                             buildProgress={buildProgress}
+                            submissionPending={sendMessageInProgress}
                             onStop={onStop}
                             resendMessage={resendMessage}
                           />

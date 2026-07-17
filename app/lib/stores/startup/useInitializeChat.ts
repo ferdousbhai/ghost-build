@@ -7,25 +7,31 @@ export function useHomepageInitializeChat(chatId: string, setChatInitialized: (c
   return useCallback(async () => {
     const sessionId = await waitForSessionId('useInitializeChat');
 
-    await executeDataOperation(api.messages.initializeChat, {
+    const result = await executeDataOperation(api.messages.initializeChat, {
       id: chatId,
       sessionId,
     });
     setChatInitialized(true);
-    return true;
+    return result;
   }, [chatId, setChatInitialized]);
 }
 
 export function useExistingInitializeChat(chatId: string) {
   return useCallback(async () => {
     const sessionId = await waitForSessionId('useInitializeChat');
-    await executeDataOperation(api.messages.initializeChat, {
+    return executeDataOperation(api.messages.initializeChat, {
       id: chatId,
       sessionId,
     });
+  }, [chatId]);
+}
 
-    // We don't need to wait for container boot here since we don't mount
-    // the UI until it's fully ready.
-    return true;
+export function useDiscardEmptyChat(chatId: string) {
+  return useCallback(async () => {
+    const sessionId = await waitForSessionId('useDiscardEmptyChat');
+    await executeDataOperation(api.messages.discardEmptyChat, {
+      id: chatId,
+      sessionId,
+    });
   }, [chatId]);
 }

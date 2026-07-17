@@ -19,6 +19,7 @@ interface StreamingIndicatorProps {
   isRecovering?: boolean;
   currentError?: Error;
   buildProgress: BuildProgress | null;
+  submissionPending: boolean;
   onStop: () => void;
   resendMessage: () => void;
 }
@@ -66,14 +67,17 @@ export default function StreamingIndicator(props: StreamingIndicatorProps) {
     streamStatus = 'streaming';
   }
 
-  if (streamStatus === 'ready' && props.numMessages === 0 && props.numSubchats === 1) {
+  if (streamStatus === 'ready' && props.numMessages === 0 && props.numSubchats === 1 && !props.submissionPending) {
     return null;
   }
 
   let icon: React.ReactNode;
   let message: React.ReactNode;
 
-  if (aborted) {
+  if (props.submissionPending && streamStatus === 'ready') {
+    icon = <LoadingIcon />;
+    message = 'Connecting to your builder…';
+  } else if (aborted) {
     icon = <WarningIcon />;
     message = STATUS_MESSAGES.stopped;
   } else {

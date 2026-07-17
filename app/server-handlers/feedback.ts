@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { getAuth } from '~/lib/.server/auth';
+import { getAuthSession } from '~/lib/.server/auth';
 import { getOptionalBinding } from '~/lib/.server/env';
 
 const MAX_SUBMISSIONS_PER_HOUR = 5;
@@ -64,7 +64,7 @@ export async function feedbackAction({ request, env }: { request: Request; env: 
 
 async function getOptionalUserId(env: Env, request: Request): Promise<string | null> {
   try {
-    const session = await getAuth(env, request).api.getSession({ headers: request.headers });
+    const session = await getAuthSession(env, request);
     return session?.user.id ?? null;
   } catch {
     return null;

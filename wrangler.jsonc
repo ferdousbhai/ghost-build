@@ -23,13 +23,10 @@
     },
   },
   "upload_source_maps": true,
-  "ai": {
-    "binding": "AI",
-  },
   // Configure all production string bindings in Cloudflare, not local env files.
   // Deployment credentials are supplied by the CI environment, not as Worker runtime secrets.
-  // Optional dashboard-managed bindings: Better Auth/Google auth secrets,
-  // CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY, and commit SHA metadata.
+  // Dashboard-managed bindings include the Cloudflare OAuth client,
+  // CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY, and optional commit SHA metadata.
   "d1_databases": [
     {
       "binding": "DB",

@@ -14,14 +14,12 @@ export type WorkersAiAccountCredentials = {
 };
 
 export function getProvider(
-  env: Env,
-  accountCredentials?: WorkersAiAccountCredentials,
+  _env: Env,
+  accountCredentials: WorkersAiAccountCredentials,
   modelId = CLOUDFLARE_WORKERS_AI_MODEL,
   settings?: { sessionAffinity?: string },
 ): Provider {
-  const cloudflare = accountCredentials
-    ? createWorkersAI({ accountId: accountCredentials.accountId, apiKey: accountCredentials.apiKey })
-    : createWorkersAI({ binding: env.AI });
+  const cloudflare = createWorkersAI({ accountId: accountCredentials.accountId, apiKey: accountCredentials.apiKey });
 
   return {
     model: cloudflare(modelId, { sessionAffinity: settings?.sessionAffinity }),
