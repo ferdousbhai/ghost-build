@@ -48,4 +48,18 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           packageManager: pnpm
-          command: deploy
+          command: deploy --var COMMIT_SHA:${{ github.sha }}
+
+      - name: Verify live deployment version
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          for attempt in {1..10}; do
+            actual_sha="$(curl --fail --silent --show-error https://ghostbuild.dev/api/version | jq -r '.sha // empty')" || true
+            if [[ "$actual_sha" == "$EXPECTED_SHA" ]]; then
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Expected production SHA $EXPECTED_SHA, received ${actual_sha:-<empty>}." >&2
+          exit 1

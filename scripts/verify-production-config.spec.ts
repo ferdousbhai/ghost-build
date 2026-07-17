@@ -46,7 +46,8 @@ describe('production config workflow verification helpers', () => {
       run: pnpm run typecheck
       run: pnpm run verify:stack
       uses: cloudflare/wrangler-action@v4
-      command: deploy
+      command: deploy --var COMMIT_SHA:\${{ github.sha }}
+      name: Verify live deployment version
     `;
 
     expect(
@@ -54,7 +55,8 @@ describe('production config workflow verification helpers', () => {
         'pnpm run verify:stack',
         'pnpm run typecheck',
         'uses: cloudflare/wrangler-action@v4',
-        'command: deploy',
+        'command: deploy --var COMMIT_SHA:${{ github.sha }}',
+        'name: Verify live deployment version',
       ]),
     ).toEqual(['.github/workflows/deploy.yml must run "pnpm run typecheck" in the production deploy sequence.']);
   });
@@ -67,7 +69,11 @@ describe('production config workflow verification helpers', () => {
         apiToken: \${{ secrets.CLOUDFLARE_API_TOKEN }}
         accountId: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         packageManager: pnpm
-        command: deploy
+        command: deploy --var COMMIT_SHA:\${{ github.sha }}
+      name: Verify live deployment version
+      env:
+        EXPECTED_SHA: \${{ github.sha }}
+      run: curl https://ghostbuild.dev/api/version
     `;
 
     expect(
@@ -76,7 +82,10 @@ describe('production config workflow verification helpers', () => {
         'apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}',
         'accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}',
         'packageManager: pnpm',
-        'command: deploy',
+        'command: deploy --var COMMIT_SHA:${{ github.sha }}',
+        'name: Verify live deployment version',
+        'EXPECTED_SHA: ${{ github.sha }}',
+        'https://ghostbuild.dev/api/version',
       ]),
     ).toEqual([]);
 

@@ -215,7 +215,10 @@ function verifyWorkflows(errors) {
       'apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}',
       'accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}',
       'packageManager: pnpm',
-      'command: deploy',
+      'command: deploy --var COMMIT_SHA:${{ github.sha }}',
+      'name: Verify live deployment version',
+      'EXPECTED_SHA: ${{ github.sha }}',
+      'https://ghostbuild.dev/api/version',
     ]),
     ...findWorkflowSequenceErrors(deploy, '.github/workflows/deploy.yml', [
       'pnpm run validate',
@@ -223,7 +226,8 @@ function verifyWorkflows(errors) {
       'pnpm run verify:production-config',
       'pnpm run d1:migrations:apply:production',
       'uses: cloudflare/wrangler-action@v4',
-      'command: deploy',
+      'command: deploy --var COMMIT_SHA:${{ github.sha }}',
+      'name: Verify live deployment version',
     ]),
   );
   errors.push(
