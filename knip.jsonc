@@ -6,6 +6,12 @@
     ".": {
       "entry": [
         "app/router.tsx",
+        // Test entrypoints are explicit because the repository has separate
+        // Node/jsdom and workerd Vitest configurations.
+        "**/*.test.{ts,tsx}",
+        "**/*.spec.{ts,tsx}",
+        "tests/workerd/**/*.integration.ts",
+        "tests/workerd/server-dependencies.stub.ts",
         "parse-compressed-messages.mjs",
         // manual build processes
         "buildSystemPrompts.ts",

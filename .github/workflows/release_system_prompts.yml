@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.repository == 'ferdousbhai/ghostbuild'
+    if: github.repository == 'ferdousbhai/ghostbuild' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -57,7 +57,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: github.repository == 'ferdousbhai/ghostbuild'
+    if: github.repository == 'ferdousbhai/ghostbuild' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
