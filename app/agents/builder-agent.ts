@@ -44,6 +44,7 @@ import {
   requireBuilderTranscriptIdentity,
   type BuilderTranscriptBinding,
 } from './builder-request-policy';
+import { initializeBuilderAgentSchema } from './builder-agent-schema';
 
 const logger = createScopedLogger('BuilderAgent');
 const STALE_CHAT_RECOVERY_MS = 15 * 60 * 1000;
@@ -94,11 +95,15 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   private ownerId: string | null = null;
   private userId: string | null = null;
   private transcriptBinding: BuilderTranscriptBinding | null = null;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    initializeBuilderAgentSchema(ctx);
+  }
+
   async onStart(props?: BuilderAgentProps) {
     this.ownerId = props?.ownerId ?? null;
     this.userId = props?.userId ?? null;
-    this.turnStore.initialize();
-    this.contextCompaction.initialize();
     this.transcriptBinding = this.ownerId
       ? await loadBuilderTranscriptBinding(this.env.DB, { agentName: this.name, ownerId: this.ownerId })
       : null;

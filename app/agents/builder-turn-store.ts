@@ -50,28 +50,6 @@ type PersistedTurnRow = {
 export class BuilderTurnStore {
   constructor(private readonly db: SqlProvider) {}
 
-  initialize(): void {
-    void this.db.sql`
-      CREATE TABLE IF NOT EXISTS builder_turns (
-        id TEXT PRIMARY KEY,
-        request_id TEXT NOT NULL,
-        chat_initial_id TEXT NOT NULL,
-        status TEXT NOT NULL,
-        started_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        continuation INTEGER NOT NULL,
-        first_user_message INTEGER NOT NULL,
-        message_count INTEGER NOT NULL,
-        last_user_message_preview TEXT,
-        recovery_incident_id TEXT,
-        recovery_attempt INTEGER,
-        recovery_kind TEXT,
-        partial_text_length INTEGER,
-        error TEXT
-      )
-    `;
-  }
-
   record(turn: BuilderTurnState): void {
     void this.db.sql`
       INSERT OR REPLACE INTO builder_turns (

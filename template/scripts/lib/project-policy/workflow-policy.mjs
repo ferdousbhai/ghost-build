@@ -76,7 +76,7 @@ export function findProductionDeployWorkflowErrors(content, label) {
     errors,
     `${label} jobs.deploy.if`,
     job.if,
-    "github.repository == 'ferdousbhai/ghostbuild'",
+    "github.repository == 'ferdousbhai/ghostbuild' && github.ref == 'refs/heads/main'",
   );
   const environmentName = isRecord(job.environment)
     ? job.environment.name
@@ -99,6 +99,10 @@ export function findProductionDeployWorkflowErrors(content, label) {
     runStep("pnpm run verify:production-config"),
     runStep("node scripts/deploy-production.mjs --check", {
       CLOUDFLARE_OAUTH_CLIENT_ID: "${{ vars.CLOUDFLARE_OAUTH_CLIENT_ID }}",
+    }),
+    runStep("pnpm run d1:bookmark:production", {
+      CLOUDFLARE_ACCOUNT_ID: "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
+      CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}",
     }),
     runStep("pnpm run d1:migrations:apply:production", {
       CLOUDFLARE_ACCOUNT_ID: "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
@@ -216,7 +220,7 @@ export function findSystemPromptsReleaseWorkflowErrors(content, label) {
       errors,
       `${label} jobs.${jobName}.if`,
       job.if,
-      "github.repository == 'ferdousbhai/ghostbuild'",
+      "github.repository == 'ferdousbhai/ghostbuild' && github.ref == 'refs/heads/main'",
     );
   }
 

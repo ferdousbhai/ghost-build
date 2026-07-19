@@ -128,6 +128,13 @@ Run the same validation pipeline used by CI before opening a pull request:
 pnpm run validate
 ```
 
+The root validation runs both the fast Node/jsdom unit suite and a workerd-native integration suite. To run only the
+Worker boundary checks—including the real D1 migration chain and local D1, R2, Durable Object, and Wrangler bindings—use:
+
+```bash
+pnpm run test:workerd
+```
+
 Read-only sub-agents are intentionally absent from the production runtime because the paired evaluation did not show a
 quality gain worth the added latency and tokens. To reproduce the fixed explorer/verifier comparison, start its isolated
 remote-dev Worker and POST once to the local URL it prints:

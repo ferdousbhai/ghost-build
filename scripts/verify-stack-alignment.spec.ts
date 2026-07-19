@@ -150,7 +150,7 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
     const toolsPackage = {
       private: true,
       license: 'Apache-2.0',
-      engines: { node: '>=26.0.0' },
+      engines: { node: '>=22.0.0' },
       packageManager: 'pnpm@11.14.0',
       dependencies: { wrangler: '4.112.0', yaml: '2.9.0' },
     };
@@ -203,7 +203,7 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
     expect(findSandboxVersionErrors(pkg, '', { private: true, packageManager: 'pnpm@11.14.0' }, '')).toEqual(
       expect.arrayContaining([
         'sandbox-tools/package.json must declare the repository Apache-2.0 license.',
-        'sandbox-tools/package.json must require the repository Node >=26.0.0 runtime.',
+        'sandbox-tools/package.json must support the pinned Cloudflare Sandbox Node >=22.0.0 runtime.',
       ]),
     );
   });

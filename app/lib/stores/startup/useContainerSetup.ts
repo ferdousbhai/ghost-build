@@ -23,7 +23,7 @@ import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifes
 import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
 import { startupInstallArgs } from './dependency-install-policy';
 
-const TEMPLATE_URL = '/template-snapshot-2194ffa9.bin';
+const TEMPLATE_URL = '/template-snapshot-e37ae4c9.bin';
 const logger = createScopedLogger('ContainerSetup');
 const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)));
 const WEBCONTAINER_BOOT_TIMEOUT_MS = 60_000;

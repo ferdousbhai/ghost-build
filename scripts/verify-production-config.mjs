@@ -51,7 +51,7 @@ const workerTargets = [
     main: 'app/server.ts',
     databaseName: 'ghostbuild',
     bucketName: 'ghostbuild-app-storage',
-    durableObject: 'BuilderAgent',
+    durableObjects: ['BuilderAgent', 'DeploymentSandbox'],
     customDomain: 'ghostbuild.dev',
     allowPlaceholderDatabase: false,
   },
@@ -146,6 +146,24 @@ export function findWorkerGcScheduleErrors(config, label) {
     : [`${label} must schedule the bounded deferred-data GC sweep every 15 minutes.`];
 }
 
+export function findDurableObjectLifecycleErrors(config, label, classNames) {
+  const errors = [];
+  if (Object.hasOwn(config ?? {}, 'migrations')) {
+    errors.push(`${label} must use declarative exports instead of the legacy Durable Object migrations flow.`);
+  }
+  for (const className of classNames) {
+    const binding = config?.durable_objects?.bindings?.find((item) => item?.class_name === className);
+    if (!binding) {
+      errors.push(`${label} must bind the ${className} Durable Object.`);
+    }
+    const lifecycle = config?.exports?.[className];
+    if (lifecycle?.type !== 'durable-object' || lifecycle?.storage !== 'sqlite') {
+      errors.push(`${label} must declare the ${className} Durable Object as a live SQLite export.`);
+    }
+  }
+  return errors;
+}
+
 function verifyWorker(errors, config, target) {
   const label = target.path;
   requireEqual(errors, `${label} name`, config?.name, target.name);
@@ -169,6 +187,7 @@ function verifyWorker(errors, config, target) {
     ...findWorkerRoutingErrors(config, label, target.customDomain),
     ...findWorkerVariableSourceErrors(config, label),
     ...findWorkerGcScheduleErrors(config, label),
+    ...findDurableObjectLifecycleErrors(config, label, target.durableObjects),
     ...findWorkerRuntimeSecretErrors(config, label, 'configure values as Cloudflare bindings'),
   );
   const configuredSecretNames = config?.secrets?.required;
@@ -199,17 +218,6 @@ function verifyWorker(errors, config, target) {
   } else {
     requireEqual(errors, `${label} R2 bucket_name`, r2.bucket_name, target.bucketName);
   }
-
-  const durableObject = config?.durable_objects?.bindings?.find(
-    (binding) => binding?.class_name === target.durableObject,
-  );
-  if (!durableObject) {
-    errors.push(`${label} must bind the ${target.durableObject} Durable Object.`);
-  }
-  const migration = config?.migrations?.some((item) => item?.new_sqlite_classes?.includes(target.durableObject));
-  if (!migration) {
-    errors.push(`${label} must migrate the ${target.durableObject} SQLite Durable Object.`);
-  }
 }
 
 function verifyScripts(errors, pkg, label) {
@@ -220,6 +228,7 @@ function verifyScripts(errors, pkg, label) {
   }
   const requiredNames = [
     'build',
+    'd1:bookmark:production',
     'deploy:production',
     'provision:production',
     'typecheck',
@@ -242,6 +251,7 @@ function verifyScripts(errors, pkg, label) {
       'validate',
       'provision:production',
       'verify:production-config',
+      'd1:bookmark:production',
       'd1:migrations:apply:production',
       'scripts/deploy-production.mjs',
     ]),

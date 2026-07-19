@@ -101,16 +101,16 @@
       },
     ],
   },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["BuilderAgent"],
+  "exports": {
+    "BuilderAgent": {
+      "type": "durable-object",
+      "storage": "sqlite",
     },
-    {
-      "tag": "v2",
-      "new_sqlite_classes": ["DeploymentSandbox"],
+    "DeploymentSandbox": {
+      "type": "durable-object",
+      "storage": "sqlite",
     },
-  ],
+  },
   "vars": {
     "CLOUDFLARE_OAUTH_SCOPES": "openid profile email account-settings.read workers-scripts.write d1.write workers-r2.write ai.read",
     "SANDBOX_TRANSPORT": "rpc",
