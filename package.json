@@ -49,7 +49,7 @@
   },
   "dependencies": {
     "@ai-sdk/provider": "^3.0.13",
-    "@ai-sdk/react": "^3.0.221",
+    "@ai-sdk/react": "^4.0.34",
     "@cloudflare/ai-chat": "^0.9.3",
     "@cloudflare/sandbox": "0.12.3",
     "@codemirror/autocomplete": "^6.20.3",
