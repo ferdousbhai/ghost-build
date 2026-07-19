@@ -1,11 +1,13 @@
-export async function putObject(env: Env, prefix: string, blob: Blob): Promise<string> {
-  const key = `${prefix}/${crypto.randomUUID()}`;
-  await env.APP_STORAGE.put(key, await blob.arrayBuffer(), {
+export function allocateObjectKey(prefix: string): string {
+  return `${prefix}/${crypto.randomUUID()}`;
+}
+
+export async function putObjectAtKey(env: Env, key: string, blob: Blob): Promise<void> {
+  await env.APP_STORAGE.put(key, blob.stream(), {
     httpMetadata: {
       contentType: blob.type || 'application/octet-stream',
     },
   });
-  return key;
 }
 
 export async function deleteObject(env: Env, key: string): Promise<void> {
@@ -20,6 +22,7 @@ export async function objectResponse(env: Env, key: string): Promise<Response> {
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set('etag', object.httpEtag);
+  headers.set('X-Content-Type-Options', 'nosniff');
   return new Response(object.body, { headers });
 }
 

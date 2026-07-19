@@ -1,5 +1,3 @@
-import { getEncoding } from 'istextorbinary';
-import { Buffer } from 'node:buffer';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 
 const logger = createScopedLogger('FileContent');
@@ -9,8 +7,15 @@ export function isBinaryFile(buffer: Uint8Array | undefined): boolean {
   if (buffer === undefined) {
     return false;
   }
-  const nodeBuffer = Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-  return getEncoding(nodeBuffer, { chunkLength: 100 }) === 'binary';
+  if (buffer.some((byte) => byte <= 8)) {
+    return true;
+  }
+  try {
+    utf8TextDecoder.decode(buffer);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 export function decodeFileContent(buffer?: Uint8Array): string {

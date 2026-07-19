@@ -3,6 +3,9 @@ import type { WebContainer } from '@webcontainer/api';
 import { getAuthToken } from '~/lib/stores/sessionId';
 import { waitForContainerBootState } from '~/lib/stores/containerBootState';
 import { runDeploy } from './deploy';
+import { deploymentSnapshotRevision } from './revision';
+import JSZip from 'jszip';
+import { DeploymentValidationStore } from './deployment-validation-store';
 
 vi.mock('~/lib/stores/containerBootState', () => ({
   ContainerBootState: { READY: 'ready' },
@@ -14,8 +17,6 @@ vi.mock('~/lib/stores/sessionId', () => ({
 }));
 
 vi.mock('~/lib/stores/chatId', () => ({ chatIdStore: { get: vi.fn(() => 'chat-1') } }));
-
-const EMPTY_WORKSPACE_REVISION = '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -37,6 +38,7 @@ describe('runDeploy production plan preparation', () => {
         hasFile: vi.fn(),
         setGeneratedFileContent: vi.fn(),
       },
+      deploymentValidation: new DeploymentValidationStore(),
     });
 
     expect(waitForContainerBootState).not.toHaveBeenCalled();
@@ -60,6 +62,7 @@ describe('runDeploy production plan preparation', () => {
           hasFile: vi.fn(),
           setGeneratedFileContent: vi.fn(),
         },
+        deploymentValidation: new DeploymentValidationStore(),
       }),
     ).rejects.toThrow('no deploy in unit test');
 
@@ -67,13 +70,16 @@ describe('runDeploy production plan preparation', () => {
     expect(readFile).not.toHaveBeenCalled();
     expect(exportSnapshot).toHaveBeenCalledWith('.', {
       format: 'zip',
-      excludes: expect.arrayContaining(['node_modules/**', '.env', '.dev.vars']),
+      excludes: expect.arrayContaining(['node_modules/**', '.npmrc', '**/.npmrc', '.env', '.dev.vars']),
     });
   });
 
   test('uploads an immutable snapshot for approval instead of running Wrangler in the browser', async () => {
     vi.mocked(getAuthToken).mockReturnValue('user-session');
-    const exportSnapshot = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]));
+    const snapshot = await zipSnapshot({ 'src/app.ts': 'export const app = true;' });
+    const revision = await deploymentSnapshotRevision(snapshot);
+    const deploymentValidation = validatedRevisionStore(revision);
+    const exportSnapshot = vi.fn().mockResolvedValue(snapshot);
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       Response.json(
         {
@@ -88,7 +94,7 @@ describe('runDeploy production plan preparation', () => {
     );
 
     const result = await runDeploy({
-      invocation: deployInvocation(),
+      invocation: deployInvocation(revision),
       container: { fs: { readFile: vi.fn() }, export: exportSnapshot } as unknown as WebContainer,
       abortSignal: new AbortController().signal,
       workspace: {
@@ -97,11 +103,12 @@ describe('runDeploy production plan preparation', () => {
         hasFile: vi.fn(),
         setGeneratedFileContent: vi.fn(),
       },
+      deploymentValidation,
     });
 
     expect(exportSnapshot).toHaveBeenCalledWith('.', {
       format: 'zip',
-      excludes: expect.arrayContaining(['node_modules/**', 'dist/**', '.env', '.dev.vars']),
+      excludes: expect.arrayContaining(['node_modules/**', 'dist/**', '.npmrc', '**/.npmrc', '.env', '.dev.vars']),
     });
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/deployments/plan?chatId=chat-1',
@@ -111,7 +118,7 @@ describe('runDeploy production plan preparation', () => {
       ok: true,
       data: {
         state: 'awaiting-approval',
-        revision: EMPTY_WORKSPACE_REVISION,
+        revision,
         deployment: {
           id: 'deployment-1',
           planDigest: 'a'.repeat(64),
@@ -123,7 +130,7 @@ describe('runDeploy production plan preparation', () => {
 
   test('refuses to snapshot a workspace revision that was not validated', async () => {
     vi.mocked(getAuthToken).mockReturnValue('user-session');
-    const exportSnapshot = vi.fn();
+    const exportSnapshot = vi.fn().mockResolvedValue(await zipSnapshot({ 'src/app.ts': 'changed' }));
     const result = await runDeploy({
       invocation: deployInvocation('a'.repeat(64)),
       container: { export: exportSnapshot } as unknown as WebContainer,
@@ -134,17 +141,77 @@ describe('runDeploy production plan preparation', () => {
         hasFile: vi.fn(),
         setGeneratedFileContent: vi.fn(),
       },
+      deploymentValidation: validatedRevisionStore('a'.repeat(64)),
     });
-    expect(exportSnapshot).not.toHaveBeenCalled();
+    expect(exportSnapshot).toHaveBeenCalledOnce();
     expect(result).toMatchObject({ ok: false, data: { state: 'validation-stale' } });
+  });
+
+  test('rejects changed binary bytes even when the text-only file map is unchanged', async () => {
+    vi.mocked(getAuthToken).mockReturnValue('user-session');
+    const validatedSnapshot = await zipSnapshot({ 'src/app.ts': 'same', 'public/logo.png': Uint8Array.of(1, 2) });
+    const changedSnapshot = await zipSnapshot({ 'src/app.ts': 'same', 'public/logo.png': Uint8Array.of(1, 3) });
+    const validatedRevision = await deploymentSnapshotRevision(validatedSnapshot);
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const result = await runDeploy({
+      invocation: deployInvocation(validatedRevision),
+      container: { export: vi.fn().mockResolvedValue(changedSnapshot) } as unknown as WebContainer,
+      abortSignal: new AbortController().signal,
+      workspace: {
+        getFiles: () => ({ '/home/project/public/logo.png': { type: 'file', content: '', isBinary: true } }) as never,
+        getPreviewPort: () => undefined,
+        hasFile: vi.fn(),
+        setGeneratedFileContent: vi.fn(),
+      },
+      deploymentValidation: validatedRevisionStore(validatedRevision),
+    });
+    expect(result).toMatchObject({ ok: false, data: { state: 'validation-stale', validatedRevision } });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('rejects a model-supplied current revision without a trusted full-validation receipt', async () => {
+    vi.mocked(getAuthToken).mockReturnValue('user-session');
+    const snapshot = await zipSnapshot({ 'src/app.ts': 'export const app = true;' });
+    const revision = await deploymentSnapshotRevision(snapshot);
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+
+    const result = await runDeploy({
+      invocation: deployInvocation(revision),
+      container: { export: vi.fn().mockResolvedValue(snapshot) } as unknown as WebContainer,
+      abortSignal: new AbortController().signal,
+      workspace: {
+        getFiles: () => ({}),
+        getPreviewPort: () => undefined,
+        hasFile: vi.fn(),
+        setGeneratedFileContent: vi.fn(),
+      },
+      deploymentValidation: new DeploymentValidationStore(),
+    });
+
+    expect(result).toMatchObject({ ok: false, data: { state: 'validation-required', currentRevision: revision } });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
-function deployInvocation(validatedRevision = EMPTY_WORKSPACE_REVISION) {
+function deployInvocation(validatedRevision = 'a'.repeat(64)) {
   return {
     state: 'call' as const,
     toolCallId: 'deploy-1',
     toolName: 'deploy',
     args: { validatedRevision },
   };
+}
+
+async function zipSnapshot(files: Record<string, string | Uint8Array>) {
+  const zip = new JSZip();
+  for (const [filePath, content] of Object.entries(files)) {
+    zip.file(filePath, content);
+  }
+  return zip.generateAsync({ type: 'uint8array' });
+}
+
+function validatedRevisionStore(revision: string): DeploymentValidationStore {
+  const store = new DeploymentValidationStore();
+  store.recordFullValidation(revision);
+  return store;
 }

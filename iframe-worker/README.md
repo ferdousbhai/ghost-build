@@ -1,13 +1,18 @@
-The vite server of the template/snapshot vite app (the initial state of every Ghostbuild app)
-injects code during development only so a Ghostbuild app in an iframe can listen to postMessage
-messages from its parent Ghostbuild window.
+# Preview Frame Helper
 
-The injected code just checks the message is from its parent, then loads this script
-to response to the message.
+`worker.mts` handles the correlated `postMessage` requests Ghostbuild uses to ping a generated-app preview and capture a
+screenshot. It accepts messages only from the frame's parent and replies to the exact requesting origin.
 
-This way we control the script if we ever needed to updated dependencies etc.
+`build.cjs` bundles the helper into `worker.bundled.mjs`. The root Worker serves that committed artifact from
+`https://ghostbuild.dev/scripts/worker.bundled.mjs` with public CORS headers because WebContainer preview origins are
+ephemeral and credentialless.
 
-Updating this script requires a deploy because the script is served from
-https://ghostbuild.dev/scripts/worker.bundled.mjs. The WebContainer _can't_ make requests of localhost,
-so use a proxy if you're updating it live in development. You'll need to add that to vite.config.ts
-server.allowedHosts to use it.
+After changing the source, regenerate and verify the committed bundle from the repository root:
+
+```bash
+pnpm run build:embedded
+pnpm run build:embedded:check
+```
+
+Testing an updated helper against a WebContainer from local development requires an HTTPS URL that the preview can
+reach; WebContainer frames cannot import it from the host's `localhost` directly.

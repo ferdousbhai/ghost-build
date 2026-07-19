@@ -24,6 +24,7 @@ export function ExpandableArtifactCard({
     <div className="artifact flex w-full flex-col overflow-hidden rounded-lg border duration-150">
       <div className="flex">
         <button
+          type="button"
           className="flex w-full items-stretch overflow-hidden bg-bolt-elements-artifacts-background hover:bg-bolt-elements-artifacts-backgroundHover"
           onClick={onOpen}
         >
@@ -40,6 +41,9 @@ export function ExpandableArtifactCard({
             <div className="w-px bg-bolt-elements-artifacts-borderColor" />
             <AnimatePresence>
               <motion.button
+                type="button"
+                aria-label={expanded ? 'Collapse artifact details' : 'Expand artifact details'}
+                aria-expanded={expanded}
                 initial={{ width: 0 }}
                 animate={{ width: 'auto' }}
                 exit={{ width: 0 }}

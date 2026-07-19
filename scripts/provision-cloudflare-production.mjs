@@ -7,6 +7,7 @@ export {
   d1DatabaseName,
   getBinding,
   parseJsonOutput,
+  requireMatchingD1Database,
   r2BucketExists,
   setD1DatabaseId,
 } from '../template/scripts/provision-cloudflare-production.mjs';

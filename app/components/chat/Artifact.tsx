@@ -104,12 +104,13 @@ const ActionList = memo(function ActionList({ actions }: ActionListProps) {
                 <div className={classNames('text-lg', getIconColor(action.status))}>{getStatusIcon(status)}</div>
                 <div>
                   {message}{' '}
-                  <code
-                    className="cursor-pointer rounded-md bg-bolt-elements-artifacts-inlineCode-background px-1.5 py-1 text-bolt-elements-artifacts-inlineCode-text text-bolt-elements-item-contentAccent hover:underline"
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded-md bg-bolt-elements-artifacts-inlineCode-background px-1.5 py-1 font-mono text-bolt-elements-artifacts-inlineCode-text text-bolt-elements-item-contentAccent hover:underline"
                     onClick={() => openArtifactInWorkbench(action.filePath)}
                   >
                     {action.filePath}
-                  </code>
+                  </button>
                 </div>
               </div>
             </motion.li>

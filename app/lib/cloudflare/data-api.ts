@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { dataOperationArgSchemas } from './data-operation-schemas';
 import type { TranscriptIdentity } from 'ghostbuild-agent/transcript';
+import type { ChatHistoryCursor, DataPage, SubchatCursor } from './data-pagination';
 
 type ChatSummary = {
   initialId: string;
@@ -46,7 +47,7 @@ export type SocialShare = {
 type DataOperationResults = {
   'messages.earliestRewindableMessageRank': number | null;
   'messages.get': ChatSummary | null;
-  'messages.getAll': ChatHistorySummary[];
+  'messages.getAll': DataPage<ChatHistorySummary, ChatHistoryCursor>;
   'messages.initializeChat': { created: boolean };
   'messages.discardEmptyChat': null;
   'messages.remove': { kind: 'success' };
@@ -61,7 +62,7 @@ type DataOperationResults = {
   'socialShare.getSocialShare': SocialShare;
   'socialShare.share': string;
   'subchats.create': number;
-  'subchats.get': SubchatSummary[];
+  'subchats.get': DataPage<SubchatSummary, SubchatCursor>;
 };
 
 export type DataOperationPath = keyof typeof dataOperationArgSchemas;

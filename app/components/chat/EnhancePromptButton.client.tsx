@@ -15,7 +15,15 @@ export const EnhancePromptButton = React.memo(function EnhancePromptButton({
   onClick,
 }: EnhancePromptButtonProps) {
   return (
-    <Button variant="neutral" tip={'Enhance your prompt'} disabled={disabled} inline onClick={onClick}>
+    <Button
+      variant="neutral"
+      tip="Enhance your prompt"
+      aria-label={isEnhancing ? 'Enhancing prompt' : 'Enhance prompt'}
+      aria-busy={isEnhancing}
+      disabled={disabled || isEnhancing}
+      inline
+      onClick={onClick}
+    >
       <div className="text-lg">
         {!isEnhancing ? <SparklesIcon className="size-4" /> : <Spinner className="size-4" />}
       </div>

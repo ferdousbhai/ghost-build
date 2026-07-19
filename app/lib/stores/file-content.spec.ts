@@ -12,4 +12,9 @@ describe('file content helpers', () => {
     expect(isBinaryFile(undefined)).toBe(false);
     expect(decodeFileContent(undefined)).toBe('');
   });
+
+  it('detects invalid UTF-8 and binary control bytes', () => {
+    expect(isBinaryFile(Uint8Array.of(0xff, 0xfe))).toBe(true);
+    expect(isBinaryFile(Uint8Array.of(0))).toBe(true);
+  });
 });

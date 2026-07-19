@@ -39,6 +39,9 @@ export function versionResponseErrors({ statusCode, headers, body, expectedSha }
   if (typeof body?.versionId !== 'string' || body.versionId.length === 0) {
     errors.push('missing Worker version ID');
   }
+  if (body?.oauthConfigured !== true) {
+    errors.push('Cloudflare OAuth bindings are incomplete');
+  }
   const cacheControl = headerValue(headers, 'cache-control') ?? '';
   if (
     !cacheControl
@@ -55,8 +58,9 @@ function probeSummary({ label, statusCode, headers, body, errors }) {
   const cfRay = headerValue(headers, 'cf-ray') ?? '<missing>';
   const sha = body?.sha ?? '<empty>';
   const versionId = body?.versionId ?? '<empty>';
+  const oauthConfigured = body?.oauthConfigured === true ? 'ready' : 'incomplete';
   const outcome = errors.length === 0 ? 'ok' : errors.join('; ');
-  return `${label}: ${outcome}; status=${statusCode ?? '<empty>'}; sha=${sha}; version=${versionId}; cf-ray=${cfRay}`;
+  return `${label}: ${outcome}; status=${statusCode ?? '<empty>'}; sha=${sha}; version=${versionId}; oauth=${oauthConfigured}; cf-ray=${cfRay}`;
 }
 
 async function fetchVersion(expectedSha, attempt, fetchImplementation) {

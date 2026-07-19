@@ -1,8 +1,14 @@
 import Cookies from 'js-cookie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { preservePromptForAuthentication, submitMessageInput } from './useMessageInputController';
+import {
+  preservePromptForAuthentication,
+  replacePromptIfUnchanged,
+  submitMessageInput,
+} from './useMessageInputController';
+import { messageInputStore } from '~/lib/stores/messageInput';
 
 afterEach(() => {
+  messageInputStore.set('');
   vi.restoreAllMocks();
 });
 
@@ -34,5 +40,21 @@ describe('preservePromptForAuthentication', () => {
     preservePromptForAuthentication('  A todo app  ');
 
     expect(setCookie).toHaveBeenCalledWith('cachedPrompt', 'A todo app', { expires: 30 });
+  });
+});
+
+describe('replacePromptIfUnchanged', () => {
+  it('does not overwrite input edited while prompt enhancement was in flight', () => {
+    messageInputStore.set('new user input');
+
+    expect(replacePromptIfUnchanged('original input', 'enhanced original')).toBe(false);
+    expect(messageInputStore.get()).toBe('new user input');
+  });
+
+  it('applies the enhancement when the source input is still current', () => {
+    messageInputStore.set('original input');
+
+    expect(replacePromptIfUnchanged('original input', 'enhanced original')).toBe(true);
+    expect(messageInputStore.get()).toBe('enhanced original');
   });
 });

@@ -1,9 +1,15 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, notFound } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
+import { isWebContainerPreviewId, webContainerPreviewUrl } from '~/lib/webcontainer/preview-url';
 
 const PREVIEW_CHANNEL = 'preview-updates';
 
 export const Route = createFileRoute('/webcontainer/preview/$id')({
+  beforeLoad: ({ params }) => {
+    if (!isWebContainerPreviewId(params.id)) {
+      throw notFound();
+    }
+  },
   head: () => ({
     meta: [{ title: 'Preview | Ghostbuild' }],
   }),
@@ -14,7 +20,7 @@ function WebContainerPreview() {
   const { id: previewId } = Route.useParams();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
-  const previewUrl = `https://${previewId}.local-credentialless.webcontainer-api.io`;
+  const previewUrl = webContainerPreviewUrl(previewId);
 
   useEffect(() => {
     // Initialize broadcast channel

@@ -5,6 +5,8 @@ import type { WebContainer } from '@webcontainer/api';
 import { PreviewsStore } from './previews';
 
 const mountedIframes: HTMLIFrameElement[] = [];
+const ONE_PIXEL_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 afterEach(() => {
   for (const iframe of mountedIframes) {
@@ -33,14 +35,35 @@ describe('PreviewsStore screenshots', () => {
       const requestId = (request as { requestId: string }).requestId;
       window.dispatchEvent(
         new MessageEvent('message', {
-          data: { type: 'screenshot', requestId, data: 'data:image/png;base64,test' },
+          data: { type: 'screenshot', requestId, data: ONE_PIXEL_PNG },
           origin: new URL(iframe.src).origin,
           source: contentWindow,
         }),
       );
     });
 
-    await expect(store.requestScreenshot(0)).resolves.toBe('data:image/png;base64,test');
+    await expect(store.requestScreenshot(0)).resolves.toBe(ONE_PIXEL_PNG);
+  });
+
+  it('rejects a correlated screenshot response that is not a PNG data URL', async () => {
+    const { store, contentWindow } = storeWithRespondingIframe('/api/auth/session');
+
+    await expect(store.requestScreenshot(0, 100)).rejects.toThrow('Invalid screenshot response');
+    expect(contentWindow.postMessage).toHaveBeenCalledOnce();
+  });
+
+  it('rejects non-PNG bytes mislabeled as a PNG data URL', async () => {
+    const { store } = storeWithRespondingIframe('data:image/png;base64,dGVzdA==');
+
+    await expect(store.requestScreenshot(0, 100)).rejects.toThrow('Invalid screenshot response');
+  });
+
+  it('rejects a correlated PNG data URL larger than the thumbnail limit', async () => {
+    const oversizedPng = `data:image/png;base64,iVBORw0KGgo${'A'.repeat(7_000_001)}`;
+    const { store, contentWindow } = storeWithRespondingIframe(oversizedPng);
+
+    await expect(store.requestScreenshot(0, 100)).rejects.toThrow('Invalid screenshot response');
+    expect(contentWindow.postMessage).toHaveBeenCalledOnce();
   });
 });
 
@@ -63,6 +86,18 @@ describe('PreviewsStore server state', () => {
     emit('port', 3000, 'close', 'https://preview.example.test');
 
     expect(store.previews.get()).toEqual([]);
+  });
+
+  it('attaches an iframe by stable port identity after the preview list changes', async () => {
+    const { store, emit } = await createEventStore();
+    emit('server-ready', 3000, 'https://first.example.test');
+    emit('server-ready', 4000, 'https://second.example.test');
+    const iframe = createIframe();
+
+    emit('port', 3000, 'close', 'https://first.example.test');
+    store.setPreviewIframe(4000, iframe);
+
+    expect(store.previews.get()).toEqual([{ port: 4000, ready: true, baseUrl: 'https://second.example.test', iframe }]);
   });
 });
 
@@ -104,4 +139,28 @@ function createIframe(): HTMLIFrameElement {
   window.document.body.appendChild(iframe);
   mountedIframes.push(iframe);
   return iframe;
+}
+
+function storeWithRespondingIframe(data: string): {
+  store: PreviewsStore;
+  contentWindow: Window;
+} {
+  const store = createStore();
+  const iframe = createIframe();
+  const contentWindow = iframe.contentWindow;
+  if (!contentWindow) {
+    throw new Error('Expected the test iframe to have a content window');
+  }
+  store.previews.set([{ port: 3000, ready: true, baseUrl: iframe.src, iframe }]);
+  vi.spyOn(contentWindow, 'postMessage').mockImplementation((request) => {
+    const requestId = (request as { requestId: string }).requestId;
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'screenshot', requestId, data },
+        origin: new URL(iframe.src).origin,
+        source: contentWindow,
+      }),
+    );
+  });
+  return { store, contentWindow };
 }

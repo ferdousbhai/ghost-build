@@ -1,5 +1,5 @@
 import { motion, type HTMLMotionProps, type Variants } from 'framer-motion';
-import { lazy, memo, Suspense, type ReactElement, type ReactNode } from 'react';
+import { lazy, memo, Suspense, useEffect, useState, type ReactElement, type ReactNode } from 'react';
 import { IconButton } from '~/components/ui/IconButton';
 import { PanelHeaderButton } from '~/components/ui/PanelHeaderButton';
 import { Slider, type SliderOptions } from '~/components/ui/Slider';
@@ -16,7 +16,6 @@ import { useWorkbenchController } from './useWorkbenchController';
 import { useStore } from '@nanostores/react';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { activeTerminalTabStore } from '~/lib/stores/terminalTabs';
-import useViewport from '~/lib/hooks/useViewport';
 
 interface WorkbenchProps {
   chatStarted?: boolean;
@@ -63,20 +62,26 @@ export const Workbench = memo(function Workbench({
 }: WorkbenchProps) {
   renderLogger.trace('Workbench');
   const showWorkbench = useStore(workbenchStore.showWorkbench);
+  const [hasMountedWorkbench, setHasMountedWorkbench] = useState(showWorkbench);
 
-  if (!chatStarted) {
+  useEffect(() => {
+    if (showWorkbench) {
+      setHasMountedWorkbench(true);
+    }
+  }, [showWorkbench]);
+
+  if (!chatStarted || !hasMountedWorkbench) {
     return null;
   }
 
-  if (isStreaming || !showWorkbench) {
-    return <StreamingWorkbench showWorkbench={showWorkbench} />;
-  }
-
-  return <ReadyWorkbench terminalInitializationOptions={terminalInitializationOptions} />;
+  return <ReadyWorkbench isStreaming={isStreaming} terminalInitializationOptions={terminalInitializationOptions} />;
 });
 
-function ReadyWorkbench({ terminalInitializationOptions }: Pick<WorkbenchProps, 'terminalInitializationOptions'>) {
-  const controller = useWorkbenchController(false);
+function ReadyWorkbench({
+  isStreaming,
+  terminalInitializationOptions,
+}: Pick<WorkbenchProps, 'isStreaming' | 'terminalInitializationOptions'>) {
+  const controller = useWorkbenchController(isStreaming);
   const showTerminal = useStore(workbenchStore.showTerminal);
 
   return (
@@ -86,6 +91,9 @@ function ReadyWorkbench({ terminalInitializationOptions }: Pick<WorkbenchProps, 
       setSelectedView={controller.setSelectedView}
       isSmallViewport={controller.isSmallViewport}
       onClose={controller.close}
+      lockedMessage={
+        isStreaming ? 'Code and preview controls will be available as soon as the current build step finishes.' : null
+      }
       headerActions={
         controller.selectedView === 'code' ? (
           <div className="flex overflow-y-auto">
@@ -111,7 +119,7 @@ function ReadyWorkbench({ terminalInitializationOptions }: Pick<WorkbenchProps, 
         <View {...slidingPosition({ view: 'code', selectedView: controller.selectedView })}>
           <EditorPanel
             editorDocument={controller.currentDocument}
-            isStreaming={false}
+            isStreaming={isStreaming}
             scrollToDocAppend={controller.scrollToDocAppend}
             selectedFile={controller.selectedFile}
             files={controller.files}
@@ -139,31 +147,13 @@ function ReadyWorkbench({ terminalInitializationOptions }: Pick<WorkbenchProps, 
   );
 }
 
-function StreamingWorkbench({ showWorkbench }: { showWorkbench: boolean }) {
-  const selectedView = useStore(workbenchStore.currentView);
-  const isSmallViewport = useViewport(1024);
-
-  return (
-    <WorkbenchFrame
-      visible={showWorkbench}
-      selectedView={selectedView}
-      setSelectedView={(view) => workbenchStore.currentView.set(view)}
-      isSmallViewport={isSmallViewport}
-      onClose={() => workbenchStore.showWorkbench.set(false)}
-    >
-      <div className="text-content-secondary flex size-full items-center justify-center px-6 text-center text-sm">
-        The {selectedView} will be available as soon as the current build step finishes.
-      </div>
-    </WorkbenchFrame>
-  );
-}
-
 function WorkbenchFrame({
   visible,
   selectedView,
   setSelectedView,
   isSmallViewport,
   onClose,
+  lockedMessage,
   headerActions,
   children,
 }: {
@@ -172,6 +162,7 @@ function WorkbenchFrame({
   setSelectedView: (view: WorkbenchViewType) => void;
   isSmallViewport: boolean;
   onClose: () => void;
+  lockedMessage?: ReactNode;
   headerActions?: ReactNode;
   children: ReactNode;
 }) {
@@ -184,36 +175,38 @@ function WorkbenchFrame({
       aria-hidden={!visible}
       inert={!visible}
     >
-      {visible ? (
-        <div
-          className={classNames(
-            'fixed top-[calc(var(--header-height)+1rem)] bottom-four w-[var(--workbench-inner-width)] z-0 transition-[left,width] duration-200 bolt-ease-cubic-bezier',
-            {
-              'w-full': isSmallViewport,
-              'left-0': isSmallViewport,
-              'left-[var(--workbench-left)]': !isSmallViewport,
-            },
-          )}
-        >
-          <div className="absolute inset-0 px-2 lg:px-6">
-            <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border-transparent bg-bolt-elements-background-depth-2 shadow-[0_20px_60px_color-mix(in_srgb,var(--ghost-home-accent-2)_10%,transparent)]">
-              <div className="flex items-center border-b border-border-transparent px-3 py-2.5">
-                <Slider selected={selectedView} options={sliderOptions} setSelected={setSelectedView} />
-                <div className="ml-auto" />
-                {headerActions}
-                <IconButton
-                  icon={<Cross2Icon />}
-                  className="-mr-1"
-                  size="xl"
-                  title="Close workbench"
-                  onClick={onClose}
-                />
+      <div
+        className={classNames(
+          'fixed top-[calc(var(--header-height)+1rem)] bottom-four w-[var(--workbench-inner-width)] z-0 transition-[left,width] duration-200 bolt-ease-cubic-bezier',
+          {
+            invisible: !visible,
+            'w-full': isSmallViewport,
+            'left-0': isSmallViewport,
+            'left-[var(--workbench-left)]': !isSmallViewport,
+          },
+        )}
+      >
+        <div className="absolute inset-0 px-2 lg:px-6">
+          <div className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-border-transparent bg-bolt-elements-background-depth-2 shadow-[0_20px_60px_color-mix(in_srgb,var(--ghost-home-accent-2)_10%,transparent)]">
+            <div className="flex items-center border-b border-border-transparent px-3 py-2.5">
+              <Slider selected={selectedView} options={sliderOptions} setSelected={setSelectedView} />
+              <div className="ml-auto" />
+              <div inert={Boolean(lockedMessage)}>{headerActions}</div>
+              <IconButton icon={<Cross2Icon />} className="-mr-1" size="xl" title="Close workbench" onClick={onClose} />
+            </div>
+            <div className="relative flex-1 overflow-hidden">
+              <div className="size-full" inert={Boolean(lockedMessage)}>
+                {children}
               </div>
-              <div className="relative flex-1 overflow-hidden">{children}</div>
+              {lockedMessage && (
+                <div className="absolute inset-0 z-20 flex items-center justify-center bg-bolt-elements-background-depth-2 px-6 text-center text-sm text-content-secondary">
+                  {lockedMessage}
+                </div>
+              )}
             </div>
           </div>
         </div>
-      ) : null}
+      </div>
     </motion.div>
   );
 }

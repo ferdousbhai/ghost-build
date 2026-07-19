@@ -52,6 +52,7 @@ describe('auth handlers', () => {
 
     expect(response.status).toBe(204);
     expect(response.headers.get('set-cookie')).toContain('Max-Age=0');
+    expect(response.headers.get('cache-control')).toBe('no-store');
     expect(mocks.deleteAuthSession).toHaveBeenCalledWith(env, request);
     expect(mocks.clearAuthSessionCookie).toHaveBeenCalledWith(request);
   });

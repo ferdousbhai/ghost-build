@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import { getAuthSession } from '~/lib/.server/auth';
 import { getOptionalBinding } from '~/lib/.server/env';
+import { InvalidJsonBodyError, PayloadTooLargeError, readJsonBodyWithLimit } from '~/lib/bounded-body';
 
 const MAX_SUBMISSIONS_PER_HOUR = 5;
 const ONE_HOUR_MS = 60 * 60 * 1000;
+const MAX_FEEDBACK_REQUEST_BYTES = 8 * 1024;
 
 const feedbackRequestSchema = z.object({
   category: z.enum(['bug', 'idea', 'ux', 'other']),
@@ -12,7 +14,19 @@ const feedbackRequestSchema = z.object({
 });
 
 export async function feedbackAction({ request, env }: { request: Request; env: Env }): Promise<Response> {
-  const parsed = feedbackRequestSchema.safeParse(await request.json().catch(() => null));
+  let rawBody: unknown;
+  try {
+    rawBody = await readJsonBodyWithLimit(request, MAX_FEEDBACK_REQUEST_BYTES, 'Feedback request');
+  } catch (error) {
+    if (error instanceof PayloadTooLargeError) {
+      return Response.json({ error: error.message }, { status: 413 });
+    }
+    if (error instanceof InvalidJsonBodyError) {
+      return Response.json({ error: 'Please provide valid feedback.' }, { status: 400 });
+    }
+    return Response.json({ error: 'Unable to read feedback right now.' }, { status: 500 });
+  }
+  const parsed = feedbackRequestSchema.safeParse(rawBody);
   if (!parsed.success) {
     return Response.json({ error: 'Please provide valid feedback.' }, { status: 400 });
   }
@@ -21,16 +35,6 @@ export async function feedbackAction({ request, env }: { request: Request; env: 
     const userId = await getOptionalUserId(env, request);
     const sourceKey = userId ? `user:${userId}` : `guest:${await hashSource(request)}`;
     const now = Date.now();
-    const recent = await env.DB.prepare(
-      'SELECT COUNT(*) AS count FROM feedback WHERE source_key = ? AND created_at >= ?',
-    )
-      .bind(sourceKey, now - ONE_HOUR_MS)
-      .first<{ count: number }>();
-
-    if ((recent?.count ?? 0) >= MAX_SUBMISSIONS_PER_HOUR) {
-      return Response.json({ error: 'Too many submissions. Please try again later.' }, { status: 429 });
-    }
-
     const id = crypto.randomUUID();
     const appVersion =
       getOptionalBinding(env, 'WORKERS_CI_COMMIT_SHA') ??
@@ -38,10 +42,13 @@ export async function feedbackAction({ request, env }: { request: Request; env: 
       getOptionalBinding(env, 'GITHUB_SHA') ??
       null;
 
-    await env.DB.prepare(
+    const result = await env.DB.prepare(
       `INSERT INTO feedback
         (id, user_id, category, message, page_path, app_version, status, source_key, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?)`,
+       SELECT ?, ?, ?, ?, ?, ?, 'new', ?, ?
+       WHERE (
+         SELECT COUNT(*) FROM feedback WHERE source_key = ? AND created_at >= ?
+       ) < ?`,
     )
       .bind(
         id,
@@ -52,8 +59,15 @@ export async function feedbackAction({ request, env }: { request: Request; env: 
         appVersion,
         sourceKey,
         now,
+        sourceKey,
+        now - ONE_HOUR_MS,
+        MAX_SUBMISSIONS_PER_HOUR,
       )
       .run();
+
+    if (result.meta.changes !== 1) {
+      return Response.json({ error: 'Too many submissions. Please try again later.' }, { status: 429 });
+    }
 
     return Response.json({ id }, { status: 201 });
   } catch (error) {

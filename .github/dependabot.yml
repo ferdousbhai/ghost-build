@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - /
+      - /ghostbuild-agent
+      - /sandbox-tools
+      - /template
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      monorepo-dependencies:
+        group-by: dependency-name
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-and-patch:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch

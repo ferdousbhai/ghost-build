@@ -2,10 +2,12 @@ import type { CloudflareCredentialResolver } from './account-workers-ai';
 
 const AES_GCM_IV_BYTES = 12;
 const AES_256_KEY_BYTES = 32;
+const OAUTH_REFRESH_TIMEOUT_MS = 30_000;
 
 type CredentialRow = {
   ciphertext_base64: string;
   iv_base64: string;
+  created_at: number;
 };
 
 export class D1CloudflareCredentialVault implements CloudflareCredentialResolver {
@@ -32,14 +34,26 @@ export class D1CloudflareCredentialVault implements CloudflareCredentialResolver
     }
     const encrypted = await this.encrypt(token);
     const handle = crypto.randomUUID();
-    await this.db
-      .prepare(
-        `INSERT INTO cloudflare_credentials
-          (handle, ciphertext_base64, iv_base64, key_version, created_at)
-         VALUES (?, ?, ?, 1, ?)`,
-      )
-      .bind(handle, encrypted.ciphertextBase64, encrypted.ivBase64, now)
-      .run();
+    try {
+      await this.db
+        .prepare(
+          `INSERT INTO cloudflare_credentials
+            (handle, ciphertext_base64, iv_base64, key_version, created_at)
+           VALUES (?, ?, ?, 1, ?)`,
+        )
+        .bind(handle, encrypted.ciphertextBase64, encrypted.ivBase64, now)
+        .run();
+    } catch (error) {
+      const committed = await this.isExactCredentialStored({
+        handle,
+        ...encrypted,
+        createdAt: now,
+        rotatedAt: null,
+      }).catch(() => false);
+      if (!committed) {
+        throw error;
+      }
+    }
     return handle;
   }
 
@@ -51,13 +65,165 @@ export class D1CloudflareCredentialVault implements CloudflareCredentialResolver
   }
 
   async resolve(credentialHandle: string): Promise<string> {
-    const row = await this.db
-      .prepare(`SELECT ciphertext_base64, iv_base64 FROM cloudflare_credentials WHERE handle = ?`)
-      .bind(credentialHandle)
-      .first<CredentialRow>();
+    const row = await this.readCredentialRow(credentialHandle);
     if (!row) {
       throw new Error('Cloudflare credential is unavailable.');
     }
+    const value = await this.decryptCredentialRow(row);
+    const oauthCredential = parseOAuthCredential(value);
+    if (!oauthCredential) {
+      return value;
+    }
+    if (oauthCredential.expiresAt > Date.now() + 60_000) {
+      return oauthCredential.accessToken;
+    }
+    return this.refreshOAuthCredential(credentialHandle, oauthCredential, row);
+  }
+
+  async deleteIfUnreferenced(credentialHandle: string): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        `DELETE FROM cloudflare_credentials
+         WHERE handle = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM cloudflare_connections
+             WHERE credential_handle = ?
+           )`,
+      )
+      .bind(credentialHandle, credentialHandle)
+      .run();
+    return result.meta.changes === 1;
+  }
+
+  private async refreshOAuthCredential(
+    credentialHandle: string,
+    credential: OAuthCredential,
+    stored: CredentialRow,
+  ): Promise<string> {
+    if (!this.oauth) {
+      throw new Error('Cloudflare authorization expired; reconnect Cloudflare.');
+    }
+    const execute = this.oauth.request ?? fetch;
+    let response: Response;
+    try {
+      response = await execute('https://dash.cloudflare.com/oauth2/token', {
+        method: 'POST',
+        headers: {
+          authorization: `Basic ${btoa(`${this.oauth.clientId}:${this.oauth.clientSecret}`)}`,
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: this.oauth.clientId,
+          refresh_token: credential.refreshToken,
+        }),
+        signal: AbortSignal.timeout(OAUTH_REFRESH_TIMEOUT_MS),
+      });
+    } catch (error) {
+      const concurrent = await this.readConcurrentRefresh(credentialHandle, stored).catch(() => null);
+      if (concurrent) {
+        return concurrent;
+      }
+      throw error;
+    }
+    const token = (await response.json().catch(() => null)) as {
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+    } | null;
+    if (!response.ok || !token?.access_token) {
+      const concurrent = await this.readConcurrentRefresh(credentialHandle, stored).catch(() => null);
+      if (concurrent) {
+        return concurrent;
+      }
+      throw new Error('Cloudflare authorization expired; reconnect Cloudflare.');
+    }
+    const refreshed: OAuthCredential = {
+      version: 1,
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token ?? credential.refreshToken,
+      expiresAt: Date.now() + Math.max(0, token.expires_in ?? 3600) * 1_000,
+    };
+    const encrypted = await this.encrypt(JSON.stringify(refreshed));
+    const rotatedAt = Date.now();
+    try {
+      const result = await this.db
+        .prepare(
+          `UPDATE cloudflare_credentials
+           SET ciphertext_base64 = ?, iv_base64 = ?, rotated_at = ?
+           WHERE handle = ? AND ciphertext_base64 = ? AND iv_base64 = ?`,
+        )
+        .bind(
+          encrypted.ciphertextBase64,
+          encrypted.ivBase64,
+          rotatedAt,
+          credentialHandle,
+          stored.ciphertext_base64,
+          stored.iv_base64,
+        )
+        .run();
+      if (result.meta.changes === 1) {
+        return refreshed.accessToken;
+      }
+    } catch (error) {
+      const committed = await this.isExactCredentialStored({
+        handle: credentialHandle,
+        ...encrypted,
+        createdAt: stored.created_at,
+        rotatedAt,
+      }).catch(() => false);
+      if (committed) {
+        return refreshed.accessToken;
+      }
+      const concurrent = await this.readConcurrentRefresh(credentialHandle, stored, encrypted).catch(() => null);
+      if (concurrent) {
+        return concurrent;
+      }
+      throw error;
+    }
+    if (
+      await this.isExactCredentialStored({
+        handle: credentialHandle,
+        ...encrypted,
+        createdAt: stored.created_at,
+        rotatedAt,
+      })
+    ) {
+      return refreshed.accessToken;
+    }
+    const concurrent = await this.readConcurrentRefresh(credentialHandle, stored, encrypted).catch(() => null);
+    if (concurrent) {
+      return concurrent;
+    }
+    throw new Error('Cloudflare credential changed while its OAuth token was being refreshed.');
+  }
+
+  private async readConcurrentRefresh(
+    credentialHandle: string,
+    previous: CredentialRow,
+    rejected?: { ciphertextBase64: string; ivBase64: string },
+  ): Promise<string | null> {
+    const current = await this.readCredentialRow(credentialHandle);
+    if (
+      !current ||
+      current.created_at !== previous.created_at ||
+      (current.ciphertext_base64 === previous.ciphertext_base64 && current.iv_base64 === previous.iv_base64) ||
+      (rejected && current.ciphertext_base64 === rejected.ciphertextBase64 && current.iv_base64 === rejected.ivBase64)
+    ) {
+      return null;
+    }
+    const credential = parseOAuthCredential(await this.decryptCredentialRow(current));
+    return credential && credential.expiresAt > Date.now() + 60_000 ? credential.accessToken : null;
+  }
+
+  private async readCredentialRow(credentialHandle: string): Promise<CredentialRow | null> {
+    return this.db
+      .prepare(`SELECT ciphertext_base64, iv_base64, created_at FROM cloudflare_credentials WHERE handle = ?`)
+      .bind(credentialHandle)
+      .first<CredentialRow>();
+  }
+
+  private async decryptCredentialRow(row: CredentialRow): Promise<string> {
     const key = await importEncryptionKey(this.encryptionKeyBase64, ['decrypt']);
     let plaintext: ArrayBuffer;
     try {
@@ -69,61 +235,32 @@ export class D1CloudflareCredentialVault implements CloudflareCredentialResolver
     } catch {
       throw new Error('Cloudflare credential could not be decrypted.');
     }
-    const value = new TextDecoder().decode(plaintext);
-    const oauthCredential = parseOAuthCredential(value);
-    if (!oauthCredential) {
-      return value;
-    }
-    if (oauthCredential.expiresAt > Date.now() + 60_000) {
-      return oauthCredential.accessToken;
-    }
-    return this.refreshOAuthCredential(credentialHandle, oauthCredential);
+    return new TextDecoder().decode(plaintext);
   }
 
-  async delete(credentialHandle: string): Promise<void> {
-    await this.db.prepare('DELETE FROM cloudflare_credentials WHERE handle = ?').bind(credentialHandle).run();
-  }
-
-  private async refreshOAuthCredential(credentialHandle: string, credential: OAuthCredential): Promise<string> {
-    if (!this.oauth) {
-      throw new Error('Cloudflare authorization expired; reconnect Cloudflare.');
-    }
-    const execute = this.oauth.request ?? fetch;
-    const response = await execute('https://dash.cloudflare.com/oauth2/token', {
-      method: 'POST',
-      headers: {
-        authorization: `Basic ${btoa(`${this.oauth.clientId}:${this.oauth.clientSecret}`)}`,
-        'content-type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: this.oauth.clientId,
-        refresh_token: credential.refreshToken,
-      }),
-    });
-    const token = (await response.json().catch(() => null)) as {
-      access_token?: string;
-      refresh_token?: string;
-      expires_in?: number;
-    } | null;
-    if (!response.ok || !token?.access_token) {
-      throw new Error('Cloudflare authorization expired; reconnect Cloudflare.');
-    }
-    const refreshed: OAuthCredential = {
-      version: 1,
-      accessToken: token.access_token,
-      refreshToken: token.refresh_token ?? credential.refreshToken,
-      expiresAt: Date.now() + Math.max(0, token.expires_in ?? 3600) * 1_000,
-    };
-    const encrypted = await this.encrypt(JSON.stringify(refreshed));
-    await this.db
+  private async isExactCredentialStored(expected: {
+    handle: string;
+    ciphertextBase64: string;
+    ivBase64: string;
+    createdAt?: number;
+    rotatedAt: number | null;
+  }): Promise<boolean> {
+    const createdAtClause = expected.createdAt === undefined ? '' : ' AND created_at = ?';
+    const row = await this.db
       .prepare(
-        `UPDATE cloudflare_credentials
-         SET ciphertext_base64 = ?, iv_base64 = ?, rotated_at = ? WHERE handle = ?`,
+        `SELECT 1 AS found FROM cloudflare_credentials
+         WHERE handle = ? AND ciphertext_base64 = ? AND iv_base64 = ? AND key_version = 1
+           AND rotated_at IS ?${createdAtClause}`,
       )
-      .bind(encrypted.ciphertextBase64, encrypted.ivBase64, Date.now(), credentialHandle)
-      .run();
-    return refreshed.accessToken;
+      .bind(
+        expected.handle,
+        expected.ciphertextBase64,
+        expected.ivBase64,
+        expected.rotatedAt,
+        ...(expected.createdAt === undefined ? [] : [expected.createdAt]),
+      )
+      .first<{ found: number }>();
+    return row?.found === 1;
   }
 
   private async encrypt(value: string): Promise<{ ciphertextBase64: string; ivBase64: string }> {
@@ -146,8 +283,11 @@ function parseOAuthCredential(value: string): OAuthCredential | null {
     const parsed = JSON.parse(value) as Partial<OAuthCredential>;
     return parsed.version === 1 &&
       typeof parsed.accessToken === 'string' &&
+      parsed.accessToken.length > 0 &&
       typeof parsed.refreshToken === 'string' &&
-      typeof parsed.expiresAt === 'number'
+      parsed.refreshToken.length > 0 &&
+      typeof parsed.expiresAt === 'number' &&
+      Number.isFinite(parsed.expiresAt)
       ? (parsed as OAuthCredential)
       : null;
   } catch {

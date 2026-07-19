@@ -89,10 +89,7 @@ export function useChatMessageSubmission(args: {
       logger.error('Failed to submit chat message', error);
       const message = error instanceof Error ? error.message : 'Ghostbuild could not start building. Please try again.';
       toast.error(message);
-      captureMessage(`Failed to submit chat message: ${message}`, {
-        level: 'error',
-        extra: { error },
-      });
+      captureMessage('Failed to submit chat message', { level: 'error' });
       return false;
     } finally {
       setSendMessageInProgress(false);
@@ -147,7 +144,11 @@ export async function runChatSubmissionLifecycle(args: {
 }): Promise<void> {
   const initializedChat = await args.initializeChat();
   let builderRequestStarted = false;
-  void args.onStartChat();
+  try {
+    void Promise.resolve(args.onStartChat()).catch((error) => logger.warn('Chat transition failed', error));
+  } catch (error) {
+    logger.warn('Chat transition failed', error);
+  }
   try {
     await args.submit(() => {
       builderRequestStarted = true;

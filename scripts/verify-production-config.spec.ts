@@ -1,13 +1,20 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  findForbiddenWorkflowCommandErrors,
+  findBuildApprovalErrors,
+  findCiWorkflowErrors,
+  findCompositeActionSafetyErrors,
   findMissingProvisionScriptPatternErrors,
-  findMissingWorkflowTextErrors,
+  findProductionDeployWorkflowErrors,
+  findSystemPromptsReleaseWorkflowErrors,
   findWorkerObservabilityErrors,
+  findWorkerOAuthStartRateLimitErrors,
+  findWorkerGcScheduleErrors,
   findWorkerRoutingErrors,
   findWorkerRuntimeSecretErrors,
-  findWorkflowSequenceErrors,
+  findWorkerTelemetryRateLimitErrors,
+  findWorkerVariableSourceErrors,
+  findWorkflowSafetyErrors,
   verifyProductionConfig,
   workflowPathsFromDirectoryEntries,
 } from './verify-production-config.mjs';
@@ -34,97 +41,342 @@ describe('findWorkerRoutingErrors', () => {
   });
 });
 
-describe('production config workflow verification helpers', () => {
-  it('reports missing required workflow text', () => {
+describe('findWorkerVariableSourceErrors', () => {
+  it('keeps deploy-provided variables out of checked-in Wrangler state', () => {
+    expect(findWorkerVariableSourceErrors({ vars: { STATIC_VALUE: 'ok' } }, 'wrangler.jsonc')).toEqual([]);
     expect(
-      findMissingWorkflowTextErrors('name: Deploy', '.github/workflows/deploy.yml', ['name: Production Deploy']),
-    ).toEqual(['.github/workflows/deploy.yml must contain "name: Production Deploy".']);
+      findWorkerVariableSourceErrors(
+        { keep_vars: true, vars: { CLOUDFLARE_OAUTH_CLIENT_ID: 'dashboard-dependent' } },
+        'wrangler.jsonc',
+      ),
+    ).toEqual([
+      'wrangler.jsonc must omit keep_vars so checked-in config and deploy arguments remain the source of truth.',
+      'wrangler.jsonc must not commit CLOUDFLARE_OAUTH_CLIENT_ID; inject it from the deploy environment.',
+    ]);
   });
+});
 
-  it('requires production deploy commands in order', () => {
-    const workflow = `
-      run: pnpm run typecheck
-      run: pnpm run verify:stack
-      uses: cloudflare/wrangler-action@v4
-      command: deploy --var COMMIT_SHA:\${{ github.sha }}
-      name: Verify live deployment stabilization
-      run: node scripts/verify-live-deployment.mjs local
-      name: Verify deployment from multiple regions
-      run: node scripts/verify-live-deployment.mjs global
-    `;
-
-    expect(
-      findWorkflowSequenceErrors(workflow, '.github/workflows/deploy.yml', [
-        'pnpm run verify:stack',
-        'pnpm run typecheck',
-        'uses: cloudflare/wrangler-action@v4',
-        'command: deploy --var COMMIT_SHA:${{ github.sha }}',
-        'name: Verify live deployment stabilization',
-        'node scripts/verify-live-deployment.mjs local',
-        'name: Verify deployment from multiple regions',
-        'node scripts/verify-live-deployment.mjs global',
-      ]),
-    ).toEqual(['.github/workflows/deploy.yml must run "pnpm run typecheck" in the production deploy sequence.']);
+describe('findWorkerGcScheduleErrors', () => {
+  it('requires the bounded deferred-data sweep cron', () => {
+    expect(findWorkerGcScheduleErrors({ triggers: { crons: ['*/15 * * * *'] } }, 'wrangler.jsonc')).toEqual([]);
+    expect(findWorkerGcScheduleErrors({}, 'wrangler.jsonc')).toEqual([
+      'wrangler.jsonc must schedule the bounded deferred-data GC sweep every 15 minutes.',
+    ]);
   });
+});
 
-  it('requires the official Cloudflare Wrangler action for production deploys', () => {
-    const workflow = `
-      name: Production Deploy
-      uses: cloudflare/wrangler-action@v4
-      with:
-        apiToken: \${{ secrets.CLOUDFLARE_API_TOKEN }}
-        accountId: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        packageManager: pnpm
-        command: deploy --var COMMIT_SHA:\${{ github.sha }}
-      name: Verify live deployment stabilization
-      env:
-        EXPECTED_SHA: \${{ github.sha }}
-      run: node scripts/verify-live-deployment.mjs local
-      name: Verify deployment from multiple regions
-      run: node scripts/verify-live-deployment.mjs global
-    `;
-
+describe('findWorkerTelemetryRateLimitErrors', () => {
+  it('requires a dedicated 30-per-minute binding', () => {
     expect(
-      findMissingWorkflowTextErrors(workflow, '.github/workflows/deploy.yml', [
-        'uses: cloudflare/wrangler-action@v4',
-        'apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}',
-        'accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}',
-        'packageManager: pnpm',
-        'command: deploy --var COMMIT_SHA:${{ github.sha }}',
-        'name: Verify live deployment stabilization',
-        'node scripts/verify-live-deployment.mjs local',
-        'name: Verify deployment from multiple regions',
-        'node scripts/verify-live-deployment.mjs global',
-        'EXPECTED_SHA: ${{ github.sha }}',
-      ]),
+      findWorkerTelemetryRateLimitErrors(
+        {
+          ratelimits: [
+            {
+              name: 'CLIENT_TELEMETRY_RATE_LIMITER',
+              namespace_id: '1001',
+              simple: { limit: 30, period: 60 },
+            },
+          ],
+        },
+        'wrangler.jsonc',
+      ),
     ).toEqual([]);
+    expect(findWorkerTelemetryRateLimitErrors({}, 'wrangler.jsonc')).toEqual([
+      'wrangler.jsonc must bind CLIENT_TELEMETRY_RATE_LIMITER.',
+    ]);
+  });
+});
 
+describe('findWorkerOAuthStartRateLimitErrors', () => {
+  it('requires a dedicated 10-per-minute namespace', () => {
     expect(
-      findMissingWorkflowTextErrors('run: pnpm wrangler deploy', '.github/workflows/deploy.yml', [
-        'uses: cloudflare/wrangler-action@v4',
+      findWorkerOAuthStartRateLimitErrors(
+        {
+          ratelimits: [
+            {
+              name: 'CLOUDFLARE_OAUTH_START_RATE_LIMITER',
+              namespace_id: '1002',
+              simple: { limit: 10, period: 60 },
+            },
+          ],
+        },
+        'wrangler.jsonc',
+      ),
+    ).toEqual([]);
+    expect(findWorkerOAuthStartRateLimitErrors({}, 'wrangler.jsonc')).toEqual([
+      'wrangler.jsonc must bind CLOUDFLARE_OAUTH_START_RATE_LIMITER.',
+    ]);
+    expect(
+      findWorkerOAuthStartRateLimitErrors(
+        {
+          ratelimits: [
+            {
+              name: 'CLOUDFLARE_OAUTH_START_RATE_LIMITER',
+              namespace_id: '1001',
+              simple: { limit: 30, period: 10 },
+            },
+          ],
+        },
+        'wrangler.jsonc',
+      ),
+    ).toEqual([
+      'wrangler.jsonc OAuth-start rate-limit namespace_id must be "1002"; found "1001".',
+      'wrangler.jsonc OAuth-start rate-limit simple.limit must be 10; found 30.',
+      'wrangler.jsonc OAuth-start rate-limit simple.period must be 60; found 10.',
+    ]);
+  });
+});
+
+describe('production config workflow verification helpers', () => {
+  it('rejects unreviewed dependency build scripts', () => {
+    const workspace = `
+minimumReleaseAge: 0
+minimumReleaseAgeStrict: false
+trustLockfile: true
+minimumReleaseAgeExclude:
+  - unexpected-installer
+strictDepBuilds: true
+allowBuilds:
+  core-js-pure: true
+  esbuild: true
+  sharp: true
+  workerd: true
+  unexpected-installer: true
+dangerouslyAllowAllBuilds: true
+`;
+
+    expect(findBuildApprovalErrors(workspace, 'pnpm-workspace.yaml')).toContain(
+      'pnpm-workspace.yaml allowBuilds must not approve unexpected package unexpected-installer.',
+    );
+    expect(findBuildApprovalErrors(workspace, 'pnpm-workspace.yaml')).toContain(
+      'pnpm-workspace.yaml must not define dangerouslyAllowAllBuilds.',
+    );
+    expect(findBuildApprovalErrors(workspace, 'pnpm-workspace.yaml')).toEqual(
+      expect.arrayContaining([
+        'pnpm-workspace.yaml must set minimumReleaseAge to 1440 minutes.',
+        'pnpm-workspace.yaml must enable minimumReleaseAgeStrict.',
+        'pnpm-workspace.yaml must not define trustLockfile.',
+        'pnpm-workspace.yaml must not define minimumReleaseAgeExclude.',
       ]),
-    ).toEqual(['.github/workflows/deploy.yml must contain "uses: cloudflare/wrangler-action@v4".']);
+    );
   });
 
-  it('rejects staging and local dev commands in workflows', () => {
-    const workflow = `
-      run: pnpm run deploy:staging
-      run: pnpm run dev
-      run: wrangler dev
-      run: pnpm wrangler deploy --env-file .env.production
-      run: source .dev.vars
-    `;
+  it.each([
+    '"trustLockfile": true',
+    "'minimumReleaseAgeExclude': [malicious-package]",
+    '"dangerouslyAllow\\u0041llBuilds": true',
+    '"trustLock\\u0066ile": true',
+    '"minimumReleaseAge\\u0045xclude": [malicious-package]',
+    'minimumReleaseAge: 1440\nminimumReleaseAge: 0',
+    '"minimumRelease\\u0041ge": 0',
+    'minimumReleaseAgeStrict: true\nminimumReleaseAgeStrict: false',
+  ])('rejects ambiguous or quoted dependency-cooling policy: %s', (weakening) => {
+    const workspace = `
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+strictDepBuilds: true
+allowBuilds:
+  core-js-pure: true
+  esbuild: true
+  sharp: true
+  workerd: true
+${weakening}
+`;
 
-    expect(findForbiddenWorkflowCommandErrors(workflow, '.github/workflows/deploy.yml')).toEqual([
-      '.github/workflows/deploy.yml:2 must not target staging.',
-      '.github/workflows/deploy.yml:3 must not start a local package script.',
-      '.github/workflows/deploy.yml:4 must not start Wrangler dev.',
-      '.github/workflows/deploy.yml:5 must not load local env files.',
-      '.github/workflows/deploy.yml:6 must not load local env files.',
+    expect(findBuildApprovalErrors(workspace, 'pnpm-workspace.yaml')).not.toEqual([]);
+  });
+
+  it('rejects workspace policy text larger than 64 KiB before parsing', () => {
+    expect(findBuildApprovalErrors('x'.repeat(64 * 1024 + 1), 'pnpm-workspace.yaml')).toEqual([
+      'pnpm-workspace.yaml must not exceed 65536 UTF-8 bytes.',
     ]);
   });
 
-  it('rejects Worker runtime secrets declared in wrangler config', () => {
+  it('accepts different safe in-tree workspace package shapes', () => {
+    expect(
+      findBuildApprovalErrors(
+        workspacePolicyFixture(['ghostbuild-agent', 'template', 'packages/*', '!packages/legacy/**']),
+        'pnpm-workspace.yaml',
+      ),
+    ).toEqual([]);
+    expect(findBuildApprovalErrors(workspacePolicyFixture(['.']), 'template/pnpm-workspace.yaml')).toEqual([]);
+  });
+
+  it.each([
+    '../outside',
+    'packages/../../outside',
+    '/tmp/package',
+    'https://example.com/package',
+    'file:../outside',
+    'C:\\outside',
+    '\\\\server\\share',
+    '~/.cache/package',
+    '{..,packages}/*',
+    '@(../outside|packages)',
+    'packages//nested',
+    ' packages/*',
+    'packages/* ',
+  ])('rejects unsafe workspace package path or glob: %s', (workspacePackage) => {
+    expect(findBuildApprovalErrors(workspacePolicyFixture([workspacePackage]), 'pnpm-workspace.yaml')).toContain(
+      `pnpm-workspace.yaml packages must contain only safe in-tree relative paths or globs; found ${JSON.stringify(workspacePackage)}.`,
+    );
+  });
+
+  it('requires a non-empty package list and the workspace-root installation guard', () => {
+    expect(findBuildApprovalErrors(workspacePolicyFixture([], false), 'pnpm-workspace.yaml')).toEqual(
+      expect.arrayContaining([
+        'pnpm-workspace.yaml packages must be a non-empty sequence.',
+        'pnpm-workspace.yaml must enable ignoreWorkspaceRootCheck.',
+      ]),
+    );
+  });
+
+  it('validates the checked-in workflow structures', () => {
+    expect(
+      findProductionDeployWorkflowErrors(
+        readFileSync('.github/workflows/deploy.yml', 'utf8'),
+        '.github/workflows/deploy.yml',
+      ),
+    ).toEqual([]);
+    expect(findCiWorkflowErrors(readFileSync('.github/workflows/ci.yml', 'utf8'), '.github/workflows/ci.yml')).toEqual(
+      [],
+    );
+    expect(
+      findSystemPromptsReleaseWorkflowErrors(
+        readFileSync('.github/workflows/release_system_prompts.yml', 'utf8'),
+        '.github/workflows/release_system_prompts.yml',
+      ),
+    ).toEqual([]);
+  });
+
+  it('accepts comments, block scalars, and reordered mapping keys without weakening step order', () => {
+    const workflow = productionWorkflowFixture();
+    expect(findWorkflowSafetyErrors(workflow, '.github/workflows/deploy.yml')).toEqual([]);
+    expect(findProductionDeployWorkflowErrors(workflow, '.github/workflows/deploy.yml')).toEqual([]);
+  });
+
+  it('does not accept required commands from comments or an unrelated job', () => {
+    const workflow = productionWorkflowFixture().replace(
+      '      - run: pnpm run provision:production',
+      `      # run: pnpm run provision:production
+      - run: pnpm run provision:other`,
+    );
+    expect(findProductionDeployWorkflowErrors(workflow, '.github/workflows/deploy.yml')).toContain(
+      '.github/workflows/deploy.yml jobs.deploy must include "pnpm run provision:production" after the preceding required step.',
+    );
+
+    const misplaced = workflow.replace(
+      '  deploy:',
+      `  decoy:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pnpm run provision:production
+  deploy:`,
+    );
+    expect(findProductionDeployWorkflowErrors(misplaced, '.github/workflows/deploy.yml')).not.toEqual([]);
+  });
+
+  it('requires the production steps in semantic array order', () => {
+    const workflow = productionWorkflowFixture().replace(
+      `      - run: pnpm run validate
+      - run: git diff --exit-code`,
+      `      - run: git diff --exit-code
+      - run: pnpm run validate`,
+    );
+    expect(findProductionDeployWorkflowErrors(workflow, '.github/workflows/deploy.yml')).toContain(
+      '.github/workflows/deploy.yml jobs.deploy must include "git diff --exit-code" after the preceding required step.',
+    );
+  });
+
+  it('requires immutable pins for workflow, reusable-job, and composite-action references', () => {
+    const workflow = `
+name: Test
+on: { workflow_dispatch: {} }
+jobs:
+  reusable:
+    uses: owner/repository/.github/workflows/reusable.yml@main
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-and-build
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+`;
+    expect(findWorkflowSafetyErrors(workflow, '.github/workflows/test.yml')).toEqual([
+      '.github/workflows/test.yml jobs.reusable.uses must pin external action "owner/repository/.github/workflows/reusable.yml@main" to a full commit SHA.',
+      '.github/workflows/test.yml jobs.test.steps[0].uses must pin external action "actions/checkout@v6" to a full commit SHA.',
+    ]);
+    expect(
+      findCompositeActionSafetyErrors(
+        `runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v6`,
+        '.github/actions/setup/action.yml',
+      ),
+    ).toEqual([
+      '.github/actions/setup/action.yml runs.steps[0].uses must pin external action "actions/setup-node@v6" to a full commit SHA.',
+    ]);
+  });
+
+  it('ignores YAML and shell comments but rejects forbidden commands in actual run steps', () => {
+    const workflow = `
+name: Test
+on: { workflow_dispatch: {} }
+# Never run pnpm run deploy:staging or wrangler dev.
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          # wrangler dev is forbidden
+          pnpm run deploy:staging
+      - run: pnpm run dev
+      - run: pnpm wrangler deploy --env-file .env.production
+`;
+    expect(findWorkflowSafetyErrors(workflow, '.github/workflows/test.yml')).toEqual([
+      '.github/workflows/test.yml jobs.test.steps[0].run must not target staging.',
+      '.github/workflows/test.yml jobs.test.steps[1].run must not start a local package script.',
+      '.github/workflows/test.yml jobs.test.steps[2].run must not load local env files.',
+    ]);
+  });
+
+  it('rejects duplicate YAML keys and structurally missing CI or release controls', () => {
+    expect(findWorkflowSafetyErrors('name: one\nname: two\njobs: {}', '.github/workflows/test.yml')).toEqual([
+      expect.stringContaining('must be unambiguous YAML'),
+    ]);
+    expect(findCiWorkflowErrors('on: { push: {} }\njobs: {}', '.github/workflows/ci.yml')).toEqual([
+      '.github/workflows/ci.yml must enable workflow_dispatch.',
+      '.github/workflows/ci.yml must run "pnpm run validate" in a job step.',
+      '.github/workflows/ci.yml must verify tracked generated files with "git diff --exit-code".',
+    ]);
+    expect(
+      findSystemPromptsReleaseWorkflowErrors(
+        'concurrency: { group: wrong, cancel-in-progress: true }\njobs: {}',
+        '.github/workflows/release_system_prompts.yml',
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        '.github/workflows/release_system_prompts.yml name must be "Create System Prompts Release"; found undefined.',
+        '.github/workflows/release_system_prompts.yml must enable workflow_dispatch.',
+        '.github/workflows/release_system_prompts.yml permissions.contents must be "read"; found undefined.',
+        '.github/workflows/release_system_prompts.yml concurrency.group must be "system-prompts-release"; found "wrong".',
+        '.github/workflows/release_system_prompts.yml concurrency.cancel-in-progress must be false; found true.',
+        '.github/workflows/release_system_prompts.yml must define jobs.build.',
+        '.github/workflows/release_system_prompts.yml must define jobs.release.',
+      ]),
+    );
+  });
+
+  it('allows required secret names but rejects values and unknown shapes', () => {
+    expect(
+      findWorkerRuntimeSecretErrors(
+        { secrets: { required: ['API_KEY', 'SIGNING_KEY'] } },
+        'template/wrangler.jsonc',
+        'configure values outside source control',
+      ),
+    ).toEqual([]);
+
     expect(
       findWorkerRuntimeSecretErrors(
         { secrets: [{ name: 'API_KEY' }] },
@@ -132,7 +384,17 @@ describe('production config workflow verification helpers', () => {
         'generated apps should configure runtime values as Cloudflare bindings',
       ),
     ).toEqual([
-      'template/wrangler.jsonc must not declare Worker runtime secrets; generated apps should configure runtime values as Cloudflare bindings.',
+      'template/wrangler.jsonc secrets may declare only unique, non-empty names in secrets.required; generated apps should configure runtime values as Cloudflare bindings.',
+    ]);
+
+    expect(
+      findWorkerRuntimeSecretErrors(
+        { secrets: { required: ['API_KEY'], API_KEY: 'secret-value' } },
+        'wrangler.jsonc',
+        'configure values outside source control',
+      ),
+    ).toEqual([
+      'wrangler.jsonc secrets may declare only unique, non-empty names in secrets.required; configure values outside source control.',
     ]);
 
     expect(
@@ -185,6 +447,19 @@ describe('production config workflow verification helpers', () => {
     );
   });
 
+  it('uses explicit deploy inputs instead of dashboard-preserved variables', () => {
+    expect(verifyProductionConfig()).not.toContain(
+      'wrangler.jsonc must omit keep_vars so checked-in config and deploy arguments remain the source of truth.',
+    );
+    expect(verifyProductionConfig()).not.toContain(
+      'wrangler.jsonc must not commit CLOUDFLARE_OAUTH_CLIENT_ID; inject it from the deploy environment.',
+    );
+  });
+
+  it('pins the least-privilege OAuth scope list in Wrangler configuration', () => {
+    expect(verifyProductionConfig()).not.toContain('wrangler.jsonc vars.CLOUDFLARE_OAUTH_SCOPES');
+  });
+
   it('discovers every YAML workflow file for production guard checks', () => {
     expect(workflowPathsFromDirectoryEntries(['deploy.yml', 'ci.yaml', 'README.md', 'nested.yml.bak'])).toEqual([
       '.github/workflows/ci.yaml',
@@ -199,5 +474,71 @@ describe('production config workflow verification helpers', () => {
     expect(script).toContain('experimental_generateTypes');
     expect(script).toContain('includeRuntime: false');
     expect(script).toContain('withPackagedRuntimeTypes');
+    expect(script).toContain('config?.secrets?.required ?? []');
   });
 });
+
+function productionWorkflowFixture(): string {
+  return `
+name: Production Deploy
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    environment:
+      name: production
+    runs-on: ubuntu-latest
+    if: github.repository == 'ferdousbhai/ghostbuild'
+    steps:
+      # Comments may mention wrangler dev and staging without becoming commands.
+      - run: pnpm run validate
+      - run: git diff --exit-code
+      - run: pnpm run provision:production
+        env:
+          CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - run: |
+          # Formatting comments are ignored.
+          pnpm run verify:production-config
+      - env:
+          CLOUDFLARE_OAUTH_CLIENT_ID: \${{ vars.CLOUDFLARE_OAUTH_CLIENT_ID }}
+        run: node scripts/deploy-production.mjs --check
+      - env:
+          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm run d1:migrations:apply:production
+      - with:
+          command: >-
+            deploy --var COMMIT_SHA:\${{ github.sha }} --var CLOUDFLARE_OAUTH_CLIENT_ID:\${{ vars.CLOUDFLARE_OAUTH_CLIENT_ID }}
+          packageManager: pnpm
+          accountId: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          apiToken: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0
+      - env:
+          EXPECTED_SHA: \${{ github.sha }}
+        run: node scripts/verify-live-deployment.mjs local
+      - run: node scripts/verify-live-deployment.mjs global
+        env:
+          EXPECTED_SHA: \${{ github.sha }}
+`;
+}
+
+function workspacePolicyFixture(packages: string[], ignoreWorkspaceRootCheck = true): string {
+  return `
+packages:
+${packages.map((workspacePackage) => `  - ${JSON.stringify(workspacePackage)}`).join('\n')}
+ignoreWorkspaceRootCheck: ${ignoreWorkspaceRootCheck}
+minimumReleaseAge: 1440
+minimumReleaseAgeIgnoreMissingTime: false
+minimumReleaseAgeStrict: true
+strictDepBuilds: true
+blockExoticSubdeps: true
+allowBuilds:
+  core-js-pure: true
+  esbuild: true
+  sharp: true
+  workerd: true
+`;
+}

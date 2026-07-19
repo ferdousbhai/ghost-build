@@ -12,6 +12,7 @@ import {
 import { Tooltip } from '@ui/Tooltip';
 import { CLOUDFLARE_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';
 import { classNames } from '~/utils/classNames';
+import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 
 export interface MessageInputHighlight {
   text: string;
@@ -98,6 +99,7 @@ export const TextareaWithHighlights = memo(function TextareaWithHighlights({
         aria-label={placeholder}
         translate="no"
         data-gramm="false"
+        maxLength={MAX_USER_MESSAGE_CHARACTERS}
       />
       <HighlightBlocks textareaRef={textareaRef} text={value} blocks={blocks} />
     </div>

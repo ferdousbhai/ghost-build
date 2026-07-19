@@ -4,6 +4,7 @@ import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import type { PreviewInfo } from '~/lib/stores/previews';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { captureMessage } from '~/lib/telemetry.client';
+import { webContainerPreviewIdFromUrl } from '~/lib/webcontainer/preview-url';
 
 const logger = createScopedLogger('PreviewNavigation');
 
@@ -17,6 +18,7 @@ export function usePreviewNavigation(previews: PreviewInfo[]) {
   const [url, setUrl] = useState<string>();
   const [iframeUrl, setIframeUrl] = useState<string>();
   const activePreview = previews[activePreviewIndex];
+  const activePreviewPort = activePreview?.port;
   const previewBaseUrl = activePreview?.ready ? activePreview.baseUrl : null;
 
   useEffect(() => {
@@ -27,7 +29,7 @@ export function usePreviewNavigation(previews: PreviewInfo[]) {
     }
     setUrl('/');
     if (previewBaseUrl.endsWith('/')) {
-      captureMessage('previewBaseUrl unexpectedly has a trailing slash');
+      captureMessage('Preview base URL unexpectedly had a trailing slash');
     }
     setIframeUrl(`${previewBaseUrl}/`);
   }, [previewBaseUrl]);
@@ -67,11 +69,11 @@ export function usePreviewNavigation(previews: PreviewInfo[]) {
         return;
       }
       if (previewBaseUrl === null) {
-        captureMessage('key down event received while previewBaseUrl is null');
+        captureMessage('Preview key event arrived before base URL');
         return;
       }
       if (iframeUrl === undefined) {
-        captureMessage('key down event received while iframeUrl is undefined');
+        captureMessage('Preview key event arrived before iframe URL');
         return;
       }
       if (url?.startsWith('http://') || url?.startsWith('https://')) {
@@ -92,14 +94,14 @@ export function usePreviewNavigation(previews: PreviewInfo[]) {
       throw new Error('Preview not loaded');
     }
     const { proxyPort, proxyUrl } = await workbenchStore.startProxy(activePreview.port);
-    const match = proxyUrl.match(/^https?:\/\/([^.]+)\.local-credentialless\.webcontainer-api\.io/);
-    if (!match) {
+    const previewId = webContainerPreviewIdFromUrl(proxyUrl);
+    if (!previewId) {
       logger.warn('Invalid WebContainer URL:', proxyUrl);
       workbenchStore.stopProxy(proxyPort);
       return;
     }
     const newWindow = window.open(
-      `/webcontainer/preview/${match[1]}`,
+      `/webcontainer/preview/${previewId}`,
       '_blank',
       'noopener,noreferrer,menubar=no,toolbar=no,location=no,status=no',
     );
@@ -107,16 +109,18 @@ export function usePreviewNavigation(previews: PreviewInfo[]) {
       workbenchStore.stopProxy(proxyPort);
       throw new Error('The browser blocked the preview window');
     }
-    workbenchStore.trackExternalPreview(proxyPort, match[1]);
+    workbenchStore.trackExternalPreview(proxyPort, previewId);
     newWindow.focus();
   }, [activePreview]);
 
   const setIframeRef = useCallback(
     (node: HTMLIFrameElement | null) => {
       iframeRef.current = node;
-      workbenchStore.setPreviewIframe(activePreviewIndex, node);
+      if (activePreviewPort !== undefined) {
+        workbenchStore.setPreviewIframe(activePreviewPort, node);
+      }
     },
-    [activePreviewIndex],
+    [activePreviewPort],
   );
 
   const selectPreviewIndex = useCallback(

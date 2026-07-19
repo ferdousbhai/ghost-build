@@ -45,6 +45,8 @@ const SliderButton = memo(function SliderButton({
 }>) {
   return (
     <button
+      type="button"
+      aria-pressed={selected}
       onClick={setSelected}
       className={classNames(
         'bg-transparent text-sm px-2.5 py-0.5 rounded-full relative',

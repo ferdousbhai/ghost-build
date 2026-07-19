@@ -40,8 +40,24 @@ describe('enhancePromptAction billing', () => {
 
   it('requires a Cloudflare-backed identity', async () => {
     mocks.resolveIdentity.mockResolvedValue(null);
-    const response = await enhancePromptAction({ request: request(), env: {} as Env });
+    const unauthenticatedRequest = request();
+    const response = await enhancePromptAction({ request: unauthenticatedRequest, env: {} as Env });
     expect(response.status).toBe(401);
+    expect(unauthenticatedRequest.bodyUsed).toBe(false);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it('rejects an oversized prompt body before calling the provider', async () => {
+    const response = await enhancePromptAction({
+      request: new Request('https://ghostbuild.dev/api/enhance-prompt', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'x'.repeat(70 * 1024) }),
+      }),
+      env: { DB: {} } as Env,
+    });
+
+    expect(response.status).toBe(413);
     expect(mocks.generateText).not.toHaveBeenCalled();
   });
 
@@ -62,5 +78,20 @@ describe('enhancePromptAction billing', () => {
       code: 'workers_paid_required',
       error: expect.stringContaining('GHOSTBUILD_WORKERS_PAID_REQUIRED:'),
     });
+  });
+
+  it('does not log provider request bodies when prompt enhancement fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const providerError = Object.assign(new Error('provider failure'), {
+      requestBodyValues: { prompt: 'SECRET_PROMPT_MARKER' },
+    });
+    mocks.generateText.mockRejectedValue(providerError);
+
+    const response = await enhancePromptAction({ request: request(), env: { DB: {} } as Env });
+
+    expect(response.status).toBe(500);
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain('SECRET_PROMPT_MARKER');
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain('provider failure');
+    consoleError.mockRestore();
   });
 });

@@ -14,6 +14,13 @@ export type CloudflareConnection = {
   generation: number;
 };
 
+export class CloudflareConnectionChangedError extends Error {
+  constructor() {
+    super('The Cloudflare connection changed while authorization was completing.');
+    this.name = 'CloudflareConnectionChangedError';
+  }
+}
+
 type CloudflareConnectionRow = {
   id: string;
   user_id: string;
@@ -71,45 +78,122 @@ export async function activateCloudflareConnection(args: {
   credentialHandle: string;
   grantedScopes: string[];
   aiBillingEnabled: boolean;
+  expectedGeneration: number | null;
   now?: number;
 }): Promise<CloudflareConnection> {
   const now = args.now ?? Date.now();
-  const id = crypto.randomUUID();
-  await args.db
-    .prepare(
-      `INSERT INTO cloudflare_connections (
+  const connectionId = crypto.randomUUID();
+  const grantedScopesJson = JSON.stringify(args.grantedScopes);
+  let row: CloudflareConnectionRow | null;
+  try {
+    row =
+      args.expectedGeneration === null
+        ? await args.db
+            .prepare(
+              `INSERT INTO cloudflare_connections (
         id, user_id, account_id, account_name, status, credential_handle,
         granted_scopes_json, ai_billing_enabled, connected_at, created_at, updated_at
       ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET
-        account_id = excluded.account_id,
-        account_name = excluded.account_name,
-        status = 'active',
-        credential_handle = excluded.credential_handle,
-        granted_scopes_json = excluded.granted_scopes_json,
-        ai_billing_enabled = excluded.ai_billing_enabled,
-        connected_at = excluded.connected_at,
-        connection_generation = cloudflare_connections.connection_generation + 1,
-        updated_at = excluded.updated_at`,
-    )
-    .bind(
-      id,
-      args.userId,
-      args.accountId,
-      args.accountName,
-      args.credentialHandle,
-      JSON.stringify(args.grantedScopes),
-      args.aiBillingEnabled ? 1 : 0,
+      ON CONFLICT(user_id) DO NOTHING
+      RETURNING id, user_id, account_id, account_name, status, credential_handle,
+                granted_scopes_json, ai_billing_enabled, connected_at, updated_at, connection_generation`,
+            )
+            .bind(
+              connectionId,
+              args.userId,
+              args.accountId,
+              args.accountName,
+              args.credentialHandle,
+              grantedScopesJson,
+              args.aiBillingEnabled ? 1 : 0,
+              now,
+              now,
+              now,
+            )
+            .first<CloudflareConnectionRow>()
+        : await args.db
+            .prepare(
+              `UPDATE cloudflare_connections
+             SET account_id = ?, account_name = ?, status = 'active', credential_handle = ?,
+                 granted_scopes_json = ?, ai_billing_enabled = ?, connected_at = ?,
+                 connection_generation = connection_generation + 1, updated_at = ?
+             WHERE user_id = ? AND connection_generation = ?
+             RETURNING id, user_id, account_id, account_name, status, credential_handle,
+                       granted_scopes_json, ai_billing_enabled, connected_at, updated_at, connection_generation`,
+            )
+            .bind(
+              args.accountId,
+              args.accountName,
+              args.credentialHandle,
+              grantedScopesJson,
+              args.aiBillingEnabled ? 1 : 0,
+              now,
+              now,
+              args.userId,
+              args.expectedGeneration,
+            )
+            .first<CloudflareConnectionRow>();
+  } catch (error) {
+    const committed = await findExactActivatedCloudflareConnection({
+      ...args,
+      connectionId,
+      grantedScopesJson,
       now,
-      now,
-      now,
-    )
-    .run();
-  const connection = await findCloudflareConnectionForUser(args.db, args.userId);
-  if (!connection || connection.status !== 'active') {
-    throw new Error('Unable to activate the Cloudflare connection.');
+    }).catch(() => null);
+    if (committed) {
+      return committed;
+    }
+    throw error;
   }
-  return connection;
+  if (!row) {
+    const committed = await findExactActivatedCloudflareConnection({
+      ...args,
+      connectionId,
+      grantedScopesJson,
+      now,
+    }).catch(() => null);
+    if (committed) {
+      return committed;
+    }
+    throw new CloudflareConnectionChangedError();
+  }
+  return connectionFromRow(row);
+}
+
+async function findExactActivatedCloudflareConnection(
+  args: Parameters<typeof activateCloudflareConnection>[0] & {
+    connectionId: string;
+    grantedScopesJson: string;
+    now: number;
+  },
+): Promise<CloudflareConnection | null> {
+  const row = await args.db
+    .prepare(
+      `SELECT id, user_id, account_id, account_name, status, credential_handle,
+              granted_scopes_json, ai_billing_enabled, connected_at, updated_at, connection_generation
+       FROM cloudflare_connections
+       WHERE user_id = ?`,
+    )
+    .bind(args.userId)
+    .first<CloudflareConnectionRow>();
+  const intendedGeneration = args.expectedGeneration === null ? 1 : args.expectedGeneration + 1;
+  if (
+    !row ||
+    (args.expectedGeneration === null && row.id !== args.connectionId) ||
+    row.user_id !== args.userId ||
+    row.account_id !== args.accountId ||
+    row.account_name !== args.accountName ||
+    row.status !== 'active' ||
+    row.credential_handle !== args.credentialHandle ||
+    row.granted_scopes_json !== args.grantedScopesJson ||
+    row.ai_billing_enabled !== (args.aiBillingEnabled ? 1 : 0) ||
+    row.connected_at !== args.now ||
+    row.updated_at !== args.now ||
+    row.connection_generation !== intendedGeneration
+  ) {
+    return null;
+  }
+  return connectionFromRow(row);
 }
 
 function connectionFromRow(row: CloudflareConnectionRow): CloudflareConnection {

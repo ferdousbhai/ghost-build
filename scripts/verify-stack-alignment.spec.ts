@@ -6,11 +6,14 @@ import {
   findForbiddenDependencies,
   findForbiddenImports,
   findForbiddenRuntimeEnvAccess,
+  findInternalPackageMetadataErrors,
   findCloudflareAiPeerCompatibilityErrors,
+  findDeploymentWorkflowErrors,
   findMissingDependencies,
   findMissingCommandSteps,
   findPackageVersionAlignmentErrors,
   findRuntimePinErrors,
+  findSandboxVersionErrors,
   findRootMigrationErrors,
   findTemplateSnapshotErrors,
   findTemplateSnapshotManifestErrors,
@@ -116,7 +119,7 @@ describe('stack alignment verification helpers', () => {
       findRuntimePinErrors(
         {
           engines: { node: '>=26.0.0' },
-          packageManager: 'pnpm@9.5.0',
+          packageManager: 'pnpm@11.14.0',
           devDependencies: { '@types/node': '^26.1.0' },
         },
         'package.json',
@@ -125,8 +128,90 @@ describe('stack alignment verification helpers', () => {
 
     expect(findRuntimePinErrors({ devDependencies: {} }, 'package.json')).toEqual([
       'package.json must set engines.node to >=26.0.0.',
-      'package.json must pin packageManager to pnpm@9.5.0.',
+      'package.json must pin packageManager to pnpm@11.14.0.',
       'package.json must use @types/node ^26.x for the Node 26 toolchain.',
+    ]);
+  });
+
+  it('keeps the Cloudflare Sandbox image aligned with the exact SDK version', () => {
+    const pkg = {
+      packageManager: 'pnpm@11.14.0',
+      dependencies: { '@cloudflare/sandbox': '0.12.3' },
+      devDependencies: { wrangler: '4.112.0' },
+    };
+    const digest = 'sha256:23f67e16131b780865a5fa5aa3c8607408a730105c248836409f4e02bb6bf042';
+    const dockerfile = `FROM docker.io/cloudflare/sandbox:0.12.3@${digest}
+COPY sandbox-tools/package.json sandbox-tools/pnpm-lock.yaml sandbox-tools/pnpm-workspace.yaml sandbox-tools/verify-pnpm-workspace-policy.mjs /opt/ghostbuild-tools/
+RUN npm install --global pnpm@11.14.0 --ignore-scripts --no-audit --no-fund && \\
+    pnpm --dir /opt/ghostbuild-tools install --prod --frozen-lockfile && \\
+    ln -s /opt/ghostbuild-tools/verify-pnpm-workspace-policy.mjs /usr/local/bin/ghostbuild-verify-pnpm-workspace
+ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
+`;
+    const toolsPackage = {
+      private: true,
+      license: 'Apache-2.0',
+      engines: { node: '>=26.0.0' },
+      packageManager: 'pnpm@11.14.0',
+      dependencies: { wrangler: '4.112.0', yaml: '2.9.0' },
+    };
+    const toolsLockfile = `wrangler:
+        specifier: 4.112.0
+        version: 4.112.0
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
+`;
+    expect(findSandboxVersionErrors(pkg, dockerfile, toolsPackage, toolsLockfile)).toEqual([]);
+    expect(
+      findSandboxVersionErrors(
+        pkg,
+        dockerfile.replace('sandbox:0.12.3', 'sandbox:0.12.2'),
+        toolsPackage,
+        toolsLockfile,
+      ),
+    ).toEqual([
+      `Dockerfile.sandbox must use FROM docker.io/cloudflare/sandbox:0.12.3@${digest} so the image matches the Sandbox SDK.`,
+    ]);
+    expect(
+      findSandboxVersionErrors(
+        pkg,
+        dockerfile.replace(' --ignore-scripts --no-audit --no-fund', ''),
+        toolsPackage,
+        toolsLockfile,
+      ),
+    ).toContain(
+      'Dockerfile.sandbox must install pnpm without running registry package lifecycle scripts or audit requests.',
+    );
+    expect(findSandboxVersionErrors({ dependencies: { '@cloudflare/sandbox': '^0.12.3' } }, '', {}, '')).toEqual([
+      'package.json must pin @cloudflare/sandbox to an exact version.',
+    ]);
+  });
+
+  it('requires lockfile-backed sandbox tools aligned with the root toolchain', () => {
+    const pkg = {
+      packageManager: 'pnpm@11.14.0',
+      dependencies: { '@cloudflare/sandbox': '0.12.3' },
+      devDependencies: { wrangler: '4.112.0' },
+    };
+
+    expect(findSandboxVersionErrors(pkg, '', {}, '')).toContain(
+      'sandbox-tools/pnpm-lock.yaml must lock wrangler 4.112.0.',
+    );
+    expect(findSandboxVersionErrors(pkg, '', { packageManager: 'pnpm@10.0.0' }, '')).toContain(
+      'sandbox-tools/package.json packageManager must match package.json pnpm@11.14.0; found pnpm@10.0.0.',
+    );
+    expect(findSandboxVersionErrors(pkg, '', { private: true, packageManager: 'pnpm@11.14.0' }, '')).toEqual(
+      expect.arrayContaining([
+        'sandbox-tools/package.json must declare the repository Apache-2.0 license.',
+        'sandbox-tools/package.json must require the repository Node >=26.0.0 runtime.',
+      ]),
+    );
+  });
+
+  it('prevents accidental publication of internal workspace packages', () => {
+    expect(findInternalPackageMetadataErrors({ private: true }, 'ghostbuild-agent/package.json')).toEqual([]);
+    expect(findInternalPackageMetadataErrors({}, 'ghostbuild-agent/package.json')).toEqual([
+      'ghostbuild-agent/package.json must set private to true so it cannot be published accidentally.',
     ]);
   });
 
@@ -156,6 +241,26 @@ describe('stack alignment verification helpers', () => {
     ).toEqual(['template-snapshot-1234abcd.bin hash must match its compressed snapshot content; expected deadbeef.']);
   });
 
+  it('keeps deployment execution split across bounded non-retrying durable steps', () => {
+    const validWorkflow = `
+      import { buildApprovedDeploymentArtifact, publishApprovedDeploymentArtifact } from './deployment-executor';
+      await step.do('claim, build, and persist approved deployment artifact',
+        { retries: { limit: 0, delay: '1 second' }, timeout: '30 minutes' }, buildApprovedDeploymentArtifact);
+      await step.do('verify artifact, provision, publish, and clean up deployment',
+        { retries: { limit: 0, delay: '1 second' }, timeout: '30 minutes' }, publishApprovedDeploymentArtifact);
+    `;
+    expect(findDeploymentWorkflowErrors(validWorkflow)).toEqual([]);
+    expect(
+      findDeploymentWorkflowErrors(validWorkflow.replaceAll("timeout: '30 minutes'", "timeout: '90 minutes'")),
+    ).toContain('deployment Workflow must give both durable steps an explicit 30-minute timeout.');
+    expect(findDeploymentWorkflowErrors(validWorkflow.replace('limit: 0', 'limit: 3'))).toContain(
+      'deployment Workflow must disable automatic retries for both provider-sensitive steps.',
+    );
+    expect(
+      findDeploymentWorkflowErrors(validWorkflow.replaceAll('publishApprovedDeploymentArtifact', 'publishDeployment')),
+    ).toContain('deployment Workflow must preserve the R2 receipt boundary between build and publish.');
+  });
+
   it('requires chat persistence uniqueness migrations', () => {
     const requiredTables = [
       'chats',
@@ -163,10 +268,17 @@ describe('stack alignment verification helpers', () => {
       'shares',
       'social_shares',
       'object_gc_candidates',
+      'agent_gc_candidates',
       'user',
       'session',
       'account',
       'verification',
+      'cloudflare_auth_sessions',
+      'cloudflare_oauth_states',
+      'cloudflare_credentials',
+      'cloudflare_connections',
+      'deployments',
+      'deployment_resources',
     ]
       .map((table) => `CREATE TABLE IF NOT EXISTS ${table} (id TEXT);`)
       .join('\n');
@@ -183,13 +295,19 @@ describe('stack alignment verification helpers', () => {
     expect(findRootMigrationErrors(requiredTables)).toContain(
       'root migrations must defer cleanup of displaced R2 object keys.',
     );
+    expect(findRootMigrationErrors(requiredTables)).toContain(
+      'root migrations must queue every deleted chat transcript generation range for Agent cleanup.',
+    );
     expect(
       findRootMigrationErrors(
         `${requiredTables}
          CREATE UNIQUE INDEX states_rank ON chat_message_states(chat_id, subchat_index, last_message_rank);
          CREATE UNIQUE INDEX active_chat ON chats(creator_id, initial_id) WHERE is_deleted = 0;
          CREATE UNIQUE INDEX social_chat ON social_shares(chat_id);
-         INSERT OR IGNORE INTO object_gc_candidates (storage_key, not_before) VALUES ('key', 1);`,
+         INSERT OR IGNORE INTO object_gc_candidates (storage_key, not_before) VALUES ('key', 1);
+         INSERT OR IGNORE INTO agent_gc_candidates (chat_id, max_generation)
+         SELECT chats.id, transcripts.generation FROM chats
+         JOIN chat_transcripts AS transcripts ON transcripts.chat_id = chats.id;`,
       ),
     ).toEqual([]);
   });

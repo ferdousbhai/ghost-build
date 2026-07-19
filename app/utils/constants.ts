@@ -1,11 +1,13 @@
 import { WORK_DIR } from 'ghostbuild-agent/constants';
-import { LOCAL_SECRET_FILE_IGNORE_PATHS } from './secretFiles';
+import { LOCAL_SECRET_FILE_EXPORT_EXCLUDES, LOCAL_SECRET_FILE_IGNORE_PATHS } from './secretFiles';
 
 export const PROMPT_COOKIE_KEY = 'cachedPrompt';
 
-const IGNORED_RELATIVE_DIRECTORIES = ['dist', 'node_modules', '.output', '.tanstack', '.wrangler'] as const;
+const IGNORED_RELATIVE_DIRECTORIES = ['dist', 'node_modules', '.output', '.tanstack', '.wrangler', '.git'] as const;
 
-export const IGNORED_RELATIVE_PATHS = [...IGNORED_RELATIVE_DIRECTORIES, ...LOCAL_SECRET_FILE_IGNORE_PATHS];
+export const IGNORED_RELATIVE_PATHS = [
+  ...new Set([...IGNORED_RELATIVE_DIRECTORIES, ...LOCAL_SECRET_FILE_EXPORT_EXCLUDES]),
+];
 
 export const IGNORED_PATHS = [
   ...IGNORED_RELATIVE_DIRECTORIES.map((path) => `${WORK_DIR}/${path}/`),

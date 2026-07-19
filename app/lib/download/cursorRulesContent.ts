@@ -11,11 +11,12 @@ export const cursorRulesContent = `# Ghostbuild Cloudflare App Rules
 - Use Workers AI through env.AI and prefer @cf/zai-org/glm-5.2 for coding-agent features.
 - Use Cloudflare Agents and Durable Objects for durable agent state. For chat UI, prefer the template AIChatAgent with useAgentChat from @cloudflare/ai-chat/react.
 - Set static override options = { sendIdentityOnConnect: false } when Agent instance names can contain chat IDs, user IDs, or session IDs, and use state updates rather than agent.identified for readiness.
+- Treat client-supplied Agent instance names as routing hints, not authorization. Before public production use, authenticate and rate-limit Agent routes and derive tenant or user instance names from verified server-side identity.
 - Keep Agent chat behavior explicit with messageConcurrency = "queue", chatRecovery, and options?.abortSignal passed through to streamText. Configure waitForMcpConnections when the Agent uses MCP servers.
 - For production Agent observability, use Agents diagnostics-channel events and attach a Cloudflare Tail Worker when structured Agent RPC, chat, recovery, state, schedule, workflow, or MCP events need collection.
-- Update wrangler.jsonc when adding bindings, Durable Objects, migrations, D1, R2, KV, Queues, or Vectorize.
+- Update wrangler.jsonc when adding bindings, Durable Object exports, D1 migrations, D1, R2, KV, Queues, or Vectorize. Use declarative exports with SQLite storage for new Durable Object classes.
 - Keep wrangler.jsonc production observability explicit: observability.enabled, observability.logs.enabled, and observability.traces.enabled should be true, with logs head_sampling_rate 0.6 and traces head_sampling_rate 0.05 unless production volume requires different sampling.
-- Do not commit secret values or write local secret files. Use wrangler secret put NAME or Cloudflare dashboard Worker settings for production secrets and variables.
+- Keep non-secret configuration in wrangler.jsonc. Declare required secret names with secrets.required, but never commit secret values or write local secret files. Configure values with wrangler secret put NAME or Cloudflare dashboard Worker settings.
 - Keep CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN as production deploy credentials only; do not use them as Worker runtime secrets.
 - Keep backend code on Cloudflare Workers and Cloudflare developer platform primitives.
 - Validate changes with pnpm run verify:stack, pnpm run typecheck, pnpm run build, and pnpm run lint.

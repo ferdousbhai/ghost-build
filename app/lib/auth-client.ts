@@ -70,7 +70,11 @@ export async function signInWithCloudflare(callbackURL = window.location.href) {
 }
 
 export async function signOutOfGhostbuild(callbackURL = window.location.origin) {
-  await fetch('/api/auth/sign-out', { method: 'POST', credentials: 'same-origin' });
+  const response = await fetch('/api/auth/sign-out', { method: 'POST', credentials: 'same-origin' });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? 'Unable to sign out of Ghostbuild.');
+  }
   setState({ data: null, isPending: false });
   window.location.assign(callbackURL);
 }

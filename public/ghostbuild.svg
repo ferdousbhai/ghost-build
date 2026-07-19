@@ -1,8 +1,0 @@
-<svg width="180" height="42" viewBox="0 0 180 42" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ghostbuild-logo-title">
-  <title id="ghostbuild-logo-title">ghostbuild.dev</title>
-  <rect x="2" y="7" width="28" height="28" rx="7" fill="#111827"/>
-  <path d="M10 26.5V17.2C10 13.6 12.7 11 16.4 11C20.1 11 22.8 13.6 22.8 17.2V24.4H18.4V20.1H14.2V26.5H10ZM14.2 17.4H18.4V17.1C18.4 15.6 17.6 14.8 16.3 14.8C15 14.8 14.2 15.6 14.2 17.1V17.4Z" fill="#F8FAFC"/>
-  <path d="M25.2 26.5H20.9L22.7 30.7H27L25.2 26.5Z" fill="#4ADE80"/>
-  <text x="40" y="27" fill="#111827" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="24" font-weight="700" letter-spacing="0">ghostbuild</text>
-  <text x="150" y="27" fill="#16A34A" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18" font-weight="700" letter-spacing="0">.dev</text>
-</svg>

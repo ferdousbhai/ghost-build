@@ -17,6 +17,15 @@ export type CloudflareAuthSession = {
   user: CloudflareAuthUser;
 };
 
+type PreparedAuthSession = {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: number;
+  createdAt: number;
+  cookie: string;
+};
+
 type CloudflareOAuthIdentity = {
   subject: string;
   email: string | null;
@@ -60,21 +69,37 @@ export async function getAuthSession(env: Env, request: Request): Promise<Cloudf
   };
 }
 
-export async function createAuthSession(
-  env: Env,
+export async function prepareAuthSession(
   userId: string,
   request?: Request,
   now = Date.now(),
-): Promise<string> {
+): Promise<PreparedAuthSession> {
   const token = randomToken();
-  const expiresAt = now + SESSION_MAX_AGE_SECONDS * 1_000;
-  await env.DB.prepare(
-    `INSERT INTO cloudflare_auth_sessions (id, user_id, token_hash, expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(crypto.randomUUID(), userId, await sha256(token), expiresAt, now, now)
-    .run();
-  return serializeSessionCookie(token, SESSION_MAX_AGE_SECONDS, isHttps(request));
+  return {
+    id: crypto.randomUUID(),
+    userId,
+    tokenHash: await sha256(token),
+    expiresAt: now + SESSION_MAX_AGE_SECONDS * 1_000,
+    createdAt: now,
+    cookie: serializeSessionCookie(token, SESSION_MAX_AGE_SECONDS, isHttps(request)),
+  };
+}
+
+export async function createAuthSession(env: Env, session: PreparedAuthSession): Promise<string> {
+  try {
+    await env.DB.prepare(
+      `INSERT INTO cloudflare_auth_sessions (id, user_id, token_hash, expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(session.id, session.userId, session.tokenHash, session.expiresAt, session.createdAt, session.createdAt)
+      .run();
+  } catch (error) {
+    const committed = await isExactAuthSessionCommitted(env.DB, session).catch(() => false);
+    if (!committed) {
+      throw error;
+    }
+  }
+  return session.cookie;
 }
 
 export async function deleteAuthSession(env: Env, request: Request): Promise<void> {
@@ -121,15 +146,57 @@ export async function upsertCloudflareUser(
   }
 
   const id = crypto.randomUUID();
-  await db
-    .prepare(
-      `INSERT INTO "user"
-        (id, name, email, emailVerified, image, createdAt, updatedAt, cloudflare_subject)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(id, name, email, identity.email ? 1 : 0, image, now, now, identity.subject)
-    .run();
+  const emailVerified = identity.email ? 1 : 0;
+  try {
+    await db
+      .prepare(
+        `INSERT INTO "user"
+          (id, name, email, emailVerified, image, createdAt, updatedAt, cloudflare_subject)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(id, name, email, emailVerified, image, now, now, identity.subject)
+      .run();
+  } catch (error) {
+    const committed = await isExactCloudflareUser(db, {
+      id,
+      subject: identity.subject,
+      name,
+      email,
+      emailVerified,
+      image,
+      createdAt: now,
+      updatedAt: now,
+    }).catch(() => false);
+    if (committed) {
+      return { id, name, email, image };
+    }
+    const racedUser = await findCloudflareUserBySubjectOrEmail(db, identity).catch(() => null);
+    if (!racedUser) {
+      throw error;
+    }
+    await updateUser(db, racedUser.id, identity.subject, name, email, image, now);
+    return { id: racedUser.id, name, email, image };
+  }
   return { id, name, email, image };
+}
+
+async function findCloudflareUserBySubjectOrEmail(
+  db: D1Database,
+  identity: CloudflareOAuthIdentity,
+): Promise<CloudflareAuthUser | null> {
+  const bySubject = await db
+    .prepare('SELECT id, name, email, image FROM "user" WHERE cloudflare_subject = ?')
+    .bind(identity.subject)
+    .first<CloudflareAuthUser>();
+  if (bySubject) {
+    return bySubject;
+  }
+  return identity.email
+    ? db
+        .prepare('SELECT id, name, email, image FROM "user" WHERE email = ?')
+        .bind(identity.email)
+        .first<CloudflareAuthUser>()
+    : null;
 }
 
 async function updateUser(
@@ -141,14 +208,82 @@ async function updateUser(
   image: string | null,
   now: number,
 ) {
-  await db
+  const emailVerified = email.endsWith('@users.cloudflare.invalid') ? 0 : 1;
+  try {
+    const result = await db
+      .prepare(
+        `UPDATE "user"
+         SET cloudflare_subject = ?, name = ?, email = ?, emailVerified = ?, image = ?, updatedAt = ?
+         WHERE id = ?`,
+      )
+      .bind(subject, name, email, emailVerified, image, now, id)
+      .run();
+    if (result.meta.changes === 1) {
+      return;
+    }
+  } catch (error) {
+    const committed = await isExactCloudflareUser(db, {
+      id,
+      subject,
+      name,
+      email,
+      emailVerified,
+      image,
+      updatedAt: now,
+    }).catch(() => false);
+    if (!committed) {
+      throw error;
+    }
+    return;
+  }
+  if (
+    await isExactCloudflareUser(db, {
+      id,
+      subject,
+      name,
+      email,
+      emailVerified,
+      image,
+      updatedAt: now,
+    })
+  ) {
+    return;
+  }
+  throw new Error('Cloudflare user changed while authentication was being persisted.');
+}
+
+async function isExactCloudflareUser(
+  db: D1Database,
+  expected: {
+    id: string;
+    subject: string;
+    name: string;
+    email: string;
+    emailVerified: number;
+    image: string | null;
+    createdAt?: number;
+    updatedAt: number;
+  },
+): Promise<boolean> {
+  const createdAtClause = expected.createdAt === undefined ? '' : ' AND createdAt = ?';
+  const statement = db
     .prepare(
-      `UPDATE "user"
-       SET cloudflare_subject = ?, name = ?, email = ?, emailVerified = ?, image = ?, updatedAt = ?
-       WHERE id = ?`,
+      `SELECT 1 AS found FROM "user"
+       WHERE id = ? AND cloudflare_subject = ? AND name = ? AND email = ?
+         AND emailVerified = ? AND image IS ? AND updatedAt = ?${createdAtClause}`,
     )
-    .bind(subject, name, email, email.endsWith('@users.cloudflare.invalid') ? 0 : 1, image, now, id)
-    .run();
+    .bind(
+      expected.id,
+      expected.subject,
+      expected.name,
+      expected.email,
+      expected.emailVerified,
+      expected.image,
+      expected.updatedAt,
+      ...(expected.createdAt === undefined ? [] : [expected.createdAt]),
+    );
+  const row = await statement.first<{ found: number }>();
+  return row?.found === 1;
 }
 
 function serializeSessionCookie(token: string, maxAge: number, secure: boolean): string {
@@ -179,6 +314,19 @@ function cookieValue(header: string | null, name: string): string | null {
 async function sha256(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function isExactAuthSessionCommitted(db: D1Database, session: PreparedAuthSession): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 AS found
+       FROM cloudflare_auth_sessions
+       WHERE id = ? AND user_id = ? AND token_hash = ? AND expires_at = ?
+         AND created_at = ? AND updated_at = ?`,
+    )
+    .bind(session.id, session.userId, session.tokenHash, session.expiresAt, session.createdAt, session.createdAt)
+    .first<{ found: number }>();
+  return row?.found === 1;
 }
 
 function randomToken(): string {

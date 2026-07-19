@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { WebContainer } from '@webcontainer/api';
-import type { FileMap } from 'ghostbuild-agent/types';
-import { getAbsolutePath } from 'ghostbuild-agent/utils/workDir';
+import JSZip from 'jszip';
 import { getAuthToken } from '~/lib/stores/sessionId';
 import { runCommand } from './command';
 import { DiagnosticsStore } from './diagnostics-store';
 import { runValidateProject } from './validate-project';
+import { DeploymentValidationStore } from './deployment-validation-store';
 
 vi.mock('~/lib/stores/containerBootState', () => ({
   ContainerBootState: { READY: 'ready' },
@@ -24,7 +24,7 @@ describe('runValidateProject', () => {
 
   test('returns a successful result tied to the current source revision', async () => {
     runCommandMock.mockResolvedValue(undefined);
-    const result = await runValidateProject(validationArgs());
+    const result = await runValidateProject(await validationArgs());
     expect(result).toMatchObject({
       ok: true,
       data: {
@@ -41,7 +41,7 @@ describe('runValidateProject', () => {
 
   test('returns structured diagnostics without exposing raw command output', async () => {
     runCommandMock.mockRejectedValueOnce(new Error('full compiler diagnostics')).mockResolvedValueOnce(undefined);
-    const result = await runValidateProject(validationArgs());
+    const result = await runValidateProject(await validationArgs());
     expect(result).toMatchObject({ ok: false });
     expect((result.data as { checks: Array<{ name: string; status: string }> }).checks).toContainEqual(
       expect.objectContaining({ name: 'typecheck', status: 'failed' }),
@@ -53,46 +53,71 @@ describe('runValidateProject', () => {
 
   test('does not certify a revision that changed while checks were running', async () => {
     runCommandMock.mockResolvedValue(undefined);
-    let readCount = 0;
     const result = await runValidateProject(
-      validationArgs(undefined, () => {
-        readCount += 1;
-        return sourceFiles(readCount === 1 ? 'export const app = true;' : 'export const app = false;');
-      }),
+      await validationArgs(undefined, ['export const app = true;', 'export const app = false;']),
     );
     expect(result).toMatchObject({ ok: false });
     expect((result.data as { checks: Array<{ name: string; status: string }> }).checks).toContainEqual(
       expect.objectContaining({ name: 'workspace-stability', status: 'failed' }),
     );
   });
+
+  test('records a trusted deployment receipt only after full validation succeeds', async () => {
+    runCommandMock.mockResolvedValue(undefined);
+    const deploymentValidation = new DeploymentValidationStore();
+    const result = await runValidateProject(await validationArgs(undefined, undefined, 'full', deploymentValidation));
+    const revision = (result.data as { revision: string }).revision;
+
+    expect(result.ok).toBe(true);
+    expect(deploymentValidation.hasFullValidation(revision)).toBe(true);
+  });
+
+  test('does not record fast or failed full validation as deployment-ready', async () => {
+    const deploymentValidation = new DeploymentValidationStore();
+    runCommandMock.mockResolvedValue(undefined);
+    const fast = await runValidateProject(await validationArgs(undefined, undefined, 'fast', deploymentValidation));
+    expect(deploymentValidation.hasFullValidation((fast.data as { revision: string }).revision)).toBe(false);
+
+    runCommandMock.mockRejectedValueOnce(new Error('typecheck failed')).mockResolvedValue(undefined);
+    const full = await runValidateProject(await validationArgs(undefined, undefined, 'full', deploymentValidation));
+    expect(full.ok).toBe(false);
+    expect(deploymentValidation.hasFullValidation((full.data as { revision: string }).revision)).toBe(false);
+  });
 });
 
-function validationArgs(
+async function validationArgs(
   diagnostics = new DiagnosticsStore(),
-  getFiles = () => sourceFiles('export const app = true;'),
+  sourceVersions = ['export const app = true;', 'export const app = true;'],
+  level: 'fast' | 'full' = 'fast',
+  deploymentValidation = new DeploymentValidationStore(),
 ) {
+  const snapshots = await Promise.all(sourceVersions.map((source) => zipSnapshot(source)));
+  let exportCount = 0;
   return {
     invocation: {
       state: 'call' as const,
       toolCallId: 'validate-1',
       toolName: 'validateProject',
-      args: { level: 'fast' },
+      args: { level },
     },
-    container: {} as WebContainer,
+    container: {
+      export: vi.fn(async () => snapshots[Math.min(exportCount++, snapshots.length - 1)]),
+    } as unknown as WebContainer,
     abortSignal: new AbortController().signal,
     onOutput: vi.fn(),
     workspace: {
-      getFiles,
-      getPreviewPort: () => undefined,
+      getFiles: () => ({}),
+      getPreviewPort: () => (level === 'full' ? 4173 : undefined),
       hasFile: () => true,
       setGeneratedFileContent: vi.fn(),
     },
     diagnostics,
+    deploymentValidation,
   };
 }
 
-function sourceFiles(content: string): FileMap {
-  return {
-    [getAbsolutePath('src/app.ts')]: { type: 'file', content, isBinary: false },
-  } as FileMap;
+async function zipSnapshot(content: string) {
+  const zip = new JSZip();
+  zip.file('src/app.ts', content);
+  return zip.generateAsync({ type: 'uint8array' });
 }

@@ -1,6 +1,10 @@
 import type { Tool } from 'ai';
 import { z } from 'zod';
-import { isForbiddenStackDependencyPackageName, packageNameFromInstallSpec } from '../utils/stackPolicy.js';
+import {
+  isForbiddenStackDependencyPackageName,
+  isRegistryPackageSpec,
+  packageNameFromInstallSpec,
+} from '../utils/stackPolicy.js';
 
 export { packageNameFromInstallSpec } from '../utils/stackPolicy.js';
 
@@ -78,6 +82,14 @@ export const npmInstallToolParameters = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `pnpm flags are not allowed in npmInstall packages: ${invalidSpecs.join(', ')}`,
+      });
+    }
+    const nonRegistrySpecs = splitPackageSpecs(packages).filter((spec) => !isRegistryPackageSpec(spec));
+    if (nonRegistrySpecs.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['packages'],
+        message: `Only npm registry package names and versions are allowed: ${nonRegistrySpecs.join(', ')}.`,
       });
     }
 

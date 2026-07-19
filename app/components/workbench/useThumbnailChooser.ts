@@ -7,6 +7,7 @@ import { useQuery } from '~/lib/cloudflare/data-hooks';
 import { useChatId } from '~/lib/stores/chatId';
 import { useSessionId } from '~/lib/stores/sessionId';
 import { uploadThumbnail } from './thumbnail-upload.client';
+import { thumbnailFileValidationError } from './thumbnail-file-policy';
 
 const logger = createScopedLogger('ThumbnailChooser');
 
@@ -25,6 +26,7 @@ export function useThumbnailChooser({ isOpen, onOpenChange, onRequestCapture }: 
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileReaderRef = useRef<FileReader | null>(null);
+  const uploadControllerRef = useRef<AbortController | null>(null);
   const optimisticPreviewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const operationGenerationRef = useRef(0);
   const mountedRef = useRef(true);
@@ -34,15 +36,21 @@ export function useThumbnailChooser({ isOpen, onOpenChange, onRequestCapture }: 
   const currentShare = useQuery(api.socialShare.getCurrentSocialShare, { id: chatId, sessionId });
   const currentThumbnail = currentShare?.thumbnailUrl ?? null;
 
+  const cancelUpload = useCallback(() => {
+    uploadControllerRef.current?.abort();
+    uploadControllerRef.current = null;
+  }, []);
+
   const cancelPendingWork = useCallback(() => {
     operationGenerationRef.current += 1;
+    cancelUpload();
     fileReaderRef.current?.abort();
     fileReaderRef.current = null;
     if (optimisticPreviewTimeoutRef.current) {
       clearTimeout(optimisticPreviewTimeoutRef.current);
       optimisticPreviewTimeoutRef.current = null;
     }
-  }, []);
+  }, [cancelUpload]);
 
   const resetLocalState = useCallback(() => {
     cancelPendingWork();
@@ -76,6 +84,7 @@ export function useThumbnailChooser({ isOpen, onOpenChange, onRequestCapture }: 
     if (!onRequestCapture) {
       return;
     }
+    cancelUpload();
     const generation = ++operationGenerationRef.current;
     setIsUploading(false);
     setIsCapturing(true);
@@ -95,7 +104,7 @@ export function useThumbnailChooser({ isOpen, onOpenChange, onRequestCapture }: 
         setIsCapturing(false);
       }
     }
-  }, [onRequestCapture]);
+  }, [cancelUpload, onRequestCapture]);
 
   useEffect(() => {
     if (isOpen && !currentThumbnail && !localPreview && !optimisticUploadedPreview && onRequestCapture) {
@@ -108,10 +117,13 @@ export function useThumbnailChooser({ isOpen, onOpenChange, onRequestCapture }: 
       return;
     }
     const imageToUpload = localPreview;
+    cancelUpload();
+    const controller = new AbortController();
+    uploadControllerRef.current = controller;
     const generation = ++operationGenerationRef.current;
     setIsUploading(true);
     try {
-      await uploadThumbnail(imageToUpload, sessionId, chatId);
+      await uploadThumbnail(imageToUpload, sessionId, chatId, controller.signal);
       if (!mountedRef.current || operationGenerationRef.current !== generation) {
         return;
       }
@@ -131,45 +143,60 @@ export function useThumbnailChooser({ isOpen, onOpenChange, onRequestCapture }: 
       }, 2000);
       toast.success('Thumbnail updated successfully');
     } catch (error) {
+      if (isAbortError(error) || controller.signal.aborted) {
+        return;
+      }
       if (!mountedRef.current || operationGenerationRef.current !== generation) {
         return;
       }
       logger.error('Failed to upload thumbnail:', error);
       toast.error('Failed to upload thumbnail');
     } finally {
+      if (uploadControllerRef.current === controller) {
+        uploadControllerRef.current = null;
+      }
       if (mountedRef.current && operationGenerationRef.current === generation) {
         setIsUploading(false);
       }
     }
-  }, [sessionId, chatId, localPreview, queryClient]);
+  }, [cancelUpload, sessionId, chatId, localPreview, queryClient]);
 
-  const handleImageFile = useCallback((file: File) => {
-    if (!file.type.startsWith('image/')) {
-      return;
-    }
-    const generation = ++operationGenerationRef.current;
-    setIsCapturing(false);
-    setIsUploading(false);
-    fileReaderRef.current?.abort();
-    const reader = new FileReader();
-    fileReaderRef.current = reader;
-    reader.onload = (event) => {
-      if (
-        mountedRef.current &&
-        operationGenerationRef.current === generation &&
-        typeof event.target?.result === 'string'
-      ) {
-        setLocalPreview(event.target.result);
-        setCaptureError(false);
-      }
-    };
-    reader.onloadend = () => {
-      if (fileReaderRef.current === reader) {
+  const handleImageFile = useCallback(
+    (file: File) => {
+      cancelUpload();
+      const generation = ++operationGenerationRef.current;
+      setIsCapturing(false);
+      setIsUploading(false);
+      fileReaderRef.current?.abort();
+      const validationError = thumbnailFileValidationError(file);
+      if (validationError) {
         fileReaderRef.current = null;
+        setLocalPreview(null);
+        setCaptureError(true);
+        toast.error(validationError);
+        return;
       }
-    };
-    reader.readAsDataURL(file);
-  }, []);
+      const reader = new FileReader();
+      fileReaderRef.current = reader;
+      reader.onload = (event) => {
+        if (
+          mountedRef.current &&
+          operationGenerationRef.current === generation &&
+          typeof event.target?.result === 'string'
+        ) {
+          setLocalPreview(event.target.result);
+          setCaptureError(false);
+        }
+      };
+      reader.onloadend = () => {
+        if (fileReaderRef.current === reader) {
+          fileReaderRef.current = null;
+        }
+      };
+      reader.readAsDataURL(file);
+    },
+    [cancelUpload],
+  );
 
   const handlePaste = useCallback(
     (event: ClipboardEvent) => {
@@ -196,11 +223,7 @@ export function useThumbnailChooser({ isOpen, onOpenChange, onRequestCapture }: 
 
   return {
     cancel: () => {
-      operationGenerationRef.current += 1;
-      fileReaderRef.current?.abort();
-      setLocalPreview(null);
-      setCaptureError(false);
-      setIsCapturing(false);
+      resetLocalState();
       onOpenChange(false);
     },
     captureError,
@@ -239,4 +262,8 @@ export function useThumbnailChooser({ isOpen, onOpenChange, onRequestCapture }: 
     previewImage: localPreview || optimisticUploadedPreview || currentThumbnail,
     uploadImage,
   };
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }

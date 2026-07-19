@@ -7,7 +7,7 @@ Ghostbuild is developed as a TanStack Start app deployed to Cloudflare Workers.
 ```bash
 nvm install
 nvm use
-npm install -g pnpm@9.5.0
+npm install -g pnpm@11.14.0
 pnpm install
 ```
 
@@ -18,10 +18,18 @@ pnpm run provision:production
 ```
 
 The provision step creates or reuses the configured D1 database and R2 bucket, then writes the non-secret D1 `database_id` into `wrangler.jsonc`.
+The checked-in root ID identifies Ghostbuild's production database. Before deploying a fork to another Cloudflare
+account, replace it with `00000000-0000-0000-0000-000000000000`; provisioning intentionally refuses to silently replace
+a non-placeholder ID that is absent from the active account.
 
 ## Production Runtime Configuration
 
-Configure all runtime secrets and variables as Cloudflare Worker bindings. Do not store secret values in local env files. Generated-project writes to `.env`, `.env.*`, `.envrc`, `.dev.vars`, and `.dev.vars.*` files are blocked.
+Configure runtime secrets as Cloudflare Worker bindings. Do not store secret values in local env files. Generated-project writes to `.env`, `.env.*`, `.envrc`, `.dev.vars`, and `.dev.vars.*` files are blocked.
+The root `wrangler.jsonc` declares the three required production secret names in `secrets.required` and keeps static,
+non-secret configuration in source control. The environment-specific `CLOUDFLARE_OAUTH_CLIENT_ID` is a required deploy
+input: set it in the current process for local deploys and as a protected GitHub production-environment variable for CI.
+The deploy wrapper validates and passes it to Wrangler explicitly, so production does not depend on dashboard-preserved
+variables or `keep_vars`.
 
 Builder inference uses only the OAuth-selected user's Cloudflare account. The root Worker intentionally has no `AI`
 binding or operator-funded inference fallback. Use Wrangler OAuth for local production deploys.
@@ -53,7 +61,10 @@ the production callback, client URL, metadata, and least-privilege scopes before
 - `CLOUDFLARE_OAUTH_CLIENT_SECRET` (Worker secret)
 
 Access and refresh tokens are encrypted before D1 persistence. Expired access tokens are refreshed server-side and
-rotated in the encrypted credential record.
+rotated in the encrypted credential record. OAuth initiation is limited by the dedicated
+`CLOUDFLARE_OAUTH_START_RATE_LIMITER` binding (10 attempts per 60 seconds per Cloudflare location and source key).
+The scheduled maintenance handler prunes bounded batches of expired OAuth states and app sessions, plus encrypted
+credential rows that have remained unreferenced for at least 24 hours.
 
 Cloudflare account connections also require `CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY`. Generate and configure the
 32-byte key as a production Worker secret; never write it into the repository or a local env file:
@@ -69,9 +80,10 @@ not a Cloudflare credential and cannot expand the plan's permissions:
 openssl rand -base64 32 | wrangler secret put DEPLOYMENT_PROXY_JWT_SECRET
 ```
 
-The deployment sandbox image is pinned in `Dockerfile.sandbox`. Building or dry-running a container update requires a
-running Docker-compatible daemon. The sandbox denies internet access by default and never receives the decrypted user
-Cloudflare credential.
+The deployment sandbox image is pinned in `Dockerfile.sandbox`. Its Wrangler dependency is installed from the standalone
+`sandbox-tools/pnpm-lock.yaml` with `--frozen-lockfile`; update that manifest and lockfile together. Building or dry-running
+a container update requires a running Docker-compatible daemon. The sandbox denies internet access by default and never
+receives the decrypted user Cloudflare credential.
 
 Approved deployments are started through the `ghostbuild-deployments` Workflow binding. The HTTP request returns after
 durable execution is queued and the browser polls the deployment record, so closing the tab cannot terminate a build or
@@ -142,11 +154,12 @@ and current limitation are recorded in `scripts/evaluations/prompt-cache-2026-07
 
 ## Deployment
 
-Production deploys run from the `Production Deploy` GitHub Actions workflow on pushes to `main` and manual `workflow_dispatch` runs. Configure `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as GitHub Actions secrets for deploy authentication, and keep runtime values configured as Cloudflare Worker bindings. The final publish step uses Cloudflare's official Wrangler GitHub Action and injects the Git commit SHA into that Worker version. After a stabilization window, CI requires consecutive version checks from its runner and matching checks from Globalping probes in the United States, Germany, and Japan. Each check records the Cloudflare Ray ID and verifies the native Worker version ID, commit SHA, and non-cacheable response policy.
+Production deploys run from the `Production Deploy` GitHub Actions workflow on pushes to `main` and manual `workflow_dispatch` runs. Configure `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as GitHub Actions secrets for deploy authentication, and configure `CLOUDFLARE_OAUTH_CLIENT_ID` as a protected production-environment variable. The final publish step uses Cloudflare's official Wrangler GitHub Action and injects the OAuth client id and Git commit SHA into that Worker version. After a stabilization window, CI requires consecutive version checks from its runner and matching checks from Globalping probes in the United States, Germany, and Japan. Each check records the Cloudflare Ray ID and verifies the native Worker version ID, commit SHA, and non-cacheable response policy.
 
 The canonical production origin is `https://ghostbuild.dev`. Its Wrangler route is a Custom Domain and `workers_dev` stays disabled. App navigation responses must preserve `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless`; without both, `window.crossOriginIsolated` is false and WebContainer boot is intentionally skipped.
 
 ```bash
+export CLOUDFLARE_OAUTH_CLIENT_ID='<production OAuth client id>'
 pnpm run deploy
 ```
 
@@ -159,3 +172,16 @@ Generated apps are created from `template/`. After changing the template, rebuil
 ```bash
 pnpm run rebuild-template
 ```
+
+## Public Release Controls
+
+Before changing the GitHub repository to public, complete the repository-host controls that cannot be expressed in this
+checkout:
+
+- Enable private vulnerability reporting, Dependabot alerts, secret scanning with push protection, and code scanning.
+- Protect `main` with a ruleset that requires the CI workflow, blocks force pushes and deletion, and applies to administrators.
+- Restrict the `production` environment to protected `main` deployments and require review if the release policy calls for it.
+- Configure `CLOUDFLARE_OAUTH_CLIENT_ID` as a non-secret variable in the protected `production` environment.
+- Set the repository homepage to `https://ghostbuild.dev`, add relevant Cloudflare/TanStack topics, and confirm GitHub detects
+  the canonical Apache-2.0 `LICENSE` plus `NOTICE` attribution.
+- Verify the security-advisory contact link from a signed-out browser before announcing the repository.

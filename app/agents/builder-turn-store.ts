@@ -3,6 +3,9 @@ import type { SqlProvider } from 'agents/experimental/memory/session';
 import { messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 
 const MAX_PROMPT_PREVIEW_LENGTH = 500;
+const MAX_PERSISTED_TURNS = 100;
+const MAX_TURN_ERROR_LENGTH = 2_000;
+const MAX_TURN_IDENTIFIER_LENGTH = 512;
 
 export type BuilderTurnStatus = 'accepted' | 'recovering' | 'completed' | 'error' | 'aborted';
 
@@ -93,6 +96,15 @@ export class BuilderTurnStore {
         ${turn.error ?? null}
       )
     `;
+    void this.db.sql`
+      DELETE FROM builder_turns
+      WHERE id IN (
+        SELECT id
+        FROM builder_turns
+        ORDER BY updated_at DESC
+        LIMIT -1 OFFSET ${MAX_PERSISTED_TURNS}
+      )
+    `;
   }
 
   getHistory(limit: number): PersistedTurnRow[] {
@@ -121,8 +133,8 @@ export function createBuilderTurn(args: {
   const lastUserMessage = args.messages.findLast((message) => message.role === 'user');
   return {
     id: crypto.randomUUID(),
-    requestId: typeof args.requestId === 'string' ? args.requestId : crypto.randomUUID(),
-    chatInitialId: args.chatInitialId,
+    requestId: boundedIdentifier(args.requestId, crypto.randomUUID()),
+    chatInitialId: truncate(args.chatInitialId, MAX_TURN_IDENTIFIER_LENGTH),
     status: 'accepted',
     startedAt: now,
     updatedAt: now,
@@ -142,7 +154,7 @@ export function createRecoveryTurn(context: ChatRecoveryContext, current?: Build
     status: 'recovering',
     updatedAt,
     recovery: {
-      incidentId: context.incidentId,
+      incidentId: boundedIdentifier(context.incidentId, 'unknown-incident'),
       attempt: context.attempt,
       recoveryKind: context.recoveryKind,
       partialTextLength: context.partialText.length,
@@ -156,17 +168,17 @@ export function completeBuilderTurn(
 ): BuilderTurnState {
   return {
     ...turn,
-    requestId: result.requestId ?? turn.requestId,
+    requestId: boundedIdentifier(result.requestId, turn.requestId),
     status: result.status,
     updatedAt: new Date().toISOString(),
-    error: result.error,
+    error: result.error === undefined ? undefined : truncate(result.error, MAX_TURN_ERROR_LENGTH),
   };
 }
 
 function fallbackRecoveryTurn(context: ChatRecoveryContext): BuilderTurnState {
   return {
-    id: context.recoveryRootRequestId,
-    requestId: context.requestId,
+    id: boundedIdentifier(context.recoveryRootRequestId, crypto.randomUUID()),
+    requestId: boundedIdentifier(context.requestId, crypto.randomUUID()),
     chatInitialId: 'agent-chat',
     status: 'recovering',
     startedAt: new Date(context.createdAt).toISOString(),
@@ -179,4 +191,8 @@ function fallbackRecoveryTurn(context: ChatRecoveryContext): BuilderTurnState {
 
 function truncate(value: string, maxLength: number): string {
   return value.length > maxLength ? value.slice(0, maxLength) : value;
+}
+
+function boundedIdentifier(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.length > 0 ? truncate(value, MAX_TURN_IDENTIFIER_LENGTH) : fallback;
 }

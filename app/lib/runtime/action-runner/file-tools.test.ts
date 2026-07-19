@@ -1,9 +1,30 @@
 import { describe, expect, test, vi } from 'vitest';
 import type { WebContainer } from '@webcontainer/api';
-import { runFileTool } from './file-tools';
+import { runFileTool, runStreamedFileAction } from './file-tools';
 import type { ActionRunnerWorkspace } from './types';
 
 describe('runFileTool', () => {
+  test('rejects traversal in legacy streamed file actions before filesystem mutation', async () => {
+    const mkdir = vi.fn();
+    const writeFile = vi.fn();
+    const workspace: ActionRunnerWorkspace = {
+      getFiles: () => ({}),
+      getPreviewPort: () => undefined,
+      hasFile: vi.fn(),
+      setGeneratedFileContent: vi.fn(),
+    };
+    await expect(
+      runStreamedFileAction(
+        { type: 'file', filePath: '/home/project/../../etc/passwd', content: 'blocked' } as never,
+        { workdir: '/home/project', fs: { mkdir, writeFile } } as unknown as WebContainer,
+        workspace,
+      ),
+    ).rejects.toThrow(/resolve under \/home\/project/);
+    expect(mkdir).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(workspace.setGeneratedFileContent).not.toHaveBeenCalled();
+  });
+
   test('rejects internal Ghostbuild placeholder files', async () => {
     const writeFile = vi.fn();
     const mkdir = vi.fn();
@@ -27,6 +48,62 @@ describe('runFileTool', () => {
         workspace,
       ),
     ).rejects.toThrow('Ghostbuild internal check files cannot be written');
+
+    expect(mkdir).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(workspace.setGeneratedFileContent).not.toHaveBeenCalled();
+  });
+
+  test('rejects package-manager credential files before filesystem mutation', async () => {
+    const writeFile = vi.fn();
+    const mkdir = vi.fn();
+    const workspace: ActionRunnerWorkspace = {
+      getFiles: () => ({}),
+      getPreviewPort: () => undefined,
+      hasFile: vi.fn(),
+      setGeneratedFileContent: vi.fn(),
+    };
+
+    await expect(
+      runFileTool(
+        {
+          state: 'call',
+          toolCallId: 'call-npmrc',
+          toolName: 'writeFile',
+          args: { path: '/home/project/.npmrc', content: '//registry.npmjs.org/:_authToken=secret' },
+        },
+        { fs: { mkdir, writeFile } } as unknown as WebContainer,
+        workspace,
+      ),
+    ).rejects.toThrow('Local secret files are disabled for Ghostbuild projects');
+
+    expect(mkdir).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(workspace.setGeneratedFileContent).not.toHaveBeenCalled();
+  });
+
+  test('rejects a workspace-wide build-script bypass before filesystem mutation', async () => {
+    const writeFile = vi.fn();
+    const mkdir = vi.fn();
+    const workspace: ActionRunnerWorkspace = {
+      getFiles: () => ({}),
+      getPreviewPort: () => undefined,
+      hasFile: vi.fn(),
+      setGeneratedFileContent: vi.fn(),
+    };
+
+    await expect(
+      runFileTool(
+        {
+          state: 'call',
+          toolCallId: 'call-workspace-policy',
+          toolName: 'writeFile',
+          args: { path: '/home/project/pnpm-workspace.yaml', content: 'dangerouslyAllowAllBuilds: true\n' },
+        },
+        { fs: { mkdir, writeFile } } as unknown as WebContainer,
+        workspace,
+      ),
+    ).rejects.toThrow('must not define dangerouslyAllowAllBuilds');
 
     expect(mkdir).not.toHaveBeenCalled();
     expect(writeFile).not.toHaveBeenCalled();

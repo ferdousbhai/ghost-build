@@ -33,4 +33,31 @@ describe('executeDataOperation', () => {
 
     await rejection;
   });
+
+  it('propagates caller cancellation to the active fetch', async () => {
+    const caller = new AbortController();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((_input, init) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+      });
+    });
+
+    const request = executeDataOperation(
+      api.messages.initializeChat,
+      { id: 'chat-1', sessionId: 'session-1' },
+      { signal: caller.signal },
+    );
+    caller.abort(new DOMException('Query cancelled', 'AbortError'));
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError', message: 'Query cancelled' });
+    expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
+  it('rejects a successful response without a result field', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ unexpected: true }));
+
+    await expect(
+      executeDataOperation(api.messages.initializeChat, { id: 'chat-1', sessionId: 'session-1' }),
+    ).rejects.toThrow('Data operation returned a malformed response: messages.initializeChat');
+  });
 });

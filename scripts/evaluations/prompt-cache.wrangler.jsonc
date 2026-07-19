@@ -2,6 +2,6 @@
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "ghostbuild-prompt-cache-evaluation",
   "main": "./prompt-cache.worker.ts",
-  "compatibility_date": "2026-07-08",
+  "compatibility_date": "2026-07-18",
   "ai": { "binding": "AI" },
 }

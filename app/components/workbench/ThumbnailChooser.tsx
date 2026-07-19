@@ -17,7 +17,7 @@ export function ThumbnailChooser(props: ThumbnailChooserProps) {
   }
   return (
     <Modal
-      onClose={() => props.onOpenChange(false)}
+      onClose={controller.cancel}
       title="Sharing thumbnail"
       description="This image is used when you share your chat with a link"
       size="lg"
@@ -85,7 +85,7 @@ export function ThumbnailChooser(props: ThumbnailChooserProps) {
               <Button
                 variant="neutral"
                 onClick={() => void controller.captureNewImage()}
-                disabled={controller.isCapturing}
+                disabled={controller.isCapturing || controller.isUploading}
                 tip="Take a screenshot of the current preview"
                 icon={<CameraIcon />}
               >
@@ -95,6 +95,7 @@ export function ThumbnailChooser(props: ThumbnailChooserProps) {
             <Button
               variant="neutral"
               onClick={controller.openFilePicker}
+              disabled={controller.isUploading}
               tip="Upload an image from your computer"
               icon={<UploadIcon />}
             >
@@ -109,8 +110,12 @@ export function ThumbnailChooser(props: ThumbnailChooserProps) {
             />
           </div>
           <div className="flex items-center gap-4">
-            <Button variant="neutral" onClick={controller.cancel} tip="Close without saving changes">
-              Close
+            <Button
+              variant="neutral"
+              onClick={controller.cancel}
+              tip={controller.isUploading ? 'Cancel the upload and close' : 'Close without saving changes'}
+            >
+              {controller.isUploading ? 'Cancel upload' : 'Close'}
             </Button>
             {controller.localPreview && (
               <Button

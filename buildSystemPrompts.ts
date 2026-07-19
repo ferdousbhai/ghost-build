@@ -1,28 +1,52 @@
 #!/usr/bin/env node
 
-import { writeFileSync } from 'fs';
+import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { ROLE_SYSTEM_PROMPT, generalSystemPrompt } from './ghostbuild-agent/prompts/system.js';
 
-console.log('Building ghostbuild system prompts release...');
+const DEFAULT_OUTPUT_PATH = 'ghostbuild-system-prompts.txt';
 
-let output: string = `# Ghostbuild System Prompts\n`;
-output += `Generated on: ${new Date().toISOString()}\n`;
-output += `========================================\n\n`;
-output += `This file contains the system prompts sent to Ghostbuild.\n\n`;
-
-output += `## System Message 1: ROLE_SYSTEM_PROMPT\n\n`;
-output += ROLE_SYSTEM_PROMPT + '\n\n';
-output += `---\n\n`;
-
-output += `## System Message 2: General System Prompt\n\n`;
-try {
-  const generalPromptContent = generalSystemPrompt();
-  output += generalPromptContent + '\n\n';
-  output += `---\n\n`;
-} catch (error: unknown) {
-  const errorMessage: string = error instanceof Error ? error.message : String(error);
-  console.log(`Could not generate general system prompt: ${errorMessage}`);
+export function renderSystemPromptsRelease(): string {
+  const rolePrompt = normalizeNewlines(ROLE_SYSTEM_PROMPT).trimEnd();
+  const generalPrompt = normalizeNewlines(generalSystemPrompt()).trimEnd();
+  return [
+    '# Ghostbuild System Prompts',
+    '========================================',
+    '',
+    'This file contains the system prompts sent to Ghostbuild.',
+    '',
+    '## System Message 1: ROLE_SYSTEM_PROMPT',
+    '',
+    rolePrompt,
+    '',
+    '---',
+    '',
+    '## System Message 2: General System Prompt',
+    '',
+    generalPrompt,
+    '',
+    '---',
+    '',
+  ].join('\n');
 }
 
-writeFileSync('ghostbuild-system-prompts.txt', output);
-console.log('✅ Built ghostbuild-system-prompts.txt');
+export function buildSystemPromptsRelease(outputPath = DEFAULT_OUTPUT_PATH): void {
+  writeFileSync(outputPath, renderSystemPromptsRelease(), { encoding: 'utf8' });
+}
+
+function normalizeNewlines(value: string): string {
+  return value.replace(/\r\n?/g, '\n');
+}
+
+function isEntrypoint(): boolean {
+  const entryPath = process.argv[1];
+  return Boolean(entryPath && pathToFileURL(resolve(entryPath)).href === import.meta.url);
+}
+
+if (isEntrypoint()) {
+  const outputPath = process.argv[2] ?? DEFAULT_OUTPUT_PATH;
+  console.log('Building ghostbuild system prompts release...');
+  buildSystemPromptsRelease(outputPath);
+  console.log(`Built ${outputPath}`);
+}

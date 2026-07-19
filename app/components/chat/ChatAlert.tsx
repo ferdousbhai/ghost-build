@@ -69,6 +69,7 @@ export default function ChatAlert({ alert, clearAlert, postMessage }: Props) {
             >
               <div className="flex gap-2">
                 <button
+                  type="button"
                   onClick={() =>
                     postMessage(
                       `*Fix this ${isPreview ? 'preview' : 'terminal'} error* \n\`\`\`${isPreview ? 'js' : 'sh'}\n${description}\n${content}\n\`\`\`\n`,
@@ -80,6 +81,7 @@ export default function ChatAlert({ alert, clearAlert, postMessage }: Props) {
                   Ask Ghostbuild
                 </button>
                 <button
+                  type="button"
                   onClick={clearAlert}
                   className="rounded-md bg-bolt-elements-button-secondary-background px-2 py-1.5 text-sm font-medium text-bolt-elements-button-secondary-text hover:bg-bolt-elements-button-secondary-backgroundHover focus:outline-none focus:ring-2 focus:ring-bolt-elements-button-secondary-background focus:ring-offset-2"
                 >

@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useLayoutEffect } from 'react';
 import { authClient, signInWithCloudflare } from '~/lib/auth-client';
 import { sessionIdStore, useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
+import { toast } from 'sonner';
 
 const logger = createScopedLogger('GhostbuildAuth');
 const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
@@ -44,7 +45,10 @@ export function GhostbuildAuthProvider({
   useEffect(() => {
     if (redirectIfUnauthenticated && state.kind === 'unauthenticated') {
       logger.debug('Redirecting unauthenticated user to Cloudflare authorization');
-      void signInWithCloudflare(window.location.href);
+      void signInWithCloudflare(window.location.href).catch((error) => {
+        logger.error('Failed to start Cloudflare authorization', error);
+        toast.error(error instanceof Error ? error.message : 'Unable to connect Cloudflare. Please try again.');
+      });
     }
   }, [redirectIfUnauthenticated, state.kind]);
 

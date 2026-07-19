@@ -1,10 +1,12 @@
 import type { Compartment } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type { EditorDocument } from 'ghostbuild-agent/types';
+import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { editableEffect } from './editor-config';
 import { getLanguage } from './languages';
 
 type TextEditorDocument = EditorDocument & { value: string };
+const logger = createScopedLogger('EditorDocument');
 
 interface SetEditorDocumentOptions {
   view: EditorView;
@@ -42,14 +44,18 @@ export function setEditorDocument({
     scrollNearDocumentEnd(view, isCurrentDocument);
   }
 
-  void getLanguage(document.filePath).then((languageSupport) => {
-    if (!isCurrentDocument()) {
-      return;
-    }
-    view.dispatch({
-      effects: languageCompartment.reconfigure(languageSupport ? [languageSupport] : []),
+  void getLanguage(document.filePath)
+    .then((languageSupport) => {
+      if (!isCurrentDocument()) {
+        return;
+      }
+      view.dispatch({
+        effects: languageCompartment.reconfigure(languageSupport ? [languageSupport] : []),
+      });
+    })
+    .catch((error) => {
+      logger.warn('Failed to load editor language support', { error, filePath: document.filePath });
     });
-  });
 }
 
 function restoreDocumentPosition(

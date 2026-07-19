@@ -1,5 +1,4 @@
 import { useCallback, type ChangeEvent } from 'react';
-import * as Dialog from '@radix-ui/react-dialog';
 import * as Popover from '@radix-ui/react-popover';
 import {
   ChevronRightIcon,
@@ -23,7 +22,12 @@ export function ShareButton() {
     <>
       <Popover.Root open={share.isOpen} onOpenChange={(open) => void share.handleOpenChange(open)}>
         <Popover.Trigger asChild>
-          <Button disabled={!share.anyPreviewReady} focused={share.isOpen} variant="neutral" size="xs">
+          <Button
+            disabled={!share.anyPreviewReady || !share.sharingReady}
+            focused={share.isOpen}
+            variant="neutral"
+            size="xs"
+          >
             <Share2Icon />
             <span>Share</span>
           </Button>
@@ -85,13 +89,11 @@ export function ShareButton() {
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
-      <Dialog.Root open={share.isThumbnailModalOpen} onOpenChange={share.setIsThumbnailModalOpen}>
-        <ThumbnailChooser
-          isOpen={share.isThumbnailModalOpen}
-          onOpenChange={share.setIsThumbnailModalOpen}
-          onRequestCapture={handleRequestCapture}
-        />
-      </Dialog.Root>
+      <ThumbnailChooser
+        isOpen={share.isThumbnailModalOpen}
+        onOpenChange={share.setIsThumbnailModalOpen}
+        onRequestCapture={handleRequestCapture}
+      />
     </>
   );
 }

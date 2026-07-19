@@ -1,4 +1,8 @@
-import { isForbiddenStackDependencyPackageName, packageNameFromInstallSpec } from 'ghostbuild-agent/utils/stackPolicy';
+import {
+  isForbiddenStackDependencyPackageName,
+  isRegistryPackageSpec,
+  packageNameFromInstallSpec,
+} from 'ghostbuild-agent/utils/stackPolicy';
 import { slashPath } from './pathNames';
 
 const packageDependencySections = [
@@ -7,16 +11,21 @@ const packageDependencySections = [
   'optionalDependencies',
   'peerDependencies',
 ] as const;
+const forbiddenPackageManagerPolicyFields = ['dependenciesMeta', 'overrides', 'pnpm', 'resolutions'] as const;
 
 type PackageDependencySection = (typeof packageDependencySections)[number];
 
-type PackageManifest = {
-  [section in PackageDependencySection]?: unknown;
-};
+type PackageManifest = Partial<Record<PackageDependencySection, unknown>> & Record<string, unknown>;
 
 type ForbiddenGeneratedPackageDependency = {
   section: PackageDependencySection;
   packageName: string;
+};
+
+type InvalidGeneratedPackageSource = {
+  section: PackageDependencySection;
+  packageName: string;
+  versionSpec: unknown;
 };
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -56,6 +65,26 @@ export function findForbiddenGeneratedPackageDependencies(manifest: PackageManif
   return forbiddenDependencies;
 }
 
+export function findInvalidGeneratedPackageSources(manifest: PackageManifest) {
+  const invalidSources: InvalidGeneratedPackageSource[] = [];
+  for (const section of packageDependencySections) {
+    const dependencies = manifest[section];
+    if (!isPlainRecord(dependencies)) {
+      continue;
+    }
+    for (const [packageName, versionSpec] of Object.entries(dependencies)) {
+      if (typeof versionSpec !== 'string' || !isRegistryPackageSpec(`${packageName}@${versionSpec}`)) {
+        invalidSources.push({ section, packageName, versionSpec });
+      }
+    }
+  }
+  return invalidSources;
+}
+
+export function findForbiddenGeneratedPackageManagerPolicyFields(manifest: PackageManifest) {
+  return forbiddenPackageManagerPolicyFields.filter((field) => Object.hasOwn(manifest, field));
+}
+
 export function assertValidGeneratedPackageJson(filePath: string, content: string) {
   if (!packageJsonPath(filePath)) {
     return;
@@ -73,15 +102,29 @@ export function assertValidGeneratedPackageJson(filePath: string, content: strin
   }
 
   const forbiddenDependencies = findForbiddenGeneratedPackageDependencies(manifest);
-  if (forbiddenDependencies.length === 0) {
-    return;
+  if (forbiddenDependencies.length > 0) {
+    const formattedDependencies = forbiddenDependencies
+      .map(({ section, packageName }) => `${section}.${packageName}`)
+      .join(', ');
+    throw new Error(
+      `Generated package.json must not depend on ${formattedDependencies}. Use Cloudflare Workers AI and TanStack/Cloudflare APIs instead.`,
+    );
   }
 
-  const formattedDependencies = forbiddenDependencies
-    .map(({ section, packageName }) => `${section}.${packageName}`)
-    .join(', ');
+  const invalidSources = findInvalidGeneratedPackageSources(manifest);
+  if (invalidSources.length > 0) {
+    const formattedDependencies = invalidSources
+      .map(({ section, packageName }) => `${section}.${packageName}`)
+      .join(', ');
+    throw new Error(
+      `Generated package.json dependencies must use npm registry versions: ${formattedDependencies}. URL, Git, file, link, and workspace sources are not allowed.`,
+    );
+  }
 
-  throw new Error(
-    `Generated package.json must not depend on ${formattedDependencies}. Use Cloudflare Workers AI and TanStack/Cloudflare APIs instead.`,
-  );
+  const forbiddenPolicyFields = findForbiddenGeneratedPackageManagerPolicyFields(manifest);
+  if (forbiddenPolicyFields.length > 0) {
+    throw new Error(
+      `Generated package.json must not override dependency resolution or build policy through: ${forbiddenPolicyFields.join(', ')}. Use the reviewed pnpm-workspace.yaml policy and npm registry dependency versions instead.`,
+    );
+  }
 }

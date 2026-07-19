@@ -1,7 +1,6 @@
 import { useStore } from '@nanostores/react';
-import * as Dialog from '@radix-ui/react-dialog';
 import { ExternalLinkIcon, ImageIcon, MobileIcon, UpdateIcon } from '@radix-ui/react-icons';
-import { memo, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { memo, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { Spinner } from '@ui/Spinner';
 import { IconButton } from '~/components/ui/IconButton';
 import { ContainerBootState, useContainerBootState } from '~/lib/stores/containerBootState';
@@ -11,6 +10,7 @@ import { PortDropdown } from './PortDropdown';
 import { ThumbnailChooser } from './ThumbnailChooser';
 import { useDevicePreviewResize, type ResizeHandleSide } from './useDevicePreviewResize';
 import { usePreviewNavigation } from './usePreviewNavigation';
+import { toast } from 'sonner';
 
 export const Preview = memo(function Preview() {
   const previews = useStore(workbenchStore.previews);
@@ -24,13 +24,26 @@ export const Preview = memo(function Preview() {
   return (
     <div className="relative flex size-full flex-col">
       {navigation.isPortDropdownOpen && (
-        <div className="z-iframe-overlay absolute size-full" onClick={() => navigation.setIsPortDropdownOpen(false)} />
+        <div
+          aria-hidden
+          className="z-iframe-overlay absolute size-full"
+          onClick={() => navigation.setIsPortDropdownOpen(false)}
+        />
       )}
       <div className="flex items-center gap-2 bg-bolt-elements-background-depth-2 p-2">
-        <IconButton icon={<UpdateIcon />} title="Reload preview" onClick={navigation.reload} />
+        <IconButton
+          icon={<UpdateIcon />}
+          title="Reload preview"
+          onClick={() => {
+            void navigation.reload().catch((error) => {
+              toast.error(error instanceof Error ? error.message : 'Unable to reload the preview.');
+            });
+          }}
+        />
         <div className="flex grow items-center gap-1 rounded-full border bg-bolt-elements-preview-addressBar-background px-3 py-1 text-sm text-bolt-elements-preview-addressBar-text hover:bg-bolt-elements-preview-addressBar-backgroundHover focus-within:border-border-selected focus-within:bg-bolt-elements-preview-addressBar-backgroundActive focus-within:text-bolt-elements-preview-addressBar-textActive hover:focus-within:bg-bolt-elements-preview-addressBar-backgroundActive">
           <input
             title="URL"
+            aria-label="Preview URL"
             ref={navigation.inputRef}
             className="w-full bg-transparent outline-none focus:outline-none"
             type="text"
@@ -51,24 +64,25 @@ export const Preview = memo(function Preview() {
               previews={previews}
             />
           )}
-          <Dialog.Root open={isThumbnailModalOpen} onOpenChange={setIsThumbnailModalOpen}>
-            <Dialog.Trigger asChild>
-              <IconButton icon={<ImageIcon />} title="View Preview Image" />
-            </Dialog.Trigger>
-            <ThumbnailChooser
-              isOpen={isThumbnailModalOpen}
-              onOpenChange={setIsThumbnailModalOpen}
-              onRequestCapture={navigation.requestScreenshot}
-            />
-          </Dialog.Root>
+          <IconButton icon={<ImageIcon />} title="View Preview Image" onClick={() => setIsThumbnailModalOpen(true)} />
+          <ThumbnailChooser
+            isOpen={isThumbnailModalOpen}
+            onOpenChange={setIsThumbnailModalOpen}
+            onRequestCapture={navigation.requestScreenshot}
+          />
           <IconButton
             icon={<MobileIcon />}
+            aria-pressed={device.isDeviceModeOn}
             onClick={device.toggleDeviceMode}
             title={device.isDeviceModeOn ? 'Switch to Responsive Mode' : 'Switch to Device Mode'}
           />
           <IconButton
             icon={<ExternalLinkIcon />}
-            onClick={() => void navigation.openInNewWindow()}
+            onClick={() => {
+              void navigation.openInNewWindow().catch((error) => {
+                toast.error(error instanceof Error ? error.message : 'Unable to open the preview window.');
+              });
+            }}
             title="Open in New Window"
           />
         </div>
@@ -100,8 +114,18 @@ export const Preview = memo(function Preview() {
           )}
           {device.isDeviceModeOn && (
             <>
-              <ResizeHandle side="left" onMouseDown={device.startResizing} />
-              <ResizeHandle side="right" onMouseDown={device.startResizing} />
+              <ResizeHandle
+                side="left"
+                widthPercent={device.widthPercent}
+                onMouseDown={device.startResizing}
+                onKeyDown={device.adjustWidthWithKeyboard}
+              />
+              <ResizeHandle
+                side="right"
+                widthPercent={device.widthPercent}
+                onMouseDown={device.startResizing}
+                onKeyDown={device.adjustWidthWithKeyboard}
+              />
             </>
           )}
         </div>
@@ -120,16 +144,33 @@ function PreviewStatus({ children }: { children: React.ReactNode }) {
 
 function ResizeHandle({
   side,
+  widthPercent,
   onMouseDown,
+  onKeyDown,
 }: {
   side: ResizeHandleSide;
+  widthPercent: number;
   onMouseDown: (event: ReactMouseEvent, side: ResizeHandleSide) => void;
+  onKeyDown: (side: ResizeHandleSide, key: 'ArrowLeft' | 'ArrowRight') => void;
 }) {
   return (
     <div
+      role="separator"
+      aria-label={`Resize preview from the ${side}`}
+      aria-orientation="vertical"
+      aria-valuemin={10}
+      aria-valuemax={90}
+      aria-valuenow={widthPercent}
+      tabIndex={0}
       onMouseDown={(event) => onMouseDown(event, side)}
+      onKeyDown={(event: ReactKeyboardEvent) => {
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+          event.preventDefault();
+          onKeyDown(side, event.key);
+        }
+      }}
       className={classNames(
-        'absolute top-0 flex h-full w-[15px] cursor-ew-resize select-none items-center justify-center bg-white/20 transition-colors hover:bg-white/50',
+        'absolute top-0 flex h-full w-[15px] cursor-ew-resize select-none items-center justify-center bg-white/20 transition-colors hover:bg-white/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500',
         side === 'left' ? 'left-0 -ml-[15px]' : 'right-0 -mr-[15px]',
       )}
       title="Drag to resize width"

@@ -57,6 +57,14 @@ function ShareProjectContent() {
     }
   };
 
+  const handleSignIn = async () => {
+    try {
+      await signInWithCloudflare();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to connect Cloudflare. Please try again.');
+    }
+  };
+
   if (ghostbuildAuthState.kind === 'loading') {
     return (
       <div className="app-page-shell">
@@ -91,13 +99,7 @@ function ShareProjectContent() {
             </p>
           </div>
 
-          <Button
-            className="mt-6 w-full"
-            size="lg"
-            onClick={() => {
-              void signInWithCloudflare();
-            }}
-          >
+          <Button className="mt-6 w-full" size="lg" onClick={() => void handleSignIn()}>
             Connect Cloudflare
           </Button>
         </Sheet>

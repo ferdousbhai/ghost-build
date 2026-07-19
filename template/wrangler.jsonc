@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ghostbuild-cloudflare-app",
-  "compatibility_date": "2026-07-08",
+  "compatibility_date": "2026-07-18",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
   "observability": {
@@ -16,6 +16,9 @@
     },
   },
   "upload_source_maps": true,
+  "triggers": {
+    "crons": ["0 3 * * *"],
+  },
   "ai": {
     "binding": "AI",
   },
@@ -41,10 +44,10 @@
       },
     ],
   },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["AppAgent"],
+  "exports": {
+    "AppAgent": {
+      "type": "durable-object",
+      "storage": "sqlite",
     },
-  ],
+  },
 }

@@ -3,11 +3,16 @@ import { profileStore } from '~/lib/stores/profile';
 import { ExitIcon, PersonIcon } from '@radix-ui/react-icons';
 import { signOutOfGhostbuild } from '~/lib/auth-client';
 import { Button } from '@ui/Button';
+import { toast } from 'sonner';
 
 export function ProfileCard() {
   const profile = useStore(profileStore);
-  const handleLogout = () => {
-    void signOutOfGhostbuild();
+  const handleLogout = async () => {
+    try {
+      await signOutOfGhostbuild();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to sign out. Please try again.');
+    }
   };
 
   if (!profile) {
@@ -34,7 +39,7 @@ export function ProfileCard() {
           {profile.email && <p className="mt-1 truncate text-sm text-content-secondary">{profile.email}</p>}
         </div>
         <div className="flex flex-col gap-2 sm:items-end">
-          <Button variant="danger" size="sm" onClick={handleLogout} icon={<ExitIcon aria-hidden />}>
+          <Button variant="danger" size="sm" onClick={() => void handleLogout()} icon={<ExitIcon aria-hidden />}>
             Log out
           </Button>
         </div>

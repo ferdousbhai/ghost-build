@@ -4,14 +4,21 @@ import {
   getLatestStorageState,
   insertChatWithState,
   requireChat,
-  requireChatByPrimaryId,
+  type ChatInsertAuthorization,
 } from './chat-repository.server';
-import { deleteObject, putObject, storageUrl } from './object-storage.server';
-import { prepareObjectGcCandidateStatements, sweepObjectGcCandidatesBestEffort } from './object-gc.server';
+import { allocateObjectKey, putObjectAtKey, storageUrl } from './object-storage.server';
+import {
+  cancelObjectGcCandidate,
+  prepareObjectGcCandidateStatements,
+  queueObjectGcCandidate,
+  sweepObjectGcCandidatesBestEffort,
+} from './object-gc.server';
 import type { ShareRow, SocialShareRow } from './types';
+import { DataNotFoundError } from './errors';
 
 const logger = createScopedLogger('CloudflareShareStorage');
 const MAX_SOCIAL_SHARE_WRITE_ATTEMPTS = 8;
+const SHARE_CODE_PATTERN = /^[a-f0-9]{32}$/;
 
 export async function createShare(db: D1Database, args: { sessionId: string; id: string }) {
   const chat = await requireChat(db, { id: args.id, sessionId: args.sessionId });
@@ -25,31 +32,83 @@ export async function createShare(db: D1Database, args: { sessionId: string; id:
   }
 
   const code = await generateUniqueCode(db);
-  await db
-    .prepare(
-      `INSERT INTO shares (
-        id, chat_id, snapshot_key, code, chat_history_key, last_message_rank,
-        last_subchat_index, part_index, description
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      crypto.randomUUID(),
-      chat.id,
-      snapshotKey,
-      code,
-      state.storage_key,
-      state.last_message_rank,
-      chat.last_subchat_index,
-      state.part_index,
-      chat.description,
-    )
-    .run();
+  const shareId = crypto.randomUUID();
+  let result: D1Result;
+  try {
+    result = await db
+      .prepare(
+        `INSERT INTO shares (
+          id, chat_id, snapshot_key, code, chat_history_key, last_message_rank,
+          last_subchat_index, part_index, description
+        )
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+        FROM chats
+        WHERE id = ? AND creator_id = ? AND is_deleted = 0`,
+      )
+      .bind(
+        shareId,
+        chat.id,
+        snapshotKey,
+        code,
+        state.storage_key,
+        state.last_message_rank,
+        chat.last_subchat_index,
+        state.part_index,
+        chat.description,
+        chat.id,
+        args.sessionId,
+      )
+      .run();
+  } catch (error) {
+    try {
+      const committed = await db
+        .prepare(
+          `SELECT 1 AS found
+           FROM shares
+           JOIN chats ON chats.id = shares.chat_id
+           WHERE shares.id = ? AND shares.chat_id = ? AND shares.code = ?
+             AND shares.snapshot_key = ? AND shares.chat_history_key = ?
+             AND shares.last_message_rank = ? AND shares.last_subchat_index = ?
+             AND shares.part_index IS ? AND shares.description IS ?
+             AND chats.creator_id = ? AND chats.is_deleted = 0
+           LIMIT 1`,
+        )
+        .bind(
+          shareId,
+          chat.id,
+          code,
+          snapshotKey,
+          state.storage_key,
+          state.last_message_rank,
+          chat.last_subchat_index,
+          state.part_index,
+          chat.description,
+          args.sessionId,
+        )
+        .first<{ found: number }>();
+      if (committed) {
+        return { code };
+      }
+    } catch {
+      // Preserve the original insert failure when the exact share receipt cannot be read.
+    }
+    throw error;
+  }
+  if (result.meta.changes !== 1) {
+    throw new DataNotFoundError('Chat not found');
+  }
   return { code };
 }
 
 export async function getShareDescription(db: D1Database, args: { code: string }) {
+  requireStrongShareCode(args.code);
   const share = await db
-    .prepare('SELECT description FROM shares WHERE code = ?')
+    .prepare(
+      `SELECT shares.description
+       FROM shares
+       JOIN chats ON chats.id = shares.chat_id
+       WHERE shares.code = ? AND chats.is_deleted = 0`,
+    )
     .bind(args.code)
     .first<{ description: string | null }>();
   if (share) {
@@ -60,38 +119,43 @@ export async function getShareDescription(db: D1Database, args: { code: string }
       `SELECT chats.description
        FROM social_shares
        JOIN chats ON chats.id = social_shares.chat_id
-       WHERE social_shares.code = ?`,
+       WHERE social_shares.code = ? AND social_shares.is_shared = 1 AND chats.is_deleted = 0`,
     )
     .bind(args.code)
     .first<{ description: string | null }>();
   if (!socialShare) {
-    throw new Error('Invalid share link');
+    throw new DataNotFoundError('Invalid share link');
   }
   return { description: socialShare.description ?? undefined };
 }
 
 export async function cloneShare(db: D1Database, args: { shareCode: string; sessionId: string }) {
-  const share = await db.prepare('SELECT * FROM shares WHERE code = ?').bind(args.shareCode).first<ShareRow>();
+  requireStrongShareCode(args.shareCode);
+  const share = await db
+    .prepare(
+      `SELECT shares.*, chats.description AS parent_description
+       FROM shares
+       JOIN chats ON chats.id = shares.chat_id
+       WHERE shares.code = ? AND chats.is_deleted = 0`,
+    )
+    .bind(args.shareCode)
+    .first<ShareRow & { parent_description: string | null }>();
   if (!share) {
     return cloneSocialShare(db, args.shareCode, args.sessionId);
   }
   if (!share.chat_history_key) {
     throw new Error('Chat history not found');
   }
-  const parentChat = await requireChatByPrimaryId(
-    db,
-    share.chat_id,
-    'The original chat was not found. It may have been deleted.',
-  );
   return cloneChatFromState(db, {
     sessionId: args.sessionId,
-    parentDescription: parentChat.description,
+    parentDescription: share.parent_description,
     storageKey: share.chat_history_key,
     subchatIndex: share.last_subchat_index,
     lastMessageRank: share.last_message_rank,
     partIndex: share.part_index ?? -1,
     snapshotKey: share.snapshot_key,
     stateDescription: share.description,
+    authorization: { kind: 'legacy-share', code: args.shareCode, parentChatId: share.chat_id },
   });
 }
 
@@ -109,9 +173,12 @@ export async function getCurrentSocialShare(
   args: { sessionId: string; id: string },
 ): Promise<CurrentSocialShare | null> {
   const chat = await requireChat(db, { id: args.id, sessionId: args.sessionId });
-  const share = await db.prepare('SELECT * FROM social_shares WHERE chat_id = ?').bind(chat.id).first<SocialShareRow>();
+  let share = await db.prepare('SELECT * FROM social_shares WHERE chat_id = ?').bind(chat.id).first<SocialShareRow>();
   if (!share) {
     return null;
+  }
+  if (!isStrongShareCode(share.code)) {
+    share = await rotateSocialShareCode(db, share);
   }
   return {
     isShared: Boolean(share.is_shared),
@@ -121,13 +188,22 @@ export async function getCurrentSocialShare(
 }
 
 export async function getSocialShare(env: Env, code: string): Promise<SocialShare> {
-  const share = await env.DB.prepare('SELECT * FROM social_shares WHERE code = ?').bind(code).first<SocialShareRow>();
-  if (!share?.is_shared) {
-    throw new Error('Invalid share link');
+  requireStrongShareCode(code);
+  const share = await env.DB.prepare(
+    `SELECT social_shares.id, social_shares.chat_id, social_shares.code,
+            social_shares.thumbnail_image_key, social_shares.is_shared,
+            chats.description AS chat_description
+     FROM social_shares
+     JOIN chats ON chats.id = social_shares.chat_id
+     WHERE social_shares.code = ? AND social_shares.is_shared = 1 AND chats.is_deleted = 0`,
+  )
+    .bind(code)
+    .first<SocialShareRow & { chat_description: string | null }>();
+  if (!share) {
+    throw new DataNotFoundError('Invalid share link');
   }
-  const chat = await requireChatByPrimaryId(env.DB, share.chat_id, 'Invalid chat');
   return {
-    description: chat.description ?? null,
+    description: share.chat_description,
     code,
     thumbnailUrl: share.thumbnail_image_key ? storageUrl(share.thumbnail_image_key) : null,
   };
@@ -138,65 +214,77 @@ export async function saveThumbnail(
   args: { sessionId: string; chatId: string; image: Blob },
 ): Promise<string> {
   const chat = await requireChat(env.DB, { id: args.chatId, sessionId: args.sessionId });
-  const storageKey = await putObject(env, 'thumbnails', args.image);
-  try {
-    let current = await insertOrKeepSocialShare(env.DB, chat.id);
-    for (let attempt = 0; attempt < MAX_SOCIAL_SHARE_WRITE_ATTEMPTS; attempt++) {
-      const displacedKey = current.thumbnail_image_key !== storageKey ? current.thumbnail_image_key : null;
-      const [update] = await env.DB.batch([
-        env.DB.prepare(
-          `UPDATE social_shares
-           SET thumbnail_image_key = ?
-           WHERE id = ? AND thumbnail_image_key IS ?`,
-        ).bind(storageKey, current.id, current.thumbnail_image_key),
-        ...prepareObjectGcCandidateStatements(env.DB, [displacedKey]),
-      ]);
-      if (update.meta.changes > 0) {
-        await sweepObjectGcCandidatesBestEffort(env);
-        return storageKey;
-      }
-      const latest = await env.DB.prepare('SELECT * FROM social_shares WHERE chat_id = ?')
-        .bind(chat.id)
-        .first<SocialShareRow>();
-      if (!latest) {
-        throw new Error('Social share disappeared during thumbnail save');
-      }
-      current = latest;
+  const storageKey = allocateObjectKey('thumbnails');
+  const gcReceipt = await queueObjectGcCandidate(env.DB, storageKey);
+  await putObjectAtKey(env, storageKey, args.image);
+  let current = await insertOrKeepSocialShare(env.DB, chat.id);
+  for (let attempt = 0; attempt < MAX_SOCIAL_SHARE_WRITE_ATTEMPTS; attempt++) {
+    const displacedKey = current.thumbnail_image_key !== storageKey ? current.thumbnail_image_key : null;
+    const [update] = await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE social_shares
+         SET thumbnail_image_key = ?
+         WHERE id = ? AND thumbnail_image_key IS ?`,
+      ).bind(storageKey, current.id, current.thumbnail_image_key),
+      ...prepareObjectGcCandidateStatements(env.DB, [displacedKey]),
+    ]);
+    if (update.meta.changes > 0) {
+      await cancelThumbnailGcCandidateBestEffort(env.DB, gcReceipt);
+      await sweepObjectGcCandidatesBestEffort(env);
+      return storageKey;
     }
-    throw new Error('Social share changed too many times; retry the thumbnail save');
-  } catch (error) {
-    await deleteObjectBestEffort(env, storageKey);
-    throw error;
+    const latest = await env.DB.prepare('SELECT * FROM social_shares WHERE chat_id = ?')
+      .bind(chat.id)
+      .first<SocialShareRow>();
+    if (!latest) {
+      throw new Error('Social share disappeared during thumbnail save');
+    }
+    current = latest;
   }
+  throw new Error('Social share changed too many times; retry the thumbnail save');
 }
 
 async function cloneSocialShare(db: D1Database, code: string, sessionId: string) {
-  const socialShare = await db.prepare('SELECT * FROM social_shares WHERE code = ?').bind(code).first<SocialShareRow>();
+  const socialShare = await db
+    .prepare(
+      `SELECT social_shares.id, social_shares.chat_id, social_shares.code,
+              social_shares.thumbnail_image_key, social_shares.is_shared,
+              chats.description AS chat_description,
+              chats.last_subchat_index AS chat_last_subchat_index,
+              chats.snapshot_key AS chat_snapshot_key
+       FROM social_shares
+       JOIN chats ON chats.id = social_shares.chat_id
+       WHERE social_shares.code = ? AND social_shares.is_shared = 1 AND chats.is_deleted = 0`,
+    )
+    .bind(code)
+    .first<
+      SocialShareRow & {
+        chat_description: string | null;
+        chat_last_subchat_index: number;
+        chat_snapshot_key: string | null;
+      }
+    >();
   if (!socialShare) {
-    throw new Error('Invalid share link');
+    throw new DataNotFoundError('Invalid share link');
   }
-  if (!socialShare.is_shared) {
-    throw new Error('This project is not allowed to be forked.');
-  }
-  const parentChat = await requireChatByPrimaryId(
-    db,
-    socialShare.chat_id,
-    'The original chat was not found. It may have been deleted.',
-  );
-  const state = await getLatestStorageState(db, { chatId: parentChat.id, subchatIndex: parentChat.last_subchat_index });
+  const state = await getLatestStorageState(db, {
+    chatId: socialShare.chat_id,
+    subchatIndex: socialShare.chat_last_subchat_index,
+  });
   if (!state?.storage_key) {
     throw new Error('Chat history not found');
   }
 
   return cloneChatFromState(db, {
     sessionId,
-    parentDescription: parentChat.description,
+    parentDescription: socialShare.chat_description,
     storageKey: state.storage_key,
     subchatIndex: state.subchat_index,
     lastMessageRank: state.last_message_rank,
     partIndex: state.part_index,
-    snapshotKey: state.snapshot_key ?? parentChat.snapshot_key,
+    snapshotKey: state.snapshot_key ?? socialShare.chat_snapshot_key,
     stateDescription: state.description,
+    authorization: { kind: 'social-share', code, parentChatId: socialShare.chat_id },
   });
 }
 
@@ -211,6 +299,7 @@ async function cloneChatFromState(
     partIndex: number;
     snapshotKey: string | null;
     stateDescription: string | null;
+    authorization: ChatInsertAuthorization;
   },
 ) {
   const initialId = crypto.randomUUID();
@@ -233,15 +322,19 @@ async function cloneChatFromState(
       snapshotKey: args.snapshotKey,
       description: args.stateDescription,
     },
+    args.authorization,
   );
   return { id: initialId, description: args.parentDescription ?? undefined };
 }
 
-async function deleteObjectBestEffort(env: Env, key: string): Promise<void> {
+async function cancelThumbnailGcCandidateBestEffort(
+  db: D1Database,
+  receipt: Awaited<ReturnType<typeof queueObjectGcCandidate>>,
+): Promise<void> {
   try {
-    await deleteObject(env, key);
+    await cancelObjectGcCandidate(db, receipt);
   } catch (error) {
-    logger.warn('Unable to clean up uploaded thumbnail object', { key, error });
+    logger.warn('Unable to cancel live thumbnail cleanup receipt', { key: receipt.storageKey, error });
   }
 }
 
@@ -265,16 +358,25 @@ async function writeSocialShare(
       const share = await db
         .prepare(
           `INSERT INTO social_shares (id, chat_id, code, thumbnail_image_key, is_shared)
-           VALUES (?, ?, ?, NULL, ?)
+           SELECT ?, ?, ?, NULL, ?
+           FROM chats
+           WHERE id = ? AND is_deleted = 0
            ON CONFLICT(chat_id) DO UPDATE SET
+             code = CASE
+               WHEN length(social_shares.code) <> 32 OR social_shares.code GLOB '*[^0-9a-f]*'
+                 OR (? AND social_shares.is_shared <> excluded.is_shared)
+               THEN excluded.code
+               ELSE social_shares.code
+             END,
              is_shared = CASE WHEN ? THEN excluded.is_shared ELSE social_shares.is_shared END
            RETURNING *`,
         )
-        .bind(crypto.randomUUID(), chatId, code, isShared, updateSharing ? 1 : 0)
+        .bind(crypto.randomUUID(), chatId, code, isShared, chatId, updateSharing ? 1 : 0, updateSharing ? 1 : 0)
         .first<SocialShareRow>();
       if (share) {
         return share;
       }
+      throw new DataNotFoundError('Chat not found');
     } catch (error) {
       if (!isUniqueConstraintError(error)) {
         throw error;
@@ -290,7 +392,9 @@ function isUniqueConstraintError(error: unknown): boolean {
 
 async function generateUniqueCode(db: D1Database): Promise<string> {
   while (true) {
-    const code = crypto.randomUUID().replace(/-/g, '').substring(0, 6);
+    const code = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+      byte.toString(16).padStart(2, '0'),
+    ).join('');
     const existing = await db
       .prepare(
         `SELECT 1 AS found FROM shares WHERE code = ?
@@ -304,4 +408,43 @@ async function generateUniqueCode(db: D1Database): Promise<string> {
       return code;
     }
   }
+}
+
+async function rotateSocialShareCode(db: D1Database, initial: SocialShareRow): Promise<SocialShareRow> {
+  let share = initial;
+  for (let attempt = 0; attempt < MAX_SOCIAL_SHARE_WRITE_ATTEMPTS; attempt++) {
+    const code = await generateUniqueCode(db);
+    try {
+      const updated = await db
+        .prepare('UPDATE social_shares SET code = ? WHERE id = ? AND code = ? RETURNING *')
+        .bind(code, share.id, share.code)
+        .first<SocialShareRow>();
+      if (updated) {
+        return updated;
+      }
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error;
+      }
+    }
+    const current = await db.prepare('SELECT * FROM social_shares WHERE id = ?').bind(share.id).first<SocialShareRow>();
+    if (!current) {
+      throw new Error('Social share disappeared while rotating its code');
+    }
+    if (isStrongShareCode(current.code)) {
+      return current;
+    }
+    share = current;
+  }
+  throw new Error('Unable to rotate an insecure social share code');
+}
+
+function requireStrongShareCode(code: string): void {
+  if (!isStrongShareCode(code)) {
+    throw new DataNotFoundError('Invalid share link');
+  }
+}
+
+function isStrongShareCode(code: string): boolean {
+  return SHARE_CODE_PATTERN.test(code);
 }

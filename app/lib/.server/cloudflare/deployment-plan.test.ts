@@ -86,7 +86,7 @@ async function webSnapshot(content: string): Promise<Blob> {
       d1_databases: [{ binding: 'DB', migrations_dir: 'migrations' }],
       r2_buckets: [{ binding: 'APP_STORAGE' }],
       durable_objects: { bindings: [{ name: 'AppAgent', class_name: 'AppAgent' }] },
-      migrations: [{ tag: 'v1', new_sqlite_classes: ['AppAgent'] }],
+      exports: { AppAgent: { type: 'durable-object', storage: 'sqlite' } },
     }),
   );
   zip.file('src/server.ts', content);
@@ -95,7 +95,7 @@ async function webSnapshot(content: string): Promise<Blob> {
 
 function runtimeConfig() {
   return {
-    compatibility_date: '2026-07-08',
+    compatibility_date: '2026-07-18',
     compatibility_flags: ['nodejs_compat'],
     observability: {
       enabled: true,

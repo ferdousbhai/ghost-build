@@ -4,6 +4,12 @@ import { createDeploymentProxyToken } from './deployment-proxy-token';
 import { deploymentPlanResourceName, deploymentProjectProfile, type DeploymentResourceType } from './deployment-plan';
 import type { Deployment } from './deployment-repository';
 import type { DeploymentSandbox } from './deployment-sandbox';
+import {
+  APP_AGENT_DECLARATIVE_EXPORT,
+  DEPLOYMENT_COMPATIBILITY_DATE,
+  DEPLOYMENT_COMPATIBILITY_FLAGS,
+  DEPLOYMENT_OBSERVABILITY,
+} from './deployment-runtime-policy';
 
 const PUBLISH_DIR = '/workspace/publish';
 const BUILD_ARCHIVE = '/workspace/build.tar.gz';
@@ -44,6 +50,11 @@ export async function publishDeploymentBuild(args: {
     CLOUDFLARE_API_TOKEN: proxyToken,
   };
   try {
+    await requireSuccess(
+      await sandbox.exec(`rm -rf ${PUBLISH_DIR} ${BUILD_ARCHIVE}`, {
+        timeout: 30 * 1000,
+      }),
+    );
     await sandbox.mkdir(PUBLISH_DIR, { recursive: true });
     await sandbox.writeFile(BUILD_ARCHIVE, new Blob([args.build]).stream());
     await requireSuccess(
@@ -53,7 +64,25 @@ export async function publishDeploymentBuild(args: {
         { timeout: 2 * 60 * 1000 },
       ),
     );
-    await requireSuccess(await sandbox.exec(`tar -xzf ${BUILD_ARCHIVE} -C ${PUBLISH_DIR}`, { timeout: 2 * 60 * 1000 }));
+    await requireSuccess(
+      await sandbox.exec(
+        `tar -tzf ${BUILD_ARCHIVE} | ` +
+          `awk 'BEGIN { bad = 0 } ` +
+          `{ name = $0; while (substr(name, 1, 2) == "./") name = substr(name, 3); ` +
+          `sub(/\\/$/, "", name); if (name == "") next; ` +
+          `if (name ~ /^\\// || name ~ /(^|\\/)\\.\\.?(\\/|$)/ || name ~ /\\\\/) bad = 1; ` +
+          `if (seen[name]++) bad = 1 } ` +
+          `END { exit bad }' && ` +
+          `test -z "$(tar -tvzf ${BUILD_ARCHIVE} | cut -c1 | grep -Ev '^[-d]$' | head -n 1)"`,
+        { timeout: 2 * 60 * 1000 },
+      ),
+    );
+    await requireSuccess(
+      await sandbox.exec(
+        `tar -xzf ${BUILD_ARCHIVE} -C ${PUBLISH_DIR} ` + '--no-same-owner --no-same-permissions --keep-old-files',
+        { timeout: 2 * 60 * 1000 },
+      ),
+    );
     await requireSuccess(
       await sandbox.exec(
         `test "$(du -sk --apparent-size ${PUBLISH_DIR} | cut -f1)" -le ${MAX_PUBLISH_EXPANDED_KIB} && ` +
@@ -115,13 +144,9 @@ function trustedPublishConfig(args: {
     account_id: args.accountId,
     main: profile.type === 'worker' ? 'dist/worker/server.js' : 'dist/server/index.js',
     no_bundle: true,
-    compatibility_date: '2026-07-08',
-    compatibility_flags: ['nodejs_compat'],
-    observability: {
-      enabled: true,
-      logs: { enabled: true, head_sampling_rate: 0.6 },
-      traces: { enabled: true, head_sampling_rate: 0.05 },
-    },
+    compatibility_date: DEPLOYMENT_COMPATIBILITY_DATE,
+    compatibility_flags: DEPLOYMENT_COMPATIBILITY_FLAGS,
+    observability: DEPLOYMENT_OBSERVABILITY,
     upload_source_maps: true,
     workers_dev: true,
   };
@@ -154,7 +179,7 @@ function trustedPublishConfig(args: {
   }
   if (deploymentPlanResourceName(args.deployment.plan, 'durable_object', 'AppAgent')) {
     config.durable_objects = { bindings: [{ name: 'AppAgent', class_name: 'AppAgent' }] };
-    config.migrations = [{ tag: 'v1', new_sqlite_classes: ['AppAgent'] }];
+    config.exports = { AppAgent: APP_AGENT_DECLARATIVE_EXPORT };
   }
   return config;
 }

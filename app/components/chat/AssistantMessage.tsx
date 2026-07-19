@@ -75,6 +75,6 @@ function AssistantMessagePart({
     return null;
   }
 
-  captureMessage('Unknown part type ' + part.type);
+  captureMessage('Unknown assistant message part');
   return null;
 }

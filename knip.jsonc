@@ -16,21 +16,23 @@
         "scripts/evaluations/*.worker.ts",
       ],
       "project": ["**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!"],
-      "ignore": ["template/**"],
+      "ignore": [
+        "template/**",
+        // Copied into the Sandbox image and invoked as an executable by tests.
+        "sandbox-tools/verify-pnpm-workspace-policy.mjs",
+      ],
     },
     "ghostbuild-agent": {
       "entry": ["**/*.test.ts", "**/*.spec.ts"],
       "project": ["**/*.{ts,mts}"],
     },
+    "template": {
+      "entry": ["src/router.tsx"],
+      "project": ["src/**/*.{ts,tsx}", "scripts/**/*.mjs"],
+    },
   },
 
   "ignoreDependencies": [
-    // these are used by local UI compatibility components and optimized by Vite
-    "classnames",
-    "react-fast-compare",
-    "warning",
-    "fuzzy",
-
     // these get shimmed in in vite.config.ts
     "buffer",
     "events",

@@ -39,7 +39,7 @@ export class FilesStore {
       import.meta.hot.data.userWrites = this.userWrites;
     }
 
-    this.#init();
+    void this.#init().catch((error) => logger.error('Failed to initialize file watching', error));
   }
 
   getFile(filePath: AbsolutePath) {
