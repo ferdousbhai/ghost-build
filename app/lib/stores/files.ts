@@ -1,21 +1,28 @@
-import type { WebContainer } from '@webcontainer/api';
+import type { IFSWatcher, WebContainer } from '@webcontainer/api';
 import { map, type MapStore } from 'nanostores';
 import { path } from 'ghostbuild-agent/utils/path';
 import { bufferWatchEvents } from '~/utils/buffer';
-import { WORK_DIR } from 'ghostbuild-agent/constants.js';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { unreachable } from 'ghostbuild-agent/utils/unreachable';
 import { getAbsolutePath, type AbsolutePath } from 'ghostbuild-agent/utils/workDir';
 import type { File, FileMap } from 'ghostbuild-agent/types';
 import { assertNotLocalSecretFilePath } from '~/utils/secretFiles';
 import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifest';
-import { applyFileWatchEvents, ensureParentFolders, prewarmFileMap } from './file-map-operations';
+import {
+  ensureParentFolders,
+  getLocalSecretRootPath,
+  normalizeWatcherPath,
+  reconcileFileMap,
+  reconcileWatchedPaths,
+} from './file-map-operations';
+import { incrementFileUpdateCounter } from './fileUpdateCounter';
 
 const logger = createScopedLogger('FilesStore');
 
 export class FilesStore {
   #webcontainer: Promise<WebContainer>;
-  #watchEvents = bufferWatchEvents(FILE_EVENTS_DEBOUNCE_MS, this.#processEventBuffer.bind(this));
+  #watchEvents = bufferWatchEvents<WatcherEvent>(FILE_EVENTS_DEBOUNCE_MS, this.#processEventBuffer.bind(this));
+  #fileWatcher: IFSWatcher | undefined;
 
   /**
    * @note Keeps track all modified files with their original content since the last user message.
@@ -37,6 +44,7 @@ export class FilesStore {
       import.meta.hot.data.files = this.files;
       import.meta.hot.data.modifiedFiles = this.#modifiedFiles;
       import.meta.hot.data.userWrites = this.userWrites;
+      import.meta.hot.dispose(() => this.#fileWatcher?.close());
     }
 
     void this.#init().catch((error) => logger.error('Failed to initialize file watching', error));
@@ -123,44 +131,109 @@ export class FilesStore {
 
   async #init() {
     const webcontainer = await this.#webcontainer;
-    webcontainer.internal.watchPaths(
-      { include: [`${WORK_DIR}/**`], exclude: ['**/node_modules', '.git'], includeContent: true },
-      this.#watchEvents,
-    );
+    this.#fileWatcher = webcontainer.fs.watch(ROOT_DIRECTORY, { recursive: true }, this.#watchEvents);
   }
 
   async prewarmWorkdir(container: WebContainer) {
-    await prewarmFileMap(container, this.files);
+    await reconcileFileMap(container, this.files);
   }
 
   flushFileEvents() {
     return this.#watchEvents.flush();
   }
 
-  #processEventBuffer(events: Parameters<typeof applyFileWatchEvents>[0]) {
-    applyFileWatchEvents(events, this.files, (filePath) => {
-      void this.#removeLocalSecretFile(filePath);
-    });
-  }
+  async #processEventBuffer(events: WatcherEvent[]) {
+    const webcontainer = await this.#webcontainer;
+    const localSecretPaths = new Set<string>();
+    const changedPaths = new Set<string>();
+    let requiresFullReconciliation = false;
 
-  async #removeLocalSecretFile(filePath: string) {
-    const absolutePath = getAbsolutePath(filePath);
-    this.files.setKey(absolutePath, undefined);
-    this.#modifiedFiles.delete(absolutePath);
-    this.userWrites.delete(absolutePath);
+    for (const [, watcherPath] of events) {
+      const relativePath = normalizeWatcherPath(webcontainer, watcherPath);
+      if (!relativePath) {
+        requiresFullReconciliation = true;
+        continue;
+      }
+      incrementFileUpdateCounter(relativePath);
+      const localSecretPath = getLocalSecretRootPath(relativePath);
+      if (localSecretPath) {
+        localSecretPaths.add(localSecretPath);
+        this.#removeTrackedPath(localSecretPath);
+      } else {
+        changedPaths.add(relativePath);
+      }
+    }
 
     try {
-      const webcontainer = await this.#webcontainer;
-      const relativePath = path.relative(webcontainer.workdir, filePath);
-      if (!relativePath) {
+      for (const localSecretPath of Array.from(localSecretPaths).sort()) {
+        await webcontainer.fs.rm(localSecretPath, { recursive: true, force: true });
+        logger.warn('Removed local secret file from generated project', { path: localSecretPath });
+      }
+    } catch (error) {
+      // Never reconcile ordinary content after a failed secret purge.
+      logger.error('Failed to remove a watched local secret file\n\n', error);
+      return;
+    }
+
+    try {
+      if (requiresFullReconciliation) {
+        await reconcileFileMap(webcontainer, this.files);
+      } else {
+        await reconcileWatchedPaths(webcontainer, this.files, Array.from(changedPaths));
+      }
+      this.#pruneTrackedPaths();
+    } catch (error) {
+      if (requiresFullReconciliation) {
+        logger.error('Failed to reconcile watched project files\n\n', error);
         return;
       }
-      await webcontainer.fs.rm(relativePath, { recursive: true, force: true });
-      logger.warn('Removed local secret file from generated project', { path: relativePath });
-    } catch (error) {
-      logger.error('Failed to remove local secret file\n\n', error);
+
+      logger.warn('Targeted file reconciliation failed; retrying with a full project scan', error);
+      try {
+        await reconcileFileMap(webcontainer, this.files);
+        this.#pruneTrackedPaths();
+      } catch (fallbackError) {
+        logger.error('Failed to reconcile watched project files\n\n', fallbackError);
+      }
+    }
+  }
+
+  #removeTrackedPath(filePath: string) {
+    const absolutePath = getAbsolutePath(filePath.replace(/\/+$/g, ''));
+    this.files.setKey(absolutePath, undefined);
+    const childPrefix = `${absolutePath}/`;
+    for (const candidatePath of Object.keys(this.files.get())) {
+      if (candidatePath.startsWith(childPrefix)) {
+        this.files.setKey(getAbsolutePath(candidatePath), undefined);
+      }
+    }
+    for (const candidatePath of this.#modifiedFiles.keys()) {
+      if (candidatePath === absolutePath || candidatePath.startsWith(childPrefix)) {
+        this.#modifiedFiles.delete(candidatePath);
+      }
+    }
+    for (const candidatePath of this.userWrites.keys()) {
+      if (candidatePath === absolutePath || candidatePath.startsWith(childPrefix)) {
+        this.userWrites.delete(candidatePath);
+      }
+    }
+  }
+
+  #pruneTrackedPaths() {
+    const currentFiles = this.files.get();
+    for (const filePath of this.#modifiedFiles.keys()) {
+      if (currentFiles[filePath]?.type !== 'file') {
+        this.#modifiedFiles.delete(filePath);
+      }
+    }
+    for (const filePath of this.userWrites.keys()) {
+      if (currentFiles[filePath]?.type !== 'file') {
+        this.userWrites.delete(filePath);
+      }
     }
   }
 }
 
 const FILE_EVENTS_DEBOUNCE_MS = 100;
+const ROOT_DIRECTORY = '.';
+type WatcherEvent = [event: 'rename' | 'change', path: string | Uint8Array];

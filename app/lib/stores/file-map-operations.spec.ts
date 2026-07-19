@@ -4,98 +4,145 @@ import { describe, expect, it, vi } from 'vitest';
 import { WORK_DIR } from 'ghostbuild-agent/constants';
 import type { FileMap } from 'ghostbuild-agent/types';
 import { getAbsolutePath } from 'ghostbuild-agent/utils/workDir';
-import { prewarmFileMap } from './file-map-operations';
+import { reconcileFileMap } from './file-map-operations';
 
-describe('prewarmFileMap', () => {
-  it('purges mounted legacy secret files before reading ordinary project files without watcher events', async () => {
-    const secretPaths = [
-      `${WORK_DIR}/.npmrc`,
-      `${WORK_DIR}/nested/.netrc`,
-      `${WORK_DIR}/nested/_netrc`,
-      `${WORK_DIR}/nested/.git-credentials`,
-      `${WORK_DIR}/nested/.pypirc`,
-      `${WORK_DIR}/nested/.yarnrc`,
-      `${WORK_DIR}/nested/.yarnrc.yml`,
-      `${WORK_DIR}/nested/.env.production`,
-      `${WORK_DIR}/nested/.envrc`,
-      `${WORK_DIR}/nested/.dev.vars.local`,
-    ].map(getAbsolutePath);
-    const rootGitConfigPath = getAbsolutePath(`${WORK_DIR}/.git/config`);
-    const nestedGitConfigPath = getAbsolutePath(`${WORK_DIR}/packages/app/.git/config`);
-    const packagePath = getAbsolutePath(`${WORK_DIR}/package.json`);
+describe('reconcileFileMap', () => {
+  it('traverses with public APIs, purges secrets and git data, and excludes dependencies and gitignore files', async () => {
     const events: string[] = [];
     const removed = new Set<string>();
+    const directoryEntries = new Map([
+      [
+        '.',
+        [
+          file('.gitignore'),
+          file('.npmrc'),
+          directory('empty'),
+          directory('node_modules'),
+          file('package.json'),
+          directory('packages'),
+          directory('src'),
+        ],
+      ],
+      ['empty', []],
+      ['packages', [directory('app')]],
+      ['packages/app', [directory('.git'), file('README.md')]],
+      ['src', [file('.env.production'), file('index.ts')]],
+    ]);
+    const readdir = vi.fn(async (directoryPath: string) => {
+      events.push(`readdir:${directoryPath}`);
+      return directoryEntries.get(directoryPath) ?? [];
+    });
     const rm = vi.fn(async (filePath: string) => {
       events.push(`remove:${filePath}`);
       removed.add(filePath);
     });
     const readFile = vi.fn(async (filePath: string) => {
       events.push(`read:${filePath}`);
-      expect(removed.size).toBe(secretPaths.length + 2);
-      return new TextEncoder().encode('{}');
+      expect(removed).toEqual(new Set(['.git', '.npmrc', 'packages/app/.git', 'src/.env.production']));
+      return new TextEncoder().encode(filePath === 'package.json' ? '{}' : filePath);
     });
-    const initialFiles = {} as FileMap;
-    initialFiles[secretPaths[0]] = { type: 'file', content: 'legacy-token', isBinary: false };
-    initialFiles[rootGitConfigPath] = { type: 'file', content: 'root-token', isBinary: false };
-    initialFiles[nestedGitConfigPath] = { type: 'file', content: 'nested-token', isBinary: false };
+    const initialFiles = {
+      [getAbsolutePath('.git/config')]: textFile('legacy-git-token'),
+      [getAbsolutePath('.npmrc')]: textFile('legacy-registry-token'),
+      [getAbsolutePath('.gitignore')]: textFile('legacy-ignore'),
+      [getAbsolutePath('node_modules/pkg/index.js')]: textFile('legacy-dependency'),
+      [getAbsolutePath('removed.ts')]: textFile('stale'),
+    } as FileMap;
     const files = map<FileMap>(initialFiles);
-    const fileSearch = vi.fn(async () => {
-      events.push('search');
-      expect(removed.has('.git')).toBe(true);
-      return [...secretPaths, nestedGitConfigPath, packagePath];
-    });
     const container = {
       workdir: WORK_DIR,
-      internal: { fileSearch },
-      fs: { rm, readFile },
+      fs: { readdir, readFile, rm },
     } as unknown as WebContainer;
 
-    await prewarmFileMap(container, files);
+    await reconcileFileMap(container, files);
 
     expect(rm.mock.calls.map(([filePath]) => filePath)).toEqual([
       '.git',
       '.npmrc',
-      'nested/.netrc',
-      'nested/_netrc',
-      'nested/.git-credentials',
-      'nested/.pypirc',
-      'nested/.yarnrc',
-      'nested/.yarnrc.yml',
-      'nested/.env.production',
-      'nested/.envrc',
-      'nested/.dev.vars.local',
       'packages/app/.git',
+      'src/.env.production',
     ]);
     expect(rm).toHaveBeenCalledWith('.git', { recursive: true, force: true });
     expect(rm).toHaveBeenCalledWith('packages/app/.git', { recursive: true, force: true });
-    expect(fileSearch).toHaveBeenCalledWith([], WORK_DIR, { excludes: ['.gitignore', 'node_modules'] });
-    expect(readFile).toHaveBeenCalledWith('package.json');
-    expect(events.slice(0, 2)).toEqual(['remove:.git', 'search']);
+    expect(readdir).toHaveBeenCalledWith('.', { withFileTypes: true });
+    expect(readdir).not.toHaveBeenCalledWith('node_modules', expect.anything());
+    expect(readFile.mock.calls.map(([filePath]) => filePath)).toEqual([
+      'package.json',
+      'packages/app/README.md',
+      'src/index.ts',
+    ]);
     expect(events.findIndex((event) => event.startsWith('read:'))).toBeGreaterThan(
       events.findLastIndex((event) => event.startsWith('remove:')),
     );
-    expect(files.get()[secretPaths[0]]).toBeUndefined();
-    expect(files.get()[rootGitConfigPath]).toBeUndefined();
-    expect(files.get()[nestedGitConfigPath]).toBeUndefined();
-    expect(files.get()[packagePath]).toMatchObject({ type: 'file', content: '{}' });
+
+    expect(files.get()).toEqual({
+      [getAbsolutePath('empty')]: { type: 'folder' },
+      [getAbsolutePath('package.json')]: textFile('{}'),
+      [getAbsolutePath('packages')]: { type: 'folder' },
+      [getAbsolutePath('packages/app')]: { type: 'folder' },
+      [getAbsolutePath('packages/app/README.md')]: textFile('packages/app/README.md'),
+      [getAbsolutePath('src')]: { type: 'folder' },
+      [getAbsolutePath('src/index.ts')]: textFile('src/index.ts'),
+    });
   });
 
-  it('fails closed before project reads when a legacy secret cannot be removed', async () => {
+  it('fails closed before traversal when the root git directory cannot be removed', async () => {
+    const readdir = vi.fn();
     const readFile = vi.fn();
-    const fileSearch = vi.fn();
     const container = {
       workdir: WORK_DIR,
-      internal: { fileSearch },
       fs: {
         rm: vi.fn(async () => {
-          throw new Error('removal failed');
+          throw new Error('root removal failed');
         }),
+        readdir,
         readFile,
       },
     } as unknown as WebContainer;
 
-    await expect(prewarmFileMap(container, map<FileMap>({}))).rejects.toThrow('removal failed');
-    expect(fileSearch).not.toHaveBeenCalled();
+    await expect(reconcileFileMap(container, map<FileMap>({}))).rejects.toThrow('root removal failed');
+    expect(readdir).not.toHaveBeenCalled();
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before ordinary project reads when a discovered secret cannot be removed', async () => {
+    const readFile = vi.fn();
+    const rm = vi.fn(async (filePath: string) => {
+      if (filePath === '.env.local') {
+        throw new Error('secret removal failed');
+      }
+    });
+    const container = {
+      workdir: WORK_DIR,
+      fs: {
+        rm,
+        readdir: vi.fn(async () => [file('.env.local'), file('package.json')]),
+        readFile,
+      },
+    } as unknown as WebContainer;
+
+    await expect(reconcileFileMap(container, map<FileMap>({}))).rejects.toThrow('secret removal failed');
+    expect(rm.mock.calls.map(([filePath]) => filePath)).toEqual(['.git', '.env.local']);
     expect(readFile).not.toHaveBeenCalled();
   });
 });
+
+function file(name: string) {
+  return {
+    name,
+    isFile: () => true,
+    isDirectory: () => false,
+  };
+}
+
+function directory(name: string) {
+  return {
+    name,
+    isFile: () => false,
+    isDirectory: () => true,
+  };
+}
+
+function textFile(content: string) {
+  return { type: 'file' as const, content, isBinary: false };
+}

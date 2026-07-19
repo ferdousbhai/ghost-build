@@ -15,7 +15,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
-    "ai": "^6.0.219",
+    "ai": "^6.0.230",
     "path-browserify": "^1.0.1",
     "zod": "^4.4.3"
   },
