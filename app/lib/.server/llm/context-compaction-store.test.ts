@@ -16,9 +16,6 @@ class TestSqlProvider implements SqlProvider {
     ...values: (string | number | boolean | null)[]
   ): T[] {
     const query = strings.join('?').replace(/\s+/g, ' ').trim();
-    if (query.startsWith('CREATE TABLE IF NOT EXISTS builder_context_state')) {
-      return [];
-    }
     if (query.startsWith('SELECT summary')) {
       const row = this.rows.get(String(values[0]));
       return (row ? [row] : []) as T[];
@@ -41,11 +38,9 @@ class TestSqlProvider implements SqlProvider {
 }
 
 describe('DurableObjectContextCompactionRepository', () => {
-  test('does not write an empty record during Agent startup', () => {
+  test('does not write an empty record when read before a compaction exists', () => {
     const db = new TestSqlProvider();
     const repository = new DurableObjectContextCompactionRepository(db);
-
-    repository.initialize();
 
     expect(db.rows.size).toBe(0);
     expect(repository.getCompaction()).toBeNull();

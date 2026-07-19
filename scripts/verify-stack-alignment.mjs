@@ -21,6 +21,7 @@ import {
 } from '../template/scripts/lib/project-policy.mjs';
 import { runVerifierIfMain } from './run-verifier.mjs';
 import { templateSourceDigest } from './template-source.mjs';
+import { verifyD1MigrationSafety } from './verify-d1-migrations.mjs';
 import { findWorkspacePolicyErrors } from '../sandbox-tools/verify-pnpm-workspace-policy.mjs';
 
 export {
@@ -427,6 +428,7 @@ export function verifyStackAlignment() {
   verifyWorkspace(errors);
   verifyToolchainConfig(errors);
   verifyRootMigrations(errors);
+  errors.push(...verifyD1MigrationSafety(rootDir));
   errors.push(
     ...findSandboxVersionErrors(
       rootPackage,

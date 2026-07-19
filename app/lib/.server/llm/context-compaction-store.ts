@@ -13,19 +13,6 @@ type ContextStateRow = {
 export class DurableObjectContextCompactionRepository {
   constructor(private readonly db: SqlProvider) {}
 
-  initialize(): void {
-    void this.db.sql`
-      CREATE TABLE IF NOT EXISTS builder_context_state (
-        id TEXT PRIMARY KEY,
-        summary TEXT,
-        from_message_id TEXT,
-        to_message_id TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `;
-  }
-
   /** Move a summary written by the former shared-Agent design to this Agent's canonical record. */
   migrateLegacySubchat(subchatIndex: number): void {
     const legacyId = `subchat:${subchatIndex}`;

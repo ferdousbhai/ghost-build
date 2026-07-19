@@ -4,6 +4,7 @@ import {
   findBuildApprovalErrors,
   findCiWorkflowErrors,
   findCompositeActionSafetyErrors,
+  findDurableObjectLifecycleErrors,
   findMissingProvisionScriptPatternErrors,
   findProductionDeployWorkflowErrors,
   findSystemPromptsReleaseWorkflowErrors,
@@ -18,6 +19,45 @@ import {
   verifyProductionConfig,
   workflowPathsFromDirectoryEntries,
 } from './verify-production-config.mjs';
+
+describe('findDurableObjectLifecycleErrors', () => {
+  const classNames = ['BuilderAgent', 'DeploymentSandbox'];
+
+  it('accepts declarative live SQLite exports for every bound class', () => {
+    expect(
+      findDurableObjectLifecycleErrors(
+        {
+          durable_objects: {
+            bindings: classNames.map((class_name) => ({ name: class_name, class_name })),
+          },
+          exports: Object.fromEntries(
+            classNames.map((className) => [className, { type: 'durable-object', storage: 'sqlite' }]),
+          ),
+        },
+        'wrangler.jsonc',
+        classNames,
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects the legacy flow and incomplete lifecycle declarations', () => {
+    expect(
+      findDurableObjectLifecycleErrors(
+        {
+          migrations: [{ tag: 'v1', new_sqlite_classes: ['BuilderAgent'] }],
+          durable_objects: { bindings: [{ name: 'BuilderAgent', class_name: 'BuilderAgent' }] },
+          exports: { BuilderAgent: { type: 'durable-object', storage: 'sqlite' } },
+        },
+        'wrangler.jsonc',
+        classNames,
+      ),
+    ).toEqual([
+      'wrangler.jsonc must use declarative exports instead of the legacy Durable Object migrations flow.',
+      'wrangler.jsonc must bind the DeploymentSandbox Durable Object.',
+      'wrangler.jsonc must declare the DeploymentSandbox Durable Object as a live SQLite export.',
+    ]);
+  });
+});
 
 describe('findWorkerRoutingErrors', () => {
   it('accepts the production custom domain with workers.dev disabled', () => {
@@ -490,7 +530,7 @@ jobs:
     environment:
       name: production
     runs-on: ubuntu-latest
-    if: github.repository == 'ferdousbhai/ghostbuild'
+    if: github.repository == 'ferdousbhai/ghostbuild' && github.ref == 'refs/heads/main'
     steps:
       # Comments may mention wrangler dev and staging without becoming commands.
       - run: pnpm run validate
@@ -505,6 +545,10 @@ jobs:
       - env:
           CLOUDFLARE_OAUTH_CLIENT_ID: \${{ vars.CLOUDFLARE_OAUTH_CLIENT_ID }}
         run: node scripts/deploy-production.mjs --check
+      - env:
+          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm run d1:bookmark:production
       - env:
           CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
