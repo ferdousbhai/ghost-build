@@ -48,7 +48,7 @@
     "node": ">=26.0.0"
   },
   "dependencies": {
-    "@ai-sdk/provider": "^3.0.13",
+    "@ai-sdk/provider": "^4.0.3",
     "@ai-sdk/react": "^3.0.221",
     "@cloudflare/ai-chat": "^0.9.3",
     "@cloudflare/sandbox": "0.12.3",

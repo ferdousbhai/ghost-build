@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@ai-sdk/provider':
-        specifier: ^3.0.13
-        version: 3.0.13
+        specifier: ^4.0.3
+        version: 4.0.3
       '@ai-sdk/react':
         specifier: ^3.0.221
         version: 3.0.223(react@19.2.7)(zod@4.4.3)
@@ -37,7 +37,7 @@ importers:
         version: 19.2.7(react@19.2.7)
       workers-ai-provider:
         specifier: ^3.3.1
-        version: 3.3.1(@ai-sdk/provider@3.0.13)(ai@6.0.221(zod@4.4.3))
+        version: 3.3.1(@ai-sdk/provider@4.0.3)(ai@6.0.221(zod@4.4.3))
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -126,6 +126,10 @@ packages:
   '@ai-sdk/provider@3.0.13':
     resolution: {integrity: sha512-ZPtVYt5QIJzOta1kdUiDuCx4HhFkvNPv/rvmZ2b1iXwybYjJsCnNYR4PAw4kW7rgVfDARvHXcU64efWuqNp6bw==}
     engines: {node: '>=18'}
+
+  '@ai-sdk/provider@4.0.3':
+    resolution: {integrity: sha512-e0CpNWJUY7OxAFAnCZkw+ri9QOHWwTs1tXP42782KFGCU07qt8NiXCrCVowyCB5dP2r5/Uls+g2oPd8kOJn9dw==}
+    engines: {node: '>=22'}
 
   '@ai-sdk/react@3.0.223':
     resolution: {integrity: sha512-b7Ri+wLOR9pZkKlEKii3ZuXi79Rh3rC5rYUEFDpXUOJLazztIE4MPM4dQRXCojYgOuPa61gVO2BFjuRVLGsOfw==}
@@ -2780,6 +2784,10 @@ snapshots:
     dependencies:
       json-schema: 0.4.0
 
+  '@ai-sdk/provider@4.0.3':
+    dependencies:
+      json-schema: 0.4.0
+
   '@ai-sdk/react@3.0.223(react@19.2.7)(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider-utils': 4.0.37(zod@4.4.3)
@@ -5192,9 +5200,9 @@ snapshots:
       '@cloudflare/workerd-linux-arm64': 1.20260714.1
       '@cloudflare/workerd-windows-64': 1.20260714.1
 
-  workers-ai-provider@3.3.1(@ai-sdk/provider@3.0.13)(ai@6.0.221(zod@4.4.3)):
+  workers-ai-provider@3.3.1(@ai-sdk/provider@4.0.3)(ai@6.0.221(zod@4.4.3)):
     dependencies:
-      '@ai-sdk/provider': 3.0.13
+      '@ai-sdk/provider': 4.0.3
       ai: 6.0.221(zod@4.4.3)
 
   wrangler@4.112.0(@cloudflare/workers-types@5.20260718.1):

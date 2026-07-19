@@ -22,7 +22,7 @@
     "lint": "eslint src vite.config.ts --max-warnings=0"
   },
   "dependencies": {
-    "@ai-sdk/provider": "^3.0.13",
+    "@ai-sdk/provider": "^4.0.3",
     "@ai-sdk/react": "^3.0.221",
     "@cloudflare/ai-chat": "^0.9.3",
     "@tanstack/react-router": "^1.170.18",
