@@ -301,8 +301,8 @@ importers:
         specifier: ^3.9.5
         version: 3.9.5
       tailwind-scrollbar:
-        specifier: 3.0.3
-        version: 3.0.3(tailwindcss@3.4.19(yaml@2.9.0))
+        specifier: 3.1.0
+        version: 3.1.0(tailwindcss@3.4.19(yaml@2.9.0))
       tailwindcss:
         specifier: ^3.4.19
         version: 3.4.19(yaml@2.9.0)
@@ -5244,8 +5244,8 @@ packages:
     peerDependencies:
       tailwindcss: ^3.3.0 || ^4.0.0 || ^4.0.0-beta
 
-  tailwind-scrollbar@3.0.3:
-    resolution: {integrity: sha512-g0yBeQODAHERnyNejtHrYMTuifhRKtNYC9zKtmhi3dtNlOdUtSrvXlJKWljgzDgdpUixbhKMgD7G636DFTI8Rw==}
+  tailwind-scrollbar@3.1.0:
+    resolution: {integrity: sha512-pmrtDIZeHyu2idTejfV59SbaJyvp1VRjYxAjZBH0jnyrPRo6HL1kD5Glz8VPagasqr6oAx6M05+Tuw429Z8jxg==}
     engines: {node: '>=12.13.0'}
     peerDependencies:
       tailwindcss: 3.x
@@ -11407,7 +11407,7 @@ snapshots:
       local-pkg: 1.2.1
       tailwindcss: 3.4.19(yaml@2.9.0)
 
-  tailwind-scrollbar@3.0.3(tailwindcss@3.4.19(yaml@2.9.0)):
+  tailwind-scrollbar@3.1.0(tailwindcss@3.4.19(yaml@2.9.0)):
     dependencies:
       tailwindcss: 3.4.19(yaml@2.9.0)
 
