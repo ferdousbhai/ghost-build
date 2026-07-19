@@ -52,6 +52,7 @@ describe('CloudflareOAuthOrchestrator', () => {
         Response.json({
           sub: 'cf-user-1',
           email: 'person@example.com',
+          email_verified: true,
           name: 'Person',
           picture: 'https://example.com/p.png',
         }),
@@ -143,6 +144,28 @@ describe('CloudflareOAuthOrchestrator', () => {
       .mockResolvedValueOnce(
         Response.json({ sub: 'cf-user-1', email: 'unverified@example.com', email_verified: false }),
       )
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ id: 'account-1' }] }));
+    const orchestrator = new CloudflareOAuthOrchestrator(config, request);
+    const challenge = await orchestrator.startConnection({
+      returnUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001',
+      requestedCapabilities: ['workers'],
+    });
+
+    await expect(
+      orchestrator.completeConnection({
+        providerSessionId: challenge.sessionId,
+        callbackUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?code=code-1',
+      }),
+    ).resolves.toMatchObject({ user: { email: null } });
+  });
+
+  test('does not use a provider email when verification evidence is omitted', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({ access_token: 'oauth-access-token', refresh_token: 'oauth-refresh-token' }),
+      )
+      .mockResolvedValueOnce(Response.json({ sub: 'cf-user-1', email: 'unverified@example.com' }))
       .mockResolvedValueOnce(Response.json({ success: true, result: [{ id: 'account-1' }] }));
     const orchestrator = new CloudflareOAuthOrchestrator(config, request);
     const challenge = await orchestrator.startConnection({

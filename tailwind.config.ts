@@ -13,7 +13,6 @@ export default {
       },
       fontFamily: {
         display: [
-          'GT America',
           'Inter Variable',
           'ui-sans-serif',
           'system-ui',

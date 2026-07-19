@@ -1,7 +1,7 @@
 import Cookies from 'js-cookie';
 import { useStore } from '@nanostores/react';
 import { useSearch } from '@tanstack/react-router';
-import { useCallback, useEffect, useState, type ChangeEventHandler, type KeyboardEventHandler } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEventHandler, type KeyboardEventHandler } from 'react';
 import { toast } from 'sonner';
 import { WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
 import { showWorkersPaidRequiredToast } from '~/lib/workers-paid.client';
@@ -27,6 +27,7 @@ export function useMessageInputController({
   prefillEnabled = true,
 }: MessageInputControllerOptions) {
   const [isEnhancing, setIsEnhancing] = useState(false);
+  const enhanceRequestRef = useRef<AbortController | null>(null);
   const authState = useGhostbuildAuth();
   const input = useStore(messageInputStore);
   const search = useSearch({ strict: false }) as { prefill?: string };
@@ -38,6 +39,13 @@ export function useMessageInputController({
 
     messageInputStore.set(search.prefill || Cookies.get(PROMPT_COOKIE_KEY) || '');
   }, [prefillEnabled, search.prefill]);
+
+  useEffect(
+    () => () => {
+      enhanceRequestRef.current?.abort();
+    },
+    [],
+  );
 
   const send = useCallback(async () => {
     await submitMessageInput(input, onSend, () => {
@@ -78,6 +86,10 @@ export function useMessageInputController({
   }, []);
 
   const enhancePrompt = useCallback(async () => {
+    const sourceInput = input;
+    enhanceRequestRef.current?.abort();
+    const controller = new AbortController();
+    enhanceRequestRef.current = controller;
     try {
       setIsEnhancing(true);
       if (!getAuthToken()) {
@@ -87,6 +99,7 @@ export function useMessageInputController({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: input.trim() }),
+        signal: controller.signal,
       });
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as {
@@ -100,20 +113,31 @@ export function useMessageInputController({
         throw new Error(payload?.error || 'Failed to enhance prompt. Please try again.');
       }
       const data = (await response.json()) as { enhancedPrompt?: string };
-      if (data.enhancedPrompt) {
-        messageInputStore.set(data.enhancedPrompt);
+      if (data.enhancedPrompt && !controller.signal.aborted) {
+        replacePromptIfUnchanged(sourceInput, data.enhancedPrompt);
       }
     } catch (error) {
-      captureException('Failed to enhance prompt', { level: 'error', extra: { error } });
+      if (isAbortError(error)) {
+        return;
+      }
+      captureException('Failed to enhance prompt', error, { level: 'error' });
       toast.error(error instanceof Error ? error.message : 'Failed to enhance prompt. Please try again.');
     } finally {
-      setIsEnhancing(false);
+      if (enhanceRequestRef.current === controller) {
+        enhanceRequestRef.current = null;
+        setIsEnhancing(false);
+      }
     }
   }, [input]);
 
   const signIn = useCallback(async () => {
     preservePromptForAuthentication(input);
-    await signInWithCloudflare();
+    try {
+      await signInWithCloudflare();
+    } catch (error) {
+      captureException('Failed to start Cloudflare authorization', error, { level: 'error' });
+      toast.error(error instanceof Error ? error.message : 'Unable to connect Cloudflare. Please try again.');
+    }
   }, [input]);
 
   return {
@@ -126,6 +150,18 @@ export function useMessageInputController({
     isEnhancing,
     signIn,
   };
+}
+
+export function replacePromptIfUnchanged(sourceInput: string, enhancedPrompt: string): boolean {
+  if (messageInputStore.get() !== sourceInput) {
+    return false;
+  }
+  messageInputStore.set(enhancedPrompt);
+  return true;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
 
 const cachePrompt = debounce(function cachePrompt(prompt: string) {

@@ -83,7 +83,7 @@ html.dark {
 .ghost-home-title {
   max-width: 780px;
   color: var(--ghost-home-ink);
-  font-family: 'GT America', ui-sans-serif, system-ui, sans-serif;
+  font-family: ui-sans-serif, system-ui, sans-serif;
   font-size: clamp(48px, 7vw, 76px);
   font-weight: 900;
   line-height: 0.98;

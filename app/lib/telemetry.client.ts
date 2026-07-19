@@ -1,51 +1,33 @@
-type TelemetryUser = { id?: string; username?: string; email?: string };
-type TelemetryContext = Record<string, unknown>;
+import type { ClientTelemetryEvent } from './client-telemetry-events';
 
-const extras: Record<string, unknown> = {};
-let user: TelemetryUser | undefined;
+type TelemetryContext = { level?: 'error' | 'warning' | 'info' };
 
-export async function captureMessage(message: string, context?: TelemetryContext): Promise<void> {
-  console.warn(message, context);
-  emitTelemetry({ kind: 'message', message, context });
+export async function captureMessage(event: ClientTelemetryEvent, context?: TelemetryContext): Promise<void> {
+  console.warn(event, context);
+  emitTelemetry({ kind: 'message', event, context });
 }
 
-export async function captureException(error: unknown, context?: TelemetryContext): Promise<void> {
+export async function captureException(
+  event: ClientTelemetryEvent,
+  error: unknown,
+  context?: TelemetryContext,
+): Promise<void> {
   console.error(error, context);
-  const normalized = normalizeError(error);
-  emitTelemetry({ kind: 'exception', message: normalized.message, error: normalized, context });
-}
-
-export function setTelemetryExtra(key: string, value: unknown): void {
-  extras[key] = value;
-}
-
-export function setTelemetryUser(nextUser: TelemetryUser | undefined): void {
-  user = nextUser;
-}
-
-export async function openFeedbackForm(): Promise<void> {
-  const message = window.prompt('What would you like Ghostbuild to improve?')?.trim();
-  if (!message) {
-    return;
-  }
-  emitTelemetry({ kind: 'feedback', message });
+  emitTelemetry({ kind: 'exception', event, context });
 }
 
 function emitTelemetry(event: {
-  kind: 'message' | 'exception' | 'feedback';
-  message: string;
-  error?: ReturnType<typeof normalizeError>;
+  kind: 'message' | 'exception';
+  event: ClientTelemetryEvent;
   context?: TelemetryContext;
 }): void {
   if (typeof navigator === 'undefined') {
     return;
   }
   const body = JSON.stringify({
-    ...event,
-    extras: { ...extras },
-    user,
-    page: typeof window === 'undefined' ? undefined : window.location.href,
-    timestamp: new Date().toISOString(),
+    kind: event.kind,
+    event: event.event,
+    context: event.context,
   });
   if (navigator.sendBeacon?.('/api/client-telemetry', new Blob([body], { type: 'application/json' }))) {
     return;
@@ -56,11 +38,4 @@ function emitTelemetry(event: {
     headers: { 'content-type': 'application/json' },
     keepalive: true,
   }).catch((sendError) => console.error('Failed to send client telemetry', sendError));
-}
-
-function normalizeError(error: unknown): { name?: string; message: string; stack?: string } {
-  if (error instanceof Error) {
-    return { name: error.name, message: error.message, stack: error.stack };
-  }
-  return { message: String(error) };
 }

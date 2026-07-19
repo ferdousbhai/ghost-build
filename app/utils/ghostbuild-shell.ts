@@ -4,14 +4,19 @@ import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import type { ITerminal } from '~/types/terminal';
 import { assertProductionShellCommandAllowed } from '~/utils/productionShellPolicy';
 import { spawnInteractiveJsh, wireInteractiveTerminal } from './interactive-terminal';
+import { appendProcessOutputTail } from './process';
 
 const logger = createScopedLogger('GhostbuildShell');
 type ExecutionResult = { output: string; exitCode: number };
 type OutputWaiter = {
   output: string;
   resolve: (result: ExecutionResult) => void;
+  reject: (error: Error) => void;
   timeoutId?: ReturnType<typeof setTimeout>;
 };
+
+const SHELL_INITIALIZATION_TIMEOUT_MS = 30_000;
+const SHELL_COMMAND_TIMEOUT_MS = 180_000;
 
 class GhostbuildShell {
   #initialized: (() => void) | undefined;
@@ -36,7 +41,7 @@ class GhostbuildShell {
     this.#terminal = terminal;
     const { process, output } = await this.#createShellProcess(webcontainer, terminal);
     this.#process = process;
-    const interactive = this.waitTillOscCode('interactive');
+    const interactive = this.waitTillOscCode('interactive', SHELL_INITIALIZATION_TIMEOUT_MS);
     void this.#monitorOutput(output.getReader());
     await interactive;
     this.#initialized?.();
@@ -73,15 +78,24 @@ class GhostbuildShell {
     await this.#shellInputStream.write(`${command.trim()}\n`);
   }
 
-  async executeCommand(command: string): Promise<ExecutionResult> {
+  async executeCommand(command: string, options: { timeoutMs?: number } = {}): Promise<ExecutionResult> {
     if (!this.process || !this.terminal || !this.#shellInputStream) {
       throw new Error('Terminal not initialized');
     }
     assertProductionShellCommandAllowed(command);
     await this.interrupt();
-    const completed = this.waitTillOscCode('exit');
+    const completed = this.waitTillOscCode('exit', options.timeoutMs ?? SHELL_COMMAND_TIMEOUT_MS);
     await this.#shellInputStream.write(`${command.trim()}\n`);
-    const { output, exitCode } = await completed;
+    let result: ExecutionResult;
+    try {
+      result = await completed;
+    } catch (error) {
+      await this.interrupt().catch((interruptError) =>
+        logger.debug('Failed to interrupt timed out command', interruptError),
+      );
+      throw error;
+    }
+    const { output, exitCode } = result;
     try {
       return { output: cleanTerminalOutput(output), exitCode };
     } catch (error) {
@@ -91,8 +105,8 @@ class GhostbuildShell {
   }
 
   waitTillOscCode(waitCode: string, timeoutMs?: number): Promise<ExecutionResult> {
-    return new Promise((resolve) => {
-      const waiter: OutputWaiter = { output: '', resolve };
+    return new Promise((resolve, reject) => {
+      const waiter: OutputWaiter = { output: '', resolve, reject };
       let waiters = this.#outputWaiters.get(waitCode);
       if (!waiters) {
         waiters = new Set();
@@ -102,7 +116,7 @@ class GhostbuildShell {
       if (timeoutMs !== undefined) {
         waiter.timeoutId = setTimeout(() => {
           this.#removeWaiter(waitCode, waiter);
-          resolve({ output: waiter.output, exitCode: 0 });
+          reject(new Error(`Timed out waiting for shell ${waitCode} after ${timeoutMs} ms.`));
         }, timeoutMs);
       }
     });
@@ -123,7 +137,7 @@ class GhostbuildShell {
       for (const [waitCode, waiters] of this.#outputWaiters) {
         for (const waiter of waiters) {
           this.#removeWaiter(waitCode, waiter);
-          waiter.resolve({ output: waiter.output, exitCode: 0 });
+          waiter.reject(new Error(`Shell output ended before ${waitCode}.`));
         }
       }
     }
@@ -132,7 +146,7 @@ class GhostbuildShell {
   #handleOutput(text: string): void {
     for (const waiters of this.#outputWaiters.values()) {
       for (const waiter of waiters) {
-        waiter.output += text;
+        waiter.output = appendProcessOutputTail(waiter.output, text);
       }
     }
 

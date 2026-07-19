@@ -67,8 +67,8 @@ export function useShareProject() {
     }
   }, [chatId, isOpen, optimisticShare, queriedShare]);
 
-  const saveSharing = useCallback(
-    async (nextIsShared = isSharedDraft) => {
+  const persistSharing = useCallback(
+    async (nextIsShared: boolean, showSuccessToast: boolean) => {
       try {
         setShareStatus('loading');
         const code = await socialShare({ sessionId, id: chatId, isShared: nextIsShared });
@@ -89,7 +89,9 @@ export function useShareProject() {
         void queryClient
           .invalidateQueries({ queryKey: ['ghostbuild-data', api.socialShare.getCurrentSocialShare] })
           .catch((error) => logger.warn('Failed to refresh sharing state', error));
-        toast.success('Sharing settings saved');
+        if (showSuccessToast) {
+          toast.success('Sharing settings saved');
+        }
         return true;
       } catch (error) {
         if (activeChatIdRef.current !== chatId) {
@@ -101,7 +103,12 @@ export function useShareProject() {
         return false;
       }
     },
-    [chatId, isSharedDraft, queriedShare?.thumbnailUrl, queryClient, sessionId, socialShare],
+    [chatId, queriedShare?.thumbnailUrl, queryClient, sessionId, socialShare],
+  );
+
+  const saveSharing = useCallback(
+    (nextIsShared = isSharedDraft) => persistSharing(nextIsShared, true),
+    [isSharedDraft, persistSharing],
   );
 
   const createSnapshot = useCallback(async () => {
@@ -125,6 +132,9 @@ export function useShareProject() {
 
   const handleOpenChange = useCallback(
     async (open: boolean) => {
+      if (open && currentShare === undefined) {
+        return;
+      }
       setIsOpen(open);
       if (!open) {
         setIsSharedDraft(currentShare?.isShared ?? false);
@@ -133,7 +143,10 @@ export function useShareProject() {
         return;
       }
 
-      const initializeSharing = currentShare ? Promise.resolve(true) : saveSharing(true);
+      // A share record is needed before uploading a thumbnail, but opening the
+      // settings popover must not publish the project. Publication remains an
+      // explicit checkbox + save action.
+      const initializeSharing = currentShare ? Promise.resolve(true) : persistSharing(false, false);
       if (!currentShare?.thumbnailUrl) {
         try {
           const [screenshot, sharingReady] = await Promise.all([
@@ -158,13 +171,13 @@ export function useShareProject() {
             return;
           }
           logger.error('Error uploading thumbnail:', error);
-          captureException(error);
+          captureException('Failed to share project thumbnail', error);
         }
         return;
       }
       await initializeSharing;
     },
-    [chatId, currentShare, queryClient, saveSharing, sessionId],
+    [chatId, currentShare, persistSharing, queryClient, sessionId],
   );
 
   return {
@@ -187,6 +200,7 @@ export function useShareProject() {
     isThumbnailModalOpen,
     requestCapture: () => workbenchStore.requestAnyScreenshot(),
     saveSharing,
+    sharingReady: currentShare !== undefined,
     setIsSharedDraft,
     setIsThumbnailModalOpen,
     shareStatus,

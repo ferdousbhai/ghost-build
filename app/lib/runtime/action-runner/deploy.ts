@@ -7,27 +7,16 @@ import type { ActionRunnerWorkspace } from './types';
 import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
 import type { GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { deployToolParameters } from 'ghostbuild-agent/tools/deploy';
-import { workspaceRevision } from './revision';
+import { deploymentSnapshotRevision, exportDeploymentSnapshot } from './revision';
+import type { DeploymentValidationStore } from './deployment-validation-store';
 
 const logger = createScopedLogger('ActionRunner.Deploy');
-const DEPLOYMENT_EXPORT_EXCLUDES = [
-  'node_modules/**',
-  'dist/**',
-  '.output/**',
-  '.tanstack/**',
-  '.wrangler/**',
-  '.env',
-  '.env.*',
-  '.dev.vars',
-  '.dev.vars.*',
-  '.envrc',
-];
-
 export async function runDeploy(args: {
   invocation: GhostbuildToolInvocation;
   container: WebContainer;
   abortSignal: AbortSignal;
   workspace: ActionRunnerWorkspace;
+  deploymentValidation: DeploymentValidationStore;
 }) {
   const startedAt = performance.now();
   const sessionId = getAuthToken();
@@ -39,29 +28,26 @@ export async function runDeploy(args: {
   const input = deployToolParameters.parse(args.invocation.args);
   await waitForContainerBootState(ContainerBootState.READY);
   args.abortSignal.throwIfAborted();
-  const revisionBeforeExport = await workspaceRevision(args.workspace.getFiles());
-  if (revisionBeforeExport !== input.validatedRevision) {
+  const snapshot = await exportDeploymentSnapshot(args.container);
+  args.abortSignal.throwIfAborted();
+  const snapshotRevision = await deploymentSnapshotRevision(snapshot);
+  if (!args.deploymentValidation.hasFullValidation(input.validatedRevision)) {
+    return toolFailure(
+      'Deployment requires a successful full validateProject check from this workspace session. Run full validation before preparing deployment.',
+      {
+        state: 'validation-required',
+        requestedRevision: input.validatedRevision,
+        currentRevision: snapshotRevision,
+      },
+    );
+  }
+  if (snapshotRevision !== input.validatedRevision) {
     return toolFailure(
       'The workspace changed after validation. Run a full validateProject check for the current revision before preparing deployment.',
       {
         state: 'validation-stale',
         validatedRevision: input.validatedRevision,
-        currentRevision: revisionBeforeExport,
-      },
-    );
-  }
-  const snapshot = await args.container.export('.', {
-    format: 'zip',
-    excludes: DEPLOYMENT_EXPORT_EXCLUDES,
-  });
-  const revisionAfterExport = await workspaceRevision(args.workspace.getFiles());
-  if (revisionAfterExport !== revisionBeforeExport) {
-    return toolFailure(
-      'The workspace changed while the deployment snapshot was being captured. Validate the current revision again.',
-      {
-        state: 'validation-stale',
-        validatedRevision: input.validatedRevision,
-        currentRevision: revisionAfterExport,
+        currentRevision: snapshotRevision,
       },
     );
   }
@@ -69,7 +55,7 @@ export async function runDeploy(args: {
   logger.info('deploy action finished in', performance.now() - startedAt);
   return toolSuccess(
     'Deployment plan ready for explicit approval. The isolated executor will revalidate before provisioning.',
-    { state: 'awaiting-approval', revision: revisionAfterExport, deployment },
+    { state: 'awaiting-approval', revision: snapshotRevision, deployment },
   );
 }
 

@@ -21,6 +21,7 @@ import {
 } from './workers-ai-tools';
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
 import { fingerprintWorkersAiModelInput } from './workers-ai-prompt-cache';
+import { logProviderFailure } from './provider-error-logging';
 
 type Messages = GhostbuildMessage[];
 const WORKERS_AI_CALL_TIMEOUT_MS = 180_000;
@@ -131,7 +132,7 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
         });
       },
       onError: ({ error }) => {
-        logger.error(error);
+        logProviderFailure(logger, 'Workers AI request failed.', error);
       },
     });
   } catch (error) {

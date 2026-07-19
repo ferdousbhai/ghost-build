@@ -12,6 +12,7 @@ import { signInWithCloudflare, signOutOfGhostbuild } from '~/lib/auth-client';
 import { BrandLink } from '~/components/BrandLink';
 import { Button } from '@ui/Button';
 import { ThemeSwitch } from '~/components/ui/ThemeSwitch';
+import { toast } from 'sonner';
 
 const DownloadButton = lazy(() => import('./DownloadButton').then((module) => ({ default: module.DownloadButton })));
 const ShareButton = lazy(() => import('./ShareButton').then((module) => ({ default: module.ShareButton })));
@@ -30,9 +31,21 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
 
   const profile = useStore(profileStore);
 
-  const handleLogout = () => {
-    setProfile(null);
-    void signOutOfGhostbuild();
+  const handleLogout = async () => {
+    try {
+      await signOutOfGhostbuild();
+      setProfile(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to sign out. Please try again.');
+    }
+  };
+
+  const handleSignIn = async () => {
+    try {
+      await signInWithCloudflare();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to connect Cloudflare. Please try again.');
+    }
   };
 
   const handleSettingsClick = () => {
@@ -88,9 +101,7 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
                     size="xs"
                     title="Connect Cloudflare to share"
                     aria-label="Connect Cloudflare to share"
-                    onClick={() => {
-                      void signInWithCloudflare();
-                    }}
+                    onClick={() => void handleSignIn()}
                   >
                     <Share2Icon />
                     <span className="hidden md:inline">Share</span>
@@ -112,7 +123,7 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
                 <Button variant="ghost" size="xs" onClick={handleSettingsClick} icon={<GearIcon />}>
                   Settings
                 </Button>
-                <Button variant="ghost" size="xs" onClick={handleLogout} icon={<ExitIcon />}>
+                <Button variant="ghost" size="xs" onClick={() => void handleLogout()} icon={<ExitIcon />}>
                   Log out
                 </Button>
                 <span
@@ -138,7 +149,7 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
                     <GearIcon className="text-content-secondary" />
                     Settings
                   </MenuItemComponent>
-                  <MenuItemComponent action={handleLogout}>
+                  <MenuItemComponent action={() => void handleLogout()}>
                     <ExitIcon className="text-content-secondary" />
                     Log out
                   </MenuItemComponent>

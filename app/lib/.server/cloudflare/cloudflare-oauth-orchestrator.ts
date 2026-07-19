@@ -14,6 +14,7 @@ const TOKEN_URL = 'https://dash.cloudflare.com/oauth2/token';
 const USERINFO_URL = 'https://dash.cloudflare.com/oauth2/userinfo';
 const ACCOUNTS_URL = 'https://api.cloudflare.com/client/v4/accounts?per_page=2';
 const SESSION_LIFETIME_MS = 10 * 60 * 1000;
+const OAUTH_REQUEST_TIMEOUT_MS = 30_000;
 export const REQUIRED_CLOUDFLARE_OAUTH_SCOPES = [
   'openid',
   'profile',
@@ -98,6 +99,7 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
         'content-type': 'application/x-www-form-urlencoded',
       },
       body: form,
+      signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
     });
     const token = (await tokenResponse.json().catch(() => null)) as {
       access_token?: string;
@@ -114,6 +116,7 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
     }
     const userInfoResponse = await execute(USERINFO_URL, {
       headers: { authorization: `Bearer ${token.access_token}` },
+      signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
     });
     const userInfo = (await userInfoResponse.json().catch(() => null)) as {
       sub?: string;
@@ -128,6 +131,7 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
     }
     const accountsResponse = await execute(ACCOUNTS_URL, {
       headers: { authorization: `Bearer ${token.access_token}` },
+      signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
     });
     const accountsPayload = (await accountsResponse.json().catch(() => null)) as {
       success?: boolean;
@@ -144,7 +148,7 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
     return {
       user: {
         subject: userInfo.sub,
-        email: userInfo.email_verified === false ? null : (userInfo.email ?? null),
+        email: userInfo.email_verified === true ? (userInfo.email ?? null) : null,
         name: userInfo.name ?? userInfo.preferred_username ?? null,
         picture: userInfo.picture ?? null,
       },

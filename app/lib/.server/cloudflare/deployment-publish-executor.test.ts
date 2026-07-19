@@ -40,7 +40,11 @@ describe('publishDeploymentBuild', () => {
       name: 'ghostbuild-deployment-1',
       account_id: 'account-1',
       no_bundle: true,
+      compatibility_date: '2026-07-18',
+      compatibility_flags: ['nodejs_compat'],
       ai: { binding: 'AI' },
+      durable_objects: { bindings: [{ name: 'AppAgent', class_name: 'AppAgent' }] },
+      exports: { AppAgent: { type: 'durable-object', storage: 'sqlite' } },
       observability: {
         enabled: true,
         logs: { enabled: true, head_sampling_rate: 0.6 },
@@ -48,6 +52,7 @@ describe('publishDeploymentBuild', () => {
       },
       upload_source_maps: true,
     });
+    expect(config).not.toHaveProperty('migrations');
     expect(JSON.stringify(config)).not.toContain('real-user-token');
 
     const deployCall = sandbox.exec.mock.calls.find((call) => call[0] === 'wrangler deploy --config wrangler.json');
@@ -55,6 +60,14 @@ describe('publishDeploymentBuild', () => {
     expect(proxyToken.split('.')).toHaveLength(3);
     expect(proxyToken).not.toBe('real-user-token');
     expect(deployCall?.[1]?.env).toMatchObject({ CLOUDFLARE_ACCOUNT_ID: 'account-1' });
+    const commands = sandbox.exec.mock.calls.map((call) => call[0] as string);
+    expect(commands[0]).toBe('rm -rf /workspace/publish /workspace/build.tar.gz');
+    const archiveValidation = commands.findIndex((command) => command.startsWith('tar -tzf '));
+    const archiveExtraction = commands.findIndex((command) => command.startsWith('tar -xzf '));
+    expect(archiveValidation).toBeGreaterThan(-1);
+    expect(archiveExtraction).toBeGreaterThan(archiveValidation);
+    expect(commands[archiveValidation]).toContain("grep -Ev '^[-d]$'");
+    expect(commands[archiveExtraction]).toContain('--no-same-owner --no-same-permissions --keep-old-files');
     expect(sandbox.destroy).toHaveBeenCalledOnce();
   });
 
@@ -80,6 +93,31 @@ describe('publishDeploymentBuild', () => {
     expect(sandbox.destroy).toHaveBeenCalledOnce();
   });
 
+  test('resets the deterministic publish workspace before retrying after destroy failure', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    sandbox.destroy.mockRejectedValueOnce(new Error('destroy timed out'));
+    const args = {
+      env: {
+        DeploymentSandbox: {},
+        DEPLOYMENT_PROXY_JWT_SECRET: btoa('0123456789abcdef0123456789abcdef'),
+      } as unknown as Env,
+      deployment: deployment(),
+      connection: connection(),
+      build: new Uint8Array([1]),
+      d1DatabaseId: 'd1-id',
+      r2BucketName: 'ghostbuild-deployment-1-storage',
+    };
+
+    await expect(publishDeploymentBuild(args)).resolves.toBeUndefined();
+    await expect(publishDeploymentBuild(args)).resolves.toBeUndefined();
+
+    expect(
+      sandbox.exec.mock.calls.filter(([command]) => command === 'rm -rf /workspace/publish /workspace/build.tar.gz'),
+    ).toHaveLength(2);
+    expect(consoleError).toHaveBeenCalledWith('Unable to destroy deployment publish sandbox', expect.any(Error));
+    consoleError.mockRestore();
+  });
+
   test('publishes a Worker-only build without TanStack assets or unused bindings', async () => {
     const workerDeployment = deployment();
     workerDeployment.plan.project = {
@@ -103,6 +141,8 @@ describe('publishDeploymentBuild', () => {
     expect(config).not.toHaveProperty('d1_databases');
     expect(config).not.toHaveProperty('r2_buckets');
     expect(config).not.toHaveProperty('durable_objects');
+    expect(config).not.toHaveProperty('exports');
+    expect(config).not.toHaveProperty('migrations');
     expect(sandbox.exec.mock.calls.map((call) => call[0])).not.toContain(
       'wrangler d1 migrations apply DB --remote --config wrangler.json --yes',
     );
@@ -116,6 +156,9 @@ function deployment(): Deployment {
     userId: 'user-1',
     connectionId: 'connection-1',
     connectionGeneration: 1,
+    executionGeneration: 1,
+    buildArtifactKey: 'build-key',
+    buildArtifactGeneration: 1,
     snapshotKey: 'snapshot-1',
     status: 'deploying',
     plan: {

@@ -10,6 +10,8 @@ import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { api } from '~/lib/cloudflare/data-api';
 import { executeDataOperation } from '~/lib/cloudflare/client';
 import { decompressWithLz4 } from '~/lib/compression';
+import { PROJECT_SNAPSHOT_LZ4_LIMITS } from '~/lib/compression-limits';
+import { readBodyBytesWithLimit } from '~/lib/bounded-body';
 import { streamOutput } from '~/utils/process';
 import { cleanTerminalOutput } from 'ghostbuild-agent/utils/shell';
 import { toast } from 'sonner';
@@ -17,8 +19,11 @@ import { workbenchStore } from '~/lib/stores/workbench.client';
 import { getFileUpdateCounter } from '~/lib/stores/fileUpdateCounter';
 import { chatSyncState } from './chatSyncState';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
+import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifest';
+import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
+import { startupInstallArgs } from './dependency-install-policy';
 
-const TEMPLATE_URL = '/template-snapshot-d409e423.bin';
+const TEMPLATE_URL = '/template-snapshot-88e43bb2.bin';
 const logger = createScopedLogger('ContainerSetup');
 const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)));
 const WEBCONTAINER_BOOT_TIMEOUT_MS = 60_000;
@@ -118,8 +123,12 @@ async function setupContainer(options: { snapshotUrl: string; allowPnpmInstallFa
   if (!resp.ok) {
     throw new Error(`Failed to download snapshot (${resp.status}): ${resp.statusText}`);
   }
-  const compressed = await resp.arrayBuffer();
-  const decompressed = decompressWithLz4(new Uint8Array(compressed));
+  const compressed = await readBodyBytesWithLimit(
+    resp,
+    PROJECT_SNAPSHOT_LZ4_LIMITS.compressedBytes,
+    'Project snapshot',
+  );
+  const decompressed = decompressWithLz4(compressed, PROJECT_SNAPSHOT_LZ4_LIMITS);
 
   const container = await withTimeout(
     startWebcontainer(),
@@ -139,12 +148,24 @@ async function setupContainer(options: { snapshotUrl: string; allowPnpmInstallFa
     WORKSPACE_STEP_TIMEOUT_MS,
     'Ghostbuild took too long to index the project files.',
   );
+  const packageJson = await withTimeout(
+    container.fs.readFile('package.json', 'utf-8'),
+    WORKSPACE_STEP_TIMEOUT_MS,
+    'Ghostbuild took too long to inspect the project manifest.',
+  );
+  assertValidGeneratedPackageJson('package.json', packageJson);
+  const pnpmWorkspace = await withTimeout(
+    container.fs.readFile('pnpm-workspace.yaml', 'utf-8'),
+    WORKSPACE_STEP_TIMEOUT_MS,
+    'Ghostbuild took too long to inspect the dependency policy.',
+  );
+  assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', pnpmWorkspace);
 
   setContainerBootState(ContainerBootState.DOWNLOADING_DEPENDENCIES);
-  let { output, exitCode } = await runPnpmInstall(container, ['install', '--frozen-lockfile']);
+  let { output, exitCode } = await runPnpmInstall(container, startupInstallArgs('--frozen-lockfile'));
   if (exitCode !== 0 && options.allowPnpmInstallFailure) {
     logger.warn('Frozen dependency install failed; retrying while repairing the generated lockfile.');
-    const repaired = await runPnpmInstall(container, ['install', '--no-frozen-lockfile']);
+    const repaired = await runPnpmInstall(container, startupInstallArgs('--no-frozen-lockfile'));
     output = `${output}\n${repaired.output}`;
     exitCode = repaired.exitCode;
   }

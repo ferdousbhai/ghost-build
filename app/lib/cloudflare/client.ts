@@ -5,12 +5,23 @@ const DATA_OPERATION_TIMEOUT_MS = 15_000;
 export async function executeDataOperation<Path extends DataOperationPath>(
   path: Path,
   args: DataOperationArgs<Path>,
+  options: { signal?: AbortSignal } = {},
 ): Promise<DataOperationResult<Path>> {
+  options.signal?.throwIfAborted();
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), DATA_OPERATION_TIMEOUT_MS);
-  let response: Response;
+  let timedOut = false;
+  const abortFromCaller = () => controller.abort(options.signal?.reason);
+  options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  if (options.signal?.aborted) {
+    abortFromCaller();
+  }
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, DATA_OPERATION_TIMEOUT_MS);
+
   try {
-    response = await fetch('/api/data', {
+    const response = await fetch('/api/data', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -18,21 +29,38 @@ export async function executeDataOperation<Path extends DataOperationPath>(
       body: JSON.stringify({ path, args }),
       signal: controller.signal,
     });
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(`Ghostbuild timed out while running ${path}. Please try again.`);
+    if (timedOut) {
+      throw dataOperationTimeoutError(path);
     }
+    options.signal?.throwIfAborted();
+
+    const body = (await response.json().catch(() => null)) as {
+      result?: DataOperationResult<Path>;
+      error?: string;
+    } | null;
+    if (timedOut) {
+      throw dataOperationTimeoutError(path);
+    }
+    options.signal?.throwIfAborted();
+    if (!response.ok) {
+      throw new Error(body?.error ?? `Data operation failed: ${path}`);
+    }
+    if (!body || !Object.hasOwn(body, 'result')) {
+      throw new Error(`Data operation returned a malformed response: ${path}`);
+    }
+    return body.result as DataOperationResult<Path>;
+  } catch (error) {
+    if (timedOut) {
+      throw dataOperationTimeoutError(path);
+    }
+    options.signal?.throwIfAborted();
     throw error;
   } finally {
     clearTimeout(timeoutId);
+    options.signal?.removeEventListener('abort', abortFromCaller);
   }
+}
 
-  const body = (await response.json().catch(() => null)) as {
-    result?: DataOperationResult<Path>;
-    error?: string;
-  } | null;
-  if (!response.ok) {
-    throw new Error(body?.error ?? `Data operation failed: ${path}`);
-  }
-  return body?.result as DataOperationResult<Path>;
+function dataOperationTimeoutError(path: DataOperationPath): Error {
+  return new Error(`Ghostbuild timed out while running ${path}. Please try again.`);
 }

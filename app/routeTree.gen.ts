@@ -9,17 +9,17 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root';
-import { Route as ShareRouteImport } from './routes/share';
-import { Route as SettingsRouteImport } from './routes/settings';
 import { Route as IndexRouteImport } from './routes/index';
-import { Route as ShareCodeRouteImport } from './routes/share.$code';
-import { Route as CreateShareCodeRouteImport } from './routes/create.$shareCode';
+import { Route as SettingsRouteImport } from './routes/settings';
+import { Route as ShareRouteImport } from './routes/share';
 import { Route as ChatIdRouteImport } from './routes/chat.$id';
+import { Route as CreateShareCodeRouteImport } from './routes/create.$shareCode';
+import { Route as ShareCodeRouteImport } from './routes/share.$code';
 import { Route as WebcontainerPreviewIdRouteImport } from './routes/webcontainer.preview.$id';
 
-const ShareRoute = ShareRouteImport.update({
-  id: '/share',
-  path: '/share',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any);
 const SettingsRoute = SettingsRouteImport.update({
@@ -27,25 +27,25 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any);
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const ShareCodeRoute = ShareCodeRouteImport.update({
-  id: '/$code',
-  path: '/$code',
-  getParentRoute: () => ShareRoute,
-} as any);
-const CreateShareCodeRoute = CreateShareCodeRouteImport.update({
-  id: '/create/$shareCode',
-  path: '/create/$shareCode',
+const ShareRoute = ShareRouteImport.update({
+  id: '/share',
+  path: '/share',
   getParentRoute: () => rootRouteImport,
 } as any);
 const ChatIdRoute = ChatIdRouteImport.update({
   id: '/chat/$id',
   path: '/chat/$id',
   getParentRoute: () => rootRouteImport,
+} as any);
+const CreateShareCodeRoute = CreateShareCodeRouteImport.update({
+  id: '/create/$shareCode',
+  path: '/create/$shareCode',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const ShareCodeRoute = ShareCodeRouteImport.update({
+  id: '/$code',
+  path: '/$code',
+  getParentRoute: () => ShareRoute,
 } as any);
 const WebcontainerPreviewIdRoute = WebcontainerPreviewIdRouteImport.update({
   id: '/webcontainer/preview/$id',
@@ -122,11 +122,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/share': {
-      id: '/share';
-      path: '/share';
-      fullPath: '/share';
-      preLoaderRoute: typeof ShareRouteImport;
+    '/': {
+      id: '/';
+      path: '/';
+      fullPath: '/';
+      preLoaderRoute: typeof IndexRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/settings': {
@@ -136,25 +136,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    '/': {
-      id: '/';
-      path: '/';
-      fullPath: '/';
-      preLoaderRoute: typeof IndexRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/share/$code': {
-      id: '/share/$code';
-      path: '/$code';
-      fullPath: '/share/$code';
-      preLoaderRoute: typeof ShareCodeRouteImport;
-      parentRoute: typeof ShareRoute;
-    };
-    '/create/$shareCode': {
-      id: '/create/$shareCode';
-      path: '/create/$shareCode';
-      fullPath: '/create/$shareCode';
-      preLoaderRoute: typeof CreateShareCodeRouteImport;
+    '/share': {
+      id: '/share';
+      path: '/share';
+      fullPath: '/share';
+      preLoaderRoute: typeof ShareRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/chat/$id': {
@@ -163,6 +149,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/chat/$id';
       preLoaderRoute: typeof ChatIdRouteImport;
       parentRoute: typeof rootRouteImport;
+    };
+    '/create/$shareCode': {
+      id: '/create/$shareCode';
+      path: '/create/$shareCode';
+      fullPath: '/create/$shareCode';
+      preLoaderRoute: typeof CreateShareCodeRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/share/$code': {
+      id: '/share/$code';
+      path: '/$code';
+      fullPath: '/share/$code';
+      preLoaderRoute: typeof ShareCodeRouteImport;
+      parentRoute: typeof ShareRoute;
     };
     '/webcontainer/preview/$id': {
       id: '/webcontainer/preview/$id';

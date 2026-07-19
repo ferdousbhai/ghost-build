@@ -4,6 +4,7 @@ import {
   d1DatabaseName,
   getBinding,
   parseJsonOutput,
+  requireMatchingD1Database,
   r2BucketExists,
   setD1DatabaseId,
 } from './provision-cloudflare-production.mjs';
@@ -58,6 +59,35 @@ describe('Cloudflare production provisioning helpers', () => {
     expect(d1DatabaseId({ id: databaseId })).toBe(databaseId);
     expect(d1DatabaseName({ name: 'ghostbuild' })).toBe('ghostbuild');
     expect(d1DatabaseName({ database_name: 'ghostbuild' })).toBe('ghostbuild');
+  });
+
+  it('rejects a configured D1 id that resolves to a different database name', () => {
+    expect(() =>
+      requireMatchingD1Database(
+        [{ uuid: databaseId, name: 'unrelated-production-database' }],
+        databaseId,
+        'ghostbuild',
+      ),
+    ).toThrow(`Configured D1 database_id ${databaseId} resolves to "unrelated-production-database", not "ghostbuild".`);
+  });
+
+  it('rejects a configured D1 id that is absent even when the account has no databases', () => {
+    expect(() => requireMatchingD1Database([], databaseId, 'ghostbuild')).toThrow(
+      `Configured D1 database_id ${databaseId} was not found in the Cloudflare account.`,
+    );
+  });
+
+  it('accepts only the remote D1 record matching both configured id and name', () => {
+    expect(
+      requireMatchingD1Database(
+        [
+          { uuid: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', name: 'other' },
+          { uuid: databaseId, name: 'ghostbuild' },
+        ],
+        databaseId,
+        'ghostbuild',
+      ),
+    ).toEqual({ uuid: databaseId, name: 'ghostbuild' });
   });
 
   it('finds configured Cloudflare bindings', () => {

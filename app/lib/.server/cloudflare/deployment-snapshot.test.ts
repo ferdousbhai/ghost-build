@@ -32,6 +32,33 @@ describe('inspectDeploymentSnapshot', () => {
     await expect(inspectDeploymentSnapshot(new Blob([oversized]))).rejects.toThrow('250 MiB');
   });
 
+  it('rejects credential-bearing local configuration in a directly submitted snapshot', async () => {
+    const zip = new JSZip();
+    zip.file('package.json', JSON.stringify({ ghostbuild: { projectType: 'worker' } }));
+    zip.file(
+      'wrangler.jsonc',
+      JSON.stringify({
+        main: 'src/server.ts',
+        compatibility_date: '2026-07-18',
+        compatibility_flags: ['nodejs_compat'],
+        observability: {
+          enabled: true,
+          logs: { enabled: true, head_sampling_rate: 0.6 },
+          traces: { enabled: true, head_sampling_rate: 0.05 },
+        },
+        upload_source_maps: true,
+      }),
+    );
+    zip.file('src/server.ts', "export default { fetch: () => new Response('ok') };\n");
+    zip.file('.npmrc', '//registry.npmjs.org/:_authToken=secret');
+
+    await expect(inspectDeploymentSnapshot(await asBlob(zip))).rejects.toThrow('local secret file');
+
+    zip.remove('.npmrc');
+    zip.file('nested/.git/config', 'url = https://user:token@example.com/repo.git');
+    await expect(inspectDeploymentSnapshot(await asBlob(zip))).rejects.toThrow('local secret file');
+  });
+
   it('bounds metadata inflation even when ZIP headers understate the expanded size', async () => {
     const zip = new JSZip();
     zip.file('package.json', JSON.stringify({ padding: 'a'.repeat(1024 * 1024) }));
@@ -85,7 +112,7 @@ async function projectZip(args: {
     'wrangler.jsonc',
     JSON.stringify({
       main: 'src/server.ts',
-      compatibility_date: args.compatibilityDate ?? '2026-07-08',
+      compatibility_date: args.compatibilityDate ?? '2026-07-18',
       compatibility_flags: ['nodejs_compat'],
       observability: {
         enabled: true,
@@ -99,7 +126,7 @@ async function projectZip(args: {
             d1_databases: [{ binding: 'DB', migrations_dir: 'migrations' }],
             r2_buckets: [{ binding: 'APP_STORAGE' }],
             durable_objects: { bindings: [{ name: 'AppAgent', class_name: args.appAgentClassName ?? 'AppAgent' }] },
-            migrations: [{ tag: 'v1', new_sqlite_classes: ['AppAgent'] }],
+            exports: { AppAgent: { type: 'durable-object', storage: 'sqlite' } },
           }
         : {}),
     }),

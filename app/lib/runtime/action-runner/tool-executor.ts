@@ -11,6 +11,7 @@ import { toolSuccess, type GhostbuildToolResult } from 'ghostbuild-agent/tool-re
 import { runValidateProject } from './validate-project';
 import type { DiagnosticsStore } from './diagnostics-store';
 import { pageCoverage } from './bounded-pagination';
+import type { DeploymentValidationStore } from './deployment-validation-store';
 
 export async function executeTool(args: {
   invocation: GhostbuildToolInvocation;
@@ -19,6 +20,7 @@ export async function executeTool(args: {
   onOutput: (output: string) => void;
   workspace: ActionRunnerWorkspace;
   diagnostics: DiagnosticsStore;
+  deploymentValidation: DeploymentValidationStore;
 }): Promise<GhostbuildToolResult> {
   if (isFileTool(args.invocation.toolName)) {
     return runFileTool(args.invocation, args.container, args.workspace);

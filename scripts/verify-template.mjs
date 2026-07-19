@@ -100,6 +100,7 @@ async function convertToWorkerProfile(tempDir) {
     'typescript',
     'typescript-eslint',
     'wrangler',
+    'yaml',
   ];
   pkg.ghostbuild = { projectType: 'worker' };
   pkg.scripts = {
@@ -122,6 +123,7 @@ async function convertToWorkerProfile(tempDir) {
   delete wrangler.r2_buckets;
   delete wrangler.durable_objects;
   delete wrangler.migrations;
+  delete wrangler.exports;
   await writeFile(join(tempDir, 'wrangler.jsonc'), `${JSON.stringify(wrangler, null, 2)}\n`);
   await writeFile(
     join(tempDir, 'tsconfig.json'),

@@ -106,17 +106,13 @@ export function useBuilderAgentChat(args: {
           });
           captureMessage('Builder client tool call failed', {
             level: 'error',
-            extra: { error, toolCallId: toolCall.toolCallId, toolName: toolCall.toolName },
           });
         }
       })();
     },
     autoContinueAfterToolResult: true,
     onError: (error: Error) => {
-      captureMessage(`Failed to process chat request: ${error.message}`, {
-        level: 'error',
-        extra: { error },
-      });
+      captureMessage('Failed to process chat request', { level: 'error' });
       logger.error('Chat request failed', error);
       recordChatFailure(error.message.includes(STATUS_MESSAGES.error));
       workbenchStore.abortAllActions();
@@ -200,7 +196,6 @@ export function useBuilderAgentChat(args: {
         logger.warn('Builder connection was not ready before send', error);
         captureMessage('Builder connection was not ready before send', {
           level: 'error',
-          extra: { error },
         });
         throw error;
       }
@@ -289,7 +284,6 @@ function handleToolOutputDeliveryFailure(error: unknown, toolName: string, stop:
   logger.error('Failed to deliver tool output for continuation', error);
   captureMessage('Failed to deliver Builder tool output for continuation', {
     level: 'error',
-    extra: { error, toolName },
   });
   workbenchStore.abortAllActions();
   stop();

@@ -6,6 +6,8 @@ import { setKnownInitialId, setKnownUrlId } from '~/lib/stores/chatId';
 import { description } from '~/lib/stores/description';
 import { toast } from 'sonner';
 import { decompressWithLz4 } from '~/lib/compression';
+import { MESSAGE_HISTORY_LZ4_LIMITS } from '~/lib/compression-limits';
+import { readBodyBytesWithLimit } from '~/lib/bounded-body';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { useStore } from '@nanostores/react';
 import {
@@ -104,7 +106,13 @@ export function useInitialMessages(chatId: string | undefined):
         }
         const history = initialMessagesResponse.headers.get('content-type')?.includes('application/json')
           ? parseMessageHistory(await initialMessagesResponse.json())
-          : decompressMessages(new Uint8Array(await initialMessagesResponse.arrayBuffer()));
+          : decompressMessages(
+              await readBodyBytesWithLimit(
+                initialMessagesResponse,
+                MESSAGE_HISTORY_LZ4_LIMITS.compressedBytes,
+                'Message history',
+              ),
+            );
         const initialMessages = history.messages;
 
         // Transform messages to convert partial-call states to failed states
@@ -196,7 +204,7 @@ function decompressMessages(compressed: Uint8Array): {
   messages: SerializedMessage[];
   checkpoint: TranscriptCheckpoint | null;
 } {
-  const decompressed = decompressWithLz4(compressed);
+  const decompressed = decompressWithLz4(compressed, MESSAGE_HISTORY_LZ4_LIMITS);
   const deserialized = JSON.parse(textDecoder.decode(decompressed));
   return parseMessageHistory(deserialized);
 }

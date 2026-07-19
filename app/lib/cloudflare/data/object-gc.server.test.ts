@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { OBJECT_GC_GRACE_PERIOD_MS, OBJECT_GC_SWEEP_LIMIT, sweepObjectGcCandidates } from './object-gc.server';
+import {
+  cancelObjectGcCandidate,
+  DEPLOYMENT_BUILD_ARTIFACT_LEASE_MS,
+  OBJECT_GC_GRACE_PERIOD_MS,
+  OBJECT_GC_SWEEP_LIMIT,
+  sweepObjectGcCandidates,
+} from './object-gc.server';
 import { deleteObject } from './object-storage.server';
 
 vi.mock('./object-storage.server', () => ({ deleteObject: vi.fn() }));
@@ -27,6 +33,69 @@ describe('deferred R2 object collection', () => {
     await expect(sweepObjectGcCandidates(database.env, { now: 20 })).resolves.toBe(0);
 
     expect(deleteObjectMock).not.toHaveBeenCalled();
+    expect(database.candidates).toEqual([]);
+  });
+
+  test('treats a deployment source snapshot as a live R2 reference', async () => {
+    const database = new ObjectGcDatabase([{ storage_key: 'deployment-snapshot', not_before: 10, attempts: 0 }]);
+    database.references.add('deployment-snapshot');
+
+    await expect(sweepObjectGcCandidates(database.env, { now: 20 })).resolves.toBe(0);
+
+    expect(database.referenceQueries.at(-1)).toContain('FROM deployments WHERE snapshot_key = ?');
+    expect(deleteObjectMock).not.toHaveBeenCalled();
+    expect(database.candidates).toEqual([]);
+  });
+
+  test('retains a fresh exact-generation build artifact lease but collects it after a hard stop', async () => {
+    const database = new ObjectGcDatabase([{ storage_key: 'deployment-build', not_before: 10, attempts: 0 }]);
+    database.buildArtifactReferences.set('deployment-build', {
+      status: 'provisioning',
+      updatedAt: 20,
+      artifactGeneration: 3,
+      executionGeneration: 3,
+    });
+
+    await expect(sweepObjectGcCandidates(database.env, { now: 20 })).resolves.toBe(0);
+
+    expect(deleteObjectMock).not.toHaveBeenCalled();
+    expect(database.candidates).toEqual([
+      {
+        storage_key: 'deployment-build',
+        not_before: 20 + DEPLOYMENT_BUILD_ARTIFACT_LEASE_MS,
+        attempts: 0,
+      },
+    ]);
+    expect(database.referenceQueries.at(-1)).toContain('build_artifact_generation = execution_generation');
+
+    await expect(
+      sweepObjectGcCandidates(database.env, { now: 20 + DEPLOYMENT_BUILD_ARTIFACT_LEASE_MS + 1 }),
+    ).resolves.toBe(1);
+    expect(deleteObjectMock).toHaveBeenCalledWith(database.env, 'deployment-build');
+    expect(database.candidates).toEqual([]);
+  });
+
+  test('does not treat a stale-generation build artifact key as live', async () => {
+    const database = new ObjectGcDatabase([{ storage_key: 'old-build', not_before: 10, attempts: 0 }]);
+    database.buildArtifactReferences.set('old-build', {
+      status: 'provisioning',
+      updatedAt: 20,
+      artifactGeneration: 2,
+      executionGeneration: 3,
+    });
+
+    await expect(sweepObjectGcCandidates(database.env, { now: 20 })).resolves.toBe(1);
+
+    expect(deleteObjectMock).toHaveBeenCalledWith(database.env, 'old-build');
+  });
+
+  test('does not cancel a candidate that was requeued after the caller received its cleanup receipt', async () => {
+    const database = new ObjectGcDatabase([{ storage_key: 'snapshot', not_before: 20, attempts: 0 }]);
+
+    await expect(cancelObjectGcCandidate(database.db, { storageKey: 'snapshot', notBefore: 10 })).resolves.toBe(false);
+    expect(database.candidates).toEqual([{ storage_key: 'snapshot', not_before: 20, attempts: 0 }]);
+
+    await expect(cancelObjectGcCandidate(database.db, { storageKey: 'snapshot', notBefore: 20 })).resolves.toBe(true);
     expect(database.candidates).toEqual([]);
   });
 
@@ -66,6 +135,16 @@ type Candidate = {
 class ObjectGcDatabase {
   candidates: Candidate[];
   references = new Set<string>();
+  buildArtifactReferences = new Map<
+    string,
+    {
+      status: string;
+      updatedAt: number;
+      artifactGeneration: number;
+      executionGeneration: number;
+    }
+  >();
+  referenceQueries: string[] = [];
 
   constructor(candidates: Candidate[]) {
     this.candidates = candidates;
@@ -99,7 +178,20 @@ class ObjectGcDatabase {
   }
 
   private first(query: string, values: unknown[]) {
+    if (query.includes('build_artifact_key')) {
+      this.referenceQueries.push(query);
+      const reference = this.buildArtifactReferences.get(values[0] as string);
+      if (
+        !reference ||
+        reference.artifactGeneration !== reference.executionGeneration ||
+        !['provisioning', 'building', 'deploying'].includes(reference.status)
+      ) {
+        return null;
+      }
+      return { updated_at: reference.updatedAt };
+    }
     if (query.includes('FROM chat_message_states')) {
+      this.referenceQueries.push(query);
       return this.references.has(values[0] as string) ? { found: 1 } : null;
     }
     return null;
@@ -107,12 +199,21 @@ class ObjectGcDatabase {
 
   private run(query: string, values: unknown[]) {
     if (query.includes('DELETE FROM object_gc_candidates')) {
+      const before = this.candidates.length;
+      if (values.length === 2) {
+        const [key, notBefore] = values as [string, number];
+        this.candidates = this.candidates.filter(
+          (candidate) => !(candidate.storage_key === key && candidate.not_before === notBefore),
+        );
+        return changed(before - this.candidates.length);
+      }
       const [key, notBefore, now] = values as [string, number, number];
       this.candidates = this.candidates.filter(
         (candidate) =>
           !(candidate.storage_key === key && candidate.not_before === notBefore && candidate.not_before <= now),
       );
-    } else if (query.includes('UPDATE object_gc_candidates')) {
+      return changed(before - this.candidates.length);
+    } else if (query.includes('attempts = attempts + 1')) {
       const [retryAt, key, notBefore, now] = values as [number, string, number, number];
       const candidate = this.candidates.find(
         (item) => item.storage_key === key && item.not_before === notBefore && item.not_before <= now,
@@ -120,6 +221,14 @@ class ObjectGcDatabase {
       if (candidate) {
         candidate.attempts++;
         candidate.not_before = retryAt;
+      }
+    } else if (query.includes('UPDATE object_gc_candidates')) {
+      const [leaseUntil, key, notBefore, now] = values as [number, string, number, number];
+      const candidate = this.candidates.find(
+        (item) => item.storage_key === key && item.not_before === notBefore && item.not_before <= now,
+      );
+      if (candidate) {
+        candidate.not_before = leaseUntil;
       }
     }
     return changed(1);

@@ -4,6 +4,7 @@ import { useLiveQuery } from '@tanstack/react-db';
 import { executeDataOperation } from './client';
 import { api, type ChatHistorySummary } from './data-api';
 import { queryClient } from '~/lib/stores/reactQueryClient';
+import { loadAllChatHistory } from './data-page-loader';
 
 function createChatHistoryCollection(sessionId: string) {
   return createCollection(
@@ -11,8 +12,8 @@ function createChatHistoryCollection(sessionId: string) {
       id: `chat-history:${sessionId}`,
       queryKey: ['ghostbuild-data', 'messages.getAll', { sessionId }],
       queryClient,
-      queryFn: () => executeDataOperation(api.messages.getAll, { sessionId }),
-      getKey: (item) => item.id,
+      queryFn: ({ signal }) => loadAllChatHistory(sessionId, signal),
+      getKey: (item) => item.initialId,
       onDelete: async ({ transaction }) => {
         await Promise.all(
           transaction.mutations.map((mutation) =>
@@ -45,9 +46,9 @@ export function useChatHistory(sessionId: string | null | undefined) {
   return data;
 }
 
-export async function removeChatHistoryItem(sessionId: string, itemId: string) {
+export async function removeChatHistoryItem(sessionId: string, initialId: string) {
   const collection = getChatHistoryCollection(sessionId);
-  const tx = collection.delete(itemId, {
+  const tx = collection.delete(initialId, {
     metadata: { source: 'sidebar' },
   });
   await tx.isPersisted.promise;

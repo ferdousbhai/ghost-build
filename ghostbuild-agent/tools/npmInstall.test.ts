@@ -53,6 +53,26 @@ describe('npmInstall tool parameters', () => {
     expect(parsed.error?.issues[0]?.message).toBe('pnpm flags are not allowed in npmInstall packages: -D');
   });
 
+  it('rejects non-registry package sources before pnpm sees them', () => {
+    for (const spec of [
+      'https://example.com/package.tgz',
+      'git+https://github.com/example/package.git',
+      'github:example/package',
+      'file:../package',
+      'link:../package',
+      'workspace:*',
+      './local-package',
+    ]) {
+      const parsed = npmInstallToolParameters.safeParse({ packages: spec });
+      expect(parsed.success, spec).toBe(false);
+      expect(parsed.error?.issues.some((issue) => issue.message.includes('Only npm registry'))).toBe(true);
+    }
+  });
+
+  it('allows registry aliases while retaining provider policy', () => {
+    expect(npmInstallToolParameters.safeParse({ packages: 'date-tools@npm:date-fns@^4.0.0' }).success).toBe(true);
+  });
+
   it('allows the agent to synchronize a lockfile without accepting arbitrary pnpm flags', () => {
     expect(npmInstallToolParameters.parse({ mode: 'sync-lockfile' })).toEqual({ mode: 'sync-lockfile' });
     expect(npmInstallToolParameters.safeParse({ mode: 'sync-lockfile', packages: 'date-fns' }).success).toBe(false);

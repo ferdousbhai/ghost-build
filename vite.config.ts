@@ -3,10 +3,8 @@ import agents from 'agents/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
-import tsconfigPaths from 'vite-tsconfig-paths';
 import { optimizeCssModules } from 'vite-plugin-optimize-css-modules';
 import wasm from 'vite-plugin-wasm';
-import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { fileURLToPath } from 'node:url';
 import { rm } from 'node:fs/promises';
 
@@ -32,29 +30,20 @@ export default defineConfig((config) => {
       },
     },
     optimizeDeps: {
-      include: ['react-dom', 'react-fast-compare', 'warning', 'fuzzy'],
+      include: ['react-dom'],
+    },
+    define: {
+      global: 'globalThis',
     },
     resolve: {
       tsconfigPaths: true,
       alias: {
-        buffer: 'vite-plugin-node-polyfills/polyfills/buffer',
-        ...(isTest ? { 'lz4-wasm': 'lz4-wasm/dist/index.js' } : {}),
+        buffer: 'buffer',
+        'node:buffer': 'buffer',
       },
     },
     plugins: [
       !isTest && agents(),
-      nodePolyfills({
-        include: ['buffer', 'process'],
-        globals: {
-          Buffer: true,
-          process: true, // this is actually require for some terminal stuff
-          // like the shell tool
-          global: true,
-        },
-        protocolImports: true,
-        // Exclude Node.js modules that shouldn't be polyfilled in Cloudflare
-        exclude: ['child_process', 'fs', 'path'],
-      }),
       // Required for WebContainer file write tooling.
       {
         name: 'buffer-polyfill',
@@ -91,7 +80,6 @@ export default defineConfig((config) => {
           },
         }),
       react(),
-      isTest && tsconfigPaths(),
       config.mode === 'production' && optimizeCssModules({ apply: 'build' }),
       wasm(),
     ].filter(Boolean),

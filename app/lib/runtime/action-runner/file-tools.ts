@@ -8,6 +8,7 @@ import type { GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { readPath } from '~/utils/fileUtils';
 import { assertNotLocalSecretFilePath } from '~/utils/secretFiles';
 import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifest';
+import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { toolSuccess } from 'ghostbuild-agent/tool-result';
 import type { ActionRunnerWorkspace, ActionState } from './types';
@@ -25,8 +26,8 @@ export async function runStreamedFileAction(
   if (action.type !== 'file') {
     unreachable('Expected file action');
   }
-  const relativePath = nodePath.relative(container.workdir, action.filePath);
-  await writeGeneratedFile(container, workspace, relativePath, action.filePath, action.content);
+  const { absolutePath, relativePath } = normalizeProjectPath(action.filePath);
+  await writeGeneratedFile(container, workspace, relativePath, absolutePath, action.content);
   logger.debug(`File written ${relativePath}`);
 }
 
@@ -146,11 +147,12 @@ async function writeGeneratedFile(
 ): Promise<void> {
   assertNotLocalSecretFilePath(relativePath);
   assertNotInternalGhostbuildFilePath(relativePath);
+  assertValidGeneratedPackageJson(relativePath, content);
+  assertSafeGeneratedPnpmWorkspace(relativePath, content);
   const folder = nodePath.dirname(relativePath).replace(/\/+$/g, '');
   if (folder !== '.') {
     await container.fs.mkdir(folder, { recursive: true });
   }
-  assertValidGeneratedPackageJson(relativePath, content);
   await container.fs.writeFile(relativePath, content);
   workspace.setGeneratedFileContent(requestedPath, content);
 }

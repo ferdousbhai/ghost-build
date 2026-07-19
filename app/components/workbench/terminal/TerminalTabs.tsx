@@ -79,7 +79,9 @@ export const TerminalTabs = memo(function TerminalTabs({
 
               return (
                 <button
+                  type="button"
                   key={index}
+                  aria-pressed={isActive}
                   className={classNames(
                     'flex items-center text-sm cursor-pointer gap-1.5 px-3 py-2 h-full whitespace-nowrap rounded-full',
                     {

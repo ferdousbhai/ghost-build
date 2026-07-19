@@ -14,6 +14,7 @@ import { toolFailure, type GhostbuildToolResult } from 'ghostbuild-agent/tool-re
 import { ToolExecutionScheduler } from './action-runner/tool-execution-scheduler';
 import { DiagnosticsStore } from './action-runner/diagnostics-store';
 import { ContainerBootState, waitForContainerBootState } from '~/lib/stores/containerBootState';
+import { DeploymentValidationStore } from './action-runner/deployment-validation-store';
 
 export { isActionStatusActive } from './action-runner/types';
 export type { ActionState, ActionStatus } from './action-runner/types';
@@ -31,6 +32,7 @@ export class ActionRunner {
   #currentExecution: Promise<void> = Promise.resolve();
   #lastSuccessfulToolCallKey: string | null = null;
   readonly #diagnostics: DiagnosticsStore;
+  readonly #deploymentValidation = new DeploymentValidationStore();
   readonly #scheduler: ToolExecutionScheduler;
 
   readonly actions: ActionsMap = map({});
@@ -180,6 +182,7 @@ export class ActionRunner {
           onOutput: (output) => this.terminalOutput.set(output),
           workspace: this.callbacks.workspace,
           diagnostics: this.#diagnostics,
+          deploymentValidation: this.#deploymentValidation,
         }),
       );
       action.abortSignal.throwIfAborted();

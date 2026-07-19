@@ -7,6 +7,10 @@ import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
 import { parseOperationDiagnostics, type DiagnosticsStore } from './diagnostics-store';
 import { pageCoverage } from './bounded-pagination';
 import { runCommand } from './command';
+import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
+
+const DEPENDENCY_COMMAND_TIMEOUT_MS = 120_000;
+const NPM_REGISTRY = 'https://registry.npmjs.org/';
 
 export async function runNpmInstall(args: {
   invocation: GhostbuildToolInvocation;
@@ -24,14 +28,20 @@ export async function runNpmInstall(args: {
     args.abortSignal.throwIfAborted();
     await waitForContainerBootState(ContainerBootState.READY);
     args.abortSignal.throwIfAborted();
+    const workspace = await args.container.fs.readFile('pnpm-workspace.yaml', 'utf-8');
+    assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', workspace);
     const syncLockfile = mode === 'sync-lockfile';
-    const commandArgs = syncLockfile ? ['install', '--lockfile-only'] : ['add', ...packages];
+    const sourcePolicyArgs = ['--ignore-pnpmfile', `--registry=${NPM_REGISTRY}`];
+    const commandArgs = syncLockfile
+      ? ['install', '--lockfile-only', ...sourcePolicyArgs]
+      : ['add', ...sourcePolicyArgs, ...packages];
     await runCommand({
       container: args.container,
       command: ['pnpm', ...commandArgs],
       displayName: syncLockfile ? 'pnpm install --lockfile-only' : `pnpm add (${packages.length} packages)`,
       abortSignal: args.abortSignal,
       onOutput: args.onOutput,
+      timeoutMs: DEPENDENCY_COMMAND_TIMEOUT_MS,
     });
     return toolSuccess(
       syncLockfile

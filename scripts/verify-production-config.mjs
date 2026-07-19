@@ -4,13 +4,16 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, printParseErrorCode } from 'jsonc-parser';
 import {
-  findForbiddenWorkflowCommandErrors,
+  findBuildApprovalErrors,
+  findCiWorkflowErrors,
+  findCompositeActionSafetyErrors,
   findMissingCommandSteps,
   findMissingProvisionScriptPatternErrors,
-  findMissingWorkflowTextErrors,
+  findProductionDeployWorkflowErrors,
+  findSystemPromptsReleaseWorkflowErrors,
   findWorkerObservabilityErrors,
   findWorkerRuntimeSecretErrors,
-  findWorkflowSequenceErrors,
+  findWorkflowSafetyErrors,
   loadsLocalEnvFiles,
   startsLocalDevServer,
   targetsStaging,
@@ -19,17 +22,27 @@ import {
 import { runVerifierIfMain } from './run-verifier.mjs';
 
 export {
-  findForbiddenWorkflowCommandErrors,
+  findBuildApprovalErrors,
+  findCiWorkflowErrors,
+  findCompositeActionSafetyErrors,
   findMissingProvisionScriptPatternErrors,
-  findMissingWorkflowTextErrors,
+  findProductionDeployWorkflowErrors,
+  findSystemPromptsReleaseWorkflowErrors,
   findWorkerObservabilityErrors,
   findWorkerRuntimeSecretErrors,
-  findWorkflowSequenceErrors,
+  findWorkflowSafetyErrors,
   workflowPathsFromDirectoryEntries,
 };
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const REQUIRED_COMPATIBILITY_DATE = '2026-07-08';
+const REQUIRED_COMPATIBILITY_DATE = '2026-07-18';
+const REQUIRED_OAUTH_SCOPES =
+  'openid profile email account-settings.read workers-scripts.write d1.write workers-r2.write ai.read';
+const REQUIRED_SECRET_NAMES = [
+  'CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY',
+  'CLOUDFLARE_OAUTH_CLIENT_SECRET',
+  'DEPLOYMENT_PROXY_JWT_SECRET',
+];
 const PLACEHOLDER_D1_ID = '00000000-0000-0000-0000-000000000000';
 const workerTargets = [
   {
@@ -72,6 +85,10 @@ function findBinding(collection, binding) {
   return Array.isArray(collection) ? collection.find((item) => item?.binding === binding) : undefined;
 }
 
+function findNamedBinding(collection, name) {
+  return Array.isArray(collection) ? collection.find((item) => item?.name === name) : undefined;
+}
+
 export function findWorkerRoutingErrors(config, label, customDomain) {
   const errors = [];
   if (config?.workers_dev !== false) {
@@ -86,6 +103,49 @@ export function findWorkerRoutingErrors(config, label, customDomain) {
   return errors;
 }
 
+export function findWorkerVariableSourceErrors(config, label) {
+  const errors = [];
+  if (Object.hasOwn(config ?? {}, 'keep_vars')) {
+    errors.push(`${label} must omit keep_vars so checked-in config and deploy arguments remain the source of truth.`);
+  }
+  if (Object.hasOwn(config?.vars ?? {}, 'CLOUDFLARE_OAUTH_CLIENT_ID')) {
+    errors.push(`${label} must not commit CLOUDFLARE_OAUTH_CLIENT_ID; inject it from the deploy environment.`);
+  }
+  return errors;
+}
+
+export function findWorkerTelemetryRateLimitErrors(config, label) {
+  const errors = [];
+  const binding = findNamedBinding(config?.ratelimits, 'CLIENT_TELEMETRY_RATE_LIMITER');
+  if (!binding) {
+    return [`${label} must bind CLIENT_TELEMETRY_RATE_LIMITER.`];
+  }
+  if (!/^\d+$/.test(binding.namespace_id ?? '') || Number(binding.namespace_id) < 1) {
+    errors.push(`${label} telemetry rate-limit namespace_id must be a positive integer string.`);
+  }
+  requireEqual(errors, `${label} telemetry rate-limit simple.limit`, binding.simple?.limit, 30);
+  requireEqual(errors, `${label} telemetry rate-limit simple.period`, binding.simple?.period, 60);
+  return errors;
+}
+
+export function findWorkerOAuthStartRateLimitErrors(config, label) {
+  const errors = [];
+  const binding = findNamedBinding(config?.ratelimits, 'CLOUDFLARE_OAUTH_START_RATE_LIMITER');
+  if (!binding) {
+    return [`${label} must bind CLOUDFLARE_OAUTH_START_RATE_LIMITER.`];
+  }
+  requireEqual(errors, `${label} OAuth-start rate-limit namespace_id`, binding.namespace_id, '1002');
+  requireEqual(errors, `${label} OAuth-start rate-limit simple.limit`, binding.simple?.limit, 10);
+  requireEqual(errors, `${label} OAuth-start rate-limit simple.period`, binding.simple?.period, 60);
+  return errors;
+}
+
+export function findWorkerGcScheduleErrors(config, label) {
+  return config?.triggers?.crons?.includes('*/15 * * * *')
+    ? []
+    : [`${label} must schedule the bounded deferred-data GC sweep every 15 minutes.`];
+}
+
 function verifyWorker(errors, config, target) {
   const label = target.path;
   requireEqual(errors, `${label} name`, config?.name, target.name);
@@ -96,11 +156,31 @@ function verifyWorker(errors, config, target) {
   }
   requireEqual(errors, `${label} upload_source_maps`, config?.upload_source_maps, true);
   requireEqual(errors, `${label} version_metadata.binding`, config?.version_metadata?.binding, 'CF_VERSION_METADATA');
+  errors.push(...findWorkerTelemetryRateLimitErrors(config, label));
+  errors.push(...findWorkerOAuthStartRateLimitErrors(config, label));
+  requireEqual(
+    errors,
+    `${label} vars.CLOUDFLARE_OAUTH_SCOPES`,
+    config?.vars?.CLOUDFLARE_OAUTH_SCOPES,
+    REQUIRED_OAUTH_SCOPES,
+  );
   errors.push(
     ...findWorkerObservabilityErrors(config, label),
     ...findWorkerRoutingErrors(config, label, target.customDomain),
+    ...findWorkerVariableSourceErrors(config, label),
+    ...findWorkerGcScheduleErrors(config, label),
     ...findWorkerRuntimeSecretErrors(config, label, 'configure values as Cloudflare bindings'),
   );
+  const configuredSecretNames = config?.secrets?.required;
+  if (Array.isArray(configuredSecretNames)) {
+    for (const secretName of REQUIRED_SECRET_NAMES) {
+      if (!configuredSecretNames.includes(secretName)) {
+        errors.push(`${label} secrets.required must include ${JSON.stringify(secretName)}.`);
+      }
+    }
+  } else {
+    errors.push(`${label} secrets.required must declare the production Worker secret names.`);
+  }
 
   const d1 = findBinding(config?.d1_databases, 'DB');
   if (!d1) {
@@ -163,7 +243,7 @@ function verifyScripts(errors, pkg, label) {
       'provision:production',
       'verify:production-config',
       'd1:migrations:apply:production',
-      'wrangler deploy',
+      'scripts/deploy-production.mjs',
     ]),
   );
 
@@ -199,48 +279,22 @@ function verifyWorkflows(errors) {
   for (const path of workflowPaths) {
     const content = readFileSync(resolve(rootDir, path), 'utf8');
     workflows.set(path, content);
-    errors.push(...findForbiddenWorkflowCommandErrors(content, path));
+    errors.push(...findWorkflowSafetyErrors(content, path));
   }
 
-  const deploy = workflows.get('.github/workflows/deploy.yml') ?? '';
+  const setupActionPath = '.github/actions/setup-and-build/action.yaml';
   errors.push(
-    ...findMissingWorkflowTextErrors(deploy, '.github/workflows/deploy.yml', [
-      'name: Production Deploy',
-      'branches:',
-      '- main',
-      'environment:',
-      'name: production',
-      'CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}',
-      'CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}',
-      'uses: cloudflare/wrangler-action@v4',
-      'apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}',
-      'accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}',
-      'packageManager: pnpm',
-      'command: deploy --var COMMIT_SHA:${{ github.sha }}',
-      'name: Verify live deployment stabilization',
-      'node scripts/verify-live-deployment.mjs local',
-      'name: Verify deployment from multiple regions',
-      'node scripts/verify-live-deployment.mjs global',
-      'EXPECTED_SHA: ${{ github.sha }}',
-    ]),
-    ...findWorkflowSequenceErrors(deploy, '.github/workflows/deploy.yml', [
-      'pnpm run validate',
-      'pnpm run provision:production',
-      'pnpm run verify:production-config',
-      'pnpm run d1:migrations:apply:production',
-      'uses: cloudflare/wrangler-action@v4',
-      'command: deploy --var COMMIT_SHA:${{ github.sha }}',
-      'name: Verify live deployment stabilization',
-      'node scripts/verify-live-deployment.mjs local',
-      'name: Verify deployment from multiple regions',
-      'node scripts/verify-live-deployment.mjs global',
-    ]),
+    ...findCompositeActionSafetyErrors(readFileSync(resolve(rootDir, setupActionPath), 'utf8'), setupActionPath),
   );
+
+  const deploy = workflows.get('.github/workflows/deploy.yml') ?? '';
+  errors.push(...findProductionDeployWorkflowErrors(deploy, '.github/workflows/deploy.yml'));
   errors.push(
-    ...findMissingWorkflowTextErrors(workflows.get('.github/workflows/ci.yml') ?? '', '.github/workflows/ci.yml', [
-      'pnpm run validate',
-      'workflow_dispatch:',
-    ]),
+    ...findCiWorkflowErrors(workflows.get('.github/workflows/ci.yml') ?? '', '.github/workflows/ci.yml'),
+    ...findSystemPromptsReleaseWorkflowErrors(
+      workflows.get('.github/workflows/release_system_prompts.yml') ?? '',
+      '.github/workflows/release_system_prompts.yml',
+    ),
   );
 }
 

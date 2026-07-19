@@ -9,7 +9,10 @@ describe('Cloudflare client telemetry', () => {
     vi.resetModules();
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal('navigator', { sendBeacon });
-    vi.stubGlobal('window', { location: { href: 'https://ghostbuild.dev/chat/example' }, prompt: vi.fn() });
+    vi.stubGlobal('window', {
+      location: { href: 'https://ghostbuild.dev/share/secret?token=credential' },
+      prompt: vi.fn(),
+    });
     vi.stubGlobal('fetch', fetchMock);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -24,7 +27,7 @@ describe('Cloudflare client telemetry', () => {
     sendBeacon.mockReturnValue(true);
     const { captureMessage } = await import('./telemetry.client');
 
-    await captureMessage('Preview failed', { level: 'warning' });
+    await captureMessage('Preview base URL unexpectedly had a trailing slash', { level: 'warning' });
 
     expect(sendBeacon).toHaveBeenCalledWith('/api/client-telemetry', expect.any(Blob));
     expect(fetchMock).not.toHaveBeenCalled();
@@ -34,35 +37,29 @@ describe('Cloudflare client telemetry', () => {
     sendBeacon.mockReturnValue(false);
     const { captureException } = await import('./telemetry.client');
 
-    await captureException(new Error('Build failed'));
+    await captureException('Failed to process chat request', new Error('Build failed'));
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/client-telemetry',
       expect.objectContaining({ method: 'POST', keepalive: true }),
     );
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body).toMatchObject({ kind: 'exception', message: 'Build failed' });
+    expect(body).toEqual({ kind: 'exception', event: 'Failed to process chat request' });
   });
 
-  it('includes current user and extra context', async () => {
+  it('omits exception details, identity, and route secrets', async () => {
     sendBeacon.mockReturnValue(false);
-    const { captureMessage, setTelemetryExtra, setTelemetryUser } = await import('./telemetry.client');
-    setTelemetryExtra('chatId', 'chat-1');
-    setTelemetryUser({ id: 'user-1' });
+    const { captureException } = await import('./telemetry.client');
 
-    await captureMessage('Something happened');
+    await captureException('Failed to submit chat message', new Error('secret for person@example.test in chat-1'), {
+      level: 'error',
+    });
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body).toMatchObject({ extras: { chatId: 'chat-1' }, user: { id: 'user-1' } });
-  });
-
-  it('submits non-empty feedback', async () => {
-    sendBeacon.mockReturnValue(true);
-    vi.mocked(window.prompt).mockReturnValue('  Make previews faster  ');
-    const { openFeedbackForm } = await import('./telemetry.client');
-
-    await openFeedbackForm();
-
-    expect(sendBeacon).toHaveBeenCalledOnce();
+    expect(body).toEqual({
+      kind: 'exception',
+      event: 'Failed to submit chat message',
+      context: { level: 'error' },
+    });
   });
 });

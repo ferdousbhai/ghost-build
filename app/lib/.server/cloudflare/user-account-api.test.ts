@@ -41,6 +41,7 @@ describe('UserCloudflareAccountApi', () => {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ name: 'ghostbuild-deployment-1' }),
+        signal: expect.any(AbortSignal),
         headers: expect.objectContaining({ authorization: 'Bearer user-token' }),
       }),
     );

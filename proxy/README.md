@@ -1,18 +1,18 @@
-The legacy WebContainer preview process for a Ghostbuild-generated app responds
-to both HTTP and HMR WebSocket traffic.
+# WebContainer Preview Proxy
 
-We proxy this traffic for previews so that different domains can be used
-to simulate different users, since different domains -> different cookies.
+Ghostbuild starts one local HTTP and HMR WebSocket proxy for each external preview. Giving each preview a distinct
+WebContainer origin also gives it distinct browser cookies, which makes multi-user authentication flows testable.
 
-I couldn't get WebContainers to accept connections on different ports for
-HTTP and WebSockets (although Vite is easy to configure to do this) so
-we also need to proxy WebSocket traffic.
+`proxy.cjs` uses `http-proxy` because both normal requests and WebSocket upgrades must reach the same Vite development
+server. `build.cjs` bundles that source into `proxy.bundled.cjs`, which the browser writes into the WebContainer and runs
+with the source and proxy ports as arguments.
 
-The Node.js in WebContainers does not support reading from stdin.
-WebContainer.writeFile() seems incapable of writing to /tmp/foo
-so it's ideal to use `node -e 'the(proxy); code()'` or
-`echo 'the(proxy); code() > /tmp/proxy.cjs'`.
+After changing the source, regenerate and verify the committed bundle from the repository root:
 
-Writing a very short proxy that works with WebSockets should be easy
-(TODO) but I couldn't get it to work. So we bundle up a simple proxy server
-built with node-http-proxy aka http-proxy.
+```bash
+pnpm run build:embedded
+pnpm run build:embedded:check
+```
+
+The generated CommonJS is base64-wrapped because the WebContainer bootstrap writes it through a single-quoted shell
+command. The bundle check prevents source and generated output from drifting.

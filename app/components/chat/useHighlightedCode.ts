@@ -1,5 +1,8 @@
 import { useEffect, useState, type CSSProperties } from 'react';
+import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { getCodeHighlighter, normalizeCodeLanguage, type CodeTheme, type HighlightLanguage } from '~/lib/shiki.client';
+
+const logger = createScopedLogger('HighlightedCode');
 
 type HighlightToken = {
   content: string;
@@ -25,11 +28,17 @@ export function useHighlightedCode(code: string, language: string, theme: CodeTh
     void getCodeHighlighter({
       langs: isLoadableLanguage(normalizedLanguage) ? [normalizedLanguage] : [],
       themes: [theme],
-    }).then((highlighter) => {
-      if (active) {
-        setHighlighted(highlighter.codeToTokens(code, { lang: normalizedLanguage, theme }));
-      }
-    });
+    })
+      .then((highlighter) => {
+        if (active) {
+          setHighlighted(highlighter.codeToTokens(code, { lang: normalizedLanguage, theme }));
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          logger.warn('Failed to highlight code block', error);
+        }
+      });
 
     return () => {
       active = false;

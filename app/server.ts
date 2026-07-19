@@ -1,5 +1,4 @@
 import handler from '@tanstack/react-start/server-entry';
-import { routeAgentRequest } from 'agents';
 import {
   dataAction,
   initialMessagesAction,
@@ -19,9 +18,11 @@ import {
   completeCloudflareConnectionAction,
   startCloudflareConnectionAction,
 } from './server-handlers/cloudflare-integration';
-import { authorizeAgentRequest } from './lib/.server/agent-request-identity';
+import { routeAuthorizedAgentRequest } from './lib/.server/agent-request-identity';
 import { createDeploymentPlanAction, deploymentAction } from './server-handlers/deployments';
 import { authSessionAction, signOutAction } from './server-handlers/auth';
+import { drainDeferredDataGcBestEffort } from './lib/cloudflare/data/deferred-gc.server';
+import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudflare-auth-retention.server';
 
 export { BuilderAgent } from './agents/builder-agent';
 export { ContainerProxy, DeploymentSandbox } from './lib/.server/cloudflare/deployment-sandbox';
@@ -35,10 +36,19 @@ function requireMethod(request: Request, method: string, handler: () => Response
   return request.method === method ? handler() : methodNotAllowed(method);
 }
 
-function withCrossOriginIsolationHeaders(response: Response) {
+function withApplicationSecurityHeaders(response: Response, pathname: string) {
   const headers = new Headers(response.headers);
   headers.set('Cross-Origin-Opener-Policy', 'same-origin');
   headers.set('Cross-Origin-Embedder-Policy', 'credentialless');
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('X-Frame-Options', 'DENY');
+  if (pathname === '/connect/return') {
+    headers.set('Cache-Control', 'no-store');
+    headers.set('Pragma', 'no-cache');
+  } else if (pathname.startsWith('/api/') && !headers.has('Cache-Control')) {
+    headers.set('Cache-Control', 'no-store');
+  }
 
   return new Response(response.body, {
     status: response.status,
@@ -49,7 +59,7 @@ function withCrossOriginIsolationHeaders(response: Response) {
 
 type ServerRoute = {
   method: 'GET' | 'POST';
-  handler: (request: Request, env: Env) => Response | Promise<Response>;
+  handler: (request: Request, env: Env, ctx?: ExecutionContext) => Response | Promise<Response>;
 };
 
 const exactRoutes: Record<string, ServerRoute> = {
@@ -71,7 +81,7 @@ const exactRoutes: Record<string, ServerRoute> = {
   },
   '/api/client-telemetry': {
     method: 'POST',
-    handler: (request) => clientTelemetryAction(request),
+    handler: (request, env) => clientTelemetryAction({ request, env }),
   },
   '/api/feedback': {
     method: 'POST',
@@ -95,7 +105,7 @@ const exactRoutes: Record<string, ServerRoute> = {
   },
   '/api/data': {
     method: 'POST',
-    handler: (request, env) => dataAction({ request, env }),
+    handler: (request, env, executionCtx) => dataAction({ request, env, executionCtx }),
   },
   '/api/version': {
     method: 'GET',
@@ -116,51 +126,53 @@ const exactRoutes: Record<string, ServerRoute> = {
 };
 
 export default {
-  async fetch(request: Request, env: Env) {
-    const url = new URL(request.url);
-    let agentProps;
-    if (url.pathname.startsWith('/agents/')) {
-      const authorization = await authorizeAgentRequest(request, env);
-      if ('response' in authorization) {
-        return authorization.response;
-      }
-      agentProps = authorization.identity;
-    }
-    const agentResponse = await routeAgentRequest(request, env, { props: agentProps });
+  async fetch(request: Request, env: Env, ctx?: ExecutionContext) {
+    const agentResponse = await routeAuthorizedAgentRequest(request, env);
     if (agentResponse) {
       return agentResponse;
     }
 
-    const route = exactRoutes[url.pathname];
-    if (route) {
-      return requireMethod(request, route.method, () => route.handler(request, env));
-    }
-
-    const deploymentRoute = matchDeploymentRoute(url.pathname);
-    if (deploymentRoute) {
-      const method = deploymentRoute.operation === 'get' ? 'GET' : 'POST';
-      return requireMethod(request, method, () =>
-        deploymentAction({
-          request,
-          env,
-          deploymentId: deploymentRoute.deploymentId,
-          operation: deploymentRoute.operation,
-        }),
-      );
-    }
-
-    if (url.pathname.startsWith('/api/storage/')) {
-      return storageObjectAction({ key: url.pathname.slice('/api/storage/'.length), env });
-    }
-
-    if (url.pathname.startsWith('/scripts/')) {
-      return scriptsAction(url.pathname.slice('/scripts/'.length));
-    }
-
-    const appResponse = await handler.fetch(request);
-    return withCrossOriginIsolationHeaders(appResponse);
+    const pathname = new URL(request.url).pathname;
+    return withApplicationSecurityHeaders(await routeApplicationRequest(request, env, ctx), pathname);
+  },
+  scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(Promise.all([drainDeferredDataGcBestEffort(env), pruneCloudflareAuthDataBestEffort(env.DB)]));
   },
 } satisfies ExportedHandler<Env>;
+
+async function routeApplicationRequest(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
+  const url = new URL(request.url);
+
+  const route = exactRoutes[url.pathname];
+  if (route) {
+    return requireMethod(request, route.method, () => route.handler(request, env, ctx));
+  }
+
+  const deploymentRoute = matchDeploymentRoute(url.pathname);
+  if (deploymentRoute) {
+    const method = deploymentRoute.operation === 'get' ? 'GET' : 'POST';
+    return requireMethod(request, method, () =>
+      deploymentAction({
+        request,
+        env,
+        deploymentId: deploymentRoute.deploymentId,
+        operation: deploymentRoute.operation,
+      }),
+    );
+  }
+
+  if (url.pathname.startsWith('/api/storage/')) {
+    return requireMethod(request, 'GET', () =>
+      storageObjectAction({ request, key: url.pathname.slice('/api/storage/'.length), env }),
+    );
+  }
+
+  if (url.pathname.startsWith('/scripts/')) {
+    return requireMethod(request, 'GET', () => scriptsAction(url.pathname.slice('/scripts/'.length)));
+  }
+
+  return handler.fetch(request);
+}
 
 function matchDeploymentRoute(pathname: string): {
   deploymentId: string;

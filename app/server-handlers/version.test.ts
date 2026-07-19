@@ -6,6 +6,9 @@ describe('versionAction', () => {
     const response = versionAction({
       env: {
         COMMIT_SHA: 'test-commit-sha',
+        CLOUDFLARE_OAUTH_CLIENT_ID: 'client-id',
+        CLOUDFLARE_OAUTH_CLIENT_SECRET: 'client-secret',
+        CLOUDFLARE_OAUTH_SCOPES: 'openid profile email',
         CF_VERSION_METADATA: {
           id: '11111111-2222-3333-4444-555555555555',
           tag: '',
@@ -19,6 +22,13 @@ describe('versionAction', () => {
     expect(await response.json()).toEqual({
       sha: 'test-commit-sha',
       versionId: '11111111-2222-3333-4444-555555555555',
+      oauthConfigured: true,
     });
+  });
+
+  it('reports incomplete OAuth configuration without exposing binding values', async () => {
+    const response = versionAction({ env: {} as Env });
+
+    expect(await response.json()).toEqual({ sha: null, versionId: null, oauthConfigured: false });
   });
 });

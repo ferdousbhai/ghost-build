@@ -13,13 +13,37 @@ type WebContainerInternalSearch = {
 };
 
 export async function prewarmFileMap(container: WebContainer, files: MapStore<FileMap>): Promise<void> {
+  await removePersistedPath(container, files, '.git');
+
   const internal = container.internal as unknown as WebContainerInternalSearch;
-  const absoluteFilePaths = await internal.fileSearch([], WORK_DIR, { excludes: ['.gitignore', 'node_modules'] });
-  const directories = new Set<string>();
+  const absoluteFilePaths = await internal.fileSearch([], WORK_DIR, {
+    excludes: ['.gitignore', 'node_modules'],
+  });
+  const localSecretPaths = new Set<string>();
   for (const absolutePath of absoluteFilePaths) {
-    if (isLocalSecretFilePath(absolutePath)) {
+    const relativePath = safeRelativeWorkdirPath(container, absolutePath);
+    if (!relativePath || !isLocalSecretFilePath(relativePath)) {
       continue;
     }
+    const gitSegmentIndex = relativePath.split('/').indexOf('.git');
+    localSecretPaths.add(
+      gitSegmentIndex === -1
+        ? relativePath
+        : relativePath
+            .split('/')
+            .slice(0, gitSegmentIndex + 1)
+            .join('/'),
+    );
+  }
+  await Promise.all(
+    Array.from(localSecretPaths, (relativePath) => removePersistedPath(container, files, relativePath)),
+  );
+  const projectFilePaths = absoluteFilePaths.filter((absolutePath) => {
+    const relativePath = safeRelativeWorkdirPath(container, absolutePath);
+    return relativePath !== null && !isLocalSecretFilePath(relativePath);
+  });
+  const directories = new Set<string>();
+  for (const absolutePath of projectFilePaths) {
     const relativePath = path.relative(container.workdir, absolutePath);
     if (relativePath) {
       directories.add(path.dirname(absolutePath));
@@ -29,11 +53,12 @@ export async function prewarmFileMap(container: WebContainer, files: MapStore<Fi
     files.setKey(getAbsolutePath(directory.replace(/\/+$/g, '')), { type: 'folder' });
   }
   await Promise.all(
-    absoluteFilePaths.map(async (absolutePath) => {
-      if (isLocalSecretFilePath(absolutePath) || !path.relative(container.workdir, absolutePath)) {
+    projectFilePaths.map(async (absolutePath) => {
+      const relativePath = safeRelativeWorkdirPath(container, absolutePath);
+      if (!relativePath) {
         return;
       }
-      const buffer = await container.fs.readFile(path.relative(container.workdir, absolutePath));
+      const buffer = await container.fs.readFile(relativePath);
       const isBinary = isBinaryFile(buffer);
       files.setKey(getAbsolutePath(absolutePath), {
         type: 'file',
@@ -42,6 +67,29 @@ export async function prewarmFileMap(container: WebContainer, files: MapStore<Fi
       });
     }),
   );
+}
+
+async function removePersistedPath(
+  container: WebContainer,
+  files: MapStore<FileMap>,
+  relativePath: string,
+): Promise<void> {
+  const absolutePath = getAbsolutePath(relativePath);
+  files.setKey(absolutePath, undefined);
+  const childPrefix = `${absolutePath}/`;
+  for (const filePath of Object.keys(files.get())) {
+    if (filePath.startsWith(childPrefix)) {
+      files.setKey(getAbsolutePath(filePath), undefined);
+    }
+  }
+  await container.fs.rm(relativePath, { recursive: true, force: true });
+}
+
+function safeRelativeWorkdirPath(container: WebContainer, absolutePath: string): string | null {
+  const relativePath = path.relative(container.workdir, absolutePath);
+  return relativePath && relativePath !== '..' && !relativePath.startsWith('../') && !path.isAbsolute(relativePath)
+    ? relativePath
+    : null;
 }
 
 export function applyFileWatchEvents(

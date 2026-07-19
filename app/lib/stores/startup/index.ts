@@ -5,8 +5,7 @@ import { useExistingChatContainerSetup, useNewChatContainerSetup } from './useCo
 import { useBackupSyncState } from './history';
 import { useCallback, useState } from 'react';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
-import { useQuery } from '~/lib/cloudflare/data-hooks';
-import { api } from '~/lib/cloudflare/data-api';
+import { useAllSubchats } from '~/lib/cloudflare/data-hooks';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { useStore } from '@nanostores/react';
@@ -87,8 +86,7 @@ export function useExistingChat(chatId: string) {
 
 function useSubchats(chatId: string, enabled = true) {
   const sessionId = useSessionIdOrNullOrLoading();
-  return useQuery(
-    api.subchats.get,
+  return useAllSubchats(
     sessionId && enabled
       ? {
           chatId,

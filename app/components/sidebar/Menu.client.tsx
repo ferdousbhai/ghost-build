@@ -60,7 +60,7 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
     }
 
     try {
-      await removeChatHistoryItem(accountSessionId, item.id);
+      await removeChatHistoryItem(accountSessionId, item.initialId);
       if (getKnownInitialId() === item.initialId) {
         // hard page navigation to clear the stores
         window.location.pathname = '/';
@@ -77,6 +77,9 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
+      if (deleteTarget) {
+        return;
+      }
       const target = event.target as Element;
 
       // Don't close if clicking on the hamburger icon
@@ -89,14 +92,22 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
       }
     }
 
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !deleteTarget) {
+        onClose();
+      }
+    }
+
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleEscape);
     }
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
     };
-  }, [isOpen, onClose]);
+  }, [deleteTarget, isOpen, onClose]);
 
   const handleDeleteClick = (item: ChatHistorySummary) => {
     setDeleteTarget(item);
@@ -108,8 +119,11 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
   }
 
   return (
-    <motion.div
+    <motion.aside
       id="project-sidebar"
+      aria-label="Projects"
+      aria-hidden={!isOpen}
+      inert={!isOpen}
       ref={menuRef}
       initial="closed"
       animate={isOpen ? 'open' : 'closed'}
@@ -189,7 +203,7 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
           )}
         </div>
       </div>
-    </motion.div>
+    </motion.aside>
   );
 });
 

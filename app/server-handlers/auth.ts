@@ -11,5 +11,8 @@ export async function signOutAction({ request, env }: { request: Request; env: E
     return Response.json({ error: 'Invalid request origin.' }, { status: 403 });
   }
   await deleteAuthSession(env, request);
-  return new Response(null, { status: 204, headers: { 'Set-Cookie': clearAuthSessionCookie(request) } });
+  return new Response(null, {
+    status: 204,
+    headers: { 'Set-Cookie': clearAuthSessionCookie(request), 'Cache-Control': 'no-store' },
+  });
 }

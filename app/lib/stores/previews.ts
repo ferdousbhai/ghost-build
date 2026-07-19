@@ -1,4 +1,5 @@
 import type { WebContainer, WebContainerProcess } from '@webcontainer/api';
+import { MAX_THUMBNAIL_BYTES } from '~/lib/thumbnail-policy';
 import { atom } from 'nanostores';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { withResolvers } from '~/utils/promises';
@@ -13,6 +14,10 @@ export interface PreviewInfo {
 const PROXY_PORT_RANGE_START = 0xc4ef;
 const PROXY_START_TIMEOUT_MS = 10_000;
 const SCREENSHOT_RESPONSE_TIMEOUT_MS = 10_000;
+const MAX_SCREENSHOT_BASE64_CHARACTERS = Math.ceil(MAX_THUMBNAIL_BYTES / 3) * 4;
+const MAX_PREVIEW_ERROR_MESSAGE_CHARACTERS = 2_000;
+const PNG_DATA_URL_PREFIX = 'data:image/png;base64,';
+const PNG_SIGNATURE_BASE64 = 'iVBORw0KGgo';
 const PREVIEW_CHANNEL = 'preview-updates';
 const logger = createScopedLogger('PreviewsStore');
 
@@ -73,6 +78,12 @@ export class PreviewsStore {
     }
     this.previews.set(
       previews.map((preview, index) => (index === previewIndex ? { ...preview, ready, baseUrl: url } : preview)),
+    );
+  }
+
+  setPreviewIframe(previewPort: number, iframe: HTMLIFrameElement | null): void {
+    this.previews.set(
+      this.previews.get().map((preview) => (preview.port === previewPort ? { ...preview, iframe } : preview)),
     );
   }
 
@@ -164,6 +175,8 @@ export class PreviewsStore {
    * Called when a proxy server is no longer used and it can be released.
    */
   stopProxy(proxyPort: number) {
+    this.#externalPreviewChannels.get(proxyPort)?.close();
+    this.#externalPreviewChannels.delete(proxyPort);
     const proxy = this.#proxies.get(proxyPort);
     if (!proxy) {
       return;
@@ -171,11 +184,13 @@ export class PreviewsStore {
 
     proxy.stop();
     this.#proxies.delete(proxyPort);
-    this.#externalPreviewChannels.get(proxyPort)?.close();
-    this.#externalPreviewChannels.delete(proxyPort);
   }
 
   trackExternalPreview(proxyPort: number, previewId: string) {
+    if (!this.#proxies.has(proxyPort)) {
+      return;
+    }
+    this.#externalPreviewChannels.get(proxyPort)?.close();
     const channel = new BroadcastChannel(PREVIEW_CHANNEL);
     channel.addEventListener('message', (event) => {
       if (event.data?.type === 'preview-closed' && event.data.previewId === previewId) {
@@ -221,11 +236,15 @@ export class PreviewsStore {
         if (
           event.origin !== targetOrigin ||
           event.source !== contentWindow ||
-          !isPreviewResponse(event.data, requestId)
+          !hasPreviewRequestId(event.data, requestId)
         ) {
           return;
         }
         cleanup();
+        if (!isPreviewResponse(event.data, requestId)) {
+          reject(new Error('Invalid screenshot response'));
+          return;
+        }
         if (event.data.type === 'ghostbuildPreviewError') {
           reject(new Error(event.data.message));
           return;
@@ -258,6 +277,13 @@ type PreviewResponse =
   | { type: 'screenshot'; requestId: string; data: string }
   | { type: 'ghostbuildPreviewError'; requestId: string; message: string };
 
+function hasPreviewRequestId(
+  value: unknown,
+  requestId: string,
+): value is { requestId: string } & Record<string, unknown> {
+  return typeof value === 'object' && value !== null && 'requestId' in value && value.requestId === requestId;
+}
+
 function isPreviewResponse(value: unknown, requestId: string): value is PreviewResponse {
   if (typeof value !== 'object' || value === null || !('type' in value) || !('requestId' in value)) {
     return false;
@@ -266,9 +292,32 @@ function isPreviewResponse(value: unknown, requestId: string): value is PreviewR
     return false;
   }
   if (value.type === 'screenshot') {
-    return 'data' in value && typeof value.data === 'string';
+    return 'data' in value && isBoundedPngDataUrl(value.data);
   }
-  return value.type === 'ghostbuildPreviewError' && 'message' in value && typeof value.message === 'string';
+  return (
+    value.type === 'ghostbuildPreviewError' &&
+    'message' in value &&
+    typeof value.message === 'string' &&
+    value.message.length <= MAX_PREVIEW_ERROR_MESSAGE_CHARACTERS
+  );
+}
+
+function isBoundedPngDataUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || !value.startsWith(PNG_DATA_URL_PREFIX)) {
+    return false;
+  }
+  const encoded = value.slice(PNG_DATA_URL_PREFIX.length);
+  if (
+    encoded.length === 0 ||
+    encoded.length > MAX_SCREENSHOT_BASE64_CHARACTERS ||
+    encoded.length % 4 !== 0 ||
+    !encoded.startsWith(PNG_SIGNATURE_BASE64) ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)
+  ) {
+    return false;
+  }
+  const paddingBytes = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
+  return (encoded.length / 4) * 3 - paddingBytes <= MAX_THUMBNAIL_BYTES;
 }
 
 async function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {

@@ -1,33 +1,50 @@
 import { z } from 'zod';
-const sessionIdArgsSchema = z.object({ sessionId: z.string() });
-const chatIdentityArgsSchema = z.object({ sessionId: z.string(), id: z.string() });
-const chatArgsSchema = z.object({ sessionId: z.string(), chatId: z.string() });
-const codeArgsSchema = z.object({ code: z.string() });
+import { MAX_DATA_PAGE_SIZE, MAX_SUBCHAT_INDEX } from './data-pagination';
+
+const MAX_IDENTIFIER_LENGTH = 512;
+const MAX_DESCRIPTION_LENGTH = 200;
+const identifierSchema = z.string().min(1).max(MAX_IDENTIFIER_LENGTH);
+const descriptionSchema = z.string().max(MAX_DESCRIPTION_LENGTH);
+const subchatIndexSchema = z.number().int().nonnegative().max(MAX_SUBCHAT_INDEX);
+const messageRankSchema = z.number().int().nonnegative();
+const sessionIdArgsSchema = z.object({ sessionId: identifierSchema });
+const chatIdentityArgsSchema = z.object({ sessionId: identifierSchema, id: identifierSchema });
+const chatArgsSchema = z.object({ sessionId: identifierSchema, chatId: identifierSchema });
+const codeArgsSchema = z.object({ code: identifierSchema });
+const pageLimitSchema = z.number().int().min(1).max(MAX_DATA_PAGE_SIZE).optional();
+const chatHistoryCursorSchema = z
+  .object({
+    timestamp: z.string().datetime({ precision: 3 }),
+    rowId: identifierSchema,
+  })
+  .strict()
+  .optional();
+const subchatCursorSchema = z.object({ subchatIndex: subchatIndexSchema }).strict().optional();
 
 export const dataOperationArgSchemas = {
   'messages.initializeChat': chatIdentityArgsSchema,
   'messages.discardEmptyChat': chatIdentityArgsSchema,
-  'messages.get': chatIdentityArgsSchema.extend({ subchatIndex: z.number().int().nonnegative().optional() }),
-  'messages.getAll': sessionIdArgsSchema,
+  'messages.get': chatIdentityArgsSchema.extend({ subchatIndex: subchatIndexSchema.optional() }),
+  'messages.getAll': sessionIdArgsSchema.extend({ cursor: chatHistoryCursorSchema, limit: pageLimitSchema }),
   'messages.setUrlId': z.object({
-    sessionId: z.string(),
-    chatId: z.string(),
-    urlHint: z.string(),
-    description: z.string(),
+    sessionId: identifierSchema,
+    chatId: identifierSchema,
+    urlHint: identifierSchema,
+    description: descriptionSchema,
   }),
-  'messages.setDescription': chatIdentityArgsSchema.extend({ description: z.string() }),
+  'messages.setDescription': chatIdentityArgsSchema.extend({ description: descriptionSchema }),
   'messages.remove': chatIdentityArgsSchema,
-  'messages.earliestRewindableMessageRank': chatArgsSchema.extend({ subchatIndex: z.number().optional() }),
+  'messages.earliestRewindableMessageRank': chatArgsSchema.extend({ subchatIndex: subchatIndexSchema.optional() }),
   'messages.rewindChat': chatArgsSchema.extend({
-    subchatIndex: z.number().optional(),
-    lastMessageRank: z.number().optional(),
+    subchatIndex: subchatIndexSchema.optional(),
+    lastMessageRank: messageRankSchema.optional(),
   }),
-  'subchats.get': chatArgsSchema,
+  'subchats.get': chatArgsSchema.extend({ cursor: subchatCursorSchema, limit: pageLimitSchema }),
   'subchats.create': chatArgsSchema,
   'snapshot.getSnapshotUrl': chatArgsSchema,
   'share.create': chatIdentityArgsSchema,
   'share.getShareDescription': codeArgsSchema,
-  'share.clone': z.object({ shareCode: z.string(), sessionId: z.string() }),
+  'share.clone': z.object({ shareCode: identifierSchema, sessionId: identifierSchema }),
   'socialShare.share': chatIdentityArgsSchema.extend({ isShared: z.boolean() }),
   'socialShare.getCurrentSocialShare': chatIdentityArgsSchema,
   'socialShare.getSocialShare': codeArgsSchema,

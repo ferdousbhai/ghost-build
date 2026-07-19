@@ -60,9 +60,9 @@ export function FileTreeNode({
 
 function copyToClipboard(value: string): void {
   try {
-    void navigator.clipboard.writeText(value);
+    void navigator.clipboard.writeText(value).catch((error) => logger.error('Failed to copy file path', error));
   } catch (error) {
-    logger.error(error);
+    logger.error('Failed to copy file path', error);
   }
 }
 
@@ -87,6 +87,7 @@ function Folder({
           'bg-bolt-elements-item-backgroundAccent text-bolt-elements-item-contentAccent': selected,
         })}
         depth={folder.depth}
+        expanded={!collapsed}
         icon={collapsed ? <CaretRightIcon /> : <CaretDownIcon />}
         onClick={actions.onClick}
       >
@@ -165,18 +166,22 @@ function ContextMenuItem({ onSelect, children }: { onSelect: () => void; childre
 function NodeButton({
   depth,
   icon,
+  expanded,
   onClick,
   className,
   children,
 }: {
   depth: number;
   icon: ReactNode;
+  expanded?: boolean;
   children: ReactNode;
   className?: string;
   onClick: () => void;
 }) {
   return (
     <button
+      type="button"
+      aria-expanded={expanded}
       className={classNames(
         'flex w-full items-center gap-1.5 border-2 border-transparent py-0.5 pr-2 text-faded',
         className,

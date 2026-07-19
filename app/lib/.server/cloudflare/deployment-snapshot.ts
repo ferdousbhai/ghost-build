@@ -1,16 +1,16 @@
 import JSZip, { type JSZipObject } from 'jszip';
 import { parse } from 'jsonc-parser';
+import { isLocalSecretFilePath } from '~/utils/secretFiles';
+import {
+  APP_AGENT_DECLARATIVE_EXPORT,
+  DEPLOYMENT_COMPATIBILITY_DATE,
+  DEPLOYMENT_COMPATIBILITY_FLAGS,
+  DEPLOYMENT_OBSERVABILITY,
+} from './deployment-runtime-policy';
 
 const MAX_DEPLOYMENT_ARCHIVE_ENTRIES = 5_000;
 export const MAX_DEPLOYMENT_EXPANDED_BYTES = 250 * 1024 * 1024;
 const MAX_METADATA_FILE_BYTES = 1024 * 1024;
-const REQUIRED_COMPATIBILITY_DATE = '2026-07-08';
-const REQUIRED_COMPATIBILITY_FLAGS = ['nodejs_compat'];
-const REQUIRED_OBSERVABILITY = {
-  enabled: true,
-  logs: { enabled: true, head_sampling_rate: 0.6 },
-  traces: { enabled: true, head_sampling_rate: 0.05 },
-};
 
 export type DeploymentProjectType = 'web_app' | 'worker';
 
@@ -59,6 +59,9 @@ export async function inspectDeploymentSnapshot(snapshot: Blob | ArrayBuffer): P
     const originalName = entry.unsafeOriginalName ?? entry.name;
     if (!isSafeArchivePath(originalName) || entry.name !== originalName) {
       throw new DeploymentSnapshotError('Deployment snapshot contains an unsafe file path.');
+    }
+    if (isLocalSecretFilePath(originalName)) {
+      throw new DeploymentSnapshotError('Deployment snapshot must not contain a local secret file.');
     }
     if (typeof entry.unixPermissions === 'number' && (entry.unixPermissions & 0o170000) === 0o120000) {
       throw new DeploymentSnapshotError('Deployment snapshot must not contain symbolic links.');
@@ -208,7 +211,7 @@ const SUPPORTED_WRANGLER_KEYS = new Set([
   'd1_databases',
   'r2_buckets',
   'durable_objects',
-  'migrations',
+  'exports',
 ]);
 
 function validateSupportedWranglerConfig(config: Record<string, unknown>): void {
@@ -218,13 +221,13 @@ function validateSupportedWranglerConfig(config: Record<string, unknown>): void 
       `Automatic deployment does not yet support wrangler.jsonc ${unsupported.sort().join(', ')} configuration.`,
     );
   }
-  if (config.compatibility_date !== REQUIRED_COMPATIBILITY_DATE) {
+  if (config.compatibility_date !== DEPLOYMENT_COMPATIBILITY_DATE) {
     throw unsupportedWranglerSetting('compatibility_date');
   }
-  if (JSON.stringify(config.compatibility_flags) !== JSON.stringify(REQUIRED_COMPATIBILITY_FLAGS)) {
+  if (JSON.stringify(config.compatibility_flags) !== JSON.stringify(DEPLOYMENT_COMPATIBILITY_FLAGS)) {
     throw unsupportedWranglerSetting('compatibility_flags');
   }
-  if (JSON.stringify(config.observability) !== JSON.stringify(REQUIRED_OBSERVABILITY)) {
+  if (JSON.stringify(config.observability) !== JSON.stringify(DEPLOYMENT_OBSERVABILITY)) {
     throw unsupportedWranglerSetting('observability');
   }
   if (config.upload_source_maps !== true) {
@@ -260,12 +263,12 @@ function validateSupportedBindings(
     class_name: 'AppAgent',
     allowedKeys: ['name', 'class_name'],
   });
-  const requiredMigrations = [{ tag: 'v1', new_sqlite_classes: ['AppAgent'] }];
-  if (bindings.appAgent && JSON.stringify(config.migrations) !== JSON.stringify(requiredMigrations)) {
-    throw unsupportedBinding('Durable Object migration', 'AppAgent');
+  const requiredExports = { AppAgent: APP_AGENT_DECLARATIVE_EXPORT };
+  if (bindings.appAgent && JSON.stringify(config.exports) !== JSON.stringify(requiredExports)) {
+    throw unsupportedBinding('Durable Object export', 'AppAgent');
   }
-  if (!bindings.appAgent && config.migrations !== undefined) {
-    throw unsupportedBinding('Durable Object migration', 'AppAgent');
+  if (!bindings.appAgent && config.exports !== undefined) {
+    throw unsupportedBinding('Durable Object export', 'AppAgent');
   }
 }
 

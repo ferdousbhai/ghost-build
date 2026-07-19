@@ -55,7 +55,7 @@ function verifyWorker(errors, config) {
     errors,
     "wrangler.jsonc compatibility_date",
     config?.compatibility_date,
-    "2026-07-08",
+    "2026-07-18",
   );
   requireEqual(
     errors,
@@ -118,13 +118,18 @@ function verifyWorker(errors, config) {
   ) {
     errors.push("wrangler.jsonc must bind the AppAgent Durable Object.");
   }
+  const appAgentExport = config?.exports?.AppAgent;
   if (
-    !config?.migrations?.some((item) =>
-      item?.new_sqlite_classes?.includes("AppAgent"),
-    )
+    appAgentExport?.type !== "durable-object" ||
+    appAgentExport?.storage !== "sqlite"
   ) {
     errors.push(
-      "wrangler.jsonc must migrate the AppAgent SQLite Durable Object.",
+      "wrangler.jsonc must declare AppAgent as a SQLite Durable Object export.",
+    );
+  }
+  if (config?.migrations !== undefined) {
+    errors.push(
+      "wrangler.jsonc must use declarative Durable Object exports instead of legacy migrations.",
     );
   }
 }

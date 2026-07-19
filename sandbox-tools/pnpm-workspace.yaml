@@ -1,0 +1,11 @@
+packages: []
+ignoreWorkspaceRootCheck: true
+minimumReleaseAge: 1440
+minimumReleaseAgeIgnoreMissingTime: false
+minimumReleaseAgeStrict: true
+strictDepBuilds: true
+blockExoticSubdeps: true
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true

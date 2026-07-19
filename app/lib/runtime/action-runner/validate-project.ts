@@ -8,10 +8,11 @@ import { streamOutput } from '~/utils/process';
 import { createPreviewSmokeCheckScript } from './preview-smoke-check';
 import { runCommand } from './command';
 import type { ActionRunnerWorkspace } from './types';
-import { workspaceRevision } from './revision';
+import { deploymentSnapshotRevision, exportDeploymentSnapshot } from './revision';
 import { ActionCommandExecutionError, ActionCommandTimeoutError } from './errors';
 import { parseOperationDiagnostics, type DiagnosticsStore, type OperationDiagnostic } from './diagnostics-store';
 import { pageCoverage } from './bounded-pagination';
+import type { DeploymentValidationStore } from './deployment-validation-store';
 
 type ValidationCheckName = 'typecheck' | 'lint' | 'build' | 'preview' | 'workspace-stability';
 type ValidationCheck = {
@@ -39,11 +40,15 @@ export async function runValidateProject(args: {
   onOutput: (output: string) => void;
   workspace: ActionRunnerWorkspace;
   diagnostics: DiagnosticsStore;
+  deploymentValidation: DeploymentValidationStore;
 }) {
   const input = validateProjectParameters.parse(args.invocation.args);
+  if (input.level === 'full') {
+    args.deploymentValidation.beginFullValidation();
+  }
   await waitForContainerBootState(ContainerBootState.READY);
   args.abortSignal.throwIfAborted();
-  const startingRevision = await workspaceRevision(args.workspace.getFiles());
+  const startingRevision = await captureDeploymentRevision(args.container, args.abortSignal);
 
   const checks: ValidationCheck[] = [];
   const diagnostics: OperationDiagnostic[] = [];
@@ -70,7 +75,7 @@ export async function runValidateProject(args: {
     }
   }
 
-  const revision = await workspaceRevision(args.workspace.getFiles());
+  const revision = await captureDeploymentRevision(args.container, args.abortSignal);
   if (revision !== startingRevision) {
     checks.push({
       name: 'workspace-stability',
@@ -103,11 +108,21 @@ export async function runValidateProject(args: {
     );
   }
   const sessionId = getAuthToken();
+  if (input.level === 'full') {
+    args.deploymentValidation.recordFullValidation(revision);
+  }
   const nextAction = !sessionId ? 'sign-in-required' : 'prepare-deployment';
   return toolSuccess(
     `Project validation passed at workspace revision ${revision}: ${checks.map((check) => check.name).join(', ')}.`,
     { ...data, nextAction },
   );
+}
+
+async function captureDeploymentRevision(container: WebContainer, abortSignal: AbortSignal): Promise<string> {
+  abortSignal.throwIfAborted();
+  const snapshot = await exportDeploymentSnapshot(container);
+  abortSignal.throwIfAborted();
+  return deploymentSnapshotRevision(snapshot);
 }
 
 async function runValidationCommand(

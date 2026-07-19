@@ -1,42 +1,43 @@
 import { z } from 'zod';
+import { InvalidJsonBodyError, PayloadTooLargeError, readJsonBodyWithLimit } from '~/lib/bounded-body';
+import { CLIENT_TELEMETRY_EVENTS } from '~/lib/client-telemetry-events';
 
 const MAX_TELEMETRY_BYTES = 64 * 1024;
-const telemetryEventSchema = z.object({
-  kind: z.enum(['message', 'exception', 'feedback']),
-  message: z.string().max(16_000),
-  error: z
-    .object({
-      name: z.string().optional(),
-      message: z.string(),
-      stack: z.string().max(32_000).optional(),
-    })
-    .optional(),
-  context: z.record(z.string(), z.unknown()).optional(),
-  extras: z.record(z.string(), z.unknown()).optional(),
-  user: z
-    .object({
-      id: z.string().optional(),
-      username: z.string().optional(),
-      email: z.string().optional(),
-    })
-    .optional(),
-  page: z.string().optional(),
-  timestamp: z.string().optional(),
-});
+const TELEMETRY_RATE_LIMIT_BINDING = 'CLIENT_TELEMETRY_RATE_LIMITER';
+const telemetryEventSchema = z
+  .object({
+    kind: z.enum(['message', 'exception']),
+    event: z.enum(CLIENT_TELEMETRY_EVENTS),
+    context: z
+      .object({ level: z.enum(['error', 'warning', 'info']).optional() })
+      .strict()
+      .optional(),
+  })
+  .strict();
 
-export async function clientTelemetryAction(request: Request): Promise<Response> {
-  const declaredLength = Number(request.headers.get('content-length') ?? 0);
-  if (declaredLength > MAX_TELEMETRY_BYTES) {
-    return new Response(null, { status: 413 });
+export async function clientTelemetryAction({ request, env }: { request: Request; env: Env }): Promise<Response> {
+  if (request.headers.get('Origin') !== new URL(request.url).origin) {
+    return new Response(null, { status: 403 });
   }
-  const rawBody = await request.text();
-  if (new TextEncoder().encode(rawBody).byteLength > MAX_TELEMETRY_BYTES) {
-    return new Response(null, { status: 413 });
+  const limiter = env[TELEMETRY_RATE_LIMIT_BINDING];
+  const { success } = await limiter.limit({ key: request.headers.get('CF-Connecting-IP') ?? 'unknown' });
+  if (!success) {
+    return new Response(null, {
+      status: 429,
+      headers: { 'Retry-After': '60', 'Cache-Control': 'no-store' },
+    });
   }
   let body: unknown;
   try {
-    body = JSON.parse(rawBody);
-  } catch {
+    body = await readJsonBodyWithLimit(request, MAX_TELEMETRY_BYTES, 'Telemetry event');
+  } catch (error) {
+    if (error instanceof PayloadTooLargeError) {
+      return new Response(null, { status: 413 });
+    }
+    if (!(error instanceof InvalidJsonBodyError)) {
+      console.error('Unable to read Ghostbuild client telemetry', error);
+      return new Response(null, { status: 500 });
+    }
     return Response.json({ error: 'Invalid telemetry event' }, { status: 400 });
   }
   const event = telemetryEventSchema.safeParse(body);
@@ -45,8 +46,6 @@ export async function clientTelemetryAction(request: Request): Promise<Response>
   }
   if (event.data.kind === 'exception') {
     console.error('Ghostbuild client telemetry', event.data);
-  } else if (event.data.kind === 'feedback') {
-    console.info('Ghostbuild client telemetry', event.data);
   } else {
     console.warn('Ghostbuild client telemetry', event.data);
   }

@@ -4,6 +4,7 @@ import { findCloudflareConnectionForUser } from '~/lib/.server/cloudflare/cloudf
 import { buildDeploymentPlan } from '~/lib/.server/cloudflare/deployment-plan';
 import { DeploymentSnapshotError } from '~/lib/.server/cloudflare/deployment-snapshot';
 import {
+  adoptLegacyApprovedDeploymentExecutionGeneration,
   approveDeployment,
   createDeployment,
   clearDeploymentSnapshot,
@@ -20,9 +21,17 @@ import {
   requireDeploymentForUser,
   type Deployment,
 } from '~/lib/.server/cloudflare/deployment-repository';
-import { deleteObject, putObject } from '~/lib/cloudflare/data/object-storage.server';
+import { InvalidJsonBodyError, PayloadTooLargeError, readJsonBodyWithLimit } from '~/lib/bounded-body';
+import { InvalidMultipartBodyError, readMultipartBodyWithLimits } from '~/lib/bounded-multipart';
+import { deleteObject, putObjectAtKey } from '~/lib/cloudflare/data/object-storage.server';
+import { cancelObjectGcCandidate, queueObjectGcCandidate } from '~/lib/cloudflare/data/object-gc.server';
 
 const MAX_DEPLOYMENT_SNAPSHOT_BYTES = 10 * 1024 * 1024;
+const MAX_DEPLOYMENT_REQUEST_BYTES = MAX_DEPLOYMENT_SNAPSHOT_BYTES + 1024 * 1024;
+const MAX_DEPLOYMENT_APPROVAL_BYTES = 4 * 1024;
+const DEPLOYMENT_FORM_FIELDS = {
+  snapshot: { kind: 'file', maximumBytes: MAX_DEPLOYMENT_SNAPSHOT_BYTES },
+} as const;
 const DEPLOYMENT_SNAPSHOT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const createQuerySchema = z.object({ chatId: z.string().min(1).max(200) });
 const approvalSchema = z.object({
@@ -50,7 +59,7 @@ export async function createDeploymentPlanAction(args: { request: Request; env: 
       return Response.json({ error: 'Chat not found.' }, { status: 404 });
     }
 
-    const formData = await args.request.formData();
+    const formData = await readBoundedDeploymentFormData(args.request);
     const snapshot = formData.get('snapshot');
     if (!(snapshot instanceof Blob) || snapshot.size === 0 || snapshot.size > MAX_DEPLOYMENT_SNAPSHOT_BYTES) {
       return Response.json(
@@ -63,27 +72,24 @@ export async function createDeploymentPlanAction(args: { request: Request; env: 
 
     const deploymentId = crypto.randomUUID();
     const { plan, digest } = await buildDeploymentPlan({ deploymentId, snapshot });
-    let snapshotKey: string | null = null;
-    try {
-      snapshotKey = await putObject(args.env, 'deployment-snapshots', snapshot);
-      const deployment = await createDeployment({
-        db: args.env.DB,
-        id: deploymentId,
-        chatId: chat.id,
-        userId,
-        connectionId: connection.id,
-        connectionGeneration: connection.generation,
-        snapshotKey,
-        plan,
-        planDigest: digest,
-      });
-      return Response.json({ deployment: publicDeployment(deployment) }, { status: 201 });
-    } catch (error) {
-      if (snapshotKey) {
-        await deleteObject(args.env, snapshotKey).catch(() => undefined);
-      }
-      throw error;
-    }
+    const snapshotKey = `deployment-snapshots/${deploymentId}`;
+    const gcReceipt = await queueObjectGcCandidate(args.env.DB, snapshotKey);
+    await putObjectAtKey(args.env, snapshotKey, snapshot);
+    const deployment = await createDeployment({
+      db: args.env.DB,
+      id: deploymentId,
+      chatId: chat.id,
+      userId,
+      connectionId: connection.id,
+      connectionGeneration: connection.generation,
+      snapshotKey,
+      plan,
+      planDigest: digest,
+    });
+    await cancelObjectGcCandidate(args.env.DB, gcReceipt).catch((error) => {
+      console.warn('Unable to cancel deployment snapshot cleanup receipt', deploymentId, error);
+    });
+    return Response.json({ deployment: publicDeployment(deployment) }, { status: 201 });
   } catch (error) {
     return deploymentErrorResponse(error);
   }
@@ -150,7 +156,7 @@ export async function deploymentAction(args: {
     }
     if (args.operation === 'retry') {
       const previous = await requireDeploymentForUser(args.env.DB, args.deploymentId, userId);
-      if (!['failed', 'canceled'].includes(previous.status) || !previous.snapshotKey) {
+      if (!previous.snapshotKey) {
         throw new DeploymentStateConflictError(previous.status);
       }
       if (previous.connectionId !== connection.id || previous.connectionGeneration !== connection.generation) {
@@ -162,6 +168,7 @@ export async function deploymentAction(args: {
         userId,
         connectionId: connection.id,
         connectionGeneration: connection.generation,
+        executionGeneration: previous.executionGeneration,
       });
       return Response.json({ deployment: publicDeployment(retry) }, { status: 201 });
     }
@@ -169,7 +176,7 @@ export async function deploymentAction(args: {
       if (!args.env.DeploymentWorkflow) {
         return Response.json({ error: 'Production deployment Workflow is not configured.' }, { status: 503 });
       }
-      const deployment = await requireDeploymentForUser(args.env.DB, args.deploymentId, userId);
+      let deployment = await requireDeploymentForUser(args.env.DB, args.deploymentId, userId);
       if (
         deployment.connectionId !== connection.id ||
         deployment.connectionGeneration !== connection.generation ||
@@ -178,15 +185,35 @@ export async function deploymentAction(args: {
       ) {
         throw new DeploymentStateConflictError(deployment.status);
       }
-      await args.env.DeploymentWorkflow.createBatch([
+      deployment = await adoptLegacyApprovedDeploymentExecutionGeneration({ db: args.env.DB, deployment });
+      const workflowId = `${deployment.id}-${deployment.executionGeneration}`;
+      // createBatch is intentionally used instead of create: Cloudflare
+      // idempotently skips a retained instance with this deterministic ID.
+      const createdInstances = await args.env.DeploymentWorkflow.createBatch([
         {
-          id: `${deployment.id}-${deployment.approvedAt}`,
-          params: { deploymentId: deployment.id, userId, connectionId: connection.id },
+          id: workflowId,
+          params: {
+            deploymentId: deployment.id,
+            userId,
+            connectionId: connection.id,
+            executionGeneration: deployment.executionGeneration,
+          },
         },
       ]);
+      if (createdInstances.length === 0) {
+        await restartRetainedDeploymentWorkflowIfSafe({
+          db: args.env.DB,
+          workflow: args.env.DeploymentWorkflow,
+          workflowId,
+          expectedDeployment: deployment,
+          userId,
+        });
+      }
       return Response.json({ deployment: publicDeployment(deployment) }, { status: 202 });
     }
-    const approval = approvalSchema.parse(await args.request.json());
+    const approval = approvalSchema.parse(
+      await readJsonBodyWithLimit(args.request, MAX_DEPLOYMENT_APPROVAL_BYTES, 'Deployment approval'),
+    );
     const deployment = await approveDeployment({
       db: args.env.DB,
       deploymentId: args.deploymentId,
@@ -201,6 +228,58 @@ export async function deploymentAction(args: {
   }
 }
 
+async function restartRetainedDeploymentWorkflowIfSafe(args: {
+  db: D1Database;
+  workflow: Env['DeploymentWorkflow'];
+  workflowId: string;
+  expectedDeployment: Deployment;
+  userId: string;
+}): Promise<void> {
+  const instance = await args.workflow.get(args.workflowId);
+  const initialStatus = (await instance.status()).status;
+  if (initialStatus === 'unknown') {
+    throw new Error(`Unable to determine retained deployment Workflow status for ${args.workflowId}.`);
+  }
+  if (initialStatus !== 'errored' && initialStatus !== 'terminated') {
+    return;
+  }
+
+  const current = await requireDeploymentForUser(args.db, args.expectedDeployment.id, args.userId);
+  if (!isSameApprovedExecution(current, args.expectedDeployment, args.userId)) {
+    return;
+  }
+
+  try {
+    await instance.restart();
+  } catch (error) {
+    // Another repeated execute request may have restarted the same retained
+    // instance after our status check. Treat that race as the same idempotent
+    // success, but preserve genuine restart failures.
+    const statusAfterFailure = (await instance.status()).status;
+    if (statusAfterFailure !== 'errored' && statusAfterFailure !== 'terminated' && statusAfterFailure !== 'unknown') {
+      return;
+    }
+    throw error;
+  }
+}
+
+function isSameApprovedExecution(current: Deployment, expected: Deployment, userId: string): boolean {
+  return (
+    current.id === expected.id &&
+    current.userId === userId &&
+    expected.userId === userId &&
+    current.status === 'approved' &&
+    current.executionGeneration === expected.executionGeneration &&
+    current.approvedAt === expected.approvedAt &&
+    current.approvedDigest === expected.approvedDigest &&
+    current.planDigest === expected.planDigest &&
+    current.snapshotKey === expected.snapshotKey &&
+    current.connectionId === expected.connectionId &&
+    current.connectionGeneration === expected.connectionGeneration &&
+    current.plan.deploymentId === expected.plan.deploymentId
+  );
+}
+
 async function requireSignedInUser(request: Request, env: Env): Promise<string> {
   const identity = await resolveAgentRequestIdentity(request, env);
   if (!identity?.userId) {
@@ -210,6 +289,20 @@ async function requireSignedInUser(request: Request, env: Env): Promise<string> 
 }
 
 class DeploymentAuthenticationError extends Error {}
+
+async function readBoundedDeploymentFormData(request: Request): Promise<FormData> {
+  const parts = await readMultipartBodyWithLimits(request, {
+    label: 'Deployment request',
+    maximumBytes: MAX_DEPLOYMENT_REQUEST_BYTES,
+    fields: DEPLOYMENT_FORM_FIELDS,
+  });
+  const formData = new FormData();
+  const snapshot = parts.get('snapshot');
+  if (snapshot instanceof Blob) {
+    formData.set('snapshot', snapshot);
+  }
+  return formData;
+}
 
 function publicDeployment(deployment: Deployment) {
   return {
@@ -230,6 +323,12 @@ function publicDeployment(deployment: Deployment) {
 function deploymentErrorResponse(error: unknown): Response {
   if (error instanceof DeploymentAuthenticationError) {
     return Response.json({ error: 'Sign in to deploy to production.' }, { status: 401 });
+  }
+  if (error instanceof PayloadTooLargeError) {
+    return Response.json({ error: 'Deployment request exceeds the 11 MiB request limit.' }, { status: 413 });
+  }
+  if (error instanceof InvalidJsonBodyError || error instanceof InvalidMultipartBodyError) {
+    return Response.json({ error: 'Invalid deployment request.' }, { status: 400 });
   }
   if (error instanceof z.ZodError) {
     return Response.json({ error: 'Invalid deployment request.', issues: error.issues }, { status: 400 });

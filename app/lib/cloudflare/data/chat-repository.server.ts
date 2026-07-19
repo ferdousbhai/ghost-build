@@ -1,13 +1,21 @@
-import type { TranscriptCheckpoint } from 'ghostbuild-agent/transcript';
-import type { ChatMessageStateRow, ChatRow } from './types';
-import { prepareObjectGcCandidateStatements } from './object-gc.server';
+import { transcriptAgentName } from 'ghostbuild-agent/transcript';
+import type { ChatRow } from './types';
+import { DataNotFoundError } from './errors';
+import { prepareInsertChatTranscript } from './transcript-repository.server';
 import {
-  checkpointMatchesIdentity,
-  prepareInsertChatTranscript,
-  requireChatTranscript,
-} from './transcript-repository.server';
+  type UpdateStorageStateArgs,
+  type UpdateStorageStateResult,
+  updateStorageStateWithChatLookup,
+} from './chat-storage-state-repository.server';
 
-const MAX_STORAGE_UPDATE_CAS_ATTEMPTS = 8;
+export {
+  enforceChatStorageRetention,
+  getLatestStorageState,
+  getLatestStorageStateForGeneration,
+  MAX_RETAINED_CHAT_STORAGE_STATES,
+} from './chat-storage-state-repository.server';
+
+const MAX_URL_ID_ALLOCATION_ATTEMPTS = 1_000;
 
 type ChatInsertArgs = {
   id: string;
@@ -17,6 +25,10 @@ type ChatInsertArgs = {
   snapshotKey?: string | null;
   lastSubchatIndex?: number;
 };
+
+export type ChatInsertAuthorization =
+  | { kind: 'legacy-share'; code: string; parentChatId: string }
+  | { kind: 'social-share'; code: string; parentChatId: string };
 
 type ChatMessageStateInsertArgs = {
   id?: string;
@@ -36,20 +48,93 @@ export async function insertChatWithState(
   db: D1Database,
   chat: ChatInsertArgs,
   state: Omit<ChatMessageStateInsertArgs, 'chatId'>,
+  authorization?: ChatInsertAuthorization,
 ): Promise<string> {
   const stateId = state.id ?? crypto.randomUUID();
-  await db.batch([
-    prepareInsertChat(db, chat),
-    prepareInsertChatTranscript(db, {
-      chatId: chat.id,
-      initialId: chat.initialId,
-      subchatIndex: state.subchatIndex,
-      generation: state.transcriptGeneration,
-      headRevision: state.transcriptRevision,
-      headDigest: state.transcriptDigest,
-    }),
-    prepareInsertChatMessageState(db, { ...state, id: stateId, chatId: chat.id }),
-  ]);
+  const transitionToken = crypto.randomUUID();
+  let results: D1Result[];
+  try {
+    results = await db.batch([
+      prepareInsertChat(db, chat, false, authorization),
+      prepareInsertChatTranscript(db, {
+        chatId: chat.id,
+        initialId: chat.initialId,
+        ownerId: chat.creatorId,
+        subchatIndex: state.subchatIndex,
+        generation: state.transcriptGeneration,
+        headRevision: state.transcriptRevision,
+        headDigest: state.transcriptDigest,
+        transitionToken,
+      }),
+      prepareInsertChatMessageState(db, { ...state, id: stateId, chatId: chat.id }, chat.creatorId),
+    ]);
+  } catch (error) {
+    try {
+      const generation = state.transcriptGeneration ?? 0;
+      const revision = state.transcriptRevision ?? 0;
+      const digest = state.transcriptDigest ?? null;
+      const committed = await db
+        .prepare(
+          `SELECT 1 AS found
+           FROM chats
+           JOIN chat_transcripts AS transcripts
+             ON transcripts.chat_id = chats.id AND transcripts.subchat_index = ?
+           JOIN chat_message_states AS states
+             ON states.chat_id = chats.id AND states.id = ?
+           WHERE chats.id = ? AND chats.creator_id = ? AND chats.initial_id = ? AND chats.is_deleted = 0
+             AND chats.url_id IS NULL AND chats.description IS ? AND chats.snapshot_key IS ?
+             AND chats.last_message_rank IS NULL AND chats.last_subchat_index = ?
+             AND transcripts.generation = ? AND transcripts.agent_name = ?
+             AND transcripts.head_revision = ? AND transcripts.head_digest IS ?
+             AND transcripts.head_message_count = 0 AND transcripts.parent_subchat_index IS NULL
+             AND transcripts.parent_generation IS NULL AND transcripts.parent_revision IS NULL
+             AND transcripts.transition_token = ?
+             AND states.storage_key IS ? AND states.subchat_index = ?
+             AND states.last_message_rank = ? AND states.part_index = ?
+             AND states.snapshot_key IS ? AND states.description IS ?
+             AND states.transcript_generation = ? AND states.transcript_revision = ?
+             AND states.transcript_digest IS ?
+           LIMIT 1`,
+        )
+        .bind(
+          state.subchatIndex,
+          stateId,
+          chat.id,
+          chat.creatorId,
+          chat.initialId,
+          chat.description ?? null,
+          chat.snapshotKey ?? null,
+          chat.lastSubchatIndex ?? 0,
+          generation,
+          transcriptAgentName(chat.initialId, state.subchatIndex, generation),
+          revision,
+          digest,
+          transitionToken,
+          state.storageKey ?? null,
+          state.subchatIndex,
+          state.lastMessageRank,
+          state.partIndex,
+          state.snapshotKey ?? null,
+          state.description ?? null,
+          generation,
+          revision,
+          digest,
+        )
+        .first<{ found: number }>();
+      if (committed) {
+        return stateId;
+      }
+    } catch {
+      // Preserve the original batch failure when the exact insert receipt cannot be read.
+    }
+    throw error;
+  }
+  if (results.some((result) => result.meta.changes !== 1)) {
+    if (authorization) {
+      throw new DataNotFoundError('Invalid share link');
+    }
+    throw new Error('Unable to create chat');
+  }
   return stateId;
 }
 
@@ -115,258 +200,36 @@ export function findChat(db: D1Database, args: { id: string; sessionId: string }
 export async function requireChat(db: D1Database, args: { id: string; sessionId: string }): Promise<ChatRow> {
   const chat = await findChat(db, args);
   if (!chat) {
-    throw new Error('Chat not found');
+    throw new DataNotFoundError('Chat not found');
   }
   return chat;
 }
 
-export async function requireChatByPrimaryId(db: D1Database, id: string, errorMessage: string): Promise<ChatRow> {
-  const chat = await db.prepare('SELECT * FROM chats WHERE id = ?').bind(id).first<ChatRow>();
-  if (!chat) {
-    throw new Error(errorMessage);
-  }
-  return chat;
-}
-
-export function getLatestStorageState(
-  db: D1Database,
-  args: { chatId: string; subchatIndex: number; lastMessageRank?: number },
-): Promise<ChatMessageStateRow | null> {
-  return requireChatTranscript(db, args).then((transcript) =>
-    getLatestStorageStateForGeneration(db, {
-      ...args,
-      generation: transcript.generation,
-    }),
-  );
-}
-
-export function getLatestStorageStateForGeneration(
-  db: D1Database,
-  args: { chatId: string; subchatIndex: number; generation: number; lastMessageRank?: number },
-): Promise<ChatMessageStateRow | null> {
-  if (args.lastMessageRank === undefined) {
-    return db
-      .prepare(
-        `SELECT * FROM chat_message_states
-         WHERE chat_id = ? AND subchat_index = ? AND transcript_generation = ?
-         ORDER BY last_message_rank DESC, part_index DESC
-         LIMIT 1`,
-      )
-      .bind(args.chatId, args.subchatIndex, args.generation)
-      .first<ChatMessageStateRow>();
-  }
-  return db
-    .prepare(
-      `SELECT * FROM chat_message_states
-       WHERE chat_id = ? AND subchat_index = ? AND transcript_generation = ? AND last_message_rank <= ?
-       ORDER BY last_message_rank DESC, part_index DESC
-       LIMIT 1`,
-    )
-    .bind(args.chatId, args.subchatIndex, args.generation, args.lastMessageRank)
-    .first<ChatMessageStateRow>();
-}
-
-export async function updateStorageState(
-  db: D1Database,
-  args: {
-    sessionId: string;
-    chatId: string;
-    storageKey: string | null;
-    snapshotKey: string | null;
-    lastMessageRank: number;
-    subchatIndex: number;
-    partIndex: number;
-    initialDescription?: string | null;
-    checkpoint: TranscriptCheckpoint;
-  },
-): Promise<{
-  accepted: boolean;
-  retainedStorageKey: boolean;
-  retainedSnapshotKey: boolean;
-  displacedKeys: string[];
-}> {
-  const chat = await requireChat(db, { id: args.chatId, sessionId: args.sessionId });
-  const transcript = await requireChatTranscript(db, { chatId: chat.id, subchatIndex: args.subchatIndex });
-  if (!checkpointMatchesIdentity(args.checkpoint, transcript)) {
-    return rejectedStorageUpdate();
-  }
-  if (
-    transcript.head_revision > args.checkpoint.revision ||
-    (transcript.head_revision === args.checkpoint.revision &&
-      transcript.head_digest !== null &&
-      transcript.head_digest !== args.checkpoint.digest)
-  ) {
-    return rejectedStorageUpdate();
-  }
-  for (let attempt = 0; attempt < MAX_STORAGE_UPDATE_CAS_ATTEMPTS; attempt++) {
-    const previous = await getLatestStorageStateForGeneration(db, {
-      chatId: chat.id,
-      subchatIndex: args.subchatIndex,
-      generation: transcript.generation,
-    });
-    if (!previous) {
-      throw new Error('Chat messages storage state not found');
-    }
-    if (previous.transcript_revision > args.checkpoint.revision || previous.last_message_rank > args.lastMessageRank) {
-      return rejectedStorageUpdate();
-    }
-    if (previous.last_message_rank === args.lastMessageRank && previous.part_index > args.partIndex) {
-      return rejectedStorageUpdate();
-    }
-    if (
-      previous.transcript_revision === args.checkpoint.revision &&
-      (previous.last_message_rank !== args.lastMessageRank ||
-        previous.part_index !== args.partIndex ||
-        (previous.transcript_digest !== null && previous.transcript_digest !== args.checkpoint.digest))
-    ) {
-      return rejectedStorageUpdate();
-    }
-    const samePosition = previous.last_message_rank === args.lastMessageRank && previous.part_index === args.partIndex;
-    if (samePosition && previous.transcript_revision === args.checkpoint.revision) {
-      await db
-        .prepare(
-          `UPDATE chat_message_states
-           SET snapshot_key = COALESCE(snapshot_key, ?), description = COALESCE(description, ?)
-           WHERE id = ?`,
-        )
-        .bind(args.snapshotKey, args.initialDescription ?? null, previous.id)
-        .run();
-      const current = await getStorageStateById(db, previous.id);
-      return {
-        accepted: true,
-        retainedStorageKey: false,
-        retainedSnapshotKey: args.snapshotKey !== null && current?.snapshot_key === args.snapshotKey,
-        displacedKeys: [],
-      };
-    }
-    if (previous.last_message_rank === args.lastMessageRank) {
-      const displaced = displacedKeys(previous, args);
-      const results = await db.batch([
-        prepareAdvanceTranscriptStatement(db, chat.id, args.checkpoint),
-        db
-          .prepare(
-            `UPDATE chat_message_states
-             SET storage_key = COALESCE(?, storage_key), part_index = ?,
-                 snapshot_key = COALESCE(?, snapshot_key), description = COALESCE(description, ?),
-                 transcript_revision = ?, transcript_digest = ?
-             WHERE id = ? AND last_message_rank = ? AND part_index = ? AND transcript_revision = ?
-               AND storage_key IS ? AND snapshot_key IS ?
-               AND EXISTS (
-                 SELECT 1 FROM chat_transcripts
-                 WHERE chat_id = ? AND subchat_index = ? AND generation = ? AND agent_name = ?
-                   AND head_revision = ? AND head_digest = ?
-               )`,
-          )
-          .bind(
-            args.storageKey,
-            args.partIndex,
-            args.snapshotKey,
-            args.initialDescription ?? null,
-            args.checkpoint.revision,
-            args.checkpoint.digest,
-            previous.id,
-            previous.last_message_rank,
-            previous.part_index,
-            previous.transcript_revision,
-            previous.storage_key,
-            previous.snapshot_key,
-            chat.id,
-            args.checkpoint.subchatIndex,
-            args.checkpoint.generation,
-            args.checkpoint.agentName,
-            args.checkpoint.revision,
-            args.checkpoint.digest,
-          ),
-        ...prepareObjectGcCandidateStatements(db, displaced),
-      ]);
-      if (results[0].meta.changes === 0 || results[1].meta.changes === 0) {
-        continue;
-      }
-      return acceptedStorageUpdate(args, displaced);
-    }
-
-    const stateId = crypto.randomUUID();
-    const results = await db.batch([
-      prepareAdvanceTranscriptStatement(db, chat.id, args.checkpoint),
-      db
-        .prepare(
-          `INSERT INTO chat_message_states (
-            id, chat_id, storage_key, subchat_index, last_message_rank, part_index,
-            snapshot_key, description, created_at, transcript_generation, transcript_revision, transcript_digest
-          )
-          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-          FROM chat_transcripts
-          WHERE chat_id = ? AND subchat_index = ? AND generation = ? AND agent_name = ?
-            AND head_revision = ? AND head_digest = ?
-          ON CONFLICT DO NOTHING`,
-        )
-        .bind(
-          stateId,
-          chat.id,
-          args.storageKey,
-          args.subchatIndex,
-          args.lastMessageRank,
-          args.partIndex,
-          args.snapshotKey ?? previous.snapshot_key,
-          previous.description ?? args.initialDescription ?? null,
-          Date.now(),
-          args.checkpoint.generation,
-          args.checkpoint.revision,
-          args.checkpoint.digest,
-          chat.id,
-          args.checkpoint.subchatIndex,
-          args.checkpoint.generation,
-          args.checkpoint.agentName,
-          args.checkpoint.revision,
-          args.checkpoint.digest,
-        ),
-      db
-        .prepare(
-          `UPDATE chats SET last_message_rank = NULL, last_subchat_index = ?
-           WHERE id = ? AND EXISTS (SELECT 1 FROM chat_message_states WHERE id = ?)`,
-        )
-        .bind(args.subchatIndex, chat.id, stateId),
-    ]);
-    if (results[0].meta.changes === 0 || results[1].meta.changes === 0) {
-      continue;
-    }
-    return acceptedStorageUpdate(args);
-  }
-  throw new Error('Chat storage state changed too many times; retry the save');
-}
-
-function prepareAdvanceTranscriptStatement(
-  db: D1Database,
-  chatId: string,
-  checkpoint: TranscriptCheckpoint,
-): D1PreparedStatement {
-  return db
-    .prepare(
-      `UPDATE chat_transcripts
-       SET head_revision = ?, head_digest = ?, head_message_count = ?, updated_at = ?
-       WHERE chat_id = ? AND subchat_index = ? AND generation = ?
-         AND head_revision <= ?
-         AND (head_revision < ? OR head_digest IS NULL OR head_digest = ?)`,
-    )
-    .bind(
-      checkpoint.revision,
-      checkpoint.digest,
-      checkpoint.messageCount,
-      Date.now(),
-      chatId,
-      checkpoint.subchatIndex,
-      checkpoint.generation,
-      checkpoint.revision,
-      checkpoint.revision,
-      checkpoint.digest,
-    );
+export function updateStorageState(db: D1Database, args: UpdateStorageStateArgs): Promise<UpdateStorageStateResult> {
+  return updateStorageStateWithChatLookup(db, args, requireChat);
 }
 
 function prepareInsertChat(
   db: D1Database,
   args: ChatInsertArgs,
-  ignoreActiveInitialConflict = false,
+  ignoreInitialConflict = false,
+  authorization?: ChatInsertAuthorization,
 ): D1PreparedStatement {
+  const authorizationSql =
+    authorization?.kind === 'legacy-share'
+      ? `AND EXISTS (
+           SELECT 1 FROM shares
+           JOIN chats AS parent_chat ON parent_chat.id = shares.chat_id
+           WHERE shares.code = ? AND shares.chat_id = ? AND parent_chat.is_deleted = 0
+         )`
+      : authorization?.kind === 'social-share'
+        ? `AND EXISTS (
+             SELECT 1 FROM social_shares
+             JOIN chats AS parent_chat ON parent_chat.id = social_shares.chat_id
+             WHERE social_shares.code = ? AND social_shares.chat_id = ?
+               AND social_shares.is_shared = 1 AND parent_chat.is_deleted = 0
+           )`
+        : '';
   return db
     .prepare(
       `INSERT INTO chats (
@@ -374,8 +237,9 @@ function prepareInsertChat(
         last_message_rank, last_subchat_index, is_deleted
       )
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-      WHERE NOT EXISTS (SELECT 1 FROM chats WHERE initial_id = ? AND is_deleted = 0)
-      ${ignoreActiveInitialConflict ? 'ON CONFLICT DO NOTHING' : ''}`,
+      WHERE NOT EXISTS (SELECT 1 FROM chats WHERE initial_id = ?)
+      ${authorizationSql}
+      ${ignoreInitialConflict ? 'ON CONFLICT DO NOTHING' : ''}`,
     )
     .bind(
       args.id,
@@ -389,16 +253,24 @@ function prepareInsertChat(
       args.lastSubchatIndex ?? 0,
       0,
       args.initialId,
+      ...(authorization ? [authorization.code, authorization.parentChatId] : []),
     );
 }
 
-function prepareInsertChatMessageState(db: D1Database, args: ChatMessageStateInsertArgs): D1PreparedStatement {
+function prepareInsertChatMessageState(
+  db: D1Database,
+  args: ChatMessageStateInsertArgs,
+  ownerId: string,
+): D1PreparedStatement {
   return db
     .prepare(
       `INSERT INTO chat_message_states (
         id, chat_id, storage_key, subchat_index, last_message_rank, part_index, snapshot_key, description, created_at,
         transcript_generation, transcript_revision, transcript_digest
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      FROM chats
+      WHERE chats.id = ? AND chats.creator_id = ? AND chats.is_deleted = 0`,
     )
     .bind(
       args.id ?? crypto.randomUUID(),
@@ -413,53 +285,57 @@ function prepareInsertChatMessageState(db: D1Database, args: ChatMessageStateIns
       args.transcriptGeneration ?? 0,
       args.transcriptRevision ?? 0,
       args.transcriptDigest ?? null,
+      args.chatId,
+      ownerId,
     );
 }
 
-function getStorageStateById(db: D1Database, id: string): Promise<ChatMessageStateRow | null> {
-  return db.prepare('SELECT * FROM chat_message_states WHERE id = ?').bind(id).first<ChatMessageStateRow>();
-}
+export async function claimChatUrlId(
+  db: D1Database,
+  args: { chatId: string; ownerId: string; urlHint: string; description: string },
+): Promise<{ urlId: string; initialId: string }> {
+  const base = slugify(args.urlHint);
+  for (let attempt = 0; attempt < MAX_URL_ID_ALLOCATION_ATTEMPTS; attempt++) {
+    const candidate = attempt === 0 ? base : `${base}-${attempt + 1}`;
+    try {
+      const claimed = await db
+        .prepare(
+          `UPDATE chats
+           SET url_id = ?, description = COALESCE(description, ?)
+           WHERE id = ? AND creator_id = ? AND is_deleted = 0 AND url_id IS NULL
+           RETURNING initial_id, url_id`,
+        )
+        .bind(candidate, args.description, args.chatId, args.ownerId)
+        .first<{ initial_id: string; url_id: string }>();
+      if (claimed) {
+        return { urlId: claimed.url_id, initialId: claimed.initial_id };
+      }
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error;
+      }
+    }
 
-function rejectedStorageUpdate() {
-  return {
-    accepted: false,
-    retainedStorageKey: false,
-    retainedSnapshotKey: false,
-    displacedKeys: [],
-  };
-}
-
-function acceptedStorageUpdate(
-  args: Pick<Parameters<typeof updateStorageState>[1], 'storageKey' | 'snapshotKey'>,
-  displacedKeys: string[] = [],
-) {
-  return {
-    accepted: true,
-    retainedStorageKey: args.storageKey !== null,
-    retainedSnapshotKey: args.snapshotKey !== null,
-    displacedKeys,
-  };
-}
-
-function displacedKeys(
-  previous: ChatMessageStateRow,
-  next: Pick<Parameters<typeof updateStorageState>[1], 'storageKey' | 'snapshotKey'>,
-): string[] {
-  return [
-    next.storageKey !== null && previous.storage_key !== next.storageKey ? previous.storage_key : null,
-    next.snapshotKey !== null && previous.snapshot_key !== next.snapshotKey ? previous.snapshot_key : null,
-  ].filter((key): key is string => key !== null);
-}
-
-export async function allocateUrlId(db: D1Database, sessionId: string, urlHint: string): Promise<string> {
-  const base = slugify(urlHint);
-  let candidate = base;
-  let index = 2;
-  while (await findChat(db, { id: candidate, sessionId })) {
-    candidate = `${base}-${index}`;
-    index++;
+    const current = await db
+      .prepare(
+        `SELECT initial_id, url_id
+         FROM chats
+         WHERE id = ? AND creator_id = ? AND is_deleted = 0`,
+      )
+      .bind(args.chatId, args.ownerId)
+      .first<{ initial_id: string; url_id: string | null }>();
+    if (!current) {
+      throw new DataNotFoundError('Chat not found');
+    }
+    if (current.url_id) {
+      return { urlId: current.url_id, initialId: current.initial_id };
+    }
   }
-  return candidate;
+  throw new Error('Unable to allocate a unique chat URL');
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return error instanceof Error && /unique constraint failed/i.test(error.message);
 }
 
 function slugify(value: string): string {

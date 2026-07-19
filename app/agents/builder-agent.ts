@@ -25,7 +25,6 @@ import { generateProjectTitle } from '~/lib/.server/llm/project-title';
 import { setGeneratedDescriptionIfMissing } from '~/lib/cloudflare/data/chat-service.server';
 import { messageText } from 'ghostbuild-agent/ai-compat';
 import {
-  transcriptIdentitySchema,
   transcriptCheckpointSchema,
   transcriptCheckpointsEqual,
   transcriptMessagesEqual,
@@ -36,12 +35,20 @@ import {
   type TranscriptIdentity,
 } from 'ghostbuild-agent/transcript';
 import { createWorkersAiSessionAffinity } from '~/lib/.server/llm/workers-ai-prompt-cache';
+import {
+  assertBuilderModelTranscriptWithinLimit,
+  boundBuilderMessageForPersistence,
+  loadBuilderTranscriptBinding,
+  MAX_BUILDER_AGENT_MESSAGES,
+  requireBuilderRequestScope,
+  requireBuilderTranscriptIdentity,
+  type BuilderTranscriptBinding,
+} from './builder-request-policy';
 
 const logger = createScopedLogger('BuilderAgent');
 const STALE_CHAT_RECOVERY_MS = 15 * 60 * 1000;
 const MAX_CHAT_RECOVERY_ATTEMPTS = 2;
 const CHAT_NO_PROGRESS_TIMEOUT_MS = 3 * 60 * 1000;
-const MAX_SUBCHAT_INDEX = 10_000;
 
 export type BuilderAgentState = {
   activeTurn?: BuilderTurnState | null;
@@ -68,7 +75,9 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     transcript: null,
   };
 
-  override messageConcurrency = 'queue' as const;
+  override messageConcurrency = 'drop' as const;
+
+  override maxPersistedMessages = MAX_BUILDER_AGENT_MESSAGES;
 
   override waitForMcpConnections = { timeout: 10_000 };
 
@@ -84,11 +93,25 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   private readonly contextCompaction = new DurableObjectContextCompactionRepository(this);
   private ownerId: string | null = null;
   private userId: string | null = null;
+  private transcriptBinding: BuilderTranscriptBinding | null = null;
   async onStart(props?: BuilderAgentProps) {
     this.ownerId = props?.ownerId ?? null;
     this.userId = props?.userId ?? null;
     this.turnStore.initialize();
     this.contextCompaction.initialize();
+    this.transcriptBinding = this.ownerId
+      ? await loadBuilderTranscriptBinding(this.env.DB, { agentName: this.name, ownerId: this.ownerId })
+      : null;
+  }
+
+  /**
+   * Accept durable deletion without making the caller wait for the
+   * abort-shaped `destroy()` RPC. This is intentionally not decorated with
+   * `@callable`: it is an internal Durable Object RPC used only by the D1 GC
+   * outbox.
+   */
+  async scheduleDestroyForGc(): Promise<void> {
+    await this._cf_scheduleDestroy();
   }
 
   override async onChatRecovery(ctx: ChatRecoveryContext): Promise<ChatRecoveryOptions> {
@@ -105,13 +128,13 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.turnStore.record(nextTurn);
 
     logger.warn('Recovering interrupted Ghostbuild chat turn', {
-      incidentId: ctx.incidentId,
+      incidentId: nextTurn.recovery?.incidentId,
       recoveryKind: ctx.recoveryKind,
-      requestId: ctx.requestId,
+      requestId: nextTurn.requestId,
       attempt: ctx.attempt,
       ageMs,
       partialTextLength: ctx.partialText.length,
-      recoveryData: ctx.recoveryData,
+      hasRecoveryData: ctx.recoveryData !== undefined,
     });
 
     if (ageMs > STALE_CHAT_RECOVERY_MS) {
@@ -134,11 +157,15 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
     const body = (options?.body ?? {}) as ChatBody;
     const messages = this.messages as NonNullable<ChatRequestBody['messages']>;
+    const { chatInitialId, shouldDisableTools, subchatIndex, transcript } = requireBuilderRequestScope(
+      body,
+      this.transcriptBinding,
+    );
+    assertBuilderModelTranscriptWithinLimit(messages);
     const pendingDeploymentPlanMarker = options?.continuation ? latestPendingDeploymentPlanMarker(messages) : null;
     if (pendingDeploymentPlanMarker) {
       console.info({
         event: 'builder_deployment_plan_continuation_stopped',
-        requestId: options?.requestId,
       });
       return createUIMessageStreamResponse({
         stream: createUIMessageStream({
@@ -155,9 +182,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         }),
       });
     }
-    const chatInitialId = typeof body.chatInitialId === 'string' ? body.chatInitialId : 'agent-chat';
-    const subchatIndex = parseSubchatIndex(body.subchatIndex);
-    const transcript = this.requireTranscriptIdentity(body.transcript, subchatIndex);
     await this.advanceTranscriptCheckpoint(transcript);
     this.contextCompaction.migrateLegacySubchat(subchatIndex);
     const turnContext = parseTurnContext(body.turnContext);
@@ -173,7 +197,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     });
     console.info({
       event: 'builder_chat_turn_started',
-      requestId: options?.requestId,
+      requestId: turn.requestId,
       chatInitialId,
       continuation: options?.continuation === true,
       firstUserMessage,
@@ -209,7 +233,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         body: {
           messages,
           chatInitialId,
-          shouldDisableTools: body.shouldDisableTools === true,
+          shouldDisableTools,
         },
       });
     } catch (error) {
@@ -272,6 +296,9 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (!Array.isArray(messagesValue)) {
       throw new Response('Invalid transcript messages', { status: 400 });
     }
+    if (messagesValue.length > MAX_BUILDER_AGENT_MESSAGES) {
+      throw new Response('Transcript has too many messages to seed', { status: 413 });
+    }
     const messages = messagesValue as NonNullable<ChatRequestBody['messages']>;
     if (this.state.transcript || this.messages.length > 0) {
       return this.advanceTranscriptCheckpoint(identity);
@@ -283,32 +310,22 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   protected override sanitizeMessageForPersistence(message: UIMessage): UIMessage {
     const metadata = isRecord(message.metadata) ? message.metadata : null;
     if (!metadata || !Object.hasOwn(metadata, TRANSCRIPT_BASE_METADATA_KEY)) {
-      return message;
+      return boundBuilderMessageForPersistence(message);
     }
     const sanitized = stripTranscriptBaseMetadata(message);
     const existing = this.messages.find((candidate) => candidate.id === message.id);
     if (existing && transcriptMessagesEqual(existing, message)) {
-      return sanitized;
+      return boundBuilderMessageForPersistence(sanitized);
     }
     const parsed = transcriptCheckpointSchema.nullable().safeParse(metadata[TRANSCRIPT_BASE_METADATA_KEY]);
     if (!parsed.success || !transcriptCheckpointsEqual(this.state.transcript ?? null, parsed.data)) {
       throw new Error('This transcript changed in another session. Reload the latest messages before sending.');
     }
-    return sanitized;
+    return boundBuilderMessageForPersistence(sanitized);
   }
 
   private requireTranscriptIdentity(value: unknown, subchatIndex?: number): TranscriptIdentity {
-    const result = transcriptIdentitySchema.safeParse(value);
-    if (!result.success) {
-      throw new Response('Invalid transcript identity', { status: 400 });
-    }
-    if (result.data.agentName !== this.name) {
-      throw new Response('Transcript identity does not match this agent', { status: 409 });
-    }
-    if (subchatIndex !== undefined && result.data.subchatIndex !== subchatIndex) {
-      throw new Response('Transcript identity does not match the selected subchat', { status: 409 });
-    }
-    return result.data;
+    return requireBuilderTranscriptIdentity(value, this.transcriptBinding, subchatIndex);
   }
 
   private async advanceTranscriptCheckpoint(identity: TranscriptIdentity): Promise<TranscriptCheckpoint> {
@@ -379,16 +396,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     });
     this.turnStore.record(finishedTurn);
   }
-}
-
-function parseSubchatIndex(value: unknown): number {
-  if (value === undefined) {
-    return 0;
-  }
-  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > MAX_SUBCHAT_INDEX) {
-    throw new Response('Invalid subchat index', { status: 400 });
-  }
-  return value as number;
 }
 
 function parseTurnContext(value: unknown): ChatTurnContext | undefined {

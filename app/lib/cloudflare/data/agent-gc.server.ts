@@ -1,0 +1,159 @@
+import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
+import { transcriptAgentName } from 'ghostbuild-agent/transcript';
+
+export const AGENT_GC_SWEEP_LIMIT = 4;
+export const AGENT_GC_RETRY_BASE_MS = 30_000;
+export const AGENT_GC_GRACE_PERIOD_MS = 30 * 60 * 1000;
+const AGENT_GC_RETRY_MAX_MS = 60 * 60 * 1000;
+
+const logger = createScopedLogger('CloudflareAgentGc');
+
+type AgentGcCandidateRow = {
+  chat_id: string;
+  initial_id: string;
+  subchat_index: number;
+  next_generation: number;
+  max_generation: number;
+  not_before: number;
+  attempts: number;
+};
+
+export function prepareChatAgentGcCandidatesStatement(
+  db: D1Database,
+  args: { chatId: string; ownerId: string; now?: number },
+): D1PreparedStatement {
+  const now = args.now ?? Date.now();
+  const notBefore = now + AGENT_GC_GRACE_PERIOD_MS;
+  return db
+    .prepare(
+      `INSERT INTO agent_gc_candidates (
+         chat_id, initial_id, subchat_index, next_generation, max_generation, not_before, created_at, attempts
+       )
+       SELECT chats.id, chats.initial_id, transcripts.subchat_index, 0, transcripts.generation, ?, ?, 0
+       FROM chats
+       JOIN chat_transcripts AS transcripts ON transcripts.chat_id = chats.id
+       WHERE chats.id = ? AND chats.creator_id = ? AND chats.is_deleted = 0
+       ON CONFLICT(chat_id, subchat_index) DO UPDATE SET
+         max_generation = MAX(agent_gc_candidates.max_generation, excluded.max_generation),
+         not_before = MIN(agent_gc_candidates.not_before, excluded.not_before)`,
+    )
+    .bind(notBefore, now, args.chatId, args.ownerId);
+}
+
+export function prepareEmptyChatAgentGcCandidatesStatement(
+  db: D1Database,
+  args: { ownerId: string; id: string; now?: number },
+): D1PreparedStatement {
+  const now = args.now ?? Date.now();
+  const notBefore = now + AGENT_GC_GRACE_PERIOD_MS;
+  return db
+    .prepare(
+      `INSERT INTO agent_gc_candidates (
+         chat_id, initial_id, subchat_index, next_generation, max_generation, not_before, created_at, attempts
+       )
+       SELECT chats.id, chats.initial_id, transcripts.subchat_index, 0, transcripts.generation, ?, ?, 0
+       FROM chats
+       JOIN chat_transcripts AS transcripts ON transcripts.chat_id = chats.id
+       WHERE chats.creator_id = ? AND (chats.initial_id = ? OR chats.url_id = ?) AND chats.is_deleted = 0
+         AND chats.url_id IS NULL AND NULLIF(TRIM(chats.description), '') IS NULL AND chats.snapshot_key IS NULL
+         AND (chats.last_message_rank IS NULL OR chats.last_message_rank < 0)
+         AND NOT EXISTS (
+           SELECT 1 FROM chat_message_states
+           WHERE chat_message_states.chat_id = chats.id AND chat_message_states.last_message_rank >= 0
+         )
+       ON CONFLICT(chat_id, subchat_index) DO UPDATE SET
+         max_generation = MAX(agent_gc_candidates.max_generation, excluded.max_generation),
+         not_before = MIN(agent_gc_candidates.not_before, excluded.not_before)`,
+    )
+    .bind(notBefore, now, args.ownerId, args.id, args.id);
+}
+
+export async function sweepAgentGcCandidates(
+  env: Pick<Env, 'BuilderAgent' | 'DB'>,
+  options: { limit?: number; now?: number } = {},
+): Promise<number> {
+  const limit = Math.max(1, Math.min(options.limit ?? AGENT_GC_SWEEP_LIMIT, AGENT_GC_SWEEP_LIMIT));
+  const now = options.now ?? Date.now();
+  const result = await env.DB.prepare(
+    `SELECT chat_id, initial_id, subchat_index, next_generation, max_generation, not_before, attempts
+     FROM agent_gc_candidates
+     WHERE not_before <= ?
+     ORDER BY not_before, chat_id, subchat_index
+     LIMIT ?`,
+  )
+    .bind(now, limit)
+    .all<AgentGcCandidateRow>();
+
+  const completions = await Promise.all(
+    result.results.map((candidate) => destroyCandidateGeneration(env, candidate, now)),
+  );
+  return completions.reduce((total, completed) => total + completed, 0);
+}
+
+export async function sweepAgentGcCandidatesBestEffort(env: Pick<Env, 'BuilderAgent' | 'DB'>): Promise<void> {
+  try {
+    await sweepAgentGcCandidates(env);
+  } catch (error) {
+    logger.warn('Unable to sweep deferred BuilderAgent state', { error });
+  }
+}
+
+async function destroyCandidateGeneration(
+  env: Pick<Env, 'BuilderAgent' | 'DB'>,
+  candidate: AgentGcCandidateRow,
+  now: number,
+): Promise<number> {
+  try {
+    const name = transcriptAgentName(candidate.initial_id, candidate.subchat_index, candidate.next_generation);
+    const agent = env.BuilderAgent.getByName(name);
+    // The SDK durably records a condemned marker and alarm before this RPC
+    // resolves. Advance the D1 receipt only after that schedule is accepted;
+    // the alarm owns the abort-shaped physical teardown and can resume it.
+    await agent.scheduleDestroyForGc();
+    const result =
+      candidate.next_generation === candidate.max_generation
+        ? await deleteCompletedCandidate(env.DB, candidate)
+        : await advanceCompletedCandidate(env.DB, candidate, now);
+    return result.meta.changes > 0 ? 1 : 0;
+  } catch (error) {
+    const retryAt = now + retryDelay(candidate.attempts);
+    await env.DB.prepare(
+      `UPDATE agent_gc_candidates
+       SET attempts = attempts + 1, not_before = ?
+       WHERE chat_id = ? AND subchat_index = ? AND next_generation = ? AND not_before = ?`,
+    )
+      .bind(retryAt, candidate.chat_id, candidate.subchat_index, candidate.next_generation, candidate.not_before)
+      .run();
+    logger.warn('Unable to destroy deferred BuilderAgent generation', {
+      subchatIndex: candidate.subchat_index,
+      generation: candidate.next_generation,
+      error,
+    });
+    return 0;
+  }
+}
+
+function deleteCompletedCandidate(db: D1Database, candidate: AgentGcCandidateRow): Promise<D1Result> {
+  return db
+    .prepare(
+      `DELETE FROM agent_gc_candidates
+       WHERE chat_id = ? AND subchat_index = ? AND next_generation = ? AND not_before = ?`,
+    )
+    .bind(candidate.chat_id, candidate.subchat_index, candidate.next_generation, candidate.not_before)
+    .run();
+}
+
+function advanceCompletedCandidate(db: D1Database, candidate: AgentGcCandidateRow, now: number): Promise<D1Result> {
+  return db
+    .prepare(
+      `UPDATE agent_gc_candidates
+       SET next_generation = next_generation + 1, attempts = 0, not_before = ?
+       WHERE chat_id = ? AND subchat_index = ? AND next_generation = ? AND not_before = ?`,
+    )
+    .bind(now, candidate.chat_id, candidate.subchat_index, candidate.next_generation, candidate.not_before)
+    .run();
+}
+
+function retryDelay(attempts: number): number {
+  return Math.min(AGENT_GC_RETRY_BASE_MS * 2 ** Math.min(attempts, 7), AGENT_GC_RETRY_MAX_MS);
+}

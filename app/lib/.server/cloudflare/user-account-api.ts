@@ -1,6 +1,7 @@
 import { deploymentPlanResourceName, type DeploymentPlan, type DeploymentResourceType } from './deployment-plan';
 
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
+const CLOUDFLARE_API_TIMEOUT_MS = 30_000;
 
 type CloudflareEnvelope<T> = {
   success?: boolean;
@@ -81,6 +82,7 @@ export class UserCloudflareAccountApi {
     const execute = this.request;
     const response = await execute(`${API_ROOT}/accounts/${encodeURIComponent(this.accountId)}${path}`, {
       ...init,
+      signal: init.signal ?? AbortSignal.timeout(CLOUDFLARE_API_TIMEOUT_MS),
       headers: {
         authorization: `Bearer ${this.accessToken}`,
         'content-type': 'application/json',

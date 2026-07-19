@@ -9,7 +9,7 @@ export default function useVersionNotificationBanner() {
   const loadedVersionSha = useRef<string | null | undefined>(undefined);
   const { data, error } = useQuery({
     queryKey: ['ghostbuild-version'],
-    queryFn: () => versionFetcher('/api/version'),
+    queryFn: ({ signal }) => versionFetcher('/api/version', signal),
     // Refresh every hour.
     refetchInterval: 1000 * 60 * 60,
     // Refresh on focus at most every 10 minutes.
@@ -54,15 +54,16 @@ export default function useVersionNotificationBanner() {
   }, [data, error]);
 }
 
-const versionFetcher = async (url: string): Promise<{ sha?: string | null }> => {
-  const res = await fetch(url);
+const versionFetcher = async (url: string, signal: AbortSignal): Promise<{ sha?: string | null }> => {
+  const res = await fetch(url, { signal });
 
   if (!res.ok) {
     try {
       const { error } = (await res.json()) as { error?: string };
-      captureMessage(error ?? 'Failed to fetch dashboard version information.');
+      console.warn(error ?? 'Failed to fetch dashboard version information.');
+      captureMessage('Failed to fetch dashboard version information');
     } catch (_e) {
-      captureMessage('Failed to fetch dashboard version information.');
+      captureMessage('Failed to fetch dashboard version information');
     }
     throw new Error('Failed to fetch dashboard version information.');
   }

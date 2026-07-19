@@ -170,6 +170,28 @@ export function d1DatabaseName(database) {
   return database?.name ?? database?.database_name;
 }
 
+export function requireMatchingD1Database(
+  databases,
+  configuredId,
+  databaseName,
+) {
+  const configuredDatabase = databases.find(
+    (database) => d1DatabaseId(database) === configuredId,
+  );
+  if (!configuredDatabase) {
+    throw new Error(
+      `Configured D1 database_id ${configuredId} was not found in the Cloudflare account.`,
+    );
+  }
+  if (d1DatabaseName(configuredDatabase) !== databaseName) {
+    throw new Error(
+      `Configured D1 database_id ${configuredId} resolves to ` +
+        `${JSON.stringify(d1DatabaseName(configuredDatabase))}, not ${JSON.stringify(databaseName)}.`,
+    );
+  }
+  return configuredDatabase;
+}
+
 function listD1Databases() {
   if (isDryRun) {
     return [];
@@ -190,21 +212,26 @@ function ensureD1Database(d1) {
 
   const configuredId = d1.binding?.database_id;
   const hasConfiguredId = configuredId && configuredId !== PLACEHOLDER_D1_ID;
+  if (hasConfiguredId && isDryRun) {
+    console.log(
+      `[dry-run] Would verify D1 database ${databaseName} is configured as ${configuredId}.`,
+    );
+    return configuredId;
+  }
   const databases = listD1Databases();
-  const configuredDatabase = hasConfiguredId
-    ? databases.find((database) => d1DatabaseId(database) === configuredId)
-    : undefined;
+  let configuredDatabase;
+  try {
+    configuredDatabase = hasConfiguredId
+      ? requireMatchingD1Database(databases, configuredId, databaseName)
+      : undefined;
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
   if (configuredDatabase) {
     console.log(
       `D1 database ${databaseName} is already configured as ${configuredId}.`,
     );
     return configuredId;
-  }
-
-  if (hasConfiguredId && databases.length > 0) {
-    fail(
-      `Configured D1 database_id ${configuredId} was not found in the Cloudflare account.`,
-    );
   }
 
   let database = databases.find(

@@ -11,6 +11,13 @@ interface ResizeSession {
 
 const INITIAL_WIDTH_PERCENT = 37.5;
 const SCALING_FACTOR = 2;
+const KEYBOARD_STEP_PERCENT = 2.5;
+const MIN_WIDTH_PERCENT = 10;
+const MAX_WIDTH_PERCENT = 90;
+
+function clampWidth(width: number): number {
+  return Math.max(MIN_WIDTH_PERCENT, Math.min(width, MAX_WIDTH_PERCENT));
+}
 
 export function useDevicePreviewResize() {
   const [isDeviceModeOn, setIsDeviceModeOn] = useState(false);
@@ -25,7 +32,7 @@ export function useDevicePreviewResize() {
     const onMouseMove = (event: MouseEvent) => {
       const deltaPercent = ((event.clientX - session.startX) / session.windowWidth) * 100 * SCALING_FACTOR;
       const direction = session.side === 'left' ? -1 : 1;
-      setWidthPercent(Math.max(10, Math.min(session.startWidthPercent + direction * deltaPercent, 90)));
+      setWidthPercent(clampWidth(session.startWidthPercent + direction * deltaPercent));
     };
     const stop = () => setSession(null);
     document.addEventListener('mousemove', onMouseMove);
@@ -54,6 +61,11 @@ export function useDevicePreviewResize() {
   );
 
   return {
+    adjustWidthWithKeyboard: (side: ResizeHandleSide, key: 'ArrowLeft' | 'ArrowRight') => {
+      const pointerDirection = key === 'ArrowRight' ? 1 : -1;
+      const widthDirection = side === 'left' ? -pointerDirection : pointerDirection;
+      setWidthPercent((width) => clampWidth(width + widthDirection * KEYBOARD_STEP_PERCENT));
+    },
     isDeviceModeOn,
     startResizing,
     toggleDeviceMode: () => setIsDeviceModeOn((enabled) => !enabled),

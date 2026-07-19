@@ -168,6 +168,10 @@ function renderFallbackTypes(config) {
     addBinding(envLines, name, "string");
   }
 
+  for (const name of config?.secrets?.required ?? []) {
+    addBinding(envLines, name, "string");
+  }
+
   const durableNamespaceType =
     durableNamespaces.length > 0 ? durableNamespaces.join(" | ") : "never";
 

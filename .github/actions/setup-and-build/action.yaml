@@ -2,25 +2,25 @@ name: Setup dependencies
 description: Install the repository's pinned Node and pnpm toolchain and dependencies
 inputs:
   pnpm-version:
+    description: pnpm version to install
     required: false
-    type: string
-    default: '9.5.0'
+    default: '11.14.0'
   node-version:
+    description: Node.js version to install
     required: false
-    type: string
     default: '26.3.0'
 
 runs:
   using: composite
 
   steps:
-    - uses: pnpm/action-setup@v6
+    - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
       with:
         version: ${{ inputs.pnpm-version }}
         run_install: false
 
     - name: Set Node.js version to ${{ inputs.node-version }}
-      uses: actions/setup-node@v6
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
       with:
         node-version: ${{ inputs.node-version }}
         cache: pnpm

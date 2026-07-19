@@ -81,6 +81,8 @@ Key modules:
 - `ghostbuild-agent/transcript.ts`: transcript identities, checkpoint schemas, and canonical digests.
 - `app/agents/builder-agent.ts`: Durable Object checkpoint advancement, snapshot reads, and empty-generation seeding.
 - `app/lib/cloudflare/data/transcript-repository.server.ts`: D1 transcript identity and lineage access.
+- `app/lib/cloudflare/data/chat-storage-state-repository.server.ts`: D1 storage-state lookup, retention, and checkpoint compare-and-swap writes.
+- `app/lib/cloudflare/data/chat-repository.server.ts`: stable chat persistence facade and chat-record creation/lookup.
 - `app/lib/cloudflare/data.server.ts`: Durable Object/R2 verification and reload reconciliation.
 - `app/lib/stores/startup/`: browser reload, digest validation, and backup coordination.
 - `migrations/0010_transcript_reconciliation.sql`: generation, checkpoint, and ancestry schema.
@@ -95,7 +97,7 @@ Repository reacquisition remains lexical by design. `listFiles` supports bounded
 
 A deterministic CI fixture keeps this choice honest: after more than 16 unrelated recent files push a build-repair target out of the recency-only context, lexical retrieval must recover the authoritative definition in one bounded page while the recency baseline misses it. Semantic indexing stays disabled until a model-backed evaluation shows higher end-to-end build-task success than this lexical baseline at acceptable latency and token cost.
 
-Every completed build requires a full fixed-command `validateProject` pass. Validation hashes the workspace before and after its typecheck, lint, build, and preview smoke checks and refuses to certify a workspace that changed during the run. Failed validation and dependency operations expose typed, bounded diagnostic records instead of raw command logs; `getDiagnostics` continues only those records through narrowly scoped turn state. Raw process output remains in the terminal and developer logs. Signed-in deployment accepts only the exact validated revision, verifies it again before and after capturing an immutable source snapshot, and then stops at the existing explicit production-approval boundary. Guest builds stop after validation and remain previewable.
+Every completed build requires a full fixed-command `validateProject` pass. Validation hashes the workspace before and after its typecheck, lint, build, and preview smoke checks and refuses to certify a workspace that changed during the run. A successful full pass records a turn-local deployment receipt inside the action runner; model-supplied revision text cannot create that receipt. Failed validation and dependency operations expose typed, bounded diagnostic records instead of raw command logs; `getDiagnostics` continues only those records through narrowly scoped turn state. Raw process output remains in the terminal and developer logs. Signed-in deployment requires that trusted receipt for the exact exported revision, verifies the bytes again while capturing an immutable source snapshot, and then stops at the existing explicit production-approval boundary. Guest builds stop after validation and remain previewable.
 
 Read-only explorer and verifier sub-agents are not part of the production runtime. A July 2026 paired GLM-5.2 evaluation
 found equal factual success with roughly 2.05× latency and cost for the assisted path, so keeping dormant facet-agent

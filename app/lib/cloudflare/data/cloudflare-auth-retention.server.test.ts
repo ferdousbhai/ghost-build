@@ -1,0 +1,124 @@
+import { createRequire } from 'node:module';
+import type { DatabaseSync as DatabaseSyncInstance, SQLInputValue } from 'node:sqlite';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  pruneCloudflareAuthData,
+  pruneCloudflareAuthDataBestEffort,
+  UNREFERENCED_CREDENTIAL_RETENTION_MS,
+} from './cloudflare-auth-retention.server';
+
+describe('Cloudflare authorization retention', () => {
+  it('prunes each class independently in bounded batches and preserves live credential references', async () => {
+    const { database, db } = retentionDatabase();
+    const now = 2 * UNREFERENCED_CREDENTIAL_RETENTION_MS;
+    const insertState = database.prepare(
+      'INSERT INTO cloudflare_oauth_states (id, status, expires_at) VALUES (?, ?, ?)',
+    );
+    for (const id of ['state-1', 'state-2', 'state-3']) {
+      insertState.run(id, 'pending', now - 1);
+    }
+    insertState.run('state-live', 'pending', now + 1);
+    const insertSession = database.prepare('INSERT INTO cloudflare_auth_sessions (id, expires_at) VALUES (?, ?)');
+    for (const id of ['session-1', 'session-2', 'session-3']) {
+      insertSession.run(id, now - 1);
+    }
+    insertSession.run('session-live', now + 1);
+    const insertCredential = database.prepare(
+      'INSERT INTO cloudflare_credentials (handle, created_at, rotated_at) VALUES (?, ?, ?)',
+    );
+    for (const handle of ['credential-1', 'credential-2', 'credential-3', 'credential-referenced']) {
+      insertCredential.run(handle, 1, null);
+    }
+    insertCredential.run('credential-fresh', now, null);
+    insertCredential.run('credential-recently-rotated', 1, now);
+    database
+      .prepare('INSERT INTO cloudflare_connections (id, credential_handle) VALUES (?, ?)')
+      .run('connection-1', 'credential-referenced');
+
+    await expect(pruneCloudflareAuthData({ db, now, limit: 2 })).resolves.toEqual({
+      oauthStates: 2,
+      authSessions: 2,
+      credentials: 2,
+    });
+    expect(values(database, 'cloudflare_oauth_states', 'id')).toEqual(['state-3', 'state-live']);
+    expect(values(database, 'cloudflare_auth_sessions', 'id')).toEqual(['session-3', 'session-live']);
+    expect(values(database, 'cloudflare_credentials', 'handle')).toEqual([
+      'credential-3',
+      'credential-fresh',
+      'credential-recently-rotated',
+      'credential-referenced',
+    ]);
+
+    await expect(pruneCloudflareAuthData({ db, now, limit: 2 })).resolves.toEqual({
+      oauthStates: 1,
+      authSessions: 1,
+      credentials: 1,
+    });
+    expect(values(database, 'cloudflare_credentials', 'handle')).toContain('credential-referenced');
+  });
+
+  it('contains scheduled pruning failures', async () => {
+    const error = new Error('D1 unavailable');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const db = {
+      prepare: vi.fn(() => ({ bind: vi.fn(() => ({ run: vi.fn() })) })),
+      batch: vi.fn(async () => Promise.reject(error)),
+    } as unknown as D1Database;
+
+    await expect(pruneCloudflareAuthDataBestEffort(db)).resolves.toBeUndefined();
+    expect(log).toHaveBeenCalledWith('Unable to prune expired Cloudflare authorization data', error);
+    log.mockRestore();
+  });
+});
+
+function retentionDatabase(): { database: DatabaseSyncInstance; db: D1Database } {
+  const require = createRequire(import.meta.url);
+  const { DatabaseSync } = require('node:sqlite') as {
+    DatabaseSync: new (location: string) => DatabaseSyncInstance;
+  };
+  const database = new DatabaseSync(':memory:');
+  database.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE cloudflare_oauth_states (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE TABLE cloudflare_auth_sessions (
+      id TEXT PRIMARY KEY,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE TABLE cloudflare_credentials (
+      handle TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL,
+      rotated_at INTEGER
+    );
+    CREATE TABLE cloudflare_connections (
+      id TEXT PRIMARY KEY,
+      credential_handle TEXT REFERENCES cloudflare_credentials(handle)
+    );
+  `);
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(...values: unknown[]) {
+          return {
+            run: async () => {
+              const result = database.prepare(sql).run(...(values as SQLInputValue[]));
+              return { success: true, meta: { changes: Number(result.changes) } } as D1Result;
+            },
+          };
+        },
+      };
+    },
+    batch: async (statements: D1PreparedStatement[]) => Promise.all(statements.map((statement) => statement.run())),
+  } as unknown as D1Database;
+  return { database, db };
+}
+
+function values(database: DatabaseSyncInstance, table: string, column: string): string[] {
+  return database
+    .prepare(`SELECT ${column} AS value FROM ${table} ORDER BY ${column}`)
+    .all()
+    .map((row) => row.value as string);
+}

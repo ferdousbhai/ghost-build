@@ -4,7 +4,7 @@ import type { ActionCallbackData } from 'ghostbuild-agent/message-parser';
 import { makePartId } from 'ghostbuild-agent/partId';
 import { executeTool } from './action-runner/tool-executor';
 import { ActionRunner } from './action-runner';
-import { toolSuccess } from 'ghostbuild-agent/tool-result';
+import { toolSuccess, type GhostbuildToolResult } from 'ghostbuild-agent/tool-result';
 
 vi.mock('./action-runner/tool-executor', () => ({ executeTool: vi.fn() }));
 
@@ -175,7 +175,7 @@ test('reports a tool failure when workspace setup fails', async () => {
 });
 
 function createRunner(
-  onToolCallComplete: ReturnType<typeof vi.fn>,
+  onToolCallComplete: (completion: { result: GhostbuildToolResult; toolCallId: string }) => void,
   waitForWorkspaceReady: () => Promise<unknown> = async () => undefined,
 ) {
   return new ActionRunner(Promise.resolve({} as WebContainer), {
