@@ -12,6 +12,10 @@ updates:
     groups:
       monorepo-dependencies:
         group-by: dependency-name
+    ignore:
+      - dependency-name: '*'
+        update-types:
+          - version-update:semver-major
   - package-ecosystem: github-actions
     directory: /
     schedule:
