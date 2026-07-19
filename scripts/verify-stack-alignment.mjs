@@ -38,6 +38,7 @@ export {
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SANDBOX_IMAGE_DIGEST = 'sha256:23f67e16131b780865a5fa5aa3c8607408a730105c248836409f4e02bb6bf042';
+const SANDBOX_NODE_ENGINE = '>=22.0.0';
 const templateSnapshotPattern = /^template-snapshot-([a-f0-9]{8})\.bin$/;
 const runtimeEnvAccessAllowlist = [
   { pathSuffix: 'app/components/ErrorComponent.tsx', snippet: 'import.meta.env.DEV' },
@@ -229,8 +230,10 @@ export function findSandboxVersionErrors(pkg, dockerfile, toolsPackage, toolsLoc
   if (toolsPackage?.license !== 'Apache-2.0') {
     errors.push('sandbox-tools/package.json must declare the repository Apache-2.0 license.');
   }
-  if (toolsPackage?.engines?.node !== '>=26.0.0') {
-    errors.push('sandbox-tools/package.json must require the repository Node >=26.0.0 runtime.');
+  if (toolsPackage?.engines?.node !== SANDBOX_NODE_ENGINE) {
+    errors.push(
+      `sandbox-tools/package.json must support the pinned Cloudflare Sandbox Node ${SANDBOX_NODE_ENGINE} runtime.`,
+    );
   }
   if (toolsPackage?.packageManager !== packageManager) {
     errors.push(
