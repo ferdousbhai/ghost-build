@@ -123,10 +123,10 @@
   },
   "vars": {
     "CLOUDFLARE_OAUTH_SCOPES": "openid profile email account-settings.read workers-scripts.write d1.write workers-r2.write ai.read",
-    // This mode stages retained byte/object enforcement while bounded legacy R2
-    // reconciliation completes. Exact D1 request limits and edge shedding are
-    // enforced in both modes. Promote to "enforce" after readiness is verified.
-    "CHAT_BACKUP_STORAGE_QUOTA_MODE": "shadow",
+    // Exact tenant-wide request limits, retained byte/object quotas, and edge
+    // shedding are enforced after the bounded legacy R2 reconciliation reaches
+    // its fail-closed readiness marker.
+    "CHAT_BACKUP_STORAGE_QUOTA_MODE": "enforce",
     "CHAT_BACKUP_STORAGE_LIMIT_BYTES": "1073741824",
     "CHAT_BACKUP_STORAGE_LIMIT_OBJECTS": "4096",
     "CHAT_BACKUP_REQUESTS_PER_MINUTE": "120",
