@@ -1,11 +1,19 @@
 import { describe, expect, test, vi } from 'vitest';
 import type { DeploymentPlan } from './deployment-plan';
 import { CloudflareAccountApiError, UserCloudflareAccountApi } from './user-account-api';
+import {
+  APP_AGENT_SECURITY_BOUNDARY_SHA256,
+  DEPLOYMENT_SECURITY_BASELINE_VERSION,
+  TEMPLATE_SOURCE_SHA256,
+} from './deployment-security-baseline';
 
 const plan: DeploymentPlan = {
-  version: 1,
+  version: 2,
   deploymentId: 'deployment-1',
   sourceSha256: 'a'.repeat(64),
+  templateSourceSha256: TEMPLATE_SOURCE_SHA256,
+  securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
+  securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
   billing: {
     infrastructure: 'user_cloudflare_account',
     workersAi: 'user_cloudflare_account',
@@ -13,6 +21,11 @@ const plan: DeploymentPlan = {
   },
   resources: [
     { type: 'd1', logicalName: 'DB', proposedName: 'ghostbuild-deployment-1' },
+    {
+      type: 'd1',
+      logicalName: 'AGENT_SECURITY_DB',
+      proposedName: 'ghostbuild-deployment-1-agent-security',
+    },
     { type: 'r2', logicalName: 'APP_STORAGE', proposedName: 'ghostbuild-deployment-1-storage' },
   ],
 };
@@ -51,6 +64,32 @@ describe('UserCloudflareAccountApi', () => {
       expect.objectContaining({ body: JSON.stringify({ name: 'ghostbuild-deployment-1-storage' }) }),
     );
     expect(request.mock.contexts).toEqual([undefined, undefined, undefined]);
+  });
+
+  test('creates the protected D1 only under its independently approved plan name', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      Response.json({
+        success: true,
+        result: {
+          uuid: 'agent-security-d1-id',
+          name: 'ghostbuild-deployment-1-agent-security',
+        },
+      }),
+    );
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).createD1ForPlan(plan, 'AGENT_SECURITY_DB'),
+    ).resolves.toEqual({
+      id: 'agent-security-d1-id',
+      name: 'ghostbuild-deployment-1-agent-security',
+    });
+    expect(request).toHaveBeenCalledWith(
+      'https://api.cloudflare.com/client/v4/accounts/account-1/d1/database',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ name: 'ghostbuild-deployment-1-agent-security' }),
+      }),
+    );
   });
 
   test('fails closed when Cloudflare returns a different resource or the plan is malformed', async () => {
@@ -94,5 +133,77 @@ describe('UserCloudflareAccountApi', () => {
     await expect(
       new UserCloudflareAccountApi('account-1', 'secret-token', request).createD1ForPlan(plan),
     ).rejects.toThrow('permission denied');
+  });
+
+  test('reads the exact active Worker version, its bindings, and cleanup schedules', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: {
+            deployments: [
+              {
+                id: 'provider-deployment-1',
+                created_on: '2026-07-20T10:00:00Z',
+                versions: [{ percentage: 100, version_id: 'worker-version-1' }],
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: {
+            id: 'worker-version-1',
+            resources: {
+              bindings: [{ name: 'CF_VERSION_METADATA', type: 'version_metadata' }],
+              script: { etag: 'etag-1' },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: { schedules: [{ cron: '0 3 * * *' }] } }));
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).readActiveWorkerDeployment('worker-name'),
+    ).resolves.toEqual({
+      providerDeploymentId: 'provider-deployment-1',
+      workerVersionId: 'worker-version-1',
+      scriptEtag: 'etag-1',
+      bindings: [{ name: 'CF_VERSION_METADATA', type: 'version_metadata' }],
+      crons: ['0 3 * * *'],
+    });
+  });
+
+  test('does not fall back to an older full deployment while the newest deployment is gradual', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      Response.json({
+        success: true,
+        result: {
+          deployments: [
+            {
+              id: 'new-gradual',
+              created_on: '2026-07-20T11:00:00Z',
+              versions: [
+                { percentage: 50, version_id: 'new-a' },
+                { percentage: 50, version_id: 'new-b' },
+              ],
+            },
+            {
+              id: 'old-full',
+              created_on: '2026-07-20T10:00:00Z',
+              versions: [{ percentage: 100, version_id: 'old' }],
+            },
+          ],
+        },
+      }),
+    );
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).readActiveWorkerDeployment('worker-name'),
+    ).rejects.toThrow('ambiguous active Worker deployment');
+    expect(request).toHaveBeenCalledOnce();
   });
 });

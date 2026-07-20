@@ -278,11 +278,13 @@ export function setD1DatabaseId(raw, d1Index, databaseId) {
   return applyEdits(raw, edits);
 }
 
-function updateD1DatabaseId(raw, d1Index, databaseId) {
+function updateD1DatabaseId(raw, d1Index, databaseId, bindingName) {
   const nextRaw = setD1DatabaseId(raw, d1Index, databaseId);
   if (nextRaw !== raw) {
     writeFileSync(configPath, nextRaw);
-    console.log(`Updated wrangler.jsonc D1 database_id to ${databaseId}.`);
+    console.log(
+      `Updated wrangler.jsonc ${bindingName} D1 database_id to ${databaseId}.`,
+    );
   }
   return nextRaw;
 }
@@ -344,11 +346,47 @@ function ensureR2Bucket(r2) {
 
 export function main() {
   const { raw, config } = readConfig();
-  const d1 = getBinding(config, "d1_databases", "DB");
+  const applicationD1 = getBinding(config, "d1_databases", "DB");
+  // This provisioner is also reused by the root Ghostbuild Worker, which has
+  // no generated AppAgent. The generated-app stack verifier requires
+  // AGENT_SECURITY_DB before this script can run from template/package.json.
+  const agentSecurityIndex = config.d1_databases.findIndex(
+    (binding) => binding?.binding === "AGENT_SECURITY_DB",
+  );
+  const agentSecurityD1 =
+    agentSecurityIndex === -1
+      ? undefined
+      : {
+          binding: config.d1_databases[agentSecurityIndex],
+          index: agentSecurityIndex,
+        };
   const r2 = getBinding(config, "r2_buckets", "APP_STORAGE");
 
-  const databaseId = ensureD1Database(d1);
-  updateD1DatabaseId(raw, d1.index, databaseId);
+  const applicationDatabaseId = ensureD1Database(applicationD1);
+  const agentSecurityDatabaseId = agentSecurityD1
+    ? ensureD1Database(agentSecurityD1)
+    : undefined;
+  if (
+    agentSecurityDatabaseId &&
+    applicationDatabaseId !== PLACEHOLDER_D1_ID &&
+    applicationDatabaseId === agentSecurityDatabaseId
+  ) {
+    fail("DB and AGENT_SECURITY_DB must resolve to separate D1 databases.");
+  }
+  const withApplicationDatabase = updateD1DatabaseId(
+    raw,
+    applicationD1.index,
+    applicationDatabaseId,
+    "DB",
+  );
+  if (agentSecurityD1 && agentSecurityDatabaseId) {
+    updateD1DatabaseId(
+      withApplicationDatabase,
+      agentSecurityD1.index,
+      agentSecurityDatabaseId,
+      "AGENT_SECURITY_DB",
+    );
+  }
   ensureR2Bucket(r2);
 }
 

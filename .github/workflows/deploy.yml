@@ -36,6 +36,11 @@ jobs:
       - name: Verify tracked generated files are current
         run: git diff --exit-code
 
+      - name: Validate production runtime variables
+        env:
+          CLOUDFLARE_OAUTH_CLIENT_ID: ${{ vars.CLOUDFLARE_OAUTH_CLIENT_ID }}
+        run: node scripts/deploy-production.mjs --check
+
       - name: Provision production Cloudflare resources
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -44,11 +49,6 @@ jobs:
 
       - name: Verify production Cloudflare config
         run: pnpm run verify:production-config
-
-      - name: Validate production runtime variables
-        env:
-          CLOUDFLARE_OAUTH_CLIENT_ID: ${{ vars.CLOUDFLARE_OAUTH_CLIENT_ID }}
-        run: node scripts/deploy-production.mjs --check
 
       - name: Record pre-migration D1 Time Travel bookmark
         id: d1-bookmark

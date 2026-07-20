@@ -13,6 +13,11 @@ import {
   createCloudflareOrchestrator,
   type CloudflareOrchestrator,
 } from '~/lib/.server/cloudflare/cloudflare-orchestrator';
+import {
+  APP_AGENT_SECURITY_BOUNDARY_SHA256,
+  DEPLOYMENT_SECURITY_BASELINE_VERSION,
+  TEMPLATE_SOURCE_SHA256,
+} from '~/lib/.server/cloudflare/deployment-security-baseline';
 import { InvalidJsonBodyError, PayloadTooLargeError, readJsonBodyWithLimit } from '~/lib/bounded-body';
 
 const requestedCapabilities = ['workers', 'd1', 'r2', 'durable_objects', 'workers_ai'] as const;
@@ -23,6 +28,7 @@ const OAUTH_START_RATE_LIMIT_RETRY_SECONDS = 60;
 const MAX_OAUTH_START_REQUEST_BYTES = 4 * 1024;
 const MAX_OAUTH_CALLBACK_CODE_LENGTH = 4_096;
 const MAX_OAUTH_CALLBACK_TEXT_LENGTH = 2_048;
+const DEPLOYMENT_SECURITY_PAGE_SIZE = 25;
 const startPayloadSchema = z.object({ callbackURL: z.string().url().max(2_048).optional() });
 const callbackPayloadSchema = z
   .object({
@@ -62,6 +68,31 @@ type PendingOAuthState = {
   authenticated_user_id: string | null;
 };
 
+type DeploymentSecurityInventoryRow = {
+  is_managed: number;
+  deployment_id: string | null;
+  production_url: string | null;
+  status: 'current' | 'legacy_candidate' | 'drifted' | 'unreachable' | 'not_found';
+  expected_template_source_sha256: string | null;
+  expected_security_baseline_version: number | null;
+  expected_security_boundary_sha256: string | null;
+  last_checked_at: number;
+  worker_name: string;
+};
+
+type DeploymentSecurityItem = {
+  scope: 'managed' | 'historical';
+  state: 'current' | 'upgrade_available' | 'user_action_required' | 'verification_failed' | 'not_applicable';
+  deploymentId: string | null;
+  productionUrl: string | null;
+  checkedAt: number | null;
+  workerName: string | null;
+  remediation:
+    | { kind: 'replace_from_fresh_builder'; builderPath: '/'; manualCleanupRequired: true }
+    | { kind: 'reauthorize_cloudflare' }
+    | null;
+};
+
 class InvalidCloudflareIntegrationRequestError extends Error {}
 
 export async function cloudflareConnectionStatusAction({
@@ -81,13 +112,171 @@ export async function cloudflareConnectionStatusAction({
     return Response.json({ error: 'An active Cloudflare account is required.' }, { status: 401 });
   }
 
-  return Response.json({
-    connected: true,
-    status: connection.status,
-    accountName: connection.accountName,
-    aiBillingEnabled: connection.aiBillingEnabled,
-    connectedAt: connection.connectedAt,
+  let deploymentSecurityCursor: string | null;
+  try {
+    deploymentSecurityCursor = parseDeploymentSecurityCursor(request);
+  } catch {
+    return Response.json({ error: 'Invalid deployment security cursor.' }, { status: 400 });
+  }
+  const deploymentSecurity = await readOwnerDeploymentSecurity({
+    db: env.DB,
+    userId: session.user.id,
+    connectionId: connection.id,
+    cursor: deploymentSecurityCursor,
   });
+
+  return Response.json(
+    {
+      connected: true,
+      status: connection.status,
+      accountName: connection.accountName,
+      aiBillingEnabled: connection.aiBillingEnabled,
+      connectedAt: connection.connectedAt,
+      deploymentSecurity,
+    },
+    { headers: { 'Cache-Control': 'private, no-store' } },
+  );
+}
+
+async function readOwnerDeploymentSecurity(args: {
+  db: D1Database;
+  userId: string;
+  connectionId: string;
+  cursor: string | null;
+}): Promise<{
+  state: 'current' | 'action_required' | 'checking' | 'none';
+  items: DeploymentSecurityItem[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}> {
+  try {
+    // Tenant scoping happens inside the bounded CTE before any deployment join.
+    // worker_name is the immutable second half of the inventory primary key, so
+    // scheduled status refreshes cannot reorder rows between continuation reads.
+    // The join repeats both ownership predicates so a corrupt inventory link
+    // cannot disclose another user's deployment metadata.
+    const result = await args.db
+      .prepare(
+        `WITH scoped_inventory AS (
+           SELECT managed_deployment_id, status,
+                  expected_template_source_sha256, expected_security_baseline_version,
+                  expected_security_boundary_sha256, last_checked_at, worker_name
+           FROM deployment_security_inventory
+           WHERE user_id = ? AND connection_id = ?
+             AND (? IS NULL OR worker_name > ?)
+           ORDER BY worker_name
+           LIMIT ?
+         )
+         SELECT CASE WHEN inventory.managed_deployment_id IS NULL THEN 0 ELSE 1 END AS is_managed,
+                deployment.id AS deployment_id, deployment.production_url,
+                inventory.status, inventory.expected_template_source_sha256,
+                inventory.expected_security_baseline_version,
+                inventory.expected_security_boundary_sha256, inventory.last_checked_at,
+                inventory.worker_name
+         FROM scoped_inventory AS inventory
+         LEFT JOIN deployments AS deployment
+           ON deployment.id = inventory.managed_deployment_id
+          AND deployment.user_id = ?
+          AND deployment.connection_id = ?
+         ORDER BY inventory.worker_name`,
+      )
+      .bind(
+        args.userId,
+        args.connectionId,
+        args.cursor,
+        args.cursor,
+        DEPLOYMENT_SECURITY_PAGE_SIZE + 1,
+        args.userId,
+        args.connectionId,
+      )
+      .all<DeploymentSecurityInventoryRow>();
+    const hasMore = result.results.length > DEPLOYMENT_SECURITY_PAGE_SIZE;
+    const visibleRows = result.results.slice(0, DEPLOYMENT_SECURITY_PAGE_SIZE);
+    const hasPendingDiscovery =
+      (args.cursor === null && result.results.length === 0) || visibleRows.some((row) => row.last_checked_at <= 0);
+    const items = visibleRows.filter((row) => row.last_checked_at > 0).map(deploymentSecurityItemFromRow);
+    const requiresAction = items.some((item) =>
+      ['upgrade_available', 'user_action_required', 'verification_failed'].includes(item.state),
+    );
+    return {
+      state: requiresAction
+        ? 'action_required'
+        : hasPendingDiscovery || hasMore
+          ? 'checking'
+          : items.some((item) => item.state === 'current')
+            ? 'current'
+            : 'none',
+      items,
+      hasMore,
+      nextCursor: hasMore ? (visibleRows.at(-1)?.worker_name ?? null) : null,
+    };
+  } catch (error) {
+    console.error('Unable to read deployment security status', error);
+    return { state: 'checking', items: [], hasMore: false, nextCursor: null };
+  }
+}
+
+function deploymentSecurityItemFromRow(row: DeploymentSecurityInventoryRow): DeploymentSecurityItem {
+  const scope: DeploymentSecurityItem['scope'] = row.is_managed === 1 ? 'managed' : 'historical';
+  const hasCurrentIdentity =
+    row.expected_template_source_sha256 === TEMPLATE_SOURCE_SHA256 &&
+    row.expected_security_baseline_version === DEPLOYMENT_SECURITY_BASELINE_VERSION &&
+    row.expected_security_boundary_sha256 === APP_AGENT_SECURITY_BOUNDARY_SHA256;
+  const base = {
+    scope,
+    deploymentId: row.deployment_id,
+    productionUrl: safeHttpsUrl(row.production_url),
+    checkedAt: row.last_checked_at > 0 ? row.last_checked_at : null,
+    workerName: safeWorkerName(row.worker_name),
+  };
+
+  if (row.status === 'unreachable') {
+    return { ...base, state: 'verification_failed', remediation: { kind: 'reauthorize_cloudflare' } };
+  }
+  if (row.status === 'not_found') {
+    return { ...base, state: 'not_applicable', remediation: null };
+  }
+  if (row.status === 'drifted') {
+    return { ...base, state: 'user_action_required', remediation: secureReplacementRemediation() };
+  }
+  if (scope === 'managed' && row.status === 'current' && hasCurrentIdentity) {
+    return { ...base, state: 'current', remediation: null };
+  }
+  if (scope === 'managed' && (row.status === 'legacy_candidate' || !hasCurrentIdentity)) {
+    return { ...base, state: 'upgrade_available', remediation: secureReplacementRemediation() };
+  }
+  return { ...base, state: 'user_action_required', remediation: secureReplacementRemediation() };
+}
+
+function parseDeploymentSecurityCursor(request: Request): string | null {
+  const values = new URL(request.url).searchParams.getAll('deploymentSecurityCursor');
+  if (values.length === 0) {
+    return null;
+  }
+  if (values.length !== 1 || safeWorkerName(values[0]!) === null) {
+    throw new InvalidCloudflareIntegrationRequestError();
+  }
+  return values[0]!;
+}
+
+function safeWorkerName(value: string): string | null {
+  return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value) ? value : null;
+}
+
+function secureReplacementRemediation() {
+  return { kind: 'replace_from_fresh_builder', builderPath: '/', manualCleanupRequired: true } as const;
+}
+
+function safeHttpsUrl(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function startCloudflareConnectionAction(args: {

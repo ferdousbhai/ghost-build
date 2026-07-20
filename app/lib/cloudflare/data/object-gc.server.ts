@@ -1,5 +1,10 @@
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { deleteObject } from './object-storage.server';
+import {
+  prepareReleaseChatBackupAttributionsStatement,
+  prepareReleaseChatBackupObjectStatement,
+  releaseUnreferencedChatBackupAttributions,
+} from './chat-backup-quota.server';
 
 export const OBJECT_GC_GRACE_PERIOD_MS = 5 * 60 * 1000;
 export const OBJECT_GC_SWEEP_LIMIT = 8;
@@ -117,6 +122,25 @@ async function deploymentBuildArtifactLeaseUntil(db: D1Database, key: string): P
   return row ? row.updated_at + DEPLOYMENT_BUILD_ARTIFACT_LEASE_MS : null;
 }
 
+async function chatBackupUploadLeaseUntil(db: D1Database, key: string, now: number): Promise<number | null> {
+  const row = await db
+    .prepare(
+      `SELECT MAX(admissions.expires_at) AS expires_at
+       FROM chat_backup_object_attributions AS attributions
+       JOIN chat_backup_admissions AS admissions ON admissions.id = attributions.admission_id
+       WHERE attributions.storage_key = ? AND admissions.status = 'pending'`,
+    )
+    .bind(key)
+    .first<{ expires_at: number }>();
+  if (row?.expires_at === null || row?.expires_at === undefined) {
+    return null;
+  }
+  // Expiry only makes an admission eligible for the reconciler's explicit
+  // pending -> released transition. Until that transition commits, preserve
+  // its objects and residual quota reservation as one atomic unit.
+  return row.expires_at > now ? row.expires_at : now + OBJECT_GC_GRACE_PERIOD_MS;
+}
+
 export async function sweepObjectGcCandidates(
   env: Pick<Env, 'APP_STORAGE' | 'DB'>,
   options: { limit?: number; now?: number } = {},
@@ -135,18 +159,22 @@ export async function sweepObjectGcCandidates(
   let deleted = 0;
 
   for (const candidate of result.results) {
-    if (await isObjectKeyPermanentlyReferenced(env.DB, candidate.storage_key)) {
-      await deleteCandidateIfUnchanged(env.DB, candidate, now);
-      continue;
-    }
-    const leaseUntil = await deploymentBuildArtifactLeaseUntil(env.DB, candidate.storage_key);
+    const leaseUntil = maximumTimestamp(
+      await deploymentBuildArtifactLeaseUntil(env.DB, candidate.storage_key),
+      await chatBackupUploadLeaseUntil(env.DB, candidate.storage_key, now),
+    );
     if (leaseUntil !== null && leaseUntil > now) {
       await rescheduleCandidateIfUnchanged(env.DB, candidate, leaseUntil, now);
       continue;
     }
+    await releaseUnreferencedChatBackupAttributions(env.DB, candidate.storage_key);
+    if (await isObjectKeyPermanentlyReferenced(env.DB, candidate.storage_key)) {
+      await deleteCandidateIfUnchanged(env.DB, candidate, now);
+      continue;
+    }
     try {
       await deleteObject(env as Env, candidate.storage_key);
-      await deleteCandidateIfUnchanged(env.DB, candidate, now);
+      await releaseDeletedCandidateIfUnchanged(env.DB, candidate, now);
       deleted++;
     } catch (error) {
       const retryAt = now + OBJECT_GC_GRACE_PERIOD_MS;
@@ -161,6 +189,16 @@ export async function sweepObjectGcCandidates(
     }
   }
   return deleted;
+}
+
+function maximumTimestamp(left: number | null, right: number | null): number | null {
+  if (left === null) {
+    return right;
+  }
+  if (right === null) {
+    return left;
+  }
+  return Math.max(left, right);
 }
 
 async function rescheduleCandidateIfUnchanged(
@@ -188,13 +226,40 @@ export async function sweepObjectGcCandidatesBestEffort(env: Pick<Env, 'APP_STOR
 }
 
 async function deleteCandidateIfUnchanged(db: D1Database, candidate: ObjectGcCandidateRow, now: number): Promise<void> {
-  await db
+  await prepareDeleteCandidateIfUnchangedStatement(db, candidate, now).run();
+}
+
+async function releaseDeletedCandidateIfUnchanged(
+  db: D1Database,
+  candidate: ObjectGcCandidateRow,
+  now: number,
+): Promise<void> {
+  await db.batch([
+    prepareReleaseChatBackupAttributionsStatement(db, {
+      storageKey: candidate.storage_key,
+      candidateNotBefore: candidate.not_before,
+      now,
+    }),
+    prepareReleaseChatBackupObjectStatement(db, {
+      storageKey: candidate.storage_key,
+      candidateNotBefore: candidate.not_before,
+      now,
+    }),
+    prepareDeleteCandidateIfUnchangedStatement(db, candidate, now),
+  ]);
+}
+
+function prepareDeleteCandidateIfUnchangedStatement(
+  db: D1Database,
+  candidate: ObjectGcCandidateRow,
+  now: number,
+): D1PreparedStatement {
+  return db
     .prepare(
       `DELETE FROM object_gc_candidates
        WHERE storage_key = ? AND not_before = ? AND not_before <= ?`,
     )
-    .bind(candidate.storage_key, candidate.not_before, now)
-    .run();
+    .bind(candidate.storage_key, candidate.not_before, now);
 }
 
 function uniqueKeys(keys: Array<string | null>): string[] {

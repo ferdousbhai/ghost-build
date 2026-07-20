@@ -25,6 +25,9 @@ const mocks = vi.hoisted(() => ({
   ensureD1: vi.fn(),
   ensureR2: vi.fn(),
   getSubdomain: vi.fn(),
+  readActiveWorker: vi.fn(),
+  recordAttestation: vi.fn(),
+  recordSecurityIntent: vi.fn(),
   build: vi.fn(),
   storeBuild: vi.fn(),
   readStoredBuild: vi.fn(),
@@ -54,7 +57,12 @@ vi.mock('./user-account-api', () => ({
     ensureD1ForPlan = mocks.ensureD1;
     ensureR2ForPlan = mocks.ensureR2;
     getWorkersSubdomain = mocks.getSubdomain;
+    readActiveWorkerDeployment = mocks.readActiveWorker;
   },
+}));
+vi.mock('./deployment-security-inventory', () => ({
+  attestManagedDeploymentSecurity: mocks.recordAttestation,
+  recordManagedDeploymentSecurityIntent: mocks.recordSecurityIntent,
 }));
 vi.mock('./deployment-build-executor', () => ({ buildDeploymentSnapshot: mocks.build }));
 vi.mock('./deployment-build-artifact', () => ({
@@ -69,6 +77,11 @@ vi.mock('./deployment-publish-executor', () => ({ publishDeploymentBuild: mocks.
 import { DeploymentConcurrencyLimitError } from './deployment-repository';
 import { DeploymentBuildArtifactError } from './deployment-build-artifact';
 import { buildApprovedDeploymentArtifact, publishApprovedDeploymentArtifact } from './deployment-executor';
+import {
+  APP_AGENT_SECURITY_BOUNDARY_SHA256,
+  DEPLOYMENT_SECURITY_BASELINE_VERSION,
+  TEMPLATE_SOURCE_SHA256,
+} from './deployment-security-baseline';
 
 describe('two-step approved deployment execution', () => {
   beforeEach(() => {
@@ -96,18 +109,30 @@ describe('two-step approved deployment execution', () => {
       generation: 1,
     });
     mocks.resolve.mockResolvedValue('real-user-token');
-    mocks.ensureD1.mockResolvedValue({ id: 'd1-id', name: 'ghostbuild-deployment-1' });
+    mocks.ensureD1.mockImplementation(async (_plan: unknown, logicalName?: string) =>
+      logicalName === 'AGENT_SECURITY_DB'
+        ? { id: 'agent-security-d1-id', name: 'ghostbuild-deployment-1-agent-security' }
+        : { id: 'd1-id', name: 'ghostbuild-deployment-1' },
+    );
     mocks.ensureR2.mockResolvedValue({
       id: 'ghostbuild-deployment-1-storage',
       name: 'ghostbuild-deployment-1-storage',
     });
     mocks.getSubdomain.mockResolvedValue('user-subdomain');
+    mocks.readActiveWorker.mockResolvedValue({
+      providerDeploymentId: 'provider-deployment-1',
+      workerVersionId: 'worker-version-1',
+      bindings: [],
+      crons: [],
+    });
+    mocks.recordAttestation.mockResolvedValue({ status: 'current' });
+    mocks.recordSecurityIntent.mockResolvedValue(undefined);
     mocks.build.mockResolvedValue(new Uint8Array([1]));
     mocks.storeBuild.mockResolvedValue(receipt);
     mocks.readStoredBuild.mockResolvedValue(null);
     mocks.loadBuild.mockResolvedValue(new Uint8Array([1]));
     mocks.buildKey.mockReturnValue('build-key');
-    mocks.publish.mockResolvedValue(undefined);
+    mocks.publish.mockResolvedValue({ workerVersionId: 'worker-version-1' });
     mocks.record.mockResolvedValue(undefined);
     mocks.transition.mockResolvedValue(undefined);
     mocks.retainBuildReference.mockResolvedValue(undefined);
@@ -127,11 +152,53 @@ describe('two-step approved deployment execution', () => {
     expect(mocks.retainBuildReference.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.readStoredBuild.mock.invocationCallOrder[0],
     );
+    expect(mocks.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        project: {
+          type: 'web_app',
+          bindings: { ai: true, d1: true, r2: true, appAgent: true },
+        },
+      }),
+    );
     expect(mocks.build.mock.invocationCallOrder[0]).toBeLessThan(mocks.ensureD1.mock.invocationCallOrder[0]);
     expect(mocks.storeBuild.mock.invocationCallOrder[0]).toBeLessThan(mocks.ensureD1.mock.invocationCallOrder[0]);
     expect(mocks.loadBuild.mock.invocationCallOrder[0]).toBeLessThan(mocks.ensureD1.mock.invocationCallOrder[0]);
     expect(mocks.publish).toHaveBeenCalledWith(
-      expect.objectContaining({ d1DatabaseId: 'd1-id', r2BucketName: 'ghostbuild-deployment-1-storage' }),
+      expect.objectContaining({
+        d1DatabaseId: 'd1-id',
+        agentSecurityD1DatabaseId: 'agent-security-d1-id',
+        r2BucketName: 'ghostbuild-deployment-1-storage',
+      }),
+    );
+    expect(mocks.ensureD1).toHaveBeenNthCalledWith(1, expect.anything());
+    expect(mocks.ensureD1).toHaveBeenNthCalledWith(2, expect.anything(), 'AGENT_SECURITY_DB');
+    expect(mocks.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resourceType: 'd1',
+        logicalName: 'AGENT_SECURITY_DB',
+        providerResourceId: 'agent-security-d1-id',
+      }),
+    );
+    expect(mocks.recordAttestation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workerName: 'ghostbuild-deployment-1',
+        accountId: 'account-1',
+        accountApi: expect.anything(),
+        expectedPublishedVersionId: 'worker-version-1',
+        expectedAgentSecurityD1DatabaseId: 'agent-security-d1-id',
+      }),
+    );
+    expect(mocks.recordSecurityIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workerName: 'ghostbuild-deployment-1',
+        accountId: 'account-1',
+      }),
+    );
+    expect(mocks.recordSecurityIntent.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.publish.mock.invocationCallOrder[0],
+    );
+    expect(mocks.recordAttestation.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.transition.mock.invocationCallOrder.at(-1)!,
     );
     expect(mocks.transition.mock.calls.map((call) => [call[0].expectedStatus, call[0].nextStatus])).toEqual([
       ['provisioning', 'building'],
@@ -340,6 +407,32 @@ describe('two-step approved deployment execution', () => {
         errorCode: 'cloudflare_cleanup_required',
       }),
     );
+    expect(mocks.recordSecurityIntent).toHaveBeenCalledOnce();
+    expect(mocks.recordSecurityIntent.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.publish.mock.invocationCallOrder[0],
+    );
+    expect(mocks.record).not.toHaveBeenCalledWith(
+      expect.objectContaining({ resourceType: 'worker', logicalName: 'app' }),
+    );
+  });
+
+  test('fails closed when the published Worker cannot be attested', async () => {
+    mocks.recordAttestation.mockRejectedValue(new Error('Published Worker is unavailable for security attestation.'));
+
+    await expect(executeBoth()).rejects.toThrow('unavailable for security attestation');
+
+    expect(mocks.recordAttestation).toHaveBeenCalledOnce();
+    expect(mocks.recordSecurityIntent).toHaveBeenCalledOnce();
+    expect(mocks.recordSecurityIntent.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.recordAttestation.mock.invocationCallOrder[0],
+    );
+    expect(mocks.transition).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        expectedStatus: 'deploying',
+        nextStatus: 'failed',
+        errorCode: 'cloudflare_cleanup_required',
+      }),
+    );
   });
 
   test('reconciles a restart after the deploying checkpoint with deterministic provider and Worker names', async () => {
@@ -445,9 +538,16 @@ function deployment(status: Deployment['status'], executionGeneration = 1): Depl
     snapshotKey: 'snapshot-1',
     status,
     plan: {
-      version: 1,
+      version: 2,
       deploymentId: 'deployment-1',
       sourceSha256: 'a'.repeat(64),
+      templateSourceSha256: TEMPLATE_SOURCE_SHA256,
+      securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
+      securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
+      project: {
+        type: 'web_app',
+        bindings: { ai: true, d1: true, r2: true, appAgent: true },
+      },
       billing: {
         infrastructure: 'user_cloudflare_account',
         workersAi: 'user_cloudflare_account',
@@ -456,6 +556,11 @@ function deployment(status: Deployment['status'], executionGeneration = 1): Depl
       resources: [
         { type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-deployment-1' },
         { type: 'd1', logicalName: 'DB', proposedName: 'ghostbuild-deployment-1' },
+        {
+          type: 'd1',
+          logicalName: 'AGENT_SECURITY_DB',
+          proposedName: 'ghostbuild-deployment-1-agent-security',
+        },
         { type: 'r2', logicalName: 'APP_STORAGE', proposedName: 'ghostbuild-deployment-1-storage' },
       ],
     },

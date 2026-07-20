@@ -27,8 +27,15 @@ type ChatInsertArgs = {
 };
 
 export type ChatInsertAuthorization =
-  | { kind: 'legacy-share'; code: string; parentChatId: string }
-  | { kind: 'social-share'; code: string; parentChatId: string };
+  | { kind: 'legacy-share'; code: string; parentChatId: string; quotaAdmissionId?: string }
+  | { kind: 'social-share'; code: string; parentChatId: string; quotaAdmissionId?: string };
+
+type ChatInsertTransactionExtension = {
+  prefixStatements: D1PreparedStatement[];
+  suffixStatements: D1PreparedStatement[];
+  validateResults: (prefixResults: D1Result[], suffixResults: D1Result[]) => boolean;
+  verifyReceipt: () => Promise<boolean>;
+};
 
 type ChatMessageStateInsertArgs = {
   id?: string;
@@ -49,12 +56,14 @@ export async function insertChatWithState(
   chat: ChatInsertArgs,
   state: Omit<ChatMessageStateInsertArgs, 'chatId'>,
   authorization?: ChatInsertAuthorization,
+  transaction?: ChatInsertTransactionExtension,
 ): Promise<string> {
   const stateId = state.id ?? crypto.randomUUID();
   const transitionToken = crypto.randomUUID();
   let results: D1Result[];
   try {
     results = await db.batch([
+      ...(transaction?.prefixStatements ?? []),
       prepareInsertChat(db, chat, false, authorization),
       prepareInsertChatTranscript(db, {
         chatId: chat.id,
@@ -67,6 +76,7 @@ export async function insertChatWithState(
         transitionToken,
       }),
       prepareInsertChatMessageState(db, { ...state, id: stateId, chatId: chat.id }, chat.creatorId),
+      ...(transaction?.suffixStatements ?? []),
     ]);
   } catch (error) {
     try {
@@ -121,7 +131,7 @@ export async function insertChatWithState(
           digest,
         )
         .first<{ found: number }>();
-      if (committed) {
+      if (committed && (!transaction || (await transaction.verifyReceipt()))) {
         return stateId;
       }
     } catch {
@@ -129,7 +139,11 @@ export async function insertChatWithState(
     }
     throw error;
   }
-  if (results.some((result) => result.meta.changes !== 1)) {
+  const prefixCount = transaction?.prefixStatements.length ?? 0;
+  const coreResults = results.slice(prefixCount, prefixCount + 3);
+  const suffixResults = results.slice(prefixCount + 3);
+  const extensionValid = !transaction || transaction.validateResults(results.slice(0, prefixCount), suffixResults);
+  if (coreResults.some((result) => result.meta.changes !== 1) || !extensionValid) {
     if (authorization) {
       throw new DataNotFoundError('Invalid share link');
     }
@@ -230,6 +244,12 @@ function prepareInsertChat(
                AND social_shares.is_shared = 1 AND parent_chat.is_deleted = 0
            )`
         : '';
+  const quotaAuthorizationSql = authorization?.quotaAdmissionId
+    ? `AND EXISTS (
+         SELECT 1 FROM chat_backup_admissions
+         WHERE id = ? AND owner_id = ? AND chat_id = ? AND status = 'pending'
+       )`
+    : '';
   return db
     .prepare(
       `INSERT INTO chats (
@@ -239,6 +259,7 @@ function prepareInsertChat(
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE NOT EXISTS (SELECT 1 FROM chats WHERE initial_id = ?)
       ${authorizationSql}
+      ${quotaAuthorizationSql}
       ${ignoreInitialConflict ? 'ON CONFLICT DO NOTHING' : ''}`,
     )
     .bind(
@@ -254,6 +275,7 @@ function prepareInsertChat(
       0,
       args.initialId,
       ...(authorization ? [authorization.code, authorization.parentChatId] : []),
+      ...(authorization?.quotaAdmissionId ? [authorization.quotaAdmissionId, args.creatorId, args.id] : []),
     );
 }
 

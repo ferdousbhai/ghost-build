@@ -14,6 +14,9 @@ const feedbackRequestSchema = z.object({
 });
 
 export async function feedbackAction({ request, env }: { request: Request; env: Env }): Promise<Response> {
+  if (request.headers.get('Origin') !== new URL(request.url).origin) {
+    return Response.json({ error: 'Invalid request origin.' }, { status: 403 });
+  }
   let rawBody: unknown;
   try {
     rawBody = await readJsonBodyWithLimit(request, MAX_FEEDBACK_REQUEST_BYTES, 'Feedback request');

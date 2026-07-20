@@ -32,7 +32,11 @@ function createEnv(changes = 1) {
 function request(body: unknown) {
   return new Request('https://ghostbuild.dev/api/feedback', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'CF-Connecting-IP': '192.0.2.1' },
+    headers: {
+      'content-type': 'application/json',
+      'CF-Connecting-IP': '192.0.2.1',
+      Origin: 'https://ghostbuild.dev',
+    },
     body: JSON.stringify(body),
   });
 }
@@ -41,6 +45,29 @@ describe('feedbackAction', () => {
   beforeEach(() => {
     getAuthSession.mockReset();
     getAuthSession.mockResolvedValue(null);
+  });
+
+  it('rejects cross-origin submissions before parsing, authentication, or storage', async () => {
+    const { env, prepare } = createEnv();
+    const crossOrigin = request({ category: 'idea', message: 'Cross-origin spam.' });
+    crossOrigin.headers.set('Origin', 'https://attacker.example');
+
+    const response = await feedbackAction({ request: crossOrigin, env });
+
+    expect(response.status).toBe(403);
+    expect(getAuthSession).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it('rejects requests without a browser origin', async () => {
+    const { env, prepare } = createEnv();
+    const missingOrigin = request({ category: 'idea', message: 'Missing origin.' });
+    missingOrigin.headers.delete('Origin');
+
+    const response = await feedbackAction({ request: missingOrigin, env });
+
+    expect(response.status).toBe(403);
+    expect(prepare).not.toHaveBeenCalled();
   });
 
   it('rejects invalid feedback', async () => {

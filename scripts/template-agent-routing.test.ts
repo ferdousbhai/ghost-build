@@ -7,7 +7,7 @@ vi.mock('../template/src/agent-security', () => ({
   resolveAgentSession: vi.fn(),
 }));
 
-const env = { DB: {}, AppAgent: {} } as unknown as AppAgentRoutingEnv;
+const env = { AGENT_SECURITY_DB: {}, AppAgent: {} } as unknown as AppAgentRoutingEnv;
 const resolveAppAgent = vi.fn();
 
 beforeEach(() => {
@@ -84,7 +84,7 @@ describe('generated app server agent routing', () => {
       method: 'POST',
     });
     await expect(routeAppAgentRequest(request, env, resolveAppAgent)).resolves.toBe(expected);
-    expect(handleAgentSessionBootstrap).toHaveBeenCalledWith(request, env.DB);
+    expect(handleAgentSessionBootstrap).toHaveBeenCalledWith(request, env.AGENT_SECURITY_DB);
     await expect(routeAppAgentRequest(new Request('https://app.example/'), env, resolveAppAgent)).resolves.toBeNull();
   });
 });

@@ -1,11 +1,15 @@
 import { getSandbox, type ExecResult } from '@cloudflare/sandbox';
 import type { DeploymentSandbox } from './deployment-sandbox';
+import { APP_AGENT_PROTECTED_FILE_SHA256 } from './deployment-security-baseline';
+import type { DeploymentProjectProfile } from './deployment-snapshot';
 
 const PROJECT_DIR = '/workspace/project';
 const SOURCE_DIR = '/workspace/source';
 const SOURCE_ARCHIVE = '/workspace/source.zip';
 const BUILD_ARCHIVE = '/workspace/build.tar.gz';
 const PACKAGE_DIR = '/workspace/package';
+const TRUSTED_BIN_DIR = '/workspace/ghostbuild-trusted-bin';
+const TRUSTED_INPUT_DIR = '/workspace/ghostbuild-approved-inputs';
 const MAX_ERROR_OUTPUT = 4_000;
 const MAX_EXPANDED_KIB = 250 * 1024;
 const MAX_EXPANDED_BYTES = MAX_EXPANDED_KIB * 1024;
@@ -43,6 +47,7 @@ type BuildStage =
   | 'type checking'
   | 'application build'
   | 'linting'
+  | 'security boundary verification'
   | 'build packaging'
   | 'build download';
 
@@ -51,6 +56,7 @@ export async function buildDeploymentSnapshot(args: {
   deploymentId: string;
   snapshotKey: string;
   expectedSourceSha256: string;
+  project: DeploymentProjectProfile;
 }): Promise<Uint8Array<ArrayBuffer>> {
   if (!args.env.DeploymentSandbox) {
     throw new DeploymentBuildError('Deployment Sandbox binding is unavailable.');
@@ -62,6 +68,9 @@ export async function buildDeploymentSnapshot(args: {
   if (!/^[a-f0-9]{64}$/.test(args.expectedSourceSha256)) {
     throw new DeploymentBuildError('Approved deployment source digest is invalid.');
   }
+  if (args.project.bindings.ai && !args.project.bindings.appAgent) {
+    throw new DeploymentBuildError('Approved deployment profile contains an unmediated Workers AI binding.');
+  }
 
   const sandboxId = `build-${args.deploymentId}`.toLowerCase();
   const sandbox = getSandbox(args.env.DeploymentSandbox as DurableObjectNamespace<DeploymentSandbox>, sandboxId, {
@@ -72,9 +81,19 @@ export async function buildDeploymentSnapshot(args: {
   let stage: BuildStage = 'sandbox initialization';
   try {
     await requireSuccess(
-      await sandbox.exec(`rm -rf ${PROJECT_DIR} ${SOURCE_DIR} ${SOURCE_ARCHIVE} ${BUILD_ARCHIVE} ${PACKAGE_DIR}`, {
-        timeout: BUILD_TIMEOUT_MS.workspaceReset,
-      }),
+      await sandbox.exec(
+        `rm -rf ${PROJECT_DIR} ${SOURCE_DIR} ${SOURCE_ARCHIVE} ${BUILD_ARCHIVE} ${PACKAGE_DIR} ` +
+          `${TRUSTED_BIN_DIR} ${TRUSTED_INPUT_DIR}`,
+        { timeout: BUILD_TIMEOUT_MS.workspaceReset },
+      ),
+    );
+    const systemNode = requireSystemExecutable(
+      await sandbox.exec('command -v node', { timeout: BUILD_TIMEOUT_MS.workspacePolicy }),
+      'Node.js',
+    );
+    const systemPnpm = requireSystemExecutable(
+      await sandbox.exec('command -v pnpm', { timeout: BUILD_TIMEOUT_MS.workspacePolicy }),
+      'pnpm',
     );
     await sandbox.mkdir(PROJECT_DIR, { recursive: true });
     await sandbox.mkdir(SOURCE_DIR, { recursive: true });
@@ -115,33 +134,126 @@ export async function buildDeploymentSnapshot(args: {
         timeout: BUILD_TIMEOUT_MS.workspacePolicy,
       }),
     );
+    const approvedInputDigests = requireApprovedInputDigests(
+      await sandbox.exec('sha256sum package.json pnpm-lock.yaml wrangler.jsonc pnpm-workspace.yaml', {
+        cwd: PROJECT_DIR,
+        timeout: BUILD_TIMEOUT_MS.workspacePolicy,
+      }),
+    );
+    const requiresAppAgentSecurity = args.project.bindings.appAgent;
+    const protectedFileDigests = requiresAppAgentSecurity ? APP_AGENT_PROTECTED_FILE_SHA256 : {};
+    const projectBoundaryCheck = securityBoundaryVerificationCommand(approvedInputDigests, protectedFileDigests, '.');
+    await requireSuccess(
+      await sandbox.exec(projectBoundaryCheck, {
+        cwd: PROJECT_DIR,
+        timeout: BUILD_TIMEOUT_MS.packageValidation,
+      }),
+    );
+    await requireSuccess(
+      await sandbox.exec(trustedInputCopyCommand(protectedFileDigests), {
+        cwd: PROJECT_DIR,
+        timeout: BUILD_TIMEOUT_MS.sourceCopy,
+      }),
+    );
+    const trustedBoundaryCheck = securityBoundaryVerificationCommand(
+      approvedInputDigests,
+      protectedFileDigests,
+      TRUSTED_INPUT_DIR,
+    );
+    await requireSuccess(
+      await sandbox.exec(trustedBoundaryCheck, {
+        timeout: BUILD_TIMEOUT_MS.packageValidation,
+      }),
+    );
     stage = 'dependency installation';
     await requireSuccess(
       await sandbox.exec(
-        'pnpm install --frozen-lockfile --ignore-scripts=false --ignore-pnpmfile --registry=https://registry.npmjs.org/',
+        `${shellQuote(systemPnpm)} install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile ` +
+          '--registry=https://registry.npmjs.org/',
         { cwd: PROJECT_DIR, timeout: BUILD_TIMEOUT_MS.install },
       ),
     );
+    await requireSuccess(
+      await sandbox.exec(
+        `rm -rf ${TRUSTED_BIN_DIR} && mkdir -p ${TRUSTED_BIN_DIR} && ` +
+          `ln -s ${shellQuote(systemNode)} ${TRUSTED_BIN_DIR}/node && ` +
+          `ln -s ${shellQuote(systemPnpm)} ${TRUSTED_BIN_DIR}/pnpm && ` +
+          `ln -s ${PROJECT_DIR}/node_modules/wrangler/bin/wrangler.js ${TRUSTED_BIN_DIR}/wrangler`,
+        { timeout: BUILD_TIMEOUT_MS.workspacePolicy },
+      ),
+    );
+    const trustedEnv = {
+      PATH: `${TRUSTED_BIN_DIR}:${systemNode.slice(0, systemNode.lastIndexOf('/'))}:/usr/bin:/bin`,
+    };
+    const verifiedEntrypoint = (command: string) => `${projectBoundaryCheck} && ${trustedBoundaryCheck} && ${command}`;
     // Type checking regenerates deployment-owned artifacts such as
     // worker-configuration.d.ts and src/routeTree.gen.ts. A browser export may
     // legitimately omit either generated file, so prepare them before the
     // stack verifier enforces the complete production contract.
-    for (const [command, scriptStage, timeout] of [
-      ['run typecheck', 'type checking', BUILD_TIMEOUT_MS.typecheck],
-      ['run verify:stack', 'stack verification', BUILD_TIMEOUT_MS.stackVerification],
-      ['run build', 'application build', BUILD_TIMEOUT_MS.build],
-      ['run lint', 'linting', BUILD_TIMEOUT_MS.lint],
-    ] as const) {
+    const webAppEntrypoints = [
+      [
+        `${shellQuote(systemNode)} ${TRUSTED_INPUT_DIR}/scripts/cf-typegen.mjs`,
+        'type checking',
+        BUILD_TIMEOUT_MS.typecheck,
+      ],
+      [
+        `${shellQuote(systemNode)} node_modules/@tanstack/router-cli/bin/tsr.cjs generate`,
+        'type checking',
+        BUILD_TIMEOUT_MS.typecheck,
+      ],
+      [
+        `${shellQuote(systemNode)} node_modules/typescript/bin/tsc -p . --noEmit --pretty false`,
+        'type checking',
+        BUILD_TIMEOUT_MS.typecheck,
+      ],
+      [
+        `${shellQuote(systemNode)} scripts/verify-stack-alignment.mjs`,
+        'stack verification',
+        BUILD_TIMEOUT_MS.stackVerification,
+      ],
+      [`${shellQuote(systemNode)} scripts/verify-production-licenses.mjs`, 'application build', BUILD_TIMEOUT_MS.build],
+      [`${shellQuote(systemNode)} node_modules/vite/bin/vite.js build`, 'application build', BUILD_TIMEOUT_MS.build],
+      [
+        `${shellQuote(systemNode)} scripts/verify-production-licenses.mjs --built`,
+        'application build',
+        BUILD_TIMEOUT_MS.build,
+      ],
+      [
+        `${shellQuote(systemNode)} node_modules/eslint/bin/eslint.js src vite.config.ts ` +
+          'scripts/verify-production-licenses.mjs scripts/lib/runtime-module-security.ts ' +
+          'scripts/lib/production-license-artifact.mjs --max-warnings=0',
+        'linting',
+        BUILD_TIMEOUT_MS.lint,
+      ],
+    ] as const;
+    const workerEntrypoints = [
+      [`${shellQuote(systemPnpm)} run typecheck`, 'type checking', BUILD_TIMEOUT_MS.typecheck],
+      [`${shellQuote(systemPnpm)} run verify:stack`, 'stack verification', BUILD_TIMEOUT_MS.stackVerification],
+      [`${shellQuote(systemPnpm)} run build`, 'application build', BUILD_TIMEOUT_MS.build],
+      [`${shellQuote(systemPnpm)} run lint`, 'linting', BUILD_TIMEOUT_MS.lint],
+    ] as const;
+    for (const [command, scriptStage, timeout] of requiresAppAgentSecurity ? webAppEntrypoints : workerEntrypoints) {
       stage = scriptStage;
-      await requireSuccess(await sandbox.exec(`pnpm ${command}`, { cwd: PROJECT_DIR, timeout }));
+      await requireSuccess(
+        await sandbox.exec(verifiedEntrypoint(command), { cwd: PROJECT_DIR, env: trustedEnv, timeout }),
+      );
     }
-    stage = 'build packaging';
     await sandbox.killAllProcesses();
+    stage = 'security boundary verification';
+    await requireSuccess(
+      await sandbox.exec(`${projectBoundaryCheck} && ${trustedBoundaryCheck}`, {
+        cwd: PROJECT_DIR,
+        timeout: BUILD_TIMEOUT_MS.packageValidation,
+      }),
+    );
+    stage = 'build packaging';
     await sandbox.mkdir(PACKAGE_DIR, { recursive: true });
     await requireSuccess(
       await sandbox.exec(
         `cp -a ${PROJECT_DIR}/dist ${PROJECT_DIR}/package.json ${PROJECT_DIR}/pnpm-lock.yaml ${PACKAGE_DIR}/ && ` +
-          `if [ -d ${PROJECT_DIR}/migrations ]; then cp -a ${PROJECT_DIR}/migrations ${PACKAGE_DIR}/; fi`,
+          `if [ -d ${PROJECT_DIR}/migrations ]; then cp -a ${PROJECT_DIR}/migrations ${PACKAGE_DIR}/; fi && ` +
+          `if [ -d ${PROJECT_DIR}/agent-security-migrations ]; then ` +
+          `cp -a ${PROJECT_DIR}/agent-security-migrations ${PACKAGE_DIR}/; fi`,
         { timeout: BUILD_TIMEOUT_MS.packageCopy },
       ),
     );
@@ -180,6 +292,66 @@ export async function buildDeploymentSnapshot(args: {
   } finally {
     await sandbox.destroy().catch((error) => console.error('Unable to destroy deployment build sandbox', error));
   }
+}
+
+const APPROVED_INPUT_PATHS = ['package.json', 'pnpm-lock.yaml', 'wrangler.jsonc', 'pnpm-workspace.yaml'] as const;
+
+function requireSystemExecutable(result: ExecResult, name: string): string {
+  if (!result.success) {
+    throw new DeploymentBuildError(`The production build image does not provide ${name}.`);
+  }
+  const path = result.stdout.trim();
+  if (!/^\/[A-Za-z0-9._+/-]+$/.test(path)) {
+    throw new DeploymentBuildError(`The production build image returned an invalid ${name} path.`);
+  }
+  return path;
+}
+
+function requireApprovedInputDigests(result: ExecResult): ReadonlyMap<string, string> {
+  if (!result.success) {
+    throw new DeploymentBuildError('Unable to capture approved deployment build inputs.');
+  }
+  const digests = new Map<string, string>();
+  for (const line of result.stdout.trim().split('\n')) {
+    const match = /^([a-f0-9]{64})  (package\.json|pnpm-lock\.yaml|wrangler\.jsonc|pnpm-workspace\.yaml)$/.exec(line);
+    if (!match || digests.has(match[2])) {
+      throw new DeploymentBuildError('Approved deployment build input digests are invalid.');
+    }
+    digests.set(match[2], match[1]);
+  }
+  if (digests.size !== APPROVED_INPUT_PATHS.length) {
+    throw new DeploymentBuildError('Approved deployment build input digests are incomplete.');
+  }
+  return digests;
+}
+
+function securityBoundaryVerificationCommand(
+  approvedInputDigests: ReadonlyMap<string, string>,
+  protectedFileDigests: Readonly<Record<string, string>>,
+  root: string,
+): string {
+  const checks = [
+    ...APPROVED_INPUT_PATHS.map((path) => exactFileDigestCheck(`${root}/${path}`, approvedInputDigests.get(path)!)),
+    ...Object.entries(protectedFileDigests).map(([path, digest]) => exactFileDigestCheck(`${root}/${path}`, digest)),
+  ];
+  return checks.join(' && ');
+}
+
+function trustedInputCopyCommand(protectedFileDigests: Readonly<Record<string, string>>): string {
+  const paths = [...APPROVED_INPUT_PATHS, ...Object.keys(protectedFileDigests)].toSorted();
+  return (
+    `rm -rf ${TRUSTED_INPUT_DIR} && mkdir -p ${TRUSTED_INPUT_DIR} && ` +
+    `cp --parents ${paths.map(shellQuote).join(' ')} ${TRUSTED_INPUT_DIR} && ` +
+    `ln -s ${PROJECT_DIR}/node_modules ${TRUSTED_INPUT_DIR}/node_modules && chmod -R a-w ${TRUSTED_INPUT_DIR}`
+  );
+}
+
+function exactFileDigestCheck(path: string, digest: string): string {
+  return `test "$(sha256sum ${shellQuote(path)} | cut -d ' ' -f1)" = "${digest}"`;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> {

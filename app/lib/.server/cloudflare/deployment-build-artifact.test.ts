@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import type { Deployment } from './deployment-repository';
 import {
+  APP_AGENT_SECURITY_BOUNDARY_SHA256,
+  DEPLOYMENT_SECURITY_BASELINE_VERSION,
+  TEMPLATE_SOURCE_SHA256,
+} from './deployment-security-baseline';
+import {
   deploymentBuildArtifactKey,
   loadDeploymentBuildArtifact,
   readStoredDeploymentBuildReceipt,
@@ -214,15 +219,30 @@ function deployment(): Deployment {
     snapshotKey: 'snapshot-1',
     status: 'provisioning',
     plan: {
-      version: 1,
+      version: 2,
       deploymentId: 'deployment-1',
       sourceSha256: 'a'.repeat(64),
+      templateSourceSha256: TEMPLATE_SOURCE_SHA256,
+      securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
+      securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
+      project: {
+        type: 'web_app',
+        bindings: { ai: true, d1: true, r2: true, appAgent: true },
+      },
       billing: {
         infrastructure: 'user_cloudflare_account',
         workersAi: 'user_cloudflare_account',
         workersPaidUpgrade: 'explicit_user_authorization_required',
       },
-      resources: [{ type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-deployment-1' }],
+      resources: [
+        { type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-deployment-1' },
+        { type: 'd1', logicalName: 'DB', proposedName: 'ghostbuild-deployment-1' },
+        {
+          type: 'd1',
+          logicalName: 'AGENT_SECURITY_DB',
+          proposedName: 'ghostbuild-deployment-1-agent-security',
+        },
+      ],
     },
     planDigest: 'b'.repeat(64),
     approvedDigest: 'b'.repeat(64),

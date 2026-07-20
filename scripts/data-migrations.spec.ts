@@ -328,6 +328,92 @@ describe('Cloudflare data deduplication migrations', () => {
     expect(plan.some(({ detail }) => detail.includes('idx_chats_creator_deleted_history'))).toBe(true);
   });
 
+  test('seeds deployment security inventory from the newest managed redeploy and queues historical discovery', () => {
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } = require('node:sqlite') as {
+      DatabaseSync: new (location: string) => DatabaseSyncInstance;
+    };
+    const db = new DatabaseSync(':memory:');
+    db.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE "user" (id TEXT PRIMARY KEY);
+      CREATE TABLE cloudflare_connections (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES "user"(id),
+        account_id TEXT NOT NULL,
+        status TEXT NOT NULL
+      );
+      CREATE TABLE deployments (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES "user"(id),
+        connection_id TEXT NOT NULL REFERENCES cloudflare_connections(id),
+        status TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE deployment_resources (
+        deployment_id TEXT NOT NULL REFERENCES deployments(id),
+        resource_type TEXT NOT NULL,
+        logical_name TEXT NOT NULL,
+        provider_resource_id TEXT NOT NULL
+      );
+      INSERT INTO "user" (id) VALUES ('owner-1'), ('owner-2');
+      INSERT INTO cloudflare_connections (id, user_id, account_id, status) VALUES
+        ('connection-1', 'owner-1', 'account-1', 'active'),
+        ('connection-2', 'owner-2', 'account-2', 'active');
+      INSERT INTO deployments (id, user_id, connection_id, status, updated_at) VALUES
+        ('deployment-old', 'owner-1', 'connection-1', 'succeeded', 10),
+        ('deployment-new-a', 'owner-1', 'connection-1', 'succeeded', 20),
+        ('deployment-new-z', 'owner-1', 'connection-1', 'succeeded', 20),
+        ('deployment-failed-after-publish', 'owner-2', 'connection-2', 'failed', 30);
+      INSERT INTO deployment_resources (deployment_id, resource_type, logical_name, provider_resource_id) VALUES
+        ('deployment-old', 'worker', 'app', 'ghostbuild-managed-app'),
+        ('deployment-new-a', 'worker', 'app', 'ghostbuild-managed-app'),
+        ('deployment-new-z', 'worker', 'app', 'ghostbuild-managed-app'),
+        ('deployment-failed-after-publish', 'worker', 'app', 'ghostbuild-failed-app');
+    `);
+
+    db.exec(migration('0021_deployment_security_inventory.sql'));
+
+    expect(
+      db
+        .prepare(
+          `SELECT connection_id, worker_name, managed_deployment_id, status, last_checked_at
+           FROM deployment_security_inventory ORDER BY connection_id, worker_name`,
+        )
+        .all(),
+    ).toEqual([
+      {
+        connection_id: 'connection-1',
+        worker_name: 'ghostbuild-cloudflare-app',
+        managed_deployment_id: null,
+        status: 'legacy_candidate',
+        last_checked_at: 0,
+      },
+      {
+        connection_id: 'connection-1',
+        worker_name: 'ghostbuild-managed-app',
+        managed_deployment_id: 'deployment-new-z',
+        status: 'legacy_candidate',
+        last_checked_at: 0,
+      },
+      {
+        connection_id: 'connection-2',
+        worker_name: 'ghostbuild-cloudflare-app',
+        managed_deployment_id: null,
+        status: 'legacy_candidate',
+        last_checked_at: 0,
+      },
+      {
+        connection_id: 'connection-2',
+        worker_name: 'ghostbuild-failed-app',
+        managed_deployment_id: 'deployment-failed-after-publish',
+        status: 'legacy_candidate',
+        last_checked_at: 0,
+      },
+    ]);
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
   test('indexes every bounded Cloudflare authorization retention predicate', async () => {
     const require = createRequire(import.meta.url);
     const { DatabaseSync } = require('node:sqlite') as {

@@ -1,6 +1,8 @@
 import JSZip from 'jszip';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildDeploymentPlan, buildDeploymentPlanFromSource, deploymentPlanResourceName } from './deployment-plan';
+import { buildDeploymentPlan, deploymentPlanResourceName } from './deployment-plan';
+import { APP_AGENT_PROTECTED_FILE_SHA256, DEPLOYMENT_SECURITY_BASELINE_VERSION } from './deployment-security-baseline';
 
 describe('buildDeploymentPlan', () => {
   it('binds the user-account billing policy and source digest into an immutable plan', async () => {
@@ -11,6 +13,11 @@ describe('buildDeploymentPlan', () => {
 
     expect(result.digest).toMatch(/^[a-f0-9]{64}$/);
     expect(result.plan.sourceSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.plan).toMatchObject({
+      version: 2,
+      templateSourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
+    });
     expect(result.plan.project?.type).toBe('web_app');
     expect(result.plan.billing).toEqual({
       infrastructure: 'user_cloudflare_account',
@@ -19,6 +26,7 @@ describe('buildDeploymentPlan', () => {
     });
     expect(result.plan.resources.map(({ type }) => type)).toEqual([
       'worker',
+      'd1',
       'd1',
       'r2',
       'durable_object',
@@ -32,36 +40,26 @@ describe('buildDeploymentPlan', () => {
     expect(first.digest).not.toBe(second.digest);
   });
 
-  it('plans only the resources configured by a Worker-only project', async () => {
+  it('plans only the resources configured by a Worker without ambient AI access', async () => {
     const zip = new JSZip();
     zip.file('package.json', JSON.stringify({ ghostbuild: { projectType: 'worker' } }));
-    zip.file('wrangler.jsonc', JSON.stringify({ main: 'src/server.ts', ...runtimeConfig(), ai: { binding: 'AI' } }));
+    zip.file('wrangler.jsonc', JSON.stringify({ main: 'src/server.ts', ...runtimeConfig() }));
     zip.file('src/server.ts', "export default { fetch: () => new Response('ok') };\n");
     const result = await buildDeploymentPlan({ deploymentId: 'deployment-1', snapshot: await zipBlob(zip) });
     expect(result.plan.project).toEqual({
       type: 'worker',
-      bindings: { ai: true, d1: false, r2: false, appAgent: false },
+      bindings: { ai: false, d1: false, r2: false, appAgent: false },
     });
-    expect(result.plan.resources.map(({ type }) => type)).toEqual(['worker', 'workers_ai']);
-  });
-
-  it('rebuilds a fresh resource plan from an already verified source digest', async () => {
-    const sourceSha256 = 'b'.repeat(64);
-    const result = await buildDeploymentPlanFromSource({ deploymentId: 'deployment-2', sourceSha256 });
-
-    expect(result.plan).toMatchObject({ deploymentId: 'deployment-2', sourceSha256 });
-    expect(result.plan.resources[0]?.proposedName).toBe('ghostbuild-deployment-2');
-    await expect(
-      buildDeploymentPlanFromSource({ deploymentId: 'deployment-3', sourceSha256: 'invalid' }),
-    ).rejects.toThrow('Deployment source digest is invalid.');
+    expect(result.plan.resources.map(({ type }) => type)).toEqual(['worker']);
   });
 
   it('returns only one valid resource name for trusted provisioning', async () => {
-    const { plan } = await buildDeploymentPlanFromSource({
+    const { plan } = await buildDeploymentPlan({
       deploymentId: 'deployment-2',
-      sourceSha256: 'b'.repeat(64),
+      snapshot: await webSnapshot('resource validation'),
     });
     expect(deploymentPlanResourceName(plan, 'worker', 'app')).toBe('ghostbuild-deployment-2');
+    expect(deploymentPlanResourceName(plan, 'd1', 'AGENT_SECURITY_DB')).toBe('ghostbuild-deployment-2-agent-security');
     expect(deploymentPlanResourceName(plan, 'workers_ai', 'AI')).toBe('AI');
     expect(deploymentPlanResourceName(plan, 'durable_object', 'AppAgent')).toBe('AppAgent');
     expect(
@@ -76,21 +74,33 @@ describe('buildDeploymentPlan', () => {
 
 async function webSnapshot(content: string): Promise<Blob> {
   const zip = new JSZip();
-  zip.file('package.json', JSON.stringify({ name: 'project', content }));
+  const pkg = JSON.parse(readFileSync('template/package.json', 'utf8')) as Record<string, unknown>;
+  zip.file('package.json', JSON.stringify({ ...pkg, ghostbuildTestContent: content }));
   zip.file(
     'wrangler.jsonc',
     JSON.stringify({
       main: 'src/server.ts',
       ...runtimeConfig(),
       ai: { binding: 'AI' },
-      d1_databases: [{ binding: 'DB', migrations_dir: 'migrations' }],
+      d1_databases: [
+        { binding: 'DB', migrations_dir: 'migrations' },
+        { binding: 'AGENT_SECURITY_DB', migrations_dir: 'agent-security-migrations' },
+      ],
       r2_buckets: [{ binding: 'APP_STORAGE' }],
       durable_objects: { bindings: [{ name: 'AppAgent', class_name: 'AppAgent' }] },
       exports: { AppAgent: { type: 'durable-object', storage: 'sqlite' } },
+      triggers: { crons: ['0 3 * * *'] },
     }),
   );
-  zip.file('src/server.ts', content);
+  addProtectedSecurityFiles(zip);
   return zipBlob(zip);
+}
+
+function addProtectedSecurityFiles(zip: JSZip): void {
+  for (const path of Object.keys(APP_AGENT_PROTECTED_FILE_SHA256)) {
+    zip.file(path, readFileSync(`template/${path}`, 'utf8'));
+  }
+  zip.file('pnpm-lock.yaml', readFileSync('template/pnpm-lock.yaml', 'utf8'));
 }
 
 function runtimeConfig() {

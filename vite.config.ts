@@ -6,9 +6,18 @@ import { defineConfig } from 'vite';
 import { optimizeCssModules } from 'vite-plugin-optimize-css-modules';
 import wasm from 'vite-plugin-wasm';
 import { fileURLToPath } from 'node:url';
-import { rm } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 
 const fromRoot = (path: string) => fileURLToPath(new URL(path, import.meta.url));
+const CLIENT_ASSETS_IGNORE_PATH = fromRoot('./dist/client/.assetsignore');
+
+export function withPrivateClientSourceMaps(content: string): string {
+  const lines = content.split(/\r?\n/).filter(Boolean);
+  if (!lines.includes('*.map')) {
+    lines.push('*.map');
+  }
+  return `${lines.join('\n')}\n`;
+}
 
 export default defineConfig((config) => {
   const isTest = config.mode === 'test';
@@ -54,6 +63,7 @@ export default defineConfig((config) => {
               map: null,
             };
           }
+          return undefined;
         },
       },
       {
@@ -63,8 +73,16 @@ export default defineConfig((config) => {
           await rm(fromRoot('./dist/server/.dev.vars'), { force: true });
         },
       },
-
       !isTest && cloudflare({ viteEnvironment: { name: 'ssr' } }),
+      {
+        name: 'ghostbuild-private-client-source-maps',
+        apply: 'build',
+        enforce: 'post',
+        async closeBundle() {
+          const generatedIgnore = await readFile(CLIENT_ASSETS_IGNORE_PATH, 'utf8');
+          await writeFile(CLIENT_ASSETS_IGNORE_PATH, withPrivateClientSourceMaps(generatedIgnore));
+        },
+      },
       !isTest &&
         tanstackStart({
           srcDirectory: 'app',

@@ -11,7 +11,7 @@ import { buildDeploymentSnapshot } from './deployment-build-executor';
 import { requireActiveCloudflareConnection } from './cloudflare-connection-repository';
 import { D1CloudflareCredentialVault } from './cloudflare-credential-vault';
 import { publishDeploymentBuild } from './deployment-publish-executor';
-import { deploymentPlanResourceName } from './deployment-plan';
+import { deploymentPlanResourceName, deploymentProjectProfile, isCurrentDeploymentPlan } from './deployment-plan';
 import {
   claimApprovedDeployment,
   clearDeploymentSnapshot,
@@ -24,6 +24,10 @@ import {
   type DeploymentStatus,
 } from './deployment-repository';
 import { UserCloudflareAccountApi } from './user-account-api';
+import {
+  attestManagedDeploymentSecurity,
+  recordManagedDeploymentSecurityIntent,
+} from './deployment-security-inventory';
 
 type DeploymentExecutionArgs = {
   env: Env;
@@ -102,6 +106,7 @@ export async function buildApprovedDeploymentArtifact(args: DeploymentExecutionA
       deploymentId: deployment.id,
       snapshotKey: deployment.snapshotKey,
       expectedSourceSha256: deployment.plan.sourceSha256,
+      project: deploymentProjectProfile(deployment.plan),
     });
     const receipt = await storeDeploymentBuildArtifact({ env: args.env, deployment, build });
     await transitionDeployment({
@@ -177,6 +182,25 @@ export async function publishApprovedDeploymentArtifact(
         providerResourceId: d1.id,
       });
     }
+    const needsAgentSecurityD1 = Boolean(deploymentPlanResourceName(deployment.plan, 'd1', 'AGENT_SECURITY_DB'));
+    if (needsAgentSecurityD1) {
+      providerChangesPossible = true;
+    }
+    const agentSecurityD1 = needsAgentSecurityD1
+      ? await accountApi.ensureD1ForPlan(deployment.plan, 'AGENT_SECURITY_DB')
+      : null;
+    if (agentSecurityD1) {
+      if (agentSecurityD1.id === d1?.id) {
+        throw new Error('Application and agent security D1 resources must be separate.');
+      }
+      await recordDeploymentResource({
+        db: args.env.DB,
+        deploymentId: deployment.id,
+        resourceType: 'd1',
+        logicalName: 'AGENT_SECURITY_DB',
+        providerResourceId: agentSecurityD1.id,
+      });
+    }
     const needsR2 = Boolean(deploymentPlanResourceName(deployment.plan, 'r2', 'APP_STORAGE'));
     if (needsR2) {
       providerChangesPossible = true;
@@ -206,20 +230,34 @@ export async function publishApprovedDeploymentArtifact(
     deployment = await requireDeployment(args.env.DB, deployment.id);
     requireDeploymentExecutionIdentity(deployment, args, ['deploying']);
     providerChangesPossible = true;
-    await publishDeploymentBuild({
+    const workerName = deploymentPlanResourceName(deployment.plan, 'worker', 'app');
+    if (!workerName) {
+      throw new Error('Deployment Worker name is unavailable.');
+    }
+    await recordManagedDeploymentSecurityIntent({
+      db: args.env.DB,
+      deployment,
+      workerName,
+      accountId: connection.accountId,
+    });
+    const published = await publishDeploymentBuild({
       env: args.env,
       deployment,
       connection,
       build,
       d1DatabaseId: d1?.id,
+      agentSecurityD1DatabaseId: agentSecurityD1?.id,
       r2BucketName: r2?.name,
     });
-    const workerName = deployment.plan.resources.find(
-      (resource) => resource.type === 'worker' && resource.logicalName === 'app',
-    )?.proposedName;
-    if (!workerName) {
-      throw new Error('Deployment Worker name is unavailable.');
-    }
+    await attestManagedDeploymentSecurity({
+      db: args.env.DB,
+      deployment,
+      workerName,
+      accountId: connection.accountId,
+      accountApi,
+      expectedPublishedVersionId: published.workerVersionId,
+      expectedAgentSecurityD1DatabaseId: agentSecurityD1?.id,
+    });
     await recordDeploymentResource({
       db: args.env.DB,
       deploymentId: deployment.id,
@@ -266,9 +304,12 @@ function requireDeploymentExecutionIdentity(
     !expectedStatuses.includes(deployment.status) ||
     !deployment.approvedDigest ||
     deployment.approvedDigest !== deployment.planDigest ||
-    deployment.plan.deploymentId !== deployment.id
+    deployment.plan.deploymentId !== deployment.id ||
+    !isCurrentDeploymentPlan(deployment.plan)
   ) {
-    throw new Error('Deployment execution identity no longer matches the approved plan.');
+    throw new Error(
+      'Deployment execution identity no longer matches the current approved security baseline; prepare and approve a new plan.',
+    );
   }
 }
 

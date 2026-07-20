@@ -63,7 +63,10 @@ export class AppAgent extends AIChatAgent<Env> {
     _onFinish?: unknown,
     options?: { abortSignal?: AbortSignal },
   ) {
-    const budget = await consumeAppAgentInferenceBudget(this.env.DB, this.name);
+    const budget = await consumeAppAgentInferenceBudget(
+      this.env.AGENT_SECURITY_DB,
+      this.name,
+    );
     if (!budget.allowed) {
       return Response.json(
         { error: "Agent request limit reached. Try again shortly." },

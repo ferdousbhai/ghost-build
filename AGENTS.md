@@ -23,8 +23,14 @@ Use this file as a source map. Prefer the implementation, types, tests, and conf
 
 - [app/lib/cloudflare/data.server.ts](app/lib/cloudflare/data.server.ts) — authenticated data facade
 - [app/lib/cloudflare/data/](app/lib/cloudflare/data/) — D1 and R2 repositories and services
+- [app/lib/cloudflare/data/chat-backup-quota.server.ts](app/lib/cloudflare/data/chat-backup-quota.server.ts) — exact
+  tenant backup admission, byte/object quotas, ownership attribution, and reconciliation
 - [app/lib/cloudflare/data-api.ts](app/lib/cloudflare/data-api.ts) — browser/server operation contract
 - [app/lib/.server/cloudflare/deployment-workflow.ts](app/lib/.server/cloudflare/deployment-workflow.ts) — deployment workflow
+- [app/lib/.server/cloudflare/deployment-security-baseline.ts](app/lib/.server/cloudflare/deployment-security-baseline.ts)
+  — generated-Worker baseline and readback attestation
+- [app/lib/.server/cloudflare/deployment-security-inventory.ts](app/lib/.server/cloudflare/deployment-security-inventory.ts)
+  — managed deployment inventory and scheduled drift classification
 - [migrations/](migrations/) — root D1 migrations
 - [wrangler.jsonc](wrangler.jsonc) — root Worker bindings
 
@@ -32,6 +38,9 @@ Use this file as a source map. Prefer the implementation, types, tests, and conf
 
 - [template/src/server.ts](template/src/server.ts) — generated Worker entrypoint
 - [template/src/agents/app-agent.ts](template/src/agents/app-agent.ts) — generated application agent
+- [template/src/app-bindings.ts](template/src/app-bindings.ts) — narrow user-application binding surface
+- [template/agent-security-migrations/](template/agent-security-migrations/) — Agent-only D1 schema, separate from
+  generated application migrations
 - [template/scripts/lib/project-policy.mjs](template/scripts/lib/project-policy.mjs) — generated-project policy
 - [make-bootstrap-snapshot.js](make-bootstrap-snapshot.js) — snapshot builder
 - [scripts/verify-template.mjs](scripts/verify-template.mjs) — clean-template verification

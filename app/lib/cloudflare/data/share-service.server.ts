@@ -15,6 +15,13 @@ import {
 } from './object-gc.server';
 import type { ShareRow, SocialShareRow } from './types';
 import { DataNotFoundError } from './errors';
+import {
+  type ChatBackupQuotaConfig,
+  createChatBackupCloneQuotaExtension,
+  enforceChatBackupEdgeRateLimit,
+  releaseChatBackupCloneAdmissionBestEffort,
+  throwIfChatBackupCloneQuotaDenied,
+} from './chat-backup-quota.server';
 
 const logger = createScopedLogger('CloudflareShareStorage');
 const MAX_SOCIAL_SHARE_WRITE_ATTEMPTS = 8;
@@ -129,8 +136,13 @@ export async function getShareDescription(db: D1Database, args: { code: string }
   return { description: socialShare.description ?? undefined };
 }
 
-export async function cloneShare(db: D1Database, args: { shareCode: string; sessionId: string }) {
+export async function cloneShare(
+  env: Pick<Env, 'CHAT_BACKUP_RATE_LIMITER' | 'DB'> & ChatBackupQuotaConfig,
+  args: { shareCode: string; sessionId: string },
+) {
+  const db = env.DB;
   requireStrongShareCode(args.shareCode);
+  await enforceChatBackupEdgeRateLimit(env, args.sessionId);
   const share = await db
     .prepare(
       `SELECT shares.*, chats.description AS parent_description
@@ -141,12 +153,12 @@ export async function cloneShare(db: D1Database, args: { shareCode: string; sess
     .bind(args.shareCode)
     .first<ShareRow & { parent_description: string | null }>();
   if (!share) {
-    return cloneSocialShare(db, args.shareCode, args.sessionId);
+    return cloneSocialShare(env, args.shareCode, args.sessionId);
   }
   if (!share.chat_history_key) {
     throw new Error('Chat history not found');
   }
-  return cloneChatFromState(db, {
+  return cloneChatFromState(env, {
     sessionId: args.sessionId,
     parentDescription: share.parent_description,
     storageKey: share.chat_history_key,
@@ -244,7 +256,8 @@ export async function saveThumbnail(
   throw new Error('Social share changed too many times; retry the thumbnail save');
 }
 
-async function cloneSocialShare(db: D1Database, code: string, sessionId: string) {
+async function cloneSocialShare(env: Pick<Env, 'DB'> & ChatBackupQuotaConfig, code: string, sessionId: string) {
+  const db = env.DB;
   const socialShare = await db
     .prepare(
       `SELECT social_shares.id, social_shares.chat_id, social_shares.code,
@@ -275,7 +288,7 @@ async function cloneSocialShare(db: D1Database, code: string, sessionId: string)
     throw new Error('Chat history not found');
   }
 
-  return cloneChatFromState(db, {
+  return cloneChatFromState(env, {
     sessionId,
     parentDescription: socialShare.chat_description,
     storageKey: state.storage_key,
@@ -289,7 +302,7 @@ async function cloneSocialShare(db: D1Database, code: string, sessionId: string)
 }
 
 async function cloneChatFromState(
-  db: D1Database,
+  env: Pick<Env, 'DB'> & ChatBackupQuotaConfig,
   args: {
     sessionId: string;
     parentDescription: string | null;
@@ -302,28 +315,49 @@ async function cloneChatFromState(
     authorization: ChatInsertAuthorization;
   },
 ) {
+  const db = env.DB;
   const initialId = crypto.randomUUID();
   const chatId = crypto.randomUUID();
-  await insertChatWithState(
-    db,
-    {
-      id: chatId,
-      creatorId: args.sessionId,
-      initialId,
-      description: args.parentDescription,
-      snapshotKey: args.snapshotKey,
-      lastSubchatIndex: args.subchatIndex,
-    },
-    {
-      storageKey: args.storageKey,
-      subchatIndex: args.subchatIndex,
-      lastMessageRank: args.lastMessageRank,
-      partIndex: args.partIndex,
-      snapshotKey: args.snapshotKey,
-      description: args.stateDescription,
-    },
-    args.authorization,
-  );
+  const storageKeys = [args.storageKey, args.snapshotKey];
+  const quota = createChatBackupCloneQuotaExtension(env, {
+    ownerId: args.sessionId,
+    chatId,
+    storageKeys,
+  });
+  try {
+    await insertChatWithState(
+      db,
+      {
+        id: chatId,
+        creatorId: args.sessionId,
+        initialId,
+        description: args.parentDescription,
+        snapshotKey: args.snapshotKey,
+        lastSubchatIndex: args.subchatIndex,
+      },
+      {
+        storageKey: args.storageKey,
+        subchatIndex: args.subchatIndex,
+        lastMessageRank: args.lastMessageRank,
+        partIndex: args.partIndex,
+        snapshotKey: args.snapshotKey,
+        description: args.stateDescription,
+      },
+      { ...args.authorization, quotaAdmissionId: quota.admissionId },
+      quota,
+    );
+  } catch (error) {
+    await releaseChatBackupCloneAdmissionBestEffort(db, {
+      admissionId: quota.admissionId,
+      ownerId: args.sessionId,
+    });
+    await throwIfChatBackupCloneQuotaDenied(env, {
+      admissionId: quota.admissionId,
+      ownerId: args.sessionId,
+      storageKeys,
+    });
+    throw error;
+  }
   return { id: initialId, description: args.parentDescription ?? undefined };
 }
 

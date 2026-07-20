@@ -1,14 +1,14 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parse } from 'jsonc-parser';
+import { listTemplateSourceFiles } from './template-source.mjs';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceDir = resolve(rootDir, 'template');
-const ignoredNames = new Set(['dist', 'node_modules', '.wrangler']);
 
 function run(cwd, args, env = process.env) {
   const result = spawnSync('pnpm', args, {
@@ -38,17 +38,23 @@ function requireFailure(cwd, args) {
 export async function verifyTemplate() {
   const tempDir = await mkdtemp(join(tmpdir(), 'ghostbuild-template-'));
   try {
-    await cp(sourceDir, tempDir, {
-      recursive: true,
-      filter: (path) => path === sourceDir || !ignoredNames.has(basename(path)),
-    });
+    await copyCanonicalTemplateSource(tempDir);
+    const generatedBindingsPath = join(tempDir, 'worker-configuration.d.ts');
+    if (existsSync(generatedBindingsPath)) {
+      throw new Error('The canonical template source must not contain generated Worker binding types.');
+    }
     run(tempDir, ['install', '--frozen-lockfile']);
-    run(tempDir, ['run', 'cf-typegen']);
+    // Typecheck owns route and Worker-binding generation. Run it before stack
+    // verification so a fresh snapshot does not depend on ignored local files.
+    run(tempDir, ['run', 'typecheck']);
+    if (!existsSync(generatedBindingsPath)) {
+      throw new Error('Template typecheck did not generate worker-configuration.d.ts.');
+    }
     run(tempDir, ['run', 'verify:stack']);
     run(tempDir, ['run', 'verify:production-config', '--', '--allow-unprovisioned']);
-    run(tempDir, ['run', 'typecheck']);
     run(tempDir, ['run', 'lint']);
     run(tempDir, ['run', 'build']);
+    await verifyResolvedProductionModulePolicy(tempDir);
     run(tempDir, ['exec', 'wrangler', 'deploy', '--dry-run']);
     run(tempDir, ['run', 'build'], { ...process.env, GHOSTBUILD_PREVIEW: '1' });
   } finally {
@@ -56,13 +62,40 @@ export async function verifyTemplate() {
   }
 }
 
+async function verifyResolvedProductionModulePolicy(tempDir) {
+  const dependencyDir = join(tempDir, 'node_modules', 'innocent-runtime-helper');
+  const routePath = join(tempDir, 'src', 'routes', 'index.tsx');
+  const originalRoute = await readFile(routePath, 'utf8');
+  await mkdir(dependencyDir, { recursive: true });
+  await writeFile(
+    join(dependencyDir, 'package.json'),
+    `${JSON.stringify({ name: 'innocent-runtime-helper', version: '1.0.0', type: 'module', exports: './index.js' })}\n`,
+  );
+  await writeFile(
+    routePath,
+    `import { leakedBinding } from "innocent-runtime-helper";\nvoid leakedBinding;\n${originalRoute}`,
+  );
+  try {
+    await writeFile(
+      join(dependencyDir, 'index.js'),
+      String.raw`export { env as leakedBinding } from "cloudflare:\x77orkers";` + '\n',
+    );
+    requireFailure(tempDir, ['run', 'build']);
+    await writeFile(
+      join(dependencyDir, 'index.js'),
+      `export const leakedBinding = import("cloudflare:" + "workers");\n`,
+    );
+    requireFailure(tempDir, ['run', 'build']);
+  } finally {
+    await writeFile(routePath, originalRoute);
+    await rm(dependencyDir, { recursive: true, force: true });
+  }
+}
+
 export async function verifyWorkerTemplateProfile() {
   const tempDir = await mkdtemp(join(tmpdir(), 'ghostbuild-worker-template-'));
   try {
-    await cp(sourceDir, tempDir, {
-      recursive: true,
-      filter: (path) => path === sourceDir || !ignoredNames.has(basename(path)),
-    });
+    await copyCanonicalTemplateSource(tempDir);
     const stalePackagePath = join(tempDir, 'package.json');
     const stalePackage = JSON.parse(await readFile(stalePackagePath, 'utf8'));
     stalePackage.ghostbuild = { projectType: 'worker' };
@@ -87,6 +120,18 @@ export async function verifyWorkerTemplateProfile() {
   }
 }
 
+export async function copyCanonicalTemplateSource(targetDir) {
+  for (const sourcePath of listTemplateSourceFiles(rootDir)) {
+    const relativePath = relative(sourceDir, sourcePath);
+    if (relativePath === '..' || relativePath.startsWith(`..${sep}`)) {
+      throw new Error(`Template source escaped its root: ${sourcePath}`);
+    }
+    const targetPath = join(targetDir, relativePath);
+    await mkdir(dirname(targetPath), { recursive: true });
+    await copyFile(sourcePath, targetPath);
+  }
+}
+
 async function convertToWorkerProfile(tempDir) {
   const packagePath = join(tempDir, 'package.json');
   const pkg = JSON.parse(await readFile(packagePath, 'utf8'));
@@ -107,7 +152,7 @@ async function convertToWorkerProfile(tempDir) {
     dev: 'wrangler dev',
     preview: 'wrangler dev',
     build: 'wrangler deploy src/server.ts --dry-run --outdir dist/worker --config wrangler.jsonc',
-    deploy: 'pnpm run verify:stack && pnpm run typecheck && pnpm run build && pnpm run lint && wrangler deploy',
+    deploy: 'pnpm run typecheck && pnpm run verify:stack && pnpm run build && pnpm run lint && wrangler deploy',
     'cf-typegen': 'node scripts/cf-typegen.mjs',
     typecheck: 'pnpm run cf-typegen && tsc -p . --noEmit --pretty false',
     'verify:stack': 'node scripts/verify-stack-alignment.mjs',
@@ -157,14 +202,21 @@ async function convertToWorkerProfile(tempDir) {
     `export default {\n  fetch(): Response {\n    return new Response("Hello from a framework-free Worker");\n  },\n} satisfies ExportedHandler<Env>;\n`,
   );
   await Promise.all([
+    rm(join(tempDir, 'agent-security-migrations'), { recursive: true, force: true }),
     rm(join(tempDir, 'migrations'), { recursive: true, force: true }),
     rm(join(tempDir, 'vite.config.ts'), { force: true }),
   ]);
 }
 
-if (process.argv.includes('--worker-only')) {
-  await verifyWorkerTemplateProfile();
-} else {
-  await verifyTemplate();
-  await verifyWorkerTemplateProfile();
+function isMainModule() {
+  return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+}
+
+if (isMainModule()) {
+  if (process.argv.includes('--worker-only')) {
+    await verifyWorkerTemplateProfile();
+  } else {
+    await verifyTemplate();
+    await verifyWorkerTemplateProfile();
+  }
 }

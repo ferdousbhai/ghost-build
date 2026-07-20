@@ -20,4 +20,19 @@ describe('Ghostbuild framework selection policy', () => {
     expect(prompt).toContain('package.json ghostbuild.projectType to "worker"');
     expect(prompt).toContain('Wrangler dry-run targeting dist/worker');
   });
+
+  it('keeps generated data access behind the reviewed binding broker', () => {
+    const prompt = solutionConstraints();
+
+    expect(prompt).toContain('getAppBindings from @/app-bindings');
+    expect(prompt).toContain('Do not import cloudflare:workers');
+    expect(prompt).toMatch(/AI and AppAgent bindings are not\s+exposed to generated routes/);
+  });
+
+  it('keeps generated dependency notices current before build and deployment', () => {
+    const prompt = solutionConstraints();
+
+    expect(prompt).toContain('After changing production dependencies, run pnpm run licenses:generate');
+    expect(prompt).toContain('public/THIRD_PARTY_LICENSES.txt');
+  });
 });

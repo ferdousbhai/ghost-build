@@ -10,7 +10,11 @@ describe('generated application response boundary', () => {
 
     expect(response.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
     expect(response.headers.get('Cross-Origin-Embedder-Policy')).toBe('credentialless');
+    expect(response.headers.get('Content-Security-Policy')).toBe(
+      "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'",
+    );
     expect(response.headers.get('Referrer-Policy')).toBe('strict-origin-when-cross-origin');
+    expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000');
     expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(response.headers.get('X-Frame-Options')).toBe('DENY');
     expect(response.headers.get('X-App')).toBe('preserved');
@@ -23,7 +27,63 @@ describe('generated application response boundary', () => {
     );
 
     expect(response.headers.get('X-Frame-Options')).toBeNull();
+    expect(response.headers.get('Content-Security-Policy')).toBeNull();
+    expect(response.headers.get('Strict-Transport-Security')).toBeNull();
     expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
+  });
+
+  test('independently enforces the baseline without weakening stricter application CSP or HSTS', () => {
+    const response = withApplicationSecurityHeaders(
+      new Response('app', {
+        headers: {
+          'Content-Security-Policy': "default-src 'none'; script-src 'self'",
+          'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload',
+        },
+      }),
+      new Request('https://app.example/'),
+    );
+
+    expect(response.headers.get('Content-Security-Policy')).toBe(
+      "default-src 'none'; script-src 'self', base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'",
+    );
+    expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=63072000; includeSubDomains; preload');
+  });
+
+  test('raises a weaker HSTS response to the production minimum without dropping its flags', () => {
+    const response = withApplicationSecurityHeaders(
+      new Response('app', {
+        headers: { 'Strict-Transport-Security': 'max-age=0; includeSubDomains' },
+      }),
+      new Request('https://app.example/'),
+    );
+
+    expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains');
+  });
+
+  test('bounds malformed HSTS parsing and preserves future non-max-age directives', () => {
+    const response = withApplicationSecurityHeaders(
+      new Response('app', {
+        headers: {
+          'Strict-Transport-Security': `max-age=${'9'.repeat(1_024)}; includeSubDomains; future=value`,
+        },
+      }),
+      new Request('https://app.example/'),
+    );
+
+    expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains; future=value');
+  });
+
+  test('normalizes duplicate HSTS max-age directives', () => {
+    const response = withApplicationSecurityHeaders(
+      new Response('ok', {
+        headers: {
+          'Strict-Transport-Security': 'max-age=63072000; max-age=0; includeSubDomains',
+        },
+      }),
+      new Request('https://example.com/'),
+    );
+
+    expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains');
   });
 
   test('returns an Agent response by identity without wrapping it or fetching the app', async () => {

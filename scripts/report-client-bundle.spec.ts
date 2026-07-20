@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assetsOverRawLimit,
   collectBundleAssets,
+  collectExcludedSourceMaps,
   summarizeBundleAssets,
   totalSizeLimitErrors,
 } from './report-client-bundle.mjs';
@@ -27,6 +28,7 @@ describe('client bundle reporting', () => {
       const assets = collectBundleAssets(directory) as BundleAsset[];
 
       expect(assets.map((asset) => asset.file)).toEqual(['large.js', 'small.css']);
+      expect(collectExcludedSourceMaps(directory)).toEqual(['large.js.map']);
       expect(assets[0]).toMatchObject({ rawBytes: 2_000 });
       expect(assets[0].gzipBytes).toBeLessThan(assets[0].rawBytes);
     } finally {

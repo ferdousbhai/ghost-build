@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { resolveAgentRequestIdentity } from '~/lib/.server/agent-request-identity';
 import { findCloudflareConnectionForUser } from '~/lib/.server/cloudflare/cloudflare-connection-repository';
-import { buildDeploymentPlan } from '~/lib/.server/cloudflare/deployment-plan';
+import { buildDeploymentPlan, isCurrentDeploymentPlan } from '~/lib/.server/cloudflare/deployment-plan';
 import { DeploymentSnapshotError } from '~/lib/.server/cloudflare/deployment-snapshot';
 import {
   adoptLegacyApprovedDeploymentExecutionGeneration,
@@ -154,8 +154,18 @@ export async function deploymentAction(args: {
     if (!connection || connection.status !== 'active') {
       return Response.json({ error: 'Reconnect Cloudflare before approving this deployment.' }, { status: 409 });
     }
+    const currentDeployment = await requireDeploymentForUser(args.env.DB, args.deploymentId, userId);
+    if (!isCurrentDeploymentPlan(currentDeployment.plan)) {
+      return Response.json(
+        {
+          code: 'deployment_plan_stale',
+          error: 'Deployment plan security baseline is stale. Prepare and approve a new plan.',
+        },
+        { status: 409 },
+      );
+    }
     if (args.operation === 'retry') {
-      const previous = await requireDeploymentForUser(args.env.DB, args.deploymentId, userId);
+      const previous = currentDeployment;
       if (!previous.snapshotKey) {
         throw new DeploymentStateConflictError(previous.status);
       }
@@ -176,7 +186,7 @@ export async function deploymentAction(args: {
       if (!args.env.DeploymentWorkflow) {
         return Response.json({ error: 'Production deployment Workflow is not configured.' }, { status: 503 });
       }
-      let deployment = await requireDeploymentForUser(args.env.DB, args.deploymentId, userId);
+      let deployment = currentDeployment;
       if (
         deployment.connectionId !== connection.id ||
         deployment.connectionGeneration !== connection.generation ||

@@ -3,6 +3,21 @@ import { deploymentPlanResourceName, type DeploymentPlan, type DeploymentResourc
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
 const CLOUDFLARE_API_TIMEOUT_MS = 30_000;
 
+type WorkerBinding = {
+  name?: string;
+  type?: string;
+  text?: string;
+  database_id?: string;
+};
+
+export type ActiveWorkerDeploymentReadback = {
+  providerDeploymentId: string;
+  workerVersionId: string;
+  scriptEtag: string;
+  bindings: WorkerBinding[];
+  crons: string[];
+};
+
 type CloudflareEnvelope<T> = {
   success?: boolean;
   result?: T;
@@ -20,8 +35,11 @@ export class UserCloudflareAccountApi {
     }
   }
 
-  async createD1ForPlan(plan: DeploymentPlan): Promise<{ id: string; name: string }> {
-    const resourceName = requirePlanResourceName(plan, 'd1', 'DB');
+  async createD1ForPlan(
+    plan: DeploymentPlan,
+    logicalName: 'DB' | 'AGENT_SECURITY_DB' = 'DB',
+  ): Promise<{ id: string; name: string }> {
+    const resourceName = requirePlanResourceName(plan, 'd1', logicalName);
     const result = await this.call<{ uuid?: string; name?: string }>('/d1/database', {
       method: 'POST',
       body: JSON.stringify({ name: resourceName }),
@@ -32,14 +50,17 @@ export class UserCloudflareAccountApi {
     return { id: result.uuid, name: result.name };
   }
 
-  async ensureD1ForPlan(plan: DeploymentPlan): Promise<{ id: string; name: string }> {
-    const resourceName = requirePlanResourceName(plan, 'd1', 'DB');
+  async ensureD1ForPlan(
+    plan: DeploymentPlan,
+    logicalName: 'DB' | 'AGENT_SECURITY_DB' = 'DB',
+  ): Promise<{ id: string; name: string }> {
+    const resourceName = requirePlanResourceName(plan, 'd1', logicalName);
     const databases = await this.call<Array<{ uuid?: string; name?: string }>>(
       `/d1/database?name=${encodeURIComponent(resourceName)}`,
       { method: 'GET' },
     );
     const existing = databases.find((database) => database.name === resourceName && database.uuid);
-    return existing?.uuid ? { id: existing.uuid, name: resourceName } : this.createD1ForPlan(plan);
+    return existing?.uuid ? { id: existing.uuid, name: resourceName } : this.createD1ForPlan(plan, logicalName);
   }
 
   async createR2ForPlan(plan: DeploymentPlan): Promise<{ id: string; name: string }> {
@@ -68,6 +89,61 @@ export class UserCloudflareAccountApi {
       throw new CloudflareAccountApiError('Cloudflare returned an invalid Workers subdomain.');
     }
     return result.subdomain;
+  }
+
+  /** Reads the exact version currently receiving 100% of production traffic. */
+  async readActiveWorkerDeployment(workerName: string): Promise<ActiveWorkerDeploymentReadback | null> {
+    if (!/^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/.test(workerName)) {
+      throw new CloudflareAccountApiError('Worker name is invalid.');
+    }
+    const listed = await this.callOptional<{
+      deployments?: Array<{
+        id?: string;
+        created_on?: string;
+        versions?: Array<{ percentage?: number; version_id?: string }>;
+      }>;
+    }>(`/workers/scripts/${encodeURIComponent(workerName)}/deployments`, { method: 'GET' });
+    if (listed === null) {
+      return null;
+    }
+    const active = [...(listed.deployments ?? [])].sort((left, right) =>
+      (right.created_on ?? '').localeCompare(left.created_on ?? ''),
+    )[0];
+    const activeVersions = active?.versions?.filter((version) => version.percentage === 100) ?? [];
+    if (!active?.id || activeVersions.length !== 1 || !activeVersions[0]?.version_id) {
+      throw new CloudflareAccountApiError('Cloudflare returned an ambiguous active Worker deployment.');
+    }
+    const workerVersionId = activeVersions[0].version_id;
+    const [version, schedules] = await Promise.all([
+      this.call<{
+        id?: string;
+        resources?: { bindings?: WorkerBinding[]; script?: { etag?: string } };
+      }>(`/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(workerVersionId)}`, {
+        method: 'GET',
+      }),
+      this.call<{ schedules?: Array<{ cron?: string }> }>(
+        `/workers/scripts/${encodeURIComponent(workerName)}/schedules`,
+        { method: 'GET' },
+      ),
+    ]);
+    if (
+      version.id !== workerVersionId ||
+      !Array.isArray(version.resources?.bindings) ||
+      typeof version.resources.script?.etag !== 'string' ||
+      version.resources.script.etag.length < 1 ||
+      version.resources.script.etag.length > 256
+    ) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid active Worker version metadata.');
+    }
+    return {
+      providerDeploymentId: active.id,
+      workerVersionId,
+      scriptEtag: version.resources.script.etag,
+      bindings: version.resources.bindings,
+      crons: (schedules.schedules ?? []).flatMap((schedule) =>
+        typeof schedule.cron === 'string' ? [schedule.cron] : [],
+      ),
+    };
   }
 
   private async call<T>(path: string, init: RequestInit): Promise<T> {

@@ -23,10 +23,15 @@ import { createDeploymentPlanAction, deploymentAction } from './server-handlers/
 import { authSessionAction, signOutAction } from './server-handlers/auth';
 import { drainDeferredDataGcBestEffort } from './lib/cloudflare/data/deferred-gc.server';
 import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudflare-auth-retention.server';
+import { refreshDeploymentSecurityInventoryBestEffort } from './lib/.server/cloudflare/deployment-security-inventory';
+import { reconcileChatBackupQuotaBestEffort } from './lib/cloudflare/data/chat-backup-quota.server';
 
 export { BuilderAgent } from './agents/builder-agent';
 export { ContainerProxy, DeploymentSandbox } from './lib/.server/cloudflare/deployment-sandbox';
 export { DeploymentWorkflow } from './lib/.server/cloudflare/deployment-workflow';
+
+const APPLICATION_CSP_BASELINE = "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
+const HSTS_MIN_AGE_SECONDS = '31536000';
 
 function methodNotAllowed(allowedMethod: string) {
   return Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: allowedMethod } });
@@ -36,11 +41,44 @@ function requireMethod(request: Request, method: string, handler: () => Response
   return request.method === method ? handler() : methodNotAllowed(method);
 }
 
+function applyContentSecurityPolicyBaseline(headers: Headers) {
+  const current = headers.get('Content-Security-Policy');
+  if (!current) {
+    headers.set('Content-Security-Policy', APPLICATION_CSP_BASELINE);
+  } else if (!current.split(',').some((policy) => policy.trim() === APPLICATION_CSP_BASELINE)) {
+    // A CSP list enforces every policy independently. Appending keeps a
+    // response's stricter resource policy while making this baseline mandatory.
+    headers.append('Content-Security-Policy', APPLICATION_CSP_BASELINE);
+  }
+}
+
+function applyHstsFloor(headers: Headers) {
+  const current = headers.get('Strict-Transport-Security');
+  const directives = current?.split(';').map((directive) => directive.trim()) ?? [];
+  const maxAgeDirectives = directives.filter((directive) => /^max-age(?:\s*=|$)/i.test(directive));
+  const maxAge =
+    maxAgeDirectives.length === 1 && maxAgeDirectives[0].length <= 64
+      ? /^max-age\s*=\s*(\d{1,20})$/i.exec(maxAgeDirectives[0])?.[1]
+      : undefined;
+  const normalizedMaxAge = maxAge?.replace(/^0+(?=\d)/, '');
+  const meetsFloor =
+    normalizedMaxAge !== undefined &&
+    (normalizedMaxAge.length > HSTS_MIN_AGE_SECONDS.length ||
+      (normalizedMaxAge.length === HSTS_MIN_AGE_SECONDS.length && normalizedMaxAge >= HSTS_MIN_AGE_SECONDS));
+  if (current && maxAgeDirectives.length === 1 && meetsFloor) {
+    return;
+  }
+  const retainedDirectives = directives.filter((directive) => directive && !/^max-age(?:\s*=|$)/i.test(directive));
+  headers.set('Strict-Transport-Security', [`max-age=${HSTS_MIN_AGE_SECONDS}`, ...retainedDirectives].join('; '));
+}
+
 function withApplicationSecurityHeaders(response: Response, pathname: string) {
   const headers = new Headers(response.headers);
+  applyContentSecurityPolicyBaseline(headers);
   headers.set('Cross-Origin-Opener-Policy', 'same-origin');
   headers.set('Cross-Origin-Embedder-Policy', 'credentialless');
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  applyHstsFloor(headers);
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('X-Frame-Options', 'DENY');
   if (pathname === '/connect/return') {
@@ -136,9 +174,19 @@ export default {
     return withApplicationSecurityHeaders(await routeApplicationRequest(request, env, ctx), pathname);
   },
   scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(Promise.all([drainDeferredDataGcBestEffort(env), pruneCloudflareAuthDataBestEffort(env.DB)]));
+    ctx.waitUntil(runScheduledMaintenance(env));
   },
 } satisfies ExportedHandler<Env>;
+
+async function runScheduledMaintenance(env: Env) {
+  // Keep connection-heavy D1, R2, and provider maintenance inside the Worker's
+  // simultaneous-outgoing-connection budget. Each task is independently
+  // bounded and best-effort, so sequencing does not couple their failures.
+  await drainDeferredDataGcBestEffort(env);
+  await pruneCloudflareAuthDataBestEffort(env.DB);
+  await reconcileChatBackupQuotaBestEffort(env);
+  await refreshDeploymentSecurityInventoryBestEffort(env);
+}
 
 async function routeApplicationRequest(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
