@@ -1,0 +1,246 @@
+import { getSandbox, type ExecResult } from '@cloudflare/sandbox';
+import type { DeploymentSandbox } from './deployment-sandbox';
+
+const PROJECT_DIR = '/workspace/project';
+const SOURCE_DIR = '/workspace/source';
+const SOURCE_ARCHIVE = '/workspace/source.zip';
+const BUILD_ARCHIVE = '/workspace/build.tar.gz';
+const PACKAGE_DIR = '/workspace/package';
+const MAX_ERROR_OUTPUT = 4_000;
+const MAX_EXPANDED_KIB = 250 * 1024;
+const MAX_EXPANDED_BYTES = MAX_EXPANDED_KIB * 1024;
+const MAX_BUILD_PACKAGE_KIB = 300 * 1024;
+const MAX_BUILD_ARCHIVE_BYTES = 50 * 1024 * 1024;
+const BUILD_TIMEOUT_MS = {
+  workspaceReset: 30_000,
+  sourceDigest: 30_000,
+  compressedSize: 60_000,
+  extraction: 60_000,
+  extractedSize: 30_000,
+  sourceCopy: 30_000,
+  workspacePolicy: 30_000,
+  install: 4 * 60_000,
+  typecheck: 3 * 60_000,
+  stackVerification: 3 * 60_000,
+  build: 4 * 60_000,
+  lint: 2 * 60_000,
+  packageCopy: 60_000,
+  packageValidation: 30_000,
+  archive: 60_000,
+  archiveValidation: 30_000,
+  download: 60_000,
+} as const;
+export const DEPLOYMENT_BUILD_STEP_BUDGET_MS = Object.values(BUILD_TIMEOUT_MS).reduce(
+  (total, timeout) => total + timeout,
+  0,
+);
+type BuildStage =
+  | 'sandbox initialization'
+  | 'source extraction'
+  | 'workspace policy verification'
+  | 'dependency installation'
+  | 'stack verification'
+  | 'type checking'
+  | 'application build'
+  | 'linting'
+  | 'build packaging'
+  | 'build download';
+
+export async function buildDeploymentSnapshot(args: {
+  env: Env;
+  deploymentId: string;
+  snapshotKey: string;
+  expectedSourceSha256: string;
+}): Promise<Uint8Array<ArrayBuffer>> {
+  if (!args.env.DeploymentSandbox) {
+    throw new DeploymentBuildError('Deployment Sandbox binding is unavailable.');
+  }
+  const source = await args.env.APP_STORAGE.get(args.snapshotKey);
+  if (!source) {
+    throw new DeploymentBuildError('Deployment source snapshot is unavailable.');
+  }
+  if (!/^[a-f0-9]{64}$/.test(args.expectedSourceSha256)) {
+    throw new DeploymentBuildError('Approved deployment source digest is invalid.');
+  }
+
+  const sandboxId = `build-${args.deploymentId}`.toLowerCase();
+  const sandbox = getSandbox(args.env.DeploymentSandbox as DurableObjectNamespace<DeploymentSandbox>, sandboxId, {
+    transport: 'rpc',
+    enableDefaultSession: false,
+    normalizeId: true,
+  });
+  let stage: BuildStage = 'sandbox initialization';
+  try {
+    await requireSuccess(
+      await sandbox.exec(`rm -rf ${PROJECT_DIR} ${SOURCE_DIR} ${SOURCE_ARCHIVE} ${BUILD_ARCHIVE} ${PACKAGE_DIR}`, {
+        timeout: BUILD_TIMEOUT_MS.workspaceReset,
+      }),
+    );
+    await sandbox.mkdir(PROJECT_DIR, { recursive: true });
+    await sandbox.mkdir(SOURCE_DIR, { recursive: true });
+    await sandbox.writeFile(SOURCE_ARCHIVE, source.body);
+    stage = 'source extraction';
+    await requireSuccess(
+      await sandbox.exec(`test "$(sha256sum ${SOURCE_ARCHIVE} | cut -d ' ' -f1)" = "${args.expectedSourceSha256}"`, {
+        timeout: BUILD_TIMEOUT_MS.sourceDigest,
+      }),
+    );
+    await requireSuccess(
+      await sandbox.exec(
+        `test "$(unzip -p ${SOURCE_ARCHIVE} | head -c ${MAX_EXPANDED_BYTES + 1} | wc -c | tr -d ' ')" ` +
+          `-le ${MAX_EXPANDED_BYTES}`,
+        { timeout: BUILD_TIMEOUT_MS.compressedSize },
+      ),
+    );
+    await requireSuccess(
+      await sandbox.exec(`unzip -q ${SOURCE_ARCHIVE} -d ${SOURCE_DIR}`, { timeout: BUILD_TIMEOUT_MS.extraction }),
+    );
+    await requireSuccess(
+      await sandbox.exec(`test "$(du -sk ${SOURCE_DIR} | cut -f1)" -le ${MAX_EXPANDED_KIB}`, {
+        timeout: BUILD_TIMEOUT_MS.extractedSize,
+      }),
+    );
+    await requireSuccess(
+      await sandbox.exec(
+        `if [ -f ${SOURCE_DIR}/package.json ]; then cp -a ${SOURCE_DIR}/. ${PROJECT_DIR}/; ` +
+          `elif [ -f ${SOURCE_DIR}/project/package.json ]; then cp -a ${SOURCE_DIR}/project/. ${PROJECT_DIR}/; ` +
+          `else echo "Deployment snapshot does not contain package.json" >&2; exit 1; fi`,
+        { timeout: BUILD_TIMEOUT_MS.sourceCopy },
+      ),
+    );
+    stage = 'workspace policy verification';
+    await requireSuccess(
+      await sandbox.exec('ghostbuild-verify-pnpm-workspace pnpm-workspace.yaml', {
+        cwd: PROJECT_DIR,
+        timeout: BUILD_TIMEOUT_MS.workspacePolicy,
+      }),
+    );
+    stage = 'dependency installation';
+    await requireSuccess(
+      await sandbox.exec(
+        'pnpm install --frozen-lockfile --ignore-scripts=false --ignore-pnpmfile --registry=https://registry.npmjs.org/',
+        { cwd: PROJECT_DIR, timeout: BUILD_TIMEOUT_MS.install },
+      ),
+    );
+    // Type checking regenerates deployment-owned artifacts such as
+    // worker-configuration.d.ts and src/routeTree.gen.ts. A browser export may
+    // legitimately omit either generated file, so prepare them before the
+    // stack verifier enforces the complete production contract.
+    for (const [command, scriptStage, timeout] of [
+      ['run typecheck', 'type checking', BUILD_TIMEOUT_MS.typecheck],
+      ['run verify:stack', 'stack verification', BUILD_TIMEOUT_MS.stackVerification],
+      ['run build', 'application build', BUILD_TIMEOUT_MS.build],
+      ['run lint', 'linting', BUILD_TIMEOUT_MS.lint],
+    ] as const) {
+      stage = scriptStage;
+      await requireSuccess(await sandbox.exec(`pnpm ${command}`, { cwd: PROJECT_DIR, timeout }));
+    }
+    stage = 'build packaging';
+    await sandbox.killAllProcesses();
+    await sandbox.mkdir(PACKAGE_DIR, { recursive: true });
+    await requireSuccess(
+      await sandbox.exec(
+        `cp -a ${PROJECT_DIR}/dist ${PROJECT_DIR}/package.json ${PROJECT_DIR}/pnpm-lock.yaml ${PACKAGE_DIR}/ && ` +
+          `if [ -d ${PROJECT_DIR}/migrations ]; then cp -a ${PROJECT_DIR}/migrations ${PACKAGE_DIR}/; fi`,
+        { timeout: BUILD_TIMEOUT_MS.packageCopy },
+      ),
+    );
+    await requireSuccess(
+      await sandbox.exec(
+        `test "$(du -sk --apparent-size ${PACKAGE_DIR} | cut -f1)" -le ${MAX_BUILD_PACKAGE_KIB} && ` +
+          `test -z "$(find ${PACKAGE_DIR} -type l -print -quit)"`,
+        { timeout: BUILD_TIMEOUT_MS.packageValidation },
+      ),
+    );
+    await requireSuccess(
+      await sandbox.exec(`tar -czf ${BUILD_ARCHIVE} -C ${PACKAGE_DIR} .`, { timeout: BUILD_TIMEOUT_MS.archive }),
+    );
+    await requireSuccess(
+      await sandbox.exec(`test "$(stat -c %s ${BUILD_ARCHIVE})" -le ${MAX_BUILD_ARCHIVE_BYTES}`, {
+        timeout: BUILD_TIMEOUT_MS.archiveValidation,
+      }),
+    );
+    stage = 'build download';
+    const build = await withTimeout(
+      new Response(
+        (await sandbox.readFileStream(BUILD_ARCHIVE)).pipeThrough(limitBuildArchiveBytes(MAX_BUILD_ARCHIVE_BYTES)),
+      ).arrayBuffer(),
+      BUILD_TIMEOUT_MS.download,
+      'Deployment build archive download timed out.',
+    );
+    return new Uint8Array(build);
+  } catch (error) {
+    throw new DeploymentBuildError(
+      `The isolated production build failed during ${stage}: ${deploymentBuildErrorDetail(error)}`.slice(
+        0,
+        MAX_ERROR_OUTPUT,
+      ),
+      { cause: error },
+    );
+  } finally {
+    await sandbox.destroy().catch((error) => console.error('Unable to destroy deployment build sandbox', error));
+  }
+}
+
+async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new DeploymentBuildError(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function limitBuildArchiveBytes(maxBytes: number): TransformStream<Uint8Array, Uint8Array> {
+  let receivedBytes = 0;
+  return new TransformStream({
+    transform(chunk, controller) {
+      if (chunk.byteLength > maxBytes - receivedBytes) {
+        throw new DeploymentBuildError('Deployment build archive exceeds the download size limit.');
+      }
+      receivedBytes += chunk.byteLength;
+      controller.enqueue(chunk);
+    },
+  });
+}
+
+function deploymentBuildErrorDetail(error: unknown): string {
+  const messages: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current) && messages.length < 4) {
+    seen.add(current);
+    const message = current.message.trim();
+    if (message && messages.at(-1) !== message) {
+      messages.push(message);
+    }
+    current = current.cause;
+  }
+  return messages.join(' Caused by: ') || 'Unknown Sandbox error.';
+}
+
+class DeploymentBuildError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'DeploymentBuildError';
+  }
+}
+
+async function requireSuccess(result: ExecResult): Promise<void> {
+  if (result.success) {
+    return;
+  }
+  const output = `${result.stderr}\n${result.stdout}`.trim().slice(-MAX_ERROR_OUTPUT);
+  throw new DeploymentBuildError(
+    output
+      ? `Production build command failed (${result.exitCode}): ${output}`
+      : `Production build command failed (${result.exitCode}).`,
+  );
+}

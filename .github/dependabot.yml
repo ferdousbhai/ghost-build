@@ -1,0 +1,46 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - /
+      - /ghostbuild-agent
+      - /sandbox-tools
+      - /template
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      xterm-suite:
+        patterns:
+          - '@xterm/*'
+        update-types:
+          - minor
+          - patch
+      cloudflare-ai-peer-family:
+        patterns:
+          - ai
+          - '@ai-sdk/*'
+          - agents
+          - '@cloudflare/ai-chat'
+          - workers-ai-provider
+        update-types:
+          - minor
+          - patch
+      monorepo-dependencies:
+        group-by: dependency-name
+    ignore:
+      - dependency-name: '*'
+        update-types:
+          - version-update:semver-major
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-and-patch:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch

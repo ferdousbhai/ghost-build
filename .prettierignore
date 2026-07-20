@@ -1,0 +1,9 @@
+pnpm-lock.yaml
+.astro
+proxy/proxy.bundled.cjs
+iframe-worker/worker.bundled.mjs
+app/routeTree.gen.ts
+template/src/routeTree.gen.ts
+worker-configuration.d.ts
+template/worker-configuration.d.ts
+vite.config.ts.timestamp-*.mjs

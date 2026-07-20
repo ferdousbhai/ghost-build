@@ -1,0 +1,64 @@
+{
+  "name": "ghostbuild-cloudflare-template",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "packageManager": "pnpm@11.14.0",
+  "imports": {
+    "#/*": "./src/*"
+  },
+  "scripts": {
+    "dev": "vite dev --host 0.0.0.0",
+    "generate-routes": "tsr generate",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "deploy": "pnpm run verify:stack && pnpm run typecheck && pnpm run provision:production && pnpm run verify:production-config && pnpm run build && pnpm run lint && pnpm run d1:migrations:apply:production && wrangler deploy",
+    "d1:migrations:apply:production": "wrangler d1 migrations apply ghostbuild-cloudflare-app --remote",
+    "cf-typegen": "node scripts/cf-typegen.mjs",
+    "typecheck": "pnpm run generate-routes && pnpm run cf-typegen && tsc -p . --noEmit --pretty false",
+    "provision:production": "node scripts/provision-cloudflare-production.mjs",
+    "verify:stack": "node scripts/verify-stack-alignment.mjs",
+    "verify:production-config": "node scripts/verify-production-config.mjs",
+    "lint": "eslint src vite.config.ts --max-warnings=0"
+  },
+  "dependencies": {
+    "@ai-sdk/provider": "^3.0.14",
+    "@ai-sdk/react": "^3.0.232",
+    "@cloudflare/ai-chat": "^0.9.3",
+    "@tanstack/react-router": "^1.170.18",
+    "@tanstack/react-start": "^1.168.30",
+    "agents": "^0.17.4",
+    "ai": "^6.0.230",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "workers-ai-provider": "^3.3.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@babel/core": "^8.0.1",
+    "@cloudflare/vite-plugin": "1.45.1",
+    "@cloudflare/workers-types": "5.20260718.1",
+    "@eslint/js": "^10.0.1",
+    "@tanstack/router-cli": "^1.167.21",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "autoprefixer": "~10.5.4",
+    "eslint": "^10.7.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.7.0",
+    "jsonc-parser": "^3.3.1",
+    "postcss": "~8.5.19",
+    "tailwindcss": "~3.4.19",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.64.0",
+    "vite": "^8.1.5",
+    "wrangler": "4.112.0",
+    "yaml": "2.9.0"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}

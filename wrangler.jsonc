@@ -1,0 +1,118 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ghostbuild",
+  "compatibility_date": "2026-07-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "app/server.ts",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "ghostbuild.dev",
+      "custom_domain": true,
+    },
+  ],
+  "triggers": {
+    "crons": ["*/15 * * * *"],
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 0.6,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.05,
+    },
+  },
+  "version_metadata": {
+    "binding": "CF_VERSION_METADATA",
+  },
+  "ratelimits": [
+    {
+      "name": "CLIENT_TELEMETRY_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": {
+        "limit": 30,
+        "period": 60,
+      },
+    },
+    {
+      "name": "CLOUDFLARE_OAUTH_START_RATE_LIMITER",
+      "namespace_id": "1002",
+      "simple": {
+        "limit": 10,
+        "period": 60,
+      },
+    },
+  ],
+  "secrets": {
+    "required": [
+      "CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY",
+      "CLOUDFLARE_OAUTH_CLIENT_SECRET",
+      "DEPLOYMENT_PROXY_JWT_SECRET",
+    ],
+  },
+  "upload_source_maps": true,
+  // Configure production secrets in Cloudflare, not local env files.
+  // Deployment credentials are supplied by the CI environment, not as Worker runtime secrets.
+  // Deploy tooling injects the environment-specific OAuth client id and commit SHA.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ghostbuild",
+      "database_id": "ecad935d-17df-453a-99eb-f3d025c917a4",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "APP_STORAGE",
+      "bucket_name": "ghostbuild-app-storage",
+    },
+  ],
+  "containers": [
+    {
+      "class_name": "DeploymentSandbox",
+      "image": "./Dockerfile.sandbox",
+      // Generated projects install and compile close to 1 GB of dependencies.
+      // The lite tier only has 256 MiB RAM and 1/16 vCPU, which is not a
+      // production-capable build environment for the supported stack.
+      "instance_type": "basic",
+      "max_instances": 2,
+    },
+  ],
+  "workflows": [
+    {
+      "name": "ghostbuild-deployments",
+      "binding": "DeploymentWorkflow",
+      "class_name": "DeploymentWorkflow",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BuilderAgent",
+        "class_name": "BuilderAgent",
+      },
+      {
+        "name": "DeploymentSandbox",
+        "class_name": "DeploymentSandbox",
+      },
+    ],
+  },
+  "exports": {
+    "BuilderAgent": {
+      "type": "durable-object",
+      "storage": "sqlite",
+    },
+    "DeploymentSandbox": {
+      "type": "durable-object",
+      "storage": "sqlite",
+    },
+  },
+  "vars": {
+    "CLOUDFLARE_OAUTH_SCOPES": "openid profile email account-settings.read workers-scripts.write d1.write workers-r2.write ai.read",
+    "SANDBOX_TRANSPORT": "rpc",
+  },
+}

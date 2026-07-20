@@ -1,0 +1,17 @@
+packages:
+  - "."
+ignoreWorkspaceRootCheck: true
+minimumReleaseAge: 1440
+minimumReleaseAgeIgnoreMissingTime: false
+minimumReleaseAgeStrict: true
+strictDepBuilds: true
+blockExoticSubdeps: true
+allowBuilds:
+  core-js-pure: true
+  esbuild: true
+  sharp: true
+  workerd: true
+peerDependencyRules:
+  allowedVersions:
+    # Type-only v5 is compatible with the currently published Agents packages.
+    "@cloudflare/workers-types": "5"

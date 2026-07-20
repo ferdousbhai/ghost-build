@@ -1,0 +1,62 @@
+import type { SqlProvider } from 'agents/experimental/memory/session';
+import type { ContextCompaction } from './context-compaction';
+
+const CONTEXT_ID = 'active';
+
+type ContextStateRow = {
+  summary: string | null;
+  from_message_id: string | null;
+  to_message_id: string | null;
+};
+
+/** Persists the single summary overlay owned by one transcript Agent. */
+export class DurableObjectContextCompactionRepository {
+  constructor(private readonly db: SqlProvider) {}
+
+  /** Move a summary written by the former shared-Agent design to this Agent's canonical record. */
+  migrateLegacySubchat(subchatIndex: number): void {
+    const legacyId = `subchat:${subchatIndex}`;
+    const legacy = this.read(legacyId);
+    if (legacy) {
+      this.saveCompaction(legacy);
+      void this.db.sql`DELETE FROM builder_context_state WHERE id = ${legacyId}`;
+    }
+  }
+
+  getCompaction(): ContextCompaction | null {
+    return this.read(CONTEXT_ID);
+  }
+
+  saveCompaction(compaction: ContextCompaction): void {
+    const updatedAt = new Date().toISOString();
+    void this.db.sql`
+      INSERT INTO builder_context_state (
+        id, summary, from_message_id, to_message_id, created_at, updated_at
+      ) VALUES (
+        ${CONTEXT_ID}, ${compaction.summary}, ${compaction.fromMessageId}, ${compaction.toMessageId},
+        ${updatedAt}, ${updatedAt}
+      ) ON CONFLICT(id) DO UPDATE SET
+        summary = excluded.summary,
+        from_message_id = excluded.from_message_id,
+        to_message_id = excluded.to_message_id,
+        updated_at = excluded.updated_at
+    `;
+  }
+
+  private read(id: string): ContextCompaction | null {
+    const row = this.db.sql<ContextStateRow>`
+      SELECT summary, from_message_id, to_message_id
+      FROM builder_context_state
+      WHERE id = ${id}
+      LIMIT 1
+    `[0];
+    if (!row?.summary || !row.from_message_id || !row.to_message_id) {
+      return null;
+    }
+    return {
+      summary: row.summary,
+      fromMessageId: row.from_message_id,
+      toMessageId: row.to_message_id,
+    };
+  }
+}

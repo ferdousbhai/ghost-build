@@ -1,0 +1,107 @@
+.BaseChat {
+  &[data-chat-visible='false'] {
+    --workbench-inner-width: 100%;
+    --workbench-left: 0;
+
+    .Chat {
+      --at-apply: bolt-ease-cubic-bezier;
+      transition-property: transform, opacity;
+      transition-duration: 0.3s;
+      will-change: transform, opacity;
+      transform: translateX(-50%);
+      opacity: 0;
+    }
+  }
+}
+
+.Chat {
+  opacity: 1;
+  background: var(--gb-background-primary);
+}
+
+.ChatScroller {
+  scroll-padding-block: 5rem 10rem;
+}
+
+.Conversation {
+  padding-top: 0.25rem;
+}
+
+.ComposerDock {
+  isolation: isolate;
+}
+
+.ComposerDock::before {
+  position: absolute;
+  z-index: -1;
+  inset: -3rem -1rem 0;
+  content: '';
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--gb-background-primary) 3rem);
+}
+
+.Message {
+  animation: message-enter 220ms ease-out both;
+}
+
+.UserMessage {
+  align-self: flex-end;
+  width: min(92%, 34rem);
+  padding: 0.875rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--gb-content-accent) 22%, var(--gb-border-transparent));
+  border-radius: 1.35rem 1.35rem 0.45rem 1.35rem;
+  background: color-mix(in srgb, var(--gb-background-secondary) 91%, var(--ghost-home-accent));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--ghost-home-accent-2) 10%, transparent);
+}
+
+.AssistantMessage {
+  padding: 0.85rem 0.25rem 1.15rem;
+  color: var(--gb-content-primary);
+}
+
+@keyframes message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (max-width: 639px) {
+  .Conversation {
+    padding-top: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .Message {
+    animation: none;
+  }
+}
+
+.PromptEffectContainer {
+  --prompt-container-offset: 50px;
+  --prompt-line-stroke-width: 1px;
+  position: absolute;
+  pointer-events: none;
+  inset: calc(var(--prompt-container-offset) / -2);
+  width: calc(100% + var(--prompt-container-offset));
+  height: calc(100% + var(--prompt-container-offset));
+}
+
+.PromptEffectLine {
+  width: calc(100% - var(--prompt-container-offset) + var(--prompt-line-stroke-width));
+  height: calc(100% - var(--prompt-container-offset) + var(--prompt-line-stroke-width));
+  x: calc(var(--prompt-container-offset) / 2 - var(--prompt-line-stroke-width) / 2);
+  y: calc(var(--prompt-container-offset) / 2 - var(--prompt-line-stroke-width) / 2);
+  rx: calc(8px - var(--prompt-line-stroke-width));
+  fill: transparent;
+  stroke-width: var(--prompt-line-stroke-width);
+  stroke: url(#line-gradient);
+  stroke-dasharray: 35px 65px;
+  stroke-dashoffset: 10;
+}
+
+.PromptShine {
+  fill: url(#shine-gradient);
+  mix-blend-mode: overlay;
+}

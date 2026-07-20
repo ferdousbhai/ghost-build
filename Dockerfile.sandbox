@@ -1,0 +1,10 @@
+FROM docker.io/cloudflare/sandbox:0.12.3@sha256:23f67e16131b780865a5fa5aa3c8607408a730105c248836409f4e02bb6bf042
+
+COPY sandbox-tools/package.json sandbox-tools/pnpm-lock.yaml sandbox-tools/pnpm-workspace.yaml sandbox-tools/verify-pnpm-workspace-policy.mjs /opt/ghostbuild-tools/
+
+RUN npm install --global pnpm@11.14.0 --ignore-scripts --no-audit --no-fund && \
+    pnpm --dir /opt/ghostbuild-tools install --prod --frozen-lockfile && \
+    chmod 0555 /opt/ghostbuild-tools/verify-pnpm-workspace-policy.mjs && \
+    ln -s /opt/ghostbuild-tools/verify-pnpm-workspace-policy.mjs /usr/local/bin/ghostbuild-verify-pnpm-workspace
+
+ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:${PATH}"

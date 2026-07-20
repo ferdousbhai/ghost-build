@@ -1,0 +1,170 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { parse } from "jsonc-parser";
+import {
+  APP_REQUIRED_PACKAGES,
+  WORKER_REQUIRED_PACKAGES,
+  collectSourceEntries,
+  findCloudflareAiPeerCompatibilityErrors,
+  findForbiddenDependencies,
+  findForbiddenImports,
+  findForbiddenRuntimeEnvAccess,
+  findBuildApprovalErrors,
+  findMissingCommandSteps,
+  findMissingDependencies,
+  findMissingPaths,
+  findRuntimePinErrors,
+  projectType,
+} from "./lib/project-policy.mjs";
+
+const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const baseRequiredPaths = [
+  "eslint.config.js",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  "src/server.ts",
+  "tsconfig.json",
+  "worker-configuration.d.ts",
+  "wrangler.jsonc",
+];
+const webAppRequiredPaths = [
+  "migrations",
+  "src/agents/app-agent.ts",
+  "src/routeTree.gen.ts",
+  "src/router.tsx",
+  "src/routes/__root.tsx",
+  "src/routes/index.tsx",
+  "vite.config.ts",
+];
+
+function readJson(path) {
+  return JSON.parse(readFileSync(resolve(rootDir, path), "utf8"));
+}
+
+export function verifyStackAlignment() {
+  const errors = [];
+  const packageJson = readJson("package.json");
+  const type = projectType(packageJson);
+  errors.push(
+    ...findForbiddenDependencies(packageJson, "package.json"),
+    ...findMissingDependencies(
+      packageJson,
+      "package.json",
+      type === "worker" ? WORKER_REQUIRED_PACKAGES : APP_REQUIRED_PACKAGES,
+    ),
+    ...findCloudflareAiPeerCompatibilityErrors(packageJson, "package.json"),
+    ...findRuntimePinErrors(packageJson, "package.json"),
+    ...findMissingPaths(rootDir, [
+      ...baseRequiredPaths,
+      ...(type === "web_app" ? webAppRequiredPaths : []),
+    ]),
+  );
+
+  if (existsSync(resolve(rootDir, "package-lock.json"))) {
+    errors.push("package-lock.json must not exist; generated apps use pnpm.");
+  }
+  const workspace = readFileSync(
+    resolve(rootDir, "pnpm-workspace.yaml"),
+    "utf8",
+  );
+  errors.push(...findBuildApprovalErrors(workspace, "pnpm-workspace.yaml"));
+
+  const scripts = packageJson.scripts ?? {};
+  if (type === "web_app" && scripts.dev !== "vite dev --host 0.0.0.0") {
+    errors.push(
+      'package.json must define "dev": "vite dev --host 0.0.0.0" for WebContainer preview.',
+    );
+  }
+  if (type === "web_app" && scripts.preview !== "vite preview --host 0.0.0.0") {
+    errors.push(
+      'package.json must define "preview": "vite preview --host 0.0.0.0".',
+    );
+  }
+  if (type === "worker" && scripts.dev !== "wrangler dev") {
+    errors.push('Worker package.json must define "dev": "wrangler dev".');
+  }
+  if (type === "worker" && scripts.preview !== "wrangler dev") {
+    errors.push('Worker package.json must define "preview": "wrangler dev".');
+  }
+  if (
+    type === "worker" &&
+    /(?:provision:production|verify:production-config|d1:migrations:apply:production|vite)/.test(
+      scripts.deploy ?? "",
+    )
+  ) {
+    errors.push(
+      "Worker package.json scripts.deploy must not contain web-app provisioning, migrations, or Vite steps.",
+    );
+  }
+  errors.push(
+    ...findMissingCommandSteps(
+      scripts.build,
+      "package.json scripts.build",
+      type === "worker"
+        ? ["wrangler deploy", "--dry-run", "--outdir dist/worker"]
+        : ["vite build"],
+    ),
+    ...findMissingCommandSteps(
+      scripts.typecheck,
+      "package.json scripts.typecheck",
+      type === "web_app"
+        ? ["generate-routes", "cf-typegen", "tsc"]
+        : ["cf-typegen", "tsc"],
+    ),
+    ...findMissingCommandSteps(scripts.deploy, "package.json scripts.deploy", [
+      "verify:stack",
+      "typecheck",
+      ...(type === "web_app"
+        ? ["provision:production", "verify:production-config"]
+        : []),
+      "build",
+      "lint",
+      ...(type === "web_app" ? ["d1:migrations:apply:production"] : []),
+      "wrangler deploy",
+    ]),
+  );
+
+  const tsconfig = parse(
+    readFileSync(resolve(rootDir, "tsconfig.json"), "utf8"),
+  );
+  if (type === "web_app" && tsconfig?.extends !== "agents/tsconfig") {
+    errors.push('tsconfig.json must extend "agents/tsconfig".');
+  }
+  if (tsconfig?.compilerOptions?.noUnusedLocals === false) {
+    errors.push("tsconfig.json must not disable noUnusedLocals.");
+  }
+  if (tsconfig?.compilerOptions?.noUnusedParameters === false) {
+    errors.push("tsconfig.json must not disable noUnusedParameters.");
+  }
+
+  const files = collectSourceEntries(rootDir, [
+    "src",
+    ...(type === "web_app" ? ["vite.config.ts"] : []),
+  ]);
+  errors.push(
+    ...findForbiddenImports(files),
+    ...findForbiddenRuntimeEnvAccess(files, [
+      {
+        pathSuffix: "vite.config.ts",
+        snippet: "process.env.GHOSTBUILD_PREVIEW",
+      },
+    ]),
+  );
+  return errors;
+}
+
+export function main() {
+  const errors = verifyStackAlignment();
+  if (errors.length > 0) {
+    console.error(errors.map((error) => `- ${error}`).join("\n"));
+    process.exitCode = 1;
+  }
+}
+
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  main();
+}

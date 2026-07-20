@@ -1,0 +1,53 @@
+{
+  "ignoreExportsUsedInFile": {
+    "interface": true,
+  },
+  "workspaces": {
+    ".": {
+      "entry": [
+        "app/router.tsx",
+        // Test entrypoints are explicit because the repository has separate
+        // Node/jsdom and workerd Vitest configurations.
+        "**/*.test.{ts,tsx}",
+        "**/*.spec.{ts,tsx}",
+        "tests/workerd/**/*.integration.ts",
+        "tests/workerd/server-dependencies.stub.ts",
+        "parse-compressed-messages.mjs",
+        // manual build processes
+        "buildSystemPrompts.ts",
+        "proxy/proxy.cjs",
+        "iframe-worker/worker.mts",
+        "iframe-worker/worker.bundled.mjs",
+        // isolated remote-dev evaluation Workers
+        "scripts/evaluations/*.worker.ts",
+      ],
+      "project": ["**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!"],
+      "ignore": [
+        "template/**",
+        // Copied into the Sandbox image and invoked as an executable by tests.
+        "sandbox-tools/verify-pnpm-workspace-policy.mjs",
+      ],
+    },
+    "ghostbuild-agent": {
+      "entry": ["**/*.test.ts", "**/*.spec.ts"],
+      "project": ["**/*.{ts,mts}"],
+    },
+    "template": {
+      "entry": ["src/router.tsx"],
+      "project": ["src/**/*.{ts,tsx}", "scripts/**/*.mjs"],
+    },
+  },
+
+  "ignoreDependencies": [
+    // these get shimmed in in vite.config.ts
+    "buffer",
+    "events",
+
+    // satisfies the Cloudflare Agents decorator transform peer dependency
+    "@babel/core",
+    "@babel/plugin-proposal-decorators",
+
+    // virtual module provided by the Cloudflare Workers runtime
+    "cloudflare",
+  ],
+}

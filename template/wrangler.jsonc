@@ -1,0 +1,53 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ghostbuild-cloudflare-app",
+  "compatibility_date": "2026-07-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "src/server.ts",
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 0.6,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.05,
+    },
+  },
+  "upload_source_maps": true,
+  "triggers": {
+    "crons": ["0 3 * * *"],
+  },
+  "ai": {
+    "binding": "AI",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ghostbuild-cloudflare-app",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "APP_STORAGE",
+      "bucket_name": "ghostbuild-cloudflare-app-storage",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AppAgent",
+        "class_name": "AppAgent",
+      },
+    ],
+  },
+  "exports": {
+    "AppAgent": {
+      "type": "durable-object",
+      "storage": "sqlite",
+    },
+  },
+}
