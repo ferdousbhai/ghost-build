@@ -19,11 +19,13 @@ describe('deferred R2 object collection', () => {
 
   test('deletes a due unreferenced object and removes its candidate', async () => {
     const database = new ObjectGcDatabase([{ storage_key: 'orphan', not_before: 10, attempts: 0 }]);
+    database.accountedObjects.add('orphan');
 
     await expect(sweepObjectGcCandidates(database.env, { now: 20 })).resolves.toBe(1);
 
     expect(deleteObjectMock).toHaveBeenCalledWith(database.env, 'orphan');
     expect(database.candidates).toEqual([]);
+    expect(database.accountedObjects).not.toContain('orphan');
   });
 
   test('retains a referenced object while removing the stale candidate', async () => {
@@ -89,6 +91,33 @@ describe('deferred R2 object collection', () => {
     expect(deleteObjectMock).toHaveBeenCalledWith(database.env, 'old-build');
   });
 
+  test('does not collect an object while its backup upload admission lease is live', async () => {
+    const database = new ObjectGcDatabase([{ storage_key: 'uploading', not_before: 10, attempts: 0 }]);
+    database.pendingAdmissionObjects.set('uploading', 30);
+
+    await expect(sweepObjectGcCandidates(database.env, { now: 20 })).resolves.toBe(0);
+
+    expect(deleteObjectMock).not.toHaveBeenCalled();
+    expect(database.candidates).toEqual([{ storage_key: 'uploading', not_before: 30, attempts: 0 }]);
+  });
+
+  test('waits for explicit admission release instead of collecting solely from wall-clock expiry', async () => {
+    const database = new ObjectGcDatabase([{ storage_key: 'abandoned', not_before: 10, attempts: 0 }]);
+    database.pendingAdmissionObjects.set('abandoned', 19);
+
+    await expect(sweepObjectGcCandidates(database.env, { now: 20 })).resolves.toBe(0);
+
+    expect(deleteObjectMock).not.toHaveBeenCalled();
+    expect(database.candidates).toEqual([
+      { storage_key: 'abandoned', not_before: 20 + OBJECT_GC_GRACE_PERIOD_MS, attempts: 0 },
+    ]);
+
+    database.pendingAdmissionObjects.delete('abandoned');
+    await expect(sweepObjectGcCandidates(database.env, { now: 20 + OBJECT_GC_GRACE_PERIOD_MS })).resolves.toBe(1);
+
+    expect(deleteObjectMock).toHaveBeenCalledWith(database.env, 'abandoned');
+  });
+
   test('does not cancel a candidate that was requeued after the caller received its cleanup receipt', async () => {
     const database = new ObjectGcDatabase([{ storage_key: 'snapshot', not_before: 20, attempts: 0 }]);
 
@@ -134,6 +163,8 @@ type Candidate = {
 
 class ObjectGcDatabase {
   candidates: Candidate[];
+  accountedObjects = new Set<string>();
+  pendingAdmissionObjects = new Map<string, number>();
   references = new Set<string>();
   buildArtifactReferences = new Map<
     string,
@@ -158,6 +189,13 @@ class ObjectGcDatabase {
         run: async () => this.run(query, values),
       }),
     }),
+    batch: async (statements: D1PreparedStatement[]) => {
+      const results = [];
+      for (const statement of statements) {
+        results.push(await statement.run());
+      }
+      return results;
+    },
   } as unknown as D1Database;
 
   readonly env = { DB: this.db, APP_STORAGE: {} } as Pick<Env, 'APP_STORAGE' | 'DB'>;
@@ -190,6 +228,10 @@ class ObjectGcDatabase {
       }
       return { updated_at: reference.updatedAt };
     }
+    if (query.includes('FROM chat_backup_object_attributions')) {
+      const expiresAt = this.pendingAdmissionObjects.get(values[0] as string);
+      return expiresAt === undefined ? null : { expires_at: expiresAt };
+    }
     if (query.includes('FROM chat_message_states')) {
       this.referenceQueries.push(query);
       return this.references.has(values[0] as string) ? { found: 1 } : null;
@@ -198,7 +240,14 @@ class ObjectGcDatabase {
   }
 
   private run(query: string, values: unknown[]) {
-    if (query.includes('DELETE FROM object_gc_candidates')) {
+    if (query.includes('DELETE FROM chat_backup_objects')) {
+      const [key, candidateKey, notBefore, now] = values as [string, string, number, number];
+      const candidate = this.candidates.find(
+        (item) => item.storage_key === candidateKey && item.not_before === notBefore && item.not_before <= now,
+      );
+      const changedRows = candidate && this.accountedObjects.delete(key) ? 1 : 0;
+      return changed(changedRows);
+    } else if (query.includes('DELETE FROM object_gc_candidates')) {
       const before = this.candidates.length;
       if (values.length === 2) {
         const [key, notBefore] = values as [string, number];

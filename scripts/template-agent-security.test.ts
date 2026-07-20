@@ -15,6 +15,15 @@ describe('generated app agent security', () => {
     const config = parse(readFileSync('template/wrangler.jsonc', 'utf8'));
 
     expect(config.triggers?.crons).toContain('0 3 * * *');
+    expect(config.d1_databases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ binding: 'DB', migrations_dir: 'migrations' }),
+        expect.objectContaining({
+          binding: 'AGENT_SECURITY_DB',
+          migrations_dir: 'agent-security-migrations',
+        }),
+      ]),
+    );
   });
 
   test('creates an opaque HttpOnly session only for same-origin requests', async () => {

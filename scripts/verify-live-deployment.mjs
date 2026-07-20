@@ -8,6 +8,7 @@ const DEFAULT_STABILIZATION_MS = 60_000;
 const DEFAULT_CHECK_INTERVAL_MS = 5_000;
 const DEFAULT_CONSECUTIVE_CHECKS = 5;
 const DEFAULT_MAX_LOCAL_ATTEMPTS = 15;
+const COMMIT_SHA_PATTERN = /^[a-f0-9]{40}$/;
 
 const waitFor = (delayMs) => wait(delayMs);
 
@@ -26,6 +27,13 @@ function parseJson(value) {
   } catch {
     return null;
   }
+}
+
+export function validateExpectedSha(value) {
+  if (typeof value !== 'string' || !COMMIT_SHA_PATTERN.test(value)) {
+    throw new Error('EXPECTED_SHA must be the exact lowercase 40-hex Git commit ID.');
+  }
+  return value;
 }
 
 export function versionResponseErrors({ statusCode, headers, body, expectedSha }) {
@@ -100,9 +108,7 @@ export async function verifyLocalDeployment({
   waitImplementation = waitFor,
   log = console.log,
 } = {}) {
-  if (!expectedSha) {
-    throw new Error('EXPECTED_SHA is required.');
-  }
+  expectedSha = validateExpectedSha(expectedSha);
 
   log(`Waiting ${stabilizationMs / 1000}s for Worker routing to stabilize.`);
   await waitImplementation(stabilizationMs);
@@ -200,9 +206,7 @@ async function fetchJson(url, options) {
  * }} [options]
  */
 export async function verifyGlobalDeployment({ expectedSha, waitImplementation = waitFor } = {}) {
-  if (!expectedSha) {
-    throw new Error('EXPECTED_SHA is required.');
-  }
+  expectedSha = validateExpectedSha(expectedSha);
 
   const created = await fetchJson(GLOBALPING_API_URL, {
     method: 'POST',

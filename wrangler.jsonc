@@ -45,6 +45,16 @@
         "period": 60,
       },
     },
+    {
+      // Fast per-location shedding only. Exact per-user rate and byte quotas
+      // are admitted atomically by D1 before any backup reaches R2.
+      "name": "CHAT_BACKUP_RATE_LIMITER",
+      "namespace_id": "1003",
+      "simple": {
+        "limit": 240,
+        "period": 60,
+      },
+    },
   ],
   "secrets": {
     "required": [
@@ -113,6 +123,14 @@
   },
   "vars": {
     "CLOUDFLARE_OAUTH_SCOPES": "openid profile email account-settings.read workers-scripts.write d1.write workers-r2.write ai.read",
+    // This mode stages retained byte/object enforcement while bounded legacy R2
+    // reconciliation completes. Exact D1 request limits and edge shedding are
+    // enforced in both modes. Promote to "enforce" after readiness is verified.
+    "CHAT_BACKUP_STORAGE_QUOTA_MODE": "shadow",
+    "CHAT_BACKUP_STORAGE_LIMIT_BYTES": "1073741824",
+    "CHAT_BACKUP_STORAGE_LIMIT_OBJECTS": "4096",
+    "CHAT_BACKUP_REQUESTS_PER_MINUTE": "120",
+    "CHAT_BACKUP_REQUESTS_PER_DAY": "10000",
     "SANDBOX_TRANSPORT": "rpc",
   },
 }

@@ -5,21 +5,33 @@ import { fileURLToPath } from 'node:url';
 
 const DEFAULT_ASSET_DIRECTORY = fileURLToPath(new URL('../dist/client/assets', import.meta.url));
 const REPORTABLE_EXTENSIONS = new Set(['.css', '.js', '.wasm']);
+const SOURCE_MAP_EXTENSION = '.map';
+
+export function collectExcludedSourceMaps(directory = DEFAULT_ASSET_DIRECTORY) {
+  return walkFiles(directory)
+    .filter((path) => path.endsWith(SOURCE_MAP_EXTENSION))
+    .map((path) => relative(directory, path))
+    .sort();
+}
 
 export function collectBundleAssets(directory = DEFAULT_ASSET_DIRECTORY) {
-  return walkFiles(directory)
-    .filter((path) => REPORTABLE_EXTENSIONS.has(extname(path)))
-    .map((path) => {
-      const contents = readFileSync(path);
+  return (
+    walkFiles(directory)
+      // Source maps are intentionally excluded from static deployment by the
+      // generated .assetsignore and therefore are not part of deployable bytes.
+      .filter((path) => !path.endsWith(SOURCE_MAP_EXTENSION) && REPORTABLE_EXTENSIONS.has(extname(path)))
+      .map((path) => {
+        const contents = readFileSync(path);
 
-      return {
-        file: relative(directory, path),
-        rawBytes: contents.byteLength,
-        gzipBytes: gzipSync(contents).byteLength,
-        brotliBytes: brotliCompressSync(contents).byteLength,
-      };
-    })
-    .sort((left, right) => right.rawBytes - left.rawBytes || left.file.localeCompare(right.file));
+        return {
+          file: relative(directory, path),
+          rawBytes: contents.byteLength,
+          gzipBytes: gzipSync(contents).byteLength,
+          brotliBytes: brotliCompressSync(contents).byteLength,
+        };
+      })
+      .sort((left, right) => right.rawBytes - left.rawBytes || left.file.localeCompare(right.file))
+  );
 }
 
 export function summarizeBundleAssets(assets) {
@@ -111,13 +123,13 @@ function formatKilobytes(bytes) {
   return `${(bytes / 1000).toFixed(1)} kB`;
 }
 
-function printReport(assets, options) {
+function printReport(assets, excludedSourceMaps, options) {
   const totals = summarizeBundleAssets(assets);
   const oversizedAssets = options.maxRawKilobytes === null ? [] : assetsOverRawLimit(assets, options.maxRawKilobytes);
   const totalLimitErrors = totalSizeLimitErrors(totals, options);
 
   if (options.json) {
-    console.log(JSON.stringify({ assets, totals, oversizedAssets, totalLimitErrors }, null, 2));
+    console.log(JSON.stringify({ assets, excludedSourceMaps, totals, oversizedAssets, totalLimitErrors }, null, 2));
   } else {
     console.log('Largest client assets (raw / gzip / brotli)');
 
@@ -130,6 +142,7 @@ function printReport(assets, options) {
     console.log(
       `\n${assets.length} assets total: ${formatKilobytes(totals.rawBytes)} raw / ${formatKilobytes(totals.gzipBytes)} gzip / ${formatKilobytes(totals.brotliBytes)} brotli`,
     );
+    console.log(`${excludedSourceMaps.length} client source map(s) excluded from deployment and bundle accounting.`);
 
     if (oversizedAssets.length > 0) {
       console.error(
@@ -147,7 +160,8 @@ function printReport(assets, options) {
 function main() {
   const options = parseArguments(process.argv.slice(2));
   const assets = collectBundleAssets(options.directory);
-  process.exitCode = printReport(assets, options) ? 0 : 1;
+  const excludedSourceMaps = collectExcludedSourceMaps(options.directory);
+  process.exitCode = printReport(assets, excludedSourceMaps, options) ? 0 : 1;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

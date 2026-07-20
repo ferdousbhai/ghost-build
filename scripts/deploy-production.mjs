@@ -1,9 +1,11 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { verifyGlobalDeployment, verifyLocalDeployment } from './verify-live-deployment.mjs';
 
 const CLIENT_ID_ENV = 'CLOUDFLARE_OAUTH_CLIENT_ID';
 const MAX_CLIENT_ID_LENGTH = 512;
+const COMMIT_SHA_PATTERN = /^[a-f0-9]{40}$/;
 
 /**
  * @typedef {(command: string, args: readonly string[], options: {stdio: 'inherit'}) => {
@@ -25,15 +27,108 @@ export function validateOAuthClientId(value) {
   return value;
 }
 
-export function wranglerDeployArgs(clientId) {
-  return ['exec', 'wrangler', 'deploy', '--var', `${CLIENT_ID_ENV}:${validateOAuthClientId(clientId)}`];
+export function validateCommitSha(value) {
+  if (typeof value !== 'string' || !COMMIT_SHA_PATTERN.test(value)) {
+    throw new Error('The production commit SHA must be the exact lowercase 40-hex Git commit ID.');
+  }
+  return value;
 }
 
 /**
- * @param {{clientId?: string, spawn?: DeploySpawn}} [options]
+ * @param {{spawn?: typeof spawnSync}} [options]
  */
-export function deployProduction({ clientId = process.env[CLIENT_ID_ENV], spawn = spawnSync } = {}) {
-  const args = wranglerDeployArgs(clientId);
+export function resolveCurrentCommitSha({ spawn = spawnSync } = {}) {
+  const result = spawn('git', ['rev-parse', '--verify', 'HEAD^{commit}'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    const detail = typeof result.stderr === 'string' ? result.stderr.trim() : '';
+    throw new Error(`Unable to resolve the current Git commit${detail ? `: ${detail}` : '.'}`);
+  }
+  return validateCommitSha(typeof result.stdout === 'string' ? result.stdout.trim() : '');
+}
+
+/**
+ * Resolve a commit that exactly describes the files being deployed. Tracked or
+ * untracked changes would make COMMIT_SHA misleading, so production fails closed.
+ * @param {{spawn?: typeof spawnSync}} [options]
+ */
+export function resolveDeployableCommitSha({ spawn = spawnSync } = {}) {
+  const commitSha = resolveCurrentCommitSha({ spawn });
+  const result = spawn('git', ['status', '--porcelain=v1', '--untracked-files=normal'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    const detail = typeof result.stderr === 'string' ? result.stderr.trim() : '';
+    throw new Error(`Unable to verify the production worktree${detail ? `: ${detail}` : '.'}`);
+  }
+  if (typeof result.stdout !== 'string' || result.stdout.trim().length > 0) {
+    throw new Error('Production deploy requires a clean Git worktree so COMMIT_SHA exactly identifies the build.');
+  }
+  const ignoredEnvironmentFiles = spawn(
+    'git',
+    [
+      'ls-files',
+      '--others',
+      '--ignored',
+      '--exclude-standard',
+      '-z',
+      '--',
+      ':(top).env',
+      ':(top).env.*',
+      ':(top).dev.vars',
+      ':(top).dev.vars*',
+      ':(top)*.vars',
+    ],
+    {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  if (ignoredEnvironmentFiles.error) {
+    throw ignoredEnvironmentFiles.error;
+  }
+  if (ignoredEnvironmentFiles.status !== 0) {
+    const detail = typeof ignoredEnvironmentFiles.stderr === 'string' ? ignoredEnvironmentFiles.stderr.trim() : '';
+    throw new Error(`Unable to inspect ignored production environment files${detail ? `: ${detail}` : '.'}`);
+  }
+  if (typeof ignoredEnvironmentFiles.stdout !== 'string' || ignoredEnvironmentFiles.stdout.length > 0) {
+    throw new Error(
+      'Production deploy refuses ignored root .env*, .dev.vars*, and *.vars files because Vite or Wrangler could make the build differ from COMMIT_SHA.',
+    );
+  }
+  return commitSha;
+}
+
+export function wranglerDeployArgs(clientId, commitSha) {
+  return [
+    'exec',
+    'wrangler',
+    'deploy',
+    '--var',
+    `COMMIT_SHA:${validateCommitSha(commitSha)}`,
+    '--var',
+    `${CLIENT_ID_ENV}:${validateOAuthClientId(clientId)}`,
+  ];
+}
+
+/**
+ * @param {{clientId?: string, commitSha?: string, spawn?: DeploySpawn}} [options]
+ */
+export function deployProduction({
+  clientId = process.env[CLIENT_ID_ENV],
+  commitSha = resolveDeployableCommitSha(),
+  spawn = spawnSync,
+} = {}) {
+  const args = wranglerDeployArgs(clientId, commitSha);
   const result = spawn('pnpm', args, { stdio: 'inherit' });
   if (result.error) {
     throw result.error;
@@ -41,7 +136,32 @@ export function deployProduction({ clientId = process.env[CLIENT_ID_ENV], spawn 
   if (typeof result.status !== 'number') {
     throw new Error('Wrangler deploy terminated without an exit status.');
   }
-  return result.status;
+  if (result.status !== 0) {
+    throw new Error(`Wrangler deploy failed with exit status ${result.status}. Live verification was not run.`);
+  }
+  return validateCommitSha(commitSha);
+}
+
+/**
+ * @param {{
+ *   clientId?: string;
+ *   commitSha?: string;
+ *   spawn?: DeploySpawn;
+ *   verifyLocal?: typeof verifyLocalDeployment;
+ *   verifyGlobal?: typeof verifyGlobalDeployment;
+ * }} [options]
+ */
+export async function deployAndVerifyProduction({
+  clientId = process.env[CLIENT_ID_ENV],
+  commitSha = resolveDeployableCommitSha(),
+  spawn = spawnSync,
+  verifyLocal = verifyLocalDeployment,
+  verifyGlobal = verifyGlobalDeployment,
+} = {}) {
+  const deployedSha = deployProduction({ clientId, commitSha, spawn });
+  await verifyLocal({ expectedSha: deployedSha });
+  await verifyGlobal({ expectedSha: deployedSha });
+  return deployedSha;
 }
 
 function isMainModule() {
@@ -52,17 +172,22 @@ function isMainModule() {
 }
 
 if (isMainModule()) {
-  try {
+  const main = async () => {
     const [command, ...extraArgs] = process.argv.slice(2);
     if (extraArgs.length > 0 || (command !== undefined && command !== '--check')) {
       throw new Error('Usage: node scripts/deploy-production.mjs [--check]');
     }
     const clientId = validateOAuthClientId(process.env[CLIENT_ID_ENV]);
-    if (command !== '--check') {
-      process.exitCode = deployProduction({ clientId });
+    const commitSha = resolveDeployableCommitSha();
+    if (command === '--check') {
+      console.log(`Production deploy inputs are valid for commit ${commitSha}.`);
+      return;
     }
-  } catch (error) {
+    await deployAndVerifyProduction({ clientId, commitSha });
+  };
+
+  main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
-  }
+  });
 }

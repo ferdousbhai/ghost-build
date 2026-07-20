@@ -10,16 +10,19 @@
   "scripts": {
     "dev": "vite dev --host 0.0.0.0",
     "generate-routes": "tsr generate",
-    "build": "vite build",
+    "build": "pnpm run verify:licenses && vite build && pnpm run verify:licenses:built",
     "preview": "vite preview --host 0.0.0.0",
-    "deploy": "pnpm run verify:stack && pnpm run typecheck && pnpm run provision:production && pnpm run verify:production-config && pnpm run build && pnpm run lint && pnpm run d1:migrations:apply:production && wrangler deploy",
-    "d1:migrations:apply:production": "wrangler d1 migrations apply ghostbuild-cloudflare-app --remote",
+    "deploy": "pnpm run typecheck && pnpm run verify:stack && pnpm run provision:production && pnpm run verify:production-config && pnpm run build && pnpm run lint && pnpm run d1:migrations:apply:production && wrangler deploy",
+    "d1:migrations:apply:production": "wrangler d1 migrations apply DB --remote && wrangler d1 migrations apply AGENT_SECURITY_DB --remote",
     "cf-typegen": "node scripts/cf-typegen.mjs",
     "typecheck": "pnpm run generate-routes && pnpm run cf-typegen && tsc -p . --noEmit --pretty false",
     "provision:production": "node scripts/provision-cloudflare-production.mjs",
     "verify:stack": "node scripts/verify-stack-alignment.mjs",
+    "verify:licenses": "node scripts/verify-production-licenses.mjs",
+    "verify:licenses:built": "node scripts/verify-production-licenses.mjs --built",
+    "licenses:generate": "node scripts/verify-production-licenses.mjs --write-notices",
     "verify:production-config": "node scripts/verify-production-config.mjs",
-    "lint": "eslint src vite.config.ts --max-warnings=0"
+    "lint": "eslint src vite.config.ts scripts/verify-production-licenses.mjs scripts/lib/runtime-module-security.ts scripts/lib/production-license-artifact.mjs --max-warnings=0"
   },
   "dependencies": {
     "@ai-sdk/provider": "^3.0.14",

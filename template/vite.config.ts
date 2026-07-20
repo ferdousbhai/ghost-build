@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 import agents from "agents/vite";
 import path from "path";
 import { fileURLToPath } from "url";
+import { productionModuleSecurityPlugin } from "./scripts/lib/runtime-module-security";
 
 const isGhostbuildPreview = process.env.GHOSTBUILD_PREVIEW === "1";
 const projectDir = path.dirname(fileURLToPath(import.meta.url));
@@ -37,6 +38,7 @@ function cloudflarePlugins(): PluginOption[] {
   }
 
   return [
+    productionModuleSecurityPlugin(projectDir),
     agents(),
     cloudflare({
       viteEnvironment: { name: "ssr" },

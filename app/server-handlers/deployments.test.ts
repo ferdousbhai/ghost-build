@@ -25,7 +25,8 @@ vi.mock('~/lib/.server/agent-request-identity', () => ({
 vi.mock('~/lib/.server/cloudflare/cloudflare-connection-repository', () => ({
   findCloudflareConnectionForUser: mocks.findConnection,
 }));
-vi.mock('~/lib/.server/cloudflare/deployment-plan', () => ({
+vi.mock('~/lib/.server/cloudflare/deployment-plan', async (importOriginal) => ({
+  ...(await importOriginal()),
   buildDeploymentPlan: mocks.buildPlan,
 }));
 vi.mock('~/lib/.server/cloudflare/deployment-repository', async (importOriginal) => ({
@@ -51,18 +52,45 @@ vi.mock('~/lib/cloudflare/data/object-gc.server', async (importOriginal) => ({
 }));
 
 import { DeploymentSnapshotLimitError } from '~/lib/.server/cloudflare/deployment-repository';
+import {
+  APP_AGENT_SECURITY_BOUNDARY_SHA256,
+  DEPLOYMENT_SECURITY_BASELINE_VERSION,
+  TEMPLATE_SOURCE_SHA256,
+} from '~/lib/.server/cloudflare/deployment-security-baseline';
 import { createDeploymentPlanAction, deploymentAction } from './deployments';
 
 const plan = {
-  version: 1 as const,
+  version: 2 as const,
   deploymentId: 'deployment-1',
   sourceSha256: 'b'.repeat(64),
+  templateSourceSha256: TEMPLATE_SOURCE_SHA256,
+  securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
+  securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
+  project: {
+    type: 'web_app' as const,
+    bindings: { ai: true, d1: true, r2: true, appAgent: true },
+  },
   billing: {
     infrastructure: 'user_cloudflare_account' as const,
     workersAi: 'user_cloudflare_account' as const,
     workersPaidUpgrade: 'explicit_user_authorization_required' as const,
   },
-  resources: [],
+  resources: [
+    { type: 'worker' as const, logicalName: 'app', proposedName: 'ghostbuild-deployment-1' },
+    { type: 'd1' as const, logicalName: 'DB', proposedName: 'ghostbuild-deployment-1' },
+    {
+      type: 'd1' as const,
+      logicalName: 'AGENT_SECURITY_DB',
+      proposedName: 'ghostbuild-deployment-1-agent-security',
+    },
+    {
+      type: 'r2' as const,
+      logicalName: 'APP_STORAGE',
+      proposedName: 'ghostbuild-deployment-1-storage',
+    },
+    { type: 'durable_object' as const, logicalName: 'AppAgent', proposedName: 'AppAgent' },
+    { type: 'workers_ai' as const, logicalName: 'AI', proposedName: 'AI' },
+  ],
 };
 
 type TestWorkflowStatus =
@@ -161,6 +189,7 @@ describe('deployment handlers', () => {
     mocks.createDeployment.mockResolvedValue(deployment());
     mocks.prepareRetry.mockResolvedValue(deployment());
     mocks.approveDeployment.mockResolvedValue(deployment('approved'));
+    mocks.requireDeployment.mockResolvedValue(deployment());
     mocks.adoptLegacyExecutionGeneration.mockImplementation(async ({ deployment: current }) => current);
   });
 
@@ -333,6 +362,41 @@ describe('deployment handlers', () => {
       }),
     );
   });
+
+  it.each(['approve', 'retry', 'execute'] as const)(
+    'rejects a stale security baseline before %s mutates deployment state',
+    async (operation) => {
+      const testEnv = env();
+      mocks.requireDeployment.mockResolvedValue({
+        ...deployment(operation === 'execute' ? 'approved' : 'failed'),
+        approvedAt: operation === 'execute' ? 123 : null,
+        plan: { ...plan, version: 1 },
+      });
+      const response = await deploymentAction({
+        request: new Request(`https://ghostbuild.dev/api/deployments/deployment-1/${operation}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body:
+            operation === 'approve'
+              ? JSON.stringify({
+                  planDigest: 'a'.repeat(64),
+                  confirmCloudflareBilling: true,
+                  confirmWorkersPaidNotAutomatic: true,
+                })
+              : undefined,
+        }),
+        env: testEnv,
+        deploymentId: 'deployment-1',
+        operation,
+      });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({ code: 'deployment_plan_stale' });
+      expect(mocks.approveDeployment).not.toHaveBeenCalled();
+      expect(mocks.prepareRetry).not.toHaveBeenCalled();
+      expect(testEnv.DeploymentWorkflow.createBatch).not.toHaveBeenCalled();
+    },
+  );
 
   it('adopts an approval created during the execution-generation migration rollout before starting Workflow work', async () => {
     const testEnv = env();

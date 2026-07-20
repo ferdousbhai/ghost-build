@@ -30,6 +30,7 @@ Production provisioning and deployment are documented in [DEVELOPMENT.md](DEVELO
 | `pnpm run build`            | Build the root Worker application          |
 | `pnpm run rebuild-template` | Rebuild the generated-application snapshot |
 | `pnpm run deploy`           | Validate, provision, migrate, and deploy   |
+| `pnpm run sbom:production`  | Print a reproducible production SPDX SBOM  |
 
 ## Repository Map
 

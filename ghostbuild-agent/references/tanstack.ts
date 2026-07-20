@@ -4,8 +4,9 @@ TanStack Start on Cloudflare:
 - Keep the Worker entrypoint in src/server.ts and import the Start handler from @tanstack/react-start/server-entry.
 - Configure vite.config.ts with @cloudflare/vite-plugin using cloudflare({ viteEnvironment: { name: "ssr" } }) and @tanstack/react-start/plugin/vite.
 - Keep wrangler.jsonc observability explicit for production: observability.enabled = true, observability.logs.enabled = true with head_sampling_rate 0.6, and observability.traces.enabled = true with head_sampling_rate 0.05.
-- Worker API routes in src/server.ts receive Cloudflare bindings from the fetch(request, env) argument.
-- TanStack Start server functions that need bindings should import { env } from "cloudflare:workers" from server-only code.
+- Generated TanStack routes and server functions should call getAppBindings() from "@/app-bindings" for application DB/R2.
+- Do not import "cloudflare:workers" from generated source. AI, AppAgent, and AGENT_SECURITY_DB bindings are intentionally
+  unavailable to generated routes.
 - Generate routes with pnpm run generate-routes after route changes.
 - Generate Cloudflare binding types with pnpm run cf-typegen after wrangler.jsonc binding changes.
 `;
@@ -28,7 +29,8 @@ TanStack DB:
 - Use useLiveQuery(collection) or useLiveQuery((q) => q.from({ items: collection })) in React components.
 - For persisted writes, configure onInsert, onUpdate, or onDelete handlers on queryCollectionOptions.
 - In persistence handlers, read transaction.mutations and call Worker API routes or TanStack Start server functions that persist to D1/R2.
-- When a server function persists to Cloudflare resources, import { env } from "cloudflare:workers" in server-only code instead of using local env files.
+- When a server function persists to Cloudflare resources, call getAppBindings() from "@/app-bindings" instead of
+  using ambient env or local env files.
 - Call collection.insert, collection.update, or collection.delete from UI helpers, then await tx.isPersisted.promise before treating the write as saved.
 - Do not use collection.utils.writeInsert, collection.utils.writeUpdate, or collection.utils.writeDelete for app mutations.
 `;

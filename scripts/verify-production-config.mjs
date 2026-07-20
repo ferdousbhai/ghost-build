@@ -140,6 +140,46 @@ export function findWorkerOAuthStartRateLimitErrors(config, label) {
   return errors;
 }
 
+export function findWorkerChatBackupQuotaErrors(config, label) {
+  const errors = [];
+  const binding = findNamedBinding(config?.ratelimits, 'CHAT_BACKUP_RATE_LIMITER');
+  if (!binding) {
+    errors.push(`${label} must bind CHAT_BACKUP_RATE_LIMITER.`);
+  } else {
+    requireEqual(errors, `${label} chat-backup rate-limit namespace_id`, binding.namespace_id, '1003');
+    requireEqual(errors, `${label} chat-backup rate-limit simple.limit`, binding.simple?.limit, 240);
+    requireEqual(errors, `${label} chat-backup rate-limit simple.period`, binding.simple?.period, 60);
+  }
+  if (!['shadow', 'enforce'].includes(config?.vars?.CHAT_BACKUP_STORAGE_QUOTA_MODE)) {
+    errors.push(`${label} vars.CHAT_BACKUP_STORAGE_QUOTA_MODE must be "shadow" or "enforce".`);
+  }
+  requireEqual(
+    errors,
+    `${label} vars.CHAT_BACKUP_STORAGE_LIMIT_BYTES`,
+    config?.vars?.CHAT_BACKUP_STORAGE_LIMIT_BYTES,
+    '1073741824',
+  );
+  requireEqual(
+    errors,
+    `${label} vars.CHAT_BACKUP_STORAGE_LIMIT_OBJECTS`,
+    config?.vars?.CHAT_BACKUP_STORAGE_LIMIT_OBJECTS,
+    '4096',
+  );
+  requireEqual(
+    errors,
+    `${label} vars.CHAT_BACKUP_REQUESTS_PER_MINUTE`,
+    config?.vars?.CHAT_BACKUP_REQUESTS_PER_MINUTE,
+    '120',
+  );
+  requireEqual(
+    errors,
+    `${label} vars.CHAT_BACKUP_REQUESTS_PER_DAY`,
+    config?.vars?.CHAT_BACKUP_REQUESTS_PER_DAY,
+    '10000',
+  );
+  return errors;
+}
+
 export function findWorkerGcScheduleErrors(config, label) {
   return config?.triggers?.crons?.includes('*/15 * * * *')
     ? []
@@ -176,6 +216,7 @@ function verifyWorker(errors, config, target) {
   requireEqual(errors, `${label} version_metadata.binding`, config?.version_metadata?.binding, 'CF_VERSION_METADATA');
   errors.push(...findWorkerTelemetryRateLimitErrors(config, label));
   errors.push(...findWorkerOAuthStartRateLimitErrors(config, label));
+  errors.push(...findWorkerChatBackupQuotaErrors(config, label));
   requireEqual(
     errors,
     `${label} vars.CLOUDFLARE_OAUTH_SCOPES`,
@@ -237,6 +278,8 @@ function verifyScripts(errors, pkg, label) {
     'validate:root',
     'validate:template',
     'verify:production-config',
+    'verify:licenses',
+    'verify:static-assets',
     'verify:stack',
   ];
   for (const name of requiredNames) {

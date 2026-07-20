@@ -10,6 +10,7 @@ import {
   findSystemPromptsReleaseWorkflowErrors,
   findWorkerObservabilityErrors,
   findWorkerOAuthStartRateLimitErrors,
+  findWorkerChatBackupQuotaErrors,
   findWorkerGcScheduleErrors,
   findWorkerRoutingErrors,
   findWorkerRuntimeSecretErrors,
@@ -163,6 +164,40 @@ describe('findWorkerOAuthStartRateLimitErrors', () => {
       'wrangler.jsonc OAuth-start rate-limit namespace_id must be "1002"; found "1001".',
       'wrangler.jsonc OAuth-start rate-limit simple.limit must be 10; found 30.',
       'wrangler.jsonc OAuth-start rate-limit simple.period must be 60; found 10.',
+    ]);
+  });
+});
+
+describe('findWorkerChatBackupQuotaErrors', () => {
+  it('requires the shedding binding and exact D1 policy configuration', () => {
+    expect(
+      findWorkerChatBackupQuotaErrors(
+        {
+          ratelimits: [
+            {
+              name: 'CHAT_BACKUP_RATE_LIMITER',
+              namespace_id: '1003',
+              simple: { limit: 240, period: 60 },
+            },
+          ],
+          vars: {
+            CHAT_BACKUP_STORAGE_QUOTA_MODE: 'shadow',
+            CHAT_BACKUP_STORAGE_LIMIT_BYTES: '1073741824',
+            CHAT_BACKUP_STORAGE_LIMIT_OBJECTS: '4096',
+            CHAT_BACKUP_REQUESTS_PER_MINUTE: '120',
+            CHAT_BACKUP_REQUESTS_PER_DAY: '10000',
+          },
+        },
+        'wrangler.jsonc',
+      ),
+    ).toEqual([]);
+    expect(findWorkerChatBackupQuotaErrors({}, 'wrangler.jsonc')).toEqual([
+      'wrangler.jsonc must bind CHAT_BACKUP_RATE_LIMITER.',
+      'wrangler.jsonc vars.CHAT_BACKUP_STORAGE_QUOTA_MODE must be "shadow" or "enforce".',
+      'wrangler.jsonc vars.CHAT_BACKUP_STORAGE_LIMIT_BYTES must be "1073741824"; found undefined.',
+      'wrangler.jsonc vars.CHAT_BACKUP_STORAGE_LIMIT_OBJECTS must be "4096"; found undefined.',
+      'wrangler.jsonc vars.CHAT_BACKUP_REQUESTS_PER_MINUTE must be "120"; found undefined.',
+      'wrangler.jsonc vars.CHAT_BACKUP_REQUESTS_PER_DAY must be "10000"; found undefined.',
     ]);
   });
 });
@@ -535,6 +570,9 @@ jobs:
       # Comments may mention wrangler dev and staging without becoming commands.
       - run: pnpm run validate
       - run: git diff --exit-code
+      - env:
+          CLOUDFLARE_OAUTH_CLIENT_ID: \${{ vars.CLOUDFLARE_OAUTH_CLIENT_ID }}
+        run: node scripts/deploy-production.mjs --check
       - run: pnpm run provision:production
         env:
           CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -542,9 +580,6 @@ jobs:
       - run: |
           # Formatting comments are ignored.
           pnpm run verify:production-config
-      - env:
-          CLOUDFLARE_OAUTH_CLIENT_ID: \${{ vars.CLOUDFLARE_OAUTH_CLIENT_ID }}
-        run: node scripts/deploy-production.mjs --check
       - env:
           CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}

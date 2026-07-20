@@ -15,9 +15,14 @@ export function solutionConstraints() {
       - src/router.tsx: router setup
       - src/server.ts: Worker API routes, Agent routing, and exported Durable Objects
       - src/agents: Cloudflare Agent classes
+      - src/app-bindings.ts: reviewed application DB/R2 binding broker for generated server-only code
       - migrations: D1 schema changes when durable relational storage is needed
+      - agent-security-migrations: protected AppAgent session and rate-limit schema; never edit or use from generated code
       - src/workers-ai.shared.ts: shared Workers AI model constants
       - wrangler.jsonc: bindings, migrations, resources, and observability
+
+      After changing production dependencies, run pnpm run licenses:generate before build or deployment so
+      public/THIRD_PARTY_LICENSES.txt remains an exact, validated inventory of the generated application.
     </template>
 
     <platform_and_framework_policy>
@@ -44,16 +49,21 @@ export function solutionConstraints() {
       Agents/Durable Objects, D1, R2, KV, Queues, Vectorize, and Cloudflare Email where appropriate. Do not introduce
       Convex, Remix, non-Cloudflare AI providers, or a second backend platform.
 
-      Default coding-agent model: @cf/zai-org/glm-5.2 via the env.AI binding. Keep its id centralized in
-      src/workers-ai.shared.ts. Chat Agents use AIChatAgent/useAgentChat, convertToModelMessages, pruneMessages,
+      Default coding-agent model: @cf/zai-org/glm-5.2 through the template's reviewed AppAgent. Keep its id centralized
+      in src/workers-ai.shared.ts. Chat Agents use AIChatAgent/useAgentChat, convertToModelMessages, pruneMessages,
       queue concurrency, explicit MCP startup timeout, abort-signal propagation, and sendIdentityOnConnect: false when
       instance names contain private identifiers. Use Agents diagnostics events and Cloudflare Tail Workers for
       production Agent observability.
     </platform_and_framework_policy>
 
     <runtime_and_data>
-      Worker handlers receive bindings through env. Server functions needing bindings import env from
-      cloudflare:workers in server-only code. Never rely on Node-only APIs in Worker handlers.
+      In generated TanStack routes and server functions, import getAppBindings from @/app-bindings for application
+      DB/R2 access.
+      Do not import cloudflare:workers or access ambient env from generated source. AI and AppAgent bindings are not
+      exposed to generated routes, and AGENT_SECURITY_DB is reserved for the reviewed session and inference controls;
+      inference remains behind the reviewed AppAgent boundary. Automatically deployed
+      AppAgent projects also disallow dynamic import(), require(), eval(), and Function constructors in generated
+      source. Never rely on Node-only APIs in Worker handlers.
 
       When using TanStack Start, remember that it renders on the server. Keep window, document, storage, layout APIs,
       and hydration-sensitive values out of module evaluation, render paths, and useState initializers; access them

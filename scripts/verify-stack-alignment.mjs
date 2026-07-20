@@ -111,6 +111,11 @@ const requiredMigrationTables = [
   'cloudflare_connections',
   'deployments',
   'deployment_resources',
+  'chat_backup_admissions',
+  'chat_backup_objects',
+  'chat_backup_object_attributions',
+  'chat_backup_reconciliation_state',
+  'deployment_security_inventory',
 ];
 
 function readJson(path) {
@@ -417,11 +422,13 @@ export function verifyStackAlignment() {
     ...findMissingCommandSteps(rootPackage.scripts?.['validate:root'], 'package.json scripts.validate:root', [
       'verify:stack',
       'verify:production-config',
+      'verify:licenses',
       'typecheck',
       'lint',
       'test',
       'knip',
       'build',
+      'verify:static-assets',
       'bundle:check',
     ]),
     ...findMissingCommandSteps(rootPackage.scripts?.['validate:template'], 'package.json scripts.validate:template', [

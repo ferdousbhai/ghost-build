@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { globalMeasurementErrors, verifyLocalDeployment, versionResponseErrors } from './verify-live-deployment.mjs';
+import {
+  globalMeasurementErrors,
+  validateExpectedSha,
+  verifyLocalDeployment,
+  versionResponseErrors,
+} from './verify-live-deployment.mjs';
 
-const expectedSha = 'expected-sha';
+const expectedSha = 'b'.repeat(40);
 const versionId = '11111111-2222-3333-4444-555555555555';
 
 async function immediateWait<T = void>(_delay?: number, value?: T): Promise<T> {
@@ -9,6 +14,12 @@ async function immediateWait<T = void>(_delay?: number, value?: T): Promise<T> {
 }
 
 describe('deployment version verification', () => {
+  it('accepts only an exact Git commit ID', () => {
+    expect(validateExpectedSha(expectedSha)).toBe(expectedSha);
+    expect(() => validateExpectedSha('expected-sha')).toThrow('exact lowercase 40-hex');
+    expect(() => validateExpectedSha(undefined)).toThrow('exact lowercase 40-hex');
+  });
+
   it('requires the SHA, Worker version, and no-store response policy', () => {
     expect(
       versionResponseErrors({
@@ -27,7 +38,7 @@ describe('deployment version verification', () => {
         expectedSha,
       }),
     ).toEqual([
-      'expected SHA expected-sha, received <empty>',
+      `expected SHA ${expectedSha}, received <empty>`,
       'missing Worker version ID',
       'Cloudflare OAuth bindings are incomplete',
       'expected Cache-Control: no-store, received <empty>',

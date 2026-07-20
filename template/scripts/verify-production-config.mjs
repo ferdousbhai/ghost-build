@@ -102,6 +102,60 @@ function verifyWorker(errors, config) {
     }
   }
 
+  const agentSecurityD1 = config?.d1_databases?.find(
+    (item) => item?.binding === "AGENT_SECURITY_DB",
+  );
+  if (!agentSecurityD1) {
+    errors.push(
+      "wrangler.jsonc must bind protected agent security D1 as AGENT_SECURITY_DB.",
+    );
+  } else {
+    requireEqual(
+      errors,
+      "wrangler.jsonc AGENT_SECURITY_DB database_name",
+      agentSecurityD1.database_name,
+      "ghostbuild-cloudflare-app-agent-security",
+    );
+    requireEqual(
+      errors,
+      "wrangler.jsonc AGENT_SECURITY_DB migrations_dir",
+      agentSecurityD1.migrations_dir,
+      "agent-security-migrations",
+    );
+    if (
+      !allowUnprovisioned &&
+      (!agentSecurityD1.database_id ||
+        agentSecurityD1.database_id === placeholderDatabaseId)
+    ) {
+      errors.push(
+        "wrangler.jsonc must contain a provisioned AGENT_SECURITY_DB database_id.",
+      );
+    }
+  }
+  if (
+    d1?.database_id &&
+    d1.database_id !== placeholderDatabaseId &&
+    d1.database_id === agentSecurityD1?.database_id
+  ) {
+    errors.push(
+      "wrangler.jsonc DB and AGENT_SECURITY_DB must use separate D1 databases.",
+    );
+  }
+  const d1Bindings = config?.d1_databases;
+  if (
+    !Array.isArray(d1Bindings) ||
+    d1Bindings.length !== 2 ||
+    new Set(d1Bindings.map((binding) => binding?.binding)).size !== 2 ||
+    d1Bindings.some(
+      (binding) =>
+        binding?.binding !== "DB" && binding?.binding !== "AGENT_SECURITY_DB",
+    )
+  ) {
+    errors.push(
+      "wrangler.jsonc must contain exactly the separate DB and AGENT_SECURITY_DB D1 bindings.",
+    );
+  }
+
   const r2 = config?.r2_buckets?.find(
     (item) => item?.binding === "APP_STORAGE",
   );
@@ -155,8 +209,8 @@ function verifyPackage(errors) {
   }
   errors.push(
     ...findMissingCommandSteps(scripts.deploy, "package.json scripts.deploy", [
-      "verify:stack",
       "typecheck",
+      "verify:stack",
       "provision:production",
       "verify:production-config",
       "build",

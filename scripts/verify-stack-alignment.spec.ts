@@ -279,6 +279,11 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
       'cloudflare_connections',
       'deployments',
       'deployment_resources',
+      'chat_backup_admissions',
+      'chat_backup_objects',
+      'chat_backup_object_attributions',
+      'chat_backup_reconciliation_state',
+      'deployment_security_inventory',
     ]
       .map((table) => `CREATE TABLE IF NOT EXISTS ${table} (id TEXT);`)
       .join('\n');

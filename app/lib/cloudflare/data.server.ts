@@ -54,12 +54,20 @@ import { MAX_THUMBNAIL_BYTES } from '~/lib/thumbnail-policy';
 import { readBodyBytesWithLimit, readJsonBodyWithLimit } from '~/lib/bounded-body';
 import { readMultipartBodyWithLimits } from '~/lib/bounded-multipart';
 import {
-  assertLz4PayloadSize,
+  assertLz4Payload,
   MESSAGE_HISTORY_LZ4_LIMITS,
   PROJECT_SNAPSHOT_LZ4_LIMITS,
   type Lz4PayloadLimits,
 } from '~/lib/compression-limits';
 import { MAX_SUBCHAT_INDEX } from './data-pagination';
+import {
+  admitChatBackupRequest,
+  completeChatBackupAdmission,
+  enforceChatBackupEdgeRateLimit,
+  registerChatBackupObject,
+  releaseChatBackupAdmissionBestEffort,
+  reserveChatBackupBytes,
+} from './data/chat-backup-quota.server';
 
 const dataOperationPathSchema = z.enum(
   Object.keys(dataOperationArgSchemas) as [DataOperationPath, ...DataOperationPath[]],
@@ -146,82 +154,110 @@ export async function storeChatAction({ request, env }: { request: Request; env:
       transcriptMessageCount,
     } = parseRequestQuery(request, storeChatRequestSchema);
     await requireMatchingSession(env, request, sessionId);
-    const checkpoint: TranscriptCheckpoint = {
-      agentName: transcriptAgentName,
-      generation: transcriptGeneration,
-      revision: transcriptRevision,
-      digest: transcriptDigest,
-      messageCount: transcriptMessageCount,
-      subchatIndex,
-    };
-    const chat = await findChat(env.DB, { id: chatId, sessionId });
-    if (!chat) {
-      return Response.json({ error: 'Chat not found' }, { status: 404 });
-    }
-    const transcript = await requireChatTranscript(env.DB, { chatId: chat.id, subchatIndex });
-    const durableBeforeUpload = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript));
-    if (!transcriptCheckpointsEqual(checkpoint, durableBeforeUpload.checkpoint)) {
-      return transcriptConflictResponse();
-    }
-    const parts = await readMultipartBodyWithLimits(request, {
-      label: 'Chat backup',
-      maximumBytes: MAX_BACKUP_REQUEST_BYTES,
-      fields: CHAT_BACKUP_FIELDS,
-    });
-    const messageBlob = parts.get('messages');
-    const snapshotBlob = parts.get('snapshot');
-    const firstMessage = parts.get('firstMessage');
-    if (messageBlob instanceof Blob) {
-      await validateLz4Upload(messageBlob, MESSAGE_HISTORY_LZ4_LIMITS);
-    }
-    if (snapshotBlob instanceof Blob) {
-      await validateLz4Upload(snapshotBlob, PROJECT_SNAPSHOT_LZ4_LIMITS);
-    }
-    await enforceChatStorageRetention(env.DB, { chatId: chat.id, reserveStates: 1 });
-    const initialDescription = typeof firstMessage === 'string' ? firstMessage.slice(0, 120) : null;
-    const storageKey = messageBlob instanceof Blob ? allocateObjectKey('message-history') : null;
-    const snapshotKey = snapshotBlob instanceof Blob ? allocateObjectKey('snapshots') : null;
-    const storageGcReceipt = storageKey ? await queueObjectGcCandidate(env.DB, storageKey) : null;
-    if (storageKey && messageBlob instanceof Blob) {
-      await putObjectAtKey(env, storageKey, messageBlob);
-    }
-    const snapshotGcReceipt = snapshotKey ? await queueObjectGcCandidate(env.DB, snapshotKey) : null;
-    if (snapshotKey && snapshotBlob instanceof Blob) {
-      await putObjectAtKey(env, snapshotKey, snapshotBlob);
-    }
-
-    const durableAfterUpload = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript));
-    if (!transcriptCheckpointsEqual(checkpoint, durableAfterUpload.checkpoint)) {
-      return transcriptConflictResponse();
-    }
-
-    const update = await updateStorageState(env.DB, {
-      sessionId,
+    await enforceChatBackupEdgeRateLimit(env, sessionId);
+    let admission = await admitChatBackupRequest(env, {
+      ownerId: sessionId,
       chatId,
-      storageKey,
-      snapshotKey,
-      lastMessageRank,
-      subchatIndex,
-      partIndex,
-      initialDescription,
-      checkpoint,
     });
-    if (!update.accepted) {
-      return transcriptConflictResponse();
-    }
-    if (update.retainedStorageKey && storageGcReceipt) {
-      await cancelObjectGcCandidateBestEffort(env.DB, storageGcReceipt);
-    }
-    if (update.retainedSnapshotKey && snapshotGcReceipt) {
-      await cancelObjectGcCandidateBestEffort(env.DB, snapshotGcReceipt);
-    }
     try {
-      await enforceChatStorageRetention(env.DB, { chatId: chat.id, reserveStates: 0 });
-    } catch (error) {
-      logger.warn('Unable to compact retained chat checkpoints after save', { chatId: chat.id, error });
+      const checkpoint: TranscriptCheckpoint = {
+        agentName: transcriptAgentName,
+        generation: transcriptGeneration,
+        revision: transcriptRevision,
+        digest: transcriptDigest,
+        messageCount: transcriptMessageCount,
+        subchatIndex,
+      };
+      const chat = await findChat(env.DB, { id: chatId, sessionId });
+      if (!chat) {
+        return Response.json({ error: 'Chat not found' }, { status: 404 });
+      }
+      const transcript = await requireChatTranscript(env.DB, { chatId: chat.id, subchatIndex });
+      const durableBeforeUpload = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript));
+      if (!transcriptCheckpointsEqual(checkpoint, durableBeforeUpload.checkpoint)) {
+        return transcriptConflictResponse();
+      }
+      const parts = await readMultipartBodyWithLimits(request, {
+        label: 'Chat backup',
+        maximumBytes: MAX_BACKUP_REQUEST_BYTES,
+        fields: CHAT_BACKUP_FIELDS,
+      });
+      const messageBlob = parts.get('messages');
+      const snapshotBlob = parts.get('snapshot');
+      const firstMessage = parts.get('firstMessage');
+      if (messageBlob instanceof Blob) {
+        await validateLz4Upload(messageBlob, MESSAGE_HISTORY_LZ4_LIMITS);
+      }
+      if (snapshotBlob instanceof Blob) {
+        await validateLz4Upload(snapshotBlob, PROJECT_SNAPSHOT_LZ4_LIMITS);
+      }
+      admission = await reserveChatBackupBytes(
+        env,
+        admission,
+        (messageBlob instanceof Blob ? messageBlob.size : 0) + (snapshotBlob instanceof Blob ? snapshotBlob.size : 0),
+        (messageBlob instanceof Blob ? 1 : 0) + (snapshotBlob instanceof Blob ? 1 : 0),
+      );
+      await enforceChatStorageRetention(env.DB, { chatId: chat.id, reserveStates: 1 });
+      const initialDescription = typeof firstMessage === 'string' ? firstMessage.slice(0, 120) : null;
+      const storageKey = messageBlob instanceof Blob ? allocateObjectKey('message-history') : null;
+      const snapshotKey = snapshotBlob instanceof Blob ? allocateObjectKey('snapshots') : null;
+      const storageGcReceipt = storageKey ? await queueObjectGcCandidate(env.DB, storageKey) : null;
+      if (storageKey && messageBlob instanceof Blob) {
+        await registerChatBackupObject(env.DB, {
+          admission,
+          storageKey,
+          sizeBytes: messageBlob.size,
+          kind: 'message-history',
+        });
+        await putObjectAtKey(env, storageKey, messageBlob);
+      }
+      const snapshotGcReceipt = snapshotKey ? await queueObjectGcCandidate(env.DB, snapshotKey) : null;
+      if (snapshotKey && snapshotBlob instanceof Blob) {
+        await registerChatBackupObject(env.DB, {
+          admission,
+          storageKey: snapshotKey,
+          sizeBytes: snapshotBlob.size,
+          kind: 'snapshot',
+        });
+        await putObjectAtKey(env, snapshotKey, snapshotBlob);
+      }
+
+      const durableAfterUpload = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript));
+      if (!transcriptCheckpointsEqual(checkpoint, durableAfterUpload.checkpoint)) {
+        return transcriptConflictResponse();
+      }
+
+      const update = await updateStorageState(env.DB, {
+        sessionId,
+        chatId,
+        storageKey,
+        snapshotKey,
+        lastMessageRank,
+        subchatIndex,
+        partIndex,
+        initialDescription,
+        checkpoint,
+      });
+      if (!update.accepted) {
+        return transcriptConflictResponse();
+      }
+      await completeChatBackupAdmission(env.DB, admission);
+      if (update.retainedStorageKey && storageGcReceipt) {
+        await cancelObjectGcCandidateBestEffort(env.DB, storageGcReceipt);
+      }
+      if (update.retainedSnapshotKey && snapshotGcReceipt) {
+        await cancelObjectGcCandidateBestEffort(env.DB, snapshotGcReceipt);
+      }
+      try {
+        await enforceChatStorageRetention(env.DB, { chatId: chat.id, reserveStates: 0 });
+      } catch (error) {
+        logger.warn('Unable to compact retained chat checkpoints after save', { chatId: chat.id, error });
+      }
+      await sweepObjectGcCandidatesBestEffort(env);
+      return new Response(null, { status: 200 });
+    } finally {
+      await releaseChatBackupAdmissionBestEffort(env.DB, admission);
     }
-    await sweepObjectGcCandidatesBestEffort(env);
-    return new Response(null, { status: 200 });
   } catch (error) {
     return internalErrorResponse(error, 'Unknown chat storage error');
   }
@@ -445,7 +481,7 @@ function runKnownDataOperation(env: Env, path: DataOperationPath, rawArgs: unkno
     case 'share.getShareDescription':
       return getShareDescription(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'share.clone':
-      return cloneShare(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
+      return cloneShare(env, dataOperationArgSchemas[path].parse(rawArgs));
     case 'socialShare.share':
       return upsertSocialShare(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'socialShare.getCurrentSocialShare':
@@ -472,6 +508,5 @@ function validateThumbnail(image: Blob): Response | null {
 }
 
 async function validateLz4Upload(blob: Blob, limits: Lz4PayloadLimits): Promise<void> {
-  const prefix = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
-  assertLz4PayloadSize(blob.size, prefix, limits);
+  assertLz4Payload(new Uint8Array(await blob.arrayBuffer()), limits);
 }

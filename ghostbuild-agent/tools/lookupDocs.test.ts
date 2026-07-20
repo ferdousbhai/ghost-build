@@ -24,6 +24,14 @@ describe('lookupDocs tool parameters', () => {
     expect(docs.cloudflarePlatform).toContain('Worker scheduled handler with Cron Triggers');
   });
 
+  it('keeps generated Cloudflare data access behind the reviewed binding broker', () => {
+    expect(docs.cloudflareStorage).toContain('getAppBindings() from "@/app-bindings"');
+    expect(docs.cloudflareStorage).toContain(
+      'AI, AppAgent, and AGENT_SECURITY_DB bindings are intentionally\n  unavailable to generated routes',
+    );
+    expect(docs.tanstackStart).toContain('Do not import "cloudflare:workers"');
+  });
+
   it('rejects removed aliases', () => {
     expect(lookupDocsParameters.safeParse({ docs: ['agents'] }).success).toBe(false);
   });

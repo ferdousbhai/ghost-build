@@ -7,13 +7,17 @@ const plan = {
 };
 const resources = [
   { resourceType: 'd1', logicalName: 'DB', providerResourceId: 'd1-id' },
+  { resourceType: 'd1', logicalName: 'AGENT_SECURITY_DB', providerResourceId: 'agent-security-d1-id' },
   { resourceType: 'r2', logicalName: 'APP_STORAGE', providerResourceId: 'ghostbuild-deployment-1-storage' },
 ];
 
 describe('deployment Cloudflare API allowlist', () => {
   test('allows only exact approved Worker and D1 deployment operations', () => {
     expect(allowed('PUT', `/accounts/${account}/workers/scripts/ghostbuild-deployment-1`)).toBe(true);
+    expect(allowed('PUT', `/accounts/${account}/workers/scripts/ghostbuild-deployment-1/schedules`)).toBe(true);
     expect(allowed('POST', `/accounts/${account}/d1/database/d1-id/query`)).toBe(true);
+    expect(allowed('POST', `/accounts/${account}/d1/database/agent-security-d1-id/query`)).toBe(true);
+    expect(allowed('GET', `/accounts/${account}/d1/database/agent-security-d1-id`)).toBe(true);
     expect(allowed('POST', `/accounts/${account}/workers/scripts/ghostbuild-deployment-1/assets-upload-session`)).toBe(
       true,
     );
@@ -23,7 +27,11 @@ describe('deployment Cloudflare API allowlist', () => {
   test('denies other accounts, resources, deletion, and every billing or subscription mutation', () => {
     expect(allowed('PUT', '/accounts/another/workers/scripts/ghostbuild-deployment-1')).toBe(false);
     expect(allowed('PUT', `/accounts/${account}/workers/scripts/unapproved-worker`)).toBe(false);
+    expect(allowed('PUT', `/accounts/${account}/workers/scripts/unapproved-worker/schedules`)).toBe(false);
+    expect(allowed('DELETE', `/accounts/${account}/workers/scripts/ghostbuild-deployment-1/schedules`)).toBe(false);
     expect(allowed('POST', `/accounts/${account}/d1/database/another-id/query`)).toBe(false);
+    expect(allowed('POST', `/accounts/${account}/d1/database/unrecorded-security-id/query`)).toBe(false);
+    expect(allowed('GET', `/accounts/${account}/d1/database`)).toBe(false);
     expect(allowed('POST', `/accounts/${account}/d1/database/d1-id/export`)).toBe(false);
     expect(allowed('POST', `/accounts/${account}/d1/database/d1-id/import`)).toBe(false);
     expect(allowed('DELETE', `/accounts/${account}/workers/scripts/ghostbuild-deployment-1`)).toBe(false);

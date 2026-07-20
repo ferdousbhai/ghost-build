@@ -16,6 +16,12 @@ import {
   upsertSocialShare,
 } from './share-service.server';
 import type { SocialShareRow } from './types';
+import {
+  createChatBackupCloneQuotaExtension,
+  enforceChatBackupEdgeRateLimit,
+  releaseChatBackupCloneAdmissionBestEffort,
+  throwIfChatBackupCloneQuotaDenied,
+} from './chat-backup-quota.server';
 
 vi.mock('./chat-repository.server', () => ({
   getLatestStorageState: vi.fn(),
@@ -33,6 +39,18 @@ vi.mock('./object-gc.server', () => ({
   queueObjectGcCandidate: vi.fn(),
   sweepObjectGcCandidatesBestEffort: vi.fn(),
 }));
+vi.mock('./chat-backup-quota.server', () => ({
+  createChatBackupCloneQuotaExtension: vi.fn(() => ({
+    admissionId: 'clone-admission',
+    prefixStatements: [],
+    suffixStatements: [],
+    validateResults: vi.fn(() => true),
+    verifyReceipt: vi.fn().mockResolvedValue(true),
+  })),
+  enforceChatBackupEdgeRateLimit: vi.fn().mockResolvedValue(undefined),
+  releaseChatBackupCloneAdmissionBestEffort: vi.fn().mockResolvedValue(undefined),
+  throwIfChatBackupCloneQuotaDenied: vi.fn().mockResolvedValue(undefined),
+}));
 
 const requireChatMock = vi.mocked(requireChat);
 const getLatestStorageStateMock = vi.mocked(getLatestStorageState);
@@ -43,6 +61,10 @@ const queueObjectGcCandidateMock = vi.mocked(queueObjectGcCandidate);
 const cancelObjectGcCandidateMock = vi.mocked(cancelObjectGcCandidate);
 const sweepObjectGcCandidatesBestEffortMock = vi.mocked(sweepObjectGcCandidatesBestEffort);
 const putObjectAtKeyMock = vi.mocked(putObjectAtKey);
+const createChatBackupCloneQuotaExtensionMock = vi.mocked(createChatBackupCloneQuotaExtension);
+const enforceChatBackupEdgeRateLimitMock = vi.mocked(enforceChatBackupEdgeRateLimit);
+const releaseChatBackupCloneAdmissionBestEffortMock = vi.mocked(releaseChatBackupCloneAdmissionBestEffort);
+const throwIfChatBackupCloneQuotaDeniedMock = vi.mocked(throwIfChatBackupCloneQuotaDenied);
 const STRONG_SHARE_CODE = 'a'.repeat(32);
 
 describe('thumbnail object ownership', () => {
@@ -242,6 +264,10 @@ describe('share persistence', () => {
     requireChatMock.mockReset();
     getLatestStorageStateMock.mockReset();
     insertChatWithStateMock.mockReset();
+    enforceChatBackupEdgeRateLimitMock.mockReset().mockResolvedValue(undefined);
+    createChatBackupCloneQuotaExtensionMock.mockClear();
+    releaseChatBackupCloneAdmissionBestEffortMock.mockClear();
+    throwIfChatBackupCloneQuotaDeniedMock.mockClear();
   });
 
   test('rejects sharing a fresh empty subchat even when it inherited a snapshot', async () => {
@@ -315,21 +341,45 @@ describe('share persistence', () => {
     const db = shareLookupDb(share);
     insertChatWithStateMock.mockRejectedValue(new Error('atomic batch failed'));
 
-    await expect(cloneShare(db, { shareCode: STRONG_SHARE_CODE, sessionId: 'session' })).rejects.toThrow(
+    await expect(cloneShare(cloneEnv(db), { shareCode: STRONG_SHARE_CODE, sessionId: 'session' })).rejects.toThrow(
       'atomic batch failed',
     );
     expect(insertChatWithStateMock).toHaveBeenCalledOnce();
-    expect(insertChatWithStateMock).toHaveBeenCalledWith(db, expect.any(Object), expect.any(Object), {
-      kind: 'legacy-share',
-      code: STRONG_SHARE_CODE,
-      parentChatId: 'parent-chat',
-    });
+    expect(insertChatWithStateMock).toHaveBeenCalledWith(
+      db,
+      expect.any(Object),
+      expect.any(Object),
+      {
+        kind: 'legacy-share',
+        code: STRONG_SHARE_CODE,
+        parentChatId: 'parent-chat',
+        quotaAdmissionId: 'clone-admission',
+      },
+      expect.objectContaining({ admissionId: 'clone-admission' }),
+    );
+    expect(releaseChatBackupCloneAdmissionBestEffortMock).toHaveBeenCalledOnce();
+  });
+
+  test('applies edge shedding before the first share lookup', async () => {
+    const prepare = vi.fn();
+    const edgeDenial = new Error('edge rate denied');
+    enforceChatBackupEdgeRateLimitMock.mockRejectedValueOnce(edgeDenial);
+
+    await expect(
+      cloneShare(cloneEnv({ prepare } as unknown as D1Database), {
+        shareCode: STRONG_SHARE_CODE,
+        sessionId: 'session',
+      }),
+    ).rejects.toBe(edgeDenial);
+
+    expect(enforceChatBackupEdgeRateLimitMock).toHaveBeenCalledWith(expect.any(Object), 'session');
+    expect(prepare).not.toHaveBeenCalled();
   });
 
   test('rejects a legacy share without stored chat history', async () => {
     const db = shareLookupDb(legacyShare({ chat_history_key: null }));
 
-    await expect(cloneShare(db, { shareCode: STRONG_SHARE_CODE, sessionId: 'session' })).rejects.toThrow(
+    await expect(cloneShare(cloneEnv(db), { shareCode: STRONG_SHARE_CODE, sessionId: 'session' })).rejects.toThrow(
       'Chat history not found',
     );
     expect(insertChatWithStateMock).not.toHaveBeenCalled();
@@ -351,14 +401,20 @@ describe('share persistence', () => {
       description: 'Shared app',
     } as Awaited<ReturnType<typeof getLatestStorageState>>);
 
-    await cloneShare(db, { shareCode: STRONG_SHARE_CODE, sessionId: 'session' });
+    await cloneShare(cloneEnv(db), { shareCode: STRONG_SHARE_CODE, sessionId: 'session' });
 
     expect(getLatestStorageStateMock).toHaveBeenCalledWith(db, { chatId: 'chat-row', subchatIndex: 2 });
     expect(insertChatWithStateMock).toHaveBeenCalledWith(
       db,
       expect.objectContaining({ description: 'Shared app', snapshotKey: 'chat-snapshot' }),
       expect.objectContaining({ storageKey: 'history-key', subchatIndex: 2, snapshotKey: 'chat-snapshot' }),
-      { kind: 'social-share', code: STRONG_SHARE_CODE, parentChatId: 'chat-row' },
+      {
+        kind: 'social-share',
+        code: STRONG_SHARE_CODE,
+        parentChatId: 'chat-row',
+        quotaAdmissionId: 'clone-admission',
+      },
+      expect.objectContaining({ admissionId: 'clone-admission' }),
     );
   });
 
@@ -367,7 +423,9 @@ describe('share persistence', () => {
     const db = { prepare } as unknown as D1Database;
 
     await expect(getShareDescription(db, { code: 'abc123' })).rejects.toThrow('Invalid share link');
-    await expect(cloneShare(db, { shareCode: 'abc123', sessionId: 'session' })).rejects.toThrow('Invalid share link');
+    await expect(cloneShare(cloneEnv(db), { shareCode: 'abc123', sessionId: 'session' })).rejects.toThrow(
+      'Invalid share link',
+    );
     expect(prepare).not.toHaveBeenCalled();
   });
 
@@ -381,7 +439,7 @@ describe('share persistence', () => {
     } as unknown as D1Database;
 
     await expect(getShareDescription(db, { code: STRONG_SHARE_CODE })).rejects.toThrow('Invalid share link');
-    await expect(cloneShare(db, { shareCode: STRONG_SHARE_CODE, sessionId: 'session' })).rejects.toThrow(
+    await expect(cloneShare(cloneEnv(db), { shareCode: STRONG_SHARE_CODE, sessionId: 'session' })).rejects.toThrow(
       'Invalid share link',
     );
     expect(queries).toContain('JOIN chats ON chats.id = shares.chat_id');
@@ -586,6 +644,16 @@ function socialShare(overrides: Partial<SocialShareRow> = {}): SocialShareRow {
 
 function thumbnailEnv(database: SocialShareDatabase) {
   return { DB: database.db, APP_STORAGE: {} } as unknown as Env;
+}
+
+function cloneEnv(db: D1Database) {
+  return {
+    DB: db,
+    CHAT_BACKUP_RATE_LIMITER: { limit: vi.fn() } as unknown as RateLimit,
+    CHAT_BACKUP_STORAGE_QUOTA_MODE: 'enforce' as const,
+    CHAT_BACKUP_STORAGE_LIMIT_BYTES: '1073741824',
+    CHAT_BACKUP_STORAGE_LIMIT_OBJECTS: '4096',
+  };
 }
 
 function legacyShare(overrides: Record<string, unknown>) {

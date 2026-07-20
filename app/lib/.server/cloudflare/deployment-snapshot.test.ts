@@ -1,6 +1,8 @@
 import JSZip from 'jszip';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { inspectDeploymentSnapshot, MAX_DEPLOYMENT_EXPANDED_BYTES } from './deployment-snapshot';
+import { APP_AGENT_PROTECTED_FILE_SHA256 } from './deployment-security-baseline';
 
 describe('inspectDeploymentSnapshot', () => {
   it('detects an explicit Worker-only profile and its configured bindings', async () => {
@@ -95,6 +97,124 @@ describe('inspectDeploymentSnapshot', () => {
     });
     await expect(inspectDeploymentSnapshot(snapshot)).rejects.toThrow('AppAgent Durable Object binding');
   });
+
+  it('rejects an ambient Workers AI binding without the reviewed AppAgent boundary', async () => {
+    const zip = new JSZip();
+    zip.file('package.json', JSON.stringify({ ghostbuild: { projectType: 'worker' } }));
+    zip.file('wrangler.jsonc', JSON.stringify({ main: 'src/server.ts', ...runtimeConfig(), ai: { binding: 'AI' } }));
+    zip.file('src/server.ts', "export default { fetch: () => new Response('ok') };\n");
+
+    await expect(inspectDeploymentSnapshot(await asBlob(zip))).rejects.toThrow('unmediated Workers AI binding');
+  });
+
+  it('fails closed when an AppAgent security boundary file or cleanup trigger is changed', async () => {
+    const changedFile = await projectZip({ includeBindings: true });
+    const changedFileZip = await JSZip.loadAsync(await changedFile.arrayBuffer());
+    changedFileZip.file('src/agent-security.ts', 'export const noSecurity = true;\n');
+    await expect(inspectDeploymentSnapshot(await asBlob(changedFileZip))).rejects.toThrow(
+      'differs from the reviewed deployment baseline',
+    );
+
+    await expect(
+      inspectDeploymentSnapshot(await projectZip({ includeBindings: true, includeCleanupTrigger: false })),
+    ).rejects.toThrow('security cleanup trigger');
+  });
+
+  it('requires the protected security database binding and exact migration directory', async () => {
+    const missing = await projectZip({ includeBindings: true });
+    const missingZip = await JSZip.loadAsync(await missing.arrayBuffer());
+    const config = JSON.parse(await missingZip.file('wrangler.jsonc')!.async('string')) as {
+      d1_databases: Array<{ binding?: string; migrations_dir?: string }>;
+    };
+    config.d1_databases = config.d1_databases.filter(
+      (binding: { binding?: string }) => binding.binding !== 'AGENT_SECURITY_DB',
+    );
+    missingZip.file('wrangler.jsonc', JSON.stringify(config));
+    await expect(inspectDeploymentSnapshot(await asBlob(missingZip))).rejects.toThrow('AGENT_SECURITY_DB');
+
+    const wrongDirectory = await projectZip({ includeBindings: true });
+    const wrongDirectoryZip = await JSZip.loadAsync(await wrongDirectory.arrayBuffer());
+    const wrongConfig = JSON.parse(await wrongDirectoryZip.file('wrangler.jsonc')!.async('string')) as {
+      d1_databases: Array<{ binding?: string; migrations_dir?: string }>;
+    };
+    const securityBinding = wrongConfig.d1_databases.find(
+      (binding: { binding?: string }) => binding.binding === 'AGENT_SECURITY_DB',
+    );
+    expect(securityBinding).toBeDefined();
+    securityBinding!.migrations_dir = 'migrations';
+    wrongDirectoryZip.file('wrangler.jsonc', JSON.stringify(wrongConfig));
+    await expect(inspectDeploymentSnapshot(await asBlob(wrongDirectoryZip))).rejects.toThrow('AGENT_SECURITY_DB');
+  });
+
+  it('rejects additional unreviewed migrations for the protected security database', async () => {
+    const snapshot = await projectZip({ includeBindings: true });
+    const zip = await JSZip.loadAsync(await snapshot.arrayBuffer());
+    zip.file('agent-security-migrations/0002_unreviewed.sql', 'DROP TABLE app_agent_sessions;\n');
+
+    await expect(inspectDeploymentSnapshot(await asBlob(zip))).rejects.toThrow(
+      'only the reviewed agent security migrations',
+    );
+  });
+
+  it('fails closed when the reviewed dependency lock identity changes', async () => {
+    const snapshot = await projectZip({ includeBindings: true });
+    const zip = await JSZip.loadAsync(await snapshot.arrayBuffer());
+    const lock = await zip.file('pnpm-lock.yaml')!.async('string');
+    zip.file('pnpm-lock.yaml', lock.replace('specifier: ^6.0.230', 'specifier: ^6.0.229'));
+
+    await expect(inspectDeploymentSnapshot(await asBlob(zip))).rejects.toThrow(
+      'changes the reviewed security or build toolchain',
+    );
+  });
+
+  it('rejects package import aliases and resolver overrides outside the reviewed mapping', async () => {
+    const snapshot = await projectZip({ includeBindings: true });
+    const aliased = await JSZip.loadAsync(await snapshot.arrayBuffer());
+    const aliasedPackage = JSON.parse(await aliased.file('package.json')!.async('string')) as Record<string, unknown>;
+    aliasedPackage.imports = { '#/*': './src/*', '#ambient': 'ambient-binding-package' };
+    aliased.file('package.json', JSON.stringify(aliasedPackage));
+    await expect(inspectDeploymentSnapshot(await asBlob(aliased))).rejects.toThrow('reviewed module type');
+
+    const redirected = await JSZip.loadAsync(await snapshot.arrayBuffer());
+    const redirectedPackage = JSON.parse(await redirected.file('package.json')!.async('string')) as Record<
+      string,
+      unknown
+    >;
+    redirectedPackage.browser = { './src/app-bindings.ts': './src/routes/unreviewed.ts' };
+    redirected.file('package.json', JSON.stringify(redirectedPackage));
+    await expect(inspectDeploymentSnapshot(await asBlob(redirected))).rejects.toThrow('resolver overrides');
+  });
+
+  it.each([
+    `import { env } /* comment */ from 'cloudflare:workers';`,
+    `void import/**/('cloudflare:workers');`,
+    `void import('cloudflare:' + 'workers').then((module) => module.env['A' + 'I']);`,
+    `const load = require /* comment */ ('cloudflare:' + 'workers');`,
+    `const run = new Function('return 1');`,
+    String.raw`import { env } from 'cloudflare:\x77orkers'; void env.AGENT_SECURITY_DB;`,
+    String.raw`import { env } from 'cloudflare:\u0077orkers'; void env.AGENT_SECURITY_DB;`,
+    String.raw`import { env } from 'cloudflare:\u{77}orkers'; void env.AGENT_SECURITY_DB;`,
+    String.raw`globalThis['e\u0076al']('1');`,
+    String.raw`new Funct\u0069on('return 1');`,
+  ])('rejects an unprotected ambient binding import: %s', async (source) => {
+    const snapshot = await projectZip({ includeBindings: true });
+    const zip = await JSZip.loadAsync(await snapshot.arrayBuffer());
+    zip.file('src/routes/unreviewed.ts', source);
+
+    await expect(inspectDeploymentSnapshot(await asBlob(zip))).rejects.toThrow(
+      'contains an unreviewed protected runtime binding access path',
+    );
+  });
+
+  it('protects the reviewed Workers AI model identity', async () => {
+    const snapshot = await projectZip({ includeBindings: true });
+    const zip = await JSZip.loadAsync(await snapshot.arrayBuffer());
+    zip.file('src/workers-ai.shared.ts', 'export const WORKERS_AI_CODING_MODEL = "@cf/other/model";\n');
+
+    await expect(inspectDeploymentSnapshot(await asBlob(zip))).rejects.toThrow(
+      'differs from the reviewed deployment baseline',
+    );
+  });
 });
 
 async function projectZip(args: {
@@ -102,11 +222,18 @@ async function projectZip(args: {
   includeBindings: boolean;
   compatibilityDate?: string;
   appAgentClassName?: string;
+  includeCleanupTrigger?: boolean;
 }): Promise<Blob> {
   const zip = new JSZip();
+  const packageJson = args.includeBindings
+    ? (JSON.parse(readFileSync('template/package.json', 'utf8')) as Record<string, unknown>)
+    : { name: 'project' };
   zip.file(
     'package.json',
-    JSON.stringify({ name: 'project', ...(args.projectType ? { ghostbuild: { projectType: args.projectType } } : {}) }),
+    JSON.stringify({
+      ...packageJson,
+      ...(args.projectType ? { ghostbuild: { projectType: args.projectType } } : {}),
+    }),
   );
   zip.file(
     'wrangler.jsonc',
@@ -123,16 +250,44 @@ async function projectZip(args: {
       ...(args.includeBindings
         ? {
             ai: { binding: 'AI' },
-            d1_databases: [{ binding: 'DB', migrations_dir: 'migrations' }],
+            d1_databases: [
+              { binding: 'DB', migrations_dir: 'migrations' },
+              { binding: 'AGENT_SECURITY_DB', migrations_dir: 'agent-security-migrations' },
+            ],
             r2_buckets: [{ binding: 'APP_STORAGE' }],
             durable_objects: { bindings: [{ name: 'AppAgent', class_name: args.appAgentClassName ?? 'AppAgent' }] },
             exports: { AppAgent: { type: 'durable-object', storage: 'sqlite' } },
+            ...(args.includeCleanupTrigger === false ? {} : { triggers: { crons: ['0 3 * * *'] } }),
           }
         : {}),
     }),
   );
-  zip.file('src/server.ts', "export default { fetch: () => new Response('ok') };\n");
+  if (args.includeBindings) {
+    addProtectedSecurityFiles(zip);
+  } else {
+    zip.file('src/server.ts', "export default { fetch: () => new Response('ok') };\n");
+  }
   return asBlob(zip);
+}
+
+function runtimeConfig() {
+  return {
+    compatibility_date: '2026-07-18',
+    compatibility_flags: ['nodejs_compat'],
+    observability: {
+      enabled: true,
+      logs: { enabled: true, head_sampling_rate: 0.6 },
+      traces: { enabled: true, head_sampling_rate: 0.05 },
+    },
+    upload_source_maps: true,
+  };
+}
+
+function addProtectedSecurityFiles(zip: JSZip): void {
+  for (const path of Object.keys(APP_AGENT_PROTECTED_FILE_SHA256)) {
+    zip.file(path, readFileSync(`template/${path}`, 'utf8'));
+  }
+  zip.file('pnpm-lock.yaml', readFileSync('template/pnpm-lock.yaml', 'utf8'));
 }
 
 async function asBlob(zip: JSZip): Promise<Blob> {

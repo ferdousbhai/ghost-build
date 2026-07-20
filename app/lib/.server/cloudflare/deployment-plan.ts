@@ -1,6 +1,12 @@
 import { inspectDeploymentSnapshot, type DeploymentProjectProfile } from './deployment-snapshot';
+import {
+  DEPLOYMENT_SECURITY_BASELINE_VERSION,
+  APP_AGENT_SECURITY_BOUNDARY_SHA256,
+  isCurrentDeploymentSecurityIdentity,
+  TEMPLATE_SOURCE_SHA256,
+} from './deployment-security-baseline';
 
-export const DEPLOYMENT_PLAN_VERSION = 1 as const;
+export const DEPLOYMENT_PLAN_VERSION = 2 as const;
 
 export type DeploymentResourceType = 'worker' | 'd1' | 'r2' | 'durable_object' | 'workers_ai';
 
@@ -14,6 +20,9 @@ export type DeploymentPlan = {
   version: typeof DEPLOYMENT_PLAN_VERSION;
   deploymentId: string;
   sourceSha256: string;
+  templateSourceSha256: string;
+  securityBaselineVersion: typeof DEPLOYMENT_SECURITY_BASELINE_VERSION;
+  securityBoundarySha256: string;
   project?: DeploymentProjectProfile;
   billing: {
     infrastructure: 'user_cloudflare_account';
@@ -32,7 +41,7 @@ export async function buildDeploymentPlan(args: {
   return buildDeploymentPlanFromSource({ deploymentId: args.deploymentId, sourceSha256, project });
 }
 
-export async function buildDeploymentPlanFromSource(args: {
+async function buildDeploymentPlanFromSource(args: {
   deploymentId: string;
   sourceSha256: string;
   project?: DeploymentProjectProfile;
@@ -46,6 +55,9 @@ export async function buildDeploymentPlanFromSource(args: {
     version: DEPLOYMENT_PLAN_VERSION,
     deploymentId: args.deploymentId,
     sourceSha256: args.sourceSha256,
+    templateSourceSha256: TEMPLATE_SOURCE_SHA256,
+    securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
+    securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
     project,
     billing: {
       infrastructure: 'user_cloudflare_account',
@@ -55,6 +67,15 @@ export async function buildDeploymentPlanFromSource(args: {
     resources: [
       { type: 'worker', logicalName: 'app', proposedName: baseName },
       ...(project.bindings.d1 ? [{ type: 'd1' as const, logicalName: 'DB', proposedName: baseName }] : []),
+      ...(project.bindings.appAgent
+        ? [
+            {
+              type: 'd1' as const,
+              logicalName: 'AGENT_SECURITY_DB',
+              proposedName: `${baseName}-agent-security`,
+            },
+          ]
+        : []),
       ...(project.bindings.r2
         ? [{ type: 'r2' as const, logicalName: 'APP_STORAGE', proposedName: `${baseName}-storage` }]
         : []),
@@ -66,6 +87,19 @@ export async function buildDeploymentPlanFromSource(args: {
   };
   const digest = await sha256Hex(new TextEncoder().encode(JSON.stringify(plan)));
   return { plan, digest };
+}
+
+export function isCurrentDeploymentPlan(plan: Partial<DeploymentPlan>): plan is DeploymentPlan {
+  if (!isCurrentDeploymentSecurityIdentity(plan) || !Array.isArray(plan.resources)) {
+    return false;
+  }
+  const requiresAgentSecurityDb = plan.project?.bindings.appAgent ?? true;
+  if (!requiresAgentSecurityDb) {
+    return true;
+  }
+  const applicationDatabase = deploymentPlanResourceName(plan as DeploymentPlan, 'd1', 'DB');
+  const agentSecurityDatabase = deploymentPlanResourceName(plan as DeploymentPlan, 'd1', 'AGENT_SECURITY_DB');
+  return Boolean(applicationDatabase && agentSecurityDatabase && applicationDatabase !== agentSecurityDatabase);
 }
 
 export function deploymentProjectProfile(plan: DeploymentPlan): DeploymentProjectProfile {

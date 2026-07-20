@@ -23,13 +23,19 @@ const baseRequiredPaths = [
   "eslint.config.js",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
+  "public/THIRD_PARTY_LICENSES.txt",
+  "scripts/production-license-policy.json",
+  "scripts/lib/production-license-artifact.mjs",
+  "scripts/verify-production-licenses.mjs",
   "src/server.ts",
   "tsconfig.json",
   "worker-configuration.d.ts",
   "wrangler.jsonc",
 ];
 const webAppRequiredPaths = [
+  "agent-security-migrations/0001_agent_security.sql",
   "migrations",
+  "scripts/lib/runtime-module-security.ts",
   "src/agents/app-agent.ts",
   "src/routeTree.gen.ts",
   "src/router.tsx",
@@ -103,7 +109,7 @@ export function verifyStackAlignment() {
       "package.json scripts.build",
       type === "worker"
         ? ["wrangler deploy", "--dry-run", "--outdir dist/worker"]
-        : ["vite build"],
+        : ["verify:licenses", "vite build", "verify:licenses:built"],
     ),
     ...findMissingCommandSteps(
       scripts.typecheck,
@@ -113,8 +119,8 @@ export function verifyStackAlignment() {
         : ["cf-typegen", "tsc"],
     ),
     ...findMissingCommandSteps(scripts.deploy, "package.json scripts.deploy", [
-      "verify:stack",
       "typecheck",
+      "verify:stack",
       ...(type === "web_app"
         ? ["provision:production", "verify:production-config"]
         : []),
@@ -140,7 +146,9 @@ export function verifyStackAlignment() {
 
   const files = collectSourceEntries(rootDir, [
     "src",
-    ...(type === "web_app" ? ["vite.config.ts"] : []),
+    ...(type === "web_app"
+      ? ["vite.config.ts", "scripts/lib/runtime-module-security.ts"]
+      : []),
   ]);
   errors.push(
     ...findForbiddenImports(files),

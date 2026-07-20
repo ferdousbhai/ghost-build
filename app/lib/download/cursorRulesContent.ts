@@ -5,10 +5,12 @@ export const cursorRulesContent = `# Ghostbuild Cloudflare App Rules
 - For HTTP APIs, webhooks, middleware, and other fetch-handler Worker scripts, use the direct Worker handler and do not invent routes, React UI, or SSR. Automatic production deployment does not yet support scheduled, queue, email, or Tail handlers.
 - Add TanStack Query or TanStack DB only when the product needs client-side server-state caching or live collections.
 - Keep pnpm run dev and pnpm run preview available for local/WebContainer preview.
+- After changing production dependencies, run pnpm run licenses:generate before build or deploy so the shipped third-party notices match the lockfile.
 - Keep Worker entrypoint code in src/server.ts.
-- Use Cloudflare bindings through the Worker env object.
-- In TanStack Start server functions, import env from cloudflare:workers from server-only code when bindings are needed.
-- Use Workers AI through env.AI and prefer @cf/zai-org/glm-5.2 for coding-agent features.
+- In generated TanStack routes and server functions, call getAppBindings() from @/app-bindings for application DB/R2 access.
+- Do not import cloudflare:workers from generated source. AI, AppAgent, and AGENT_SECURITY_DB bindings are intentionally unavailable to generated routes.
+- Automatically deployed AppAgent projects do not allow dynamic import(), require(), eval(), or Function constructors in generated source.
+- Use Workers AI only through the reviewed AppAgent and prefer @cf/zai-org/glm-5.2 for coding-agent features.
 - Use Cloudflare Agents and Durable Objects for durable agent state. For chat UI, prefer the template AIChatAgent with useAgentChat from @cloudflare/ai-chat/react.
 - Set static override options = { sendIdentityOnConnect: false } when Agent instance names can contain chat IDs, user IDs, or session IDs, and use state updates rather than agent.identified for readiness.
 - Treat client-supplied Agent instance names as routing hints, not authorization. Before public production use, authenticate and rate-limit Agent routes and derive tenant or user instance names from verified server-side identity.

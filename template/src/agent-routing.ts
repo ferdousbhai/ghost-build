@@ -4,7 +4,7 @@ import {
 } from "./agent-security";
 
 export type AppAgentRoutingEnv = {
-  DB: D1Database;
+  AGENT_SECURITY_DB: D1Database;
   AppAgent: unknown;
 };
 
@@ -23,7 +23,7 @@ export async function routeAppAgentRequest(
 ): Promise<Response | null> {
   const url = new URL(request.url);
   if (url.pathname === "/api/agent/session") {
-    return handleAgentSessionBootstrap(request, env.DB);
+    return handleAgentSessionBootstrap(request, env.AGENT_SECURITY_DB);
   }
   if (url.pathname === "/agent") {
     const origin = request.headers.get("Origin");
@@ -33,7 +33,7 @@ export async function routeAppAgentRequest(
         headers: { "Cache-Control": "no-store" },
       });
     }
-    const session = await resolveAgentSession(request, env.DB);
+    const session = await resolveAgentSession(request, env.AGENT_SECURITY_DB);
     if (!session) {
       return Response.json(
         { error: "An agent session is required." },

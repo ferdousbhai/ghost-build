@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-07-20",
+  "allowedLicenseExpressions": [
+    "(AFL-2.1 OR BSD-3-Clause)",
+    "(Apache-2.0 AND BSD-3-Clause)",
+    "(MIT AND Zlib)",
+    "(MIT OR GPL-3.0-or-later)",
+    "0BSD",
+    "Apache-2.0",
+    "BlueOak-1.0.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC-BY-4.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT OR Apache-2.0",
+    "MIT/X11",
+    "MPL-2.0",
+    "Python-2.0",
+    "Unlicense"
+  ],
+  "spdxLicenseNormalizations": {
+    "MIT/X11": "MIT"
+  },
+  "metadataOnlyPackageAllowlist": [
+    "@ai-sdk/provider-utils@4.0.40",
+    "@bufbuild/protobuf@2.12.1",
+    "@cfworker/json-schema@4.1.1",
+    "@cloudflare/containers@0.3.7",
+    "@cloudflare/workers-types@5.20260718.1",
+    "@uiw/codemirror-theme-vscode@4.25.11",
+    "@uiw/codemirror-themes@4.25.11",
+    "partyserver@0.5.8",
+    "react-remove-scroll-bar@2.3.8",
+    "varint@6.0.0"
+  ]
+}

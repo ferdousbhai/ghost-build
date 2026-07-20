@@ -18,6 +18,9 @@ export default {
     );
   },
   async scheduled(controller: ScheduledController, env: Env) {
-    await cleanupExpiredAgentSecurityState(env.DB, controller.scheduledTime);
+    await cleanupExpiredAgentSecurityState(
+      env.AGENT_SECURITY_DB,
+      controller.scheduledTime,
+    );
   },
 } satisfies ExportedHandler<Env>;

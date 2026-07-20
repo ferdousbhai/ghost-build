@@ -32,16 +32,16 @@ Cloudflare storage:
 - Use KV for simple low-write key/value data.
 - Use Queues for async jobs.
 - Use Vectorize for vector search.
-- Add bindings in wrangler.jsonc and read them from Worker env.
-- In TanStack Start server functions, read configured bindings with import { env } from "cloudflare:workers".
+- In generated TanStack routes and server functions, call getAppBindings() from "@/app-bindings" for application DB/R2 access.
+- Do not import "cloudflare:workers" in generated source. AI, AppAgent, and AGENT_SECURITY_DB bindings are intentionally
+  unavailable to generated routes.
 `;
 
 export const workersAi = `
 Workers AI:
-- Add an AI binding in wrangler.jsonc: "ai": { "binding": "AI" }.
-- Worker handlers access it as env.AI.
-- Use @cf/zai-org/glm-5.2 for coding-agent and app AI features.
-- Example: await env.AI.run("@cf/zai-org/glm-5.2", { messages }).
+- The AppAgent template already owns the AI binding and inference boundary.
+- Do not access env.AI or import "cloudflare:workers" from generated routes or server functions.
+- Use @cf/zai-org/glm-5.2 for coding-agent and app AI features through the reviewed AppAgent.
 - For chat UI, prefer the template AIChatAgent plus useAgentChat from @cloudflare/ai-chat/react instead of custom /api/ai routes.
 `;
 

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { initialMessagesAction, storageObjectAction, storeChatAction, uploadThumbnailAction } from './data.server';
 import {
   enforceChatStorageRetention,
+  findChat,
   getLatestStorageStateForGeneration,
   updateStorageState,
 } from './data/chat-repository.server';
@@ -12,6 +13,16 @@ import {
   queueObjectGcCandidate,
   sweepObjectGcCandidatesBestEffort,
 } from './data/object-gc.server';
+import {
+  admitChatBackupRequest,
+  ChatBackupQuotaError,
+  completeChatBackupAdmission,
+  enforceChatBackupEdgeRateLimit,
+  registerChatBackupObject,
+  releaseChatBackupAdmissionBestEffort,
+  reserveChatBackupBytes,
+} from './data/chat-backup-quota.server';
+import { MESSAGE_HISTORY_LZ4_LIMITS, PROJECT_SNAPSHOT_LZ4_LIMITS } from '~/lib/compression-limits';
 
 const getAuthSession = vi.hoisted(() => vi.fn());
 
@@ -59,8 +70,21 @@ vi.mock('./data/object-gc.server', () => ({
   queueObjectGcCandidate: vi.fn(),
   sweepObjectGcCandidatesBestEffort: vi.fn(),
 }));
+vi.mock('./data/chat-backup-quota.server', async () => {
+  const actual = await vi.importActual('./data/chat-backup-quota.server');
+  return {
+    ...actual,
+    admitChatBackupRequest: vi.fn(),
+    completeChatBackupAdmission: vi.fn(),
+    enforceChatBackupEdgeRateLimit: vi.fn(),
+    registerChatBackupObject: vi.fn(),
+    releaseChatBackupAdmissionBestEffort: vi.fn(),
+    reserveChatBackupBytes: vi.fn(),
+  };
+});
 
 const updateStorageStateMock = vi.mocked(updateStorageState);
+const findChatMock = vi.mocked(findChat);
 const getLatestStorageStateMock = vi.mocked(getLatestStorageStateForGeneration);
 const enforceChatStorageRetentionMock = vi.mocked(enforceChatStorageRetention);
 const allocateObjectKeyMock = vi.mocked(allocateObjectKey);
@@ -69,10 +93,36 @@ const queueObjectGcCandidateMock = vi.mocked(queueObjectGcCandidate);
 const cancelObjectGcCandidateMock = vi.mocked(cancelObjectGcCandidate);
 const objectResponseMock = vi.mocked(objectResponse);
 const sweepObjectGcCandidatesBestEffortMock = vi.mocked(sweepObjectGcCandidatesBestEffort);
+const admitChatBackupRequestMock = vi.mocked(admitChatBackupRequest);
+const completeChatBackupAdmissionMock = vi.mocked(completeChatBackupAdmission);
+const enforceChatBackupEdgeRateLimitMock = vi.mocked(enforceChatBackupEdgeRateLimit);
+const registerChatBackupObjectMock = vi.mocked(registerChatBackupObject);
+const releaseChatBackupAdmissionBestEffortMock = vi.mocked(releaseChatBackupAdmissionBestEffort);
+const reserveChatBackupBytesMock = vi.mocked(reserveChatBackupBytes);
+
+const quotaAdmission = {
+  id: 'admission',
+  ownerId: 'session',
+  reservedBytes: 0,
+  reservedObjects: 0,
+  policyViolation: false,
+};
 
 describe('chat blob ownership', () => {
   beforeEach(() => {
     getAuthSession.mockReset();
+    findChatMock.mockReset().mockResolvedValue({
+      id: 'chat-row',
+      creator_id: 'session',
+      initial_id: 'chat',
+      url_id: null,
+      description: null,
+      timestamp: '2026-01-01T00:00:00.000Z',
+      snapshot_key: null,
+      last_message_rank: null,
+      last_subchat_index: 0,
+      is_deleted: 0,
+    });
     updateStorageStateMock.mockReset();
     allocateObjectKeyMock.mockReset().mockImplementation((prefix) => `${prefix}/new`);
     putObjectAtKeyMock.mockReset().mockResolvedValue(undefined);
@@ -85,6 +135,48 @@ describe('chat blob ownership', () => {
     enforceChatStorageRetentionMock.mockResolvedValue(undefined);
     objectResponseMock.mockReset();
     sweepObjectGcCandidatesBestEffortMock.mockReset();
+    admitChatBackupRequestMock.mockReset().mockResolvedValue(quotaAdmission);
+    completeChatBackupAdmissionMock.mockReset().mockResolvedValue(undefined);
+    enforceChatBackupEdgeRateLimitMock.mockReset().mockResolvedValue(undefined);
+    registerChatBackupObjectMock.mockReset().mockResolvedValue(undefined);
+    releaseChatBackupAdmissionBestEffortMock.mockReset().mockResolvedValue(undefined);
+    reserveChatBackupBytesMock.mockReset().mockImplementation(async (_env, admission, reservedBytes) => ({
+      ...admission,
+      reservedBytes,
+    }));
+  });
+
+  test('rejects an exact request-rate denial before parsing or uploading the multipart body', async () => {
+    admitChatBackupRequestMock.mockRejectedValueOnce(new ChatBackupQuotaError('request-rate', 60));
+
+    const response = await storeChatAction({ request: storageRequest(), env: storageEnv() });
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('60');
+    expect(reserveChatBackupBytesMock).not.toHaveBeenCalled();
+    expect(putObjectAtKeyMock).not.toHaveBeenCalled();
+  });
+
+  test('releases an admitted request when the owned chat lookup returns not found', async () => {
+    findChatMock.mockResolvedValueOnce(null);
+
+    const response = await storeChatAction({ request: storageRequest(), env: storageEnv() });
+
+    expect(response.status).toBe(404);
+    expect(admitChatBackupRequestMock).toHaveBeenCalledOnce();
+    expect(releaseChatBackupAdmissionBestEffortMock).toHaveBeenCalledWith(expect.anything(), quotaAdmission);
+    expect(reserveChatBackupBytesMock).not.toHaveBeenCalled();
+  });
+
+  test('rejects a tenant byte-quota denial before allocating or uploading R2 objects', async () => {
+    reserveChatBackupBytesMock.mockRejectedValueOnce(new ChatBackupQuotaError('storage'));
+
+    const response = await storeChatAction({ request: storageRequest(), env: storageEnv() });
+
+    expect(response.status).toBe(409);
+    expect(allocateObjectKeyMock).not.toHaveBeenCalled();
+    expect(putObjectAtKeyMock).not.toHaveBeenCalled();
+    expect(releaseChatBackupAdmissionBestEffortMock).toHaveBeenCalledWith(expect.anything(), quotaAdmission);
   });
 
   test('leaves rejected backup objects on durable reference-aware cleanup receipts', async () => {
@@ -123,6 +215,8 @@ describe('chat blob ownership', () => {
     const response = await storeChatAction({ request, env: storageEnv() });
 
     expect(response.status).toBe(413);
+    expect(admitChatBackupRequestMock).toHaveBeenCalledOnce();
+    expect(releaseChatBackupAdmissionBestEffortMock).toHaveBeenCalledOnce();
     expect(putObjectAtKeyMock).not.toHaveBeenCalled();
     expect(updateStorageStateMock).not.toHaveBeenCalled();
   });
@@ -134,6 +228,18 @@ describe('chat blob ownership', () => {
     });
 
     expect(response.status).toBe(413);
+    expect(putObjectAtKeyMock).not.toHaveBeenCalled();
+  });
+
+  test('rejects an LZ4 block with an invalid back-reference before quota reservation or upload', async () => {
+    const malformed = new Uint8Array([4, 0, 0, 0, 0, 0, 0]);
+    const response = await storeChatAction({
+      request: storageRequest({ messageBlob: new Blob([malformed]) }),
+      env: storageEnv(),
+    });
+
+    expect(response.status).toBe(400);
+    expect(reserveChatBackupBytesMock).not.toHaveBeenCalled();
     expect(putObjectAtKeyMock).not.toHaveBeenCalled();
   });
 
@@ -224,6 +330,8 @@ describe('chat blob ownership', () => {
 
     expect(response.status).toBe(500);
     expect(queuedObjectKeys()).toEqual(['message-history/new', 'snapshots/new']);
+    expect(registerChatBackupObjectMock).toHaveBeenCalledTimes(2);
+    expect(releaseChatBackupAdmissionBestEffortMock).toHaveBeenCalledOnce();
     expect(cancelObjectGcCandidateMock).not.toHaveBeenCalled();
     expect(updateStorageStateMock).not.toHaveBeenCalled();
   });
@@ -467,12 +575,20 @@ function storageRequest(
     contentLength?: number;
     messageExpandedBytes?: number;
     snapshotExpandedBytes?: number;
+    messageBlob?: Blob;
     duplicateFirstMessages?: number;
   } = {},
 ): Request {
   const body = new FormData();
-  body.set('messages', lz4LikeBlob(options.messageExpandedBytes ?? 128));
-  body.set('snapshot', lz4LikeBlob(options.snapshotExpandedBytes ?? 256));
+  body.set(
+    'messages',
+    options.messageBlob ??
+      lz4TestBlob(options.messageExpandedBytes ?? 128, MESSAGE_HISTORY_LZ4_LIMITS.decompressedBytes),
+  );
+  body.set(
+    'snapshot',
+    lz4TestBlob(options.snapshotExpandedBytes ?? 256, PROJECT_SNAPSHOT_LZ4_LIMITS.decompressedBytes),
+  );
   for (let index = 0; index < (options.duplicateFirstMessages ?? 0); index++) {
     body.append('firstMessage', '');
   }
@@ -490,9 +606,25 @@ function queuedObjectKeys(): string[] {
   return queueObjectGcCandidateMock.mock.calls.map(([, key]) => key);
 }
 
-function lz4LikeBlob(expandedBytes: number): Blob {
-  const bytes = new Uint8Array(5);
+function lz4TestBlob(expandedBytes: number, maximumExpandedBytes: number): Blob {
+  if (expandedBytes > maximumExpandedBytes) {
+    const declaredOnly = new Uint8Array(5);
+    new DataView(declaredOnly.buffer).setUint32(0, expandedBytes, true);
+    return new Blob([declaredOnly], { type: 'application/octet-stream' });
+  }
+  const extensions: number[] = [];
+  if (expandedBytes >= 15) {
+    let remaining = expandedBytes - 15;
+    while (remaining >= 255) {
+      extensions.push(255);
+      remaining -= 255;
+    }
+    extensions.push(remaining);
+  }
+  const bytes = new Uint8Array(4 + 1 + extensions.length + expandedBytes);
   new DataView(bytes.buffer).setUint32(0, expandedBytes, true);
+  bytes[4] = Math.min(expandedBytes, 15) << 4;
+  bytes.set(extensions, 5);
   return new Blob([bytes], { type: 'application/octet-stream' });
 }
 

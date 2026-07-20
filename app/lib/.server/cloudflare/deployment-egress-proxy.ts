@@ -84,6 +84,9 @@ export function isApprovedCloudflareApiRequest(
   if (workerName && path === `${accountRoot}/workers/scripts/${workerName}` && method === 'PUT') {
     return true;
   }
+  if (workerName && path === `${accountRoot}/workers/scripts/${workerName}/schedules` && method === 'PUT') {
+    return true;
+  }
   if (
     workerName &&
     path === `${accountRoot}/workers/scripts/${workerName}/assets-upload-session` &&
@@ -92,17 +95,18 @@ export function isApprovedCloudflareApiRequest(
     return true;
   }
 
-  const d1Id = provisioned.find(
-    (resource) => resource.resourceType === 'd1' && resource.logicalName === 'DB',
-  )?.providerResourceId;
-  if (d1Id && path === `${accountRoot}/d1/database/${d1Id}/query` && method === 'POST') {
-    return true;
-  }
-  if (d1Id && path === `${accountRoot}/d1/database/${d1Id}` && method === 'GET') {
-    return true;
-  }
-  if (method === 'GET' && path === `${accountRoot}/d1/database`) {
-    return true;
+  const approvedD1Ids = provisioned.flatMap((resource) =>
+    resource.resourceType === 'd1' && (resource.logicalName === 'DB' || resource.logicalName === 'AGENT_SECURITY_DB')
+      ? [resource.providerResourceId]
+      : [],
+  );
+  for (const d1Id of approvedD1Ids) {
+    if (path === `${accountRoot}/d1/database/${d1Id}/query` && method === 'POST') {
+      return true;
+    }
+    if (path === `${accountRoot}/d1/database/${d1Id}` && method === 'GET') {
+      return true;
+    }
   }
   if (method === 'GET' && path === `${accountRoot}/r2/buckets`) {
     return true;

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DeploymentPlan } from './deployment-plan';
 import {
+  APP_AGENT_SECURITY_BOUNDARY_SHA256,
+  DEPLOYMENT_SECURITY_BASELINE_VERSION,
+  TEMPLATE_SOURCE_SHA256,
+} from './deployment-security-baseline';
+import {
   adoptLegacyApprovedDeploymentExecutionGeneration,
   approveDeployment,
   claimApprovedDeployment,
@@ -20,9 +25,13 @@ import {
 
 const digest = 'a'.repeat(64);
 const testPlan: DeploymentPlan = {
-  version: 1,
+  version: 2,
   deploymentId: 'deployment-1',
   sourceSha256: 'b'.repeat(64),
+  templateSourceSha256: TEMPLATE_SOURCE_SHA256,
+  securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
+  securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
+  project: { type: 'worker', bindings: { ai: false, d1: false, r2: false, appAgent: false } },
   billing: {
     infrastructure: 'user_cloudflare_account',
     workersAi: 'user_cloudflare_account',

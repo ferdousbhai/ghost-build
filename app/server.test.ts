@@ -11,6 +11,8 @@ const cloudflareConnectionStatusAction = vi.hoisted(() => vi.fn());
 const startCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const drainDeferredDataGcBestEffort = vi.hoisted(() => vi.fn());
 const pruneCloudflareAuthDataBestEffort = vi.hoisted(() => vi.fn());
+const refreshDeploymentSecurityInventoryBestEffort = vi.hoisted(() => vi.fn());
+const reconcileChatBackupQuotaBestEffort = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-start/server-entry', () => ({ default: { fetch: tanstackFetch } }));
 vi.mock('agents', () => ({ routeAgentRequest }));
@@ -48,6 +50,10 @@ vi.mock('./server-handlers/scripts', () => ({ scriptsAction }));
 vi.mock('./server-handlers/version', () => ({ versionAction: vi.fn() }));
 vi.mock('./lib/cloudflare/data/deferred-gc.server', () => ({ drainDeferredDataGcBestEffort }));
 vi.mock('./lib/cloudflare/data/cloudflare-auth-retention.server', () => ({ pruneCloudflareAuthDataBestEffort }));
+vi.mock('./lib/.server/cloudflare/deployment-security-inventory', () => ({
+  refreshDeploymentSecurityInventoryBestEffort,
+}));
+vi.mock('./lib/cloudflare/data/chat-backup-quota.server', () => ({ reconcileChatBackupQuotaBestEffort }));
 
 import server from './server';
 
@@ -72,6 +78,8 @@ describe('server Agent routing boundary', () => {
       .mockResolvedValue(Response.json({ error: 'Invalid request.' }, { status: 400 }));
     drainDeferredDataGcBestEffort.mockReset().mockResolvedValue(undefined);
     pruneCloudflareAuthDataBestEffort.mockReset().mockResolvedValue(undefined);
+    refreshDeploymentSecurityInventoryBestEffort.mockReset().mockResolvedValue(undefined);
+    reconcileChatBackupQuotaBestEffort.mockReset().mockResolvedValue(undefined);
   });
 
   it.each([
@@ -93,7 +101,11 @@ describe('server Agent routing boundary', () => {
     expect(await response.text()).toBe('application');
     expect(response.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
     expect(response.headers.get('Cross-Origin-Embedder-Policy')).toBe('credentialless');
+    expect(response.headers.get('Content-Security-Policy')).toBe(
+      "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'",
+    );
     expect(response.headers.get('Referrer-Policy')).toBe('strict-origin-when-cross-origin');
+    expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000');
     expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(response.headers.get('X-Frame-Options')).toBe('DENY');
     expect(routeAgentRequest).not.toHaveBeenCalled();
@@ -106,7 +118,11 @@ describe('server Agent routing boundary', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
     expect(response.headers.get('Cross-Origin-Embedder-Policy')).toBe('credentialless');
+    expect(response.headers.get('Content-Security-Policy')).toBe(
+      "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'",
+    );
     expect(response.headers.get('Referrer-Policy')).toBe('strict-origin-when-cross-origin');
+    expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000');
     expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(response.headers.get('X-Frame-Options')).toBe('DENY');
     expect(response.headers.get('Cache-Control')).toBe('no-store');
@@ -176,15 +192,77 @@ describe('server Agent routing boundary', () => {
     expect(response.headers.get('Cache-Control')).toBe('public, max-age=60');
   });
 
-  it('uses the scheduled execution budget for bounded deferred-data and authorization retention sweeps', async () => {
+  it('independently enforces the baseline without weakening stricter application CSP or HSTS', async () => {
+    tanstackFetch.mockResolvedValueOnce(
+      new Response('application', {
+        headers: {
+          'Content-Security-Policy': "default-src 'none'; script-src 'self'",
+          'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload',
+        },
+      }),
+    );
+
+    const response = await server.fetch(new Request('https://ghostbuild.dev/strict'), {} as Env);
+
+    expect(response.headers.get('Content-Security-Policy')).toBe(
+      "default-src 'none'; script-src 'self', base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'",
+    );
+    expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=63072000; includeSubDomains; preload');
+  });
+
+  it('bounds malformed HSTS parsing and preserves non-max-age directives when applying the floor', async () => {
+    tanstackFetch.mockResolvedValueOnce(
+      new Response('application', {
+        headers: {
+          'Strict-Transport-Security': `max-age=${'9'.repeat(1_024)}; includeSubDomains; future=value`,
+        },
+      }),
+    );
+
+    const response = await server.fetch(new Request('https://ghostbuild.dev/hsts-floor'), {} as Env);
+
+    expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains; future=value');
+  });
+
+  it('normalizes duplicate HSTS max-age directives', async () => {
+    tanstackFetch.mockResolvedValueOnce(
+      new Response('application', {
+        headers: {
+          'Strict-Transport-Security': 'max-age=63072000; max-age=0; includeSubDomains',
+        },
+      }),
+    );
+
+    const response = await server.fetch(new Request('https://ghostbuild.dev/duplicate-hsts'), {} as Env);
+
+    expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains');
+  });
+
+  it('sequences bounded scheduled maintenance to stay within the outgoing-connection budget', async () => {
     const waitUntil = vi.fn();
     const env = { DB: {} as D1Database } as Env;
+    const calls: string[] = [];
+    drainDeferredDataGcBestEffort.mockImplementationOnce(async () => {
+      calls.push('deferred-data-gc');
+    });
+    pruneCloudflareAuthDataBestEffort.mockImplementationOnce(async () => {
+      calls.push('auth-retention');
+    });
+    reconcileChatBackupQuotaBestEffort.mockImplementationOnce(async () => {
+      calls.push('chat-backup-quota');
+    });
+    refreshDeploymentSecurityInventoryBestEffort.mockImplementationOnce(async () => {
+      calls.push('deployment-security-inventory');
+    });
 
     server.scheduled({} as ScheduledController, env, { waitUntil } as unknown as ExecutionContext);
 
     expect(waitUntil).toHaveBeenCalledOnce();
     await waitUntil.mock.calls[0][0];
+    expect(calls).toEqual(['deferred-data-gc', 'auth-retention', 'chat-backup-quota', 'deployment-security-inventory']);
     expect(drainDeferredDataGcBestEffort).toHaveBeenCalledOnce();
     expect(pruneCloudflareAuthDataBestEffort).toHaveBeenCalledWith(env.DB);
+    expect(refreshDeploymentSecurityInventoryBestEffort).toHaveBeenCalledWith(env);
+    expect(reconcileChatBackupQuotaBestEffort).toHaveBeenCalledWith(env);
   });
 });
