@@ -3,6 +3,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   admitChatBackupRequest,
+  CHAT_BACKUP_MAX_INTAKE_BYTES,
   CHAT_BACKUP_HEAD_CONCURRENCY,
   CHAT_BACKUP_RECONCILIATION_LIMIT,
   ChatBackupQuotaError,
@@ -27,7 +28,10 @@ describe('chat backup quota admission', () => {
   });
 
   test('atomically admits only the configured number of concurrent requests', async () => {
-    const env = quotaEnv(database, { CHAT_BACKUP_REQUESTS_PER_MINUTE: '2' });
+    const env = quotaEnv(database, {
+      CHAT_BACKUP_REQUESTS_PER_MINUTE: '2',
+      CHAT_BACKUP_INFLIGHT_LIMIT_BYTES: String(CHAT_BACKUP_MAX_INTAKE_BYTES * 3),
+    });
     const results = await Promise.allSettled(
       Array.from({ length: 3 }, (_, index) =>
         admitChatBackupRequest(env, { ownerId: 'owner', chatId: `chat-${index}`, now: 10_000 }),
@@ -38,6 +42,50 @@ describe('chat backup quota admission', () => {
     const rejected = results.find((result) => result.status === 'rejected');
     expect(rejected).toMatchObject({ reason: expect.objectContaining({ kind: 'request-rate' }) });
     expect(database.sqlite.prepare('SELECT COUNT(*) AS count FROM chat_backup_admissions').get()).toEqual({ count: 2 });
+  });
+
+  test('reserves worst-case multipart bytes before materialization and releases them exactly', async () => {
+    const env = quotaEnv(database, {
+      CHAT_BACKUP_INFLIGHT_LIMIT_BYTES: String(CHAT_BACKUP_MAX_INTAKE_BYTES),
+    });
+    const first = await admitChatBackupRequest(env, { ownerId: 'owner', chatId: 'chat-a', now: 10_000 });
+
+    await expect(
+      admitChatBackupRequest(env, { ownerId: 'owner', chatId: 'chat-b', now: 10_000 }),
+    ).rejects.toMatchObject({ kind: 'in-flight' });
+
+    await releaseChatBackupAdmissionBestEffort(database.db, first);
+    await expect(
+      admitChatBackupRequest(env, { ownerId: 'owner', chatId: 'chat-b', now: 10_000 }),
+    ).resolves.toMatchObject({ ownerId: 'owner' });
+  });
+
+  test('releases the complete owner-scoped expired backlog before admitting new intake', async () => {
+    const env = quotaEnv(database, {
+      CHAT_BACKUP_INFLIGHT_LIMIT_BYTES: String(CHAT_BACKUP_MAX_INTAKE_BYTES),
+    });
+    const insert = database.sqlite.prepare(
+      `INSERT INTO chat_backup_admissions (
+         id, owner_id, chat_id, reserved_bytes, reserved_objects, intake_reserved_bytes, operation,
+         status, policy_violation, created_at, expires_at, reserved_at, completed_at
+       ) VALUES (?, 'owner', 'stale-chat', 0, 0, ?, 'upload', 'pending', 0, 1, 2, NULL, NULL)`,
+    );
+    for (let index = 0; index < 2_100; index++) {
+      insert.run(`stale-${index}`, CHAT_BACKUP_MAX_INTAKE_BYTES);
+    }
+
+    await expect(
+      admitChatBackupRequest(env, {
+        ownerId: 'owner',
+        chatId: 'new-chat',
+        now: 2 * 24 * 60 * 60 * 1_000,
+      }),
+    ).resolves.toMatchObject({ ownerId: 'owner' });
+    expect(
+      database.sqlite
+        .prepare(`SELECT COUNT(*) AS count FROM chat_backup_admissions WHERE owner_id = 'owner' AND status = 'pending'`)
+        .get(),
+    ).toEqual({ count: 1 });
   });
 
   test('keeps exact request limits tenant-scoped', async () => {
@@ -272,6 +320,47 @@ describe('chat backup quota admission', () => {
     expect(database.sqlite.prepare('SELECT COUNT(*) AS count FROM chat_backup_objects').get()).toEqual({ count: 1 });
   });
 
+  test('releases expired owner reservations in the same transaction before clone admission', async () => {
+    database.sqlite.exec(`
+      INSERT INTO chat_backup_objects VALUES ('message-history/shared', 7, 'message-history', 'measured', 1);
+      INSERT INTO chat_backup_object_attributions VALUES ('source-owner', 'message-history/shared', NULL, 1);
+      INSERT INTO chat_backup_admissions (
+        id, owner_id, chat_id, reserved_bytes, reserved_objects, intake_reserved_bytes, operation,
+        status, policy_violation, created_at, expires_at, reserved_at, completed_at
+      ) VALUES ('expired', 'clone-owner', 'stale-chat', 7, 1, 0, 'upload', 'pending', 0, 1, 2, 1, NULL);
+    `);
+    const extension = createChatBackupCloneQuotaExtension(
+      quotaEnv(database, { CHAT_BACKUP_STORAGE_LIMIT_BYTES: '7', CHAT_BACKUP_STORAGE_LIMIT_OBJECTS: '1' }),
+      {
+        ownerId: 'clone-owner',
+        chatId: 'clone-chat',
+        storageKeys: ['message-history/shared'],
+        now: 10_000,
+      },
+    );
+    const results = await database.db.batch([
+      ...extension.prefixStatements,
+      database.db
+        .prepare(
+          `INSERT INTO chats (id, creator_id, snapshot_key)
+           SELECT 'clone-chat', 'clone-owner', NULL
+           WHERE EXISTS (
+             SELECT 1 FROM chat_backup_admissions
+             WHERE id = ? AND owner_id = 'clone-owner' AND status = 'pending'
+           )`,
+        )
+        .bind(extension.admissionId),
+      ...extension.suffixStatements,
+    ]);
+
+    expect(extension.validateResults(results.slice(0, extension.prefixStatements.length), results.slice(-1))).toBe(
+      true,
+    );
+    expect(database.sqlite.prepare(`SELECT status FROM chat_backup_admissions WHERE id = 'expired'`).get()).toEqual({
+      status: 'released',
+    });
+  });
+
   test('prevents a clone reference from becoming visible when the recipient object cap is exhausted', async () => {
     database.sqlite.exec(`
       INSERT INTO chat_backup_objects VALUES
@@ -458,7 +547,7 @@ describe('chat backup quota admission', () => {
     ).rejects.toMatchObject({ kind: 'request-rate', retryAfterSeconds: 24 * 60 * 60 });
   });
 
-  test('keeps expired pending residual capacity charged until reconciliation explicitly releases it', async () => {
+  test('releases expired owner residual capacity before the next request while retaining physical bytes', async () => {
     const env = quotaEnv(database, { CHAT_BACKUP_STORAGE_LIMIT_BYTES: '10' });
     let stalled = await admitChatBackupRequest(env, { ownerId: 'owner', chatId: 'stalled', now: 10_000 });
     stalled = await reserveChatBackupBytes(env, stalled, 10, 2, 10_000);
@@ -472,13 +561,10 @@ describe('chat backup quota admission', () => {
     const afterExpiry = 10_000 + 15 * 60 * 1_000 + 1;
     const next = await admitChatBackupRequest(env, { ownerId: 'owner', chatId: 'next', now: afterExpiry });
 
-    await expect(reserveChatBackupBytes(env, next, 4, 1, afterExpiry)).rejects.toMatchObject({ kind: 'storage' });
-
-    await reconcileChatBackupQuota(
-      { DB: database.db, APP_STORAGE: { head: vi.fn() } as unknown as R2Bucket },
-      { now: afterExpiry, limit: 1 },
-    );
     await expect(reserveChatBackupBytes(env, next, 4, 1, afterExpiry)).resolves.toMatchObject({ reservedBytes: 4 });
+    expect(database.sqlite.prepare(`SELECT status FROM chat_backup_admissions WHERE id = ?`).get(stalled.id)).toEqual({
+      status: 'released',
+    });
     await expect(
       registerChatBackupObject(database.db, {
         admission: stalled,
@@ -733,6 +819,9 @@ class TestD1Database {
     `);
     this.sqlite.exec(
       readFileSync(new URL('../../../../migrations/0020_chat_backup_quota.sql', import.meta.url), 'utf8'),
+    );
+    this.sqlite.exec(
+      readFileSync(new URL('../../../../migrations/0022_upload_resource_quotas.sql', import.meta.url), 'utf8'),
     );
     if (options.backfillReady !== false) {
       this.sqlite.exec(

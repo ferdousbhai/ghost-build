@@ -42,6 +42,10 @@ type SessionRow = {
   image: string | null;
 };
 
+type CloudflareAuthUserRow = CloudflareAuthUser & {
+  cloudflare_subject: string | null;
+};
+
 export async function getAuthSession(env: Env, request: Request): Promise<CloudflareAuthSession | null> {
   const token = cookieValue(request.headers.get('cookie'), SESSION_COOKIE);
   if (!token) {
@@ -134,12 +138,7 @@ export async function upsertCloudflareUser(
     return { id: existingBySubject.id, name, email, image };
   }
 
-  const existingByEmail = identity.email
-    ? await db
-        .prepare('SELECT id, name, email, image FROM "user" WHERE email = ?')
-        .bind(identity.email)
-        .first<CloudflareAuthUser>()
-    : null;
+  const existingByEmail = await findAdoptableCloudflareUserByEmail(db, identity);
   if (existingByEmail) {
     await updateUser(db, existingByEmail.id, identity.subject, name, email, image, now);
     return { id: existingByEmail.id, name, email, image };
@@ -191,12 +190,24 @@ async function findCloudflareUserBySubjectOrEmail(
   if (bySubject) {
     return bySubject;
   }
-  return identity.email
-    ? db
-        .prepare('SELECT id, name, email, image FROM "user" WHERE email = ?')
-        .bind(identity.email)
-        .first<CloudflareAuthUser>()
-    : null;
+  return findAdoptableCloudflareUserByEmail(db, identity);
+}
+
+async function findAdoptableCloudflareUserByEmail(
+  db: D1Database,
+  identity: CloudflareOAuthIdentity,
+): Promise<CloudflareAuthUser | null> {
+  if (!identity.email) {
+    return null;
+  }
+  const row = await db
+    .prepare('SELECT id, name, email, image, cloudflare_subject FROM "user" WHERE email = ?')
+    .bind(identity.email)
+    .first<CloudflareAuthUserRow>();
+  if (row && row.cloudflare_subject !== null && row.cloudflare_subject !== identity.subject) {
+    throw new Error('This verified email is already linked to a different Cloudflare identity.');
+  }
+  return row;
 }
 
 async function updateUser(
@@ -214,9 +225,9 @@ async function updateUser(
       .prepare(
         `UPDATE "user"
          SET cloudflare_subject = ?, name = ?, email = ?, emailVerified = ?, image = ?, updatedAt = ?
-         WHERE id = ?`,
+         WHERE id = ? AND (cloudflare_subject IS NULL OR cloudflare_subject = ?)`,
       )
-      .bind(subject, name, email, emailVerified, image, now, id)
+      .bind(subject, name, email, emailVerified, image, now, id, subject)
       .run();
     if (result.meta.changes === 1) {
       return;

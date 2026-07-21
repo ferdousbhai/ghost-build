@@ -4,6 +4,7 @@ import type { UIMessage } from 'ai';
 
 export const MAX_BUILDER_AGENT_MESSAGES = 500;
 const MAX_BUILDER_AGENT_NAME_LENGTH = 512;
+const MAX_BUILDER_MESSAGE_ID_LENGTH = 512;
 const MAX_BUILDER_SUBCHAT_INDEX = 10_000;
 export const MAX_BUILDER_MODEL_TRANSCRIPT_BYTES = 4 * 1024 * 1024;
 
@@ -123,10 +124,59 @@ export function boundBuilderMessageForPersistence(message: UIMessage): UIMessage
 }
 
 export function assertBuilderModelTranscriptWithinLimit(messages: unknown[]): void {
-  const bytes = new TextEncoder().encode(JSON.stringify(messages)).byteLength;
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(messages);
+  } catch {
+    throw new Response('Transcript messages must be JSON serializable', { status: 400 });
+  }
+  const bytes = new TextEncoder().encode(serialized).byteLength;
   if (bytes > MAX_BUILDER_MODEL_TRANSCRIPT_BYTES) {
     throw new Response('Transcript is too large for a builder turn', { status: 413 });
   }
+}
+
+/** Validate and bound a direct client's complete transcript before any durable write or checkpoint hash. */
+export function requireBuilderSeedTranscript(value: unknown): UIMessage[] {
+  if (!Array.isArray(value)) {
+    throw new Response('Invalid transcript messages', { status: 400 });
+  }
+  if (value.length > MAX_BUILDER_AGENT_MESSAGES) {
+    throw new Response('Transcript has too many messages to seed', { status: 413 });
+  }
+
+  const messageIds = new Set<string>();
+  const messages = value.map((candidate) => {
+    const role = (candidate as { role?: unknown } | null)?.role;
+    const parts = (candidate as { parts?: unknown } | null)?.parts;
+    if (
+      typeof candidate !== 'object' ||
+      candidate === null ||
+      typeof (candidate as { id?: unknown }).id !== 'string' ||
+      (candidate as { id: string }).id.length === 0 ||
+      (candidate as { id: string }).id.length > MAX_BUILDER_MESSAGE_ID_LENGTH ||
+      (role !== 'user' && role !== 'assistant' && role !== 'system') ||
+      !Array.isArray(parts) ||
+      !parts.every(
+        (part) =>
+          typeof part === 'object' &&
+          part !== null &&
+          typeof (part as { type?: unknown }).type === 'string' &&
+          (part as { type: string }).type.length > 0,
+      )
+    ) {
+      throw new Response('Invalid transcript message shape', { status: 400 });
+    }
+    const id = (candidate as { id: string }).id;
+    if (messageIds.has(id)) {
+      throw new Response('Transcript message identifiers must be unique', { status: 400 });
+    }
+    messageIds.add(id);
+    return boundBuilderMessageForPersistence(candidate as UIMessage);
+  });
+
+  assertBuilderModelTranscriptWithinLimit(messages);
+  return messages;
 }
 
 function parseBuilderSubchatIndex(value: unknown): number {

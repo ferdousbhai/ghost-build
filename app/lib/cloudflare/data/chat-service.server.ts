@@ -18,6 +18,7 @@ import {
   type SubchatCursor,
 } from '~/lib/cloudflare/data-pagination';
 import { SubchatLimitError } from './errors';
+import { prepareReleaseThumbnailForChatStatement } from './thumbnail-quota.server';
 
 export async function initializeChat(
   db: D1Database,
@@ -178,6 +179,7 @@ export async function removeChat(db: D1Database, args: { sessionId: string; id: 
     await db.batch([
       prepareChatObjectGcCandidatesStatement(db, { chatId: chat.id, ownerId: args.sessionId }),
       prepareChatAgentGcCandidatesStatement(db, { chatId: chat.id, ownerId: args.sessionId }),
+      prepareReleaseThumbnailForChatStatement(db, { chatId: chat.id, ownerId: args.sessionId }),
       db
         .prepare(
           `UPDATE chats

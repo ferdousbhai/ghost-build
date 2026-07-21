@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { parseDocument, stringify } from 'yaml';
 import { inspectDeploymentSnapshot, MAX_DEPLOYMENT_EXPANDED_BYTES } from './deployment-snapshot';
 import { APP_AGENT_PROTECTED_FILE_SHA256 } from './deployment-security-baseline';
 
@@ -32,6 +33,31 @@ describe('inspectDeploymentSnapshot', () => {
     );
     setCentralDirectoryUncompressedSize(oversized, 'src/server.ts', MAX_DEPLOYMENT_EXPANDED_BYTES + 1);
     await expect(inspectDeploymentSnapshot(new Blob([oversized]))).rejects.toThrow('250 MiB');
+  });
+
+  it('preflights the raw central-directory count before duplicate names can be collapsed', async () => {
+    const source = new Uint8Array(
+      await (await projectZip({ projectType: 'worker', includeBindings: false })).arrayBuffer(),
+    );
+    const duplicateFlood = repeatFirstCentralDirectoryEntry(source, 5_001);
+
+    await expect(inspectDeploymentSnapshot(duplicateFlood.buffer)).rejects.toThrow(
+      'must contain between 1 and 5000 entries',
+    );
+  });
+
+  it('rejects ambiguous duplicate records and ZIP64 sentinels during raw archive preflight', async () => {
+    const source = new Uint8Array(
+      await (await projectZip({ projectType: 'worker', includeBindings: false })).arrayBuffer(),
+    );
+    await expect(inspectDeploymentSnapshot(repeatFirstCentralDirectoryEntry(source, 2).buffer)).rejects.toThrow(
+      'ambiguous duplicate entries',
+    );
+
+    const zip64 = source.slice();
+    const eocd = findEndOfCentralDirectory(zip64);
+    new DataView(zip64.buffer).setUint16(eocd + 10, 0xffff, true);
+    await expect(inspectDeploymentSnapshot(zip64.buffer)).rejects.toThrow('valid non-ZIP64 ZIP archive');
   });
 
   it('rejects credential-bearing local configuration in a directly submitted snapshot', async () => {
@@ -165,6 +191,84 @@ describe('inspectDeploymentSnapshot', () => {
     await expect(inspectDeploymentSnapshot(await asBlob(zip))).rejects.toThrow(
       'changes the reviewed security or build toolchain',
     );
+  });
+
+  it('commits peer-qualified roots and every reachable lock snapshot edge', async () => {
+    const snapshot = await projectZip({ includeBindings: true });
+    const peerSubstitution = await JSZip.loadAsync(await snapshot.arrayBuffer());
+    const peerLock = await peerSubstitution.file('pnpm-lock.yaml')!.async('string');
+    peerSubstitution.file(
+      'pnpm-lock.yaml',
+      peerLock.replace(
+        'version: 6.0.3(@rolldown/plugin-babel@0.2.3(@babel/core@8.0.1)',
+        'version: 6.0.3(@rolldown/plugin-babel@0.2.3(@babel/core@7.29.7)',
+      ),
+    );
+    await expect(inspectDeploymentSnapshot(await asBlob(peerSubstitution))).rejects.toThrow(
+      'complete reviewed build toolchain',
+    );
+
+    const edgeSubstitution = await JSZip.loadAsync(await snapshot.arrayBuffer());
+    const edgeLock = parseDocument(await edgeSubstitution.file('pnpm-lock.yaml')!.async('string')).toJS() as Record<
+      string,
+      any
+    >;
+    const viteVersion = edgeLock.importers['.'].devDependencies.vite.version as string;
+    edgeLock.snapshots[`vite@${viteVersion}`].optionalDependencies.yaml = 'npm:jsonc-parser@3.3.1';
+    edgeSubstitution.file('pnpm-lock.yaml', stringify(edgeLock));
+    await expect(inspectDeploymentSnapshot(await asBlob(edgeSubstitution))).rejects.toThrow(
+      'changes the reviewed security or build toolchain',
+    );
+
+    const patchedSubstitution = await JSZip.loadAsync(await snapshot.arrayBuffer());
+    const patchedLock = parseDocument(
+      await patchedSubstitution.file('pnpm-lock.yaml')!.async('string'),
+    ).toJS() as Record<string, any>;
+    patchedLock.patchedDependencies = { 'vite@8.1.5': 'patches/vite.patch' };
+    patchedSubstitution.file('pnpm-lock.yaml', stringify(patchedLock));
+    await expect(inspectDeploymentSnapshot(await asBlob(patchedSubstitution))).rejects.toThrow(
+      'complete reviewed build toolchain',
+    );
+  });
+
+  it.each(['jsonc-parser', 'yaml', 'globals', '@babel/core', 'zod'])(
+    'requires the protected executable root %s',
+    async (name) => {
+      const snapshot = await projectZip({ includeBindings: true });
+      const omittedRoot = await JSZip.loadAsync(await snapshot.arrayBuffer());
+      const changedPackage = JSON.parse(await omittedRoot.file('package.json')!.async('string')) as Record<string, any>;
+      const section = changedPackage.dependencies[name] === undefined ? 'devDependencies' : 'dependencies';
+      changedPackage[section][name] = '0.0.0-unreviewed';
+      omittedRoot.file('package.json', JSON.stringify(changedPackage));
+      await expect(inspectDeploymentSnapshot(await asBlob(omittedRoot))).rejects.toThrow(
+        `build dependency ${name} differs from the reviewed spec`,
+      );
+    },
+  );
+
+  it('permits unrelated application dependencies outside the protected toolchain closure', async () => {
+    const snapshot = await projectZip({ includeBindings: true });
+    const extended = await JSZip.loadAsync(await snapshot.arrayBuffer());
+    const extendedPackage = JSON.parse(await extended.file('package.json')!.async('string')) as Record<string, any>;
+    extendedPackage.dependencies['legitimate-app-package'] = '^1.0.0';
+    extended.file('package.json', JSON.stringify(extendedPackage));
+    const extendedLock = parseDocument(await extended.file('pnpm-lock.yaml')!.async('string')).toJS() as Record<
+      string,
+      any
+    >;
+    extendedLock.importers['.'].dependencies['legitimate-app-package'] = {
+      specifier: '^1.0.0',
+      version: '1.0.0',
+    };
+    extendedLock.packages['legitimate-app-package@1.0.0'] = {
+      resolution: { integrity: 'sha512-legitimate-application-dependency' },
+    };
+    extendedLock.snapshots['legitimate-app-package@1.0.0'] = {};
+    extended.file('pnpm-lock.yaml', stringify(extendedLock));
+    await expect(inspectDeploymentSnapshot(await asBlob(extended))).resolves.toEqual({
+      type: 'web_app',
+      bindings: { ai: true, d1: true, r2: true, appAgent: true },
+    });
   });
 
   it('rejects package import aliases and resolver overrides outside the reviewed mapping', async () => {
@@ -308,8 +412,43 @@ function setCentralDirectoryUncompressedSize(bytes: Uint8Array, filename: string
     const entryName = decoder.decode(bytes.subarray(offset + 46, offset + 46 + filenameLength));
     if (entryName === filename) {
       view.setUint32(offset + 24, size, true);
+      const localHeaderOffset = view.getUint32(offset + 42, true);
+      view.setUint32(localHeaderOffset + 22, size, true);
       return;
     }
   }
   throw new Error(`Unable to find ${filename} in ZIP central directory.`);
+}
+
+function repeatFirstCentralDirectoryEntry(bytes: Uint8Array<ArrayBuffer>, count: number): Uint8Array<ArrayBuffer> {
+  const sourceView = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const eocd = findEndOfCentralDirectory(bytes);
+  const centralOffset = sourceView.getUint32(eocd + 16, true);
+  const filenameBytes = sourceView.getUint16(centralOffset + 28, true);
+  const extraBytes = sourceView.getUint16(centralOffset + 30, true);
+  const commentBytes = sourceView.getUint16(centralOffset + 32, true);
+  const record = bytes.slice(centralOffset, centralOffset + 46 + filenameBytes + extraBytes + commentBytes);
+  const eocdBytes = bytes.slice(eocd);
+  const result = new Uint8Array(centralOffset + record.byteLength * count + eocdBytes.byteLength);
+  result.set(bytes.subarray(0, centralOffset));
+  for (let index = 0; index < count; index += 1) {
+    result.set(record, centralOffset + index * record.byteLength);
+  }
+  const resultEocd = centralOffset + record.byteLength * count;
+  result.set(eocdBytes, resultEocd);
+  const resultView = new DataView(result.buffer);
+  resultView.setUint16(resultEocd + 8, count, true);
+  resultView.setUint16(resultEocd + 10, count, true);
+  resultView.setUint32(resultEocd + 12, record.byteLength * count, true);
+  return result;
+}
+
+function findEndOfCentralDirectory(bytes: Uint8Array<ArrayBuffer>): number {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let offset = bytes.byteLength - 22; offset >= 0; offset -= 1) {
+    if (view.getUint32(offset, true) === 0x06054b50) {
+      return offset;
+    }
+  }
+  throw new Error('ZIP end-of-central-directory record is missing.');
 }

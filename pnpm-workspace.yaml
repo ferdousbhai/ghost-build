@@ -7,6 +7,10 @@ minimumReleaseAgeIgnoreMissingTime: false
 minimumReleaseAgeStrict: true
 strictDepBuilds: true
 blockExoticSubdeps: true
+overrides:
+  # @blitz/eslint-plugin still resolves the GHSA-3jxr-9vmj-r5cp-affected patch levels.
+  'brace-expansion@<1.1.16': '1.1.16'
+  'brace-expansion@>=2.0.0 <2.1.2': '2.1.2'
 allowBuilds:
   core-js-pure: true
   esbuild: true

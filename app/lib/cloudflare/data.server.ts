@@ -62,12 +62,14 @@ import {
 import { MAX_SUBCHAT_INDEX } from './data-pagination';
 import {
   admitChatBackupRequest,
+  CHAT_BACKUP_MAX_INTAKE_BYTES,
   completeChatBackupAdmission,
   enforceChatBackupEdgeRateLimit,
   registerChatBackupObject,
   releaseChatBackupAdmissionBestEffort,
   reserveChatBackupBytes,
 } from './data/chat-backup-quota.server';
+import { admitThumbnailUpload, releaseThumbnailAdmissionBestEffort } from './data/thumbnail-quota.server';
 
 const dataOperationPathSchema = z.enum(
   Object.keys(dataOperationArgSchemas) as [DataOperationPath, ...DataOperationPath[]],
@@ -101,11 +103,7 @@ const logger = createScopedLogger('CloudflareDataStorage');
 const MAX_DATA_REQUEST_BYTES = 64 * 1024;
 const MAX_INITIAL_MESSAGES_REQUEST_BYTES = 8 * 1024;
 const MAX_FIRST_MESSAGE_BYTES = 64 * 1024;
-const MAX_BACKUP_MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
-const MAX_BACKUP_REQUEST_BYTES =
-  MESSAGE_HISTORY_LZ4_LIMITS.compressedBytes +
-  PROJECT_SNAPSHOT_LZ4_LIMITS.compressedBytes +
-  MAX_BACKUP_MULTIPART_OVERHEAD_BYTES;
+const MAX_BACKUP_REQUEST_BYTES = CHAT_BACKUP_MAX_INTAKE_BYTES;
 const CHAT_BACKUP_FIELDS = {
   messages: { kind: 'file', maximumBytes: MESSAGE_HISTORY_LZ4_LIMITS.compressedBytes },
   snapshot: { kind: 'file', maximumBytes: PROJECT_SNAPSHOT_LZ4_LIMITS.compressedBytes },
@@ -364,14 +362,23 @@ export async function uploadThumbnailAction({ request, env }: { request: Request
     ensureDataBindings(env);
     const { sessionId, chatId } = parseRequestQuery(request, chatRequestSchema);
     await requireMatchingSession(env, request, sessionId);
-    const imageBytes = await readBodyBytesWithLimit(request, MAX_THUMBNAIL_BYTES, 'Thumbnail image');
-    const image = new Blob([imageBytes], { type: request.headers.get('content-type') ?? '' });
-    const validationError = validateThumbnail(image);
-    if (validationError) {
-      return validationError;
+    const chat = await findChat(env.DB, { id: chatId, sessionId });
+    if (!chat) {
+      return Response.json({ error: 'Chat not found' }, { status: 404 });
     }
-    const storageId = await saveThumbnail(env, { sessionId, chatId, image });
-    return Response.json({ storageId });
+    const admission = await admitThumbnailUpload(env, { ownerId: sessionId, chatId: chat.id });
+    try {
+      const imageBytes = await readBodyBytesWithLimit(request, MAX_THUMBNAIL_BYTES, 'Thumbnail image');
+      const image = new Blob([imageBytes], { type: request.headers.get('content-type') ?? '' });
+      const validationError = validateThumbnail(image);
+      if (validationError) {
+        return validationError;
+      }
+      const storageId = await saveThumbnail(env, { admission, image });
+      return Response.json({ storageId });
+    } finally {
+      await releaseThumbnailAdmissionBestEffort(env.DB, admission);
+    }
   } catch (error) {
     return internalErrorResponse(error, 'Unknown thumbnail upload error');
   }

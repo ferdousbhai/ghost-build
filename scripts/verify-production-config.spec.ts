@@ -277,6 +277,29 @@ ${weakening}
     expect(findBuildApprovalErrors(workspacePolicyFixture(['.']), 'template/pnpm-workspace.yaml')).toEqual([]);
   });
 
+  it('allows only the reviewed transitive vulnerability overrides', () => {
+    const reviewed = `${workspacePolicyFixture(['ghostbuild-agent', 'template'])}
+overrides:
+  'brace-expansion@<1.1.16': '1.1.16'
+  'brace-expansion@>=2.0.0 <2.1.2': '2.1.2'
+`;
+    expect(findBuildApprovalErrors(reviewed, 'pnpm-workspace.yaml')).toEqual([]);
+
+    const unreviewed = `${workspacePolicyFixture(['ghostbuild-agent', 'template'])}
+overrides:
+  'brace-expansion@<1.1.16': '1.1.15'
+  'malicious-package@*': 'file:../outside'
+`;
+    expect(findBuildApprovalErrors(unreviewed, 'pnpm-workspace.yaml')).toEqual(
+      expect.arrayContaining([
+        'pnpm-workspace.yaml overrides must not change unreviewed dependency brace-expansion@<1.1.16.',
+        'pnpm-workspace.yaml overrides must not change unreviewed dependency malicious-package@*.',
+        'pnpm-workspace.yaml overrides must pin brace-expansion@<1.1.16 to 1.1.16.',
+        'pnpm-workspace.yaml overrides must pin brace-expansion@>=2.0.0 <2.1.2 to 2.1.2.',
+      ]),
+    );
+  });
+
   it.each([
     '../outside',
     'packages/../../outside',

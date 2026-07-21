@@ -115,6 +115,9 @@ const requiredMigrationTables = [
   'chat_backup_objects',
   'chat_backup_object_attributions',
   'chat_backup_reconciliation_state',
+  'thumbnail_upload_admissions',
+  'thumbnail_objects',
+  'thumbnail_reconciliation_state',
   'deployment_security_inventory',
 ];
 

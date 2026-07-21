@@ -22,6 +22,13 @@ import {
   releaseChatBackupCloneAdmissionBestEffort,
   throwIfChatBackupCloneQuotaDenied,
 } from './chat-backup-quota.server';
+import {
+  publishThumbnailReplacement,
+  registerThumbnailUploadObject,
+  reserveThumbnailReplacement,
+  ThumbnailReservationStaleError,
+  type ThumbnailUploadAdmission,
+} from './thumbnail-quota.server';
 
 const logger = createScopedLogger('CloudflareShareStorage');
 const MAX_SOCIAL_SHARE_WRITE_ATTEMPTS = 8;
@@ -223,35 +230,53 @@ export async function getSocialShare(env: Env, code: string): Promise<SocialShar
 
 export async function saveThumbnail(
   env: Env,
-  args: { sessionId: string; chatId: string; image: Blob },
+  args: { admission: ThumbnailUploadAdmission; image: Blob },
 ): Promise<string> {
-  const chat = await requireChat(env.DB, { id: args.chatId, sessionId: args.sessionId });
+  let current = await insertOrKeepSocialShare(env.DB, args.admission.chatId);
+  let admission = await reserveThumbnailReplacement(env.DB, args.admission, {
+    sizeBytes: args.image.size,
+    expectedStorageKey: current.thumbnail_image_key,
+  });
   const storageKey = allocateObjectKey('thumbnails');
   const gcReceipt = await queueObjectGcCandidate(env.DB, storageKey);
+  await registerThumbnailUploadObject(env.DB, {
+    admission,
+    storageKey,
+    sizeBytes: args.image.size,
+  });
   await putObjectAtKey(env, storageKey, args.image);
-  let current = await insertOrKeepSocialShare(env.DB, chat.id);
   for (let attempt = 0; attempt < MAX_SOCIAL_SHARE_WRITE_ATTEMPTS; attempt++) {
     const displacedKey = current.thumbnail_image_key !== storageKey ? current.thumbnail_image_key : null;
-    const [update] = await env.DB.batch([
-      env.DB.prepare(
-        `UPDATE social_shares
-         SET thumbnail_image_key = ?
-         WHERE id = ? AND thumbnail_image_key IS ?`,
-      ).bind(storageKey, current.id, current.thumbnail_image_key),
-      ...prepareObjectGcCandidateStatements(env.DB, [displacedKey]),
-    ]);
-    if (update.meta.changes > 0) {
+    const result = await publishThumbnailReplacement(env.DB, {
+      admission,
+      storageKey,
+      sizeBytes: args.image.size,
+      displacedStorageKey: displacedKey,
+      gcStatements: prepareObjectGcCandidateStatements(env.DB, [displacedKey]),
+    });
+    if (result === 'published') {
       await cancelThumbnailGcCandidateBestEffort(env.DB, gcReceipt);
       await sweepObjectGcCandidatesBestEffort(env);
       return storageKey;
     }
     const latest = await env.DB.prepare('SELECT * FROM social_shares WHERE chat_id = ?')
-      .bind(chat.id)
+      .bind(args.admission.chatId)
       .first<SocialShareRow>();
     if (!latest) {
       throw new Error('Social share disappeared during thumbnail save');
     }
     current = latest;
+    try {
+      admission = await reserveThumbnailReplacement(env.DB, admission, {
+        sizeBytes: args.image.size,
+        expectedStorageKey: current.thumbnail_image_key,
+      });
+    } catch (error) {
+      if (error instanceof ThumbnailReservationStaleError) {
+        continue;
+      }
+      throw error;
+    }
   }
   throw new Error('Social share changed too many times; retry the thumbnail save');
 }
