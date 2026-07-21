@@ -5,6 +5,7 @@ import {
   prepareReleaseChatBackupObjectStatement,
   releaseUnreferencedChatBackupAttributions,
 } from './chat-backup-quota.server';
+import { prepareReleaseThumbnailObjectStatement } from './thumbnail-quota.server';
 
 export const OBJECT_GC_GRACE_PERIOD_MS = 5 * 60 * 1000;
 export const OBJECT_GC_SWEEP_LIMIT = 8;
@@ -141,6 +142,25 @@ async function chatBackupUploadLeaseUntil(db: D1Database, key: string, now: numb
   return row.expires_at > now ? row.expires_at : now + OBJECT_GC_GRACE_PERIOD_MS;
 }
 
+async function thumbnailUploadLeaseUntil(db: D1Database, key: string, now: number): Promise<number | null> {
+  const row = await db
+    .prepare(
+      `SELECT admissions.expires_at
+       FROM thumbnail_objects AS objects
+       JOIN thumbnail_upload_admissions AS admissions ON admissions.id = objects.admission_id
+       WHERE objects.storage_key = ? AND admissions.status = 'pending'
+       LIMIT 1`,
+    )
+    .bind(key)
+    .first<{ expires_at: number }>();
+  if (!row) {
+    return null;
+  }
+  // An expired pending admission is still authoritative until the owner or
+  // scheduled reconciler commits its explicit release transition.
+  return row.expires_at > now ? row.expires_at : now + OBJECT_GC_GRACE_PERIOD_MS;
+}
+
 export async function sweepObjectGcCandidates(
   env: Pick<Env, 'APP_STORAGE' | 'DB'>,
   options: { limit?: number; now?: number } = {},
@@ -160,8 +180,11 @@ export async function sweepObjectGcCandidates(
 
   for (const candidate of result.results) {
     const leaseUntil = maximumTimestamp(
-      await deploymentBuildArtifactLeaseUntil(env.DB, candidate.storage_key),
-      await chatBackupUploadLeaseUntil(env.DB, candidate.storage_key, now),
+      maximumTimestamp(
+        await deploymentBuildArtifactLeaseUntil(env.DB, candidate.storage_key),
+        await chatBackupUploadLeaseUntil(env.DB, candidate.storage_key, now),
+      ),
+      await thumbnailUploadLeaseUntil(env.DB, candidate.storage_key, now),
     );
     if (leaseUntil !== null && leaseUntil > now) {
       await rescheduleCandidateIfUnchanged(env.DB, candidate, leaseUntil, now);
@@ -241,6 +264,11 @@ async function releaseDeletedCandidateIfUnchanged(
       now,
     }),
     prepareReleaseChatBackupObjectStatement(db, {
+      storageKey: candidate.storage_key,
+      candidateNotBefore: candidate.not_before,
+      now,
+    }),
+    prepareReleaseThumbnailObjectStatement(db, {
       storageKey: candidate.storage_key,
       candidateNotBefore: candidate.not_before,
       now,

@@ -133,7 +133,13 @@ describe('Cloudflare auth sessions', () => {
                   return null;
                 }
                 if (sql.includes('WHERE email =')) {
-                  return { id: 'legacy-user', name: 'Old', email: 'person@example.com', image: null };
+                  return {
+                    id: 'legacy-user',
+                    name: 'Old',
+                    email: 'person@example.com',
+                    image: null,
+                    cloudflare_subject: null,
+                  };
                 }
                 return null;
               },
@@ -155,7 +161,78 @@ describe('Cloudflare auth sessions', () => {
         123,
       ),
     ).resolves.toMatchObject({ id: 'legacy-user', name: 'Person' });
-    expect(updates[0]).toEqual(['cf-user-1', 'Person', 'person@example.com', 1, null, 123, 'legacy-user']);
+    expect(updates[0]).toEqual(['cf-user-1', 'Person', 'person@example.com', 1, null, 123, 'legacy-user', 'cf-user-1']);
+  });
+
+  it('never reassigns a verified email already bound to a different Cloudflare subject', async () => {
+    const updates: unknown[][] = [];
+    const db = subjectAwareEmailDb({ cloudflareSubject: 'cf-user-existing', updates });
+
+    await expect(
+      upsertCloudflareUser(
+        db,
+        { subject: 'cf-user-attacker', email: 'person@example.com', name: 'Other person', picture: null },
+        'Account',
+        123,
+      ),
+    ).rejects.toThrow('verified email is already linked to a different Cloudflare identity');
+    expect(updates).toEqual([]);
+  });
+
+  it('preserves idempotent same-subject adoption by verified email', async () => {
+    const updates: unknown[][] = [];
+    const db = subjectAwareEmailDb({ cloudflareSubject: 'cf-user-1', updates });
+
+    await expect(
+      upsertCloudflareUser(
+        db,
+        { subject: 'cf-user-1', email: 'person@example.com', name: 'Person', picture: null },
+        'Account',
+        123,
+      ),
+    ).resolves.toMatchObject({ id: 'legacy-user', name: 'Person' });
+    expect(updates).toEqual([['cf-user-1', 'Person', 'person@example.com', 1, null, 123, 'legacy-user', 'cf-user-1']]);
+  });
+
+  it('fails closed if an unbound legacy row is concurrently linked before adoption updates it', async () => {
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind() {
+            return {
+              first: async () => {
+                if (sql.includes('SELECT 1 AS found')) {
+                  return null;
+                }
+                if (sql.includes('WHERE cloudflare_subject = ?')) {
+                  return null;
+                }
+                if (sql.includes('WHERE email = ?')) {
+                  return {
+                    id: 'legacy-user',
+                    name: 'Old',
+                    email: 'person@example.com',
+                    image: null,
+                    cloudflare_subject: null,
+                  };
+                }
+                return null;
+              },
+              run: async () => ({ success: true, meta: { changes: 0 } }),
+            };
+          },
+        };
+      },
+    } as unknown as D1Database;
+
+    await expect(
+      upsertCloudflareUser(
+        db,
+        { subject: 'cf-user-1', email: 'person@example.com', name: 'Person', picture: null },
+        'Account',
+        123,
+      ),
+    ).rejects.toThrow('Cloudflare user changed while authentication was being persisted');
   });
 
   it('adopts only an exact new user insert whose acknowledgement failed after commit', async () => {
@@ -205,7 +282,7 @@ describe('Cloudflare auth sessions', () => {
           123,
         ),
       ).resolves.toMatchObject({ id: 'raced-user', name: 'Person', email: 'person@example.com' });
-      expect(updates).toEqual([['cf-user-1', 'Person', 'person@example.com', 1, null, 123, 'raced-user']]);
+      expect(updates).toEqual([['cf-user-1', 'Person', 'person@example.com', 1, null, 123, 'raced-user', 'cf-user-1']]);
     },
   );
 
@@ -228,7 +305,13 @@ function racedUserDb(match: 'subject' | 'email' | 'none') {
   const insertError = new Error('UNIQUE constraint failed: user.cloudflare_subject');
   const updates: unknown[][] = [];
   let raceVisible = false;
-  const racedUser = { id: 'raced-user', name: 'Winner', email: 'person@example.com', image: null };
+  const racedUser = {
+    id: 'raced-user',
+    name: 'Winner',
+    email: 'person@example.com',
+    image: null,
+    cloudflare_subject: match === 'subject' ? 'cf-user-1' : null,
+  };
   const db = {
     prepare(sql: string) {
       return {
@@ -266,6 +349,38 @@ function racedUserDb(match: 'subject' | 'email' | 'none') {
     },
   } as unknown as D1Database;
   return { db, insertError, updates };
+}
+
+function subjectAwareEmailDb(options: { cloudflareSubject: string | null; updates: unknown[][] }): D1Database {
+  return {
+    prepare(sql: string) {
+      return {
+        bind(...values: unknown[]) {
+          return {
+            first: async () => {
+              if (sql.includes('WHERE cloudflare_subject = ?')) {
+                return null;
+              }
+              if (sql.includes('WHERE email = ?')) {
+                return {
+                  id: 'legacy-user',
+                  name: 'Old',
+                  email: 'person@example.com',
+                  image: null,
+                  cloudflare_subject: options.cloudflareSubject,
+                };
+              }
+              return null;
+            },
+            run: async () => {
+              options.updates.push(values);
+              return { success: true, meta: { changes: 1 } };
+            },
+          };
+        },
+      };
+    },
+  } as unknown as D1Database;
 }
 
 function userMutationDb(options: {
@@ -327,7 +442,13 @@ function userMutationDb(options: {
               }
               if (sql.includes('WHERE email = ?')) {
                 if (current && current.email === values[0]) {
-                  return { id: current.id, name: current.name, email: current.email, image: current.image };
+                  return {
+                    id: current.id,
+                    name: current.name,
+                    email: current.email,
+                    image: current.image,
+                    cloudflare_subject: current.subject,
+                  };
                 }
                 return null;
               }

@@ -7,6 +7,11 @@ export const APPROVED_BUILD_DEPENDENCIES = [
   "workerd",
 ];
 
+const APPROVED_PNPM_OVERRIDES = new Map([
+  ["brace-expansion@<1.1.16", "1.1.16"],
+  ["brace-expansion@>=2.0.0 <2.1.2", "2.1.2"],
+]);
+
 const MAX_PNPM_WORKSPACE_POLICY_BYTES = 64 * 1024;
 const ALLOWED_PNPM_WORKSPACE_KEYS = new Set([
   "packages",
@@ -16,6 +21,7 @@ const ALLOWED_PNPM_WORKSPACE_KEYS = new Set([
   "minimumReleaseAgeStrict",
   "strictDepBuilds",
   "blockExoticSubdeps",
+  "overrides",
   "allowBuilds",
   "peerDependencyRules",
 ]);
@@ -120,6 +126,8 @@ export function findBuildApprovalErrors(workspace, label) {
     errors,
   );
 
+  findOverrideErrors(root, label, errors);
+
   const allowBuildsPair = root.items.find(
     (pair) => isScalar(pair.key) && pair.key.value === "allowBuilds",
   );
@@ -170,6 +178,47 @@ export function findBuildApprovalErrors(workspace, label) {
     }
   }
   return errors;
+}
+
+function findOverrideErrors(root, label, errors) {
+  const overridesPair = root.items.find(
+    (pair) => isScalar(pair.key) && pair.key.value === "overrides",
+  );
+  if (!overridesPair) {
+    return;
+  }
+  if (
+    !isScalar(overridesPair.key) ||
+    overridesPair.key.type !== "PLAIN" ||
+    !isMap(overridesPair.value) ||
+    overridesPair.value.flow
+  ) {
+    errors.push(`${label} overrides must use a canonical block mapping.`);
+    return;
+  }
+
+  const configured = new Map();
+  for (const pair of overridesPair.value.items) {
+    const selector = isScalar(pair.key) ? pair.key.value : undefined;
+    const version = isScalar(pair.value) ? pair.value.value : undefined;
+    if (typeof selector !== "string" || typeof version !== "string") {
+      errors.push(
+        `${label} overrides must map package selectors to version strings.`,
+      );
+      continue;
+    }
+    configured.set(selector, version);
+    if (APPROVED_PNPM_OVERRIDES.get(selector) !== version) {
+      errors.push(
+        `${label} overrides must not change unreviewed dependency ${selector}.`,
+      );
+    }
+  }
+  for (const [selector, version] of APPROVED_PNPM_OVERRIDES) {
+    if (configured.get(selector) !== version) {
+      errors.push(`${label} overrides must pin ${selector} to ${version}.`);
+    }
+  }
 }
 
 function findWorkspacePackageErrors(root, label, errors) {

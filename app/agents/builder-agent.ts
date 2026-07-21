@@ -41,6 +41,7 @@ import {
   loadBuilderTranscriptBinding,
   MAX_BUILDER_AGENT_MESSAGES,
   requireBuilderRequestScope,
+  requireBuilderSeedTranscript,
   requireBuilderTranscriptIdentity,
   type BuilderTranscriptBinding,
 } from './builder-request-policy';
@@ -298,17 +299,11 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   @callable()
   async seedTranscript(identityValue: unknown, messagesValue: unknown): Promise<TranscriptCheckpoint> {
     const identity = this.requireTranscriptIdentity(identityValue);
-    if (!Array.isArray(messagesValue)) {
-      throw new Response('Invalid transcript messages', { status: 400 });
-    }
-    if (messagesValue.length > MAX_BUILDER_AGENT_MESSAGES) {
-      throw new Response('Transcript has too many messages to seed', { status: 413 });
-    }
-    const messages = messagesValue as NonNullable<ChatRequestBody['messages']>;
+    const messages = requireBuilderSeedTranscript(messagesValue);
     if (this.state.transcript || this.messages.length > 0) {
       return this.advanceTranscriptCheckpoint(identity);
     }
-    await this.persistMessages(messages as unknown as UIMessage[]);
+    await this.persistMessages(messages);
     return this.advanceTranscriptCheckpoint(identity);
   }
 

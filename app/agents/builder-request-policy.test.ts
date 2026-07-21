@@ -7,6 +7,7 @@ import {
   MAX_BUILDER_AGENT_MESSAGES,
   MAX_BUILDER_MODEL_TRANSCRIPT_BYTES,
   requireBuilderRequestScope,
+  requireBuilderSeedTranscript,
   requireBuilderTranscriptIdentity,
   type BuilderTranscriptBinding,
 } from './builder-request-policy';
@@ -119,5 +120,39 @@ describe('BuilderAgent request policy', () => {
     expect(() => assertBuilderModelTranscriptWithinLimit(['x'.repeat(MAX_BUILDER_MODEL_TRANSCRIPT_BYTES)])).toThrow(
       expect.objectContaining({ status: 413 }),
     );
+  });
+
+  it('validates and bounds the aggregate seeded transcript before persistence', () => {
+    const seed = [
+      { id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'hello' }] },
+      { id: 'assistant-1', role: 'assistant', parts: [{ type: 'text', text: 'welcome' }] },
+    ];
+
+    expect(requireBuilderSeedTranscript(seed)).toEqual(seed);
+    expect(() =>
+      requireBuilderSeedTranscript([
+        {
+          id: 'assistant-oversized',
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'x'.repeat(MAX_BUILDER_MODEL_TRANSCRIPT_BYTES) }],
+        },
+      ]),
+    ).toThrow(expect.objectContaining({ status: 413 }));
+  });
+
+  it.each([
+    { name: 'missing identifier', messages: [{ role: 'user', parts: [] }] },
+    { name: 'unexpected role', messages: [{ id: 'message', role: 'unexpected', parts: [] }] },
+    { name: 'non-array parts', messages: [{ id: 'message', role: 'user', parts: null }] },
+    { name: 'malformed part', messages: [{ id: 'message', role: 'user', parts: [null] }] },
+    {
+      name: 'duplicate identifiers',
+      messages: [
+        { id: 'duplicate', role: 'user', parts: [] },
+        { id: 'duplicate', role: 'assistant', parts: [] },
+      ],
+    },
+  ])('rejects $name before persistence', ({ messages }) => {
+    expect(() => requireBuilderSeedTranscript(messages)).toThrow(expect.objectContaining({ status: 400 }));
   });
 });

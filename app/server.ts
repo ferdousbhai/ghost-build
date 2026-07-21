@@ -25,6 +25,7 @@ import { drainDeferredDataGcBestEffort } from './lib/cloudflare/data/deferred-gc
 import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudflare-auth-retention.server';
 import { refreshDeploymentSecurityInventoryBestEffort } from './lib/.server/cloudflare/deployment-security-inventory';
 import { reconcileChatBackupQuotaBestEffort } from './lib/cloudflare/data/chat-backup-quota.server';
+import { reconcileThumbnailQuotaBestEffort } from './lib/cloudflare/data/thumbnail-quota.server';
 
 export { BuilderAgent } from './agents/builder-agent';
 export { ContainerProxy, DeploymentSandbox } from './lib/.server/cloudflare/deployment-sandbox';
@@ -185,6 +186,7 @@ async function runScheduledMaintenance(env: Env) {
   await drainDeferredDataGcBestEffort(env);
   await pruneCloudflareAuthDataBestEffort(env.DB);
   await reconcileChatBackupQuotaBestEffort(env);
+  await reconcileThumbnailQuotaBestEffort(env);
   await refreshDeploymentSecurityInventoryBestEffort(env);
 }
 

@@ -10,6 +10,11 @@ const DEFAULT_CHAT_BACKUP_STORAGE_LIMIT_OBJECTS = 4_096;
 // preserves a two-times burst margin while remaining finite per tenant.
 const DEFAULT_CHAT_BACKUP_REQUESTS_PER_MINUTE = 120;
 const DEFAULT_CHAT_BACKUP_REQUESTS_PER_DAY = 10_000;
+export const CHAT_BACKUP_MAX_INTAKE_BYTES =
+  MESSAGE_HISTORY_LZ4_LIMITS.compressedBytes + PROJECT_SNAPSHOT_LZ4_LIMITS.compressedBytes + 1024 * 1024;
+// Two maximum-sized multipart requests may be materialized concurrently per
+// tenant. The reservation is independent from exact retained-object quota.
+const DEFAULT_CHAT_BACKUP_INFLIGHT_LIMIT_BYTES = CHAT_BACKUP_MAX_INTAKE_BYTES * 2;
 const CHAT_BACKUP_RESERVATION_TTL_MS = 15 * 60 * 1000;
 export const CHAT_BACKUP_RECONCILIATION_LIMIT = 256;
 export const CHAT_BACKUP_HEAD_CONCURRENCY = 4;
@@ -30,6 +35,7 @@ export type ChatBackupQuotaConfig = {
   CHAT_BACKUP_STORAGE_LIMIT_OBJECTS?: string;
   CHAT_BACKUP_REQUESTS_PER_MINUTE?: string;
   CHAT_BACKUP_REQUESTS_PER_DAY?: string;
+  CHAT_BACKUP_INFLIGHT_LIMIT_BYTES?: string;
 };
 
 type ChatBackupQuotaPolicy = {
@@ -38,6 +44,7 @@ type ChatBackupQuotaPolicy = {
   storageLimitObjects: number;
   requestsPerMinute: number;
   requestsPerDay: number;
+  inflightLimitBytes: number;
 };
 
 type ChatBackupAdmission = {
@@ -63,6 +70,7 @@ type UsageRow = {
   retained_objects: number;
   minute_requests: number;
   day_requests: number;
+  in_flight_bytes: number;
 };
 
 type EstimatedObjectRow = {
@@ -86,7 +94,7 @@ type LegacyObjectRow = {
 
 export class ChatBackupQuotaError extends Error {
   constructor(
-    readonly kind: 'edge-rate' | 'request-rate' | 'storage' | 'not-ready',
+    readonly kind: 'edge-rate' | 'request-rate' | 'in-flight' | 'storage' | 'not-ready',
     readonly retryAfterSeconds?: number,
   ) {
     super(
@@ -94,7 +102,9 @@ export class ChatBackupQuotaError extends Error {
         ? 'Chat backup storage quota exceeded. Remove older projects or backups before retrying.'
         : kind === 'not-ready'
           ? 'Chat backup storage accounting is still being prepared. Retry later.'
-          : 'Chat backup request quota exceeded. Retry later.',
+          : kind === 'in-flight'
+            ? 'Too many chat backup bytes are already being processed. Retry later.'
+            : 'Chat backup request quota exceeded. Retry later.',
     );
     this.name = 'ChatBackupQuotaError';
   }
@@ -119,6 +129,7 @@ export async function admitChatBackupRequest(
 ): Promise<ChatBackupAdmission> {
   const policy = chatBackupQuotaPolicy(env);
   const now = args.now ?? Date.now();
+  await releaseExpiredChatBackupAdmissionsForOwner(env.DB, args.ownerId, now);
   const id = crypto.randomUUID();
   const expiresAt = now + CHAT_BACKUP_RESERVATION_TTL_MS;
   const statement = env.DB.prepare(
@@ -132,14 +143,19 @@ export async function admitChatBackupRequest(
        SELECT
          CASE WHEN minute_requests < ?
                    AND day_requests < ?
+                   AND COALESCE((
+                     SELECT SUM(intake_reserved_bytes)
+                     FROM chat_backup_admissions
+                     WHERE owner_id = ? AND status = 'pending'
+                   ), 0) + ? <= ?
               THEN 0 ELSE 1 END AS policy_violation
        FROM usage
      )
      INSERT INTO chat_backup_admissions (
-       id, owner_id, chat_id, reserved_bytes, reserved_objects, operation,
+       id, owner_id, chat_id, reserved_bytes, reserved_objects, intake_reserved_bytes, operation,
        status, policy_violation, created_at, expires_at, reserved_at, completed_at
      )
-     SELECT ?, ?, ?, 0, 0, 'upload', 'pending', policy_violation, ?, ?, NULL, NULL
+     SELECT ?, ?, ?, 0, 0, ?, 'upload', 'pending', policy_violation, ?, ?, NULL, NULL
      FROM decision
      WHERE policy_violation = 0`,
   ).bind(
@@ -149,9 +165,13 @@ export async function admitChatBackupRequest(
     now - DAY_MS,
     policy.requestsPerMinute,
     policy.requestsPerDay,
+    args.ownerId,
+    CHAT_BACKUP_MAX_INTAKE_BYTES,
+    policy.inflightLimitBytes,
     id,
     args.ownerId,
     args.chatId,
+    CHAT_BACKUP_MAX_INTAKE_BYTES,
     now,
     expiresAt,
   );
@@ -176,6 +196,9 @@ export async function admitChatBackupRequest(
   }
 
   const usage = await readUsage(env.DB, args.ownerId, now);
+  if (usage.in_flight_bytes + CHAT_BACKUP_MAX_INTAKE_BYTES > policy.inflightLimitBytes) {
+    throw new ChatBackupQuotaError('in-flight', 60);
+  }
   throw new ChatBackupQuotaError('request-rate', usage.minute_requests >= policy.requestsPerMinute ? 60 : 24 * 60 * 60);
 }
 
@@ -481,6 +504,11 @@ export function createChatBackupCloneQuotaExtension(
   if (storageKeys.length < 1 || storageKeys.length > 2) {
     throw new Error('A cloned chat must retain one or two backup objects');
   }
+  const releaseExpiredStatement = env.DB.prepare(
+    `UPDATE chat_backup_admissions
+     SET status = 'released', completed_at = ?
+     WHERE owner_id = ? AND status = 'pending' AND expires_at <= ?`,
+  ).bind(now, args.ownerId, now);
   const requestedValues = storageKeys.map(() => '(?)').join(', ');
   const admissionStatement = env.DB.prepare(
     `WITH requested(storage_key) AS (VALUES ${requestedValues}),
@@ -606,10 +634,10 @@ export function createChatBackupCloneQuotaExtension(
   ).bind(now, admissionId, args.ownerId, admissionId, admissionId);
   return {
     admissionId,
-    prefixStatements: [admissionStatement, ...attributionStatements],
+    prefixStatements: [releaseExpiredStatement, admissionStatement, ...attributionStatements],
     suffixStatements: [completionStatement],
     validateResults: (prefixResults, suffixResults) =>
-      prefixResults[0]?.meta.changes === 1 && suffixResults[0]?.meta.changes === 1,
+      prefixResults[1]?.meta.changes === 1 && suffixResults[0]?.meta.changes === 1,
     verifyReceipt: async () => {
       const receipt = await readAdmission(env.DB, admissionId);
       return receipt?.owner_id === args.ownerId && receipt.status === 'completed';
@@ -925,6 +953,11 @@ function chatBackupQuotaPolicy(env: ChatBackupQuotaConfig): ChatBackupQuotaPolic
       DEFAULT_CHAT_BACKUP_REQUESTS_PER_DAY,
       'CHAT_BACKUP_REQUESTS_PER_DAY',
     ),
+    inflightLimitBytes: positiveInteger(
+      env.CHAT_BACKUP_INFLIGHT_LIMIT_BYTES,
+      DEFAULT_CHAT_BACKUP_INFLIGHT_LIMIT_BYTES,
+      'CHAT_BACKUP_INFLIGHT_LIMIT_BYTES',
+    ),
   };
 }
 
@@ -966,6 +999,17 @@ async function purgeOwnerAdmissionHistoryBestEffort(db: D1Database, ownerId: str
   } catch (error) {
     logger.warn('Unable to purge expired per-user chat backup admission history', { error });
   }
+}
+
+async function releaseExpiredChatBackupAdmissionsForOwner(db: D1Database, ownerId: string, now: number): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE chat_backup_admissions
+       SET status = 'released', completed_at = ?
+       WHERE owner_id = ? AND status = 'pending' AND expires_at <= ?`,
+    )
+    .bind(now, ownerId, now)
+    .run();
 }
 
 async function readAdmission(db: D1Database, id: string): Promise<AdmissionRow | null> {
@@ -1043,9 +1087,13 @@ async function readUsage(db: D1Database, ownerId: string, now: number): Promise<
          (SELECT COUNT(*) FROM chat_backup_admissions
           WHERE owner_id = ? AND created_at >= ?) AS minute_requests,
          (SELECT COUNT(*) FROM chat_backup_admissions
-          WHERE owner_id = ? AND created_at >= ?) AS day_requests`,
+          WHERE owner_id = ? AND created_at >= ?) AS day_requests,
+         COALESCE((
+           SELECT SUM(intake_reserved_bytes) FROM chat_backup_admissions
+           WHERE owner_id = ? AND status = 'pending'
+         ), 0) AS in_flight_bytes`,
     )
-    .bind(ownerId, ownerId, ownerId, ownerId, ownerId, now - MINUTE_MS, ownerId, now - DAY_MS)
+    .bind(ownerId, ownerId, ownerId, ownerId, ownerId, now - MINUTE_MS, ownerId, now - DAY_MS, ownerId)
     .first<UsageRow>();
   if (!row) {
     throw new Error('Unable to read chat backup quota usage');

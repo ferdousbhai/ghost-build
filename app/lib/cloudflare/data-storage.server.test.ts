@@ -23,6 +23,12 @@ import {
   reserveChatBackupBytes,
 } from './data/chat-backup-quota.server';
 import { MESSAGE_HISTORY_LZ4_LIMITS, PROJECT_SNAPSHOT_LZ4_LIMITS } from '~/lib/compression-limits';
+import {
+  admitThumbnailUpload,
+  releaseThumbnailAdmissionBestEffort,
+  ThumbnailQuotaError,
+} from './data/thumbnail-quota.server';
+import { saveThumbnail } from './data/share-service.server';
 
 const getAuthSession = vi.hoisted(() => vi.fn());
 
@@ -82,6 +88,18 @@ vi.mock('./data/chat-backup-quota.server', async () => {
     reserveChatBackupBytes: vi.fn(),
   };
 });
+vi.mock('./data/thumbnail-quota.server', async () => {
+  const actual = await vi.importActual('./data/thumbnail-quota.server');
+  return {
+    ...actual,
+    admitThumbnailUpload: vi.fn(),
+    releaseThumbnailAdmissionBestEffort: vi.fn(),
+  };
+});
+vi.mock('./data/share-service.server', async () => {
+  const actual = await vi.importActual('./data/share-service.server');
+  return { ...actual, saveThumbnail: vi.fn() };
+});
 
 const updateStorageStateMock = vi.mocked(updateStorageState);
 const findChatMock = vi.mocked(findChat);
@@ -99,6 +117,9 @@ const enforceChatBackupEdgeRateLimitMock = vi.mocked(enforceChatBackupEdgeRateLi
 const registerChatBackupObjectMock = vi.mocked(registerChatBackupObject);
 const releaseChatBackupAdmissionBestEffortMock = vi.mocked(releaseChatBackupAdmissionBestEffort);
 const reserveChatBackupBytesMock = vi.mocked(reserveChatBackupBytes);
+const admitThumbnailUploadMock = vi.mocked(admitThumbnailUpload);
+const releaseThumbnailAdmissionBestEffortMock = vi.mocked(releaseThumbnailAdmissionBestEffort);
+const saveThumbnailMock = vi.mocked(saveThumbnail);
 
 const quotaAdmission = {
   id: 'admission',
@@ -435,7 +456,58 @@ describe('chat blob ownership', () => {
 });
 
 describe('thumbnail body limits', () => {
-  beforeEach(() => putObjectAtKeyMock.mockReset());
+  beforeEach(() => {
+    putObjectAtKeyMock.mockReset();
+    admitThumbnailUploadMock.mockReset().mockResolvedValue({
+      id: 'thumbnail-admission',
+      ownerId: 'session',
+      chatId: 'chat-row',
+      reservedBytes: 0,
+      reservedObjects: 0,
+      expectedStorageKey: null,
+    });
+    releaseThumbnailAdmissionBestEffortMock.mockReset().mockResolvedValue(undefined);
+    saveThumbnailMock.mockReset();
+  });
+
+  test('releases admission when object persistence fails after a valid body is read', async () => {
+    saveThumbnailMock.mockRejectedValueOnce(new Error('R2 unavailable'));
+    const response = await uploadThumbnailAction({
+      request: new Request('https://ghostbuild.dev/api/thumbnails?sessionId=session&chatId=chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/png' },
+        body: new Uint8Array([1]),
+      }),
+      env: storageEnv(),
+    });
+
+    expect(response.status).toBe(500);
+    expect(saveThumbnailMock).toHaveBeenCalledOnce();
+    expect(releaseThumbnailAdmissionBestEffortMock).toHaveBeenCalledOnce();
+  });
+
+  test('rejects tenant-concurrent admission before reading the request stream', async () => {
+    admitThumbnailUploadMock.mockRejectedValueOnce(new ThumbnailQuotaError('in-flight', 60));
+    const request = new Request('https://ghostbuild.dev/api/thumbnails?sessionId=session&chatId=chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'image/png' },
+      body: new ReadableStream({
+        pull(controller) {
+          controller.enqueue(new Uint8Array([1]));
+          controller.close();
+        },
+      }),
+      duplex: 'half',
+    } as RequestInit);
+    const response = await uploadThumbnailAction({
+      request,
+      env: storageEnv(),
+    });
+
+    expect(response.status).toBe(429);
+    expect(request.bodyUsed).toBe(false);
+    expect(releaseThumbnailAdmissionBestEffortMock).not.toHaveBeenCalled();
+  });
 
   test('rejects an oversized declared body before materializing the thumbnail', async () => {
     const response = await uploadThumbnailAction({
@@ -449,6 +521,7 @@ describe('thumbnail body limits', () => {
 
     expect(response.status).toBe(413);
     expect(putObjectAtKeyMock).not.toHaveBeenCalled();
+    expect(releaseThumbnailAdmissionBestEffortMock).toHaveBeenCalledOnce();
   });
 
   test('rejects an oversized chunked thumbnail stream without Content-Length', async () => {
@@ -470,6 +543,7 @@ describe('thumbnail body limits', () => {
 
     expect(response.status).toBe(413);
     expect(putObjectAtKeyMock).not.toHaveBeenCalled();
+    expect(releaseThumbnailAdmissionBestEffortMock).toHaveBeenCalledOnce();
   });
 });
 

@@ -22,6 +22,11 @@ import {
   releaseChatBackupCloneAdmissionBestEffort,
   throwIfChatBackupCloneQuotaDenied,
 } from './chat-backup-quota.server';
+import {
+  publishThumbnailReplacement,
+  registerThumbnailUploadObject,
+  reserveThumbnailReplacement,
+} from './thumbnail-quota.server';
 
 vi.mock('./chat-repository.server', () => ({
   getLatestStorageState: vi.fn(),
@@ -51,6 +56,12 @@ vi.mock('./chat-backup-quota.server', () => ({
   releaseChatBackupCloneAdmissionBestEffort: vi.fn().mockResolvedValue(undefined),
   throwIfChatBackupCloneQuotaDenied: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock('./thumbnail-quota.server', () => ({
+  ThumbnailReservationStaleError: class ThumbnailReservationStaleError extends Error {},
+  publishThumbnailReplacement: vi.fn(),
+  registerThumbnailUploadObject: vi.fn(),
+  reserveThumbnailReplacement: vi.fn(),
+}));
 
 const requireChatMock = vi.mocked(requireChat);
 const getLatestStorageStateMock = vi.mocked(getLatestStorageState);
@@ -65,7 +76,18 @@ const createChatBackupCloneQuotaExtensionMock = vi.mocked(createChatBackupCloneQ
 const enforceChatBackupEdgeRateLimitMock = vi.mocked(enforceChatBackupEdgeRateLimit);
 const releaseChatBackupCloneAdmissionBestEffortMock = vi.mocked(releaseChatBackupCloneAdmissionBestEffort);
 const throwIfChatBackupCloneQuotaDeniedMock = vi.mocked(throwIfChatBackupCloneQuotaDenied);
+const publishThumbnailReplacementMock = vi.mocked(publishThumbnailReplacement);
+const registerThumbnailUploadObjectMock = vi.mocked(registerThumbnailUploadObject);
+const reserveThumbnailReplacementMock = vi.mocked(reserveThumbnailReplacement);
 const STRONG_SHARE_CODE = 'a'.repeat(32);
+const thumbnailAdmission = {
+  id: 'thumbnail-admission',
+  ownerId: 'session',
+  chatId: 'chat-row',
+  reservedBytes: 0,
+  reservedObjects: 0,
+  expectedStorageKey: null,
+};
 
 describe('thumbnail object ownership', () => {
   beforeEach(() => {
@@ -78,6 +100,18 @@ describe('thumbnail object ownership', () => {
     cancelObjectGcCandidateMock.mockReset().mockResolvedValue(true);
     prepareObjectGcCandidateStatementsMock.mockClear();
     sweepObjectGcCandidatesBestEffortMock.mockReset();
+    registerThumbnailUploadObjectMock.mockReset().mockResolvedValue(undefined);
+    reserveThumbnailReplacementMock.mockReset().mockImplementation(async (_db, admission, args) => ({
+      ...admission,
+      expectedStorageKey: args.expectedStorageKey,
+    }));
+    publishThumbnailReplacementMock.mockReset().mockImplementation(async (db, args) => {
+      const result = await db
+        .prepare('UPDATE social_shares SET thumbnail_image_key = ? WHERE chat_id = ? AND thumbnail_image_key IS ?')
+        .bind(args.storageKey, args.admission.chatId, args.displacedStorageKey)
+        .run();
+      return result.meta.changes === 1 ? 'published' : 'stale';
+    });
     requireChatMock.mockResolvedValue({ id: 'chat-row' } as Awaited<ReturnType<typeof requireChat>>);
   });
 
@@ -87,8 +121,7 @@ describe('thumbnail object ownership', () => {
 
     await expect(
       saveThumbnail(env, {
-        sessionId: 'session',
-        chatId: 'chat',
+        admission: thumbnailAdmission,
         image: new Blob(['image'], { type: 'image/png' }),
       }),
     ).resolves.toBe('thumbnails/new');
@@ -110,8 +143,7 @@ describe('thumbnail object ownership', () => {
 
     await expect(
       saveThumbnail(env, {
-        sessionId: 'session',
-        chatId: 'chat',
+        admission: thumbnailAdmission,
         image: new Blob(['image'], { type: 'image/png' }),
       }),
     ).rejects.toThrow('database unavailable');
@@ -127,8 +159,7 @@ describe('thumbnail object ownership', () => {
 
     await expect(
       saveThumbnail(env, {
-        sessionId: 'session',
-        chatId: 'chat',
+        admission: thumbnailAdmission,
         image: new Blob(['image'], { type: 'image/png' }),
       }),
     ).rejects.toThrow('D1 acknowledgement lost');
@@ -149,8 +180,7 @@ describe('thumbnail object ownership', () => {
 
     await expect(
       saveThumbnail(env, {
-        sessionId: 'session',
-        chatId: 'chat',
+        admission: thumbnailAdmission,
         image: new Blob(['image'], { type: 'image/png' }),
       }),
     ).rejects.toThrow('R2 acknowledgement lost');
@@ -170,8 +200,7 @@ describe('thumbnail object ownership', () => {
 
     await expect(
       saveThumbnail(env, {
-        sessionId: 'session',
-        chatId: 'chat',
+        admission: thumbnailAdmission,
         image: new Blob(['image'], { type: 'image/png' }),
       }),
     ).resolves.toBe('thumbnails/new');
@@ -554,7 +583,10 @@ class SocialShareDatabase {
       if (!current) {
         return changed(0);
       }
-      if (current.id === values[1] && current.thumbnail_image_key === values[2]) {
+      const selectorMatches = query.includes('WHERE chat_id')
+        ? current.chat_id === values[1]
+        : current.id === values[1];
+      if (selectorMatches && current.thumbnail_image_key === values[2]) {
         current.thumbnail_image_key = values[0] as string;
         if (this.throwAfterNextThumbnailCommit) {
           this.throwAfterNextThumbnailCommit = false;

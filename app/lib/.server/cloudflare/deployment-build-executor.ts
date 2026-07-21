@@ -1,4 +1,11 @@
-import { getSandbox, type ExecResult } from '@cloudflare/sandbox';
+import {
+  getSandbox,
+  parseSSEStream,
+  type ExecResult,
+  type ISandbox,
+  type LogEvent,
+  type ProcessOptions,
+} from '@cloudflare/sandbox';
 import type { DeploymentSandbox } from './deployment-sandbox';
 import { APP_AGENT_PROTECTED_FILE_SHA256 } from './deployment-security-baseline';
 import type { DeploymentProjectProfile } from './deployment-snapshot';
@@ -11,6 +18,8 @@ const PACKAGE_DIR = '/workspace/package';
 const TRUSTED_BIN_DIR = '/workspace/ghostbuild-trusted-bin';
 const TRUSTED_INPUT_DIR = '/workspace/ghostbuild-approved-inputs';
 const MAX_ERROR_OUTPUT = 4_000;
+export const MAX_DEPLOYMENT_BUILD_COMMAND_OUTPUT_BYTES = 1024 * 1024;
+const MAX_DEPLOYMENT_BUILD_COMMAND_EVENT_BYTES = MAX_DEPLOYMENT_BUILD_COMMAND_OUTPUT_BYTES * 6 + 64 * 1024;
 const MAX_EXPANDED_KIB = 250 * 1024;
 const MAX_EXPANDED_BYTES = MAX_EXPANDED_KIB * 1024;
 const MAX_BUILD_PACKAGE_KIB = 300 * 1024;
@@ -235,7 +244,11 @@ export async function buildDeploymentSnapshot(args: {
     for (const [command, scriptStage, timeout] of requiresAppAgentSecurity ? webAppEntrypoints : workerEntrypoints) {
       stage = scriptStage;
       await requireSuccess(
-        await sandbox.exec(verifiedEntrypoint(command), { cwd: PROJECT_DIR, env: trustedEnv, timeout }),
+        await runBoundedDeploymentBuildCommand(sandbox, verifiedEntrypoint(command), {
+          cwd: PROJECT_DIR,
+          env: trustedEnv,
+          timeout,
+        }),
       );
     }
     await sandbox.killAllProcesses();
@@ -295,6 +308,78 @@ export async function buildDeploymentSnapshot(args: {
 }
 
 const APPROVED_INPUT_PATHS = ['package.json', 'pnpm-lock.yaml', 'wrangler.jsonc', 'pnpm-workspace.yaml'] as const;
+
+/** Run user-configurable Worker scripts without ever collecting unbounded command output in the Worker isolate. */
+export async function runBoundedDeploymentBuildCommand(
+  sandbox: Pick<ISandbox, 'startProcess' | 'streamProcessLogs' | 'killAllProcesses'>,
+  command: string,
+  options: Pick<ProcessOptions, 'cwd' | 'env' | 'timeout'>,
+): Promise<ExecResult> {
+  const startedAt = Date.now();
+  const timestamp = new Date().toISOString();
+  const process = await sandbox.startProcess(command, { ...options, autoCleanup: false });
+  const stream = (await sandbox.streamProcessLogs(process.id)).pipeThrough(
+    limitBuildCommandEventBytes(MAX_DEPLOYMENT_BUILD_COMMAND_EVENT_BYTES),
+  );
+  let outputBytes = 0;
+  let stdout = '';
+  let stderr = '';
+  try {
+    for await (const event of parseSSEStream<LogEvent>(stream)) {
+      if (event.type === 'stdout' || event.type === 'stderr') {
+        const data = event.data ?? '';
+        outputBytes += new TextEncoder().encode(data).byteLength;
+        if (outputBytes > MAX_DEPLOYMENT_BUILD_COMMAND_OUTPUT_BYTES) {
+          throw new DeploymentBuildError('Production build command output exceeds the 1 MiB limit.');
+        }
+        if (event.type === 'stdout') {
+          stdout = appendOutputTail(stdout, data);
+        } else {
+          stderr = appendOutputTail(stderr, data);
+        }
+        continue;
+      }
+      if (event.type === 'exit') {
+        const exitCode = event.exitCode ?? 1;
+        return {
+          success: exitCode === 0,
+          exitCode,
+          stdout,
+          stderr,
+          command,
+          duration: Date.now() - startedAt,
+          timestamp,
+        };
+      }
+      if (event.type === 'error') {
+        throw new DeploymentBuildError(
+          event.data ? appendOutputTail('', event.data) : 'Production build command stream failed.',
+        );
+      }
+    }
+    throw new DeploymentBuildError('Production build command stream ended without an exit status.');
+  } catch (error) {
+    await Promise.allSettled([process.kill('SIGKILL'), sandbox.killAllProcesses()]);
+    throw error;
+  }
+}
+
+function appendOutputTail(current: string, next: string): string {
+  return `${current}${next}`.slice(-MAX_ERROR_OUTPUT);
+}
+
+function limitBuildCommandEventBytes(maxBytes: number): TransformStream<Uint8Array, Uint8Array> {
+  let receivedBytes = 0;
+  return new TransformStream({
+    transform(chunk, controller) {
+      if (chunk.byteLength > maxBytes - receivedBytes) {
+        throw new DeploymentBuildError('Production build command event stream exceeds its encoded size limit.');
+      }
+      receivedBytes += chunk.byteLength;
+      controller.enqueue(chunk);
+    },
+  });
+}
 
 function requireSystemExecutable(result: ExecResult, name: string): string {
   if (!result.success) {

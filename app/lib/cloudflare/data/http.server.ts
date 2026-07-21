@@ -6,6 +6,7 @@ import { InvalidJsonBodyError, PayloadTooLargeError } from '~/lib/bounded-body';
 import { InvalidMultipartBodyError } from '~/lib/bounded-multipart';
 import { Lz4PayloadError } from '~/lib/compression-limits';
 import { ChatBackupQuotaError } from './chat-backup-quota.server';
+import { ThumbnailQuotaError } from './thumbnail-quota.server';
 
 const logger = createScopedLogger('CloudflareData');
 
@@ -23,6 +24,11 @@ export function internalErrorResponse(error: unknown, fallback: string): Respons
     return Response.json({ error: error.message }, { status: 409 });
   }
   if (error instanceof ChatBackupQuotaError) {
+    const headers = error.retryAfterSeconds ? { 'Retry-After': String(error.retryAfterSeconds) } : undefined;
+    const status = error.kind === 'storage' ? 409 : error.kind === 'not-ready' ? 503 : 429;
+    return Response.json({ error: error.message }, { status, headers });
+  }
+  if (error instanceof ThumbnailQuotaError) {
     const headers = error.retryAfterSeconds ? { 'Retry-After': String(error.retryAfterSeconds) } : undefined;
     const status = error.kind === 'storage' ? 409 : error.kind === 'not-ready' ? 503 : 429;
     return Response.json({ error: error.message }, { status, headers });

@@ -5,14 +5,32 @@ const sandbox = vi.hoisted(() => ({
   mkdir: vi.fn(),
   writeFile: vi.fn(),
   exec: vi.fn(),
+  startProcess: vi.fn(),
+  streamProcessLogs: vi.fn(),
   killAllProcesses: vi.fn(),
   readFileStream: vi.fn(),
   destroy: vi.fn(),
 }));
 
-vi.mock('@cloudflare/sandbox', () => ({ getSandbox: vi.fn(() => sandbox) }));
+vi.mock('@cloudflare/sandbox', () => ({
+  getSandbox: vi.fn(() => sandbox),
+  async *parseSSEStream(stream: ReadableStream<Uint8Array>) {
+    const content = await new Response(stream).text();
+    for (const frame of content.split('\n\n')) {
+      const data = frame.startsWith('data: ') ? frame.slice(6) : '';
+      if (data) {
+        yield JSON.parse(data);
+      }
+    }
+  },
+}));
 
-import { buildDeploymentSnapshot, DEPLOYMENT_BUILD_STEP_BUDGET_MS } from './deployment-build-executor';
+import {
+  buildDeploymentSnapshot,
+  DEPLOYMENT_BUILD_STEP_BUDGET_MS,
+  MAX_DEPLOYMENT_BUILD_COMMAND_OUTPUT_BYTES,
+  runBoundedDeploymentBuildCommand,
+} from './deployment-build-executor';
 
 const appAgentWebProject: DeploymentProjectProfile = {
   type: 'web_app',
@@ -38,6 +56,17 @@ describe('buildDeploymentSnapshot', () => {
       stderr: '',
       command,
     }));
+    sandbox.startProcess.mockImplementation(async (command: string) => ({
+      id: 'build-process',
+      command,
+      kill: vi.fn().mockResolvedValue(undefined),
+    }));
+    sandbox.streamProcessLogs.mockImplementation(async () =>
+      eventStream([
+        { type: 'stdout', data: 'build output\n', processId: 'build-process' },
+        { type: 'exit', data: '', processId: 'build-process', exitCode: 0 },
+      ]),
+    );
     sandbox.killAllProcesses.mockResolvedValue(0);
     sandbox.readFileStream.mockResolvedValue(stream([9, 8, 7]));
     sandbox.destroy.mockResolvedValue(undefined);
@@ -69,10 +98,7 @@ describe('buildDeploymentSnapshot', () => {
     expect(commands).toContain(
       "'/usr/local/bin/pnpm' install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/",
     );
-    const entrypoints = commands.filter(
-      (command) =>
-        command.includes("'/usr/local/bin/node'") && !command.includes('/workspace/ghostbuild-trusted-bin/node'),
-    );
+    const entrypoints = sandbox.startProcess.mock.calls.map((call) => call[0] as string);
     expect(entrypoints).toHaveLength(8);
     for (const command of entrypoints) {
       expect(command).toContain(`sha256sum './package.json'`);
@@ -117,10 +143,7 @@ describe('buildDeploymentSnapshot', () => {
     ).resolves.toEqual(new Uint8Array([9, 8, 7]));
 
     const commands = sandbox.exec.mock.calls.map((call) => call[0] as string);
-    const entrypoints = commands.filter(
-      (command) =>
-        command.includes("'/usr/local/bin/node'") && !command.includes('/workspace/ghostbuild-trusted-bin/node'),
-    );
+    const entrypoints = sandbox.startProcess.mock.calls.map((call) => call[0] as string);
     expect(entrypoints).toHaveLength(8);
     for (const command of entrypoints) {
       expect(command).toContain(`sha256sum './scripts/cf-typegen.mjs'`);
@@ -148,8 +171,7 @@ describe('buildDeploymentSnapshot', () => {
       }),
     ).resolves.toEqual(new Uint8Array([9, 8, 7]));
 
-    const commands = sandbox.exec.mock.calls.map((call) => call[0] as string);
-    const entrypoints = commands.filter((command) => command.includes("'/usr/local/bin/pnpm' run "));
+    const entrypoints = sandbox.startProcess.mock.calls.map((call) => call[0] as string);
     expect(entrypoints).toHaveLength(4);
     for (const command of entrypoints) {
       expect(command).toContain(`sha256sum './package.json'`);
@@ -257,6 +279,58 @@ describe('buildDeploymentSnapshot', () => {
     expect(DEPLOYMENT_BUILD_STEP_BUDGET_MS).toBeLessThanOrEqual(25 * 60 * 1000);
   });
 
+  test('streams normal Worker build output through the bounded command runner', async () => {
+    const kill = vi.fn().mockResolvedValue(undefined);
+    const boundedSandbox = {
+      startProcess: vi.fn().mockResolvedValue({ id: 'process-1', kill }),
+      streamProcessLogs: vi.fn().mockResolvedValue(
+        eventStream([
+          { type: 'stdout', data: 'compiled\n', processId: 'process-1' },
+          { type: 'stderr', data: 'warning\n', processId: 'process-1' },
+          { type: 'exit', data: '', processId: 'process-1', exitCode: 0 },
+        ]),
+      ),
+      killAllProcesses: vi.fn(),
+    };
+
+    await expect(
+      runBoundedDeploymentBuildCommand(boundedSandbox as never, 'pnpm run build', {
+        cwd: '/workspace/project',
+        timeout: 1_000,
+      }),
+    ).resolves.toMatchObject({ success: true, exitCode: 0, stdout: 'compiled\n', stderr: 'warning\n' });
+    expect(kill).not.toHaveBeenCalled();
+    expect(boundedSandbox.killAllProcesses).not.toHaveBeenCalled();
+  });
+
+  test('kills command processes when streamed stdout and stderr exceed the aggregate byte limit', async () => {
+    const kill = vi.fn().mockResolvedValue(undefined);
+    const killAllProcesses = vi.fn().mockResolvedValue(1);
+    const boundedSandbox = {
+      startProcess: vi.fn().mockResolvedValue({ id: 'process-1', kill }),
+      streamProcessLogs: vi.fn().mockResolvedValue(
+        eventStream([
+          {
+            type: 'stdout',
+            data: 'x'.repeat(MAX_DEPLOYMENT_BUILD_COMMAND_OUTPUT_BYTES),
+            processId: 'process-1',
+          },
+          { type: 'stderr', data: '!', processId: 'process-1' },
+        ]),
+      ),
+      killAllProcesses,
+    };
+
+    await expect(
+      runBoundedDeploymentBuildCommand(boundedSandbox as never, 'pnpm run build', {
+        cwd: '/workspace/project',
+        timeout: 1_000,
+      }),
+    ).rejects.toThrow('command output exceeds the 1 MiB limit');
+    expect(kill).toHaveBeenCalledWith('SIGKILL');
+    expect(killAllProcesses).toHaveBeenCalledOnce();
+  });
+
   test('rejects an unsafe workspace policy before dependency installation', async () => {
     sandbox.exec.mockImplementation(async (command: string) => {
       if (command === 'command -v node') {
@@ -308,11 +382,14 @@ describe('buildDeploymentSnapshot', () => {
       if (command === 'sha256sum package.json pnpm-lock.yaml wrangler.jsonc pnpm-workspace.yaml') {
         return { success: true, exitCode: 0, stdout: approvedInputDigestOutput(), stderr: '', command };
       }
-      if (command.startsWith(`test "$(sha256sum './package.json'`) && command.includes("'/usr/local/bin/node'")) {
-        return { success: false, exitCode: 1, stdout: '', stderr: 'vite.config.ts changed', command };
-      }
       return { success: true, exitCode: 0, stdout: '', stderr: '', command };
     });
+    sandbox.streamProcessLogs.mockImplementation(async () =>
+      eventStream([
+        { type: 'stderr', data: 'vite.config.ts changed', processId: 'build-process' },
+        { type: 'exit', data: '', processId: 'build-process', exitCode: 1 },
+      ]),
+    );
     const env = {
       DeploymentSandbox: {},
       APP_STORAGE: { get: vi.fn(async () => ({ body: stream([1]) })) },
@@ -327,13 +404,11 @@ describe('buildDeploymentSnapshot', () => {
         project: appAgentWebProject,
       }),
     ).rejects.toThrow('failed during type checking');
-    expect(
-      sandbox.exec.mock.calls.some(
-        (call) =>
-          call[0].includes('/workspace/ghostbuild-approved-inputs/scripts/cf-typegen.mjs') &&
-          call[0].startsWith(`test "$(sha256sum './package.json'`),
-      ),
-    ).toBe(true);
+    expect(sandbox.startProcess).toHaveBeenCalledOnce();
+    expect(sandbox.startProcess.mock.calls[0]?.[0]).toContain(
+      '/workspace/ghostbuild-approved-inputs/scripts/cf-typegen.mjs',
+    );
+    expect(sandbox.startProcess.mock.calls[0]?.[0]).toMatch(/^test "\$\(sha256sum '\.\/package\.json'/);
     expect(sandbox.exec.mock.calls.some((call) => call[0].startsWith('cp -a /workspace/project/dist'))).toBe(false);
     expect(sandbox.destroy).toHaveBeenCalledOnce();
   });
@@ -349,14 +424,14 @@ describe('buildDeploymentSnapshot', () => {
       if (command === 'sha256sum package.json pnpm-lock.yaml wrangler.jsonc pnpm-workspace.yaml') {
         return { success: true, exitCode: 0, stdout: approvedInputDigestOutput(), stderr: '', command };
       }
-      if (
-        command.includes(`sha256sum '/workspace/ghostbuild-approved-inputs/scripts/cf-typegen.mjs'`) &&
-        command.includes("'/usr/local/bin/node'")
-      ) {
-        return { success: false, exitCode: 1, stdout: '', stderr: 'trusted verifier changed', command };
-      }
       return { success: true, exitCode: 0, stdout: '', stderr: '', command };
     });
+    sandbox.streamProcessLogs.mockImplementation(async () =>
+      eventStream([
+        { type: 'stderr', data: 'trusted verifier changed', processId: 'build-process' },
+        { type: 'exit', data: '', processId: 'build-process', exitCode: 1 },
+      ]),
+    );
     const env = {
       DeploymentSandbox: {},
       APP_STORAGE: { get: vi.fn(async () => ({ body: stream([1]) })) },
@@ -371,6 +446,10 @@ describe('buildDeploymentSnapshot', () => {
         project: appAgentWebProject,
       }),
     ).rejects.toThrow('failed during type checking');
+    expect(sandbox.startProcess).toHaveBeenCalledOnce();
+    expect(sandbox.startProcess.mock.calls[0]?.[0]).toContain(
+      `sha256sum '/workspace/ghostbuild-approved-inputs/scripts/cf-typegen.mjs'`,
+    );
     expect(sandbox.exec.mock.calls.some((call) => call[0].startsWith('cp -a /workspace/project/dist'))).toBe(false);
     expect(sandbox.destroy).toHaveBeenCalledOnce();
   });
@@ -399,6 +478,20 @@ function stream(bytes: number[]): ReadableStream<Uint8Array> {
   return new ReadableStream({
     start(controller) {
       controller.enqueue(new Uint8Array(bytes));
+      controller.close();
+    },
+  });
+}
+
+function eventStream(events: Array<Record<string, unknown>>): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const event of events) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ timestamp: new Date(0).toISOString(), ...event })}\n\n`),
+        );
+      }
       controller.close();
     },
   });

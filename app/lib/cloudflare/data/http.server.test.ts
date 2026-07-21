@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { internalErrorResponse } from './http.server';
 import { SubchatLimitError } from './errors';
 import { ChatBackupQuotaError } from './chat-backup-quota.server';
+import { ThumbnailQuotaError } from './thumbnail-quota.server';
 
 describe('internalErrorResponse', () => {
   it('does not reflect unexpected backend error messages to callers', async () => {
@@ -14,6 +15,15 @@ describe('internalErrorResponse', () => {
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: 'Unknown data error' });
     consoleError.mockRestore();
+  });
+
+  it('returns typed thumbnail rate and storage quota responses', async () => {
+    const rate = internalErrorResponse(new ThumbnailQuotaError('in-flight', 60), 'Unknown data error');
+    const storage = internalErrorResponse(new ThumbnailQuotaError('storage'), 'Unknown data error');
+
+    expect(rate.status).toBe(429);
+    expect(rate.headers.get('Retry-After')).toBe('60');
+    expect(storage.status).toBe(409);
   });
 
   it('returns a conflict when a project reaches the subchat ceiling', async () => {

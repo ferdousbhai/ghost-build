@@ -13,6 +13,10 @@ import {
   APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256,
   DEPLOYMENT_SECURITY_CLEANUP_CRON,
 } from './deployment-security-baseline';
+import {
+  APP_AGENT_PROTECTED_PACKAGE_REQUIREMENTS,
+  createAppAgentProtectedLockIdentity,
+} from './deployment-security-lock';
 
 const MAX_DEPLOYMENT_ARCHIVE_ENTRIES = 5_000;
 export const MAX_DEPLOYMENT_EXPANDED_BYTES = 250 * 1024 * 1024;
@@ -44,9 +48,11 @@ type ZipEntryStream = {
 };
 
 export async function inspectDeploymentSnapshot(snapshot: Blob | ArrayBuffer): Promise<DeploymentProjectProfile> {
+  const source = snapshot instanceof Blob ? await snapshot.arrayBuffer() : snapshot;
+  const rawEntryCount = preflightDeploymentArchive(source);
   let archive: JSZip;
   try {
-    archive = await JSZip.loadAsync(snapshot instanceof Blob ? await snapshot.arrayBuffer() : snapshot, {
+    archive = await JSZip.loadAsync(source, {
       createFolders: false,
     });
   } catch {
@@ -54,6 +60,9 @@ export async function inspectDeploymentSnapshot(snapshot: Blob | ArrayBuffer): P
   }
 
   const entries = Object.values(archive.files) as LoadedZipObject[];
+  if (entries.length !== rawEntryCount) {
+    throw new DeploymentSnapshotError('Deployment snapshot contains ambiguous duplicate entries.');
+  }
   if (entries.length === 0 || entries.length > MAX_DEPLOYMENT_ARCHIVE_ENTRIES) {
     throw new DeploymentSnapshotError(
       `Deployment snapshot must contain between 1 and ${MAX_DEPLOYMENT_ARCHIVE_ENTRIES} entries.`,
@@ -148,6 +157,205 @@ export async function inspectDeploymentSnapshot(snapshot: Blob | ArrayBuffer): P
     await validateNoAlternateAiSinks(archive, root);
   }
   return { type, bindings };
+}
+
+function preflightDeploymentArchive(source: ArrayBuffer): number {
+  const bytes = new Uint8Array(source);
+  const view = new DataView(source);
+  const minimumEocdBytes = 22;
+  const maximumCommentBytes = 0xffff;
+  const firstCandidate = Math.max(0, bytes.byteLength - minimumEocdBytes - maximumCommentBytes);
+  const candidates: number[] = [];
+  for (let offset = firstCandidate; offset <= bytes.byteLength - minimumEocdBytes; offset += 1) {
+    if (view.getUint32(offset, true) !== 0x06054b50) {
+      continue;
+    }
+    const commentBytes = view.getUint16(offset + 20, true);
+    if (offset + minimumEocdBytes + commentBytes === bytes.byteLength) {
+      candidates.push(offset);
+    }
+  }
+  if (candidates.length !== 1) {
+    throw invalidDeploymentArchive();
+  }
+
+  const eocdOffset = candidates[0]!;
+  const diskNumber = view.getUint16(eocdOffset + 4, true);
+  const centralDirectoryDisk = view.getUint16(eocdOffset + 6, true);
+  const diskEntries = view.getUint16(eocdOffset + 8, true);
+  const totalEntries = view.getUint16(eocdOffset + 10, true);
+  const centralDirectoryBytes = view.getUint32(eocdOffset + 12, true);
+  const centralDirectoryOffset = view.getUint32(eocdOffset + 16, true);
+  if (
+    diskNumber !== 0 ||
+    centralDirectoryDisk !== 0 ||
+    diskEntries !== totalEntries ||
+    totalEntries === 0xffff ||
+    centralDirectoryBytes === 0xffffffff ||
+    centralDirectoryOffset === 0xffffffff
+  ) {
+    throw invalidDeploymentArchive();
+  }
+  if (totalEntries === 0 || totalEntries > MAX_DEPLOYMENT_ARCHIVE_ENTRIES) {
+    throw new DeploymentSnapshotError(
+      `Deployment snapshot must contain between 1 and ${MAX_DEPLOYMENT_ARCHIVE_ENTRIES} entries.`,
+    );
+  }
+  if (eocdOffset >= 20 && view.getUint32(eocdOffset - 20, true) === 0x07064b50) {
+    throw invalidDeploymentArchive();
+  }
+
+  const centralDirectoryEnd = centralDirectoryOffset + centralDirectoryBytes;
+  if (!Number.isSafeInteger(centralDirectoryEnd) || centralDirectoryEnd !== eocdOffset) {
+    throw invalidDeploymentArchive();
+  }
+
+  const names = new Set<string>();
+  const localHeaderOffsets = new Set<number>();
+  const localEntryRanges: Array<{ start: number; end: number }> = [];
+  let offset = centralDirectoryOffset;
+  for (let index = 0; index < totalEntries; index += 1) {
+    if (offset + 46 > centralDirectoryEnd || view.getUint32(offset, true) !== 0x02014b50) {
+      throw invalidDeploymentArchive();
+    }
+    const flags = view.getUint16(offset + 8, true);
+    const compressionMethod = view.getUint16(offset + 10, true);
+    const crc32 = view.getUint32(offset + 16, true);
+    const compressedBytes = view.getUint32(offset + 20, true);
+    const expandedBytes = view.getUint32(offset + 24, true);
+    const filenameBytes = view.getUint16(offset + 28, true);
+    const extraBytes = view.getUint16(offset + 30, true);
+    const commentBytes = view.getUint16(offset + 32, true);
+    const entryDisk = view.getUint16(offset + 34, true);
+    const localHeaderOffset = view.getUint32(offset + 42, true);
+    const entryEnd = offset + 46 + filenameBytes + extraBytes + commentBytes;
+    if (
+      entryEnd > centralDirectoryEnd ||
+      entryDisk !== 0 ||
+      compressedBytes === 0xffffffff ||
+      expandedBytes === 0xffffffff ||
+      localHeaderOffset === 0xffffffff ||
+      (flags & 0x41) !== 0 ||
+      containsZip64Extra(bytes, offset + 46 + filenameBytes, extraBytes)
+    ) {
+      throw invalidDeploymentArchive();
+    }
+
+    const name = hexBytes(bytes.subarray(offset + 46, offset + 46 + filenameBytes));
+    if (names.has(name) || localHeaderOffsets.has(localHeaderOffset)) {
+      throw new DeploymentSnapshotError('Deployment snapshot contains ambiguous duplicate entries.');
+    }
+    names.add(name);
+    localHeaderOffsets.add(localHeaderOffset);
+    localEntryRanges.push(
+      validateLocalHeader({
+        bytes,
+        view,
+        centralNameOffset: offset + 46,
+        filenameBytes,
+        flags,
+        compressionMethod,
+        crc32,
+        compressedBytes,
+        expandedBytes,
+        localHeaderOffset,
+        centralDirectoryOffset,
+      }),
+    );
+    offset = entryEnd;
+  }
+  if (offset !== centralDirectoryEnd) {
+    throw invalidDeploymentArchive();
+  }
+  localEntryRanges.sort((left, right) => left.start - right.start);
+  if (localEntryRanges.some((entry, index) => index > 0 && entry.start < localEntryRanges[index - 1]!.end)) {
+    throw invalidDeploymentArchive();
+  }
+  return totalEntries;
+}
+
+function validateLocalHeader(args: {
+  bytes: Uint8Array;
+  view: DataView;
+  centralNameOffset: number;
+  filenameBytes: number;
+  flags: number;
+  compressionMethod: number;
+  crc32: number;
+  compressedBytes: number;
+  expandedBytes: number;
+  localHeaderOffset: number;
+  centralDirectoryOffset: number;
+}): { start: number; end: number } {
+  const { bytes, view, localHeaderOffset } = args;
+  if (localHeaderOffset + 30 > args.centralDirectoryOffset || view.getUint32(localHeaderOffset, true) !== 0x04034b50) {
+    throw invalidDeploymentArchive();
+  }
+  const localFlags = view.getUint16(localHeaderOffset + 6, true);
+  const localMethod = view.getUint16(localHeaderOffset + 8, true);
+  const localCrc32 = view.getUint32(localHeaderOffset + 14, true);
+  const localCompressedBytes = view.getUint32(localHeaderOffset + 18, true);
+  const localExpandedBytes = view.getUint32(localHeaderOffset + 22, true);
+  const localFilenameBytes = view.getUint16(localHeaderOffset + 26, true);
+  const localExtraBytes = view.getUint16(localHeaderOffset + 28, true);
+  const localNameOffset = localHeaderOffset + 30;
+  const dataOffset = localNameOffset + localFilenameBytes + localExtraBytes;
+  const usesDataDescriptor = (args.flags & 0x08) !== 0;
+  if (
+    localFlags !== args.flags ||
+    localMethod !== args.compressionMethod ||
+    localFilenameBytes !== args.filenameBytes ||
+    dataOffset + args.compressedBytes > args.centralDirectoryOffset ||
+    containsZip64Extra(bytes, localNameOffset + localFilenameBytes, localExtraBytes) ||
+    !equalBytes(
+      bytes.subarray(localNameOffset, localNameOffset + localFilenameBytes),
+      bytes.subarray(args.centralNameOffset, args.centralNameOffset + args.filenameBytes),
+    ) ||
+    (!usesDataDescriptor &&
+      (localCrc32 !== args.crc32 ||
+        localCompressedBytes !== args.compressedBytes ||
+        localExpandedBytes !== args.expandedBytes)) ||
+    (usesDataDescriptor &&
+      ((localCrc32 !== 0 && localCrc32 !== args.crc32) ||
+        (localCompressedBytes !== 0 && localCompressedBytes !== args.compressedBytes) ||
+        (localExpandedBytes !== 0 && localExpandedBytes !== args.expandedBytes)))
+  ) {
+    throw invalidDeploymentArchive();
+  }
+  return { start: localHeaderOffset, end: dataOffset + args.compressedBytes };
+}
+
+function containsZip64Extra(bytes: Uint8Array, offset: number, length: number): boolean {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const end = offset + length;
+  while (offset < end) {
+    if (offset + 4 > end) {
+      throw invalidDeploymentArchive();
+    }
+    const field = view.getUint16(offset, true);
+    const fieldBytes = view.getUint16(offset + 2, true);
+    offset += 4;
+    if (offset + fieldBytes > end) {
+      throw invalidDeploymentArchive();
+    }
+    if (field === 0x0001) {
+      return true;
+    }
+    offset += fieldBytes;
+  }
+  return false;
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+}
+
+function hexBytes(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function invalidDeploymentArchive(): DeploymentSnapshotError {
+  return new DeploymentSnapshotError('Deployment snapshot must be a valid non-ZIP64 ZIP archive.');
 }
 
 async function validateNoAlternateAiSinks(archive: JSZip, root: string): Promise<void> {
@@ -412,28 +620,7 @@ function validateAppAgentPackage(pkg: Record<string, unknown>): void {
   if (pkg.pnpm !== undefined || pkg.overrides !== undefined || pkg.resolutions !== undefined) {
     throw new DeploymentSnapshotError('AppAgent package.json must not override the reviewed dependency resolver.');
   }
-  const expectedBuildPackages: Record<string, string> = {
-    '@cloudflare/ai-chat': '^0.9.3',
-    '@tanstack/react-router': '^1.170.18',
-    '@tanstack/react-start': '^1.168.30',
-    agents: '^0.17.4',
-    ai: '^6.0.230',
-    'workers-ai-provider': '^3.3.1',
-    '@cloudflare/vite-plugin': '1.45.1',
-    '@eslint/js': '^10.0.1',
-    '@tanstack/router-cli': '^1.167.21',
-    '@vitejs/plugin-react': '^6.0.3',
-    autoprefixer: '~10.5.4',
-    eslint: '^10.7.0',
-    'eslint-plugin-react-hooks': '^7.1.1',
-    'eslint-plugin-react-refresh': '^0.5.3',
-    postcss: '~8.5.19',
-    tailwindcss: '~3.4.19',
-    typescript: '~6.0.3',
-    'typescript-eslint': '^8.64.0',
-    vite: '^8.1.5',
-    wrangler: '4.112.0',
-  };
+  const expectedBuildPackages: Record<string, string> = { ...APP_AGENT_PROTECTED_PACKAGE_REQUIREMENTS };
   const dependencies = dependencyRecord(pkg.dependencies);
   const devDependencies = dependencyRecord(pkg.devDependencies);
   for (const [name, expected] of Object.entries(expectedBuildPackages)) {
@@ -449,29 +636,6 @@ function validateAppAgentPackage(pkg: Record<string, unknown>): void {
 function dependencyRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
-
-const APP_AGENT_PROTECTED_PACKAGES = [
-  '@cloudflare/ai-chat',
-  '@tanstack/react-router',
-  '@tanstack/react-start',
-  'agents',
-  'ai',
-  'workers-ai-provider',
-  '@cloudflare/vite-plugin',
-  '@eslint/js',
-  '@tanstack/router-cli',
-  '@vitejs/plugin-react',
-  'autoprefixer',
-  'eslint',
-  'eslint-plugin-react-hooks',
-  'eslint-plugin-react-refresh',
-  'postcss',
-  'tailwindcss',
-  'typescript',
-  'typescript-eslint',
-  'vite',
-  'wrangler',
-] as const;
 
 async function validateAppAgentLockfile(archive: JSZip, root: string): Promise<void> {
   const source = await readMetadataFile(archive, `${root}pnpm-lock.yaml`);
@@ -490,41 +654,17 @@ async function validateAppAgentLockfile(archive: JSZip, root: string): Promise<v
     throw new DeploymentSnapshotError('AppAgent pnpm-lock.yaml is invalid.', { cause: error });
   }
 
-  const importer = nestedRecord(lock, 'importers', '.');
-  const packages = nestedRecord(lock, 'packages');
-  const dependencies = dependencyRecord(importer.dependencies);
-  const devDependencies = dependencyRecord(importer.devDependencies);
-  const protectedEntries = APP_AGENT_PROTECTED_PACKAGES.toSorted().map((name) => {
-    const entry = dependencyRecord(dependencies[name] ?? devDependencies[name]);
-    const specifier = entry.specifier;
-    const versionWithPeers = entry.version;
-    const version = typeof versionWithPeers === 'string' ? versionWithPeers.split('(', 1)[0] : undefined;
-    const resolution = typeof version === 'string' ? nestedRecord(packages, `${name}@${version}`, 'resolution') : {};
-    const integrity = resolution.integrity;
-    if (
-      typeof specifier !== 'string' ||
-      typeof version !== 'string' ||
-      version.length === 0 ||
-      typeof integrity !== 'string' ||
-      integrity.length === 0 ||
-      (dependencies[name] !== undefined && devDependencies[name] !== undefined)
-    ) {
-      throw new DeploymentSnapshotError(`AppAgent pnpm-lock.yaml does not pin the reviewed ${name} package identity.`);
-    }
-    return { name, specifier, version, integrity };
-  });
-  const digest = await sha256Hex(new TextEncoder().encode(JSON.stringify(protectedEntries)));
+  let digest: string;
+  try {
+    digest = await createAppAgentProtectedLockIdentity(lock);
+  } catch (error) {
+    throw new DeploymentSnapshotError('AppAgent pnpm-lock.yaml does not pin the complete reviewed build toolchain.', {
+      cause: error,
+    });
+  }
   if (digest !== APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256) {
     throw new DeploymentSnapshotError('AppAgent pnpm-lock.yaml changes the reviewed security or build toolchain.');
   }
-}
-
-function nestedRecord(value: unknown, ...keys: string[]): Record<string, unknown> {
-  let record = dependencyRecord(value);
-  for (const key of keys) {
-    record = dependencyRecord(record[key]);
-  }
-  return record;
 }
 
 async function sha256Hex(value: Uint8Array): Promise<string> {

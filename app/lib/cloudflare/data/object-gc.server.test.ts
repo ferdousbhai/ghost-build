@@ -118,6 +118,43 @@ describe('deferred R2 object collection', () => {
     expect(deleteObjectMock).toHaveBeenCalledWith(database.env, 'abandoned');
   });
 
+  test('protects a pending thumbnail upload through its TTL and until explicit expiry release', async () => {
+    const database = new ObjectGcDatabase([{ storage_key: 'thumbnail-upload', not_before: 10, attempts: 0 }]);
+    database.pendingThumbnailAdmissionObjects.set('thumbnail-upload', 30);
+    database.thumbnailObjects.add('thumbnail-upload');
+
+    await expect(sweepObjectGcCandidates(database.env, { now: 20 })).resolves.toBe(0);
+    expect(deleteObjectMock).not.toHaveBeenCalled();
+    expect(database.candidates).toEqual([{ storage_key: 'thumbnail-upload', not_before: 30, attempts: 0 }]);
+
+    await expect(sweepObjectGcCandidates(database.env, { now: 31 })).resolves.toBe(0);
+    expect(database.candidates).toEqual([
+      { storage_key: 'thumbnail-upload', not_before: 31 + OBJECT_GC_GRACE_PERIOD_MS, attempts: 0 },
+    ]);
+
+    database.pendingThumbnailAdmissionObjects.delete('thumbnail-upload');
+    await expect(sweepObjectGcCandidates(database.env, { now: 31 + OBJECT_GC_GRACE_PERIOD_MS })).resolves.toBe(1);
+    expect(deleteObjectMock).toHaveBeenCalledWith(database.env, 'thumbnail-upload');
+    expect(database.thumbnailObjects).not.toContain('thumbnail-upload');
+  });
+
+  test('closes thumbnail accounting only after R2 deletion succeeds', async () => {
+    const database = new ObjectGcDatabase([{ storage_key: 'failed-thumbnail', not_before: 10, attempts: 0 }]);
+    database.thumbnailObjects.add('failed-thumbnail');
+    deleteObjectMock.mockRejectedValueOnce(new Error('R2 unavailable'));
+
+    await expect(sweepObjectGcCandidates(database.env, { now: 20 })).resolves.toBe(0);
+    expect(database.thumbnailObjects).toContain('failed-thumbnail');
+    expect(database.candidates).toEqual([
+      { storage_key: 'failed-thumbnail', not_before: 20 + OBJECT_GC_GRACE_PERIOD_MS, attempts: 1 },
+    ]);
+
+    deleteObjectMock.mockResolvedValueOnce(undefined);
+    await expect(sweepObjectGcCandidates(database.env, { now: 20 + OBJECT_GC_GRACE_PERIOD_MS })).resolves.toBe(1);
+    expect(database.thumbnailObjects).not.toContain('failed-thumbnail');
+    expect(database.candidates).toEqual([]);
+  });
+
   test('does not cancel a candidate that was requeued after the caller received its cleanup receipt', async () => {
     const database = new ObjectGcDatabase([{ storage_key: 'snapshot', not_before: 20, attempts: 0 }]);
 
@@ -165,6 +202,8 @@ class ObjectGcDatabase {
   candidates: Candidate[];
   accountedObjects = new Set<string>();
   pendingAdmissionObjects = new Map<string, number>();
+  thumbnailObjects = new Set<string>();
+  pendingThumbnailAdmissionObjects = new Map<string, number>();
   references = new Set<string>();
   buildArtifactReferences = new Map<
     string,
@@ -232,6 +271,10 @@ class ObjectGcDatabase {
       const expiresAt = this.pendingAdmissionObjects.get(values[0] as string);
       return expiresAt === undefined ? null : { expires_at: expiresAt };
     }
+    if (query.includes('FROM thumbnail_objects AS objects')) {
+      const expiresAt = this.pendingThumbnailAdmissionObjects.get(values[0] as string);
+      return expiresAt === undefined ? null : { expires_at: expiresAt };
+    }
     if (query.includes('FROM chat_message_states')) {
       this.referenceQueries.push(query);
       return this.references.has(values[0] as string) ? { found: 1 } : null;
@@ -246,6 +289,13 @@ class ObjectGcDatabase {
         (item) => item.storage_key === candidateKey && item.not_before === notBefore && item.not_before <= now,
       );
       const changedRows = candidate && this.accountedObjects.delete(key) ? 1 : 0;
+      return changed(changedRows);
+    } else if (query.includes('DELETE FROM thumbnail_objects')) {
+      const [key, candidateKey, notBefore, now] = values as [string, string, number, number];
+      const candidate = this.candidates.find(
+        (item) => item.storage_key === candidateKey && item.not_before === notBefore && item.not_before <= now,
+      );
+      const changedRows = candidate && this.thumbnailObjects.delete(key) ? 1 : 0;
       return changed(changedRows);
     } else if (query.includes('DELETE FROM object_gc_candidates')) {
       const before = this.candidates.length;

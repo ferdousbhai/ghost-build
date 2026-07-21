@@ -6,13 +6,148 @@ import type { Plugin } from "vite";
 
 const AMBIENT_WORKERS_MODULE = "cloudflare:workers";
 const SOURCE_EXTENSION = /\.[cm]?[jt]sx?$/i;
+const INTRINSIC_LOCKDOWN_MODULE =
+  "virtual:ghostbuild-security-intrinsics-lockdown";
+const RESOLVED_INTRINSIC_LOCKDOWN_MODULE = `\0${INTRINSIC_LOCKDOWN_MODULE}`;
+
+export const RUNTIME_INTRINSIC_LOCKDOWN_SOURCE = `
+const freeze = Object.freeze;
+const getPrototypeOf = Object.getPrototypeOf;
+const getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+const defineProperty = Object.defineProperty;
+const objectPrototype = Object.prototype;
+const functionPrototype = Function.prototype;
+const protectedGlobalBindings = [
+  "crypto",
+  "Boolean",
+  "Date",
+  "Math",
+  "Object",
+  "Reflect",
+  "Array",
+  "ArrayBuffer",
+  "Uint8Array",
+  "TextEncoder",
+  "String",
+  "Number",
+  "RegExp",
+  "URL",
+  "Request",
+  "Response",
+  "Headers",
+  "Promise",
+  "JSON",
+  "btoa",
+];
+for (const name of protectedGlobalBindings) {
+  const descriptor = getOwnPropertyDescriptor(globalThis, name);
+  if (!descriptor) continue;
+  defineProperty(
+    globalThis,
+    name,
+    "value" in descriptor
+      ? { ...descriptor, writable: false, configurable: false }
+      : { ...descriptor, configurable: false },
+  );
+}
+const protectedValues = [
+  globalThis.crypto?.subtle,
+  globalThis.crypto,
+  globalThis.Boolean,
+  globalThis.Boolean?.prototype,
+  globalThis.Date,
+  globalThis.Date?.prototype,
+  globalThis.Math,
+  globalThis.Object,
+  globalThis.Reflect,
+  globalThis.Array,
+  globalThis.Array?.prototype,
+  globalThis.ArrayBuffer,
+  globalThis.ArrayBuffer?.prototype,
+  globalThis.Uint8Array,
+  globalThis.Uint8Array?.prototype,
+  globalThis.TextEncoder,
+  globalThis.TextEncoder?.prototype,
+  globalThis.String,
+  globalThis.String?.prototype,
+  globalThis.Number,
+  globalThis.Number?.prototype,
+  globalThis.RegExp,
+  globalThis.RegExp?.prototype,
+  globalThis.URL,
+  globalThis.URL?.prototype,
+  globalThis.Request,
+  globalThis.Request?.prototype,
+  globalThis.Response,
+  globalThis.Response?.prototype,
+  globalThis.Headers,
+  globalThis.Headers?.prototype,
+  globalThis.Promise,
+  globalThis.Promise?.prototype,
+  globalThis.JSON,
+  globalThis.btoa,
+];
+const seen = new Set();
+for (const value of protectedValues) {
+  let current = value;
+  while (
+    current &&
+    current !== objectPrototype &&
+    current !== functionPrototype &&
+    !seen.has(current)
+  ) {
+    if (typeof current !== "object" && typeof current !== "function") break;
+    seen.add(current);
+    freeze(current);
+    current = getPrototypeOf(current);
+  }
+}
+`;
 
 type RuntimeCapability =
   | "ambient-workers-module"
   | "dynamic-import"
   | "require-call"
   | "eval-call"
-  | "function-constructor";
+  | "function-constructor"
+  | "shared-intrinsic-mutation";
+
+const PROTECTED_INTRINSIC_ROOTS = new Set([
+  "globalThis",
+  "self",
+  "window",
+  "crypto",
+  "Boolean",
+  "Date",
+  "Math",
+  "Object",
+  "Reflect",
+  "Array",
+  "ArrayBuffer",
+  "Uint8Array",
+  "TextEncoder",
+  "String",
+  "Number",
+  "RegExp",
+  "URL",
+  "Request",
+  "Response",
+  "Headers",
+  "Promise",
+  "JSON",
+  "btoa",
+]);
+
+const SHARED_INTRINSIC_MUTATORS = new Map([
+  [
+    "Object",
+    new Set(["assign", "defineProperties", "defineProperty", "setPrototypeOf"]),
+  ],
+  [
+    "Reflect",
+    new Set(["defineProperty", "deleteProperty", "set", "setPrototypeOf"]),
+  ],
+]);
 
 type RuntimeModuleSecurityViolation = {
   capability: RuntimeCapability;
@@ -105,6 +240,9 @@ export function productionModuleSecurityPlugin(projectDir: string): Plugin {
     name: "ghostbuild-production-module-security",
     enforce: "pre",
     async resolveId(source, importer, options) {
+      if (source === INTRINSIC_LOCKDOWN_MODULE) {
+        return RESOLVED_INTRINSIC_LOCKDOWN_MODULE;
+      }
       if (!importer || importer.includes("\0")) {
         return null;
       }
@@ -124,7 +262,16 @@ export function productionModuleSecurityPlugin(projectDir: string): Plugin {
       }
       return null;
     },
-    transform(code, id) {
+    load(id) {
+      if (id === RESOLVED_INTRINSIC_LOCKDOWN_MODULE) {
+        return {
+          code: RUNTIME_INTRINSIC_LOCKDOWN_SOURCE,
+          moduleSideEffects: true,
+        };
+      }
+      return null;
+    },
+    transform(code, id, options) {
       const cleanId = id.split("?", 1)[0];
       if (!SOURCE_EXTENSION.test(cleanId) || cleanId.includes("\0")) {
         return null;
@@ -142,7 +289,12 @@ export function productionModuleSecurityPlugin(projectDir: string): Plugin {
         new Set<RuntimeCapability>();
       const violations = findRuntimeModuleSecurityViolations(
         securedCode,
-      ).filter((violation) => !allowed.has(violation.capability));
+      ).filter(
+        (violation) =>
+          !allowed.has(violation.capability) &&
+          (violation.capability !== "shared-intrinsic-mutation" ||
+            identity.startsWith("project:")),
+      );
       if (violations.length > 0) {
         const first = violations[0];
         this.error(
@@ -151,7 +303,10 @@ export function productionModuleSecurityPlugin(projectDir: string): Plugin {
             "must use the protected Ghostbuild binding broker.",
         );
       }
-      return securedCode === code ? null : { code: securedCode, map: null };
+      const runtimeCode = options?.ssr
+        ? `import ${JSON.stringify(INTRINSIC_LOCKDOWN_MODULE)};\n${securedCode}`
+        : securedCode;
+      return runtimeCode === code ? null : { code: runtimeCode, map: null };
     },
     moduleParsed(module) {
       for (const imported of [
@@ -243,6 +398,7 @@ export function findRuntimeModuleSecurityViolations(
   );
   const violations: RuntimeModuleSecurityViolation[] = [];
   const seen = new Set<string>();
+  const protectedAliases = collectProtectedIntrinsicAliases(file);
 
   function add(node: ts.Node, capability: RuntimeCapability) {
     const start = node.getStart(file);
@@ -261,6 +417,30 @@ export function findRuntimeModuleSecurityViolations(
 
   function visit(node: ts.Node) {
     if (
+      ts.isBinaryExpression(node) &&
+      isAssignmentOperator(node.operatorToken.kind) &&
+      isProtectedMutationTarget(node.left, protectedAliases)
+    ) {
+      add(node.left, "shared-intrinsic-mutation");
+    }
+    if (
+      ((ts.isPrefixUnaryExpression(node) &&
+        (node.operator === ts.SyntaxKind.PlusPlusToken ||
+          node.operator === ts.SyntaxKind.MinusMinusToken)) ||
+        (ts.isPostfixUnaryExpression(node) &&
+          (node.operator === ts.SyntaxKind.PlusPlusToken ||
+            node.operator === ts.SyntaxKind.MinusMinusToken))) &&
+      isProtectedMutationTarget(node.operand, protectedAliases)
+    ) {
+      add(node.operand, "shared-intrinsic-mutation");
+    }
+    if (
+      ts.isDeleteExpression(node) &&
+      isProtectedMutationTarget(node.expression, protectedAliases)
+    ) {
+      add(node.expression, "shared-intrinsic-mutation");
+    }
+    if (
       (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
       node.moduleSpecifier &&
       ts.isStringLiteralLike(node.moduleSpecifier) &&
@@ -278,6 +458,9 @@ export function findRuntimeModuleSecurityViolations(
       add(node.moduleReference.expression, "ambient-workers-module");
     }
     if (ts.isCallExpression(node)) {
+      if (isSharedIntrinsicMutatorCall(node, protectedAliases)) {
+        add(node.expression, "shared-intrinsic-mutation");
+      }
       if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
         if (!isStaticDynamicImport(node)) {
           add(node.expression, "dynamic-import");
@@ -307,6 +490,181 @@ export function findRuntimeModuleSecurityViolations(
 
   visit(file);
   return violations;
+}
+
+function collectProtectedIntrinsicAliases(
+  file: ts.SourceFile,
+): ReadonlySet<string> {
+  const aliases = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const visit = (node: ts.Node) => {
+      if (
+        ts.isVariableDeclaration(node) &&
+        node.initializer &&
+        isProtectedIntrinsicValue(node.initializer, aliases)
+      ) {
+        for (const name of bindingNames(node.name)) {
+          if (!aliases.has(name)) {
+            aliases.add(name);
+            changed = true;
+          }
+        }
+      }
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isIdentifier(node.left) &&
+        isProtectedIntrinsicValue(node.right, aliases) &&
+        !aliases.has(node.left.text)
+      ) {
+        aliases.add(node.left.text);
+        changed = true;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+  }
+  return aliases;
+}
+
+function bindingNames(name: ts.BindingName): string[] {
+  if (ts.isIdentifier(name)) {
+    return [name.text];
+  }
+  return name.elements.flatMap((element) =>
+    ts.isOmittedExpression(element) ? [] : bindingNames(element.name),
+  );
+}
+
+function isAssignmentOperator(kind: ts.SyntaxKind): boolean {
+  return (
+    kind >= ts.SyntaxKind.FirstAssignment &&
+    kind <= ts.SyntaxKind.LastAssignment
+  );
+}
+
+function isProtectedMutationTarget(
+  expression: ts.Expression,
+  aliases: ReadonlySet<string>,
+): boolean {
+  const target = unwrapExpression(expression);
+  if (ts.isIdentifier(target)) {
+    return PROTECTED_INTRINSIC_ROOTS.has(target.text);
+  }
+  if (
+    ts.isPropertyAccessExpression(target) ||
+    ts.isElementAccessExpression(target)
+  ) {
+    return isProtectedIntrinsicValue(target.expression, aliases);
+  }
+  return isProtectedIntrinsicValue(target, aliases);
+}
+
+function isProtectedIntrinsicValue(
+  expression: ts.Expression,
+  aliases: ReadonlySet<string>,
+): boolean {
+  const value = unwrapExpression(expression);
+  if (ts.isIdentifier(value)) {
+    return PROTECTED_INTRINSIC_ROOTS.has(value.text) || aliases.has(value.text);
+  }
+  if (
+    ts.isPropertyAccessExpression(value) ||
+    ts.isElementAccessExpression(value)
+  ) {
+    return isProtectedIntrinsicValue(value.expression, aliases);
+  }
+  if (ts.isCallExpression(value)) {
+    const member = staticMember(value.expression);
+    return (
+      member?.root === "Object" &&
+      [
+        "getOwnPropertyDescriptor",
+        "getOwnPropertyDescriptors",
+        "getPrototypeOf",
+      ].includes(member.name) &&
+      value.arguments.some((argument) =>
+        isProtectedIntrinsicValue(argument, aliases),
+      )
+    );
+  }
+  if (ts.isConditionalExpression(value)) {
+    return (
+      isProtectedIntrinsicValue(value.whenTrue, aliases) ||
+      isProtectedIntrinsicValue(value.whenFalse, aliases)
+    );
+  }
+  if (ts.isArrayLiteralExpression(value)) {
+    return value.elements.some(
+      (element) =>
+        ts.isExpression(element) && isProtectedIntrinsicValue(element, aliases),
+    );
+  }
+  if (ts.isObjectLiteralExpression(value)) {
+    return value.properties.some((property) => {
+      if (ts.isPropertyAssignment(property)) {
+        return isProtectedIntrinsicValue(property.initializer, aliases);
+      }
+      if (ts.isShorthandPropertyAssignment(property)) {
+        return (
+          PROTECTED_INTRINSIC_ROOTS.has(property.name.text) ||
+          aliases.has(property.name.text)
+        );
+      }
+      return false;
+    });
+  }
+  return false;
+}
+
+function isSharedIntrinsicMutatorCall(
+  node: ts.CallExpression,
+  aliases: ReadonlySet<string>,
+): boolean {
+  const member = staticMember(node.expression);
+  if (
+    !member ||
+    !SHARED_INTRINSIC_MUTATORS.get(member.root)?.has(member.name)
+  ) {
+    return false;
+  }
+  const target = node.arguments[0];
+  return Boolean(target && isProtectedIntrinsicValue(target, aliases));
+}
+
+function staticMember(
+  expression: ts.Expression,
+): { root: string; name: string } | null {
+  const value = unwrapExpression(expression);
+  if (
+    ts.isPropertyAccessExpression(value) &&
+    ts.isIdentifier(value.expression)
+  ) {
+    return { root: value.expression.text, name: value.name.text };
+  }
+  if (
+    ts.isElementAccessExpression(value) &&
+    ts.isIdentifier(value.expression)
+  ) {
+    const name = staticString(value.argumentExpression);
+    return name === null ? null : { root: value.expression.text, name };
+  }
+  return null;
+}
+
+function unwrapExpression(expression: ts.Expression): ts.Expression {
+  let value = expression;
+  while (
+    ts.isParenthesizedExpression(value) ||
+    ts.isAsExpression(value) ||
+    ts.isTypeAssertionExpression(value) ||
+    ts.isNonNullExpression(value)
+  ) {
+    value = value.expression;
+  }
+  return value;
 }
 
 function isStaticRequire(node: ts.CallExpression): boolean {

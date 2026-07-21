@@ -13,6 +13,7 @@ const drainDeferredDataGcBestEffort = vi.hoisted(() => vi.fn());
 const pruneCloudflareAuthDataBestEffort = vi.hoisted(() => vi.fn());
 const refreshDeploymentSecurityInventoryBestEffort = vi.hoisted(() => vi.fn());
 const reconcileChatBackupQuotaBestEffort = vi.hoisted(() => vi.fn());
+const reconcileThumbnailQuotaBestEffort = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-start/server-entry', () => ({ default: { fetch: tanstackFetch } }));
 vi.mock('agents', () => ({ routeAgentRequest }));
@@ -54,6 +55,7 @@ vi.mock('./lib/.server/cloudflare/deployment-security-inventory', () => ({
   refreshDeploymentSecurityInventoryBestEffort,
 }));
 vi.mock('./lib/cloudflare/data/chat-backup-quota.server', () => ({ reconcileChatBackupQuotaBestEffort }));
+vi.mock('./lib/cloudflare/data/thumbnail-quota.server', () => ({ reconcileThumbnailQuotaBestEffort }));
 
 import server from './server';
 
@@ -251,6 +253,9 @@ describe('server Agent routing boundary', () => {
     reconcileChatBackupQuotaBestEffort.mockImplementationOnce(async () => {
       calls.push('chat-backup-quota');
     });
+    reconcileThumbnailQuotaBestEffort.mockImplementationOnce(async () => {
+      calls.push('thumbnail-quota');
+    });
     refreshDeploymentSecurityInventoryBestEffort.mockImplementationOnce(async () => {
       calls.push('deployment-security-inventory');
     });
@@ -259,10 +264,17 @@ describe('server Agent routing boundary', () => {
 
     expect(waitUntil).toHaveBeenCalledOnce();
     await waitUntil.mock.calls[0][0];
-    expect(calls).toEqual(['deferred-data-gc', 'auth-retention', 'chat-backup-quota', 'deployment-security-inventory']);
+    expect(calls).toEqual([
+      'deferred-data-gc',
+      'auth-retention',
+      'chat-backup-quota',
+      'thumbnail-quota',
+      'deployment-security-inventory',
+    ]);
     expect(drainDeferredDataGcBestEffort).toHaveBeenCalledOnce();
     expect(pruneCloudflareAuthDataBestEffort).toHaveBeenCalledWith(env.DB);
     expect(refreshDeploymentSecurityInventoryBestEffort).toHaveBeenCalledWith(env);
     expect(reconcileChatBackupQuotaBestEffort).toHaveBeenCalledWith(env);
+    expect(reconcileThumbnailQuotaBestEffort).toHaveBeenCalledWith(env);
   });
 });
