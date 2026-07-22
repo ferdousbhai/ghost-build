@@ -34,7 +34,7 @@
     "test": "vitest run",
     "test:workerd": "vitest run --config vitest.workerd.config.ts",
     "test:watch": "vitest",
-    "lint:code": "eslint --cache --cache-location ./node_modules/.cache/eslint app ghostbuild-agent scripts iframe-worker/build.cjs proxy/build.cjs make-bootstrap-snapshot.js parse-compressed-messages.mjs",
+    "lint:code": "eslint --cache --cache-location ./node_modules/.cache/eslint app ghostbuild-agent scripts iframe-worker/build.cjs proxy/build.cjs make-bootstrap-snapshot.js",
     "lint": "pnpm run lint:code && prettier -c .",
     "lint:fix-code": "pnpm run lint:code -- --fix",
     "lint:fix": "pnpm run lint:fix-code && prettier --write .",

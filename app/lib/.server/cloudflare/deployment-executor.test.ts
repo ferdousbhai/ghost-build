@@ -54,9 +54,28 @@ vi.mock('./cloudflare-credential-vault', () => ({
 }));
 vi.mock('./user-account-api', () => ({
   UserCloudflareAccountApi: class {
-    ensureD1ForPlan = mocks.ensureD1;
-    ensureR2ForPlan = mocks.ensureR2;
-    getWorkersSubdomain = mocks.getSubdomain;
+    constructor(
+      _accountId: string,
+      _accessToken: string,
+      _request?: typeof fetch,
+      private readonly authorizeRequest?: () => Promise<void>,
+    ) {}
+
+    async ensureD1ForPlan(plan: unknown, logicalName?: string) {
+      await this.authorizeRequest?.();
+      return logicalName === undefined ? mocks.ensureD1(plan) : mocks.ensureD1(plan, logicalName);
+    }
+
+    async ensureR2ForPlan(plan: unknown) {
+      await this.authorizeRequest?.();
+      return mocks.ensureR2(plan);
+    }
+
+    async getWorkersSubdomain() {
+      await this.authorizeRequest?.();
+      return mocks.getSubdomain();
+    }
+
     readActiveWorkerDeployment = mocks.readActiveWorker;
   },
 }));
@@ -163,6 +182,7 @@ describe('two-step approved deployment execution', () => {
     expect(mocks.build.mock.invocationCallOrder[0]).toBeLessThan(mocks.ensureD1.mock.invocationCallOrder[0]);
     expect(mocks.storeBuild.mock.invocationCallOrder[0]).toBeLessThan(mocks.ensureD1.mock.invocationCallOrder[0]);
     expect(mocks.loadBuild.mock.invocationCallOrder[0]).toBeLessThan(mocks.ensureD1.mock.invocationCallOrder[0]);
+    expect(mocks.requireConnection).toHaveBeenCalledTimes(7);
     expect(mocks.publish).toHaveBeenCalledWith(
       expect.objectContaining({
         d1DatabaseId: 'd1-id',
@@ -378,6 +398,34 @@ describe('two-step approved deployment execution', () => {
         nextStatus: 'failed',
         errorCode: 'cloudflare_cleanup_required',
         errorMessage: expect.stringContaining('Retry this deployment to reconcile its approved plan.'),
+      }),
+    );
+  });
+
+  test('stops later provider requests when the approved connection generation changes during provisioning', async () => {
+    mocks.ensureD1.mockImplementationOnce(async () => {
+      mocks.requireConnection.mockResolvedValue({
+        id: 'connection-1',
+        userId: 'user-1',
+        accountId: 'account-2',
+        credentialHandle: 'credential-2',
+        status: 'active',
+        generation: 2,
+      });
+      return { id: 'd1-id', name: 'ghostbuild-deployment-1' };
+    });
+
+    await expect(executeBoth()).rejects.toThrow('Cloudflare connection is unavailable.');
+
+    expect(mocks.ensureD1).toHaveBeenCalledOnce();
+    expect(mocks.ensureR2).not.toHaveBeenCalled();
+    expect(mocks.getSubdomain).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+    expect(mocks.transition).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        expectedStatus: 'provisioning',
+        nextStatus: 'failed',
+        errorCode: 'cloudflare_cleanup_required',
       }),
     );
   });

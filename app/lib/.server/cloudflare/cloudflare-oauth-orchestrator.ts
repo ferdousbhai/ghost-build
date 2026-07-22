@@ -11,15 +11,13 @@ export { CloudflareOAuthError } from './cloudflare-orchestrator';
 
 const AUTHORIZE_URL = 'https://dash.cloudflare.com/oauth2/auth';
 const TOKEN_URL = 'https://dash.cloudflare.com/oauth2/token';
-const USERINFO_URL = 'https://dash.cloudflare.com/oauth2/userinfo';
+const USER_DETAILS_URL = 'https://api.cloudflare.com/client/v4/user';
 const ACCOUNTS_URL = 'https://api.cloudflare.com/client/v4/accounts?per_page=2';
 const SESSION_LIFETIME_MS = 10 * 60 * 1000;
 const OAUTH_REQUEST_TIMEOUT_MS = 30_000;
 export const REQUIRED_CLOUDFLARE_OAUTH_SCOPES = [
-  'openid',
-  'profile',
-  'email',
   'account-settings.read',
+  'user-details.read',
   'workers-scripts.write',
   'd1.write',
   'workers-r2.write',
@@ -114,19 +112,21 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
         'Cloudflare did not issue a refresh token. Reconnect with offline access enabled.',
       );
     }
-    const userInfoResponse = await execute(USERINFO_URL, {
+    const userDetailsResponse = await execute(USER_DETAILS_URL, {
       headers: { authorization: `Bearer ${token.access_token}` },
       signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
     });
-    const userInfo = (await userInfoResponse.json().catch(() => null)) as {
-      sub?: string;
-      email?: string;
-      name?: string;
-      preferred_username?: string;
-      picture?: string;
-      email_verified?: boolean;
+    const userDetailsPayload = (await userDetailsResponse.json().catch(() => null)) as {
+      success?: boolean;
+      result?: {
+        id?: string;
+        email?: string;
+        first_name?: string;
+        last_name?: string;
+      };
     } | null;
-    if (!userInfoResponse.ok || !userInfo?.sub) {
+    const userDetails = userDetailsPayload?.result;
+    if (!userDetailsResponse.ok || userDetailsPayload?.success !== true || !userDetails?.id) {
       throw new CloudflareOAuthError('Cloudflare did not return an authenticated user identity.');
     }
     const accountsResponse = await execute(ACCOUNTS_URL, {
@@ -147,10 +147,10 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
     }
     return {
       user: {
-        subject: userInfo.sub,
-        email: userInfo.email_verified === true ? (userInfo.email ?? null) : null,
-        name: userInfo.name ?? userInfo.preferred_username ?? null,
-        picture: userInfo.picture ?? null,
+        subject: userDetails.id,
+        email: userDetails.email ?? null,
+        name: [userDetails.first_name, userDetails.last_name].filter(Boolean).join(' ') || null,
+        picture: null,
       },
       accountId: account.id,
       accountName: account.name ?? null,

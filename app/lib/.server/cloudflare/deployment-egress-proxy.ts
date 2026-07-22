@@ -1,7 +1,11 @@
 import { requireActiveCloudflareConnection } from './cloudflare-connection-repository';
 import { D1CloudflareCredentialVault } from './cloudflare-credential-vault';
 import { listDeploymentResources, requireDeployment } from './deployment-repository';
-import { DeploymentProxyTokenError, verifyDeploymentProxyToken } from './deployment-proxy-token';
+import {
+  DeploymentProxyTokenError,
+  parseDeploymentPublishContainerId,
+  verifyDeploymentProxyToken,
+} from './deployment-proxy-token';
 
 type OutboundContext = { containerId: string };
 
@@ -30,13 +34,19 @@ export async function proxyApprovedCloudflareRequest(
     const deployment = await requireDeployment(env.DB, claims.deploymentId);
     if (
       deployment.status !== 'deploying' ||
+      deployment.connectionGeneration !== claims.connectionGeneration ||
+      deployment.executionGeneration !== claims.executionGeneration ||
       deployment.planDigest !== claims.planDigest ||
       deployment.approvedDigest !== claims.planDigest
     ) {
       return new Response('Deployment state denied.', { status: 409 });
     }
     const connection = await requireActiveCloudflareConnection(env.DB, deployment.connectionId);
-    if (connection.accountId !== claims.accountId || !connection.credentialHandle) {
+    if (
+      connection.generation !== claims.connectionGeneration ||
+      connection.accountId !== claims.accountId ||
+      !connection.credentialHandle
+    ) {
       return new Response('Cloudflare connection denied.', { status: 403 });
     }
     const resources = await listDeploymentResources(env.DB, deployment.id);
@@ -120,15 +130,22 @@ async function proxyAssetsUploadRequest(
   context: OutboundContext,
   url: URL,
 ): Promise<Response> {
-  if (!context.containerId.startsWith('publish-')) {
+  const container = parseDeploymentPublishContainerId(context.containerId);
+  if (!container) {
     return new Response('Asset upload denied.', { status: 403 });
   }
-  const deploymentId = context.containerId.slice('publish-'.length);
-  const deployment = await requireDeployment(env.DB, deploymentId);
-  if (deployment.status !== 'deploying') {
+  const deployment = await requireDeployment(env.DB, container.deploymentId);
+  if (
+    deployment.status !== 'deploying' ||
+    deployment.connectionGeneration !== container.connectionGeneration ||
+    deployment.executionGeneration !== container.executionGeneration
+  ) {
     return new Response('Asset upload denied.', { status: 409 });
   }
   const connection = await requireActiveCloudflareConnection(env.DB, deployment.connectionId);
+  if (connection.generation !== container.connectionGeneration) {
+    return new Response('Asset upload denied.', { status: 403 });
+  }
   const accountRoot = `/client/v4/accounts/${connection.accountId}`;
   const path = decodeURIComponent(url.pathname);
   const exactBulkPath = `${accountRoot}/workers/assets/upload`;

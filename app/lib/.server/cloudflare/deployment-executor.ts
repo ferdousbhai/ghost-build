@@ -8,7 +8,7 @@ import {
   type DeploymentBuildReceipt,
 } from './deployment-build-artifact';
 import { buildDeploymentSnapshot } from './deployment-build-executor';
-import { requireActiveCloudflareConnection } from './cloudflare-connection-repository';
+import { requireActiveCloudflareConnection, type CloudflareConnection } from './cloudflare-connection-repository';
 import { D1CloudflareCredentialVault } from './cloudflare-credential-vault';
 import { publishDeploymentBuild } from './deployment-publish-executor';
 import { deploymentPlanResourceName, deploymentProjectProfile, isCurrentDeploymentPlan } from './deployment-plan';
@@ -155,16 +155,17 @@ export async function publishApprovedDeploymentArtifact(
     if (!args.env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY) {
       throw new Error('Cloudflare credential encryption is not configured.');
     }
-    const connection = await requireActiveCloudflareConnection(args.env.DB, deployment.connectionId);
-    if (
-      connection.userId !== args.userId ||
-      connection.generation !== deployment.connectionGeneration ||
-      !connection.credentialHandle
-    ) {
-      throw new Error('Cloudflare connection is unavailable.');
-    }
+    const connection = await requireCurrentDeploymentConnection(args.env.DB, deployment, args.userId);
     const accessToken = await D1CloudflareCredentialVault.fromEnv(args.env).resolve(connection.credentialHandle);
-    const accountApi = new UserCloudflareAccountApi(connection.accountId, accessToken);
+    const authorizeProviderRequest = async () => {
+      await requireCurrentDeploymentConnection(args.env.DB, deployment, args.userId, connection);
+    };
+    const accountApi = new UserCloudflareAccountApi(
+      connection.accountId,
+      accessToken,
+      undefined,
+      authorizeProviderRequest,
+    );
     if (deployment.status === 'deploying') {
       providerChangesPossible = true;
     }
@@ -240,6 +241,7 @@ export async function publishApprovedDeploymentArtifact(
       workerName,
       accountId: connection.accountId,
     });
+    await authorizeProviderRequest();
     const published = await publishDeploymentBuild({
       env: args.env,
       deployment,
@@ -290,6 +292,27 @@ export async function publishApprovedDeploymentArtifact(
       await releaseBuildArtifactBestEffort(args.env, artifactKey, args.deploymentId);
     }
   }
+}
+
+async function requireCurrentDeploymentConnection(
+  db: D1Database,
+  deployment: Deployment,
+  userId: string,
+  expected?: CloudflareConnection,
+): Promise<CloudflareConnection & { credentialHandle: string }> {
+  const connection = await requireActiveCloudflareConnection(db, deployment.connectionId);
+  if (
+    connection.userId !== userId ||
+    connection.generation !== deployment.connectionGeneration ||
+    !connection.credentialHandle ||
+    (expected &&
+      (connection.id !== expected.id ||
+        connection.accountId !== expected.accountId ||
+        connection.credentialHandle !== expected.credentialHandle))
+  ) {
+    throw new Error('Cloudflare connection is unavailable.');
+  }
+  return connection as CloudflareConnection & { credentialHandle: string };
 }
 
 function requireDeploymentExecutionIdentity(

@@ -12,7 +12,6 @@
         "**/*.spec.{ts,tsx}",
         "tests/workerd/**/*.integration.ts",
         "tests/workerd/server-dependencies.stub.ts",
-        "parse-compressed-messages.mjs",
         // manual build processes
         "buildSystemPrompts.ts",
         "proxy/proxy.cjs",
