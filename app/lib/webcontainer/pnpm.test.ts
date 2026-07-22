@@ -15,6 +15,7 @@ describe('WebContainer pnpm command', () => {
   test('directs pnpm to the project-visible managed config', () => {
     expect(webContainerPnpmEnvironment({ workdir: '/home/project' } as never)).toEqual({
       XDG_CONFIG_HOME: '/home/project/.ghostbuild/pnpm-config',
+      npm_config_manage_package_manager_versions: 'false',
     });
   });
 
@@ -24,7 +25,7 @@ describe('WebContainer pnpm command', () => {
       '--yes',
       '--ignore-scripts',
       '--registry=https://registry.npmjs.org/',
-      '--package=pnpm@11.14.0',
+      '--package=pnpm@10.34.0',
       '--',
       'pnpm',
       'install',
