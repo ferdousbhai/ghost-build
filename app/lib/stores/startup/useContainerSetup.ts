@@ -22,7 +22,7 @@ import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifest';
 import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
 import { startupInstallArgs } from './dependency-install-policy';
-import { prepareWebContainerPnpm, webContainerPnpmCommand } from '~/lib/webcontainer/pnpm';
+import { prepareWebContainerPnpm, webContainerPnpmCommand, webContainerPnpmEnvironment } from '~/lib/webcontainer/pnpm';
 
 const TEMPLATE_URL = '/template-snapshot-6e1a5ada.bin';
 const logger = createScopedLogger('ContainerSetup');
@@ -204,7 +204,7 @@ async function runPnpmInstall(
   );
   const [command, ...commandArgs] = webContainerPnpmCommand(args);
   const pnpm = await withTimeout(
-    container.spawn(command, commandArgs),
+    container.spawn(command, commandArgs, { env: webContainerPnpmEnvironment(container) }),
     WORKSPACE_STEP_TIMEOUT_MS,
     'Ghostbuild could not start dependency installation.',
   );
