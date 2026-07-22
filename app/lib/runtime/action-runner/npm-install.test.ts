@@ -25,7 +25,7 @@ describe('runNpmInstall', () => {
         '--yes',
         '--ignore-scripts',
         '--registry=https://registry.npmjs.org/',
-        '--package=pnpm@11.14.0',
+        '--package=pnpm@10.34.0',
         '--',
         'pnpm',
         'install',
@@ -33,7 +33,12 @@ describe('runNpmInstall', () => {
         '--ignore-pnpmfile',
         '--registry=https://registry.npmjs.org/',
       ],
-      { env: { XDG_CONFIG_HOME: '/home/project/.ghostbuild/pnpm-config' } },
+      {
+        env: {
+          XDG_CONFIG_HOME: '/home/project/.ghostbuild/pnpm-config',
+          npm_config_manage_package_manager_versions: 'false',
+        },
+      },
     );
   });
 
