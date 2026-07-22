@@ -22,7 +22,7 @@ import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifest';
 import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
 import { startupInstallArgs } from './dependency-install-policy';
-import { webContainerPnpmCommand } from '~/lib/webcontainer/pnpm';
+import { prepareWebContainerPnpm, webContainerPnpmCommand } from '~/lib/webcontainer/pnpm';
 
 const TEMPLATE_URL = '/template-snapshot-6e1a5ada.bin';
 const logger = createScopedLogger('ContainerSetup');
@@ -197,6 +197,11 @@ async function runPnpmInstall(
   container: Awaited<ReturnType<typeof startWebcontainer>>,
   args: string[],
 ): Promise<{ output: string; exitCode: number }> {
+  await withTimeout(
+    prepareWebContainerPnpm(container),
+    WORKSPACE_STEP_TIMEOUT_MS,
+    'Ghostbuild could not prepare dependency installation.',
+  );
   const [command, ...commandArgs] = webContainerPnpmCommand(args);
   const pnpm = await withTimeout(
     container.spawn(command, commandArgs),
