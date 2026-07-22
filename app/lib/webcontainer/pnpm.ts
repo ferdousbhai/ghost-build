@@ -6,6 +6,7 @@ const NPM_REGISTRY = 'https://registry.npmjs.org/';
 const PNPM_CONFIG_ROOT = '.ghostbuild/pnpm-config';
 const PNPM_CONFIG_DIRECTORY = `${PNPM_CONFIG_ROOT}/pnpm`;
 const PNPM_CONFIG_FILE = `${PNPM_CONFIG_DIRECTORY}/config.yaml`;
+const PROJECT_NPMRC_FILE = '.npmrc';
 
 /**
  * pnpm 11 expects its user configuration file to exist in WebContainer. Keep
@@ -16,6 +17,9 @@ const PNPM_CONFIG_FILE = `${PNPM_CONFIG_DIRECTORY}/config.yaml`;
 export async function prepareWebContainerPnpm(container: Pick<WebContainer, 'fs'>): Promise<void> {
   await container.fs.mkdir(PNPM_CONFIG_DIRECTORY, { recursive: true });
   await container.fs.writeFile(PNPM_CONFIG_FILE, '{}\n');
+  // WebContainer's Node 22 filesystem shim reports a missing project npmrc as
+  // a fatal read error to pnpm 10 instead of treating it as optional.
+  await container.fs.writeFile(PROJECT_NPMRC_FILE, '');
 }
 
 export function webContainerPnpmEnvironment(container: Pick<WebContainer, 'workdir'>): Record<string, string> {
