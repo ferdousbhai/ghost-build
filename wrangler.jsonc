@@ -122,7 +122,7 @@
     },
   },
   "vars": {
-    "CLOUDFLARE_OAUTH_SCOPES": "openid profile email account-settings.read workers-scripts.write d1.write workers-r2.write ai.read",
+    "CLOUDFLARE_OAUTH_SCOPES": "account-settings.read user-details.read workers-scripts.write d1.write workers-r2.write ai.read",
     // Exact tenant-wide request limits, retained byte/object quotas, and edge
     // shedding are enforced after the bounded legacy R2 reconciliation reaches
     // its fail-closed readiness marker.
