@@ -283,12 +283,9 @@ async function getBuilderTranscriptSnapshotIfReady(
   try {
     return await getBuilderTranscriptSnapshot(env, identity);
   } catch (error) {
-    if (!(error instanceof Response) || error.status < 400 || error.status >= 500) {
-      throw error;
-    }
-    logger.warn('Durable transcript is not ready; using materialized chat history', {
+    logger.warn('Durable transcript is unavailable; using generation-scoped materialized chat history', {
       agentName: identity.agentName,
-      status: error.status,
+      ...(error instanceof Response ? { status: error.status } : {}),
     });
     return null;
   }
