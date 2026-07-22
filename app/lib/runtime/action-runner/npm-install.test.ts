@@ -113,6 +113,6 @@ function containerWithWorkspace(
 ): WebContainer {
   return {
     spawn,
-    fs: { mkdir: vi.fn(), readFile: vi.fn(async () => workspace) },
+    fs: { mkdir: vi.fn(), readFile: vi.fn(async () => workspace), writeFile: vi.fn() },
   } as unknown as WebContainer;
 }

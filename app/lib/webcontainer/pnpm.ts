@@ -4,14 +4,16 @@ const WEBCONTAINER_PNPM_VERSION = '11.14.0';
 
 const NPM_REGISTRY = 'https://registry.npmjs.org/';
 const PNPM_CONFIG_DIRECTORY = '/home/.config/pnpm';
+const PNPM_CONFIG_FILE = `${PNPM_CONFIG_DIRECTORY}/config.yaml`;
 
 /**
  * pnpm 11 reads its user configuration from /home/.config/pnpm in
- * WebContainer. Fresh containers do not always include that directory, and
- * pnpm treats the missing parent as a fatal ENOENT instead of an empty config.
+ * WebContainer. Fresh containers do not always include that file, and pnpm
+ * treats the missing config as a fatal ENOENT instead of an empty config.
  */
 export async function prepareWebContainerPnpm(container: Pick<WebContainer, 'fs'>): Promise<void> {
   await container.fs.mkdir(PNPM_CONFIG_DIRECTORY, { recursive: true });
+  await container.fs.writeFile(PNPM_CONFIG_FILE, '{}\n');
 }
 
 /**
