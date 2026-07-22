@@ -8,6 +8,7 @@ import { parseOperationDiagnostics, type DiagnosticsStore } from './diagnostics-
 import { pageCoverage } from './bounded-pagination';
 import { runCommand } from './command';
 import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
+import { webContainerPnpmCommand } from '~/lib/webcontainer/pnpm';
 
 const DEPENDENCY_COMMAND_TIMEOUT_MS = 120_000;
 const NPM_REGISTRY = 'https://registry.npmjs.org/';
@@ -37,7 +38,7 @@ export async function runNpmInstall(args: {
       : ['add', ...sourcePolicyArgs, ...packages];
     await runCommand({
       container: args.container,
-      command: ['pnpm', ...commandArgs],
+      command: webContainerPnpmCommand(commandArgs),
       displayName: syncLockfile ? 'pnpm install --lockfile-only' : `pnpm add (${packages.length} packages)`,
       abortSignal: args.abortSignal,
       onOutput: args.onOutput,
