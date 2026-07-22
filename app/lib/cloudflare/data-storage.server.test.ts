@@ -653,7 +653,8 @@ describe('chat transcript reload', () => {
         BuilderAgent: {
           getByName: () => ({
             getTranscriptSnapshot: async () => {
-              throw new Response('Transcript identity does not match this agent', { status: 409 });
+              // Durable Object RPC serializes a thrown Response into an opaque Error.
+              throw new Error('#<Response>');
             },
           }),
         },
