@@ -19,18 +19,22 @@ describe('runNpmInstall', () => {
       diagnostics: new DiagnosticsStore(),
     });
     expect(result).toMatchObject({ ok: true, data: { mode: 'sync-lockfile', exitCode: 0 } });
-    expect(spawn).toHaveBeenCalledWith('npx', [
-      '--yes',
-      '--ignore-scripts',
-      '--registry=https://registry.npmjs.org/',
-      '--package=pnpm@11.14.0',
-      '--',
-      'pnpm',
-      'install',
-      '--lockfile-only',
-      '--ignore-pnpmfile',
-      '--registry=https://registry.npmjs.org/',
-    ]);
+    expect(spawn).toHaveBeenCalledWith(
+      'npx',
+      [
+        '--yes',
+        '--ignore-scripts',
+        '--registry=https://registry.npmjs.org/',
+        '--package=pnpm@11.14.0',
+        '--',
+        'pnpm',
+        'install',
+        '--lockfile-only',
+        '--ignore-pnpmfile',
+        '--registry=https://registry.npmjs.org/',
+      ],
+      { env: { XDG_CONFIG_HOME: '/home/project/.ghostbuild/pnpm-config' } },
+    );
   });
 
   test('turns failed command output into structured diagnostics', async () => {
@@ -113,6 +117,7 @@ function containerWithWorkspace(
 ): WebContainer {
   return {
     spawn,
+    workdir: '/home/project',
     fs: { mkdir: vi.fn(), readFile: vi.fn(async () => workspace), writeFile: vi.fn() },
   } as unknown as WebContainer;
 }

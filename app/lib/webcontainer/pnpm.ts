@@ -3,17 +3,23 @@ import type { WebContainer } from '@webcontainer/api';
 const WEBCONTAINER_PNPM_VERSION = '11.14.0';
 
 const NPM_REGISTRY = 'https://registry.npmjs.org/';
-const PNPM_CONFIG_DIRECTORY = '/home/.config/pnpm';
+const PNPM_CONFIG_ROOT = '.ghostbuild/pnpm-config';
+const PNPM_CONFIG_DIRECTORY = `${PNPM_CONFIG_ROOT}/pnpm`;
 const PNPM_CONFIG_FILE = `${PNPM_CONFIG_DIRECTORY}/config.yaml`;
 
 /**
- * pnpm 11 reads its user configuration from /home/.config/pnpm in
- * WebContainer. Fresh containers do not always include that file, and pnpm
- * treats the missing config as a fatal ENOENT instead of an empty config.
+ * pnpm 11 expects its user configuration file to exist in WebContainer. Keep
+ * that managed file inside the project-visible filesystem because absolute
+ * paths written through the WebContainer FS API do not necessarily address
+ * the same root observed by spawned processes.
  */
 export async function prepareWebContainerPnpm(container: Pick<WebContainer, 'fs'>): Promise<void> {
   await container.fs.mkdir(PNPM_CONFIG_DIRECTORY, { recursive: true });
   await container.fs.writeFile(PNPM_CONFIG_FILE, '{}\n');
+}
+
+export function webContainerPnpmEnvironment(container: Pick<WebContainer, 'workdir'>): Record<string, string> {
+  return { XDG_CONFIG_HOME: `${container.workdir}/${PNPM_CONFIG_ROOT}` };
 }
 
 /**
