@@ -10,6 +10,7 @@ describe('WebContainer pnpm command', () => {
 
     expect(mkdir).toHaveBeenCalledWith('.ghostbuild/pnpm-config/pnpm', { recursive: true });
     expect(writeFile).toHaveBeenCalledWith('.ghostbuild/pnpm-config/pnpm/config.yaml', '{}\n');
+    expect(writeFile).toHaveBeenCalledWith('.npmrc', '');
   });
 
   test('directs pnpm to the project-visible managed config', () => {
