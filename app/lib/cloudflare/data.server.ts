@@ -276,6 +276,24 @@ function getBuilderTranscriptSnapshot(
   return stub.getTranscriptSnapshot(identity);
 }
 
+async function getBuilderTranscriptSnapshotIfReady(
+  env: Env,
+  identity: TranscriptIdentity,
+): Promise<Awaited<ReturnType<BuilderAgent['getTranscriptSnapshot']>> | null> {
+  try {
+    return await getBuilderTranscriptSnapshot(env, identity);
+  } catch (error) {
+    if (!(error instanceof Response) || error.status < 400 || error.status >= 500) {
+      throw error;
+    }
+    logger.warn('Durable transcript is not ready; using materialized chat history', {
+      agentName: identity.agentName,
+      status: error.status,
+    });
+    return null;
+  }
+}
+
 async function cancelObjectGcCandidateBestEffort(
   db: D1Database,
   receipt: Awaited<ReturnType<typeof queueObjectGcCandidate>>,
@@ -314,9 +332,9 @@ export async function initialMessagesAction({ request, env }: { request: Request
       generation: transcript.generation,
       lastMessageRank: chat.last_message_rank ?? undefined,
     });
-    const durable = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript));
+    const durable = await getBuilderTranscriptSnapshotIfReady(env, transcriptIdentity(transcript));
     if (
-      durable.checkpoint &&
+      durable?.checkpoint &&
       transcriptIdentitiesEqual(durable.checkpoint, transcriptIdentity(transcript)) &&
       durable.checkpoint.revision > 0
     ) {
