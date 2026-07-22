@@ -19,7 +19,13 @@ describe('runNpmInstall', () => {
       diagnostics: new DiagnosticsStore(),
     });
     expect(result).toMatchObject({ ok: true, data: { mode: 'sync-lockfile', exitCode: 0 } });
-    expect(spawn).toHaveBeenCalledWith('pnpm', [
+    expect(spawn).toHaveBeenCalledWith('npx', [
+      '--yes',
+      '--ignore-scripts',
+      '--registry=https://registry.npmjs.org/',
+      '--package=pnpm@11.14.0',
+      '--',
+      'pnpm',
       'install',
       '--lockfile-only',
       '--ignore-pnpmfile',
