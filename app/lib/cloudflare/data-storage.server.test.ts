@@ -642,6 +642,27 @@ describe('chat transcript reload', () => {
     expect(await response.text()).toBe('compressed-history');
     expect(objectResponseMock).toHaveBeenCalledWith(expect.anything(), 'history-key');
   });
+
+  test('returns an empty chat when a new Durable Object transcript is not initialized yet', async () => {
+    getLatestStorageStateMock.mockResolvedValue(null);
+    const response = await initialMessagesAction({
+      request: initialMessagesRequest(),
+      env: {
+        DB: {},
+        APP_STORAGE: {},
+        BuilderAgent: {
+          getByName: () => ({
+            getTranscriptSnapshot: async () => {
+              throw new Response('Transcript identity does not match this agent', { status: 409 });
+            },
+          }),
+        },
+      } as unknown as Env,
+    });
+
+    expect(response.status).toBe(204);
+    expect(objectResponseMock).not.toHaveBeenCalled();
+  });
 });
 
 function storageRequest(
