@@ -9,7 +9,10 @@ const sandbox = vi.hoisted(() => ({
   readFile: vi.fn(),
   destroy: vi.fn(),
 }));
-vi.mock('@cloudflare/sandbox', () => ({ getSandbox: vi.fn(() => sandbox) }));
+const mocks = vi.hoisted(() => ({
+  getSandbox: vi.fn((_namespace: unknown, _id: string, _options?: unknown) => sandbox),
+}));
+vi.mock('@cloudflare/sandbox', () => ({ getSandbox: mocks.getSandbox }));
 
 import { publishDeploymentBuild } from './deployment-publish-executor';
 import {
@@ -89,6 +92,10 @@ describe('publishDeploymentBuild', () => {
     ]);
     expect(JSON.stringify(config)).not.toContain('real-user-token');
 
+    const sandboxId = mocks.getSandbox.mock.calls[0]?.[1] as string;
+    expect(sandboxId.length).toBeLessThanOrEqual(63);
+    expect(sandboxId).toMatch(/^[a-z0-9-]+$/);
+
     const deployCall = sandbox.exec.mock.calls.find((call) => call[0] === 'wrangler deploy --config wrangler.json');
     const proxyToken = deployCall?.[1]?.env?.CLOUDFLARE_API_TOKEN as string;
     expect(proxyToken.split('.')).toHaveLength(3);
@@ -122,6 +129,25 @@ describe('publishDeploymentBuild', () => {
         build: new Uint8Array([1]),
       }),
     ).rejects.toThrow('security baseline is stale');
+
+    expect(sandbox.exec).not.toHaveBeenCalled();
+  });
+
+  test('rejects a connection generation that no longer matches the approved deployment', async () => {
+    const rotated = connection();
+    rotated.generation = 2;
+
+    await expect(
+      publishDeploymentBuild({
+        env: {
+          DeploymentSandbox: {},
+          DEPLOYMENT_PROXY_JWT_SECRET: btoa('0123456789abcdef0123456789abcdef'),
+        } as unknown as Env,
+        deployment: deployment(),
+        connection: rotated,
+        build: new Uint8Array([1]),
+      }),
+    ).rejects.toThrow('no longer matches the approved deployment');
 
     expect(sandbox.exec).not.toHaveBeenCalled();
   });
@@ -253,7 +279,7 @@ describe('publishDeploymentBuild', () => {
 
 function deployment(): Deployment {
   return {
-    id: 'deployment-1',
+    id: '11111111-2222-4333-8444-555555555555',
     chatId: 'chat-1',
     userId: 'user-1',
     connectionId: 'connection-1',
@@ -265,7 +291,7 @@ function deployment(): Deployment {
     status: 'deploying',
     plan: {
       version: 2,
-      deploymentId: 'deployment-1',
+      deploymentId: '11111111-2222-4333-8444-555555555555',
       sourceSha256: 'a'.repeat(64),
       templateSourceSha256: TEMPLATE_SOURCE_SHA256,
       securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,

@@ -1,10 +1,14 @@
 const TOKEN_AUDIENCE = 'ghostbuild-cloudflare-deployment-proxy';
 const MAX_TOKEN_LIFETIME_SECONDS = 15 * 60;
+const DEPLOYMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PUBLISH_CONTAINER_PATTERN = /^p-([0-9a-f]{32})-([0-9a-z]+)-([0-9a-z]+)$/;
 
 type DeploymentProxyClaims = {
   aud: typeof TOKEN_AUDIENCE;
   deploymentId: string;
   accountId: string;
+  connectionGeneration: number;
+  executionGeneration: number;
   planDigest: string;
   containerId: string;
   iat: number;
@@ -16,11 +20,16 @@ export async function createDeploymentProxyToken(args: {
   secretBase64: string;
   deploymentId: string;
   accountId: string;
+  connectionGeneration: number;
+  executionGeneration: number;
   planDigest: string;
   containerId: string;
   nowSeconds?: number;
   lifetimeSeconds?: number;
 }): Promise<string> {
+  if (!isPositiveSafeInteger(args.connectionGeneration) || !isPositiveSafeInteger(args.executionGeneration)) {
+    throw new Error('Deployment proxy token generation is invalid.');
+  }
   const now = args.nowSeconds ?? Math.floor(Date.now() / 1000);
   const lifetime = args.lifetimeSeconds ?? MAX_TOKEN_LIFETIME_SECONDS;
   if (!Number.isInteger(lifetime) || lifetime <= 0 || lifetime > MAX_TOKEN_LIFETIME_SECONDS) {
@@ -31,6 +40,8 @@ export async function createDeploymentProxyToken(args: {
     aud: TOKEN_AUDIENCE,
     deploymentId: args.deploymentId,
     accountId: args.accountId,
+    connectionGeneration: args.connectionGeneration,
+    executionGeneration: args.executionGeneration,
     planDigest: args.planDigest,
     containerId: args.containerId,
     iat: now,
@@ -80,6 +91,49 @@ export class DeploymentProxyTokenError extends Error {
     super('Deployment proxy authorization is invalid or expired.');
     this.name = 'DeploymentProxyTokenError';
   }
+}
+
+export function deploymentPublishContainerId(args: {
+  deploymentId: string;
+  connectionGeneration: number;
+  executionGeneration: number;
+}): string {
+  if (
+    !DEPLOYMENT_ID_PATTERN.test(args.deploymentId) ||
+    !isPositiveSafeInteger(args.connectionGeneration) ||
+    !isPositiveSafeInteger(args.executionGeneration)
+  ) {
+    throw new Error('Deployment publish container generation is invalid.');
+  }
+  return (
+    `p-${args.deploymentId.replaceAll('-', '')}-` +
+    `${args.connectionGeneration.toString(36)}-${args.executionGeneration.toString(36)}`
+  ).toLowerCase();
+}
+
+export function parseDeploymentPublishContainerId(containerId: string): {
+  deploymentId: string;
+  connectionGeneration: number;
+  executionGeneration: number;
+} | null {
+  const match = PUBLISH_CONTAINER_PATTERN.exec(containerId);
+  if (!match) {
+    return null;
+  }
+  const connectionGeneration = Number.parseInt(match[2], 36);
+  const executionGeneration = Number.parseInt(match[3], 36);
+  if (!isPositiveSafeInteger(connectionGeneration) || !isPositiveSafeInteger(executionGeneration)) {
+    return null;
+  }
+  return {
+    deploymentId: restoreDeploymentId(match[1]),
+    connectionGeneration,
+    executionGeneration,
+  };
+}
+
+function restoreDeploymentId(compact: string): string {
+  return `${compact.slice(0, 8)}-${compact.slice(8, 12)}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(20)}`;
 }
 
 async function sign(value: string, secretBase64: string): Promise<string> {
@@ -146,10 +200,16 @@ function isDeploymentProxyClaims(value: unknown): value is DeploymentProxyClaims
     typeof value.aud === 'string' &&
     typeof value.deploymentId === 'string' &&
     typeof value.accountId === 'string' &&
+    isPositiveSafeInteger(value.connectionGeneration) &&
+    isPositiveSafeInteger(value.executionGeneration) &&
     typeof value.planDigest === 'string' &&
     typeof value.containerId === 'string' &&
     typeof value.iat === 'number' &&
     typeof value.exp === 'number' &&
     typeof value.jti === 'string'
   );
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }

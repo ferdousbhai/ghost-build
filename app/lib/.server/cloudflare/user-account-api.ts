@@ -29,6 +29,7 @@ export class UserCloudflareAccountApi {
     private readonly accountId: string,
     private readonly accessToken: string,
     private readonly request: typeof fetch = fetch,
+    private readonly authorizeRequest?: () => Promise<void>,
   ) {
     if (!accountId || !accessToken) {
       throw new Error('Cloudflare account credentials are required.');
@@ -155,6 +156,7 @@ export class UserCloudflareAccountApi {
   }
 
   private async callOptional<T>(path: string, init: RequestInit): Promise<T | null> {
+    await this.authorizeRequest?.();
     const execute = this.request;
     const response = await execute(`${API_ROOT}/accounts/${encodeURIComponent(this.accountId)}${path}`, {
       ...init,

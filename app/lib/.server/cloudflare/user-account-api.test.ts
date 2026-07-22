@@ -39,7 +39,8 @@ describe('UserCloudflareAccountApi', () => {
       )
       .mockResolvedValueOnce(Response.json({ success: true, result: { name: 'ghostbuild-deployment-1-storage' } }))
       .mockResolvedValueOnce(Response.json({ success: true, result: { subdomain: 'user-subdomain' } }));
-    const api = new UserCloudflareAccountApi('account-1', 'user-token', request);
+    const authorizeRequest = vi.fn(async () => undefined);
+    const api = new UserCloudflareAccountApi('account-1', 'user-token', request, authorizeRequest);
 
     await expect(api.createD1ForPlan(plan)).resolves.toEqual({ id: 'd1-id', name: 'ghostbuild-deployment-1' });
     await expect(api.createR2ForPlan(plan)).resolves.toEqual({
@@ -64,6 +65,10 @@ describe('UserCloudflareAccountApi', () => {
       expect.objectContaining({ body: JSON.stringify({ name: 'ghostbuild-deployment-1-storage' }) }),
     );
     expect(request.mock.contexts).toEqual([undefined, undefined, undefined]);
+    expect(authorizeRequest).toHaveBeenCalledTimes(3);
+    authorizeRequest.mock.invocationCallOrder.forEach((authorizationOrder, index) => {
+      expect(authorizationOrder).toBeLessThan(request.mock.invocationCallOrder[index]);
+    });
   });
 
   test('creates the protected D1 only under its independently approved plan name', async () => {
@@ -124,6 +129,61 @@ describe('UserCloudflareAccountApi', () => {
     expect(request.mock.calls.every((call) => call[1]?.method === 'GET')).toBe(true);
   });
 
+  test('revalidates authorization for the create request after an ensure lookup', async () => {
+    let generation = 1;
+    const authorizeRequest = vi.fn(async () => {
+      if (generation !== 1) {
+        throw new Error('Cloudflare connection is unavailable.');
+      }
+    });
+    const request = vi.fn<typeof fetch>(async (_input, init) => {
+      if (init?.method === 'GET') {
+        generation = 2;
+        return Response.json({ success: true, result: [] });
+      }
+      return Response.json({
+        success: true,
+        result: { uuid: 'd1-id', name: 'ghostbuild-deployment-1' },
+      });
+    });
+    const api = new UserCloudflareAccountApi('account-1', 'token', request, authorizeRequest);
+
+    await expect(api.ensureD1ForPlan(plan)).rejects.toThrow('Cloudflare connection is unavailable.');
+
+    expect(authorizeRequest).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining('/d1/database?name='),
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  test('revalidates authorization for an R2 create after a not-found lookup', async () => {
+    let generation = 1;
+    const authorizeRequest = vi.fn(async () => {
+      if (generation !== 1) {
+        throw new Error('Cloudflare connection is unavailable.');
+      }
+    });
+    const request = vi.fn<typeof fetch>(async (_input, init) => {
+      if (init?.method === 'GET') {
+        generation = 2;
+        return Response.json({ success: false }, { status: 404 });
+      }
+      return Response.json({ success: true, result: { name: 'ghostbuild-deployment-1-storage' } });
+    });
+    const api = new UserCloudflareAccountApi('account-1', 'token', request, authorizeRequest);
+
+    await expect(api.ensureR2ForPlan(plan)).rejects.toThrow('Cloudflare connection is unavailable.');
+
+    expect(authorizeRequest).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining('/r2/buckets/ghostbuild-deployment-1-storage'),
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   test('does not leak the connected token through provider errors', async () => {
     const request = vi
       .fn<typeof fetch>()
@@ -136,6 +196,7 @@ describe('UserCloudflareAccountApi', () => {
   });
 
   test('reads the exact active Worker version, its bindings, and cleanup schedules', async () => {
+    const authorizeRequest = vi.fn(async () => undefined);
     const request = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -167,13 +228,19 @@ describe('UserCloudflareAccountApi', () => {
       .mockResolvedValueOnce(Response.json({ success: true, result: { schedules: [{ cron: '0 3 * * *' }] } }));
 
     await expect(
-      new UserCloudflareAccountApi('account-1', 'token', request).readActiveWorkerDeployment('worker-name'),
+      new UserCloudflareAccountApi('account-1', 'token', request, authorizeRequest).readActiveWorkerDeployment(
+        'worker-name',
+      ),
     ).resolves.toEqual({
       providerDeploymentId: 'provider-deployment-1',
       workerVersionId: 'worker-version-1',
       scriptEtag: 'etag-1',
       bindings: [{ name: 'CF_VERSION_METADATA', type: 'version_metadata' }],
       crons: ['0 3 * * *'],
+    });
+    expect(authorizeRequest).toHaveBeenCalledTimes(3);
+    authorizeRequest.mock.invocationCallOrder.forEach((authorizationOrder, index) => {
+      expect(authorizationOrder).toBeLessThan(request.mock.invocationCallOrder[index]);
     });
   });
 

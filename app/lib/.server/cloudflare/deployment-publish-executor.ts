@@ -1,6 +1,6 @@
 import { getSandbox, type ExecResult } from '@cloudflare/sandbox';
 import type { CloudflareConnection } from './cloudflare-connection-repository';
-import { createDeploymentProxyToken } from './deployment-proxy-token';
+import { createDeploymentProxyToken, deploymentPublishContainerId } from './deployment-proxy-token';
 import {
   deploymentPlanResourceName,
   deploymentProjectProfile,
@@ -49,12 +49,24 @@ export async function publishDeploymentBuild(args: {
   if (args.build.byteLength > MAX_PUBLISH_ARCHIVE_BYTES) {
     throw new DeploymentPublishError('Deployment build archive exceeds the publish size limit.');
   }
+  if (
+    args.connection.id !== args.deployment.connectionId ||
+    args.connection.generation !== args.deployment.connectionGeneration
+  ) {
+    throw new DeploymentPublishError('Cloudflare connection no longer matches the approved deployment.');
+  }
   const workerName = requireResourceName(args.deployment, 'worker', 'app');
-  const sandboxId = `publish-${args.deployment.id}`.toLowerCase();
+  const sandboxId = deploymentPublishContainerId({
+    deploymentId: args.deployment.id,
+    connectionGeneration: args.deployment.connectionGeneration,
+    executionGeneration: args.deployment.executionGeneration,
+  });
   const proxyToken = await createDeploymentProxyToken({
     secretBase64: args.env.DEPLOYMENT_PROXY_JWT_SECRET,
     deploymentId: args.deployment.id,
     accountId: args.connection.accountId,
+    connectionGeneration: args.deployment.connectionGeneration,
+    executionGeneration: args.deployment.executionGeneration,
     planDigest: args.deployment.planDigest,
     containerId: sandboxId,
   });
