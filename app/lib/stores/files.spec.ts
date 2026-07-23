@@ -72,6 +72,17 @@ describe('FilesStore public filesystem watcher', () => {
     expect(store.files.get()[getAbsolutePath('node_modules/pkg/index.js')]).toBeUndefined();
   });
 
+  it('drops dependency install events before allocating a watcher buffer', () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+    for (let index = 0; index < 1_000; index += 1) {
+      project.emit('rename', `node_modules/pkg-${index}/index.js`);
+    }
+
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+    setTimeoutSpy.mockRestore();
+  });
+
   it('purges watcher-reported and traversal-discovered secrets before reconciling ordinary files', async () => {
     const reportedSecretPath = getAbsolutePath('nested/.env.local');
     const discoveredGitPath = getAbsolutePath('packages/app/.git/config');

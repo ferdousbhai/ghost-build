@@ -39,8 +39,8 @@ describe('WebContainer preview package manifest', () => {
         react: '19.0.0',
       },
       devDependencies: {
-        '@vitejs/plugin-react': '5.2.0',
-        vite: '7.3.6',
+        '@vitejs/plugin-react': '1.0.0',
+        vite: '8.0.0',
       },
     });
     expect(preview.dependencies).not.toHaveProperty('@cloudflare/ai-chat');
@@ -89,7 +89,7 @@ describe('WebContainer preview package manifest', () => {
     expect(previewLock.packages['']).toMatchObject({
       name: 'generated-app',
       dependencies: { react: '19.0.0' },
-      devDependencies: { vite: '7.3.6' },
+      devDependencies: { vite: '8.0.0' },
     });
     expect(previewLock.packages['']).not.toHaveProperty('dependencies.ai');
     expect(previewLock.packages['']).not.toHaveProperty('devDependencies.typescript');

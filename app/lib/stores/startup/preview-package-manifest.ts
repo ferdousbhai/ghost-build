@@ -33,11 +33,6 @@ const PREVIEW_OMITTED_DEV_DEPENDENCIES = new Set([
   'yaml',
 ]);
 
-const PREVIEW_DEV_DEPENDENCY_OVERRIDES = new Map([
-  ['@vitejs/plugin-react', '5.2.0'],
-  ['vite', '7.3.6'],
-]);
-
 type PackageManifest = {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
@@ -55,11 +50,7 @@ export function createPreviewPackageJson(packageJson: string): string {
     {
       ...manifest,
       dependencies: omitDependencies(manifest.dependencies, PREVIEW_OMITTED_DEPENDENCIES),
-      devDependencies: omitDependencies(
-        manifest.devDependencies,
-        PREVIEW_OMITTED_DEV_DEPENDENCIES,
-        PREVIEW_DEV_DEPENDENCY_OVERRIDES,
-      ),
+      devDependencies: omitDependencies(manifest.devDependencies, PREVIEW_OMITTED_DEV_DEPENDENCIES),
     },
     null,
     2,
@@ -123,13 +114,8 @@ export async function withPreviewPackageManifest<T>(
 function omitDependencies(
   dependencies: Record<string, string> | undefined,
   omitted: ReadonlySet<string>,
-  overrides: ReadonlyMap<string, string> = new Map(),
 ): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(dependencies ?? {})
-      .filter(([name]) => !omitted.has(name))
-      .map(([name, version]) => [name, overrides.get(name) ?? version]),
-  );
+  return Object.fromEntries(Object.entries(dependencies ?? {}).filter(([name]) => !omitted.has(name)));
 }
 
 async function readOptionalFile(container: Pick<WebContainer, 'fs'>, path: string): Promise<string | null> {

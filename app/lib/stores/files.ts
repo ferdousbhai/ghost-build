@@ -11,6 +11,7 @@ import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifes
 import {
   ensureParentFolders,
   getLocalSecretRootPath,
+  isExcludedProjectPath,
   normalizeWatcherPath,
   reconcileFileMap,
   reconcileWatchedPaths,
@@ -131,7 +132,13 @@ export class FilesStore {
 
   async #init() {
     const webcontainer = await this.#webcontainer;
-    this.#fileWatcher = webcontainer.fs.watch(ROOT_DIRECTORY, { recursive: true }, this.#watchEvents);
+    this.#fileWatcher = webcontainer.fs.watch(ROOT_DIRECTORY, { recursive: true }, (eventType, watcherPath) => {
+      const relativePath = normalizeWatcherPath(webcontainer, watcherPath);
+      if (relativePath && isExcludedProjectPath(relativePath)) {
+        return;
+      }
+      this.#watchEvents(eventType, watcherPath);
+    });
   }
 
   async prewarmWorkdir(container: WebContainer) {
@@ -152,6 +159,9 @@ export class FilesStore {
       const relativePath = normalizeWatcherPath(webcontainer, watcherPath);
       if (!relativePath) {
         requiresFullReconciliation = true;
+        continue;
+      }
+      if (isExcludedProjectPath(relativePath)) {
         continue;
       }
       incrementFileUpdateCounter(relativePath);
