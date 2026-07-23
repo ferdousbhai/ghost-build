@@ -23,6 +23,7 @@ import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifes
 import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
 import { startupInstallArgs } from './dependency-install-policy';
 import { prepareWebContainerPackageManagers, webContainerNpmEnvironment } from '~/lib/webcontainer/pnpm';
+import { withPreviewPackageManifest } from './preview-package-manifest';
 
 const TEMPLATE_URL = '/template-snapshot-86f14cd7.bin';
 const logger = createScopedLogger('ContainerSetup');
@@ -163,7 +164,9 @@ async function setupContainer(options: { snapshotUrl: string; allowInstallFailur
   assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', pnpmWorkspace);
 
   setContainerBootState(ContainerBootState.DOWNLOADING_DEPENDENCIES);
-  const { output, exitCode } = await runDependencyInstall(container, startupInstallArgs());
+  const { output, exitCode } = await withPreviewPackageManifest(container, packageJson, () =>
+    runDependencyInstall(container, startupInstallArgs()),
+  );
   logger.debug('dependency install output', cleanTerminalOutput(output));
 
   if (exitCode !== 0) {
