@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
+import { MANAGED_WEBCONTAINER_NPMRC_CONTENT } from '~/utils/secretFiles';
 import { prepareWebContainerPnpm, webContainerPnpmCommand, webContainerPnpmEnvironment } from './pnpm';
 
 describe('WebContainer pnpm command', () => {
@@ -10,7 +11,7 @@ describe('WebContainer pnpm command', () => {
 
     expect(mkdir).toHaveBeenCalledWith('.ghostbuild/pnpm-config/pnpm', { recursive: true });
     expect(writeFile).toHaveBeenCalledWith('.ghostbuild/pnpm-config/pnpm/config.yaml', '{}\n');
-    expect(writeFile).toHaveBeenCalledWith('.npmrc', '');
+    expect(writeFile).toHaveBeenCalledWith('.npmrc', MANAGED_WEBCONTAINER_NPMRC_CONTENT);
   });
 
   test('directs pnpm to the project-visible managed config', () => {

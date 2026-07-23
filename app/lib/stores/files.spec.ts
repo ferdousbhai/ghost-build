@@ -2,6 +2,7 @@ import type { FSWatchCallback, WebContainer } from '@webcontainer/api';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WORK_DIR } from 'ghostbuild-agent/constants';
 import { getAbsolutePath } from 'ghostbuild-agent/utils/workDir';
+import { MANAGED_WEBCONTAINER_NPMRC_CONTENT } from '~/utils/secretFiles';
 import { FilesStore } from './files';
 
 describe('FilesStore public filesystem watcher', () => {
@@ -100,6 +101,36 @@ describe('FilesStore public filesystem watcher', () => {
     );
   });
 
+  it('keeps the inert managed npmrc on disk without exposing it in project state', async () => {
+    const npmrcPath = getAbsolutePath('.npmrc');
+    store.setGeneratedFile(npmrcPath, 'stale content');
+    store.userWrites.set(npmrcPath, Date.now());
+    project.setFile('.npmrc', MANAGED_WEBCONTAINER_NPMRC_CONTENT);
+    project.events.length = 0;
+
+    project.emit('rename', '.npmrc');
+    await store.flushFileEvents();
+
+    expect(project.has('.npmrc')).toBe(true);
+    expect(store.files.get()[npmrcPath]).toBeUndefined();
+    expect(store.userWrites.has(npmrcPath)).toBe(false);
+    expect(project.events).toContain('read:.npmrc');
+    expect(project.events).not.toContain('remove:.npmrc');
+  });
+
+  it('purges an npmrc that differs from the managed marker', async () => {
+    project.setFile('.npmrc', '//registry.npmjs.org/:_authToken=secret');
+    project.events.length = 0;
+
+    project.emit('change', '.npmrc');
+    await store.flushFileEvents();
+
+    expect(project.has('.npmrc')).toBe(false);
+    expect(store.files.get()[getAbsolutePath('.npmrc')]).toBeUndefined();
+    expect(project.events).toContain('read:.npmrc');
+    expect(project.events).toContain('remove:.npmrc');
+  });
+
   it('keeps ordinary map content unchanged when a watcher-triggered secret purge fails', async () => {
     project.setFile('.env.local', 'secret');
     project.setFile('src/current.ts', 'must not be exposed by this reconciliation');
@@ -151,14 +182,14 @@ class MemoryProject {
           isDirectory: () => type === 'directory',
         }));
       }),
-      readFile: vi.fn(async (filePath: string) => {
+      readFile: vi.fn(async (filePath: string, encoding?: string) => {
         const normalizedPath = normalize(filePath);
         this.events.push(`read:${normalizedPath}`);
         const content = this.files.get(normalizedPath);
         if (!content) {
           throw new Error(`ENOENT: ${normalizedPath}`);
         }
-        return content;
+        return encoding ? new TextDecoder().decode(content) : content;
       }),
       rm: vi.fn(async (filePath: string) => {
         const normalizedPath = normalize(filePath);
