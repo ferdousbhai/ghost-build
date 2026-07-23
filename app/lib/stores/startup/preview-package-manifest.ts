@@ -13,6 +13,7 @@ const PREVIEW_OMITTED_DEPENDENCIES = new Set([
   '@tanstack/react-start',
   'agents',
   'ai',
+  'lucide-react',
   'workers-ai-provider',
   'zod',
 ]);

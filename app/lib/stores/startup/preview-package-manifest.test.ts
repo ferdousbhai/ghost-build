@@ -18,6 +18,7 @@ describe('WebContainer preview package manifest', () => {
             '@tanstack/react-start': '1.0.0',
             ai: '1.0.0',
             'date-fns': '4.0.0',
+            'lucide-react': '1.25.0',
             react: '19.0.0',
           },
           devDependencies: {
@@ -46,6 +47,7 @@ describe('WebContainer preview package manifest', () => {
     expect(preview.dependencies).not.toHaveProperty('@tanstack/react-router');
     expect(preview.dependencies).not.toHaveProperty('@tanstack/react-start');
     expect(preview.dependencies).not.toHaveProperty('ai');
+    expect(preview.dependencies).not.toHaveProperty('lucide-react');
     expect(preview.devDependencies).not.toHaveProperty('@cloudflare/vite-plugin');
     expect(preview.devDependencies).not.toHaveProperty('@vitejs/plugin-react');
   });
