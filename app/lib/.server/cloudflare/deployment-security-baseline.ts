@@ -1,6 +1,6 @@
 import templateSnapshotManifest from 'public/template-snapshot-manifest.json';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 5 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 6 as const;
 export const DEPLOYMENT_SECURITY_CLEANUP_CRON = '0 3 * * *';
 export const DEPLOYMENT_VERSION_METADATA_BINDING = 'CF_VERSION_METADATA';
 export const DEPLOYMENT_SECURITY_BASELINE_BINDING = 'GHOSTBUILD_SECURITY_BASELINE_VERSION';
@@ -29,7 +29,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'migrations/0001_app_data.sql': '114d3df6142196cb43a95e5896e1b9a8e8753514becf3400884b27acb5793d65',
   'agent-security-migrations/0001_agent_security.sql':
     'cc62c34bcfb5e176155e371a099d000679ae69877facf252fe3d3c7e1190fbeb',
-  'vite.config.ts': 'be985dea26388476aae441a4e742da5d6f964bfc70f2958ed77e773de8c102f4',
+  'vite.config.ts': 'a8517c36a2eab622d189cf886b242a030f2e48ce7f80f0bbe2bd933a17e7a920',
   'tsconfig.json': 'a005fcf59f0217cc7486892312d032adad3e400f86c396d4150390247c989b6a',
   'postcss.config.cjs': 'fa650b380adfabb151a0b352f7135e107e6352345f899060f1c5c231228f94bf',
   'tailwind.config.js': 'c43ce7f83ee3ef0259121fa47ebc98dcb67a25a106aea5318fb0559ce72bc558',
@@ -38,6 +38,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'src/preview/agents.ts': 'dc202dcc357004a13ba106b9c35229484f4ac5c1273067473639ab4452efa27c',
   'src/preview/ai-chat-react.ts': 'fccec1499fb5b66a31430feddd7f1070dd8d7357e83e83368a688e3d9dd6c9d5',
   'src/preview/ai-chat.ts': 'eea156db8463ab280b8d44af1390e7cc40ef416134518a94e68ceface470ed27',
+  'src/preview/tanstack-react-router.tsx': 'ed062b05aaa268ada75b7293ec5f71a8b6fe23146ea4e25fa62c713afd413b22',
   'src/preview/workers-ai-provider.ts': '6bc1fd2c8e9154b7fd44fe4c2b4475d2c02311093c11c2fc90047d7d303111f1',
   'scripts/cf-typegen.mjs': '6c82a0afdb50c32b205dbe4677b207337a38ad7ea70950a3e63758f0c04e1ae7',
   'scripts/verify-stack-alignment.mjs': '24aa753cd35912056e32b3cf0cfc8a3784cb49702ecc5c635b1d9b53a7f07e17',
@@ -53,7 +54,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/lib/project-policy/workspace-policy.mjs': '2eae19d07b13fcedf89bb0825bc99ee0a803493cbf10bfad2d557c46820ec3f5',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '2e5e631b9641a81008e519ac94d90a2c715c5372a8555ee563bfc4e7c2631e5b';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '80a71df8e36e3bd8db983945239a8410508ce1a3dd580b6f77a88e6796fef9aa';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
   '32df8c2fea1562044c38b9faabc729e046737de4c833b83e6d7087e4b392682a';

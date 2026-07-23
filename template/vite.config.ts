@@ -1,5 +1,4 @@
 import { defineConfig, type PluginOption } from "vite";
-import react from "@vitejs/plugin-react";
 import path from "path";
 import { fileURLToPath } from "url";
 import { productionModuleSecurityPlugin } from "./scripts/lib/runtime-module-security";
@@ -26,6 +25,10 @@ const previewAlias: Record<string, string> = isGhostbuildPreview
         projectDir,
         "./src/preview/workers-ai-provider.ts",
       ),
+      "@tanstack/react-router": path.resolve(
+        projectDir,
+        "./src/preview/tanstack-react-router.tsx",
+      ),
     }
   : {};
 
@@ -34,12 +37,17 @@ async function productionPlugins(): Promise<PluginOption[]> {
     return [];
   }
 
-  const [{ tanstackStart }, { cloudflare }, { default: agents }] =
-    await Promise.all([
-      import("@tanstack/react-start/plugin/vite"),
-      import("@cloudflare/vite-plugin"),
-      import("agents/vite"),
-    ]);
+  const [
+    { tanstackStart },
+    { cloudflare },
+    { default: agents },
+    { default: react },
+  ] = await Promise.all([
+    import("@tanstack/react-start/plugin/vite"),
+    import("@cloudflare/vite-plugin"),
+    import("agents/vite"),
+    import("@vitejs/plugin-react"),
+  ]);
 
   return [
     productionModuleSecurityPlugin(projectDir),
@@ -48,11 +56,15 @@ async function productionPlugins(): Promise<PluginOption[]> {
       viteEnvironment: { name: "ssr" },
     }),
     tanstackStart(),
+    react(),
   ];
 }
 
 export default defineConfig(async () => ({
-  plugins: [...(await productionPlugins()), react()],
+  plugins: [
+    ...(await productionPlugins()),
+    ...(isGhostbuildPreview ? [tailwindBrowserPreviewPlugin()] : []),
+  ],
   resolve: {
     alias: {
       ...baseAlias,
@@ -60,3 +72,23 @@ export default defineConfig(async () => ({
     },
   },
 }));
+
+function tailwindBrowserPreviewPlugin(): PluginOption {
+  return {
+    name: "ghostbuild-preview-tailwind",
+    transformIndexHtml: {
+      order: "pre",
+      handler() {
+        return [
+          {
+            tag: "script",
+            attrs: {
+              src: "https://cdn.tailwindcss.com/3.4.17",
+            },
+            injectTo: "head",
+          },
+        ];
+      },
+    },
+  };
+}

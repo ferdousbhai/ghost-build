@@ -7,10 +7,12 @@ const PREVIEW_OMITTED_DEPENDENCIES = new Set([
   '@ai-sdk/provider',
   '@ai-sdk/react',
   '@cloudflare/ai-chat',
+  '@tanstack/react-router',
   '@tanstack/react-start',
   'agents',
   'ai',
   'workers-ai-provider',
+  'zod',
 ]);
 
 const PREVIEW_OMITTED_DEV_DEPENDENCIES = new Set([
@@ -22,11 +24,15 @@ const PREVIEW_OMITTED_DEV_DEPENDENCIES = new Set([
   '@types/node',
   '@types/react',
   '@types/react-dom',
+  '@vitejs/plugin-react',
+  'autoprefixer',
   'eslint',
   'eslint-plugin-react-hooks',
   'eslint-plugin-react-refresh',
   'globals',
   'jsonc-parser',
+  'postcss',
+  'tailwindcss',
   'typescript',
   'typescript-eslint',
   'wrangler',

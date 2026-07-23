@@ -34,19 +34,19 @@ describe('WebContainer preview package manifest', () => {
       name: 'generated-app',
       scripts: { dev: 'vite dev' },
       dependencies: {
-        '@tanstack/react-router': '1.0.0',
         'date-fns': '4.0.0',
         react: '19.0.0',
       },
       devDependencies: {
-        '@vitejs/plugin-react': '1.0.0',
         vite: '8.0.0',
       },
     });
     expect(preview.dependencies).not.toHaveProperty('@cloudflare/ai-chat');
+    expect(preview.dependencies).not.toHaveProperty('@tanstack/react-router');
     expect(preview.dependencies).not.toHaveProperty('@tanstack/react-start');
     expect(preview.dependencies).not.toHaveProperty('ai');
     expect(preview.devDependencies).not.toHaveProperty('@cloudflare/vite-plugin');
+    expect(preview.devDependencies).not.toHaveProperty('@vitejs/plugin-react');
     expect(preview.devDependencies).not.toHaveProperty('typescript');
   });
 
