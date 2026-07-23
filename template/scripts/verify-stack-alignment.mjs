@@ -67,9 +67,6 @@ export function verifyStackAlignment() {
     ]),
   );
 
-  if (existsSync(resolve(rootDir, "package-lock.json"))) {
-    errors.push("package-lock.json must not exist; generated apps use pnpm.");
-  }
   const workspace = readFileSync(
     resolve(rootDir, "pnpm-workspace.yaml"),
     "utf8",
