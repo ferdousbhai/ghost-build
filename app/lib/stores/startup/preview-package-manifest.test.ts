@@ -80,7 +80,22 @@ describe('WebContainer preview package manifest', () => {
                 vite: '8.0.0',
               },
             },
-            'node_modules/react': { version: '19.0.0' },
+            'node_modules/ai': {
+              version: '1.0.0',
+              dependencies: { zod: '1.0.0' },
+            },
+            'node_modules/react': {
+              version: '19.0.0',
+              dependencies: { scheduler: '1.0.0' },
+            },
+            'node_modules/scheduler': { version: '1.0.0' },
+            'node_modules/vite': {
+              version: '8.0.0',
+              dependencies: { picocolors: '1.0.0' },
+            },
+            'node_modules/picocolors': { version: '2.0.0' },
+            'node_modules/vite/node_modules/picocolors': { version: '1.0.0' },
+            'node_modules/zod': { version: '1.0.0' },
           },
         }),
       ),
@@ -93,7 +108,23 @@ describe('WebContainer preview package manifest', () => {
     });
     expect(previewLock.packages['']).not.toHaveProperty('dependencies.ai');
     expect(previewLock.packages['']).not.toHaveProperty('devDependencies.typescript');
-    expect(previewLock.packages['node_modules/react']).toEqual({ version: '19.0.0' });
+    expect(previewLock.packages).toEqual({
+      '': expect.objectContaining({
+        name: 'generated-app',
+        dependencies: { react: '19.0.0' },
+        devDependencies: { vite: '8.0.0' },
+      }),
+      'node_modules/react': {
+        version: '19.0.0',
+        dependencies: { scheduler: '1.0.0' },
+      },
+      'node_modules/scheduler': { version: '1.0.0' },
+      'node_modules/vite': {
+        version: '8.0.0',
+        dependencies: { picocolors: '1.0.0' },
+      },
+      'node_modules/vite/node_modules/picocolors': { version: '1.0.0' },
+    });
   });
 
   test('restores deployment manifests after installation', async () => {

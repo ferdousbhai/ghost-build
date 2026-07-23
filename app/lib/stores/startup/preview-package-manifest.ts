@@ -42,6 +42,7 @@ const PREVIEW_OMITTED_DEV_DEPENDENCIES = new Set([
 type PackageManifest = {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
   [key: string]: unknown;
 };
 
@@ -68,25 +69,85 @@ export function createPreviewPackageLock(packageJson: string, packageLock: strin
   const lock = JSON.parse(packageLock) as PackageLock;
   const root = lock.packages?.[''];
 
-  if (!root) {
+  if (!root || !lock.packages) {
     return packageLock;
   }
+
+  const previewPackagePaths = collectReachablePackagePaths(lock.packages, previewManifest);
 
   return `${JSON.stringify(
     {
       ...lock,
-      packages: {
-        ...lock.packages,
-        '': {
-          ...root,
-          dependencies: previewManifest.dependencies,
-          devDependencies: previewManifest.devDependencies,
-        },
-      },
+      packages: Object.fromEntries(
+        Object.entries(lock.packages)
+          .filter(([path]) => path === '' || previewPackagePaths.has(path))
+          .map(([path, entry]) => [
+            path,
+            path === ''
+              ? {
+                  ...root,
+                  dependencies: previewManifest.dependencies,
+                  devDependencies: previewManifest.devDependencies,
+                }
+              : entry,
+          ]),
+      ),
     },
     null,
     2,
   )}\n`;
+}
+
+function collectReachablePackagePaths(packages: Record<string, PackageManifest>, root: PackageManifest): Set<string> {
+  const reachable = new Set<string>();
+  const pending = Object.keys({
+    ...root.dependencies,
+    ...root.devDependencies,
+    ...root.optionalDependencies,
+  }).map((name) => ({ importerPath: '', name }));
+
+  for (let index = 0; index < pending.length; index++) {
+    const dependency = pending[index];
+    const packagePath = resolvePackagePath(packages, dependency.importerPath, dependency.name);
+    if (!packagePath || reachable.has(packagePath)) {
+      continue;
+    }
+
+    reachable.add(packagePath);
+    const entry = packages[packagePath];
+    for (const name of Object.keys({
+      ...entry.dependencies,
+      ...entry.optionalDependencies,
+    })) {
+      pending.push({ importerPath: packagePath, name });
+    }
+  }
+
+  return reachable;
+}
+
+function resolvePackagePath(
+  packages: Record<string, PackageManifest>,
+  importerPath: string,
+  dependencyName: string,
+): string | undefined {
+  let directory = importerPath;
+
+  while (true) {
+    const candidate = directory ? `${directory}/node_modules/${dependencyName}` : `node_modules/${dependencyName}`;
+    if (packages[candidate]) {
+      return candidate;
+    }
+
+    const parentNodeModules = directory.lastIndexOf('/node_modules/');
+    if (parentNodeModules >= 0) {
+      directory = directory.slice(0, parentNodeModules);
+    } else if (directory) {
+      directory = '';
+    } else {
+      return undefined;
+    }
+  }
 }
 
 /**
