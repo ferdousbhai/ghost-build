@@ -12,7 +12,12 @@ const LOCAL_CREDENTIAL_FILE_NAMES = [
 const PROJECT_DEPENDENCY_HOOK_FILE_NAMES = ['.pnpmfile.cjs', '.pnpmfile.js'] as const;
 const FORBIDDEN_LOCAL_FILE_NAMES = [...LOCAL_CREDENTIAL_FILE_NAMES, ...PROJECT_DEPENDENCY_HOOK_FILE_NAMES] as const;
 
-export const MANAGED_WEBCONTAINER_NPMRC_CONTENT = '# Ghostbuild-managed WebContainer pnpm configuration\n';
+export const MANAGED_WEBCONTAINER_NPMRC_CONTENT = `# Ghostbuild-managed WebContainer package-manager configuration
+ignore-scripts=true
+audit=false
+fund=false
+registry=https://registry.npmjs.org/
+`;
 
 export function isManagedWebContainerNpmrc(filePath: string, content: string) {
   return filePath === '.npmrc' && content === MANAGED_WEBCONTAINER_NPMRC_CONTENT;

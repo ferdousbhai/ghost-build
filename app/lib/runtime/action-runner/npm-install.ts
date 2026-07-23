@@ -8,8 +8,8 @@ import { parseOperationDiagnostics, type DiagnosticsStore } from './diagnostics-
 import { pageCoverage } from './bounded-pagination';
 import { runCommand } from './command';
 import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
-import { prepareWebContainerPackageManagers, webContainerNpmEnvironment } from '~/lib/webcontainer/pnpm';
-import { createPreviewPackageJson, withPreviewPackageManifest } from '~/lib/stores/startup/preview-package-manifest';
+import { prepareWebContainerPackageManagers } from '~/lib/webcontainer/pnpm';
+import { withPreviewPackageManifest } from '~/lib/stores/startup/preview-package-manifest';
 
 const DEPENDENCY_COMMAND_TIMEOUT_MS = 120_000;
 
@@ -39,31 +39,22 @@ export async function runNpmInstall(args: {
     const syncLockfile = mode === 'sync-lockfile';
     await prepareWebContainerPackageManagers(args.container);
     const packageJson = await args.container.fs.readFile('package.json', 'utf-8');
-    const previewPackageJson = createPreviewPackageJson(packageJson);
-    let installedPreviewPackageJson = previewPackageJson;
+    const packageJsonWithRequestedDependencies = addRequestedDependencies(packageJson, packages);
     await withPreviewPackageManifest(
       args.container,
-      packageJson,
+      packageJsonWithRequestedDependencies,
       async () => {
         await runCommand({
           container: args.container,
-          command: ['npm', 'install', ...packages],
+          command: ['npm', 'install'],
           displayName: 'npm install (browser preview)',
           abortSignal: args.abortSignal,
           onOutput: args.onOutput,
-          env: webContainerNpmEnvironment(),
           timeoutMs: DEPENDENCY_COMMAND_TIMEOUT_MS,
         });
-        installedPreviewPackageJson = await args.container.fs.readFile('package.json', 'utf-8');
       },
       { persistPreviewLock: true },
     );
-    if (!syncLockfile) {
-      await args.container.fs.writeFile(
-        'package.json',
-        mergeInstalledPreviewDependencies(packageJson, previewPackageJson, installedPreviewPackageJson),
-      );
-    }
     return toolSuccess(
       syncLockfile
         ? 'Synchronized the browser preview dependencies with package.json.'
@@ -99,27 +90,33 @@ export async function runNpmInstall(args: {
   }
 }
 
-function mergeInstalledPreviewDependencies(
-  packageJson: string,
-  previewPackageJson: string,
-  installedPreviewPackageJson: string,
-): string {
+function addRequestedDependencies(packageJson: string, packageSpecs: string[]): string {
+  if (packageSpecs.length === 0) {
+    return packageJson;
+  }
+
   const manifest = JSON.parse(packageJson) as PackageManifest;
-  const preview = JSON.parse(previewPackageJson) as PackageManifest;
-  const installed = JSON.parse(installedPreviewPackageJson) as PackageManifest;
-  const dependencyChanges = Object.fromEntries(
-    Object.entries(installed.dependencies ?? {}).filter(([name, version]) => preview.dependencies?.[name] !== version),
-  );
+  const requestedDependencies = Object.fromEntries(packageSpecs.map(splitRegistryPackageSpec));
 
   return `${JSON.stringify(
     {
       ...manifest,
       dependencies: {
         ...manifest.dependencies,
-        ...dependencyChanges,
+        ...requestedDependencies,
       },
     },
     null,
     2,
   )}\n`;
+}
+
+function splitRegistryPackageSpec(spec: string): [name: string, selector: string] {
+  const selectorIndex = spec.startsWith('@') ? spec.indexOf('@', spec.indexOf('/') + 1) : spec.indexOf('@');
+
+  if (selectorIndex === -1) {
+    return [spec, 'latest'];
+  }
+
+  return [spec.slice(0, selectorIndex), spec.slice(selectorIndex + 1)];
 }

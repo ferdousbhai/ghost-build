@@ -11,27 +11,20 @@ vi.mock('~/lib/stores/containerBootState', () => ({
 describe('runNpmInstall', () => {
   test('synchronizes the browser lockfile without resolving the production graph', async () => {
     const spawn = vi.fn(async () => process('', 0));
+    const container = containerWithWorkspace(spawn);
     const result = await runNpmInstall({
       invocation: { toolName: 'npmInstall', args: { mode: 'sync-lockfile' } } as never,
-      container: containerWithWorkspace(spawn),
+      container,
       abortSignal: new AbortController().signal,
       onOutput: vi.fn(),
       diagnostics: new DiagnosticsStore(),
     });
     expect(result).toMatchObject({ ok: true, data: { mode: 'sync-lockfile', exitCode: 0 } });
-    expect(spawn).toHaveBeenCalledWith('npm', ['install'], {
-      env: {
-        CI: 'true',
-        npm_config_ignore_scripts: 'true',
-        npm_config_audit: 'false',
-        npm_config_fund: 'false',
-        npm_config_registry: 'https://registry.npmjs.org/',
-      },
-    });
+    expect(container.spawn).toHaveBeenCalledWith('npm', ['install']);
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
-  test('merges browser-resolved dependency versions back into package.json', async () => {
+  test('stages requested dependencies before running the native preview install', async () => {
     const spawn = vi.fn(async () => process('', 0));
     const container = containerWithWorkspace(spawn);
     const result = await runNpmInstall({
@@ -43,9 +36,30 @@ describe('runNpmInstall', () => {
     });
 
     expect(result).toMatchObject({ ok: true, data: { mode: 'add', exitCode: 0 } });
-    expect(container.fs.writeFile).toHaveBeenLastCalledWith(
+    expect(container.fs.writeFile).toHaveBeenCalledWith(
       'package.json',
-      expect.stringContaining('"date-fns": "^4.0.0"'),
+      expect.stringContaining('"date-fns": "latest"'),
+    );
+    expect(container.spawn).toHaveBeenCalledWith('npm', ['install']);
+  });
+
+  test('preserves registry selectors and aliases in the generated manifest', async () => {
+    const container = containerWithWorkspace(vi.fn(async () => process('', 0)));
+    const result = await runNpmInstall({
+      invocation: {
+        toolName: 'npmInstall',
+        args: { packages: '@scope/icons@^2.0.0 date-tools@npm:date-fns@^4.0.0' },
+      } as never,
+      container,
+      abortSignal: new AbortController().signal,
+      onOutput: vi.fn(),
+      diagnostics: new DiagnosticsStore(),
+    });
+
+    expect(result).toMatchObject({ ok: true, data: { mode: 'add', exitCode: 0 } });
+    expect(container.fs.writeFile).toHaveBeenCalledWith(
+      'package.json',
+      expect.stringMatching(/"@scope\/icons": "\^2\.0\.0"[\s\S]*"date-tools": "npm:date-fns@\^4\.0\.0"/),
     );
   });
 
@@ -141,12 +155,6 @@ function containerWithWorkspace(
   ]);
   return {
     spawn: vi.fn(async (command: string, args: string[], options: unknown) => {
-      if (command === 'npm' && args.includes('date-fns')) {
-        files.set(
-          'package.json',
-          '{"name":"generated","dependencies":{"react":"19.0.0","date-fns":"^4.0.0"},"devDependencies":{"vite":"6.4.3"}}\n',
-        );
-      }
       return invokeSpawn(command, args, options);
     }),
     workdir: '/home/project',
