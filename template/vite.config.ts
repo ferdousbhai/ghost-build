@@ -1,8 +1,5 @@
 import { defineConfig, type PluginOption } from "vite";
-import { tanstackStart } from "@tanstack/react-start/plugin/vite";
-import { cloudflare } from "@cloudflare/vite-plugin";
 import react from "@vitejs/plugin-react";
-import agents from "agents/vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import { productionModuleSecurityPlugin } from "./scripts/lib/runtime-module-security";
@@ -32,10 +29,17 @@ const previewAlias: Record<string, string> = isGhostbuildPreview
     }
   : {};
 
-function cloudflarePlugins(): PluginOption[] {
+async function productionPlugins(): Promise<PluginOption[]> {
   if (isGhostbuildPreview) {
     return [];
   }
+
+  const [{ tanstackStart }, { cloudflare }, { default: agents }] =
+    await Promise.all([
+      import("@tanstack/react-start/plugin/vite"),
+      import("@cloudflare/vite-plugin"),
+      import("agents/vite"),
+    ]);
 
   return [
     productionModuleSecurityPlugin(projectDir),
@@ -43,11 +47,12 @@ function cloudflarePlugins(): PluginOption[] {
     cloudflare({
       viteEnvironment: { name: "ssr" },
     }),
+    tanstackStart(),
   ];
 }
 
-export default defineConfig(() => ({
-  plugins: [...cloudflarePlugins(), tanstackStart(), react()],
+export default defineConfig(async () => ({
+  plugins: [...(await productionPlugins()), react()],
   resolve: {
     alias: {
       ...baseAlias,

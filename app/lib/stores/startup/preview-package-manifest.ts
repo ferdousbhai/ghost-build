@@ -7,6 +7,7 @@ const PREVIEW_OMITTED_DEPENDENCIES = new Set([
   '@ai-sdk/provider',
   '@ai-sdk/react',
   '@cloudflare/ai-chat',
+  '@tanstack/react-start',
   'agents',
   'ai',
   'workers-ai-provider',

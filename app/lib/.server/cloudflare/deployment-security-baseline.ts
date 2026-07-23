@@ -1,6 +1,6 @@
 import templateSnapshotManifest from 'public/template-snapshot-manifest.json';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 4 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 5 as const;
 export const DEPLOYMENT_SECURITY_CLEANUP_CRON = '0 3 * * *';
 export const DEPLOYMENT_VERSION_METADATA_BINDING = 'CF_VERSION_METADATA';
 export const DEPLOYMENT_SECURITY_BASELINE_BINDING = 'GHOSTBUILD_SECURITY_BASELINE_VERSION';
@@ -29,7 +29,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'migrations/0001_app_data.sql': '114d3df6142196cb43a95e5896e1b9a8e8753514becf3400884b27acb5793d65',
   'agent-security-migrations/0001_agent_security.sql':
     'cc62c34bcfb5e176155e371a099d000679ae69877facf252fe3d3c7e1190fbeb',
-  'vite.config.ts': 'cd6392553d61b37cf83593fe1e224c1e13fd1c2f068e62aa4aa5445e30c45ac6',
+  'vite.config.ts': 'be985dea26388476aae441a4e742da5d6f964bfc70f2958ed77e773de8c102f4',
   'tsconfig.json': 'a005fcf59f0217cc7486892312d032adad3e400f86c396d4150390247c989b6a',
   'postcss.config.cjs': 'fa650b380adfabb151a0b352f7135e107e6352345f899060f1c5c231228f94bf',
   'tailwind.config.js': 'c43ce7f83ee3ef0259121fa47ebc98dcb67a25a106aea5318fb0559ce72bc558',
@@ -53,7 +53,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/lib/project-policy/workspace-policy.mjs': '2eae19d07b13fcedf89bb0825bc99ee0a803493cbf10bfad2d557c46820ec3f5',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'c3031807b77570871fe2ba3003bdcfc41f01035221b65d7f27f9cc3c13b2b881';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '2e5e631b9641a81008e519ac94d90a2c715c5372a8555ee563bfc4e7c2631e5b';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
   '32df8c2fea1562044c38b9faabc729e046737de4c833b83e6d7087e4b392682a';

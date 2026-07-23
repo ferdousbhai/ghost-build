@@ -11,6 +11,7 @@ describe('WebContainer preview package manifest', () => {
           dependencies: {
             '@cloudflare/ai-chat': '1.0.0',
             '@tanstack/react-router': '1.0.0',
+            '@tanstack/react-start': '1.0.0',
             ai: '1.0.0',
             'date-fns': '4.0.0',
             react: '19.0.0',
@@ -39,6 +40,7 @@ describe('WebContainer preview package manifest', () => {
       },
     });
     expect(preview.dependencies).not.toHaveProperty('@cloudflare/ai-chat');
+    expect(preview.dependencies).not.toHaveProperty('@tanstack/react-start');
     expect(preview.dependencies).not.toHaveProperty('ai');
     expect(preview.devDependencies).not.toHaveProperty('@cloudflare/vite-plugin');
     expect(preview.devDependencies).not.toHaveProperty('typescript');
