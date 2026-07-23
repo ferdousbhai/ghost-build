@@ -56,9 +56,11 @@ The OAuth client callback is `https://<deployment-origin>/connect/return`. Keep 
 is verified in `pnpm run validate`; Cloudflare does not read it automatically. Mirror it in the `ghostbuild` Worker's
 Build settings:
 
-- connect `ferdousbhai/ghostbuild`, production branch `main`, with non-production builds disabled
+- connect `ferdousbhai/ghostbuild`, production branch `main`, with non-production branch builds enabled
 - set the build command to `pnpm run workers-builds:build` and the deploy command to
   `pnpm run workers-builds:deploy`
+- set the non-production branch deploy command to `pnpm run workers-builds:preview`; it uploads a Worker version for
+  review without promoting it to the active deployment
 - use `/` as the root directory, include all paths, and enable build caching
 - select `account-workers-builds-production`
 - configure `NODE_VERSION=26.3.0`, `PNPM_VERSION=11.14.0`, `SKIP_DEPENDENCY_INSTALL=1`, and the non-secret
@@ -93,9 +95,13 @@ check fails if either side of that policy drifts; bundle size accounting exclude
 
 ## Deployment
 
-Pushes to `main` are built and deployed by Cloudflare Workers Builds. The build command installs the locked dependency
-graph, verifies the pinned toolchain, runs the complete validation pipeline, and rejects generated-file drift. The
-deploy command accepts only a Workers Builds checkout of the exact `main` commit and then runs the production release.
+Every branch push is built by Cloudflare Workers Builds. The build command installs the locked dependency graph,
+verifies the pinned toolchain, runs the complete validation pipeline, and rejects generated-file drift. Non-production
+branches upload an undeployed Worker version and report the result to the pull request through Cloudflare's GitHub
+check run. The protected `main` branch requires that Cloudflare check instead of a GitHub Actions job.
+
+Pushes to `main` use the production deploy command. It accepts only a Workers Builds checkout of the exact `main`
+commit and then runs the production release.
 
 Workers Builds does not provide the Docker daemon Wrangler needs to build `Dockerfile.sandbox`. Production therefore
 uses the immutable Cloudflare Registry digest recorded in both `wrangler.jsonc` and `workers-builds.production.json`.
@@ -119,8 +125,8 @@ ID, and verifies that same commit locally and from multiple regions. A failed pu
 The bookmark output includes a machine-readable receipt with the commit and Workers Builds UUID.
 
 Run `pnpm run provision:production` separately when bootstrapping production resources or intentionally reconciling
-their checked-in identifiers. GitHub Actions remains responsible for pull-request and branch validation, but it no
-longer holds or invokes the production deployment path.
+their checked-in identifiers. Cloudflare Workers Builds owns both pull-request validation and production deployment;
+the repository intentionally contains no GitHub Actions workflows.
 
 ### Backup-quota rollout
 

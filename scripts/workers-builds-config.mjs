@@ -3,6 +3,7 @@ const EXPECTED_REPOSITORY = 'ferdousbhai/ghostbuild';
 const EXPECTED_BRANCH = 'main';
 const EXPECTED_BUILD_COMMAND = 'pnpm run workers-builds:build';
 const EXPECTED_DEPLOY_COMMAND = 'pnpm run workers-builds:deploy';
+const EXPECTED_PREVIEW_COMMAND = 'pnpm run workers-builds:preview';
 const EXPECTED_TOKEN_NAME = 'account-workers-builds-production';
 const EXPECTED_BUILD_VARIABLES = {
   NODE_VERSION: '26.3.0',
@@ -25,7 +26,8 @@ export function findWorkersBuildsConfigErrors({
   config,
   packageJson,
   nvmrc,
-  deployWorkflowExists,
+  githubWorkflowPaths,
+  githubCompositeActionExists,
   workerConfig,
   containerSourceSha256,
 }) {
@@ -36,7 +38,13 @@ export function findWorkersBuildsConfigErrors({
   requireEqual(errors, 'workers-builds.production.json rootDirectory', config?.rootDirectory, '/');
   requireEqual(errors, 'workers-builds.production.json buildCommand', config?.buildCommand, EXPECTED_BUILD_COMMAND);
   requireEqual(errors, 'workers-builds.production.json deployCommand', config?.deployCommand, EXPECTED_DEPLOY_COMMAND);
-  requireEqual(errors, 'workers-builds.production.json nonProductionBuilds', config?.nonProductionBuilds, false);
+  requireEqual(errors, 'workers-builds.production.json nonProductionBuilds', config?.nonProductionBuilds, true);
+  requireEqual(
+    errors,
+    'workers-builds.production.json nonProductionDeployCommand',
+    config?.nonProductionDeployCommand,
+    EXPECTED_PREVIEW_COMMAND,
+  );
   requireEqual(errors, 'workers-builds.production.json buildCaching', config?.buildCaching, true);
   requireEqual(errors, 'workers-builds.production.json buildTokenName', config?.buildTokenName, EXPECTED_TOKEN_NAME);
   requireStringArray(errors, 'workers-builds.production.json pathIncludes', config?.pathIncludes, ['*']);
@@ -111,12 +119,23 @@ export function findWorkersBuildsConfigErrors({
     scripts?.['workers-builds:deploy'],
     'node scripts/deploy-production.mjs --check-workers-builds && pnpm run release:production',
   );
+  requireEqual(
+    errors,
+    'package.json scripts.workers-builds:preview',
+    scripts?.['workers-builds:preview'],
+    'node scripts/upload-workers-builds-preview.mjs',
+  );
   requireEqual(errors, 'package.json packageManager', packageJson?.packageManager, 'pnpm@11.14.0');
   requireEqual(errors, '.nvmrc', nvmrc?.trim(), '26.3.0');
 
-  if (deployWorkflowExists) {
+  if (Array.isArray(githubWorkflowPaths) && githubWorkflowPaths.length > 0) {
     errors.push(
-      '.github/workflows/deploy.yml must not exist; production pushes are deployed by Cloudflare Workers Builds.',
+      `GitHub Actions workflows must not exist; Cloudflare Workers Builds is the only CI/CD provider. Found: ${githubWorkflowPaths.join(', ')}.`,
+    );
+  }
+  if (githubCompositeActionExists) {
+    errors.push(
+      '.github/actions/setup-and-build/action.yaml must not exist; the Cloudflare build command owns toolchain setup.',
     );
   }
   return errors;

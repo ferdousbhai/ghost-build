@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, printParseErrorCode } from 'jsonc-parser';
@@ -51,12 +51,20 @@ export function verifyWorkersBuildsConfig() {
       `Workers Builds Container sources must be readable: ${error instanceof Error ? error.message : String(error)}.`,
     );
   }
+  const workflowsDirectory = resolve(rootDir, '.github/workflows');
+  const githubWorkflowPaths = existsSync(workflowsDirectory)
+    ? readdirSync(workflowsDirectory)
+        .filter((entry) => /\.ya?ml$/i.test(entry))
+        .sort()
+        .map((entry) => `.github/workflows/${entry}`)
+    : [];
   errors.push(
     ...findWorkersBuildsConfigErrors({
       config,
       packageJson,
       nvmrc,
-      deployWorkflowExists: existsSync(resolve(rootDir, '.github/workflows/deploy.yml')),
+      githubWorkflowPaths,
+      githubCompositeActionExists: existsSync(resolve(rootDir, '.github/actions/setup-and-build/action.yaml')),
       workerConfig,
       containerSourceSha256,
     }),

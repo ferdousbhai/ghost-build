@@ -25,6 +25,22 @@ describe('Workers Builds environment preflight', () => {
     expect(spawn).not.toHaveBeenCalledWith('docker', expect.anything(), expect.anything());
   });
 
+  it('accepts non-production branch builds for Cloudflare-native PR validation', () => {
+    const spawn = vi.fn((command: string) => {
+      if (command === 'git') {
+        return { status: 0, stdout: `${commitSha}\n`, stderr: '' };
+      }
+      return { status: 0, stdout: '11.14.0\n', stderr: '' };
+    });
+    expect(() =>
+      checkWorkersBuildEnvironment({
+        env: { ...env, WORKERS_CI_BRANCH: 'feature/cloudflare-preview' },
+        nodeVersion: 'v26.3.0',
+        spawn: spawn as never,
+      }),
+    ).not.toThrow();
+  });
+
   it('fails before deployment when pnpm drifts', () => {
     const spawn = vi.fn((command: string) => {
       if (command === 'git') {

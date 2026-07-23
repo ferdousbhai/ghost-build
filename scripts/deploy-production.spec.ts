@@ -8,6 +8,7 @@ import {
   validateCommitSha,
   validateOAuthClientId,
   validateWorkersBuildContext,
+  validateWorkersBuildMetadata,
   wranglerDeployArgs,
 } from './deploy-production.mjs';
 
@@ -119,6 +120,12 @@ describe('production deploy wrapper', () => {
       WORKERS_CI_BUILD_UUID: '11111111-2222-3333-8444-555555555555',
       WORKERS_CI_COMMIT_SHA: commitSha,
     };
+    expect(
+      validateWorkersBuildMetadata({
+        env: { ...env, WORKERS_CI_BRANCH: 'feature/cloudflare-preview' },
+        currentCommitSha: commitSha,
+      }),
+    ).toEqual({ branch: 'feature/cloudflare-preview', commitSha });
     expect(
       validateWorkersBuildContext({
         env,

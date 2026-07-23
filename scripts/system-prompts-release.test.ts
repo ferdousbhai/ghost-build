@@ -39,31 +39,6 @@ describe('system prompts release artifact', () => {
     expect(first.toString('utf8')).not.toContain('Generated on:');
   });
 
-  test('release workflow watches every source and toolchain input', () => {
-    const workflow = readFileSync(new URL('../.github/workflows/release_system_prompts.yml', import.meta.url), 'utf8');
-    const requiredInputs = [
-      '.github/actions/setup-and-build/action.yaml',
-      '.github/workflows/release_system_prompts.yml',
-      '.nvmrc',
-      'buildSystemPrompts.ts',
-      'ghostbuild-agent/prompts/**',
-      'ghostbuild-agent/utils/stripIndent.ts',
-      'ghostbuild-agent/package.json',
-      'package.json',
-      'pnpm-lock.yaml',
-      'pnpm-workspace.yaml',
-      'scripts/create-system-prompts-release.mjs',
-    ];
-
-    for (const input of requiredInputs) {
-      expect(workflow).toContain(`- '${input}'`);
-    }
-    expect(workflow.match(/node dist\/buildSystemPrompts\.js/g)).toHaveLength(2);
-    expect(workflow).toContain('test "$first_hash" = "$second_hash"');
-    expect(workflow).toContain('run: node scripts/create-system-prompts-release.mjs');
-    expect(workflow).not.toContain('rymndhng/release-on-push-action');
-  });
-
   test('selects the next semantic prompt release without trusting malformed tags', () => {
     expect(nextSystemPromptsReleaseTag([])).toBe('prompts-v0.0.1');
     expect(

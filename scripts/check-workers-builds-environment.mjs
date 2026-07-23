@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { validateWorkersBuildContext } from './deploy-production.mjs';
+import { validateWorkersBuildMetadata } from './deploy-production.mjs';
 
 const EXPECTED_NODE_VERSION = 'v26.3.0';
 const EXPECTED_PNPM_VERSION = '11.14.0';
@@ -17,7 +17,7 @@ export function checkWorkersBuildEnvironment({
   nodeVersion = process.version,
   spawn = spawnSync,
 } = {}) {
-  validateWorkersBuildContext({ env, spawn });
+  validateWorkersBuildMetadata({ env, spawn });
   if (nodeVersion !== EXPECTED_NODE_VERSION) {
     throw new Error(`Workers Builds must use Node.js ${EXPECTED_NODE_VERSION}; found ${nodeVersion}.`);
   }

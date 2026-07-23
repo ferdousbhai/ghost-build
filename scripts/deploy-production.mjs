@@ -61,13 +61,32 @@ export function resolveCurrentCommitSha({ spawn = spawnSync } = {}) {
  * }} [options]
  */
 export function validateWorkersBuildContext({ env = process.env, spawn = spawnSync, currentCommitSha } = {}) {
-  if (env.WORKERS_CI !== '1') {
-    throw new Error('Cloudflare production deploy requires WORKERS_CI=1.');
+  const { branch, commitSha } = validateWorkersBuildMetadata({ env, spawn, currentCommitSha });
+  if (branch !== 'main') {
+    throw new Error(`Cloudflare production deploy requires the main branch; found ${branch}.`);
   }
-  if (env.WORKERS_CI_BRANCH !== 'main') {
-    throw new Error(
-      `Cloudflare production deploy requires the main branch; found ${env.WORKERS_CI_BRANCH ?? '<empty>'}.`,
-    );
+  return commitSha;
+}
+
+/**
+ * @param {{
+ *   env?: Record<string, string | undefined>;
+ *   spawn?: typeof spawnSync;
+ *   currentCommitSha?: string;
+ * }} [options]
+ */
+export function validateWorkersBuildMetadata({ env = process.env, spawn = spawnSync, currentCommitSha } = {}) {
+  if (env.WORKERS_CI !== '1') {
+    throw new Error('Cloudflare Workers Builds requires WORKERS_CI=1.');
+  }
+  const branch = env.WORKERS_CI_BRANCH;
+  if (
+    typeof branch !== 'string' ||
+    branch.length === 0 ||
+    branch.length > 255 ||
+    /[\u0000-\u001f\u007f]/.test(branch)
+  ) {
+    throw new Error('WORKERS_CI_BRANCH must be a non-empty Git branch name without control characters.');
   }
   const buildCommitSha = validateCommitSha(env.WORKERS_CI_COMMIT_SHA);
   const checkoutCommitSha = currentCommitSha ?? resolveCurrentCommitSha({ spawn });
@@ -79,7 +98,7 @@ export function validateWorkersBuildContext({ env = process.env, spawn = spawnSy
   if (typeof env.WORKERS_CI_BUILD_UUID !== 'string' || !WORKERS_BUILD_UUID_PATTERN.test(env.WORKERS_CI_BUILD_UUID)) {
     throw new Error('WORKERS_CI_BUILD_UUID must be a lowercase UUID.');
   }
-  return buildCommitSha;
+  return { branch, commitSha: buildCommitSha };
 }
 
 /**

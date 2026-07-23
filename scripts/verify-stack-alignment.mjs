@@ -307,17 +307,13 @@ function verifyWorkspace(errors) {
   }
 }
 
-function verifyToolchainConfig(errors) {
+function verifyToolchainConfig(errors, rootPackage) {
   const nodeVersion = readFileSync(resolve(rootDir, '.nvmrc'), 'utf8').trim();
-  const setupAction = readFileSync(resolve(rootDir, '.github/actions/setup-and-build/action.yaml'), 'utf8');
   if (nodeVersion !== '26.3.0') {
     errors.push('.nvmrc must pin Node.js 26.3.0.');
   }
-  if (!setupAction.includes("default: '26.3.0'")) {
-    errors.push('the setup action must default to Node.js 26.3.0.');
-  }
-  if (!setupAction.includes("default: '11.14.0'")) {
-    errors.push('the setup action must default to pnpm 11.14.0.');
+  if (rootPackage?.packageManager !== 'pnpm@11.14.0') {
+    errors.push('package.json must pin pnpm 11.14.0 for Cloudflare Workers Builds.');
   }
 }
 
@@ -440,7 +436,7 @@ export function verifyStackAlignment() {
   );
 
   verifyWorkspace(errors);
-  verifyToolchainConfig(errors);
+  verifyToolchainConfig(errors, rootPackage);
   verifyRootMigrations(errors);
   errors.push(...verifyD1MigrationSafety(rootDir));
   errors.push(

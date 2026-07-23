@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, printParseErrorCode } from 'jsonc-parser';
@@ -348,26 +348,18 @@ function verifyProvisionScript(errors, path) {
 }
 
 function verifyWorkflows(errors) {
-  const workflowPaths = workflowPathsFromDirectoryEntries(readdirSync(resolve(rootDir, '.github/workflows')));
-  const workflows = new Map();
+  const workflowsDirectory = resolve(rootDir, '.github/workflows');
+  const workflowPaths = existsSync(workflowsDirectory)
+    ? workflowPathsFromDirectoryEntries(readdirSync(workflowsDirectory))
+    : [];
   for (const path of workflowPaths) {
-    const content = readFileSync(resolve(rootDir, path), 'utf8');
-    workflows.set(path, content);
-    errors.push(...findWorkflowSafetyErrors(content, path));
+    errors.push(`${path} must not exist; Cloudflare Workers Builds is the only CI/CD provider.`);
   }
 
   const setupActionPath = '.github/actions/setup-and-build/action.yaml';
-  errors.push(
-    ...findCompositeActionSafetyErrors(readFileSync(resolve(rootDir, setupActionPath), 'utf8'), setupActionPath),
-  );
-
-  errors.push(
-    ...findCiWorkflowErrors(workflows.get('.github/workflows/ci.yml') ?? '', '.github/workflows/ci.yml'),
-    ...findSystemPromptsReleaseWorkflowErrors(
-      workflows.get('.github/workflows/release_system_prompts.yml') ?? '',
-      '.github/workflows/release_system_prompts.yml',
-    ),
-  );
+  if (existsSync(resolve(rootDir, setupActionPath))) {
+    errors.push(`${setupActionPath} must not exist; Cloudflare's build image owns CI toolchain setup.`);
+  }
 }
 
 export function verifyProductionConfig() {

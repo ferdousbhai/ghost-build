@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   findBuildApprovalErrors,
@@ -328,16 +328,10 @@ overrides:
     );
   });
 
-  it('validates the checked-in workflow structures', () => {
-    expect(findCiWorkflowErrors(readFileSync('.github/workflows/ci.yml', 'utf8'), '.github/workflows/ci.yml')).toEqual(
-      [],
-    );
-    expect(
-      findSystemPromptsReleaseWorkflowErrors(
-        readFileSync('.github/workflows/release_system_prompts.yml', 'utf8'),
-        '.github/workflows/release_system_prompts.yml',
-      ),
-    ).toEqual([]);
+  it('keeps paid GitHub Actions disabled', () => {
+    expect(existsSync('.github/workflows/ci.yml')).toBe(false);
+    expect(existsSync('.github/workflows/release_system_prompts.yml')).toBe(false);
+    expect(existsSync('.github/actions/setup-and-build/action.yaml')).toBe(false);
   });
 
   it('requires immutable pins for workflow, reusable-job, and composite-action references', () => {
