@@ -9,7 +9,5 @@ interface Env {
   CLOUDFLARE_OAUTH_CLIENT_SECRET: string;
   CLOUDFLARE_OAUTH_SCOPES: 'account-settings.read user-details.read workers-scripts.write d1.write workers-r2.write ai.read';
   DEPLOYMENT_PROXY_JWT_SECRET: string;
-  WORKERS_CI_COMMIT_SHA?: string;
   COMMIT_SHA?: string;
-  GITHUB_SHA?: string;
 }

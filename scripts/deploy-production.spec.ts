@@ -13,6 +13,12 @@ import {
 } from './deploy-production.mjs';
 
 const commitSha = 'a'.repeat(40);
+const workersBuildEnv = {
+  WORKERS_CI: '1',
+  WORKERS_CI_BRANCH: 'main',
+  WORKERS_CI_BUILD_UUID: '11111111-2222-3333-8444-555555555555',
+  WORKERS_CI_COMMIT_SHA: commitSha,
+};
 
 function expectOrdered(content: string, steps: readonly string[]) {
   let previous = -1;
@@ -24,14 +30,16 @@ function expectOrdered(content: string, steps: readonly string[]) {
 }
 
 describe('production deploy wrapper', () => {
-  it('keeps manual and Workers Builds releases on the same ordered production path', () => {
+  it('exposes only the ordered Workers Builds production path', () => {
     const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
       scripts: Record<string, string>;
     };
-    expect(packageJson.scripts['deploy:preflight']).toBe('node scripts/deploy-production.mjs --check');
-    expectOrdered(packageJson.scripts['deploy:production'], ['pnpm run validate', 'pnpm run release:production']);
-    expectOrdered(packageJson.scripts['release:production'], [
-      'pnpm run deploy:preflight',
+    expect(packageJson.scripts.deploy).toBeUndefined();
+    expect(packageJson.scripts['deploy:preflight']).toBeUndefined();
+    expect(packageJson.scripts['deploy:production']).toBeUndefined();
+    expect(packageJson.scripts['release:production']).toBeUndefined();
+    expectOrdered(packageJson.scripts['workers-builds:deploy'], [
+      'scripts/deploy-production.mjs --check-workers-builds',
       'pnpm run provision:production:check',
       'pnpm run verify:production-config',
       'pnpm run verify:workers-builds-config',
@@ -39,9 +47,6 @@ describe('production deploy wrapper', () => {
       'pnpm run d1:migrations:apply:production',
       '&& node scripts/deploy-production.mjs',
     ]);
-    expect(packageJson.scripts['workers-builds:deploy']).toContain(
-      'node scripts/deploy-production.mjs --check-workers-builds && pnpm run release:production',
-    );
     expect(existsSync(new URL('../.github/workflows/deploy.yml', import.meta.url))).toBe(false);
   });
 
@@ -76,7 +81,7 @@ describe('production deploy wrapper', () => {
       .mockReturnValueOnce({ status: 0, stdout: `${commitSha}\n`, stderr: '' })
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });
-    expect(resolveDeployableCommitSha({ spawn: cleanSpawn as never, env: {} })).toBe(commitSha);
+    expect(resolveDeployableCommitSha({ spawn: cleanSpawn as never, env: workersBuildEnv })).toBe(commitSha);
     expect(cleanSpawn).toHaveBeenLastCalledWith(
       'git',
       [
@@ -99,7 +104,7 @@ describe('production deploy wrapper', () => {
       .fn()
       .mockReturnValueOnce({ status: 0, stdout: `${commitSha}\n`, stderr: '' })
       .mockReturnValueOnce({ status: 0, stdout: ' M app/server.ts\n', stderr: '' });
-    expect(() => resolveDeployableCommitSha({ spawn: dirtySpawn as never, env: {} })).toThrow(
+    expect(() => resolveDeployableCommitSha({ spawn: dirtySpawn as never, env: workersBuildEnv })).toThrow(
       'Production deploy requires a clean Git worktree',
     );
 
@@ -108,45 +113,46 @@ describe('production deploy wrapper', () => {
       .mockReturnValueOnce({ status: 0, stdout: `${commitSha}\n`, stderr: '' })
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })
       .mockReturnValueOnce({ status: 0, stdout: '.env.production\0', stderr: '' });
-    expect(() => resolveDeployableCommitSha({ spawn: ignoredEnvSpawn as never, env: {} })).toThrow(
+    expect(() => resolveDeployableCommitSha({ spawn: ignoredEnvSpawn as never, env: workersBuildEnv })).toThrow(
       'Production deploy refuses ignored root .env*, .dev.vars*, and *.vars files',
     );
+
+    expect(() =>
+      resolveDeployableCommitSha({
+        spawn: vi.fn(() => ({ status: 0, stdout: `${commitSha}\n`, stderr: '' })) as never,
+        env: {},
+      }),
+    ).toThrow('Cloudflare Workers Builds requires WORKERS_CI=1');
   });
 
   it('binds Workers Builds releases to main, the exact checkout, and a build UUID', () => {
-    const env = {
-      WORKERS_CI: '1',
-      WORKERS_CI_BRANCH: 'main',
-      WORKERS_CI_BUILD_UUID: '11111111-2222-3333-8444-555555555555',
-      WORKERS_CI_COMMIT_SHA: commitSha,
-    };
     expect(
       validateWorkersBuildMetadata({
-        env: { ...env, WORKERS_CI_BRANCH: 'feature/cloudflare-preview' },
+        env: { ...workersBuildEnv, WORKERS_CI_BRANCH: 'feature/cloudflare-preview' },
         currentCommitSha: commitSha,
       }),
     ).toEqual({ branch: 'feature/cloudflare-preview', commitSha });
     expect(
       validateWorkersBuildContext({
-        env,
+        env: workersBuildEnv,
         spawn: vi.fn(() => ({ status: 0, stdout: `${commitSha}\n`, stderr: '' })) as never,
       }),
     ).toBe(commitSha);
     expect(() =>
       validateWorkersBuildContext({
-        env: { ...env, WORKERS_CI_BRANCH: 'feature' },
+        env: { ...workersBuildEnv, WORKERS_CI_BRANCH: 'feature' },
         currentCommitSha: commitSha,
       }),
     ).toThrow('requires the main branch');
     expect(() =>
       validateWorkersBuildContext({
-        env: { ...env, WORKERS_CI_COMMIT_SHA: 'b'.repeat(40) },
+        env: { ...workersBuildEnv, WORKERS_CI_COMMIT_SHA: 'b'.repeat(40) },
         currentCommitSha: commitSha,
       }),
     ).toThrow('does not match the checked-out commit');
     expect(() =>
       validateWorkersBuildContext({
-        env: { ...env, WORKERS_CI_BUILD_UUID: 'not-a-uuid' },
+        env: { ...workersBuildEnv, WORKERS_CI_BUILD_UUID: 'not-a-uuid' },
         currentCommitSha: commitSha,
       }),
     ).toThrow('must be a lowercase UUID');
@@ -164,7 +170,7 @@ describe('production deploy wrapper', () => {
     ]);
 
     const spawn = vi.fn(() => ({ status: 0 }));
-    expect(deployProduction({ clientId: 'oauth-client-id', commitSha, spawn })).toBe(commitSha);
+    expect(deployProduction({ clientId: 'oauth-client-id', commitSha, env: workersBuildEnv, spawn })).toBe(commitSha);
     expect(spawn).toHaveBeenCalledWith(
       'pnpm',
       [
@@ -188,6 +194,7 @@ describe('production deploy wrapper', () => {
       deployAndVerifyProduction({
         clientId: 'oauth-client-id',
         commitSha,
+        env: workersBuildEnv,
         spawn: () => ({ status: 0 }),
         verifyLocal,
         verifyGlobal,
@@ -203,14 +210,25 @@ describe('production deploy wrapper', () => {
       deployProduction({
         clientId: 'oauth-client-id',
         commitSha,
+        env: workersBuildEnv,
         spawn: () => ({ error: new Error('spawn failed') }),
       }),
     ).toThrow('spawn failed');
-    expect(() => deployProduction({ clientId: 'oauth-client-id', commitSha, spawn: () => ({ status: null }) })).toThrow(
-      'Wrangler deploy terminated without an exit status.',
-    );
-    expect(() => deployProduction({ clientId: 'oauth-client-id', commitSha, spawn: () => ({ status: 23 }) })).toThrow(
-      'Wrangler deploy failed with exit status 23. Live verification was not run.',
-    );
+    expect(() =>
+      deployProduction({
+        clientId: 'oauth-client-id',
+        commitSha,
+        env: workersBuildEnv,
+        spawn: () => ({ status: null }),
+      }),
+    ).toThrow('Wrangler deploy terminated without an exit status.');
+    expect(() =>
+      deployProduction({
+        clientId: 'oauth-client-id',
+        commitSha,
+        env: workersBuildEnv,
+        spawn: () => ({ status: 23 }),
+      }),
+    ).toThrow('Wrangler deploy failed with exit status 23. Live verification was not run.');
   });
 });

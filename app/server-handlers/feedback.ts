@@ -39,11 +39,7 @@ export async function feedbackAction({ request, env }: { request: Request; env: 
     const sourceKey = userId ? `user:${userId}` : `guest:${await hashSource(request)}`;
     const now = Date.now();
     const id = crypto.randomUUID();
-    const appVersion =
-      getOptionalBinding(env, 'WORKERS_CI_COMMIT_SHA') ??
-      getOptionalBinding(env, 'COMMIT_SHA') ??
-      getOptionalBinding(env, 'GITHUB_SHA') ??
-      null;
+    const appVersion = getOptionalBinding(env, 'COMMIT_SHA') ?? null;
 
     const result = await env.DB.prepare(
       `INSERT INTO feedback
