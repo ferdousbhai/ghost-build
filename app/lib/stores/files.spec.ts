@@ -5,12 +5,22 @@ import { getAbsolutePath } from 'ghostbuild-agent/utils/workDir';
 import { MANAGED_WEBCONTAINER_NPMRC_CONTENT } from '~/utils/secretFiles';
 import { FilesStore } from './files';
 
+const containerBootMocks = vi.hoisted(() => ({
+  waitForContainerBootState: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock('./containerBootState', () => ({
+  ContainerBootState: { READY: 4 },
+  waitForContainerBootState: containerBootMocks.waitForContainerBootState,
+}));
+
 describe('FilesStore public filesystem watcher', () => {
   let project: MemoryProject;
   let container: WebContainer;
   let store: FilesStore;
 
   beforeEach(async () => {
+    containerBootMocks.waitForContainerBootState.mockResolvedValue(undefined);
     project = new MemoryProject();
     project.setFile('src/current.ts', 'version one');
     project.setFile('src/remove-me.ts', 'remove me');
@@ -20,6 +30,27 @@ describe('FilesStore public filesystem watcher', () => {
 
     await vi.waitFor(() => expect(project.watch).toHaveBeenCalledOnce());
     await store.prewarmWorkdir(container);
+  });
+
+  it('waits for the initial workspace setup before attaching the recursive watcher', async () => {
+    let markReady: () => void = () => undefined;
+    containerBootMocks.waitForContainerBootState.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          markReady = resolve;
+        }),
+    );
+    const delayedProject = new MemoryProject();
+
+    new FilesStore(Promise.resolve(delayedProject.container));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(containerBootMocks.waitForContainerBootState).toHaveBeenCalledWith(4);
+    expect(delayedProject.watch).not.toHaveBeenCalled();
+
+    markReady();
+    await vi.waitFor(() => expect(delayedProject.watch).toHaveBeenCalledOnce());
   });
 
   it('reconciles added, changed, and removed files and directories', async () => {

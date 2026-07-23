@@ -17,6 +17,7 @@ import {
   reconcileWatchedPaths,
 } from './file-map-operations';
 import { incrementFileUpdateCounter } from './fileUpdateCounter';
+import { ContainerBootState, waitForContainerBootState } from './containerBootState';
 
 const logger = createScopedLogger('FilesStore');
 
@@ -132,6 +133,7 @@ export class FilesStore {
 
   async #init() {
     const webcontainer = await this.#webcontainer;
+    await waitForContainerBootState(ContainerBootState.READY);
     this.#fileWatcher = webcontainer.fs.watch(ROOT_DIRECTORY, { recursive: true }, (eventType, watcherPath) => {
       const relativePath = normalizeWatcherPath(webcontainer, watcherPath);
       if (relativePath && isExcludedProjectPath(relativePath)) {
