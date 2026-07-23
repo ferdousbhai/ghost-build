@@ -38,7 +38,8 @@ describe('WebContainer preview package manifest', () => {
         react: '19.0.0',
       },
       devDependencies: {
-        vite: '8.0.0',
+        typescript: '6.0.0',
+        vite: '6.4.3',
       },
     });
     expect(preview.dependencies).not.toHaveProperty('@cloudflare/ai-chat');
@@ -47,7 +48,6 @@ describe('WebContainer preview package manifest', () => {
     expect(preview.dependencies).not.toHaveProperty('ai');
     expect(preview.devDependencies).not.toHaveProperty('@cloudflare/vite-plugin');
     expect(preview.devDependencies).not.toHaveProperty('@vitejs/plugin-react');
-    expect(preview.devDependencies).not.toHaveProperty('typescript');
   });
 
   test('keeps the temporary lockfile root synchronized with the preview manifest', () => {
@@ -77,7 +77,7 @@ describe('WebContainer preview package manifest', () => {
               },
               devDependencies: {
                 typescript: '6.0.0',
-                vite: '8.0.0',
+                vite: '6.4.3',
               },
             },
             'node_modules/ai': {
@@ -89,8 +89,9 @@ describe('WebContainer preview package manifest', () => {
               dependencies: { scheduler: '1.0.0' },
             },
             'node_modules/scheduler': { version: '1.0.0' },
+            'node_modules/typescript': { version: '6.0.0' },
             'node_modules/vite': {
-              version: '8.0.0',
+              version: '6.4.3',
               dependencies: { picocolors: '1.0.0' },
             },
             'node_modules/picocolors': { version: '2.0.0' },
@@ -104,23 +105,23 @@ describe('WebContainer preview package manifest', () => {
     expect(previewLock.packages['']).toMatchObject({
       name: 'generated-app',
       dependencies: { react: '19.0.0' },
-      devDependencies: { vite: '8.0.0' },
+      devDependencies: { typescript: '6.0.0', vite: '6.4.3' },
     });
     expect(previewLock.packages['']).not.toHaveProperty('dependencies.ai');
-    expect(previewLock.packages['']).not.toHaveProperty('devDependencies.typescript');
     expect(previewLock.packages).toEqual({
       '': expect.objectContaining({
         name: 'generated-app',
         dependencies: { react: '19.0.0' },
-        devDependencies: { vite: '8.0.0' },
+        devDependencies: { typescript: '6.0.0', vite: '6.4.3' },
       }),
       'node_modules/react': {
         version: '19.0.0',
         dependencies: { scheduler: '1.0.0' },
       },
       'node_modules/scheduler': { version: '1.0.0' },
+      'node_modules/typescript': { version: '6.0.0' },
       'node_modules/vite': {
-        version: '8.0.0',
+        version: '6.4.3',
         dependencies: { picocolors: '1.0.0' },
       },
       'node_modules/vite/node_modules/picocolors': { version: '1.0.0' },
@@ -133,6 +134,10 @@ describe('WebContainer preview package manifest', () => {
       [
         'package-lock.json',
         '{"name":"complete","lockfileVersion":3,"packages":{"":{"dependencies":{"ai":"1.0.0","react":"19.0.0"}}}}\n',
+      ],
+      [
+        'preview-runtime/package-lock.json',
+        '{"name":"preview","lockfileVersion":3,"packages":{"":{"dependencies":{"react":"19.0.0"}},"node_modules/react":{"version":"19.0.0"}}}\n',
       ],
     ]);
     const fs = {
@@ -155,6 +160,9 @@ describe('WebContainer preview package manifest', () => {
       expect(JSON.parse(files.get('package.json')!).dependencies).toEqual({ react: '19.0.0' });
       expect(JSON.parse(files.get('package-lock.json')!).packages[''].dependencies).toEqual({
         react: '19.0.0',
+      });
+      expect(JSON.parse(files.get('package-lock.json')!).packages['node_modules/react']).toEqual({
+        version: '19.0.0',
       });
       files.set('package-lock.json', '{"changed":true}\n');
     });

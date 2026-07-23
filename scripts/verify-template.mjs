@@ -62,7 +62,7 @@ export async function verifyTemplate() {
     run(tempDir, ['run', 'build']);
     await verifyResolvedProductionModulePolicy(tempDir);
     run(tempDir, ['exec', 'wrangler', 'deploy', '--dry-run']);
-    run(tempDir, ['exec', 'vite', 'build'], { ...process.env, GHOSTBUILD_PREVIEW: '1' });
+    run(tempDir, ['exec', 'vite', 'build', '--config', 'vite.preview.config.mjs']);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

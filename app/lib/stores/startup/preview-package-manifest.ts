@@ -2,6 +2,8 @@ import type { WebContainer } from '@webcontainer/api';
 
 const PACKAGE_JSON = 'package.json';
 const PACKAGE_LOCK = 'package-lock.json';
+const PREVIEW_PACKAGE_LOCK = 'preview-runtime/package-lock.json';
+const PREVIEW_VITE_VERSION = '6.4.3';
 
 const PREVIEW_OMITTED_DEPENDENCIES = new Set([
   '@ai-sdk/provider',
@@ -33,11 +35,12 @@ const PREVIEW_OMITTED_DEV_DEPENDENCIES = new Set([
   'jsonc-parser',
   'postcss',
   'tailwindcss',
-  'typescript',
   'typescript-eslint',
   'wrangler',
   'yaml',
 ]);
+
+const PREVIEW_DEV_DEPENDENCY_OVERRIDES = new Map([['vite', PREVIEW_VITE_VERSION]]);
 
 type PackageManifest = {
   dependencies?: Record<string, string>;
@@ -57,7 +60,10 @@ export function createPreviewPackageJson(packageJson: string): string {
     {
       ...manifest,
       dependencies: omitDependencies(manifest.dependencies, PREVIEW_OMITTED_DEPENDENCIES),
-      devDependencies: omitDependencies(manifest.devDependencies, PREVIEW_OMITTED_DEV_DEPENDENCIES),
+      devDependencies: overrideDependencies(
+        omitDependencies(manifest.devDependencies, PREVIEW_OMITTED_DEV_DEPENDENCIES),
+        PREVIEW_DEV_DEPENDENCY_OVERRIDES,
+      ),
     },
     null,
     2,
@@ -162,10 +168,14 @@ export async function withPreviewPackageManifest<T>(
   operation: () => Promise<T>,
 ): Promise<T> {
   const packageLock = await readOptionalFile(container, PACKAGE_LOCK);
+  const previewPackageLock = await readOptionalFile(container, PREVIEW_PACKAGE_LOCK);
   try {
     await container.fs.writeFile(PACKAGE_JSON, createPreviewPackageJson(packageJson));
     if (packageLock !== null) {
-      await container.fs.writeFile(PACKAGE_LOCK, createPreviewPackageLock(packageJson, packageLock));
+      await container.fs.writeFile(
+        PACKAGE_LOCK,
+        createPreviewPackageLock(packageJson, previewPackageLock ?? packageLock),
+      );
     }
     return await operation();
   } finally {
@@ -183,6 +193,15 @@ function omitDependencies(
   omitted: ReadonlySet<string>,
 ): Record<string, string> {
   return Object.fromEntries(Object.entries(dependencies ?? {}).filter(([name]) => !omitted.has(name)));
+}
+
+function overrideDependencies(
+  dependencies: Record<string, string>,
+  overrides: ReadonlyMap<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(dependencies).map(([name, version]) => [name, overrides.get(name) ?? version]),
+  );
 }
 
 async function readOptionalFile(container: Pick<WebContainer, 'fs'>, path: string): Promise<string | null> {

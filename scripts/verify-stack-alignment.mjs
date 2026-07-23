@@ -43,7 +43,7 @@ const templateSnapshotPattern = /^template-snapshot-([a-f0-9]{8})\.bin$/;
 const runtimeEnvAccessAllowlist = [
   { pathSuffix: 'app/components/ErrorComponent.tsx', snippet: 'import.meta.env.DEV' },
   { pathSuffix: 'app/lib/webcontainer/index.ts', snippet: 'import.meta.env.SSR' },
-  { pathSuffix: 'template/vite.config.ts', snippet: 'process.env.GHOSTBUILD_PREVIEW' },
+  { pathSuffix: 'template/scripts/vite-dev.mjs', snippet: 'process.env.GHOSTBUILD_PREVIEW' },
 ];
 const agentRequiredPackages = ['ai', 'zod'];
 const SANDBOX_YAML_VERSION = '2.9.0';
