@@ -29,11 +29,16 @@ pnpm run lint
 
 ## Deployment
 
-Use Wrangler OAuth for local production deploys, or configure \`CLOUDFLARE_ACCOUNT_ID\` and \`CLOUDFLARE_API_TOKEN\` as GitHub Actions secrets for CI authentication, then run:
+Use Wrangler OAuth for a deliberate local production deploy:
 
 \`\`\`sh
 pnpm run deploy
 \`\`\`
+
+For continuous deployment, connect the repository directly in Cloudflare Workers Builds, use a least-privilege Workers
+Builds deployment token, and set the build command to \`pnpm run validate\` and the deploy command to
+\`pnpm run deploy\`. Store token credentials only in Cloudflare's build-token setting, not in source or repository
+secrets.
 
 The deploy script verifies stack alignment, regenerates TanStack routes and Cloudflare binding types, typechecks the Worker, provisions required Cloudflare resources, verifies production Cloudflare config, builds the Worker, runs production linting, applies both application and protected Agent-security D1 migrations, and deploys with Wrangler. Provisioning writes each non-secret D1 \`database_id\` into \`wrangler.jsonc\` after creating or finding the separate production databases.
 

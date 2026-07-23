@@ -9,7 +9,6 @@ import {
   findCompositeActionSafetyErrors,
   findMissingCommandSteps,
   findMissingProvisionScriptPatternErrors,
-  findProductionDeployWorkflowErrors,
   findSystemPromptsReleaseWorkflowErrors,
   findWorkerObservabilityErrors,
   findWorkerRuntimeSecretErrors,
@@ -26,7 +25,6 @@ export {
   findCiWorkflowErrors,
   findCompositeActionSafetyErrors,
   findMissingProvisionScriptPatternErrors,
-  findProductionDeployWorkflowErrors,
   findSystemPromptsReleaseWorkflowErrors,
   findWorkerObservabilityErrors,
   findWorkerRuntimeSecretErrors,
@@ -271,13 +269,18 @@ function verifyScripts(errors, pkg, label) {
     'build',
     'd1:bookmark:production',
     'deploy:production',
+    'release:production',
+    'workers-builds:build',
+    'workers-builds:deploy',
     'provision:production',
+    'provision:production:check',
     'typecheck',
     'validate',
     'validate:agent',
     'validate:root',
     'validate:template',
     'verify:production-config',
+    'verify:workers-builds-config',
     'verify:licenses',
     'verify:static-assets',
     'verify:stack',
@@ -290,13 +293,31 @@ function verifyScripts(errors, pkg, label) {
 
   const deployScript = scripts['deploy:production'];
   errors.push(
-    ...findMissingCommandSteps(deployScript, `${label} production deploy script`, [
-      'validate',
-      'provision:production',
+    ...findMissingCommandSteps(deployScript, `${label} production deploy script`, ['validate', 'release:production']),
+  );
+  errors.push(
+    ...findMissingCommandSteps(scripts['release:production'], `${label} production release script`, [
+      'deploy:preflight',
+      'provision:production:check',
       'verify:production-config',
+      'verify:workers-builds-config',
       'd1:bookmark:production',
       'd1:migrations:apply:production',
       'scripts/deploy-production.mjs',
+    ]),
+  );
+  errors.push(
+    ...findMissingCommandSteps(scripts['workers-builds:deploy'], `${label} Workers Builds deploy script`, [
+      'scripts/deploy-production.mjs --check-workers-builds',
+      'release:production',
+    ]),
+  );
+  errors.push(
+    ...findMissingCommandSteps(scripts['workers-builds:build'], `${label} Workers Builds build script`, [
+      'pnpm install --frozen-lockfile',
+      'scripts/check-workers-builds-environment.mjs',
+      'validate',
+      'git diff --exit-code',
     ]),
   );
 
@@ -340,8 +361,6 @@ function verifyWorkflows(errors) {
     ...findCompositeActionSafetyErrors(readFileSync(resolve(rootDir, setupActionPath), 'utf8'), setupActionPath),
   );
 
-  const deploy = workflows.get('.github/workflows/deploy.yml') ?? '';
-  errors.push(...findProductionDeployWorkflowErrors(deploy, '.github/workflows/deploy.yml'));
   errors.push(
     ...findCiWorkflowErrors(workflows.get('.github/workflows/ci.yml') ?? '', '.github/workflows/ci.yml'),
     ...findSystemPromptsReleaseWorkflowErrors(

@@ -1,6 +1,6 @@
 import templateSnapshotManifest from 'public/template-snapshot-manifest.json';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 7 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 8 as const;
 export const DEPLOYMENT_SECURITY_CLEANUP_CRON = '0 3 * * *';
 export const DEPLOYMENT_VERSION_METADATA_BINDING = 'CF_VERSION_METADATA';
 export const DEPLOYMENT_SECURITY_BASELINE_BINDING = 'GHOSTBUILD_SECURITY_BASELINE_VERSION';
@@ -53,11 +53,11 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
     '5ba6a6bd6d2f7ce4d1c64e2238d647d709ed9ea7c35ff312e9eb926606aa2298',
   'scripts/lib/project-policy/source-policy.mjs': 'deed7d40e7c9c1bca8cfb3dbf46503f9dc89a4004988f8ef55871b7ed0c24f86',
   'scripts/lib/project-policy/worker-policy.mjs': '9f908807030d1a91c99b442b41488048d2e49b996783a18900b413e046f3edbc',
-  'scripts/lib/project-policy/workflow-policy.mjs': 'da9f44a45e16350d76a33474ce0efb0a3df56642ace1a605e93de4eb9789e027',
+  'scripts/lib/project-policy/workflow-policy.mjs': 'fac22c4e8cfbf3450916b479aed4b4efbc1bbd01e7d03075598a8811828e299c',
   'scripts/lib/project-policy/workspace-policy.mjs': '2eae19d07b13fcedf89bb0825bc99ee0a803493cbf10bfad2d557c46820ec3f5',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '9ef2cb6b02442eeab0864c728fc7602cffb531b0eac5cd8f6bbd2edc6e41e823';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'f3de557e3064914b1b2c9a61d1d53326aa7f6b1b4f929371425d261a2e70b6d1';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
   '32df8c2fea1562044c38b9faabc729e046737de4c833b83e6d7087e4b392682a';

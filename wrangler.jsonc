@@ -84,7 +84,9 @@
   "containers": [
     {
       "class_name": "DeploymentSandbox",
-      "image": "./Dockerfile.sandbox",
+      // Workers Builds does not provide Docker. This immutable production
+      // image is tied to the reviewed source hash in workers-builds.production.json.
+      "image": "registry.cloudflare.com/0af9e0921b880657d84a6c07307f8aef/ghostbuild-deploymentsandbox@sha256:cc0a20cdff32ba56cabeb43a38ddc5e6001bd765cb019496458d47b4140bde13",
       // Generated projects install and compile close to 1 GB of dependencies.
       // The lite tier only has 256 MiB RAM and 1/16 vCPU, which is not a
       // production-capable build environment for the supported stack.

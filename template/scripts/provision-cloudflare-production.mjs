@@ -10,6 +10,7 @@ const rootDir = process.env.GHOSTBUILD_PROVISION_ROOT
 const configPath = resolve(rootDir, "wrangler.jsonc");
 const PLACEHOLDER_D1_ID = "00000000-0000-0000-0000-000000000000";
 const isDryRun = process.argv.includes("--dry-run");
+const isCheck = process.argv.includes("--check");
 
 function fail(message) {
   console.error(message);
@@ -37,6 +38,19 @@ function readConfig() {
   }
 
   return { raw, config };
+}
+
+function validateArguments() {
+  const args = process.argv.slice(2);
+  if (
+    args.some((arg) => arg !== "--dry-run" && arg !== "--check") ||
+    (isDryRun && isCheck) ||
+    args.length > 1
+  ) {
+    fail(
+      "Usage: node scripts/provision-cloudflare-production.mjs [--check|--dry-run]",
+    );
+  }
 }
 
 export function getBinding(config, collectionName, bindingName) {
@@ -212,6 +226,11 @@ function ensureD1Database(d1) {
 
   const configuredId = d1.binding?.database_id;
   const hasConfiguredId = configuredId && configuredId !== PLACEHOLDER_D1_ID;
+  if (isCheck && !hasConfiguredId) {
+    fail(
+      `wrangler.jsonc D1 database ${databaseName} must have a non-placeholder database_id before production release.`,
+    );
+  }
   if (hasConfiguredId && isDryRun) {
     console.log(
       `[dry-run] Would verify D1 database ${databaseName} is configured as ${configuredId}.`,
@@ -232,6 +251,11 @@ function ensureD1Database(d1) {
       `D1 database ${databaseName} is already configured as ${configuredId}.`,
     );
     return configuredId;
+  }
+  if (isCheck) {
+    fail(
+      `D1 database ${databaseName} must already exist before production release.`,
+    );
   }
 
   let database = databases.find(
@@ -324,6 +348,11 @@ function ensureR2Bucket(r2) {
     console.log(`R2 bucket ${bucketName} already exists.`);
     return;
   }
+  if (isCheck) {
+    fail(
+      `R2 bucket ${bucketName} must already exist before production release.`,
+    );
+  }
 
   const createResult = runWrangler(["r2", "bucket", "create", bucketName], {
     allowFailure: true,
@@ -345,6 +374,7 @@ function ensureR2Bucket(r2) {
 }
 
 export function main() {
+  validateArguments();
   const { raw, config } = readConfig();
   const applicationD1 = getBinding(config, "d1_databases", "DB");
   // This provisioner is also reused by the root Ghostbuild Worker, which has
@@ -373,19 +403,21 @@ export function main() {
   ) {
     fail("DB and AGENT_SECURITY_DB must resolve to separate D1 databases.");
   }
-  const withApplicationDatabase = updateD1DatabaseId(
-    raw,
-    applicationD1.index,
-    applicationDatabaseId,
-    "DB",
-  );
-  if (agentSecurityD1 && agentSecurityDatabaseId) {
-    updateD1DatabaseId(
-      withApplicationDatabase,
-      agentSecurityD1.index,
-      agentSecurityDatabaseId,
-      "AGENT_SECURITY_DB",
+  if (!isCheck) {
+    const withApplicationDatabase = updateD1DatabaseId(
+      raw,
+      applicationD1.index,
+      applicationDatabaseId,
+      "DB",
     );
+    if (agentSecurityD1 && agentSecurityDatabaseId) {
+      updateD1DatabaseId(
+        withApplicationDatabase,
+        agentSecurityD1.index,
+        agentSecurityDatabaseId,
+        "AGENT_SECURITY_DB",
+      );
+    }
   }
   ensureR2Bucket(r2);
 }

@@ -6,7 +6,6 @@ import {
   findCompositeActionSafetyErrors,
   findDurableObjectLifecycleErrors,
   findMissingProvisionScriptPatternErrors,
-  findProductionDeployWorkflowErrors,
   findSystemPromptsReleaseWorkflowErrors,
   findWorkerObservabilityErrors,
   findWorkerOAuthStartRateLimitErrors,
@@ -330,12 +329,6 @@ overrides:
   });
 
   it('validates the checked-in workflow structures', () => {
-    expect(
-      findProductionDeployWorkflowErrors(
-        readFileSync('.github/workflows/deploy.yml', 'utf8'),
-        '.github/workflows/deploy.yml',
-      ),
-    ).toEqual([]);
     expect(findCiWorkflowErrors(readFileSync('.github/workflows/ci.yml', 'utf8'), '.github/workflows/ci.yml')).toEqual(
       [],
     );
@@ -345,45 +338,6 @@ overrides:
         '.github/workflows/release_system_prompts.yml',
       ),
     ).toEqual([]);
-  });
-
-  it('accepts comments, block scalars, and reordered mapping keys without weakening step order', () => {
-    const workflow = productionWorkflowFixture();
-    expect(findWorkflowSafetyErrors(workflow, '.github/workflows/deploy.yml')).toEqual([]);
-    expect(findProductionDeployWorkflowErrors(workflow, '.github/workflows/deploy.yml')).toEqual([]);
-  });
-
-  it('does not accept required commands from comments or an unrelated job', () => {
-    const workflow = productionWorkflowFixture().replace(
-      '      - run: pnpm run provision:production',
-      `      # run: pnpm run provision:production
-      - run: pnpm run provision:other`,
-    );
-    expect(findProductionDeployWorkflowErrors(workflow, '.github/workflows/deploy.yml')).toContain(
-      '.github/workflows/deploy.yml jobs.deploy must include "pnpm run provision:production" after the preceding required step.',
-    );
-
-    const misplaced = workflow.replace(
-      '  deploy:',
-      `  decoy:
-    runs-on: ubuntu-latest
-    steps:
-      - run: pnpm run provision:production
-  deploy:`,
-    );
-    expect(findProductionDeployWorkflowErrors(misplaced, '.github/workflows/deploy.yml')).not.toEqual([]);
-  });
-
-  it('requires the production steps in semantic array order', () => {
-    const workflow = productionWorkflowFixture().replace(
-      `      - run: pnpm run validate
-      - run: git diff --exit-code`,
-      `      - run: git diff --exit-code
-      - run: pnpm run validate`,
-    );
-    expect(findProductionDeployWorkflowErrors(workflow, '.github/workflows/deploy.yml')).toContain(
-      '.github/workflows/deploy.yml jobs.deploy must include "git diff --exit-code" after the preceding required step.',
-    );
   });
 
   it('requires immutable pins for workflow, reusable-job, and composite-action references', () => {
@@ -575,57 +529,6 @@ jobs:
     expect(script).toContain('config?.secrets?.required ?? []');
   });
 });
-
-function productionWorkflowFixture(): string {
-  return `
-name: Production Deploy
-on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-jobs:
-  deploy:
-    environment:
-      name: production
-    runs-on: ubuntu-latest
-    if: github.repository == 'ferdousbhai/ghostbuild' && github.ref == 'refs/heads/main'
-    steps:
-      # Comments may mention wrangler dev and staging without becoming commands.
-      - run: pnpm run validate
-      - run: git diff --exit-code
-      - env:
-          CLOUDFLARE_OAUTH_CLIENT_ID: \${{ vars.CLOUDFLARE_OAUTH_CLIENT_ID }}
-        run: node scripts/deploy-production.mjs --check
-      - run: pnpm run provision:production
-        env:
-          CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      - run: |
-          # Formatting comments are ignored.
-          pnpm run verify:production-config
-      - env:
-          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: pnpm run d1:bookmark:production
-      - env:
-          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: pnpm run d1:migrations:apply:production
-      - with:
-          command: >-
-            deploy --var COMMIT_SHA:\${{ github.sha }} --var CLOUDFLARE_OAUTH_CLIENT_ID:\${{ vars.CLOUDFLARE_OAUTH_CLIENT_ID }}
-          packageManager: pnpm
-          accountId: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          apiToken: \${{ secrets.CLOUDFLARE_API_TOKEN }}
-        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0
-      - env:
-          EXPECTED_SHA: \${{ github.sha }}
-        run: node scripts/verify-live-deployment.mjs local
-      - run: node scripts/verify-live-deployment.mjs global
-        env:
-          EXPECTED_SHA: \${{ github.sha }}
-`;
-}
 
 function workspacePolicyFixture(packages: string[], ignoreWorkspaceRootCheck = true): string {
   return `

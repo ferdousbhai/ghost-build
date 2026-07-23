@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   deployAndVerifyProduction,
   deployProduction,
@@ -7,6 +7,7 @@ import {
   resolveDeployableCommitSha,
   validateCommitSha,
   validateOAuthClientId,
+  validateWorkersBuildContext,
   wranglerDeployArgs,
 } from './deploy-production.mjs';
 
@@ -22,30 +23,25 @@ function expectOrdered(content: string, steps: readonly string[]) {
 }
 
 describe('production deploy wrapper', () => {
-  it('runs the clean-tree preflight before every production mutation in manual and CI deploys', () => {
+  it('keeps manual and Workers Builds releases on the same ordered production path', () => {
     const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
       scripts: Record<string, string>;
     };
     expect(packageJson.scripts['deploy:preflight']).toBe('node scripts/deploy-production.mjs --check');
-    expectOrdered(packageJson.scripts['deploy:production'], [
-      'pnpm run validate',
+    expectOrdered(packageJson.scripts['deploy:production'], ['pnpm run validate', 'pnpm run release:production']);
+    expectOrdered(packageJson.scripts['release:production'], [
       'pnpm run deploy:preflight',
-      'pnpm run provision:production',
+      'pnpm run provision:production:check',
+      'pnpm run verify:production-config',
+      'pnpm run verify:workers-builds-config',
       'pnpm run d1:bookmark:production',
       'pnpm run d1:migrations:apply:production',
       '&& node scripts/deploy-production.mjs',
     ]);
-
-    const workflow = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
-    expectOrdered(workflow, [
-      'pnpm run validate',
-      'git diff --exit-code',
-      'node scripts/deploy-production.mjs --check',
-      'pnpm run provision:production',
-      'pnpm run d1:bookmark:production',
-      'pnpm run d1:migrations:apply:production',
-      'cloudflare/wrangler-action@',
-    ]);
+    expect(packageJson.scripts['workers-builds:deploy']).toContain(
+      'node scripts/deploy-production.mjs --check-workers-builds && pnpm run release:production',
+    );
+    expect(existsSync(new URL('../.github/workflows/deploy.yml', import.meta.url))).toBe(false);
   });
 
   it('requires a bounded, single-line OAuth client id', () => {
@@ -79,7 +75,7 @@ describe('production deploy wrapper', () => {
       .mockReturnValueOnce({ status: 0, stdout: `${commitSha}\n`, stderr: '' })
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });
-    expect(resolveDeployableCommitSha({ spawn: cleanSpawn as never })).toBe(commitSha);
+    expect(resolveDeployableCommitSha({ spawn: cleanSpawn as never, env: {} })).toBe(commitSha);
     expect(cleanSpawn).toHaveBeenLastCalledWith(
       'git',
       [
@@ -102,7 +98,7 @@ describe('production deploy wrapper', () => {
       .fn()
       .mockReturnValueOnce({ status: 0, stdout: `${commitSha}\n`, stderr: '' })
       .mockReturnValueOnce({ status: 0, stdout: ' M app/server.ts\n', stderr: '' });
-    expect(() => resolveDeployableCommitSha({ spawn: dirtySpawn as never })).toThrow(
+    expect(() => resolveDeployableCommitSha({ spawn: dirtySpawn as never, env: {} })).toThrow(
       'Production deploy requires a clean Git worktree',
     );
 
@@ -111,9 +107,42 @@ describe('production deploy wrapper', () => {
       .mockReturnValueOnce({ status: 0, stdout: `${commitSha}\n`, stderr: '' })
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })
       .mockReturnValueOnce({ status: 0, stdout: '.env.production\0', stderr: '' });
-    expect(() => resolveDeployableCommitSha({ spawn: ignoredEnvSpawn as never })).toThrow(
+    expect(() => resolveDeployableCommitSha({ spawn: ignoredEnvSpawn as never, env: {} })).toThrow(
       'Production deploy refuses ignored root .env*, .dev.vars*, and *.vars files',
     );
+  });
+
+  it('binds Workers Builds releases to main, the exact checkout, and a build UUID', () => {
+    const env = {
+      WORKERS_CI: '1',
+      WORKERS_CI_BRANCH: 'main',
+      WORKERS_CI_BUILD_UUID: '11111111-2222-3333-8444-555555555555',
+      WORKERS_CI_COMMIT_SHA: commitSha,
+    };
+    expect(
+      validateWorkersBuildContext({
+        env,
+        spawn: vi.fn(() => ({ status: 0, stdout: `${commitSha}\n`, stderr: '' })) as never,
+      }),
+    ).toBe(commitSha);
+    expect(() =>
+      validateWorkersBuildContext({
+        env: { ...env, WORKERS_CI_BRANCH: 'feature' },
+        currentCommitSha: commitSha,
+      }),
+    ).toThrow('requires the main branch');
+    expect(() =>
+      validateWorkersBuildContext({
+        env: { ...env, WORKERS_CI_COMMIT_SHA: 'b'.repeat(40) },
+        currentCommitSha: commitSha,
+      }),
+    ).toThrow('does not match the checked-out commit');
+    expect(() =>
+      validateWorkersBuildContext({
+        env: { ...env, WORKERS_CI_BUILD_UUID: 'not-a-uuid' },
+        currentCommitSha: commitSha,
+      }),
+    ).toThrow('must be a lowercase UUID');
   });
 
   it('passes the OAuth ID and exact commit to Wrangler without a shell', () => {
