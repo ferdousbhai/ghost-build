@@ -82,6 +82,8 @@ describe('FilesStore public filesystem watcher', () => {
     project.setFile('src/current.ts', 'one read only');
     project.setFile('.gitignore', 'ignored');
     project.setFile('node_modules/pkg/index.js', 'dependency');
+    project.setFile('.wrangler/tmp/bundle.js', 'generated worker bundle');
+    project.setFile('dist/assets/index.js', 'generated client bundle');
     project.events.length = 0;
 
     project.emit('change', 'src/current.ts');
@@ -90,6 +92,8 @@ describe('FilesStore public filesystem watcher', () => {
     project.emit('rename', '.gitignore');
     project.emit('change', '.gitignore');
     project.emit('rename', 'node_modules/pkg/index.js');
+    project.emit('rename', '.wrangler/tmp/bundle.js');
+    project.emit('rename', 'dist/assets/index.js');
     await store.flushFileEvents();
 
     expect(project.events.filter((event) => event === 'readdir:src')).toHaveLength(1);
@@ -97,10 +101,14 @@ describe('FilesStore public filesystem watcher', () => {
     expect(project.events).not.toContain('readdir:node_modules/pkg');
     expect(project.events).not.toContain('read:.gitignore');
     expect(project.events).not.toContain('read:node_modules/pkg/index.js');
+    expect(project.events).not.toContain('read:.wrangler/tmp/bundle.js');
+    expect(project.events).not.toContain('read:dist/assets/index.js');
     expect(project.events).not.toContain('remove:.git');
     expect(store.files.get()[getAbsolutePath('src/current.ts')]).toEqual(textFile('one read only'));
     expect(store.files.get()[getAbsolutePath('.gitignore')]).toBeUndefined();
     expect(store.files.get()[getAbsolutePath('node_modules/pkg/index.js')]).toBeUndefined();
+    expect(store.files.get()[getAbsolutePath('.wrangler/tmp/bundle.js')]).toBeUndefined();
+    expect(store.files.get()[getAbsolutePath('dist/assets/index.js')]).toBeUndefined();
   });
 
   it('drops dependency install events before allocating a watcher buffer', () => {
@@ -108,6 +116,7 @@ describe('FilesStore public filesystem watcher', () => {
 
     for (let index = 0; index < 1_000; index += 1) {
       project.emit('rename', `node_modules/pkg-${index}/index.js`);
+      project.emit('rename', `.wrangler/tmp/build-${index}.js`);
     }
 
     expect(setTimeoutSpy).not.toHaveBeenCalled();

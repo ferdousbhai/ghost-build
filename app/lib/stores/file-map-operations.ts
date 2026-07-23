@@ -8,7 +8,18 @@ import { isLocalSecretFilePath } from '~/utils/secretFiles';
 import { decodeFileContent, isBinaryFile } from './file-content';
 
 const ROOT_DIRECTORY = '.';
-const EXCLUDED_DIRECTORY_NAMES = new Set(['node_modules']);
+const EXCLUDED_DIRECTORY_NAMES = new Set([
+  '.cache',
+  '.ghostbuild',
+  '.output',
+  '.turbo',
+  '.vite',
+  '.wrangler',
+  'coverage',
+  'dist',
+  'dist-ssr',
+  'node_modules',
+]);
 const EXCLUDED_FILE_NAMES = new Set(['.gitignore']);
 
 type ProjectEntry = { type: 'folder' } | { type: 'file'; relativePath: string };
