@@ -14,6 +14,7 @@ import {
   webContainerPnpmCommand,
   webContainerPnpmEnvironment,
 } from '~/lib/webcontainer/pnpm';
+import { withPreviewPackageManifest } from '~/lib/stores/startup/preview-package-manifest';
 
 const DEPENDENCY_COMMAND_TIMEOUT_MS = 120_000;
 const NPM_REGISTRY = 'https://registry.npmjs.org/';
@@ -37,32 +38,42 @@ export async function runNpmInstall(args: {
     const workspace = await args.container.fs.readFile('pnpm-workspace.yaml', 'utf-8');
     assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', workspace);
     const syncLockfile = mode === 'sync-lockfile';
-    const npmSourcePolicyArgs = ['--ignore-scripts', '--no-audit', '--no-fund', `--registry=${NPM_REGISTRY}`];
     const pnpmSourcePolicyArgs = ['--ignore-pnpmfile', '--reporter=append-only', `--registry=${NPM_REGISTRY}`];
     await prepareWebContainerPackageManagers(args.container);
     await runCommand({
       container: args.container,
-      command: syncLockfile
-        ? ['npm', 'install', '--package-lock-only', ...npmSourcePolicyArgs]
-        : ['npm', 'install', ...npmSourcePolicyArgs, ...packages],
-      displayName: syncLockfile ? 'npm install --package-lock-only' : `npm install (${packages.length} packages)`,
-      abortSignal: args.abortSignal,
-      onOutput: args.onOutput,
-      env: webContainerNpmEnvironment(),
-      timeoutMs: DEPENDENCY_COMMAND_TIMEOUT_MS,
-    });
-    await runCommand({
-      container: args.container,
-      command: webContainerPnpmCommand(['install', '--lockfile-only', '--no-frozen-lockfile', ...pnpmSourcePolicyArgs]),
-      displayName: 'pnpm install --lockfile-only',
+      command: webContainerPnpmCommand([
+        syncLockfile ? 'install' : 'add',
+        '--lockfile-only',
+        '--no-frozen-lockfile',
+        ...(!syncLockfile ? ['--save-prod', ...packages] : []),
+        ...pnpmSourcePolicyArgs,
+      ]),
+      displayName: syncLockfile ? 'pnpm install --lockfile-only' : `pnpm add (${packages.length} packages)`,
       abortSignal: args.abortSignal,
       onOutput: args.onOutput,
       env: webContainerPnpmEnvironment(args.container),
       timeoutMs: DEPENDENCY_COMMAND_TIMEOUT_MS,
     });
+    const packageJson = await args.container.fs.readFile('package.json', 'utf-8');
+    await withPreviewPackageManifest(
+      args.container,
+      packageJson,
+      () =>
+        runCommand({
+          container: args.container,
+          command: ['npm', 'install'],
+          displayName: 'npm install (browser preview)',
+          abortSignal: args.abortSignal,
+          onOutput: args.onOutput,
+          env: webContainerNpmEnvironment(),
+          timeoutMs: DEPENDENCY_COMMAND_TIMEOUT_MS,
+        }),
+      { persistPreviewLock: true },
+    );
     return toolSuccess(
       syncLockfile
-        ? 'Synchronized package-lock.json and pnpm-lock.yaml with package.json.'
+        ? 'Synchronized the browser preview and deployment lockfiles with package.json.'
         : `Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'}.`,
       { mode, exitCode: 0 },
     );

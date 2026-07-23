@@ -156,20 +156,26 @@ describe('WebContainer preview package manifest', () => {
       }),
     };
 
-    await withPreviewPackageManifest({ fs } as never, files.get('package.json')!, async () => {
-      expect(JSON.parse(files.get('package.json')!).dependencies).toEqual({ react: '19.0.0' });
-      expect(JSON.parse(files.get('package-lock.json')!).packages[''].dependencies).toEqual({
-        react: '19.0.0',
-      });
-      expect(JSON.parse(files.get('package-lock.json')!).packages['node_modules/react']).toEqual({
-        version: '19.0.0',
-      });
-      files.set('package-lock.json', '{"changed":true}\n');
-    });
+    await withPreviewPackageManifest(
+      { fs } as never,
+      files.get('package.json')!,
+      async () => {
+        expect(JSON.parse(files.get('package.json')!).dependencies).toEqual({ react: '19.0.0' });
+        expect(JSON.parse(files.get('package-lock.json')!).packages[''].dependencies).toEqual({
+          react: '19.0.0',
+        });
+        expect(JSON.parse(files.get('package-lock.json')!).packages['node_modules/react']).toEqual({
+          version: '19.0.0',
+        });
+        files.set('package-lock.json', '{"changed":true}\n');
+      },
+      { persistPreviewLock: true },
+    );
 
     expect(files.get('package.json')).toBe('{"name":"complete","dependencies":{"ai":"1.0.0","react":"19.0.0"}}\n');
     expect(files.get('package-lock.json')).toBe(
       '{"name":"complete","lockfileVersion":3,"packages":{"":{"dependencies":{"ai":"1.0.0","react":"19.0.0"}}}}\n',
     );
+    expect(files.get('preview-runtime/package-lock.json')).toBe('{"changed":true}\n');
   });
 });

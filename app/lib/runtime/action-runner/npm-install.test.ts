@@ -21,27 +21,6 @@ describe('runNpmInstall', () => {
     expect(result).toMatchObject({ ok: true, data: { mode: 'sync-lockfile', exitCode: 0 } });
     expect(spawn).toHaveBeenNthCalledWith(
       1,
-      'npm',
-      [
-        'install',
-        '--package-lock-only',
-        '--ignore-scripts',
-        '--no-audit',
-        '--no-fund',
-        '--registry=https://registry.npmjs.org/',
-      ],
-      {
-        env: {
-          CI: 'true',
-          npm_config_ignore_scripts: 'true',
-          npm_config_audit: 'false',
-          npm_config_fund: 'false',
-          npm_config_registry: 'https://registry.npmjs.org/',
-        },
-      },
-    );
-    expect(spawn).toHaveBeenNthCalledWith(
-      2,
       'npx',
       [
         '--yes',
@@ -69,6 +48,15 @@ describe('runNpmInstall', () => {
         },
       },
     );
+    expect(spawn).toHaveBeenNthCalledWith(2, 'npm', ['install'], {
+      env: {
+        CI: 'true',
+        npm_config_ignore_scripts: 'true',
+        npm_config_audit: 'false',
+        npm_config_fund: 'false',
+        npm_config_registry: 'https://registry.npmjs.org/',
+      },
+    });
   });
 
   test('turns failed command output into structured diagnostics', async () => {
@@ -149,9 +137,35 @@ function containerWithWorkspace(
     'strictDepBuilds: true\nblockExoticSubdeps: true\nallowBuilds:\n' +
     '  core-js-pure: true\n  esbuild: true\n  sharp: true\n  workerd: true\n',
 ): WebContainer {
+  const files = new Map([
+    ['package.json', '{"name":"generated","dependencies":{"react":"19.0.0"},"devDependencies":{"vite":"8.0.0"}}\n'],
+    [
+      'package-lock.json',
+      '{"lockfileVersion":3,"packages":{"":{"dependencies":{"react":"19.0.0"},"devDependencies":{"vite":"8.0.0"}},"node_modules/react":{"version":"19.0.0"},"node_modules/vite":{"version":"8.0.0"}}}\n',
+    ],
+    [
+      'preview-runtime/package-lock.json',
+      '{"lockfileVersion":3,"packages":{"":{"dependencies":{"react":"19.0.0"},"devDependencies":{"vite":"6.4.3"}},"node_modules/react":{"version":"19.0.0"},"node_modules/vite":{"version":"6.4.3"}}}\n',
+    ],
+  ]);
   return {
     spawn,
     workdir: '/home/project',
-    fs: { mkdir: vi.fn(), readFile: vi.fn(async () => workspace), writeFile: vi.fn() },
+    fs: {
+      mkdir: vi.fn(),
+      readFile: vi.fn(async (path: string) => {
+        if (path === 'pnpm-workspace.yaml') {
+          return workspace;
+        }
+        const content = files.get(path);
+        if (content === undefined) {
+          throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        }
+        return content;
+      }),
+      writeFile: vi.fn(async (path: string, content: string) => {
+        files.set(path, content);
+      }),
+    },
   } as unknown as WebContainer;
 }

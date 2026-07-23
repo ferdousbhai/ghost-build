@@ -166,6 +166,7 @@ export async function withPreviewPackageManifest<T>(
   container: Pick<WebContainer, 'fs'>,
   packageJson: string,
   operation: () => Promise<T>,
+  options: { persistPreviewLock?: boolean } = {},
 ): Promise<T> {
   const packageLock = await readOptionalFile(container, PACKAGE_LOCK);
   const previewPackageLock = await readOptionalFile(container, PREVIEW_PACKAGE_LOCK);
@@ -177,7 +178,14 @@ export async function withPreviewPackageManifest<T>(
         createPreviewPackageLock(packageJson, previewPackageLock ?? packageLock),
       );
     }
-    return await operation();
+    const result = await operation();
+    if (options.persistPreviewLock && packageLock !== null) {
+      const installedPreviewLock = await readOptionalFile(container, PACKAGE_LOCK);
+      if (installedPreviewLock !== null) {
+        await container.fs.writeFile(PREVIEW_PACKAGE_LOCK, installedPreviewLock);
+      }
+    }
+    return result;
   } finally {
     await container.fs.writeFile(PACKAGE_JSON, packageJson);
     if (packageLock === null) {
