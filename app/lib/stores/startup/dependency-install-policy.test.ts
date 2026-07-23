@@ -10,6 +10,8 @@ describe('startup dependency installation policy', () => {
         lockfileMode,
         '--ignore-scripts',
         '--ignore-pnpmfile',
+        '--package-import-method=copy',
+        '--reporter=append-only',
         '--registry=https://registry.npmjs.org/',
       ]);
     },
