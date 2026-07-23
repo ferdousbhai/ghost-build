@@ -32,7 +32,12 @@ export async function runNpmInstall(args: {
     const workspace = await args.container.fs.readFile('pnpm-workspace.yaml', 'utf-8');
     assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', workspace);
     const syncLockfile = mode === 'sync-lockfile';
-    const sourcePolicyArgs = ['--ignore-pnpmfile', `--registry=${NPM_REGISTRY}`];
+    const sourcePolicyArgs = [
+      '--ignore-pnpmfile',
+      '--package-import-method=copy',
+      '--reporter=append-only',
+      `--registry=${NPM_REGISTRY}`,
+    ];
     const commandArgs = syncLockfile
       ? ['install', '--lockfile-only', ...sourcePolicyArgs]
       : ['add', ...sourcePolicyArgs, ...packages];
