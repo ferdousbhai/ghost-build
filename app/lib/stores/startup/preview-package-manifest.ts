@@ -39,6 +39,11 @@ type PackageManifest = {
   [key: string]: unknown;
 };
 
+type PackageLock = {
+  packages?: Record<string, PackageManifest>;
+  [key: string]: unknown;
+};
+
 export function createPreviewPackageJson(packageJson: string): string {
   const manifest = JSON.parse(packageJson) as PackageManifest;
   return `${JSON.stringify(
@@ -52,10 +57,37 @@ export function createPreviewPackageJson(packageJson: string): string {
   )}\n`;
 }
 
+export function createPreviewPackageLock(packageJson: string, packageLock: string): string {
+  const previewManifest = JSON.parse(createPreviewPackageJson(packageJson)) as PackageManifest;
+  const lock = JSON.parse(packageLock) as PackageLock;
+  const root = lock.packages?.[''];
+
+  if (!root) {
+    return packageLock;
+  }
+
+  return `${JSON.stringify(
+    {
+      ...lock,
+      packages: {
+        ...lock.packages,
+        '': {
+          ...root,
+          dependencies: previewManifest.dependencies,
+          devDependencies: previewManifest.devDependencies,
+        },
+      },
+    },
+    null,
+    2,
+  )}\n`;
+}
+
 /**
  * npm uses package.json and package-lock.json in place. Give the browser cold
- * start a reduced preview graph, then restore the complete deployment inputs
- * before project generation, backup, or deployment can observe them.
+ * start a reduced, lockfile-synchronized preview graph, then restore the
+ * complete deployment inputs before project generation, backup, or deployment
+ * can observe them.
  */
 export async function withPreviewPackageManifest<T>(
   container: Pick<WebContainer, 'fs'>,
@@ -65,6 +97,9 @@ export async function withPreviewPackageManifest<T>(
   const packageLock = await readOptionalFile(container, PACKAGE_LOCK);
   try {
     await container.fs.writeFile(PACKAGE_JSON, createPreviewPackageJson(packageJson));
+    if (packageLock !== null) {
+      await container.fs.writeFile(PACKAGE_LOCK, createPreviewPackageLock(packageJson, packageLock));
+    }
     return await operation();
   } finally {
     await container.fs.writeFile(PACKAGE_JSON, packageJson);

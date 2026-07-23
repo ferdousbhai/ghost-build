@@ -1,5 +1,9 @@
 import { describe, expect, test, vi } from 'vitest';
-import { createPreviewPackageJson, withPreviewPackageManifest } from './preview-package-manifest';
+import {
+  createPreviewPackageJson,
+  createPreviewPackageLock,
+  withPreviewPackageManifest,
+} from './preview-package-manifest';
 
 describe('WebContainer preview package manifest', () => {
   test('removes production-only packages while preserving UI and user dependencies', () => {
@@ -46,10 +50,59 @@ describe('WebContainer preview package manifest', () => {
     expect(preview.devDependencies).not.toHaveProperty('typescript');
   });
 
+  test('keeps the temporary lockfile root synchronized with the preview manifest', () => {
+    const packageJson = JSON.stringify({
+      name: 'generated-app',
+      dependencies: {
+        ai: '1.0.0',
+        react: '19.0.0',
+      },
+      devDependencies: {
+        typescript: '6.0.0',
+        vite: '8.0.0',
+      },
+    });
+    const previewLock = JSON.parse(
+      createPreviewPackageLock(
+        packageJson,
+        JSON.stringify({
+          name: 'generated-app',
+          lockfileVersion: 3,
+          packages: {
+            '': {
+              name: 'generated-app',
+              dependencies: {
+                ai: '1.0.0',
+                react: '19.0.0',
+              },
+              devDependencies: {
+                typescript: '6.0.0',
+                vite: '8.0.0',
+              },
+            },
+            'node_modules/react': { version: '19.0.0' },
+          },
+        }),
+      ),
+    );
+
+    expect(previewLock.packages['']).toMatchObject({
+      name: 'generated-app',
+      dependencies: { react: '19.0.0' },
+      devDependencies: { vite: '8.0.0' },
+    });
+    expect(previewLock.packages['']).not.toHaveProperty('dependencies.ai');
+    expect(previewLock.packages['']).not.toHaveProperty('devDependencies.typescript');
+    expect(previewLock.packages['node_modules/react']).toEqual({ version: '19.0.0' });
+  });
+
   test('restores deployment manifests after installation', async () => {
     const files = new Map([
       ['package.json', '{"name":"complete","dependencies":{"ai":"1.0.0","react":"19.0.0"}}\n'],
-      ['package-lock.json', '{"name":"complete","lockfileVersion":3}\n'],
+      [
+        'package-lock.json',
+        '{"name":"complete","lockfileVersion":3,"packages":{"":{"dependencies":{"ai":"1.0.0","react":"19.0.0"}}}}\n',
+      ],
     ]);
     const fs = {
       readFile: vi.fn(async (path: string) => {
@@ -69,10 +122,15 @@ describe('WebContainer preview package manifest', () => {
 
     await withPreviewPackageManifest({ fs } as never, files.get('package.json')!, async () => {
       expect(JSON.parse(files.get('package.json')!).dependencies).toEqual({ react: '19.0.0' });
+      expect(JSON.parse(files.get('package-lock.json')!).packages[''].dependencies).toEqual({
+        react: '19.0.0',
+      });
       files.set('package-lock.json', '{"changed":true}\n');
     });
 
     expect(files.get('package.json')).toBe('{"name":"complete","dependencies":{"ai":"1.0.0","react":"19.0.0"}}\n');
-    expect(files.get('package-lock.json')).toBe('{"name":"complete","lockfileVersion":3}\n');
+    expect(files.get('package-lock.json')).toBe(
+      '{"name":"complete","lockfileVersion":3,"packages":{"":{"dependencies":{"ai":"1.0.0","react":"19.0.0"}}}}\n',
+    );
   });
 });
