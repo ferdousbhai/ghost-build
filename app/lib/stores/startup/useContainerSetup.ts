@@ -163,13 +163,7 @@ async function setupContainer(options: { snapshotUrl: string; allowInstallFailur
   assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', pnpmWorkspace);
 
   setContainerBootState(ContainerBootState.DOWNLOADING_DEPENDENCIES);
-  let { output, exitCode } = await runDependencyInstall(container, startupInstallArgs('ci'));
-  if (exitCode !== 0 && options.allowInstallFailure) {
-    logger.warn('Frozen dependency install failed; retrying while repairing the browser lockfile.');
-    const repaired = await runDependencyInstall(container, startupInstallArgs('install'));
-    output = `${output}\n${repaired.output}`;
-    exitCode = repaired.exitCode;
-  }
+  const { output, exitCode } = await runDependencyInstall(container, startupInstallArgs());
   logger.debug('dependency install output', cleanTerminalOutput(output));
 
   if (exitCode !== 0) {
