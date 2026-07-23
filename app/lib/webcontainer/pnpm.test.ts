@@ -1,13 +1,18 @@
 import { describe, expect, test, vi } from 'vitest';
 import { MANAGED_WEBCONTAINER_NPMRC_CONTENT } from '~/utils/secretFiles';
-import { prepareWebContainerPnpm, webContainerPnpmCommand, webContainerPnpmEnvironment } from './pnpm';
+import {
+  prepareWebContainerPackageManagers,
+  webContainerNpmEnvironment,
+  webContainerPnpmCommand,
+  webContainerPnpmEnvironment,
+} from './pnpm';
 
 describe('WebContainer pnpm command', () => {
   test('creates pnpm user config for fresh containers', async () => {
     const mkdir = vi.fn();
     const writeFile = vi.fn();
 
-    await prepareWebContainerPnpm({ fs: { mkdir, writeFile } } as never);
+    await prepareWebContainerPackageManagers({ fs: { mkdir, writeFile } } as never);
 
     expect(mkdir).toHaveBeenCalledWith('.ghostbuild/pnpm-config/pnpm', { recursive: true });
     expect(writeFile).toHaveBeenCalledWith('.ghostbuild/pnpm-config/pnpm/config.yaml', '{}\n');
@@ -15,6 +20,7 @@ describe('WebContainer pnpm command', () => {
   });
 
   test('directs pnpm to the project-visible managed config', () => {
+    expect(webContainerNpmEnvironment()).toEqual({ CI: 'true' });
     expect(webContainerPnpmEnvironment({ workdir: '/home/project' } as never)).toEqual({
       XDG_CONFIG_HOME: '/home/project/.ghostbuild/pnpm-config',
       CI: 'true',

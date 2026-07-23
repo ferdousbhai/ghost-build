@@ -9,7 +9,7 @@ vi.mock('~/lib/stores/containerBootState', () => ({
 }));
 
 describe('runNpmInstall', () => {
-  test('provides a constrained agent path for synchronizing pnpm-lock.yaml', async () => {
+  test('synchronizes the browser and deployment lockfiles through constrained commands', async () => {
     const spawn = vi.fn(async () => process('', 0));
     const result = await runNpmInstall({
       invocation: { toolName: 'npmInstall', args: { mode: 'sync-lockfile' } } as never,
@@ -19,7 +19,25 @@ describe('runNpmInstall', () => {
       diagnostics: new DiagnosticsStore(),
     });
     expect(result).toMatchObject({ ok: true, data: { mode: 'sync-lockfile', exitCode: 0 } });
-    expect(spawn).toHaveBeenCalledWith(
+    expect(spawn).toHaveBeenNthCalledWith(
+      1,
+      'npm',
+      [
+        'install',
+        '--package-lock-only',
+        '--ignore-scripts',
+        '--no-audit',
+        '--no-fund',
+        '--registry=https://registry.npmjs.org/',
+      ],
+      {
+        env: {
+          CI: 'true',
+        },
+      },
+    );
+    expect(spawn).toHaveBeenNthCalledWith(
+      2,
       'npx',
       [
         '--yes',
@@ -30,8 +48,8 @@ describe('runNpmInstall', () => {
         'pnpm',
         'install',
         '--lockfile-only',
+        '--no-frozen-lockfile',
         '--ignore-pnpmfile',
-        '--package-import-method=copy',
         '--reporter=append-only',
         '--registry=https://registry.npmjs.org/',
       ],

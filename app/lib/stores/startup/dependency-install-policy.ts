@@ -5,14 +5,6 @@ const NPM_REGISTRY = 'https://registry.npmjs.org/';
  * registry-bound, project pnpm hooks are disabled, and no lifecycle scripts
  * execute merely because a user opens or restores a project.
  */
-export function startupInstallArgs(lockfileMode: '--frozen-lockfile' | '--no-frozen-lockfile'): string[] {
-  return [
-    'install',
-    lockfileMode,
-    '--ignore-scripts',
-    '--ignore-pnpmfile',
-    '--package-import-method=copy',
-    '--reporter=append-only',
-    `--registry=${NPM_REGISTRY}`,
-  ];
+export function startupInstallArgs(mode: 'ci' | 'install'): string[] {
+  return [mode, '--ignore-scripts', '--no-audit', '--no-fund', `--registry=${NPM_REGISTRY}`];
 }

@@ -22,9 +22,9 @@ import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifest';
 import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
 import { startupInstallArgs } from './dependency-install-policy';
-import { prepareWebContainerPnpm, webContainerPnpmCommand, webContainerPnpmEnvironment } from '~/lib/webcontainer/pnpm';
+import { prepareWebContainerPackageManagers, webContainerNpmEnvironment } from '~/lib/webcontainer/pnpm';
 
-const TEMPLATE_URL = '/template-snapshot-6e1a5ada.bin';
+const TEMPLATE_URL = '/template-snapshot-86f14cd7.bin';
 const logger = createScopedLogger('ContainerSetup');
 const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)));
 const WEBCONTAINER_BOOT_TIMEOUT_MS = 60_000;
@@ -50,7 +50,7 @@ export function useNewChatContainerSetup(enabled: boolean) {
           WEBCONTAINER_BOOT_TIMEOUT_MS,
           'The browser workspace took too long to start.',
         );
-        await setupContainer({ snapshotUrl: TEMPLATE_URL, allowPnpmInstallFailure: false });
+        await setupContainer({ snapshotUrl: TEMPLATE_URL, allowInstallFailure: false });
       } catch (error) {
         if (isUnsupportedRuntimeError(error)) {
           return;
@@ -94,7 +94,7 @@ export function useExistingChatContainerSetup(loadedChatId: string | undefined) 
           logger.warn(`Existing chat ${loadedChatId} has no snapshot. Loading the base template.`);
           snapshotUrl = TEMPLATE_URL;
         }
-        await setupContainer({ snapshotUrl, allowPnpmInstallFailure: true });
+        await setupContainer({ snapshotUrl, allowInstallFailure: true });
       } catch (error) {
         if (isUnsupportedRuntimeError(error)) {
           return;
@@ -107,7 +107,7 @@ export function useExistingChatContainerSetup(loadedChatId: string | undefined) 
   }, [loadedChatId, sessionId]);
 }
 
-async function setupContainer(options: { snapshotUrl: string; allowPnpmInstallFailure: boolean }) {
+async function setupContainer(options: { snapshotUrl: string; allowInstallFailure: boolean }) {
   const controller = new AbortController();
   const downloadTimeout = setTimeout(() => controller.abort(), SNAPSHOT_DOWNLOAD_TIMEOUT_MS);
   let resp: Response;
@@ -163,24 +163,24 @@ async function setupContainer(options: { snapshotUrl: string; allowPnpmInstallFa
   assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', pnpmWorkspace);
 
   setContainerBootState(ContainerBootState.DOWNLOADING_DEPENDENCIES);
-  let { output, exitCode } = await runPnpmInstall(container, startupInstallArgs('--frozen-lockfile'));
-  if (exitCode !== 0 && options.allowPnpmInstallFailure) {
-    logger.warn('Frozen dependency install failed; retrying while repairing the generated lockfile.');
-    const repaired = await runPnpmInstall(container, startupInstallArgs('--no-frozen-lockfile'));
+  let { output, exitCode } = await runDependencyInstall(container, startupInstallArgs('ci'));
+  if (exitCode !== 0 && options.allowInstallFailure) {
+    logger.warn('Frozen dependency install failed; retrying while repairing the browser lockfile.');
+    const repaired = await runDependencyInstall(container, startupInstallArgs('install'));
     output = `${output}\n${repaired.output}`;
     exitCode = repaired.exitCode;
   }
-  logger.debug('pnpm install output', cleanTerminalOutput(output));
+  logger.debug('dependency install output', cleanTerminalOutput(output));
 
   if (exitCode !== 0) {
-    if (!options.allowPnpmInstallFailure) {
-      throw new Error(`pnpm install failed with exit code ${exitCode}: ${output}`);
+    if (!options.allowInstallFailure) {
+      throw new Error(`Dependency install failed with exit code ${exitCode}: ${output}`);
     }
 
     toast.error(`Failed to install dependencies. Fix your package.json and tell Ghostbuild to redeploy.`, {
       duration: Infinity,
     });
-    logger.error(`pnpm install failed with exit code ${exitCode}: ${output}`);
+    logger.error(`Dependency install failed with exit code ${exitCode}: ${output}`);
   }
 
   setContainerBootState(ContainerBootState.STARTING_BACKUP);
@@ -193,29 +193,28 @@ async function setupContainer(options: { snapshotUrl: string; allowPnpmInstallFa
   setContainerBootState(ContainerBootState.READY);
 }
 
-async function runPnpmInstall(
+async function runDependencyInstall(
   container: Awaited<ReturnType<typeof startWebcontainer>>,
   args: string[],
 ): Promise<{ output: string; exitCode: number }> {
   await withTimeout(
-    prepareWebContainerPnpm(container),
+    prepareWebContainerPackageManagers(container),
     WORKSPACE_STEP_TIMEOUT_MS,
     'Ghostbuild could not prepare dependency installation.',
   );
-  const [command, ...commandArgs] = webContainerPnpmCommand(args);
-  const pnpm = await withTimeout(
-    container.spawn(command, commandArgs, { env: webContainerPnpmEnvironment(container) }),
+  const npm = await withTimeout(
+    container.spawn('npm', args, { env: webContainerNpmEnvironment() }),
     WORKSPACE_STEP_TIMEOUT_MS,
     'Ghostbuild could not start dependency installation.',
   );
   try {
     return await withTimeout(
-      streamOutput(pnpm),
+      streamOutput(npm),
       DEPENDENCY_INSTALL_TIMEOUT_MS,
       'Dependency installation took too long.',
     );
   } catch (error) {
-    pnpm.kill();
+    npm.kill();
     throw error;
   }
 }

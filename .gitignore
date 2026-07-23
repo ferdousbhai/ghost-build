@@ -50,6 +50,7 @@ app/commit.json
 .cursorrules
 
 package-lock.json
+!template/package-lock.json
 vite.config.ts.timestamp-*.mjs
 
 # Sentry Config File

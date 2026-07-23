@@ -47,7 +47,7 @@ const runtimeEnvAccessAllowlist = [
 ];
 const agentRequiredPackages = ['ai', 'zod'];
 const SANDBOX_YAML_VERSION = '2.9.0';
-const forbiddenLockfiles = ['package-lock.json', 'template/package-lock.json'];
+const forbiddenLockfiles = ['package-lock.json'];
 const forbiddenLegacyPaths = [
   '.cursor/rules/convex_rules.mdc',
   'app/components/convex',

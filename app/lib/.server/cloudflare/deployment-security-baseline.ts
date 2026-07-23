@@ -1,6 +1,6 @@
 import templateSnapshotManifest from 'public/template-snapshot-manifest.json';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 3 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 4 as const;
 export const DEPLOYMENT_SECURITY_CLEANUP_CRON = '0 3 * * *';
 export const DEPLOYMENT_VERSION_METADATA_BINDING = 'CF_VERSION_METADATA';
 export const DEPLOYMENT_SECURITY_BASELINE_BINDING = 'GHOSTBUILD_SECURITY_BASELINE_VERSION';
@@ -40,7 +40,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'src/preview/ai-chat.ts': 'eea156db8463ab280b8d44af1390e7cc40ef416134518a94e68ceface470ed27',
   'src/preview/workers-ai-provider.ts': '6bc1fd2c8e9154b7fd44fe4c2b4475d2c02311093c11c2fc90047d7d303111f1',
   'scripts/cf-typegen.mjs': '6c82a0afdb50c32b205dbe4677b207337a38ad7ea70950a3e63758f0c04e1ae7',
-  'scripts/verify-stack-alignment.mjs': '77cb04a7762b6c601262f9fe48e0b663c8e0009cc79e8b2f213bf83495881544',
+  'scripts/verify-stack-alignment.mjs': '24aa753cd35912056e32b3cf0cfc8a3784cb49702ecc5c635b1d9b53a7f07e17',
   'scripts/verify-production-licenses.mjs': '22952be32b45c416551ca2681a202b72c616aca61c6643ce946868373320a82d',
   'scripts/lib/production-license-artifact.mjs': 'e9ff7fc97973e4299f9a4b3026f148f3e32e6c2ff71d21bdbc40ae1e60d49892',
   'scripts/lib/runtime-module-security.ts': 'da536c84a63bb5e4c6ad4c301a64d329ac25b870c808f1df54a927022c7d6939',
@@ -53,7 +53,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/lib/project-policy/workspace-policy.mjs': '2eae19d07b13fcedf89bb0825bc99ee0a803493cbf10bfad2d557c46820ec3f5',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '171908f9f9be57f1496e1c70b05e7b0693036a1ef738e35a8767e1e362d502d9';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'c3031807b77570871fe2ba3003bdcfc41f01035221b65d7f27f9cc3c13b2b881';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
   '32df8c2fea1562044c38b9faabc729e046737de4c833b83e6d7087e4b392682a';

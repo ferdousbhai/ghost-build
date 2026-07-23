@@ -10,8 +10,8 @@ import { listTemplateSourceFiles } from './template-source.mjs';
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceDir = resolve(rootDir, 'template');
 
-function run(cwd, args, env = process.env) {
-  const result = spawnSync('pnpm', args, {
+function runExecutable(command, cwd, args, env = process.env) {
+  const result = spawnSync(command, args, {
     cwd,
     encoding: 'utf8',
     stdio: 'inherit',
@@ -21,8 +21,12 @@ function run(cwd, args, env = process.env) {
     throw result.error;
   }
   if (result.status !== 0) {
-    throw new Error(`pnpm ${args.join(' ')} failed with exit code ${result.status}.`);
+    throw new Error(`${command} ${args.join(' ')} failed with exit code ${result.status}.`);
   }
+}
+
+function run(cwd, args, env = process.env) {
+  runExecutable('pnpm', cwd, args, env);
 }
 
 function requireFailure(cwd, args) {
@@ -43,6 +47,8 @@ export async function verifyTemplate() {
     if (existsSync(generatedBindingsPath)) {
       throw new Error('The canonical template source must not contain generated Worker binding types.');
     }
+    runExecutable('npm', tempDir, ['ci', '--ignore-scripts', '--no-audit', '--no-fund']);
+    await rm(join(tempDir, 'node_modules'), { recursive: true, force: true });
     run(tempDir, ['install', '--frozen-lockfile']);
     // Typecheck owns route and Worker-binding generation. Run it before stack
     // verification so a fresh snapshot does not depend on ignored local files.
@@ -106,6 +112,7 @@ export async function verifyWorkerTemplateProfile() {
     requireFailure(tempDir, ['run', 'verify:stack']);
     await rm(join(tempDir, 'worker-configuration.d.ts'), { force: true });
     await convertToWorkerProfile(tempDir);
+    runExecutable('npm', tempDir, ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund']);
     run(tempDir, ['install', '--lockfile-only']);
     run(tempDir, ['install', '--frozen-lockfile']);
     run(tempDir, ['run', 'typecheck']);

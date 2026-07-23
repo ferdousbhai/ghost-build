@@ -10,23 +10,26 @@ const PNPM_CONFIG_FILE = `${PNPM_CONFIG_DIRECTORY}/config.yaml`;
 const PROJECT_NPMRC_FILE = '.npmrc';
 
 /**
- * pnpm 11 expects its user configuration file to exist in WebContainer. Keep
- * that managed file inside the project-visible filesystem because absolute
- * paths written through the WebContainer FS API do not necessarily address
- * the same root observed by spawned processes.
+ * Browser package managers probe project and user configuration paths while
+ * starting. Keep their managed, credential-free files in the project-visible
+ * filesystem because absolute paths written through the WebContainer FS API
+ * do not necessarily address the same root observed by spawned processes.
  */
-export async function prepareWebContainerPnpm(container: Pick<WebContainer, 'fs'>): Promise<void> {
+export async function prepareWebContainerPackageManagers(container: Pick<WebContainer, 'fs'>): Promise<void> {
   await container.fs.mkdir(PNPM_CONFIG_DIRECTORY, { recursive: true });
   await container.fs.writeFile(PNPM_CONFIG_FILE, '{}\n');
-  // WebContainer's Node 22 filesystem shim reports a missing project npmrc as
-  // a fatal read error to pnpm 10 instead of treating it as optional.
+  // Avoid an optional-config read race with the secret-file watcher.
   await container.fs.writeFile(PROJECT_NPMRC_FILE, MANAGED_WEBCONTAINER_NPMRC_CONTENT);
+}
+
+export function webContainerNpmEnvironment(): Record<string, string> {
+  return { CI: 'true' };
 }
 
 export function webContainerPnpmEnvironment(container: Pick<WebContainer, 'workdir'>): Record<string, string> {
   return {
     XDG_CONFIG_HOME: `${container.workdir}/${PNPM_CONFIG_ROOT}`,
-    CI: 'true',
+    ...webContainerNpmEnvironment(),
     // Keep the browser-only pnpm pinned even when packageManager names the
     // newer version used by production builds.
     npm_config_manage_package_manager_versions: 'false',
