@@ -8,16 +8,15 @@ import { parseOperationDiagnostics, type DiagnosticsStore } from './diagnostics-
 import { pageCoverage } from './bounded-pagination';
 import { runCommand } from './command';
 import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
-import {
-  prepareWebContainerPackageManagers,
-  webContainerNpmEnvironment,
-  webContainerPnpmCommand,
-  webContainerPnpmEnvironment,
-} from '~/lib/webcontainer/pnpm';
-import { withPreviewPackageManifest } from '~/lib/stores/startup/preview-package-manifest';
+import { prepareWebContainerPackageManagers, webContainerNpmEnvironment } from '~/lib/webcontainer/pnpm';
+import { createPreviewPackageJson, withPreviewPackageManifest } from '~/lib/stores/startup/preview-package-manifest';
 
 const DEPENDENCY_COMMAND_TIMEOUT_MS = 120_000;
-const NPM_REGISTRY = 'https://registry.npmjs.org/';
+
+type PackageManifest = {
+  dependencies?: Record<string, string>;
+  [key: string]: unknown;
+};
 
 export async function runNpmInstall(args: {
   invocation: GhostbuildToolInvocation;
@@ -38,42 +37,36 @@ export async function runNpmInstall(args: {
     const workspace = await args.container.fs.readFile('pnpm-workspace.yaml', 'utf-8');
     assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', workspace);
     const syncLockfile = mode === 'sync-lockfile';
-    const pnpmSourcePolicyArgs = ['--ignore-pnpmfile', '--reporter=append-only', `--registry=${NPM_REGISTRY}`];
     await prepareWebContainerPackageManagers(args.container);
-    await runCommand({
-      container: args.container,
-      command: webContainerPnpmCommand([
-        syncLockfile ? 'install' : 'add',
-        '--lockfile-only',
-        '--no-frozen-lockfile',
-        ...(!syncLockfile ? ['--save-prod', ...packages] : []),
-        ...pnpmSourcePolicyArgs,
-      ]),
-      displayName: syncLockfile ? 'pnpm install --lockfile-only' : `pnpm add (${packages.length} packages)`,
-      abortSignal: args.abortSignal,
-      onOutput: args.onOutput,
-      env: webContainerPnpmEnvironment(args.container),
-      timeoutMs: DEPENDENCY_COMMAND_TIMEOUT_MS,
-    });
     const packageJson = await args.container.fs.readFile('package.json', 'utf-8');
+    const previewPackageJson = createPreviewPackageJson(packageJson);
+    let installedPreviewPackageJson = previewPackageJson;
     await withPreviewPackageManifest(
       args.container,
       packageJson,
-      () =>
-        runCommand({
+      async () => {
+        await runCommand({
           container: args.container,
-          command: ['npm', 'install'],
+          command: ['npm', 'install', ...packages],
           displayName: 'npm install (browser preview)',
           abortSignal: args.abortSignal,
           onOutput: args.onOutput,
           env: webContainerNpmEnvironment(),
           timeoutMs: DEPENDENCY_COMMAND_TIMEOUT_MS,
-        }),
+        });
+        installedPreviewPackageJson = await args.container.fs.readFile('package.json', 'utf-8');
+      },
       { persistPreviewLock: true },
     );
+    if (!syncLockfile) {
+      await args.container.fs.writeFile(
+        'package.json',
+        mergeInstalledPreviewDependencies(packageJson, previewPackageJson, installedPreviewPackageJson),
+      );
+    }
     return toolSuccess(
       syncLockfile
-        ? 'Synchronized the browser preview and deployment lockfiles with package.json.'
+        ? 'Synchronized the browser preview dependencies with package.json.'
         : `Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'}.`,
       { mode, exitCode: 0 },
     );
@@ -104,4 +97,29 @@ export async function runNpmInstall(args: {
       { mode },
     );
   }
+}
+
+function mergeInstalledPreviewDependencies(
+  packageJson: string,
+  previewPackageJson: string,
+  installedPreviewPackageJson: string,
+): string {
+  const manifest = JSON.parse(packageJson) as PackageManifest;
+  const preview = JSON.parse(previewPackageJson) as PackageManifest;
+  const installed = JSON.parse(installedPreviewPackageJson) as PackageManifest;
+  const dependencyChanges = Object.fromEntries(
+    Object.entries(installed.dependencies ?? {}).filter(([name, version]) => preview.dependencies?.[name] !== version),
+  );
+
+  return `${JSON.stringify(
+    {
+      ...manifest,
+      dependencies: {
+        ...manifest.dependencies,
+        ...dependencyChanges,
+      },
+    },
+    null,
+    2,
+  )}\n`;
 }

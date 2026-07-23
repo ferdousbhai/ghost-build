@@ -9,7 +9,7 @@ vi.mock('~/lib/stores/containerBootState', () => ({
 }));
 
 describe('runNpmInstall', () => {
-  test('synchronizes the browser and deployment lockfiles through constrained commands', async () => {
+  test('synchronizes the browser lockfile without resolving the production graph', async () => {
     const spawn = vi.fn(async () => process('', 0));
     const result = await runNpmInstall({
       invocation: { toolName: 'npmInstall', args: { mode: 'sync-lockfile' } } as never,
@@ -19,36 +19,7 @@ describe('runNpmInstall', () => {
       diagnostics: new DiagnosticsStore(),
     });
     expect(result).toMatchObject({ ok: true, data: { mode: 'sync-lockfile', exitCode: 0 } });
-    expect(spawn).toHaveBeenNthCalledWith(
-      1,
-      'npx',
-      [
-        '--yes',
-        '--ignore-scripts',
-        '--registry=https://registry.npmjs.org/',
-        '--package=pnpm@9.15.9',
-        '--',
-        'pnpm',
-        'install',
-        '--lockfile-only',
-        '--no-frozen-lockfile',
-        '--ignore-pnpmfile',
-        '--reporter=append-only',
-        '--registry=https://registry.npmjs.org/',
-      ],
-      {
-        env: {
-          XDG_CONFIG_HOME: '/home/project/.ghostbuild/pnpm-config',
-          CI: 'true',
-          npm_config_ignore_scripts: 'true',
-          npm_config_audit: 'false',
-          npm_config_fund: 'false',
-          npm_config_registry: 'https://registry.npmjs.org/',
-          npm_config_manage_package_manager_versions: 'false',
-        },
-      },
-    );
-    expect(spawn).toHaveBeenNthCalledWith(2, 'npm', ['install'], {
+    expect(spawn).toHaveBeenCalledWith('npm', ['install'], {
       env: {
         CI: 'true',
         npm_config_ignore_scripts: 'true',
@@ -57,6 +28,25 @@ describe('runNpmInstall', () => {
         npm_config_registry: 'https://registry.npmjs.org/',
       },
     });
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  test('merges browser-resolved dependency versions back into package.json', async () => {
+    const spawn = vi.fn(async () => process('', 0));
+    const container = containerWithWorkspace(spawn);
+    const result = await runNpmInstall({
+      invocation: { toolName: 'npmInstall', args: { packages: 'date-fns' } } as never,
+      container,
+      abortSignal: new AbortController().signal,
+      onOutput: vi.fn(),
+      diagnostics: new DiagnosticsStore(),
+    });
+
+    expect(result).toMatchObject({ ok: true, data: { mode: 'add', exitCode: 0 } });
+    expect(container.fs.writeFile).toHaveBeenLastCalledWith(
+      'package.json',
+      expect.stringContaining('"date-fns": "^4.0.0"'),
+    );
   });
 
   test('turns failed command output into structured diagnostics', async () => {
@@ -79,7 +69,7 @@ describe('runNpmInstall', () => {
     });
   });
 
-  test('rejects a workspace-wide build-script bypass before spawning pnpm', async () => {
+  test('rejects a workspace-wide build-script bypass before spawning npm', async () => {
     const spawn = vi.fn(async () => process('', 0));
     const result = await runNpmInstall({
       invocation: { toolName: 'npmInstall', args: { packages: 'date-fns' } } as never,
@@ -137,6 +127,7 @@ function containerWithWorkspace(
     'strictDepBuilds: true\nblockExoticSubdeps: true\nallowBuilds:\n' +
     '  core-js-pure: true\n  esbuild: true\n  sharp: true\n  workerd: true\n',
 ): WebContainer {
+  const invokeSpawn = spawn as unknown as (command: string, args: string[], options: unknown) => Promise<unknown>;
   const files = new Map([
     ['package.json', '{"name":"generated","dependencies":{"react":"19.0.0"},"devDependencies":{"vite":"8.0.0"}}\n'],
     [
@@ -149,7 +140,15 @@ function containerWithWorkspace(
     ],
   ]);
   return {
-    spawn,
+    spawn: vi.fn(async (command: string, args: string[], options: unknown) => {
+      if (command === 'npm' && args.includes('date-fns')) {
+        files.set(
+          'package.json',
+          '{"name":"generated","dependencies":{"react":"19.0.0","date-fns":"^4.0.0"},"devDependencies":{"vite":"6.4.3"}}\n',
+        );
+      }
+      return invokeSpawn(command, args, options);
+    }),
     workdir: '/home/project',
     fs: {
       mkdir: vi.fn(),
