@@ -29,7 +29,7 @@
     "@ai-sdk/react": "^3.0.232",
     "@cloudflare/ai-chat": "^0.9.3",
     "@tanstack/react-router": "^1.170.18",
-    "@tanstack/react-start": "^1.168.30",
+    "@tanstack/react-start": "^1.168.32",
     "agents": "^0.17.4",
     "ai": "^6.0.230",
     "lucide-react": "1.25.0",
