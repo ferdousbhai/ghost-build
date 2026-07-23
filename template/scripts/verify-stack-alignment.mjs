@@ -36,12 +36,14 @@ const webAppRequiredPaths = [
   "agent-security-migrations/0001_agent_security.sql",
   "migrations",
   "scripts/lib/runtime-module-security.ts",
+  "scripts/vite-dev.mjs",
   "src/agents/app-agent.ts",
   "src/routeTree.gen.ts",
   "src/router.tsx",
   "src/routes/__root.tsx",
   "src/routes/index.tsx",
   "vite.config.ts",
+  "vite.preview.config.mjs",
 ];
 
 function readJson(path) {
@@ -74,9 +76,9 @@ export function verifyStackAlignment() {
   errors.push(...findBuildApprovalErrors(workspace, "pnpm-workspace.yaml"));
 
   const scripts = packageJson.scripts ?? {};
-  if (type === "web_app" && scripts.dev !== "vite dev --host 0.0.0.0") {
+  if (type === "web_app" && scripts.dev !== "node scripts/vite-dev.mjs") {
     errors.push(
-      'package.json must define "dev": "vite dev --host 0.0.0.0" for WebContainer preview.',
+      'package.json must define "dev": "node scripts/vite-dev.mjs" for environment-aware local and WebContainer development.',
     );
   }
   if (type === "web_app" && scripts.preview !== "vite preview --host 0.0.0.0") {
@@ -144,14 +146,18 @@ export function verifyStackAlignment() {
   const files = collectSourceEntries(rootDir, [
     "src",
     ...(type === "web_app"
-      ? ["vite.config.ts", "scripts/lib/runtime-module-security.ts"]
+      ? [
+          "vite.config.ts",
+          "scripts/lib/runtime-module-security.ts",
+          "scripts/vite-dev.mjs",
+        ]
       : []),
   ]);
   errors.push(
     ...findForbiddenImports(files),
     ...findForbiddenRuntimeEnvAccess(files, [
       {
-        pathSuffix: "vite.config.ts",
+        pathSuffix: "scripts/vite-dev.mjs",
         snippet: "process.env.GHOSTBUILD_PREVIEW",
       },
     ]),

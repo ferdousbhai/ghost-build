@@ -20,7 +20,8 @@ pnpm install --frozen-lockfile
 pnpm run validate
 ```
 
-Production provisioning and deployment are documented in [DEVELOPMENT.md](DEVELOPMENT.md).
+Production provisioning and the Cloudflare Workers Builds deployment path are documented in
+[DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Commands
 
@@ -29,7 +30,7 @@ Production provisioning and deployment are documented in [DEVELOPMENT.md](DEVELO
 | `pnpm run validate`         | Run the complete repository validation     |
 | `pnpm run build`            | Build the root Worker application          |
 | `pnpm run rebuild-template` | Rebuild the generated-application snapshot |
-| `pnpm run deploy`           | Validate, provision, migrate, and deploy   |
+| `pnpm run deploy`           | Validate, verify, migrate, and deploy      |
 | `pnpm run sbom:production`  | Print a reproducible production SPDX SBOM  |
 
 ## Repository Map

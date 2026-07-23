@@ -8,15 +8,15 @@ import { parseOperationDiagnostics, type DiagnosticsStore } from './diagnostics-
 import { pageCoverage } from './bounded-pagination';
 import { runCommand } from './command';
 import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
-import {
-  prepareWebContainerPackageManagers,
-  webContainerNpmEnvironment,
-  webContainerPnpmCommand,
-  webContainerPnpmEnvironment,
-} from '~/lib/webcontainer/pnpm';
+import { prepareWebContainerPackageManagers } from '~/lib/webcontainer/pnpm';
+import { withPreviewPackageManifest } from '~/lib/stores/startup/preview-package-manifest';
 
 const DEPENDENCY_COMMAND_TIMEOUT_MS = 120_000;
-const NPM_REGISTRY = 'https://registry.npmjs.org/';
+
+type PackageManifest = {
+  dependencies?: Record<string, string>;
+  [key: string]: unknown;
+};
 
 export async function runNpmInstall(args: {
   invocation: GhostbuildToolInvocation;
@@ -37,32 +37,34 @@ export async function runNpmInstall(args: {
     const workspace = await args.container.fs.readFile('pnpm-workspace.yaml', 'utf-8');
     assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', workspace);
     const syncLockfile = mode === 'sync-lockfile';
-    const npmSourcePolicyArgs = ['--ignore-scripts', '--no-audit', '--no-fund', `--registry=${NPM_REGISTRY}`];
-    const pnpmSourcePolicyArgs = ['--ignore-pnpmfile', '--reporter=append-only', `--registry=${NPM_REGISTRY}`];
     await prepareWebContainerPackageManagers(args.container);
-    await runCommand({
-      container: args.container,
-      command: syncLockfile
-        ? ['npm', 'install', '--package-lock-only', ...npmSourcePolicyArgs]
-        : ['npm', 'install', ...npmSourcePolicyArgs, ...packages],
-      displayName: syncLockfile ? 'npm install --package-lock-only' : `npm install (${packages.length} packages)`,
-      abortSignal: args.abortSignal,
-      onOutput: args.onOutput,
-      env: webContainerNpmEnvironment(),
-      timeoutMs: DEPENDENCY_COMMAND_TIMEOUT_MS,
-    });
-    await runCommand({
-      container: args.container,
-      command: webContainerPnpmCommand(['install', '--lockfile-only', '--no-frozen-lockfile', ...pnpmSourcePolicyArgs]),
-      displayName: 'pnpm install --lockfile-only',
-      abortSignal: args.abortSignal,
-      onOutput: args.onOutput,
-      env: webContainerPnpmEnvironment(args.container),
-      timeoutMs: DEPENDENCY_COMMAND_TIMEOUT_MS,
-    });
+    const packageJson = await args.container.fs.readFile('package.json', 'utf-8');
+    const packagesNeedingInstall = syncLockfile ? packages : findPackagesNeedingInstall(packageJson, packages);
+    if (!syncLockfile && packagesNeedingInstall.length === 0) {
+      return toolSuccess(`Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'}.`, {
+        mode,
+        exitCode: 0,
+      });
+    }
+    const packageJsonWithRequestedDependencies = addRequestedDependencies(packageJson, packagesNeedingInstall);
+    await withPreviewPackageManifest(
+      args.container,
+      packageJsonWithRequestedDependencies,
+      async () => {
+        await runCommand({
+          container: args.container,
+          command: ['npm', 'install'],
+          displayName: 'npm install (browser preview)',
+          abortSignal: args.abortSignal,
+          onOutput: args.onOutput,
+          timeoutMs: DEPENDENCY_COMMAND_TIMEOUT_MS,
+        });
+      },
+      { persistPreviewLock: true },
+    );
     return toolSuccess(
       syncLockfile
-        ? 'Synchronized package-lock.json and pnpm-lock.yaml with package.json.'
+        ? 'Synchronized the browser preview dependencies with package.json.'
         : `Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'}.`,
       { mode, exitCode: 0 },
     );
@@ -93,4 +95,53 @@ export async function runNpmInstall(args: {
       { mode },
     );
   }
+}
+
+function addRequestedDependencies(packageJson: string, packageSpecs: string[]): string {
+  if (packageSpecs.length === 0) {
+    return packageJson;
+  }
+
+  const manifest = JSON.parse(packageJson) as PackageManifest;
+  const requestedDependencies = Object.fromEntries(packageSpecs.map(splitRegistryPackageSpec));
+
+  return `${JSON.stringify(
+    {
+      ...manifest,
+      dependencies: {
+        ...manifest.dependencies,
+        ...requestedDependencies,
+      },
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function findPackagesNeedingInstall(packageJson: string, packageSpecs: string[]): string[] {
+  const manifest = JSON.parse(packageJson) as PackageManifest & {
+    devDependencies?: Record<string, string>;
+    optionalDependencies?: Record<string, string>;
+  };
+  const installedDependencies = {
+    ...manifest.devDependencies,
+    ...manifest.optionalDependencies,
+    ...manifest.dependencies,
+  };
+
+  return packageSpecs.filter((spec) => {
+    const [name, selector] = splitRegistryPackageSpec(spec);
+    const installedSelector = installedDependencies[name];
+    return installedSelector === undefined || (selector !== 'latest' && selector !== installedSelector);
+  });
+}
+
+function splitRegistryPackageSpec(spec: string): [name: string, selector: string] {
+  const selectorIndex = spec.startsWith('@') ? spec.indexOf('@', spec.indexOf('/') + 1) : spec.indexOf('@');
+
+  if (selectorIndex === -1) {
+    return [spec, 'latest'];
+  }
+
+  return [spec.slice(0, selectorIndex), spec.slice(selectorIndex + 1)];
 }

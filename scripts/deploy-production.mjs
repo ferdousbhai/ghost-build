@@ -6,6 +6,7 @@ import { verifyGlobalDeployment, verifyLocalDeployment } from './verify-live-dep
 const CLIENT_ID_ENV = 'CLOUDFLARE_OAUTH_CLIENT_ID';
 const MAX_CLIENT_ID_LENGTH = 512;
 const COMMIT_SHA_PATTERN = /^[a-f0-9]{40}$/;
+const WORKERS_BUILD_UUID_PATTERN = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 
 /**
  * @typedef {(command: string, args: readonly string[], options: {stdio: 'inherit'}) => {
@@ -53,12 +54,65 @@ export function resolveCurrentCommitSha({ spawn = spawnSync } = {}) {
 }
 
 /**
+ * @param {{
+ *   env?: Record<string, string | undefined>;
+ *   spawn?: typeof spawnSync;
+ *   currentCommitSha?: string;
+ * }} [options]
+ */
+export function validateWorkersBuildContext({ env = process.env, spawn = spawnSync, currentCommitSha } = {}) {
+  const { branch, commitSha } = validateWorkersBuildMetadata({ env, spawn, currentCommitSha });
+  if (branch !== 'main') {
+    throw new Error(`Cloudflare production deploy requires the main branch; found ${branch}.`);
+  }
+  return commitSha;
+}
+
+/**
+ * @param {{
+ *   env?: Record<string, string | undefined>;
+ *   spawn?: typeof spawnSync;
+ *   currentCommitSha?: string;
+ * }} [options]
+ */
+export function validateWorkersBuildMetadata({ env = process.env, spawn = spawnSync, currentCommitSha } = {}) {
+  if (env.WORKERS_CI !== '1') {
+    throw new Error('Cloudflare Workers Builds requires WORKERS_CI=1.');
+  }
+  const branch = env.WORKERS_CI_BRANCH;
+  if (
+    typeof branch !== 'string' ||
+    branch.length === 0 ||
+    branch.length > 255 ||
+    /[\u0000-\u001f\u007f]/.test(branch)
+  ) {
+    throw new Error('WORKERS_CI_BRANCH must be a non-empty Git branch name without control characters.');
+  }
+  const buildCommitSha = validateCommitSha(env.WORKERS_CI_COMMIT_SHA);
+  const checkoutCommitSha = currentCommitSha ?? resolveCurrentCommitSha({ spawn });
+  if (buildCommitSha !== checkoutCommitSha) {
+    throw new Error(
+      `Workers Builds commit ${buildCommitSha} does not match the checked-out commit ${checkoutCommitSha}.`,
+    );
+  }
+  if (typeof env.WORKERS_CI_BUILD_UUID !== 'string' || !WORKERS_BUILD_UUID_PATTERN.test(env.WORKERS_CI_BUILD_UUID)) {
+    throw new Error('WORKERS_CI_BUILD_UUID must be a lowercase UUID.');
+  }
+  return { branch, commitSha: buildCommitSha };
+}
+
+/**
  * Resolve a commit that exactly describes the files being deployed. Tracked or
  * untracked changes would make COMMIT_SHA misleading, so production fails closed.
- * @param {{spawn?: typeof spawnSync}} [options]
+ * @param {{spawn?: typeof spawnSync, env?: Record<string, string | undefined>}} [options]
  */
-export function resolveDeployableCommitSha({ spawn = spawnSync } = {}) {
+export function resolveDeployableCommitSha({ spawn = spawnSync, env = process.env } = {}) {
   const commitSha = resolveCurrentCommitSha({ spawn });
+  if (env.WORKERS_CI === '1') {
+    validateWorkersBuildContext({ env, spawn, currentCommitSha: commitSha });
+  } else if (env.WORKERS_CI !== undefined) {
+    throw new Error(`WORKERS_CI must be "1" when configured; found ${JSON.stringify(env.WORKERS_CI)}.`);
+  }
   const result = spawn('git', ['status', '--porcelain=v1', '--untracked-files=normal'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -174,12 +228,18 @@ function isMainModule() {
 if (isMainModule()) {
   const main = async () => {
     const [command, ...extraArgs] = process.argv.slice(2);
-    if (extraArgs.length > 0 || (command !== undefined && command !== '--check')) {
-      throw new Error('Usage: node scripts/deploy-production.mjs [--check]');
+    if (
+      extraArgs.length > 0 ||
+      (command !== undefined && command !== '--check' && command !== '--check-workers-builds')
+    ) {
+      throw new Error('Usage: node scripts/deploy-production.mjs [--check|--check-workers-builds]');
+    }
+    if (command === '--check-workers-builds' && process.env.WORKERS_CI !== '1') {
+      throw new Error('The Workers Builds preflight may run only when WORKERS_CI=1.');
     }
     const clientId = validateOAuthClientId(process.env[CLIENT_ID_ENV]);
     const commitSha = resolveDeployableCommitSha();
-    if (command === '--check') {
+    if (command === '--check' || command === '--check-workers-builds') {
       console.log(`Production deploy inputs are valid for commit ${commitSha}.`);
       return;
     }

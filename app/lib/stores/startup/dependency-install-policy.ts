@@ -1,10 +1,9 @@
-const NPM_REGISTRY = 'https://registry.npmjs.org/';
-
 /**
  * Restored snapshots are untrusted project data. Dependency resolution is
- * registry-bound, project pnpm hooks are disabled, and no lifecycle scripts
- * execute merely because a user opens or restores a project.
+ * constrained by the managed npm environment. Keep the argv shape identical
+ * to WebContainer's documented accelerated install command so it does not
+ * fall back to materializing the full dependency graph in the renderer.
  */
 export function startupInstallArgs(): string[] {
-  return ['install', '--ignore-scripts', '--no-audit', '--no-fund', `--registry=${NPM_REGISTRY}`];
+  return ['install'];
 }

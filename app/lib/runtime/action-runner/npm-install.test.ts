@@ -9,57 +9,72 @@ vi.mock('~/lib/stores/containerBootState', () => ({
 }));
 
 describe('runNpmInstall', () => {
-  test('synchronizes the browser and deployment lockfiles through constrained commands', async () => {
+  test('synchronizes the browser lockfile without resolving the production graph', async () => {
     const spawn = vi.fn(async () => process('', 0));
+    const container = containerWithWorkspace(spawn);
     const result = await runNpmInstall({
       invocation: { toolName: 'npmInstall', args: { mode: 'sync-lockfile' } } as never,
-      container: containerWithWorkspace(spawn),
+      container,
       abortSignal: new AbortController().signal,
       onOutput: vi.fn(),
       diagnostics: new DiagnosticsStore(),
     });
     expect(result).toMatchObject({ ok: true, data: { mode: 'sync-lockfile', exitCode: 0 } });
-    expect(spawn).toHaveBeenNthCalledWith(
-      1,
-      'npm',
-      [
-        'install',
-        '--package-lock-only',
-        '--ignore-scripts',
-        '--no-audit',
-        '--no-fund',
-        '--registry=https://registry.npmjs.org/',
-      ],
-      {
-        env: {
-          CI: 'true',
-        },
-      },
+    expect(container.spawn).toHaveBeenCalledWith('npm', ['install']);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  test('stages requested dependencies before running the native preview install', async () => {
+    const spawn = vi.fn(async () => process('', 0));
+    const container = containerWithWorkspace(spawn);
+    const result = await runNpmInstall({
+      invocation: { toolName: 'npmInstall', args: { packages: 'date-fns' } } as never,
+      container,
+      abortSignal: new AbortController().signal,
+      onOutput: vi.fn(),
+      diagnostics: new DiagnosticsStore(),
+    });
+
+    expect(result).toMatchObject({ ok: true, data: { mode: 'add', exitCode: 0 } });
+    expect(container.fs.writeFile).toHaveBeenCalledWith(
+      'package.json',
+      expect.stringContaining('"date-fns": "latest"'),
     );
-    expect(spawn).toHaveBeenNthCalledWith(
-      2,
-      'npx',
-      [
-        '--yes',
-        '--ignore-scripts',
-        '--registry=https://registry.npmjs.org/',
-        '--package=pnpm@9.15.9',
-        '--',
-        'pnpm',
-        'install',
-        '--lockfile-only',
-        '--no-frozen-lockfile',
-        '--ignore-pnpmfile',
-        '--reporter=append-only',
-        '--registry=https://registry.npmjs.org/',
-      ],
-      {
-        env: {
-          XDG_CONFIG_HOME: '/home/project/.ghostbuild/pnpm-config',
-          CI: 'true',
-          npm_config_manage_package_manager_versions: 'false',
-        },
-      },
+    expect(container.spawn).toHaveBeenCalledWith('npm', ['install']);
+  });
+
+  test('skips packages already present in the generated runtime', async () => {
+    const spawn = vi.fn(async () => process('', 0));
+    const container = containerWithWorkspace(spawn);
+    const result = await runNpmInstall({
+      invocation: { toolName: 'npmInstall', args: { packages: 'react' } } as never,
+      container,
+      abortSignal: new AbortController().signal,
+      onOutput: vi.fn(),
+      diagnostics: new DiagnosticsStore(),
+    });
+
+    expect(result).toMatchObject({ ok: true, data: { mode: 'add', exitCode: 0 } });
+    expect(container.spawn).not.toHaveBeenCalled();
+  });
+
+  test('preserves registry selectors and aliases in the generated manifest', async () => {
+    const container = containerWithWorkspace(vi.fn(async () => process('', 0)));
+    const result = await runNpmInstall({
+      invocation: {
+        toolName: 'npmInstall',
+        args: { packages: '@scope/icons@^2.0.0 date-tools@npm:date-fns@^4.0.0' },
+      } as never,
+      container,
+      abortSignal: new AbortController().signal,
+      onOutput: vi.fn(),
+      diagnostics: new DiagnosticsStore(),
+    });
+
+    expect(result).toMatchObject({ ok: true, data: { mode: 'add', exitCode: 0 } });
+    expect(container.fs.writeFile).toHaveBeenCalledWith(
+      'package.json',
+      expect.stringMatching(/"@scope\/icons": "\^2\.0\.0"[\s\S]*"date-tools": "npm:date-fns@\^4\.0\.0"/),
     );
   });
 
@@ -83,7 +98,7 @@ describe('runNpmInstall', () => {
     });
   });
 
-  test('rejects a workspace-wide build-script bypass before spawning pnpm', async () => {
+  test('rejects a workspace-wide build-script bypass before spawning npm', async () => {
     const spawn = vi.fn(async () => process('', 0));
     const result = await runNpmInstall({
       invocation: { toolName: 'npmInstall', args: { packages: 'date-fns' } } as never,
@@ -141,9 +156,38 @@ function containerWithWorkspace(
     'strictDepBuilds: true\nblockExoticSubdeps: true\nallowBuilds:\n' +
     '  core-js-pure: true\n  esbuild: true\n  sharp: true\n  workerd: true\n',
 ): WebContainer {
+  const invokeSpawn = spawn as unknown as (command: string, args: string[], options: unknown) => Promise<unknown>;
+  const files = new Map([
+    ['package.json', '{"name":"generated","dependencies":{"react":"19.0.0"},"devDependencies":{"vite":"8.0.0"}}\n'],
+    [
+      'package-lock.json',
+      '{"lockfileVersion":3,"packages":{"":{"dependencies":{"react":"19.0.0"},"devDependencies":{"vite":"8.0.0"}},"node_modules/react":{"version":"19.0.0"},"node_modules/vite":{"version":"8.0.0"}}}\n',
+    ],
+    [
+      'preview-runtime/package-lock.json',
+      '{"lockfileVersion":3,"packages":{"":{"dependencies":{"react":"19.0.0"},"devDependencies":{"vite":"6.4.3"}},"node_modules/react":{"version":"19.0.0"},"node_modules/vite":{"version":"6.4.3"}}}\n',
+    ],
+  ]);
   return {
-    spawn,
+    spawn: vi.fn(async (command: string, args: string[], options: unknown) => {
+      return invokeSpawn(command, args, options);
+    }),
     workdir: '/home/project',
-    fs: { mkdir: vi.fn(), readFile: vi.fn(async () => workspace), writeFile: vi.fn() },
+    fs: {
+      mkdir: vi.fn(),
+      readFile: vi.fn(async (path: string) => {
+        if (path === 'pnpm-workspace.yaml') {
+          return workspace;
+        }
+        const content = files.get(path);
+        if (content === undefined) {
+          throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        }
+        return content;
+      }),
+      writeFile: vi.fn(async (path: string, content: string) => {
+        files.set(path, content);
+      }),
+    },
   } as unknown as WebContainer;
 }

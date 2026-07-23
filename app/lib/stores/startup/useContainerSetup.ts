@@ -23,8 +23,9 @@ import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifes
 import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
 import { startupInstallArgs } from './dependency-install-policy';
 import { prepareWebContainerPackageManagers, webContainerNpmEnvironment } from '~/lib/webcontainer/pnpm';
+import { withPreviewPackageManifest } from './preview-package-manifest';
 
-const TEMPLATE_URL = '/template-snapshot-86f14cd7.bin';
+const TEMPLATE_URL = '/template-snapshot-003d998c.bin';
 const logger = createScopedLogger('ContainerSetup');
 const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)));
 const WEBCONTAINER_BOOT_TIMEOUT_MS = 60_000;
@@ -50,7 +51,11 @@ export function useNewChatContainerSetup(enabled: boolean) {
           WEBCONTAINER_BOOT_TIMEOUT_MS,
           'The browser workspace took too long to start.',
         );
-        await setupContainer({ snapshotUrl: TEMPLATE_URL, allowInstallFailure: false });
+        await setupContainer({
+          snapshotUrl: TEMPLATE_URL,
+          allowInstallFailure: false,
+          trustedTemplateDependencies: true,
+        });
       } catch (error) {
         if (isUnsupportedRuntimeError(error)) {
           return;
@@ -94,7 +99,11 @@ export function useExistingChatContainerSetup(loadedChatId: string | undefined) 
           logger.warn(`Existing chat ${loadedChatId} has no snapshot. Loading the base template.`);
           snapshotUrl = TEMPLATE_URL;
         }
-        await setupContainer({ snapshotUrl, allowInstallFailure: true });
+        await setupContainer({
+          snapshotUrl,
+          allowInstallFailure: true,
+          trustedTemplateDependencies: false,
+        });
       } catch (error) {
         if (isUnsupportedRuntimeError(error)) {
           return;
@@ -107,7 +116,11 @@ export function useExistingChatContainerSetup(loadedChatId: string | undefined) 
   }, [loadedChatId, sessionId]);
 }
 
-async function setupContainer(options: { snapshotUrl: string; allowInstallFailure: boolean }) {
+async function setupContainer(options: {
+  snapshotUrl: string;
+  allowInstallFailure: boolean;
+  trustedTemplateDependencies: boolean;
+}) {
   const controller = new AbortController();
   const downloadTimeout = setTimeout(() => controller.abort(), SNAPSHOT_DOWNLOAD_TIMEOUT_MS);
   let resp: Response;
@@ -163,7 +176,9 @@ async function setupContainer(options: { snapshotUrl: string; allowInstallFailur
   assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', pnpmWorkspace);
 
   setContainerBootState(ContainerBootState.DOWNLOADING_DEPENDENCIES);
-  const { output, exitCode } = await runDependencyInstall(container, startupInstallArgs());
+  const { output, exitCode } = await withPreviewPackageManifest(container, packageJson, () =>
+    runDependencyInstall(container, startupInstallArgs(), options.trustedTemplateDependencies),
+  );
   logger.debug('dependency install output', cleanTerminalOutput(output));
 
   if (exitCode !== 0) {
@@ -190,14 +205,20 @@ async function setupContainer(options: { snapshotUrl: string; allowInstallFailur
 async function runDependencyInstall(
   container: Awaited<ReturnType<typeof startWebcontainer>>,
   args: string[],
+  trustedTemplateDependencies: boolean,
 ): Promise<{ output: string; exitCode: number }> {
   await withTimeout(
     prepareWebContainerPackageManagers(container),
     WORKSPACE_STEP_TIMEOUT_MS,
     'Ghostbuild could not prepare dependency installation.',
   );
+  // WebContainer Turbo recognizes the literal two-argument `npm install`
+  // call. Use it only for the reviewed base-template lock; restored project
+  // data keeps the hardened environment that disables dependency scripts.
   const npm = await withTimeout(
-    container.spawn('npm', args, { env: webContainerNpmEnvironment() }),
+    trustedTemplateDependencies
+      ? container.spawn('npm', args)
+      : container.spawn('npm', args, { env: webContainerNpmEnvironment() }),
     WORKSPACE_STEP_TIMEOUT_MS,
     'Ghostbuild could not start dependency installation.',
   );

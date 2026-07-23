@@ -51,111 +51,6 @@ export function findCompositeActionSafetyErrors(content, label) {
   return [...parsed.errors, ...findActionPinErrors(parsed.value, label)];
 }
 
-export function findProductionDeployWorkflowErrors(content, label) {
-  const parsed = parseYamlObject(content, label);
-  if (!parsed.value) {
-    return parsed.errors;
-  }
-  const workflow = parsed.value;
-  const errors = [...parsed.errors];
-  requireValue(errors, `${label} name`, workflow.name, "Production Deploy");
-  requireWorkflowDispatch(errors, workflow, label);
-  const push = isRecord(workflow.on) ? workflow.on.push : undefined;
-  const branches =
-    isRecord(push) && Array.isArray(push.branches) ? push.branches : [];
-  if (!branches.includes("main")) {
-    errors.push(`${label} must run for pushes to main.`);
-  }
-
-  const job = workflowJob(workflow, "deploy");
-  if (!job) {
-    errors.push(`${label} must define jobs.deploy.`);
-    return errors;
-  }
-  requireValue(
-    errors,
-    `${label} jobs.deploy.if`,
-    job.if,
-    "github.repository == 'ferdousbhai/ghostbuild' && github.ref == 'refs/heads/main'",
-  );
-  const environmentName = isRecord(job.environment)
-    ? job.environment.name
-    : job.environment;
-  requireValue(
-    errors,
-    `${label} jobs.deploy.environment.name`,
-    environmentName,
-    "production",
-  );
-
-  const steps = workflowJobSteps(job);
-  const specifications = [
-    runStep("pnpm run validate"),
-    runStep("git diff --exit-code"),
-    runStep("node scripts/deploy-production.mjs --check", {
-      CLOUDFLARE_OAUTH_CLIENT_ID: "${{ vars.CLOUDFLARE_OAUTH_CLIENT_ID }}",
-    }),
-    runStep("pnpm run provision:production", {
-      CLOUDFLARE_ACCOUNT_ID: "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
-      CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}",
-    }),
-    runStep("pnpm run verify:production-config"),
-    runStep("pnpm run d1:bookmark:production", {
-      CLOUDFLARE_ACCOUNT_ID: "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
-      CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}",
-    }),
-    runStep("pnpm run d1:migrations:apply:production", {
-      CLOUDFLARE_ACCOUNT_ID: "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
-      CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}",
-    }),
-    {
-      description: "the Cloudflare Wrangler deploy action",
-      matches: (step) =>
-        typeof step.uses === "string" &&
-        step.uses.startsWith("cloudflare/wrangler-action@"),
-      validate: (step, path) => {
-        requireValue(
-          errors,
-          `${path}.with.apiToken`,
-          isRecord(step.with) ? step.with.apiToken : undefined,
-          "${{ secrets.CLOUDFLARE_API_TOKEN }}",
-        );
-        requireValue(
-          errors,
-          `${path}.with.accountId`,
-          isRecord(step.with) ? step.with.accountId : undefined,
-          "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
-        );
-        requireValue(
-          errors,
-          `${path}.with.packageManager`,
-          isRecord(step.with) ? step.with.packageManager : undefined,
-          "pnpm",
-        );
-        requireValue(
-          errors,
-          `${path}.with.command`,
-          isRecord(step.with) ? normalizedScalar(step.with.command) : undefined,
-          "deploy --var COMMIT_SHA:${{ github.sha }} --var CLOUDFLARE_OAUTH_CLIENT_ID:${{ vars.CLOUDFLARE_OAUTH_CLIENT_ID }}",
-        );
-      },
-    },
-    runStep("node scripts/verify-live-deployment.mjs local", {
-      EXPECTED_SHA: "${{ github.sha }}",
-    }),
-    runStep("node scripts/verify-live-deployment.mjs global", {
-      EXPECTED_SHA: "${{ github.sha }}",
-    }),
-  ];
-  requireOrderedWorkflowSteps(
-    errors,
-    steps,
-    `${label} jobs.deploy`,
-    specifications,
-  );
-  return errors;
-}
-
 export function findCiWorkflowErrors(content, label) {
   const parsed = parseYamlObject(content, label);
   if (!parsed.value) {
@@ -496,10 +391,6 @@ function meaningfulRunLines(run) {
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith("#"));
-}
-
-function normalizedScalar(value) {
-  return typeof value === "string" ? value.trim() : value;
 }
 
 function requireValue(errors, label, actual, expected) {

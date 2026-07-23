@@ -16,7 +16,7 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const allowUnprovisioned = process.argv.includes("--allow-unprovisioned");
 const placeholderDatabaseId = "00000000-0000-0000-0000-000000000000";
 const previewScripts = new Map([
-  ["dev", "vite dev --host 0.0.0.0"],
+  ["dev", "node scripts/vite-dev.mjs"],
   ["preview", "vite preview --host 0.0.0.0"],
 ]);
 
@@ -55,7 +55,7 @@ function verifyWorker(errors, config) {
     errors,
     "wrangler.jsonc compatibility_date",
     config?.compatibility_date,
-    "2026-07-18",
+    "2026-07-21",
   );
   requireEqual(
     errors,

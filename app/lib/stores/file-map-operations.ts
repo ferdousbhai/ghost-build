@@ -205,7 +205,7 @@ function pathDepth(relativePath: string): number {
   return relativePath.split('/').length;
 }
 
-function isExcludedProjectPath(relativePath: string): boolean {
+export function isExcludedProjectPath(relativePath: string): boolean {
   const segments = relativePath.split('/');
   return (
     segments.some((segment) => EXCLUDED_DIRECTORY_NAMES.has(segment)) || EXCLUDED_FILE_NAMES.has(segments.at(-1) ?? '')
