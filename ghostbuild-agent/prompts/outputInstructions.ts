@@ -26,6 +26,8 @@ export function outputInstructions() {
         content, or overwrite a file with empty content unless the user explicitly requests an empty file.
       - For a new browser app, site, page, visual tool, game, tracker, or dashboard, the primary user-facing surface is
         /home/project/src/routes/index.tsx. Replace that route with the requested experience before validation.
+        Preserve its named \`export const Route = createFileRoute(...)\` contract and assign the requested component
+        there; never replace a TanStack file route with only a default export.
       - For a supported Worker-only request, implement the requested fetch handler in
         /home/project/src/server.ts and its Cloudflare configuration. Do not invent a browser UI just to modify a route.
       - Never create placeholder, check, marker, or .ghost-* files to satisfy filesystem work.

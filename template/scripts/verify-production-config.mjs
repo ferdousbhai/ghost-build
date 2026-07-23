@@ -55,7 +55,7 @@ function verifyWorker(errors, config) {
     errors,
     "wrangler.jsonc compatibility_date",
     config?.compatibility_date,
-    "2026-07-18",
+    "2026-07-21",
   );
   requireEqual(
     errors,

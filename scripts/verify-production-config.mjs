@@ -33,7 +33,7 @@ export {
 };
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const REQUIRED_COMPATIBILITY_DATE = '2026-07-18';
+const REQUIRED_COMPATIBILITY_DATE = '2026-07-21';
 const REQUIRED_OAUTH_SCOPES =
   'account-settings.read user-details.read workers-scripts.write d1.write workers-r2.write ai.read';
 const REQUIRED_SECRET_NAMES = [

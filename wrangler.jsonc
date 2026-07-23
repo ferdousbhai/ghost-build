@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ghostbuild",
-  "compatibility_date": "2026-07-18",
+  "compatibility_date": "2026-07-21",
   "compatibility_flags": ["nodejs_compat"],
   "main": "app/server.ts",
   "workers_dev": false,

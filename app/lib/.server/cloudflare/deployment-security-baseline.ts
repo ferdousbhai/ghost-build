@@ -1,6 +1,6 @@
 import templateSnapshotManifest from 'public/template-snapshot-manifest.json';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 9 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 10 as const;
 export const DEPLOYMENT_SECURITY_CLEANUP_CRON = '0 3 * * *';
 export const DEPLOYMENT_VERSION_METADATA_BINDING = 'CF_VERSION_METADATA';
 export const DEPLOYMENT_SECURITY_BASELINE_BINDING = 'GHOSTBUILD_SECURITY_BASELINE_VERSION';
@@ -45,7 +45,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/cf-typegen.mjs': '6c82a0afdb50c32b205dbe4677b207337a38ad7ea70950a3e63758f0c04e1ae7',
   'scripts/vite-dev.mjs': '7470bae2236ca6eda89c4eb2ac99563124d35c70fbaf102ddd9dcb19ebb8f559',
   'scripts/verify-stack-alignment.mjs': '50cdb173e68c5763532e9ba1b7b34f646785a7d361144acd8ce6fc29ffe0c2b9',
-  'scripts/verify-production-config.mjs': '779ddbf6fe353ff430b51a4e431bb43df13bbe0045c27ae50ec218bbff5ca060',
+  'scripts/verify-production-config.mjs': 'b22c025b4c3e4a53aa8c2edca59ead871979dbadad6d575bfb052e44ed645a8d',
   'scripts/verify-production-licenses.mjs': '22952be32b45c416551ca2681a202b72c616aca61c6643ce946868373320a82d',
   'scripts/lib/production-license-artifact.mjs': 'e9ff7fc97973e4299f9a4b3026f148f3e32e6c2ff71d21bdbc40ae1e60d49892',
   'scripts/lib/runtime-module-security.ts': 'da536c84a63bb5e4c6ad4c301a64d329ac25b870c808f1df54a927022c7d6939',
@@ -58,7 +58,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/lib/project-policy/workspace-policy.mjs': '2eae19d07b13fcedf89bb0825bc99ee0a803493cbf10bfad2d557c46820ec3f5',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'be3da8216470e9729bbc848245de51a0e149d68c6039e52f72cff61658fc8f8a';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '9b12aa559171fe6409e40a7e3cdb4db6c3ba97a5ef54024cbba2859587ff7ff9';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
   '32df8c2fea1562044c38b9faabc729e046737de4c833b83e6d7087e4b392682a';
