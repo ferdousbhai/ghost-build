@@ -39,7 +39,14 @@ export async function runNpmInstall(args: {
     const syncLockfile = mode === 'sync-lockfile';
     await prepareWebContainerPackageManagers(args.container);
     const packageJson = await args.container.fs.readFile('package.json', 'utf-8');
-    const packageJsonWithRequestedDependencies = addRequestedDependencies(packageJson, packages);
+    const packagesNeedingInstall = syncLockfile ? packages : findPackagesNeedingInstall(packageJson, packages);
+    if (!syncLockfile && packagesNeedingInstall.length === 0) {
+      return toolSuccess(`Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'}.`, {
+        mode,
+        exitCode: 0,
+      });
+    }
+    const packageJsonWithRequestedDependencies = addRequestedDependencies(packageJson, packagesNeedingInstall);
     await withPreviewPackageManifest(
       args.container,
       packageJsonWithRequestedDependencies,
@@ -109,6 +116,24 @@ function addRequestedDependencies(packageJson: string, packageSpecs: string[]): 
     null,
     2,
   )}\n`;
+}
+
+function findPackagesNeedingInstall(packageJson: string, packageSpecs: string[]): string[] {
+  const manifest = JSON.parse(packageJson) as PackageManifest & {
+    devDependencies?: Record<string, string>;
+    optionalDependencies?: Record<string, string>;
+  };
+  const installedDependencies = {
+    ...manifest.devDependencies,
+    ...manifest.optionalDependencies,
+    ...manifest.dependencies,
+  };
+
+  return packageSpecs.filter((spec) => {
+    const [name, selector] = splitRegistryPackageSpec(spec);
+    const installedSelector = installedDependencies[name];
+    return installedSelector === undefined || (selector !== 'latest' && selector !== installedSelector);
+  });
 }
 
 function splitRegistryPackageSpec(spec: string): [name: string, selector: string] {

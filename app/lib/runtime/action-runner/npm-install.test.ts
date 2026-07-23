@@ -43,6 +43,21 @@ describe('runNpmInstall', () => {
     expect(container.spawn).toHaveBeenCalledWith('npm', ['install']);
   });
 
+  test('skips packages already present in the generated runtime', async () => {
+    const spawn = vi.fn(async () => process('', 0));
+    const container = containerWithWorkspace(spawn);
+    const result = await runNpmInstall({
+      invocation: { toolName: 'npmInstall', args: { packages: 'react' } } as never,
+      container,
+      abortSignal: new AbortController().signal,
+      onOutput: vi.fn(),
+      diagnostics: new DiagnosticsStore(),
+    });
+
+    expect(result).toMatchObject({ ok: true, data: { mode: 'add', exitCode: 0 } });
+    expect(container.spawn).not.toHaveBeenCalled();
+  });
+
   test('preserves registry selectors and aliases in the generated manifest', async () => {
     const container = containerWithWorkspace(vi.fn(async () => process('', 0)));
     const result = await runNpmInstall({
