@@ -42,10 +42,10 @@ Configure secret values as Cloudflare Worker secrets; do not store them in sourc
 The checked-in D1 ID belongs to Ghostbuild production. Before provisioning a fork in another account, replace it with
 `00000000-0000-0000-0000-000000000000`. The provisioning script refuses to replace an unknown non-placeholder ID.
 
-Production deployment requires:
+Production operations require:
 
-- Wrangler authentication for local deploys, or the shared `account-workers-builds-production` build token in Workers
-  Builds
+- the shared `account-workers-builds-production` build token for Workers Builds source deployments, or Wrangler
+  authentication for separate provisioning and emergency rollback operations
 - `CLOUDFLARE_OAUTH_CLIENT_ID` in the deploy environment
 - the Worker secrets declared by `wrangler.jsonc`
 
@@ -115,8 +115,11 @@ For an emergency rollback from a clean checkout of current `main`, first inspect
 
 ```bash
 pnpm exec wrangler versions view '<version-id>' --name ghostbuild --json
-pnpm exec wrangler versions deploy '<version-id>@100%' --name ghostbuild --message '<reason>' --yes
+pnpm exec wrangler rollback '<version-id>' --name ghostbuild --message '<reason>'
 ```
+
+Rollback promotes the selected immutable Worker version without changing connected D1 or R2 resources. If a release
+also changed stored data, assess recovery separately using the pre-migration D1 bookmark.
 
 The Workers Builds deploy pipeline validates the repository and confirms that its clean Git commit exactly identifies
 the build before any Cloudflare resource, bookmark, or migration mutation. The preflight also rejects ignored root

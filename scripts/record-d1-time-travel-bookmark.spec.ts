@@ -18,11 +18,16 @@ describe('D1 Time Travel bookmark recording', () => {
     expect(() => parseD1TimeTravelBookmark('{"bookmark":"unsafe value"}')).toThrow('returned an invalid bookmark');
   });
 
-  it('formats the exact restore command with a local fallback', () => {
-    expect(formatD1RestoreSummary('bookmark-1')).toContain(
-      '`pnpm exec wrangler d1 time-travel restore ghostbuild --bookmark=bookmark-1`',
-    );
-    expect(formatD1RestoreSummary('bookmark-1')).toContain('`local deployment`');
+  it('formats the exact Workers Builds identity and restore command', () => {
+    const summary = formatD1RestoreSummary('bookmark-1', {
+      buildUuid: '11111111-2222-3333-8444-555555555555',
+      commitSha,
+      provider: 'cloudflare-workers-builds',
+    });
+    expect(summary).toContain('`pnpm exec wrangler d1 time-travel restore ghostbuild --bookmark=bookmark-1`');
+    expect(summary).toContain(`- Commit: \`${commitSha}\``);
+    expect(summary).toContain('- Build: `11111111-2222-3333-8444-555555555555`');
+    expect(summary).toContain('- Provider: `cloudflare-workers-builds`');
   });
 
   it('resolves Workers Builds release identity from provider metadata', () => {

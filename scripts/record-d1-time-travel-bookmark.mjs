@@ -18,21 +18,18 @@ export function parseD1TimeTravelBookmark(output) {
   return bookmark;
 }
 
-export function formatD1RestoreSummary(bookmark, commitSha = '', { buildUuid = '', provider = 'local' } = {}) {
-  const commit = commitSha.trim() || 'local deployment';
-  const lines = [
+export function formatD1RestoreSummary(bookmark, { buildUuid, commitSha, provider }) {
+  return [
     '### Pre-migration D1 restore point',
     '',
     `- Database: \`${DATABASE_NAME}\``,
-    `- Commit: \`${commit}\``,
+    `- Commit: \`${commitSha}\``,
+    `- Build: \`${buildUuid}\``,
     `- Provider: \`${provider}\``,
     `- Bookmark: \`${bookmark}\``,
     `- Restore command: \`pnpm exec wrangler d1 time-travel restore ${DATABASE_NAME} --bookmark=${bookmark}\``,
-  ];
-  if (buildUuid) {
-    lines.splice(4, 0, `- Build: \`${buildUuid}\``);
-  }
-  return [...lines, ''].join('\n');
+    '',
+  ].join('\n');
 }
 
 /**
@@ -64,7 +61,7 @@ export function recordD1TimeTravelBookmark({
   identity = resolveReleaseIdentity(),
 } = {}) {
   const bookmark = parseD1TimeTravelBookmark(query());
-  const summary = formatD1RestoreSummary(bookmark, identity.commitSha, identity);
+  const summary = formatD1RestoreSummary(bookmark, identity);
   const receipt = {
     bookmark,
     buildUuid: identity.buildUuid || null,
