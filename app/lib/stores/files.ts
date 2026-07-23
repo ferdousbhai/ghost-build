@@ -6,7 +6,7 @@ import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { unreachable } from 'ghostbuild-agent/utils/unreachable';
 import { getAbsolutePath, type AbsolutePath } from 'ghostbuild-agent/utils/workDir';
 import type { File, FileMap } from 'ghostbuild-agent/types';
-import { assertNotLocalSecretFilePath } from '~/utils/secretFiles';
+import { assertNotLocalSecretFilePath, isManagedWebContainerNpmrc } from '~/utils/secretFiles';
 import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifest';
 import {
   ensureParentFolders,
@@ -157,6 +157,17 @@ export class FilesStore {
       incrementFileUpdateCounter(relativePath);
       const localSecretPath = getLocalSecretRootPath(relativePath);
       if (localSecretPath) {
+        if (relativePath === '.npmrc') {
+          try {
+            const content = await webcontainer.fs.readFile(relativePath, 'utf8');
+            if (isManagedWebContainerNpmrc(relativePath, content)) {
+              this.#removeTrackedPath(localSecretPath);
+              continue;
+            }
+          } catch {
+            // Missing or unreadable secret paths are handled by the idempotent purge below.
+          }
+        }
         localSecretPaths.add(localSecretPath);
         this.#removeTrackedPath(localSecretPath);
       } else {

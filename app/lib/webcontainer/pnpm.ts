@@ -1,4 +1,5 @@
 import type { WebContainer } from '@webcontainer/api';
+import { MANAGED_WEBCONTAINER_NPMRC_CONTENT } from '~/utils/secretFiles';
 
 const WEBCONTAINER_PNPM_VERSION = '10.34.0';
 
@@ -19,7 +20,7 @@ export async function prepareWebContainerPnpm(container: Pick<WebContainer, 'fs'
   await container.fs.writeFile(PNPM_CONFIG_FILE, '{}\n');
   // WebContainer's Node 22 filesystem shim reports a missing project npmrc as
   // a fatal read error to pnpm 10 instead of treating it as optional.
-  await container.fs.writeFile(PROJECT_NPMRC_FILE, '');
+  await container.fs.writeFile(PROJECT_NPMRC_FILE, MANAGED_WEBCONTAINER_NPMRC_CONTENT);
 }
 
 export function webContainerPnpmEnvironment(container: Pick<WebContainer, 'workdir'>): Record<string, string> {
