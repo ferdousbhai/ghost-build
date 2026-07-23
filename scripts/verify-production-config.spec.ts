@@ -2,11 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   findBuildApprovalErrors,
-  findCiWorkflowErrors,
-  findCompositeActionSafetyErrors,
   findDurableObjectLifecycleErrors,
   findMissingProvisionScriptPatternErrors,
-  findSystemPromptsReleaseWorkflowErrors,
   findWorkerObservabilityErrors,
   findWorkerOAuthStartRateLimitErrors,
   findWorkerChatBackupQuotaErrors,
@@ -15,7 +12,6 @@ import {
   findWorkerRuntimeSecretErrors,
   findWorkerTelemetryRateLimitErrors,
   findWorkerVariableSourceErrors,
-  findWorkflowSafetyErrors,
   verifyProductionConfig,
   workflowPathsFromDirectoryEntries,
 } from './verify-production-config.mjs';
@@ -329,89 +325,8 @@ overrides:
   });
 
   it('keeps paid GitHub Actions disabled', () => {
-    expect(existsSync('.github/workflows/ci.yml')).toBe(false);
-    expect(existsSync('.github/workflows/release_system_prompts.yml')).toBe(false);
+    expect(existsSync('.github/workflows')).toBe(false);
     expect(existsSync('.github/actions/setup-and-build/action.yaml')).toBe(false);
-  });
-
-  it('requires immutable pins for workflow, reusable-job, and composite-action references', () => {
-    const workflow = `
-name: Test
-on: { workflow_dispatch: {} }
-jobs:
-  reusable:
-    uses: owner/repository/.github/workflows/reusable.yml@main
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup-and-build
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
-`;
-    expect(findWorkflowSafetyErrors(workflow, '.github/workflows/test.yml')).toEqual([
-      '.github/workflows/test.yml jobs.reusable.uses must pin external action "owner/repository/.github/workflows/reusable.yml@main" to a full commit SHA.',
-      '.github/workflows/test.yml jobs.test.steps[0].uses must pin external action "actions/checkout@v6" to a full commit SHA.',
-    ]);
-    expect(
-      findCompositeActionSafetyErrors(
-        `runs:
-  using: composite
-  steps:
-    - uses: actions/setup-node@v6`,
-        '.github/actions/setup/action.yml',
-      ),
-    ).toEqual([
-      '.github/actions/setup/action.yml runs.steps[0].uses must pin external action "actions/setup-node@v6" to a full commit SHA.',
-    ]);
-  });
-
-  it('ignores YAML and shell comments but rejects forbidden commands in actual run steps', () => {
-    const workflow = `
-name: Test
-on: { workflow_dispatch: {} }
-# Never run pnpm run deploy:staging or wrangler dev.
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          # wrangler dev is forbidden
-          pnpm run deploy:staging
-      - run: pnpm run dev
-      - run: pnpm wrangler deploy --env-file .env.production
-`;
-    expect(findWorkflowSafetyErrors(workflow, '.github/workflows/test.yml')).toEqual([
-      '.github/workflows/test.yml jobs.test.steps[0].run must not target staging.',
-      '.github/workflows/test.yml jobs.test.steps[1].run must not start a local package script.',
-      '.github/workflows/test.yml jobs.test.steps[2].run must not load local env files.',
-    ]);
-  });
-
-  it('rejects duplicate YAML keys and structurally missing CI or release controls', () => {
-    expect(findWorkflowSafetyErrors('name: one\nname: two\njobs: {}', '.github/workflows/test.yml')).toEqual([
-      expect.stringContaining('must be unambiguous YAML'),
-    ]);
-    expect(findCiWorkflowErrors('on: { push: {} }\njobs: {}', '.github/workflows/ci.yml')).toEqual([
-      '.github/workflows/ci.yml must enable workflow_dispatch.',
-      '.github/workflows/ci.yml must run "pnpm run validate" in a job step.',
-      '.github/workflows/ci.yml must verify tracked generated files with "git diff --exit-code".',
-    ]);
-    expect(
-      findSystemPromptsReleaseWorkflowErrors(
-        'concurrency: { group: wrong, cancel-in-progress: true }\njobs: {}',
-        '.github/workflows/release_system_prompts.yml',
-      ),
-    ).toEqual(
-      expect.arrayContaining([
-        '.github/workflows/release_system_prompts.yml name must be "Create System Prompts Release"; found undefined.',
-        '.github/workflows/release_system_prompts.yml must enable workflow_dispatch.',
-        '.github/workflows/release_system_prompts.yml permissions.contents must be "read"; found undefined.',
-        '.github/workflows/release_system_prompts.yml concurrency.group must be "system-prompts-release"; found "wrong".',
-        '.github/workflows/release_system_prompts.yml concurrency.cancel-in-progress must be false; found true.',
-        '.github/workflows/release_system_prompts.yml must define jobs.build.',
-        '.github/workflows/release_system_prompts.yml must define jobs.release.',
-      ]),
-    );
   });
 
   it('allows required secret names but rejects values and unknown shapes', () => {

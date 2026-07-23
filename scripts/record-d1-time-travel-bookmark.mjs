@@ -1,5 +1,4 @@
 import { execFileSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const DATABASE_NAME = 'ghostbuild';
@@ -19,48 +18,38 @@ export function parseD1TimeTravelBookmark(output) {
   return bookmark;
 }
 
-export function formatD1RestoreSummary(bookmark, commitSha = '', { buildUuid = '', provider = 'local' } = {}) {
-  const commit = commitSha.trim() || 'local deployment';
-  const lines = [
+export function formatD1RestoreSummary(bookmark, { buildUuid, commitSha, provider }) {
+  return [
     '### Pre-migration D1 restore point',
     '',
     `- Database: \`${DATABASE_NAME}\``,
-    `- Commit: \`${commit}\``,
+    `- Commit: \`${commitSha}\``,
+    `- Build: \`${buildUuid}\``,
     `- Provider: \`${provider}\``,
     `- Bookmark: \`${bookmark}\``,
     `- Restore command: \`pnpm exec wrangler d1 time-travel restore ${DATABASE_NAME} --bookmark=${bookmark}\``,
-  ];
-  if (buildUuid) {
-    lines.splice(4, 0, `- Build: \`${buildUuid}\``);
-  }
-  return [...lines, ''].join('\n');
+    '',
+  ].join('\n');
 }
 
 /**
  * @param {{
  *   env?: Record<string, string | undefined>;
- *   resolveGitCommit?: () => string;
  * }} [options]
  */
-export function resolveReleaseIdentity({
-  env = process.env,
-  resolveGitCommit = () =>
-    execFileSync('git', ['rev-parse', '--verify', 'HEAD^{commit}'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'inherit'],
-    }).trim(),
-} = {}) {
-  const commitSha = (env.WORKERS_CI_COMMIT_SHA ?? env.GITHUB_SHA ?? resolveGitCommit()).trim();
+export function resolveReleaseIdentity({ env = process.env } = {}) {
+  if (env.WORKERS_CI !== '1') {
+    throw new Error('The D1 restore receipt may be created only by Cloudflare Workers Builds.');
+  }
+  const commitSha = (env.WORKERS_CI_COMMIT_SHA ?? '').trim();
   if (!COMMIT_SHA_PATTERN.test(commitSha)) {
     throw new Error('The D1 restore receipt requires an exact lowercase 40-hex Git commit ID.');
   }
-  const provider =
-    env.WORKERS_CI === '1' ? 'cloudflare-workers-builds' : env.GITHUB_ACTIONS === 'true' ? 'github-actions' : 'local';
-  const buildUuid = env.WORKERS_CI === '1' ? (env.WORKERS_CI_BUILD_UUID ?? '').trim() : '';
-  if (env.WORKERS_CI === '1' && !BUILD_UUID_PATTERN.test(buildUuid)) {
+  const buildUuid = (env.WORKERS_CI_BUILD_UUID ?? '').trim();
+  if (!BUILD_UUID_PATTERN.test(buildUuid)) {
     throw new Error('The D1 restore receipt requires a valid WORKERS_CI_BUILD_UUID.');
   }
-  return { buildUuid, commitSha, provider };
+  return { buildUuid, commitSha, provider: 'cloudflare-workers-builds' };
 }
 
 export function recordD1TimeTravelBookmark({
@@ -69,12 +58,10 @@ export function recordD1TimeTravelBookmark({
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'inherit'],
     }),
-  githubOutput = process.env.GITHUB_OUTPUT,
-  githubStepSummary = process.env.GITHUB_STEP_SUMMARY,
   identity = resolveReleaseIdentity(),
 } = {}) {
   const bookmark = parseD1TimeTravelBookmark(query());
-  const summary = formatD1RestoreSummary(bookmark, identity.commitSha, identity);
+  const summary = formatD1RestoreSummary(bookmark, identity);
   const receipt = {
     bookmark,
     buildUuid: identity.buildUuid || null,
@@ -82,13 +69,6 @@ export function recordD1TimeTravelBookmark({
     database: DATABASE_NAME,
     provider: identity.provider,
   };
-
-  if (githubOutput) {
-    appendFileSync(githubOutput, `bookmark=${bookmark}\n`, 'utf8');
-  }
-  if (githubStepSummary) {
-    appendFileSync(githubStepSummary, summary, 'utf8');
-  }
 
   process.stdout.write(`${summary}\n${D1_RESTORE_RECEIPT_MARKER} ${JSON.stringify(receipt)}\n`);
   return bookmark;

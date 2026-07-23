@@ -108,11 +108,7 @@ export function validateWorkersBuildMetadata({ env = process.env, spawn = spawnS
  */
 export function resolveDeployableCommitSha({ spawn = spawnSync, env = process.env } = {}) {
   const commitSha = resolveCurrentCommitSha({ spawn });
-  if (env.WORKERS_CI === '1') {
-    validateWorkersBuildContext({ env, spawn, currentCommitSha: commitSha });
-  } else if (env.WORKERS_CI !== undefined) {
-    throw new Error(`WORKERS_CI must be "1" when configured; found ${JSON.stringify(env.WORKERS_CI)}.`);
-  }
+  validateWorkersBuildContext({ env, spawn, currentCommitSha: commitSha });
   const result = spawn('git', ['status', '--porcelain=v1', '--untracked-files=normal'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -175,13 +171,23 @@ export function wranglerDeployArgs(clientId, commitSha) {
 }
 
 /**
- * @param {{clientId?: string, commitSha?: string, spawn?: DeploySpawn}} [options]
+ * @param {{
+ *   clientId?: string;
+ *   commitSha?: string;
+ *   env?: Record<string, string | undefined>;
+ *   spawn?: DeploySpawn;
+ * }} [options]
  */
 export function deployProduction({
   clientId = process.env[CLIENT_ID_ENV],
-  commitSha = resolveDeployableCommitSha(),
+  commitSha,
+  env = process.env,
   spawn = spawnSync,
 } = {}) {
+  commitSha =
+    commitSha === undefined
+      ? resolveDeployableCommitSha({ spawn, env })
+      : validateWorkersBuildContext({ env, spawn, currentCommitSha: validateCommitSha(commitSha) });
   const args = wranglerDeployArgs(clientId, commitSha);
   const result = spawn('pnpm', args, { stdio: 'inherit' });
   if (result.error) {
@@ -200,6 +206,7 @@ export function deployProduction({
  * @param {{
  *   clientId?: string;
  *   commitSha?: string;
+ *   env?: Record<string, string | undefined>;
  *   spawn?: DeploySpawn;
  *   verifyLocal?: typeof verifyLocalDeployment;
  *   verifyGlobal?: typeof verifyGlobalDeployment;
@@ -207,12 +214,13 @@ export function deployProduction({
  */
 export async function deployAndVerifyProduction({
   clientId = process.env[CLIENT_ID_ENV],
-  commitSha = resolveDeployableCommitSha(),
+  commitSha,
+  env = process.env,
   spawn = spawnSync,
   verifyLocal = verifyLocalDeployment,
   verifyGlobal = verifyGlobalDeployment,
 } = {}) {
-  const deployedSha = deployProduction({ clientId, commitSha, spawn });
+  const deployedSha = deployProduction({ clientId, commitSha, env, spawn });
   await verifyLocal({ expectedSha: deployedSha });
   await verifyGlobal({ expectedSha: deployedSha });
   return deployedSha;
@@ -228,18 +236,12 @@ function isMainModule() {
 if (isMainModule()) {
   const main = async () => {
     const [command, ...extraArgs] = process.argv.slice(2);
-    if (
-      extraArgs.length > 0 ||
-      (command !== undefined && command !== '--check' && command !== '--check-workers-builds')
-    ) {
-      throw new Error('Usage: node scripts/deploy-production.mjs [--check|--check-workers-builds]');
-    }
-    if (command === '--check-workers-builds' && process.env.WORKERS_CI !== '1') {
-      throw new Error('The Workers Builds preflight may run only when WORKERS_CI=1.');
+    if (extraArgs.length > 0 || (command !== undefined && command !== '--check-workers-builds')) {
+      throw new Error('Usage: node scripts/deploy-production.mjs [--check-workers-builds]');
     }
     const clientId = validateOAuthClientId(process.env[CLIENT_ID_ENV]);
     const commitSha = resolveDeployableCommitSha();
-    if (command === '--check' || command === '--check-workers-builds') {
+    if (command === '--check-workers-builds') {
       console.log(`Production deploy inputs are valid for commit ${commitSha}.`);
       return;
     }

@@ -117,7 +117,15 @@ export function findWorkersBuildsConfigErrors({
     errors,
     'package.json scripts.workers-builds:deploy',
     scripts?.['workers-builds:deploy'],
-    'node scripts/deploy-production.mjs --check-workers-builds && pnpm run release:production',
+    [
+      'node scripts/deploy-production.mjs --check-workers-builds',
+      'pnpm run provision:production:check',
+      'pnpm run verify:production-config',
+      'pnpm run verify:workers-builds-config',
+      'pnpm run d1:bookmark:production',
+      'pnpm run d1:migrations:apply:production',
+      'node scripts/deploy-production.mjs',
+    ].join(' && '),
   );
   requireEqual(
     errors,

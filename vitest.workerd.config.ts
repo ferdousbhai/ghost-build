@@ -59,7 +59,7 @@ export default defineConfig({
           ...testSecrets,
           CLOUDFLARE_OAUTH_CLIENT_ID: 'test-oauth-client',
           TEST_MIGRATIONS: await readD1Migrations(fromRoot('./migrations')),
-          WORKERS_CI_COMMIT_SHA: 'workerd-test-sha',
+          COMMIT_SHA: 'workerd-test-sha',
         },
       },
     })),

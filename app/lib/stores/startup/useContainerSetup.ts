@@ -25,7 +25,7 @@ import { startupInstallArgs } from './dependency-install-policy';
 import { prepareWebContainerPackageManagers, webContainerNpmEnvironment } from '~/lib/webcontainer/pnpm';
 import { withPreviewPackageManifest } from './preview-package-manifest';
 
-const TEMPLATE_URL = '/template-snapshot-003d998c.bin';
+const TEMPLATE_URL = '/template-snapshot-812fbb99.bin';
 const logger = createScopedLogger('ContainerSetup');
 const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)));
 const WEBCONTAINER_BOOT_TIMEOUT_MS = 60_000;

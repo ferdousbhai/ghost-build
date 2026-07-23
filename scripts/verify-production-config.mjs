@@ -5,14 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { parse, printParseErrorCode } from 'jsonc-parser';
 import {
   findBuildApprovalErrors,
-  findCiWorkflowErrors,
-  findCompositeActionSafetyErrors,
   findMissingCommandSteps,
   findMissingProvisionScriptPatternErrors,
-  findSystemPromptsReleaseWorkflowErrors,
   findWorkerObservabilityErrors,
   findWorkerRuntimeSecretErrors,
-  findWorkflowSafetyErrors,
   loadsLocalEnvFiles,
   startsLocalDevServer,
   targetsStaging,
@@ -22,13 +18,9 @@ import { runVerifierIfMain } from './run-verifier.mjs';
 
 export {
   findBuildApprovalErrors,
-  findCiWorkflowErrors,
-  findCompositeActionSafetyErrors,
   findMissingProvisionScriptPatternErrors,
-  findSystemPromptsReleaseWorkflowErrors,
   findWorkerObservabilityErrors,
   findWorkerRuntimeSecretErrors,
-  findWorkflowSafetyErrors,
   workflowPathsFromDirectoryEntries,
 };
 
@@ -268,10 +260,9 @@ function verifyScripts(errors, pkg, label) {
   const requiredNames = [
     'build',
     'd1:bookmark:production',
-    'deploy:production',
-    'release:production',
     'workers-builds:build',
     'workers-builds:deploy',
+    'workers-builds:preview',
     'provision:production',
     'provision:production:check',
     'typecheck',
@@ -291,25 +282,15 @@ function verifyScripts(errors, pkg, label) {
     }
   }
 
-  const deployScript = scripts['deploy:production'];
   errors.push(
-    ...findMissingCommandSteps(deployScript, `${label} production deploy script`, ['validate', 'release:production']),
-  );
-  errors.push(
-    ...findMissingCommandSteps(scripts['release:production'], `${label} production release script`, [
-      'deploy:preflight',
+    ...findMissingCommandSteps(scripts['workers-builds:deploy'], `${label} Workers Builds deploy script`, [
+      'scripts/deploy-production.mjs --check-workers-builds',
       'provision:production:check',
       'verify:production-config',
       'verify:workers-builds-config',
       'd1:bookmark:production',
       'd1:migrations:apply:production',
       'scripts/deploy-production.mjs',
-    ]),
-  );
-  errors.push(
-    ...findMissingCommandSteps(scripts['workers-builds:deploy'], `${label} Workers Builds deploy script`, [
-      'scripts/deploy-production.mjs --check-workers-builds',
-      'release:production',
     ]),
   );
   errors.push(

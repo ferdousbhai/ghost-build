@@ -25,7 +25,7 @@ function createEnv(changes = 1) {
       return statement;
     },
   }));
-  const env = { DB: { prepare }, WORKERS_CI_COMMIT_SHA: 'test-sha' } as unknown as Env;
+  const env = { DB: { prepare }, COMMIT_SHA: 'test-sha' } as unknown as Env;
   return { env, prepare, statements };
 }
 

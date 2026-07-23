@@ -42,10 +42,10 @@ Configure secret values as Cloudflare Worker secrets; do not store them in sourc
 The checked-in D1 ID belongs to Ghostbuild production. Before provisioning a fork in another account, replace it with
 `00000000-0000-0000-0000-000000000000`. The provisioning script refuses to replace an unknown non-placeholder ID.
 
-Production deployment requires:
+Production operations require:
 
-- Wrangler authentication for local deploys, or the shared `account-workers-builds-production` build token in Workers
-  Builds
+- the shared `account-workers-builds-production` build token for Workers Builds source deployments, or Wrangler
+  authentication for separate provisioning and emergency rollback operations
 - `CLOUDFLARE_OAUTH_CLIENT_ID` in the deploy environment
 - the Worker secrets declared by `wrangler.jsonc`
 
@@ -109,20 +109,26 @@ Validation hashes the Dockerfile and its copied `sandbox-tools` inputs so a Cont
 reuse the old image. To release a Container change, build and push it from an approved Docker-capable environment, then
 update the image digest and `sourceSha256` together before merging.
 
-For a deliberate local fallback:
+Production source deploys are accepted only from Cloudflare Workers Builds. There is no local source-build fallback.
+For an emergency rollback from a clean checkout of current `main`, first inspect the immutable version and its
+`COMMIT_SHA`, then promote that exact version:
 
 ```bash
-export CLOUDFLARE_OAUTH_CLIENT_ID='<production OAuth client id>'
-pnpm run deploy:production
+pnpm exec wrangler versions view '<version-id>' --name ghostbuild --json
+pnpm exec wrangler rollback '<version-id>' --name ghostbuild --message '<reason>'
 ```
 
-The deploy pipeline validates the repository and confirms that its clean Git commit exactly identifies the build before
-any Cloudflare resource, bookmark, or migration mutation. The preflight also rejects ignored root `.env*`, `.dev.vars*`,
-and `*.vars` files because Vite or Wrangler could otherwise consume uncommitted build inputs. The steady-state release
-checks that the declared Cloudflare resources already exist, verifies production and Workers Builds configuration,
-records a D1 recovery bookmark, applies migrations, publishes the Worker with the exact current 40-character Git commit
-ID, and verifies that same commit locally and from multiple regions. A failed publish stops before live verification.
-The bookmark output includes a machine-readable receipt with the commit and Workers Builds UUID.
+Rollback promotes the selected immutable Worker version without changing connected D1 or R2 resources. If a release
+also changed stored data, assess recovery separately using the pre-migration D1 bookmark.
+
+The Workers Builds deploy pipeline validates the repository and confirms that its clean Git commit exactly identifies
+the build before any Cloudflare resource, bookmark, or migration mutation. The preflight also rejects ignored root
+`.env*`, `.dev.vars*`, and `*.vars` files because Vite or Wrangler could otherwise consume uncommitted build inputs.
+The steady-state release checks that the declared Cloudflare resources already exist, verifies production and Workers
+Builds configuration, records a D1 recovery bookmark, applies migrations, publishes the Worker with the exact current
+40-character Git commit ID, and verifies that same commit locally and from multiple regions. A failed publish stops
+before live verification. The bookmark output includes a machine-readable receipt with the commit and Workers Builds
+UUID.
 
 Run `pnpm run provision:production` separately when bootstrapping production resources or intentionally reconciling
 their checked-in identifiers. Cloudflare Workers Builds owns both pull-request validation and production deployment;
