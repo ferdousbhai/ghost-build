@@ -24,7 +24,8 @@ const logger = createScopedLogger('FilesStore');
 export class FilesStore {
   #webcontainer: Promise<WebContainer>;
   #watchEvents = bufferWatchEvents<WatcherEvent>(FILE_EVENTS_DEBOUNCE_MS, this.#processEventBuffer.bind(this));
-  #fileWatcher: IFSWatcher | undefined;
+  #fileWatchers = new Map<string, IFSWatcher>();
+  #watcherRefresh: Promise<void> = Promise.resolve();
 
   /**
    * @note Keeps track all modified files with their original content since the last user message.
@@ -46,7 +47,7 @@ export class FilesStore {
       import.meta.hot.data.files = this.files;
       import.meta.hot.data.modifiedFiles = this.#modifiedFiles;
       import.meta.hot.data.userWrites = this.userWrites;
-      import.meta.hot.dispose(() => this.#fileWatcher?.close());
+      import.meta.hot.dispose(() => this.#closeFileWatchers());
     }
 
     void this.#init().catch((error) => logger.error('Failed to initialize file watching', error));
@@ -134,21 +135,67 @@ export class FilesStore {
   async #init() {
     const webcontainer = await this.#webcontainer;
     await waitForContainerBootState(ContainerBootState.READY);
-    this.#fileWatcher = webcontainer.fs.watch(ROOT_DIRECTORY, { recursive: true }, (eventType, watcherPath) => {
-      const relativePath = normalizeWatcherPath(webcontainer, watcherPath);
-      if (relativePath && isExcludedProjectPath(relativePath)) {
-        return;
-      }
-      this.#watchEvents(eventType, watcherPath);
-    });
+    await this.#refreshFileWatchers(webcontainer);
   }
 
   async prewarmWorkdir(container: WebContainer) {
     await reconcileFileMap(container, this.files);
   }
 
-  flushFileEvents() {
-    return this.#watchEvents.flush();
+  async flushFileEvents() {
+    await this.#watcherRefresh;
+    await this.#watchEvents.flush();
+  }
+
+  async #refreshFileWatchers(webcontainer: WebContainer) {
+    this.#watchDirectory(webcontainer, ROOT_DIRECTORY, false);
+
+    const topLevelEntries = await webcontainer.fs.readdir(ROOT_DIRECTORY, { withFileTypes: true });
+    const watchedDirectories = new Set([ROOT_DIRECTORY]);
+    for (const entry of topLevelEntries) {
+      if (!entry.isDirectory() || isExcludedProjectPath(entry.name) || getLocalSecretRootPath(entry.name) !== null) {
+        continue;
+      }
+      watchedDirectories.add(entry.name);
+      this.#watchDirectory(webcontainer, entry.name, true);
+    }
+
+    for (const [directory, watcher] of this.#fileWatchers) {
+      if (!watchedDirectories.has(directory)) {
+        watcher.close();
+        this.#fileWatchers.delete(directory);
+      }
+    }
+  }
+
+  #watchDirectory(webcontainer: WebContainer, directory: string, recursive: boolean) {
+    if (this.#fileWatchers.has(directory)) {
+      return;
+    }
+    const watcher = webcontainer.fs.watch(directory, { recursive }, (eventType, watcherPath) => {
+      const relativePath = normalizeWatchedPath(webcontainer, directory, watcherPath);
+      if (!relativePath || isExcludedProjectPath(relativePath)) {
+        return;
+      }
+      this.#watchEvents(eventType, relativePath);
+      if (directory === ROOT_DIRECTORY) {
+        this.#queueWatcherRefresh(webcontainer);
+      }
+    });
+    this.#fileWatchers.set(directory, watcher);
+  }
+
+  #queueWatcherRefresh(webcontainer: WebContainer) {
+    this.#watcherRefresh = this.#watcherRefresh
+      .then(() => this.#refreshFileWatchers(webcontainer))
+      .catch((error) => logger.error('Failed to refresh file watching', error));
+  }
+
+  #closeFileWatchers() {
+    for (const watcher of this.#fileWatchers.values()) {
+      watcher.close();
+    }
+    this.#fileWatchers.clear();
   }
 
   async #processEventBuffer(events: WatcherEvent[]) {
@@ -260,3 +307,20 @@ export class FilesStore {
 const FILE_EVENTS_DEBOUNCE_MS = 100;
 const ROOT_DIRECTORY = '.';
 type WatcherEvent = [event: 'rename' | 'change', path: string | Uint8Array];
+
+function normalizeWatchedPath(
+  webcontainer: WebContainer,
+  watchedDirectory: string,
+  watcherPath: string | Uint8Array,
+): string | null {
+  const relativePath = normalizeWatcherPath(webcontainer, watcherPath);
+  if (
+    !relativePath ||
+    watchedDirectory === ROOT_DIRECTORY ||
+    relativePath === watchedDirectory ||
+    relativePath.startsWith(`${watchedDirectory}/`)
+  ) {
+    return relativePath;
+  }
+  return path.join(watchedDirectory, relativePath);
+}

@@ -28,7 +28,7 @@ describe('FilesStore public filesystem watcher', () => {
     container = project.container;
     store = new FilesStore(Promise.resolve(container));
 
-    await vi.waitFor(() => expect(project.watch).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(project.watch).toHaveBeenCalledWith('.', { recursive: false }, expect.any(Function)));
     await store.prewarmWorkdir(container);
   });
 
@@ -50,7 +50,9 @@ describe('FilesStore public filesystem watcher', () => {
     expect(delayedProject.watch).not.toHaveBeenCalled();
 
     markReady();
-    await vi.waitFor(() => expect(delayedProject.watch).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(delayedProject.watch).toHaveBeenCalledWith('.', { recursive: false }, expect.any(Function)),
+    );
   });
 
   it('reconciles added, changed, and removed files and directories', async () => {
@@ -67,7 +69,8 @@ describe('FilesStore public filesystem watcher', () => {
     project.emit('rename', 'old');
     await store.flushFileEvents();
 
-    expect(project.watch).toHaveBeenCalledWith('.', { recursive: true }, expect.any(Function));
+    expect(project.watch).toHaveBeenCalledWith('.', { recursive: false }, expect.any(Function));
+    expect(project.watch).toHaveBeenCalledWith('src', { recursive: true }, expect.any(Function));
     expect(store.files.get()[getAbsolutePath('src/current.ts')]).toEqual(textFile('version two'));
     expect(store.files.get()[getAbsolutePath('src/added.ts')]).toEqual(textFile('added file'));
     expect(store.files.get()[getAbsolutePath('new')]).toEqual({ type: 'folder' });
@@ -202,11 +205,16 @@ class MemoryProject {
   readonly directories = new Set<string>(['.']);
   readonly events: string[] = [];
   failRemovalFor: string | undefined;
-  listener: FSWatchCallback | undefined;
+  readonly watchers = new Map<string, { recursive: boolean; listener: FSWatchCallback }>();
 
-  readonly watch = vi.fn((_filename: string, _options: unknown, listener: FSWatchCallback) => {
-    this.listener = listener;
-    return { close: vi.fn() };
+  readonly watch = vi.fn((filename: string, options: { recursive?: boolean }, listener: FSWatchCallback) => {
+    const normalizedFilename = normalize(filename);
+    this.watchers.set(normalizedFilename, { recursive: options.recursive ?? false, listener });
+    return {
+      close: vi.fn(() => {
+        this.watchers.delete(normalizedFilename);
+      }),
+    };
   });
 
   readonly container = {
@@ -282,10 +290,28 @@ class MemoryProject {
   }
 
   emit(event: 'rename' | 'change', filePath: string | Uint8Array): void {
-    if (!this.listener) {
+    if (this.watchers.size === 0) {
       throw new Error('Watcher has not initialized');
     }
-    this.listener(event, filePath);
+    const decodedPath = typeof filePath === 'string' ? filePath : new TextDecoder().decode(filePath);
+    const normalizedPath = normalize(decodedPath.replace(`${WORK_DIR}/`, ''));
+    for (const [watchedDirectory, watcher] of this.watchers) {
+      if (watchedDirectory === '.') {
+        const rootEntry = normalizedPath.split('/')[0];
+        watcher.listener(event, typeof filePath === 'string' ? rootEntry : new TextEncoder().encode(rootEntry));
+        continue;
+      }
+      if (normalizedPath === watchedDirectory) {
+        watcher.listener(event, watchedDirectory);
+        continue;
+      }
+      const watchedPrefix = `${watchedDirectory}/`;
+      if (!normalizedPath.startsWith(watchedPrefix)) {
+        continue;
+      }
+      const watchedPath = watcher.recursive ? normalizedPath.slice(watchedPrefix.length) : basename(normalizedPath);
+      watcher.listener(event, typeof filePath === 'string' ? watchedPath : new TextEncoder().encode(watchedPath));
+    }
   }
 
   private ensureDirectories(directoryPath: string): void {
