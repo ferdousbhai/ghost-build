@@ -20,10 +20,20 @@ describe('WebContainer pnpm command', () => {
   });
 
   test('directs pnpm to the project-visible managed config', () => {
-    expect(webContainerNpmEnvironment()).toEqual({ CI: 'true' });
+    expect(webContainerNpmEnvironment()).toEqual({
+      CI: 'true',
+      npm_config_ignore_scripts: 'true',
+      npm_config_audit: 'false',
+      npm_config_fund: 'false',
+      npm_config_registry: 'https://registry.npmjs.org/',
+    });
     expect(webContainerPnpmEnvironment({ workdir: '/home/project' } as never)).toEqual({
       XDG_CONFIG_HOME: '/home/project/.ghostbuild/pnpm-config',
       CI: 'true',
+      npm_config_ignore_scripts: 'true',
+      npm_config_audit: 'false',
+      npm_config_fund: 'false',
+      npm_config_registry: 'https://registry.npmjs.org/',
       npm_config_manage_package_manager_versions: 'false',
     });
   });

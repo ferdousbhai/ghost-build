@@ -23,7 +23,13 @@ export async function prepareWebContainerPackageManagers(container: Pick<WebCont
 }
 
 export function webContainerNpmEnvironment(): Record<string, string> {
-  return { CI: 'true' };
+  return {
+    CI: 'true',
+    npm_config_ignore_scripts: 'true',
+    npm_config_audit: 'false',
+    npm_config_fund: 'false',
+    npm_config_registry: NPM_REGISTRY,
+  };
 }
 
 export function webContainerPnpmEnvironment(container: Pick<WebContainer, 'workdir'>): Record<string, string> {

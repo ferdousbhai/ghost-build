@@ -33,6 +33,10 @@ describe('runNpmInstall', () => {
       {
         env: {
           CI: 'true',
+          npm_config_ignore_scripts: 'true',
+          npm_config_audit: 'false',
+          npm_config_fund: 'false',
+          npm_config_registry: 'https://registry.npmjs.org/',
         },
       },
     );
@@ -57,6 +61,10 @@ describe('runNpmInstall', () => {
         env: {
           XDG_CONFIG_HOME: '/home/project/.ghostbuild/pnpm-config',
           CI: 'true',
+          npm_config_ignore_scripts: 'true',
+          npm_config_audit: 'false',
+          npm_config_fund: 'false',
+          npm_config_registry: 'https://registry.npmjs.org/',
           npm_config_manage_package_manager_versions: 'false',
         },
       },
