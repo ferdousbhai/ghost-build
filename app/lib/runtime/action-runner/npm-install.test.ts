@@ -153,7 +153,10 @@ function containerWithWorkspace(
   spawn: ReturnType<typeof vi.fn>,
   workspace = 'packages:\n  - .\nignoreWorkspaceRootCheck: true\nminimumReleaseAge: 1440\n' +
     'minimumReleaseAgeIgnoreMissingTime: false\nminimumReleaseAgeStrict: true\n' +
-    'strictDepBuilds: true\nblockExoticSubdeps: true\nallowBuilds:\n' +
+    'strictDepBuilds: true\nblockExoticSubdeps: true\noverrides:\n' +
+    "  'brace-expansion@<1.1.16': '1.1.16'\n" +
+    "  'brace-expansion@>=2.0.0 <2.1.2': '2.1.2'\n" +
+    "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\nallowBuilds:\n" +
     '  core-js-pure: true\n  esbuild: true\n  sharp: true\n  workerd: true\n',
 ): WebContainer {
   const invokeSpawn = spawn as unknown as (command: string, args: string[], options: unknown) => Promise<unknown>;

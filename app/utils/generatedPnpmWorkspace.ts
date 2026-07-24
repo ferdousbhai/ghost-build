@@ -2,6 +2,11 @@ import { isAlias, isMap, isScalar, isSeq, parseDocument, visit } from 'yaml';
 
 const MAX_PNPM_WORKSPACE_POLICY_BYTES = 64 * 1024;
 const APPROVED_GENERATED_BUILD_DEPENDENCIES = ['core-js-pure', 'esbuild', 'sharp', 'workerd'] as const;
+const APPROVED_GENERATED_OVERRIDES = new Map([
+  ['brace-expansion@<1.1.16', '1.1.16'],
+  ['brace-expansion@>=2.0.0 <2.1.2', '2.1.2'],
+  ['fast-uri@>=3.0.0 <=3.1.3', '3.1.4'],
+]);
 const ALLOWED_POLICY_KEYS = new Set([
   'packages',
   'ignoreWorkspaceRootCheck',
@@ -10,6 +15,7 @@ const ALLOWED_POLICY_KEYS = new Set([
   'minimumReleaseAgeStrict',
   'strictDepBuilds',
   'blockExoticSubdeps',
+  'overrides',
   'allowBuilds',
   'peerDependencyRules',
 ]);
@@ -84,6 +90,7 @@ function findGeneratedPnpmWorkspacePolicyErrors(content: string, label: string):
   requirePlainScalar(root, 'minimumReleaseAgeStrict', true, `${label} must enable minimumReleaseAgeStrict.`, errors);
   requirePlainScalar(root, 'strictDepBuilds', true, `${label} must enable strictDepBuilds.`, errors);
   requirePlainScalar(root, 'blockExoticSubdeps', true, `${label} must enable blockExoticSubdeps.`, errors);
+  findOverrideErrors(root, label, errors);
 
   const packagesPair = root.items.find((pair) => isScalar(pair.key) && pair.key.value === 'packages');
   const packages = packagesPair?.value;
@@ -129,6 +136,42 @@ function findGeneratedPnpmWorkspacePolicyErrors(content: string, label: string):
     }
   }
   return errors;
+}
+
+function findOverrideErrors(root: ReturnType<typeof parseDocument>['contents'], label: string, errors: string[]): void {
+  if (!isMap(root)) {
+    return;
+  }
+  const overridesPair = root.items.find((pair) => isScalar(pair.key) && pair.key.value === 'overrides');
+  if (
+    !overridesPair ||
+    !isScalar(overridesPair.key) ||
+    overridesPair.key.type !== 'PLAIN' ||
+    !isMap(overridesPair.value) ||
+    overridesPair.value.flow
+  ) {
+    errors.push(`${label} must define overrides with a canonical block mapping.`);
+    return;
+  }
+
+  const configured = new Map<string, string>();
+  for (const pair of overridesPair.value.items) {
+    const selector = isScalar(pair.key) ? pair.key.value : undefined;
+    const version = isScalar(pair.value) ? pair.value.value : undefined;
+    if (typeof selector !== 'string' || typeof version !== 'string') {
+      errors.push(`${label} overrides must map package selectors to version strings.`);
+      continue;
+    }
+    configured.set(selector, version);
+    if (APPROVED_GENERATED_OVERRIDES.get(selector) !== version) {
+      errors.push(`${label} overrides must not change unreviewed dependency ${selector}.`);
+    }
+  }
+  for (const [selector, version] of APPROVED_GENERATED_OVERRIDES) {
+    if (configured.get(selector) !== version) {
+      errors.push(`${label} overrides must pin ${selector} to ${version}.`);
+    }
+  }
 }
 
 function exceedsPolicySizeLimit(content: string): boolean {
