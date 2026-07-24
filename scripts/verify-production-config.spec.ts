@@ -278,6 +278,7 @@ overrides:
   'brace-expansion@<1.1.16': '1.1.16'
   'brace-expansion@>=2.0.0 <2.1.2': '2.1.2'
   'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'
+  'sharp@<0.35.0': '0.35.3'
 `;
     expect(findBuildApprovalErrors(reviewed, 'pnpm-workspace.yaml')).toEqual([]);
 
@@ -293,6 +294,7 @@ overrides:
         'pnpm-workspace.yaml overrides must pin brace-expansion@<1.1.16 to 1.1.16.',
         'pnpm-workspace.yaml overrides must pin brace-expansion@>=2.0.0 <2.1.2 to 2.1.2.',
         'pnpm-workspace.yaml overrides must pin fast-uri@>=3.0.0 <=3.1.3 to 3.1.4.',
+        'pnpm-workspace.yaml overrides must pin sharp@<0.35.0 to 0.35.3.',
       ]),
     );
   });

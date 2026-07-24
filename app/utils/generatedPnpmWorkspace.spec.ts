@@ -23,6 +23,8 @@ describe('assertSafeGeneratedPnpmWorkspace', () => {
     safePolicy.replace('blockExoticSubdeps: true', 'blockExoticSubdeps: false'),
     safePolicy.replace("  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'", "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.3'"),
     safePolicy.replace("  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\n", ''),
+    safePolicy.replace("  'sharp@<0.35.0': '0.35.3'", "  'sharp@<0.35.0': '0.34.5'"),
+    safePolicy.replace("  'sharp@<0.35.0': '0.35.3'\n", ''),
     safePolicy.replace(
       "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\n",
       "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\n  'malicious-package@*': 'file:../outside'\n",
@@ -83,5 +85,6 @@ const safePolicy =
   'strictDepBuilds: true\nblockExoticSubdeps: true\noverrides:\n' +
   "  'brace-expansion@<1.1.16': '1.1.16'\n" +
   "  'brace-expansion@>=2.0.0 <2.1.2': '2.1.2'\n" +
-  "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\nallowBuilds:\n" +
-  '  core-js-pure: true\n  esbuild: true\n  sharp: true\n  workerd: true\n';
+  "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\n" +
+  "  'sharp@<0.35.0': '0.35.3'\n" +
+  'allowBuilds:\n  core-js-pure: true\n  esbuild: true\n  sharp: true\n  workerd: true\n';

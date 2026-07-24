@@ -11,6 +11,7 @@ const APPROVED_PNPM_OVERRIDES = new Map([
   ["brace-expansion@<1.1.16", "1.1.16"],
   ["brace-expansion@>=2.0.0 <2.1.2", "2.1.2"],
   ["fast-uri@>=3.0.0 <=3.1.3", "3.1.4"],
+  ["sharp@<0.35.0", "0.35.3"],
 ]);
 
 const MAX_PNPM_WORKSPACE_POLICY_BYTES = 64 * 1024;
