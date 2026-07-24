@@ -186,19 +186,35 @@ describe('chat deletion', () => {
 
     await removeChat(db, { sessionId: 'owner', id: 'chat' });
 
-    expect(statements).toHaveLength(7);
-    expect(statements[0].query).toContain('INSERT INTO object_gc_candidates');
-    expect(statements[0].query).toContain('SELECT storage_key FROM chat_message_states');
-    expect(statements[0].query).toContain('SELECT snapshot_key FROM chat_message_states');
-    expect(statements[0].query).toContain('SELECT chat_history_key FROM shares');
-    expect(statements[0].query).toContain('SELECT thumbnail_image_key FROM social_shares');
-    expect(statements[1].query).toContain('INSERT INTO agent_gc_candidates');
-    expect(statements[1].query).toContain('JOIN chat_transcripts');
-    expect(Number(statements[1].values[0]) - Number(statements[1].values[1])).toBe(AGENT_GC_GRACE_PERIOD_MS);
-    expect(statements[2].query).toContain("SET status = 'released'");
-    expect(statements[2].query).toContain('SELECT thumbnail_image_key FROM social_shares');
-    expect(statements[3].query).toContain('SET is_deleted = 1, snapshot_key = NULL');
-    expect(statements.slice(4).map((statement) => statement.query)).toEqual([
+    expect(statements).toHaveLength(12);
+    const objectGcStatements = statements.slice(0, 6);
+    expect(objectGcStatements).toHaveLength(6);
+    expect(objectGcStatements.every((statement) => statement.query.includes('INSERT INTO object_gc_candidates'))).toBe(
+      true,
+    );
+    expect(objectGcStatements.every((statement) => !statement.query.includes('UNION'))).toBe(true);
+    expect(objectGcStatements.map((statement) => statement.query)).toEqual([
+      expect.stringContaining('FROM chats'),
+      expect.stringContaining('FROM chat_message_states'),
+      expect.stringContaining('FROM chat_message_states'),
+      expect.stringContaining('FROM shares'),
+      expect.stringContaining('FROM shares'),
+      expect.stringContaining('FROM social_shares'),
+    ]);
+    expect(objectGcStatements.map((statement) => statement.query)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('SELECT storage_key, ?, ?, 0'),
+        expect.stringContaining('SELECT chat_history_key, ?, ?, 0'),
+        expect.stringContaining('SELECT thumbnail_image_key, ?, ?, 0'),
+      ]),
+    );
+    expect(statements[6].query).toContain('INSERT INTO agent_gc_candidates');
+    expect(statements[6].query).toContain('JOIN chat_transcripts');
+    expect(Number(statements[6].values[0]) - Number(statements[6].values[1])).toBe(AGENT_GC_GRACE_PERIOD_MS);
+    expect(statements[7].query).toContain("SET status = 'released'");
+    expect(statements[7].query).toContain('SELECT thumbnail_image_key FROM social_shares');
+    expect(statements[8].query).toContain('SET is_deleted = 1, snapshot_key = NULL');
+    expect(statements.slice(9).map((statement) => statement.query)).toEqual([
       expect.stringContaining('DELETE FROM shares'),
       expect.stringContaining('DELETE FROM social_shares'),
       expect.stringContaining('DELETE FROM chat_message_states'),
