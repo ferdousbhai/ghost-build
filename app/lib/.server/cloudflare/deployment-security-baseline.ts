@@ -1,6 +1,6 @@
 import templateSnapshotManifest from 'public/template-snapshot-manifest.json';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 11 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 12 as const;
 export const DEPLOYMENT_SECURITY_CLEANUP_CRON = '0 3 * * *';
 export const DEPLOYMENT_VERSION_METADATA_BINDING = 'CF_VERSION_METADATA';
 export const DEPLOYMENT_SECURITY_BASELINE_BINDING = 'GHOSTBUILD_SECURITY_BASELINE_VERSION';
@@ -55,13 +55,13 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/lib/project-policy/source-policy.mjs': 'deed7d40e7c9c1bca8cfb3dbf46503f9dc89a4004988f8ef55871b7ed0c24f86',
   'scripts/lib/project-policy/worker-policy.mjs': '9f908807030d1a91c99b442b41488048d2e49b996783a18900b413e046f3edbc',
   'scripts/lib/project-policy/workflow-policy.mjs': 'e4c172b80ffe2f551a4ca25d4f8a4d0ea19195a7cef0ee056536e331d3993fab',
-  'scripts/lib/project-policy/workspace-policy.mjs': '2eae19d07b13fcedf89bb0825bc99ee0a803493cbf10bfad2d557c46820ec3f5',
+  'scripts/lib/project-policy/workspace-policy.mjs': 'cefc0cb64381d7eb89a38cc1e3084d1e252584d15ddd66f2f8642da3473a1deb',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'f09dc6d1ec4614bf665872aab415a888c449d58d27d0ee347d3ca15113983cec';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '670bde68a44c1d6797a6a6ac903e02f9efce4f8d80854ee88f039a99a369247e';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
-  '32df8c2fea1562044c38b9faabc729e046737de4c833b83e6d7087e4b392682a';
+  '1f818a9176a0cc427e5cb4a2c296a03f9f6cde17aaba47c576fbe55292967e9d';
 
 export function isCurrentDeploymentSecurityIdentity(value: {
   version?: unknown;

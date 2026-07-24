@@ -8,7 +8,7 @@ updates:
       - /template
     schedule:
       interval: weekly
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 6
     groups:
       xterm-suite:
         patterns:
@@ -23,6 +23,53 @@ updates:
           - agents
           - '@cloudflare/ai-chat'
           - workers-ai-provider
+        update-types:
+          - minor
+          - patch
+      react-runtime:
+        patterns:
+          - react
+          - react-dom
+          - '@types/react'
+          - '@types/react-dom'
+        update-types:
+          - minor
+          - patch
+      tanstack-suite:
+        patterns:
+          - '@tanstack/*'
+        update-types:
+          - minor
+          - patch
+      web-tooling:
+        patterns:
+          - '@babel/*'
+          - '@eslint/*'
+          - '@types/*'
+          - '@vitejs/*'
+          - eslint
+          - eslint-*
+          - globals
+          - knip
+          - postcss
+          - prettier
+          - typescript
+          - typescript-eslint
+          - vite
+          - vitest
+        update-types:
+          - minor
+          - patch
+      sandbox-runtime:
+        patterns:
+          - '@cloudflare/sandbox'
+        update-types:
+          - minor
+          - patch
+      cloudflare-platform:
+        patterns:
+          - '@cloudflare/*'
+          - wrangler
         update-types:
           - minor
           - patch

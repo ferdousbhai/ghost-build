@@ -7,13 +7,22 @@ A package whose package-level evidence is <not published> remains exact-version 
 This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-07-20
-Production packages: 539
-Inventory SHA-256: 7755fc6068cd958449cad266f86e4ae57df94afc05c6ca7fd6497ff6894475c5
+Production packages: 542
+Inventory SHA-256: 5dce9ff5ddca965fa37dd62c98a25f5075b9c01f6b4cacdc26524c5a4f56e0cb
 
 PACKAGE INVENTORY
 =================
 
 @ai-sdk/gateway@3.0.153
+Declared license: Apache-2.0
+Author: <not published>
+Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/gateway"}
+Homepage: https://ai-sdk.dev/docs
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529)
+
+@ai-sdk/gateway@3.0.156
 Declared license: Apache-2.0
 Author: <not published>
 Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/gateway"}
@@ -1324,7 +1333,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 9fe9970f409e5b1d2067c0107ac0201761d5fddc53e9b20b66619fb0d2b4122f)
 
-@tanstack/query-core@5.101.2
+@tanstack/query-core@5.101.4
 Declared license: MIT
 Author: tannerlinsley
 Repository: {"type":"git","url":"git+https://github.com/TanStack/query.git","directory":"packages/query-core"}
@@ -1333,7 +1342,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7)
 
-@tanstack/query-db-collection@1.1.0
+@tanstack/query-db-collection@1.2.0
 Declared license: MIT
 Author: Kyle Mathews
 Repository: {"type":"git","url":"git+https://github.com/TanStack/db.git","directory":"packages/query-db-collection"}
@@ -1351,7 +1360,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 dd5fd3a2e8ca256521b80e46d7fb0aa953c842ef1420fb31f4b1f08ae31d82e7)
 
-@tanstack/react-query@5.101.2
+@tanstack/react-query@5.101.4
 Declared license: MIT
 Author: tannerlinsley
 Repository: {"type":"git","url":"git+https://github.com/TanStack/query.git","directory":"packages/react-query"}
@@ -1369,7 +1378,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7)
 
-@tanstack/react-start@1.168.30
+@tanstack/react-start@1.168.32
 Declared license: MIT
 Author: Tanner Linsley
 Repository: {"type":"git","url":"git+https://github.com/TanStack/router.git","directory":"packages/react-start"}
@@ -1387,7 +1396,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7)
 
-@tanstack/react-start-rsc@0.1.29
+@tanstack/react-start-rsc@0.1.31
 Declared license: MIT
 Author: Tanner Linsley
 Repository: {"type":"git","url":"git+https://github.com/TanStack/router.git","directory":"packages/react-start-rsc"}
@@ -1432,7 +1441,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7)
 
-@tanstack/router-plugin@1.168.22
+@tanstack/router-plugin@1.168.23
 Declared license: MIT
 Author: Tanner Linsley
 Repository: {"type":"git","url":"git+https://github.com/TanStack/router.git","directory":"packages/router-plugin"}
@@ -1468,7 +1477,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7)
 
-@tanstack/start-plugin-core@1.171.22
+@tanstack/start-plugin-core@1.171.24
 Declared license: MIT
 Author: Tanner Linsley
 Repository: {"type":"git","url":"git+https://github.com/TanStack/router.git","directory":"packages/start-plugin-core"}
@@ -1755,6 +1764,15 @@ Published license/notice files:
 - LICENSE (SHA-256 b33ae783f02478cd31787cd07cbf61cd3a6fbee1a50b2baf832b8f0fb7c600f7)
 
 ai@6.0.230
+Declared license: Apache-2.0
+Author: <not published>
+Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/ai"}
+Homepage: https://ai-sdk.dev/docs
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529)
+
+ai@6.0.234
 Declared license: Apache-2.0
 Author: <not published>
 Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/ai"}
@@ -2438,7 +2456,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a)
 
-fast-uri@3.1.3
+fast-uri@3.1.4
 Declared license: BSD-3-Clause
 Author: Vincent Le Goff <vince.legoff@gmail.com> (https://github.com/zekth)
 Repository: {"type":"git","url":"git+https://github.com/fastify/fast-uri.git"}
@@ -2708,7 +2726,7 @@ Package-level license evidence: published
 Published license/notice files:
 - license (SHA-256 dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb)
 
-hono@4.12.27
+hono@4.12.31
 Declared license: MIT
 Author: Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)
 Repository: {"type":"git","url":"git+https://github.com/honojs/hono.git"}
@@ -3816,7 +3834,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 feb87a2e0c305de3464cc44077da5393c52d8ca6362d37427157d04ec6f4510d)
 
-postcss@8.5.19
+postcss@8.5.22
 Declared license: MIT
 Author: Andrey Sitnik <andrey@sitnik.es>
 Repository: postcss/postcss
@@ -3825,7 +3843,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 5be1f3465bba68a626777f984878814aaf35e7ef8e9fd314d469bcf887050fb8)
 
-prettier@3.9.5
+prettier@3.9.6
 Declared license: MIT
 Author: James Long
 Repository: prettier/prettier
@@ -3888,19 +3906,19 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 37876d7de8bdf5e5b9b58a697ebc34044624e493e6f49eff5c938e5226dcac6b)
 
-react@19.2.7
+react@19.2.8
 Declared license: MIT
 Author: <not published>
-Repository: {"type":"git","url":"https://github.com/facebook/react.git","directory":"packages/react"}
+Repository: {"type":"git","url":"https://github.com/react/react.git","directory":"packages/react"}
 Homepage: https://react.dev/
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93)
 
-react-dom@19.2.7
+react-dom@19.2.8
 Declared license: MIT
 Author: <not published>
-Repository: {"type":"git","url":"https://github.com/facebook/react.git","directory":"packages/react-dom"}
+Repository: {"type":"git","url":"https://github.com/react/react.git","directory":"packages/react-dom"}
 Homepage: https://react.dev/
 Package-level license evidence: published
 Published license/notice files:
@@ -4167,6 +4185,15 @@ Published license/notice files:
 - LICENSE (SHA-256 25a328069fe771f8ed5b6f983ed4b0e6c84b3312ac0f69b28c3d52dc277962c9)
 
 seroval@1.5.5
+Declared license: MIT
+Author: Alexis Munsayac
+Repository: {"url":"https://github.com/lxsmnsyc/seroval.git","type":"git"}
+Homepage: https://github.com/lxsmnsyc/seroval/tree/main/packages/seroval
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 2bd8a2c61751fc47dcd214f864b6fcdbcb518995fbf497c81a06c3bfe8d1d9d4)
+
+seroval@1.5.6
 Declared license: MIT
 Author: Alexis Munsayac
 Repository: {"url":"https://github.com/lxsmnsyc/seroval.git","type":"git"}
@@ -5896,6 +5923,7 @@ SHA-256 2bd8a2c61751fc47dcd214f864b6fcdbcb518995fbf497c81a06c3bfe8d1d9d4
 Used by:
 - seroval-plugins@1.5.5:LICENSE
 - seroval@1.5.5:LICENSE
+- seroval@1.5.6:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License Copyright (c) 2025 Alexis Munsayac <alexis.munsayac@gmail.com>
 
@@ -7986,7 +8014,7 @@ THIS SOFTWARE.
 
 SHA-256 5be1f3465bba68a626777f984878814aaf35e7ef8e9fd314d469bcf887050fb8
 Used by:
-- postcss@8.5.19:LICENSE
+- postcss@8.5.22:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 The MIT License (MIT)
 
@@ -11002,20 +11030,20 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 SHA-256 a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7
 Used by:
 - @tanstack/history@1.162.0:LICENSE
-- @tanstack/query-core@5.101.2:LICENSE
-- @tanstack/react-query@5.101.2:LICENSE
+- @tanstack/query-core@5.101.4:LICENSE
+- @tanstack/react-query@5.101.4:LICENSE
 - @tanstack/react-router@1.170.18:LICENSE
 - @tanstack/react-start-client@1.168.16:LICENSE
-- @tanstack/react-start-rsc@0.1.29:LICENSE
+- @tanstack/react-start-rsc@0.1.31:LICENSE
 - @tanstack/react-start-server@1.167.22:LICENSE
-- @tanstack/react-start@1.168.30:LICENSE
+- @tanstack/react-start@1.168.32:LICENSE
 - @tanstack/router-core@1.171.15:LICENSE
 - @tanstack/router-generator@1.167.21:LICENSE
-- @tanstack/router-plugin@1.168.22:LICENSE
+- @tanstack/router-plugin@1.168.23:LICENSE
 - @tanstack/router-utils@1.162.2:LICENSE
 - @tanstack/start-client-core@1.170.14:LICENSE
 - @tanstack/start-fn-stubs@1.162.0:LICENSE
-- @tanstack/start-plugin-core@1.171.22:LICENSE
+- @tanstack/start-plugin-core@1.171.24:LICENSE
 - @tanstack/start-server-core@1.169.17:LICENSE
 - @tanstack/start-storage-context@1.167.17:LICENSE
 - @tanstack/virtual-file-routes@1.162.0:LICENSE
@@ -11046,7 +11074,7 @@ SOFTWARE.
 
 SHA-256 a6ab98e5c77b9070c443eaff2ff81034a6f8cc05a7524d5098eb0f24defa0115
 Used by:
-- hono@4.12.27:LICENSE
+- hono@4.12.31:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 
@@ -11402,7 +11430,7 @@ SOFTWARE.
 
 SHA-256 b010b0dfdfdb23d7396e03b82cd4621fc9bb8f95d6b0aea70b9c24e12074c786
 Used by:
-- fast-uri@3.1.3:LICENSE
+- fast-uri@3.1.4:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 Copyright (c) 2011-2021, Gary Court until https://github.com/garycourt/uri-js/commit/a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae
 Copyright (c) 2021-present The Fastify team <https://github.com/fastify/fastify#team>
@@ -11647,7 +11675,7 @@ Used by:
 
 SHA-256 b0f2417199889f1c0d28ec4e0244eacf1a15de5819d61f641dd7d8f45153ac9c
 Used by:
-- prettier@3.9.5:LICENSE
+- prettier@3.9.6:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 Copyright © James Long and contributors
 
@@ -14299,9 +14327,11 @@ SOFTWARE.
 SHA-256 b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529
 Used by:
 - @ai-sdk/gateway@3.0.153:LICENSE
+- @ai-sdk/gateway@3.0.156:LICENSE
 - @ai-sdk/provider@3.0.14:LICENSE
 - @ai-sdk/react@3.0.232:LICENSE
 - ai@6.0.230:LICENSE
+- ai@6.0.234:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 Copyright 2023 Vercel, Inc.
 
@@ -15560,8 +15590,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 SHA-256 da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93
 Used by:
-- react-dom@19.2.7:LICENSE
-- react@19.2.7:LICENSE
+- react-dom@19.2.8:LICENSE
+- react@19.2.8:LICENSE
 - scheduler@0.27.0:LICENSE
 - use-sync-external-store@1.6.0:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
@@ -15740,7 +15770,7 @@ SHA-256 dd5fd3a2e8ca256521b80e46d7fb0aa953c842ef1420fb31f4b1f08ae31d82e7
 Used by:
 - @tanstack/db-ivm@0.1.18:LICENSE
 - @tanstack/db@0.6.16:LICENSE
-- @tanstack/query-db-collection@1.1.0:LICENSE
+- @tanstack/query-db-collection@1.2.0:LICENSE
 - @tanstack/react-db@0.1.94:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
