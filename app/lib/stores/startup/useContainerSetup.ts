@@ -24,6 +24,7 @@ import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace
 import { startupInstallArgs } from './dependency-install-policy';
 import { prepareWebContainerPackageManagers, webContainerNpmEnvironment } from '~/lib/webcontainer/pnpm';
 import { withPreviewPackageManifest } from './preview-package-manifest';
+import { resolveContainerSnapshotSource } from './snapshot-source';
 
 const TEMPLATE_URL = '/template-snapshot-7e576022.bin';
 const logger = createScopedLogger('ContainerSetup');
@@ -90,19 +91,17 @@ export function useExistingChatContainerSetup(loadedChatId: string | undefined) 
           WEBCONTAINER_BOOT_TIMEOUT_MS,
           'The browser workspace took too long to start.',
         );
-        let snapshotUrl = await withTimeout(
+        const storedSnapshotUrl = await withTimeout(
           executeDataOperation(api.snapshot.getSnapshotUrl, { chatId: loadedChatId, sessionId }),
           WORKSPACE_STEP_TIMEOUT_MS,
           'Ghostbuild took too long to locate the project snapshot.',
         );
-        if (!snapshotUrl) {
+        if (!storedSnapshotUrl) {
           logger.warn(`Existing chat ${loadedChatId} has no snapshot. Loading the base template.`);
-          snapshotUrl = TEMPLATE_URL;
         }
         await setupContainer({
-          snapshotUrl,
+          ...resolveContainerSnapshotSource(storedSnapshotUrl, TEMPLATE_URL),
           allowInstallFailure: true,
-          trustedTemplateDependencies: false,
         });
       } catch (error) {
         if (isUnsupportedRuntimeError(error)) {
