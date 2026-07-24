@@ -156,7 +156,8 @@ function containerWithWorkspace(
     'strictDepBuilds: true\nblockExoticSubdeps: true\noverrides:\n' +
     "  'brace-expansion@<1.1.16': '1.1.16'\n" +
     "  'brace-expansion@>=2.0.0 <2.1.2': '2.1.2'\n" +
-    "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\nallowBuilds:\n" +
+    "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\n" +
+    "  'sharp@<0.35.0': '0.35.3'\nallowBuilds:\n" +
     '  core-js-pure: true\n  esbuild: true\n  sharp: true\n  workerd: true\n',
 ): WebContainer {
   const invokeSpawn = spawn as unknown as (command: string, args: string[], options: unknown) => Promise<unknown>;
