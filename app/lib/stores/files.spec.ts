@@ -5,12 +5,22 @@ import { getAbsolutePath } from 'ghostbuild-agent/utils/workDir';
 import { MANAGED_WEBCONTAINER_NPMRC_CONTENT } from '~/utils/secretFiles';
 import { FilesStore } from './files';
 
+const containerBootMocks = vi.hoisted(() => ({
+  waitForContainerBootState: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock('./containerBootState', () => ({
+  ContainerBootState: { READY: 4 },
+  waitForContainerBootState: containerBootMocks.waitForContainerBootState,
+}));
+
 describe('FilesStore public filesystem watcher', () => {
   let project: MemoryProject;
   let container: WebContainer;
   let store: FilesStore;
 
   beforeEach(async () => {
+    containerBootMocks.waitForContainerBootState.mockResolvedValue(undefined);
     project = new MemoryProject();
     project.setFile('src/current.ts', 'version one');
     project.setFile('src/remove-me.ts', 'remove me');
@@ -18,8 +28,31 @@ describe('FilesStore public filesystem watcher', () => {
     container = project.container;
     store = new FilesStore(Promise.resolve(container));
 
-    await vi.waitFor(() => expect(project.watch).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(project.watch).toHaveBeenCalledWith('.', { recursive: false }, expect.any(Function)));
     await store.prewarmWorkdir(container);
+  });
+
+  it('waits for the initial workspace setup before attaching the recursive watcher', async () => {
+    let markReady: () => void = () => undefined;
+    containerBootMocks.waitForContainerBootState.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          markReady = resolve;
+        }),
+    );
+    const delayedProject = new MemoryProject();
+
+    new FilesStore(Promise.resolve(delayedProject.container));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(containerBootMocks.waitForContainerBootState).toHaveBeenCalledWith(4);
+    expect(delayedProject.watch).not.toHaveBeenCalled();
+
+    markReady();
+    await vi.waitFor(() =>
+      expect(delayedProject.watch).toHaveBeenCalledWith('.', { recursive: false }, expect.any(Function)),
+    );
   });
 
   it('reconciles added, changed, and removed files and directories', async () => {
@@ -36,7 +69,8 @@ describe('FilesStore public filesystem watcher', () => {
     project.emit('rename', 'old');
     await store.flushFileEvents();
 
-    expect(project.watch).toHaveBeenCalledWith('.', { recursive: true }, expect.any(Function));
+    expect(project.watch).toHaveBeenCalledWith('.', { recursive: false }, expect.any(Function));
+    expect(project.watch).toHaveBeenCalledWith('src', { recursive: true }, expect.any(Function));
     expect(store.files.get()[getAbsolutePath('src/current.ts')]).toEqual(textFile('version two'));
     expect(store.files.get()[getAbsolutePath('src/added.ts')]).toEqual(textFile('added file'));
     expect(store.files.get()[getAbsolutePath('new')]).toEqual({ type: 'folder' });
@@ -51,6 +85,8 @@ describe('FilesStore public filesystem watcher', () => {
     project.setFile('src/current.ts', 'one read only');
     project.setFile('.gitignore', 'ignored');
     project.setFile('node_modules/pkg/index.js', 'dependency');
+    project.setFile('.wrangler/tmp/bundle.js', 'generated worker bundle');
+    project.setFile('dist/assets/index.js', 'generated client bundle');
     project.events.length = 0;
 
     project.emit('change', 'src/current.ts');
@@ -59,6 +95,8 @@ describe('FilesStore public filesystem watcher', () => {
     project.emit('rename', '.gitignore');
     project.emit('change', '.gitignore');
     project.emit('rename', 'node_modules/pkg/index.js');
+    project.emit('rename', '.wrangler/tmp/bundle.js');
+    project.emit('rename', 'dist/assets/index.js');
     await store.flushFileEvents();
 
     expect(project.events.filter((event) => event === 'readdir:src')).toHaveLength(1);
@@ -66,10 +104,14 @@ describe('FilesStore public filesystem watcher', () => {
     expect(project.events).not.toContain('readdir:node_modules/pkg');
     expect(project.events).not.toContain('read:.gitignore');
     expect(project.events).not.toContain('read:node_modules/pkg/index.js');
+    expect(project.events).not.toContain('read:.wrangler/tmp/bundle.js');
+    expect(project.events).not.toContain('read:dist/assets/index.js');
     expect(project.events).not.toContain('remove:.git');
     expect(store.files.get()[getAbsolutePath('src/current.ts')]).toEqual(textFile('one read only'));
     expect(store.files.get()[getAbsolutePath('.gitignore')]).toBeUndefined();
     expect(store.files.get()[getAbsolutePath('node_modules/pkg/index.js')]).toBeUndefined();
+    expect(store.files.get()[getAbsolutePath('.wrangler/tmp/bundle.js')]).toBeUndefined();
+    expect(store.files.get()[getAbsolutePath('dist/assets/index.js')]).toBeUndefined();
   });
 
   it('drops dependency install events before allocating a watcher buffer', () => {
@@ -77,6 +119,7 @@ describe('FilesStore public filesystem watcher', () => {
 
     for (let index = 0; index < 1_000; index += 1) {
       project.emit('rename', `node_modules/pkg-${index}/index.js`);
+      project.emit('rename', `.wrangler/tmp/build-${index}.js`);
     }
 
     expect(setTimeoutSpy).not.toHaveBeenCalled();
@@ -162,11 +205,16 @@ class MemoryProject {
   readonly directories = new Set<string>(['.']);
   readonly events: string[] = [];
   failRemovalFor: string | undefined;
-  listener: FSWatchCallback | undefined;
+  readonly watchers = new Map<string, { recursive: boolean; listener: FSWatchCallback }>();
 
-  readonly watch = vi.fn((_filename: string, _options: unknown, listener: FSWatchCallback) => {
-    this.listener = listener;
-    return { close: vi.fn() };
+  readonly watch = vi.fn((filename: string, options: { recursive?: boolean }, listener: FSWatchCallback) => {
+    const normalizedFilename = normalize(filename);
+    this.watchers.set(normalizedFilename, { recursive: options.recursive ?? false, listener });
+    return {
+      close: vi.fn(() => {
+        this.watchers.delete(normalizedFilename);
+      }),
+    };
   });
 
   readonly container = {
@@ -242,10 +290,28 @@ class MemoryProject {
   }
 
   emit(event: 'rename' | 'change', filePath: string | Uint8Array): void {
-    if (!this.listener) {
+    if (this.watchers.size === 0) {
       throw new Error('Watcher has not initialized');
     }
-    this.listener(event, filePath);
+    const decodedPath = typeof filePath === 'string' ? filePath : new TextDecoder().decode(filePath);
+    const normalizedPath = normalize(decodedPath.replace(`${WORK_DIR}/`, ''));
+    for (const [watchedDirectory, watcher] of this.watchers) {
+      if (watchedDirectory === '.') {
+        const rootEntry = normalizedPath.split('/')[0];
+        watcher.listener(event, typeof filePath === 'string' ? rootEntry : new TextEncoder().encode(rootEntry));
+        continue;
+      }
+      if (normalizedPath === watchedDirectory) {
+        watcher.listener(event, watchedDirectory);
+        continue;
+      }
+      const watchedPrefix = `${watchedDirectory}/`;
+      if (!normalizedPath.startsWith(watchedPrefix)) {
+        continue;
+      }
+      const watchedPath = watcher.recursive ? normalizedPath.slice(watchedPrefix.length) : basename(normalizedPath);
+      watcher.listener(event, typeof filePath === 'string' ? watchedPath : new TextEncoder().encode(watchedPath));
+    }
   }
 
   private ensureDirectories(directoryPath: string): void {
