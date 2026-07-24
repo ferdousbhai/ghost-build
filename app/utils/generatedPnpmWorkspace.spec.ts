@@ -1,7 +1,14 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { assertSafeGeneratedPnpmWorkspace } from './generatedPnpmWorkspace';
 
 describe('assertSafeGeneratedPnpmWorkspace', () => {
+  test('accepts the canonical generated template policy', () => {
+    expect(() =>
+      assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', readFileSync('template/pnpm-workspace.yaml', 'utf8')),
+    ).not.toThrow();
+  });
+
   test('accepts the canonical cooling period and explicit dependency build approvals', () => {
     expect(() => assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', safePolicy)).not.toThrow();
   });
@@ -14,6 +21,12 @@ describe('assertSafeGeneratedPnpmWorkspace', () => {
     safePolicy.replace('minimumReleaseAgeIgnoreMissingTime: false', 'minimumReleaseAgeIgnoreMissingTime: true'),
     safePolicy.replace('minimumReleaseAgeStrict: true', 'minimumReleaseAgeStrict: false'),
     safePolicy.replace('blockExoticSubdeps: true', 'blockExoticSubdeps: false'),
+    safePolicy.replace("  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'", "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.3'"),
+    safePolicy.replace("  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\n", ''),
+    safePolicy.replace(
+      "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\n",
+      "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\n  'malicious-package@*': 'file:../outside'\n",
+    ),
     `${safePolicy}trustLockfile: true\n`,
     `${safePolicy}minimumReleaseAgeExclude:\n  - malicious-package\n`,
     `${safePolicy}registries:\n  default: https://packages.example.invalid/\n`,
@@ -22,7 +35,7 @@ describe('assertSafeGeneratedPnpmWorkspace', () => {
     `${safePolicy}"minimumReleaseAge\\u0045xclude": [malicious-package]\n`,
   ])('rejects dependency cooling-period and lockfile-trust weakening %#', (workspace) => {
     expect(() => assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', workspace)).toThrow(
-      /minimumReleaseAge|ignoreWorkspaceRootCheck|project root|blockExoticSubdeps|trustLockfile|unexpected setting|top-level keys/,
+      /minimumReleaseAge|ignoreWorkspaceRootCheck|project root|blockExoticSubdeps|overrides|trustLockfile|unexpected setting|top-level keys/,
     );
   });
 
@@ -67,5 +80,8 @@ describe('assertSafeGeneratedPnpmWorkspace', () => {
 const safePolicy =
   'packages:\n  - .\nignoreWorkspaceRootCheck: true\nminimumReleaseAge: 1440\n' +
   'minimumReleaseAgeIgnoreMissingTime: false\nminimumReleaseAgeStrict: true\n' +
-  'strictDepBuilds: true\nblockExoticSubdeps: true\nallowBuilds:\n' +
+  'strictDepBuilds: true\nblockExoticSubdeps: true\noverrides:\n' +
+  "  'brace-expansion@<1.1.16': '1.1.16'\n" +
+  "  'brace-expansion@>=2.0.0 <2.1.2': '2.1.2'\n" +
+  "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\nallowBuilds:\n" +
   '  core-js-pure: true\n  esbuild: true\n  sharp: true\n  workerd: true\n';
