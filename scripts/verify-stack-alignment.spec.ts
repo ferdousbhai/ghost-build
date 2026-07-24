@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   dependencyNames,
+  findForbiddenDependencyUpdateConfigs,
   findForbiddenFiles,
   findForbiddenLegacyPaths,
   findForbiddenDependencies,
@@ -105,6 +106,12 @@ describe('stack alignment verification helpers', () => {
   it('reports forbidden generated lockfiles', () => {
     expect(findForbiddenFiles(['scripts/fixtures/forbidden-stack-imports.txt'])).toEqual([
       'scripts/fixtures/forbidden-stack-imports.txt must not exist; Ghostbuild uses pnpm lockfiles only.',
+    ]);
+  });
+
+  it('forbids automated dependency update configuration', () => {
+    expect(findForbiddenDependencyUpdateConfigs(['scripts/fixtures/forbidden-stack-imports.txt'])).toEqual([
+      'scripts/fixtures/forbidden-stack-imports.txt must not exist; Ghostbuild uses private vulnerability alerts without automated dependency update pull requests.',
     ]);
   });
 
