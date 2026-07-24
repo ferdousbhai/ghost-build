@@ -62,34 +62,77 @@ export async function cancelObjectGcCandidate(db: D1Database, receipt: ObjectGcC
   return result.meta.changes === 1;
 }
 
-export function prepareChatObjectGcCandidatesStatement(
+export function prepareChatObjectGcCandidateStatements(
   db: D1Database,
   args: { chatId: string; ownerId: string; now?: number },
-): D1PreparedStatement {
+): D1PreparedStatement[] {
   const now = args.now ?? Date.now();
   const notBefore = now + OBJECT_GC_GRACE_PERIOD_MS;
-  return db
-    .prepare(
-      `INSERT INTO object_gc_candidates (storage_key, not_before, created_at, attempts)
-       SELECT DISTINCT storage_key, ?, ?, 0
-       FROM (
-         SELECT snapshot_key AS storage_key FROM chats WHERE id = ? AND creator_id = ?
-         UNION ALL
-         SELECT storage_key FROM chat_message_states WHERE chat_id = ?
-         UNION ALL
-         SELECT snapshot_key FROM chat_message_states WHERE chat_id = ?
-         UNION ALL
-         SELECT chat_history_key FROM shares WHERE chat_id = ?
-         UNION ALL
-         SELECT snapshot_key FROM shares WHERE chat_id = ?
-         UNION ALL
-         SELECT thumbnail_image_key FROM social_shares WHERE chat_id = ?
-       )
-       WHERE storage_key IS NOT NULL
-       ON CONFLICT(storage_key) DO UPDATE SET
-         not_before = MAX(object_gc_candidates.not_before, excluded.not_before)`,
-    )
-    .bind(notBefore, now, args.chatId, args.ownerId, args.chatId, args.chatId, args.chatId, args.chatId, args.chatId);
+
+  // D1 rejects the equivalent six-way compound SELECT in production. Keep
+  // every source in the same atomic batch while avoiding that query limit.
+  return [
+    db
+      .prepare(
+        `INSERT INTO object_gc_candidates (storage_key, not_before, created_at, attempts)
+         SELECT snapshot_key, ?, ?, 0
+         FROM chats
+         WHERE id = ? AND creator_id = ? AND snapshot_key IS NOT NULL
+         ON CONFLICT(storage_key) DO UPDATE SET
+           not_before = MAX(object_gc_candidates.not_before, excluded.not_before)`,
+      )
+      .bind(notBefore, now, args.chatId, args.ownerId),
+    db
+      .prepare(
+        `INSERT INTO object_gc_candidates (storage_key, not_before, created_at, attempts)
+         SELECT storage_key, ?, ?, 0
+         FROM chat_message_states
+         WHERE chat_id = ? AND storage_key IS NOT NULL
+         ON CONFLICT(storage_key) DO UPDATE SET
+           not_before = MAX(object_gc_candidates.not_before, excluded.not_before)`,
+      )
+      .bind(notBefore, now, args.chatId),
+    db
+      .prepare(
+        `INSERT INTO object_gc_candidates (storage_key, not_before, created_at, attempts)
+         SELECT snapshot_key, ?, ?, 0
+         FROM chat_message_states
+         WHERE chat_id = ? AND snapshot_key IS NOT NULL
+         ON CONFLICT(storage_key) DO UPDATE SET
+           not_before = MAX(object_gc_candidates.not_before, excluded.not_before)`,
+      )
+      .bind(notBefore, now, args.chatId),
+    db
+      .prepare(
+        `INSERT INTO object_gc_candidates (storage_key, not_before, created_at, attempts)
+         SELECT chat_history_key, ?, ?, 0
+         FROM shares
+         WHERE chat_id = ? AND chat_history_key IS NOT NULL
+         ON CONFLICT(storage_key) DO UPDATE SET
+           not_before = MAX(object_gc_candidates.not_before, excluded.not_before)`,
+      )
+      .bind(notBefore, now, args.chatId),
+    db
+      .prepare(
+        `INSERT INTO object_gc_candidates (storage_key, not_before, created_at, attempts)
+         SELECT snapshot_key, ?, ?, 0
+         FROM shares
+         WHERE chat_id = ? AND snapshot_key IS NOT NULL
+         ON CONFLICT(storage_key) DO UPDATE SET
+           not_before = MAX(object_gc_candidates.not_before, excluded.not_before)`,
+      )
+      .bind(notBefore, now, args.chatId),
+    db
+      .prepare(
+        `INSERT INTO object_gc_candidates (storage_key, not_before, created_at, attempts)
+         SELECT thumbnail_image_key, ?, ?, 0
+         FROM social_shares
+         WHERE chat_id = ? AND thumbnail_image_key IS NOT NULL
+         ON CONFLICT(storage_key) DO UPDATE SET
+           not_before = MAX(object_gc_candidates.not_before, excluded.not_before)`,
+      )
+      .bind(notBefore, now, args.chatId),
+  ];
 }
 
 async function isObjectKeyPermanentlyReferenced(db: D1Database, key: string): Promise<boolean> {

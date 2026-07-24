@@ -9,7 +9,7 @@ import {
 } from './chat-repository.server';
 import { transcriptAgentName } from 'ghostbuild-agent/transcript';
 import { prepareInsertChatTranscript, requireChatTranscript, transcriptIdentity } from './transcript-repository.server';
-import { prepareChatObjectGcCandidatesStatement } from './object-gc.server';
+import { prepareChatObjectGcCandidateStatements } from './object-gc.server';
 import { prepareChatAgentGcCandidatesStatement, prepareEmptyChatAgentGcCandidatesStatement } from './agent-gc.server';
 import {
   boundedDataPageSize,
@@ -177,7 +177,7 @@ export async function removeChat(db: D1Database, args: { sessionId: string; id: 
   const chat = await findChat(db, { id: args.id, sessionId: args.sessionId });
   if (chat) {
     await db.batch([
-      prepareChatObjectGcCandidatesStatement(db, { chatId: chat.id, ownerId: args.sessionId }),
+      ...prepareChatObjectGcCandidateStatements(db, { chatId: chat.id, ownerId: args.sessionId }),
       prepareChatAgentGcCandidatesStatement(db, { chatId: chat.id, ownerId: args.sessionId }),
       prepareReleaseThumbnailForChatStatement(db, { chatId: chat.id, ownerId: args.sessionId }),
       db
