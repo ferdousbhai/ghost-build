@@ -5,21 +5,21 @@ export const APP_AGENT_PROTECTED_PACKAGE_REQUIREMENTS = {
   '@cloudflare/workers-types': '5.20260718.1',
   '@eslint/js': '^10.0.1',
   '@tanstack/react-router': '^1.170.18',
-  '@tanstack/react-start': '^1.168.30',
+  '@tanstack/react-start': '^1.168.32',
   '@tanstack/router-cli': '^1.167.21',
   '@types/node': '^26.1.1',
   '@types/react': '^19.2.17',
   '@types/react-dom': '^19.2.3',
-  '@vitejs/plugin-react': '^6.0.3',
+  '@vitejs/plugin-react': '^6.0.4',
   agents: '^0.17.4',
-  ai: '^6.0.230',
+  ai: '^6.0.234',
   autoprefixer: '~10.5.4',
   eslint: '^10.7.0',
   'eslint-plugin-react-hooks': '^7.1.1',
   'eslint-plugin-react-refresh': '^0.5.3',
   globals: '^17.7.0',
   'jsonc-parser': '^3.3.1',
-  postcss: '~8.5.19',
+  postcss: '~8.5.22',
   tailwindcss: '~3.4.19',
   typescript: '~6.0.3',
   'typescript-eslint': '^8.64.0',
@@ -33,13 +33,24 @@ export const APP_AGENT_PROTECTED_PACKAGE_REQUIREMENTS = {
 type JsonRecord = Record<string, unknown>;
 
 export async function createAppAgentProtectedLockIdentity(lock: JsonRecord): Promise<string> {
-  const allowedTopLevelKeys = new Set(['lockfileVersion', 'settings', 'importers', 'packages', 'snapshots']);
+  const allowedTopLevelKeys = new Set([
+    'lockfileVersion',
+    'settings',
+    'overrides',
+    'importers',
+    'packages',
+    'snapshots',
+  ]);
   if (Object.keys(lock).some((key) => !allowedTopLevelKeys.has(key)) || lock.lockfileVersion !== '9.0') {
     throw new TypeError('protected lockfile has unsupported resolution controls');
   }
   const settings = record(lock.settings);
   if (Object.keys(settings).length === 0) {
     throw new TypeError('protected lockfile settings are missing');
+  }
+  const overrides = record(lock.overrides);
+  if (Object.keys(overrides).length === 0) {
+    throw new TypeError('protected lockfile overrides are missing');
   }
   const importer = nestedRecord(lock, 'importers', '.');
   const packages = nestedRecord(lock, 'packages');
@@ -106,9 +117,10 @@ export async function createAppAgentProtectedLockIdentity(lock: JsonRecord): Pro
   return sha256Hex(
     new TextEncoder().encode(
       JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 3,
         lockfileVersion: lock.lockfileVersion,
         settings: canonicalize(settings),
+        overrides: canonicalize(overrides),
         roots,
         closure,
       }),

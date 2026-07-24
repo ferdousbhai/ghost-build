@@ -186,7 +186,7 @@ describe('inspectDeploymentSnapshot', () => {
     const snapshot = await projectZip({ includeBindings: true });
     const zip = await JSZip.loadAsync(await snapshot.arrayBuffer());
     const lock = await zip.file('pnpm-lock.yaml')!.async('string');
-    zip.file('pnpm-lock.yaml', lock.replace('specifier: ^6.0.230', 'specifier: ^6.0.229'));
+    zip.file('pnpm-lock.yaml', lock.replace('specifier: ^6.0.234', 'specifier: ^6.0.233'));
 
     await expect(inspectDeploymentSnapshot(await asBlob(zip))).rejects.toThrow(
       'changes the reviewed security or build toolchain',
@@ -200,8 +200,8 @@ describe('inspectDeploymentSnapshot', () => {
     peerSubstitution.file(
       'pnpm-lock.yaml',
       peerLock.replace(
-        'version: 6.0.3(@rolldown/plugin-babel@0.2.3(@babel/core@8.0.1)',
-        'version: 6.0.3(@rolldown/plugin-babel@0.2.3(@babel/core@7.29.7)',
+        'version: 6.0.4(@rolldown/plugin-babel@0.2.3(@babel/core@8.0.1)',
+        'version: 6.0.4(@rolldown/plugin-babel@0.2.3(@babel/core@7.29.7)',
       ),
     );
     await expect(inspectDeploymentSnapshot(await asBlob(peerSubstitution))).rejects.toThrow(
