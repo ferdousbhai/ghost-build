@@ -84,9 +84,10 @@ export function solutionConstraints() {
     <source_quality>
       Keep generated code and default UI copy ASCII unless non-ASCII text is requested. For browser UI, use
       lucide-react icons instead of raw decorative characters. Replace the template title, description, favicon, and
-      social-preview metadata with branding that matches the requested product; do not ship the generic template
-      metadata unchanged. Generate routes when TanStack routes change and binding types when Cloudflare configuration
-      changes. Leave the project type-safe, lint-clean, buildable, and validated.
+      social-preview metadata with branding that matches the requested product, and use an absolute deployed URL for
+      social-preview images; do not ship the generic template metadata unchanged. Generate routes when TanStack routes
+      change and binding types when Cloudflare configuration changes. Leave the project type-safe, lint-clean,
+      buildable, and validated.
     </source_quality>
   </solution_constraints>
   `;
