@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { parseDocument, stringify } from 'yaml';
 import { inspectDeploymentSnapshot, MAX_DEPLOYMENT_EXPANDED_BYTES } from './deployment-snapshot';
 import { APP_AGENT_PROTECTED_FILE_SHA256 } from './deployment-security-baseline';
+import { DEPLOYMENT_COMPATIBILITY_DATE } from './deployment-runtime-policy';
 
 describe('inspectDeploymentSnapshot', () => {
   it('detects an explicit Worker-only profile and its configured bindings', async () => {
@@ -67,7 +68,7 @@ describe('inspectDeploymentSnapshot', () => {
       'wrangler.jsonc',
       JSON.stringify({
         main: 'src/server.ts',
-        compatibility_date: '2026-07-18',
+        compatibility_date: DEPLOYMENT_COMPATIBILITY_DATE,
         compatibility_flags: ['nodejs_compat'],
         observability: {
           enabled: true,
@@ -343,7 +344,7 @@ async function projectZip(args: {
     'wrangler.jsonc',
     JSON.stringify({
       main: 'src/server.ts',
-      compatibility_date: args.compatibilityDate ?? '2026-07-18',
+      compatibility_date: args.compatibilityDate ?? DEPLOYMENT_COMPATIBILITY_DATE,
       compatibility_flags: ['nodejs_compat'],
       observability: {
         enabled: true,
@@ -376,7 +377,7 @@ async function projectZip(args: {
 
 function runtimeConfig() {
   return {
-    compatibility_date: '2026-07-18',
+    compatibility_date: DEPLOYMENT_COMPATIBILITY_DATE,
     compatibility_flags: ['nodejs_compat'],
     observability: {
       enabled: true,

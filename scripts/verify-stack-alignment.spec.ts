@@ -9,6 +9,7 @@ import {
   findForbiddenRuntimeEnvAccess,
   findInternalPackageMetadataErrors,
   findCloudflareAiPeerCompatibilityErrors,
+  findDeploymentRuntimePolicyErrors,
   findDeploymentWorkflowErrors,
   findMissingDependencies,
   findMissingCommandSteps,
@@ -267,6 +268,22 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
     expect(
       findDeploymentWorkflowErrors(validWorkflow.replaceAll('publishApprovedDeploymentArtifact', 'publishDeployment')),
     ).toContain('deployment Workflow must preserve the R2 receipt boundary between build and publish.');
+  });
+
+  it('keeps deployment admission aligned with the generated template compatibility date', () => {
+    const runtimePolicy = "export const DEPLOYMENT_COMPATIBILITY_DATE = '2026-07-21';";
+    const templateConfig = '{ "compatibility_date": "2026-07-21", }';
+
+    expect(findDeploymentRuntimePolicyErrors(templateConfig, runtimePolicy)).toEqual([]);
+    expect(findDeploymentRuntimePolicyErrors('{ "compatibility_date": "2026-07-22" }', runtimePolicy)).toEqual([
+      'deployment compatibility date "2026-07-21" must match template/wrangler.jsonc "2026-07-22".',
+    ]);
+    expect(findDeploymentRuntimePolicyErrors(templateConfig, 'export const other = 1;')).toEqual([
+      'deployment runtime policy must declare DEPLOYMENT_COMPATIBILITY_DATE.',
+    ]);
+    expect(findDeploymentRuntimePolicyErrors('{}', runtimePolicy)).toEqual([
+      'template/wrangler.jsonc must declare compatibility_date.',
+    ]);
   });
 
   it('requires chat persistence uniqueness migrations', () => {

@@ -1,4 +1,4 @@
-export const DEPLOYMENT_COMPATIBILITY_DATE = '2026-07-18';
+export const DEPLOYMENT_COMPATIBILITY_DATE = '2026-07-21';
 export const DEPLOYMENT_COMPATIBILITY_FLAGS = ['nodejs_compat'] as const;
 export const DEPLOYMENT_OBSERVABILITY = {
   enabled: true,
