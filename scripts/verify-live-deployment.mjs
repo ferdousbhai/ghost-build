@@ -8,6 +8,10 @@ const DEFAULT_STABILIZATION_MS = 60_000;
 const DEFAULT_CHECK_INTERVAL_MS = 5_000;
 const DEFAULT_CONSECUTIVE_CHECKS = 5;
 const DEFAULT_MAX_LOCAL_ATTEMPTS = 15;
+const DEFAULT_GLOBAL_MEASUREMENT_ATTEMPTS = 5;
+const DEFAULT_GLOBAL_RETRY_INTERVAL_MS = 10_000;
+const DEFAULT_GLOBAL_POLL_ATTEMPTS = 15;
+const DEFAULT_GLOBAL_POLL_INTERVAL_MS = 2_000;
 const COMMIT_SHA_PATTERN = /^[a-f0-9]{40}$/;
 
 const waitFor = (delayMs) => wait(delayMs);
@@ -157,7 +161,7 @@ export function globalpingRequest(expectedSha) {
   };
 }
 
-export function globalMeasurementErrors(measurement, expectedSha) {
+export function globalMeasurementErrors(measurement, expectedSha, log = console.log) {
   const errors = [];
   if (measurement?.status !== 'finished') {
     errors.push(`measurement status is ${measurement?.status ?? '<empty>'}`);
@@ -177,7 +181,7 @@ export function globalMeasurementErrors(measurement, expectedSha) {
       body,
       expectedSha,
     });
-    console.log(
+    log(
       probeSummary({
         label: `Regional probe ${location}`,
         statusCode: entry.result?.statusCode,
@@ -191,8 +195,8 @@ export function globalMeasurementErrors(measurement, expectedSha) {
   return errors;
 }
 
-async function fetchJson(url, options) {
-  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(20_000) });
+async function fetchJson(url, options, fetchImplementation) {
+  const response = await fetchImplementation(url, { ...options, signal: AbortSignal.timeout(20_000) });
   const body = await response.json();
   if (!response.ok) {
     throw new Error(`Globalping returned HTTP ${response.status}: ${JSON.stringify(body)}`);
@@ -203,34 +207,76 @@ async function fetchJson(url, options) {
 /**
  * @param {{
  *   expectedSha?: string;
+ *   fetchImplementation?: typeof fetch;
  *   waitImplementation?: (delayMs: number) => Promise<unknown>;
+ *   measurementAttempts?: number;
+ *   retryIntervalMs?: number;
+ *   pollAttempts?: number;
+ *   pollIntervalMs?: number;
+ *   log?: (message: string) => void;
  * }} [options]
  */
-export async function verifyGlobalDeployment({ expectedSha, waitImplementation = waitFor } = {}) {
+export async function verifyGlobalDeployment({
+  expectedSha,
+  fetchImplementation = fetch,
+  waitImplementation = waitFor,
+  measurementAttempts = DEFAULT_GLOBAL_MEASUREMENT_ATTEMPTS,
+  retryIntervalMs = DEFAULT_GLOBAL_RETRY_INTERVAL_MS,
+  pollAttempts = DEFAULT_GLOBAL_POLL_ATTEMPTS,
+  pollIntervalMs = DEFAULT_GLOBAL_POLL_INTERVAL_MS,
+  log = console.log,
+} = {}) {
   expectedSha = validateExpectedSha(expectedSha);
 
-  const created = await fetchJson(GLOBALPING_API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(globalpingRequest(expectedSha)),
-  });
-  if (!created?.id) {
-    throw new Error('Globalping did not return a measurement ID.');
-  }
-  console.log(`Globalping measurement: https://globalping.io?measurement=${created.id}`);
-
-  for (let attempt = 1; attempt <= 15; attempt += 1) {
-    const measurement = await fetchJson(`${GLOBALPING_API_URL}/${created.id}`);
-    if (measurement.status === 'finished') {
-      const errors = globalMeasurementErrors(measurement, expectedSha);
-      if (errors.length > 0) {
-        throw new Error(`Multi-region verification failed: ${errors.join('; ')}`);
+  let lastErrors = ['no measurements completed'];
+  for (let measurementAttempt = 1; measurementAttempt <= measurementAttempts; measurementAttempt += 1) {
+    try {
+      const created = await fetchJson(
+        GLOBALPING_API_URL,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(globalpingRequest(expectedSha)),
+        },
+        fetchImplementation,
+      );
+      if (!created?.id) {
+        throw new Error('Globalping did not return a measurement ID.');
       }
-      return;
+      log(`Globalping measurement: https://globalping.io?measurement=${created.id}`);
+
+      let finished = false;
+      for (let pollAttempt = 1; pollAttempt <= pollAttempts; pollAttempt += 1) {
+        const measurement = await fetchJson(`${GLOBALPING_API_URL}/${created.id}`, undefined, fetchImplementation);
+        if (measurement.status === 'finished') {
+          finished = true;
+          lastErrors = globalMeasurementErrors(measurement, expectedSha, log);
+          if (lastErrors.length === 0) {
+            return;
+          }
+          break;
+        }
+        if (pollAttempt < pollAttempts) {
+          await waitImplementation(pollIntervalMs);
+        }
+      }
+      if (!finished) {
+        lastErrors = [`Globalping measurement did not finish after ${pollAttempts} polls`];
+      }
+    } catch (error) {
+      lastErrors = [error instanceof Error ? error.message : String(error)];
     }
-    await waitImplementation(2_000);
+    if (measurementAttempt < measurementAttempts) {
+      log(
+        `Regional deployment has not converged (${lastErrors.join('; ')}). Retrying measurement ${measurementAttempt + 1}/${measurementAttempts}.`,
+      );
+      await waitImplementation(retryIntervalMs);
+    }
   }
-  throw new Error('Globalping measurement did not finish within 30 seconds.');
+
+  throw new Error(
+    `Multi-region verification failed after ${measurementAttempts} measurement attempts: ${lastErrors.join('; ')}`,
+  );
 }
 
 async function main() {
