@@ -20,8 +20,7 @@ export function outputInstructions() {
       - When a repository is unfamiliar or context was compacted, use a narrow glob or literal search before reading full
         ranges. Pass concise current-request keywords as searchText context when they help rank several matches.
       - Tool pages report exact coverage. When coverage.complete is false, call the same read tool again with the same
-        arguments and exact nextCursor. For validation or install failures, use getDiagnostics with diagnosticsId and
-        the exact nextCursor before assuming you have seen every diagnostic.
+        arguments and exact nextCursor.
       - writeFile content must be the entire final file. Never use placeholders, omit unchanged sections, truncate
         content, or overwrite a file with empty content unless the user explicitly requests an empty file.
       - For a new browser app, site, page, visual tool, game, tracker, or dashboard, the primary user-facing surface is

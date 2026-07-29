@@ -40,26 +40,18 @@ class WorkbenchStore {
   actionAlert = workbenchActionAlert;
 
   constructor() {
-    this.#artifactStore = new WorkbenchArtifactStore(
-      webcontainer,
-      this.artifacts,
-      this.actionAlert,
-      this.#reloadedParts,
-      {
-        getFiles: () => this.#filesStore.files.get(),
-        getRecentFileWrites: () => this.#filesStore.userWrites,
-        getPreviewPort: () => this.#previewsStore.previews.get().find((preview) => preview.ready)?.port,
-        getSelectedFile: () => this.#editorStore.selectedFile.get(),
-        getCurrentView: () => this.currentView.get(),
-        isFollowingStreamedCode: () => this.#editorStore.followingStreamedCode.get(),
-        setSelectedFile: (filePath) => this.setSelectedFile(filePath),
-        getEditorDocument: (filePath) => this.#editorStore.documents.get()[filePath],
-        updateEditorFile: (filePath, content) => this.#editorStore.updateFile(filePath, content),
-        resetFileModifications: () => this.resetAllFileModifications(),
-        setGeneratedFileContent: (filePath, content) => this.setGeneratedFileContent(filePath, content),
-        waitForWorkspaceReady: () => this.#workspaceReadyWaiter?.(),
-      },
-    );
+    this.#artifactStore = new WorkbenchArtifactStore(webcontainer, this.artifacts, this.#reloadedParts, {
+      getFiles: () => this.#filesStore.files.get(),
+      getSelectedFile: () => this.#editorStore.selectedFile.get(),
+      getCurrentView: () => this.currentView.get(),
+      isFollowingStreamedCode: () => this.#editorStore.followingStreamedCode.get(),
+      setSelectedFile: (filePath) => this.setSelectedFile(filePath),
+      getEditorDocument: (filePath) => this.#editorStore.documents.get()[filePath],
+      updateEditorFile: (filePath, content) => this.#editorStore.updateFile(filePath, content),
+      resetFileModifications: () => this.resetAllFileModifications(),
+      setGeneratedFileContent: (filePath, content) => this.setGeneratedFileContent(filePath, content),
+      waitForWorkspaceReady: () => this.#workspaceReadyWaiter?.(),
+    });
     if (import.meta.hot) {
       import.meta.hot.data.artifacts = this.artifacts;
       import.meta.hot.data.unsavedFiles = this.unsavedFiles;
@@ -156,15 +148,7 @@ class WorkbenchStore {
     return this.#filesStore.flushFileEvents();
   }
 
-  waitOnToolCall(toolCallId: string) {
-    return this.#artifactStore.waitOnToolCall(toolCallId);
-  }
-
-  runToolInvocation(toolInvocation: GhostbuildToolInvocation) {
-    return this.#artifactStore.runToolInvocation(toolInvocation);
-  }
-
-  scheduleToolInvocation(toolInvocation: GhostbuildToolInvocation, partId?: PartId): void {
+  scheduleToolInvocation(toolInvocation: GhostbuildToolInvocation, partId: PartId): void {
     this.#artifactStore.scheduleToolInvocation(toolInvocation, partId);
   }
 

@@ -1,12 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { GhostbuildMessage, GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { toolSuccess } from 'ghostbuild-agent/tool-result';
-import {
-  getBuildToolChoice,
-  getNextServerToolStepSettings,
-  getWorkersAiToolSettings,
-  type AgentToolSettings,
-} from './workers-ai-tools';
+import { getBuildToolChoice, getNextServerToolStepSettings, type AgentToolSettings } from './workers-ai-tools';
 
 describe('Workers AI structured tool policy', () => {
   test('moves server operations through validation and exact-revision deployment in one turn', () => {
@@ -92,37 +87,6 @@ describe('Workers AI structured tool policy', () => {
       toolResult('validateProject', {}, toolSuccess('valid', { revision: 'abc', nextAction: 'sign-in-required' })),
     ];
     expect(getBuildToolChoice(messages)).toBe('required');
-  });
-
-  test('activates diagnostic continuation only after incomplete diagnostics exist', () => {
-    expect(getWorkersAiToolSettings([user('Explain this project')]).activeTools).not.toContain('getDiagnostics');
-    const diagnosticsId = crypto.randomUUID();
-    const incomplete = toolSuccess(
-      'page',
-      { diagnosticsId },
-      { complete: false, start: 0, end: 40, total: 42, nextCursor: '12000' },
-    );
-    expect(
-      getWorkersAiToolSettings([user('Explain this project'), toolResult('validateProject', {}, incomplete)])
-        .activeTools,
-    ).toContain('getDiagnostics');
-
-    const complete = toolSuccess('last page', { diagnosticsId }, { complete: true, start: 40, end: 42, total: 42 });
-    expect(
-      getWorkersAiToolSettings([
-        user('Explain this project'),
-        toolResult('validateProject', {}, incomplete),
-        toolResult('getDiagnostics', { diagnosticsId, cursor: '12000' }, complete),
-      ]).activeTools,
-    ).not.toContain('getDiagnostics');
-
-    expect(
-      getWorkersAiToolSettings([
-        user('Explain this project'),
-        toolResult('validateProject', {}, incomplete),
-        user('Now explain something else'),
-      ]).activeTools,
-    ).not.toContain('getDiagnostics');
   });
 });
 

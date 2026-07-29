@@ -55,7 +55,7 @@ const ToolCallContents = memo(function ToolCallContents({
       body={
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           <ul className="list-none space-y-2.5">
-            <ToolUseContents artifact={artifact} invocation={invocation} />
+            <ToolUseContents invocation={invocation} />
           </ul>
         </motion.div>
       }

@@ -1,4 +1,4 @@
-import { atom, map, type MapStore } from 'nanostores';
+import { map, type MapStore } from 'nanostores';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { WebContainer } from '@webcontainer/api';
 import { makePartId, type PartId } from 'ghostbuild-agent/partId';
@@ -7,13 +7,7 @@ import type { ActionCallbackData } from 'ghostbuild-agent/message-parser';
 import { getAbsolutePath, getRelativePath } from 'ghostbuild-agent/utils/workDir';
 import type { ActionRunner } from '~/lib/runtime/action-runner';
 import type { ActionState } from '~/lib/runtime/action-runner/types';
-import type { ActionAlert } from '~/types/actions';
-import {
-  ToolCallAbortedError,
-  WorkbenchArtifactStore,
-  type ArtifactState,
-  type ArtifactWorkspace,
-} from './workbench-artifacts';
+import { WorkbenchArtifactStore, type ArtifactState, type ArtifactWorkspace } from './workbench-artifacts';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -29,52 +23,21 @@ describe('WorkbenchArtifactStore abort lifecycle', () => {
     const artifacts = map<Record<typeof partId, ArtifactState>>({
       [partId]: { id: 'artifact', title: 'Artifact', closed: false, runner },
     });
-    const store = new WorkbenchArtifactStore(
-      Promise.resolve({} as WebContainer),
-      artifacts,
-      atom<ActionAlert | undefined>(),
-      new Set(),
-      {
-        getFiles: () => ({}) as FileMap,
-        getPreviewPort: () => undefined,
-        getSelectedFile: () => undefined,
-        getCurrentView: () => 'code',
-        isFollowingStreamedCode: () => false,
-        setSelectedFile: vi.fn(),
-        getEditorDocument: () => undefined,
-        updateEditorFile: vi.fn(),
-        resetFileModifications: vi.fn(),
-        setGeneratedFileContent: vi.fn(),
-      },
-    );
+    const store = new WorkbenchArtifactStore(Promise.resolve({} as WebContainer), artifacts, new Set(), {
+      getFiles: () => ({}) as FileMap,
+      getSelectedFile: () => undefined,
+      getCurrentView: () => 'code',
+      isFollowingStreamedCode: () => false,
+      setSelectedFile: vi.fn(),
+      getEditorDocument: () => undefined,
+      updateEditorFile: vi.fn(),
+      resetFileModifications: vi.fn(),
+      setGeneratedFileContent: vi.fn(),
+    });
 
     store.abortAllActions();
 
     expect(abort).toHaveBeenCalledOnce();
-  });
-
-  test('rejects pending and late tool-call waiters until the next turn starts', async () => {
-    const store = createStore(map<Record<PartId, ArtifactState>>({}));
-    const first = store.waitOnToolCall('first');
-    const second = store.waitOnToolCall('second');
-
-    store.abortAllActions();
-
-    await expect(first).rejects.toEqual(new ToolCallAbortedError('first'));
-    await expect(second).rejects.toEqual(new ToolCallAbortedError('second'));
-
-    await expect(store.waitOnToolCall('late')).rejects.toEqual(new ToolCallAbortedError('late'));
-
-    store.startActionTurn();
-    const replacement = store.waitOnToolCall('next-turn');
-    let replacementRejected = false;
-    void replacement.catch(() => {
-      replacementRejected = true;
-    });
-    await Promise.resolve();
-    expect(replacementRejected).toBe(false);
-    store.abortAllActions();
-    await expect(replacement).rejects.toEqual(new ToolCallAbortedError('next-turn'));
   });
 
   test('invalidates file actions queued before abort', async () => {
@@ -140,7 +103,6 @@ function createStore(
 ) {
   const workspace: ArtifactWorkspace = {
     getFiles: () => ({}) as FileMap,
-    getPreviewPort: () => undefined,
     getSelectedFile: () => undefined,
     getCurrentView: () => 'code',
     isFollowingStreamedCode: () => false,
@@ -154,7 +116,6 @@ function createStore(
   return new WorkbenchArtifactStore(
     Promise.resolve(options.container ?? ({} as WebContainer)),
     artifacts,
-    atom<ActionAlert | undefined>(),
     new Set(),
     workspace,
   );

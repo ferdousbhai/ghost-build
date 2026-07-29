@@ -9,14 +9,9 @@ export const SERVER_WORKSPACE_TOOL_NAMES = ['view', 'listFiles', 'searchText', '
 export type ServerWorkspaceToolName = (typeof SERVER_WORKSPACE_TOOL_NAMES)[number];
 export const SERVER_OPERATION_TOOL_NAMES = ['lookupDocs', 'npmInstall', 'validateProject', 'deploy'] as const;
 export type ServerOperationToolName = (typeof SERVER_OPERATION_TOOL_NAMES)[number];
-const SERVER_EXECUTED_TOOL_NAMES = [...SERVER_WORKSPACE_TOOL_NAMES, ...SERVER_OPERATION_TOOL_NAMES] as const;
 
 export function isServerWorkspaceToolName(name: string): name is ServerWorkspaceToolName {
   return (SERVER_WORKSPACE_TOOL_NAMES as readonly string[]).includes(name);
-}
-
-export function isServerExecutedToolName(name: string): boolean {
-  return (SERVER_EXECUTED_TOOL_NAMES as readonly string[]).includes(name);
 }
 
 export type BuilderWorkspaceEncoding = 'utf8' | 'base64';
