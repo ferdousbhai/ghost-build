@@ -145,6 +145,10 @@ describe('BuilderWorkspaceRepository', () => {
   it('rejects concurrent reuse of an in-flight tool identifier with different arguments', async () => {
     const harness = await initializedHarness();
     let finish!: () => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
     const execution = harness.workspace.executeToolOnce(
       'tool-in-flight',
       'view',
@@ -152,9 +156,10 @@ describe('BuilderWorkspaceRepository', () => {
       () =>
         new Promise<{ ok: true }>((resolve) => {
           finish = () => resolve({ ok: true });
+          markStarted();
         }),
     );
-    await Promise.resolve();
+    await started;
 
     await expect(
       harness.workspace.executeToolOnce('tool-in-flight', 'view', { path: 'b' }, async () => ({ ok: false })),
