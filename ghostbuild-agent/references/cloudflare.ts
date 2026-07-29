@@ -9,15 +9,17 @@ Retrieval-first rule:
 - When docs and local snippets disagree, trust the current docs.
 
 Decision guide:
+- Agent-owned durable background work -> an Agent Fiber. Decide ownership
+  before choosing a general background-processing primitive.
 - Full browser application with routes, SSR, and server functions -> TanStack Start on Workers by default when the user does not specify a framework.
 - HTTP API, webhook, middleware, or small custom edge script -> a direct Worker handler without an application framework.
 - Scheduled task -> a Worker scheduled handler with Cron Triggers.
-- Asynchronous event processing -> a Queue consumer or Workflow, depending on whether the work is message-driven or a durable multi-step job.
+- Non-Agent asynchronous event processing -> a Queue consumer or Workflow, depending on whether the work is message-driven or a durable multi-step job.
 - Lightweight response rewriting at the edge -> Snippets when its product limits fit; otherwise a Worker.
 - Relational data -> D1, or Hyperdrive for an existing external SQL database.
 - Object/file storage -> R2.
 - Key/value config, low-write settings, or sessions -> KV.
-- Async processing -> Queues or Workflows.
+- Non-Agent async processing -> Queues or Workflows.
 - Vector search -> Vectorize.
 - Stateful coordination, per-room/per-user state, WebSockets, or strong consistency -> Durable Objects or Agents SDK.
 - LLM inference -> Workers AI binding when available.
@@ -30,7 +32,8 @@ Cloudflare storage:
 - Use D1 for relational data.
 - Use R2 for object and file storage.
 - Use KV for simple low-write key/value data.
-- Use Queues for async jobs.
+- Use an Agent Fiber for async work owned by an Agent.
+- Use Queues for application-owned, message-driven async jobs.
 - Use Vectorize for vector search.
 - In generated TanStack routes and server functions, call getAppBindings() from "@/app-bindings" for application DB/R2 access.
 - Do not import "cloudflare:workers" in generated source. AI, AppAgent, and AGENT_SECURITY_DB bindings are intentionally
@@ -54,6 +57,9 @@ Use when creating stateful AI agents, durable workflows, WebSocket apps, schedul
 
 Ghostbuild defaults:
 - Use the agents package for durable agent identities and callable methods.
+- Use an Agent Fiber for durable background work whose state and lifecycle
+  belong to one Agent. Use a Workflow only when the work belongs to the
+  application or another owner outside that Agent.
 - For AI chat experiences, use @cloudflare/ai-chat AIChatAgent, streamText, convertToModelMessages, pruneMessages, and useAgentChat.
 - Define Agent classes in src/agents/* and export Durable Object classes from src/server.ts.
 - Configure Vite with agents/vite and TypeScript with agents/tsconfig.
@@ -101,7 +107,9 @@ Docs: https://developers.cloudflare.com/workers/best-practices/workers-best-prac
 Load before writing or reviewing Workers code, wrangler.jsonc, bindings, secrets, streaming, observability, or Worker architecture.
 
 Rules quick reference:
-- Set a recent compatibility_date for new projects and update periodically on existing projects.
+- Outside Ghostbuild, set a recent compatibility_date for new projects and update periodically on existing projects.
+- In Ghostbuild, preserve the exact compatibility_date already present in the project template. Automatic deployment
+  pins it to a centrally tested value.
 - Enable nodejs_compat when libraries need Node.js built-ins.
 - Generate Env types with wrangler types; do not hand-write binding interfaces.
 - Use wrangler secret put for secrets; never hardcode secrets in source or config.
@@ -109,7 +117,8 @@ Rules quick reference:
 - Stream large or unknown payloads instead of buffering them with response.text().
 - Use ctx.waitUntil() for post-response work; avoid floating promises.
 - Prefer bindings over Cloudflare REST API calls from Workers.
-- Use Queues or Workflows for background work.
+- Use Agent Fibers for work owned by an Agent; use Queues or Workflows for
+  application-owned background work.
 - Use service bindings for Worker-to-Worker calls rather than public HTTP.
 - Use Hyperdrive for external PostgreSQL/MySQL connections.
 - Enable Workers observability for production.
@@ -126,7 +135,9 @@ Guidelines:
 - Prefer Wrangler over hand-rolled Cloudflare API requests.
 - Prefer wrangler.jsonc. Newer features are often JSON-only.
 - Include "$schema": "./node_modules/wrangler/config-schema.json" where useful.
-- Use a recent compatibility_date and add required compatibility_flags explicitly.
+- Outside Ghostbuild, use a recent compatibility_date. In Ghostbuild, never change the template's existing
+  compatibility_date because automatic deployment pins it to a centrally tested value.
+- Add required compatibility_flags explicitly.
 - Generate TypeScript bindings with wrangler types after config changes.
 - Local dev uses local simulated bindings unless remote: true is configured.
 - Use environments for staging/production when the app has separate deploy targets.
