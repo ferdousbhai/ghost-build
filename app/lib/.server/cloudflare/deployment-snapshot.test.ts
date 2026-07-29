@@ -147,6 +147,20 @@ describe('inspectDeploymentSnapshot', () => {
     ).rejects.toThrow('security cleanup trigger');
   });
 
+  it('accepts the reviewed production provisioner and rejects changes to it', async () => {
+    const snapshot = await projectZip({ includeBindings: true });
+    await expect(inspectDeploymentSnapshot(snapshot)).resolves.toEqual({
+      type: 'web_app',
+      bindings: { ai: true, d1: true, r2: true, appAgent: true },
+    });
+
+    const changed = await JSZip.loadAsync(await snapshot.arrayBuffer());
+    changed.file('scripts/provision-cloudflare-production.mjs', 'void env.AGENT_SECURITY_DB;\n');
+    await expect(inspectDeploymentSnapshot(await asBlob(changed))).rejects.toThrow(
+      'differs from the reviewed deployment baseline',
+    );
+  });
+
   it('requires the protected security database binding and exact migration directory', async () => {
     const missing = await projectZip({ includeBindings: true });
     const missingZip = await JSZip.loadAsync(await missing.arrayBuffer());
