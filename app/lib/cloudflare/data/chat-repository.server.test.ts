@@ -1,6 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
 import {
-  claimChatUrlId,
   enforceChatStorageRetention,
   ensureInitialChat,
   insertChatWithState,
@@ -22,52 +21,6 @@ const chat = {
   last_subchat_index: 0,
   is_deleted: 0,
 } satisfies ChatRow;
-
-describe('claimChatUrlId', () => {
-  test('allocates distinct URL ids when two chats race for the same hint', async () => {
-    const database = new UrlClaimDatabase([urlChat('chat-a', 'initial-a'), urlChat('chat-b', 'initial-b')]);
-
-    const [first, second] = await Promise.all([
-      claimChatUrlId(database.db, {
-        chatId: 'chat-a',
-        ownerId: 'session',
-        urlHint: 'Shared Project',
-        description: 'A',
-      }),
-      claimChatUrlId(database.db, {
-        chatId: 'chat-b',
-        ownerId: 'session',
-        urlHint: 'Shared Project',
-        description: 'B',
-      }),
-    ]);
-
-    expect(new Set([first.urlId, second.urlId])).toEqual(new Set(['shared-project', 'shared-project-2']));
-    expect(database.activeUrlIds).toEqual(['shared-project', 'shared-project-2']);
-  });
-
-  test('returns the committed winner when two callers race to name one chat', async () => {
-    const database = new UrlClaimDatabase([urlChat('chat-a', 'initial-a')]);
-
-    const results = await Promise.all([
-      claimChatUrlId(database.db, {
-        chatId: 'chat-a',
-        ownerId: 'session',
-        urlHint: 'First Choice',
-        description: 'A',
-      }),
-      claimChatUrlId(database.db, {
-        chatId: 'chat-a',
-        ownerId: 'session',
-        urlHint: 'Second Choice',
-        description: 'B',
-      }),
-    ]);
-
-    expect(results[0]).toEqual(results[1]);
-    expect(results[0].urlId).toMatch(/^(first|second)-choice$/);
-  });
-});
 
 describe('updateStorageState object ownership', () => {
   test('rejects both uploaded objects for an older message rank', async () => {
@@ -458,67 +411,6 @@ function storageState(overrides: Partial<ChatMessageStateRow> = {}): ChatMessage
     transcript_digest: null,
     ...overrides,
   };
-}
-
-function urlChat(id: string, initialId: string): ChatRow {
-  return {
-    ...chat,
-    id,
-    initial_id: initialId,
-  };
-}
-
-class UrlClaimDatabase {
-  constructor(private readonly chats: ChatRow[]) {}
-
-  get activeUrlIds(): string[] {
-    return this.chats
-      .filter((candidate) => candidate.is_deleted === 0 && candidate.url_id !== null)
-      .map((candidate) => candidate.url_id as string)
-      .sort();
-  }
-
-  readonly db = {
-    prepare: (query: string) => ({
-      bind: (...values: unknown[]) => ({
-        first: async () => this.first(query, values),
-      }),
-    }),
-  } as unknown as D1Database;
-
-  private first(query: string, values: unknown[]): unknown {
-    if (query.includes('UPDATE chats')) {
-      const [urlId, description, chatId, ownerId] = values as [string, string, string, string];
-      const target = this.chats.find(
-        (candidate) => candidate.id === chatId && candidate.creator_id === ownerId && candidate.is_deleted === 0,
-      );
-      if (!target || target.url_id !== null) {
-        return null;
-      }
-      if (
-        this.chats.some(
-          (candidate) =>
-            candidate !== target &&
-            candidate.creator_id === ownerId &&
-            candidate.is_deleted === 0 &&
-            candidate.url_id === urlId,
-        )
-      ) {
-        throw new Error('UNIQUE constraint failed: chats.creator_id, chats.url_id');
-      }
-      target.url_id = urlId;
-      target.description ??= description;
-      return { initial_id: target.initial_id, url_id: target.url_id };
-    }
-    if (query.includes('SELECT initial_id, url_id')) {
-      const [chatId, ownerId] = values as [string, string];
-      const target = this.chats.find(
-        (candidate) => candidate.id === chatId && candidate.creator_id === ownerId && candidate.is_deleted === 0,
-      );
-      return target ? { initial_id: target.initial_id, url_id: target.url_id } : null;
-    }
-    return null;
-  }
 }
 
 class StorageStateDatabase {

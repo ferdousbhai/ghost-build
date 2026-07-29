@@ -1,21 +1,16 @@
-import { atom, map, type ReadableAtom, type WritableAtom } from 'nanostores';
+import { atom, type ReadableAtom, type WritableAtom } from 'nanostores';
 import type { EditorDocument, ScrollPosition } from 'ghostbuild-agent/types';
-import type { ActionCallbackData, ArtifactCallbackData } from 'ghostbuild-agent/message-parser';
 import { webcontainer } from '~/lib/webcontainer';
 import type { ITerminal, TerminalInitializationOptions } from '~/types/terminal';
 import { EditorStore } from './editor';
 import { FilesStore } from './files';
 import type { FileMap } from 'ghostbuild-agent/types';
-import type { GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import type { AbsolutePath } from 'ghostbuild-agent/utils/workDir';
 import { getAbsolutePath } from 'ghostbuild-agent/utils/workDir';
 import { PreviewsStore } from './previews';
 import { TerminalStore } from './terminal';
 import { description } from './description';
 import type { WebContainer } from '@webcontainer/api';
-import type { Artifacts } from './artifacts';
-import type { PartId } from 'ghostbuild-agent/partId.js';
-import { WorkbenchArtifactStore, type ArtifactState } from './workbench-artifacts';
 import { downloadProject } from '~/lib/download/download-project';
 import { isWorkerBuildTriggerPath } from './worker-build-trigger';
 import { workbenchActionAlert, workbenchCurrentView } from './workbench-ui-state';
@@ -28,35 +23,15 @@ class WorkbenchStore {
   #filesStore = new FilesStore(webcontainer);
   #editorStore = new EditorStore();
   #terminalStore = new TerminalStore(webcontainer);
-  #reloadedParts = import.meta.hot?.data.reloadedParts ?? new Set<string>();
-  #artifactStore: WorkbenchArtifactStore;
-  #workspaceReadyWaiter: (() => Promise<unknown>) | null = null;
-
-  artifacts: Artifacts = import.meta.hot?.data.artifacts ?? map({});
-
   showWorkbench: WritableAtom<boolean> = import.meta.hot?.data.showWorkbench ?? atom(false);
   currentView = workbenchCurrentView;
   unsavedFiles: WritableAtom<Set<AbsolutePath>> = import.meta.hot?.data.unsavedFiles ?? atom(new Set<AbsolutePath>());
   actionAlert = workbenchActionAlert;
 
   constructor() {
-    this.#artifactStore = new WorkbenchArtifactStore(webcontainer, this.artifacts, this.#reloadedParts, {
-      getFiles: () => this.#filesStore.files.get(),
-      getSelectedFile: () => this.#editorStore.selectedFile.get(),
-      getCurrentView: () => this.currentView.get(),
-      isFollowingStreamedCode: () => this.#editorStore.followingStreamedCode.get(),
-      setSelectedFile: (filePath) => this.setSelectedFile(filePath),
-      getEditorDocument: (filePath) => this.#editorStore.documents.get()[filePath],
-      updateEditorFile: (filePath, content) => this.#editorStore.updateFile(filePath, content),
-      resetFileModifications: () => this.resetAllFileModifications(),
-      setGeneratedFileContent: (filePath, content) => this.setGeneratedFileContent(filePath, content),
-      waitForWorkspaceReady: () => this.#workspaceReadyWaiter?.(),
-    });
     if (import.meta.hot) {
-      import.meta.hot.data.artifacts = this.artifacts;
       import.meta.hot.data.unsavedFiles = this.unsavedFiles;
       import.meta.hot.data.showWorkbench = this.showWorkbench;
-      import.meta.hot.data.reloadedParts = this.#reloadedParts;
     }
   }
 
@@ -121,16 +96,6 @@ class WorkbenchStore {
     this.#filesStore.clearWorkspaceChangeListener(listener);
   }
 
-  setWorkspaceReadyWaiter(waiter: () => Promise<unknown>): void {
-    this.#workspaceReadyWaiter = waiter;
-  }
-
-  clearWorkspaceReadyWaiter(waiter: () => Promise<unknown>): void {
-    if (this.#workspaceReadyWaiter === waiter) {
-      this.#workspaceReadyWaiter = null;
-    }
-  }
-
   async applyWorkspaceSyncEntries(entries: BuilderWorkspaceSyncEntry[]): Promise<void> {
     await this.#filesStore.applyWorkspaceSyncEntries(entries);
     this.#editorStore.setDocuments(this.#filesStore.files.get(), this.unsavedFiles.get());
@@ -146,10 +111,6 @@ class WorkbenchStore {
 
   flushFileEvents() {
     return this.#filesStore.flushFileEvents();
-  }
-
-  scheduleToolInvocation(toolInvocation: GhostbuildToolInvocation, partId: PartId): void {
-    this.#artifactStore.scheduleToolInvocation(toolInvocation, partId);
   }
 
   get currentDocument(): ReadableAtom<EditorDocument | undefined> {
@@ -242,13 +203,6 @@ class WorkbenchStore {
     this.unsavedFiles.set(newUnsavedFiles);
   }
 
-  async setGeneratedFileContent(filePath: string, content: string): Promise<void> {
-    const absPath = getAbsolutePath(filePath);
-
-    await this.#filesStore.setGeneratedFile(absPath, content);
-    this.#editorStore.setDocuments(this.#filesStore.files.get(), this.unsavedFiles.get());
-  }
-
   setCurrentDocumentScrollPosition(position: ScrollPosition) {
     const editorDocument = this.currentDocument.get();
 
@@ -318,34 +272,6 @@ class WorkbenchStore {
 
   resetAllFileModifications() {
     this.#filesStore.resetFileModifications();
-  }
-
-  abortAllActions() {
-    this.#artifactStore.abortAllActions();
-  }
-
-  startActionTurn() {
-    this.#artifactStore.startActionTurn();
-  }
-
-  addReloadedPart(partId: PartId) {
-    this.#artifactStore.addReloadedPart(partId);
-  }
-
-  addArtifact(data: ArtifactCallbackData) {
-    this.#artifactStore.addArtifact(data);
-  }
-
-  updateArtifact(data: ArtifactCallbackData, state: Partial<Pick<ArtifactState, 'title' | 'closed'>>) {
-    this.#artifactStore.updateArtifact(data, state);
-  }
-
-  addAction(data: ActionCallbackData) {
-    this.#artifactStore.addAction(data);
-  }
-
-  runAction(data: ActionCallbackData, isStreaming: boolean = false) {
-    this.#artifactStore.runAction(data, isStreaming);
   }
 
   async downloadZip() {

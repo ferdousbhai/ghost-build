@@ -1,6 +1,5 @@
 import { storageUrl } from './object-storage.server';
 import {
-  claimChatUrlId,
   ensureInitialChat,
   findChat,
   getLatestStorageState,
@@ -19,6 +18,7 @@ import {
 } from '~/lib/cloudflare/data-pagination';
 import { SubchatLimitError } from './errors';
 import { prepareReleaseThumbnailForChatStatement } from './thumbnail-quota.server';
+import { EMPTY_CHAT_DISCARD_PREDICATE } from './empty-chat.server';
 
 export async function initializeChat(
   db: D1Database,
@@ -35,13 +35,8 @@ export async function discardEmptyChat(db: D1Database, args: { sessionId: string
       .prepare(
         `UPDATE chats
          SET is_deleted = 1
-         WHERE creator_id = ? AND (initial_id = ? OR url_id = ?) AND is_deleted = 0
-           AND url_id IS NULL AND NULLIF(TRIM(description), '') IS NULL AND snapshot_key IS NULL
-           AND (last_message_rank IS NULL OR last_message_rank < 0)
-           AND NOT EXISTS (
-             SELECT 1 FROM chat_message_states
-             WHERE chat_message_states.chat_id = chats.id AND chat_message_states.last_message_rank >= 0
-           )`,
+         WHERE creator_id = ? AND (initial_id = ? OR url_id = ?)
+           AND ${EMPTY_CHAT_DISCARD_PREDICATE}`,
       )
       .bind(args.sessionId, args.id, args.id),
   ]);
@@ -130,22 +125,6 @@ export async function getAllChats(
           }
         : undefined,
   };
-}
-
-export async function setUrlId(
-  db: D1Database,
-  args: { sessionId: string; chatId: string; urlHint: string; description: string },
-) {
-  const chat = await requireChat(db, { id: args.chatId, sessionId: args.sessionId });
-  if (chat.url_id) {
-    return { urlId: chat.url_id, initialId: chat.initial_id };
-  }
-  return claimChatUrlId(db, {
-    chatId: chat.id,
-    ownerId: args.sessionId,
-    urlHint: args.urlHint,
-    description: args.description,
-  });
 }
 
 export async function setDescription(

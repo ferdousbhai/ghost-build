@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSnapScroll } from '~/lib/hooks/useSnapScroll';
 import { chatStore } from '~/lib/stores/chatId';
 import { workbenchStore } from '~/lib/stores/workbench.client';
+import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { BaseChat } from './BaseChat.client';
 import { toast } from 'sonner';
@@ -181,7 +182,7 @@ const AuthenticatedChat = memo(
     const abort = () => {
       stop();
       chatStore.setKey('aborted', true);
-      workbenchStore.abortAllActions();
+      toolActivityStore.abortActive();
     };
 
     const { toolStatus, activeToolNames, activityRevision } = useCurrentToolStatus();

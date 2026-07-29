@@ -3,54 +3,43 @@ import { motion } from 'framer-motion';
 import { memo, useMemo, useState } from 'react';
 import type { GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { workbenchStore } from '~/lib/stores/workbench.client';
-import type { PartId } from '~/lib/stores/artifacts';
+import type { PartId } from 'ghostbuild-agent/partId';
 import { ToolUseContents } from './ToolUseContents';
-import { parseToolInvocation, statusIcon, toolTitle } from './tool-call-presentation';
-import { ExpandableArtifactCard } from './ExpandableArtifactCard';
-import type { ArtifactState } from '~/lib/stores/workbench-artifacts';
+import { normalizeToolInvocation, statusIcon, toolTitle } from './tool-call-presentation';
+import { ExpandableToolCard } from './ExpandableToolCard';
+import { invocationStatus, toolActivityStore } from '~/lib/stores/tool-activity.client';
 
-export const ToolCall = memo(function ToolCall({ partId, toolCallId }: { partId: PartId; toolCallId: string }) {
-  const artifacts = useStore(workbenchStore.artifacts);
-  const artifact = artifacts[partId];
-  if (!artifact) {
-    return null;
-  }
-  return <ToolCallContents artifact={artifact} toolCallId={toolCallId} />;
-});
-
-const ToolCallContents = memo(function ToolCallContents({
-  artifact,
-  toolCallId,
+export const ToolCall = memo(function ToolCall({
+  partId,
+  invocation: rawInvocation,
 }: {
-  artifact: ArtifactState;
-  toolCallId: string;
+  partId: PartId;
+  invocation: GhostbuildToolInvocation;
 }) {
+  const activities = useStore(toolActivityStore.activities);
   const [showAction, setShowAction] = useState(false);
-  const actions = useStore(artifact.runner.actions);
-  const action = actions[toolCallId];
-
-  const invocation: GhostbuildToolInvocation = useMemo(() => parseToolInvocation(action?.content), [action?.content]);
-
-  if (!action) {
-    return null;
-  }
+  const activity = activities[partId];
+  const invocation = useMemo(
+    () => normalizeToolInvocation(activity?.invocation ?? rawInvocation),
+    [activity?.invocation, rawInvocation],
+  );
+  const status = activity?.status ?? invocationStatus(invocation);
 
   const toggleAction = () => {
     setShowAction((visible) => !visible);
   };
 
-  const expandable = artifact.type !== 'bundled';
   return (
-    <ExpandableArtifactCard
-      expanded={expandable && showAction}
+    <ExpandableToolCard
+      expanded={showAction}
       header={
         <div className="flex items-center gap-1.5">
           <div className="w-full text-sm font-medium leading-5 text-content-primary">{toolTitle(invocation)}</div>
-          {statusIcon(action.status, invocation)}
+          {statusIcon(status, invocation)}
         </div>
       }
       onOpen={() => workbenchStore.showWorkbench.set(!workbenchStore.showWorkbench.get())}
-      onToggle={expandable ? toggleAction : undefined}
+      onToggle={toggleAction}
       toggleDisabled={invocation.state === 'partial-call'}
       body={
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>

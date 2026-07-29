@@ -1,46 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
-import { StreamingMessageParser } from 'ghostbuild-agent/message-parser';
-import { workbenchStore } from '~/lib/stores/workbench.client';
 import { makePartId, type PartId } from 'ghostbuild-agent/partId';
-import type { ArtifactAction } from 'ghostbuild-agent/types';
-import { EXCLUDED_FILE_PATHS } from 'ghostbuild-agent/constants';
-import {
-  getToolInvocation,
-  isMisparsedArtifactToolPart,
-  isToolPart,
-  type GhostbuildMessage,
-  type GhostbuildPart,
-} from 'ghostbuild-agent/ai-compat';
-import { isServerWorkspaceToolName } from '~/agents/builder-workspace-types';
-
-export const messageParser = new StreamingMessageParser({
-  callbacks: {
-    onArtifactOpen: (data) => {
-      workbenchStore.showWorkbench.set(true);
-      workbenchStore.addArtifact(data);
-    },
-    onArtifactClose: (data) => {
-      workbenchStore.updateArtifact(data, { closed: true });
-    },
-    onActionOpen: (data) => {
-      // Block writes to generated and infrastructure-owned files.
-      if (isValidAction(data.action)) {
-        workbenchStore.addAction(data);
-      }
-    },
-    onActionClose: (data) => {
-      if (data.action.type !== 'file') {
-        workbenchStore.addAction(data);
-      }
-      if (isValidAction(data.action)) {
-        workbenchStore.runAction(data);
-      }
-    },
-    // Do not apply partial file payloads here. Rewriting and re-indexing a growing
-    // document for every streamed chunk can monopolize the browser. The complete
-    // action is applied once in onActionClose instead.
-  },
-});
+import { getToolInvocation, isToolPart, type GhostbuildMessage, type GhostbuildPart } from 'ghostbuild-agent/ai-compat';
+import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 
 export type PartCache = Map<PartId, { original: Part; parsed: Part }>;
 
@@ -65,9 +26,7 @@ function processToolInvocationPart(partId: PartId, part: Part): Part | null {
   if (!toolInvocation) {
     return null;
   }
-  if (!isServerWorkspaceToolName(toolInvocation.toolName)) {
-    workbenchStore.scheduleToolInvocation(toolInvocation, partId);
-  }
+  toolActivityStore.record(partId, toolInvocation);
   return {
     type: 'tool-invocation',
     toolInvocation,
@@ -95,35 +54,7 @@ export function processMessage(
       hits++;
       continue;
     }
-    let newPart;
-    switch (part.type) {
-      case 'text': {
-        let prevContent = '';
-        if (cacheEntry && cacheEntry.parsed.type === 'text') {
-          prevContent = cacheEntry.parsed.text;
-        }
-        const delta = messageParser.parse(partId, part.text);
-        newPart = {
-          type: 'text' as const,
-          text: prevContent + delta,
-        };
-        break;
-      }
-      default: {
-        if (isMisparsedArtifactToolPart(part)) {
-          newPart = {
-            type: 'text' as const,
-            text: 'The builder returned an unsupported file-write block, so the changes were not applied. Please retry the request.',
-          };
-          break;
-        }
-        if (isToolPart(part)) {
-          newPart = processToolInvocationPart(partId, part) ?? part;
-          break;
-        }
-        newPart = part;
-      }
-    }
+    const newPart = isToolPart(part) ? (processToolInvocationPart(partId, part) ?? part) : part;
     parsedParts.push(newPart);
     previousParts.set(partId, { original: part, parsed: newPart });
   }
@@ -136,13 +67,13 @@ export function processMessage(
   };
 }
 
-export function useMessageParser(partCache: PartCache) {
+export function useProcessedMessages(partCache: PartCache) {
   const [parsedMessages, setParsedMessages] = useState<GhostbuildMessage[]>([]);
 
   const previousMessages = useRef<{ original: GhostbuildMessage; parsed: GhostbuildMessage }[]>([]);
   const previousParts = useRef<PartCache>(partCache);
 
-  const parseMessages = useCallback((messages: GhostbuildMessage[]) => {
+  const processMessages = useCallback((messages: GhostbuildMessage[]) => {
     const nextPrevMessages: { original: GhostbuildMessage; parsed: GhostbuildMessage }[] = [];
     const prevMessages = previousMessages.current;
 
@@ -168,16 +99,9 @@ export function useMessageParser(partCache: PartCache) {
 
     previousMessages.current = nextPrevMessages;
     if (parsedMessagesChanged) {
-      setParsedMessages(nextPrevMessages.map((p) => p.parsed));
+      setParsedMessages(nextPrevMessages.map((message) => message.parsed));
     }
   }, []);
 
-  return { parsedMessages, parseMessages };
-}
-
-function isValidAction(action: ArtifactAction): boolean {
-  if (action.type === 'file') {
-    return !EXCLUDED_FILE_PATHS.some((excludedPath) => action.filePath.includes(excludedPath));
-  }
-  return true;
+  return { parsedMessages, processMessages };
 }

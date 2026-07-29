@@ -53,7 +53,6 @@ type DataOperationResults = {
   'messages.remove': { kind: 'success' };
   'messages.rewindChat': null;
   'messages.setDescription': null;
-  'messages.setUrlId': { urlId: string; initialId: string };
   'share.clone': { id: string; description?: string };
   'share.create': { code: string };
   'share.getShareDescription': { description?: string };
@@ -80,7 +79,6 @@ export const api = {
     remove: 'messages.remove',
     rewindChat: 'messages.rewindChat',
     setDescription: 'messages.setDescription',
-    setUrlId: 'messages.setUrlId',
   },
   share: {
     clone: 'share.clone',

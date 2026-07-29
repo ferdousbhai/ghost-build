@@ -57,13 +57,9 @@ export const initialIdStore = computed([pageLoadChatId, knownInitialId], (pageLo
 });
 
 /*
- * We may not know a chat's `urlId` until its first message.
+ * Existing chats can have a human-friendly `urlId`, which is learned while loading.
  */
 const knownUrlId = atom<string | undefined>(undefined);
-
-export function getKnownUrlId() {
-  return knownUrlId.get();
-}
 
 export function setKnownUrlId(urlId: string) {
   if (!knownUrlId.get()) {

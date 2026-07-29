@@ -1,5 +1,6 @@
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { transcriptAgentName } from 'ghostbuild-agent/transcript';
+import { EMPTY_CHAT_DISCARD_PREDICATE } from './empty-chat.server';
 
 export const AGENT_GC_SWEEP_LIMIT = 4;
 export const AGENT_GC_RETRY_BASE_MS = 30_000;
@@ -54,13 +55,8 @@ export function prepareEmptyChatAgentGcCandidatesStatement(
        SELECT chats.id, chats.initial_id, transcripts.subchat_index, 0, transcripts.generation, ?, ?, 0
        FROM chats
        JOIN chat_transcripts AS transcripts ON transcripts.chat_id = chats.id
-       WHERE chats.creator_id = ? AND (chats.initial_id = ? OR chats.url_id = ?) AND chats.is_deleted = 0
-         AND chats.url_id IS NULL AND NULLIF(TRIM(chats.description), '') IS NULL AND chats.snapshot_key IS NULL
-         AND (chats.last_message_rank IS NULL OR chats.last_message_rank < 0)
-         AND NOT EXISTS (
-           SELECT 1 FROM chat_message_states
-           WHERE chat_message_states.chat_id = chats.id AND chat_message_states.last_message_rank >= 0
-         )
+       WHERE chats.creator_id = ? AND (chats.initial_id = ? OR chats.url_id = ?)
+         AND ${EMPTY_CHAT_DISCARD_PREDICATE}
        ON CONFLICT(chat_id, subchat_index) DO UPDATE SET
          max_generation = MAX(agent_gc_candidates.max_generation, excluded.max_generation),
          not_before = MIN(agent_gc_candidates.not_before, excluded.not_before)`,

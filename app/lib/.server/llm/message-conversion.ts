@@ -6,7 +6,6 @@ import {
   type GhostbuildMessage,
   type GhostbuildPart,
 } from 'ghostbuild-agent/ai-compat';
-import { EXCLUDED_FILE_PATHS } from 'ghostbuild-agent/constants';
 
 const TOOL_RESULT_EXCERPT_CHARS = 6_000;
 const TOOL_RESULT_HEAD_CHARS = 1_200;
@@ -60,17 +59,7 @@ export async function cleanupAssistantMessages(messages: GhostbuildMessage[], to
 }
 
 function cleanMessage(message: string) {
-  let cleaned = message.replace(/<div class=\\"__boltThought__\\">.*?<\/div>/s, '').replace(/<think>.*?<\/think>/s, '');
-
-  for (const excludedPath of EXCLUDED_FILE_PATHS) {
-    const escapedPath = excludedPath.replace(/\//g, '\\/');
-    cleaned = cleaned.replace(
-      new RegExp(`<boltAction type="file" filePath="${escapedPath}"[^>]*>[\\s\\S]*?<\\/boltAction>`, 'g'),
-      `You tried to modify \`${excludedPath}\` but this is not allowed. Please modify a different file.`,
-    );
-  }
-
-  return cleaned;
+  return message.replace(/<div class=\\"__ghostbuildThought__\\">.*?<\/div>/s, '').replace(/<think>.*?<\/think>/s, '');
 }
 
 export function summarizeToolInvocationForPrompt(invocation: NonNullable<ReturnType<typeof getToolInvocation>>) {
@@ -83,10 +72,10 @@ export function summarizeToolInvocationForPrompt(invocation: NonNullable<ReturnT
   const structured = isGhostbuildToolResult(invocation.result);
   const resultExcerpt = structured
     ? result
-    : excerptLegacyToolResult(result, TOOL_RESULT_EXCERPT_CHARS, TOOL_RESULT_HEAD_CHARS);
+    : excerptUnstructuredToolResult(result, TOOL_RESULT_EXCERPT_CHARS, TOOL_RESULT_HEAD_CHARS);
   return [
     `The assistant called ${invocation.toolName} with ${argsSummary} and it ${status}.`,
-    resultExcerpt ? `${structured ? 'Result' : 'Legacy result excerpt'}:\n${resultExcerpt}` : null,
+    resultExcerpt ? `${structured ? 'Result' : 'Result excerpt'}:\n${resultExcerpt}` : null,
   ]
     .filter(Boolean)
     .join('\n');
@@ -135,14 +124,13 @@ function summarizeToolArgs(toolName: string, args: unknown) {
   }
 }
 
-function excerptLegacyToolResult(value: string, maxChars: number, headChars: number) {
+function excerptUnstructuredToolResult(value: string, maxChars: number, headChars: number) {
   if (value.length <= maxChars) {
     return value;
   }
-  return [
-    'Legacy tool result exceeded the current bounded-result contract.',
-    excerptText(value, maxChars, headChars),
-  ].join('\n');
+  return ['Tool result exceeded the current bounded-result contract.', excerptText(value, maxChars, headChars)].join(
+    '\n',
+  );
 }
 
 function excerptText(value: string | undefined, maxChars: number, headChars = Math.floor(maxChars / 3)) {

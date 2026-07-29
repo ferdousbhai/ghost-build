@@ -10,6 +10,7 @@ import { Button } from '@ui/Button';
 import { BrandLink } from '~/components/BrandLink';
 import { Sheet } from '@ui/Sheet';
 import { signInWithCloudflare } from '~/lib/auth-client';
+import { ProjectTitle } from '~/components/ProjectTitle';
 
 export const Route = createFileRoute('/create/$shareCode')({
   head: () => ({
@@ -91,7 +92,10 @@ function ShareProjectContent() {
               Ghostbuild will add a private copy to your project history
               {getShareDescription?.description ? (
                 <>
-                  : <strong className="text-content-primary"> {getShareDescription.description}</strong>
+                  :{' '}
+                  <ProjectTitle className="font-semibold text-content-primary">
+                    {getShareDescription.description}
+                  </ProjectTitle>
                 </>
               ) : (
                 '.'
@@ -120,7 +124,11 @@ function ShareProjectContent() {
         <span className="app-status-badge">Shared build found</span>
         <div className="mt-5">
           <h2 className="app-card-title">Clone project</h2>
-          {getShareDescription?.description && <p className="app-card-copy mt-2">{getShareDescription.description}</p>}
+          {getShareDescription?.description && (
+            <p className="app-card-copy mt-2">
+              <ProjectTitle>{getShareDescription.description}</ProjectTitle>
+            </p>
+          )}
         </div>
 
         <Button className="mt-6 w-full" size="lg" onClick={handleCloneChat}>

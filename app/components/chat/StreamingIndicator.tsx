@@ -6,7 +6,7 @@ import { Spinner } from '@ui/Spinner';
 import { ExclamationTriangleIcon, CheckCircledIcon, ResetIcon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { isActionStatusActive } from '~/lib/runtime/action-runner';
+import { isToolActivityStatusActive } from '~/lib/common/types';
 import type { BuildProgress } from './build-progress';
 
 const logger = createScopedLogger('StreamingIndicator');
@@ -62,7 +62,7 @@ export default function StreamingIndicator(props: StreamingIndicatorProps) {
 
   let streamStatus = props.streamStatus;
   const anyToolRunning =
-    props.toolStatus && Object.values(props.toolStatus).some((status) => isActionStatusActive(status));
+    props.toolStatus && Object.values(props.toolStatus).some((status) => isToolActivityStatusActive(status));
   if (props.isRecovering || anyToolRunning) {
     streamStatus = 'streaming';
   }

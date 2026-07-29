@@ -96,7 +96,7 @@ export function useEditChatDescription({
         return;
       }
       if (validationResult === 'invalidCharacters') {
-        toast.error('Description can only contain letters, numbers, spaces, and basic punctuation.');
+        toast.error('Description can only contain letters, numbers, spaces, basic punctuation, and inline Markdown.');
         return;
       }
 
@@ -157,7 +157,7 @@ function validateDescription(description: string, initialDescription: string): D
     return 'invalidLength';
   }
 
-  return /^[a-zA-Z0-9\s\-_.,!?()[\]{}'"]+$/.test(trimmedDescription) ? 'valid' : 'invalidCharacters';
+  return /^[a-zA-Z0-9\s\-_.,!?()[\]{}'"*~`]+$/.test(trimmedDescription) ? 'valid' : 'invalidCharacters';
 }
 
 function errorMessage(error: unknown) {

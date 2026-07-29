@@ -24,7 +24,6 @@ export class BuilderWorkspaceSyncController {
   #pendingChanges = new Map<string, BuilderWorkspaceClientChange>();
   #disposed = false;
   readonly #changeListener = (changes: BuilderWorkspaceClientChange[]) => this.push(changes);
-  readonly #readyWaiter = () => this.pull();
 
   private constructor(private readonly agent: BuilderWorkspaceAgent) {}
 
@@ -37,7 +36,6 @@ export class BuilderWorkspaceSyncController {
     controller.#revision = 0;
     await controller.pull();
     workbenchStore.setWorkspaceChangeListener(controller.#changeListener);
-    workbenchStore.setWorkspaceReadyWaiter(controller.#readyWaiter);
     return controller;
   }
 
@@ -48,7 +46,6 @@ export class BuilderWorkspaceSyncController {
   dispose(): void {
     this.#disposed = true;
     workbenchStore.clearWorkspaceChangeListener(this.#changeListener);
-    workbenchStore.clearWorkspaceReadyWaiter(this.#readyWaiter);
   }
 
   push(changes: BuilderWorkspaceClientChange[]): Promise<void> {

@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import type { ChatContextManager } from 'ghostbuild-agent/ChatContextManager';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { filesToArtifacts } from '~/utils/fileUtils';
+import { filesToTurnContext } from '~/utils/fileUtils';
 import { captureMessage } from '~/lib/telemetry.client';
 import { isStreamStatusActive, type StreamStatus } from '~/lib/common/types';
 import { chatStore } from '~/lib/stores/chatId';
@@ -14,6 +14,7 @@ import { textFromParts } from './chat-message-utils';
 import { getChatRetryState, MAX_CHAT_RETRIES } from './chat-retry';
 import { MAX_EPHEMERAL_CONTEXT_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
+import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 
 const logger = createScopedLogger('ChatMessageSubmission');
 
@@ -180,14 +181,14 @@ async function submitMessage(
 ): Promise<void> {
   const id = `${Date.now()}`;
   const modifiedFiles = chatStarted ? workbenchStore.getModifiedFiles() : undefined;
-  const modifiedContext = modifiedFiles ? filesToArtifacts(modifiedFiles, id) : '';
+  const modifiedContext = modifiedFiles ? filesToTurnContext(modifiedFiles) : '';
   const separatorCharacters = modifiedContext ? 2 : 0;
   const relevantBudget = Math.max(0, MAX_EPHEMERAL_CONTEXT_CHARACTERS - modifiedContext.length - separatorCharacters);
   const relevantContext = textFromParts(contextManager.relevantFiles(messages, id, relevantBudget).parts);
   const content = [modifiedContext, relevantContext].filter(Boolean).join('\n\n');
   const turnContext: ChatTurnContext = { version: 1, content };
 
-  workbenchStore.startActionTurn();
+  toolActivityStore.startTurn();
   chatStore.setKey('aborted', false);
   await sendChatMessage({ text: messageInput }, { body: { turnContext } }, onRequestStart);
   if (modifiedFiles) {

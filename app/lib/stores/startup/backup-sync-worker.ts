@@ -18,7 +18,6 @@ import { chatSyncState, type BackupSyncState, type InitialBackupSyncState } from
 import { isCompleteMessageInfoAtLeast } from './backup-sync-policy';
 import {
   type CompleteMessageInfo,
-  handleUrlHintAndDescription,
   lastCompleteMessageInfoStore,
   prepareMessageHistory,
   waitForNewMessages,
@@ -192,15 +191,6 @@ async function syncBackup(
     currentState.savedFileUpdateCounter !== nextSavedUpdateCounter ? await prepareBackupSnapshot() : undefined;
   signal.throwIfAborted();
 
-  if (update?.urlHintAndDescription) {
-    await handleUrlHintAndDescription(
-      chatId,
-      sessionId,
-      update.urlHintAndDescription.urlHint,
-      update.urlHintAndDescription.description,
-    );
-    signal.throwIfAborted();
-  }
   if (!update?.compressed && !snapshot) {
     return;
   }

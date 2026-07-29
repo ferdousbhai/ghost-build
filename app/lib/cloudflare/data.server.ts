@@ -21,7 +21,6 @@ import {
   removeChat,
   rewindChat,
   setDescription,
-  setUrlId,
 } from './data/chat-service.server';
 import { ensureDataBindings, internalErrorResponse, parseRequestQuery } from './data/http.server';
 import { allocateObjectKey, objectResponse, putObjectAtKey } from './data/object-storage.server';
@@ -485,8 +484,6 @@ function runKnownDataOperation(env: Env, path: DataOperationPath, rawArgs: unkno
       return getChat(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'messages.getAll':
       return getAllChats(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
-    case 'messages.setUrlId':
-      return setUrlId(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'messages.setDescription':
       return setDescription(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'messages.remove':

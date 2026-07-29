@@ -17,10 +17,6 @@
     margin-block-end: 16px;
   }
 
-  :global(.artifact) {
-    margin: 0.75em 0;
-  }
-
   :is(h1, h2, h3, h4, h5, h6) {
     @mixin not-inside-actions {
       margin-block-start: 24px;

@@ -1,26 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import {
-  cachedPromptTokens,
-  cachedPromptTokenCount,
-  isMisparsedArtifactToolPart,
-  isToolPart,
-  messageText,
-  type GhostbuildPart,
-} from './ai-compat.js';
+import { cachedPromptTokens, cachedPromptTokenCount, messageText } from './ai-compat.js';
 
 describe('AI compatibility helpers', () => {
-  it('does not treat misparsed artifact XML as a tool invocation', () => {
-    const part = {
-      type: 'tool-boltArtifact id="app" title="App"><boltAction type="file" filePath="src/routes/index.tsx">',
-      toolCallId: 'call_1',
-      state: 'input-available',
-      input: {},
-    } as unknown as GhostbuildPart;
-
-    expect(isMisparsedArtifactToolPart(part)).toBe(true);
-    expect(isToolPart(part)).toBe(false);
-  });
-
   it('handles cyclic provider metadata while finding cached token usage', () => {
     const metadata: Record<string, unknown> = {};
     metadata.self = metadata;
