@@ -3,6 +3,13 @@ import { ROLE_SYSTEM_PROMPT } from './system.js';
 import { solutionConstraints } from './solutionConstraints.js';
 
 describe('Ghostbuild framework selection policy', () => {
+  it('keeps the deployment-tested compatibility date pinned', () => {
+    const prompt = solutionConstraints();
+
+    expect(prompt).toContain('Never change that value');
+    expect(prompt).toMatch(/Ghostbuild updates\s+the pinned date centrally/);
+  });
+
   it('defaults full web applications to TanStack Start without requiring it for every project', () => {
     const prompt = `${ROLE_SYSTEM_PROMPT}\n${solutionConstraints()}`;
 
