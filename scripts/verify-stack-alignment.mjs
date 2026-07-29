@@ -209,6 +209,22 @@ export function findDeploymentWorkflowErrors(content) {
   return errors;
 }
 
+export function findDeploymentRuntimePolicyErrors(templateConfigSource, runtimePolicySource) {
+  const runtimeMatch = /export const DEPLOYMENT_COMPATIBILITY_DATE = '([^']+)'/.exec(runtimePolicySource);
+  if (!runtimeMatch) {
+    return ['deployment runtime policy must declare DEPLOYMENT_COMPATIBILITY_DATE.'];
+  }
+  const templateMatch = /"compatibility_date"\s*:\s*"([^"]+)"/.exec(templateConfigSource);
+  if (!templateMatch) {
+    return ['template/wrangler.jsonc must declare compatibility_date.'];
+  }
+  return runtimeMatch[1] === templateMatch[1]
+    ? []
+    : [
+        `deployment compatibility date ${JSON.stringify(runtimeMatch[1])} must match template/wrangler.jsonc ${JSON.stringify(templateMatch[1])}.`,
+      ];
+}
+
 function verifyPackage(errors, pkg, label, requiredPackages, checkAiPeers = false) {
   errors.push(
     ...findForbiddenDependencies(pkg, label),
@@ -467,6 +483,10 @@ export function verifyStackAlignment() {
     ).map((error) => `sandbox-tools/${error}`),
     ...findDeploymentWorkflowErrors(
       readFileSync(resolve(rootDir, 'app/lib/.server/cloudflare/deployment-workflow.ts'), 'utf8'),
+    ),
+    ...findDeploymentRuntimePolicyErrors(
+      readFileSync(resolve(rootDir, 'template/wrangler.jsonc'), 'utf8'),
+      readFileSync(resolve(rootDir, 'app/lib/.server/cloudflare/deployment-runtime-policy.ts'), 'utf8'),
     ),
   );
 

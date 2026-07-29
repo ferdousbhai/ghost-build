@@ -20,6 +20,7 @@ import {
   DEPLOYMENT_SECURITY_BASELINE_VERSION,
   TEMPLATE_SOURCE_SHA256,
 } from './deployment-security-baseline';
+import { DEPLOYMENT_COMPATIBILITY_DATE } from './deployment-runtime-policy';
 
 describe('publishDeploymentBuild', () => {
   beforeEach(() => {
@@ -56,7 +57,7 @@ describe('publishDeploymentBuild', () => {
       name: 'ghostbuild-deployment-1',
       account_id: 'account-1',
       no_bundle: true,
-      compatibility_date: '2026-07-18',
+      compatibility_date: DEPLOYMENT_COMPATIBILITY_DATE,
       compatibility_flags: ['nodejs_compat'],
       ai: { binding: 'AI' },
       durable_objects: { bindings: [{ name: 'AppAgent', class_name: 'AppAgent' }] },
