@@ -13,6 +13,7 @@ import { ActionCommandExecutionError, ActionCommandTimeoutError } from './errors
 import { parseOperationDiagnostics, type DiagnosticsStore, type OperationDiagnostic } from './diagnostics-store';
 import { pageCoverage } from './bounded-pagination';
 import type { DeploymentValidationStore } from './deployment-validation-store';
+import type { ProjectBuildExecutor } from './project-build-executor';
 
 type ValidationCheckName = 'typecheck' | 'lint' | 'build' | 'preview' | 'workspace-stability';
 type ValidationCheck = {
@@ -41,38 +42,33 @@ export async function runValidateProject(args: {
   workspace: ActionRunnerWorkspace;
   diagnostics: DiagnosticsStore;
   deploymentValidation: DeploymentValidationStore;
+  buildExecutor: ProjectBuildExecutor;
 }) {
-  const input = validateProjectParameters.parse(args.invocation.args);
-  if (input.level === 'full') {
-    args.deploymentValidation.beginFullValidation();
-  }
+  validateProjectParameters.parse(args.invocation.args);
+  args.deploymentValidation.beginFullValidation();
   await waitForContainerBootState(ContainerBootState.READY);
   args.abortSignal.throwIfAborted();
   const startingRevision = await captureDeploymentRevision(args.container, args.abortSignal);
 
   const checks: ValidationCheck[] = [];
   const diagnostics: OperationDiagnostic[] = [];
-  for (const name of input.level === 'full'
-    ? (['typecheck', 'lint', 'build'] as const)
-    : (['typecheck', 'lint'] as const)) {
+  for (const name of ['typecheck', 'lint', 'build'] as const) {
     const result = await runValidationCommand(name, args);
     checks.push(result.check);
     diagnostics.push(...result.diagnostics);
   }
 
-  if (input.level === 'full') {
-    if (checks.some((check) => check.status === 'failed')) {
-      checks.push({
-        name: 'preview',
-        status: 'not-run',
-        durationMs: 0,
-        reason: 'Preview smoke check was skipped because an earlier validation check failed.',
-      });
-    } else {
-      const result = await runPreviewCheck(args);
-      checks.push(result.check);
-      diagnostics.push(...result.diagnostics);
-    }
+  if (checks.some((check) => check.status === 'failed')) {
+    checks.push({
+      name: 'preview',
+      status: 'not-run',
+      durationMs: 0,
+      reason: 'Preview smoke check was skipped because an earlier validation check failed.',
+    });
+  } else {
+    const result = await runPreviewCheck(args);
+    checks.push(result.check);
+    diagnostics.push(...result.diagnostics);
   }
 
   const revision = await captureDeploymentRevision(args.container, args.abortSignal);
@@ -93,8 +89,9 @@ export async function runValidateProject(args: {
   }
   const failed = checks.filter((check) => check.status === 'failed');
   const data = {
-    level: input.level,
+    level: 'full',
     revision,
+    buildEnvironment: args.buildExecutor.environment,
     ...(revision !== startingRevision ? { startingRevision } : {}),
     checks,
   };
@@ -108,9 +105,7 @@ export async function runValidateProject(args: {
     );
   }
   const sessionId = getAuthToken();
-  if (input.level === 'full') {
-    args.deploymentValidation.recordFullValidation(revision);
-  }
+  args.deploymentValidation.recordFullValidation(revision);
   const nextAction = !sessionId ? 'sign-in-required' : 'prepare-deployment';
   return toolSuccess(
     `Project validation passed at workspace revision ${revision}: ${checks.map((check) => check.name).join(', ')}.`,
@@ -131,8 +126,7 @@ async function runValidationCommand(
 ): Promise<ValidationCheckResult> {
   const startedAt = performance.now();
   try {
-    await runCommand({
-      container: args.container,
+    await args.buildExecutor.run({
       command: VALIDATION_COMMANDS[name],
       displayName: VALIDATION_COMMANDS[name].join(' '),
       abortSignal: args.abortSignal,

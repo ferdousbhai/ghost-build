@@ -226,9 +226,18 @@ dangerouslyAllowAllBuilds: true
         'pnpm-workspace.yaml must set minimumReleaseAge to 1440 minutes.',
         'pnpm-workspace.yaml must enable minimumReleaseAgeStrict.',
         'pnpm-workspace.yaml must not define trustLockfile.',
-        'pnpm-workspace.yaml must not define minimumReleaseAgeExclude.',
+        'pnpm-workspace.yaml minimumReleaseAgeExclude must not exempt unreviewed package unexpected-installer.',
       ]),
     );
+  });
+
+  it('allows only the reviewed provenance-backed Ghostkit release-age exemption', () => {
+    const workspace = `${workspacePolicyFixture(['ghostbuild-agent', 'template'])}
+minimumReleaseAgeExclude:
+  - '@summonghost/compaction@0.1.1'
+`;
+
+    expect(findBuildApprovalErrors(workspace, 'pnpm-workspace.yaml')).toEqual([]);
   });
 
   it.each([

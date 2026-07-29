@@ -81,6 +81,69 @@ describe('FilesStore public filesystem watcher', () => {
     expect(store.files.get()[getAbsolutePath('old/nested/file.ts')]).toBeUndefined();
   });
 
+  it('publishes watcher and direct generated-file changes to the durable workspace listener', async () => {
+    const listener = vi.fn(async () => undefined);
+    store.setWorkspaceChangeListener(listener);
+    project.setFile('src/current.ts', 'version two');
+
+    project.emit('change', 'src/current.ts');
+    await store.flushFileEvents();
+    await store.setGeneratedFile(getAbsolutePath('src/generated.ts'), 'generated');
+
+    expect(listener).toHaveBeenNthCalledWith(1, [
+      {
+        kind: 'write',
+        path: getAbsolutePath('src/current.ts'),
+        content: 'version two',
+        encoding: 'utf8',
+      },
+    ]);
+    expect(listener).toHaveBeenNthCalledWith(2, [
+      {
+        kind: 'write',
+        path: getAbsolutePath('src/generated.ts'),
+        content: 'generated',
+        encoding: 'utf8',
+      },
+    ]);
+  });
+
+  it('publishes the reconciled workspace after a targeted scan falls back to a full scan', async () => {
+    const listener = vi.fn(async () => undefined);
+    store.setWorkspaceChangeListener(listener);
+    project.setFile('src/current.ts', 'version two');
+    project.failNextReadFor = 'src/current.ts';
+    project.events.length = 0;
+
+    project.emit('change', 'src/current.ts');
+    await store.flushFileEvents();
+
+    expect(project.events.filter((event) => event === 'read:src/current.ts')).toHaveLength(2);
+    expect(listener).toHaveBeenCalledWith([
+      {
+        kind: 'write',
+        path: getAbsolutePath('src/current.ts'),
+        content: 'version two',
+        encoding: 'utf8',
+      },
+    ]);
+  });
+
+  it('does not repeat filesystem reconciliation when durable workspace delivery fails', async () => {
+    const listener = vi.fn(async () => {
+      throw new Error('temporary workspace connection failure');
+    });
+    store.setWorkspaceChangeListener(listener);
+    project.setFile('src/current.ts', 'version two');
+    project.events.length = 0;
+
+    project.emit('change', 'src/current.ts');
+    await store.flushFileEvents();
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(project.events.filter((event) => event === 'read:src/current.ts')).toHaveLength(1);
+  });
+
   it('collapses rapid duplicate events and skips excluded watcher paths', async () => {
     project.setFile('src/current.ts', 'one read only');
     project.setFile('.gitignore', 'ignored');
@@ -129,8 +192,8 @@ describe('FilesStore public filesystem watcher', () => {
   it('purges watcher-reported and traversal-discovered secrets before reconciling ordinary files', async () => {
     const reportedSecretPath = getAbsolutePath('nested/.env.local');
     const discoveredGitPath = getAbsolutePath('packages/app/.git/config');
-    store.setGeneratedFile(reportedSecretPath, 'stale secret');
-    store.setGeneratedFile(discoveredGitPath, 'stale git token');
+    await store.setGeneratedFile(reportedSecretPath, 'stale secret');
+    await store.setGeneratedFile(discoveredGitPath, 'stale git token');
     store.userWrites.set(reportedSecretPath, Date.now());
     project.setFile('nested/.env.local', 'secret');
     project.setFile('packages/app/.git/config', 'token');
@@ -157,7 +220,7 @@ describe('FilesStore public filesystem watcher', () => {
 
   it('keeps the inert managed npmrc on disk without exposing it in project state', async () => {
     const npmrcPath = getAbsolutePath('.npmrc');
-    store.setGeneratedFile(npmrcPath, 'stale content');
+    await store.setGeneratedFile(npmrcPath, 'stale content');
     store.userWrites.set(npmrcPath, Date.now());
     project.setFile('.npmrc', MANAGED_WEBCONTAINER_NPMRC_CONTENT);
     project.events.length = 0;
@@ -205,6 +268,7 @@ class MemoryProject {
   readonly directories = new Set<string>(['.']);
   readonly events: string[] = [];
   failRemovalFor: string | undefined;
+  failNextReadFor: string | undefined;
   readonly watchers = new Map<string, { recursive: boolean; listener: FSWatchCallback }>();
 
   readonly watch = vi.fn((filename: string, options: { recursive?: boolean }, listener: FSWatchCallback) => {
@@ -244,6 +308,10 @@ class MemoryProject {
       readFile: vi.fn(async (filePath: string, encoding?: string) => {
         const normalizedPath = normalize(filePath);
         this.events.push(`read:${normalizedPath}`);
+        if (normalizedPath === this.failNextReadFor) {
+          this.failNextReadFor = undefined;
+          throw new Error(`temporary read failure: ${normalizedPath}`);
+        }
         const content = this.files.get(normalizedPath);
         if (!content) {
           throw new Error(`ENOENT: ${normalizedPath}`);

@@ -66,6 +66,7 @@ export async function buildDeploymentSnapshot(args: {
   snapshotKey: string;
   expectedSourceSha256: string;
   project: DeploymentProjectProfile;
+  validationOnly?: boolean;
 }): Promise<Uint8Array<ArrayBuffer>> {
   if (!args.env.DeploymentSandbox) {
     throw new DeploymentBuildError('Deployment Sandbox binding is unavailable.');
@@ -259,6 +260,9 @@ export async function buildDeploymentSnapshot(args: {
         timeout: BUILD_TIMEOUT_MS.packageValidation,
       }),
     );
+    if (args.validationOnly) {
+      return new Uint8Array(0) as Uint8Array<ArrayBuffer>;
+    }
     stage = 'build packaging';
     await sandbox.mkdir(PACKAGE_DIR, { recursive: true });
     await requireSuccess(

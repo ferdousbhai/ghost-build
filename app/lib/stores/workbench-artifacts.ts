@@ -51,7 +51,8 @@ export interface ArtifactWorkspace {
   getEditorDocument(filePath: string): EditorDocument | undefined;
   updateEditorFile(filePath: string, content: string): void;
   resetFileModifications(): void;
-  setGeneratedFileContent(filePath: string, content: string): void;
+  setGeneratedFileContent(filePath: string, content: string): void | Promise<void>;
+  waitForWorkspaceReady?(): Promise<unknown> | undefined;
 }
 
 export class WorkbenchArtifactStore {
@@ -182,6 +183,7 @@ export class WorkbenchArtifactStore {
         },
         diagnostics: this.#diagnostics,
         scheduler: this.#toolScheduler,
+        waitForWorkspaceReady: () => this.workspace.waitForWorkspaceReady?.(),
       }),
     });
   }

@@ -18,6 +18,7 @@ import {
 } from './file-map-operations';
 import { incrementFileUpdateCounter } from './fileUpdateCounter';
 import { ContainerBootState, waitForContainerBootState } from './containerBootState';
+import type { BuilderWorkspaceClientChange, BuilderWorkspaceSyncEntry } from '~/agents/builder-workspace-types';
 
 const logger = createScopedLogger('FilesStore');
 
@@ -39,6 +40,7 @@ export class FilesStore {
    */
   files: MapStore<FileMap> = import.meta.hot?.data.files ?? map({});
   userWrites: Map<AbsolutePath, number> = import.meta.hot?.data.userWrites ?? new Map();
+  #workspaceChangeListener: ((changes: BuilderWorkspaceClientChange[]) => Promise<void>) | null = null;
 
   constructor(webcontainerPromise: Promise<WebContainer>) {
     this.#webcontainer = webcontainerPromise;
@@ -89,10 +91,11 @@ export class FilesStore {
     this.#modifiedFiles.clear();
   }
 
-  setGeneratedFile(filePath: AbsolutePath, content: string) {
+  async setGeneratedFile(filePath: AbsolutePath, content: string): Promise<void> {
     ensureParentFolders(this.files, filePath);
 
     this.files.setKey(filePath, { type: 'file', content, isBinary: false });
+    await this.#notifyWorkspaceWrite(filePath, content);
   }
 
   async saveFile(filePath: AbsolutePath, content: string) {
@@ -125,6 +128,7 @@ export class FilesStore {
       this.userWrites.set(filePath, Date.now());
 
       logger.info('File updated');
+      await this.#notifyWorkspaceWrite(filePath, content);
     } catch (error) {
       logger.error('Failed to update file content\n\n', error);
 
@@ -140,6 +144,58 @@ export class FilesStore {
 
   async prewarmWorkdir(container: WebContainer) {
     await reconcileFileMap(container, this.files);
+  }
+
+  setWorkspaceChangeListener(listener: ((changes: BuilderWorkspaceClientChange[]) => Promise<void>) | null): void {
+    this.#workspaceChangeListener = listener;
+  }
+
+  clearWorkspaceChangeListener(listener: (changes: BuilderWorkspaceClientChange[]) => Promise<void>): void {
+    if (this.#workspaceChangeListener === listener) {
+      this.#workspaceChangeListener = null;
+    }
+  }
+
+  async applyWorkspaceSyncEntries(entries: BuilderWorkspaceSyncEntry[]): Promise<void> {
+    const container = await this.#webcontainer;
+    for (const entry of entries) {
+      const relativePath = path.relative(container.workdir, entry.path);
+      if (!relativePath || relativePath === '..' || relativePath.startsWith('../') || path.isAbsolute(relativePath)) {
+        throw new Error(`Invalid server workspace path: ${entry.path}`);
+      }
+      if (entry.kind === 'delete') {
+        await container.fs.rm(relativePath, { recursive: true, force: true });
+        this.#removeTrackedPath(relativePath);
+        continue;
+      }
+      assertNotLocalSecretFilePath(relativePath);
+      const folder = path.dirname(relativePath);
+      if (folder !== '.') {
+        await container.fs.mkdir(folder, { recursive: true });
+      }
+      const content = entry.encoding === 'utf8' ? entry.content : decodeBase64(entry.content);
+      await container.fs.writeFile(relativePath, content);
+      ensureParentFolders(this.files, getAbsolutePath(relativePath));
+      this.files.setKey(getAbsolutePath(relativePath), {
+        type: 'file',
+        content: entry.encoding === 'utf8' ? entry.content : '',
+        isBinary: entry.encoding === 'base64',
+      });
+    }
+  }
+
+  async replaceWorkspaceSnapshot(
+    entries: BuilderWorkspaceSyncEntry[],
+    preservedPaths = new Set<string>(),
+  ): Promise<void> {
+    const serverPaths = new Set(entries.filter((entry) => entry.kind === 'write').map((entry) => entry.path));
+    const deletions: BuilderWorkspaceSyncEntry[] = [];
+    for (const [filePath, entry] of Object.entries(this.files.get())) {
+      if (entry?.type === 'file' && !serverPaths.has(filePath) && !preservedPaths.has(filePath)) {
+        deletions.push({ kind: 'delete', path: filePath, revision: 0 });
+      }
+    }
+    await this.applyWorkspaceSyncEntries([...deletions, ...entries]);
   }
 
   async flushFileEvents() {
@@ -200,6 +256,7 @@ export class FilesStore {
 
   async #processEventBuffer(events: WatcherEvent[]) {
     const webcontainer = await this.#webcontainer;
+    const filesBeforeReconciliation = { ...this.files.get() };
     const localSecretPaths = new Set<string>();
     const changedPaths = new Set<string>();
     let requiresFullReconciliation = false;
@@ -245,11 +302,12 @@ export class FilesStore {
       return;
     }
 
+    let reconciledScopes: string[] | null = requiresFullReconciliation ? null : Array.from(changedPaths);
     try {
       if (requiresFullReconciliation) {
         await reconcileFileMap(webcontainer, this.files);
       } else {
-        await reconcileWatchedPaths(webcontainer, this.files, Array.from(changedPaths));
+        await reconcileWatchedPaths(webcontainer, this.files, reconciledScopes ?? []);
       }
       this.#pruneTrackedPaths();
     } catch (error) {
@@ -262,10 +320,79 @@ export class FilesStore {
       try {
         await reconcileFileMap(webcontainer, this.files);
         this.#pruneTrackedPaths();
+        reconciledScopes = null;
       } catch (fallbackError) {
         logger.error('Failed to reconcile watched project files\n\n', fallbackError);
+        return;
       }
     }
+    try {
+      await this.#notifyWorkspaceChanges(webcontainer, filesBeforeReconciliation, reconciledScopes);
+    } catch (error) {
+      logger.warn('Failed to publish watched project changes to the durable workspace', error);
+    }
+  }
+
+  async #notifyWorkspaceChanges(
+    webcontainer: WebContainer,
+    before: FileMap,
+    relativeScopes: string[] | null,
+  ): Promise<void> {
+    if (!this.#workspaceChangeListener) {
+      return;
+    }
+    const after = this.files.get();
+    const absoluteScopes = relativeScopes?.map(getAbsolutePath) ?? null;
+    const relevant = (filePath: string) =>
+      !absoluteScopes || absoluteScopes.some((scope) => filePath === scope || filePath.startsWith(`${scope}/`));
+    const paths = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]))
+      .filter(relevant)
+      .sort((left, right) => left.localeCompare(right));
+    const changes: BuilderWorkspaceClientChange[] = [];
+    for (const filePath of paths) {
+      const previous = before[filePath as AbsolutePath];
+      const current = after[filePath as AbsolutePath];
+      if (previous?.type !== 'file' && current?.type !== 'file') {
+        continue;
+      }
+      if (current?.type !== 'file') {
+        changes.push({ kind: 'delete', path: filePath });
+        continue;
+      }
+      if (
+        previous?.type === 'file' &&
+        previous.isBinary === current.isBinary &&
+        previous.content === current.content &&
+        !current.isBinary
+      ) {
+        continue;
+      }
+      if (current.isBinary) {
+        const relativePath = path.relative(webcontainer.workdir, filePath);
+        changes.push({
+          kind: 'write',
+          path: filePath,
+          content: encodeBase64(await webcontainer.fs.readFile(relativePath)),
+          encoding: 'base64',
+        });
+      } else {
+        changes.push({ kind: 'write', path: filePath, content: current.content, encoding: 'utf8' });
+      }
+    }
+    if (changes.length > 0) {
+      await this.#workspaceChangeListener(changes);
+    }
+  }
+
+  async #notifyWorkspaceWrite(filePath: AbsolutePath, content: string): Promise<void> {
+    await this.#workspaceChangeListener?.([
+      {
+        kind: 'write',
+        path: filePath,
+        content,
+        encoding: 'utf8',
+      },
+    ]);
   }
 
   #removeTrackedPath(filePath: string) {
@@ -307,6 +434,23 @@ export class FilesStore {
 const FILE_EVENTS_DEBOUNCE_MS = 100;
 const ROOT_DIRECTORY = '.';
 type WatcherEvent = [event: 'rename' | 'change', path: string | Uint8Array];
+
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
+}
+
+function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
 
 function normalizeWatchedPath(
   webcontainer: WebContainer,

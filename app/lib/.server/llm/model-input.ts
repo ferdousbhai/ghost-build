@@ -1,4 +1,5 @@
 import { pruneMessages, type ModelMessage } from 'ai';
+import { decideConversationCompaction, type ConversationCompactionAction } from '@summonghost/compaction';
 import { estimateStringTokens } from 'agents/experimental/memory/utils';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { MAX_ESTIMATED_MODEL_INPUT_TOKENS } from 'ghostbuild-agent/context-limits';
@@ -20,7 +21,13 @@ type PreparedModelInput = {
   estimatedTokens: number;
   contextCompacted: boolean;
   nextCompaction: ContextCompaction | null;
+  compactionAction: ConversationCompactionAction;
 };
+
+const GHOSTBUILD_COMPACTION_POLICY = {
+  proactiveTokens: 80_000,
+  hardLimitTokens: MAX_ESTIMATED_MODEL_INPUT_TOKENS,
+} as const;
 
 export class ModelInputBudgetExceededError extends Error {
   constructor(
@@ -47,7 +54,9 @@ export async function prepareModelInput(args: {
   messages: GhostbuildMessage[];
   turnContext?: ChatTurnContext;
   currentCompaction?: ContextCompaction | null;
+  compactionPending?: boolean;
   summarize: (prompt: string) => Promise<string>;
+  scheduleCompaction?: () => Promise<void>;
   systemPrompts: string[];
   tools: GhostbuildToolSet;
   toolChoice: AgentToolChoice;
@@ -57,13 +66,22 @@ export async function prepareModelInput(args: {
   let assembled = assembleCompactedContext(args.messages, args.currentCompaction);
   let promptMessages = injectTurnContext(assembled.messages, args.turnContext);
   let modelInput = await assembleModelInput(promptMessages, args);
+  const compactionAction = decideConversationCompaction({
+    estimatedTokens: modelInput.estimatedTokens,
+    pending: args.compactionPending,
+    policy: GHOSTBUILD_COMPACTION_POLICY,
+  });
 
-  if (modelInput.estimatedTokens <= MAX_ESTIMATED_MODEL_INPUT_TOKENS) {
+  if (compactionAction !== 'blocking') {
+    if (compactionAction === 'background') {
+      await args.scheduleCompaction?.();
+    }
     return {
       ...modelInput,
       promptMessages,
       contextCompacted: assembled.overlayApplied,
       nextCompaction: null,
+      compactionAction,
     };
   }
 
@@ -112,6 +130,7 @@ export async function prepareModelInput(args: {
     promptMessages,
     contextCompacted: true,
     nextCompaction,
+    compactionAction,
   };
 }
 

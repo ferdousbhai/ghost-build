@@ -61,6 +61,7 @@
     "@ai-sdk/react": "^3.0.232",
     "@cloudflare/ai-chat": "^0.9.3",
     "@cloudflare/sandbox": "0.12.3",
+    "@summonghost/compaction": "^0.1.1",
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-cpp": "^6.0.3",

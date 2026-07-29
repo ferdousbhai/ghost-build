@@ -57,7 +57,7 @@ import {
   DEPLOYMENT_SECURITY_BASELINE_VERSION,
   TEMPLATE_SOURCE_SHA256,
 } from '~/lib/.server/cloudflare/deployment-security-baseline';
-import { createDeploymentPlanAction, deploymentAction } from './deployments';
+import { createDeploymentPlanAction, createOrReplayDeploymentPlanForUser, deploymentAction } from './deployments';
 
 const plan = {
   version: 2 as const,
@@ -229,6 +229,24 @@ describe('deployment handlers', () => {
     expect(await response.json()).toMatchObject({
       deployment: { status: 'awaiting_approval', planDigest: 'a'.repeat(64) },
     });
+  });
+
+  it('replays a deterministic server deployment plan without replacing its snapshot', async () => {
+    const existing = deployment();
+    mocks.requireDeployment.mockResolvedValue(existing);
+
+    await expect(
+      createOrReplayDeploymentPlanForUser({
+        env: env(),
+        userId: 'user-1',
+        chatId: 'chat-1',
+        deploymentId: existing.id,
+        snapshot: new Blob(['source']),
+      }),
+    ).resolves.toMatchObject({ id: existing.id, planDigest: existing.planDigest });
+    expect(mocks.buildPlan).not.toHaveBeenCalled();
+    expect(mocks.putObjectAtKey).not.toHaveBeenCalled();
+    expect(mocks.createDeployment).not.toHaveBeenCalled();
   });
 
   it('leaves a durable reference-aware cleanup receipt when R2 commits but its acknowledgement is lost', async () => {

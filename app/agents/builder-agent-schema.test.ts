@@ -37,13 +37,18 @@ describe('BuilderAgent schema migrations', () => {
     expect(storage.applied).toEqual([
       { version: 1, name: 'create_builder_turns' },
       { version: 2, name: 'create_builder_context_state' },
+      { version: 3, name: 'create_builder_workspace' },
+      { version: 4, name: 'create_builder_workspace_validations' },
     ]);
-    expect(storage.transactionCount).toBe(2);
+    expect(storage.transactionCount).toBe(4);
     expect(storage.statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS builder_turns'))).toBe(
       true,
     );
     expect(
       storage.statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS builder_context_state')),
+    ).toBe(true);
+    expect(
+      storage.statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS builder_workspace_files')),
     ).toBe(true);
   });
 
@@ -80,6 +85,6 @@ describe('BuilderAgent schema migrations', () => {
 
     expect(blockConcurrencyWhile).toHaveBeenCalledOnce();
     await expect(initialization).resolves.toBeUndefined();
-    expect(storage.applied).toHaveLength(2);
+    expect(storage.applied).toHaveLength(4);
   });
 });

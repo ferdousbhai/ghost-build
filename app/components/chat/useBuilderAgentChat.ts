@@ -32,6 +32,9 @@ import {
   TRANSCRIPT_BASE_METADATA_KEY,
   type TranscriptIdentity,
 } from 'ghostbuild-agent/transcript';
+import { isServerExecutedToolName } from '~/agents/builder-workspace-types';
+import { BuilderWorkspaceSyncController } from '~/lib/stores/builder-workspace-sync.client';
+import { ContainerBootState, waitForContainerBootState } from '~/lib/stores/containerBootState';
 
 const logger = createScopedLogger('BuilderAgentChat');
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
@@ -55,6 +58,9 @@ export function useBuilderAgentChat(args: {
     agent: 'BuilderAgent',
     name: args.transcript.agentName,
   });
+  const workspaceControllerRef = useRef<BuilderWorkspaceSyncController | null>(null);
+  const workspaceKey = args.transcript.agentName;
+  const workspaceGateRef = useAsyncGate(workspaceKey);
   const chat = useAgentChat<BuilderAgentState, UIMessage>({
     agent: builderAgent,
     getInitialMessages: null,
@@ -77,6 +83,9 @@ export function useBuilderAgentChat(args: {
     },
     onToolCall({ toolCall, addToolOutput }) {
       logger.debug('Starting tool call', toolCall);
+      if (isServerExecutedToolName(toolCall.toolName)) {
+        return;
+      }
       void (async () => {
         const invocation: GhostbuildToolInvocation = {
           toolCallId: toolCall.toolCallId,
@@ -85,6 +94,7 @@ export function useBuilderAgentChat(args: {
           state: 'call',
         };
         try {
+          await workspaceControllerRef.current?.pull();
           const { result } = await workbenchStore.runToolInvocation(invocation);
           deliverToolOutput({
             deliver: addToolOutput,
@@ -126,6 +136,9 @@ export function useBuilderAgentChat(args: {
         resetChatRetryState();
       }
       logger.debug('Finished streaming');
+      void workspaceControllerRef.current?.pull().catch((workspaceError) => {
+        logger.error('Failed to mirror the durable project workspace after a builder response', workspaceError);
+      });
       void refreshProjectMetadata();
     },
   });
@@ -137,22 +150,7 @@ export function useBuilderAgentChat(args: {
   const seedKey = args.seedTranscript
     ? `${args.transcript.agentName}:${args.transcript.generation}:${args.transcript.subchatIndex}`
     : null;
-  const seedGateRef = useRef<{
-    key: string | null;
-    promise: Promise<void>;
-    resolve: () => void;
-    error: unknown;
-    started: boolean;
-  }>({ key: null, promise: Promise.resolve(), resolve: () => undefined, error: null, started: false });
-  if (seedGateRef.current.key !== seedKey) {
-    let resolve: () => void = () => undefined;
-    const promise = seedKey
-      ? new Promise<void>((complete) => {
-          resolve = complete;
-        })
-      : Promise.resolve();
-    seedGateRef.current = { key: seedKey, promise, resolve, error: null, started: false };
-  }
+  const seedGateRef = useAsyncGate(seedKey);
 
   useEffect(() => {
     if (!seedKey) {
@@ -177,7 +175,65 @@ export function useBuilderAgentChat(args: {
         gate.resolve();
       }
     })();
-  }, [args.initialMessages, args.transcript, builderAgent, seedKey]);
+  }, [args.initialMessages, args.transcript, builderAgent, seedGateRef, seedKey]);
+
+  useEffect(() => {
+    const gate = workspaceGateRef.current;
+    if (gate.key !== workspaceKey || gate.started) {
+      return () => undefined;
+    }
+    gate.started = true;
+    gate.error = null;
+    let disposed = false;
+    let sendGateResolved = false;
+    let activeController: BuilderWorkspaceSyncController | null = null;
+    void (async () => {
+      try {
+        await waitForAgentSocketOpen(builderAgent, AGENT_SEND_READY_TIMEOUT_MS, { requireIdentity: false });
+        const state = (await builderAgent.call('prepareWorkspace', [])) as { initialized?: boolean };
+        if (!state.initialized) {
+          throw new Error('The durable project workspace was not initialized.');
+        }
+        if (!disposed && workspaceGateRef.current === gate) {
+          sendGateResolved = true;
+          gate.resolve();
+        }
+        await waitForContainerBootState(ContainerBootState.READY);
+        const controller = await BuilderWorkspaceSyncController.initialize(builderAgent as never);
+        if (disposed || workspaceGateRef.current !== gate) {
+          controller.dispose();
+          return;
+        }
+        workspaceControllerRef.current?.dispose();
+        activeController = controller;
+        workspaceControllerRef.current = controller;
+      } catch (workspaceError) {
+        if (!disposed && workspaceGateRef.current === gate) {
+          if (!sendGateResolved) {
+            gate.error = workspaceError;
+          }
+          logger.error(
+            sendGateResolved
+              ? 'Failed to mirror the durable project workspace into the browser'
+              : 'Failed to initialize the durable project workspace',
+            workspaceError,
+          );
+        }
+      } finally {
+        if (!disposed && workspaceGateRef.current === gate && !sendGateResolved) {
+          gate.resolve();
+        }
+      }
+    })();
+    return () => {
+      disposed = true;
+      activeController?.dispose();
+      gate.started = false;
+      if (workspaceControllerRef.current === activeController) {
+        workspaceControllerRef.current = null;
+      }
+    };
+  }, [builderAgent, workspaceGateRef, workspaceKey]);
 
   const sendMessage = useCallback(
     async (
@@ -186,9 +242,10 @@ export function useBuilderAgentChat(args: {
       onRequestStart?: () => void,
     ) => {
       const gate = seedGateRef.current;
-      await gate.promise;
-      if (gate.error) {
-        throw gate.error;
+      const workspaceGate = workspaceGateRef.current;
+      await Promise.all([gate.promise, workspaceGate.promise]);
+      if (gate.error || workspaceGate.error) {
+        throw gate.error ?? workspaceGate.error;
       }
       try {
         await waitForAgentSocketOpen(builderAgent, AGENT_SEND_READY_TIMEOUT_MS, { requireIdentity: false });
@@ -238,7 +295,7 @@ export function useBuilderAgentChat(args: {
       onRequestStart?.();
       return request;
     },
-    [args.transcript, builderAgent, chat],
+    [args.transcript, builderAgent, chat, seedGateRef, workspaceGateRef],
   );
 
   useEffect(() => {
@@ -257,6 +314,39 @@ export function useBuilderAgentChat(args: {
         ? builderAgent.state.transcript
         : null,
   };
+}
+
+type AsyncGate = {
+  key: string | null;
+  promise: Promise<void>;
+  resolve: () => void;
+  error: unknown;
+  started: boolean;
+};
+
+function useAsyncGate(key: string | null): { current: AsyncGate } {
+  const gateRef = useRef<AsyncGate | null>(null);
+  if (gateRef.current?.key !== key) {
+    gateRef.current = createAsyncGate(key);
+  }
+  return gateRef as { current: AsyncGate };
+}
+
+function createAsyncGate(key: string | null): AsyncGate {
+  if (key === null) {
+    return {
+      key,
+      promise: Promise.resolve(),
+      resolve: () => undefined,
+      error: null,
+      started: false,
+    };
+  }
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { key, promise, resolve, error: null, started: false };
 }
 
 async function refreshProjectMetadata(attempt = 0): Promise<void> {

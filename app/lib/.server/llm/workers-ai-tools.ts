@@ -11,7 +11,19 @@ import { getDiagnosticsTool } from 'ghostbuild-agent/tools/getDiagnostics';
 import { validateProjectTool } from 'ghostbuild-agent/tools/validateProject';
 import { isReadOnlyToolName, type GhostbuildToolName, type GhostbuildToolSet } from 'ghostbuild-agent/types';
 import { z, type ZodType } from 'zod';
-import { isGhostbuildToolResult, toolResultSucceeded } from 'ghostbuild-agent/tool-result';
+import { isGhostbuildToolResult, toolFailure, toolResultSucceeded } from 'ghostbuild-agent/tool-result';
+import type { Tool } from 'ai';
+import type { BuilderWorkspaceRepository } from '~/agents/builder-workspace';
+import { executeBuilderWorkspaceTool } from '~/agents/builder-workspace-tools';
+import type { ServerWorkspaceToolName } from '~/agents/builder-workspace-types';
+import type { ServerOperationToolName } from '~/agents/builder-workspace-types';
+
+type BuilderOperationContext = {
+  env: Env;
+  userId: string;
+  chatInitialId: string;
+  agentName: string;
+};
 
 export type AgentToolChoice = 'auto' | 'none' | 'required' | { type: 'tool'; toolName: GhostbuildToolName };
 export type AgentToolSettings = {
@@ -20,8 +32,11 @@ export type AgentToolSettings = {
 };
 const GENERATED_APP_ROUTE = '/home/project/src/routes/index.tsx';
 
-export function createWorkersAiTools(): GhostbuildToolSet {
-  return {
+export function createWorkersAiTools(
+  workspace: BuilderWorkspaceRepository,
+  operationContext: BuilderOperationContext,
+): GhostbuildToolSet {
+  const tools: GhostbuildToolSet = {
     deploy: deployTool,
     edit: editTool,
     listFiles: listFilesTool,
@@ -32,6 +47,108 @@ export function createWorkersAiTools(): GhostbuildToolSet {
     validateProject: validateProjectTool,
     view: viewTool,
     writeFile: writeFileTool,
+  };
+  for (const toolName of ['view', 'listFiles', 'searchText', 'edit', 'writeFile'] as const) {
+    tools[toolName] = serverWorkspaceTool(toolName, tools[toolName], workspace);
+  }
+  for (const toolName of ['lookupDocs', 'npmInstall', 'validateProject', 'deploy'] as const) {
+    tools[toolName] = serverOperationTool(toolName, tools[toolName], workspace, operationContext);
+  }
+  return tools;
+}
+
+export function getNextServerToolStepSettings(
+  toolResults: ReadonlyArray<{ toolName: string; output: unknown }>,
+  fallback: AgentToolSettings,
+): AgentToolSettings {
+  const latest = toolResults.at(-1);
+  if (!latest) {
+    return fallback;
+  }
+  if (
+    (latest.toolName === 'edit' || latest.toolName === 'writeFile' || latest.toolName === 'npmInstall') &&
+    toolResultSucceeded(latest.output)
+  ) {
+    return {
+      activeTools: ['validateProject'],
+      toolChoice: 'required',
+    };
+  }
+  if (latest.toolName === 'validateProject') {
+    if (isSuccessfulValidationResult(latest.output)) {
+      return validationNextAction(latest.output) === 'prepare-deployment'
+        ? { activeTools: ['deploy'], toolChoice: 'required' }
+        : { toolChoice: 'none' };
+    }
+    return {
+      activeTools: ['view', 'listFiles', 'searchText', 'edit', 'writeFile', 'npmInstall'],
+      toolChoice: 'required',
+    };
+  }
+  if (latest.toolName === 'deploy') {
+    return { toolChoice: 'none' };
+  }
+  return fallback;
+}
+
+function serverOperationTool(
+  toolName: ServerOperationToolName,
+  definition: Tool,
+  workspace: BuilderWorkspaceRepository,
+  context: BuilderOperationContext,
+): Tool {
+  return {
+    ...definition,
+    execute: async (input, options) => {
+      try {
+        const { executeBuilderOperationTool } = await import('~/agents/builder-operation-tools');
+        return await executeBuilderOperationTool({
+          context,
+          workspace,
+          toolCallId: options.toolCallId,
+          toolName,
+          input,
+          abortSignal: options.abortSignal,
+        });
+      } catch (error) {
+        options.abortSignal?.throwIfAborted();
+        const message = error instanceof Error ? error.message : String(error);
+        return toolFailure(
+          message.length <= 4_000
+            ? message
+            : `${toolName} failed with an unusually large internal error retained in server logs.`,
+        );
+      }
+    },
+  };
+}
+
+function serverWorkspaceTool(
+  toolName: ServerWorkspaceToolName,
+  definition: Tool,
+  workspace: BuilderWorkspaceRepository,
+): Tool {
+  return {
+    ...definition,
+    execute: async (input, options) => {
+      try {
+        return await executeBuilderWorkspaceTool({
+          workspace,
+          toolCallId: options.toolCallId,
+          toolName,
+          input,
+          abortSignal: options.abortSignal,
+        });
+      } catch (error) {
+        options.abortSignal?.throwIfAborted();
+        const message = error instanceof Error ? error.message : String(error);
+        return toolFailure(
+          message.length <= 4_000
+            ? message
+            : `${toolName} failed with an unusually large internal error retained in server logs.`,
+        );
+      }
+    },
   };
 }
 
@@ -111,9 +228,6 @@ function getPostMutationToolChoice(
   }
   const validationResult = toolResults[lastValidationIndex].result;
   if (!isSuccessfulValidationResult(validationResult)) {
-    if (validationLevel(validationResult) === 'fast' && toolResultSucceeded(validationResult)) {
-      return { type: 'tool', toolName: 'validateProject' };
-    }
     return hasReadOnlyLoopAfterFailure(toolResults, lastValidationIndex)
       ? { type: 'tool', toolName: 'writeFile' }
       : 'required';
@@ -196,7 +310,7 @@ export function getValidatedBuildCompletion(messages: GhostbuildMessage[]): stri
   }
   const validationResult = toolResultsAfterLastUser[validationIndex].result;
   if (validationNextAction(validationResult) === 'sign-in-required') {
-    return 'Done. I built and validated the app, including a clean preview smoke check, and it is ready to preview here. Sign in when you are ready to deploy it to Cloudflare production.';
+    return 'Done. I built and validated the app in the isolated production build environment, and it is ready to preview here. Sign in when you are ready to deploy it to Cloudflare production.';
   }
   const deployResult = toolResultsAfterLastUser.findLast(
     ({ toolName, result }, index) =>
@@ -351,13 +465,6 @@ function validationRevision(result: unknown): string | undefined {
     return undefined;
   }
   return typeof result.data.revision === 'string' ? result.data.revision : undefined;
-}
-
-function validationLevel(result: unknown): 'fast' | 'full' | undefined {
-  if (!isGhostbuildToolResult(result) || !isRecord(result.data)) {
-    return undefined;
-  }
-  return result.data.level === 'fast' || result.data.level === 'full' ? result.data.level : undefined;
 }
 
 function validationNextAction(result: unknown): 'sign-in-required' | 'prepare-deployment' | undefined {

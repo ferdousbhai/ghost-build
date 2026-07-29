@@ -1,4 +1,4 @@
-import { createUIMessageStream, streamText, type UIMessage, type UIMessageChunk } from 'ai';
+import { createUIMessageStream, stepCountIs, streamText, type UIMessage, type UIMessageChunk } from 'ai';
 import { languageModelId, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { calculatePromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
 import { ROLE_SYSTEM_PROMPT, generalSystemPrompt } from 'ghostbuild-agent/prompts/system';
@@ -13,6 +13,7 @@ import { normalizeTextPartBoundaries } from './workers-ai-stream';
 import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
 import {
   createWorkersAiTools,
+  getNextServerToolStepSettings,
   getValidatedBuildCompletion,
   getWorkersAiBuildGuidance,
   getWorkersAiToolSettings,
@@ -22,9 +23,13 @@ import {
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
 import { fingerprintWorkersAiModelInput } from './workers-ai-prompt-cache';
 import { logProviderFailure } from './provider-error-logging';
+import type { BuilderWorkspaceRepository } from '~/agents/builder-workspace';
 
 type Messages = GhostbuildMessage[];
-const WORKERS_AI_CALL_TIMEOUT_MS = 180_000;
+// Server-owned validation can legitimately span the bounded production build
+// pipeline (install, typecheck, stack verification, build, and lint).
+const WORKERS_AI_CALL_TIMEOUT_MS = 25 * 60_000;
+const MAX_SERVER_TOOL_STEPS = 8;
 
 interface WorkersAiAgentOptions {
   env: Env;
@@ -36,11 +41,16 @@ interface WorkersAiAgentOptions {
   shouldDisableTools: boolean;
   compaction: {
     current: ContextCompaction | null;
+    pending: boolean;
     summarize: (prompt: string) => Promise<string>;
     save: (compaction: ContextCompaction) => void;
+    schedule?: () => Promise<void>;
   };
   accountCredentials: WorkersAiAccountCredentials;
   sessionAffinity: string;
+  workspace: BuilderWorkspaceRepository;
+  userId: string;
+  agentName: string;
 }
 
 export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<ReadableStream<UIMessageChunk>> {
@@ -55,12 +65,20 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     compaction,
     accountCredentials,
     sessionAffinity,
+    workspace,
+    userId,
+    agentName,
   } = options;
   logger.debug('Starting Workers AI agent');
   const startedAt = Date.now();
   let recordedFirstResponse = false;
   const provider = getProvider(env, accountCredentials, CLOUDFLARE_WORKERS_AI_MODEL, { sessionAffinity });
-  const tools = createWorkersAiTools();
+  const tools = createWorkersAiTools(workspace, {
+    env,
+    userId,
+    agentName,
+    chatInitialId,
+  });
   const validatedBuildCompletion = shouldDisableTools ? undefined : getValidatedBuildCompletion(messages);
   if (validatedBuildCompletion) {
     logger.info('Returning validated build completion without another model turn', { chatInitialId });
@@ -78,7 +96,9 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     messages,
     turnContext,
     currentCompaction: compaction.current,
+    compactionPending: compaction.pending,
     summarize: compaction.summarize,
+    scheduleCompaction: compaction.schedule,
     systemPrompts,
     tools,
     toolChoice: toolSettings.toolChoice,
@@ -110,6 +130,17 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
       tools: asAiSdkTools(tools),
       toolChoice: toolSettings.toolChoice,
       activeTools: toolSettings.activeTools,
+      stopWhen: stepCountIs(MAX_SERVER_TOOL_STEPS),
+      prepareStep: ({ stepNumber, steps }) => {
+        if (stepNumber === 0) {
+          return undefined;
+        }
+        const nextSettings = getNextServerToolStepSettings(steps.at(-1)?.toolResults ?? [], toolSettings);
+        return {
+          activeTools: nextSettings.activeTools,
+          toolChoice: nextSettings.toolChoice,
+        };
+      },
       onChunk: () => {
         if (!recordedFirstResponse) {
           recordedFirstResponse = true;

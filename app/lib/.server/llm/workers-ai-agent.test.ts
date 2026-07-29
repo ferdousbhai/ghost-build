@@ -163,7 +163,7 @@ describe('getBuildToolChoice', () => {
         toolResult('validateProject', validationResult('sign-in-required')),
       ]),
     ).toBe(
-      'Done. I built and validated the app, including a clean preview smoke check, and it is ready to preview here. Sign in when you are ready to deploy it to Cloudflare production.',
+      'Done. I built and validated the app in the isolated production build environment, and it is ready to preview here. Sign in when you are ready to deploy it to Cloudflare production.',
     );
   });
 

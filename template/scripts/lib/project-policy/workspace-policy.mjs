@@ -14,11 +14,16 @@ const APPROVED_PNPM_OVERRIDES = new Map([
   ["sharp@<0.35.0", "0.35.3"],
 ]);
 
+const APPROVED_MINIMUM_RELEASE_AGE_EXCLUSIONS = new Set([
+  "@summonghost/compaction@0.1.1",
+]);
+
 const MAX_PNPM_WORKSPACE_POLICY_BYTES = 64 * 1024;
 const ALLOWED_PNPM_WORKSPACE_KEYS = new Set([
   "packages",
   "ignoreWorkspaceRootCheck",
   "minimumReleaseAge",
+  "minimumReleaseAgeExclude",
   "minimumReleaseAgeIgnoreMissingTime",
   "minimumReleaseAgeStrict",
   "strictDepBuilds",
@@ -30,7 +35,6 @@ const ALLOWED_PNPM_WORKSPACE_KEYS = new Set([
 const FORBIDDEN_PNPM_WORKSPACE_KEYS = new Set([
   "dangerouslyAllowAllBuilds",
   "trustLockfile",
-  "minimumReleaseAgeExclude",
 ]);
 
 export function findBuildApprovalErrors(workspace, label) {
@@ -99,6 +103,7 @@ export function findBuildApprovalErrors(workspace, label) {
     `${label} must set minimumReleaseAge to 1440 minutes.`,
     errors,
   );
+  findMinimumReleaseAgeExclusionErrors(root, label, errors);
   requirePlainScalar(
     root,
     "minimumReleaseAgeIgnoreMissingTime",
@@ -180,6 +185,50 @@ export function findBuildApprovalErrors(workspace, label) {
     }
   }
   return errors;
+}
+
+function findMinimumReleaseAgeExclusionErrors(root, label, errors) {
+  const exclusionsPair = root.items.find(
+    (pair) =>
+      isScalar(pair.key) && pair.key.value === "minimumReleaseAgeExclude",
+  );
+  if (!exclusionsPair) {
+    return;
+  }
+  if (
+    !isScalar(exclusionsPair.key) ||
+    exclusionsPair.key.type !== "PLAIN" ||
+    !isSeq(exclusionsPair.value) ||
+    exclusionsPair.value.flow
+  ) {
+    errors.push(
+      `${label} minimumReleaseAgeExclude must use a canonical block sequence.`,
+    );
+    return;
+  }
+
+  const configured = new Set();
+  for (const item of exclusionsPair.value.items) {
+    const selector = isScalar(item) ? item.value : undefined;
+    if (typeof selector !== "string") {
+      errors.push(
+        `${label} minimumReleaseAgeExclude entries must be package selectors.`,
+      );
+      continue;
+    }
+    if (configured.has(selector)) {
+      errors.push(
+        `${label} minimumReleaseAgeExclude must not repeat ${selector}.`,
+      );
+      continue;
+    }
+    configured.add(selector);
+    if (!APPROVED_MINIMUM_RELEASE_AGE_EXCLUSIONS.has(selector)) {
+      errors.push(
+        `${label} minimumReleaseAgeExclude must not exempt unreviewed package ${selector}.`,
+      );
+    }
+  }
 }
 
 function findOverrideErrors(root, label, errors) {

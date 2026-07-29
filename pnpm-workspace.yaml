@@ -3,6 +3,9 @@ packages:
   - 'template'
 ignoreWorkspaceRootCheck: true
 minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  # Reviewed Ghostkit release published from ferdousbhai/ghostkit with GitHub OIDC provenance.
+  - '@summonghost/compaction@0.1.1'
 minimumReleaseAgeIgnoreMissingTime: false
 minimumReleaseAgeStrict: true
 strictDepBuilds: true

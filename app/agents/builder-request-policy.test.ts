@@ -17,6 +17,7 @@ const binding: BuilderTranscriptBinding = {
   chatInitialId: 'chat',
   generation: 3,
   subchatIndex: 2,
+  parentAgentName: 'chat--transcript-1-2',
 };
 
 describe('BuilderAgent request policy', () => {
@@ -26,6 +27,7 @@ describe('BuilderAgent request policy', () => {
       initial_id: binding.chatInitialId,
       generation: binding.generation,
       subchat_index: binding.subchatIndex,
+      parent_agent_name: binding.parentAgentName,
     }));
     const bind = vi.fn(() => ({ first }));
     const prepare = vi.fn((_query: string) => ({ bind }));

@@ -178,6 +178,12 @@ export function findTemplateSnapshotManifestErrors(manifest, snapshotName, sourc
   return errors;
 }
 
+export function findBuilderTemplateModuleErrors(content, sourceSha256) {
+  return content.includes(`export const BUILDER_TEMPLATE_SOURCE_SHA256 = '${sourceSha256}';`)
+    ? []
+    : ['app/agents/builder-template.generated.ts is stale; run pnpm run rebuild-template.'];
+}
+
 export function findDeploymentWorkflowErrors(content) {
   const errors = [];
   const requiredStepNames = [
@@ -473,11 +479,16 @@ export function verifyStackAlignment() {
     ),
   );
   if (snapshots.length === 1) {
+    const sourceSha256 = templateSourceDigest(rootDir);
     errors.push(
       ...findTemplateSnapshotManifestErrors(
         readJson('public/template-snapshot-manifest.json'),
         snapshots[0],
-        templateSourceDigest(rootDir),
+        sourceSha256,
+      ),
+      ...findBuilderTemplateModuleErrors(
+        readFileSync(resolve(rootDir, 'app/agents/builder-template.generated.ts'), 'utf8'),
+        sourceSha256,
       ),
     );
   }

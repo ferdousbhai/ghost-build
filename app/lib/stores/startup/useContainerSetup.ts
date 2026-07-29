@@ -26,7 +26,7 @@ import { prepareWebContainerPackageManagers, webContainerNpmEnvironment } from '
 import { withPreviewPackageManifest } from './preview-package-manifest';
 import { resolveContainerSnapshotSource } from './snapshot-source';
 
-const TEMPLATE_URL = '/template-snapshot-7e576022.bin';
+const TEMPLATE_URL = '/template-snapshot-172e785d.bin';
 const logger = createScopedLogger('ContainerSetup');
 const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)));
 const WEBCONTAINER_BOOT_TIMEOUT_MS = 60_000;

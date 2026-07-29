@@ -6,6 +6,7 @@ import { ContextCompactionUnavailableError, ModelInputBudgetExceededError } from
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import type { WorkersAiAccountCredentials } from './llm/provider';
 import type { ContextCompaction } from './llm/context-compaction';
+import type { BuilderWorkspaceRepository } from '~/agents/builder-workspace';
 
 type Messages = GhostbuildMessage[];
 
@@ -28,19 +29,27 @@ export async function createChatResponseFromBody({
   turnContext,
   accountCredentials,
   sessionAffinity,
+  workspace,
+  userId,
+  agentName,
 }: {
   abortSignal?: AbortSignal;
   body: Pick<ChatRequestBody, 'messages' | 'chatInitialId' | 'shouldDisableTools'>;
   compaction: {
     current: ContextCompaction | null;
+    pending: boolean;
     summarize: (prompt: string) => Promise<string>;
     save: (compaction: ContextCompaction) => void;
+    schedule?: () => Promise<void>;
   };
   env: Env;
   firstUserMessage: boolean;
   turnContext?: ChatTurnContext;
   accountCredentials: WorkersAiAccountCredentials;
   sessionAffinity: string;
+  workspace: BuilderWorkspaceRepository;
+  userId: string;
+  agentName: string;
 }) {
   const { messages, chatInitialId } = body;
   const transcriptMessages = messages ?? [];
@@ -59,6 +68,9 @@ export async function createChatResponseFromBody({
       compaction,
       accountCredentials,
       sessionAffinity,
+      workspace,
+      userId,
+      agentName,
     });
 
     return createUIMessageStreamResponse({ stream: dataStream });
