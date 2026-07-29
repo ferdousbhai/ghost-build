@@ -4,14 +4,14 @@ export const TOOL_PAGE_SERIALIZED_CHARACTERS = 12_000;
 export const TOOL_PAGE_RECORDS = 40;
 const CURSOR_HASH_CHARACTERS = 16;
 
-export type Page = {
+type Page = {
   start: number;
   end: number;
   total: number;
   complete: boolean;
 };
 
-export type RecordPage<T> = Page & { items: T[] };
+type RecordPage<T> = Page & { items: T[] };
 type TextPage = Page & { content: string };
 
 export function recordPage<T>(records: T[], start: number): RecordPage<T> {

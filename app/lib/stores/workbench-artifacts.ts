@@ -1,20 +1,15 @@
 import type { WebContainer } from '@webcontainer/api';
-import type { MapStore, WritableAtom } from 'nanostores';
+import type { MapStore } from 'nanostores';
 import type { EditorDocument, FileMap } from 'ghostbuild-agent/types';
 import type { ActionCallbackData, ArtifactCallbackData } from 'ghostbuild-agent/message-parser';
-import { makePartId, type PartId } from 'ghostbuild-agent/partId.js';
+import type { PartId } from 'ghostbuild-agent/partId.js';
 import { path } from 'ghostbuild-agent/utils/path';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { unreachable } from 'ghostbuild-agent/utils/unreachable';
 import type { AbsolutePath } from 'ghostbuild-agent/utils/workDir';
 import type { GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
-import { withResolvers } from '~/utils/promises';
 import { createSampler } from '~/utils/sampler';
-import type { ActionAlert } from '~/types/actions';
 import { ActionRunner, isActionStatusActive } from '~/lib/runtime/action-runner';
-import type { GhostbuildToolResult } from 'ghostbuild-agent/tool-result';
-import { ToolExecutionScheduler } from '~/lib/runtime/action-runner/tool-execution-scheduler';
-import { DiagnosticsStore } from '~/lib/runtime/action-runner/diagnostics-store';
 
 const logger = createScopedLogger('WorkbenchArtifacts');
 const ACTION_STREAM_SAMPLE_MS = 100;
@@ -28,22 +23,12 @@ export interface ArtifactState {
 }
 
 type ArtifactUpdateState = Pick<ArtifactState, 'title' | 'closed'>;
-type ToolCallResolver = PromiseWithResolvers<{ result: GhostbuildToolResult }>;
 type ActionStreamSampler = ((data: ActionCallbackData, isStreaming: boolean, generation: number) => void) & {
   cancel(): void;
 };
 
-export class ToolCallAbortedError extends Error {
-  constructor(readonly toolCallId: string) {
-    super(`Tool call aborted: ${toolCallId}`);
-    this.name = 'ToolCallAbortedError';
-  }
-}
-
 export interface ArtifactWorkspace {
   getFiles(): FileMap;
-  getRecentFileWrites?(): ReadonlyMap<string, number>;
-  getPreviewPort(): number | undefined;
   getSelectedFile(): string | undefined;
   getCurrentView(): 'code' | 'preview';
   isFollowingStreamedCode(): boolean;
@@ -56,19 +41,14 @@ export interface ArtifactWorkspace {
 }
 
 export class WorkbenchArtifactStore {
-  #toolCalls = new Map<string, ToolCallResolver>();
   #executionQueue = Promise.resolve();
   #actionGeneration = 0;
   #turnActive = true;
-  #toolCallPartIds = new Map<string, PartId>();
   #actionStreamSampler: ActionStreamSampler;
-  #diagnostics = new DiagnosticsStore();
-  #toolScheduler = new ToolExecutionScheduler();
 
   constructor(
     private readonly webcontainer: Promise<WebContainer>,
     private readonly artifacts: MapStore<Record<PartId, ArtifactState>>,
-    private readonly actionAlert: WritableAtom<ActionAlert | undefined>,
     private readonly reloadedParts: Set<string>,
     private readonly workspace: ArtifactWorkspace,
   ) {
@@ -79,32 +59,10 @@ export class WorkbenchArtifactStore {
     }, ACTION_STREAM_SAMPLE_MS);
   }
 
-  waitOnToolCall(toolCallId: string): Promise<{ result: GhostbuildToolResult }> {
-    if (!this.#turnActive) {
-      return Promise.reject(new ToolCallAbortedError(toolCallId));
-    }
-    const resolver = this.#getOrCreateToolCall(toolCallId);
-    return resolver.promise.finally(() => {
-      if (this.#toolCalls.get(toolCallId) === resolver) {
-        this.#toolCalls.delete(toolCallId);
-      }
-    });
-  }
-
-  runToolInvocation(toolInvocation: GhostbuildToolInvocation): Promise<{ result: GhostbuildToolResult }> {
-    this.scheduleToolInvocation(toolInvocation);
-    return this.waitOnToolCall(toolInvocation.toolCallId);
-  }
-
-  scheduleToolInvocation(toolInvocation: GhostbuildToolInvocation, preferredPartId?: PartId): void {
+  scheduleToolInvocation(toolInvocation: GhostbuildToolInvocation, partId: PartId): void {
     if (!this.#turnActive || toolInvocation.state === 'partial-call') {
       return;
     }
-    const partId =
-      this.#toolCallPartIds.get(toolInvocation.toolCallId) ??
-      preferredPartId ??
-      makePartId(`tool-${toolInvocation.toolCallId}`, 0);
-    this.#toolCallPartIds.set(toolInvocation.toolCallId, partId);
     this.addArtifact({
       id: partId,
       partId,
@@ -127,8 +85,6 @@ export class WorkbenchArtifactStore {
 
   startActionTurn(): void {
     this.#turnActive = true;
-    this.#toolCallPartIds.clear();
-    this.#diagnostics.clear();
   }
 
   abortAllActions(): void {
@@ -141,12 +97,6 @@ export class WorkbenchArtifactStore {
           action.abort();
         }
       }
-    }
-    const pendingToolCalls = [...this.#toolCalls.entries()];
-    this.#toolCalls.clear();
-    this.#toolCallPartIds.clear();
-    for (const [toolCallId, resolver] of pendingToolCalls) {
-      resolver.reject(new ToolCallAbortedError(toolCallId));
     }
   }
 
@@ -168,21 +118,10 @@ export class WorkbenchArtifactStore {
       closed: false,
       type,
       runner: new ActionRunner(this.webcontainer, {
-        onAlert: (alert) => {
-          if (!this.reloadedParts.has(partId)) {
-            this.actionAlert.set(alert);
-          }
-        },
-        onToolCallComplete: (completion) => this.#completeToolCall(completion),
         workspace: {
-          getFiles: () => this.workspace.getFiles(),
-          getRecentFileWrites: () => this.workspace.getRecentFileWrites?.() ?? new Map(),
-          getPreviewPort: () => this.workspace.getPreviewPort(),
           hasFile: (filePath) => Boolean(this.workspace.getFiles()[filePath as AbsolutePath]),
           setGeneratedFileContent: (filePath, content) => this.workspace.setGeneratedFileContent(filePath, content),
         },
-        diagnostics: this.#diagnostics,
-        scheduler: this.#toolScheduler,
         waitForWorkspaceReady: () => this.workspace.waitForWorkspaceReady?.(),
       }),
     });
@@ -274,9 +213,6 @@ export class WorkbenchArtifactStore {
       await this.#runFileAction(artifact, data, isStreaming, generation);
       return;
     }
-    if (data.action.type === 'toolUse') {
-      this.#getOrCreateToolCall(data.action.parsedContent.toolCallId);
-    }
     await artifact.runner.runAction(data, { isStreaming });
   }
 
@@ -315,24 +251,5 @@ export class WorkbenchArtifactStore {
       }
       this.workspace.resetFileModifications();
     }
-  }
-
-  #completeToolCall(completion: { result: GhostbuildToolResult; toolCallId: string }): void {
-    const resolver = this.#toolCalls.get(completion.toolCallId);
-    if (!resolver) {
-      logger.error('Tool call promise not found');
-      return;
-    }
-    resolver.resolve({ result: completion.result });
-  }
-
-  #getOrCreateToolCall(toolCallId: string): ToolCallResolver {
-    let resolver = this.#toolCalls.get(toolCallId);
-    if (!resolver) {
-      resolver = withResolvers<{ result: GhostbuildToolResult }>();
-      void resolver.promise.catch(() => undefined);
-      this.#toolCalls.set(toolCallId, resolver);
-    }
-    return resolver;
   }
 }

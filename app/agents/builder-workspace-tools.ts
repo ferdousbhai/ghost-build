@@ -1,6 +1,6 @@
 import type { FileMap } from 'ghostbuild-agent/types';
 import type { AbsolutePath } from 'ghostbuild-agent/utils/workDir';
-import { editToolInputParameters } from 'ghostbuild-agent/tools/edit';
+import { editToolParameters } from 'ghostbuild-agent/tools/edit';
 import { listFilesParameters } from 'ghostbuild-agent/tools/listFiles';
 import { searchTextParameters } from 'ghostbuild-agent/tools/searchText';
 import { viewParameters } from 'ghostbuild-agent/tools/view';
@@ -117,7 +117,7 @@ async function runEdit(
   toolCallId: string,
   input: unknown,
 ): Promise<GhostbuildToolResult> {
-  const parsed = editToolInputParameters.parse(input);
+  const parsed = editToolParameters.parse(input);
   const file = await workspace.readText(parsed.path);
   const replacements = prepareReplacements(file.content, parsed.edits);
   let content = file.content;

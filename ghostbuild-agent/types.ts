@@ -52,7 +52,6 @@ export type GhostbuildToolSet = {
   listFiles: Tool;
   lookupDocs: Tool;
   npmInstall: Tool;
-  getDiagnostics: Tool;
   searchText: Tool;
   validateProject: Tool;
   view: Tool;
@@ -66,7 +65,6 @@ export const READ_ONLY_TOOL_NAMES = [
   'listFiles',
   'searchText',
   'lookupDocs',
-  'getDiagnostics',
 ] as const satisfies readonly GhostbuildToolName[];
 
 export function isReadOnlyToolName(toolName: string): boolean {
