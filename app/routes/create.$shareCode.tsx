@@ -11,20 +11,17 @@ import { BrandLink } from '~/components/BrandLink';
 import { Sheet } from '@ui/Sheet';
 import { signInWithCloudflare } from '~/lib/auth-client';
 import { ProjectTitle } from '~/components/ProjectTitle';
+import { createSocialPageHead } from '~/lib/social-meta';
 
 export const Route = createFileRoute('/create/$shareCode')({
-  head: () => ({
-    meta: [
-      { title: 'Built with Ghostbuild' },
-      {
-        name: 'description',
-        content: 'Someone shared a project built with Ghostbuild, the full-stack AI coding agent.',
-      },
-      {
-        property: 'og:image',
-        content: 'https://ghostbuild.dev/social_preview_share.png',
-      },
-    ],
+  head: ({ params }) => ({
+    ...createSocialPageHead({
+      title: 'Built with Ghostbuild',
+      description: 'Create an editable copy of a Cloudflare app project shared with you.',
+      path: `/create/${encodeURIComponent(params.shareCode)}`,
+      imagePath: '/social-preview-share-v2.png',
+      imageAlt: 'A shared project built with Ghostbuild',
+    }),
   }),
   component: ShareProject,
 });

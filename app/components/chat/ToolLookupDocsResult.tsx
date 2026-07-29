@@ -1,7 +1,7 @@
-import type { ReactNode } from 'react';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { isGhostbuildToolResult } from 'ghostbuild-agent/tool-result';
 import { Markdown } from './Markdown';
+import { ToolResultFrame } from './ToolResultFrame';
 
 export function ToolLookupDocsResult({ invocation }: { invocation: GhostbuildToolInvocation }) {
   if (invocation.toolName !== 'lookupDocs' || isToolInvocationInProgress(invocation)) {
@@ -10,13 +10,13 @@ export function ToolLookupDocsResult({ invocation }: { invocation: GhostbuildToo
   const resultText =
     structuredContent(invocation.result) ?? (typeof invocation.result === 'string' ? invocation.result : '');
   return resultText.startsWith('Error:') ? (
-    <ResultFrame>
+    <ToolResultFrame>
       <pre>{resultText}</pre>
-    </ResultFrame>
+    </ToolResultFrame>
   ) : (
-    <ResultFrame>
+    <ToolResultFrame>
       <Markdown html>{resultText}</Markdown>
-    </ResultFrame>
+    </ToolResultFrame>
   );
 }
 
@@ -26,12 +26,4 @@ function structuredContent(result: unknown): string | undefined {
   }
   const content = (result.data as { content?: unknown }).content;
   return typeof content === 'string' ? content : undefined;
-}
-
-function ResultFrame({ children }: { children: ReactNode }) {
-  return (
-    <div className="text-content-primary overflow-hidden rounded-lg border bg-bolt-elements-background-depth-1 font-mono text-sm">
-      <div className="max-h-[400px] overflow-auto p-4">{children}</div>
-    </div>
-  );
 }
