@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  globalpingRequest,
   globalMeasurementErrors,
   validateExpectedSha,
   verifyLocalDeployment,
@@ -87,5 +88,12 @@ describe('deployment version verification', () => {
         expectedSha,
       ),
     ).toEqual([]);
+  });
+
+  it('requests one probe for every configured region', () => {
+    const request = globalpingRequest(expectedSha);
+
+    expect(request.limit).toBe(request.locations.length);
+    expect(request.locations).toEqual([{ country: 'US' }, { country: 'DE' }, { country: 'JP' }]);
   });
 });

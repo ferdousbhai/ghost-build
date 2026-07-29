@@ -139,10 +139,11 @@ export async function verifyLocalDeployment({
   );
 }
 
-function globalpingRequest(expectedSha) {
+export function globalpingRequest(expectedSha) {
   return {
     target: 'ghostbuild.dev',
     type: 'http',
+    limit: GLOBALPING_LOCATIONS.length,
     locations: GLOBALPING_LOCATIONS,
     measurementOptions: {
       protocol: 'HTTPS',

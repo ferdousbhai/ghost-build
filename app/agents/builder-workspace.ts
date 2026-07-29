@@ -81,7 +81,7 @@ export class BuilderWorkspaceConflictError extends Error {
  * used when a single file is too large for a conservative SQLite row.
  */
 export class BuilderWorkspaceRepository {
-  readonly #inFlightTools = new Map<string, { toolName: string; argsSha256: string; promise: Promise<unknown> }>();
+  readonly #inFlightTools = new Map<string, { toolName: string; argsJson: string; promise: Promise<unknown> }>();
 
   constructor(
     private readonly storage: WorkspaceStorage,
@@ -752,18 +752,18 @@ export class BuilderWorkspaceRepository {
     execute: (identity: ToolExecutionIdentity) => Promise<T>,
   ): Promise<T> {
     const toolCallId = requireToolCallId(toolCallIdValue);
-    const argsSha256 = await sha256Text(stableJson(toolArgs));
-    const stored = this.#toolResult<T>(toolCallId, toolName, argsSha256);
-    if (stored !== undefined) {
-      return stored;
-    }
+    const argsJson = stableJson(toolArgs);
     const existing = this.#inFlightTools.get(toolCallId);
     if (existing) {
-      assertMatchingInFlightTool(existing, toolName, argsSha256);
+      assertMatchingInFlightTool(existing, toolName, argsJson);
       return (await existing.promise) as T;
     }
-    const execution = execute({ toolCallId, argsSha256 });
-    this.#inFlightTools.set(toolCallId, { toolName, argsSha256, promise: execution });
+    const execution = (async () => {
+      const argsSha256 = await sha256Text(argsJson);
+      const stored = this.#toolResult<T>(toolCallId, toolName, argsSha256);
+      return stored === undefined ? execute({ toolCallId, argsSha256 }) : stored;
+    })();
+    this.#inFlightTools.set(toolCallId, { toolName, argsJson, promise: execution });
     try {
       return await execution;
     } finally {
@@ -1316,11 +1316,11 @@ function stableJson(value: unknown): string {
 }
 
 function assertMatchingInFlightTool(
-  inFlight: { toolName: string; argsSha256: string },
+  inFlight: { toolName: string; argsJson: string },
   toolName: string,
-  argsSha256: string,
+  argsJson: string,
 ): void {
-  if (inFlight.toolName !== toolName || inFlight.argsSha256 !== argsSha256) {
+  if (inFlight.toolName !== toolName || inFlight.argsJson !== argsJson) {
     throw new Error('A workspace tool-call identifier was reused with different arguments.');
   }
 }
