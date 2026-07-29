@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import { advanceTranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 import { isCompleteMessageInfoAtLeast } from './backup-sync-policy';
-import { initializeBackupPosition } from './backup-sync-worker';
+import { adoptAdvancedTranscriptCheckpoint, initializeBackupPosition } from './backup-sync-worker';
 import { chatSyncState } from './chatSyncState';
 import { lastCompleteMessageInfoStore } from './messages';
 
@@ -85,5 +86,46 @@ describe('initializeBackupPosition', () => {
       persistedMessageInfo: { messageIndex: 3, partIndex: 2 },
       savedFileUpdateCounter: 7,
     });
+  });
+});
+
+describe('adoptAdvancedTranscriptCheckpoint', () => {
+  it('updates a stale client checkpoint when the durable transcript matches the complete messages', async () => {
+    const messages = [message('a-1', 'first'), message('a-2', 'second')];
+    const identity = { agentName: 'chat-a', generation: 0, subchatIndex: 0 };
+    const stale = await advanceTranscriptCheckpoint(null, identity, messages.slice(0, 1));
+    const current = await advanceTranscriptCheckpoint(stale, identity, messages);
+    initializeBackupPosition('chat-a', messages, 0, stale);
+    lastCompleteMessageInfoStore.set({
+      messageIndex: 1,
+      partIndex: 0,
+      allMessages: messages,
+      hasNextPart: false,
+      transcriptCheckpoint: stale,
+    });
+
+    await expect(adoptAdvancedTranscriptCheckpoint(JSON.stringify({ checkpoint: current }), 'chat-a', 0)).resolves.toBe(
+      true,
+    );
+    expect(lastCompleteMessageInfoStore.get()?.transcriptCheckpoint).toEqual(current);
+  });
+
+  it('rejects malformed, cross-chat, and message-mismatched conflict checkpoints', async () => {
+    const messages = [message('a-1', 'first')];
+    const identity = { agentName: 'chat-a', generation: 0, subchatIndex: 0 };
+    const checkpoint = await advanceTranscriptCheckpoint(null, identity, messages);
+    initializeBackupPosition('chat-a', messages, 0, checkpoint);
+
+    await expect(adoptAdvancedTranscriptCheckpoint('not json', 'chat-a', 0)).resolves.toBe(false);
+    await expect(adoptAdvancedTranscriptCheckpoint(JSON.stringify({ checkpoint }), 'chat-b', 0)).resolves.toBe(false);
+    await expect(
+      adoptAdvancedTranscriptCheckpoint(
+        JSON.stringify({
+          checkpoint: { ...checkpoint, digest: 'b'.repeat(64) },
+        }),
+        'chat-a',
+        0,
+      ),
+    ).resolves.toBe(false);
   });
 });

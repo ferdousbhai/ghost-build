@@ -173,7 +173,7 @@ export async function storeChatAction({ request, env }: { request: Request; env:
       const transcript = await requireChatTranscript(env.DB, { chatId: chat.id, subchatIndex });
       const durableBeforeUpload = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript));
       if (!transcriptCheckpointsEqual(checkpoint, durableBeforeUpload.checkpoint)) {
-        return transcriptConflictResponse();
+        return transcriptConflictResponse(durableBeforeUpload.checkpoint);
       }
       const parts = await readMultipartBodyWithLimits(request, {
         label: 'Chat backup',
@@ -222,7 +222,7 @@ export async function storeChatAction({ request, env }: { request: Request; env:
 
       const durableAfterUpload = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript));
       if (!transcriptCheckpointsEqual(checkpoint, durableAfterUpload.checkpoint)) {
-        return transcriptConflictResponse();
+        return transcriptConflictResponse(durableAfterUpload.checkpoint);
       }
 
       const update = await updateStorageState(env.DB, {
@@ -261,9 +261,12 @@ export async function storeChatAction({ request, env }: { request: Request; env:
   }
 }
 
-function transcriptConflictResponse(): Response {
+function transcriptConflictResponse(checkpoint?: TranscriptCheckpoint | null): Response {
   return Response.json(
-    { error: 'The agent transcript advanced before this backup was saved. Retry with the latest transcript.' },
+    {
+      error: 'The agent transcript advanced before this backup was saved. Retry with the latest transcript.',
+      ...(checkpoint === undefined ? {} : { checkpoint }),
+    },
     { status: 409 },
   );
 }

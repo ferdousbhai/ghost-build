@@ -1,5 +1,11 @@
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
-import { transcriptCheckpointsEqual, type TranscriptCheckpoint } from 'ghostbuild-agent/transcript';
+import {
+  transcriptCheckpointMatchesMessages,
+  transcriptCheckpointSchema,
+  transcriptCheckpointsEqual,
+  transcriptIdentitiesEqual,
+  type TranscriptCheckpoint,
+} from 'ghostbuild-agent/transcript';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { toast } from 'sonner';
 import { compressWithLz4 } from '~/lib/compression';
@@ -271,6 +277,17 @@ async function handleSyncFailure(
   if (currentState.chatId !== attemptedChatId || currentState.subchatIndex !== attemptedSubchatIndex) {
     return;
   }
+  if (
+    response?.status === 409 &&
+    (await adoptAdvancedTranscriptCheckpoint(errorText, attemptedChatId, attemptedSubchatIndex))
+  ) {
+    if (currentState.numFailures >= 3) {
+      toast.dismiss('chat-save-failure');
+    }
+    chatSyncState.set({ ...currentState, numFailures: 0 });
+    logger.info('Retrying chat backup with the latest durable transcript checkpoint');
+    return;
+  }
   const failures = currentState.numFailures + 1;
   chatSyncState.set({ ...currentState, numFailures: failures });
   if (failures >= 3) {
@@ -282,6 +299,37 @@ async function handleSyncFailure(
   const delay = backoffTime(failures);
   logger.error(`Failed to save chat (num failures: ${failures}), sleeping for ${delay.toFixed(2)}ms`, errorText);
   await abortableDelay(delay, signal);
+}
+
+export async function adoptAdvancedTranscriptCheckpoint(
+  responseBody: string,
+  attemptedChatId: string,
+  attemptedSubchatIndex: number,
+): Promise<boolean> {
+  let value: unknown;
+  try {
+    value = JSON.parse(responseBody);
+  } catch {
+    return false;
+  }
+  const result = transcriptCheckpointSchema.safeParse(
+    typeof value === 'object' && value !== null ? (value as Record<string, unknown>).checkpoint : undefined,
+  );
+  const complete = lastCompleteMessageInfoStore.get();
+  const state = chatSyncState.get();
+  if (
+    !result.success ||
+    complete === null ||
+    state.chatId !== attemptedChatId ||
+    state.subchatIndex !== attemptedSubchatIndex ||
+    (complete.transcriptCheckpoint !== null &&
+      !transcriptIdentitiesEqual(complete.transcriptCheckpoint, result.data)) ||
+    !(await transcriptCheckpointMatchesMessages(result.data, complete.allMessages))
+  ) {
+    return false;
+  }
+  lastCompleteMessageInfoStore.set({ ...complete, transcriptCheckpoint: result.data });
+  return true;
 }
 
 async function waitForNextSyncTrigger(
