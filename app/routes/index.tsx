@@ -1,25 +1,16 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { ClientHeader, ClientHomepage } from '~/components/ClientRouteComponents';
+import { createSocialPageHead } from '~/lib/social-meta';
 
 export const Route = createFileRoute('/')({
   head: () => ({
-    meta: [
-      { title: 'Ghostbuild | Generate Cloudflare full-stack apps' },
-      {
-        name: 'description',
-        content: 'Build Cloudflare Worker apps with Ghostbuild, the full-stack AI coding agent.',
-      },
-      {
-        property: 'og:image',
-        content: '/social_preview_index.png',
-      },
-    ],
-    links: [
-      {
-        rel: 'canonical',
-        href: 'https://ghostbuild.dev/',
-      },
-    ],
+    ...createSocialPageHead({
+      title: 'Ghostbuild | Build and ship Cloudflare apps',
+      description: 'Build and ship Cloudflare apps with Ghostbuild, the full-stack AI coding agent.',
+      path: '/',
+      imagePath: '/social-preview-home-v2.png',
+      imageAlt: 'Ghostbuild — build and ship Cloudflare apps',
+    }),
   }),
   component: Index,
 });

@@ -9,6 +9,7 @@ import { path } from 'ghostbuild-agent/utils/path';
 import { loggingSafeParse } from 'ghostbuild-agent/utils/zodUtil';
 import { normalizeCodeLanguage, type CodeTheme } from '~/lib/shiki.client';
 import { themeStore } from '~/lib/stores/theme';
+import { ToolResultFrame } from './ToolResultFrame';
 import { highlightTokenStyle, useHighlightedCode } from './useHighlightedCode';
 
 export function ToolViewResult({ invocation }: { invocation: GhostbuildToolInvocation }) {
@@ -21,11 +22,11 @@ export function ToolViewResult({ invocation }: { invocation: GhostbuildToolInvoc
   const structured = structuredContent(invocation.result);
   const resultText = structured ?? (typeof invocation.result === 'string' ? invocation.result : '');
   if (resultText.startsWith('Error:')) {
-    return <ResultFrame>{resultText}</ResultFrame>;
+    return <ToolResultFrame>{resultText}</ToolResultFrame>;
   }
   if (resultText.startsWith('Directory:')) {
     return (
-      <div className="text-content-primary space-y-1 rounded-lg border p-4 font-mono text-sm">
+      <div className="space-y-1 rounded-lg border border-bolt-elements-artifacts-borderColor p-4 font-mono text-sm text-content-primary">
         {resultText
           .split('\n')
           .slice(1)
@@ -76,13 +77,13 @@ const LineNumberViewer = memo(function LineNumberViewer({
   const highlightedLines = useHighlightedCode(lines.join('\n'), normalizedLanguage, codeTheme)?.tokens;
 
   return (
-    <div className="text-content-primary overflow-hidden rounded-lg border bg-bolt-elements-background-depth-1 font-mono text-sm">
+    <div className="overflow-hidden rounded-lg border border-bolt-elements-artifacts-borderColor bg-bolt-elements-background-depth-1 font-mono text-sm text-content-primary">
       <div className="max-h-[400px] overflow-auto">
         <table className="w-full border-collapse">
           <tbody>
             {lines.map((line, index) => (
               <tr key={index} className="group">
-                <td className="text-content-tertiary w-12 select-none border-r bg-bolt-elements-background-depth-1 px-4 py-1 text-right">
+                <td className="w-12 select-none border-r border-bolt-elements-artifacts-borderColor bg-bolt-elements-background-depth-1 px-4 py-1 text-right text-content-tertiary">
                   {index + startLineNumber}
                 </td>
                 <td className="whitespace-pre py-1 group-hover:bg-bolt-elements-background-depth-2">
@@ -111,12 +112,4 @@ function structuredContent(result: unknown): string | undefined {
   }
   const content = (result.data as { content?: unknown }).content;
   return typeof content === 'string' ? content : undefined;
-}
-
-function ResultFrame({ children }: { children: string }) {
-  return (
-    <div className="text-content-primary overflow-hidden rounded-lg border bg-bolt-elements-background-depth-1 font-mono text-sm">
-      <div className="max-h-[400px] overflow-auto p-4">{children}</div>
-    </div>
-  );
 }

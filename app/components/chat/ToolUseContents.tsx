@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, type ReactNode } from 'react';
+import { lazy, memo, Suspense } from 'react';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { editToolParameters } from 'ghostbuild-agent/tools/edit';
 import { writeFileParameters } from 'ghostbuild-agent/tools/writeFile';
@@ -6,6 +6,7 @@ import { loggingSafeParse } from 'ghostbuild-agent/utils/zodUtil';
 import { DeploymentApproval } from './DeploymentApproval.client';
 import { parsePendingDeploymentApproval } from '~/lib/deployment-approval';
 import { isGhostbuildToolResult, toolResultSummary } from 'ghostbuild-agent/tool-result';
+import { ToolResultFrame } from './ToolResultFrame';
 
 const ToolViewResult = lazy(() => import('./ToolViewResult').then((module) => ({ default: module.ToolViewResult })));
 const ToolLookupDocsResult = lazy(() =>
@@ -63,7 +64,7 @@ function EditTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
     return null;
   }
   return (
-    <div className="text-content-primary overflow-hidden rounded-lg border bg-bolt-elements-background-depth-1 font-mono text-sm">
+    <div className="overflow-hidden rounded-lg border border-bolt-elements-artifacts-borderColor bg-bolt-elements-background-depth-1 font-mono text-sm text-content-primary">
       <div className="space-y-4 p-4">
         <div className="space-y-2 overflow-x-auto">
           {args.data.edits.map((edit, index) => (
@@ -84,9 +85,9 @@ function WriteFileTool({ invocation }: { invocation: GhostbuildToolInvocation })
   }
   const args = loggingSafeParse(writeFileParameters, invocation.args);
   return args.success ? (
-    <ResultFrame>
+    <ToolResultFrame>
       <pre>{args.data.content}</pre>
-    </ResultFrame>
+    </ToolResultFrame>
   ) : null;
 }
 
@@ -95,10 +96,10 @@ function StructuredResultTool({ invocation }: { invocation: GhostbuildToolInvoca
     return null;
   }
   if (!isGhostbuildToolResult(invocation.result)) {
-    return <ResultFrame>{toolResultSummary(invocation.result)}</ResultFrame>;
+    return <ToolResultFrame>{toolResultSummary(invocation.result)}</ToolResultFrame>;
   }
   return (
-    <ResultFrame>
+    <ToolResultFrame>
       <div className="space-y-2">
         <div>{invocation.result.summary}</div>
         {invocation.result.coverage ? (
@@ -108,14 +109,6 @@ function StructuredResultTool({ invocation }: { invocation: GhostbuildToolInvoca
           <pre className="whitespace-pre-wrap">{JSON.stringify(invocation.result.data, null, 2)}</pre>
         ) : null}
       </div>
-    </ResultFrame>
-  );
-}
-
-function ResultFrame({ children }: { children: ReactNode }) {
-  return (
-    <div className="text-content-primary overflow-hidden rounded-lg border bg-bolt-elements-background-depth-1 font-mono text-sm">
-      <div className="max-h-[400px] overflow-auto p-4">{children}</div>
-    </div>
+    </ToolResultFrame>
   );
 }

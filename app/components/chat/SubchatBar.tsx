@@ -1,7 +1,15 @@
 import { Button } from '@ui/Button';
-import { ArrowLeftIcon, ArrowRightIcon, PlusIcon, ResetIcon } from '@radix-ui/react-icons';
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  ChatBubbleIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  PlusIcon,
+  ResetIcon,
+} from '@radix-ui/react-icons';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useCallback, useState } from 'react';
-import { Combobox } from '@ui/Combobox';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { Spinner } from '@ui/Spinner';
 import { useAreFilesSaving } from '~/lib/stores/fileUpdateCounter';
@@ -65,6 +73,10 @@ export function SubchatBar({
         },
       ];
   const visibleSubchatOptions = [...subchatOptions].reverse();
+  const currentSubchat = subchatOptions.find((option) => option.value === currentSubchatIndex);
+  const currentSubchatLabel =
+    currentSubchat?.label ?? (currentSubchatIndex === 0 ? 'Initial chat' : `Feature #${currentSubchatIndex}`);
+  const chatPositionLabel = hasMultipleSubchats ? `Chat ${currentSubchatIndex + 1} of ${subchatCount}` : 'Current chat';
 
   return (
     <div className="sticky top-0 z-[2] mx-auto mb-5 w-full max-w-chat px-3 pt-4 sm:px-0">
@@ -82,15 +94,16 @@ export function SubchatBar({
           handleCreateSubchat();
         }}
       />
-      <div className="border-content-secondary/15 bg-background-secondary/85 flex items-center justify-between gap-2 rounded-xl border px-2.5 py-2 shadow-sm backdrop-blur-xl">
-        <div className="flex min-w-0 grow items-center gap-2">
-          <div className="bg-background-secondary flex rounded-lg border">
+      <div className="border-content-secondary/15 bg-background-secondary/85 flex items-center gap-2 rounded-2xl border p-2 shadow-sm backdrop-blur-xl">
+        {hasMultipleSubchats && (
+          <div className="bg-background-secondary flex shrink-0 rounded-xl border border-bolt-elements-borderColor">
             <Button
-              size="xs"
+              size="sm"
               variant="neutral"
-              className="border-border-transparent dark:border-border-transparent rounded-r-none border-0"
-              icon={<ArrowLeftIcon className="my-px" />}
+              className="!size-11 !min-h-11 rounded-r-none border-0 !px-0"
+              icon={<ArrowLeftIcon />}
               inline
+              aria-label="Previous chat"
               tip={
                 isStreaming
                   ? 'Navigation disabled while generating a response'
@@ -106,11 +119,12 @@ export function SubchatBar({
               }}
             />
             <Button
-              size="xs"
+              size="sm"
               variant="neutral"
-              className="border-border-transparent dark:border-border-transparent rounded-l-none border-0"
-              icon={<ArrowRightIcon className="my-px" />}
+              className="!size-11 !min-h-11 rounded-l-none border-0 border-l border-l-bolt-elements-borderColor !px-0"
+              icon={<ArrowRightIcon />}
               inline
+              aria-label="Next chat"
               tip={
                 isStreaming
                   ? 'Navigation disabled while generating a response'
@@ -126,34 +140,103 @@ export function SubchatBar({
               }}
             />
           </div>
+        )}
 
-          <div className="flex items-center gap-2">
-            <Combobox
-              label="Select chat"
-              labelHidden
-              className="max-w-full"
-              buttonClasses="w-full"
-              disabled={isStreaming || !isSubchatLoaded}
-              options={visibleSubchatOptions}
-              selectedOption={currentSubchatIndex}
-              setSelectedOption={(subchatIndex) => {
-                if (subchatIndex !== null && !isStreaming && isSubchatLoaded) {
-                  handleNavigateToSubchat(subchatIndex);
-                }
-              }}
-            />
-            {!isSubchatLoaded && <Spinner />}
-          </div>
+        <div className="min-w-0 grow">
+          {hasMultipleSubchats ? (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild disabled={isStreaming || !isSubchatLoaded}>
+                <button
+                  type="button"
+                  className="group flex min-h-11 w-full min-w-0 items-center gap-3 rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3 text-left text-content-primary outline-none transition-colors hover:bg-bolt-elements-background-depth-2 focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label={`Switch chat. ${chatPositionLabel}: ${currentSubchatLabel}`}
+                >
+                  <ChatBubbleIcon className="size-4 shrink-0 text-content-secondary" />
+                  <span className="min-w-0 grow">
+                    <span className="block whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.12em] text-content-secondary">
+                      {chatPositionLabel}
+                    </span>
+                    <span className="block truncate text-sm font-medium" title={currentSubchatLabel}>
+                      {currentSubchatLabel}
+                    </span>
+                  </span>
+                  <ChevronDownIcon className="size-4 shrink-0 text-content-secondary transition-transform group-data-[state=open]:rotate-180" />
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  align="start"
+                  sideOffset={8}
+                  collisionPadding={12}
+                  className="z-50 max-h-[min(24rem,var(--radix-dropdown-menu-content-available-height))] w-[var(--radix-dropdown-menu-trigger-width)] min-w-72 overflow-y-auto rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-1.5 text-content-primary shadow-[0_18px_50px_rgba(0,0,0,0.28)] outline-none"
+                  aria-label="Build history"
+                >
+                  <DropdownMenu.Label className="px-3 pb-2 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-content-secondary">
+                    Build history
+                  </DropdownMenu.Label>
+                  <DropdownMenu.RadioGroup
+                    value={String(currentSubchatIndex)}
+                    onValueChange={(value) => {
+                      const subchatIndex = Number(value);
+                      if (Number.isInteger(subchatIndex) && !isStreaming && isSubchatLoaded) {
+                        handleNavigateToSubchat(subchatIndex);
+                      }
+                    }}
+                  >
+                    {visibleSubchatOptions.map((option) => {
+                      const isCurrent = option.value === currentSubchatIndex;
+                      return (
+                        <DropdownMenu.RadioItem
+                          key={String(option.value)}
+                          value={String(option.value)}
+                          className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-left outline-none transition-colors hover:bg-bolt-elements-background-depth-2 focus:bg-bolt-elements-background-depth-2 data-[state=checked]:bg-bolt-elements-background-depth-2"
+                        >
+                          <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 text-xs font-semibold text-content-secondary">
+                            {option.value + 1}
+                          </span>
+                          <span className="min-w-0 grow">
+                            <span className="block truncate text-sm font-medium" title={option.label}>
+                              {option.label}
+                            </span>
+                            <span className="block text-xs text-content-secondary">
+                              {isCurrent ? 'Currently viewing' : `Chat ${option.value + 1}`}
+                            </span>
+                          </span>
+                          {isCurrent && <CheckIcon className="size-4 shrink-0 text-accent-500" />}
+                        </DropdownMenu.RadioItem>
+                      );
+                    })}
+                  </DropdownMenu.RadioGroup>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          ) : (
+            <div className="flex min-h-11 min-w-0 items-center gap-3 px-2">
+              <ChatBubbleIcon className="size-4 shrink-0 text-content-secondary" />
+              <span className="min-w-0 grow">
+                <span className="block whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.12em] text-content-secondary">
+                  {chatPositionLabel}
+                </span>
+                <span className="block truncate text-sm font-medium text-content-primary" title={currentSubchatLabel}>
+                  {currentSubchatLabel}
+                </span>
+              </span>
+            </div>
+          )}
         </div>
-        <div className="flex items-center gap-2">
+
+        {!isSubchatLoaded && <Spinner />}
+
+        <div className="flex shrink-0 items-center">
           {canCreateSubchat ? (
             <Button
-              size="xs"
+              size="sm"
               variant="neutral"
-              className="bg-background-secondary flex rounded-lg border"
-              icon={<PlusIcon className="my-px" />}
+              className="!min-h-11 rounded-xl !px-3"
+              icon={<PlusIcon />}
               disabled={chatDisabled || isStreaming || !isSubchatLoaded || areFilesSaving}
               inline
+              aria-label="Start a new chat"
               tip={
                 isStreaming
                   ? 'New chats disabled while generating a response'
@@ -161,25 +244,30 @@ export function SubchatBar({
                     ? 'Loading...'
                     : areFilesSaving
                       ? 'Saving...'
-                      : 'New Chat'
+                      : 'Start a new chat with fresh context'
               }
               onClick={() => {
                 setIsAddChatModalOpen(true);
               }}
-            />
+            >
+              <span className="hidden sm:inline">New chat</span>
+            </Button>
           ) : (
             <Button
-              size="xs"
+              size="sm"
               variant="neutral"
-              className="bg-background-secondary flex rounded-lg border"
-              icon={<ResetIcon className="my-px" />}
+              className="!min-h-11 rounded-xl !px-3"
+              icon={<ResetIcon />}
               inline
-              tip={!isSubchatLoaded ? 'Loading...' : 'Rewind to this chat'}
+              aria-label="Rewind project to this chat"
+              tip={!isSubchatLoaded ? 'Loading...' : 'Rewind project to this chat'}
               disabled={currentSubchatIndex < 0 || !isSubchatLoaded}
               onClick={() => {
                 setIsRewindModalOpen(true);
               }}
-            />
+            >
+              <span className="hidden sm:inline">Rewind</span>
+            </Button>
           )}
         </div>
       </div>
