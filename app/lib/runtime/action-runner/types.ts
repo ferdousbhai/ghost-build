@@ -35,5 +35,5 @@ export type ActionRunnerWorkspace = {
   getRecentFileWrites?(): ReadonlyMap<string, number>;
   getPreviewPort(): number | undefined;
   hasFile(path: string): boolean;
-  setGeneratedFileContent(path: string, content: string): void;
+  setGeneratedFileContent(path: string, content: string): void | Promise<void>;
 };

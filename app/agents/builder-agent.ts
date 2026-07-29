@@ -4,7 +4,8 @@ import {
   type ChatRecoveryOptions,
   type ChatResponseResult,
 } from '@cloudflare/ai-chat';
-import { callable } from 'agents';
+import { callable, type FiberRecoveryContext, type FiberRecoveryResult } from 'agents';
+import { canApplyConversationCompaction, conversationCompactionKey } from '@summonghost/compaction';
 import { createChatResponseFromBody, type ChatRequestBody } from '~/lib/.server/chat';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import {
@@ -16,6 +17,7 @@ import {
   type BuilderTurnStatus,
 } from './builder-turn-store';
 import { DurableObjectContextCompactionRepository } from '~/lib/.server/llm/context-compaction-store';
+import { compactContext } from '~/lib/.server/llm/context-compaction';
 import { summarizeBuilderContext } from '~/lib/.server/llm/workers-ai-text';
 import { chatTurnContextSchema, type ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
@@ -46,11 +48,25 @@ import {
   type BuilderTranscriptBinding,
 } from './builder-request-policy';
 import { initializeBuilderAgentSchema } from './builder-agent-schema';
+import { BuilderWorkspaceRepository } from './builder-workspace';
+import type {
+  BuilderWorkspaceFileInput,
+  BuilderWorkspaceApplyResult,
+  BuilderWorkspaceState,
+  BuilderWorkspaceSyncPage,
+} from './builder-workspace-types';
+import {
+  batchBuilderWorkspaceSeed,
+  builderTemplateSeedId,
+  builderTemplateTotals,
+  loadBuilderTemplate,
+} from './builder-template';
 
 const logger = createScopedLogger('BuilderAgent');
-const STALE_CHAT_RECOVERY_MS = 15 * 60 * 1000;
+const STALE_CHAT_RECOVERY_MS = 30 * 60 * 1000;
 const MAX_CHAT_RECOVERY_ATTEMPTS = 2;
-const CHAT_NO_PROGRESS_TIMEOUT_MS = 3 * 60 * 1000;
+const CHAT_NO_PROGRESS_TIMEOUT_MS = 25 * 60 * 1000;
+const CONTEXT_COMPACTION_FIBER = 'background:context_compaction';
 
 export type BuilderAgentState = {
   activeTurn?: BuilderTurnState | null;
@@ -93,6 +109,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
 
   private readonly turnStore = new BuilderTurnStore(this);
   private readonly contextCompaction = new DurableObjectContextCompactionRepository(this);
+  private readonly workspace: BuilderWorkspaceRepository;
   private ownerId: string | null = null;
   private userId: string | null = null;
   private transcriptBinding: BuilderTranscriptBinding | null = null;
@@ -100,6 +117,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     initializeBuilderAgentSchema(ctx);
+    this.workspace = new BuilderWorkspaceRepository(ctx.storage, env.APP_STORAGE, ctx.id.toString());
   }
 
   async onStart(props?: BuilderAgentProps) {
@@ -108,6 +126,9 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.transcriptBinding = this.ownerId
       ? await loadBuilderTranscriptBinding(this.env.DB, { agentName: this.name, ownerId: this.ownerId })
       : null;
+    if (this.transcriptBinding) {
+      await this.initializeWorkspace(this.transcriptBinding);
+    }
   }
 
   /**
@@ -117,6 +138,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
    * outbox.
    */
   async scheduleDestroyForGc(): Promise<void> {
+    await this.workspace.deleteExternalObjects();
     await this._cf_scheduleDestroy();
   }
 
@@ -152,6 +174,19 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
 
     return {};
+  }
+
+  override async onFiberRecovered(ctx: FiberRecoveryContext): Promise<void | FiberRecoveryResult> {
+    if (ctx.name !== CONTEXT_COMPACTION_FIBER) {
+      return super.onFiberRecovered(ctx);
+    }
+    const throughMessageId = typeof ctx.metadata?.throughMessageId === 'string' ? ctx.metadata.throughMessageId : null;
+    if (!throughMessageId || !this.userId) {
+      return { status: 'error', error: 'missing context compaction recovery data' };
+    }
+    const credentials = await getUserWorkersAiCredentials(this.env, this.userId);
+    await this.runContextCompaction(throughMessageId, credentials);
+    return { status: 'completed', snapshot: ctx.snapshot };
   }
 
   override async onChatMessage(
@@ -224,6 +259,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         );
       }
       this.stashTurn(turn);
+      const compactionPending = await this.hasPendingContextCompaction();
       return await createChatResponseFromBody({
         env: this.env,
         abortSignal: options?.abortSignal,
@@ -231,10 +267,35 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         turnContext,
         accountCredentials,
         sessionAffinity: await createWorkersAiSessionAffinity(transcript),
+        workspace: this.workspace,
+        userId: this.userId,
+        agentName: this.name,
         compaction: {
           current: this.contextCompaction.getCompaction(),
+          pending: compactionPending,
           summarize: (prompt) => summarizeBuilderContext(this.env, prompt, accountCredentials),
           save: (compaction) => this.contextCompaction.saveCompaction(compaction),
+          schedule: async () => {
+            const throughMessageId = messages.at(-1)?.id;
+            if (!throughMessageId || (await this.hasPendingContextCompaction())) {
+              return;
+            }
+            await this.startFiber(
+              CONTEXT_COMPACTION_FIBER,
+              async (fiber) => {
+                fiber.stash({ throughMessageId, version: 1 });
+                await this.runContextCompaction(throughMessageId, accountCredentials);
+              },
+              {
+                idempotencyKey: conversationCompactionKey({
+                  scope: this.name,
+                  throughId: throughMessageId,
+                  revision: messages.length,
+                }),
+                metadata: { throughMessageId },
+              },
+            );
+          },
         },
         body: {
           messages,
@@ -249,6 +310,48 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       });
       throw error;
     }
+  }
+
+  private async runContextCompaction(
+    throughMessageId: string,
+    accountCredentials: Awaited<ReturnType<typeof getUserWorkersAiCredentials>>,
+  ): Promise<void> {
+    const currentMessages = this.messages as NonNullable<ChatRequestBody['messages']>;
+    const throughIndex = currentMessages.findIndex((message) => message.id === throughMessageId);
+    if (throughIndex < 0) {
+      return;
+    }
+    const sourceMessages = currentMessages.slice(0, throughIndex + 1);
+    const expected = this.contextCompaction.getCompaction();
+    const next = await compactContext({
+      messages: sourceMessages,
+      current: expected,
+      summarize: (prompt) => summarizeBuilderContext(this.env, prompt, accountCredentials),
+    });
+    if (!next) {
+      return;
+    }
+    const latestIds = (this.messages as NonNullable<ChatRequestBody['messages']>).map((message) => message.id);
+    if (
+      !canApplyConversationCompaction({
+        expectedFromId: next.fromMessageId,
+        expectedThroughId: next.toMessageId,
+        currentMessageIds: latestIds,
+        currentThroughId: this.contextCompaction.getCompaction()?.toMessageId,
+      })
+    ) {
+      return;
+    }
+    this.contextCompaction.saveCompactionIfCurrent(next, expected);
+  }
+
+  private async hasPendingContextCompaction(): Promise<boolean> {
+    const fibers = await this.listFibers({
+      name: CONTEXT_COMPACTION_FIBER,
+      status: ['pending', 'running', 'interrupted'],
+      limit: 1,
+    });
+    return fibers.length > 0;
   }
 
   protected override async onChatResponse(result: ChatResponseResult) {
@@ -272,6 +375,29 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   @callable()
   getTurnHistory(limit = 20) {
     return this.turnStore.getHistory(limit);
+  }
+
+  @callable()
+  getWorkspaceState(): BuilderWorkspaceState {
+    return this.workspace.getState();
+  }
+
+  @callable()
+  async prepareWorkspace(): Promise<BuilderWorkspaceState> {
+    if (!this.transcriptBinding) {
+      throw new Response('Agent authentication is required.', { status: 401 });
+    }
+    return this.initializeWorkspace(this.transcriptBinding);
+  }
+
+  @callable()
+  getWorkspaceSyncPage(request: unknown): Promise<BuilderWorkspaceSyncPage> {
+    return this.workspace.getSyncPage(request);
+  }
+
+  @callable()
+  applyWorkspaceClientChanges(request: unknown): Promise<BuilderWorkspaceApplyResult> {
+    return this.workspace.applyClientChanges(request);
   }
 
   @callable()
@@ -380,6 +506,75 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         chatInitialId,
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  private async initializeWorkspace(binding: BuilderTranscriptBinding): Promise<BuilderWorkspaceState> {
+    const current = this.workspace.getState();
+    if (current.initialized) {
+      return current;
+    }
+    if (binding.parentAgentName) {
+      const parentEntries = await this.loadParentWorkspace(binding.parentAgentName);
+      return this.seedWorkspace(`parent_${crypto.randomUUID()}`, parentEntries);
+    }
+    const template = await loadBuilderTemplate();
+    return this.seedWorkspace(builderTemplateSeedId(), template);
+  }
+
+  private async loadParentWorkspace(parentAgentName: string): Promise<BuilderWorkspaceFileInput[]> {
+    const parent = this.env.BuilderAgent.getByName(parentAgentName) as unknown as Pick<
+      BuilderAgent,
+      'getWorkspaceState' | 'getWorkspaceSyncPage'
+    >;
+    const parentState = await parent.getWorkspaceState();
+    if (!parentState.initialized) {
+      throw new Error('The parent durable project workspace is not initialized.');
+    }
+    const entries: BuilderWorkspaceFileInput[] = [];
+    let cursor: string | undefined;
+    let targetRevision: number | undefined;
+    while (true) {
+      const page = await parent.getWorkspaceSyncPage({
+        fromRevision: 0,
+        ...(targetRevision !== undefined ? { targetRevision } : {}),
+        ...(cursor ? { cursor } : {}),
+      });
+      if (page.restart) {
+        entries.length = 0;
+        cursor = undefined;
+        targetRevision = undefined;
+        continue;
+      }
+      targetRevision = page.targetRevision;
+      for (const entry of page.entries) {
+        if (entry.kind === 'write') {
+          entries.push({ path: entry.path, content: entry.content, encoding: entry.encoding });
+        }
+      }
+      if (!page.nextCursor) {
+        return entries;
+      }
+      cursor = page.nextCursor;
+    }
+  }
+
+  private async seedWorkspace(seedId: string, entries: BuilderWorkspaceFileInput[]): Promise<BuilderWorkspaceState> {
+    const started = await this.workspace.beginSeed(seedId);
+    if (started.status === 'initialized') {
+      return started.state;
+    }
+    if (started.status === 'seeding' && started.state.seeding) {
+      throw new Error('The durable project workspace is already being initialized.');
+    }
+    try {
+      for (const batch of batchBuilderWorkspaceSeed(entries)) {
+        await this.workspace.appendSeed(seedId, batch);
+      }
+      return await this.workspace.commitSeed(seedId, builderTemplateTotals(entries));
+    } catch (error) {
+      await this.workspace.abortSeed(seedId).catch(() => undefined);
+      throw error;
     }
   }
 

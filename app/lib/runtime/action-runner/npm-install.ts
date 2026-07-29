@@ -10,13 +10,9 @@ import { runCommand } from './command';
 import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
 import { prepareWebContainerPackageManagers } from '~/lib/webcontainer/pnpm';
 import { withPreviewPackageManifest } from '~/lib/stores/startup/preview-package-manifest';
+import { addRequestedDependencies, findPackagesNeedingInstall } from './dependency-manifest';
 
 const DEPENDENCY_COMMAND_TIMEOUT_MS = 120_000;
-
-type PackageManifest = {
-  dependencies?: Record<string, string>;
-  [key: string]: unknown;
-};
 
 export async function runNpmInstall(args: {
   invocation: GhostbuildToolInvocation;
@@ -95,53 +91,4 @@ export async function runNpmInstall(args: {
       { mode },
     );
   }
-}
-
-function addRequestedDependencies(packageJson: string, packageSpecs: string[]): string {
-  if (packageSpecs.length === 0) {
-    return packageJson;
-  }
-
-  const manifest = JSON.parse(packageJson) as PackageManifest;
-  const requestedDependencies = Object.fromEntries(packageSpecs.map(splitRegistryPackageSpec));
-
-  return `${JSON.stringify(
-    {
-      ...manifest,
-      dependencies: {
-        ...manifest.dependencies,
-        ...requestedDependencies,
-      },
-    },
-    null,
-    2,
-  )}\n`;
-}
-
-function findPackagesNeedingInstall(packageJson: string, packageSpecs: string[]): string[] {
-  const manifest = JSON.parse(packageJson) as PackageManifest & {
-    devDependencies?: Record<string, string>;
-    optionalDependencies?: Record<string, string>;
-  };
-  const installedDependencies = {
-    ...manifest.devDependencies,
-    ...manifest.optionalDependencies,
-    ...manifest.dependencies,
-  };
-
-  return packageSpecs.filter((spec) => {
-    const [name, selector] = splitRegistryPackageSpec(spec);
-    const installedSelector = installedDependencies[name];
-    return installedSelector === undefined || (selector !== 'latest' && selector !== installedSelector);
-  });
-}
-
-function splitRegistryPackageSpec(spec: string): [name: string, selector: string] {
-  const selectorIndex = spec.startsWith('@') ? spec.indexOf('@', spec.indexOf('/') + 1) : spec.indexOf('@');
-
-  if (selectorIndex === -1) {
-    return [spec, 'latest'];
-  }
-
-  return [spec.slice(0, selectorIndex), spec.slice(selectorIndex + 1)];
 }

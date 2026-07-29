@@ -16,6 +16,7 @@ import {
   findRuntimePinErrors,
   findSandboxVersionErrors,
   findRootMigrationErrors,
+  findBuilderTemplateModuleErrors,
   findTemplateSnapshotErrors,
   findTemplateSnapshotManifestErrors,
   packageDependencyVersion,
@@ -344,6 +345,15 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
     ).toEqual([
       'public/template-snapshot-manifest.json must reference template-snapshot-1234abcd.bin.',
       'public/template-snapshot-manifest.json is stale; run pnpm run rebuild-template.',
+    ]);
+  });
+
+  it('requires the server Builder template to match the current template source', () => {
+    expect(
+      findBuilderTemplateModuleErrors("export const BUILDER_TEMPLATE_SOURCE_SHA256 = 'source-hash';", 'source-hash'),
+    ).toEqual([]);
+    expect(findBuilderTemplateModuleErrors('', 'source-hash')).toEqual([
+      'app/agents/builder-template.generated.ts is stale; run pnpm run rebuild-template.',
     ]);
   });
 

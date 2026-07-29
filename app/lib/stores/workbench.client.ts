@@ -19,6 +19,7 @@ import { WorkbenchArtifactStore, type ArtifactState } from './workbench-artifact
 import { downloadProject } from '~/lib/download/download-project';
 import { isWorkerBuildTriggerPath } from './worker-build-trigger';
 import { workbenchActionAlert, workbenchCurrentView } from './workbench-ui-state';
+import type { BuilderWorkspaceClientChange, BuilderWorkspaceSyncEntry } from '~/agents/builder-workspace-types';
 
 export type { WorkbenchViewType } from './workbench-ui-state';
 
@@ -29,6 +30,7 @@ class WorkbenchStore {
   #terminalStore = new TerminalStore(webcontainer);
   #reloadedParts = import.meta.hot?.data.reloadedParts ?? new Set<string>();
   #artifactStore: WorkbenchArtifactStore;
+  #workspaceReadyWaiter: (() => Promise<unknown>) | null = null;
 
   artifacts: Artifacts = import.meta.hot?.data.artifacts ?? map({});
 
@@ -55,6 +57,7 @@ class WorkbenchStore {
         updateEditorFile: (filePath, content) => this.#editorStore.updateFile(filePath, content),
         resetFileModifications: () => this.resetAllFileModifications(),
         setGeneratedFileContent: (filePath, content) => this.setGeneratedFileContent(filePath, content),
+        waitForWorkspaceReady: () => this.#workspaceReadyWaiter?.(),
       },
     );
     if (import.meta.hot) {
@@ -116,6 +119,37 @@ class WorkbenchStore {
 
   prewarmWorkdir(container: WebContainer) {
     return this.#filesStore.prewarmWorkdir(container);
+  }
+
+  setWorkspaceChangeListener(listener: ((changes: BuilderWorkspaceClientChange[]) => Promise<void>) | null): void {
+    this.#filesStore.setWorkspaceChangeListener(listener);
+  }
+
+  clearWorkspaceChangeListener(listener: (changes: BuilderWorkspaceClientChange[]) => Promise<void>): void {
+    this.#filesStore.clearWorkspaceChangeListener(listener);
+  }
+
+  setWorkspaceReadyWaiter(waiter: () => Promise<unknown>): void {
+    this.#workspaceReadyWaiter = waiter;
+  }
+
+  clearWorkspaceReadyWaiter(waiter: () => Promise<unknown>): void {
+    if (this.#workspaceReadyWaiter === waiter) {
+      this.#workspaceReadyWaiter = null;
+    }
+  }
+
+  async applyWorkspaceSyncEntries(entries: BuilderWorkspaceSyncEntry[]): Promise<void> {
+    await this.#filesStore.applyWorkspaceSyncEntries(entries);
+    this.#editorStore.setDocuments(this.#filesStore.files.get(), this.unsavedFiles.get());
+  }
+
+  async replaceWorkspaceSnapshot(
+    entries: BuilderWorkspaceSyncEntry[],
+    preservedPaths = new Set<string>(),
+  ): Promise<void> {
+    await this.#filesStore.replaceWorkspaceSnapshot(entries, preservedPaths);
+    this.#editorStore.setDocuments(this.#filesStore.files.get(), this.unsavedFiles.get());
   }
 
   flushFileEvents() {
@@ -224,10 +258,10 @@ class WorkbenchStore {
     this.unsavedFiles.set(newUnsavedFiles);
   }
 
-  setGeneratedFileContent(filePath: string, content: string) {
+  async setGeneratedFileContent(filePath: string, content: string): Promise<void> {
     const absPath = getAbsolutePath(filePath);
 
-    this.#filesStore.setGeneratedFile(absPath, content);
+    await this.#filesStore.setGeneratedFile(absPath, content);
     this.#editorStore.setDocuments(this.#filesStore.files.get(), this.unsavedFiles.get());
   }
 

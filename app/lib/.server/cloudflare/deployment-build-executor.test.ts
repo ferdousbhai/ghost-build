@@ -123,6 +123,30 @@ describe('buildDeploymentSnapshot', () => {
     expect(sandbox.destroy).toHaveBeenCalledOnce();
   });
 
+  test('runs the complete build contract without materializing a deployment artifact during validation', async () => {
+    const env = {
+      DeploymentSandbox: {},
+      APP_STORAGE: { get: vi.fn(async () => ({ body: stream([1, 2, 3]) })) },
+    } as unknown as Env;
+
+    await expect(
+      buildDeploymentSnapshot({
+        env,
+        deploymentId: 'validation-1',
+        snapshotKey: 'builder-validations/1.zip',
+        expectedSourceSha256: 'a'.repeat(64),
+        project: appAgentWebProject,
+        validationOnly: true,
+      }),
+    ).resolves.toEqual(new Uint8Array());
+
+    expect(sandbox.startProcess).toHaveBeenCalledTimes(8);
+    expect(sandbox.mkdir).toHaveBeenCalledTimes(2);
+    expect(sandbox.readFileStream).not.toHaveBeenCalled();
+    expect(sandbox.exec.mock.calls.some(([command]) => String(command).startsWith('tar -czf'))).toBe(false);
+    expect(sandbox.destroy).toHaveBeenCalledOnce();
+  });
+
   test('does not let a Worker project label bypass AppAgent protected entrypoint gates', async () => {
     const env = {
       DeploymentSandbox: {},

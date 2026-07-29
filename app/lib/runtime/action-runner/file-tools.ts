@@ -154,7 +154,7 @@ async function writeGeneratedFile(
     await container.fs.mkdir(folder, { recursive: true });
   }
   await container.fs.writeFile(relativePath, content);
-  workspace.setGeneratedFileContent(requestedPath, content);
+  await workspace.setGeneratedFileContent(requestedPath, content);
 }
 
 function assertNotInternalGhostbuildFilePath(filePath: string): void {

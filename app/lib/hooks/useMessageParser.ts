@@ -11,6 +11,7 @@ import {
   type GhostbuildMessage,
   type GhostbuildPart,
 } from 'ghostbuild-agent/ai-compat';
+import { isServerWorkspaceToolName } from '~/agents/builder-workspace-types';
 
 export const messageParser = new StreamingMessageParser({
   callbacks: {
@@ -64,7 +65,9 @@ function processToolInvocationPart(partId: PartId, part: Part): Part | null {
   if (!toolInvocation) {
     return null;
   }
-  workbenchStore.scheduleToolInvocation(toolInvocation, partId);
+  if (!isServerWorkspaceToolName(toolInvocation.toolName)) {
+    workbenchStore.scheduleToolInvocation(toolInvocation, partId);
+  }
   return {
     type: 'tool-invocation',
     toolInvocation,

@@ -61,6 +61,29 @@ describe('DurableObjectContextCompactionRepository', () => {
     });
   });
 
+  test('does not let a stale background compaction overwrite a newer checkpoint', () => {
+    const repository = new DurableObjectContextCompactionRepository(new TestSqlProvider());
+    const first = { summary: 'first', fromMessageId: 'm-1', toMessageId: 'm-3' };
+    repository.saveCompaction(first);
+    repository.saveCompaction({
+      summary: 'newer',
+      fromMessageId: 'm-1',
+      toMessageId: 'm-8',
+    });
+
+    expect(
+      repository.saveCompactionIfCurrent(
+        {
+          summary: 'stale result',
+          fromMessageId: 'm-1',
+          toMessageId: 'm-5',
+        },
+        first,
+      ),
+    ).toBe(false);
+    expect(repository.getCompaction()?.summary).toBe('newer');
+  });
+
   test('lazily moves a deployed scoped summary to the canonical Agent record', () => {
     const db = new TestSqlProvider();
     db.rows.set('active', {

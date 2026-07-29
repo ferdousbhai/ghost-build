@@ -13,6 +13,7 @@ export type BuilderTranscriptBinding = {
   chatInitialId: string;
   generation: number;
   subchatIndex: number;
+  parentAgentName: string | null;
 };
 
 type BuilderTranscriptRow = {
@@ -20,6 +21,7 @@ type BuilderTranscriptRow = {
   initial_id: string;
   generation: number;
   subchat_index: number;
+  parent_agent_name: string | null;
 };
 
 /** Resolve the durable Agent name to the active, owner-scoped D1 transcript it represents. */
@@ -29,13 +31,18 @@ export async function loadBuilderTranscriptBinding(
 ): Promise<BuilderTranscriptBinding | null> {
   const row = await db
     .prepare(
-      `SELECT chat_transcripts.agent_name,
+      `SELECT transcripts.agent_name,
               chats.initial_id,
-              chat_transcripts.generation,
-              chat_transcripts.subchat_index
-       FROM chat_transcripts
-       INNER JOIN chats ON chats.id = chat_transcripts.chat_id
-       WHERE chat_transcripts.agent_name = ?
+              transcripts.generation,
+              transcripts.subchat_index,
+              parent.agent_name AS parent_agent_name
+       FROM chat_transcripts AS transcripts
+       INNER JOIN chats ON chats.id = transcripts.chat_id
+       LEFT JOIN chat_transcripts AS parent
+         ON parent.chat_id = transcripts.chat_id
+        AND parent.subchat_index = transcripts.parent_subchat_index
+        AND parent.generation = transcripts.parent_generation
+       WHERE transcripts.agent_name = ?
          AND chats.creator_id = ?
          AND chats.is_deleted = 0
        LIMIT 1`,
@@ -49,6 +56,7 @@ export async function loadBuilderTranscriptBinding(
         chatInitialId: row.initial_id,
         generation: row.generation,
         subchatIndex: row.subchat_index,
+        parentAgentName: row.parent_agent_name ?? null,
       }
     : null;
 }

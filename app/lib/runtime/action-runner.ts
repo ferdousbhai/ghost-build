@@ -15,6 +15,7 @@ import { ToolExecutionScheduler } from './action-runner/tool-execution-scheduler
 import { DiagnosticsStore } from './action-runner/diagnostics-store';
 import { ContainerBootState, waitForContainerBootState } from '~/lib/stores/containerBootState';
 import { DeploymentValidationStore } from './action-runner/deployment-validation-store';
+import { createWebContainerBuildExecutor, type ProjectBuildExecutor } from './action-runner/project-build-executor';
 
 export { isActionStatusActive } from './action-runner/types';
 export type { ActionState, ActionStatus } from './action-runner/types';
@@ -46,7 +47,8 @@ export class ActionRunner {
       workspace: ActionRunnerWorkspace;
       diagnostics?: DiagnosticsStore;
       scheduler?: ToolExecutionScheduler;
-      waitForWorkspaceReady?: () => Promise<unknown>;
+      waitForWorkspaceReady?: () => Promise<unknown> | undefined;
+      buildExecutor?: ProjectBuildExecutor;
     },
   ) {
     this.#diagnostics = callbacks.diagnostics ?? new DiagnosticsStore();
@@ -174,15 +176,17 @@ export class ActionRunner {
 
     try {
       await this.waitForWorkspaceReady();
+      const container = await this.webcontainer;
       const result = await this.#scheduler.run(invocation.toolName, async () =>
         executeTool({
           invocation,
-          container: await this.webcontainer,
+          container,
           abortSignal: action.abortSignal,
           onOutput: (output) => this.terminalOutput.set(output),
           workspace: this.callbacks.workspace,
           diagnostics: this.#diagnostics,
           deploymentValidation: this.#deploymentValidation,
+          buildExecutor: this.callbacks.buildExecutor ?? createWebContainerBuildExecutor(container),
         }),
       );
       action.abortSignal.throwIfAborted();

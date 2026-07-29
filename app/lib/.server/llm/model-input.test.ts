@@ -67,6 +67,31 @@ describe('prepareModelInput', () => {
     expect(result.estimatedTokens).toBeLessThanOrEqual(MAX_ESTIMATED_MODEL_INPUT_TOKENS);
   });
 
+  test('accepts proactive compaction without waiting for summary generation', async () => {
+    const summarize = vi.fn(async () => 'summary');
+    const scheduleCompaction = vi.fn(async () => undefined);
+    const result = await prepare(largeHistory(18), { scheduleCompaction, summarize });
+
+    expect(result.compactionAction).toBe('background');
+    expect(scheduleCompaction).toHaveBeenCalledOnce();
+    expect(summarize).not.toHaveBeenCalled();
+    expect(result.nextCompaction).toBeNull();
+  });
+
+  test('does not schedule another proactive compaction while one is pending', async () => {
+    const summarize = vi.fn(async () => 'summary');
+    const scheduleCompaction = vi.fn(async () => undefined);
+    const result = await prepare(largeHistory(18), {
+      compactionPending: true,
+      scheduleCompaction,
+      summarize,
+    });
+
+    expect(result.compactionAction).toBe('none');
+    expect(scheduleCompaction).not.toHaveBeenCalled();
+    expect(summarize).not.toHaveBeenCalled();
+  });
+
   test('counts turn-local context but never places it in the persisted summary prompt', async () => {
     const summarize = vi.fn(async (_prompt: string) => 'durable summary');
     const messages = Array.from({ length: 20 }, (_, index) => message(`m-${index}`, 'x'.repeat(18_000)));

@@ -6,6 +6,7 @@ import { runCommand } from './command';
 import { DiagnosticsStore } from './diagnostics-store';
 import { runValidateProject } from './validate-project';
 import { DeploymentValidationStore } from './deployment-validation-store';
+import type { ProjectBuildExecutor } from './project-build-executor';
 
 vi.mock('~/lib/stores/containerBootState', () => ({
   ContainerBootState: { READY: 'ready' },
@@ -28,15 +29,39 @@ describe('runValidateProject', () => {
     expect(result).toMatchObject({
       ok: true,
       data: {
-        level: 'fast',
+        level: 'full',
         nextAction: 'sign-in-required',
         checks: [
           { name: 'typecheck', status: 'passed' },
           { name: 'lint', status: 'passed' },
+          { name: 'build', status: 'passed' },
+          { name: 'preview', status: 'passed' },
         ],
       },
     });
     expect((result.data as { revision: string }).revision).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  test('can route build checks through an injected build executor', async () => {
+    const buildExecutor: ProjectBuildExecutor = {
+      environment: 'remote-sandbox',
+      run: vi.fn(async () => undefined),
+    };
+
+    const result = await runValidateProject(await validationArgs(undefined, undefined, undefined, buildExecutor));
+
+    expect(result.ok).toBe(true);
+    expect(buildExecutor.run).toHaveBeenCalledTimes(3);
+    expect(buildExecutor.run).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ command: ['pnpm', 'run', 'typecheck'] }),
+    );
+    expect(buildExecutor.run).toHaveBeenNthCalledWith(2, expect.objectContaining({ command: ['pnpm', 'run', 'lint'] }));
+    expect(buildExecutor.run).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ command: ['pnpm', 'run', 'build'] }),
+    );
+    expect(runCommandMock).toHaveBeenCalledOnce();
   });
 
   test('returns structured diagnostics without exposing raw command output', async () => {
@@ -65,54 +90,55 @@ describe('runValidateProject', () => {
   test('records a trusted deployment receipt only after full validation succeeds', async () => {
     runCommandMock.mockResolvedValue(undefined);
     const deploymentValidation = new DeploymentValidationStore();
-    const result = await runValidateProject(await validationArgs(undefined, undefined, 'full', deploymentValidation));
+    const result = await runValidateProject(await validationArgs(undefined, undefined, deploymentValidation));
     const revision = (result.data as { revision: string }).revision;
 
     expect(result.ok).toBe(true);
     expect(deploymentValidation.hasFullValidation(revision)).toBe(true);
   });
 
-  test('does not record fast or failed full validation as deployment-ready', async () => {
+  test('does not record failed validation as deployment-ready', async () => {
     const deploymentValidation = new DeploymentValidationStore();
-    runCommandMock.mockResolvedValue(undefined);
-    const fast = await runValidateProject(await validationArgs(undefined, undefined, 'fast', deploymentValidation));
-    expect(deploymentValidation.hasFullValidation((fast.data as { revision: string }).revision)).toBe(false);
-
     runCommandMock.mockRejectedValueOnce(new Error('typecheck failed')).mockResolvedValue(undefined);
-    const full = await runValidateProject(await validationArgs(undefined, undefined, 'full', deploymentValidation));
-    expect(full.ok).toBe(false);
-    expect(deploymentValidation.hasFullValidation((full.data as { revision: string }).revision)).toBe(false);
+    const result = await runValidateProject(await validationArgs(undefined, undefined, deploymentValidation));
+    expect(result.ok).toBe(false);
+    expect(deploymentValidation.hasFullValidation((result.data as { revision: string }).revision)).toBe(false);
   });
 });
 
 async function validationArgs(
   diagnostics = new DiagnosticsStore(),
   sourceVersions = ['export const app = true;', 'export const app = true;'],
-  level: 'fast' | 'full' = 'fast',
-  deploymentValidation = new DeploymentValidationStore(),
+  deploymentValidation: DeploymentValidationStore | undefined = new DeploymentValidationStore(),
+  buildExecutor?: ProjectBuildExecutor,
 ) {
   const snapshots = await Promise.all(sourceVersions.map((source) => zipSnapshot(source)));
   let exportCount = 0;
+  const container = {
+    export: vi.fn(async () => snapshots[Math.min(exportCount++, snapshots.length - 1)]),
+  } as unknown as WebContainer;
   return {
     invocation: {
       state: 'call' as const,
       toolCallId: 'validate-1',
       toolName: 'validateProject',
-      args: { level },
+      args: {},
     },
-    container: {
-      export: vi.fn(async () => snapshots[Math.min(exportCount++, snapshots.length - 1)]),
-    } as unknown as WebContainer,
+    container,
     abortSignal: new AbortController().signal,
     onOutput: vi.fn(),
     workspace: {
       getFiles: () => ({}),
-      getPreviewPort: () => (level === 'full' ? 4173 : undefined),
+      getPreviewPort: () => 4173,
       hasFile: () => true,
       setGeneratedFileContent: vi.fn(),
     },
     diagnostics,
-    deploymentValidation,
+    deploymentValidation: deploymentValidation ?? new DeploymentValidationStore(),
+    buildExecutor: buildExecutor ?? {
+      environment: 'browser',
+      run: (command) => runCommand({ ...command, container }),
+    },
   };
 }
 

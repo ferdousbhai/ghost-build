@@ -44,21 +44,6 @@ export async function createDeploymentPlanAction(args: { request: Request; env: 
   try {
     const userId = await requireSignedInUser(args.request, args.env);
     const { chatId } = createQuerySchema.parse(Object.fromEntries(new URL(args.request.url).searchParams));
-    const connection = await findCloudflareConnectionForUser(args.env.DB, userId);
-    if (!connection || connection.status !== 'active') {
-      return Response.json({ error: 'Connect Cloudflare before preparing a production deployment.' }, { status: 409 });
-    }
-    const chat = await args.env.DB.prepare(
-      `SELECT id FROM chats
-       WHERE creator_id = ? AND (initial_id = ? OR url_id = ?) AND is_deleted = 0
-       LIMIT 1`,
-    )
-      .bind(userId, chatId, chatId)
-      .first<{ id: string }>();
-    if (!chat) {
-      return Response.json({ error: 'Chat not found.' }, { status: 404 });
-    }
-
     const formData = await readBoundedDeploymentFormData(args.request);
     const snapshot = formData.get('snapshot');
     if (!(snapshot instanceof Blob) || snapshot.size === 0 || snapshot.size > MAX_DEPLOYMENT_SNAPSHOT_BYTES) {
@@ -67,32 +52,94 @@ export async function createDeploymentPlanAction(args: { request: Request; env: 
         { status: 400 },
       );
     }
-    await cleanupExpiredDeploymentSnapshots(args.env, userId);
-    await releaseOldestReplaceableSnapshot(args.env, userId);
-
-    const deploymentId = crypto.randomUUID();
-    const { plan, digest } = await buildDeploymentPlan({ deploymentId, snapshot });
-    const snapshotKey = `deployment-snapshots/${deploymentId}`;
-    const gcReceipt = await queueObjectGcCandidate(args.env.DB, snapshotKey);
-    await putObjectAtKey(args.env, snapshotKey, snapshot);
-    const deployment = await createDeployment({
-      db: args.env.DB,
-      id: deploymentId,
-      chatId: chat.id,
+    const deployment = await createDeploymentPlanForUser({
+      env: args.env,
       userId,
-      connectionId: connection.id,
-      connectionGeneration: connection.generation,
-      snapshotKey,
-      plan,
-      planDigest: digest,
+      chatId,
+      deploymentId: crypto.randomUUID(),
+      snapshot,
     });
-    await cancelObjectGcCandidate(args.env.DB, gcReceipt).catch((error) => {
-      console.warn('Unable to cancel deployment snapshot cleanup receipt', deploymentId, error);
-    });
-    return Response.json({ deployment: publicDeployment(deployment) }, { status: 201 });
+    return Response.json({ deployment }, { status: 201 });
   } catch (error) {
     return deploymentErrorResponse(error);
   }
+}
+
+async function createDeploymentPlanForUser(args: {
+  env: Env;
+  userId: string;
+  chatId: string;
+  deploymentId: string;
+  snapshot: Blob;
+}) {
+  return createFreshDeploymentPlanForUser(args);
+}
+
+export async function createOrReplayDeploymentPlanForUser(args: {
+  env: Env;
+  userId: string;
+  chatId: string;
+  deploymentId: string;
+  snapshot: Blob;
+}) {
+  try {
+    const existing = await requireDeploymentForUser(args.env.DB, args.deploymentId, args.userId);
+    if (existing.snapshotKey) {
+      return publicDeployment(existing);
+    }
+  } catch (error) {
+    if (!(error instanceof DeploymentNotFoundError)) {
+      throw error;
+    }
+  }
+  return createFreshDeploymentPlanForUser(args);
+}
+
+async function createFreshDeploymentPlanForUser(args: {
+  env: Env;
+  userId: string;
+  chatId: string;
+  deploymentId: string;
+  snapshot: Blob;
+}) {
+  const connection = await findCloudflareConnectionForUser(args.env.DB, args.userId);
+  if (!connection || connection.status !== 'active') {
+    throw new DeploymentConnectionRequiredError();
+  }
+  const chat = await args.env.DB.prepare(
+    `SELECT id FROM chats
+     WHERE creator_id = ? AND (initial_id = ? OR url_id = ?) AND is_deleted = 0
+     LIMIT 1`,
+  )
+    .bind(args.userId, args.chatId, args.chatId)
+    .first<{ id: string }>();
+  if (!chat) {
+    throw new DeploymentChatNotFoundError();
+  }
+  await cleanupExpiredDeploymentSnapshots(args.env, args.userId);
+  await releaseOldestReplaceableSnapshot(args.env, args.userId);
+  const { plan, digest } = await buildDeploymentPlan({
+    deploymentId: args.deploymentId,
+    snapshot: args.snapshot,
+  });
+  const snapshotKey = `deployment-snapshots/${args.deploymentId}`;
+  const gcReceipt = await queueObjectGcCandidate(args.env.DB, snapshotKey);
+  await putObjectAtKey(args.env, snapshotKey, args.snapshot);
+  const deployment = await createDeployment({
+    db: args.env.DB,
+    id: args.deploymentId,
+    chatId: chat.id,
+    userId: args.userId,
+    connectionId: connection.id,
+    connectionGeneration: connection.generation,
+    snapshotKey,
+    plan,
+    planDigest: digest,
+  });
+  await cancelObjectGcCandidate(args.env.DB, gcReceipt).catch((error) => {
+    console.warn('Unable to cancel deployment snapshot cleanup receipt', args.deploymentId, error);
+  });
+  return publicDeployment(deployment);
 }
 
 async function releaseOldestReplaceableSnapshot(env: Env, userId: string): Promise<void> {
@@ -299,6 +346,8 @@ async function requireSignedInUser(request: Request, env: Env): Promise<string> 
 }
 
 class DeploymentAuthenticationError extends Error {}
+class DeploymentConnectionRequiredError extends Error {}
+class DeploymentChatNotFoundError extends Error {}
 
 async function readBoundedDeploymentFormData(request: Request): Promise<FormData> {
   const parts = await readMultipartBodyWithLimits(request, {
@@ -333,6 +382,12 @@ function publicDeployment(deployment: Deployment) {
 function deploymentErrorResponse(error: unknown): Response {
   if (error instanceof DeploymentAuthenticationError) {
     return Response.json({ error: 'Sign in to deploy to production.' }, { status: 401 });
+  }
+  if (error instanceof DeploymentConnectionRequiredError) {
+    return Response.json({ error: 'Connect Cloudflare before preparing a production deployment.' }, { status: 409 });
+  }
+  if (error instanceof DeploymentChatNotFoundError) {
+    return Response.json({ error: 'Chat not found.' }, { status: 404 });
   }
   if (error instanceof PayloadTooLargeError) {
     return Response.json({ error: 'Deployment request exceeds the 11 MiB request limit.' }, { status: 413 });
