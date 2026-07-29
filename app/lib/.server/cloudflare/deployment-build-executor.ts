@@ -222,7 +222,8 @@ export async function buildDeploymentSnapshot(args: {
         BUILD_TIMEOUT_MS.stackVerification,
       ],
       [`${shellQuote(systemNode)} scripts/verify-production-licenses.mjs`, 'application build', BUILD_TIMEOUT_MS.build],
-      [`${shellQuote(systemNode)} node_modules/vite/bin/vite.js build`, 'application build', BUILD_TIMEOUT_MS.build],
+      // pnpm supplies the generated shim's NODE_PATH, which Babel uses for virtual plugin resolution.
+      [`${shellQuote(systemPnpm)} exec vite build`, 'application build', BUILD_TIMEOUT_MS.build],
       [
         `${shellQuote(systemNode)} scripts/verify-production-licenses.mjs --built`,
         'application build',

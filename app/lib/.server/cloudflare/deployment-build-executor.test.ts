@@ -106,6 +106,8 @@ describe('buildDeploymentSnapshot', () => {
     }
     expect(entrypoints[0]).toContain('/workspace/ghostbuild-approved-inputs/scripts/cf-typegen.mjs');
     expect(entrypoints.some((command) => command.includes(' scripts/cf-typegen.mjs'))).toBe(false);
+    expect(entrypoints).toContainEqual(expect.stringContaining("'/usr/local/bin/pnpm' exec vite build"));
+    expect(entrypoints.some((command) => command.includes('node_modules/vite/bin/vite.js build'))).toBe(false);
     expect(commands.at(-5)).toContain(`sha256sum './package.json'`);
     expect(commands.at(-5)).toContain(`sha256sum '/workspace/ghostbuild-approved-inputs/package.json'`);
     expect(commands.at(-4)).toContain('cp -a /workspace/project/dist');
