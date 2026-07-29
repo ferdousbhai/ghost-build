@@ -91,13 +91,6 @@ export class FilesStore {
     this.#modifiedFiles.clear();
   }
 
-  async setGeneratedFile(filePath: AbsolutePath, content: string): Promise<void> {
-    ensureParentFolders(this.files, filePath);
-
-    this.files.setKey(filePath, { type: 'file', content, isBinary: false });
-    await this.#notifyWorkspaceWrite(filePath, content);
-  }
-
   async saveFile(filePath: AbsolutePath, content: string) {
     const webcontainer = await this.#webcontainer;
 

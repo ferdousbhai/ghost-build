@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
-import { makePartId } from 'ghostbuild-agent/partId';
 import { toast } from 'sonner';
-import { workbenchStore } from '~/lib/stores/workbench.client';
-import { messageParser, processMessage, type PartCache } from '~/lib/hooks/useMessageParser';
+import { processMessage, type PartCache } from '~/lib/hooks/useProcessedMessages';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { useStore } from '@nanostores/react';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
@@ -27,14 +25,9 @@ export function useReloadMessages(initialMessages: GhostbuildMessage[] | undefin
         if (!message.parts) {
           continue;
         }
-        for (let i = 0; i < message.parts.length; i++) {
-          const partId = makePartId(message.id, i);
-          workbenchStore.addReloadedPart(partId);
-        }
         processMessage(message, partCache);
       }
       setReloadState({ partCache });
-      messageParser.reset();
     } catch (error) {
       toast.error('Failed to load previous chat messages from storage.');
       logger.error('Error reloading messages:', error);

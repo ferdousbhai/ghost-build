@@ -81,14 +81,14 @@ describe('FilesStore public filesystem watcher', () => {
     expect(store.files.get()[getAbsolutePath('old/nested/file.ts')]).toBeUndefined();
   });
 
-  it('publishes watcher and direct generated-file changes to the durable workspace listener', async () => {
+  it('publishes watcher and editor changes to the durable workspace listener', async () => {
     const listener = vi.fn(async () => undefined);
     store.setWorkspaceChangeListener(listener);
     project.setFile('src/current.ts', 'version two');
 
     project.emit('change', 'src/current.ts');
     await store.flushFileEvents();
-    await store.setGeneratedFile(getAbsolutePath('src/generated.ts'), 'generated');
+    await store.saveFile(getAbsolutePath('src/current.ts'), 'version three');
 
     expect(listener).toHaveBeenNthCalledWith(1, [
       {
@@ -101,8 +101,8 @@ describe('FilesStore public filesystem watcher', () => {
     expect(listener).toHaveBeenNthCalledWith(2, [
       {
         kind: 'write',
-        path: getAbsolutePath('src/generated.ts'),
-        content: 'generated',
+        path: getAbsolutePath('src/current.ts'),
+        content: 'version three',
         encoding: 'utf8',
       },
     ]);
@@ -192,8 +192,8 @@ describe('FilesStore public filesystem watcher', () => {
   it('purges watcher-reported and traversal-discovered secrets before reconciling ordinary files', async () => {
     const reportedSecretPath = getAbsolutePath('nested/.env.local');
     const discoveredGitPath = getAbsolutePath('packages/app/.git/config');
-    await store.setGeneratedFile(reportedSecretPath, 'stale secret');
-    await store.setGeneratedFile(discoveredGitPath, 'stale git token');
+    store.files.setKey(reportedSecretPath, textFile('stale secret'));
+    store.files.setKey(discoveredGitPath, textFile('stale git token'));
     store.userWrites.set(reportedSecretPath, Date.now());
     project.setFile('nested/.env.local', 'secret');
     project.setFile('packages/app/.git/config', 'token');
@@ -220,7 +220,7 @@ describe('FilesStore public filesystem watcher', () => {
 
   it('keeps the inert managed npmrc on disk without exposing it in project state', async () => {
     const npmrcPath = getAbsolutePath('.npmrc');
-    await store.setGeneratedFile(npmrcPath, 'stale content');
+    store.files.setKey(npmrcPath, textFile('stale content'));
     store.userWrites.set(npmrcPath, Date.now());
     project.setFile('.npmrc', MANAGED_WEBCONTAINER_NPMRC_CONTENT);
     project.events.length = 0;
@@ -317,6 +317,11 @@ class MemoryProject {
           throw new Error(`ENOENT: ${normalizedPath}`);
         }
         return encoding ? new TextDecoder().decode(content) : content;
+      }),
+      writeFile: vi.fn(async (filePath: string, content: string | Uint8Array) => {
+        const normalizedPath = normalize(filePath);
+        this.events.push(`write:${normalizedPath}`);
+        this.setFile(normalizedPath, typeof content === 'string' ? content : new TextDecoder().decode(content));
       }),
       rm: vi.fn(async (filePath: string) => {
         const normalizedPath = normalize(filePath);

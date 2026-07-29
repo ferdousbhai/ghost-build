@@ -9,7 +9,7 @@ export const UserMessage = memo(function UserMessage({ content }: UserMessagePro
   let body: ReactNode;
   if (Array.isArray(content)) {
     const textItem = content.find((item) => item.type === 'text');
-    const textContent = stripMetadata(textItem?.text || '');
+    const textContent = textItem?.text || '';
     const images = content.filter((item) => item.type === 'image' && item.image);
 
     body = (
@@ -27,13 +27,8 @@ export const UserMessage = memo(function UserMessage({ content }: UserMessagePro
       </div>
     );
   } else {
-    body = <Markdown html>{stripMetadata(content)}</Markdown>;
+    body = <Markdown html>{content}</Markdown>;
   }
 
   return <div className="overflow-hidden text-sm">{body}</div>;
 });
-
-export function stripMetadata(content: string) {
-  const artifactRegex = /<boltArtifact\s+[^>]*>[\s\S]*?<\/boltArtifact>/gm;
-  return content.replace(artifactRegex, '');
-}

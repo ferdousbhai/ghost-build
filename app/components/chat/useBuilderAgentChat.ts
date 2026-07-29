@@ -32,6 +32,7 @@ import {
 } from 'ghostbuild-agent/transcript';
 import { BuilderWorkspaceSyncController } from '~/lib/stores/builder-workspace-sync.client';
 import { ContainerBootState, waitForContainerBootState } from '~/lib/stores/containerBootState';
+import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 
 const logger = createScopedLogger('BuilderAgentChat');
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
@@ -82,7 +83,7 @@ export function useBuilderAgentChat(args: {
       captureMessage('Failed to process chat request', { level: 'error' });
       logger.error('Chat request failed', error);
       recordChatFailure(error.message.includes(STATUS_MESSAGES.error));
-      workbenchStore.abortAllActions();
+      toolActivityStore.abortActive();
       if (error.message.includes(WORKERS_PAID_REQUIRED_MARKER)) {
         showWorkersPaidRequiredToast();
       }

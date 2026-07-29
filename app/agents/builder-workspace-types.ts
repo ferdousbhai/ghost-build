@@ -5,14 +5,9 @@ export const BUILDER_WORKSPACE_MAX_FILES = 10_000;
 export const BUILDER_WORKSPACE_SYNC_BATCH_BYTES = 4 * 1024 * 1024;
 export const BUILDER_WORKSPACE_SYNC_BATCH_FILES = 100;
 
-export const SERVER_WORKSPACE_TOOL_NAMES = ['view', 'listFiles', 'searchText', 'edit', 'writeFile'] as const;
-export type ServerWorkspaceToolName = (typeof SERVER_WORKSPACE_TOOL_NAMES)[number];
+export type ServerWorkspaceToolName = 'view' | 'listFiles' | 'searchText' | 'edit' | 'writeFile';
 export const SERVER_OPERATION_TOOL_NAMES = ['lookupDocs', 'npmInstall', 'validateProject', 'deploy'] as const;
 export type ServerOperationToolName = (typeof SERVER_OPERATION_TOOL_NAMES)[number];
-
-export function isServerWorkspaceToolName(name: string): name is ServerWorkspaceToolName {
-  return (SERVER_WORKSPACE_TOOL_NAMES as readonly string[]).includes(name);
-}
 
 export type BuilderWorkspaceEncoding = 'utf8' | 'base64';
 

@@ -4,8 +4,6 @@ import type { BuilderWorkspaceClientChange, BuilderWorkspaceSyncEntry } from '~/
 const workbench = vi.hoisted(() => ({
   setWorkspaceChangeListener: vi.fn(),
   clearWorkspaceChangeListener: vi.fn(),
-  setWorkspaceReadyWaiter: vi.fn(),
-  clearWorkspaceReadyWaiter: vi.fn(),
   applyWorkspaceSyncEntries: vi.fn(async (_entries: BuilderWorkspaceSyncEntry[]) => undefined),
   replaceWorkspaceSnapshot: vi.fn(
     async (_entries: BuilderWorkspaceSyncEntry[], _preservedPaths?: Set<string>) => undefined,

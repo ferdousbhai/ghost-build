@@ -1,6 +1,6 @@
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { TranscriptCheckpoint, TranscriptIdentity } from 'ghostbuild-agent/transcript';
-import type { PartCache } from '~/lib/hooks/useMessageParser';
+import type { PartCache } from '~/lib/hooks/useProcessedMessages';
 import type { StreamStatus } from '~/lib/common/types';
 import type { SubchatSummary } from './subchat-model';
 

@@ -29,12 +29,12 @@ describe('RelevantFilesContext', () => {
     expect(part.type).toBe('text');
     if (part.type === 'text') {
       expect(part.text.length).toBeLessThanOrEqual(500);
-      expect(part.text.match(/<boltArtifact/g)).toHaveLength(1);
+      expect(part.text).toMatch(/^Relevant workspace context:/);
       expect(part.text).toContain('more paths');
     }
   });
 
-  test('escapes file paths used as XML attributes', () => {
+  test('quotes unusual file paths without legacy artifact markup', () => {
     const filePath = getAbsolutePath('src/a"&b.ts');
     const context = new RelevantFilesContext(
       () => ({ filePath, value: 'export {};', isBinary: false }),
@@ -42,12 +42,12 @@ describe('RelevantFilesContext', () => {
       () => new Map(),
     );
 
-    const message = context.build([], 'id"&', 1_000);
+    const message = context.build([], 'context', 1_000);
     const part = message.parts[0];
     expect(part.type).toBe('text');
     if (part.type === 'text') {
-      expect(part.text).toContain('id="id&quot;&amp;"');
-      expect(part.text).toContain('filePath="/home/project/src/a&quot;&amp;b.ts"');
+      expect(part.text).toContain('File "/home/project/src/a\\"&b.ts":');
+      expect(part.text).not.toContain('boltArtifact');
     }
   });
 });

@@ -15,6 +15,7 @@ import { Button } from '@ui/Button';
 import { TextInput } from '@ui/TextInput';
 import { PlusIcon } from '@radix-ui/react-icons';
 import { removeChatHistoryItem, useChatHistory } from '~/lib/cloudflare/chat-history-db';
+import { ProjectTitle } from '~/components/ProjectTitle';
 
 const menuVariants = {
   closed: {
@@ -194,9 +195,9 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
               dialogBody={
                 <p>
                   You are about to delete{' '}
-                  <span className="font-medium text-content-primary">
+                  <ProjectTitle className="font-medium text-content-primary">
                     {deleteTarget.description || 'Untitled project'}
-                  </span>
+                  </ProjectTitle>
                 </p>
               }
             />

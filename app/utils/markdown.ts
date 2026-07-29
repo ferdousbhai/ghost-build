@@ -26,7 +26,7 @@ function remarkThinkRawContent() {
     visit(tree, (node: UnistNode) => {
       if (isHtmlNode(node) && node.value?.startsWith('<think>')) {
         const cleanedContent = node.value.slice(7);
-        node.value = `<div class="__boltThought__">${cleanedContent}`;
+        node.value = `<div class="__ghostbuildThought__">${cleanedContent}`;
 
         return;
       }
@@ -44,13 +44,7 @@ const rehypeSanitizeOptions: RehypeSanitizeOptions = {
   tagNames: allowedHTMLElements,
   attributes: {
     ...defaultSchema.attributes,
-    div: [
-      ...(defaultSchema.attributes?.div ?? []),
-      'data*',
-      ['className', '__boltArtifact__', '__boltThought__'],
-
-      // ['className', '__boltThought__']
-    ],
+    div: [...(defaultSchema.attributes?.div ?? []), 'data*', ['className', '__ghostbuildThought__']],
   },
   strip: [],
 };

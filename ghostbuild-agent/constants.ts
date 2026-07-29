@@ -10,11 +10,3 @@ export const PREWARM_PATHS = [
   `${WORK_DIR}/src/routes/index.tsx`,
   `${WORK_DIR}/src/styles.css`,
 ];
-
-// A list of files that we block the LLM from modifying
-export const EXCLUDED_FILE_PATHS = [
-  'vite.config.ts',
-  'package.json',
-  'src/routeTree.gen.ts',
-  'worker-configuration.d.ts',
-];

@@ -82,9 +82,9 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
           />
         </div>
         {chat.started && (
-          <span className="hidden flex-1 truncate px-4 text-center text-content-primary lg:block">
+          <div className="hidden min-w-0 flex-1 px-4 text-center text-content-primary lg:block">
             <ChatDescription />
-          </span>
+          </div>
         )}
         <div className="ml-auto flex items-center gap-2">
           {!isAccountSession && <LoggedOutHeaderButtons />}

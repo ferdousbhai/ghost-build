@@ -4,6 +4,7 @@ import { description as descriptionStore } from '~/lib/stores/description';
 import { CheckIcon, Pencil1Icon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
 import { TextInput } from '@ui/TextInput';
+import { ProjectTitle } from '~/components/ProjectTitle';
 
 export function ChatDescription() {
   const initialDescription = useStore(descriptionStore) ?? '';
@@ -36,7 +37,7 @@ export function ChatDescription() {
         </form>
       ) : (
         <>
-          <span className="mr-1 max-w-64 truncate">{currentDescription}</span>
+          <ProjectTitle className="mr-1 block max-w-64 truncate">{currentDescription}</ProjectTitle>
           <Button
             variant="neutral"
             onClick={toggleEditMode}

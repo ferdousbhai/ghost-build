@@ -15,8 +15,6 @@ export {
   MAX_RETAINED_CHAT_STORAGE_STATES,
 } from './chat-storage-state-repository.server';
 
-const MAX_URL_ID_ALLOCATION_ATTEMPTS = 1_000;
-
 type ChatInsertArgs = {
   id: string;
   creatorId: string;
@@ -310,61 +308,4 @@ function prepareInsertChatMessageState(
       args.chatId,
       ownerId,
     );
-}
-
-export async function claimChatUrlId(
-  db: D1Database,
-  args: { chatId: string; ownerId: string; urlHint: string; description: string },
-): Promise<{ urlId: string; initialId: string }> {
-  const base = slugify(args.urlHint);
-  for (let attempt = 0; attempt < MAX_URL_ID_ALLOCATION_ATTEMPTS; attempt++) {
-    const candidate = attempt === 0 ? base : `${base}-${attempt + 1}`;
-    try {
-      const claimed = await db
-        .prepare(
-          `UPDATE chats
-           SET url_id = ?, description = COALESCE(description, ?)
-           WHERE id = ? AND creator_id = ? AND is_deleted = 0 AND url_id IS NULL
-           RETURNING initial_id, url_id`,
-        )
-        .bind(candidate, args.description, args.chatId, args.ownerId)
-        .first<{ initial_id: string; url_id: string }>();
-      if (claimed) {
-        return { urlId: claimed.url_id, initialId: claimed.initial_id };
-      }
-    } catch (error) {
-      if (!isUniqueConstraintError(error)) {
-        throw error;
-      }
-    }
-
-    const current = await db
-      .prepare(
-        `SELECT initial_id, url_id
-         FROM chats
-         WHERE id = ? AND creator_id = ? AND is_deleted = 0`,
-      )
-      .bind(args.chatId, args.ownerId)
-      .first<{ initial_id: string; url_id: string | null }>();
-    if (!current) {
-      throw new DataNotFoundError('Chat not found');
-    }
-    if (current.url_id) {
-      return { urlId: current.url_id, initialId: current.initial_id };
-    }
-  }
-  throw new Error('Unable to allocate a unique chat URL');
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return error instanceof Error && /unique constraint failed/i.test(error.message);
-}
-
-function slugify(value: string): string {
-  const slug = value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64);
-  return slug || crypto.randomUUID().slice(0, 8);
 }
