@@ -1,7 +1,15 @@
 import { skipToken, useMutation as useTanStackMutation, useQuery as useTanStackQuery } from '@tanstack/react-query';
 import { executeDataOperation } from './client';
-import type { DataOperationArgs, DataOperationPath, DataOperationResult, SubchatSummary } from './data-api';
+import {
+  api,
+  type DataOperationArgs,
+  type DataOperationPath,
+  type DataOperationResult,
+  type SubchatSummary,
+} from './data-api';
 import { loadAllSubchats } from './data-page-loader';
+
+type SubchatQueryArgs = { chatId: string; sessionId: string };
 
 export function useQuery<Path extends DataOperationPath>(
   path: Path,
@@ -29,9 +37,13 @@ export function useMutation<Path extends DataOperationPath>(path: Path) {
   return mutateAsync;
 }
 
-export function useAllSubchats(args: { chatId: string; sessionId: string } | 'skip'): SubchatSummary[] | undefined {
+export function subchatQueryKey(args: SubchatQueryArgs | 'skip') {
+  return ['ghostbuild-data', api.subchats.get, args] as const;
+}
+
+export function useAllSubchats(args: SubchatQueryArgs | 'skip'): SubchatSummary[] | undefined {
   const query = useTanStackQuery({
-    queryKey: ['ghostbuild-data', 'subchats.get', args],
+    queryKey: subchatQueryKey(args),
     queryFn: args === 'skip' ? skipToken : ({ signal }) => loadAllSubchats(args.chatId, args.sessionId, signal),
   });
 

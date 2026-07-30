@@ -5,10 +5,13 @@ import { Modal } from '@ui/Modal';
 interface SubchatDialogsProps {
   rewindOpen: boolean;
   createOpen: boolean;
+  rewindDisabled: boolean;
+  createDisabled: boolean;
+  createPending: boolean;
   closeRewind: () => void;
   closeCreate: () => void;
   confirmRewind: () => void;
-  confirmCreate: () => void;
+  confirmCreate: () => Promise<void>;
 }
 
 export function SubchatDialogs(props: SubchatDialogsProps) {
@@ -26,7 +29,13 @@ export function SubchatDialogs(props: SubchatDialogsProps) {
               use this previous version.
             </p>
             <p className="text-content-primary text-sm">Are you sure you want to continue?</p>
-            <DialogActions cancel={props.closeRewind} confirm={props.confirmRewind} confirmLabel="Rewind" danger />
+            <DialogActions
+              cancel={props.closeRewind}
+              confirm={props.confirmRewind}
+              confirmLabel="Rewind"
+              disabled={props.rewindDisabled}
+              danger
+            />
           </div>
         </Modal>
       )}
@@ -42,7 +51,13 @@ export function SubchatDialogs(props: SubchatDialogsProps) {
               to view your chat history, but you won&apos;t be able to send more messages in previous chats.
             </p>
             <p className="text-content-primary text-sm">Are you sure you want to continue?</p>
-            <DialogActions cancel={props.closeCreate} confirm={props.confirmCreate} confirmLabel="Create Chat" />
+            <DialogActions
+              cancel={props.closeCreate}
+              confirm={props.confirmCreate}
+              confirmLabel="Create Chat"
+              disabled={props.createDisabled}
+              pending={props.createPending}
+            />
           </div>
         </Modal>
       )}
@@ -55,18 +70,28 @@ function DialogActions({
   confirm,
   confirmLabel,
   danger = false,
+  disabled = false,
+  pending = false,
 }: {
   cancel: () => void;
-  confirm: () => void;
+  confirm: () => void | Promise<void>;
   confirmLabel: string;
   danger?: boolean;
+  disabled?: boolean;
+  pending?: boolean;
 }) {
   return (
     <div className="flex justify-end gap-2">
-      <Button variant="neutral" onClick={cancel}>
+      <Button variant="neutral" onClick={cancel} disabled={pending}>
         Cancel
       </Button>
-      <Button variant={danger ? 'danger' : 'primary'} onClick={confirm}>
+      <Button
+        variant={danger ? 'danger' : 'primary'}
+        onClick={confirm}
+        disabled={disabled}
+        loading={pending}
+        aria-busy={pending}
+      >
         {confirmLabel}
       </Button>
     </div>

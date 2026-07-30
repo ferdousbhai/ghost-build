@@ -9,12 +9,12 @@ import {
   ResetIcon,
 } from '@radix-ui/react-icons';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { Spinner } from '@ui/Spinner';
 import { useAreFilesSaving } from '~/lib/stores/fileUpdateCounter';
 import { SubchatDialogs } from './SubchatDialogs';
-import { createSubchatOptions, getSubchatNavigation, type SubchatSummary } from './subchat-model';
+import { createSubchatOptions, getSubchatLabel, getSubchatNavigation, type SubchatSummary } from './subchat-model';
 
 interface SubchatBarProps {
   subchats?: SubchatSummary[];
@@ -22,7 +22,7 @@ interface SubchatBarProps {
   isStreaming: boolean;
   chatDisabled: boolean;
   sessionId: string | null;
-  handleCreateSubchat: () => void;
+  handleCreateSubchat: () => Promise<boolean>;
   onRewind?: (subchatIndex?: number, messageIndex?: number) => void;
   isSubchatLoaded: boolean;
 }
@@ -39,6 +39,7 @@ export function SubchatBar({
 }: SubchatBarProps) {
   const [isRewindModalOpen, setIsRewindModalOpen] = useState(false);
   const [isAddChatModalOpen, setIsAddChatModalOpen] = useState(false);
+  const [isCreatingSubchat, setIsCreatingSubchat] = useState(false);
   const areFilesSaving = useAreFilesSaving();
 
   const subchatCount = subchats?.length ?? 1;
@@ -48,34 +49,38 @@ export function SubchatBar({
     sessionId !== null,
   );
 
-  const handleNavigateToSubchat = useCallback(
-    (index: number) => {
-      if (!hasMultipleSubchats) {
-        return;
-      }
-      if (index < 0 || index >= subchatCount) {
-        return;
-      }
+  const busyTip = isCreatingSubchat
+    ? 'Creating chat...'
+    : isStreaming
+      ? 'Wait for the current response to finish'
+      : !isSubchatLoaded
+        ? 'Loading...'
+        : areFilesSaving
+          ? 'Saving...'
+          : undefined;
+  const interactionsDisabled = busyTip !== undefined;
 
-      subchatIndexStore.set(index);
-    },
-    [hasMultipleSubchats, subchatCount],
-  );
+  const handleNavigateToSubchat = (index: number) => {
+    if (!hasMultipleSubchats || interactionsDisabled || index < 0 || index >= subchatCount) {
+      return;
+    }
+    subchatIndexStore.set(index);
+  };
 
   const persistedSubchatOptions = createSubchatOptions(subchats);
+  const fallbackSubchatLabel = getSubchatLabel(currentSubchatIndex);
   const subchatOptions = persistedSubchatOptions.some((option) => option.value === currentSubchatIndex)
     ? persistedSubchatOptions
     : [
         ...persistedSubchatOptions,
         {
-          label: currentSubchatIndex === 0 ? 'Initial chat' : `Feature #${currentSubchatIndex}`,
+          label: fallbackSubchatLabel,
           value: currentSubchatIndex,
         },
       ];
   const visibleSubchatOptions = [...subchatOptions].reverse();
   const currentSubchat = subchatOptions.find((option) => option.value === currentSubchatIndex);
-  const currentSubchatLabel =
-    currentSubchat?.label ?? (currentSubchatIndex === 0 ? 'Initial chat' : `Feature #${currentSubchatIndex}`);
+  const currentSubchatLabel = currentSubchat?.label ?? fallbackSubchatLabel;
   const chatPositionLabel = hasMultipleSubchats ? `Chat ${currentSubchatIndex + 1} of ${subchatCount}` : 'Current chat';
 
   return (
@@ -83,15 +88,34 @@ export function SubchatBar({
       <SubchatDialogs
         rewindOpen={isRewindModalOpen}
         createOpen={isAddChatModalOpen}
+        rewindDisabled={interactionsDisabled}
+        createDisabled={interactionsDisabled}
         closeRewind={() => setIsRewindModalOpen(false)}
-        closeCreate={() => setIsAddChatModalOpen(false)}
+        closeCreate={() => {
+          if (!isCreatingSubchat) {
+            setIsAddChatModalOpen(false);
+          }
+        }}
+        createPending={isCreatingSubchat}
         confirmRewind={() => {
+          if (interactionsDisabled) {
+            return;
+          }
           setIsRewindModalOpen(false);
           onRewind?.(currentSubchatIndex, undefined);
         }}
-        confirmCreate={() => {
-          setIsAddChatModalOpen(false);
-          handleCreateSubchat();
+        confirmCreate={async () => {
+          if (interactionsDisabled) {
+            return;
+          }
+          setIsCreatingSubchat(true);
+          try {
+            if (await handleCreateSubchat()) {
+              setIsAddChatModalOpen(false);
+            }
+          } finally {
+            setIsCreatingSubchat(false);
+          }
         }}
       />
       <div className="border-content-secondary/15 bg-background-secondary/85 flex items-center gap-2 rounded-2xl border p-2 shadow-sm backdrop-blur-xl">
@@ -104,16 +128,8 @@ export function SubchatBar({
               icon={<ArrowLeftIcon />}
               inline
               aria-label="Previous chat"
-              tip={
-                isStreaming
-                  ? 'Navigation disabled while generating a response'
-                  : !isSubchatLoaded
-                    ? 'Loading...'
-                    : areFilesSaving
-                      ? 'Saving...'
-                      : 'Previous Chat'
-              }
-              disabled={!canNavigatePrev || isStreaming || !isSubchatLoaded || areFilesSaving}
+              tip={busyTip ?? 'Previous chat'}
+              disabled={!canNavigatePrev || interactionsDisabled}
               onClick={() => {
                 handleNavigateToSubchat(currentSubchatIndex - 1);
               }}
@@ -125,16 +141,8 @@ export function SubchatBar({
               icon={<ArrowRightIcon />}
               inline
               aria-label="Next chat"
-              tip={
-                isStreaming
-                  ? 'Navigation disabled while generating a response'
-                  : !isSubchatLoaded
-                    ? 'Loading...'
-                    : areFilesSaving
-                      ? 'Saving...'
-                      : 'Next Chat'
-              }
-              disabled={!canNavigateNext || isStreaming || !isSubchatLoaded || areFilesSaving}
+              tip={busyTip ?? 'Next chat'}
+              disabled={!canNavigateNext || interactionsDisabled}
               onClick={() => {
                 handleNavigateToSubchat(currentSubchatIndex + 1);
               }}
@@ -145,7 +153,7 @@ export function SubchatBar({
         <div className="min-w-0 grow">
           {hasMultipleSubchats ? (
             <DropdownMenu.Root>
-              <DropdownMenu.Trigger asChild disabled={isStreaming || !isSubchatLoaded}>
+              <DropdownMenu.Trigger asChild disabled={interactionsDisabled}>
                 <button
                   type="button"
                   className="group flex min-h-11 w-full min-w-0 items-center gap-3 rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3 text-left text-content-primary outline-none transition-colors hover:bg-bolt-elements-background-depth-2 focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:opacity-50"
@@ -178,7 +186,7 @@ export function SubchatBar({
                     value={String(currentSubchatIndex)}
                     onValueChange={(value) => {
                       const subchatIndex = Number(value);
-                      if (Number.isInteger(subchatIndex) && !isStreaming && isSubchatLoaded) {
+                      if (Number.isInteger(subchatIndex)) {
                         handleNavigateToSubchat(subchatIndex);
                       }
                     }}
@@ -234,18 +242,10 @@ export function SubchatBar({
               variant="neutral"
               className="!min-h-11 rounded-xl !px-3"
               icon={<PlusIcon />}
-              disabled={chatDisabled || isStreaming || !isSubchatLoaded || areFilesSaving}
+              disabled={chatDisabled || interactionsDisabled}
               inline
               aria-label="Start a new chat"
-              tip={
-                isStreaming
-                  ? 'New chats disabled while generating a response'
-                  : !isSubchatLoaded
-                    ? 'Loading...'
-                    : areFilesSaving
-                      ? 'Saving...'
-                      : 'Start a new chat with fresh context'
-              }
+              tip={busyTip ?? (chatDisabled ? 'New chat unavailable' : 'Start a new chat with fresh context')}
               onClick={() => {
                 setIsAddChatModalOpen(true);
               }}
@@ -260,8 +260,8 @@ export function SubchatBar({
               icon={<ResetIcon />}
               inline
               aria-label="Rewind project to this chat"
-              tip={!isSubchatLoaded ? 'Loading...' : 'Rewind project to this chat'}
-              disabled={currentSubchatIndex < 0 || !isSubchatLoaded}
+              tip={busyTip ?? 'Rewind project to this chat'}
+              disabled={currentSubchatIndex < 0 || interactionsDisabled}
               onClick={() => {
                 setIsRewindModalOpen(true);
               }}
