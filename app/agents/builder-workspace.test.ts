@@ -145,6 +145,10 @@ describe('BuilderWorkspaceRepository', () => {
   it('rejects concurrent reuse of an in-flight tool identifier with different arguments', async () => {
     const harness = await initializedHarness();
     let finish!: () => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
     const execution = harness.workspace.executeToolOnce(
       'tool-in-flight',
       'view',
@@ -152,9 +156,10 @@ describe('BuilderWorkspaceRepository', () => {
       () =>
         new Promise<{ ok: true }>((resolve) => {
           finish = () => resolve({ ok: true });
+          markStarted();
         }),
     );
-    await Promise.resolve();
+    await started;
 
     await expect(
       harness.workspace.executeToolOnce('tool-in-flight', 'view', { path: 'b' }, async () => ({ ok: false })),
@@ -235,6 +240,46 @@ describe('BuilderWorkspaceRepository', () => {
       ok: true,
       data: { content: 'export const value = 2;\n', workspaceRevision: 2 },
     });
+  });
+
+  it('applies multi-edit calls only through the current server schema', async () => {
+    const harness = await initializedHarness();
+    const edited = await executeBuilderWorkspaceTool({
+      workspace: harness.workspace,
+      toolCallId: 'edit-1',
+      toolName: 'edit',
+      input: {
+        path: '/home/project/src/index.ts',
+        edits: [
+          { old: 'value', new: 'answer' },
+          { old: '= 1', new: '= 42' },
+        ],
+      },
+    });
+
+    expect(edited).toMatchObject({
+      ok: true,
+      data: {
+        path: '/home/project/src/index.ts',
+        replacements: [
+          { startLine: 1, endLine: 1 },
+          { startLine: 1, endLine: 1 },
+        ],
+        workspaceRevision: 2,
+      },
+    });
+    await expect(harness.workspace.readText('/home/project/src/index.ts')).resolves.toMatchObject({
+      content: 'export const answer = 42;\n',
+    });
+
+    await expect(
+      executeBuilderWorkspaceTool({
+        workspace: harness.workspace,
+        toolCallId: 'edit-old-shape',
+        toolName: 'edit',
+        input: { path: '/home/project/src/index.ts', old: 'answer', new: 'value' },
+      }),
+    ).rejects.toThrow();
   });
 
   it('commits dependency manifest and lockfile changes atomically and replays without reinstalling', async () => {

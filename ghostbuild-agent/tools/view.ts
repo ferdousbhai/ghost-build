@@ -15,28 +15,27 @@ The result includes exact line and character coverage. Unusually dense requested
 calling view again with the same path, range, and returned revision-bound nextCursor.
 `;
 
+const viewRangeParameters = z
+  .array(z.number().int().min(1))
+  .length(2)
+  .superRefine(([start, end], ctx) => {
+    if (end <= start) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'view_range end must be greater than start.' });
+    }
+    if (end - start > 200) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'view_range may contain at most 200 lines.' });
+    }
+  });
+
 export const viewParameters = z.object({
   path: z.string().max(1_024).describe('The absolute path to the file to read.'),
-  view_range: z
-    .tuple([z.number().int().min(1), z.number().int().min(2)])
-    .optional()
-    .default([1, 201])
-    .superRefine(([start, end], ctx) => {
-      if (end <= start) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'view_range end must be greater than start.' });
-      }
-      if (end - start > 200) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'view_range may contain at most 200 lines.' });
-      }
-    })
-    .describe(viewRangeDescription),
+  view_range: viewRangeParameters.optional().default([1, 201]).describe(viewRangeDescription),
   cursor: z.string().max(64).optional().describe('Exact nextCursor returned when a dense range spans pages.'),
 });
 
-/** Accepts the former `-1` end sentinel in stored transcripts for display and context recovery only. */
 export const viewToolInputParameters = z.object({
   path: z.string().max(1_024),
-  view_range: z.tuple([z.number().int().min(1), z.union([z.literal(-1), z.number().int().min(2)])]).optional(),
+  view_range: viewRangeParameters.optional(),
   cursor: z.string().max(64).optional(),
 });
 

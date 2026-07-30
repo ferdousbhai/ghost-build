@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildDeploymentPlan, deploymentPlanResourceName } from './deployment-plan';
 import { APP_AGENT_PROTECTED_FILE_SHA256, DEPLOYMENT_SECURITY_BASELINE_VERSION } from './deployment-security-baseline';
+import { DEPLOYMENT_COMPATIBILITY_DATE } from './deployment-runtime-policy';
 
 describe('buildDeploymentPlan', () => {
   it('binds the user-account billing policy and source digest into an immutable plan', async () => {
@@ -105,7 +106,7 @@ function addProtectedSecurityFiles(zip: JSZip): void {
 
 function runtimeConfig() {
   return {
-    compatibility_date: '2026-07-18',
+    compatibility_date: DEPLOYMENT_COMPATIBILITY_DATE,
     compatibility_flags: ['nodejs_compat'],
     observability: {
       enabled: true,

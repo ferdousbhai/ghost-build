@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import {
   createSubchat,
   discardEmptyChat,
@@ -78,9 +79,44 @@ describe('empty chat lifecycle', () => {
     expect(statements).toHaveLength(2);
     expect(statements[0].query).toContain('INSERT INTO agent_gc_candidates');
     expect(statements[0].query).toContain('chat_message_states.last_message_rank >= 0');
+    expect(statements[0].query).not.toContain('TRIM(chats.description)');
     expect(Number(statements[0].values[0]) - Number(statements[0].values[1])).toBe(AGENT_GC_GRACE_PERIOD_MS);
     expect(statements[1].query).toContain('SET is_deleted = 1');
+    expect(statements[1].query).not.toContain('TRIM(description)');
     expect(statements[1].values).toEqual(['user-1', 'chat-1', 'chat-1']);
+  });
+
+  it('discards a titled empty chat while preserving chats with durable content', async () => {
+    const database = emptyChatDatabase();
+    const insertChat = database.sqlite.prepare(
+      `INSERT INTO chats (
+         id, creator_id, initial_id, url_id, description, snapshot_key, last_message_rank, is_deleted
+       ) VALUES (?, 'owner', ?, NULL, ?, ?, ?, 0)`,
+    );
+    insertChat.run('empty-row', 'empty', '**Generated title**', null, -1);
+    insertChat.run('snapshot-row', 'snapshot', 'Snapshot project', 'snapshot-key', -1);
+    insertChat.run('message-row', 'message', 'Message project', null, -1);
+    for (const chatId of ['empty-row', 'snapshot-row', 'message-row']) {
+      database.sqlite
+        .prepare(`INSERT INTO chat_transcripts (chat_id, subchat_index, generation) VALUES (?, 0, 0)`)
+        .run(chatId);
+    }
+    database.sqlite
+      .prepare(`INSERT INTO chat_message_states (chat_id, last_message_rank) VALUES ('message-row', 0)`)
+      .run();
+
+    await discardEmptyChat(database.db, { sessionId: 'owner', id: 'empty' });
+    await discardEmptyChat(database.db, { sessionId: 'owner', id: 'snapshot' });
+    await discardEmptyChat(database.db, { sessionId: 'owner', id: 'message' });
+
+    expect(database.sqlite.prepare(`SELECT id, is_deleted FROM chats ORDER BY id`).all()).toEqual([
+      { id: 'empty-row', is_deleted: 1 },
+      { id: 'message-row', is_deleted: 0 },
+      { id: 'snapshot-row', is_deleted: 0 },
+    ]);
+    expect(database.sqlite.prepare(`SELECT chat_id FROM agent_gc_candidates`).all()).toEqual([
+      { chat_id: 'empty-row' },
+    ]);
   });
 });
 
@@ -349,6 +385,64 @@ describe('transcript generation transitions', () => {
     );
   });
 });
+
+function emptyChatDatabase(): { sqlite: DatabaseSync; db: D1Database } {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(`
+    CREATE TABLE chats (
+      id TEXT PRIMARY KEY,
+      creator_id TEXT NOT NULL,
+      initial_id TEXT NOT NULL,
+      url_id TEXT,
+      description TEXT,
+      snapshot_key TEXT,
+      last_message_rank INTEGER,
+      is_deleted INTEGER NOT NULL
+    );
+    CREATE TABLE chat_transcripts (
+      chat_id TEXT NOT NULL,
+      subchat_index INTEGER NOT NULL,
+      generation INTEGER NOT NULL
+    );
+    CREATE TABLE chat_message_states (
+      chat_id TEXT NOT NULL,
+      last_message_rank INTEGER NOT NULL
+    );
+    CREATE TABLE agent_gc_candidates (
+      chat_id TEXT NOT NULL,
+      initial_id TEXT NOT NULL,
+      subchat_index INTEGER NOT NULL,
+      next_generation INTEGER NOT NULL,
+      max_generation INTEGER NOT NULL,
+      not_before INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      attempts INTEGER NOT NULL,
+      PRIMARY KEY (chat_id, subchat_index)
+    );
+  `);
+  const db = {
+    prepare: (query: string) => ({
+      bind: (...values: unknown[]) => ({
+        run: async () => {
+          const result = sqlite.prepare(query).run(...(values as SQLInputValue[]));
+          return { success: true, meta: { changes: Number(result.changes) } } as D1Result;
+        },
+      }),
+    }),
+    batch: async (statements: D1PreparedStatement[]) => {
+      sqlite.exec('BEGIN IMMEDIATE');
+      try {
+        const results = await Promise.all(statements.map((statement) => statement.run()));
+        sqlite.exec('COMMIT');
+        return results;
+      } catch (error) {
+        sqlite.exec('ROLLBACK');
+        throw error;
+      }
+    },
+  } as unknown as D1Database;
+  return { sqlite, db };
+}
 
 type BoundStatement = {
   query: string;

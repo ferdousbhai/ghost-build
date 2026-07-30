@@ -1,6 +1,6 @@
 import templateSnapshotManifest from 'public/template-snapshot-manifest.json';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 14 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 15 as const;
 export const DEPLOYMENT_SECURITY_CLEANUP_CRON = '0 3 * * *';
 export const DEPLOYMENT_VERSION_METADATA_BINDING = 'CF_VERSION_METADATA';
 export const DEPLOYMENT_SECURITY_BASELINE_BINDING = 'GHOSTBUILD_SECURITY_BASELINE_VERSION';
@@ -43,6 +43,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'src/preview/tanstack-react-router.tsx': 'ed062b05aaa268ada75b7293ec5f71a8b6fe23146ea4e25fa62c713afd413b22',
   'src/preview/workers-ai-provider.ts': '6bc1fd2c8e9154b7fd44fe4c2b4475d2c02311093c11c2fc90047d7d303111f1',
   'scripts/cf-typegen.mjs': '6c82a0afdb50c32b205dbe4677b207337a38ad7ea70950a3e63758f0c04e1ae7',
+  'scripts/provision-cloudflare-production.mjs': 'ed574cda1dedb81f7ae22e2b1069b1326d31135a7e92e602d2f86ee269409485',
   'scripts/vite-dev.mjs': '7470bae2236ca6eda89c4eb2ac99563124d35c70fbaf102ddd9dcb19ebb8f559',
   'scripts/verify-stack-alignment.mjs': '50cdb173e68c5763532e9ba1b7b34f646785a7d361144acd8ce6fc29ffe0c2b9',
   'scripts/verify-production-config.mjs': 'b22c025b4c3e4a53aa8c2edca59ead871979dbadad6d575bfb052e44ed645a8d',
@@ -58,7 +59,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/lib/project-policy/workspace-policy.mjs': 'a828f5ffb669f2b69ec143510837056d1e6eb658bf35c2a2eb890a1d917dc5fc',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'b09d33777433bc9b4b63bb2dbb63cc15f13684ddadefd4ec7d6fa21909fa4bd2';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'c28167420bbb29785574f4abfb7adb8a541872718a2c29b48331669dd2113944';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
   '619dcb199e10da6f0f84cbdffdc5551cd388968ed8861cc8cb6310b84bbf463e';

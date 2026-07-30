@@ -15,10 +15,13 @@ import { HomeIntro } from './HomeIntro.client';
 import StreamingIndicator from './StreamingIndicator';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useStore } from '@nanostores/react';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { SubchatBar } from './SubchatBar';
 import { SubchatLimitNudge } from './SubchatLimitNudge';
-import { useMutation } from '~/lib/cloudflare/data-hooks';
+import { subchatQueryKey, useMutation } from '~/lib/cloudflare/data-hooks';
 import { api } from '~/lib/cloudflare/data-api';
+import { loadAllSubchats } from '~/lib/cloudflare/data-page-loader';
 import { subchatIndexStore, useIsSubchatLoaded } from '~/lib/stores/subchats';
 import type { BuildProgress } from './build-progress';
 import type { SubchatSummary } from './subchat-model';
@@ -93,18 +96,76 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
     const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
     const shouldShowNudge = messages.length > MIN_MESSAGES_FOR_SUBCHAT_NUDGE;
     const createSubchat = useMutation(api.subchats.create);
+    const queryClient = useQueryClient();
     const isSubchatLoaded = useIsSubchatLoaded();
-
     const chatId = useChatId();
     const sessionId = useSessionIdOrNullOrLoading();
-    const handleCreateSubchat = useCallback(async () => {
-      if (!sessionId) {
-        return;
+    const activeChatContextRef = React.useRef<{ chatId: string; sessionId: string | null | undefined } | null>(null);
+    const createSubchatPendingRef = React.useRef<symbol | null>(null);
+
+    React.useEffect(() => {
+      const context = { chatId, sessionId };
+      activeChatContextRef.current = context;
+      createSubchatPendingRef.current = null;
+      return () => {
+        if (activeChatContextRef.current === context) {
+          activeChatContextRef.current = null;
+        }
+        createSubchatPendingRef.current = null;
+      };
+    }, [chatId, sessionId]);
+
+    const handleCreateSubchat = useCallback(async (): Promise<boolean> => {
+      const context = activeChatContextRef.current;
+      if (
+        !sessionId ||
+        context?.chatId !== chatId ||
+        context.sessionId !== sessionId ||
+        createSubchatPendingRef.current
+      ) {
+        return false;
       }
-      const subchatIndex = await createSubchat({ chatId, sessionId });
-      subchatIndexStore.set(subchatIndex);
-      messageInputStore.set('');
-    }, [createSubchat, chatId, sessionId]);
+      const attempt = Symbol('create-subchat');
+      createSubchatPendingRef.current = attempt;
+      const isActiveChat = () => activeChatContextRef.current === context;
+      try {
+        let subchatIndex: number;
+        try {
+          subchatIndex = await createSubchat({ chatId, sessionId });
+        } catch (error) {
+          if (isActiveChat()) {
+            toast.error(error instanceof Error ? error.message : 'Unable to create a new chat.');
+          }
+          return false;
+        }
+        if (!isActiveChat()) {
+          return true;
+        }
+        try {
+          const subchats = await loadAllSubchats(chatId, sessionId);
+          if (!isActiveChat()) {
+            return true;
+          }
+          queryClient.setQueryData(subchatQueryKey({ chatId, sessionId }), subchats);
+        } catch (error) {
+          if (isActiveChat()) {
+            toast.error(
+              error instanceof Error
+                ? `The chat was created, but its history could not refresh: ${error.message}`
+                : 'The chat was created, but its history could not refresh. Reload to continue.',
+            );
+          }
+          return true;
+        }
+        subchatIndexStore.set(subchatIndex);
+        messageInputStore.set('');
+        return true;
+      } finally {
+        if (createSubchatPendingRef.current === attempt) {
+          createSubchatPendingRef.current = null;
+        }
+      }
+    }, [createSubchat, chatId, queryClient, sessionId]);
 
     const lastUserMessage = messages.findLast((message) => message.role === 'user');
     const resendMessage = useCallback(async () => {

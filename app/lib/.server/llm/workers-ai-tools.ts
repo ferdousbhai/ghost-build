@@ -7,7 +7,6 @@ import { viewTool } from 'ghostbuild-agent/tools/view';
 import { writeFileTool } from 'ghostbuild-agent/tools/writeFile';
 import { listFilesTool } from 'ghostbuild-agent/tools/listFiles';
 import { searchTextTool } from 'ghostbuild-agent/tools/searchText';
-import { getDiagnosticsTool } from 'ghostbuild-agent/tools/getDiagnostics';
 import { validateProjectTool } from 'ghostbuild-agent/tools/validateProject';
 import { isReadOnlyToolName, type GhostbuildToolName, type GhostbuildToolSet } from 'ghostbuild-agent/types';
 import { z, type ZodType } from 'zod';
@@ -42,7 +41,6 @@ export function createWorkersAiTools(
     listFiles: listFilesTool,
     lookupDocs: lookupDocsTool(),
     npmInstall: npmInstallTool,
-    getDiagnostics: getDiagnosticsTool,
     searchText: searchTextTool,
     validateProject: validateProjectTool,
     view: viewTool,
@@ -255,36 +253,12 @@ export function getWorkersAiToolSettings(messages: GhostbuildMessage[]): AgentTo
     };
   }
   if (toolChoice === 'auto') {
-    const activeTools: GhostbuildToolName[] = [
-      'view',
-      'listFiles',
-      'searchText',
-      'edit',
-      'writeFile',
-      'lookupDocs',
-      'npmInstall',
-    ];
-    if (hasIncompleteDiagnostics(messages)) {
-      activeTools.push('getDiagnostics');
-    }
-    return { activeTools, toolChoice };
+    return {
+      activeTools: ['view', 'listFiles', 'searchText', 'edit', 'writeFile', 'lookupDocs', 'npmInstall'],
+      toolChoice,
+    };
   }
   return { toolChoice };
-}
-
-function hasIncompleteDiagnostics(messages: GhostbuildMessage[]): boolean {
-  const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
-  const incompleteById = new Map<string, boolean>();
-  for (const { messageIndex, result } of collectToolResults(messages)) {
-    if (messageIndex <= lastUserIndex || !isGhostbuildToolResult(result) || !isRecord(result.data)) {
-      continue;
-    }
-    const diagnosticsId = result.data.diagnosticsId;
-    if (typeof diagnosticsId === 'string') {
-      incompleteById.set(diagnosticsId, result.coverage?.complete === false && Boolean(result.coverage.nextCursor));
-    }
-  }
-  return [...incompleteById.values()].some(Boolean);
 }
 
 export function getValidatedBuildCompletion(messages: GhostbuildMessage[]): string | undefined {

@@ -3,11 +3,11 @@ import { CheckIcon, CircleIcon, Cross2Icon, FileIcon, Pencil1Icon } from '@radix
 import { FolderIcon } from '@heroicons/react/24/outline';
 import type { ZodError, ZodType } from 'zod';
 import { Spinner } from '@ui/Spinner';
-import type { ActionState } from '~/lib/runtime/action-runner';
+import type { ToolActivityStatus } from '~/lib/common/types';
 import { classNames } from '~/utils/classNames';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { deployToolInputParameters } from 'ghostbuild-agent/tools/deploy';
-import { editToolInputParameters } from 'ghostbuild-agent/tools/edit';
+import { editToolParameters } from 'ghostbuild-agent/tools/edit';
 import { lookupDocsParameters } from 'ghostbuild-agent/tools/lookupDocs';
 import { npmInstallToolParameters } from 'ghostbuild-agent/tools/npmInstall';
 import { viewToolInputParameters } from 'ghostbuild-agent/tools/view';
@@ -16,7 +16,6 @@ import { getRelativePath } from 'ghostbuild-agent/utils/workDir';
 import { loggingSafeParse } from 'ghostbuild-agent/utils/zodUtil';
 import { listFilesParameters } from 'ghostbuild-agent/tools/listFiles';
 import { searchTextParameters } from 'ghostbuild-agent/tools/searchText';
-import { getDiagnosticsParameters } from 'ghostbuild-agent/tools/getDiagnostics';
 import { validateProjectParameters } from 'ghostbuild-agent/tools/validateProject';
 import type { GhostbuildToolName } from 'ghostbuild-agent/types';
 import {
@@ -43,8 +42,7 @@ const emptyInvocation: GhostbuildToolInvocation = {
 
 const TOOL_INPUT_SCHEMAS: Record<GhostbuildToolName, ZodType> = {
   deploy: deployToolInputParameters,
-  edit: editToolInputParameters,
-  getDiagnostics: getDiagnosticsParameters,
+  edit: editToolParameters,
   listFiles: listFilesParameters,
   lookupDocs: lookupDocsParameters,
   npmInstall: npmInstallToolParameters,
@@ -54,17 +52,10 @@ const TOOL_INPUT_SCHEMAS: Record<GhostbuildToolName, ZodType> = {
   writeFile: writeFileParameters,
 };
 
-export function parseToolInvocation(content: string | undefined): GhostbuildToolInvocation {
-  if (!content) {
+export function normalizeToolInvocation(invocation: GhostbuildToolInvocation | undefined): GhostbuildToolInvocation {
+  if (!invocation) {
     return emptyInvocation;
   }
-  let invocation: GhostbuildToolInvocation;
-  try {
-    invocation = JSON.parse(content);
-  } catch {
-    return emptyInvocation;
-  }
-
   if (invocation.state !== 'result' || isErrorResult(invocation)) {
     return invocation;
   }
@@ -75,7 +66,7 @@ export function parseToolInvocation(content: string | undefined): GhostbuildTool
   return invocation;
 }
 
-export function statusIcon(status: ActionState['status'], invocation: GhostbuildToolInvocation): ReactNode {
+export function statusIcon(status: ToolActivityStatus, invocation: GhostbuildToolInvocation): ReactNode {
   if (isErrorResult(invocation)) {
     return icon(<Cross2Icon />, 'text-bolt-elements-icon-error');
   }
@@ -86,8 +77,6 @@ export function statusIcon(status: ActionState['status'], invocation: Ghostbuild
       return icon(<CircleIcon />, 'text-content-tertiary');
     case 'complete':
       return icon(<CheckIcon />, 'text-bolt-elements-icon-success');
-    case 'failed':
-      return icon(<Cross2Icon />, 'text-bolt-elements-icon-error');
     case 'aborted':
       return icon(<Cross2Icon />, 'text-content-secondary');
     default:
@@ -128,8 +117,6 @@ export function toolTitle(invocation: GhostbuildToolInvocation): ReactNode {
         <FileIcon />,
       );
     }
-    case 'getDiagnostics':
-      return titleRow('Read operation diagnostics', <FileIcon />);
     case 'validateProject':
       return titleRow(
         isToolInvocationInProgress(invocation)
@@ -223,7 +210,7 @@ function deployTitle(invocation: GhostbuildToolInvocation, resultText: string): 
 }
 
 function editTitle(invocation: GhostbuildToolInvocation): ReactNode {
-  const args = loggingSafeParse(editToolInputParameters, invocation.args);
+  const args = loggingSafeParse(editToolParameters, invocation.args);
   return titleRow(
     `Edited ${args.success ? getRelativePath(args.data.path) || args.data.path : 'a file'}`,
     <Pencil1Icon className="text-content-secondary" />,

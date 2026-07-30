@@ -28,7 +28,7 @@
       ],
     },
     "ghostbuild-agent": {
-      "entry": ["**/*.test.ts", "**/*.spec.ts"],
+      "entry": ["**/*.test.ts"],
       "project": ["**/*.{ts,mts}"],
     },
     "template": {

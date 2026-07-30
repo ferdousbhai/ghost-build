@@ -7,10 +7,15 @@ export interface SubchatOption {
   value: number;
 }
 
+export function getSubchatLabel(subchatIndex: number, description?: string): string {
+  const normalizedDescription = description?.trim();
+  return normalizedDescription || (subchatIndex === 0 ? 'Initial chat' : `Feature #${subchatIndex}`);
+}
+
 export function createSubchatOptions(subchats: SubchatSummary[] | undefined): SubchatOption[] {
   return (
-    subchats?.map((subchat, arrayIndex) => ({
-      label: subchat.description || (arrayIndex === 0 ? 'Initial chat' : `Feature #${arrayIndex}`),
+    subchats?.map((subchat) => ({
+      label: getSubchatLabel(subchat.subchatIndex, subchat.description),
       value: subchat.subchatIndex,
     })) ?? []
   );

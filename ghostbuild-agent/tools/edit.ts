@@ -22,20 +22,6 @@ export const editToolParameters = z.object({
   edits: z.array(editReplacementParameters).min(1).max(20).describe('Non-overlapping replacements.'),
 });
 
-// Stored tool calls from before multi-edit used top-level `old` and `new`
-// fields. Keep those transcripts executable and renderable without exposing
-// the legacy shape in the schema shown to new model turns.
-export const editToolInputParameters = z.preprocess((input) => {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    return input;
-  }
-  const value = input as Record<string, unknown>;
-  if (!Array.isArray(value.edits) && typeof value.old === 'string' && typeof value.new === 'string') {
-    return { path: value.path, edits: [{ old: value.old, new: value.new }] };
-  }
-  return input;
-}, editToolParameters);
-
 export const editTool: Tool = {
   description: editToolDescription,
   inputSchema: editToolParameters,

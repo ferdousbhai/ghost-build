@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { createSampler } from '~/utils/sampler';
-import { useMessageParser, type PartCache } from '~/lib/hooks/useMessageParser';
+import { useProcessedMessages, type PartCache } from '~/lib/hooks/useProcessedMessages';
 import type { StreamStatus } from '~/lib/common/types';
 import type { StoreMessageHistory } from './chat-types';
 import type { TranscriptCheckpoint } from 'ghostbuild-agent/transcript';
@@ -10,7 +10,7 @@ import type { TranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 interface ProcessMessagesOptions {
   messages: GhostbuildMessage[];
   initialMessages: GhostbuildMessage[];
-  parseMessages: (messages: GhostbuildMessage[]) => void;
+  processMessages: (messages: GhostbuildMessage[]) => void;
   streamStatus: StreamStatus;
   storeMessageHistory: StoreMessageHistory;
   transcriptCheckpoint: TranscriptCheckpoint | null;
@@ -24,12 +24,12 @@ export function useChatHistoryProcessing(args: {
   storeMessageHistory: StoreMessageHistory;
   transcriptCheckpoint: TranscriptCheckpoint | null;
 }) {
-  const { parsedMessages, parseMessages } = useMessageParser(args.partCache);
+  const { parsedMessages, processMessages } = useProcessedMessages(args.partCache);
   const { messages, initialMessages, streamStatus, storeMessageHistory } = args;
   const processSampledMessages = useMemo(
     () =>
       createSampler((options: ProcessMessagesOptions) => {
-        options.parseMessages(options.messages);
+        options.processMessages(options.messages);
         if (options.messages.length >= options.initialMessages.length) {
           Promise.resolve(
             options.storeMessageHistory(options.messages, options.streamStatus, options.transcriptCheckpoint),
@@ -45,14 +45,14 @@ export function useChatHistoryProcessing(args: {
       initialMessages,
       streamStatus,
       storeMessageHistory,
-      parseMessages,
+      processMessages,
       transcriptCheckpoint: args.transcriptCheckpoint,
     });
   }, [
     args.transcriptCheckpoint,
     initialMessages,
     messages,
-    parseMessages,
+    processMessages,
     processSampledMessages,
     storeMessageHistory,
     streamStatus,

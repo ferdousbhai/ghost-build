@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { parseDocument, stringify } from 'yaml';
 import { inspectDeploymentSnapshot, MAX_DEPLOYMENT_EXPANDED_BYTES } from './deployment-snapshot';
 import { APP_AGENT_PROTECTED_FILE_SHA256 } from './deployment-security-baseline';
+import { DEPLOYMENT_COMPATIBILITY_DATE } from './deployment-runtime-policy';
 
 describe('inspectDeploymentSnapshot', () => {
   it('detects an explicit Worker-only profile and its configured bindings', async () => {
@@ -67,7 +68,7 @@ describe('inspectDeploymentSnapshot', () => {
       'wrangler.jsonc',
       JSON.stringify({
         main: 'src/server.ts',
-        compatibility_date: '2026-07-18',
+        compatibility_date: DEPLOYMENT_COMPATIBILITY_DATE,
         compatibility_flags: ['nodejs_compat'],
         observability: {
           enabled: true,
@@ -144,6 +145,20 @@ describe('inspectDeploymentSnapshot', () => {
     await expect(
       inspectDeploymentSnapshot(await projectZip({ includeBindings: true, includeCleanupTrigger: false })),
     ).rejects.toThrow('security cleanup trigger');
+  });
+
+  it('accepts the reviewed production provisioner and rejects changes to it', async () => {
+    const snapshot = await projectZip({ includeBindings: true });
+    await expect(inspectDeploymentSnapshot(snapshot)).resolves.toEqual({
+      type: 'web_app',
+      bindings: { ai: true, d1: true, r2: true, appAgent: true },
+    });
+
+    const changed = await JSZip.loadAsync(await snapshot.arrayBuffer());
+    changed.file('scripts/provision-cloudflare-production.mjs', 'void env.AGENT_SECURITY_DB;\n');
+    await expect(inspectDeploymentSnapshot(await asBlob(changed))).rejects.toThrow(
+      'differs from the reviewed deployment baseline',
+    );
   });
 
   it('requires the protected security database binding and exact migration directory', async () => {
@@ -343,7 +358,7 @@ async function projectZip(args: {
     'wrangler.jsonc',
     JSON.stringify({
       main: 'src/server.ts',
-      compatibility_date: args.compatibilityDate ?? '2026-07-18',
+      compatibility_date: args.compatibilityDate ?? DEPLOYMENT_COMPATIBILITY_DATE,
       compatibility_flags: ['nodejs_compat'],
       observability: {
         enabled: true,
@@ -376,7 +391,7 @@ async function projectZip(args: {
 
 function runtimeConfig() {
   return {
-    compatibility_date: '2026-07-18',
+    compatibility_date: DEPLOYMENT_COMPATIBILITY_DATE,
     compatibility_flags: ['nodejs_compat'],
     observability: {
       enabled: true,

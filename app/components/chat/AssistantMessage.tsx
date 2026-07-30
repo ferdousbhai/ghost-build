@@ -54,7 +54,7 @@ function AssistantMessagePart({
 }) {
   const toolInvocation = getToolInvocation(part);
   if (toolInvocation) {
-    return hideToolCalls ? null : <ToolCall partId={partId} toolCallId={toolInvocation.toolCallId} />;
+    return hideToolCalls ? null : <ToolCall partId={partId} invocation={toolInvocation} />;
   }
 
   if (part.type === 'text') {

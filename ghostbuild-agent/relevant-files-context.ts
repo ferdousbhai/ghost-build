@@ -1,12 +1,9 @@
 import { createdAtMillis, getToolInvocation, type GhostbuildMessage } from './ai-compat.js';
-import { PREWARM_PATHS, WORK_DIR } from './constants.js';
-import { LegacyBoltMessageParser } from './message-parser.js';
-import { makePartId, type PartId } from './partId.js';
-import { editToolInputParameters } from './tools/edit.js';
+import { PREWARM_PATHS } from './constants.js';
+import { editToolParameters } from './tools/edit.js';
 import { viewToolInputParameters } from './tools/view.js';
 import { writeFileParameters } from './tools/writeFile.js';
 import type { EditorDocument, FileMap } from './types.js';
-import { path } from './utils/path.js';
 import { renderFile } from './utils/renderFile.js';
 import { type AbsolutePath, getAbsolutePath } from './utils/workDir.js';
 import { loggingSafeParse } from './utils/zodUtil.js';
@@ -49,7 +46,6 @@ export class RelevantFilesContext {
       files,
       lastUsed,
       allPaths,
-      id,
       maximumCharacters,
     });
     return content ? makeRelevantFilesMessage(content, id) : emptyUserMessage(id);
@@ -92,18 +88,7 @@ export class RelevantFilesContext {
       return cached;
     }
     const filesTouched = new Map<AbsolutePath, number>();
-    const legacyContent = typeof message.content === 'string' && message.content.length > 0 ? message.content : null;
-    if (legacyContent) {
-      for (const filePath of extractFileArtifacts(makePartId(message.id, 0), legacyContent)) {
-        filesTouched.set(getAbsolutePath(filePath), 0);
-      }
-    }
     message.parts.forEach((part, partIndex) => {
-      if (!legacyContent && part.type === 'text') {
-        for (const filePath of extractFileArtifacts(makePartId(message.id, partIndex), part.text)) {
-          filesTouched.set(getAbsolutePath(filePath), partIndex);
-        }
-      }
       const invocation = getToolInvocation(part);
       if (!invocation || invocation.state === 'partial-call') {
         return;
@@ -126,7 +111,7 @@ function invocationFilePath(invocation: NonNullable<ReturnType<typeof getToolInv
       return args.success ? args.data.path : undefined;
     }
     case 'edit': {
-      const args = loggingSafeParse(editToolInputParameters, invocation.args);
+      const args = loggingSafeParse(editToolParameters, invocation.args);
       return args.success ? args.data.path : undefined;
     }
     case 'writeFile': {
@@ -143,12 +128,10 @@ function createBoundedRelevantFilesContent(args: {
   files: FileMap;
   lastUsed: Map<AbsolutePath, number>;
   allPaths: string[];
-  id: string;
   maximumCharacters: number;
 }): string {
-  const open = `<boltArtifact id="${escapeXmlAttribute(args.id)}" title="Relevant Files">\n`;
-  const close = '\n</boltArtifact>';
-  const contentBudget = Math.max(0, Math.trunc(args.maximumCharacters) - open.length - close.length);
+  const heading = 'Relevant workspace context:\n';
+  const contentBudget = Math.max(0, Math.trunc(args.maximumCharacters) - heading.length);
   const sections: string[] = [];
   let size = 0;
   let fileCount = 0;
@@ -164,8 +147,8 @@ function createBoundedRelevantFilesContent(args: {
   };
 
   if (args.currentDocument) {
-    const action = renderFileAction(args.currentDocument.filePath, args.currentDocument.value);
-    if (append(action)) {
+    const section = renderFileContext(args.currentDocument.filePath, args.currentDocument.value);
+    if (append(section)) {
       fileCount++;
     }
   }
@@ -178,7 +161,7 @@ function createBoundedRelevantFilesContent(args: {
     if (entry?.type !== 'file') {
       continue;
     }
-    if (append(renderFileAction(filePath, entry.content))) {
+    if (append(renderFileContext(filePath, entry.content))) {
       fileCount++;
     }
   }
@@ -189,11 +172,11 @@ function createBoundedRelevantFilesContent(args: {
     append(pathSummary);
   }
 
-  return sections.length ? `${open}${sections.join('\n\n')}${close}` : '';
+  return sections.length ? `${heading}${sections.join('\n\n')}` : '';
 }
 
-function renderFileAction(filePath: string, content: string): string {
-  return `<boltAction type="file" filePath="${escapeXmlAttribute(filePath)}">${renderFile(content)}</boltAction>`;
+function renderFileContext(filePath: string, content: string): string {
+  return `File ${JSON.stringify(filePath)}:\n${renderFile(content)}`;
 }
 
 function renderPathSummary(allPaths: string[], maximumCharacters: number): string {
@@ -245,23 +228,4 @@ function makeRelevantFilesMessage(content: string, id: string): GhostbuildMessag
 
 function emptyUserMessage(id: string): GhostbuildMessage {
   return { id, content: '', role: 'user', parts: [] };
-}
-
-function escapeXmlAttribute(value: string): string {
-  return value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-}
-
-function extractFileArtifacts(partId: PartId, content: string): string[] {
-  const filesTouched = new Set<string>();
-  const parser = new LegacyBoltMessageParser({
-    callbacks: {
-      onActionClose: (data) => {
-        if (data.action.type === 'file') {
-          filesTouched.add(path.join(WORK_DIR, data.action.filePath));
-        }
-      },
-    },
-  });
-  parser.parse(partId, content);
-  return Array.from(filesTouched);
 }

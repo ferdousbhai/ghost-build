@@ -22,6 +22,13 @@ describe('lookupDocs tool parameters', () => {
     expect(docs.cloudflarePlatform).toContain('github.com/cloudflare/skills/tree/main/skills/cloudflare');
     expect(docs.cloudflarePlatform).toContain('a direct Worker handler without an application framework');
     expect(docs.cloudflarePlatform).toContain('Worker scheduled handler with Cron Triggers');
+    expect(docs.cloudflarePlatform).toContain('Agent-owned durable background work -> an Agent Fiber');
+    expect(docs.cloudflarePlatform).toContain('Non-Agent asynchronous event processing');
+    expect(docs.cloudflareStorage).toContain('Use an Agent Fiber for async work owned by an Agent');
+    expect(docs.cloudflareAgentsSdk).toContain(
+      'Use an Agent Fiber for durable background work whose state and lifecycle',
+    );
+    expect(docs.workersBestPractices).toContain('Use Agent Fibers for work owned by an Agent');
   });
 
   it('keeps generated Cloudflare data access behind the reviewed binding broker', () => {

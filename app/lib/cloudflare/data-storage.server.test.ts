@@ -421,6 +421,10 @@ describe('chat blob ownership', () => {
     const response = await storeChatAction({ request: storageRequest(), env: storageEnv(advanced) });
 
     expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: 'The agent transcript advanced before this backup was saved. Retry with the latest transcript.',
+      checkpoint: advanced,
+    });
     expect(putObjectAtKeyMock).not.toHaveBeenCalled();
     expect(updateStorageStateMock).not.toHaveBeenCalled();
   });
@@ -434,6 +438,10 @@ describe('chat blob ownership', () => {
     });
 
     expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: 'The agent transcript advanced before this backup was saved. Retry with the latest transcript.',
+      checkpoint: advanced,
+    });
     expect(queuedObjectKeys()).toEqual(['message-history/new', 'snapshots/new']);
     expect(cancelObjectGcCandidateMock).not.toHaveBeenCalled();
     expect(updateStorageStateMock).not.toHaveBeenCalled();

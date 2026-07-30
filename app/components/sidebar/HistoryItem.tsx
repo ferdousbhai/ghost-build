@@ -6,6 +6,7 @@ import { CheckIcon, FileTextIcon, Pencil1Icon, TrashIcon } from '@radix-ui/react
 import { Button } from '@ui/Button';
 import { TextInput } from '@ui/TextInput';
 import { format } from 'date-fns';
+import { ProjectTitle } from '~/components/ProjectTitle';
 
 interface HistoryItemProps {
   item: ChatHistorySummary;
@@ -64,13 +65,14 @@ export function HistoryItem({ item, handleDeleteClick }: HistoryItemProps) {
           <a
             href={`/chat/${item.urlId ?? item.initialId}`}
             className="flex min-w-0 flex-1 items-start gap-2.5 rounded-lg p-2 text-content-primary no-underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500"
-            aria-label={`${description}, ${projectTime}`}
           >
             <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--gb-background-secondary)] text-content-accent shadow-sm">
               <FileTextIcon className="size-4" aria-hidden />
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate font-bold leading-5 text-content-primary">{description}</span>
+              <ProjectTitle className="block truncate font-bold leading-5 text-content-primary">
+                {description}
+              </ProjectTitle>
               <span className="mt-0.5 text-[11px] font-medium leading-4 text-content-tertiary">
                 Created {projectTime}
               </span>

@@ -1,28 +1,5 @@
-import type { AbsolutePath, RelativePath } from './utils/workDir.js';
+import type { AbsolutePath } from './utils/workDir.js';
 import type { Tool } from 'ai';
-import type { GhostbuildToolInvocation } from './ai-compat.js';
-
-export interface ArtifactData {
-  id: string;
-  title: string;
-  type?: string | undefined;
-}
-
-export interface FileAction {
-  type: 'file';
-  filePath: RelativePath;
-  isEdit?: boolean;
-  content: string;
-}
-
-interface ToolUseAction {
-  type: 'toolUse';
-  toolName: string;
-  parsedContent: GhostbuildToolInvocation;
-  content: string;
-}
-
-export type ArtifactAction = FileAction | ToolUseAction;
 
 export interface EditorDocument {
   value: string;
@@ -52,7 +29,6 @@ export type GhostbuildToolSet = {
   listFiles: Tool;
   lookupDocs: Tool;
   npmInstall: Tool;
-  getDiagnostics: Tool;
   searchText: Tool;
   validateProject: Tool;
   view: Tool;
@@ -66,7 +42,6 @@ export const READ_ONLY_TOOL_NAMES = [
   'listFiles',
   'searchText',
   'lookupDocs',
-  'getDiagnostics',
 ] as const satisfies readonly GhostbuildToolName[];
 
 export function isReadOnlyToolName(toolName: string): boolean {

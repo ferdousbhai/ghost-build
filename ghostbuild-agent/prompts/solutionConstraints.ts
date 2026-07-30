@@ -10,6 +10,10 @@ export function solutionConstraints() {
       TanStack. Preserve the useful architecture and modify package.json, vite.config.ts, or wrangler.jsonc only when
       the requested feature requires it.
 
+      Automatic deployment pins wrangler.jsonc compatibility_date to the value already present in the template.
+      Never change that value, including when general Cloudflare guidance recommends a newer date. Ghostbuild updates
+      the pinned date centrally after compatibility testing.
+
       Key locations:
       - src/routes: TanStack Router pages and route loaders for browser applications
       - src/router.tsx: router setup
@@ -79,8 +83,11 @@ export function solutionConstraints() {
 
     <source_quality>
       Keep generated code and default UI copy ASCII unless non-ASCII text is requested. For browser UI, use
-      lucide-react icons instead of raw decorative characters. Generate routes when TanStack routes change and binding
-      types when Cloudflare configuration changes. Leave the project type-safe, lint-clean, buildable, and validated.
+      lucide-react icons instead of raw decorative characters. Replace the template title, description, favicon, and
+      social-preview metadata with branding that matches the requested product, and use an absolute deployed URL for
+      social-preview images; do not ship the generic template metadata unchanged. Generate routes when TanStack routes
+      change and binding types when Cloudflare configuration changes. Leave the project type-safe, lint-clean,
+      buildable, and validated.
     </source_quality>
   </solution_constraints>
   `;

@@ -26,12 +26,6 @@ export const dataOperationArgSchemas = {
   'messages.discardEmptyChat': chatIdentityArgsSchema,
   'messages.get': chatIdentityArgsSchema.extend({ subchatIndex: subchatIndexSchema.optional() }),
   'messages.getAll': sessionIdArgsSchema.extend({ cursor: chatHistoryCursorSchema, limit: pageLimitSchema }),
-  'messages.setUrlId': z.object({
-    sessionId: identifierSchema,
-    chatId: identifierSchema,
-    urlHint: identifierSchema,
-    description: descriptionSchema,
-  }),
   'messages.setDescription': chatIdentityArgsSchema.extend({ description: descriptionSchema }),
   'messages.remove': chatIdentityArgsSchema,
   'messages.earliestRewindableMessageRank': chatArgsSchema.extend({ subchatIndex: subchatIndexSchema.optional() }),

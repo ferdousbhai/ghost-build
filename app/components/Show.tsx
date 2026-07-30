@@ -7,6 +7,7 @@ import { classNames } from '~/utils/classNames';
 import { PlusIcon } from '@radix-ui/react-icons';
 import { Loading } from '~/components/Loading';
 import { BrandLink } from '~/components/BrandLink';
+import { ProjectTitle } from '~/components/ProjectTitle';
 
 interface ShowInnerProps {
   share: SocialShare;
@@ -51,7 +52,7 @@ const ShowInner: FC<ShowInnerProps> = ({ share, className }) => {
             <div className="min-w-0">
               <p className="app-page-eyebrow">Built with Ghostbuild</p>
               <h1 id="shared-project-title" className="app-page-title break-words">
-                {share.description || 'Shared Ghostbuild project'}
+                <ProjectTitle>{share.description || 'Shared Ghostbuild project'}</ProjectTitle>
               </h1>
             </div>
             <Button

@@ -118,14 +118,7 @@ function isStoredToolInvocationPart(part: GhostbuildPart): part is StoredToolInv
 }
 
 export function isToolPart(part: GhostbuildPart): part is GhostbuildToolPart {
-  return (
-    !isMisparsedArtifactToolPart(part) &&
-    (isStoredToolInvocationPart(part) || part.type === 'dynamic-tool' || part.type.startsWith('tool-'))
-  );
-}
-
-export function isMisparsedArtifactToolPart(part: GhostbuildPart): boolean {
-  return typeof part.type === 'string' && part.type.startsWith('tool-boltArtifact');
+  return isStoredToolInvocationPart(part) || part.type === 'dynamic-tool' || part.type.startsWith('tool-');
 }
 
 export function getToolInvocation(part: GhostbuildPart): GhostbuildToolInvocation | null {
