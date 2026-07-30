@@ -8,7 +8,7 @@ This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-07-20
 Production packages: 544
-Inventory SHA-256: 967d7e5ba79b4abfac22d2a858b30e09723b4c6ee61977395f16d2897715b62b
+Inventory SHA-256: 065af6b3d4abbe43bfea14be0b9927286bfc2d9fa8a3047d401a82c315fd90e4
 
 PACKAGE INVENTORY
 =================
@@ -1297,7 +1297,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 653b779005a3a4d64a7288c940f7b9a0e8f0b1e0375f6aa6af9473caf131e564)
 
-@summonghost/compaction@0.1.1
+@summonghost/compaction@0.1.2
 Declared license: MIT
 Author: <not published>
 Repository: {"type":"git","url":"git+https://github.com/ferdousbhai/ghostkit.git","directory":"packages/compaction"}
@@ -5521,7 +5521,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 SHA-256 1e49bdc29eeed35263ce05ab658cf97bdeac1573328d84510d891e1d7e6305c4
 Used by:
-- @summonghost/compaction@0.1.1:LICENSE
+- @summonghost/compaction@0.1.2:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 

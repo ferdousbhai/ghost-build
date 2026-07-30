@@ -96,8 +96,8 @@ importers:
         specifier: ^1.1.19
         version: 1.1.19(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@summonghost/compaction':
-        specifier: ^0.1.1
-        version: 0.1.1
+        specifier: 0.1.2
+        version: 0.1.2
       '@summonghost/title-generation':
         specifier: 0.1.0
         version: 0.1.0
@@ -2195,8 +2195,8 @@ packages:
     peerDependencies:
       eslint: '>=8.40.0'
 
-  '@summonghost/compaction@0.1.1':
-    resolution: {integrity: sha512-XB/jEB4ocO1Xwugtapqum1xQkHKw4c0p1QwVjfmSYWGP27tH8+Bbe/ycqmCztwWEN3ZScKDZKFy2CxMlhjDVBA==}
+  '@summonghost/compaction@0.1.2':
+    resolution: {integrity: sha512-d9X42OH9Yu3RjIHjC/BxPiWWUdELOTb0th8/CiNiesRZGIqpVu5vVUNRJScvc3zPmcxkbAL0KzotTNt8wbnp+Q==}
 
   '@summonghost/title-generation@0.1.0':
     resolution: {integrity: sha512-VVZUO60wlrrD3ra79PAQn7q1MeSCzIFdpYFfq7l3lpirQsqSNkfSIvT+sAt6o27SBCsWboM8rZzNgeqHPurlmw==}
@@ -7486,7 +7486,7 @@ snapshots:
       - supports-color
       - typescript
 
-  '@summonghost/compaction@0.1.1': {}
+  '@summonghost/compaction@0.1.2': {}
 
   '@summonghost/title-generation@0.1.0': {}
 

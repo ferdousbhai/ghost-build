@@ -15,7 +15,7 @@ const APPROVED_PNPM_OVERRIDES = new Map([
 ]);
 
 const APPROVED_MINIMUM_RELEASE_AGE_EXCLUSIONS = new Set([
-  "@summonghost/compaction@0.1.1",
+  "@summonghost/compaction@0.1.2",
   "@summonghost/title-generation@0.1.0",
 ]);
 

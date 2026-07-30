@@ -5,7 +5,7 @@ ignoreWorkspaceRootCheck: true
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   # Reviewed, exact-version Ghostkit releases pinned by lockfile integrity.
-  - '@summonghost/compaction@0.1.1'
+  - '@summonghost/compaction@0.1.2'
   - '@summonghost/title-generation@0.1.0'
 minimumReleaseAgeIgnoreMissingTime: false
 minimumReleaseAgeStrict: true
