@@ -8,7 +8,7 @@ import { writeFileTool } from 'ghostbuild-agent/tools/writeFile';
 import { listFilesTool } from 'ghostbuild-agent/tools/listFiles';
 import { searchTextTool } from 'ghostbuild-agent/tools/searchText';
 import { validateProjectTool } from 'ghostbuild-agent/tools/validateProject';
-import { isReadOnlyToolName, type GhostbuildToolName, type GhostbuildToolSet } from 'ghostbuild-agent/types';
+import type { GhostbuildToolName, GhostbuildToolSet } from 'ghostbuild-agent/types';
 import { z, type ZodType } from 'zod';
 import { isGhostbuildToolResult, toolFailure, toolResultSucceeded } from 'ghostbuild-agent/tool-result';
 import type { Tool } from 'ai';
@@ -172,22 +172,8 @@ export function serializeWorkersAiToolDefinitions(
 
 export function getBuildToolChoice(messages: GhostbuildMessage[]): AgentToolChoice {
   const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
-  const lastUserMessage = lastUserIndex === -1 ? undefined : messages[lastUserIndex];
-  const lastUserText = lastUserMessage ? messageText(lastUserMessage) : '';
-  const looksLikeBuildRequest =
-    /\b(build|create|make|add|update|change|fix|implement|ship|validate|deploy|site|page|tool|game|tracker|dashboard)\b/i.test(
-      lastUserText,
-    );
-  const requiresAppRouteMutation = looksLikeNewAppBuildRequest(lastUserText);
   const toolResults = collectToolResults(messages);
   const toolResultsAfterLastUser = toolResults.filter(({ messageIndex }) => messageIndex > lastUserIndex);
-  const lastAppRouteMutationAfterUserIndex = toolResultsAfterLastUser.findLastIndex(isAppRouteMutation);
-
-  if (requiresAppRouteMutation) {
-    if (lastAppRouteMutationAfterUserIndex === -1) {
-      return { type: 'tool', toolName: 'writeFile' };
-    }
-  }
 
   const lastMutationAfterUserIndex = toolResultsAfterLastUser.findLastIndex(isMutationResult);
 
@@ -207,10 +193,6 @@ export function getBuildToolChoice(messages: GhostbuildMessage[]): AgentToolChoi
     return 'required';
   }
 
-  if (looksLikeBuildRequest) {
-    return { type: 'tool', toolName: 'writeFile' };
-  }
-
   return 'auto';
 }
 
@@ -226,9 +208,7 @@ function getPostMutationToolChoice(
   }
   const validationResult = toolResults[lastValidationIndex].result;
   if (!isSuccessfulValidationResult(validationResult)) {
-    return hasReadOnlyLoopAfterFailure(toolResults, lastValidationIndex)
-      ? { type: 'tool', toolName: 'writeFile' }
-      : 'required';
+    return 'required';
   }
   if (validationNextAction(validationResult) !== 'prepare-deployment') {
     return undefined;
@@ -323,9 +303,10 @@ export function getWorkersAiBuildGuidance(messages: GhostbuildMessage[]): string
     nonRouteWrites.length > 0 ? ` Recent non-route file writes were: ${dedupe(nonRouteWrites).join(', ')}.` : '';
 
   return [
-    'Current required build step:',
+    'Current build target:',
     `The user asked for a new app, and the primary app route has not been replaced yet.${attemptedPaths}`,
-    `Your next filesystem action must write the complete requested app to ${GENERATED_APP_ROUTE}.`,
+    `Implement the complete requested app in ${GENERATED_APP_ROUTE} before validation.`,
+    'You may inspect the workspace and consult lookupDocs before choosing the implementation.',
     'Do not write .ghost-* files, check files, marker files, placeholder files, or only src/routes/__root.tsx.',
     'Do not call validateProject or deploy until the requested experience is implemented in src/routes/index.tsx.',
   ].join('\n');
@@ -371,14 +352,6 @@ function isAppRouteMutation(result: { toolName: string; path?: string }): boolea
 
 function isUserFacingRoutePath(path: string | undefined): boolean {
   return /^src\/routes\/(?!__root\.tsx$).+\.(?:[cm]?[jt]sx?)$/i.test(path ?? '');
-}
-
-function hasReadOnlyLoopAfterFailure(toolResults: Array<{ toolName: string }>, failureIndex: number): boolean {
-  const toolResultsAfterFailure = toolResults.slice(failureIndex + 1);
-  if (toolResultsAfterFailure.some(isMutationResult)) {
-    return false;
-  }
-  return toolResultsAfterFailure.filter(({ toolName }) => isReadOnlyToolName(toolName)).length >= 3;
 }
 
 function getToolInvocationPath(args: unknown, result: unknown): string | undefined {

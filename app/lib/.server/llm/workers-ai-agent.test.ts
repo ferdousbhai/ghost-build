@@ -40,11 +40,8 @@ function validationResult(nextAction: 'sign-in-required' | 'prepare-deployment',
 }
 
 describe('getBuildToolChoice', () => {
-  it('requires writeFile for build requests until a file is changed', () => {
-    expect(getBuildToolChoice([userMessage('Build a habit tracker app')])).toEqual({
-      type: 'tool',
-      toolName: 'writeFile',
-    });
+  it('allows discovery and skill lookup before a build changes files', () => {
+    expect(getBuildToolChoice([userMessage('Build a habit tracker app')])).toBe('auto');
 
     expect(getBuildToolChoice([userMessage('How does this app work?')])).toBe('auto');
 
@@ -52,11 +49,9 @@ describe('getBuildToolChoice', () => {
       getBuildToolChoice([
         userMessage('Build a habit tracker app'),
         toolResult('view', 'src/routes/index.tsx contents'),
+        toolResult('lookupDocs', 'Cloudflare and frontend design guidance'),
       ]),
-    ).toEqual({
-      type: 'tool',
-      toolName: 'writeFile',
-    });
+    ).toBe('auto');
   });
 
   it('requires validation after a file change', () => {
@@ -71,7 +66,7 @@ describe('getBuildToolChoice', () => {
     });
   });
 
-  it('requires a user-facing route change before deploying a new app build', () => {
+  it('requires validation after any mutation without prescribing the initial mutation', () => {
     expect(
       getBuildToolChoice([
         userMessage('Build a habit tracker app'),
@@ -79,7 +74,7 @@ describe('getBuildToolChoice', () => {
       ]),
     ).toEqual({
       type: 'tool',
-      toolName: 'writeFile',
+      toolName: 'validateProject',
     });
   });
 
@@ -103,7 +98,7 @@ describe('getBuildToolChoice', () => {
     ).toBe('required');
   });
 
-  it('forces a route rewrite after the app check reports the starter template', () => {
+  it('keeps an unvalidated mutation on the validation path after another tool fails', () => {
     expect(
       getBuildToolChoice([
         userMessage('Build a habit tracker app'),
@@ -112,11 +107,11 @@ describe('getBuildToolChoice', () => {
       ]),
     ).toEqual({
       type: 'tool',
-      toolName: 'writeFile',
+      toolName: 'validateProject',
     });
   });
 
-  it('forces a write after repeated read-only tools follow failed validation', () => {
+  it('keeps all repair tools available after failed validation and repeated reads', () => {
     expect(
       getBuildToolChoice([
         userMessage('Build a habit tracker app'),
@@ -126,10 +121,7 @@ describe('getBuildToolChoice', () => {
         toolResult('lookupDocs', 'Cloudflare docs excerpt'),
         toolResult('view', 'package.json contents'),
       ]),
-    ).toEqual({
-      type: 'tool',
-      toolName: 'writeFile',
-    });
+    ).toBe('required');
   });
 
   it('disables tools after a signed-in deployment plan succeeds', () => {
@@ -176,10 +168,10 @@ describe('getBuildToolChoice', () => {
     ).toBeUndefined();
   });
 
-  it('limits Workers AI to a single active tool instead of forcing named tools', () => {
+  it('keeps discovery and skill tools available initially, then enforces validation sequencing', () => {
     expect(getWorkersAiToolSettings([userMessage('Build a habit tracker app')])).toEqual({
-      activeTools: ['writeFile'],
-      toolChoice: 'required',
+      activeTools: ['view', 'listFiles', 'searchText', 'edit', 'writeFile', 'lookupDocs', 'npmInstall'],
+      toolChoice: 'auto',
     });
 
     expect(
@@ -204,9 +196,10 @@ describe('getBuildToolChoice', () => {
   });
 
   it('adds route-specific guidance for new app builds until the user-facing route changes', () => {
-    expect(getWorkersAiBuildGuidance([userMessage('Build a habit tracker app')])).toContain(
-      '/home/project/src/routes/index.tsx',
-    );
+    const guidance = getWorkersAiBuildGuidance([userMessage('Build a habit tracker app')]);
+    expect(guidance).toContain('/home/project/src/routes/index.tsx');
+    expect(guidance).toContain('consult lookupDocs before choosing the implementation');
+    expect(guidance).not.toContain('Your next filesystem action must');
 
     expect(
       getWorkersAiBuildGuidance([
