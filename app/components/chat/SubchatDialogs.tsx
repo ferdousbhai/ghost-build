@@ -1,6 +1,7 @@
 import { ArrowLeftIcon, ArrowRightIcon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
 import { Modal } from '@ui/Modal';
+import { TextInput } from '@ui/TextInput';
 
 interface SubchatDialogsProps {
   rewindOpen: boolean;
@@ -8,10 +9,17 @@ interface SubchatDialogsProps {
   rewindDisabled: boolean;
   createDisabled: boolean;
   createPending: boolean;
+  renameOpen: boolean;
+  renameValue: string;
+  renamePending: boolean;
+  renameDisabled: boolean;
   closeRewind: () => void;
   closeCreate: () => void;
+  closeRename: () => void;
   confirmRewind: () => void;
   confirmCreate: () => Promise<void>;
+  confirmRename: () => Promise<void>;
+  setRenameValue: (value: string) => void;
 }
 
 export function SubchatDialogs(props: SubchatDialogsProps) {
@@ -59,6 +67,32 @@ export function SubchatDialogs(props: SubchatDialogsProps) {
               pending={props.createPending}
             />
           </div>
+        </Modal>
+      )}
+      {props.renameOpen && (
+        <Modal onClose={props.closeRename} title="Rename chat">
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void props.confirmRename();
+            }}
+          >
+            <TextInput
+              autoFocus
+              aria-label="Chat title"
+              maxLength={200}
+              value={props.renameValue}
+              onChange={(event) => props.setRenameValue(event.target.value)}
+            />
+            <DialogActions
+              cancel={props.closeRename}
+              confirm={props.confirmRename}
+              confirmLabel="Save title"
+              disabled={props.renameDisabled}
+              pending={props.renamePending}
+            />
+          </form>
         </Modal>
       )}
     </>

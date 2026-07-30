@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createSubchatOptions, getSubchatLabel, getSubchatNavigation } from './subchat-model';
+import { applyLiveSubchatTitle, createSubchatOptions, getSubchatLabel, getSubchatNavigation } from './subchat-model';
 
 describe('subchat model', () => {
   it('creates stable fallback labels', () => {
@@ -19,6 +19,27 @@ describe('subchat model', () => {
       canCreateSubchat: false,
     });
     expect(getSubchatNavigation(3, 2, true).canCreateSubchat).toBe(true);
+  });
+
+  it('keeps a persisted manual title when a stale generated title is replayed', () => {
+    const persisted = [
+      {
+        subchatIndex: 0,
+        updatedAt: 1,
+        description: 'Team Voting',
+        transcript: transcript(0),
+      },
+    ];
+
+    expect(applyLiveSubchatTitle(persisted, { subchatIndex: 0, title: 'Pocket Poll' }, transcript(0))).toBe(persisted);
+  });
+
+  it('uses a live title while the persisted title is still empty', () => {
+    const subchats = [{ subchatIndex: 0, updatedAt: 1, transcript: transcript(0) }];
+
+    expect(
+      applyLiveSubchatTitle(subchats, { subchatIndex: 0, title: 'Pocket Poll' }, transcript(0))?.[0]?.description,
+    ).toBe('Pocket Poll');
   });
 });
 

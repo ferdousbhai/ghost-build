@@ -24,7 +24,10 @@ import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from 'ai';
 import { latestPendingDeploymentPlanMarker } from './deployment-continuation';
 import { generateProjectTitle } from '~/lib/.server/llm/project-title';
-import { setGeneratedDescriptionIfMissing } from '~/lib/cloudflare/data/chat-service.server';
+import {
+  setGeneratedDescriptionIfMissing,
+  setGeneratedSubchatDescription,
+} from '~/lib/cloudflare/data/chat-service.server';
 import { messageText } from 'ghostbuild-agent/ai-compat';
 import {
   transcriptCheckpointSchema,
@@ -61,6 +64,7 @@ import {
   builderTemplateTotals,
   loadBuilderTemplate,
 } from './builder-template';
+import { deriveProvisionalTitle } from '@summonghost/title-generation';
 
 const logger = createScopedLogger('BuilderAgent');
 const STALE_CHAT_RECOVERY_MS = 30 * 60 * 1000;
@@ -70,6 +74,11 @@ const CONTEXT_COMPACTION_FIBER = 'background:context_compaction';
 
 export type BuilderAgentState = {
   activeTurn?: BuilderTurnState | null;
+  generatedSubchatTitle?: {
+    subchatIndex: number;
+    title: string;
+    updatedAt: string;
+  } | null;
   lastCompletedTurn?: BuilderTurnState | null;
   updatedAt?: string;
   transcript?: TranscriptCheckpoint | null;
@@ -89,6 +98,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
 
   initialState: BuilderAgentState = {
     activeTurn: null,
+    generatedSubchatTitle: null,
     lastCompletedTurn: null,
     transcript: null,
   };
@@ -255,7 +265,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       const accountCredentials = await getUserWorkersAiCredentials(this.env, this.userId);
       if (firstPrompt) {
         this.ctx.waitUntil(
-          this.generateInitialProjectTitle(chatInitialId, messageText(firstPrompt), accountCredentials),
+          this.generateTitlesForFirstPrompt(chatInitialId, subchatIndex, messageText(firstPrompt), accountCredentials),
         );
       }
       this.stashTurn(turn);
@@ -482,8 +492,9 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
   }
 
-  private async generateInitialProjectTitle(
+  private async generateTitlesForFirstPrompt(
     chatInitialId: string,
+    subchatIndex: number,
     firstPrompt: string,
     accountCredentials: Awaited<ReturnType<typeof getUserWorkersAiCredentials>>,
   ): Promise<void> {
@@ -495,14 +506,36 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       if (!title) {
         return;
       }
-      const saved = await setGeneratedDescriptionIfMissing(this.env.DB, {
-        sessionId: this.ownerId,
-        id: chatInitialId,
-        description: title,
+      const [savedProjectTitle, savedSubchatTitle] = await Promise.all([
+        setGeneratedDescriptionIfMissing(this.env.DB, {
+          sessionId: this.ownerId,
+          id: chatInitialId,
+          description: title,
+        }),
+        setGeneratedSubchatDescription(this.env.DB, {
+          sessionId: this.ownerId,
+          id: chatInitialId,
+          subchatIndex,
+          description: title,
+          provisionalDescription: deriveProvisionalTitle(firstPrompt),
+        }),
+      ]);
+      if (savedSubchatTitle) {
+        const updatedAt = new Date().toISOString();
+        this.setState({
+          ...this.state,
+          generatedSubchatTitle: { subchatIndex, title, updatedAt },
+          updatedAt,
+        });
+      }
+      logger.info('Generated titles for first prompt', {
+        chatInitialId,
+        subchatIndex,
+        savedProjectTitle,
+        savedSubchatTitle,
       });
-      logger.info(saved ? 'Generated initial project title' : 'Kept existing project title', { chatInitialId });
     } catch (error) {
-      logger.warn('Project title generation failed; keeping first-prompt fallback', {
+      logger.warn('Title generation failed; keeping first-prompt fallback', {
         chatInitialId,
         error: error instanceof Error ? error.message : String(error),
       });

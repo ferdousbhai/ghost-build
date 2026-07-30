@@ -65,6 +65,7 @@ interface BaseChatProps {
 
   // Subchat navigation props
   subchats?: SubchatSummary[];
+  onSubchatTitleChange?: (subchatIndex: number, title: string) => void;
 }
 
 export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
@@ -89,6 +90,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       disabledReason,
       onRewindToMessage,
       subchats,
+      onSubchatTitleChange,
     },
     ref,
   ) => {
@@ -96,6 +98,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
     const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
     const shouldShowNudge = messages.length > MIN_MESSAGES_FOR_SUBCHAT_NUDGE;
     const createSubchat = useMutation(api.subchats.create);
+    const setSubchatDescription = useMutation(api.subchats.setDescription);
     const queryClient = useQueryClient();
     const isSubchatLoaded = useIsSubchatLoaded();
     const chatId = useChatId();
@@ -166,6 +169,29 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
         }
       }
     }, [createSubchat, chatId, queryClient, sessionId]);
+    const handleRenameSubchat = useCallback(
+      async (title: string): Promise<boolean> => {
+        if (!sessionId) {
+          return false;
+        }
+        try {
+          await setSubchatDescription({
+            chatId,
+            sessionId,
+            subchatIndex: currentSubchatIndex,
+            description: title,
+          });
+          await queryClient.invalidateQueries({
+            queryKey: subchatQueryKey({ chatId, sessionId }),
+          });
+          return true;
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'Unable to rename this chat.');
+          return false;
+        }
+      },
+      [chatId, currentSubchatIndex, queryClient, sessionId, setSubchatDescription],
+    );
 
     const lastUserMessage = messages.findLast((message) => message.role === 'user');
     const resendMessage = useCallback(async () => {
@@ -211,7 +237,9 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                       chatDisabled={disabledReason !== null || messages.length === 0}
                       sessionId={sessionId ?? null}
                       onRewind={onRewindToMessage}
+                      onSubchatTitleChange={onSubchatTitleChange}
                       handleCreateSubchat={handleCreateSubchat}
+                      handleRenameSubchat={handleRenameSubchat}
                       isSubchatLoaded={isSubchatLoaded}
                     />
 

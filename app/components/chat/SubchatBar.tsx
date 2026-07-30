@@ -6,6 +6,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   PlusIcon,
+  Pencil1Icon,
   ResetIcon,
 } from '@radix-ui/react-icons';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -23,6 +24,8 @@ interface SubchatBarProps {
   chatDisabled: boolean;
   sessionId: string | null;
   handleCreateSubchat: () => Promise<boolean>;
+  handleRenameSubchat: (title: string) => Promise<boolean>;
+  onSubchatTitleChange?: (subchatIndex: number, title: string) => void;
   onRewind?: (subchatIndex?: number, messageIndex?: number) => void;
   isSubchatLoaded: boolean;
 }
@@ -35,11 +38,16 @@ export function SubchatBar({
   sessionId,
   onRewind,
   handleCreateSubchat,
+  handleRenameSubchat,
+  onSubchatTitleChange,
   isSubchatLoaded,
 }: SubchatBarProps) {
   const [isRewindModalOpen, setIsRewindModalOpen] = useState(false);
   const [isAddChatModalOpen, setIsAddChatModalOpen] = useState(false);
   const [isCreatingSubchat, setIsCreatingSubchat] = useState(false);
+  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [isRenaming, setIsRenaming] = useState(false);
   const areFilesSaving = useAreFilesSaving();
 
   const subchatCount = subchats?.length ?? 1;
@@ -88,6 +96,10 @@ export function SubchatBar({
       <SubchatDialogs
         rewindOpen={isRewindModalOpen}
         createOpen={isAddChatModalOpen}
+        renameOpen={isRenameModalOpen}
+        renameValue={renameValue}
+        renamePending={isRenaming}
+        renameDisabled={!renameValue.trim() || isRenaming}
         rewindDisabled={interactionsDisabled}
         createDisabled={interactionsDisabled}
         closeRewind={() => setIsRewindModalOpen(false)}
@@ -96,6 +108,12 @@ export function SubchatBar({
             setIsAddChatModalOpen(false);
           }
         }}
+        closeRename={() => {
+          if (!isRenaming) {
+            setIsRenameModalOpen(false);
+          }
+        }}
+        setRenameValue={setRenameValue}
         createPending={isCreatingSubchat}
         confirmRewind={() => {
           if (interactionsDisabled) {
@@ -115,6 +133,21 @@ export function SubchatBar({
             }
           } finally {
             setIsCreatingSubchat(false);
+          }
+        }}
+        confirmRename={async () => {
+          const title = renameValue.trim();
+          if (!sessionId || !title || isRenaming) {
+            return;
+          }
+          setIsRenaming(true);
+          try {
+            if (await handleRenameSubchat(title)) {
+              onSubchatTitleChange?.(currentSubchatIndex, title);
+              setIsRenameModalOpen(false);
+            }
+          } finally {
+            setIsRenaming(false);
           }
         }}
       />
@@ -236,6 +269,22 @@ export function SubchatBar({
         {!isSubchatLoaded && <Spinner />}
 
         <div className="flex shrink-0 items-center">
+          {sessionId && (
+            <Button
+              size="sm"
+              variant="neutral"
+              className="mr-2 !size-11 !min-h-11 !px-0"
+              icon={<Pencil1Icon />}
+              inline
+              aria-label="Rename current chat"
+              tip="Rename current chat"
+              disabled={!isSubchatLoaded || isRenaming}
+              onClick={() => {
+                setRenameValue(currentSubchatLabel);
+                setIsRenameModalOpen(true);
+              }}
+            />
+          )}
           {canCreateSubchat ? (
             <Button
               size="sm"

@@ -38,6 +38,54 @@ export const MessageInput = memo(function MessageInput({
       ? 'Request changes by sending another message…'
       : 'Send a prompt for a new feature…'
     : 'Describe the app, workflow, and data you want to build…';
+  const inputStatus =
+    input.length > PROMPT_LENGTH_WARNING_THRESHOLD ? (
+      <CharacterWarning />
+    ) : input.length > 3 ? (
+      <NewLineShortcut />
+    ) : null;
+  const actions = (
+    <>
+      {chatStarted && authState.kind === 'unauthenticated' && (
+        <Button variant="neutral" onClick={() => void controller.signIn()} size="xs" className="text-xs font-normal">
+          <span>Connect Cloudflare</span>
+        </Button>
+      )}
+      {chatStarted && hasActiveSession && (
+        <EnhancePromptButton
+          isEnhancing={controller.isEnhancing}
+          disabled={disabled || input.length === 0}
+          onClick={controller.enhancePrompt}
+        />
+      )}
+      <Button
+        disabled={
+          (!isStreaming && input.length === 0) ||
+          authState.kind === 'loading' ||
+          (sendMessageInProgress && !isStreaming) ||
+          disabled
+        }
+        tip={authState.kind === 'unauthenticated' ? 'Connect Cloudflare to continue' : undefined}
+        onClick={
+          !chatStarted && authState.kind === 'unauthenticated'
+            ? () => void controller.signIn()
+            : controller.handleButtonClick
+        }
+        size="xs"
+        className={classNames('ml-1 h-8 min-w-8 rounded-full', !chatStarted ? 'ghost-message-input__send' : '')}
+        aria-label={isStreaming ? 'Stop' : 'Send'}
+        icon={
+          sendMessageInProgress && !isStreaming ? (
+            <Spinner className="text-white" />
+          ) : !isStreaming ? (
+            <ArrowRightIcon />
+          ) : (
+            <StopIcon />
+          )
+        }
+      />
+    </>
+  );
 
   return (
     <div
@@ -54,8 +102,8 @@ export const MessageInput = memo(function MessageInput({
       >
         <div
           className={classNames(
-            'ghost-message-input__editor has-[textarea:focus]:border-border-selected border border-bolt-elements-borderColor transition-all',
-            chatStarted ? 'rounded-t-2xl' : 'rounded-xl',
+            'ghost-message-input__editor relative has-[textarea:focus]:border-border-selected border border-bolt-elements-borderColor transition-all',
+            chatStarted ? 'rounded-2xl' : 'rounded-xl',
           )}
         >
           <TextareaWithHighlights
@@ -67,62 +115,20 @@ export const MessageInput = memo(function MessageInput({
             placeholder={placeholder}
             disabled={disabled}
             highlights={MESSAGE_INPUT_HIGHLIGHTS}
+            contentClassName={chatStarted ? 'pb-14' : undefined}
           />
-        </div>
-        <div
-          className={classNames(
-            'ghost-message-input__footer flex flex-wrap items-center gap-2 border border-t-0 border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-1.5 text-sm',
-            chatStarted ? 'rounded-b-2xl' : 'rounded-b-xl',
+          {chatStarted && (
+            <div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex items-end gap-2">
+              <div className="pointer-events-auto min-w-0 flex-1 pl-1">{inputStatus}</div>
+              <div className="pointer-events-auto ml-auto flex items-center gap-1">{actions}</div>
+            </div>
           )}
-        >
-          {chatStarted && input.length > 3 && input.length <= PROMPT_LENGTH_WARNING_THRESHOLD && <NewLineShortcut />}
-          {chatStarted && input.length > PROMPT_LENGTH_WARNING_THRESHOLD && <CharacterWarning />}
-          <div className="ml-auto flex items-center gap-1">
-            {chatStarted && authState.kind === 'unauthenticated' && (
-              <Button
-                variant="neutral"
-                onClick={() => void controller.signIn()}
-                size="xs"
-                className="text-xs font-normal"
-              >
-                <span>Connect Cloudflare</span>
-              </Button>
-            )}
-            {chatStarted && hasActiveSession && (
-              <EnhancePromptButton
-                isEnhancing={controller.isEnhancing}
-                disabled={disabled || input.length === 0}
-                onClick={controller.enhancePrompt}
-              />
-            )}
-            <Button
-              disabled={
-                (!isStreaming && input.length === 0) ||
-                authState.kind === 'loading' ||
-                (sendMessageInProgress && !isStreaming) ||
-                disabled
-              }
-              tip={authState.kind === 'unauthenticated' ? 'Connect Cloudflare to continue' : undefined}
-              onClick={
-                !chatStarted && authState.kind === 'unauthenticated'
-                  ? () => void controller.signIn()
-                  : controller.handleButtonClick
-              }
-              size="xs"
-              className={classNames('ml-1 h-8 min-w-8 rounded-full', !chatStarted ? 'ghost-message-input__send' : '')}
-              aria-label={isStreaming ? 'Stop' : 'Send'}
-              icon={
-                sendMessageInProgress && !isStreaming ? (
-                  <Spinner className="text-white" />
-                ) : !isStreaming ? (
-                  <ArrowRightIcon />
-                ) : (
-                  <StopIcon />
-                )
-              }
-            />
-          </div>
         </div>
+        {!chatStarted && (
+          <div className="ghost-message-input__footer flex flex-wrap items-center gap-2 rounded-b-xl border border-t-0 border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-1.5 text-sm">
+            <div className="ml-auto flex items-center gap-1">{actions}</div>
+          </div>
+        )}
       </div>
     </div>
   );

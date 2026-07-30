@@ -22,6 +22,8 @@ export const EnhancePromptButton = React.memo(function EnhancePromptButton({
       aria-busy={isEnhancing}
       disabled={disabled || isEnhancing}
       inline
+      size="xs"
+      className="h-8 min-w-8 px-2"
       onClick={onClick}
     >
       <div className="text-lg">

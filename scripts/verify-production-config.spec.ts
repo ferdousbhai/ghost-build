@@ -231,10 +231,11 @@ dangerouslyAllowAllBuilds: true
     );
   });
 
-  it('allows only the reviewed provenance-backed Ghostkit release-age exemption', () => {
+  it('allows only reviewed exact-version Ghostkit release-age exemptions', () => {
     const workspace = `${workspacePolicyFixture(['ghostbuild-agent', 'template'])}
 minimumReleaseAgeExclude:
-  - '@summonghost/compaction@0.1.1'
+  - '@summonghost/compaction@0.1.2'
+  - '@summonghost/title-generation@0.1.0'
 `;
 
     expect(findBuildApprovalErrors(workspace, 'pnpm-workspace.yaml')).toEqual([]);

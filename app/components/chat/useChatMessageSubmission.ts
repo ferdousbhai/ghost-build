@@ -34,6 +34,7 @@ export function useChatMessageSubmission(args: {
   enableAutoScroll: () => void;
   onAbort: () => void;
   onStartChat: () => void | Promise<void>;
+  onFirstPrompt: (prompt: string) => void;
   onBuilderRequestStart: () => void;
   pendingMessage: string | null;
   clearPendingMessage: () => void;
@@ -70,6 +71,9 @@ export function useChatMessageSubmission(args: {
     try {
       setSendMessageInProgress(true);
       args.enableAutoScroll();
+      if (!args.messages.some((message) => message.role === 'user')) {
+        args.onFirstPrompt(messageInput);
+      }
       await runChatSubmissionLifecycle({
         initializeChat: args.initializeChat,
         discardEmptyChat: args.discardEmptyChat,

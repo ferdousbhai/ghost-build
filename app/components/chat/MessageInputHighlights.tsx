@@ -58,6 +58,7 @@ interface TextareaWithHighlightsProps {
   minHeight: number;
   maxHeight: number;
   highlights: MessageInputHighlight[];
+  contentClassName?: string;
 }
 
 export const TextareaWithHighlights = memo(function TextareaWithHighlights({
@@ -69,6 +70,7 @@ export const TextareaWithHighlights = memo(function TextareaWithHighlights({
   placeholder,
   disabled,
   highlights,
+  contentClassName,
 }: TextareaWithHighlightsProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -89,6 +91,7 @@ export const TextareaWithHighlights = memo(function TextareaWithHighlights({
           'transition-opacity',
           'disabled:cursor-not-allowed disabled:opacity-50',
           'scrollbar-thin scrollbar-track-transparent scrollbar-thumb-macosScrollbar-thumb',
+          contentClassName,
         )}
         disabled={disabled}
         onKeyDown={onKeyDown}
@@ -101,7 +104,7 @@ export const TextareaWithHighlights = memo(function TextareaWithHighlights({
         data-gramm="false"
         maxLength={MAX_USER_MESSAGE_CHARACTERS}
       />
-      <HighlightBlocks textareaRef={textareaRef} text={value} blocks={blocks} />
+      <HighlightBlocks textareaRef={textareaRef} text={value} blocks={blocks} contentClassName={contentClassName} />
     </div>
   );
 });
@@ -123,10 +126,12 @@ const HighlightBlocks = memo(function HighlightBlocks({
   text,
   blocks,
   textareaRef,
+  contentClassName,
 }: {
   text: string;
   blocks: HighlightBlock[];
   textareaRef: RefObject<HTMLTextAreaElement | null>;
+  contentClassName?: string;
 }) {
   const mirrorRef = useRef<HTMLDivElement>(null);
   const [resizeVersion, setResizeVersion] = useState(0);
@@ -176,7 +181,10 @@ const HighlightBlocks = memo(function HighlightBlocks({
     <div>
       <div
         ref={mirrorRef}
-        className="pointer-events-none absolute inset-0 -z-20 whitespace-pre-wrap break-words p-3 text-sm leading-snug opacity-0"
+        className={classNames(
+          'pointer-events-none absolute inset-0 -z-20 whitespace-pre-wrap break-words p-3 text-sm leading-snug opacity-0',
+          contentClassName,
+        )}
         aria-hidden
       >
         {text}
