@@ -10,7 +10,6 @@ import { isStreamStatusActive, type StreamStatus } from '~/lib/common/types';
 import { chatStore } from '~/lib/stores/chatId';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { messageInputStore } from '~/lib/stores/messageInput';
-import { textFromParts } from './chat-message-utils';
 import { getChatRetryState, MAX_CHAT_RETRIES } from './chat-retry';
 import { MAX_EPHEMERAL_CONTEXT_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
@@ -188,7 +187,10 @@ async function submitMessage(
   const modifiedContext = modifiedFiles ? filesToTurnContext(modifiedFiles) : '';
   const separatorCharacters = modifiedContext ? 2 : 0;
   const relevantBudget = Math.max(0, MAX_EPHEMERAL_CONTEXT_CHARACTERS - modifiedContext.length - separatorCharacters);
-  const relevantContext = textFromParts(contextManager.relevantFiles(messages, id, relevantBudget).parts);
+  const relevantContext = contextManager
+    .relevantFiles(messages, id, relevantBudget)
+    .parts.map((part) => (part.type === 'text' ? part.text : ''))
+    .join('');
   const content = [modifiedContext, relevantContext].filter(Boolean).join('\n\n');
   const turnContext: ChatTurnContext = { version: 1, content };
 

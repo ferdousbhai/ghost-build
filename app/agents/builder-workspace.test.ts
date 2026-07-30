@@ -1,11 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
+import JSZip from 'jszip';
 import { describe, expect, it, vi } from 'vitest';
 import { runBuilderAgentSchemaMigrations } from './builder-agent-schema';
 import { BuilderWorkspaceRepository } from './builder-workspace';
 import { BUILDER_WORKSPACE_INLINE_BYTES } from './builder-workspace-types';
 import { executeBuilderWorkspaceTool } from './builder-workspace-tools';
 import { createBuilderWorkspaceSnapshot } from './builder-workspace-snapshot';
-import { deploymentSnapshotRevision } from '~/lib/runtime/action-runner/revision';
 
 describe('BuilderWorkspaceRepository', () => {
   it('atomically seeds a workspace and returns it as a revisioned snapshot', async () => {
@@ -356,10 +356,26 @@ describe('BuilderWorkspaceRepository', () => {
       ],
     });
     const snapshot = await createBuilderWorkspaceSnapshot(harness.workspace);
-    expect(await deploymentSnapshotRevision(snapshot.bytes)).toBe(snapshot.revision);
+    expect(await archiveContentRevision(snapshot.bytes)).toBe(snapshot.revision);
     expect(snapshot.workspaceRevision).toBe(2);
   });
 });
+
+async function archiveContentRevision(snapshot: Uint8Array): Promise<string> {
+  const archive = await JSZip.loadAsync(snapshot);
+  const paths = Object.keys(archive.files)
+    .filter((path) => !archive.files[path]?.dir)
+    .sort((left, right) => left.localeCompare(right));
+  const records = await Promise.all(
+    paths.map(async (path) => [path, await sha256(await archive.files[path]!.async('uint8array'))]),
+  );
+  return sha256(new TextEncoder().encode(JSON.stringify(records)));
+}
+
+async function sha256(value: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', value as Uint8Array<ArrayBuffer>);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 
 async function initializedHarness() {
   const harness = createHarness();

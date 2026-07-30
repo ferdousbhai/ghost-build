@@ -2,10 +2,6 @@
  * Cleans and formats terminal output while preserving structure and paths
  * Handles ANSI, OSC, and various terminal control sequences
  */
-import { createScopedLogger } from './logger.js';
-
-const logger = createScopedLogger('Shell');
-
 export function cleanTerminalOutput(input: string): string {
   // Step 1: Remove OSC sequences (including those with parameters)
   const removeOsc = input
@@ -59,49 +55,4 @@ export function cleanTerminalOutput(input: string): string {
     .replace(/\s{2,}/g, ' ') // Remove multiple spaces
     .replace(/^\s+|\s+$/g, '') // Trim start and end
     .replace(/\u0000/g, ''); // Remove null characters
-}
-
-const BANNED_LINES = ['transforming (', 'computing gzip size', 'idealTree buildDeps', 'timing reify:unpack'];
-
-// Taken from https://github.com/sindresorhus/cli-spinners
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
-// Cleaning terminal output helps the agent focus on the important parts and
-// not waste input tokens.
-export function cleanBuildOutput(output: string) {
-  output = cleanTerminalOutput(output);
-  let lastSpinnerLine: string | null = null;
-  const lines: string[] = [];
-  for (const line of output.split('\n')) {
-    if (BANNED_LINES.some((bannedLine) => line.includes(bannedLine))) {
-      continue;
-    }
-    if (SPINNER_FRAMES.some((spinnerFrame) => line.startsWith(spinnerFrame))) {
-      const lineWithoutSpinner = line.slice(1).trim();
-      if (lineWithoutSpinner === lastSpinnerLine) {
-        continue;
-      }
-      lastSpinnerLine = lineWithoutSpinner;
-      lines.push(lineWithoutSpinner);
-      continue;
-    }
-    lines.push(line);
-  }
-
-  // Remove all esbuild "could not resolve" errors except the last one
-  const firstEsbuildResolveError = lines.findIndex((line) => line.includes('[ERROR] Could not resolve'));
-  let resultLines = lines;
-  if (firstEsbuildResolveError !== -1) {
-    const lastEsbuildNodeError = lines.findLastIndex((line) => line.includes('[ERROR] Could not resolve'));
-    if (lastEsbuildNodeError !== -1) {
-      // just keep the last one
-      resultLines = [...lines.slice(0, firstEsbuildResolveError), ...lines.slice(lastEsbuildNodeError)];
-    }
-  }
-
-  const result = resultLines.join('\n');
-  if (output !== result) {
-    logger.debug(`Sanitized output: ${output.length} -> ${result.length}`);
-  }
-  return result;
 }

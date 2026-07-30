@@ -1,17 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { WORK_DIR } from 'ghostbuild-agent/constants';
-import { filesToTurnContext, workDirRelative } from './fileUtils';
+import { filesToTurnContext } from './fileUtils';
 
 describe('fileUtils', () => {
-  it('converts workspace paths to relative paths', () => {
-    expect(workDirRelative(WORK_DIR)).toBe('');
-    expect(workDirRelative(`${WORK_DIR}/src/index.ts`)).toBe('src/index.ts');
-  });
-
-  it('keeps existing relative paths unchanged', () => {
-    expect(workDirRelative('src/index.ts')).toBe('src/index.ts');
-  });
-
   it('renders modified files as plain bounded workspace context', () => {
     expect(filesToTurnContext({ 'src/index.ts': { content: 'export const value = 1;' } })).toBe(
       `User-modified workspace files:

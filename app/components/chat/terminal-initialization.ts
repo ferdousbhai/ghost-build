@@ -1,5 +1,6 @@
-import { GHOSTBUILD_PREVIEW_COMMAND } from '~/lib/preview-config';
 import type { TerminalInitializationOptions } from '~/types/terminal';
+
+const GHOSTBUILD_PREVIEW_COMMAND = 'GHOSTBUILD_PREVIEW=1 pnpm run dev';
 
 export function createTerminalInitializationOptions(args: {
   isReload: boolean;

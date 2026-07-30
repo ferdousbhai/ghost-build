@@ -2,10 +2,6 @@ import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { getToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { deploymentApprovalMarker, parsePendingDeploymentApproval } from '~/lib/deployment-approval';
 
-export function latestMessageHasPendingDeploymentPlan(messages: GhostbuildMessage[]): boolean {
-  return latestPendingDeploymentPlanMarker(messages) !== null;
-}
-
 export function latestPendingDeploymentPlanMarker(messages: GhostbuildMessage[]): string | null {
   const latest = messages.at(-1);
   if (latest?.role !== 'assistant') {

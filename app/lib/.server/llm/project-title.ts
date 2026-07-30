@@ -19,5 +19,3 @@ export async function generateProjectTitle(
   });
   return generated?.title ?? null;
 }
-
-export { normalizeGeneratedTitle as cleanProjectTitle } from '@summonghost/title-generation';

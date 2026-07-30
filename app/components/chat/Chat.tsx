@@ -14,7 +14,6 @@ import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { ContainerBootState, useContainerBootState } from '~/lib/stores/containerBootState';
 import { UnsupportedRuntimeNotice, WorkspaceSetupErrorNotice } from '~/components/UnsupportedRuntime';
 import type { ChatProps } from './chat-types';
-import { useChatSessionId } from './useChatSessionId';
 import { UnauthenticatedChat } from './UnauthenticatedChat';
 import { useBuilderAgentChat } from './useBuilderAgentChat';
 import { createTerminalInitializationOptions } from './terminal-initialization';
@@ -45,7 +44,7 @@ export const Chat = memo(
   }: ChatProps) => {
     const [pendingInitialMessage, setPendingInitialMessage] = useState<string | null>(initialPrompt ?? null);
     const clearPendingInitialMessage = useCallback(() => setPendingInitialMessage(null), []);
-    const sessionId = useChatSessionId();
+    const sessionId = useSessionIdOrNullOrLoading();
     if (typeof sessionId !== 'string') {
       return (
         <UnauthenticatedChat

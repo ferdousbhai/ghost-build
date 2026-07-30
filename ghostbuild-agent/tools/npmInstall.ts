@@ -6,8 +6,6 @@ import {
   packageNameFromInstallSpec,
 } from '../utils/stackPolicy.js';
 
-export { packageNameFromInstallSpec } from '../utils/stackPolicy.js';
-
 const npmInstallToolDescription = `
 Install additional dependencies or synchronize the lockfile for the project with pnpm.
 

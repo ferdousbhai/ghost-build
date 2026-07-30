@@ -9,7 +9,6 @@ import {
   type GhostbuildPart,
 } from 'ghostbuild-agent/ai-compat';
 import { captureMessage } from '~/lib/telemetry.client';
-import { isHiddenAssistantPart } from './assistant-message-parts';
 import { DeploymentApproval } from './DeploymentApproval.client';
 import { parsePendingDeploymentApproval, stripPendingDeploymentApprovalMarker } from '~/lib/deployment-approval';
 
@@ -71,7 +70,7 @@ function AssistantMessagePart({
     return <Markdown html>{part.text}</Markdown>;
   }
 
-  if (isHiddenAssistantPart(part)) {
+  if (part.type === 'step-start' || part.type === 'reasoning') {
     return null;
   }
 

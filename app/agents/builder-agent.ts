@@ -232,10 +232,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
     const body = (options?.body ?? {}) as ChatBody;
     const messages = this.messages as NonNullable<ChatRequestBody['messages']>;
-    const { chatInitialId, shouldDisableTools, subchatIndex, transcript } = requireBuilderRequestScope(
-      body,
-      this.transcriptBinding,
-    );
+    const { chatInitialId, subchatIndex, transcript } = requireBuilderRequestScope(body, this.transcriptBinding);
     assertBuilderModelTranscriptWithinLimit(messages);
     const pendingDeploymentPlanMarker = options?.continuation ? latestPendingDeploymentPlanMarker(messages) : null;
     if (pendingDeploymentPlanMarker) {
@@ -334,7 +331,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         body: {
           messages,
           chatInitialId,
-          shouldDisableTools,
         },
       });
     } catch (error) {

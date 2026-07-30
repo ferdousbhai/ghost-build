@@ -66,7 +66,6 @@ export function requireBuilderRequestScope(
   binding: BuilderTranscriptBinding | null,
 ): {
   chatInitialId: string;
-  shouldDisableTools: boolean;
   subchatIndex: number;
   transcript: TranscriptIdentity;
 } {
@@ -77,9 +76,6 @@ export function requireBuilderRequestScope(
   ) {
     throw new Response('Invalid initial chat identifier', { status: 400 });
   }
-  if (typeof body.shouldDisableTools !== 'boolean') {
-    throw new Response('Invalid tool-disable flag', { status: 400 });
-  }
   const subchatIndex = parseBuilderSubchatIndex(body.subchatIndex);
   const transcript = requireBuilderTranscriptIdentity(body.transcript, binding, subchatIndex);
   if (body.chatInitialId !== binding?.chatInitialId) {
@@ -87,7 +83,6 @@ export function requireBuilderRequestScope(
   }
   return {
     chatInitialId: body.chatInitialId,
-    shouldDisableTools: body.shouldDisableTools,
     subchatIndex,
     transcript,
   };

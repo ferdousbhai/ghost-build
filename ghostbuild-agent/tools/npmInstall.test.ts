@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  findForbiddenNpmInstallPackages,
-  npmInstallToolParameters,
-  packageNameFromInstallSpec,
-  splitPackageSpecs,
-} from './npmInstall.js';
+import { findForbiddenNpmInstallPackages, npmInstallToolParameters, splitPackageSpecs } from './npmInstall.js';
+import { packageNameFromInstallSpec } from '../utils/stackPolicy.js';
 
 describe('npmInstall tool parameters', () => {
   it('accepts ordinary package specs', () => {

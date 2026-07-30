@@ -1,7 +1,5 @@
 import { MAX_THUMBNAIL_BYTES } from '~/lib/thumbnail-policy';
 
-export { MAX_THUMBNAIL_BYTES as MAX_THUMBNAIL_FILE_BYTES } from '~/lib/thumbnail-policy';
-
 export function thumbnailFileValidationError(file: Pick<File, 'size' | 'type'>): string | null {
   if (!file.type.startsWith('image/')) {
     return 'Choose an image file.';

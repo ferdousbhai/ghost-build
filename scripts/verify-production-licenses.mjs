@@ -18,29 +18,6 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
-export function flattenLicenseReport(report) {
-  const packages = [];
-  for (const [reportedLicense, entries] of Object.entries(report ?? {})) {
-    if (!Array.isArray(entries)) {
-      continue;
-    }
-    for (const entry of entries) {
-      for (const version of entry?.versions ?? []) {
-        packages.push({
-          name: entry?.name,
-          version,
-          reportedLicense,
-          packageLicense: entry?.license,
-        });
-      }
-    }
-  }
-  return packages.sort(
-    (left, right) =>
-      String(left.name).localeCompare(String(right.name)) || String(left.version).localeCompare(String(right.version)),
-  );
-}
-
 function packageIdentity(name, version) {
   return `${name}@${version}`;
 }

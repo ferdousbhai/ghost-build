@@ -42,12 +42,11 @@ describe('BuilderAgent request policy', () => {
     expect(prepare.mock.calls[0]?.[0]).toContain('chats.is_deleted = 0');
   });
 
-  it('accepts only an exact D1-bound chat, subchat, generation, and boolean', () => {
+  it('accepts only an exact D1-bound chat, subchat, and generation', () => {
     expect(
       requireBuilderRequestScope(
         {
           chatInitialId: 'chat',
-          shouldDisableTools: false,
           subchatIndex: 2,
           transcript: { agentName: binding.agentName, generation: 3, subchatIndex: 2 },
         },
@@ -55,7 +54,6 @@ describe('BuilderAgent request policy', () => {
       ),
     ).toEqual({
       chatInitialId: 'chat',
-      shouldDisableTools: false,
       subchatIndex: 2,
       transcript: { agentName: binding.agentName, generation: 3, subchatIndex: 2 },
     });
@@ -63,7 +61,6 @@ describe('BuilderAgent request policy', () => {
 
   it.each([
     [{ chatInitialId: 'other-chat' }, 409],
-    [{ shouldDisableTools: 'false' }, 400],
     [{ subchatIndex: 10_001 }, 400],
     [{ transcript: { agentName: binding.agentName, generation: 4, subchatIndex: 2 } }, 409],
     [{ transcript: { agentName: binding.agentName, generation: 3, subchatIndex: 1 } }, 409],
@@ -72,7 +69,6 @@ describe('BuilderAgent request policy', () => {
       requireBuilderRequestScope(
         {
           chatInitialId: 'chat',
-          shouldDisableTools: false,
           subchatIndex: 2,
           transcript: { agentName: binding.agentName, generation: 3, subchatIndex: 2 },
           ...override,

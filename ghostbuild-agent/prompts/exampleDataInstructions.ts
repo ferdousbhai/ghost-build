@@ -3,24 +3,13 @@ import { stripIndents } from '../utils/stripIndent.js';
 export function exampleDataInstructions() {
   return stripIndents`
   <example_data_instructions>
-    If the user asks you to make an app that requires data, use some example data to populate the
-    UI but ONLY include it in the browser UI, never in Worker responses, durable storage, or source-of-truth data.
+    When an app depends on external real-world data that is unavailable during the build, example data may be used to
+    make the browser UI previewable. Keep it out of Worker responses, durable storage, and source-of-truth data, and
+    clearly label it as non-authoritative example data.
 
-    IMPORTANT: Do NOT write example data to the database.
-    IMPORTANT: You MUST also tell the user that the data is example data and not authoritative.
-
-    Then, decide on an API service for providing the data and ask the user to configure its API key as a
-    Cloudflare Worker secret binding.
-
-    For example, if the user asks you to make a weather app:
-    1. Fill in the UI with example data, tell them explicitly that the data is just for rendering the
-      UI, and then suggest an API service for getting real data. Pick a service that's easy to sign
-      up for, has a free tier, and is easy to call from Cloudflare Worker code.
-    2. Instruct the user to set up the API key as a Cloudflare Worker secret binding (see \`<secrets_instructions>\`).
-    3. Then, after the user confirms they've set the Worker secret binding, set up the API call in a
-      TanStack Start server function when using TanStack, or a \`src/server.ts\` Worker API route, write the data to D1 or a
-      TanStack DB-backed API collection if appropriate, remove the example data from the UI, and update
-      the app to load the real data.
+    Do not introduce an external API, database, or secret merely because an app has data. Use local state or the
+    Cloudflare storage primitive requested by the user. When a requested external integration needs a credential,
+    scaffold the named secret binding and explain how to configure it.
   </example_data_instructions>
 `;
 }

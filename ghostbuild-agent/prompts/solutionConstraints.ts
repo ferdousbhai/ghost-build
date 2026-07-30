@@ -30,8 +30,8 @@ export function solutionConstraints() {
     </template>
 
     <platform_and_framework_policy>
-      Choose the smallest Cloudflare-native execution surface that fits the request. Use the official Cloudflare
-      platform guidance available through lookupDocs before selecting products or architecture for Cloudflare work.
+      Choose the smallest Cloudflare-native execution surface that fits the request. Consult the bundled Cloudflare
+      guidance when the product choice or architecture is uncertain.
 
       For a user-facing web application, use TanStack Start and Router with React and Tailwind CSS when the user does
       not specify a framework. Prefer TanStack Start whenever its routing, SSR, server functions, and browser UI are a
@@ -53,11 +53,8 @@ export function solutionConstraints() {
       Agents/Durable Objects, D1, R2, KV, Queues, Vectorize, and Cloudflare Email where appropriate. Do not introduce
       Convex, Remix, non-Cloudflare AI providers, or a second backend platform.
 
-      Default coding-agent model: @cf/zai-org/glm-5.2 through the template's reviewed AppAgent. Keep its id centralized
-      in src/workers-ai.shared.ts. Chat Agents use AIChatAgent/useAgentChat, convertToModelMessages, pruneMessages,
-      queue concurrency, explicit MCP startup timeout, abort-signal propagation, and sendIdentityOnConnect: false when
-      instance names contain private identifiers. Use Agents diagnostics events and Cloudflare Tail Workers for
-      production Agent observability.
+      Keep AI features behind the template's reviewed AppAgent and centralized Workers AI model helper. Consult the
+      bundled Agents and Workers AI guidance before changing that boundary.
     </platform_and_framework_policy>
 
     <runtime_and_data>

@@ -21,8 +21,7 @@ import { chatSyncState } from './chatSyncState';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifest';
 import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
-import { startupInstallArgs } from './dependency-install-policy';
-import { prepareWebContainerPackageManagers, webContainerNpmEnvironment } from '~/lib/webcontainer/pnpm';
+import { prepareWebContainerNpm, webContainerNpmEnvironment } from '~/lib/webcontainer/npm';
 import { withPreviewPackageManifest } from './preview-package-manifest';
 import { resolveContainerSnapshotSource } from './snapshot-source';
 
@@ -175,8 +174,9 @@ async function setupContainer(options: {
   assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', pnpmWorkspace);
 
   setContainerBootState(ContainerBootState.DOWNLOADING_DEPENDENCIES);
+  // Keep the literal argv shape required by WebContainer's accelerated npm install path.
   const { output, exitCode } = await withPreviewPackageManifest(container, packageJson, () =>
-    runDependencyInstall(container, startupInstallArgs(), options.trustedTemplateDependencies),
+    runDependencyInstall(container, ['install'], options.trustedTemplateDependencies),
   );
   logger.debug('dependency install output', cleanTerminalOutput(output));
 
@@ -207,7 +207,7 @@ async function runDependencyInstall(
   trustedTemplateDependencies: boolean,
 ): Promise<{ output: string; exitCode: number }> {
   await withTimeout(
-    prepareWebContainerPackageManagers(container),
+    prepareWebContainerNpm(container),
     WORKSPACE_STEP_TIMEOUT_MS,
     'Ghostbuild could not prepare dependency installation.',
   );

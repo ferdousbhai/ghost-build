@@ -1,5 +1,3 @@
-import type { CloudflareCredentialResolver } from './account-workers-ai';
-
 const AES_GCM_IV_BYTES = 12;
 const AES_256_KEY_BYTES = 32;
 const OAUTH_REFRESH_TIMEOUT_MS = 30_000;
@@ -10,7 +8,7 @@ type CredentialRow = {
   created_at: number;
 };
 
-export class D1CloudflareCredentialVault implements CloudflareCredentialResolver {
+export class D1CloudflareCredentialVault {
   constructor(
     private readonly db: D1Database,
     private readonly encryptionKeyBase64: string,

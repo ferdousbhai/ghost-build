@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('ai', () => ({ generateText: mocks.generateText }));
 vi.mock('./provider', () => ({ getProvider: mocks.getProvider }));
 
-import { cleanProjectTitle, generateProjectTitle } from './project-title';
+import { generateProjectTitle } from './project-title';
 import { CLOUDFLARE_PROJECT_TITLE_MODEL } from '~/lib/workers-ai-model';
 
 describe('generateProjectTitle', () => {
@@ -31,25 +31,5 @@ describe('generateProjectTitle', () => {
     await expect(
       generateProjectTitle({} as Env, 'Build a calendar', { accountId: 'account-1', apiKey: 'token' }),
     ).rejects.toThrow('model unavailable');
-  });
-});
-
-describe('cleanProjectTitle', () => {
-  it('removes common model framing and ignores extra lines', () => {
-    expect(cleanProjectTitle('Project title: "Team Planning Calendar."\nHope this helps')).toBe(
-      'Team Planning Calendar',
-    );
-  });
-
-  it('bounds unexpectedly long output without adding punctuation', () => {
-    const title = cleanProjectTitle(
-      'A very long generated project title that keeps going far beyond the desired limit',
-    );
-    expect(title).toBeTruthy();
-    expect(title!.length).toBeLessThanOrEqual(60);
-  });
-
-  it('rejects empty output', () => {
-    expect(cleanProjectTitle('  ""  ')).toBeNull();
   });
 });

@@ -3,9 +3,9 @@ import {
   enforceChatStorageRetention,
   ensureInitialChat,
   insertChatWithState,
-  MAX_RETAINED_CHAT_STORAGE_STATES,
   updateStorageState,
 } from './chat-repository.server';
+import { MAX_RETAINED_CHAT_STORAGE_STATES } from './chat-storage-state-repository.server';
 import { ChatStorageRetentionError } from './errors';
 import type { ChatMessageStateRow, ChatRow } from './types';
 

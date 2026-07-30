@@ -1,6 +1,5 @@
 import { cachedPromptTokenCount } from 'ghostbuild-agent/ai-compat';
 import type { PromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
-import { logger } from 'ghostbuild-agent/utils/logger';
 import type { OnFinishEvent, ToolSet } from 'ai';
 import type { WorkersAiPromptCacheStatus } from './workers-ai-prompt-cache';
 
@@ -11,7 +10,6 @@ interface FinishTelemetryOptions {
   result: OnFinishEvent<ToolSet>;
   chatInitialId: string;
   firstUserMessage: boolean;
-  toolsDisabledFromRepeatedErrors: boolean;
   contextReduced: boolean;
   estimatedContextTokens?: number;
   promptCharacterCounts: PromptCharacterCounts;
@@ -43,12 +41,8 @@ export function recordWorkersAiFinish(options: FinishTelemetryOptions): void {
     durationMs: Date.now() - options.startedAt,
     modelInputFingerprint: options.modelInputFingerprint,
     promptCache: cache,
-    toolsDisabledFromRepeatedErrors: options.toolsDisabledFromRepeatedErrors,
   };
   console.info(event);
-  if (options.toolsDisabledFromRepeatedErrors) {
-    logger.warn('Tools disabled because of repeated errors');
-  }
 }
 
 export function workersAiPromptCacheTelemetry(

@@ -1,4 +1,3 @@
-import { getRelativePath } from 'ghostbuild-agent/utils/workDir';
 import { MAX_EPHEMERAL_CONTEXT_CHARACTERS } from 'ghostbuild-agent/context-limits';
 
 export function filesToTurnContext(
@@ -44,9 +43,4 @@ export function filesToTurnContext(
   }
 
   return sections.length ? `${heading}${sections.join('\n')}` : '';
-}
-
-export function workDirRelative(absPath: string) {
-  // The agent often sends relative paths instead of absolute paths, so we should just return that.
-  return getRelativePath(absPath);
 }

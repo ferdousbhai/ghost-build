@@ -17,7 +17,6 @@ export type ChatRequestBody = {
   chatInitialId: string;
   subchatIndex: number;
   turnContext?: ChatTurnContext;
-  shouldDisableTools: boolean;
 };
 
 export async function createChatResponseFromBody({
@@ -34,7 +33,7 @@ export async function createChatResponseFromBody({
   agentName,
 }: {
   abortSignal?: AbortSignal;
-  body: Pick<ChatRequestBody, 'messages' | 'chatInitialId' | 'shouldDisableTools'>;
+  body: Pick<ChatRequestBody, 'messages' | 'chatInitialId'>;
   compaction: {
     current: ContextCompaction | null;
     pending: boolean;
@@ -64,7 +63,6 @@ export async function createChatResponseFromBody({
       firstUserMessage,
       messages: transcriptMessages,
       turnContext,
-      shouldDisableTools: body.shouldDisableTools,
       compaction,
       accountCredentials,
       sessionAffinity,

@@ -13,12 +13,9 @@ import { normalizeTextPartBoundaries } from './workers-ai-stream';
 import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
 import {
   createWorkersAiTools,
-  getNextServerToolStepSettings,
   getValidatedBuildCompletion,
-  getWorkersAiBuildGuidance,
   getWorkersAiToolSettings,
   serializeWorkersAiToolDefinitions,
-  type AgentToolSettings,
 } from './workers-ai-tools';
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
 import { fingerprintWorkersAiModelInput } from './workers-ai-prompt-cache';
@@ -38,7 +35,6 @@ interface WorkersAiAgentOptions {
   firstUserMessage: boolean;
   messages: Messages;
   turnContext?: ChatTurnContext;
-  shouldDisableTools: boolean;
   compaction: {
     current: ContextCompaction | null;
     pending: boolean;
@@ -61,7 +57,6 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     firstUserMessage,
     messages,
     turnContext,
-    shouldDisableTools,
     compaction,
     accountCredentials,
     sessionAffinity,
@@ -79,19 +74,14 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     agentName,
     chatInitialId,
   });
-  const validatedBuildCompletion = shouldDisableTools ? undefined : getValidatedBuildCompletion(messages);
+  const validatedBuildCompletion = getValidatedBuildCompletion(messages);
   if (validatedBuildCompletion) {
     logger.info('Returning validated build completion without another model turn', { chatInitialId });
     return createValidatedBuildCompletionStream(messages, validatedBuildCompletion);
   }
 
-  const toolSettings: AgentToolSettings = shouldDisableTools
-    ? { toolChoice: 'none' }
-    : getWorkersAiToolSettings(messages);
-  const buildGuidance = getWorkersAiBuildGuidance(messages);
-  const systemPrompts = [ROLE_SYSTEM_PROMPT, generalSystemPrompt(), buildGuidance].filter((prompt): prompt is string =>
-    Boolean(prompt),
-  );
+  const toolSettings = getWorkersAiToolSettings(messages);
+  const systemPrompts = [ROLE_SYSTEM_PROMPT, generalSystemPrompt()];
   const modelInput = await prepareModelInput({
     messages,
     turnContext,
@@ -119,56 +109,58 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     activeTools: toolSettings.activeTools,
     toolChoice: toolSettings.toolChoice,
   });
-  let result;
-  try {
-    result = streamText({
-      model: provider.model,
-      abortSignal,
-      timeout: WORKERS_AI_CALL_TIMEOUT_MS,
-      maxOutputTokens: provider.maxTokens,
-      messages: modelInput.messages,
-      tools: asAiSdkTools(tools),
-      toolChoice: toolSettings.toolChoice,
-      activeTools: toolSettings.activeTools,
-      stopWhen: stepCountIs(MAX_SERVER_TOOL_STEPS),
-      prepareStep: ({ stepNumber, steps }) => {
-        if (stepNumber === 0) {
-          return undefined;
-        }
-        const nextSettings = getNextServerToolStepSettings(steps.at(-1)?.toolResults ?? [], toolSettings);
-        return {
-          activeTools: nextSettings.activeTools,
-          toolChoice: nextSettings.toolChoice,
-        };
-      },
-      onChunk: () => {
-        if (!recordedFirstResponse) {
-          recordedFirstResponse = true;
-          recordFirstWorkersAiResponse(chatInitialId, startedAt);
-        }
-      },
-      onFinish: (finishResult) => {
-        recordWorkersAiFinish({
-          result: finishResult,
-          chatInitialId,
-          firstUserMessage,
-          toolsDisabledFromRepeatedErrors: shouldDisableTools,
-          contextReduced: modelInput.contextCompacted,
-          estimatedContextTokens: modelInput.estimatedTokens,
-          promptCharacterCounts,
-          providerModel,
-          promptCacheAttempted: true,
-          modelInputFingerprint,
-          startedAt,
-        });
-      },
-      onError: ({ error }) => {
-        logProviderFailure(logger, 'Workers AI request failed.', error);
-      },
-    });
-  } catch (error) {
-    throw error;
-  }
+  const result = streamText({
+    model: provider.model,
+    abortSignal,
+    timeout: WORKERS_AI_CALL_TIMEOUT_MS,
+    maxOutputTokens: provider.maxTokens,
+    messages: modelInput.messages,
+    tools: asAiSdkTools(tools),
+    toolChoice: toolSettings.toolChoice,
+    activeTools: toolSettings.activeTools,
+    stopWhen: stepCountIs(MAX_SERVER_TOOL_STEPS),
+    prepareStep: ({ stepNumber, steps }) => {
+      if (stepNumber === 0) {
+        return undefined;
+      }
+      const nextSettings = getWorkersAiToolSettings(
+        messages,
+        steps.flatMap(({ toolResults }) =>
+          toolResults.map(({ toolName, output }) => ({
+            toolName,
+            result: output,
+          })),
+        ),
+      );
+      return {
+        activeTools: nextSettings.activeTools,
+        toolChoice: nextSettings.toolChoice,
+      };
+    },
+    onChunk: () => {
+      if (!recordedFirstResponse) {
+        recordedFirstResponse = true;
+        recordFirstWorkersAiResponse(chatInitialId, startedAt);
+      }
+    },
+    onFinish: (finishResult) => {
+      recordWorkersAiFinish({
+        result: finishResult,
+        chatInitialId,
+        firstUserMessage,
+        contextReduced: modelInput.contextCompacted,
+        estimatedContextTokens: modelInput.estimatedTokens,
+        promptCharacterCounts,
+        providerModel,
+        promptCacheAttempted: true,
+        modelInputFingerprint,
+        startedAt,
+      });
+    },
+    onError: ({ error }) => {
+      logProviderFailure(logger, 'Workers AI request failed.', error);
+    },
+  });
 
   const stream = result.toUIMessageStream({
     originalMessages: asOriginalMessages(messages),

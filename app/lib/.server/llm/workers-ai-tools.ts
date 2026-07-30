@@ -1,4 +1,4 @@
-import { getToolInvocation, messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import { getToolInvocation, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { deployTool } from 'ghostbuild-agent/tools/deploy';
 import { editTool } from 'ghostbuild-agent/tools/edit';
 import { lookupDocsTool } from 'ghostbuild-agent/tools/lookupDocs';
@@ -24,12 +24,33 @@ type BuilderOperationContext = {
   agentName: string;
 };
 
-export type AgentToolChoice = 'auto' | 'none' | 'required' | { type: 'tool'; toolName: GhostbuildToolName };
-export type AgentToolSettings = {
+export type AgentToolChoice = 'auto' | 'none' | 'required';
+type AgentToolSettings = {
   activeTools?: GhostbuildToolName[];
   toolChoice: AgentToolChoice;
 };
-const GENERATED_APP_ROUTE = '/home/project/src/routes/index.tsx';
+type ToolResultEvent = {
+  toolName: string;
+  result: unknown;
+};
+type BuildLifecycle =
+  | { stage: 'needs-validation' }
+  | { stage: 'validation-failed' }
+  | { stage: 'guest-validated' }
+  | { stage: 'needs-deploy' }
+  | { stage: 'deploy-failed' }
+  | { stage: 'deployment-ready'; production: boolean };
+
+const AUTOMATIC_TOOLS: GhostbuildToolName[] = [
+  'view',
+  'listFiles',
+  'searchText',
+  'edit',
+  'writeFile',
+  'lookupDocs',
+  'npmInstall',
+  'validateProject',
+];
 
 export function createWorkersAiTools(
   workspace: BuilderWorkspaceRepository,
@@ -53,40 +74,6 @@ export function createWorkersAiTools(
     tools[toolName] = serverOperationTool(toolName, tools[toolName], workspace, operationContext);
   }
   return tools;
-}
-
-export function getNextServerToolStepSettings(
-  toolResults: ReadonlyArray<{ toolName: string; output: unknown }>,
-  fallback: AgentToolSettings,
-): AgentToolSettings {
-  const latest = toolResults.at(-1);
-  if (!latest) {
-    return fallback;
-  }
-  if (
-    (latest.toolName === 'edit' || latest.toolName === 'writeFile' || latest.toolName === 'npmInstall') &&
-    toolResultSucceeded(latest.output)
-  ) {
-    return {
-      activeTools: ['validateProject'],
-      toolChoice: 'required',
-    };
-  }
-  if (latest.toolName === 'validateProject') {
-    if (isSuccessfulValidationResult(latest.output)) {
-      return validationNextAction(latest.output) === 'prepare-deployment'
-        ? { activeTools: ['deploy'], toolChoice: 'required' }
-        : { toolChoice: 'none' };
-    }
-    return {
-      activeTools: ['view', 'listFiles', 'searchText', 'edit', 'writeFile', 'npmInstall'],
-      toolChoice: 'required',
-    };
-  }
-  if (latest.toolName === 'deploy') {
-    return { toolChoice: 'none' };
-  }
-  return fallback;
 }
 
 function serverOperationTool(
@@ -170,75 +157,101 @@ export function serializeWorkersAiToolDefinitions(
   );
 }
 
-export function getBuildToolChoice(messages: GhostbuildMessage[]): AgentToolChoice {
+export function getWorkersAiToolSettings(
+  messages: GhostbuildMessage[],
+  currentStepResults: ReadonlyArray<ToolResultEvent> = [],
+): AgentToolSettings {
   const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
   const toolResults = collectToolResults(messages);
-  const toolResultsAfterLastUser = toolResults.filter(({ messageIndex }) => messageIndex > lastUserIndex);
-
-  const lastMutationAfterUserIndex = toolResultsAfterLastUser.findLastIndex(isMutationResult);
-
-  if (lastMutationAfterUserIndex !== -1) {
-    return getPostMutationToolChoice(toolResultsAfterLastUser, lastMutationAfterUserIndex) ?? 'none';
+  const currentTurnResults = [
+    ...toolResults.filter(({ messageIndex }) => messageIndex > lastUserIndex),
+    ...currentStepResults,
+  ];
+  const currentTurnLifecycle = analyzeBuildLifecycle(currentTurnResults);
+  if (currentTurnLifecycle) {
+    return lifecycleToolSettings(currentTurnLifecycle);
   }
 
-  const lastMutationIndex = toolResults.findLastIndex(isMutationResult);
-  if (lastMutationIndex !== -1) {
-    const unfinishedPriorBuild = getPostMutationToolChoice(toolResults, lastMutationIndex);
-    if (unfinishedPriorBuild !== undefined) {
-      return unfinishedPriorBuild;
+  const priorLifecycle = analyzeBuildLifecycle([...toolResults, ...currentStepResults]);
+  if (priorLifecycle) {
+    const priorSettings = lifecycleToolSettings(priorLifecycle);
+    if (priorSettings.toolChoice !== 'none') {
+      return priorSettings;
     }
   }
 
-  if (toolResultsAfterLastUser.some(({ result }) => !toolResultSucceeded(result))) {
-    return 'required';
-  }
-
-  return 'auto';
+  return automaticToolSettings();
 }
 
-function getPostMutationToolChoice(
-  toolResults: Array<{ toolName: string; result: unknown }>,
-  mutationIndex: number,
-): AgentToolChoice | undefined {
+function analyzeBuildLifecycle(toolResults: ReadonlyArray<ToolResultEvent>): BuildLifecycle | undefined {
+  const mutationIndex = toolResults.findLastIndex(isMutationResult);
+  if (mutationIndex === -1) {
+    return undefined;
+  }
   const lastValidationIndex = toolResults.findLastIndex(
     ({ toolName }, index) => toolName === 'validateProject' && index > mutationIndex,
   );
   if (lastValidationIndex === -1) {
-    return { type: 'tool', toolName: 'validateProject' };
+    return { stage: 'needs-validation' };
   }
   const validationResult = toolResults[lastValidationIndex].result;
   if (!isSuccessfulValidationResult(validationResult)) {
-    return 'required';
+    return { stage: 'validation-failed' };
   }
-  if (validationNextAction(validationResult) !== 'prepare-deployment') {
-    return undefined;
+  if (validationNextAction(validationResult) === 'sign-in-required') {
+    return { stage: 'guest-validated' };
   }
   const lastDeployIndex = toolResults.findLastIndex(
     ({ toolName }, index) => toolName === 'deploy' && index > lastValidationIndex,
   );
   if (lastDeployIndex === -1) {
-    return { type: 'tool', toolName: 'deploy' };
+    return { stage: 'needs-deploy' };
   }
-  return isSuccessfulDeployResult(toolResults[lastDeployIndex].result, validationRevision(validationResult))
-    ? undefined
-    : 'required';
+  const deployResult = toolResults[lastDeployIndex].result;
+  if (isProductionDeployResult(deployResult)) {
+    return { stage: 'deployment-ready', production: true };
+  }
+  if (isSuccessfulDeployResult(deployResult, validationRevision(validationResult))) {
+    return { stage: 'deployment-ready', production: false };
+  }
+  return { stage: 'deploy-failed' };
 }
 
-export function getWorkersAiToolSettings(messages: GhostbuildMessage[]): AgentToolSettings {
-  const toolChoice = getBuildToolChoice(messages);
-  if (typeof toolChoice === 'object') {
-    return {
-      activeTools: [toolChoice.toolName],
-      toolChoice: 'required',
-    };
+function lifecycleToolSettings(lifecycle: BuildLifecycle): AgentToolSettings {
+  switch (lifecycle.stage) {
+    case 'needs-validation':
+      return requiredToolSettings('validateProject');
+    case 'validation-failed':
+      return automaticToolSettings();
+    case 'guest-validated':
+    case 'deployment-ready':
+      return { toolChoice: 'none' };
+    case 'needs-deploy':
+      return requiredToolSettings('deploy');
+    case 'deploy-failed':
+      return {
+        activeTools: [...AUTOMATIC_TOOLS, 'deploy'],
+        toolChoice: 'auto',
+      };
+    default: {
+      const unsupported: never = lifecycle;
+      throw new Error(`Unsupported build lifecycle: ${JSON.stringify(unsupported)}`);
+    }
   }
-  if (toolChoice === 'auto') {
-    return {
-      activeTools: ['view', 'listFiles', 'searchText', 'edit', 'writeFile', 'lookupDocs', 'npmInstall'],
-      toolChoice,
-    };
-  }
-  return { toolChoice };
+}
+
+function automaticToolSettings(): AgentToolSettings {
+  return {
+    activeTools: [...AUTOMATIC_TOOLS],
+    toolChoice: 'auto',
+  };
+}
+
+function requiredToolSettings(toolName: GhostbuildToolName): AgentToolSettings {
+  return {
+    activeTools: [toolName],
+    toolChoice: 'required',
+  };
 }
 
 export function getValidatedBuildCompletion(messages: GhostbuildMessage[]): string | undefined {
@@ -247,76 +260,24 @@ export function getValidatedBuildCompletion(messages: GhostbuildMessage[]): stri
     return undefined;
   }
 
-  const toolResultsAfterLastUser = collectToolResults(messages).filter(
-    ({ messageIndex }) => messageIndex > lastUserIndex,
+  const lifecycle = analyzeBuildLifecycle(
+    collectToolResults(messages).filter(({ messageIndex }) => messageIndex > lastUserIndex),
   );
-  const lastMutationAfterUserIndex = toolResultsAfterLastUser.findLastIndex(isMutationResult);
-  if (lastMutationAfterUserIndex === -1) {
-    return undefined;
-  }
-
-  const validationIndex = toolResultsAfterLastUser.findLastIndex(
-    ({ toolName, result }, index) =>
-      toolName === 'validateProject' && index > lastMutationAfterUserIndex && isSuccessfulValidationResult(result),
-  );
-  if (validationIndex === -1) {
-    return undefined;
-  }
-  const validationResult = toolResultsAfterLastUser[validationIndex].result;
-  if (validationNextAction(validationResult) === 'sign-in-required') {
+  if (lifecycle?.stage === 'guest-validated') {
     return 'Done. I built and validated the app in the isolated production build environment, and it is ready to preview here. Sign in when you are ready to deploy it to Cloudflare production.';
   }
-  const deployResult = toolResultsAfterLastUser.findLast(
-    ({ toolName, result }, index) =>
-      toolName === 'deploy' &&
-      index > validationIndex &&
-      isSuccessfulDeployResult(result, validationRevision(validationResult)),
-  )?.result;
-  if (!deployResult) {
+  if (lifecycle?.stage !== 'deployment-ready') {
     return undefined;
   }
-  return isProductionDeployResult(deployResult)
+  return lifecycle.production
     ? 'Done. I built, validated, and deployed the app to Cloudflare production.'
     : 'Done. I built and validated the app. The production deployment plan is ready for your approval.';
-}
-
-export function getWorkersAiBuildGuidance(messages: GhostbuildMessage[]): string | undefined {
-  const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
-  const lastUserMessage = lastUserIndex === -1 ? undefined : messages[lastUserIndex];
-  const lastUserText = lastUserMessage ? messageText(lastUserMessage) : '';
-  if (!looksLikeNewAppBuildRequest(lastUserText)) {
-    return undefined;
-  }
-
-  const toolResultsAfterLastUser = collectToolResults(messages).filter(
-    ({ messageIndex }) => messageIndex > lastUserIndex,
-  );
-  if (toolResultsAfterLastUser.some(isAppRouteMutation)) {
-    return undefined;
-  }
-
-  const nonRouteWrites = toolResultsAfterLastUser
-    .filter(({ toolName }) => toolName === 'writeFile' || toolName === 'edit')
-    .map(({ path }) => path)
-    .filter((path): path is string => Boolean(path));
-  const attemptedPaths =
-    nonRouteWrites.length > 0 ? ` Recent non-route file writes were: ${dedupe(nonRouteWrites).join(', ')}.` : '';
-
-  return [
-    'Current build target:',
-    `The user asked for a new app, and the primary app route has not been replaced yet.${attemptedPaths}`,
-    `Implement the complete requested app in ${GENERATED_APP_ROUTE} before validation.`,
-    'You may inspect the workspace and consult lookupDocs before choosing the implementation.',
-    'Do not write .ghost-* files, check files, marker files, placeholder files, or only src/routes/__root.tsx.',
-    'Do not call validateProject or deploy until the requested experience is implemented in src/routes/index.tsx.',
-  ].join('\n');
 }
 
 function collectToolResults(messages: GhostbuildMessage[]): Array<{
   messageIndex: number;
   toolName: string;
   result: unknown;
-  path?: string;
 }> {
   return messages.flatMap((message, messageIndex) =>
     message.parts.flatMap((part) => {
@@ -329,61 +290,10 @@ function collectToolResults(messages: GhostbuildMessage[]): Array<{
           messageIndex,
           toolName: invocation.toolName,
           result: invocation.result,
-          path: getToolInvocationPath(invocation.args, invocation.result),
         },
       ];
     }),
   );
-}
-
-function looksLikeNewAppBuildRequest(text: string): boolean {
-  return (
-    /\b(build|create|generate|scaffold)\b/i.test(text) ||
-    /\b(make|ship|implement)\b.*\b(app|site|page|tool|game|tracker|dashboard)\b/i.test(text)
-  );
-}
-
-function isAppRouteMutation(result: { toolName: string; path?: string }): boolean {
-  if (result.toolName !== 'writeFile' && result.toolName !== 'edit') {
-    return false;
-  }
-  return isUserFacingRoutePath(result.path);
-}
-
-function isUserFacingRoutePath(path: string | undefined): boolean {
-  return /^src\/routes\/(?!__root\.tsx$).+\.(?:[cm]?[jt]sx?)$/i.test(path ?? '');
-}
-
-function getToolInvocationPath(args: unknown, result: unknown): string | undefined {
-  if (isRecord(args) && typeof args.path === 'string') {
-    return normalizeProjectPath(args.path);
-  }
-
-  const resultText = typeof result === 'string' ? result : '';
-  const match =
-    resultText.match(/\b(?:wrote|updated|edited|created)\s+(?:file\s+)?[`'"]?([^`'"\s]+)/i) ??
-    resultText.match(/[`'"]?((?:\/home\/project\/|\.\/|\/)?src\/routes\/[^`'"\s]+)[`'"]?/i) ??
-    resultText.match(/[`'"]?((?:\/home\/project\/|\.\/|\/)?src\/[^`'"\s]+)[`'"]?/i);
-  return match ? normalizeProjectPath(match[1]) : undefined;
-}
-
-function normalizeProjectPath(path: string): string {
-  let normalized = path
-    .trim()
-    .replace(/\\/g, '/')
-    .replace(/^["'`]+|["'`,.]+$/g, '');
-  const projectPrefixIndex = normalized.lastIndexOf('/home/project/');
-  if (projectPrefixIndex !== -1) {
-    normalized = normalized.slice(projectPrefixIndex + '/home/project/'.length);
-  }
-  while (normalized.startsWith('./') || normalized.startsWith('/')) {
-    normalized = normalized.startsWith('./') ? normalized.slice(2) : normalized.slice(1);
-  }
-  return normalized;
-}
-
-function dedupe(values: string[]): string[] {
-  return Array.from(new Set(values));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -403,7 +313,8 @@ function isSuccessfulValidationResult(result: unknown): boolean {
     result.ok &&
     isRecord(result.data) &&
     result.data.level === 'full' &&
-    validationRevision(result) !== undefined
+    validationRevision(result) !== undefined &&
+    validationNextAction(result) !== undefined
   );
 }
 

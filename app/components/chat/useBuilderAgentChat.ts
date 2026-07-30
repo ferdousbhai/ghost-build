@@ -13,7 +13,6 @@ import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { STATUS_MESSAGES } from './StreamingIndicator';
 import { recordChatFailure, resetChatRetryState } from './chat-retry';
 import { subchatIndexStore } from '~/lib/stores/subchats';
-import { buildBuilderAgentRequest } from './builder-agent-request';
 import { waitForAgentSocketOpen } from './agent-connection';
 import { WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
 import { showWorkersPaidRequiredToast } from '~/lib/workers-paid.client';
@@ -84,19 +83,18 @@ export function useBuilderAgentChat(args: {
     messages: args.initialMessages as UIMessage[],
     syncMessagesToServer: false,
     experimental_throttle: 100,
-    prepareSendMessagesRequest: ({ messages, body }) => {
-      const ghostMessages = messages as GhostbuildMessage[];
+    prepareSendMessagesRequest: ({ body }) => {
       if (!getAuthToken()) {
         throw new Error('No token');
       }
-      const requestBody = buildBuilderAgentRequest({
-        messages: ghostMessages,
-        body,
-        chatInitialId: args.chatInitialId,
-        subchatIndex: subchatIndexStore.get() ?? 0,
-        transcript: args.transcript,
-      });
-      return { body: requestBody };
+      return {
+        body: {
+          ...body,
+          chatInitialId: args.chatInitialId,
+          subchatIndex: subchatIndexStore.get() ?? 0,
+          transcript: args.transcript,
+        },
+      };
     },
     autoContinueAfterToolResult: true,
     onError: (error: Error) => {

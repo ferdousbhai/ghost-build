@@ -11,8 +11,8 @@ export function secretsInstructions() {
       2. Tell them to use \`wrangler secret put NAME\` for production secrets or Cloudflare dashboard
          Worker settings. Do not create local env files for secrets. Never write \`.env\`, \`.env.*\`,
          \`.envrc\`, \`.dev.vars\`, or \`.dev.vars.*\` files.
-      3. After the user confirms they've set the Worker secret binding, you can use the secret in your
-         Worker code through the \`env\` binding.
+      3. You may scaffold code and configuration that reference the named binding before its value is provisioned.
+         Never request, handle, or invent the secret value.
    </secrets_instructions>
 `;
 }

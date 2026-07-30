@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { DEPLOYMENT_PLAN_MARKER } from '~/lib/deployment-approval';
-import { latestMessageHasPendingDeploymentPlan, latestPendingDeploymentPlanMarker } from './deployment-continuation';
+import { latestPendingDeploymentPlanMarker } from './deployment-continuation';
 
-describe('latestMessageHasPendingDeploymentPlan', () => {
+describe('latestPendingDeploymentPlanMarker', () => {
   test('stops the automatic continuation after a deploy plan result', () => {
     const marker = `${DEPLOYMENT_PLAN_MARKER}${JSON.stringify({
       id: 'deployment-1',
@@ -26,7 +26,6 @@ describe('latestMessageHasPendingDeploymentPlan', () => {
       },
     ];
 
-    expect(latestMessageHasPendingDeploymentPlan(messages)).toBe(true);
     expect(latestPendingDeploymentPlanMarker(messages)).toBe(marker);
   });
 
@@ -53,7 +52,6 @@ describe('latestMessageHasPendingDeploymentPlan', () => {
       { id: 'user-2', role: 'user', parts: [{ type: 'text', text: 'Change the title.' }] },
     ];
 
-    expect(latestMessageHasPendingDeploymentPlan(messages)).toBe(false);
     expect(latestPendingDeploymentPlanMarker(messages)).toBeNull();
   });
 

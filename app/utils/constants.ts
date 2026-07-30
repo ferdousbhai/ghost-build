@@ -30,5 +30,3 @@ const MAX_BACKOFF = 60000;
 export function backoffTime(numFailures: number) {
   return Math.min(MIN_BACKOFF * Math.pow(2, numFailures), MAX_BACKOFF) * Math.random();
 }
-
-export const MAX_CONSECUTIVE_DEPLOY_ERRORS = 5;

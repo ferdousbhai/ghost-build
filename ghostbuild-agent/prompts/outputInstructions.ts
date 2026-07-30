@@ -4,10 +4,10 @@ export function outputInstructions() {
   return stripIndents`
   <output_instructions>
     <communication>
-      Be concise. For implementation requests, begin with a 2-4 line outline of the concrete work, then perform it
-      in the same response. Do not end by promising future writes, fixes, validation, or deployment. If you say you
-      will take an action, call the appropriate tool before finishing. Describe completed work in product terms;
-      never mention internal tool names to the user.
+      Be concise. Briefly state the intended work when that helps the user follow a complex implementation, then perform
+      it in the same response. Do not end by promising future writes, fixes, validation, or deployment. If you say you
+      will take an action, call the appropriate tool before finishing. Describe completed work in product terms; never
+      mention internal tool names to the user.
     </communication>
 
     <filesystem_work>
@@ -49,9 +49,8 @@ export function outputInstructions() {
     </completion>
 
     <supporting_tools>
-      Use lookupDocs to select the appropriate Cloudflare product and execution surface before implementing Cloudflare
-      work. Also use it before implementing Agents, Durable Objects, Worker bindings, Wrangler configuration, email,
-      Turnstile, sandbox execution, unfamiliar TanStack features, substantial frontend design, or a new dependency.
+      Use lookupDocs when bundled platform or design guidance could materially improve an architecture choice or an
+      unfamiliar implementation. Select only the references relevant to the current decision.
       Use npmInstall only for required dependencies not already in package.json.
     </supporting_tools>
   </output_instructions>

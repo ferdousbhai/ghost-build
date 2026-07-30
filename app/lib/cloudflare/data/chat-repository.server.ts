@@ -12,7 +12,6 @@ export {
   enforceChatStorageRetention,
   getLatestStorageState,
   getLatestStorageStateForGeneration,
-  MAX_RETAINED_CHAT_STORAGE_STATES,
 } from './chat-storage-state-repository.server';
 
 type ChatInsertArgs = {

@@ -1,7 +1,8 @@
 import type { WebContainer, WebContainerProcess } from '@webcontainer/api';
 import { atom, type WritableAtom } from 'nanostores';
 import type { ITerminal, TerminalInitializationOptions } from '~/types/terminal';
-import { newGhostbuildShellProcess, newShellProcess } from '~/utils/shell';
+import { newGhostbuildShellProcess } from '~/utils/ghostbuild-shell';
+import { newShellProcess } from '~/utils/interactive-terminal';
 import { coloredText } from '~/utils/terminal';
 import { workbenchCurrentView } from './workbench-ui-state';
 import {

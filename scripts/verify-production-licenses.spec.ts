@@ -4,7 +4,6 @@ import {
   createThirdPartyLicenseArtifact,
   findLicenseNoticeErrors,
   findLicensePolicyErrors,
-  flattenLicenseReport,
   isPlatformNeutralProductionPackage,
 } from './verify-production-licenses.mjs';
 
@@ -17,23 +16,6 @@ const policy = {
 };
 
 describe('production dependency license inventory', () => {
-  it('flattens and sorts pnpm license output without local installation paths', () => {
-    expect(
-      flattenLicenseReport({
-        MIT: [{ name: 'z-package', versions: ['2.0.0'], paths: ['/private/install'], license: 'MIT' }],
-        'Apache-2.0': [{ name: 'a-package', versions: ['1.0.0'], paths: ['/other/install'], license: 'Apache-2.0' }],
-      }),
-    ).toEqual([
-      {
-        name: 'a-package',
-        version: '1.0.0',
-        reportedLicense: 'Apache-2.0',
-        packageLicense: 'Apache-2.0',
-      },
-      { name: 'z-package', version: '2.0.0', reportedLicense: 'MIT', packageLicense: 'MIT' },
-    ]);
-  });
-
   it('uses one platform-neutral inventory on macOS, Linux, and other build hosts', () => {
     expect(isPlatformNeutralProductionPackage({ name: 'portable' })).toBe(true);
     expect(isPlatformNeutralProductionPackage({ name: 'darwin-binding', os: ['darwin'], cpu: ['arm64'] })).toBe(false);
