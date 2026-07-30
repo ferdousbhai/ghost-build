@@ -87,6 +87,7 @@ describe('SubchatBar', () => {
           chatDisabled={false}
           sessionId="session"
           handleCreateSubchat={handleCreateSubchat}
+          handleRenameSubchat={() => Promise.resolve(true)}
           isSubchatLoaded
         />,
       );
@@ -114,6 +115,50 @@ describe('SubchatBar', () => {
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     expect(createButton?.disabled).toBe(false);
   });
+
+  it('lets the user overwrite the current chat title', async () => {
+    const handleRenameSubchat = vi.fn().mockResolvedValue(true);
+    const onSubchatTitleChange = vi.fn();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        <SubchatBar
+          subchats={[subchat(0, 'Pocket Poll')]}
+          currentSubchatIndex={0}
+          isStreaming={false}
+          chatDisabled={false}
+          sessionId="session"
+          handleCreateSubchat={() => Promise.resolve(true)}
+          handleRenameSubchat={handleRenameSubchat}
+          onSubchatTitleChange={onSubchatTitleChange}
+          isSubchatLoaded
+        />,
+      );
+    });
+
+    act(() => {
+      document.querySelector<HTMLButtonElement>('button[aria-label="Rename current chat"]')?.click();
+    });
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Chat title"]');
+    expect(input?.value).toBe('Pocket Poll');
+
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      valueSetter?.call(input, 'Team Voting');
+      input?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const saveButton = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Save title',
+    );
+    await act(async () => saveButton?.click());
+
+    expect(handleRenameSubchat).toHaveBeenCalledWith('Team Voting');
+    expect(onSubchatTitleChange).toHaveBeenCalledWith(0, 'Team Voting');
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
 });
 
 function renderSubchatBar({
@@ -131,6 +176,7 @@ function renderSubchatBar({
       chatDisabled={false}
       sessionId="session"
       handleCreateSubchat={() => Promise.resolve(true)}
+      handleRenameSubchat={() => Promise.resolve(true)}
       isSubchatLoaded
     />,
   );

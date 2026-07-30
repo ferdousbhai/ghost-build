@@ -22,6 +22,9 @@ import { useChatHistoryProcessing } from './useChatHistoryProcessing';
 import { useCurrentToolStatus } from './useCurrentToolStatus';
 import { useBuildProgress } from './useBuildProgress';
 import { useChatMessageSubmission } from './useChatMessageSubmission';
+import { deriveProvisionalTitle } from '@summonghost/title-generation';
+import { subchatIndexStore } from '~/lib/stores/subchats';
+import { applyLiveSubchatTitle, type LiveSubchatTitle } from './subchat-model';
 
 const logger = createScopedLogger('Chat');
 
@@ -94,7 +97,13 @@ const AuthenticatedChat = memo(
   }: ChatProps & { pendingInitialMessage: string | null; clearPendingInitialMessage: () => void }) => {
     const sessionId = useSessionIdOrNullOrLoading();
     const chatInitialId = useStore(initialIdStore);
+    const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
     const hasMultipleSubchats = (subchats?.length ?? 0) > 1;
+    const [liveSubchatTitle, setLiveSubchatTitle] = useState<LiveSubchatTitle | null>(null);
+    const handleSubchatTitleChange = useCallback(
+      (subchatIndex: number, title: string) => setLiveSubchatTitle({ subchatIndex, title }),
+      [],
+    );
     const [chatStarted, setChatStarted] = useState(initialMessages.length > 0 || hasMultipleSubchats);
     const actionAlert = useStore(workbenchStore.alert);
     const bootState = useContainerBootState();
@@ -163,6 +172,7 @@ const AuthenticatedChat = memo(
     } = useBuilderAgentChat({
       chatInitialId,
       initialMessages,
+      onSubchatTitle: handleSubchatTitleChange,
       transcript,
       seedTranscript,
     });
@@ -216,10 +226,20 @@ const AuthenticatedChat = memo(
       enableAutoScroll,
       onAbort: abort,
       onStartChat: startChat,
+      onFirstPrompt: (prompt) => {
+        const title = deriveProvisionalTitle(prompt);
+        if (title) {
+          handleSubchatTitleChange(currentSubchatIndex, title);
+        }
+      },
       onBuilderRequestStart,
       pendingMessage: pendingInitialMessage,
       clearPendingMessage: clearPendingInitialMessage,
     });
+    const visibleSubchats = useMemo(
+      () => applyLiveSubchatTitle(subchats, liveSubchatTitle, transcript),
+      [liveSubchatTitle, subchats, transcript],
+    );
 
     return (
       <BaseChat
@@ -241,7 +261,8 @@ const AuthenticatedChat = memo(
         disabledReason={disabledReason}
         sendMessageInProgress={sendMessageInProgress}
         onRewindToMessage={rewindToMessage}
-        subchats={subchats}
+        subchats={visibleSubchats}
+        onSubchatTitleChange={handleSubchatTitleChange}
       />
     );
   },

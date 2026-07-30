@@ -62,6 +62,7 @@ type DataOperationResults = {
   'socialShare.share': string;
   'subchats.create': number;
   'subchats.get': DataPage<SubchatSummary, SubchatCursor>;
+  'subchats.setDescription': null;
 };
 
 export type DataOperationPath = keyof typeof dataOperationArgSchemas;
@@ -96,5 +97,6 @@ export const api = {
   subchats: {
     create: 'subchats.create',
     get: 'subchats.get',
+    setDescription: 'subchats.setDescription',
   },
 } as const satisfies Record<string, DataApiNamespace>;

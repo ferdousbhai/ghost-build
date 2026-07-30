@@ -134,18 +134,6 @@ Run `pnpm run provision:production` separately when bootstrapping production res
 their checked-in identifiers. Cloudflare Workers Builds owns both pull-request validation and production deployment;
 the repository intentionally contains no GitHub Actions workflows.
 
-### Backup-quota rollout
-
-`CHAT_BACKUP_STORAGE_QUOTA_MODE` is intentionally staged. Deploy migration `0020` with `shadow`, allow the scheduled
-reconciler to complete at least two discovery passes and replace every estimated object size, then change the value to
-`enforce` in a separately validated deployment. Before enforcement, confirm `backfill_completed_at` is non-null, no
-`chat_backup_objects` rows remain with `size_source = 'estimated'`, and no expired pending admission remains. Byte,
-object, and tenant-wide upload/clone request limits are exact D1 admission controls; `CHAT_BACKUP_RATE_LIMITER` is only
-an early edge-shedding layer.
-
-If migration or rollout verification fails, stop before publishing or enforcement and use the D1 Time Travel bookmark
-printed by the deploy pipeline to plan recovery. Never infer quota readiness from a successful Worker upload alone.
-
 Generated applications deploy through the server-owned workflow in
 `app/lib/.server/cloudflare/deployment-workflow.ts`. Never route a user's deployment through Ghostbuild's own
 Cloudflare credentials. AppAgent projects provision `DB` for application data and a distinct `AGENT_SECURITY_DB` for

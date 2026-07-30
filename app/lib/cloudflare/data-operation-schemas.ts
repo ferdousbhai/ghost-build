@@ -35,6 +35,10 @@ export const dataOperationArgSchemas = {
   }),
   'subchats.get': chatArgsSchema.extend({ cursor: subchatCursorSchema, limit: pageLimitSchema }),
   'subchats.create': chatArgsSchema,
+  'subchats.setDescription': chatArgsSchema.extend({
+    subchatIndex: subchatIndexSchema,
+    description: descriptionSchema.trim().min(1),
+  }),
   'snapshot.getSnapshotUrl': chatArgsSchema,
   'share.create': chatIdentityArgsSchema,
   'share.getShareDescription': codeArgsSchema,

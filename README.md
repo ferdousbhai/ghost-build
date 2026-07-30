@@ -33,17 +33,8 @@ Production provisioning and the Cloudflare Workers Builds deployment path are do
 | `pnpm run deploy`           | Validate, verify, migrate, and deploy      |
 | `pnpm run sbom:production`  | Print a reproducible production SPDX SBOM  |
 
-## Repository Map
-
-- `app/server.ts` is the root Cloudflare Worker entrypoint.
-- `app/agents/` and `app/lib/.server/` own the durable agent runtime and model orchestration.
-- `app/components/` and `app/routes/` contain the product interface.
-- `app/lib/cloudflare/` contains persistence and data-operation boundaries.
-- `ghostbuild-agent/` contains shared prompts, protocols, parsing, and tool definitions.
-- `template/` is the independent source project copied into generated applications.
-- `migrations/` contains the root D1 schema history.
-
-See [AGENTS.md](AGENTS.md) for a source index and [DEVELOPMENT.md](DEVELOPMENT.md) for contributor workflows.
+Use [AGENTS.md](AGENTS.md) as the source index, [ARCHITECTURE.md](ARCHITECTURE.md) for runtime boundaries, and
+[DEVELOPMENT.md](DEVELOPMENT.md) for contributor workflows.
 
 ## Contributing and Security
 

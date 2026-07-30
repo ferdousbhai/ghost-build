@@ -16,6 +16,7 @@ const APPROVED_PNPM_OVERRIDES = new Map([
 
 const APPROVED_MINIMUM_RELEASE_AGE_EXCLUSIONS = new Set([
   "@summonghost/compaction@0.1.1",
+  "@summonghost/title-generation@0.1.0",
 ]);
 
 const MAX_PNPM_WORKSPACE_POLICY_BYTES = 64 * 1024;

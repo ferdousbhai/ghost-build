@@ -152,6 +152,67 @@ export async function setGeneratedDescriptionIfMissing(
   return result.meta.changes > 0;
 }
 
+export async function setGeneratedSubchatDescription(
+  db: D1Database,
+  args: {
+    sessionId: string;
+    id: string;
+    subchatIndex: number;
+    description: string;
+    provisionalDescription: string | null;
+  },
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE chat_message_states
+       SET description = ?
+       WHERE chat_id = (
+         SELECT id FROM chats
+         WHERE creator_id = ? AND (initial_id = ? OR url_id = ?) AND is_deleted = 0
+       )
+         AND subchat_index = ?
+         AND transcript_generation = (
+           SELECT generation FROM chat_transcripts
+           WHERE chat_id = chat_message_states.chat_id
+             AND subchat_index = chat_message_states.subchat_index
+         )
+         AND (
+           description IS NULL
+           OR description = ?
+         )`,
+    )
+    .bind(args.description, args.sessionId, args.id, args.id, args.subchatIndex, args.provisionalDescription)
+    .run();
+  return result.meta.changes > 0;
+}
+
+export async function setSubchatDescription(
+  db: D1Database,
+  args: { sessionId: string; chatId: string; subchatIndex: number; description: string },
+): Promise<null> {
+  const result = await db
+    .prepare(
+      `UPDATE chat_message_states
+       SET description = ?
+       WHERE chat_id = (
+         SELECT id FROM chats
+         WHERE creator_id = ? AND (initial_id = ? OR url_id = ?) AND is_deleted = 0
+       )
+         AND subchat_index = ?
+         AND transcript_generation = (
+           SELECT generation FROM chat_transcripts
+           WHERE chat_id = chat_message_states.chat_id
+             AND subchat_index = chat_message_states.subchat_index
+         )`,
+    )
+    .bind(args.description, args.sessionId, args.chatId, args.chatId, args.subchatIndex)
+    .run();
+  if (result.meta.changes === 0) {
+    throw new Error('Chat not found');
+  }
+  return null;
+}
+
 export async function removeChat(db: D1Database, args: { sessionId: string; id: string }) {
   const chat = await findChat(db, { id: args.id, sessionId: args.sessionId });
   if (chat) {

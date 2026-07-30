@@ -33,6 +33,8 @@ import {
 import { BuilderWorkspaceSyncController } from '~/lib/stores/builder-workspace-sync.client';
 import { ContainerBootState, waitForContainerBootState } from '~/lib/stores/containerBootState';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
+import { useQueryClient } from '@tanstack/react-query';
+import { subchatQueryKey } from '~/lib/cloudflare/data-hooks';
 
 const logger = createScopedLogger('BuilderAgentChat');
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
@@ -40,10 +42,13 @@ const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
 export function useBuilderAgentChat(args: {
   chatInitialId: string;
   initialMessages: GhostbuildMessage[];
+  onSubchatTitle: (subchatIndex: number, title: string) => void;
   transcript: TranscriptIdentity;
   seedTranscript: boolean;
 }) {
   const currentSubchatIndex = useStore(subchatIndexStore);
+  const queryClient = useQueryClient();
+  const generatedSubchatTitleUpdatedAtRef = useRef<string | null>(null);
   const contextManager = useRef(
     new ChatContextManager(
       () => workbenchStore.currentDocument.get(),
@@ -54,6 +59,21 @@ export function useBuilderAgentChat(args: {
   const builderAgent = useAgent<BuilderAgent, BuilderAgentState>({
     agent: 'BuilderAgent',
     name: args.transcript.agentName,
+    onStateUpdate: (state) => {
+      const generatedTitle = state.generatedSubchatTitle;
+      if (!generatedTitle || generatedSubchatTitleUpdatedAtRef.current === generatedTitle.updatedAt) {
+        return;
+      }
+      generatedSubchatTitleUpdatedAtRef.current = generatedTitle.updatedAt;
+      args.onSubchatTitle(generatedTitle.subchatIndex, generatedTitle.title);
+      const sessionId = sessionIdStore.get();
+      const chatId = chatIdStore.get();
+      if (typeof sessionId === 'string' && chatId) {
+        void queryClient.invalidateQueries({
+          queryKey: subchatQueryKey({ chatId, sessionId }),
+        });
+      }
+    },
   });
   const workspaceControllerRef = useRef<BuilderWorkspaceSyncController | null>(null);
   const workspaceKey = args.transcript.agentName;

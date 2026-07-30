@@ -7,6 +7,11 @@ export interface SubchatOption {
   value: number;
 }
 
+export interface LiveSubchatTitle {
+  subchatIndex: number;
+  title: string;
+}
+
 export function getSubchatLabel(subchatIndex: number, description?: string): string {
   const normalizedDescription = description?.trim();
   return normalizedDescription || (subchatIndex === 0 ? 'Initial chat' : `Feature #${subchatIndex}`);
@@ -31,4 +36,46 @@ export function getSubchatNavigation(subchatCount: number, currentSubchatIndex: 
     hasMultipleSubchats,
     latestSubchatIndex,
   };
+}
+
+export function applyLiveSubchatTitle(
+  subchats: SubchatSummary[] | undefined,
+  liveTitle: LiveSubchatTitle | null,
+  transcript: SubchatSummary['transcript'],
+): SubchatSummary[] | undefined {
+  if (!liveTitle) {
+    return subchats;
+  }
+
+  if (!subchats) {
+    return [
+      {
+        subchatIndex: liveTitle.subchatIndex,
+        description: liveTitle.title,
+        updatedAt: Date.now(),
+        transcript,
+      },
+    ];
+  }
+
+  const persisted = subchats.find((subchat) => subchat.subchatIndex === liveTitle.subchatIndex);
+  if (persisted?.description?.trim()) {
+    return subchats;
+  }
+
+  if (!persisted) {
+    return [
+      ...subchats,
+      {
+        subchatIndex: liveTitle.subchatIndex,
+        description: liveTitle.title,
+        updatedAt: Date.now(),
+        transcript,
+      },
+    ];
+  }
+
+  return subchats.map((subchat) =>
+    subchat.subchatIndex === liveTitle.subchatIndex ? { ...subchat, description: liveTitle.title } : subchat,
+  );
 }

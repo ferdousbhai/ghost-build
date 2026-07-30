@@ -98,6 +98,9 @@ importers:
       '@summonghost/compaction':
         specifier: ^0.1.1
         version: 0.1.1
+      '@summonghost/title-generation':
+        specifier: 0.1.0
+        version: 0.1.0
       '@tanstack/db':
         specifier: ^0.6.16
         version: 0.6.16(typescript@6.0.3)
@@ -2194,6 +2197,9 @@ packages:
 
   '@summonghost/compaction@0.1.1':
     resolution: {integrity: sha512-XB/jEB4ocO1Xwugtapqum1xQkHKw4c0p1QwVjfmSYWGP27tH8+Bbe/ycqmCztwWEN3ZScKDZKFy2CxMlhjDVBA==}
+
+  '@summonghost/title-generation@0.1.0':
+    resolution: {integrity: sha512-VVZUO60wlrrD3ra79PAQn7q1MeSCzIFdpYFfq7l3lpirQsqSNkfSIvT+sAt6o27SBCsWboM8rZzNgeqHPurlmw==}
 
   '@tanstack/db-ivm@0.1.18':
     resolution: {integrity: sha512-+pZJiRKdoKRM5Epq9T7otD9ZJl82pRFauo7LKuJGrarjVKQ7r+QQlPe3kGdN9LEKSnuNGIWjX9OOY4M8kH4eLw==}
@@ -7481,6 +7487,8 @@ snapshots:
       - typescript
 
   '@summonghost/compaction@0.1.1': {}
+
+  '@summonghost/title-generation@0.1.0': {}
 
   '@tanstack/db-ivm@0.1.18(typescript@6.0.3)':
     dependencies:

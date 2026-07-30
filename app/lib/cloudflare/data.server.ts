@@ -21,6 +21,7 @@ import {
   removeChat,
   rewindChat,
   setDescription,
+  setSubchatDescription,
 } from './data/chat-service.server';
 import { ensureDataBindings, internalErrorResponse, parseRequestQuery } from './data/http.server';
 import { allocateObjectKey, objectResponse, putObjectAtKey } from './data/object-storage.server';
@@ -68,6 +69,7 @@ import {
   releaseChatBackupAdmissionBestEffort,
   reserveChatBackupBytes,
 } from './data/chat-backup-quota.server';
+import { deriveProvisionalTitle } from '@summonghost/title-generation';
 import { admitThumbnailUpload, releaseThumbnailAdmissionBestEffort } from './data/thumbnail-quota.server';
 
 const dataOperationPathSchema = z.enum(
@@ -195,7 +197,7 @@ export async function storeChatAction({ request, env }: { request: Request; env:
         (messageBlob instanceof Blob ? 1 : 0) + (snapshotBlob instanceof Blob ? 1 : 0),
       );
       await enforceChatStorageRetention(env.DB, { chatId: chat.id, reserveStates: 1 });
-      const initialDescription = typeof firstMessage === 'string' ? firstMessage.slice(0, 120) : null;
+      const initialDescription = typeof firstMessage === 'string' ? deriveProvisionalTitle(firstMessage) : null;
       const storageKey = messageBlob instanceof Blob ? allocateObjectKey('message-history') : null;
       const snapshotKey = snapshotBlob instanceof Blob ? allocateObjectKey('snapshots') : null;
       const storageGcReceipt = storageKey ? await queueObjectGcCandidate(env.DB, storageKey) : null;
@@ -496,6 +498,8 @@ function runKnownDataOperation(env: Env, path: DataOperationPath, rawArgs: unkno
       return getSubchats(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'subchats.create':
       return createSubchat(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
+    case 'subchats.setDescription':
+      return setSubchatDescription(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'snapshot.getSnapshotUrl':
       return getSnapshotUrl(env, dataOperationArgSchemas[path].parse(rawArgs));
     case 'share.create':

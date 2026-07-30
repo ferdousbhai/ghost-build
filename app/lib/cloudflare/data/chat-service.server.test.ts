@@ -8,6 +8,8 @@ import {
   removeChat,
   rewindChat,
   setGeneratedDescriptionIfMissing,
+  setGeneratedSubchatDescription,
+  setSubchatDescription,
 } from './chat-service.server';
 import type { ChatMessageStateRow, ChatRow, ChatTranscriptRow } from './types';
 import { AGENT_GC_GRACE_PERIOD_MS } from './agent-gc.server';
@@ -43,6 +45,64 @@ describe('setGeneratedDescriptionIfMissing', () => {
         description: 'Generated title',
       }),
     ).resolves.toBe(false);
+  });
+});
+
+describe('setGeneratedSubchatDescription', () => {
+  it('replaces the current transcript generation label through an owner-scoped update', async () => {
+    const run = vi.fn().mockResolvedValue({ meta: { changes: 1 } });
+    const bind = vi.fn(() => ({ run }));
+    const prepare = vi.fn(() => ({ bind }));
+
+    await expect(
+      setGeneratedSubchatDescription({ prepare } as unknown as D1Database, {
+        sessionId: 'user-1',
+        id: 'chat-1',
+        subchatIndex: 2,
+        description: 'Pocket Poll',
+        provisionalDescription: 'polling app',
+      }),
+    ).resolves.toBe(true);
+
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('SET description = ?'));
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('transcript_generation'));
+    expect(bind).toHaveBeenCalledWith('Pocket Poll', 'user-1', 'chat-1', 'chat-1', 2, 'polling app');
+  });
+
+  it('does not replace a manual title that raced the generated title', async () => {
+    const run = vi.fn().mockResolvedValue({ meta: { changes: 0 } });
+    const db = {
+      prepare: vi.fn(() => ({ bind: vi.fn(() => ({ run })) })),
+    } as unknown as D1Database;
+
+    await expect(
+      setGeneratedSubchatDescription(db, {
+        sessionId: 'user-1',
+        id: 'chat-1',
+        subchatIndex: 0,
+        description: 'Generated title',
+        provisionalDescription: 'provisional title',
+      }),
+    ).resolves.toBe(false);
+  });
+});
+
+describe('setSubchatDescription', () => {
+  it('lets the owner overwrite the current chat title', async () => {
+    const run = vi.fn().mockResolvedValue({ meta: { changes: 1 } });
+    const bind = vi.fn(() => ({ run }));
+    const prepare = vi.fn(() => ({ bind }));
+
+    await expect(
+      setSubchatDescription({ prepare } as unknown as D1Database, {
+        sessionId: 'user-1',
+        chatId: 'chat-1',
+        subchatIndex: 0,
+        description: 'My custom title',
+      }),
+    ).resolves.toBeNull();
+
+    expect(bind).toHaveBeenCalledWith('My custom title', 'user-1', 'chat-1', 'chat-1', 0);
   });
 });
 
