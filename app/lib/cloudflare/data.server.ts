@@ -24,7 +24,7 @@ import {
   setSubchatDescription,
 } from './data/chat-service.server';
 import { ensureDataBindings, internalErrorResponse, parseRequestQuery } from './data/http.server';
-import { allocateObjectKey, objectResponse, putObjectAtKey } from './data/object-storage.server';
+import { allocateCustomerObjectKey, objectResponse, putObjectAtKey } from './data/object-storage.server';
 import { drainDeferredDataGcBestEffort } from './data/deferred-gc.server';
 import {
   cancelObjectGcCandidate,
@@ -198,8 +198,8 @@ export async function storeChatAction({ request, env }: { request: Request; env:
       );
       await enforceChatStorageRetention(env.DB, { chatId: chat.id, reserveStates: 1 });
       const initialDescription = typeof firstMessage === 'string' ? deriveProvisionalTitle(firstMessage) : null;
-      const storageKey = messageBlob instanceof Blob ? allocateObjectKey('message-history') : null;
-      const snapshotKey = snapshotBlob instanceof Blob ? allocateObjectKey('snapshots') : null;
+      const storageKey = messageBlob instanceof Blob ? allocateCustomerObjectKey(sessionId, 'message-history') : null;
+      const snapshotKey = snapshotBlob instanceof Blob ? allocateCustomerObjectKey(sessionId, 'snapshots') : null;
       const storageGcReceipt = storageKey ? await queueObjectGcCandidate(env.DB, storageKey) : null;
       if (storageKey && messageBlob instanceof Blob) {
         await registerChatBackupObject(env.DB, {

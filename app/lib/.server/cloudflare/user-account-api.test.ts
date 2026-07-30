@@ -184,6 +184,23 @@ describe('UserCloudflareAccountApi', () => {
     );
   });
 
+  test('accepts a bucket concurrently created after its create request loses the race', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: false }, { status: 404 }))
+      .mockResolvedValueOnce(
+        Response.json({ success: false, errors: [{ message: 'bucket already exists' }] }, { status: 409 }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: { name: 'ghostbuild-user-data' } }));
+    const api = new UserCloudflareAccountApi('account-1', 'token', request);
+
+    await expect(api.ensureR2Bucket('ghostbuild-user-data')).resolves.toEqual({
+      id: 'ghostbuild-user-data',
+      name: 'ghostbuild-user-data',
+    });
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
   test('does not leak the connected token through provider errors', async () => {
     const request = vi
       .fn<typeof fetch>()
@@ -272,5 +289,54 @@ describe('UserCloudflareAccountApi', () => {
       new UserCloudflareAccountApi('account-1', 'token', request).readActiveWorkerDeployment('worker-name'),
     ).rejects.toThrow('ambiguous active Worker deployment');
     expect(request).toHaveBeenCalledOnce();
+  });
+
+  test('ensures the customer bucket and uploads an object with bearer authorization', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: { name: 'ghostbuild-user-data' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const authorizeRequest = vi.fn(async () => undefined);
+    const api = new UserCloudflareAccountApi('account-1', 'secret-token', request, authorizeRequest);
+
+    await api.ensureR2Bucket('ghostbuild-user-data');
+    await api.putR2Object(
+      'ghostbuild-user-data',
+      'customer-r2/v1/owner/snapshots/object',
+      new Blob(['data']),
+      'app/test',
+    );
+
+    expect(authorizeRequest).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      'https://api.cloudflare.com/client/v4/accounts/account-1/r2/buckets/ghostbuild-user-data',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({ authorization: 'Bearer secret-token' }),
+      }),
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      'https://api.cloudflare.com/client/v4/accounts/account-1/r2/buckets/ghostbuild-user-data/objects/customer-r2/v1/owner/snapshots/object',
+      expect.objectContaining({
+        method: 'PUT',
+        headers: expect.objectContaining({
+          authorization: 'Bearer secret-token',
+          'content-type': 'app/test',
+        }),
+      }),
+    );
+  });
+
+  test('treats a missing customer object as absent and delete as idempotent', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+    const api = new UserCloudflareAccountApi('account-1', 'token', request);
+
+    await expect(api.getR2Object('ghostbuild-user-data', 'missing/key')).resolves.toBeNull();
+    await expect(api.deleteR2Object('ghostbuild-user-data', 'missing/key')).resolves.toBeUndefined();
   });
 });

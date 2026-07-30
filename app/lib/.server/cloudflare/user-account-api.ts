@@ -2,6 +2,7 @@ import { deploymentPlanResourceName, type DeploymentPlan, type DeploymentResourc
 
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
 const CLOUDFLARE_API_TIMEOUT_MS = 30_000;
+const R2_BUCKET_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 
 type WorkerBinding = {
   name?: string;
@@ -66,6 +67,11 @@ export class UserCloudflareAccountApi {
 
   async createR2ForPlan(plan: DeploymentPlan): Promise<{ id: string; name: string }> {
     const resourceName = requirePlanResourceName(plan, 'r2', 'APP_STORAGE');
+    return this.createR2Bucket(resourceName);
+  }
+
+  async createR2Bucket(resourceName: string): Promise<{ id: string; name: string }> {
+    requireR2BucketName(resourceName);
     const result = await this.call<{ name?: string }>('/r2/buckets', {
       method: 'POST',
       body: JSON.stringify({ name: resourceName }),
@@ -78,10 +84,71 @@ export class UserCloudflareAccountApi {
 
   async ensureR2ForPlan(plan: DeploymentPlan): Promise<{ id: string; name: string }> {
     const resourceName = requirePlanResourceName(plan, 'r2', 'APP_STORAGE');
+    return this.ensureR2Bucket(resourceName);
+  }
+
+  async ensureR2Bucket(resourceName: string): Promise<{ id: string; name: string }> {
+    requireR2BucketName(resourceName);
     const existing = await this.callOptional<{ name?: string }>(`/r2/buckets/${encodeURIComponent(resourceName)}`, {
       method: 'GET',
     });
-    return existing?.name === resourceName ? { id: resourceName, name: resourceName } : this.createR2ForPlan(plan);
+    if (existing?.name === resourceName) {
+      return { id: resourceName, name: resourceName };
+    }
+    try {
+      return await this.createR2Bucket(resourceName);
+    } catch (error) {
+      if (!(error instanceof CloudflareAccountApiError)) {
+        throw error;
+      }
+      const raced = await this.callOptional<{ name?: string }>(`/r2/buckets/${encodeURIComponent(resourceName)}`, {
+        method: 'GET',
+      });
+      if (raced?.name === resourceName) {
+        return { id: resourceName, name: resourceName };
+      }
+      throw error;
+    }
+  }
+
+  async putR2Object(bucketName: string, objectKey: string, body: BodyInit, contentType: string): Promise<void> {
+    const response = await this.callRaw(r2ObjectPath(bucketName, objectKey), {
+      method: 'PUT',
+      body,
+      headers: { 'content-type': contentType || 'application/octet-stream' },
+    });
+    if (!response.ok) {
+      throw await cloudflareRawApiError(response);
+    }
+  }
+
+  async getR2Object(bucketName: string, objectKey: string): Promise<Response | null> {
+    const response = await this.callRaw(r2ObjectPath(bucketName, objectKey), { method: 'GET' });
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      throw await cloudflareRawApiError(response);
+    }
+    return response;
+  }
+
+  async headR2Object(bucketName: string, objectKey: string): Promise<Response | null> {
+    const response = await this.callRaw(r2ObjectPath(bucketName, objectKey), { method: 'HEAD' });
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      throw await cloudflareRawApiError(response);
+    }
+    return response;
+  }
+
+  async deleteR2Object(bucketName: string, objectKey: string): Promise<void> {
+    const response = await this.callRaw(r2ObjectPath(bucketName, objectKey), { method: 'DELETE' });
+    if (response.status !== 404 && !response.ok) {
+      throw await cloudflareRawApiError(response);
+    }
   }
 
   async getWorkersSubdomain(): Promise<string> {
@@ -156,13 +223,9 @@ export class UserCloudflareAccountApi {
   }
 
   private async callOptional<T>(path: string, init: RequestInit): Promise<T | null> {
-    await this.authorizeRequest?.();
-    const execute = this.request;
-    const response = await execute(`${API_ROOT}/accounts/${encodeURIComponent(this.accountId)}${path}`, {
+    const response = await this.callRaw(path, {
       ...init,
-      signal: init.signal ?? AbortSignal.timeout(CLOUDFLARE_API_TIMEOUT_MS),
       headers: {
-        authorization: `Bearer ${this.accessToken}`,
         'content-type': 'application/json',
         ...init.headers,
       },
@@ -176,6 +239,19 @@ export class UserCloudflareAccountApi {
       throw new CloudflareAccountApiError(providerMessage || `Cloudflare API request failed (${response.status}).`);
     }
     return payload.result;
+  }
+
+  private async callRaw(path: string, init: RequestInit): Promise<Response> {
+    await this.authorizeRequest?.();
+    const execute = this.request;
+    return execute(`${API_ROOT}/accounts/${encodeURIComponent(this.accountId)}${path}`, {
+      ...init,
+      signal: init.signal ?? AbortSignal.timeout(CLOUDFLARE_API_TIMEOUT_MS),
+      headers: {
+        authorization: `Bearer ${this.accessToken}`,
+        ...init.headers,
+      },
+    });
   }
 }
 
@@ -192,4 +268,28 @@ function requirePlanResourceName(plan: DeploymentPlan, type: DeploymentResourceT
     throw new CloudflareAccountApiError(`Approved deployment plan has an invalid ${type} resource.`);
   }
   return name;
+}
+
+function requireR2BucketName(name: string): void {
+  if (!R2_BUCKET_NAME_PATTERN.test(name)) {
+    throw new CloudflareAccountApiError('R2 bucket name is invalid.');
+  }
+}
+
+function r2ObjectPath(bucketName: string, objectKey: string): string {
+  requireR2BucketName(bucketName);
+  if (!objectKey || objectKey.length > 1_024) {
+    throw new CloudflareAccountApiError('R2 object key is invalid.');
+  }
+  const encodedKey = objectKey.split('/').map(encodeURIComponent).join('/');
+  return `/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodedKey}`;
+}
+
+async function cloudflareRawApiError(response: Response): Promise<CloudflareAccountApiError> {
+  const payload = (await response
+    .clone()
+    .json()
+    .catch(() => null)) as CloudflareEnvelope<unknown> | null;
+  const providerMessage = payload?.errors?.find((error) => error.message)?.message;
+  return new CloudflareAccountApiError(providerMessage || `Cloudflare API request failed (${response.status}).`);
 }

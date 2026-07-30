@@ -6,7 +6,13 @@ import {
   queueObjectGcCandidate,
   sweepObjectGcCandidatesBestEffort,
 } from './object-gc.server';
-import { allocateObjectKey, putObjectAtKey } from './object-storage.server';
+import {
+  allocateCustomerObjectKey,
+  allocateObjectKey,
+  isCustomerObjectKey,
+  objectResponse,
+  putObjectAtKey,
+} from './object-storage.server';
 import {
   cloneShare,
   createShare,
@@ -19,6 +25,7 @@ import type { SocialShareRow } from './types';
 import {
   createChatBackupCloneQuotaExtension,
   enforceChatBackupEdgeRateLimit,
+  registerMaterializedChatBackupObject,
   releaseChatBackupCloneAdmissionBestEffort,
   throwIfChatBackupCloneQuotaDenied,
 } from './chat-backup-quota.server';
@@ -34,7 +41,10 @@ vi.mock('./chat-repository.server', () => ({
   requireChat: vi.fn(),
 }));
 vi.mock('./object-storage.server', () => ({
+  allocateCustomerObjectKey: vi.fn(),
   allocateObjectKey: vi.fn(),
+  isCustomerObjectKey: vi.fn(() => false),
+  objectResponse: vi.fn(),
   putObjectAtKey: vi.fn(),
   storageUrl: vi.fn((key: string) => `/api/storage/${encodeURIComponent(key)}`),
 }));
@@ -53,6 +63,7 @@ vi.mock('./chat-backup-quota.server', () => ({
     verifyReceipt: vi.fn().mockResolvedValue(true),
   })),
   enforceChatBackupEdgeRateLimit: vi.fn().mockResolvedValue(undefined),
+  registerMaterializedChatBackupObject: vi.fn().mockResolvedValue(undefined),
   releaseChatBackupCloneAdmissionBestEffort: vi.fn().mockResolvedValue(undefined),
   throwIfChatBackupCloneQuotaDenied: vi.fn().mockResolvedValue(undefined),
 }));
@@ -67,6 +78,9 @@ const requireChatMock = vi.mocked(requireChat);
 const getLatestStorageStateMock = vi.mocked(getLatestStorageState);
 const insertChatWithStateMock = vi.mocked(insertChatWithState);
 const allocateObjectKeyMock = vi.mocked(allocateObjectKey);
+const allocateCustomerObjectKeyMock = vi.mocked(allocateCustomerObjectKey);
+const isCustomerObjectKeyMock = vi.mocked(isCustomerObjectKey);
+const objectResponseMock = vi.mocked(objectResponse);
 const prepareObjectGcCandidateStatementsMock = vi.mocked(prepareObjectGcCandidateStatements);
 const queueObjectGcCandidateMock = vi.mocked(queueObjectGcCandidate);
 const cancelObjectGcCandidateMock = vi.mocked(cancelObjectGcCandidate);
@@ -74,6 +88,7 @@ const sweepObjectGcCandidatesBestEffortMock = vi.mocked(sweepObjectGcCandidatesB
 const putObjectAtKeyMock = vi.mocked(putObjectAtKey);
 const createChatBackupCloneQuotaExtensionMock = vi.mocked(createChatBackupCloneQuotaExtension);
 const enforceChatBackupEdgeRateLimitMock = vi.mocked(enforceChatBackupEdgeRateLimit);
+const registerMaterializedChatBackupObjectMock = vi.mocked(registerMaterializedChatBackupObject);
 const releaseChatBackupCloneAdmissionBestEffortMock = vi.mocked(releaseChatBackupCloneAdmissionBestEffort);
 const throwIfChatBackupCloneQuotaDeniedMock = vi.mocked(throwIfChatBackupCloneQuotaDenied);
 const publishThumbnailReplacementMock = vi.mocked(publishThumbnailReplacement);
@@ -294,6 +309,13 @@ describe('share persistence', () => {
     getLatestStorageStateMock.mockReset();
     insertChatWithStateMock.mockReset();
     enforceChatBackupEdgeRateLimitMock.mockReset().mockResolvedValue(undefined);
+    allocateCustomerObjectKeyMock.mockReset();
+    isCustomerObjectKeyMock.mockReset().mockReturnValue(false);
+    objectResponseMock.mockReset();
+    putObjectAtKeyMock.mockReset().mockResolvedValue(undefined);
+    queueObjectGcCandidateMock.mockReset();
+    cancelObjectGcCandidateMock.mockReset();
+    registerMaterializedChatBackupObjectMock.mockReset().mockResolvedValue(undefined);
     createChatBackupCloneQuotaExtensionMock.mockClear();
     releaseChatBackupCloneAdmissionBestEffortMock.mockClear();
     throwIfChatBackupCloneQuotaDeniedMock.mockClear();
@@ -445,6 +467,39 @@ describe('share persistence', () => {
       },
       expect.objectContaining({ admissionId: 'clone-admission' }),
     );
+  });
+
+  test('materializes customer-owned share objects into the clone owner account', async () => {
+    const db = shareLookupDb(legacyShare({ chat_history_key: 'customer-history', snapshot_key: 'customer-snapshot' }));
+    isCustomerObjectKeyMock.mockReturnValue(true);
+    objectResponseMock
+      .mockResolvedValueOnce(new Response(new Blob(['history'])))
+      .mockResolvedValueOnce(new Response(new Blob(['snapshot'])));
+    allocateCustomerObjectKeyMock.mockReturnValueOnce('cloned-history').mockReturnValueOnce('cloned-snapshot');
+    queueObjectGcCandidateMock.mockImplementation(async (_db, storageKey) => ({
+      storageKey,
+      notBefore: 123,
+    }));
+    cancelObjectGcCandidateMock.mockResolvedValue(true);
+
+    await cloneShare(cloneEnv(db), { shareCode: STRONG_SHARE_CODE, sessionId: 'session' });
+
+    expect(allocateCustomerObjectKeyMock).toHaveBeenNthCalledWith(1, 'session', 'message-history');
+    expect(allocateCustomerObjectKeyMock).toHaveBeenNthCalledWith(2, 'session', 'snapshots');
+    expect(registerMaterializedChatBackupObjectMock).toHaveBeenCalledTimes(2);
+    expect(putObjectAtKeyMock).toHaveBeenCalledTimes(2);
+    expect(createChatBackupCloneQuotaExtensionMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ ownerId: 'session', storageKeys: ['cloned-history', 'cloned-snapshot'] }),
+    );
+    expect(insertChatWithStateMock).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({ snapshotKey: 'cloned-snapshot' }),
+      expect.objectContaining({ storageKey: 'cloned-history', snapshotKey: 'cloned-snapshot' }),
+      expect.any(Object),
+      expect.any(Object),
+    );
+    expect(cancelObjectGcCandidateMock).toHaveBeenCalledTimes(2);
   });
 
   test('rejects pre-fix short share capabilities without querying saved state', async () => {

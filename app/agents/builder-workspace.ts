@@ -2,6 +2,7 @@ import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace
 import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifest';
 import { assertNotLocalSecretFilePath } from '~/utils/secretFiles';
 import { normalizeProjectPath } from '~/lib/runtime/action-runner/project-path';
+import { allocateCustomerObjectKey } from '~/lib/cloudflare/data/object-storage.server';
 import {
   BUILDER_WORKSPACE_INLINE_BYTES,
   BUILDER_WORKSPACE_MAX_FILE_BYTES,
@@ -20,6 +21,11 @@ import {
 } from './builder-workspace-types';
 
 type WorkspaceStorage = Pick<DurableObjectStorage, 'sql' | 'transactionSync'>;
+type WorkspaceObjectStore = {
+  put(key: string, value: Uint8Array): Promise<unknown>;
+  get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>;
+  delete(keys: string | string[]): Promise<unknown>;
+};
 
 type WorkspaceMetaRow = {
   initialized: number;
@@ -85,8 +91,9 @@ export class BuilderWorkspaceRepository {
 
   constructor(
     private readonly storage: WorkspaceStorage,
-    private readonly bucket: R2Bucket,
+    private readonly bucket: WorkspaceObjectStore,
     private readonly durableObjectId: string,
+    private readonly objectOwnerId: () => string | null = () => null,
   ) {}
 
   getState(): BuilderWorkspaceState {
@@ -1064,7 +1071,10 @@ export class BuilderWorkspaceRepository {
   }
 
   #newR2Key(): string {
-    return `builder-workspaces/${encodeURIComponent(this.durableObjectId)}/${crypto.randomUUID()}`;
+    const ownerId = this.objectOwnerId();
+    return ownerId
+      ? allocateCustomerObjectKey(ownerId, 'builder-workspaces')
+      : `builder-workspaces/${encodeURIComponent(this.durableObjectId)}/${crypto.randomUUID()}`;
   }
 
   async #deleteR2Keys(keys: Iterable<string>, strict = false): Promise<void> {

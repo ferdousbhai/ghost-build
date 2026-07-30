@@ -111,7 +111,8 @@ export function CloudflareCard() {
           ) : connection?.connected ? (
             <p className="mt-1 text-sm text-content-secondary">
               Connected{connection.accountName ? ` to ${connection.accountName}` : ''}. Cloudflare bills this account
-              for generated-app infrastructure{connection.aiBillingEnabled ? ' and builder inference' : ''}.
+              for project storage, generated-app infrastructure
+              {connection.aiBillingEnabled ? ' and builder inference' : ''}.
             </p>
           ) : (
             <p className="mt-1 max-w-2xl text-sm text-content-secondary">
@@ -142,8 +143,9 @@ export function CloudflareCard() {
         />
       ) : null}
       <p className="mt-3 text-xs text-content-tertiary">
-        Workers Paid is never enabled automatically; Ghostbuild asks for separate authorization if the free allocation
-        is exhausted.
+        Project backups and oversized workspace files use the managed ghostbuild-user-data R2 bucket in this account.
+        Public share images and temporary deployment artifacts remain with Ghostbuild. Workers Paid is never enabled
+        automatically.
       </p>
     </section>
   );

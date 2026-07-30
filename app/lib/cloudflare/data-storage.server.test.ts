@@ -7,7 +7,7 @@ import {
   updateStorageState,
 } from './data/chat-repository.server';
 import { ChatStorageRetentionError } from './data/errors';
-import { allocateObjectKey, objectResponse, putObjectAtKey } from './data/object-storage.server';
+import { allocateCustomerObjectKey, objectResponse, putObjectAtKey } from './data/object-storage.server';
 import {
   cancelObjectGcCandidate,
   queueObjectGcCandidate,
@@ -67,7 +67,7 @@ vi.mock('./data/transcript-repository.server', () => ({
   }),
 }));
 vi.mock('./data/object-storage.server', () => ({
-  allocateObjectKey: vi.fn(),
+  allocateCustomerObjectKey: vi.fn(),
   objectResponse: vi.fn(),
   putObjectAtKey: vi.fn(),
 }));
@@ -105,7 +105,7 @@ const updateStorageStateMock = vi.mocked(updateStorageState);
 const findChatMock = vi.mocked(findChat);
 const getLatestStorageStateMock = vi.mocked(getLatestStorageStateForGeneration);
 const enforceChatStorageRetentionMock = vi.mocked(enforceChatStorageRetention);
-const allocateObjectKeyMock = vi.mocked(allocateObjectKey);
+const allocateCustomerObjectKeyMock = vi.mocked(allocateCustomerObjectKey);
 const putObjectAtKeyMock = vi.mocked(putObjectAtKey);
 const queueObjectGcCandidateMock = vi.mocked(queueObjectGcCandidate);
 const cancelObjectGcCandidateMock = vi.mocked(cancelObjectGcCandidate);
@@ -145,7 +145,7 @@ describe('chat blob ownership', () => {
       is_deleted: 0,
     });
     updateStorageStateMock.mockReset();
-    allocateObjectKeyMock.mockReset().mockImplementation((prefix) => `${prefix}/new`);
+    allocateCustomerObjectKeyMock.mockReset().mockImplementation((_ownerId, prefix) => `${prefix}/new`);
     putObjectAtKeyMock.mockReset().mockResolvedValue(undefined);
     queueObjectGcCandidateMock
       .mockReset()
@@ -195,7 +195,7 @@ describe('chat blob ownership', () => {
     const response = await storeChatAction({ request: storageRequest(), env: storageEnv() });
 
     expect(response.status).toBe(409);
-    expect(allocateObjectKeyMock).not.toHaveBeenCalled();
+    expect(allocateCustomerObjectKeyMock).not.toHaveBeenCalled();
     expect(putObjectAtKeyMock).not.toHaveBeenCalled();
     expect(releaseChatBackupAdmissionBestEffortMock).toHaveBeenCalledWith(expect.anything(), quotaAdmission);
   });
@@ -296,6 +296,8 @@ describe('chat blob ownership', () => {
     const response = await storeChatAction({ request: storageRequest(), env: storageEnv() });
 
     expect(response.status).toBe(200);
+    expect(allocateCustomerObjectKeyMock).toHaveBeenNthCalledWith(1, 'session', 'message-history');
+    expect(allocateCustomerObjectKeyMock).toHaveBeenNthCalledWith(2, 'session', 'snapshots');
     expect(cancelObjectGcCandidateMock.mock.calls.map(([, receipt]) => receipt.storageKey)).toEqual([
       'message-history/new',
       'snapshots/new',

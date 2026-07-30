@@ -1,5 +1,6 @@
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { MESSAGE_HISTORY_LZ4_LIMITS, PROJECT_SNAPSHOT_LZ4_LIMITS } from '~/lib/compression-limits';
+import { objectHead } from './object-storage.server';
 
 const DEFAULT_CHAT_BACKUP_STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
 // Retained-object cardinality is bounded independently from bytes because tiny
@@ -424,6 +425,41 @@ export async function registerChatBackupObject(
   }
   if (!(await isExactRegisteredObject(db, args))) {
     throw new Error('Unable to register chat backup object against its quota admission');
+  }
+}
+
+export async function registerMaterializedChatBackupObject(
+  db: D1Database,
+  args: {
+    storageKey: string;
+    sizeBytes: number;
+    kind: ChatBackupObjectKind;
+    now?: number;
+  },
+): Promise<void> {
+  const now = args.now ?? Date.now();
+  const maximumBytes =
+    args.kind === 'message-history'
+      ? MESSAGE_HISTORY_LZ4_LIMITS.compressedBytes
+      : PROJECT_SNAPSHOT_LZ4_LIMITS.compressedBytes;
+  assertSafeByteCount(args.sizeBytes, 'sizeBytes', maximumBytes);
+  await db
+    .prepare(
+      `INSERT INTO chat_backup_objects (storage_key, size_bytes, kind, size_source, created_at)
+       VALUES (?, ?, ?, 'measured', ?)
+       ON CONFLICT(storage_key) DO NOTHING`,
+    )
+    .bind(args.storageKey, args.sizeBytes, args.kind, now)
+    .run();
+  const exact = await db
+    .prepare(
+      `SELECT 1 AS found FROM chat_backup_objects
+       WHERE storage_key = ? AND size_bytes = ? AND kind = ? AND size_source = 'measured'`,
+    )
+    .bind(args.storageKey, args.sizeBytes, args.kind)
+    .first<{ found: number }>();
+  if (!exact) {
+    throw new Error('Unable to register a materialized chat backup object.');
   }
 }
 
@@ -1192,7 +1228,7 @@ async function insertMissingLegacyObjects(db: D1Database, now: number, limit: nu
 
 async function measureLegacyObject(env: Pick<Env, 'APP_STORAGE' | 'DB'>, row: EstimatedObjectRow): Promise<number> {
   try {
-    const object = await env.APP_STORAGE.head(row.storage_key);
+    const object = await objectHead(env, row.storage_key);
     const result = await env.DB.prepare(
       `UPDATE chat_backup_objects
        SET size_bytes = ?, size_source = 'measured'

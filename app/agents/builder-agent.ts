@@ -65,6 +65,7 @@ import {
   loadBuilderTemplate,
 } from './builder-template';
 import { deriveProvisionalTitle } from '@summonghost/title-generation';
+import { deleteObject, getObjectBytes, putObjectBytesAtKey } from '~/lib/cloudflare/data/object-storage.server';
 
 const logger = createScopedLogger('BuilderAgent');
 const STALE_CHAT_RECOVERY_MS = 30 * 60 * 1000;
@@ -127,7 +128,30 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     initializeBuilderAgentSchema(ctx);
-    this.workspace = new BuilderWorkspaceRepository(ctx.storage, env.APP_STORAGE, ctx.id.toString());
+    this.workspace = new BuilderWorkspaceRepository(
+      ctx.storage,
+      {
+        put: async (key, value) => {
+          if (!(value instanceof Uint8Array)) {
+            throw new Error('Builder workspace object bytes are invalid.');
+          }
+          await putObjectBytesAtKey(env, key, value);
+        },
+        get: async (key) => {
+          const bytes = await getObjectBytes(env, key);
+          return bytes
+            ? {
+                arrayBuffer: async () => bytes.slice().buffer,
+              }
+            : null;
+        },
+        delete: async (keys) => {
+          await Promise.all((Array.isArray(keys) ? keys : [keys]).map((key) => deleteObject(env, key)));
+        },
+      },
+      ctx.id.toString(),
+      () => this.userId,
+    );
   }
 
   async onStart(props?: BuilderAgentProps) {

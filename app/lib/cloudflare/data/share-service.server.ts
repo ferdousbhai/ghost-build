@@ -6,7 +6,14 @@ import {
   requireChat,
   type ChatInsertAuthorization,
 } from './chat-repository.server';
-import { allocateObjectKey, putObjectAtKey, storageUrl } from './object-storage.server';
+import {
+  allocateCustomerObjectKey,
+  allocateObjectKey,
+  isCustomerObjectKey,
+  objectResponse,
+  putObjectAtKey,
+  storageUrl,
+} from './object-storage.server';
 import {
   cancelObjectGcCandidate,
   prepareObjectGcCandidateStatements,
@@ -19,6 +26,7 @@ import {
   type ChatBackupQuotaConfig,
   createChatBackupCloneQuotaExtension,
   enforceChatBackupEdgeRateLimit,
+  registerMaterializedChatBackupObject,
   releaseChatBackupCloneAdmissionBestEffort,
   throwIfChatBackupCloneQuotaDenied,
 } from './chat-backup-quota.server';
@@ -343,7 +351,12 @@ async function cloneChatFromState(
   const db = env.DB;
   const initialId = crypto.randomUUID();
   const chatId = crypto.randomUUID();
-  const storageKeys = [args.storageKey, args.snapshotKey];
+  const materialized = await materializeCustomerOwnedCloneObjects(env, {
+    ownerId: args.sessionId,
+    storageKey: args.storageKey,
+    snapshotKey: args.snapshotKey,
+  });
+  const storageKeys = [materialized.storageKey, materialized.snapshotKey];
   const quota = createChatBackupCloneQuotaExtension(env, {
     ownerId: args.sessionId,
     chatId,
@@ -357,15 +370,15 @@ async function cloneChatFromState(
         creatorId: args.sessionId,
         initialId,
         description: args.parentDescription,
-        snapshotKey: args.snapshotKey,
+        snapshotKey: materialized.snapshotKey,
         lastSubchatIndex: args.subchatIndex,
       },
       {
-        storageKey: args.storageKey,
+        storageKey: materialized.storageKey,
         subchatIndex: args.subchatIndex,
         lastMessageRank: args.lastMessageRank,
         partIndex: args.partIndex,
-        snapshotKey: args.snapshotKey,
+        snapshotKey: materialized.snapshotKey,
         description: args.stateDescription,
       },
       { ...args.authorization, quotaAdmissionId: quota.admissionId },
@@ -383,7 +396,62 @@ async function cloneChatFromState(
     });
     throw error;
   }
+  await Promise.all(
+    materialized.gcReceipts.map((receipt) =>
+      cancelObjectGcCandidate(db, receipt).catch((error) => {
+        logger.warn('Unable to cancel cloned backup cleanup receipt', { key: receipt.storageKey, error });
+        return false;
+      }),
+    ),
+  );
   return { id: initialId, description: args.parentDescription ?? undefined };
+}
+
+async function materializeCustomerOwnedCloneObjects(
+  env: Pick<Env, 'DB'>,
+  args: { ownerId: string; storageKey: string; snapshotKey: string | null },
+): Promise<{
+  storageKey: string;
+  snapshotKey: string | null;
+  gcReceipts: Array<Awaited<ReturnType<typeof queueObjectGcCandidate>>>;
+}> {
+  if (!isCustomerObjectKey(args.storageKey) && (!args.snapshotKey || !isCustomerObjectKey(args.snapshotKey))) {
+    return { storageKey: args.storageKey, snapshotKey: args.snapshotKey, gcReceipts: [] };
+  }
+  const copied = await Promise.all([
+    copyCloneObject(env, args.ownerId, args.storageKey, 'message-history'),
+    args.snapshotKey ? copyCloneObject(env, args.ownerId, args.snapshotKey, 'snapshot') : null,
+  ]);
+  return {
+    storageKey: copied[0].storageKey,
+    snapshotKey: copied[1]?.storageKey ?? null,
+    gcReceipts: copied.flatMap((object) => (object ? [object.gcReceipt] : [])),
+  };
+}
+
+async function copyCloneObject(
+  env: Pick<Env, 'DB'>,
+  ownerId: string,
+  sourceKey: string,
+  kind: 'message-history' | 'snapshot',
+): Promise<{
+  storageKey: string;
+  gcReceipt: Awaited<ReturnType<typeof queueObjectGcCandidate>>;
+}> {
+  const response = await objectResponse(env as Env, sourceKey);
+  if (!response.ok) {
+    throw new Error('Shared project backup is unavailable.');
+  }
+  const blob = await response.blob();
+  const storageKey = allocateCustomerObjectKey(ownerId, kind === 'snapshot' ? 'snapshots' : 'message-history');
+  const gcReceipt = await queueObjectGcCandidate(env.DB, storageKey);
+  await registerMaterializedChatBackupObject(env.DB, {
+    storageKey,
+    sizeBytes: blob.size,
+    kind,
+  });
+  await putObjectAtKey(env as Env, storageKey, blob);
+  return { storageKey, gcReceipt };
 }
 
 async function cancelThumbnailGcCandidateBestEffort(

@@ -125,6 +125,22 @@ describe('BuilderWorkspaceRepository', () => {
     expect(harness.objects.size).toBe(0);
   });
 
+  it('allocates new large-file objects under the authenticated customer owner', async () => {
+    const harness = createHarness('user-123');
+    await harness.workspace.beginSeed('seed_initial');
+    await harness.workspace.appendSeed('seed_initial', [
+      {
+        path: '/home/project/src/large.ts',
+        content: 'x'.repeat(BUILDER_WORKSPACE_INLINE_BYTES + 1),
+      },
+    ]);
+
+    expect(harness.bucket.put).toHaveBeenCalledWith(
+      expect.stringMatching(/^customer-r2\/v1\/[A-Za-z0-9_-]+\/builder-workspaces\//),
+      expect.any(Uint8Array),
+    );
+  });
+
   it('durably reuses tool results and rejects identifier reuse with different arguments', async () => {
     const harness = await initializedHarness();
     const execute = vi.fn(async () => ({ ok: true, revision: harness.workspace.getState().revision }));
@@ -355,7 +371,7 @@ async function initializedHarness() {
   return harness;
 }
 
-function createHarness() {
+function createHarness(ownerId: string | null = null) {
   const database = new DatabaseSync(':memory:');
   const storage = new SqlStorageHarness(database);
   runBuilderAgentSchemaMigrations(storage as never);
@@ -382,7 +398,7 @@ function createHarness() {
   return {
     bucket,
     objects,
-    workspace: new BuilderWorkspaceRepository(storage as never, bucket as never, 'test-object'),
+    workspace: new BuilderWorkspaceRepository(storage as never, bucket as never, 'test-object', () => ownerId),
   };
 }
 
