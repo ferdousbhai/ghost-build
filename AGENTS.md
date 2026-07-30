@@ -2,6 +2,10 @@
 
 Use this file as a source map. Prefer the implementation, types, tests, and configuration over prose descriptions.
 
+## Delivery
+
+Work on `main`; no branches, worktrees, or PRs unless asked. Before each commit, simplify the diff and affected logic, fix all valid issues, run checks, commit, and push `origin/main`.
+
 ## Primary Entry Points
 
 - [app/server.ts](app/server.ts) — root Worker dispatch and exported Durable Objects
