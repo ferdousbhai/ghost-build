@@ -33,7 +33,7 @@ export async function executeBuilderOperationTool(args: {
   switch (args.toolName) {
     case 'lookupDocs':
       return args.workspace.executeToolOnce(args.toolCallId, args.toolName, args.input, () =>
-        runLookupDocs(invocation(args)),
+        runLookupDocs(invocation(args), args.context.env),
       );
     case 'npmInstall':
       return runDependencyInstall(args);

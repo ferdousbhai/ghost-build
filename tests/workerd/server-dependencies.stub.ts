@@ -6,6 +6,7 @@ export class BuilderAgent {}
 export class ContainerProxy {}
 export class DeploymentSandbox {}
 export class DeploymentWorkflow {}
+export class SkillSyncWorkflow {}
 
 export const CLOUDFLARE_CONNECTION_CALLBACK_METHOD = 'GET' as const;
 export const authSessionAction = unavailable;

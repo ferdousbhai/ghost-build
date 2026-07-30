@@ -41,6 +41,7 @@ const migrationPolicies = [
       '0020_chat_backup_quota.sql': '191e1a61edf93e81ac2eefa7e2194213eb8c1cb16060b0623b1b66c75f29a1ec',
       '0021_deployment_security_inventory.sql': '5e5a4c5e78d03756f2385297f99d705fa1da6ba4377f64b1e0479e219958daed',
       '0022_upload_resource_quotas.sql': '18184f5e2cf43ca247b69922511c2264730488d83f3cebe48e91be526de7c3a8',
+      '0023_skill_sync.sql': '17ea5beb522d31c4a0493c6f192e93d80c8d3a72f3d32ec381efae7f2729a17f',
     },
     contractAllowlist: {},
   },

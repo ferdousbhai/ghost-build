@@ -100,6 +100,12 @@
       "binding": "DeploymentWorkflow",
       "class_name": "DeploymentWorkflow",
     },
+    {
+      "name": "ghostbuild-skill-sync",
+      "binding": "SkillSyncWorkflow",
+      "class_name": "SkillSyncWorkflow",
+      "schedules": ["0 8 * * 1"],
+    },
   ],
   "durable_objects": {
     "bindings": [

@@ -24,6 +24,7 @@ vi.mock('./lib/.server/cloudflare/deployment-sandbox', () => ({
   DeploymentSandbox: class {},
 }));
 vi.mock('./lib/.server/cloudflare/deployment-workflow', () => ({ DeploymentWorkflow: class {} }));
+vi.mock('./lib/.server/cloudflare/skill-sync-workflow', () => ({ SkillSyncWorkflow: class {} }));
 vi.mock('./lib/cloudflare/data/chat-repository.server', () => ({ ensureInitialChat }));
 vi.mock('./lib/cloudflare/data.server', () => ({
   dataAction: vi.fn(),
@@ -88,6 +89,7 @@ describe('server Agent routing boundary', () => {
     '/agents/deployment-sandbox/private',
     '/agents/container-proxy/private',
     '/agents/deployment-workflow/private',
+    '/agents/skill-sync-workflow/private',
   ])('rejects a non-BuilderAgent namespace before either application or PartyServer routing: %s', async (pathname) => {
     const response = await server.fetch(new Request(`https://ghostbuild.dev${pathname}`), {} as Env);
 

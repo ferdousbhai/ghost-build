@@ -8,6 +8,7 @@ import {
   findWorkerOAuthStartRateLimitErrors,
   findWorkerChatBackupQuotaErrors,
   findWorkerGcScheduleErrors,
+  findSkillSyncWorkflowErrors,
   findWorkerRoutingErrors,
   findWorkerRuntimeSecretErrors,
   findWorkerTelemetryRateLimitErrors,
@@ -97,6 +98,29 @@ describe('findWorkerGcScheduleErrors', () => {
     expect(findWorkerGcScheduleErrors({ triggers: { crons: ['*/15 * * * *'] } }, 'wrangler.jsonc')).toEqual([]);
     expect(findWorkerGcScheduleErrors({}, 'wrangler.jsonc')).toEqual([
       'wrangler.jsonc must schedule the bounded deferred-data GC sweep every 15 minutes.',
+    ]);
+  });
+});
+
+describe('findSkillSyncWorkflowErrors', () => {
+  it('requires the dedicated weekly Cloudflare Workflow schedule', () => {
+    expect(
+      findSkillSyncWorkflowErrors(
+        {
+          workflows: [
+            {
+              name: 'ghostbuild-skill-sync',
+              binding: 'SkillSyncWorkflow',
+              class_name: 'SkillSyncWorkflow',
+              schedules: ['0 8 * * 1'],
+            },
+          ],
+        },
+        'wrangler.jsonc',
+      ),
+    ).toEqual([]);
+    expect(findSkillSyncWorkflowErrors({}, 'wrangler.jsonc')).toEqual([
+      'wrangler.jsonc must bind the weekly SkillSyncWorkflow.',
     ]);
   });
 });

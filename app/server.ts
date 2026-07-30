@@ -30,6 +30,7 @@ import { reconcileThumbnailQuotaBestEffort } from './lib/cloudflare/data/thumbna
 export { BuilderAgent } from './agents/builder-agent';
 export { ContainerProxy, DeploymentSandbox } from './lib/.server/cloudflare/deployment-sandbox';
 export { DeploymentWorkflow } from './lib/.server/cloudflare/deployment-workflow';
+export { SkillSyncWorkflow } from './lib/.server/cloudflare/skill-sync-workflow';
 
 const APPLICATION_CSP_BASELINE = "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
 const HSTS_MIN_AGE_SECONDS = '31536000';

@@ -176,6 +176,20 @@ export function findWorkerGcScheduleErrors(config, label) {
     : [`${label} must schedule the bounded deferred-data GC sweep every 15 minutes.`];
 }
 
+export function findSkillSyncWorkflowErrors(config, label) {
+  const workflow = findBinding(config?.workflows, 'SkillSyncWorkflow');
+  if (!workflow) {
+    return [`${label} must bind the weekly SkillSyncWorkflow.`];
+  }
+  const errors = [];
+  requireEqual(errors, `${label} SkillSyncWorkflow name`, workflow.name, 'ghostbuild-skill-sync');
+  requireEqual(errors, `${label} SkillSyncWorkflow class_name`, workflow.class_name, 'SkillSyncWorkflow');
+  if (!Array.isArray(workflow.schedules) || !workflow.schedules.includes('0 8 * * 1')) {
+    errors.push(`${label} must schedule SkillSyncWorkflow weekly at 08:00 UTC on Monday.`);
+  }
+  return errors;
+}
+
 export function findDurableObjectLifecycleErrors(config, label, classNames) {
   const errors = [];
   if (Object.hasOwn(config ?? {}, 'migrations')) {
@@ -218,6 +232,7 @@ function verifyWorker(errors, config, target) {
     ...findWorkerRoutingErrors(config, label, target.customDomain),
     ...findWorkerVariableSourceErrors(config, label),
     ...findWorkerGcScheduleErrors(config, label),
+    ...findSkillSyncWorkflowErrors(config, label),
     ...findDurableObjectLifecycleErrors(config, label, target.durableObjects),
     ...findWorkerRuntimeSecretErrors(config, label, 'configure values as Cloudflare bindings'),
   );

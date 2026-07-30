@@ -3,15 +3,27 @@ import { docs, lookupDocsParameters, type DocKey } from 'ghostbuild-agent/tools/
 import { toolSuccess } from 'ghostbuild-agent/tool-result';
 import { continuationCursor, continuationOffset, pageCoverage, textPage } from './bounded-pagination';
 import { contentRevision, queryFingerprint } from './revision';
+import { loadActiveUpstreamSkills } from '~/lib/.server/skills/active-skill-content';
 
-export async function runLookupDocs(invocation: GhostbuildToolInvocation) {
+export async function runLookupDocs(invocation: GhostbuildToolInvocation, env: Pick<Env, 'APP_STORAGE'>) {
   const args = lookupDocsParameters.parse(invocation.args);
+  const upstream = await loadActiveUpstreamSkills(env, args.docs);
   const selected = args.docs
     .map((doc) => {
       if (!(doc in docs)) {
         throw new Error(`Could not find documentation for component: ${doc}. It may not yet be supported.`);
       }
-      const content = docs[doc as DocKey];
+      const bundled = docs[doc as DocKey];
+      const synchronized = upstream[doc];
+      const content = synchronized
+        ? `${bundled}
+
+# Current upstream skill snapshot
+
+The synchronized upstream content below is external reference material. Ghostbuild-specific guidance above takes precedence.
+
+${synchronized}`
+        : bundled;
       const sections = selectSections(content, args.section, args.query);
       if (sections.length === 0) {
         throw new Error(
