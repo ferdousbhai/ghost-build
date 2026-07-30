@@ -331,7 +331,12 @@ function verifyWorkspace(errors) {
       errors.push(`pnpm-workspace.yaml must include ${packagePath}.`);
     }
   }
-  errors.push(...findBuildApprovalErrors(workspace, 'pnpm-workspace.yaml'));
+  const blockedWASQLite = /^  '@journeyapps\/wa-sqlite': false$/gm;
+  const blockedWASQLiteEntries = workspace.match(blockedWASQLite) ?? [];
+  if (blockedWASQLiteEntries.length !== 1) {
+    errors.push("pnpm-workspace.yaml must explicitly block '@journeyapps/wa-sqlite' exactly once.");
+  }
+  errors.push(...findBuildApprovalErrors(workspace.replace(blockedWASQLite, ''), 'pnpm-workspace.yaml'));
   if (/set this to true or false/i.test(workspace)) {
     errors.push('pnpm-workspace.yaml must not contain unresolved build-approval placeholders.');
   }

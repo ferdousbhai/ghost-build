@@ -6,7 +6,7 @@ export const CLOUDFLARE_SKILL_SOURCE = {
   branch: 'main',
 } as const;
 
-export type UpstreamSkillSource = {
+type UpstreamSkillSource = {
   docKey: DocKey;
   name: string;
   path: `skills/${string}/SKILL.md`;

@@ -6,6 +6,7 @@ import {
   assetsOverRawLimit,
   collectBundleAssets,
   collectExcludedSourceMaps,
+  partitionBundleAssets,
   summarizeBundleAssets,
   totalSizeLimitErrors,
 } from './report-client-bundle.mjs';
@@ -48,6 +49,10 @@ describe('client bundle reporting', () => {
       brotliBytes: 98_000,
     });
     expect((assetsOverRawLimit(assets, 500) as BundleAsset[]).map((asset) => asset.file)).toEqual(['large.js']);
+    expect(partitionBundleAssets(assets, ['large.'])).toEqual({
+      isolatedAssets: [assets[0]],
+      primaryAssets: [assets[1]],
+    });
     expect(
       totalSizeLimitErrors(summarizeBundleAssets(assets), {
         maxTotalBrotliKilobytes: 90,

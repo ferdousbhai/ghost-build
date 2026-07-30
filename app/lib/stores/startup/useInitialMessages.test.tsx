@@ -7,11 +7,16 @@ import { sessionIdStore } from '~/lib/stores/sessionId';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { useInitialMessages } from './useInitialMessages';
 import { description } from '~/lib/stores/description';
+import { queryClient } from '~/lib/stores/reactQueryClient';
 
 const executeDataOperationMock = vi.hoisted(() => vi.fn());
 
 vi.mock('~/lib/cloudflare/client', () => ({
   executeDataOperation: executeDataOperationMock,
+}));
+vi.mock('~/lib/cloudflare/account-local-replica', () => ({
+  ACCOUNT_LOCAL_REPLICA_SCHEMA_VERSION: 1,
+  useAccountLocalReplica: () => null,
 }));
 vi.mock('~/lib/compression', () => ({
   decompressWithLz4: (value: Uint8Array) => value,
@@ -69,12 +74,16 @@ describe('useInitialMessages', () => {
       root.render(<Harness />);
       sessionIdStore.set('stale-session');
     });
-    expect(container.textContent).toBe('missing');
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toBe('missing'));
+    });
 
     await act(async () => {
       sessionIdStore.set('signed-in-user');
     });
-    expect(container.textContent).toBe('ready');
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toBe('ready'));
+    });
     expect(seen).toContain('missing');
     expect(seen.at(-1)).toBe('ready');
     expect(executeDataOperationMock).toHaveBeenCalledTimes(2);
@@ -122,18 +131,66 @@ describe('useInitialMessages', () => {
 
     await act(async () => {
       root.render(<Harness />);
-      sessionIdStore.set('signed-in-user');
+      sessionIdStore.set('signed-in-subchat-user');
     });
-    expect(container.textContent).toBe('ready-0');
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toBe('ready-0'));
+    });
 
     await act(() => {
       subchatIndexStore.set(1);
     });
     expect(container.textContent).toBe('loading');
 
-    await act(async () => finishSubchatLoad?.());
-    expect(container.textContent).toBe('ready-1');
+    await act(async () => {
+      finishSubchatLoad?.();
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toBe('ready-1'));
+    });
     expect(states).toContain('loading');
+
+    await act(async () => root.unmount());
+  });
+
+  it('adopts a newer latest subchat discovered during server revalidation', async () => {
+    let latestSubchatIndex = 0;
+    executeDataOperationMock.mockImplementation(async () => ({
+      initialId: 'project-id',
+      urlId: undefined,
+      description: 'Project',
+      subchatIndex: latestSubchatIndex,
+      transcript: {
+        agentName: `project-id--transcript-${latestSubchatIndex}-0`,
+        generation: 0,
+        subchatIndex: latestSubchatIndex,
+      },
+    }));
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    function Harness() {
+      const messages = useInitialMessages('project-id');
+      return <span>{messages ? `ready-${messages.loadedSubchatIndex}` : 'loading'}</span>;
+    }
+
+    await act(async () => {
+      root.render(<Harness />);
+      sessionIdStore.set('signed-in-revalidation-user');
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toBe('ready-0'));
+    });
+
+    latestSubchatIndex = 1;
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ['ghostbuild-local', 'transcripts', 'signed-in-revalidation-user'],
+      });
+      await vi.waitFor(() => expect(container.textContent).toBe('ready-1'));
+    });
 
     await act(async () => root.unmount());
   });
@@ -187,7 +244,10 @@ describe('useInitialMessages', () => {
 
     await act(async () => {
       root.render(<Harness />);
-      sessionIdStore.set('signed-in-user');
+      sessionIdStore.set('signed-in-materialized-user');
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(loaded).toBeDefined());
     });
 
     expect(loaded).toMatchObject({

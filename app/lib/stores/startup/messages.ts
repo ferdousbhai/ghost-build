@@ -116,12 +116,11 @@ export function serializeMessageForStorage(message: GhostbuildMessage) {
   };
 }
 
-function compressMessages(
+export function serializeCompleteMessages(
   messages: GhostbuildMessage[],
   lastMessageRank: number,
   partIndex: number,
-  transcript: TranscriptCheckpoint,
-): Uint8Array {
+): SerializedMessage[] {
   const slicedMessages = messages.slice(0, lastMessageRank + 1);
   const lastMessage = slicedMessages.at(-1);
   if (lastMessage) {
@@ -130,11 +129,19 @@ function compressMessages(
       parts: lastMessage.parts?.slice(0, partIndex + 1),
     };
   }
-  const serialized = slicedMessages.map(serializeMessageForStorage);
+  return slicedMessages.map(serializeMessageForStorage);
+}
+
+function compressMessages(
+  messages: GhostbuildMessage[],
+  lastMessageRank: number,
+  partIndex: number,
+  transcript: TranscriptCheckpoint,
+): Uint8Array {
   const history: StoredMessageHistory = {
     version: TRANSCRIPT_HISTORY_FORMAT_VERSION,
     transcript,
-    messages: serialized,
+    messages: serializeCompleteMessages(messages, lastMessageRank, partIndex),
   };
   const uint8Array = textEncoder.encode(JSON.stringify(history));
   return compressWithLz4(uint8Array);

@@ -24,6 +24,9 @@
   "spdxLicenseNormalizations": {
     "MIT/X11": "MIT"
   },
+  "missingLicenseMetadataOverrides": {
+    "@journeyapps/wa-sqlite@1.7.2": "MIT"
+  },
   "metadataOnlyPackageAllowlist": [
     "@ai-sdk/provider-utils@4.0.40",
     "@bufbuild/protobuf@2.12.1",

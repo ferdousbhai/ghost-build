@@ -287,6 +287,7 @@ export function findLicensePolicyErrors(packages, policy) {
     errors.push('scripts/production-license-policy.json must record its review date as YYYY-MM-DD.');
   }
   const allowed = new Set(policy?.allowedLicenseExpressions ?? []);
+  const missingMetadataOverrides = new Map(Object.entries(policy?.missingLicenseMetadataOverrides ?? {}));
   if (allowed.size === 0) {
     errors.push('The production license allowlist must not be empty.');
   }
@@ -295,6 +296,7 @@ export function findLicensePolicyErrors(packages, policy) {
   }
 
   const packageIds = new Set();
+  const packagesById = new Map();
   for (const entry of packages) {
     const packageId = `${entry.name}@${entry.version}`;
     if (typeof entry.name !== 'string' || !entry.name || typeof entry.version !== 'string' || !entry.version) {
@@ -305,13 +307,29 @@ export function findLicensePolicyErrors(packages, policy) {
       errors.push(`Production dependency inventory contains duplicate ${packageId}.`);
     }
     packageIds.add(packageId);
-    if (entry.packageLicense !== entry.reportedLicense) {
+    packagesById.set(packageId, entry);
+    if (
+      entry.packageLicense !== entry.reportedLicense &&
+      missingMetadataOverrides.get(packageId) !== entry.reportedLicense
+    ) {
       errors.push(
         `${packageId} license grouping ${JSON.stringify(entry.reportedLicense)} does not match package metadata ${JSON.stringify(entry.packageLicense)}.`,
       );
     }
     if (!allowed.has(entry.reportedLicense)) {
       errors.push(`${packageId} declares unreviewed production license ${JSON.stringify(entry.reportedLicense)}.`);
+    }
+  }
+  for (const [packageId, license] of missingMetadataOverrides) {
+    const entry = packagesById.get(packageId);
+    if (!entry) {
+      errors.push(`${packageId} is a stale missingLicenseMetadataOverrides entry.`);
+    } else if (entry.packageLicense !== undefined && entry.packageLicense !== null) {
+      errors.push(`${packageId} now publishes license metadata; remove its missingLicenseMetadataOverrides entry.`);
+    } else if (entry.reportedLicense !== license) {
+      errors.push(
+        `${packageId} missing-license-metadata override ${JSON.stringify(license)} does not match inventory grouping ${JSON.stringify(entry.reportedLicense)}.`,
+      );
     }
   }
   return errors;

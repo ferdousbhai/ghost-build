@@ -22,6 +22,9 @@ overrides:
   # current Cloudflare tooling.
   'sharp@<0.35.0': '0.35.3'
 allowBuilds:
+  # The OPFS adapter uses wa-sqlite's published dist artifacts. Its postinstall
+  # only downloads the unrelated optional PowerSync core.
+  '@journeyapps/wa-sqlite': false
   core-js-pure: true
   esbuild: true
   sharp: true

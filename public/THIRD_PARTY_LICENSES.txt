@@ -7,8 +7,8 @@ A package whose package-level evidence is <not published> remains exact-version 
 This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-07-20
-Production packages: 544
-Inventory SHA-256: 065af6b3d4abbe43bfea14be0b9927286bfc2d9fa8a3047d401a82c315fd90e4
+Production packages: 547
+Inventory SHA-256: 07504d3808de0002bed82f7b866b2f1a940f76f811e310d853cde13be787b76f
 
 PACKAGE INVENTORY
 =================
@@ -703,6 +703,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 6895190430d809c4c57a7582ecc2f99acbc2ea39a5dfad20262a41d5b3e91733)
 
+@journeyapps/wa-sqlite@1.7.2
+Declared license: MIT
+Author: <not published>
+Repository: {"type":"git","url":"git+https://github.com/powersync-ja/wa-sqlite.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 547f9e97e461bd369cc64b6fc12d724e8b02764b8db7812691f29f0ec572be79)
+
 @jridgewell/gen-mapping@0.3.13
 Declared license: MIT
 Author: Justin Ridgewell <justin@ridgewell.name>
@@ -1315,7 +1324,16 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 0ee425558b9215a206c489f5e795ccdb5ade8d5184acc1843a3bd38f526d5bf7)
 
-@tanstack/db@0.6.16
+@tanstack/browser-db-sqlite-persistence@0.2.9
+Declared license: MIT
+Author: TanStack Team
+Repository: {"type":"git","url":"git+https://github.com/TanStack/db.git","directory":"packages/browser-db-sqlite-persistence"}
+Homepage: https://tanstack.com/db
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 dd5fd3a2e8ca256521b80e46d7fb0aa953c842ef1420fb31f4b1f08ae31d82e7)
+
+@tanstack/db@0.6.17
 Declared license: MIT
 Author: Kyle Mathews
 Repository: {"type":"git","url":"git+https://github.com/TanStack/db.git","directory":"packages/db"}
@@ -1328,6 +1346,15 @@ Published license/notice files:
 Declared license: MIT
 Author: Sam Willis
 Repository: {"type":"git","url":"git+https://github.com/TanStack/db.git","directory":"packages/db-ivm"}
+Homepage: https://tanstack.com/db
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 dd5fd3a2e8ca256521b80e46d7fb0aa953c842ef1420fb31f4b1f08ae31d82e7)
+
+@tanstack/db-sqlite-persistence-core@0.2.9
+Declared license: MIT
+Author: TanStack Team
+Repository: {"type":"git","url":"git+https://github.com/TanStack/db.git","directory":"packages/db-sqlite-persistence-core"}
 Homepage: https://tanstack.com/db
 Package-level license evidence: published
 Published license/notice files:
@@ -1360,7 +1387,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7)
 
-@tanstack/query-db-collection@1.2.0
+@tanstack/query-db-collection@1.2.1
 Declared license: MIT
 Author: Kyle Mathews
 Repository: {"type":"git","url":"git+https://github.com/TanStack/db.git","directory":"packages/query-db-collection"}
@@ -1369,7 +1396,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 dd5fd3a2e8ca256521b80e46d7fb0aa953c842ef1420fb31f4b1f08ae31d82e7)
 
-@tanstack/react-db@0.1.94
+@tanstack/react-db@0.1.95
 Declared license: MIT
 Author: Kyle Mathews
 Repository: {"type":"git","url":"git+https://github.com/TanStack/db.git","directory":"packages/react-db"}
@@ -7221,6 +7248,34 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 [others]: https://github.com/json5/json5/contributors
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 547f9e97e461bd369cc64b6fc12d724e8b02764b8db7812691f29f0ec572be79
+Used by:
+- @journeyapps/wa-sqlite@1.7.2:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright (c) 2023 Roy T. Hashimoto
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
@@ -15842,10 +15897,12 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 SHA-256 dd5fd3a2e8ca256521b80e46d7fb0aa953c842ef1420fb31f4b1f08ae31d82e7
 Used by:
+- @tanstack/browser-db-sqlite-persistence@0.2.9:LICENSE
 - @tanstack/db-ivm@0.1.18:LICENSE
-- @tanstack/db@0.6.16:LICENSE
-- @tanstack/query-db-collection@1.2.0:LICENSE
-- @tanstack/react-db@0.1.94:LICENSE
+- @tanstack/db-sqlite-persistence-core@0.2.9:LICENSE
+- @tanstack/db@0.6.17:LICENSE
+- @tanstack/query-db-collection@1.2.1:LICENSE
+- @tanstack/react-db@0.1.95:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 

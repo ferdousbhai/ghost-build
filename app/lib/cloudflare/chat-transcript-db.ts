@@ -1,0 +1,337 @@
+import { createCollection, eq, type LoadSubsetOptions } from '@tanstack/db';
+import { parseLoadSubsetOptions, queryCollectionOptions } from '@tanstack/query-db-collection';
+import { useLiveQuery } from '@tanstack/react-db';
+import { z } from 'zod';
+import {
+  transcriptCheckpointSchema,
+  transcriptIdentitiesEqual,
+  transcriptIdentitySchema,
+  type TranscriptCheckpoint,
+  type TranscriptIdentity,
+} from 'ghostbuild-agent/transcript';
+import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import { executeDataOperation } from './client';
+import { api } from './data-api';
+import { readBodyBytesWithLimit } from '~/lib/bounded-body';
+import { decompressWithLz4 } from '~/lib/compression';
+import { MESSAGE_HISTORY_LZ4_LIMITS } from '~/lib/compression-limits';
+import { queryClient } from '~/lib/stores/reactQueryClient';
+import type { SerializedMessage } from '~/lib/stores/startup/messages';
+import { serializeCompleteMessages } from '~/lib/stores/startup/messages';
+import {
+  ACCOUNT_LOCAL_REPLICA_SCHEMA_VERSION,
+  type AccountLocalReplica,
+  useAccountLocalReplica,
+} from './account-local-replica';
+
+const textDecoder = new TextDecoder();
+const TRANSCRIPT_QUERY_KEY_PREFIX = ['ghostbuild-local', 'transcripts'] as const;
+
+const serializedMessageShape = z
+  .object({
+    id: z.string().min(1),
+    role: z.enum(['system', 'user', 'assistant']),
+    createdAt: z.number().optional(),
+    parts: z.array(z.object({ type: z.string().min(1) }).loose()).optional(),
+  })
+  .loose();
+
+const serializedMessageSchema = z.custom<SerializedMessage>(
+  (value) => serializedMessageShape.safeParse(value).success,
+  'Invalid serialized message.',
+);
+
+const missingChatTranscriptSchema = z.object({
+  requestKey: z.string().min(1),
+  status: z.literal('missing'),
+});
+
+const readyChatTranscriptSchema = z.object({
+  requestKey: z.string().min(1),
+  status: z.literal('ready'),
+  loadedChatId: z.string().min(1),
+  initialId: z.string().min(1),
+  urlId: z.string().min(1).optional(),
+  description: z.string().optional(),
+  loadedSubchatIndex: z.number().int().nonnegative(),
+  transcript: transcriptIdentitySchema,
+  checkpoint: transcriptCheckpointSchema.nullable(),
+  messages: z.array(serializedMessageSchema),
+  seedTranscript: z.boolean(),
+});
+
+const cachedChatTranscriptSchema = z.discriminatedUnion('status', [
+  missingChatTranscriptSchema,
+  readyChatTranscriptSchema,
+]);
+
+type CachedChatTranscript = z.infer<typeof cachedChatTranscriptSchema>;
+type ReadyChatTranscript = z.infer<typeof readyChatTranscriptSchema>;
+
+type TranscriptRequest = {
+  chatId: string;
+  subchatIndex?: number;
+};
+
+function transcriptRequestKey(request: TranscriptRequest): string {
+  return JSON.stringify([request.chatId, request.subchatIndex ?? null]);
+}
+
+function parseTranscriptRequestKey(value: string): TranscriptRequest {
+  const parsed: unknown = JSON.parse(value);
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length !== 2 ||
+    typeof parsed[0] !== 'string' ||
+    parsed[0].length === 0 ||
+    (parsed[1] !== null && (!Number.isSafeInteger(parsed[1]) || parsed[1] < 0))
+  ) {
+    throw new Error('Invalid persisted transcript request key.');
+  }
+  return {
+    chatId: parsed[0],
+    ...(parsed[1] === null ? {} : { subchatIndex: parsed[1] as number }),
+  };
+}
+
+function requestKeyFromSubsetOptions(options: unknown): string | undefined {
+  const parsed = parseLoadSubsetOptions(options as LoadSubsetOptions | null | undefined);
+  const requestFilter = parsed.filters.find(
+    (filter) =>
+      filter.operator === 'eq' &&
+      filter.field.length === 1 &&
+      filter.field[0] === 'requestKey' &&
+      typeof filter.value === 'string',
+  );
+  return typeof requestFilter?.value === 'string' ? requestFilter.value : undefined;
+}
+
+function createTranscriptCollection(sessionId: string, replica: AccountLocalReplica | null) {
+  const queryOptions = queryCollectionOptions({
+    id: 'transcripts',
+    schema: cachedChatTranscriptSchema,
+    syncMode: 'on-demand',
+    queryKey: (options) => {
+      const requestKey = requestKeyFromSubsetOptions(options);
+      return requestKey
+        ? [...TRANSCRIPT_QUERY_KEY_PREFIX, sessionId, requestKey]
+        : [...TRANSCRIPT_QUERY_KEY_PREFIX, sessionId];
+    },
+    queryFn: async ({ meta, signal }) => {
+      const requestKey = requestKeyFromSubsetOptions(meta?.loadSubsetOptions);
+      if (!requestKey) {
+        throw new Error('Transcript queries require an exact request key.');
+      }
+      return [await loadChatTranscript(sessionId, requestKey, parseTranscriptRequestKey(requestKey), signal)];
+    },
+    queryClient,
+    getKey: (item) => item.requestKey,
+    persistedGcTime: Number.POSITIVE_INFINITY,
+    refetchOnMount: 'always',
+    refetchOnReconnect: true,
+  });
+  if (!replica) {
+    return createCollection(queryOptions);
+  }
+  return createCollection({
+    ...replica.persistedCollectionOptions({
+      ...queryOptions,
+      persistence: replica.persistence,
+      schemaVersion: ACCOUNT_LOCAL_REPLICA_SCHEMA_VERSION,
+    }),
+    schema: cachedChatTranscriptSchema,
+  });
+}
+
+type TranscriptCollection = ReturnType<typeof createTranscriptCollection>;
+
+const transcriptCollections = new Map<string, TranscriptCollection>();
+const activeTranscriptCollections = new Map<string, TranscriptCollection>();
+
+function getTranscriptCollection(sessionId: string, replica: AccountLocalReplica | null) {
+  const cacheKey = `${sessionId}:${replica ? 'persisted' : 'memory'}`;
+  const existing = transcriptCollections.get(cacheKey);
+  if (existing) {
+    activeTranscriptCollections.set(sessionId, existing);
+    return existing;
+  }
+  const collection = createTranscriptCollection(sessionId, replica);
+  transcriptCollections.set(cacheKey, collection);
+  activeTranscriptCollections.set(sessionId, collection);
+  return collection;
+}
+
+export function useCachedChatTranscript(
+  sessionId: string | null | undefined,
+  request: TranscriptRequest | undefined,
+): {
+  transcript: CachedChatTranscript | undefined;
+  isLoading: boolean;
+  error: unknown;
+} {
+  const replica = useAccountLocalReplica(sessionId);
+  const collection = sessionId && replica !== undefined ? getTranscriptCollection(sessionId, replica) : undefined;
+  const requestKey = request ? transcriptRequestKey(request) : undefined;
+  const query = useLiveQuery(
+    (q) =>
+      collection && requestKey
+        ? q.from({ transcript: collection }).where(({ transcript }) => eq(transcript.requestKey, requestKey))
+        : undefined,
+    [collection, requestKey],
+  );
+  return {
+    transcript: query.data?.[0],
+    isLoading: replica === undefined || query.isLoading,
+    error: collection?.utils.lastError,
+  };
+}
+
+export function cachePersistedTranscript(args: {
+  sessionId: string;
+  chatId: string;
+  subchatIndex: number;
+  messages: GhostbuildMessage[];
+  lastMessageRank: number;
+  partIndex: number;
+  checkpoint: TranscriptCheckpoint;
+}): void {
+  const collection = activeTranscriptCollections.get(args.sessionId);
+  if (!collection) {
+    return;
+  }
+  const exactRequestKey = transcriptRequestKey({
+    chatId: args.chatId,
+    subchatIndex: args.subchatIndex,
+  });
+  const latestRequestKey = transcriptRequestKey({ chatId: args.chatId });
+  const existing = collection.get(exactRequestKey) ?? collection.get(latestRequestKey);
+  if (!existing || existing.status !== 'ready') {
+    return;
+  }
+  const updated: ReadyChatTranscript = {
+    requestKey: exactRequestKey,
+    status: 'ready',
+    loadedChatId: existing.loadedChatId,
+    initialId: existing.initialId,
+    ...(existing.urlId === undefined ? {} : { urlId: existing.urlId }),
+    ...(existing.description === undefined ? {} : { description: existing.description }),
+    loadedSubchatIndex: args.subchatIndex,
+    transcript: transcriptIdentity(args.checkpoint),
+    checkpoint: args.checkpoint,
+    messages: serializeCompleteMessages(args.messages, args.lastMessageRank, args.partIndex),
+    seedTranscript: false,
+  };
+  collection.utils.writeBatch(() => {
+    collection.utils.writeUpsert({ ...updated, requestKey: exactRequestKey });
+    collection.utils.writeUpsert({ ...updated, requestKey: latestRequestKey });
+  });
+}
+
+async function loadChatTranscript(
+  sessionId: string,
+  requestKey: string,
+  request: TranscriptRequest,
+  signal: AbortSignal,
+): Promise<CachedChatTranscript> {
+  signal.throwIfAborted();
+  const chatInfo = await executeDataOperation(
+    api.messages.get,
+    {
+      id: request.chatId,
+      sessionId,
+      ...(request.subchatIndex === undefined ? {} : { subchatIndex: request.subchatIndex }),
+    },
+    { signal },
+  );
+  signal.throwIfAborted();
+  if (chatInfo === null) {
+    return { requestKey, status: 'missing' };
+  }
+  const loadedSubchatIndex = request.subchatIndex ?? chatInfo.subchatIndex;
+  const response = await fetch('/api/chats/messages', {
+    method: 'POST',
+    body: JSON.stringify({
+      chatId: request.chatId,
+      sessionId,
+      subchatIndex: loadedSubchatIndex,
+    }),
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error('Failed to fetch initial messages');
+  }
+  const responseTranscript = transcriptIdentityFromHeaders(response.headers) ?? chatInfo.transcript;
+  const history =
+    response.status === 204
+      ? { messages: [], checkpoint: null }
+      : response.headers.get('content-type')?.includes('application/json')
+        ? parseMessageHistory(await response.json())
+        : decompressMessages(
+            await readBodyBytesWithLimit(response, MESSAGE_HISTORY_LZ4_LIMITS.compressedBytes, 'Message history'),
+          );
+  signal.throwIfAborted();
+  return {
+    requestKey,
+    status: 'ready',
+    loadedChatId: chatInfo.urlId ?? chatInfo.initialId,
+    initialId: chatInfo.initialId,
+    urlId: chatInfo.urlId,
+    description: chatInfo.description,
+    loadedSubchatIndex,
+    transcript: responseTranscript,
+    checkpoint:
+      history.checkpoint && transcriptIdentitiesEqual(history.checkpoint, responseTranscript)
+        ? history.checkpoint
+        : null,
+    messages: history.messages,
+    seedTranscript:
+      response.headers.get('X-Ghostbuild-Transcript-Source') === 'materialized' && history.messages.length > 0,
+  };
+}
+
+function transcriptIdentity(checkpoint: TranscriptCheckpoint): TranscriptIdentity {
+  return {
+    agentName: checkpoint.agentName,
+    generation: checkpoint.generation,
+    subchatIndex: checkpoint.subchatIndex,
+  };
+}
+
+function transcriptIdentityFromHeaders(headers: Headers): TranscriptIdentity | null {
+  const generation = headers.get('X-Ghostbuild-Transcript-Generation');
+  const subchatIndex = headers.get('X-Ghostbuild-Transcript-Subchat');
+  const result = transcriptIdentitySchema.safeParse({
+    agentName: headers.get('X-Ghostbuild-Transcript-Agent'),
+    generation: generation === null ? Number.NaN : Number(generation),
+    subchatIndex: subchatIndex === null ? Number.NaN : Number(subchatIndex),
+  });
+  return result.success ? result.data : null;
+}
+
+function decompressMessages(compressed: Uint8Array): {
+  messages: SerializedMessage[];
+  checkpoint: TranscriptCheckpoint | null;
+} {
+  const decompressed = decompressWithLz4(compressed, MESSAGE_HISTORY_LZ4_LIMITS);
+  return parseMessageHistory(JSON.parse(textDecoder.decode(decompressed)));
+}
+
+function parseMessageHistory(deserialized: unknown): {
+  messages: SerializedMessage[];
+  checkpoint: TranscriptCheckpoint | null;
+} {
+  if (!Array.isArray(deserialized)) {
+    const history = deserialized as Record<string, unknown> | null;
+    if (history !== null && history.version === 2 && Array.isArray(history.messages)) {
+      return {
+        messages: z.array(serializedMessageSchema).parse(history.messages),
+        checkpoint: transcriptCheckpointSchema.parse(history.transcript),
+      };
+    }
+    throw new Error('Unexpected state -- decompressed data is not a message history');
+  }
+  return {
+    messages: z.array(serializedMessageSchema).parse(deserialized),
+    checkpoint: null,
+  };
+}

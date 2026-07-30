@@ -100,7 +100,7 @@ Current guidance.
       blobSha: changedBlobSha,
       size: new TextEncoder().encode(content).byteLength,
     };
-    const put = vi.fn(async () => ({}));
+    const put = vi.fn(async (_key: string, _value: unknown) => ({}));
     const batch = vi.fn(async () => []);
     const prepare = vi.fn(() => ({
       bind: vi.fn(() => ({})),

@@ -8,6 +8,7 @@ import {
 } from 'ghostbuild-agent/transcript';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { toast } from 'sonner';
+import { cachePersistedTranscript } from '~/lib/cloudflare/chat-transcript-db';
 import { compressWithLz4 } from '~/lib/compression';
 import { buildUncompressedSnapshot } from '~/lib/snapshot.client';
 import { getFileUpdateCounter, waitForFileUpdateCounterChanged } from '~/lib/stores/fileUpdateCounter';
@@ -223,6 +224,17 @@ async function syncBackup(
   }
   if (latestState.numFailures >= 3) {
     toast.dismiss('chat-save-failure');
+  }
+  if (update && completeMessageInfo.transcriptCheckpoint) {
+    cachePersistedTranscript({
+      sessionId,
+      chatId,
+      subchatIndex: currentState.subchatIndex,
+      messages: completeMessageInfo.allMessages,
+      lastMessageRank: update.messageIndex,
+      partIndex: update.partIndex,
+      checkpoint: completeMessageInfo.transcriptCheckpoint,
+    });
   }
   chatSyncState.set({
     ...latestState,

@@ -38,7 +38,7 @@ type StoredSkillEntry = {
   storageKey: string;
 };
 
-export type SkillSyncInspection =
+type SkillSyncInspection =
   | {
       status: 'unchanged';
       treeSha: string;

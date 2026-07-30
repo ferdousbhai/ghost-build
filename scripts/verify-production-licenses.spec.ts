@@ -40,6 +40,27 @@ describe('production dependency license inventory', () => {
     ]);
   });
 
+  it('accepts an exact reviewed grouping when package metadata omits its license', () => {
+    const reviewedPolicy = {
+      ...policy,
+      allowedLicenseExpressions: [...policy.allowedLicenseExpressions, 'MIT'],
+      missingLicenseMetadataOverrides: { '@journeyapps/wa-sqlite@1.7.2': 'MIT' },
+    };
+    expect(
+      findLicensePolicyErrors(
+        [
+          {
+            name: '@journeyapps/wa-sqlite',
+            version: '1.7.2',
+            reportedLicense: 'MIT',
+            packageLicense: undefined,
+          },
+        ],
+        reviewedPolicy,
+      ),
+    ).toEqual([]);
+  });
+
   it('creates a deterministic SPDX 2.3 document with normalized license identifiers', () => {
     const packages = [
       { name: 'buffer-builder', version: '0.2.0', reportedLicense: 'MIT/X11', packageLicense: 'MIT/X11' },
