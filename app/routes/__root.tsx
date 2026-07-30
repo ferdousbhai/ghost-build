@@ -22,8 +22,6 @@ const inlineThemeCode = stripIndents`
   }
 `;
 
-const ghostbuildFavicon =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%91%BB%3C/text%3E%3C/svg%3E";
 const dynamicImportRecoveryKey = 'ghostbuild:dynamic-import-recovery';
 
 export const Route = createRootRoute({
@@ -40,7 +38,7 @@ export const Route = createRootRoute({
     links: [
       {
         rel: 'icon',
-        href: ghostbuildFavicon,
+        href: '/ghostbuild-logo.svg',
         type: 'image/svg+xml',
       },
       { rel: 'stylesheet', href: globalStyles },

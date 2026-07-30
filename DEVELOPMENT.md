@@ -50,7 +50,9 @@ Production operations require:
 - the Worker secrets declared by `wrangler.jsonc`
 
 The OAuth client callback is `https://<deployment-origin>/connect/return`. Keep its permissions aligned with
-`CLOUDFLARE_OAUTH_SCOPES` in `wrangler.jsonc`.
+`CLOUDFLARE_OAUTH_SCOPES` in `wrangler.jsonc`. The public Ghostbuild client uses
+`https://ghostbuild.dev/ghostbuild-logo.svg` as its logo URL so the Cloudflare consent screen stays aligned with the
+deployed brand asset.
 
 `workers-builds.production.json` is the reviewed source-of-truth contract for Cloudflare dashboard build settings. It
 is verified in `pnpm run validate`; Cloudflare does not read it automatically. Mirror it in the `ghostbuild` Worker's
