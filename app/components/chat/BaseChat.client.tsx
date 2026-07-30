@@ -21,6 +21,7 @@ import { SubchatBar } from './SubchatBar';
 import { SubchatLimitNudge } from './SubchatLimitNudge';
 import { subchatQueryKey, useMutation } from '~/lib/cloudflare/data-hooks';
 import { api } from '~/lib/cloudflare/data-api';
+import { loadAllSubchats } from '~/lib/cloudflare/data-page-loader';
 import { subchatIndexStore, useIsSubchatLoaded } from '~/lib/stores/subchats';
 import type { BuildProgress } from './build-progress';
 import type { SubchatSummary } from './subchat-model';
@@ -97,39 +98,72 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
     const createSubchat = useMutation(api.subchats.create);
     const queryClient = useQueryClient();
     const isSubchatLoaded = useIsSubchatLoaded();
-    const createSubchatPendingRef = React.useRef(false);
-
     const chatId = useChatId();
     const sessionId = useSessionIdOrNullOrLoading();
+    const activeChatContextRef = React.useRef<{ chatId: string; sessionId: string | null | undefined } | null>(null);
+    const createSubchatPendingRef = React.useRef<symbol | null>(null);
+
+    React.useEffect(() => {
+      const context = { chatId, sessionId };
+      activeChatContextRef.current = context;
+      createSubchatPendingRef.current = null;
+      return () => {
+        if (activeChatContextRef.current === context) {
+          activeChatContextRef.current = null;
+        }
+        createSubchatPendingRef.current = null;
+      };
+    }, [chatId, sessionId]);
+
     const handleCreateSubchat = useCallback(async (): Promise<boolean> => {
-      if (!sessionId || createSubchatPendingRef.current) {
+      const context = activeChatContextRef.current;
+      if (
+        !sessionId ||
+        context?.chatId !== chatId ||
+        context.sessionId !== sessionId ||
+        createSubchatPendingRef.current
+      ) {
         return false;
       }
-      createSubchatPendingRef.current = true;
+      const attempt = Symbol('create-subchat');
+      createSubchatPendingRef.current = attempt;
+      const isActiveChat = () => activeChatContextRef.current === context;
       try {
         let subchatIndex: number;
         try {
           subchatIndex = await createSubchat({ chatId, sessionId });
         } catch (error) {
-          toast.error(error instanceof Error ? error.message : 'Unable to create a new chat.');
+          if (isActiveChat()) {
+            toast.error(error instanceof Error ? error.message : 'Unable to create a new chat.');
+          }
           return false;
         }
+        if (!isActiveChat()) {
+          return true;
+        }
         try {
-          await queryClient.invalidateQueries({
-            queryKey: subchatQueryKey({ chatId, sessionId }),
-          });
+          const subchats = await loadAllSubchats(chatId, sessionId);
+          if (!isActiveChat()) {
+            return true;
+          }
+          queryClient.setQueryData(subchatQueryKey({ chatId, sessionId }), subchats);
         } catch (error) {
-          toast.error(
-            error instanceof Error
-              ? `The chat was created, but its history could not refresh: ${error.message}`
-              : 'The chat was created, but its history could not refresh. Reload to continue.',
-          );
+          if (isActiveChat()) {
+            toast.error(
+              error instanceof Error
+                ? `The chat was created, but its history could not refresh: ${error.message}`
+                : 'The chat was created, but its history could not refresh. Reload to continue.',
+            );
+          }
+          return true;
         }
         subchatIndexStore.set(subchatIndex);
         messageInputStore.set('');
         return true;
       } finally {
-        createSubchatPendingRef.current = false;
+        if (createSubchatPendingRef.current === attempt) {
+          createSubchatPendingRef.current = null;
+        }
       }
     }, [createSubchat, chatId, queryClient, sessionId]);
 
