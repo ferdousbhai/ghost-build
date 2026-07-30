@@ -1,16 +1,12 @@
-import { useStore } from '@nanostores/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { toast } from 'sonner';
-import { uploadThumbnail } from '~/components/workbench/thumbnail-upload.client';
 import { api } from '~/lib/cloudflare/data-api';
 import type { CurrentSocialShare } from '~/lib/cloudflare/data-api';
 import { useMutation, useQuery } from '~/lib/cloudflare/data-hooks';
 import { useChatId } from '~/lib/stores/chatId';
 import { useSessionId } from '~/lib/stores/sessionId';
-import { workbenchStore } from '~/lib/stores/workbench.client';
-import { captureException } from '~/lib/telemetry.client';
 
 const logger = createScopedLogger('ShareProject');
 type OperationStatus = 'idle' | 'loading' | 'success';
@@ -19,12 +15,9 @@ type OptimisticShare = CurrentSocialShare & { chatId: string };
 export function useShareProject() {
   const [isOpen, setIsOpen] = useState(false);
   const [isThumbnailModalOpen, setIsThumbnailModalOpen] = useState(false);
-  const [snapshotStatus, setSnapshotStatus] = useState<OperationStatus>('idle');
   const [shareStatus, setShareStatus] = useState<OperationStatus>('idle');
-  const [snapshotUrl, setSnapshotUrl] = useState('');
   const [isSharedDraft, setIsSharedDraft] = useState(false);
   const [optimisticShare, setOptimisticShare] = useState<OptimisticShare | null>(null);
-  const previews = useStore(workbenchStore.previews);
   const chatId = useChatId();
   const activeChatIdRef = useRef(chatId);
   const previousChatIdRef = useRef(chatId);
@@ -33,7 +26,6 @@ export function useShareProject() {
   const queriedShare = useQuery(api.socialShare.getCurrentSocialShare, { id: chatId, sessionId });
   const currentShare = optimisticShare?.chatId === chatId ? optimisticShare : queriedShare;
   const shareUrl = useMemo(() => (currentShare?.code ? shareUrlForCode(currentShare.code) : ''), [currentShare?.code]);
-  const createShare = useMutation(api.share.create);
   const socialShare = useMutation(api.socialShare.share);
   const queryClient = useQueryClient();
 
@@ -46,8 +38,6 @@ export function useShareProject() {
     setIsThumbnailModalOpen(false);
     setIsSharedDraft(false);
     setOptimisticShare(null);
-    setSnapshotUrl('');
-    setSnapshotStatus('idle');
     setShareStatus('idle');
   }, [chatId]);
 
@@ -111,25 +101,6 @@ export function useShareProject() {
     [isSharedDraft, persistSharing],
   );
 
-  const createSnapshot = useCallback(async () => {
-    try {
-      setSnapshotStatus('loading');
-      const result = await createShare({ id: chatId, sessionId });
-      if (activeChatIdRef.current !== chatId) {
-        return;
-      }
-      setSnapshotUrl(`${window.location.origin}/create/${result.code}`);
-      setSnapshotStatus('success');
-    } catch (error) {
-      if (activeChatIdRef.current !== chatId) {
-        return;
-      }
-      toast.error('Failed to create snapshot. Please try again.');
-      logger.error('Snapshot error:', error);
-      setSnapshotStatus('idle');
-    }
-  }, [chatId, createShare, sessionId]);
-
   const handleOpenChange = useCallback(
     async (open: boolean) => {
       if (open && currentShare === undefined) {
@@ -138,7 +109,6 @@ export function useShareProject() {
       setIsOpen(open);
       if (!open) {
         setIsSharedDraft(currentShare?.isShared ?? false);
-        setSnapshotStatus('idle');
         setShareStatus('idle');
         return;
       }
@@ -147,41 +117,12 @@ export function useShareProject() {
       // settings popover must not publish the project. Publication remains an
       // explicit checkbox + save action.
       const initializeSharing = currentShare ? Promise.resolve(true) : persistSharing(false, false);
-      if (!currentShare?.thumbnailUrl) {
-        try {
-          const [screenshot, sharingReady] = await Promise.all([
-            workbenchStore.requestAnyScreenshot(3000),
-            initializeSharing,
-          ]);
-          if (!sharingReady) {
-            return;
-          }
-          await uploadThumbnail(screenshot, sessionId, chatId);
-          if (activeChatIdRef.current !== chatId) {
-            return;
-          }
-          setOptimisticShare((existing) =>
-            existing?.chatId === chatId ? { ...existing, thumbnailUrl: screenshot } : existing,
-          );
-          void queryClient
-            .invalidateQueries({ queryKey: ['ghostbuild-data', api.socialShare.getCurrentSocialShare] })
-            .catch((error) => logger.warn('Failed to refresh sharing thumbnail', error));
-        } catch (error) {
-          if (activeChatIdRef.current !== chatId) {
-            return;
-          }
-          logger.error('Error uploading thumbnail:', error);
-          captureException('Failed to share project thumbnail', error);
-        }
-        return;
-      }
       await initializeSharing;
     },
-    [chatId, currentShare, persistSharing, queryClient, sessionId],
+    [currentShare, persistSharing],
   );
 
   return {
-    anyPreviewReady: previews.some((preview) => preview.ready),
     copyToClipboard: async (url: string) => {
       try {
         await navigator.clipboard.writeText(url);
@@ -191,22 +132,18 @@ export function useShareProject() {
         toast.error('Failed to copy link');
       }
     },
-    createSnapshot,
     currentShare,
     handleOpenChange,
     hasChanges: Boolean(currentShare && currentShare.isShared !== isSharedDraft),
     isOpen,
     isSharedDraft,
     isThumbnailModalOpen,
-    requestCapture: () => workbenchStore.requestAnyScreenshot(),
     saveSharing,
     sharingReady: currentShare !== undefined,
     setIsSharedDraft,
     setIsThumbnailModalOpen,
     shareStatus,
     shareUrl,
-    snapshotStatus,
-    snapshotUrl,
   };
 }
 

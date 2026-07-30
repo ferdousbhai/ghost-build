@@ -5,7 +5,7 @@ const getAuthSession = vi.hoisted(() => vi.fn());
 const ensureInitialChat = vi.hoisted(() => vi.fn());
 const routeAgentRequest = vi.hoisted(() => vi.fn());
 const healthAction = vi.hoisted(() => vi.fn());
-const scriptsAction = vi.hoisted(() => vi.fn());
+const cleanupExpiredBuilderPreviewsBestEffort = vi.hoisted(() => vi.fn());
 const completeCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const cloudflareConnectionStatusAction = vi.hoisted(() => vi.fn());
 const startCloudflareConnectionAction = vi.hoisted(() => vi.fn());
@@ -48,12 +48,18 @@ vi.mock('./server-handlers/deployments', () => ({
 vi.mock('./server-handlers/enhance-prompt', () => ({ enhancePromptAction: vi.fn() }));
 vi.mock('./server-handlers/feedback', () => ({ feedbackAction: vi.fn() }));
 vi.mock('./server-handlers/health', () => ({ healthAction }));
-vi.mock('./server-handlers/scripts', () => ({ scriptsAction }));
 vi.mock('./server-handlers/version', () => ({ versionAction: vi.fn() }));
 vi.mock('./lib/cloudflare/data/deferred-gc.server', () => ({ drainDeferredDataGcBestEffort }));
 vi.mock('./lib/cloudflare/data/cloudflare-auth-retention.server', () => ({ pruneCloudflareAuthDataBestEffort }));
 vi.mock('./lib/.server/cloudflare/deployment-security-inventory', () => ({
   refreshDeploymentSecurityInventoryBestEffort,
+}));
+vi.mock('./lib/.server/cloudflare/builder-preview-repository', () => ({
+  cleanupExpiredBuilderPreviewsBestEffort,
+}));
+vi.mock('./server-handlers/previews', () => ({
+  matchPreviewRequest: () => null,
+  previewAction: vi.fn(),
 }));
 vi.mock('./lib/cloudflare/data/chat-backup-quota.server', () => ({ reconcileChatBackupQuotaBestEffort }));
 vi.mock('./lib/cloudflare/data/thumbnail-quota.server', () => ({ reconcileThumbnailQuotaBestEffort }));
@@ -68,7 +74,7 @@ describe('server Agent routing boundary', () => {
     ensureInitialChat.mockReset();
     routeAgentRequest.mockReset();
     healthAction.mockReset().mockResolvedValue(Response.json({ status: 'ok' }));
-    scriptsAction.mockReset().mockReturnValue(new Response('script'));
+    cleanupExpiredBuilderPreviewsBestEffort.mockReset().mockResolvedValue(undefined);
     completeCloudflareConnectionAction.mockReset().mockImplementation(async () => {
       const headers = new Headers({ Location: 'https://ghostbuild.dev/' });
       headers.append('Set-Cookie', 'ghostbuild_session=session; Path=/; HttpOnly; Secure');
@@ -103,8 +109,8 @@ describe('server Agent routing boundary', () => {
     const response = await server.fetch(new Request('https://ghostbuild.dev/not-an-agent'), {} as Env);
 
     expect(await response.text()).toBe('application');
-    expect(response.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
-    expect(response.headers.get('Cross-Origin-Embedder-Policy')).toBe('credentialless');
+    expect(response.headers.has('Cross-Origin-Opener-Policy')).toBe(false);
+    expect(response.headers.has('Cross-Origin-Embedder-Policy')).toBe(false);
     expect(response.headers.get('Content-Security-Policy')).toBe(
       "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'",
     );
@@ -120,8 +126,8 @@ describe('server Agent routing boundary', () => {
     const response = await server.fetch(new Request('https://ghostbuild.dev/api/health'), {} as Env);
 
     expect(response.status).toBe(200);
-    expect(response.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
-    expect(response.headers.get('Cross-Origin-Embedder-Policy')).toBe('credentialless');
+    expect(response.headers.has('Cross-Origin-Opener-Policy')).toBe(false);
+    expect(response.headers.has('Cross-Origin-Embedder-Policy')).toBe(false);
     expect(response.headers.get('Content-Security-Policy')).toBe(
       "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'",
     );
@@ -146,19 +152,6 @@ describe('server Agent routing boundary', () => {
     expect(response.headers.get('X-Frame-Options')).toBe('DENY');
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(healthAction).not.toHaveBeenCalled();
-  });
-
-  it('serves scripts only over GET and preserves the centralized 405 policy', async () => {
-    const response = await server.fetch(
-      new Request('https://ghostbuild.dev/scripts/example.js', { method: 'POST' }),
-      {} as Env,
-    );
-
-    expect(response.status).toBe(405);
-    expect(response.headers.get('Allow')).toBe('GET');
-    expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
-    expect(response.headers.get('X-Frame-Options')).toBe('DENY');
-    expect(scriptsAction).not.toHaveBeenCalled();
   });
 
   it('marks OAuth callback redirects no-store without losing either cookie', async () => {
@@ -258,6 +251,9 @@ describe('server Agent routing boundary', () => {
     reconcileThumbnailQuotaBestEffort.mockImplementationOnce(async () => {
       calls.push('thumbnail-quota');
     });
+    cleanupExpiredBuilderPreviewsBestEffort.mockImplementationOnce(async () => {
+      calls.push('builder-previews');
+    });
     refreshDeploymentSecurityInventoryBestEffort.mockImplementationOnce(async () => {
       calls.push('deployment-security-inventory');
     });
@@ -271,6 +267,7 @@ describe('server Agent routing boundary', () => {
       'auth-retention',
       'chat-backup-quota',
       'thumbnail-quota',
+      'builder-previews',
       'deployment-security-inventory',
     ]);
     expect(drainDeferredDataGcBestEffort).toHaveBeenCalledOnce();
@@ -278,5 +275,6 @@ describe('server Agent routing boundary', () => {
     expect(refreshDeploymentSecurityInventoryBestEffort).toHaveBeenCalledWith(env);
     expect(reconcileChatBackupQuotaBestEffort).toHaveBeenCalledWith(env);
     expect(reconcileThumbnailQuotaBestEffort).toHaveBeenCalledWith(env);
+    expect(cleanupExpiredBuilderPreviewsBestEffort).toHaveBeenCalledWith(env);
   });
 });

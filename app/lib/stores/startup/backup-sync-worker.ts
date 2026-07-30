@@ -9,9 +9,6 @@ import {
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { toast } from 'sonner';
 import { cachePersistedTranscript } from '~/lib/cloudflare/chat-transcript-db';
-import { compressWithLz4 } from '~/lib/compression';
-import { buildUncompressedSnapshot } from '~/lib/snapshot.client';
-import { getFileUpdateCounter, waitForFileUpdateCounterChanged } from '~/lib/stores/fileUpdateCounter';
 import { subchatIndexStore, waitForSubchatIndexChanged } from '~/lib/stores/subchats';
 import { waitForStoreValue } from '~/lib/stores/waitForStore';
 import { backoffTime } from '~/utils/constants';
@@ -60,7 +57,6 @@ export function initializeBackupPosition(
       ? {
           lastSync: 0,
           numFailures: 0,
-          savedFileUpdateCounter: null,
           started: false,
           persistedTranscriptCheckpoint: null,
         }
@@ -83,15 +79,8 @@ export function initializeBackupPosition(
 export function hasPendingBackupWork(
   currentState: BackupSyncState,
   completeMessageInfo: CompleteMessageInfo | null,
-  fileUpdateCounter: number,
 ): boolean {
-  return (
-    hasPendingMessageBackup(currentState, completeMessageInfo) ||
-    (completeMessageInfo?.transcriptCheckpoint !== null &&
-      completeMessageInfo?.transcriptCheckpoint !== undefined &&
-      currentState.savedFileUpdateCounter !== null &&
-      currentState.savedFileUpdateCounter !== fileUpdateCounter)
-  );
+  return hasPendingMessageBackup(currentState, completeMessageInfo);
 }
 
 export async function chatSyncWorker(options: ChatSyncWorkerOptions): Promise<void> {
@@ -125,7 +114,7 @@ export async function chatSyncWorker(options: ChatSyncWorkerOptions): Promise<vo
         await waitForNextSyncTrigger(state, completeMessageInfo, signal);
         continue;
       }
-      if (!hasPendingBackupWork(state, completeMessageInfo, getFileUpdateCounter())) {
+      if (!hasPendingBackupWork(state, completeMessageInfo)) {
         await waitForNextSyncTrigger(state, completeMessageInfo, signal);
         // Every wait invalidates the snapshots above. Restart the loop instead
         // of syncing with the state that existed before the trigger.
@@ -135,10 +124,7 @@ export async function chatSyncWorker(options: ChatSyncWorkerOptions): Promise<vo
       await waitForBackupDebounce(state.lastSync, signal);
       const latestState = await waitForInitialized(options.chatId, signal);
       const latestCompleteMessageInfo = lastCompleteMessageInfoStore.get();
-      if (
-        latestCompleteMessageInfo === null ||
-        !hasPendingBackupWork(latestState, latestCompleteMessageInfo, getFileUpdateCounter())
-      ) {
+      if (latestCompleteMessageInfo === null || !hasPendingBackupWork(latestState, latestCompleteMessageInfo)) {
         continue;
       }
       await syncBackup(options.chatId, options.sessionId, latestState, latestCompleteMessageInfo, signal);
@@ -187,12 +173,9 @@ async function syncBackup(
     persistedTranscriptCheckpoint: currentState.persistedTranscriptCheckpoint,
     subchatIndex: currentState.subchatIndex,
   });
-  const nextSavedUpdateCounter = getFileUpdateCounter();
-  const snapshot =
-    currentState.savedFileUpdateCounter !== nextSavedUpdateCounter ? await prepareBackupSnapshot() : undefined;
   signal.throwIfAborted();
 
-  if (!update?.compressed && !snapshot) {
+  if (!update?.compressed) {
     return;
   }
   if (currentState.chatId !== chatId || currentState.subchatIndex !== subchatIndexStore.get()) {
@@ -203,7 +186,7 @@ async function syncBackup(
     return;
   }
 
-  const formData = buildBackupFormData(update?.compressed, snapshot, update?.firstMessage);
+  const formData = buildBackupFormData(update.compressed, update.firstMessage);
   let response: Response | undefined;
   let requestError: Error | null = null;
   try {
@@ -240,7 +223,6 @@ async function syncBackup(
     ...latestState,
     lastSync: Date.now(),
     numFailures: 0,
-    savedFileUpdateCounter: nextSavedUpdateCounter,
     ...(update ? { persistedMessageInfo: { messageIndex: update.messageIndex, partIndex: update.partIndex } } : {}),
     ...(completeMessageInfo.transcriptCheckpoint
       ? { persistedTranscriptCheckpoint: completeMessageInfo.transcriptCheckpoint }
@@ -248,17 +230,10 @@ async function syncBackup(
   });
 }
 
-function buildBackupFormData(
-  messages: Uint8Array | undefined,
-  snapshot: Uint8Array | undefined,
-  firstMessage: string | undefined,
-): FormData {
+function buildBackupFormData(messages: Uint8Array | undefined, firstMessage: string | undefined): FormData {
   const formData = new FormData();
   if (messages) {
     formData.append('messages', blobFromBytes(messages));
-  }
-  if (snapshot) {
-    formData.append('snapshot', blobFromBytes(snapshot));
   }
   if (firstMessage) {
     formData.append('firstMessage', firstMessage);
@@ -351,9 +326,6 @@ async function waitForNextSyncTrigger(
     ),
     waitForSubchatIndexChanged(currentState.subchatIndex, triggerController.signal),
   ];
-  if (!completeMessageInfo.hasNextPart) {
-    triggers.push(waitForFileUpdateCounterChanged(currentState.savedFileUpdateCounter, triggerController.signal));
-  }
   try {
     await Promise.race(triggers);
   } finally {
@@ -382,7 +354,6 @@ function waitForInitialized(chatId: string, signal: AbortSignal): Promise<Initia
       if (
         state.chatId !== chatId ||
         state.persistedMessageInfo === null ||
-        state.savedFileUpdateCounter === null ||
         state.subchatIndex !== subchatIndexStore.get()
       ) {
         return null;
@@ -391,15 +362,10 @@ function waitForInitialized(chatId: string, signal: AbortSignal): Promise<Initia
         ...state,
         chatId,
         persistedMessageInfo: state.persistedMessageInfo,
-        savedFileUpdateCounter: state.savedFileUpdateCounter,
       };
     },
     { signal },
   );
-}
-
-async function prepareBackupSnapshot(): Promise<Uint8Array> {
-  return compressWithLz4(await buildUncompressedSnapshot());
 }
 
 function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {

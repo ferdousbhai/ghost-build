@@ -89,7 +89,6 @@ export function useWorkbenchController(isStreaming?: boolean) {
     selectedView,
     setSelectedView: (view: WorkbenchViewType) => workbenchStore.currentView.set(view),
     showWorkbench,
-    toggleTerminal: () => workbenchStore.toggleTerminal(!workbenchStore.showTerminal.get()),
     unsavedFiles,
     scrollToDocAppend: following && isStreaming,
   };

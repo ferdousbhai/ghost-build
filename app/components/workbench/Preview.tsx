@@ -1,182 +1,161 @@
 import { useStore } from '@nanostores/react';
-import { ExternalLinkIcon, ImageIcon, MobileIcon, UpdateIcon } from '@radix-ui/react-icons';
-import { memo, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
-import { Spinner } from '@ui/Spinner';
+import { ReloadIcon } from '@radix-ui/react-icons';
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { IconButton } from '~/components/ui/IconButton';
-import { ContainerBootState, useContainerBootState } from '~/lib/stores/containerBootState';
+import { Button } from '@ui/Button';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { classNames } from '~/utils/classNames';
-import { PortDropdown } from './PortDropdown';
-import { ThumbnailChooser } from './ThumbnailChooser';
-import { useDevicePreviewResize, type ResizeHandleSide } from './useDevicePreviewResize';
-import { usePreviewNavigation } from './usePreviewNavigation';
-import { toast } from 'sonner';
 
-export const Preview = memo(function Preview() {
-  const previews = useStore(workbenchStore.previews);
-  const navigation = usePreviewNavigation(previews);
-  const device = useDevicePreviewResize();
-  const containerBoot = useContainerBootState();
-  const [isThumbnailModalOpen, setIsThumbnailModalOpen] = useState(false);
-  const previewStartupMessage =
-    containerBoot.state < ContainerBootState.READY ? 'Preparing preview...' : 'Starting preview...';
+export function Preview() {
+  const state = useStore(workbenchStore.previewState);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [requesting, setRequesting] = useState(false);
+  const [, setExpirationTick] = useState(0);
+  const candidate = state.active ?? state.lastSuccessful;
+  const preview = candidate && Date.parse(candidate.expiresAt) > Date.now() ? candidate : null;
+  const previewUrl = preview?.url ?? null;
+  const expiresAt = preview ? new Date(preview.expiresAt) : null;
+  const status =
+    candidate && !preview && state.status !== 'queued' && state.status !== 'building' ? 'expired' : state.status;
+
+  useEffect(() => {
+    if (!candidate) {
+      return undefined;
+    }
+    const remaining = Date.parse(candidate.expiresAt) - Date.now();
+    if (remaining <= 0) {
+      return undefined;
+    }
+    const timeout = setTimeout(() => setExpirationTick((value) => value + 1), Math.min(remaining + 10, 2_147_483_647));
+    return () => clearTimeout(timeout);
+  }, [candidate]);
+
+  const requestPreview = async () => {
+    setRequesting(true);
+    try {
+      workbenchStore.updatePreview(await workbenchStore.requestPreview());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to queue a remote preview.');
+    } finally {
+      setRequesting(false);
+    }
+  };
 
   return (
-    <div className="relative flex size-full flex-col">
-      {navigation.isPortDropdownOpen && (
-        <div
-          aria-hidden
-          className="z-iframe-overlay absolute size-full"
-          onClick={() => navigation.setIsPortDropdownOpen(false)}
-        />
-      )}
-      <div className="flex items-center gap-2 bg-bolt-elements-background-depth-2 p-2">
+    <div className="flex size-full min-h-0 flex-col bg-bolt-elements-background-depth-1">
+      <div className="flex min-h-12 items-center gap-2 border-b border-border-transparent px-3 py-2">
+        <PreviewBadge status={status} stale={state.stale} />
+        <div className="min-w-0 flex-1 truncate text-xs text-content-secondary" aria-live="polite">
+          {preview
+            ? `Durable revision ${preview.workspaceRevision}${expiresAt ? ` · expires ${expiresAt.toLocaleTimeString()}` : ''}`
+            : `Durable revision ${state.currentWorkspaceRevision}`}
+        </div>
         <IconButton
-          icon={<UpdateIcon />}
-          title="Reload preview"
-          onClick={() => {
-            void navigation.reload().catch((error) => {
-              toast.error(error instanceof Error ? error.message : 'Unable to reload the preview.');
-            });
-          }}
+          icon={<ReloadIcon />}
+          title="Reload preview frame"
+          disabled={!previewUrl}
+          onClick={() => setReloadKey((value) => value + 1)}
         />
-        <div className="flex grow items-center gap-1 rounded-full border bg-bolt-elements-preview-addressBar-background px-3 py-1 text-sm text-bolt-elements-preview-addressBar-text hover:bg-bolt-elements-preview-addressBar-backgroundHover focus-within:border-border-selected focus-within:bg-bolt-elements-preview-addressBar-backgroundActive focus-within:text-bolt-elements-preview-addressBar-textActive hover:focus-within:bg-bolt-elements-preview-addressBar-backgroundActive">
-          <input
-            title="URL"
-            aria-label="Preview URL"
-            ref={navigation.inputRef}
-            className="w-full bg-transparent outline-none focus:outline-none"
-            type="text"
-            value={navigation.url || ''}
-            onChange={(event) => navigation.setUrl(event.target.value)}
-            onKeyDown={navigation.handleAddressKeyDown}
-            disabled={navigation.previewBaseUrl === null}
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          {previews.length > 1 && (
-            <PortDropdown
-              activePreviewIndex={navigation.activePreviewIndex}
-              setActivePreviewIndex={navigation.setActivePreviewIndex}
-              isDropdownOpen={navigation.isPortDropdownOpen}
-              setHasSelectedPreview={navigation.markPreviewSelected}
-              setIsDropdownOpen={navigation.setIsPortDropdownOpen}
-              previews={previews}
-            />
-          )}
-          <IconButton icon={<ImageIcon />} title="View Preview Image" onClick={() => setIsThumbnailModalOpen(true)} />
-          <ThumbnailChooser
-            isOpen={isThumbnailModalOpen}
-            onOpenChange={setIsThumbnailModalOpen}
-            onRequestCapture={navigation.requestScreenshot}
-          />
-          <IconButton
-            icon={<MobileIcon />}
-            aria-pressed={device.isDeviceModeOn}
-            onClick={device.toggleDeviceMode}
-            title={device.isDeviceModeOn ? 'Switch to Responsive Mode' : 'Switch to Device Mode'}
-          />
-          <IconButton
-            icon={<ExternalLinkIcon />}
-            onClick={() => {
-              void navigation.openInNewWindow().catch((error) => {
-                toast.error(error instanceof Error ? error.message : 'Unable to open the preview window.');
-              });
-            }}
-            title="Open in New Window"
-          />
-        </div>
-      </div>
-
-      <div className="flex flex-1 items-center justify-center overflow-auto border-t">
-        <div
-          className="relative flex h-full bg-bolt-elements-background-depth-1"
-          style={{ width: device.isDeviceModeOn ? `${device.widthPercent}%` : '100%', overflow: 'visible' }}
+        <Button
+          size="xs"
+          variant="neutral"
+          disabled={requesting || state.status === 'building'}
+          onClick={requestPreview}
         >
-          {navigation.activePreview ? (
-            navigation.previewBaseUrl ? (
-              <iframe
-                ref={navigation.setIframeRef}
-                title="preview"
-                className="size-full border-none bg-bolt-elements-background-depth-1"
-                src={navigation.iframeUrl}
-                sandbox="allow-downloads allow-forms allow-modals allow-orientation-lock allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-presentation allow-same-origin allow-scripts"
-                allow="accelerometer; ambient-light-sensor; autoplay; bluetooth; camera; clipboard-write; compute-pressure; display-capture; fullscreen; gamepad; geolocation; gyroscope; hid; identity-credentials-get; idle-detection; local-fonts; magnetometer; microphone; midi; otp-credentials; payment; picture-in-picture; publickey-credentials-create; publickey-credentials-get; screen-wake-lock; serial; speaker-selection; usb; web-share; window-management; xr-spatial-tracking"
-                allowFullScreen
-              />
-            ) : (
-              <PreviewStatus>
-                <Spinner />
-              </PreviewStatus>
-            )
-          ) : (
-            <PreviewStatus>{previewStartupMessage}</PreviewStatus>
-          )}
-          {device.isDeviceModeOn && (
-            <>
-              <ResizeHandle
-                side="left"
-                widthPercent={device.widthPercent}
-                onMouseDown={device.startResizing}
-                onKeyDown={device.adjustWidthWithKeyboard}
-              />
-              <ResizeHandle
-                side="right"
-                widthPercent={device.widthPercent}
-                onMouseDown={device.startResizing}
-                onKeyDown={device.adjustWidthWithKeyboard}
-              />
-            </>
-          )}
-        </div>
+          {requesting || state.status === 'queued' ? 'Queued…' : state.stale ? 'Rebuild' : 'Refresh'}
+        </Button>
       </div>
-    </div>
-  );
-});
 
-function PreviewStatus({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex size-full items-center justify-center bg-bolt-elements-background-depth-1 text-content-primary">
-      {children}
+      {(state.stale || status === 'failed' || status === 'expired') && (
+        <div
+          className={classNames('border-b px-4 py-2 text-xs', {
+            'border-amber-500/20 bg-amber-500/10 text-content-warning': state.stale || state.status === 'expired',
+            'border-red-500/20 bg-red-500/10 text-content-error': status === 'failed',
+          })}
+          role="status"
+        >
+          {status === 'failed'
+            ? `${state.error ?? 'The latest remote build failed.'}${preview ? ' The last successful preview is still available.' : ''}`
+            : status === 'expired'
+              ? 'This preview expired. Build a fresh preview from the current durable revision.'
+              : `This preview is stale. The project is now at durable revision ${state.currentWorkspaceRevision}.`}
+        </div>
+      )}
+
+      <div className="relative min-h-0 flex-1">
+        {previewUrl && preview ? (
+          <iframe
+            key={`${preview.id}:${reloadKey}`}
+            className="size-full border-0 bg-white"
+            src={previewUrl}
+            title={`Remote preview for durable revision ${preview.workspaceRevision}`}
+            sandbox="allow-forms allow-modals allow-popups allow-scripts"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <PreviewEmpty
+            status={state.status}
+            error={state.error}
+            onRequest={() => void requestPreview()}
+            disabled={requesting}
+          />
+        )}
+        {(state.status === 'queued' || state.status === 'building') && (
+          <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center p-3">
+            <div className="rounded-full border border-border-transparent bg-bolt-elements-background-depth-2/95 px-3 py-1.5 text-xs text-content-secondary shadow-lg backdrop-blur">
+              {state.status === 'queued'
+                ? 'Preview queued — isolated capacity is bounded.'
+                : `Building revision ${state.workspaceRevision ?? state.currentWorkspaceRevision} in an isolated sandbox…`}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function ResizeHandle({
-  side,
-  widthPercent,
-  onMouseDown,
-  onKeyDown,
+function PreviewBadge({ status, stale }: { status: string; stale: boolean }) {
+  const label = stale && status === 'ready' ? 'stale' : status;
+  return (
+    <span
+      className={classNames('rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide', {
+        'border-emerald-500/30 bg-emerald-500/10 text-emerald-600': label === 'ready',
+        'border-amber-500/30 bg-amber-500/10 text-amber-600':
+          label === 'queued' || label === 'building' || label === 'stale',
+        'border-red-500/30 bg-red-500/10 text-red-600': label === 'failed' || label === 'expired',
+        'border-border-transparent text-content-tertiary': label === 'idle' || label === 'cancelled',
+      })}
+    >
+      {label}
+    </span>
+  );
+}
+
+function PreviewEmpty({
+  status,
+  error,
+  onRequest,
+  disabled,
 }: {
-  side: ResizeHandleSide;
-  widthPercent: number;
-  onMouseDown: (event: ReactMouseEvent, side: ResizeHandleSide) => void;
-  onKeyDown: (side: ResizeHandleSide, key: 'ArrowLeft' | 'ArrowRight') => void;
+  status: string;
+  error: string | null;
+  onRequest: () => void;
+  disabled: boolean;
 }) {
   return (
-    <div
-      role="separator"
-      aria-label={`Resize preview from the ${side}`}
-      aria-orientation="vertical"
-      aria-valuemin={10}
-      aria-valuemax={90}
-      aria-valuenow={widthPercent}
-      tabIndex={0}
-      onMouseDown={(event) => onMouseDown(event, side)}
-      onKeyDown={(event: ReactKeyboardEvent) => {
-        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-          event.preventDefault();
-          onKeyDown(side, event.key);
-        }
-      }}
-      className={classNames(
-        'absolute top-0 flex h-full w-[15px] cursor-ew-resize select-none items-center justify-center bg-white/20 transition-colors hover:bg-white/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500',
-        side === 'left' ? 'left-0 -ml-[15px]' : 'right-0 -mr-[15px]',
-      )}
-      title="Drag to resize width"
-    >
-      <div className="pointer-events-none flex h-full items-center justify-center">
-        <div className="ml-px select-none text-[10px] leading-[5px] text-black/50">••• •••</div>
+    <div className="flex size-full items-center justify-center p-6 text-center">
+      <div className="max-w-sm">
+        <p className="font-medium text-content-primary">
+          {status === 'failed' ? 'Remote preview build failed' : 'Build a remote preview'}
+        </p>
+        <p className="mt-2 text-sm text-content-secondary">
+          {error ??
+            'Ghostbuild will capture the exact durable workspace revision and run it in a short-lived, isolated Cloudflare Sandbox.'}
+        </p>
+        <Button className="mt-4" size="sm" disabled={disabled} onClick={onRequest}>
+          Build preview
+        </Button>
       </div>
     </div>
   );

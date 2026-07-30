@@ -7,6 +7,7 @@ import {
   findForbiddenDependencies,
   findForbiddenImports,
   findForbiddenRuntimeEnvAccess,
+  findForbiddenRootBrowserRuntimeDependencies,
   findInternalPackageMetadataErrors,
   findCloudflareAiPeerCompatibilityErrors,
   findDeploymentRuntimePolicyErrors,
@@ -18,8 +19,6 @@ import {
   findSandboxVersionErrors,
   findRootMigrationErrors,
   findBuilderTemplateModuleErrors,
-  findTemplateSnapshotErrors,
-  findTemplateSnapshotManifestErrors,
   packageDependencyVersion,
 } from './verify-stack-alignment.mjs';
 
@@ -224,32 +223,6 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
     ]);
   });
 
-  it('requires exactly one generated template snapshot referenced by setup code', () => {
-    expect(
-      findTemplateSnapshotErrors(
-        ['template-snapshot-1234abcd.bin'],
-        "const TEMPLATE_URL = '/template-snapshot-1234abcd.bin';",
-        new Map([['template-snapshot-1234abcd.bin', '1234abcd']]),
-      ),
-    ).toEqual([]);
-
-    expect(findTemplateSnapshotErrors([], '')).toEqual([
-      'public must contain exactly one template-snapshot-*.bin file; found none.',
-    ]);
-
-    expect(findTemplateSnapshotErrors(['template-snapshot-1234abcd.bin'], "const TEMPLATE_URL = '/old.bin';")).toEqual([
-      'app/lib/stores/startup/useContainerSetup.ts must reference /template-snapshot-1234abcd.bin.',
-    ]);
-
-    expect(
-      findTemplateSnapshotErrors(
-        ['template-snapshot-1234abcd.bin'],
-        "const TEMPLATE_URL = '/template-snapshot-1234abcd.bin';",
-        new Map([['template-snapshot-1234abcd.bin', 'deadbeef']]),
-      ),
-    ).toEqual(['template-snapshot-1234abcd.bin hash must match its compressed snapshot content; expected deadbeef.']);
-  });
-
   it('keeps deployment execution split across bounded non-retrying durable steps', () => {
     const validWorkflow = `
       import { buildApprovedDeploymentArtifact, publishApprovedDeploymentArtifact } from './deployment-executor';
@@ -312,6 +285,8 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
       'thumbnail_objects',
       'thumbnail_reconciliation_state',
       'deployment_security_inventory',
+      'builder_previews',
+      'builder_preview_build_admissions',
     ]
       .map((table) => `CREATE TABLE IF NOT EXISTS ${table} (id TEXT);`)
       .join('\n');
@@ -345,32 +320,24 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
     ).toEqual([]);
   });
 
-  it('requires the template snapshot manifest to match the artifact and current source', () => {
-    expect(
-      findTemplateSnapshotManifestErrors(
-        { snapshot: 'template-snapshot-1234abcd.bin', sourceSha256: 'source-hash' },
-        'template-snapshot-1234abcd.bin',
-        'source-hash',
-      ),
-    ).toEqual([]);
-    expect(
-      findTemplateSnapshotManifestErrors(
-        { snapshot: 'template-snapshot-old.bin', sourceSha256: 'old-source' },
-        'template-snapshot-1234abcd.bin',
-        'source-hash',
-      ),
-    ).toEqual([
-      'public/template-snapshot-manifest.json must reference template-snapshot-1234abcd.bin.',
-      'public/template-snapshot-manifest.json is stale; run pnpm run rebuild-template.',
-    ]);
-  });
-
   it('requires the server Builder template to match the current template source', () => {
     expect(
       findBuilderTemplateModuleErrors("export const BUILDER_TEMPLATE_SOURCE_SHA256 = 'source-hash';", 'source-hash'),
     ).toEqual([]);
     expect(findBuilderTemplateModuleErrors('', 'source-hash')).toEqual([
       'app/agents/builder-template.generated.ts is stale; run pnpm run rebuild-template.',
+    ]);
+  });
+
+  it('rejects reintroducing a browser execution runtime into the root application', () => {
+    expect(
+      findForbiddenRootBrowserRuntimeDependencies({
+        dependencies: { '@webcontainer/api': '1.6.4' },
+        devDependencies: { '@xterm/xterm': '5.5.0' },
+      }),
+    ).toEqual([
+      'package.json must not depend on the removed browser execution runtime @webcontainer/api.',
+      'package.json must not depend on the removed browser execution runtime @xterm/xterm.',
     ]);
   });
 
@@ -389,7 +356,7 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
     ]);
   });
 
-  it('allows the WebContainer SSR gate without allowing other import.meta.env usage', () => {
+  it('allows an explicitly reviewed runtime env access without allowing other import.meta.env usage', () => {
     const fixture = new URL('./fixtures/forbidden-runtime-env-access.ts', import.meta.url).pathname;
 
     expect(

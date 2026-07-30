@@ -5,10 +5,6 @@ import type {
   BuilderWorkspaceSyncEntry,
   BuilderWorkspaceSyncPage,
 } from '~/agents/builder-workspace-types';
-import {
-  BUILDER_WORKSPACE_SYNC_BATCH_BYTES,
-  BUILDER_WORKSPACE_SYNC_BATCH_FILES,
-} from '~/agents/builder-workspace-types';
 import { workbenchStore } from './workbench.client';
 
 type BuilderWorkspaceAgent = {
@@ -16,12 +12,15 @@ type BuilderWorkspaceAgent = {
 };
 
 const WORKSPACE_RPC_TIMEOUT_MS = 30_000;
-const WORKSPACE_SYNC_RETRIES = 3;
 
+/**
+ * Keeps a rebuildable browser presentation cache aligned with the authoritative
+ * Durable Object workspace. Browser writes are single-revision CAS operations:
+ * conflicts reload server state and never rebase a stale local edit.
+ */
 export class BuilderWorkspaceSyncController {
   #revision = 0;
   #operationQueue: Promise<void> = Promise.resolve();
-  #pendingChanges = new Map<string, BuilderWorkspaceClientChange>();
   #disposed = false;
   readonly #changeListener = (changes: BuilderWorkspaceClientChange[]) => this.push(changes);
 
@@ -33,8 +32,7 @@ export class BuilderWorkspaceSyncController {
     if (!state.initialized) {
       throw new Error('The durable project workspace is not initialized.');
     }
-    controller.#revision = 0;
-    await controller.pull();
+    await controller.#replaceFromSnapshot();
     workbenchStore.setWorkspaceChangeListener(controller.#changeListener);
     return controller;
   }
@@ -48,58 +46,45 @@ export class BuilderWorkspaceSyncController {
     workbenchStore.clearWorkspaceChangeListener(this.#changeListener);
   }
 
-  push(changes: BuilderWorkspaceClientChange[]): Promise<void> {
-    if (this.#disposed || changes.length === 0) {
-      return Promise.resolve();
+  async push(changes: BuilderWorkspaceClientChange[]): Promise<BuilderWorkspaceApplyResult> {
+    if (this.#disposed) {
+      throw new Error('The durable workspace connection was closed.');
     }
-    for (const change of changes) {
-      this.#pendingChanges.set(change.path, change);
+    if (changes.length === 0) {
+      return { ok: true, state: await this.#call('getWorkspaceState', []), changedPaths: [] };
     }
-    return this.#enqueue(() => this.#flushPendingChanges());
+    let resolveResult: (result: BuilderWorkspaceApplyResult) => void = () => undefined;
+    let rejectResult: (error: unknown) => void = () => undefined;
+    const result = new Promise<BuilderWorkspaceApplyResult>((resolve, reject) => {
+      resolveResult = resolve;
+      rejectResult = reject;
+    });
+    this.#enqueue(async () => {
+      try {
+        const applied = await this.#call<BuilderWorkspaceApplyResult>('applyWorkspaceClientChanges', [
+          { baseRevision: this.#revision, changes },
+        ]);
+        if (applied.ok) {
+          this.#revision = applied.state.revision;
+        } else {
+          await this.#replaceFromSnapshot();
+        }
+        resolveResult(applied);
+      } catch (error) {
+        rejectResult(error);
+      }
+    });
+    return result;
   }
 
   pull(): Promise<void> {
     if (this.#disposed) {
       return Promise.resolve();
     }
-    return this.#enqueue(async () => {
-      await this.#flushPendingChanges();
-      await this.#pullFromRevision();
-    });
+    return this.#enqueue(() => this.#pullFromRevision());
   }
 
-  async #pushBatch(changes: BuilderWorkspaceClientChange[]): Promise<void> {
-    let baseRevision = this.#revision;
-    const preservedPaths = new Set(changes.map((change) => change.path));
-    for (let attempt = 0; attempt < WORKSPACE_SYNC_RETRIES; attempt += 1) {
-      const result = await this.#call<BuilderWorkspaceApplyResult>('applyWorkspaceClientChanges', [
-        { baseRevision, changes },
-      ]);
-      if (result.ok) {
-        this.#revision = result.state.revision;
-        return;
-      }
-      await this.#pullFromRevision(preservedPaths);
-      baseRevision = this.#revision;
-    }
-    throw new Error('The project changed repeatedly while browser edits were being synchronized.');
-  }
-
-  async #flushPendingChanges(): Promise<void> {
-    while (!this.#disposed && this.#pendingChanges.size > 0) {
-      const pending = Array.from(this.#pendingChanges.values());
-      for (const batch of batchChanges(pending)) {
-        await this.#pushBatch(batch);
-        for (const change of batch) {
-          if (this.#pendingChanges.get(change.path) === change) {
-            this.#pendingChanges.delete(change.path);
-          }
-        }
-      }
-    }
-  }
-
-  async #pullFromRevision(preservedPaths = new Set<string>()): Promise<void> {
+  async #pullFromRevision(): Promise<void> {
     const fromRevision = this.#revision;
     let targetRevision: number | undefined;
     let cursor: string | undefined;
@@ -113,23 +98,50 @@ export class BuilderWorkspaceSyncController {
         },
       ]);
       if (page.restart) {
-        targetRevision = undefined;
+        await this.#replaceFromSnapshot();
+        return;
+      }
+      targetRevision = page.targetRevision;
+      if (page.mode === 'snapshot') {
+        snapshotEntries ??= [];
+        snapshotEntries.push(...page.entries);
+      } else {
+        workbenchStore.applyWorkspaceSyncEntries(page.entries);
+      }
+      if (!page.nextCursor) {
+        this.#revision = page.targetRevision;
+        if (snapshotEntries) {
+          workbenchStore.replaceWorkspaceSnapshot(snapshotEntries);
+        }
+        return;
+      }
+      cursor = page.nextCursor;
+    }
+  }
+
+  async #replaceFromSnapshot(): Promise<void> {
+    let cursor: string | undefined;
+    let targetRevision: number | undefined;
+    const entries: BuilderWorkspaceSyncEntry[] = [];
+    while (true) {
+      const page = await this.#call<BuilderWorkspaceSyncPage>('getWorkspaceSyncPage', [
+        {
+          fromRevision: 0,
+          ...(targetRevision !== undefined ? { targetRevision } : {}),
+          ...(cursor ? { cursor } : {}),
+        },
+      ]);
+      if (page.restart) {
         cursor = undefined;
-        snapshotEntries = null;
+        targetRevision = undefined;
+        entries.length = 0;
         continue;
       }
       targetRevision = page.targetRevision;
-      this.#revision = page.targetRevision;
-      if (page.mode === 'snapshot') {
-        snapshotEntries ??= [];
-        snapshotEntries.push(...page.entries.filter((entry) => !preservedPaths.has(entry.path)));
-      } else if (page.entries.length > 0) {
-        await workbenchStore.applyWorkspaceSyncEntries(page.entries.filter((entry) => !preservedPaths.has(entry.path)));
-      }
+      entries.push(...page.entries);
       if (!page.nextCursor) {
-        if (snapshotEntries) {
-          await workbenchStore.replaceWorkspaceSnapshot(snapshotEntries, preservedPaths);
-        }
+        this.#revision = page.targetRevision;
+        workbenchStore.replaceWorkspaceSnapshot(entries);
         return;
       }
       cursor = page.nextCursor;
@@ -145,31 +157,4 @@ export class BuilderWorkspaceSyncController {
     this.#operationQueue = execution.catch(() => undefined);
     return execution;
   }
-}
-
-function batchChanges(changes: BuilderWorkspaceClientChange[]): BuilderWorkspaceClientChange[][] {
-  return batchBySize(changes, (change) => change.path.length + (change.kind === 'write' ? change.content.length : 0));
-}
-
-function batchBySize<T>(values: T[], size: (value: T) => number): T[][] {
-  const batches: T[][] = [];
-  let batch: T[] = [];
-  let batchSize = 0;
-  for (const value of values) {
-    const valueSize = size(value);
-    if (
-      batch.length > 0 &&
-      (batch.length >= BUILDER_WORKSPACE_SYNC_BATCH_FILES || batchSize + valueSize > BUILDER_WORKSPACE_SYNC_BATCH_BYTES)
-    ) {
-      batches.push(batch);
-      batch = [];
-      batchSize = 0;
-    }
-    batch.push(value);
-    batchSize += valueSize;
-  }
-  if (batch.length > 0) {
-    batches.push(batch);
-  }
-  return batches;
 }

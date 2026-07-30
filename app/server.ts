@@ -8,7 +8,6 @@ import {
 } from '~/lib/cloudflare/data.server';
 import { enhancePromptAction } from './server-handlers/enhance-prompt';
 import { healthAction } from './server-handlers/health';
-import { scriptsAction } from './server-handlers/scripts';
 import { versionAction } from './server-handlers/version';
 import { clientTelemetryAction } from './server-handlers/client-telemetry';
 import { feedbackAction } from './server-handlers/feedback';
@@ -26,6 +25,8 @@ import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudfl
 import { refreshDeploymentSecurityInventoryBestEffort } from './lib/.server/cloudflare/deployment-security-inventory';
 import { reconcileChatBackupQuotaBestEffort } from './lib/cloudflare/data/chat-backup-quota.server';
 import { reconcileThumbnailQuotaBestEffort } from './lib/cloudflare/data/thumbnail-quota.server';
+import { cleanupExpiredBuilderPreviewsBestEffort } from './lib/.server/cloudflare/builder-preview-repository';
+import { matchPreviewRequest, previewAction } from './server-handlers/previews';
 
 export { BuilderAgent } from './agents/builder-agent';
 export { ContainerProxy, DeploymentSandbox } from './lib/.server/cloudflare/deployment-sandbox';
@@ -77,8 +78,6 @@ function applyHstsFloor(headers: Headers) {
 function withApplicationSecurityHeaders(response: Response, pathname: string) {
   const headers = new Headers(response.headers);
   applyContentSecurityPolicyBaseline(headers);
-  headers.set('Cross-Origin-Opener-Policy', 'same-origin');
-  headers.set('Cross-Origin-Embedder-Policy', 'credentialless');
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   applyHstsFloor(headers);
   headers.set('X-Content-Type-Options', 'nosniff');
@@ -173,6 +172,10 @@ export default {
     }
 
     const pathname = new URL(request.url).pathname;
+    const previewRoute = matchPreviewRequest(pathname);
+    if (previewRoute) {
+      return previewAction({ request, env, ...previewRoute });
+    }
     return withApplicationSecurityHeaders(await routeApplicationRequest(request, env, ctx), pathname);
   },
   scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
@@ -188,6 +191,7 @@ async function runScheduledMaintenance(env: Env) {
   await pruneCloudflareAuthDataBestEffort(env.DB);
   await reconcileChatBackupQuotaBestEffort(env);
   await reconcileThumbnailQuotaBestEffort(env);
+  await cleanupExpiredBuilderPreviewsBestEffort(env);
   await refreshDeploymentSecurityInventoryBestEffort(env);
 }
 
@@ -216,10 +220,6 @@ async function routeApplicationRequest(request: Request, env: Env, ctx?: Executi
     return requireMethod(request, 'GET', () =>
       storageObjectAction({ request, key: url.pathname.slice('/api/storage/'.length), env }),
     );
-  }
-
-  if (url.pathname.startsWith('/scripts/')) {
-    return requireMethod(request, 'GET', () => scriptsAction(url.pathname.slice('/scripts/'.length)));
   }
 
   return handler.fetch(request);

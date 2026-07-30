@@ -1,15 +1,11 @@
 import { lazy, Suspense, type ReactNode } from 'react';
-import type { ActionAlert } from '~/types/actions';
 import { MessageInput } from './MessageInput';
 
-const ChatActionAlert = lazy(() => import('./ChatActionAlert').then((module) => ({ default: module.ChatActionAlert })));
 const DisabledChatMessageSheet = lazy(() =>
   import('./DisabledChatMessageSheet').then((module) => ({ default: module.DisabledChatMessageSheet })),
 );
 
 interface HomeIntroProps {
-  actionAlert: ActionAlert | undefined;
-  clearAlert: () => void;
   disabledReason: ReactNode | null;
   isStreaming: boolean;
   messagesLength: number;
@@ -19,8 +15,6 @@ interface HomeIntroProps {
 }
 
 export function HomeIntro({
-  actionAlert,
-  clearAlert,
   disabledReason,
   isStreaming,
   messagesLength,
@@ -42,11 +36,6 @@ export function HomeIntro({
           </div>
 
           <div className="ghost-home-reveal ghost-home-composer-stack">
-            {actionAlert && (
-              <Suspense fallback={null}>
-                <ChatActionAlert alert={actionAlert} clearAlert={clearAlert} onSend={onSend} />
-              </Suspense>
-            )}
             <MessageInput
               chatStarted={false}
               isStreaming={isStreaming}

@@ -66,12 +66,49 @@ import {
 } from './builder-template';
 import { deriveProvisionalTitle } from '@summonghost/title-generation';
 import { deleteObject, getObjectBytes, putObjectBytesAtKey } from '~/lib/cloudflare/data/object-storage.server';
+import {
+  BUILDER_PREVIEW_MAX_ATTEMPTS,
+  BUILDER_PREVIEW_PORT,
+  BUILDER_PREVIEW_TTL_MS,
+  failedBuilderPreviewState,
+  idleBuilderPreviewState,
+  previewStateForWorkspace,
+  type BuilderPreviewState,
+  type BuilderPreviewSuccess,
+} from './builder-preview-types';
+import { createBuilderWorkspaceSnapshot } from './builder-workspace-snapshot';
+import { buildBuilderPreview } from '~/lib/.server/cloudflare/builder-preview-sandbox';
+import {
+  acquirePreviewBuildAdmission,
+  markPreviewReady,
+  previewAccessTokenHash,
+  previewPath,
+  registerBuildingPreview,
+  releasePreviewBuildAdmission,
+  retireBuilderPreview,
+} from '~/lib/.server/cloudflare/builder-preview-repository';
 
 const logger = createScopedLogger('BuilderAgent');
 const STALE_CHAT_RECOVERY_MS = 30 * 60 * 1000;
 const MAX_CHAT_RECOVERY_ATTEMPTS = 2;
 const CHAT_NO_PROGRESS_TIMEOUT_MS = 25 * 60 * 1000;
 const CONTEXT_COMPACTION_FIBER = 'background:context_compaction';
+const PREVIEW_BUILD_FIBER = 'background:builder_preview';
+const PREVIEW_RETRY_DELAYS_MS = [5_000, 15_000, 30_000] as const;
+const PREVIEW_BUILD_LEASE_MS = 12 * 60 * 1000;
+
+type PreviewBuildJob = {
+  previewId: string;
+  sandboxId: string;
+  snapshotKey: string;
+  workspaceRevision: number;
+  snapshotRevision: string;
+  ownerId: string;
+  chatInitialId: string;
+  agentName: string;
+  requestedAt: number;
+  accessToken: string;
+};
 
 export type BuilderAgentState = {
   activeTurn?: BuilderTurnState | null;
@@ -83,6 +120,7 @@ export type BuilderAgentState = {
   lastCompletedTurn?: BuilderTurnState | null;
   updatedAt?: string;
   transcript?: TranscriptCheckpoint | null;
+  preview?: BuilderPreviewState | null;
 };
 
 type ChatBody = Partial<ChatRequestBody> & { transcript?: unknown };
@@ -102,6 +140,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     generatedSubchatTitle: null,
     lastCompletedTurn: null,
     transcript: null,
+    preview: idleBuilderPreviewState(0),
   };
 
   override messageConcurrency = 'drop' as const;
@@ -161,7 +200,8 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       ? await loadBuilderTranscriptBinding(this.env.DB, { agentName: this.name, ownerId: this.ownerId })
       : null;
     if (this.transcriptBinding) {
-      await this.initializeWorkspace(this.transcriptBinding);
+      const workspace = await this.initializeWorkspace(this.transcriptBinding);
+      this.updatePreviewForWorkspace(workspace.revision);
     }
   }
 
@@ -172,6 +212,15 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
    * outbox.
    */
   async scheduleDestroyForGc(): Promise<void> {
+    const previewJobs = [
+      ...this.ctx.storage.sql.exec<{ id: string; sandbox_id: string; snapshot_key: string }>(
+        `SELECT id, sandbox_id, snapshot_key FROM builder_preview_jobs`,
+      ),
+    ];
+    for (const preview of previewJobs) {
+      await this.cancelFiberByKey(this.previewFiberKey(preview.id), 'Project deletion').catch(() => undefined);
+      await retireBuilderPreview(this.env, preview.id, 'cancelled', Date.now(), preview).catch(() => undefined);
+    }
     await this.workspace.deleteExternalObjects();
     await this._cf_scheduleDestroy();
   }
@@ -211,6 +260,14 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   override async onFiberRecovered(ctx: FiberRecoveryContext): Promise<void | FiberRecoveryResult> {
+    if (ctx.name === PREVIEW_BUILD_FIBER) {
+      const job = parsePreviewBuildJob(ctx.metadata);
+      if (!job) {
+        return { status: 'error', error: 'missing preview build recovery data' };
+      }
+      await this.runPreviewBuild(job);
+      return { status: 'completed', snapshot: ctx.snapshot };
+    }
     if (ctx.name !== CONTEXT_COMPACTION_FIBER) {
       return super.onFiberRecovered(ctx);
     }
@@ -400,6 +457,13 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       status,
       error: result.error,
     });
+    if (status === 'completed') {
+      await this.requestPreviewInternal().catch((error) =>
+        logger.warn('Unable to queue the automatic remote preview', {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
   }
 
   @callable()
@@ -426,8 +490,52 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   @callable()
-  applyWorkspaceClientChanges(request: unknown): Promise<BuilderWorkspaceApplyResult> {
-    return this.workspace.applyClientChanges(request);
+  async applyWorkspaceClientChanges(request: unknown): Promise<BuilderWorkspaceApplyResult> {
+    const result = await this.workspace.applyClientChanges(request);
+    this.updatePreviewForWorkspace(result.state.revision);
+    return result;
+  }
+
+  @callable()
+  getPreviewState(): BuilderPreviewState {
+    return this.currentPreviewState();
+  }
+
+  @callable()
+  requestPreview(): Promise<BuilderPreviewState> {
+    return this.requestPreviewInternal();
+  }
+
+  @callable()
+  async cancelPreview(): Promise<BuilderPreviewState> {
+    const preview = this.currentPreviewState();
+    if (!preview.pendingId || (preview.status !== 'queued' && preview.status !== 'building')) {
+      return preview;
+    }
+    await this.cancelFiberByKey(this.previewFiberKey(preview.pendingId), 'Cancelled by the project owner');
+    const job = [
+      ...this.ctx.storage.sql.exec<{ sandbox_id: string; snapshot_key: string }>(
+        `SELECT sandbox_id, snapshot_key FROM builder_preview_jobs WHERE id = ?`,
+        preview.pendingId,
+      ),
+    ][0];
+    await retireBuilderPreview(this.env, preview.pendingId, 'cancelled', Date.now(), job).catch(() => undefined);
+    this.ctx.storage.sql.exec(
+      `UPDATE builder_preview_jobs SET status = 'cancelled', updated_at = ? WHERE id = ?`,
+      Date.now(),
+      preview.pendingId,
+    );
+    const next: BuilderPreviewState = {
+      ...preview,
+      status: 'cancelled',
+      pendingId: null,
+      startedAt: null,
+      updatedAt: new Date().toISOString(),
+      error: null,
+      active: null,
+    };
+    this.setPreviewState(next);
+    return next;
   }
 
   @callable()
@@ -631,6 +739,290 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
   }
 
+  private async requestPreviewInternal(): Promise<BuilderPreviewState> {
+    if (!this.ownerId || !this.userId || !this.transcriptBinding) {
+      throw new Response('Agent authentication is required.', { status: 401 });
+    }
+    const workspace = await this.initializeWorkspace(this.transcriptBinding);
+    const current = this.currentPreviewState();
+    if (
+      current.workspaceRevision === workspace.revision &&
+      (current.status === 'queued' || current.status === 'building')
+    ) {
+      return current;
+    }
+    if (
+      current.status === 'ready' &&
+      current.active?.workspaceRevision === workspace.revision &&
+      Date.parse(current.active.expiresAt) > Date.now()
+    ) {
+      return current;
+    }
+    if (current.pendingId && (current.status === 'queued' || current.status === 'building')) {
+      await this.cancelPreview();
+    }
+
+    const snapshot = await createBuilderWorkspaceSnapshot(this.workspace);
+    const previewId = crypto.randomUUID();
+    const accessToken = createPreviewAccessToken();
+    const snapshotKey = `builder-previews/${previewId}.zip`;
+    const requestedAt = Date.now();
+    const job: PreviewBuildJob = {
+      previewId,
+      sandboxId: `preview-${previewId.replaceAll('-', '')}`,
+      snapshotKey,
+      workspaceRevision: snapshot.workspaceRevision,
+      snapshotRevision: snapshot.revision,
+      ownerId: this.ownerId,
+      chatInitialId: this.transcriptBinding.chatInitialId,
+      agentName: this.name,
+      requestedAt,
+      accessToken,
+    };
+    await this.env.APP_STORAGE.put(snapshotKey, snapshot.bytes);
+    this.recordPreviewJob(job, 'queued');
+    const queued: BuilderPreviewState = {
+      status: 'queued',
+      pendingId: previewId,
+      workspaceRevision: snapshot.workspaceRevision,
+      currentWorkspaceRevision: workspace.revision,
+      stale: snapshot.workspaceRevision !== workspace.revision,
+      attempt: 0,
+      requestedAt: new Date(requestedAt).toISOString(),
+      startedAt: null,
+      updatedAt: new Date().toISOString(),
+      error: null,
+      active: null,
+      lastSuccessful: current.lastSuccessful ?? current.active,
+    };
+    this.setPreviewState(queued);
+    try {
+      await this.startFiber(
+        PREVIEW_BUILD_FIBER,
+        async (fiber) => {
+          fiber.stash(job);
+          await this.runPreviewBuild(job);
+        },
+        {
+          idempotencyKey: this.previewFiberKey(previewId),
+          metadata: job,
+        },
+      );
+    } catch (error) {
+      await this.failPreviewJob(
+        job,
+        error instanceof Error ? error.message : 'The durable preview job could not be started.',
+      );
+      throw error;
+    }
+    return this.currentPreviewState();
+  }
+
+  private async runPreviewBuild(job: PreviewBuildJob): Promise<void> {
+    if (!this.isCurrentPreviewJob(job.previewId)) {
+      await this.env.APP_STORAGE.delete(job.snapshotKey).catch(() => undefined);
+      return;
+    }
+    const chat = await this.env.DB.prepare(
+      `SELECT id
+       FROM chats
+       WHERE initial_id = ? AND creator_id = ? AND is_deleted = 0
+       LIMIT 1`,
+    )
+      .bind(job.chatInitialId, job.ownerId)
+      .first<{ id: string }>();
+    if (!chat) {
+      await this.failPreviewJob(job, 'The project was deleted before its preview could start.');
+      return;
+    }
+
+    let admitted = false;
+    for (let attempt = 1; attempt <= BUILDER_PREVIEW_MAX_ATTEMPTS; attempt += 1) {
+      if (!this.isCurrentPreviewJob(job.previewId)) {
+        await this.env.APP_STORAGE.delete(job.snapshotKey).catch(() => undefined);
+        return;
+      }
+      const now = Date.now();
+      const current = this.currentPreviewState();
+      this.setPreviewState({
+        ...current,
+        status: 'queued',
+        attempt,
+        updatedAt: new Date(now).toISOString(),
+        error: null,
+      });
+      const admission = await acquirePreviewBuildAdmission(this.env.DB, {
+        previewId: job.previewId,
+        ownerId: job.ownerId,
+        agentName: job.agentName,
+        sandboxId: job.sandboxId,
+        now,
+        expiresAt: now + PREVIEW_BUILD_LEASE_MS,
+      });
+      if (admission.admitted) {
+        admitted = true;
+        break;
+      }
+      if (admission.reason === 'hourly-quota') {
+        await this.failPreviewJob(job, 'The hourly remote preview quota is exhausted. Try again later.');
+        return;
+      }
+      if (attempt < BUILDER_PREVIEW_MAX_ATTEMPTS) {
+        await delay(PREVIEW_RETRY_DELAYS_MS[attempt - 1] ?? 30_000);
+      }
+    }
+    if (!admitted) {
+      await this.failPreviewJob(job, 'Remote preview capacity is busy. The build stayed queued through every retry.');
+      return;
+    }
+
+    const startedAt = Date.now();
+    try {
+      await registerBuildingPreview(this.env.DB, {
+        id: job.previewId,
+        ownerId: job.ownerId,
+        chatId: chat.id,
+        agentName: job.agentName,
+        sandboxId: job.sandboxId,
+        snapshotKey: job.snapshotKey,
+        accessTokenHash: await previewAccessTokenHash(job.accessToken),
+        workspaceRevision: job.workspaceRevision,
+        snapshotRevision: job.snapshotRevision,
+        port: BUILDER_PREVIEW_PORT,
+        createdAt: job.requestedAt,
+        expiresAt: startedAt + PREVIEW_BUILD_LEASE_MS,
+      });
+      this.recordPreviewJob(job, 'building');
+      this.setPreviewState({
+        ...this.currentPreviewState(),
+        status: 'building',
+        startedAt: new Date(startedAt).toISOString(),
+        updatedAt: new Date(startedAt).toISOString(),
+      });
+      await buildBuilderPreview({
+        env: this.env,
+        sandboxId: job.sandboxId,
+        snapshotKey: job.snapshotKey,
+        previewBasePath: previewPath(job.previewId, job.accessToken),
+      });
+      if (!this.isCurrentPreviewJob(job.previewId)) {
+        await retireBuilderPreview(this.env, job.previewId, 'cancelled');
+        return;
+      }
+      const readyAt = Date.now();
+      const expiresAt = readyAt + BUILDER_PREVIEW_TTL_MS;
+      await markPreviewReady(this.env.DB, job.previewId, readyAt, expiresAt);
+      await this.env.DB.prepare(
+        `UPDATE builder_preview_build_admissions
+         SET expires_at = ?
+         WHERE preview_id = ? AND status = 'active'`,
+      )
+        .bind(expiresAt, job.previewId)
+        .run();
+      await this.env.APP_STORAGE.delete(job.snapshotKey).catch(() => undefined);
+      const success: BuilderPreviewSuccess = {
+        id: job.previewId,
+        url: previewPath(job.previewId, job.accessToken),
+        workspaceRevision: job.workspaceRevision,
+        snapshotRevision: job.snapshotRevision,
+        readyAt: new Date(readyAt).toISOString(),
+        expiresAt: new Date(expiresAt).toISOString(),
+      };
+      const previous = this.currentPreviewState().lastSuccessful;
+      const currentRevision = this.workspace.getState().revision;
+      this.setPreviewState({
+        status: 'ready',
+        pendingId: null,
+        workspaceRevision: job.workspaceRevision,
+        currentWorkspaceRevision: currentRevision,
+        stale: currentRevision !== job.workspaceRevision,
+        attempt: this.currentPreviewState().attempt,
+        requestedAt: new Date(job.requestedAt).toISOString(),
+        startedAt: new Date(startedAt).toISOString(),
+        updatedAt: new Date(readyAt).toISOString(),
+        error: null,
+        active: success,
+        lastSuccessful: success,
+      });
+      this.recordPreviewJob(job, 'ready');
+      if (previous && previous.id !== success.id) {
+        await retireBuilderPreview(this.env, previous.id, 'expired').catch((error) =>
+          logger.warn('Unable to retire the superseded remote preview', { error }),
+        );
+        this.ctx.storage.sql.exec(`DELETE FROM builder_preview_jobs WHERE id = ?`, previous.id);
+      }
+    } catch (error) {
+      await releasePreviewBuildAdmission(this.env.DB, job.previewId).catch(() => undefined);
+      await retireBuilderPreview(this.env, job.previewId, 'failed').catch(() => undefined);
+      await this.failPreviewJob(
+        job,
+        (error instanceof Error ? error.message : 'The isolated remote preview build failed.').slice(-4_000),
+      );
+    }
+  }
+
+  private async failPreviewJob(job: PreviewBuildJob, error: string): Promise<void> {
+    await this.env.APP_STORAGE.delete(job.snapshotKey).catch(() => undefined);
+    if (!this.isCurrentPreviewJob(job.previewId)) {
+      return;
+    }
+    const current = this.currentPreviewState();
+    this.setPreviewState(failedBuilderPreviewState(current, this.workspace.getState().revision, error));
+    this.recordPreviewJob(job, 'failed');
+  }
+
+  private previewFiberKey(previewId: string): string {
+    return `builder-preview:${this.name}:${previewId}`;
+  }
+
+  private isCurrentPreviewJob(previewId: string): boolean {
+    return this.state.preview?.pendingId === previewId;
+  }
+
+  private currentPreviewState(): BuilderPreviewState {
+    const revision = this.workspace.getState().revision;
+    const stored = this.state.preview ?? idleBuilderPreviewState(revision);
+    const successful = stored.active ?? stored.lastSuccessful;
+    const expired = successful ? Date.parse(successful.expiresAt) <= Date.now() : false;
+    return {
+      ...stored,
+      status: expired && stored.status === 'ready' ? 'expired' : stored.status,
+      currentWorkspaceRevision: revision,
+      stale: Boolean(successful) && successful!.workspaceRevision !== revision,
+      active: expired ? null : stored.active,
+    };
+  }
+
+  private updatePreviewForWorkspace(revision: number): void {
+    const preview = this.state.preview ?? idleBuilderPreviewState(revision);
+    this.setPreviewState(previewStateForWorkspace(preview, revision));
+  }
+
+  private setPreviewState(preview: BuilderPreviewState): void {
+    this.setState({ ...this.state, preview, updatedAt: preview.updatedAt });
+  }
+
+  private recordPreviewJob(
+    job: PreviewBuildJob,
+    status: 'queued' | 'building' | 'ready' | 'failed' | 'cancelled',
+  ): void {
+    const now = Date.now();
+    this.ctx.storage.sql.exec(
+      `INSERT INTO builder_preview_jobs
+        (id, sandbox_id, snapshot_key, workspace_revision, snapshot_revision, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at`,
+      job.previewId,
+      job.sandboxId,
+      job.snapshotKey,
+      job.workspaceRevision,
+      job.snapshotRevision,
+      status,
+      job.requestedAt,
+      now,
+    );
+  }
+
   private finishTurn(
     turn: BuilderTurnState,
     result: { status: BuilderTurnStatus; requestId?: string; error?: string },
@@ -659,4 +1051,42 @@ function parseTurnContext(value: unknown): ChatTurnContext | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parsePreviewBuildJob(value: unknown): PreviewBuildJob | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const stringKeys = [
+    'previewId',
+    'sandboxId',
+    'snapshotKey',
+    'snapshotRevision',
+    'ownerId',
+    'chatInitialId',
+    'agentName',
+    'accessToken',
+  ] as const;
+  if (
+    stringKeys.some((key) => typeof value[key] !== 'string' || (value[key] as string).length === 0) ||
+    !Number.isSafeInteger(value.workspaceRevision) ||
+    (value.workspaceRevision as number) < 0 ||
+    !Number.isSafeInteger(value.requestedAt) ||
+    (value.requestedAt as number) <= 0
+  ) {
+    return null;
+  }
+  return value as PreviewBuildJob;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function createPreviewAccessToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replace(/=+$/, '');
 }

@@ -3,13 +3,8 @@ import { finalizeApplicationResponse, withApplicationSecurityHeaders } from '../
 
 describe('generated application response boundary', () => {
   test('adds the production application header baseline', () => {
-    const response = withApplicationSecurityHeaders(
-      new Response('app', { headers: { 'X-App': 'preserved' } }),
-      new Request('https://app.example/'),
-    );
+    const response = withApplicationSecurityHeaders(new Response('app', { headers: { 'X-App': 'preserved' } }));
 
-    expect(response.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
-    expect(response.headers.get('Cross-Origin-Embedder-Policy')).toBe('credentialless');
     expect(response.headers.get('Content-Security-Policy')).toBe(
       "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'",
     );
@@ -20,18 +15,6 @@ describe('generated application response boundary', () => {
     expect(response.headers.get('X-App')).toBe('preserved');
   });
 
-  test('allows the credentialless WebContainer host to remain frameable for preview', () => {
-    const response = withApplicationSecurityHeaders(
-      new Response('preview'),
-      new Request('https://preview-id.local-credentialless.webcontainer-api.io/'),
-    );
-
-    expect(response.headers.get('X-Frame-Options')).toBeNull();
-    expect(response.headers.get('Content-Security-Policy')).toBeNull();
-    expect(response.headers.get('Strict-Transport-Security')).toBeNull();
-    expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
-  });
-
   test('independently enforces the baseline without weakening stricter application CSP or HSTS', () => {
     const response = withApplicationSecurityHeaders(
       new Response('app', {
@@ -40,7 +23,6 @@ describe('generated application response boundary', () => {
           'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload',
         },
       }),
-      new Request('https://app.example/'),
     );
 
     expect(response.headers.get('Content-Security-Policy')).toBe(
@@ -54,7 +36,6 @@ describe('generated application response boundary', () => {
       new Response('app', {
         headers: { 'Strict-Transport-Security': 'max-age=0; includeSubDomains' },
       }),
-      new Request('https://app.example/'),
     );
 
     expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains');
@@ -67,7 +48,6 @@ describe('generated application response boundary', () => {
           'Strict-Transport-Security': `max-age=${'9'.repeat(1_024)}; includeSubDomains; future=value`,
         },
       }),
-      new Request('https://app.example/'),
     );
 
     expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains; future=value');
@@ -80,7 +60,6 @@ describe('generated application response boundary', () => {
           'Strict-Transport-Security': 'max-age=63072000; max-age=0; includeSubDomains',
         },
       }),
-      new Request('https://example.com/'),
     );
 
     expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains');

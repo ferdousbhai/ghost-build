@@ -2,7 +2,6 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSnapScroll } from '~/lib/hooks/useSnapScroll';
 import { chatStore } from '~/lib/stores/chatId';
-import { workbenchStore } from '~/lib/stores/workbench.client';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { BaseChat } from './BaseChat.client';
@@ -11,12 +10,9 @@ import { chatIdStore, initialIdStore } from '~/lib/stores/chatId';
 import { executeDataOperation } from '~/lib/cloudflare/client';
 import { api } from '~/lib/cloudflare/data-api';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
-import { ContainerBootState, useContainerBootState } from '~/lib/stores/containerBootState';
-import { UnsupportedRuntimeNotice, WorkspaceSetupErrorNotice } from '~/components/UnsupportedRuntime';
 import type { ChatProps } from './chat-types';
 import { UnauthenticatedChat } from './UnauthenticatedChat';
 import { useBuilderAgentChat } from './useBuilderAgentChat';
-import { createTerminalInitializationOptions } from './terminal-initialization';
 import { useChatHistoryProcessing } from './useChatHistoryProcessing';
 import { useCurrentToolStatus } from './useCurrentToolStatus';
 import { useBuildProgress } from './useBuildProgress';
@@ -35,8 +31,6 @@ export const Chat = memo(
     initializeChat,
     discardEmptyChat,
     onBuilderRequestStart,
-    isReload,
-    hadSuccessfulDeploy,
     subchats,
     initialPrompt,
     transcript,
@@ -49,8 +43,6 @@ export const Chat = memo(
       return (
         <UnauthenticatedChat
           initialMessages={initialMessages}
-          isReload={isReload}
-          hadSuccessfulDeploy={hadSuccessfulDeploy}
           subchats={subchats}
           authLoading={sessionId === undefined}
         />
@@ -65,8 +57,6 @@ export const Chat = memo(
         initializeChat={initializeChat}
         discardEmptyChat={discardEmptyChat}
         onBuilderRequestStart={onBuilderRequestStart}
-        isReload={isReload}
-        hadSuccessfulDeploy={hadSuccessfulDeploy}
         subchats={subchats}
         pendingInitialMessage={pendingInitialMessage}
         clearPendingInitialMessage={clearPendingInitialMessage}
@@ -86,14 +76,15 @@ const AuthenticatedChat = memo(
     initializeChat,
     discardEmptyChat,
     onBuilderRequestStart,
-    isReload,
-    hadSuccessfulDeploy,
     subchats,
     pendingInitialMessage,
     clearPendingInitialMessage,
     transcript,
     seedTranscript,
-  }: ChatProps & { pendingInitialMessage: string | null; clearPendingInitialMessage: () => void }) => {
+  }: Omit<ChatProps, 'isReload' | 'hadSuccessfulDeploy'> & {
+    pendingInitialMessage: string | null;
+    clearPendingInitialMessage: () => void;
+  }) => {
     const sessionId = useSessionIdOrNullOrLoading();
     const chatInitialId = useStore(initialIdStore);
     const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
@@ -104,14 +95,7 @@ const AuthenticatedChat = memo(
       [],
     );
     const [chatStarted, setChatStarted] = useState(initialMessages.length > 0 || hasMultipleSubchats);
-    const actionAlert = useStore(workbenchStore.alert);
-    const bootState = useContainerBootState();
-    const disabledReason =
-      bootState.state === ContainerBootState.UNSUPPORTED ? (
-        <UnsupportedRuntimeNotice experience={bootState.unsupportedExperience} framed={false} />
-      ) : bootState.state === ContainerBootState.ERROR ? (
-        <WorkspaceSetupErrorNotice framed={false} />
-      ) : null;
+    const disabledReason = null;
 
     const rewindToMessage = async (subchatIndex?: number, messageIndex?: number) => {
       if (sessionId && typeof sessionId === 'string') {
@@ -143,15 +127,6 @@ const AuthenticatedChat = memo(
     };
     const { showChat } = useStore(chatStore);
 
-    const terminalInitializationOptions = useMemo(
-      () =>
-        createTerminalInitializationOptions({
-          isReload,
-          shouldRunWorkerBuild: hadSuccessfulDeploy || hasMultipleSubchats,
-        }),
-      [isReload, hadSuccessfulDeploy, hasMultipleSubchats],
-    );
-
     useEffect(() => {
       const url = new URL(window.location.href);
       if (url.searchParams.get('rewind') === 'true') {
@@ -168,6 +143,7 @@ const AuthenticatedChat = memo(
       streamStatus,
       contextManager,
       transcriptCheckpoint,
+      workspacePresentationState,
     } = useBuilderAgentChat({
       chatInitialId,
       initialMessages,
@@ -217,8 +193,6 @@ const AuthenticatedChat = memo(
       contextManager,
       chatStarted,
       streamStatus,
-      runtimeSupported:
-        bootState.state !== ContainerBootState.UNSUPPORTED && bootState.state !== ContainerBootState.ERROR,
       initializeChat,
       discardEmptyChat,
       sendChatMessage,
@@ -254,10 +228,14 @@ const AuthenticatedChat = memo(
         toolStatus={toolStatus}
         buildProgress={buildProgress}
         messages={parsedMessages /* Note that parsedMessages are throttled. */}
-        actionAlert={actionAlert}
-        clearAlert={() => workbenchStore.clearAlert()}
-        terminalInitializationOptions={terminalInitializationOptions}
         disabledReason={disabledReason}
+        runtimeNotice={
+          workspacePresentationState === 'presentation-error'
+            ? 'The code editor could not load. Chat, builds, and remote preview still run from the durable cloud workspace.'
+            : workspacePresentationState === 'connecting'
+              ? 'Connecting to the durable cloud workspace…'
+              : 'Cloud workspace active · builds and preview run remotely on every browser.'
+        }
         sendMessageInProgress={sendMessageInProgress}
         onRewindToMessage={rewindToMessage}
         subchats={visibleSubchats}

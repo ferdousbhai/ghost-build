@@ -1,13 +1,13 @@
-import templateSnapshotManifest from 'public/template-snapshot-manifest.json';
+import { BUILDER_TEMPLATE_SOURCE_SHA256 } from '~/agents/builder-template.generated';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 17 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 18 as const;
 export const DEPLOYMENT_SECURITY_CLEANUP_CRON = '0 3 * * *';
 export const DEPLOYMENT_VERSION_METADATA_BINDING = 'CF_VERSION_METADATA';
 export const DEPLOYMENT_SECURITY_BASELINE_BINDING = 'GHOSTBUILD_SECURITY_BASELINE_VERSION';
 export const DEPLOYMENT_TEMPLATE_SOURCE_BINDING = 'GHOSTBUILD_TEMPLATE_SOURCE_SHA256';
 export const DEPLOYMENT_SECURITY_BOUNDARY_BINDING = 'GHOSTBUILD_SECURITY_BOUNDARY_SHA256';
 
-export const TEMPLATE_SOURCE_SHA256 = templateSnapshotManifest.sourceSha256;
+export const TEMPLATE_SOURCE_SHA256 = BUILDER_TEMPLATE_SOURCE_SHA256;
 
 /**
  * These files form the generated AppAgent's authentication, inference-budget,
@@ -24,7 +24,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'src/agents/anonymous-retention.ts': '38489c93827bc38bcf48deac80005fbe03c6bbb31a6c4fe885c6064e22eb05ae',
   'src/agents/chat-policy.ts': '16a806aa0e26b5c7057e70fecb59cbbfd08921e36e8d2b967102eab6b7e6dec2',
   'src/app-bindings.ts': '6f5fd82619b6bd55d20ee66428ad264aaf8dfee7b179efeb7cf3eb09906a7998',
-  'src/application-response.ts': 'e937a8397d1734cf3b349dabbaa1d6e7925b8d8c2f1d111075f053595dea2370',
+  'src/application-response.ts': 'd5a200ad672d89f6fc68535d825e73128bc3ab0da57adc227e0b540f89f0f07c',
   'src/workers-ai.shared.ts': '04a50a0d46bcb5a24dfe0a0d1d597112eed890e38ff11f384ebbdfba7ab26f0e',
   'migrations/0001_app_data.sql': '114d3df6142196cb43a95e5896e1b9a8e8753514becf3400884b27acb5793d65',
   'agent-security-migrations/0001_agent_security.sql':
@@ -45,7 +45,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/cf-typegen.mjs': '6c82a0afdb50c32b205dbe4677b207337a38ad7ea70950a3e63758f0c04e1ae7',
   'scripts/provision-cloudflare-production.mjs': 'ed574cda1dedb81f7ae22e2b1069b1326d31135a7e92e602d2f86ee269409485',
   'scripts/vite-dev.mjs': '7470bae2236ca6eda89c4eb2ac99563124d35c70fbaf102ddd9dcb19ebb8f559',
-  'scripts/verify-stack-alignment.mjs': '50cdb173e68c5763532e9ba1b7b34f646785a7d361144acd8ce6fc29ffe0c2b9',
+  'scripts/verify-stack-alignment.mjs': '1edce336ae3716686e2cc771f67dd81453f359e414564938921e0f8f228eadc0',
   'scripts/verify-production-config.mjs': 'b22c025b4c3e4a53aa8c2edca59ead871979dbadad6d575bfb052e44ed645a8d',
   'scripts/verify-production-licenses.mjs': '22952be32b45c416551ca2681a202b72c616aca61c6643ce946868373320a82d',
   'scripts/lib/production-license-artifact.mjs': 'e9ff7fc97973e4299f9a4b3026f148f3e32e6c2ff71d21bdbc40ae1e60d49892',
@@ -59,7 +59,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/lib/project-policy/workspace-policy.mjs': '237800ac1f899b2c9cf91ec9bc11fb31e2832a5b77922662bc826edfb00ede65',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '78cb84c9f4fdd7b438c8604683c320c6c9110e8224de77990ae16314cbd95a6f';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '3dafa3c2e334634c9a9920c67285b3314b9c22f9f0484168bb616729185dac5c';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
   '619dcb199e10da6f0f84cbdffdc5551cd388968ed8861cc8cb6310b84bbf463e';

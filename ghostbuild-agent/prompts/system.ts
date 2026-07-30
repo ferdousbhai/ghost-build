@@ -28,7 +28,7 @@ ${emailGuidelines()}
 ${outputInstructions()}
 `;
 
-// This system prompt explains how to work within the WebContainer environment and Ghostbuild. It
+// This system prompt explains how to work within Ghostbuild's durable workspace. It
 // doesn't contain any details specific to the current session.
 export function generalSystemPrompt() {
   return GENERAL_SYSTEM_PROMPT;

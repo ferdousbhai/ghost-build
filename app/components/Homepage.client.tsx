@@ -29,8 +29,6 @@ export function Homepage() {
 
   const homeIntro = (
     <HomeIntro
-      actionAlert={undefined}
-      clearAlert={() => undefined}
       disabledReason={null}
       isStreaming={false}
       messagesLength={0}

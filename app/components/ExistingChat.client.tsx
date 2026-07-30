@@ -4,12 +4,10 @@ import { GhostbuildAuthProvider } from './chat/GhostbuildAuthWrapper';
 import { setPageLoadChatId } from '~/lib/stores/chatId';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { Loading } from './Loading';
-import { ContainerBootState, useContainerBootState } from '~/lib/stores/containerBootState';
 import { useReloadMessages } from '~/lib/stores/startup/reloadMessages';
 import { UserProvider } from '~/components/UserProvider';
 import { Toaster } from '~/components/ui/Toaster';
 import { getToolInvocation } from 'ghostbuild-agent/ai-compat';
-import { UnsupportedRuntimeScreen, WorkspaceSetupErrorScreen } from '~/components/UnsupportedRuntime';
 
 export function ExistingChat({ chatId }: { chatId: string }) {
   // Fill in the chatID store from props early in app initialization. If this
@@ -37,14 +35,12 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
     initializeChat,
     discardEmptyChat,
     onBuilderRequestStart,
-    requiresInitialContainer,
     subchats,
     transcript,
     seedTranscript,
   } = useExistingChat(chatId);
 
   const reloadState = useReloadMessages(initialMessages ?? undefined);
-  const bootState = useContainerBootState();
 
   if (initialMessages === null) {
     return <NotFound />;
@@ -66,26 +62,6 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
   if (reloadState === undefined) {
     return <Loading message="Parsing chat messages..." />;
   }
-  // Once we've loaded chat messages, let's wait on setting up the container.
-  if (requiresInitialContainer && bootState.state === ContainerBootState.LOADING_SNAPSHOT) {
-    return <Loading message="Loading snapshot..." />;
-  }
-  if (requiresInitialContainer && bootState.state === ContainerBootState.DOWNLOADING_DEPENDENCIES) {
-    return <Loading message="Downloading dependencies..." />;
-  }
-  if (requiresInitialContainer && bootState.state === ContainerBootState.STARTING_BACKUP) {
-    return <Loading message="Starting backup..." />;
-  }
-  if (bootState.state === ContainerBootState.UNSUPPORTED) {
-    return <UnsupportedRuntimeScreen experience={bootState.unsupportedExperience} />;
-  }
-  if (requiresInitialContainer && bootState.state === ContainerBootState.ERROR) {
-    return <WorkspaceSetupErrorScreen />;
-  }
-  if (requiresInitialContainer && bootState.state !== ContainerBootState.READY) {
-    return <Loading message="Preparing workspace..." />;
-  }
-
   const hadSuccessfulDeploy = initialMessages.some(
     (message) =>
       message.role === 'assistant' && message.parts?.some((part) => getToolInvocation(part)?.toolName === 'deploy'),

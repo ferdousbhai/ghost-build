@@ -54,6 +54,12 @@ The OAuth client callback is `https://<deployment-origin>/connect/return`. Keep 
 `https://ghostbuild.dev/ghostbuild-logo.svg` as its logo URL so the Cloudflare consent screen stays aligned with the
 deployed brand asset.
 
+Remote previews use the existing RPC-transport `DeploymentSandbox` binding and Ghostbuild D1/R2 bindings. Apply the
+root D1 migrations before deploying a version that can create previews. Keep `max_instances: 2` aligned with the
+explicit admission limit in `builder-preview-types.ts`; increasing one without reviewing the other does not increase
+safe capacity. Preview URLs are served through the Ghostbuild Worker, so no wildcard DNS route or public Sandbox
+tunnel is required.
+
 `workers-builds.production.json` is the reviewed source-of-truth contract for Cloudflare dashboard build settings. It
 is verified in `pnpm run validate`; Cloudflare does not read it automatically. Mirror it in the `ghostbuild` Worker's
 Build settings:
@@ -79,14 +85,7 @@ After editing the generated-application source:
 pnpm run rebuild-template
 ```
 
-After editing either embedded helper source:
-
-```bash
-pnpm run build:embedded
-pnpm run build:embedded:check
-```
-
-Do not edit generated route trees, Worker binding types, embedded bundles, or template snapshots directly.
+Do not edit generated route trees, Worker binding types, or the generated Builder template module directly.
 
 Client source maps are generated for internal diagnosis but excluded from the static asset upload by the build-generated
 `dist/client/.assetsignore`, following Cloudflare's

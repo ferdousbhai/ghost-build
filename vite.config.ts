@@ -46,26 +46,9 @@ export default defineConfig((config) => {
     },
     resolve: {
       tsconfigPaths: true,
-      alias: {
-        buffer: 'buffer',
-        'node:buffer': 'buffer',
-      },
     },
     plugins: [
       !isTest && agents(),
-      // Required for WebContainer file write tooling.
-      {
-        name: 'buffer-polyfill',
-        transform(code: string, id: string) {
-          if (id.includes('env.mjs')) {
-            return {
-              code: `import { Buffer } from 'buffer';\n${code}`,
-              map: null,
-            };
-          }
-          return undefined;
-        },
-      },
       {
         name: 'ghostbuild-strip-local-dev-vars',
         apply: 'build',

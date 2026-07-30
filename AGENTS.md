@@ -12,14 +12,14 @@ Work on `main`; no branches, worktrees, or PRs unless asked. Before each commit,
 - [app/agents/builder-agent.ts](app/agents/builder-agent.ts) — builder lifecycle, recovery, and turn preparation
 - [app/lib/.server/chat.ts](app/lib/.server/chat.ts) — model and tool orchestration
 - [app/components/chat/Chat.tsx](app/components/chat/Chat.tsx) — chat UI composition
-- [app/lib/stores/workbench.client.ts](app/lib/stores/workbench.client.ts) — browser workbench facade
+- [app/lib/stores/workbench.client.ts](app/lib/stores/workbench.client.ts) — durable-workspace presentation facade
 - [app/lib/runtime/action-runner.ts](app/lib/runtime/action-runner.ts) — generated-project action dispatch
 
 ## Runtime Areas
 
 - [app/lib/.server/llm/](app/lib/.server/llm/) — model input, compaction, memory, and Workers AI adapters
 - [ghostbuild-agent/](ghostbuild-agent/) — shared prompts, protocol types, parsing, and tool schemas
-- [app/lib/webcontainer/](app/lib/webcontainer/) — WebContainer integration
+- [app/lib/.server/cloudflare/builder-preview-sandbox.ts](app/lib/.server/cloudflare/builder-preview-sandbox.ts) — isolated remote previews
 - [app/lib/stores/startup/](app/lib/stores/startup/) — workspace bootstrap and restoration
 - [app/components/editor/codemirror/](app/components/editor/codemirror/) — editor integration
 
@@ -49,9 +49,8 @@ Work on `main`; no branches, worktrees, or PRs unless asked. Before each commit,
 - [make-bootstrap-snapshot.js](make-bootstrap-snapshot.js) — snapshot builder
 - [scripts/verify-template.mjs](scripts/verify-template.mjs) — clean-template verification
 
-After editing `template/`, run `pnpm run rebuild-template`. After editing `proxy/proxy.cjs` or
-`iframe-worker/worker.mts`, run `pnpm run build:embedded`. Do not hand-edit generated route trees, Worker binding types,
-embedded bundles, or template snapshots.
+After editing `template/`, run `pnpm run rebuild-template`. Do not hand-edit generated route trees, Worker binding types,
+or the generated durable template module.
 
 ## Review Rules
 

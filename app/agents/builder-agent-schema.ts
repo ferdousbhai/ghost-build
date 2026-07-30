@@ -126,6 +126,24 @@ const migrations: readonly SchemaMigration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    name: 'create_builder_preview_jobs',
+    apply(sql) {
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS builder_preview_jobs (
+          id TEXT PRIMARY KEY,
+          sandbox_id TEXT NOT NULL,
+          snapshot_key TEXT NOT NULL,
+          workspace_revision INTEGER NOT NULL,
+          snapshot_revision TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('queued', 'building', 'ready', 'failed', 'cancelled')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+    },
+  },
 ];
 
 type AppliedMigration = {

@@ -1,33 +1,19 @@
-import { useCallback, type ChangeEvent } from 'react';
+import type { ChangeEvent } from 'react';
 import * as Popover from '@radix-ui/react-popover';
-import {
-  ChevronRightIcon,
-  ClipboardIcon,
-  ExternalLinkIcon,
-  ImageIcon,
-  InfoCircledIcon,
-  Share2Icon,
-} from '@radix-ui/react-icons';
+import { ClipboardIcon, ExternalLinkIcon, ImageIcon, Share2Icon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
 import { Checkbox } from '@ui/Checkbox';
 import { Spinner } from '@ui/Spinner';
-import { Tooltip } from '@ui/Tooltip';
 import { ThumbnailChooser } from '~/components/workbench/ThumbnailChooser';
 import { useShareProject } from './useShareProject';
 
 export function ShareButton() {
   const share = useShareProject();
-  const handleRequestCapture = useCallback(() => share.requestCapture(), [share]);
   return (
     <>
       <Popover.Root open={share.isOpen} onOpenChange={(open) => void share.handleOpenChange(open)}>
         <Popover.Trigger asChild>
-          <Button
-            disabled={!share.anyPreviewReady || !share.sharingReady}
-            focused={share.isOpen}
-            variant="neutral"
-            size="xs"
-          >
+          <Button disabled={!share.sharingReady} focused={share.isOpen} variant="neutral" size="xs">
             <Share2Icon />
             <span>Share</span>
           </Button>
@@ -83,17 +69,12 @@ export function ShareButton() {
                   </Button>
                 </div>
               </div>
-              <MoreSharingOptions share={share} />
             </div>
             <Popover.Arrow className="fill-border-transparent" />
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
-      <ThumbnailChooser
-        isOpen={share.isThumbnailModalOpen}
-        onOpenChange={share.setIsThumbnailModalOpen}
-        onRequestCapture={handleRequestCapture}
-      />
+      <ThumbnailChooser isOpen={share.isThumbnailModalOpen} onOpenChange={share.setIsThumbnailModalOpen} />
     </>
   );
 }
@@ -115,43 +96,6 @@ function ShareLink({ url, onCopy }: { url: string; onCopy: (url: string) => void
         tip="Open in new tab"
         icon={<ExternalLinkIcon />}
       />
-    </div>
-  );
-}
-
-function MoreSharingOptions({ share }: { share: ReturnType<typeof useShareProject> }) {
-  return (
-    <div className="space-y-4 border-t pt-4">
-      <details className="group">
-        <summary className="flex cursor-pointer select-none items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ChevronRightIcon className="size-4 transition-transform group-open:rotate-90" />
-            <span className="text-content-secondary group-hover:text-content-primary text-sm">More ways to share</span>
-          </div>
-        </summary>
-        <div className="mt-4 space-y-4">
-          <div className="flex items-center justify-start gap-2">
-            <Button variant="neutral" onClick={() => void share.createSnapshot()}>
-              Create Point-In-Time Snapshot
-            </Button>
-            <Tooltip tip="Create a link to a specific version of your project that others can clone, including all chat history but without database contents. This can be useful for support tickets.">
-              <InfoCircledIcon className="size-4" />
-            </Tooltip>
-          </div>
-          {share.snapshotStatus === 'loading' && (
-            <div className="flex flex-col items-center justify-center py-4">
-              <Spinner />
-              <p className="text-content-secondary text-sm">Creating snapshot…</p>
-            </div>
-          )}
-          {share.snapshotStatus === 'success' && share.snapshotUrl && (
-            <div className="space-y-2">
-              <p className="text-content-secondary text-sm">Snapshot link:</p>
-              <ShareLink url={share.snapshotUrl} onCopy={share.copyToClipboard} />
-            </div>
-          )}
-        </div>
-      </details>
     </div>
   );
 }

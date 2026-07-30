@@ -24,8 +24,8 @@ describe('root Worker in workerd', () => {
     const response = await rootWorker.default.fetch('https://ghostbuild.test/api/health');
 
     expect(response.status).toBe(200);
-    expect(response.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
-    expect(response.headers.get('Cross-Origin-Embedder-Policy')).toBe('credentialless');
+    expect(response.headers.has('Cross-Origin-Opener-Policy')).toBe(false);
+    expect(response.headers.has('Cross-Origin-Embedder-Policy')).toBe(false);
     expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
     await expect(response.json()).resolves.toMatchObject({ status: 'healthy' });
   });

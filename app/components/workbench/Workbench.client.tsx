@@ -1,5 +1,14 @@
 import { motion, type HTMLMotionProps, type Variants } from 'framer-motion';
-import { lazy, memo, Suspense, useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import {
+  lazy,
+  memo,
+  Suspense,
+  useEffect,
+  useState,
+  type CSSProperties,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { IconButton } from '~/components/ui/IconButton';
 import { PanelHeaderButton } from '~/components/ui/PanelHeaderButton';
 import { Slider, type SliderOptions } from '~/components/ui/Slider';
@@ -8,19 +17,14 @@ import { classNames } from '~/utils/classNames';
 import { cubicEasingFn } from '~/utils/easings';
 import { renderLogger } from 'ghostbuild-agent/utils/logger';
 import { EditorPanel } from './EditorPanel';
-import { BackupStatusIndicator } from '~/components/BackupStatusIndicator';
-import type { TerminalInitializationOptions } from '~/types/terminal';
 import { Cross2Icon } from '@radix-ui/react-icons';
-import { CommandLineIcon } from '@heroicons/react/24/outline';
 import { useWorkbenchController } from './useWorkbenchController';
 import { useStore } from '@nanostores/react';
 import { workbenchStore } from '~/lib/stores/workbench.client';
-import { activeTerminalTabStore } from '~/lib/stores/terminalTabs';
 
 interface WorkbenchProps {
   chatStarted?: boolean;
   isStreaming?: boolean;
-  terminalInitializationOptions?: TerminalInitializationOptions;
 }
 
 const viewTransition = { ease: cubicEasingFn };
@@ -55,11 +59,7 @@ const workbenchVariants = {
   },
 } satisfies Variants;
 
-export const Workbench = memo(function Workbench({
-  chatStarted,
-  isStreaming,
-  terminalInitializationOptions,
-}: WorkbenchProps) {
+export const Workbench = memo(function Workbench({ chatStarted, isStreaming }: WorkbenchProps) {
   renderLogger.trace('Workbench');
   const showWorkbench = useStore(workbenchStore.showWorkbench);
   const [hasMountedWorkbench, setHasMountedWorkbench] = useState(showWorkbench);
@@ -74,15 +74,11 @@ export const Workbench = memo(function Workbench({
     return null;
   }
 
-  return <ReadyWorkbench isStreaming={isStreaming} terminalInitializationOptions={terminalInitializationOptions} />;
+  return <ReadyWorkbench isStreaming={isStreaming} />;
 });
 
-function ReadyWorkbench({
-  isStreaming,
-  terminalInitializationOptions,
-}: Pick<WorkbenchProps, 'isStreaming' | 'terminalInitializationOptions'>) {
+function ReadyWorkbench({ isStreaming }: Pick<WorkbenchProps, 'isStreaming'>) {
   const controller = useWorkbenchController(isStreaming);
-  const showTerminal = useStore(workbenchStore.showTerminal);
 
   return (
     <WorkbenchFrame
@@ -96,22 +92,9 @@ function ReadyWorkbench({
       }
       headerActions={
         controller.selectedView === 'code' ? (
-          <div className="flex overflow-y-auto">
-            <BackupStatusIndicator />
-            <div className="w-4" />
-            <PanelHeaderButton
-              className="mr-1 text-sm"
-              onClick={() => {
-                if (!showTerminal) {
-                  activeTerminalTabStore.set(2);
-                }
-                controller.toggleTerminal();
-              }}
-            >
-              <CommandLineIcon className="size-4" />
-              {showTerminal ? 'Hide shell' : 'Open shell'}
-            </PanelHeaderButton>
-          </div>
+          <PanelHeaderButton className="mr-1 text-sm" onClick={() => void controller.onFileSave()}>
+            Save
+          </PanelHeaderButton>
         ) : null
       }
     >
@@ -130,7 +113,6 @@ function ReadyWorkbench({
             onEditorChange={controller.onEditorChange}
             onFileSave={controller.onFileSave}
             onFileReset={controller.onFileReset}
-            terminalInitializationOptions={terminalInitializationOptions}
           />
         </View>
         <View {...slidingPosition({ view: 'preview', selectedView: controller.selectedView })}>
@@ -172,6 +154,7 @@ function WorkbenchFrame({
       animate={visible ? 'open' : 'closed'}
       variants={workbenchVariants}
       className={classNames('z-workbench', { 'pointer-events-none': !visible })}
+      style={isSmallViewport ? ({ '--workbench-width': '100vw' } as CSSProperties) : undefined}
       aria-hidden={!visible}
       inert={!visible}
     >

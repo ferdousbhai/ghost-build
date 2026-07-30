@@ -14,9 +14,6 @@
         "tests/workerd/server-dependencies.stub.ts",
         // manual build processes
         "buildSystemPrompts.ts",
-        "proxy/proxy.cjs",
-        "iframe-worker/worker.mts",
-        "iframe-worker/worker.bundled.mjs",
         // isolated remote-dev evaluation Workers
         "scripts/evaluations/*.worker.ts",
       ],
@@ -38,8 +35,7 @@
   },
 
   "ignoreDependencies": [
-    // these get shimmed in in vite.config.ts
-    "buffer",
+    // supplied transitively by the runtime toolchain
     "events",
 
     // satisfies the Cloudflare Agents decorator transform peer dependency

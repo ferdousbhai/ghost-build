@@ -7,8 +7,8 @@ A package whose package-level evidence is <not published> remains exact-version 
 This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-07-20
-Production packages: 547
-Inventory SHA-256: 07504d3808de0002bed82f7b866b2f1a940f76f811e310d853cde13be787b76f
+Production packages: 541
+Inventory SHA-256: 2230f42125837616d0f1a4c577eb2edee55b20ef6a2986a72e960df6ede9e0c4
 
 PACKAGE INVENTORY
 =================
@@ -1675,15 +1675,6 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383)
 
-@types/ua-parser-js@0.7.39
-Declared license: MIT
-Author: <not published>
-Repository: {"type":"git","url":"https://github.com/DefinitelyTyped/DefinitelyTyped.git","directory":"types/ua-parser-js"}
-Homepage: https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/ua-parser-js
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383)
-
 @types/unist@2.0.11
 Declared license: MIT
 Author: <not published>
@@ -1744,33 +1735,6 @@ Homepage: https://vercel.com
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 b070d77bfb2c52a1dd6996de0ce5f64c49a0ca55c889b163a963ddf5cb001ee2)
-
-@webcontainer/api@1.6.4
-Declared license: MIT
-Author: StackBlitz Inc.
-Repository: stackblitz/webcontainer-core
-Homepage: https://github.com/stackblitz/webcontainer-core
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 d9c3231e994e1a221719a70e2ae5b7a5eb458bb2b8988f9a8d254fadab797c02)
-
-@xterm/addon-fit@0.11.0
-Declared license: MIT
-Author: {"name":"The xterm.js authors","url":"https://xtermjs.org/"}
-Repository: https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit
-Homepage: <not published>
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 e256f01188af527e4d06d21d06fbf785ae9c50d4b328bf03cbe0ba7f0aa4228f)
-
-@xterm/addon-web-links@0.12.0
-Declared license: MIT
-Author: {"name":"The xterm.js authors","url":"https://xtermjs.org/"}
-Repository: https://github.com/xtermjs/xterm.js/tree/master/addons/addon-web-links
-Homepage: <not published>
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 689ceb10716bd7a87a804c14951d7c2b818cbd60aab83d540902470ce3b13444)
 
 @xterm/xterm@6.0.0
 Declared license: MIT
@@ -3995,15 +3959,6 @@ Homepage: <not published>
 Package-level license evidence: <not published>
 Published license/notice files: <not published>
 
-react-resizable-panels@2.1.9
-Declared license: MIT
-Author: Brian Vaughn <brian.david.vaughn@gmail.com>
-Repository: {"type":"git","url":"git+https://github.com/bvaughn/react-resizable-panels.git"}
-Homepage: <not published>
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 8b21167f99f3c016b39473b2984ceb03b54bf796dd9a7c74fcb80cfd513fe8a8)
-
 react-style-singleton@2.2.3
 Declared license: MIT
 Author: Anton Korzunov (thekashey@gmail.com)
@@ -4579,15 +4534,6 @@ Homepage: https://www.typescriptlang.org/
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE.txt (SHA-256 a7d00bfd54525bc694b6e32f64c7ebcf5e6b7ae3657be5cc12767bce74654a47)
-
-ua-parser-js@1.0.41
-Declared license: MIT
-Author: Faisal Salman <f@faisalman.com> (http://faisalman.com)
-Repository: {"type":"git","url":"https://github.com/faisalman/ua-parser-js.git"}
-Homepage: https://uaparser.dev
-Package-level license evidence: published
-Published license/notice files:
-- license.md (SHA-256 9659b14ee609fc60bcb0d660a0823d03bbb6184c20d1f50e96af4bbe1f56d5b1)
 
 ufo@1.6.4
 Declared license: MIT
@@ -9200,32 +9146,6 @@ SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
-SHA-256 689ceb10716bd7a87a804c14951d7c2b818cbd60aab83d540902470ce3b13444
-Used by:
-- @xterm/addon-web-links@0.12.0:LICENSE
------ BEGIN VERBATIM CONTENT -----
-Copyright (c) 2017, The xterm.js authors (https://github.com/xtermjs/xterm.js)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-
------ END VERBATIM CONTENT -----
-
 SHA-256 68e112c272f0a1988f4014518abaaacdcfa9ced6830d734acfb6a28ff9172e3e
 Used by:
 - throttleit@2.1.0:license
@@ -10387,34 +10307,6 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
-SHA-256 8b21167f99f3c016b39473b2984ceb03b54bf796dd9a7c74fcb80cfd513fe8a8
-Used by:
-- react-resizable-panels@2.1.9:LICENSE
------ BEGIN VERBATIM CONTENT -----
-MIT License
-
-Copyright (c) 2023 Brian Vaughn
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
------ END VERBATIM CONTENT -----
-
 SHA-256 8c535800331e1e4439835555b3f9edc7fe9dee2fab0d8bbbd5a982e8b8343d4d
 Used by:
 - parse5@7.3.0:LICENSE
@@ -10604,34 +10496,6 @@ MIT License
 
 Copyright (c) 2024-present VoidZero Inc. & Contributors
 Copyright (c) 2023 Boshen
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
------ END VERBATIM CONTENT -----
-
-SHA-256 9659b14ee609fc60bcb0d660a0823d03bbb6184c20d1f50e96af4bbe1f56d5b1
-Used by:
-- ua-parser-js@1.0.41:license.md
------ BEGIN VERBATIM CONTENT -----
-MIT License
-
-Copyright (c) 2012-2025 Faisal Salman <<f@faisalman.com>>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -14954,7 +14818,6 @@ Used by:
 - @types/node@26.1.1:LICENSE
 - @types/react-dom@19.2.3:LICENSE
 - @types/react@19.2.17:LICENSE
-- @types/ua-parser-js@0.7.39:LICENSE
 - @types/unist@2.0.11:LICENSE
 - @types/unist@3.0.3:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
@@ -15676,20 +15539,6 @@ SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
-SHA-256 d9c3231e994e1a221719a70e2ae5b7a5eb458bb2b8988f9a8d254fadab797c02
-Used by:
-- @webcontainer/api@1.6.4:LICENSE
------ BEGIN VERBATIM CONTENT -----
-Copyright (c) 2022-25 StackBlitz Inc.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
------ END VERBATIM CONTENT -----
-
 SHA-256 da4db1480d9beea3483a2eda5c53b22238d0827d57da162b48f122e04d2d9987
 Used by:
 - nanoid@3.3.16:LICENSE
@@ -16271,32 +16120,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
------ END VERBATIM CONTENT -----
-
-SHA-256 e256f01188af527e4d06d21d06fbf785ae9c50d4b328bf03cbe0ba7f0aa4228f
-Used by:
-- @xterm/addon-fit@0.11.0:LICENSE
------ BEGIN VERBATIM CONTENT -----
-Copyright (c) 2019, The xterm.js authors (https://github.com/xtermjs/xterm.js)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 

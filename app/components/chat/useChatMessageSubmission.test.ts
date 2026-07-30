@@ -2,6 +2,29 @@ import { describe, expect, it, vi } from 'vitest';
 import { runChatSubmissionLifecycle } from './useChatMessageSubmission';
 
 describe('runChatSubmissionLifecycle', () => {
+  it.each([
+    ['iPhone Safari', 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148'],
+    ['iPad Safari', 'Mozilla/5.0 (iPad; CPU OS 18_5 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148'],
+    ['Android Chrome', 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 Chrome/138 Mobile'],
+    ['Firefox', 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0'],
+  ])('creates and dispatches the first prompt on %s without a browser execution runtime', async (_name, userAgent) => {
+    vi.stubGlobal('navigator', { userAgent });
+    const initializeChat = vi.fn(async () => ({ created: true }));
+    const submit = vi.fn(async (onRequestStart: () => void) => onRequestStart());
+
+    await runChatSubmissionLifecycle({
+      initializeChat,
+      discardEmptyChat: vi.fn(),
+      onStartChat: vi.fn(),
+      onBuilderRequestStart: vi.fn(),
+      submit,
+    });
+
+    expect(initializeChat).toHaveBeenCalledOnce();
+    expect(submit).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
+
   it('does not let a cosmetic transition block the builder request', async () => {
     const submit = vi.fn(async (onRequestStart: () => void) => onRequestStart());
     const onBuilderRequestStart = vi.fn();

@@ -2,7 +2,7 @@ import { useAgentChat } from '@cloudflare/ai-chat/react';
 import { useAgent } from 'agents/react';
 import type { UIMessage } from 'ai';
 import { useStore } from '@nanostores/react';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BuilderAgent, BuilderAgentState } from '~/agents/builder-agent';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { getAuthToken, sessionIdStore } from '~/lib/stores/sessionId';
@@ -30,7 +30,6 @@ import {
   type TranscriptIdentity,
 } from 'ghostbuild-agent/transcript';
 import { BuilderWorkspaceSyncController } from '~/lib/stores/builder-workspace-sync.client';
-import { ContainerBootState, waitForContainerBootState } from '~/lib/stores/containerBootState';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { useQueryClient } from '@tanstack/react-query';
 import { subchatQueryKey } from '~/lib/cloudflare/data-hooks';
@@ -46,6 +45,9 @@ export function useBuilderAgentChat(args: {
   seedTranscript: boolean;
 }) {
   const currentSubchatIndex = useStore(subchatIndexStore);
+  const [workspacePresentationState, setWorkspacePresentationState] = useState<
+    'connecting' | 'ready' | 'presentation-error'
+  >('connecting');
   const queryClient = useQueryClient();
   const generatedSubchatTitleUpdatedAtRef = useRef<string | null>(null);
   const contextManager = useRef(
@@ -59,6 +61,9 @@ export function useBuilderAgentChat(args: {
     agent: 'BuilderAgent',
     name: args.transcript.agentName,
     onStateUpdate: (state) => {
+      if (state.preview) {
+        workbenchStore.updatePreview(state.preview);
+      }
       const generatedTitle = state.generatedSubchatTitle;
       if (!generatedTitle || generatedSubchatTitleUpdatedAtRef.current === generatedTitle.updatedAt) {
         return;
@@ -113,7 +118,7 @@ export function useBuilderAgentChat(args: {
       }
       logger.debug('Finished streaming');
       void workspaceControllerRef.current?.pull().catch((workspaceError) => {
-        logger.error('Failed to mirror the durable project workspace after a builder response', workspaceError);
+        logger.error('Failed to refresh the durable workspace presentation after a builder response', workspaceError);
       });
       void refreshProjectMetadata();
     },
@@ -126,6 +131,29 @@ export function useBuilderAgentChat(args: {
     ? `${args.transcript.agentName}:${args.transcript.generation}:${args.transcript.subchatIndex}`
     : null;
   const seedGateRef = useAsyncGate(seedKey);
+
+  useEffect(() => {
+    let disposed = false;
+    const callPreview = async (method: 'getPreviewState' | 'requestPreview' | 'cancelPreview') => {
+      const state = (await builderAgent.call(method, [], {
+        timeout: method === 'getPreviewState' ? 10_000 : 30_000,
+      })) as NonNullable<BuilderAgentState['preview']>;
+      if (!disposed) {
+        workbenchStore.updatePreview(state);
+      }
+      return state;
+    };
+    const disconnect = workbenchStore.connectPreview({
+      refresh: () => callPreview('getPreviewState'),
+      request: () => callPreview('requestPreview'),
+      cancel: () => callPreview('cancelPreview'),
+    });
+    void callPreview('getPreviewState').catch((error) => logger.warn('Unable to load remote preview state', error));
+    return () => {
+      disposed = true;
+      disconnect();
+    };
+  }, [builderAgent]);
 
   useEffect(() => {
     if (!seedKey) {
@@ -173,7 +201,6 @@ export function useBuilderAgentChat(args: {
           sendGateResolved = true;
           gate.resolve();
         }
-        await waitForContainerBootState(ContainerBootState.READY);
         const controller = await BuilderWorkspaceSyncController.initialize(builderAgent as never);
         if (disposed || workspaceGateRef.current !== gate) {
           controller.dispose();
@@ -182,6 +209,7 @@ export function useBuilderAgentChat(args: {
         workspaceControllerRef.current?.dispose();
         activeController = controller;
         workspaceControllerRef.current = controller;
+        setWorkspacePresentationState('ready');
       } catch (workspaceError) {
         if (!disposed && workspaceGateRef.current === gate) {
           if (!sendGateResolved) {
@@ -189,10 +217,13 @@ export function useBuilderAgentChat(args: {
           }
           logger.error(
             sendGateResolved
-              ? 'Failed to mirror the durable project workspace into the browser'
+              ? 'Failed to load the durable project workspace into the browser presentation cache'
               : 'Failed to initialize the durable project workspace',
             workspaceError,
           );
+          if (sendGateResolved) {
+            setWorkspacePresentationState('presentation-error');
+          }
         }
       } finally {
         if (!disposed && workspaceGateRef.current === gate && !sendGateResolved) {
@@ -288,6 +319,7 @@ export function useBuilderAgentChat(args: {
       builderAgent.state?.transcript && transcriptIdentitiesEqual(builderAgent.state.transcript, args.transcript)
         ? builderAgent.state.transcript
         : null,
+    workspacePresentationState,
   };
 }
 

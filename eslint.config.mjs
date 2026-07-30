@@ -186,7 +186,7 @@ export default [
     },
   },
   {
-    files: ['scripts/**/*.{cjs,js,mjs}', 'iframe-worker/build.cjs', 'proxy/build.cjs', 'make-bootstrap-snapshot.js'],
+    files: ['scripts/**/*.{cjs,js,mjs}', 'make-bootstrap-snapshot.js'],
     rules: {
       '@blitz/block-scope-case': 'off',
       '@blitz/catch-error-name': 'off',

@@ -35,9 +35,9 @@ describe('BuilderWorkspaceSyncController', () => {
     expect(workbench.replaceWorkspaceSnapshot).not.toHaveBeenCalled();
   });
 
-  test('pulls concurrent server changes without overwriting the browser paths being pushed', async () => {
-    let applyCount = 0;
+  test('rejects a stale manual edit and replaces the presentation cache from the durable snapshot', async () => {
     const applyRequests: unknown[] = [];
+    let conflicted = false;
     const agent = {
       call: vi.fn(async (method: string, args: unknown[]) => {
         switch (method) {
@@ -46,7 +46,12 @@ describe('BuilderWorkspaceSyncController', () => {
           case 'getWorkspaceSyncPage': {
             const request = args[0] as { fromRevision: number };
             if (request.fromRevision === 0) {
-              return syncPage(0, 1, 'snapshot', [write('/home/project/src/local.ts', 'initial', 1)]);
+              return conflicted
+                ? syncPage(0, 2, 'snapshot', [
+                    write('/home/project/src/local.ts', 'server-version', 2),
+                    write('/home/project/src/remote.ts', 'remote-change', 2),
+                  ])
+                : syncPage(0, 1, 'snapshot', [write('/home/project/src/local.ts', 'initial', 1)]);
             }
             return syncPage(1, 2, 'delta', [
               write('/home/project/src/local.ts', 'server-version', 2),
@@ -55,10 +60,8 @@ describe('BuilderWorkspaceSyncController', () => {
           }
           case 'applyWorkspaceClientChanges':
             applyRequests.push(args[0]);
-            applyCount += 1;
-            return applyCount === 1
-              ? { ok: false, conflict: true, state: workspaceState(2) }
-              : { ok: true, state: workspaceState(3), changedPaths: ['/home/project/src/local.ts'] };
+            conflicted = true;
+            return { ok: false, conflict: true, state: workspaceState(2) };
           default:
             throw new Error(`Unexpected RPC: ${method}`);
         }
@@ -74,20 +77,15 @@ describe('BuilderWorkspaceSyncController', () => {
 
     await controller.push([localChange]);
 
-    expect(applyRequests).toEqual([
-      { baseRevision: 1, changes: [localChange] },
-      { baseRevision: 2, changes: [localChange] },
-    ]);
-    expect(workbench.applyWorkspaceSyncEntries).toHaveBeenCalledWith([
+    expect(applyRequests).toEqual([{ baseRevision: 1, changes: [localChange] }]);
+    expect(workbench.replaceWorkspaceSnapshot).toHaveBeenLastCalledWith([
+      expect.objectContaining({ path: '/home/project/src/local.ts', content: 'server-version' }),
       expect.objectContaining({ path: '/home/project/src/remote.ts', content: 'remote-change' }),
     ]);
-    expect(workbench.applyWorkspaceSyncEntries).not.toHaveBeenCalledWith([
-      expect.objectContaining({ path: '/home/project/src/local.ts' }),
-    ]);
-    expect(controller.revision).toBe(3);
+    expect(controller.revision).toBe(2);
   });
 
-  test('retains a failed browser change and retries it before the next pull', async () => {
+  test('does not silently retry a failed manual edit during a later pull', async () => {
     let applyCount = 0;
     const agent = {
       call: vi.fn(async (method: string, args: unknown[]) => {
@@ -125,7 +123,7 @@ describe('BuilderWorkspaceSyncController', () => {
     await expect(controller.push([change])).rejects.toThrow('temporary connection failure');
     await expect(controller.pull()).resolves.toBeUndefined();
 
-    expect(applyCount).toBe(2);
+    expect(applyCount).toBe(1);
     expect(controller.revision).toBe(2);
   });
 

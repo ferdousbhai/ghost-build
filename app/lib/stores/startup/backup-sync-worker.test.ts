@@ -7,7 +7,6 @@ import { chatSyncState } from './chatSyncState';
 import { lastCompleteMessageInfoStore } from './messages';
 
 vi.mock('~/lib/compression', () => ({ compressWithLz4: vi.fn() }));
-vi.mock('~/lib/snapshot.client', () => ({ buildUncompressedSnapshot: vi.fn() }));
 
 function message(id: string, text: string): GhostbuildMessage {
   return { id, role: 'user', parts: [{ type: 'text', text }] };
@@ -21,7 +20,6 @@ beforeEach(() => {
     started: false,
     persistedMessageInfo: null,
     persistedTranscriptCheckpoint: null,
-    savedFileUpdateCounter: null,
     subchatIndex: 0,
   });
   lastCompleteMessageInfoStore.set(null);
@@ -47,7 +45,6 @@ describe('initializeBackupPosition', () => {
       ...chatSyncState.get(),
       lastSync: 123,
       numFailures: 2,
-      savedFileUpdateCounter: 42,
     });
 
     const secondChatMessages = [message('b-1', 'new chat')];
@@ -58,7 +55,6 @@ describe('initializeBackupPosition', () => {
       lastSync: 0,
       numFailures: 0,
       persistedMessageInfo: { messageIndex: 0, partIndex: 0 },
-      savedFileUpdateCounter: null,
       subchatIndex: 0,
     });
     expect(lastCompleteMessageInfoStore.get()).toEqual({
@@ -76,7 +72,6 @@ describe('initializeBackupPosition', () => {
     chatSyncState.set({
       ...chatSyncState.get(),
       persistedMessageInfo: { messageIndex: 3, partIndex: 2 },
-      savedFileUpdateCounter: 7,
     });
 
     initializeBackupPosition('chat-a', initialMessages, 0);
@@ -84,7 +79,6 @@ describe('initializeBackupPosition', () => {
     expect(chatSyncState.get()).toMatchObject({
       chatId: 'chat-a',
       persistedMessageInfo: { messageIndex: 3, partIndex: 2 },
-      savedFileUpdateCounter: 7,
     });
   });
 });

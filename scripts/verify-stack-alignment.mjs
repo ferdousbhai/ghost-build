@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,10 +38,8 @@ export {
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SANDBOX_IMAGE_DIGEST = 'sha256:23f67e16131b780865a5fa5aa3c8607408a730105c248836409f4e02bb6bf042';
 const SANDBOX_NODE_ENGINE = '>=22.0.0';
-const templateSnapshotPattern = /^template-snapshot-([a-f0-9]{8})\.bin$/;
 const runtimeEnvAccessAllowlist = [
   { pathSuffix: 'app/components/ErrorComponent.tsx', snippet: 'import.meta.env.DEV' },
-  { pathSuffix: 'app/lib/webcontainer/index.ts', snippet: 'import.meta.env.SSR' },
   { pathSuffix: 'template/scripts/vite-dev.mjs', snippet: 'process.env.GHOSTBUILD_PREVIEW' },
 ];
 const agentRequiredPackages = ['ai', 'zod'];
@@ -62,6 +59,11 @@ const forbiddenLegacyPaths = [
   'chef-agent',
   'convex',
   'template/convex',
+  'app/lib/webcontainer',
+  'app/routes/webcontainer.preview.$id.tsx',
+  'iframe-worker',
+  'proxy',
+  'public/template-snapshot-manifest.json',
 ];
 const requiredPaths = [
   'CODE_OF_CONDUCT.md',
@@ -92,7 +94,6 @@ const requiredPaths = [
   'template/src/agents/anonymous-retention.ts',
   'template/vite.config.ts',
   'template/wrangler.jsonc',
-  'public/template-snapshot-manifest.json',
 ];
 const requiredMigrationTables = [
   'user',
@@ -119,6 +120,8 @@ const requiredMigrationTables = [
   'thumbnail_objects',
   'thumbnail_reconciliation_state',
   'deployment_security_inventory',
+  'builder_previews',
+  'builder_preview_build_admissions',
 ];
 
 function readJson(path) {
@@ -145,37 +148,12 @@ export function findForbiddenRuntimeEnvAccess(files, allowlist = runtimeEnvAcces
   return findForbiddenRuntimeEnvAccessShared(files, allowlist);
 }
 
-export function findTemplateSnapshotErrors(snapshotFiles, setupContent, hashByFile = new Map()) {
-  const errors = [];
-  const snapshotNames = snapshotFiles.map((file) => file.split('/').pop() ?? file).sort();
-  if (snapshotNames.length !== 1) {
-    return [`public must contain exactly one template-snapshot-*.bin file; found ${snapshotNames.length || 'none'}.`];
-  }
-
-  const [snapshotName] = snapshotNames;
-  const match = templateSnapshotPattern.exec(snapshotName);
-  if (!match) {
-    return [`${snapshotName} must match template-snapshot-<8 hex chars>.bin.`];
-  }
-  if (!setupContent.includes(`const TEMPLATE_URL = '/${snapshotName}';`)) {
-    errors.push(`app/lib/stores/startup/useContainerSetup.ts must reference /${snapshotName}.`);
-  }
-  const actualHash = hashByFile.get(snapshotName);
-  if (actualHash && actualHash !== match[1]) {
-    errors.push(`${snapshotName} hash must match its compressed snapshot content; expected ${actualHash}.`);
-  }
-  return errors;
-}
-
-export function findTemplateSnapshotManifestErrors(manifest, snapshotName, sourceSha256) {
-  const errors = [];
-  if (manifest?.snapshot !== snapshotName) {
-    errors.push(`public/template-snapshot-manifest.json must reference ${snapshotName}.`);
-  }
-  if (manifest?.sourceSha256 !== sourceSha256) {
-    errors.push('public/template-snapshot-manifest.json is stale; run pnpm run rebuild-template.');
-  }
-  return errors;
+export function findForbiddenRootBrowserRuntimeDependencies(pkg) {
+  const forbidden = ['@webcontainer/api', '@webcontainer/snapshot', '@xterm/xterm', '@xterm/addon-fit'];
+  const dependencies = dependencyNames(pkg);
+  return forbidden
+    .filter((name) => dependencies.has(name))
+    .map((name) => `package.json must not depend on the removed browser execution runtime ${name}.`);
 }
 
 export function findBuilderTemplateModuleErrors(content, sourceSha256) {
@@ -399,22 +377,6 @@ export function findRootMigrationErrors(sql) {
   return errors;
 }
 
-function collectSnapshots() {
-  return readdirSync(resolve(rootDir, 'public')).filter((file) => /^template-snapshot-.*\.bin$/.test(file));
-}
-
-function snapshotHashes(files) {
-  return new Map(
-    files.map((file) => [
-      file,
-      createHash('sha256')
-        .update(readFileSync(resolve(rootDir, 'public', file)))
-        .digest('hex')
-        .slice(0, 8),
-    ]),
-  );
-}
-
 export function verifyStackAlignment() {
   const errors = [];
   const rootPackage = readJson('package.json');
@@ -425,6 +387,7 @@ export function verifyStackAlignment() {
   verifyPackage(errors, agentPackage, 'ghostbuild-agent/package.json', agentRequiredPackages);
   verifyPackage(errors, templatePackage, 'template/package.json', APP_REQUIRED_PACKAGES, true);
   errors.push(
+    ...findForbiddenRootBrowserRuntimeDependencies(rootPackage),
     ...findInternalPackageMetadataErrors(rootPackage, 'package.json'),
     ...findInternalPackageMetadataErrors(agentPackage, 'ghostbuild-agent/package.json'),
     ...findInternalPackageMetadataErrors(templatePackage, 'template/package.json'),
@@ -495,28 +458,12 @@ export function verifyStackAlignment() {
     ),
   );
 
-  const snapshots = collectSnapshots();
   errors.push(
-    ...findTemplateSnapshotErrors(
-      snapshots,
-      readFileSync(resolve(rootDir, 'app/lib/stores/startup/useContainerSetup.ts'), 'utf8'),
-      snapshotHashes(snapshots),
+    ...findBuilderTemplateModuleErrors(
+      readFileSync(resolve(rootDir, 'app/agents/builder-template.generated.ts'), 'utf8'),
+      templateSourceDigest(rootDir),
     ),
   );
-  if (snapshots.length === 1) {
-    const sourceSha256 = templateSourceDigest(rootDir);
-    errors.push(
-      ...findTemplateSnapshotManifestErrors(
-        readJson('public/template-snapshot-manifest.json'),
-        snapshots[0],
-        sourceSha256,
-      ),
-      ...findBuilderTemplateModuleErrors(
-        readFileSync(resolve(rootDir, 'app/agents/builder-template.generated.ts'), 'utf8'),
-        sourceSha256,
-      ),
-    );
-  }
 
   const sourceFiles = collectSourceEntries(rootDir, [
     'app',

@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { normalizeProjectPath } from '~/lib/runtime/action-runner/project-path';
 import type { BuilderWorkspaceRepository } from './builder-workspace';
+import { BUILDER_PREVIEW_MAX_SOURCE_BYTES } from './builder-preview-types';
 
 const EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.tanstack', '.wrangler']);
 
@@ -16,6 +17,9 @@ export async function createBuilderWorkspaceSnapshot(
   const startingState = workspace.getState();
   if (!startingState.initialized) {
     throw new Error('The durable project workspace is not initialized.');
+  }
+  if (startingState.totalBytes > BUILDER_PREVIEW_MAX_SOURCE_BYTES) {
+    throw new Error('The durable project is too large for a bounded remote preview build.');
   }
   const files = workspace
     .listFiles()

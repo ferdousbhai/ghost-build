@@ -4,7 +4,7 @@ export const cursorRulesContent = `# Ghostbuild Cloudflare App Rules
 - For a Worker-only project, set package.json ghostbuild.projectType to "worker", use a Wrangler dry-run build targeting dist/worker, and remove unused framework dependencies, route-generation steps, and bindings.
 - For HTTP APIs, webhooks, middleware, and other fetch-handler Worker scripts, use the direct Worker handler and do not invent routes, React UI, or SSR. Automatic production deployment does not yet support scheduled, queue, email, or Tail handlers.
 - Add TanStack Query or TanStack DB only when the product needs client-side server-state caching or live collections.
-- Keep pnpm run dev and pnpm run preview available for local/WebContainer preview.
+- Keep pnpm run dev and pnpm run preview available for local and isolated remote preview.
 - After changing production dependencies, run pnpm run licenses:generate before build or deploy so the shipped third-party notices match the lockfile.
 - Keep Worker entrypoint code in src/server.ts.
 - In generated TanStack routes and server functions, call getAppBindings() from @/app-bindings for application DB/R2 access.

@@ -1,7 +1,6 @@
 import { useStoreMessageHistory } from './useStoreMessageHistory';
 import { useDiscardEmptyChat, useExistingInitializeChat, useHomepageInitializeChat } from './useInitializeChat';
 import { useInitialMessages } from './useInitialMessages';
-import { useExistingChatContainerSetup, useNewChatContainerSetup } from './useContainerSetup';
 import { useBackupSyncState } from './history';
 import { useCallback, useState } from 'react';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
@@ -16,11 +15,9 @@ const EMPTY_INITIAL_MESSAGES: GhostbuildMessage[] = [];
 
 export function useChatHomepage(chatId: string) {
   const [chatInitialized, setChatInitialized] = useState(false);
-  const [containerSetupEnabled, setContainerSetupEnabled] = useState(false);
   const initializeChat = useHomepageInitializeChat(chatId, setChatInitialized);
   const discardEmptyChat = useDiscardEmptyChat(chatId);
   const storeMessageHistory = useStoreMessageHistory();
-  useNewChatContainerSetup(containerSetupEnabled);
   const loaded = useInitialMessages(chatInitialized ? chatId : undefined);
   useBackupSyncState(
     chatId,
@@ -37,7 +34,6 @@ export function useChatHomepage(chatId: string) {
     ({ agentName: transcriptAgentName(chatId, subchatIndex, 0), generation: 0, subchatIndex } as const);
   const onBuilderRequestStart = useCallback(() => {
     navigateToChat(chatId);
-    setContainerSetupEnabled(true);
   }, [chatId]);
 
   return {
@@ -53,7 +49,6 @@ export function useChatHomepage(chatId: string) {
 }
 
 export function useExistingChat(chatId: string) {
-  const [containerSetupEnabled, setContainerSetupEnabled] = useState(false);
   const initializeChat = useExistingInitializeChat(chatId);
   const discardEmptyChat = useDiscardEmptyChat(chatId);
   const initialMessages = useInitialMessages(chatId);
@@ -64,19 +59,14 @@ export function useExistingChat(chatId: string) {
     initialMessages?.checkpoint,
   );
   const storeMessageHistory = useStoreMessageHistory();
-  const requiresInitialContainer = (initialMessages?.deserialized.length ?? 0) > 0;
-  useExistingChatContainerSetup(
-    requiresInitialContainer || containerSetupEnabled ? initialMessages?.loadedChatId : undefined,
-  );
   const subchats = useSubchats(chatId);
-  const onBuilderRequestStart = useCallback(() => setContainerSetupEnabled(true), []);
+  const onBuilderRequestStart = useCallback(() => undefined, []);
 
   return {
     initialMessages: initialMessages ? initialMessages.deserialized : initialMessages,
     initializeChat,
     discardEmptyChat,
     onBuilderRequestStart,
-    requiresInitialContainer,
     storeMessageHistory,
     subchats,
     transcript: initialMessages?.transcript,

@@ -8,7 +8,6 @@ export const chatSyncState = atom<BackupSyncState>({
   started: false,
   persistedMessageInfo: null,
   persistedTranscriptCheckpoint: null,
-  savedFileUpdateCounter: null,
   subchatIndex: 0,
 });
 
@@ -19,7 +18,6 @@ export type BackupSyncState = {
   started: boolean;
   persistedMessageInfo: { messageIndex: number; partIndex: number } | null;
   persistedTranscriptCheckpoint: TranscriptCheckpoint | null;
-  savedFileUpdateCounter: number | null;
   subchatIndex: number;
 };
 
@@ -30,6 +28,5 @@ export type InitialBackupSyncState = {
   started: boolean;
   persistedMessageInfo: { messageIndex: number; partIndex: number };
   persistedTranscriptCheckpoint: TranscriptCheckpoint | null;
-  savedFileUpdateCounter: number;
   subchatIndex: number;
 };

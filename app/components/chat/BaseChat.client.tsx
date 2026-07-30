@@ -1,15 +1,12 @@
 import React, { lazy, Suspense, type ReactNode, type RefCallback, useCallback } from 'react';
 import { messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { isStreamStatusActive, type StreamStatus, type ToolStatus } from '~/lib/common/types';
-import type { TerminalInitializationOptions } from '~/types/terminal';
 import { MessageInput } from './MessageInput';
 import { useChatId } from '~/lib/stores/chatId';
 import { messageInputStore } from '~/lib/stores/messageInput';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
-import type { ActionAlert } from '~/types/actions';
 import { classNames } from '~/utils/classNames';
 import styles from './BaseChat.module.css';
-import { ChatActionAlert } from './ChatActionAlert';
 import { DisabledChatMessageSheet } from './DisabledChatMessageSheet';
 import { HomeIntro } from './HomeIntro.client';
 import StreamingIndicator from './StreamingIndicator';
@@ -53,12 +50,8 @@ interface BaseChatProps {
   toolStatus: ToolStatus;
   buildProgress: BuildProgress | null;
   messages: GhostbuildMessage[];
-  terminalInitializationOptions: TerminalInitializationOptions | undefined;
   disabledReason: ReactNode | null;
-
-  // Alert related props
-  actionAlert: ActionAlert | undefined;
-  clearAlert: () => void;
+  runtimeNotice: ReactNode;
 
   // Rewind functionality
   onRewindToMessage?: (subchatIndex?: number, messageIndex?: number) => void;
@@ -82,12 +75,10 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       sendMessageInProgress,
       messages,
       isRecovering,
-      actionAlert,
-      clearAlert,
       toolStatus,
       buildProgress,
-      terminalInitializationOptions,
       disabledReason,
+      runtimeNotice,
       onRewindToMessage,
       subchats,
       onSubchatTitleChange,
@@ -219,8 +210,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
               >
                 {!chatStarted ? (
                   <HomeIntro
-                    actionAlert={actionAlert}
-                    clearAlert={clearAlert}
                     disabledReason={disabledReason}
                     isStreaming={isStreaming}
                     messagesLength={messages.length}
@@ -275,12 +264,9 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                       'z-prompt sticky bottom-0 mx-auto flex w-full max-w-chat flex-col px-3 pb-3 sm:px-0 sm:pb-4',
                     )}
                   >
-                    <ChatActionAlert
-                      alert={actionAlert}
-                      clearAlert={clearAlert}
-                      onSend={onSend}
-                      className="mb-4 bg-background-secondary"
-                    />
+                    <div className="mb-2 px-1 text-xs text-content-tertiary" role="status">
+                      {runtimeNotice}
+                    </div>
                     {(!subchats || (currentSubchatIndex >= subchats.length - 1 && isSubchatLoaded)) && (
                       <>
                         {shouldShowNudge && sessionId && (
@@ -325,11 +311,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
             </div>
             {chatStarted && (
               <Suspense fallback={null}>
-                <Workbench
-                  chatStarted
-                  isStreaming={isStreaming}
-                  terminalInitializationOptions={terminalInitializationOptions}
-                />
+                <Workbench chatStarted isStreaming={isStreaming} />
               </Suspense>
             )}
           </div>

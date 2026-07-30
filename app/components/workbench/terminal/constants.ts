@@ -1,1 +1,0 @@
-export const DEFAULT_TERMINAL_SIZE = 25;

@@ -15,7 +15,6 @@ import { Route as ShareRouteImport } from './routes/share';
 import { Route as ChatIdRouteImport } from './routes/chat.$id';
 import { Route as CreateShareCodeRouteImport } from './routes/create.$shareCode';
 import { Route as ShareCodeRouteImport } from './routes/share.$code';
-import { Route as WebcontainerPreviewIdRouteImport } from './routes/webcontainer.preview.$id';
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -47,11 +46,6 @@ const ShareCodeRoute = ShareCodeRouteImport.update({
   path: '/$code',
   getParentRoute: () => ShareRoute,
 } as any);
-const WebcontainerPreviewIdRoute = WebcontainerPreviewIdRouteImport.update({
-  id: '/webcontainer/preview/$id',
-  path: '/webcontainer/preview/$id',
-  getParentRoute: () => rootRouteImport,
-} as any);
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute;
@@ -60,7 +54,6 @@ export interface FileRoutesByFullPath {
   '/chat/$id': typeof ChatIdRoute;
   '/create/$shareCode': typeof CreateShareCodeRoute;
   '/share/$code': typeof ShareCodeRoute;
-  '/webcontainer/preview/$id': typeof WebcontainerPreviewIdRoute;
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute;
@@ -69,7 +62,6 @@ export interface FileRoutesByTo {
   '/chat/$id': typeof ChatIdRoute;
   '/create/$shareCode': typeof CreateShareCodeRoute;
   '/share/$code': typeof ShareCodeRoute;
-  '/webcontainer/preview/$id': typeof WebcontainerPreviewIdRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
@@ -79,7 +71,6 @@ export interface FileRoutesById {
   '/chat/$id': typeof ChatIdRoute;
   '/create/$shareCode': typeof CreateShareCodeRoute;
   '/share/$code': typeof ShareCodeRoute;
-  '/webcontainer/preview/$id': typeof WebcontainerPreviewIdRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
@@ -89,8 +80,7 @@ export interface FileRouteTypes {
     | '/share'
     | '/chat/$id'
     | '/create/$shareCode'
-    | '/share/$code'
-    | '/webcontainer/preview/$id';
+    | '/share/$code';
   fileRoutesByTo: FileRoutesByTo;
   to:
     | '/'
@@ -98,8 +88,7 @@ export interface FileRouteTypes {
     | '/share'
     | '/chat/$id'
     | '/create/$shareCode'
-    | '/share/$code'
-    | '/webcontainer/preview/$id';
+    | '/share/$code';
   id:
     | '__root__'
     | '/'
@@ -107,8 +96,7 @@ export interface FileRouteTypes {
     | '/share'
     | '/chat/$id'
     | '/create/$shareCode'
-    | '/share/$code'
-    | '/webcontainer/preview/$id';
+    | '/share/$code';
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
@@ -117,7 +105,6 @@ export interface RootRouteChildren {
   ShareRoute: typeof ShareRouteWithChildren;
   ChatIdRoute: typeof ChatIdRoute;
   CreateShareCodeRoute: typeof CreateShareCodeRoute;
-  WebcontainerPreviewIdRoute: typeof WebcontainerPreviewIdRoute;
 }
 
 declare module '@tanstack/react-router' {
@@ -164,13 +151,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShareCodeRouteImport;
       parentRoute: typeof ShareRoute;
     };
-    '/webcontainer/preview/$id': {
-      id: '/webcontainer/preview/$id';
-      path: '/webcontainer/preview/$id';
-      fullPath: '/webcontainer/preview/$id';
-      preLoaderRoute: typeof WebcontainerPreviewIdRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
   }
 }
 
@@ -190,7 +170,6 @@ const rootRouteChildren: RootRouteChildren = {
   ShareRoute: ShareRouteWithChildren,
   ChatIdRoute: ChatIdRoute,
   CreateShareCodeRoute: CreateShareCodeRoute,
-  WebcontainerPreviewIdRoute: WebcontainerPreviewIdRoute,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

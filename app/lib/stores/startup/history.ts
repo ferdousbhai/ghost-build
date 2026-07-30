@@ -4,7 +4,6 @@ import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { api } from '~/lib/cloudflare/data-api';
 import { useQuery } from '~/lib/cloudflare/data-hooks';
-import { getFileUpdateCounter } from '~/lib/stores/fileUpdateCounter';
 import { useSessionIdOrNullOrLoading, waitForSessionId } from '~/lib/stores/sessionId';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { workbenchStore } from '~/lib/stores/workbench.client';
@@ -36,7 +35,7 @@ export function useBackupSyncState(
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (hasPendingBackupWork(chatSyncState.get(), lastCompleteMessageInfoStore.get(), getFileUpdateCounter())) {
+      if (hasPendingBackupWork(chatSyncState.get(), lastCompleteMessageInfoStore.get())) {
         event.preventDefault();
         event.returnValue = '';
         return '';

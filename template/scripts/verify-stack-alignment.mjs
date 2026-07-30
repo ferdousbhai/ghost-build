@@ -78,7 +78,7 @@ export function verifyStackAlignment() {
   const scripts = packageJson.scripts ?? {};
   if (type === "web_app" && scripts.dev !== "node scripts/vite-dev.mjs") {
     errors.push(
-      'package.json must define "dev": "node scripts/vite-dev.mjs" for environment-aware local and WebContainer development.',
+      'package.json must define "dev": "node scripts/vite-dev.mjs" for environment-aware local development.',
     );
   }
   if (type === "web_app" && scripts.preview !== "vite preview --host 0.0.0.0") {

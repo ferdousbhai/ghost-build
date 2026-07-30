@@ -22,7 +22,6 @@ export function useChatMessageSubmission(args: {
   contextManager: ChatContextManager;
   chatStarted: boolean;
   streamStatus: StreamStatus;
-  runtimeSupported: boolean;
   initializeChat: () => Promise<{ created: boolean }>;
   discardEmptyChat: () => Promise<void>;
   sendChatMessage: (
@@ -62,11 +61,6 @@ export function useChatMessageSubmission(args: {
       logger.debug('Message submission already in progress');
       return false;
     }
-    if (!args.runtimeSupported) {
-      toast.error('Open Ghostbuild in Chrome or Edge to use the live builder.');
-      return false;
-    }
-
     try {
       setSendMessageInProgress(true);
       args.enableAutoScroll();
