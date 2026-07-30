@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createSubchatOptions, getSubchatNavigation } from './subchat-model';
+import { createSubchatOptions, getSubchatLabel, getSubchatNavigation } from './subchat-model';
 
 describe('subchat model', () => {
   it('creates stable fallback labels', () => {
@@ -9,6 +9,7 @@ describe('subchat model', () => {
         { subchatIndex: 1, updatedAt: 2, description: 'Billing', transcript: transcript(1) },
       ]).map(({ label }) => label),
     ).toEqual(['Initial chat', 'Billing']);
+    expect(getSubchatLabel(3, '   ')).toBe('Feature #3');
   });
 
   it('derives navigation and creation permissions', () => {

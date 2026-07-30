@@ -23,8 +23,9 @@ export const ToolUseContents = memo(function ToolUseContents({ invocation }: { i
         </>
       );
     case 'npmInstall':
-      return <StructuredResultTool invocation={invocation} />;
     case 'validateProject':
+    case 'listFiles':
+    case 'searchText':
       return <StructuredResultTool invocation={invocation} />;
     case 'view':
       return (
@@ -42,9 +43,6 @@ export const ToolUseContents = memo(function ToolUseContents({ invocation }: { i
           <ToolLookupDocsResult invocation={invocation} />
         </Suspense>
       );
-    case 'listFiles':
-    case 'searchText':
-      return <StructuredResultTool invocation={invocation} />;
     default:
       return <pre className="overflow-x-auto whitespace-pre-wrap">{JSON.stringify(invocation, null, 2)}</pre>;
   }
@@ -64,18 +62,16 @@ function EditTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
     return null;
   }
   return (
-    <div className="overflow-hidden rounded-lg border border-bolt-elements-artifacts-borderColor bg-bolt-elements-background-depth-1 font-mono text-sm text-content-primary">
-      <div className="space-y-4 p-4">
-        <div className="space-y-2 overflow-x-auto">
-          {args.data.edits.map((edit, index) => (
-            <div key={index} className="space-y-2">
-              <pre className="text-bolt-elements-icon-error">{edit.old}</pre>
-              <pre className="text-bolt-elements-icon-success">{edit.new}</pre>
-            </div>
-          ))}
-        </div>
+    <ToolResultFrame>
+      <div className="space-y-2 overflow-x-auto">
+        {args.data.edits.map((edit, index) => (
+          <div key={index} className="space-y-2">
+            <pre className="text-bolt-elements-icon-error">{edit.old}</pre>
+            <pre className="text-bolt-elements-icon-success">{edit.new}</pre>
+          </div>
+        ))}
       </div>
-    </div>
+    </ToolResultFrame>
   );
 }
 
@@ -102,10 +98,10 @@ function StructuredResultTool({ invocation }: { invocation: GhostbuildToolInvoca
     <ToolResultFrame>
       <div className="space-y-2">
         <div>{invocation.result.summary}</div>
-        {invocation.result.coverage ? (
+        {invocation.result.coverage !== undefined ? (
           <pre className="whitespace-pre-wrap">{JSON.stringify(invocation.result.coverage, null, 2)}</pre>
         ) : null}
-        {invocation.result.data ? (
+        {invocation.result.data !== undefined ? (
           <pre className="whitespace-pre-wrap">{JSON.stringify(invocation.result.data, null, 2)}</pre>
         ) : null}
       </div>

@@ -15,9 +15,11 @@ import { HomeIntro } from './HomeIntro.client';
 import StreamingIndicator from './StreamingIndicator';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useStore } from '@nanostores/react';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { SubchatBar } from './SubchatBar';
 import { SubchatLimitNudge } from './SubchatLimitNudge';
-import { useMutation } from '~/lib/cloudflare/data-hooks';
+import { subchatQueryKey, useMutation } from '~/lib/cloudflare/data-hooks';
 import { api } from '~/lib/cloudflare/data-api';
 import { subchatIndexStore, useIsSubchatLoaded } from '~/lib/stores/subchats';
 import type { BuildProgress } from './build-progress';
@@ -93,18 +95,43 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
     const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
     const shouldShowNudge = messages.length > MIN_MESSAGES_FOR_SUBCHAT_NUDGE;
     const createSubchat = useMutation(api.subchats.create);
+    const queryClient = useQueryClient();
     const isSubchatLoaded = useIsSubchatLoaded();
+    const createSubchatPendingRef = React.useRef(false);
 
     const chatId = useChatId();
     const sessionId = useSessionIdOrNullOrLoading();
-    const handleCreateSubchat = useCallback(async () => {
-      if (!sessionId) {
-        return;
+    const handleCreateSubchat = useCallback(async (): Promise<boolean> => {
+      if (!sessionId || createSubchatPendingRef.current) {
+        return false;
       }
-      const subchatIndex = await createSubchat({ chatId, sessionId });
-      subchatIndexStore.set(subchatIndex);
-      messageInputStore.set('');
-    }, [createSubchat, chatId, sessionId]);
+      createSubchatPendingRef.current = true;
+      try {
+        let subchatIndex: number;
+        try {
+          subchatIndex = await createSubchat({ chatId, sessionId });
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'Unable to create a new chat.');
+          return false;
+        }
+        try {
+          await queryClient.invalidateQueries({
+            queryKey: subchatQueryKey({ chatId, sessionId }),
+          });
+        } catch (error) {
+          toast.error(
+            error instanceof Error
+              ? `The chat was created, but its history could not refresh: ${error.message}`
+              : 'The chat was created, but its history could not refresh. Reload to continue.',
+          );
+        }
+        subchatIndexStore.set(subchatIndex);
+        messageInputStore.set('');
+        return true;
+      } finally {
+        createSubchatPendingRef.current = false;
+      }
+    }, [createSubchat, chatId, queryClient, sessionId]);
 
     const lastUserMessage = messages.findLast((message) => message.role === 'user');
     const resendMessage = useCallback(async () => {

@@ -3,7 +3,12 @@ import { FolderIcon } from '@heroicons/react/24/outline';
 import { FileIcon } from '@radix-ui/react-icons';
 import { memo } from 'react';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
-import { isGhostbuildToolResult } from 'ghostbuild-agent/tool-result';
+import {
+  isGhostbuildToolResult,
+  toolResultContent,
+  toolResultSucceeded,
+  toolResultSummary,
+} from 'ghostbuild-agent/tool-result';
 import { viewToolInputParameters } from 'ghostbuild-agent/tools/view';
 import { path } from 'ghostbuild-agent/utils/path';
 import { loggingSafeParse } from 'ghostbuild-agent/utils/zodUtil';
@@ -19,9 +24,9 @@ export function ToolViewResult({ invocation }: { invocation: GhostbuildToolInvoc
   if (isToolInvocationInProgress(invocation)) {
     return null;
   }
-  const structured = structuredContent(invocation.result);
-  const resultText = structured ?? (typeof invocation.result === 'string' ? invocation.result : '');
-  if (resultText.startsWith('Error:')) {
+  const structured = toolResultContent(invocation.result);
+  const resultText = structured ?? toolResultSummary(invocation.result);
+  if (!toolResultSucceeded(invocation.result)) {
     return <ToolResultFrame>{resultText}</ToolResultFrame>;
   }
   if (resultText.startsWith('Directory:')) {
@@ -30,6 +35,7 @@ export function ToolViewResult({ invocation }: { invocation: GhostbuildToolInvoc
         {resultText
           .split('\n')
           .slice(1)
+          .filter((item) => item.trim().length > 0)
           .map((item, index) => {
             const isDirectory = item.includes('(dir)');
             const label = item.replace('(dir)', '').replace('(file)', '').replace('- ', '').trim();
@@ -105,11 +111,3 @@ const LineNumberViewer = memo(function LineNumberViewer({
     </div>
   );
 });
-
-function structuredContent(result: unknown): string | undefined {
-  if (!isGhostbuildToolResult(result) || typeof result.data !== 'object' || result.data === null) {
-    return undefined;
-  }
-  const content = (result.data as { content?: unknown }).content;
-  return typeof content === 'string' ? content : undefined;
-}
