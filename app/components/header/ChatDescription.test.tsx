@@ -31,6 +31,7 @@ describe('ChatDescription', () => {
     expect(renameButton?.classList).toContain('bg-transparent');
     expect(renameButton?.classList).toContain('text-content-primary');
     expect(renameButton?.textContent).toContain('Car Racing Game');
+    expect(renameButton?.querySelector('span')?.classList).not.toContain('group-hover:underline');
     expect(renameButton?.querySelector('svg')?.classList).toContain('opacity-0');
     expect(document.querySelectorAll('button')).toHaveLength(1);
   });

@@ -43,7 +43,7 @@ export function ChatDescription() {
           aria-label={`Rename project: ${currentDescription}`}
           onClick={toggleEditMode}
         >
-          <ProjectTitle className="block max-w-64 truncate group-hover:underline">{currentDescription}</ProjectTitle>
+          <ProjectTitle className="block max-w-64 truncate">{currentDescription}</ProjectTitle>
           <Pencil1Icon
             className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
             aria-hidden

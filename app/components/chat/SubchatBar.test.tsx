@@ -40,6 +40,7 @@ describe('SubchatBar', () => {
     const renameButton = document.querySelector<HTMLButtonElement>('button[aria-label^="Rename current chat:"]');
     expect(renameButton?.classList).toContain('bg-transparent');
     expect(renameButton?.classList).toContain('text-content-primary');
+    expect(renameButton?.querySelector('span')?.classList).not.toContain('group-hover:underline');
     expect(renameButton?.querySelector('svg')?.classList).toContain('opacity-0');
     expect(markup).toContain('aria-label="Start a new chat"');
     expect(markup).not.toContain('aria-label="Previous chat"');
