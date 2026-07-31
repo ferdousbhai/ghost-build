@@ -6,7 +6,12 @@
  * Server-side functions accept either, so we call their union a `chatId`.
  */
 import { useStore } from '@nanostores/react';
+import { useNavigate, useParams } from '@tanstack/react-router';
+import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
+import { useCallback } from 'react';
 import { atom, computed, map } from 'nanostores';
+
+const logger = createScopedLogger('ChatId');
 
 /*
  * When loading the homepage, we set `pageLoadMixedId` to a randomly generated initialId.
@@ -63,9 +68,8 @@ const knownUrlId = atom<string | undefined>(undefined);
 
 export function setKnownUrlId(urlId: string) {
   if (!knownUrlId.get()) {
-    navigateChat(urlId);
+    knownUrlId.set(urlId);
   }
-  knownUrlId.set(urlId);
 }
 
 export const chatIdStore = computed(
@@ -88,17 +92,60 @@ export function useChatId() {
   return useStore(chatIdStore);
 }
 
-// Very important: This *only* updates the state in `window.history` and
-// does not reload the app. This way we keep all our in-memory state
-// intact.
-function navigateChat(chatId: string) {
-  const url = new URL(window.location.href);
-  url.pathname = `/chat/${chatId}`;
-  window.history.replaceState({}, '', url);
+export function chatUrlMask(chatId: string) {
+  return {
+    to: '/chat/$id',
+    params: { id: chatId },
+    unmaskOnReload: true,
+  } as const;
 }
 
-export function navigateToChat(chatId: string) {
-  navigateChat(chatId);
+/**
+ * Keep the live route mounted while publishing its resumable chat URL.
+ *
+ * A homepage build continues to run on the `/` route in memory, while an
+ * existing chat continues to run against the ID it loaded with. TanStack
+ * Router's route mask keeps that runtime location and the displayed URL in
+ * sync without bypassing router history.
+ */
+export function useNavigateToChat() {
+  const navigate = useNavigate();
+  const params = useParams({ strict: false }) as { id?: string };
+  const currentChatRouteId = params.id;
+
+  return useCallback(
+    async (chatId: string): Promise<void> => {
+      try {
+        if (currentChatRouteId === chatId) {
+          return;
+        }
+
+        const commonOptions = {
+          mask: chatUrlMask(chatId),
+          replace: true,
+          resetScroll: false,
+          ignoreBlocker: true,
+        } as const;
+
+        if (currentChatRouteId) {
+          await navigate({
+            to: '/chat/$id',
+            params: { id: currentChatRouteId },
+            ...commonOptions,
+          });
+          return;
+        }
+
+        await navigate({
+          to: '/',
+          ...commonOptions,
+        });
+      } catch (error) {
+        logger.warn('Unable to publish the resumable chat URL', error);
+      }
+    },
+    [currentChatRouteId, navigate],
+  );
 }
 
 export const chatStore = map({

@@ -16,10 +16,10 @@ export const Route = createFileRoute('/')({
 });
 
 // The home page preserves the initial prompt while Cloudflare authentication is established. After
-// starting the chat, all of the globals' in-memory state is preserved as it
-// switches to the chat view (we do *not* do a full page reload and go to the
-// chat route). This route is optimized for making the initial experience
-// really seamless.
+// starting the chat, all global in-memory state is preserved as it switches to
+// the chat view. The router stays on this runtime route and masks the published
+// URL as `/chat/$id`; reloading that URL uses the existing-chat route below.
+// This route is optimized for making the initial experience seamless.
 //
 // It's critical that going back to the homepage or to other chats use a `<a>`
 // tag so all in-memory state is rebuilt from scratch.

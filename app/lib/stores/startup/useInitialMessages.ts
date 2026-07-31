@@ -20,6 +20,7 @@ const logger = createScopedLogger('InitialMessages');
 
 interface InitialMessages {
   loadedChatId: string;
+  urlId?: string;
   deserialized: GhostbuildMessage[];
   loadedSubchatIndex: number;
   transcript: TranscriptIdentity;
@@ -113,6 +114,7 @@ export function useInitialMessages(chatId: string | undefined):
     const deserialized = transcript.messages.map(markInterruptedToolCalls).map(deserializeMessageFromStorage);
     return {
       loadedChatId: transcript.loadedChatId,
+      ...(transcript.urlId ? { urlId: transcript.urlId } : {}),
       deserialized,
       loadedSubchatIndex: transcript.loadedSubchatIndex,
       transcript: transcript.transcript,

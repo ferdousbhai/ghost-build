@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runChatSubmissionLifecycle } from './useChatMessageSubmission';
+import { appendPendingUserMessage, runChatSubmissionLifecycle } from './useChatMessageSubmission';
 
 describe('runChatSubmissionLifecycle', () => {
   it.each([
@@ -78,5 +78,35 @@ describe('runChatSubmissionLifecycle', () => {
     ).rejects.toThrow('stream failed');
 
     expect(discardEmptyChat).not.toHaveBeenCalled();
+  });
+});
+
+describe('appendPendingUserMessage', () => {
+  const pending = {
+    id: 'pending-1',
+    text: 'Build a calendar',
+    previousUserMessageCount: 0,
+  };
+
+  it('renders an accepted prompt before the chat transport appends it', () => {
+    expect(appendPendingUserMessage([], pending)).toEqual([
+      {
+        id: 'pending-1',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Build a calendar' }],
+      },
+    ]);
+  });
+
+  it('removes the optimistic copy after the transport message is visible', () => {
+    const messages = [
+      {
+        id: 'user-1',
+        role: 'user' as const,
+        parts: [{ type: 'text' as const, text: 'Build a calendar' }],
+      },
+    ];
+
+    expect(appendPendingUserMessage(messages, pending)).toBe(messages);
   });
 });

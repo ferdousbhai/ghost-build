@@ -16,7 +16,7 @@ import { useBuilderAgentChat } from './useBuilderAgentChat';
 import { useChatHistoryProcessing } from './useChatHistoryProcessing';
 import { useCurrentToolStatus } from './useCurrentToolStatus';
 import { useBuildProgress } from './useBuildProgress';
-import { useChatMessageSubmission } from './useChatMessageSubmission';
+import { appendPendingUserMessage, useChatMessageSubmission } from './useChatMessageSubmission';
 import { deriveProvisionalTitle } from '@summonghost/title-generation';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { applyLiveSubchatTitle, type LiveSubchatTitle } from './subchat-model';
@@ -94,7 +94,9 @@ const AuthenticatedChat = memo(
       (subchatIndex: number, title: string) => setLiveSubchatTitle({ subchatIndex, title }),
       [],
     );
-    const [chatStarted, setChatStarted] = useState(initialMessages.length > 0 || hasMultipleSubchats);
+    const [chatStarted, setChatStarted] = useState(
+      initialMessages.length > 0 || hasMultipleSubchats || pendingInitialMessage !== null,
+    );
     const disabledReason = null;
 
     const rewindToMessage = async (subchatIndex?: number, messageIndex?: number) => {
@@ -161,8 +163,8 @@ const AuthenticatedChat = memo(
     });
 
     useEffect(() => {
-      chatStore.setKey('started', messages.length > 0 || hasMultipleSubchats);
-    }, [messages.length, hasMultipleSubchats]);
+      chatStore.setKey('started', chatStarted);
+    }, [chatStarted]);
 
     const abort = () => {
       stop();
@@ -188,7 +190,7 @@ const AuthenticatedChat = memo(
     };
 
     const { messageRef, scrollRef, enableAutoScroll } = useSnapScroll();
-    const { sendMessage, sendMessageInProgress } = useChatMessageSubmission({
+    const { pendingUserMessage, sendMessage, sendMessageInProgress } = useChatMessageSubmission({
       messages,
       contextManager,
       chatStarted,
@@ -209,6 +211,10 @@ const AuthenticatedChat = memo(
       pendingMessage: pendingInitialMessage,
       clearPendingMessage: clearPendingInitialMessage,
     });
+    const visibleMessages = useMemo(
+      () => appendPendingUserMessage(parsedMessages, pendingUserMessage),
+      [parsedMessages, pendingUserMessage],
+    );
     const visibleSubchats = useMemo(
       () => applyLiveSubchatTitle(subchats, liveSubchatTitle, transcript),
       [liveSubchatTitle, subchats, transcript],
@@ -227,7 +233,7 @@ const AuthenticatedChat = memo(
         currentError={error}
         toolStatus={toolStatus}
         buildProgress={buildProgress}
-        messages={parsedMessages /* Note that parsedMessages are throttled. */}
+        messages={visibleMessages /* Note that parsedMessages are throttled. */}
         disabledReason={disabledReason}
         runtimeNotice={
           workspacePresentationState === 'presentation-error'

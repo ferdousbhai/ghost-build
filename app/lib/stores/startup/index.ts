@@ -2,23 +2,29 @@ import { useStoreMessageHistory } from './useStoreMessageHistory';
 import { useDiscardEmptyChat, useExistingInitializeChat, useHomepageInitializeChat } from './useInitializeChat';
 import { useInitialMessages } from './useInitialMessages';
 import { useBackupSyncState } from './history';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { useAllSubchats } from '~/lib/cloudflare/data-hooks';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { useStore } from '@nanostores/react';
 import { transcriptAgentName } from 'ghostbuild-agent/transcript';
-import { navigateToChat } from '~/lib/stores/chatId';
+import { useNavigateToChat } from '~/lib/stores/chatId';
 
 const EMPTY_INITIAL_MESSAGES: GhostbuildMessage[] = [];
 
 export function useChatHomepage(chatId: string) {
+  const navigateToChat = useNavigateToChat();
   const [chatInitialized, setChatInitialized] = useState(false);
   const initializeChat = useHomepageInitializeChat(chatId, setChatInitialized);
   const discardEmptyChat = useDiscardEmptyChat(chatId);
   const storeMessageHistory = useStoreMessageHistory();
   const loaded = useInitialMessages(chatInitialized ? chatId : undefined);
+  useEffect(() => {
+    if (loaded?.urlId) {
+      void navigateToChat(loaded.urlId);
+    }
+  }, [loaded?.urlId, navigateToChat]);
   useBackupSyncState(
     chatId,
     loaded?.loadedSubchatIndex ?? (chatInitialized ? 0 : undefined),
@@ -33,8 +39,8 @@ export function useChatHomepage(chatId: string) {
     subchats?.find((subchat) => subchat.subchatIndex === subchatIndex)?.transcript ??
     ({ agentName: transcriptAgentName(chatId, subchatIndex, 0), generation: 0, subchatIndex } as const);
   const onBuilderRequestStart = useCallback(() => {
-    navigateToChat(chatId);
-  }, [chatId]);
+    void navigateToChat(chatId);
+  }, [chatId, navigateToChat]);
 
   return {
     initializeChat,
@@ -49,9 +55,15 @@ export function useChatHomepage(chatId: string) {
 }
 
 export function useExistingChat(chatId: string) {
+  const navigateToChat = useNavigateToChat();
   const initializeChat = useExistingInitializeChat(chatId);
   const discardEmptyChat = useDiscardEmptyChat(chatId);
   const initialMessages = useInitialMessages(chatId);
+  useEffect(() => {
+    if (initialMessages?.urlId) {
+      void navigateToChat(initialMessages.urlId);
+    }
+  }, [initialMessages?.urlId, navigateToChat]);
   useBackupSyncState(
     chatId,
     initialMessages?.loadedSubchatIndex,

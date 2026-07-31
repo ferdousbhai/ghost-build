@@ -2,6 +2,7 @@ import React, { lazy, Suspense, type ReactNode, type RefCallback, useCallback } 
 import { messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { isStreamStatusActive, type StreamStatus, type ToolStatus } from '~/lib/common/types';
 import { MessageInput } from './MessageInput';
+import { Messages } from './Messages.client';
 import { useChatId } from '~/lib/stores/chatId';
 import { messageInputStore } from '~/lib/stores/messageInput';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
@@ -27,8 +28,6 @@ const MIN_MESSAGES_FOR_SUBCHAT_NUDGE = 12;
 const Workbench = lazy(() =>
   import('~/components/workbench/Workbench.client').then((module) => ({ default: module.Workbench })),
 );
-const Messages = lazy(() => import('./Messages.client').then((module) => ({ default: module.Messages })));
-
 interface BaseChatProps {
   // Refs
   messageRef: RefCallback<HTMLDivElement> | undefined;
@@ -242,16 +241,14 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                           transition={{ duration: 0.3, ease: 'easeInOut' }}
                           className={classNames(styles.Conversation, 'mx-auto flex w-full max-w-chat flex-1 flex-col')}
                         >
-                          <Suspense fallback={null}>
-                            <Messages
-                              ref={messageRef}
-                              className="z-[1] mx-auto flex w-full max-w-chat flex-1 flex-col gap-3 px-3 pb-8 sm:px-0"
-                              messages={messages}
-                              isStreaming={isStreaming}
-                              onRewindToMessage={onRewindToMessage}
-                              subchatsLength={subchats?.length}
-                            />
-                          </Suspense>
+                          <Messages
+                            ref={messageRef}
+                            className="z-[1] mx-auto flex w-full max-w-chat flex-1 flex-col gap-3 px-3 pb-8 sm:px-0"
+                            messages={messages}
+                            isStreaming={isStreaming}
+                            onRewindToMessage={onRewindToMessage}
+                            subchatsLength={subchats?.length}
+                          />
                         </motion.div>
                       </AnimatePresence>
                     )}

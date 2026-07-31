@@ -76,7 +76,7 @@ export default function StreamingIndicator(props: StreamingIndicatorProps) {
 
   if (props.submissionPending && streamStatus === 'ready') {
     icon = <LoadingIcon />;
-    message = 'Connecting to your builder…';
+    message = 'Preparing your project…';
   } else if (aborted) {
     icon = <WarningIcon />;
     message = STATUS_MESSAGES.stopped;

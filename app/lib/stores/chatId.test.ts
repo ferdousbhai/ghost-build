@@ -16,22 +16,24 @@ describe('chat URL lifecycle', () => {
     expect(window.location.pathname).toBe('/');
   });
 
-  it('navigates to the resumable draft only after the builder request starts', async () => {
-    const { navigateToChat, setKnownInitialId } = await import('./chatId');
+  it('builds a reload-safe mask for the resumable chat URL', async () => {
+    const { chatUrlMask, setKnownInitialId } = await import('./chatId');
 
     setKnownInitialId('initial-chat-id');
-    navigateToChat('initial-chat-id');
 
-    expect(window.location.pathname).toBe('/chat/initial-chat-id');
+    expect(chatUrlMask('initial-chat-id')).toEqual({
+      to: '/chat/$id',
+      params: { id: 'initial-chat-id' },
+      unmaskOnReload: true,
+    });
   });
 
-  it('replaces the draft ID once a real URL ID has been assigned', async () => {
-    const { navigateToChat, setKnownInitialId, setKnownUrlId } = await import('./chatId');
+  it('uses the real URL ID once it has been assigned', async () => {
+    const { chatIdStore, setKnownInitialId, setKnownUrlId } = await import('./chatId');
 
     setKnownInitialId('initial-chat-id');
-    navigateToChat('initial-chat-id');
     setKnownUrlId('todo-app');
 
-    expect(window.location.pathname).toBe('/chat/todo-app');
+    expect(chatIdStore.get()).toBe('todo-app');
   });
 });

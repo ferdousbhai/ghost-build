@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useState } from 'react';
+import { lazy, Suspense, useCallback, useRef, useState } from 'react';
 import { GhostbuildAuthProvider } from './chat/GhostbuildAuthWrapper';
 import { HomeIntro } from './chat/HomeIntro.client';
 import { Toaster } from '~/components/ui/Toaster';
@@ -22,7 +22,12 @@ function getOrCreateHomepageInitialId() {
 export function Homepage() {
   const initialId = getOrCreateHomepageInitialId();
   const [initialPrompt, setInitialPrompt] = useState<string | null>(null);
+  const initialPromptRef = useRef<string | null>(null);
   const startChat = useCallback(async (prompt: string) => {
+    if (initialPromptRef.current !== null) {
+      return false;
+    }
+    initialPromptRef.current = prompt;
     setInitialPrompt(prompt);
     return true;
   }, []);

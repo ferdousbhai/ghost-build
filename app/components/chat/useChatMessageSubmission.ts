@@ -38,6 +38,9 @@ export function useChatMessageSubmission(args: {
   clearPendingMessage: () => void;
 }) {
   const [sendMessageInProgress, setSendMessageInProgress] = useState(false);
+  const [pendingUserMessage, setPendingUserMessage] = useState<PendingUserMessage | null>(null);
+  const sendMessageInProgressRef = useRef(false);
+  const pendingMessageSequenceRef = useRef(0);
 
   const sendMessage = async (messageInput: string): Promise<boolean> => {
     const retries = getChatRetryState();
@@ -57,12 +60,18 @@ export function useChatMessageSubmission(args: {
       args.onAbort();
       return false;
     }
-    if (sendMessageInProgress) {
+    if (sendMessageInProgressRef.current) {
       logger.debug('Message submission already in progress');
       return false;
     }
     try {
+      sendMessageInProgressRef.current = true;
       setSendMessageInProgress(true);
+      setPendingUserMessage({
+        id: `pending-user-message-${Date.now()}-${pendingMessageSequenceRef.current++}`,
+        text: messageInput,
+        previousUserMessageCount: args.messages.filter((message) => message.role === 'user').length,
+      });
       args.enableAutoScroll();
       if (!args.messages.some((message) => message.role === 'user')) {
         args.onFirstPrompt(messageInput);
@@ -90,26 +99,32 @@ export function useChatMessageSubmission(args: {
       captureMessage('Failed to submit chat message', { level: 'error' });
       return false;
     } finally {
+      sendMessageInProgressRef.current = false;
       setSendMessageInProgress(false);
+      setPendingUserMessage(null);
     }
   };
 
   const sendMessageRef = useRef(sendMessage);
   sendMessageRef.current = sendMessage;
   const pendingMessageStarted = useRef(false);
+  const mountedRef = useRef(true);
   const { pendingMessage, clearPendingMessage } = args;
 
   useEffect(() => {
-    let active = true;
-    const cleanup = () => {
-      active = false;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
     };
+  }, []);
+
+  useEffect(() => {
     if (!pendingMessage) {
       pendingMessageStarted.current = false;
-      return cleanup;
+      return;
     }
     if (pendingMessageStarted.current) {
-      return cleanup;
+      return;
     }
     pendingMessageStarted.current = true;
     if (!messageInputStore.get()) {
@@ -117,7 +132,7 @@ export function useChatMessageSubmission(args: {
     }
     void (async () => {
       const sent = await sendMessageRef.current(pendingMessage);
-      if (!active) {
+      if (!mountedRef.current) {
         return;
       }
       clearPendingMessage();
@@ -127,10 +142,36 @@ export function useChatMessageSubmission(args: {
         messageInputStore.set(pendingMessage);
       }
     })();
-    return cleanup;
   }, [clearPendingMessage, pendingMessage]);
 
-  return { sendMessage, sendMessageInProgress };
+  return { pendingUserMessage, sendMessage, sendMessageInProgress };
+}
+
+export interface PendingUserMessage {
+  id: string;
+  text: string;
+  previousUserMessageCount: number;
+}
+
+export function appendPendingUserMessage(
+  messages: GhostbuildMessage[],
+  pendingMessage: PendingUserMessage | null,
+): GhostbuildMessage[] {
+  if (
+    !pendingMessage ||
+    messages.filter((message) => message.role === 'user').length > pendingMessage.previousUserMessageCount
+  ) {
+    return messages;
+  }
+
+  return [
+    ...messages,
+    {
+      id: pendingMessage.id,
+      role: 'user',
+      parts: [{ type: 'text', text: pendingMessage.text }],
+    },
+  ];
 }
 
 export async function runChatSubmissionLifecycle(args: {
