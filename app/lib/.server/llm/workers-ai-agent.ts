@@ -25,11 +25,7 @@ import type { BuilderWorkspaceRepository } from '~/agents/builder-workspace';
 type Messages = GhostbuildMessage[];
 // Server-owned validation can legitimately span the bounded production build
 // pipeline (install, typecheck, stack verification, build, and lint).
-const WORKERS_AI_CALL_TIMEOUT_MS = 10 * 60 * 60_000;
-// Give the model a bounded implementation window before requiring validation.
-// The overall turn is bounded by WORKERS_AI_CALL_TIMEOUT_MS rather than an
-// arbitrary tool-step count so legitimate validation repair loops can finish.
-const IMPLEMENTATION_TOOL_STEP_BUDGET = 7;
+const WORKERS_AI_CALL_TIMEOUT_MS = 5 * 60 * 60_000;
 
 interface WorkersAiAgentOptions {
   env: Env;
@@ -150,7 +146,6 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
             result: output,
           })),
         ),
-        stepNumber >= IMPLEMENTATION_TOOL_STEP_BUDGET,
       );
       return {
         activeTools: nextSettings.activeTools,

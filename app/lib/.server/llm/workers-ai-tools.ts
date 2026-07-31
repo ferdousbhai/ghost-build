@@ -211,7 +211,6 @@ export function serializeWorkersAiToolDefinitions(
 export function getWorkersAiToolSettings(
   messages: GhostbuildMessage[],
   currentStepResults: ReadonlyArray<ToolResultEvent> = [],
-  forceValidationAfterMutation = false,
 ): AgentToolSettings {
   const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
   const toolResults = collectToolResults(messages);
@@ -221,10 +220,7 @@ export function getWorkersAiToolSettings(
   ];
   const currentTurnLifecycle = analyzeBuildLifecycle(currentTurnResults);
   if (currentTurnLifecycle) {
-    if (currentTurnLifecycle.stage === 'needs-validation') {
-      return forceValidationAfterMutation ? lifecycleToolSettings(currentTurnLifecycle) : automaticToolSettings();
-    }
-    return lifecycleToolSettings(currentTurnLifecycle);
+    return currentTurnLifecycleToolSettings(currentTurnLifecycle);
   }
 
   const priorLifecycle = analyzeBuildLifecycle([...toolResults, ...currentStepResults]);
@@ -236,6 +232,24 @@ export function getWorkersAiToolSettings(
   }
 
   return automaticToolSettings();
+}
+
+function currentTurnLifecycleToolSettings(lifecycle: BuildLifecycle): AgentToolSettings {
+  switch (lifecycle.stage) {
+    case 'needs-validation':
+    case 'validation-failed':
+      return {
+        activeTools: [...AUTOMATIC_TOOLS],
+        toolChoice: 'required',
+      };
+    case 'deploy-failed':
+      return {
+        activeTools: [...AUTOMATIC_TOOLS, 'deploy'],
+        toolChoice: 'required',
+      };
+    default:
+      return lifecycleToolSettings(lifecycle);
+  }
 }
 
 function analyzeBuildLifecycle(toolResults: ReadonlyArray<ToolResultEvent>): BuildLifecycle | undefined {

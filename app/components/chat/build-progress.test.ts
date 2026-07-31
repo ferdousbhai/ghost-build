@@ -83,7 +83,7 @@ describe('getBuildProgress', () => {
     ).toMatchObject({ delayed: true, stalled: true });
   });
 
-  it('prioritizes recovery and returns nothing after the turn ends', () => {
+  it('shows recovered tool activity, then recovery while waiting, and nothing after the turn ends', () => {
     expect(
       getBuildProgress({
         streamStatus: 'submitted',
@@ -91,7 +91,7 @@ describe('getBuildProgress', () => {
         activeToolNames: ['writeFile'],
         inactiveForMs: 0,
       }),
-    ).toMatchObject({ phase: 'recovering', message: 'Recovering the interrupted build…' });
+    ).toMatchObject({ phase: 'saving', message: 'Saving changes…' });
     expect(
       getBuildProgress({
         streamStatus: 'submitted',

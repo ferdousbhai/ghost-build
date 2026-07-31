@@ -433,12 +433,11 @@ export class BuilderWorkspaceRepository {
     if (!row) {
       throw new Error(`File not found: ${path}`);
     }
-    if (row.encoding !== 'utf8') {
-      throw new Error(`Cannot read binary file as text: ${path}`);
-    }
+    const storedContent = await this.#readStoredContent(row);
+    const content = row.encoding === 'utf8' ? storedContent : decodeLegacyText(storedContent, path);
     return {
       path,
-      content: await this.#readStoredContent(row),
+      content,
       size: row.size,
       sha256: row.sha256,
       revision: row.revision,
@@ -1297,6 +1296,18 @@ function decodeBase64(value: string): Uint8Array {
     return bytes;
   } catch {
     throw new Error('Invalid base64 project file content.');
+  }
+}
+
+function decodeLegacyText(value: string, path: string): string {
+  const bytes = decodeBase64(value);
+  if (bytes.some((byte) => byte < 0x20 && byte !== 0x09 && byte !== 0x0a && byte !== 0x0d)) {
+    throw new Error(`Cannot read binary file as text: ${path}`);
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error(`Cannot read binary file as text: ${path}`);
   }
 }
 

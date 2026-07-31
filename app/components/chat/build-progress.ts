@@ -62,9 +62,6 @@ function buildPhase(args: {
   isRecovering: boolean;
   activeToolNames: string[];
 }): BuildProgressPhase {
-  if (args.isRecovering) {
-    return 'recovering';
-  }
   if (args.activeToolNames.includes('npmInstall')) {
     return 'installing';
   }
@@ -76,6 +73,9 @@ function buildPhase(args: {
   }
   if (args.activeToolNames.includes('deploy')) {
     return 'checking';
+  }
+  if (args.isRecovering) {
+    return 'recovering';
   }
   return args.streamStatus === 'submitted' ? 'planning' : 'creating';
 }

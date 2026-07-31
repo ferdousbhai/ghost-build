@@ -44,7 +44,7 @@ describe('Workers AI tool lifecycle', () => {
     });
   });
 
-  it('keeps implementation tools available after a successful mutation in the current turn', () => {
+  it('requires concrete implementation or validation work after a successful current-turn mutation', () => {
     expect(
       getWorkersAiToolSettings([
         user('Build a habit tracker'),
@@ -52,28 +52,7 @@ describe('Workers AI tool lifecycle', () => {
       ]),
     ).toEqual({
       activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'auto',
-    });
-  });
-
-  it('forces the validation checkpoint after the implementation step budget is exhausted', () => {
-    expect(
-      getWorkersAiToolSettings(
-        [
-          user('Build a habit tracker'),
-          toolResult('writeFile', { path: '/home/project/src/router.tsx' }, toolSuccess('wrote')),
-        ],
-        [],
-        true,
-      ),
-    ).toEqual({
-      activeTools: ['validateProject'],
       toolChoice: 'required',
-    });
-
-    expect(getWorkersAiToolSettings([user('Explain this project')], [], true)).toEqual({
-      activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'auto',
     });
   });
 
@@ -100,7 +79,7 @@ describe('Workers AI tool lifecycle', () => {
       ),
     ).toEqual({
       activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'auto',
+      toolChoice: 'required',
     });
   });
 
@@ -117,7 +96,7 @@ describe('Workers AI tool lifecycle', () => {
     });
   });
 
-  it('returns control to the model after arbitrary tool or validation failures', () => {
+  it('returns control after read failures and requires repair work after validation failures', () => {
     expect(
       getWorkersAiToolSettings([
         user('Explain the project'),
@@ -136,7 +115,7 @@ describe('Workers AI tool lifecycle', () => {
       ]),
     ).toEqual({
       activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'auto',
+      toolChoice: 'required',
     });
 
     expect(
@@ -147,7 +126,7 @@ describe('Workers AI tool lifecycle', () => {
       ]),
     ).toEqual({
       activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'auto',
+      toolChoice: 'required',
     });
   });
 
@@ -169,7 +148,7 @@ describe('Workers AI tool lifecycle', () => {
       ]),
     ).toEqual({
       activeTools: [...AUTOMATIC_TOOLS, 'deploy'],
-      toolChoice: 'auto',
+      toolChoice: 'required',
     });
 
     expect(
@@ -232,7 +211,7 @@ describe('Workers AI tool lifecycle', () => {
 
     expect(getWorkersAiToolSettings(messages)).toEqual({
       activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'auto',
+      toolChoice: 'required',
     });
     expect(getValidatedBuildCompletion(messages)).toBeUndefined();
   });

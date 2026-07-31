@@ -367,6 +367,27 @@ describe('BuilderWorkspaceRepository', () => {
     );
   });
 
+  it('reads legacy text that was incorrectly stored with binary metadata', async () => {
+    const harness = createHarness();
+    const manifest = '{"scripts":{"build":"vite build"}}\n';
+    await harness.workspace.beginSeed('legacy_text');
+    await harness.workspace.appendSeed('legacy_text', [
+      {
+        path: '/home/project/package.json',
+        content: Buffer.from(manifest).toString('base64'),
+        encoding: 'base64',
+      },
+    ]);
+    await harness.workspace.commitSeed('legacy_text', {
+      fileCount: 1,
+      totalBytes: Buffer.byteLength(manifest),
+    });
+
+    await expect(harness.workspace.readText('/home/project/package.json')).resolves.toMatchObject({
+      content: manifest,
+    });
+  });
+
   it('applies multi-edit calls only through the current server schema', async () => {
     const harness = await initializedHarness();
     const edited = await executeBuilderWorkspaceTool({
