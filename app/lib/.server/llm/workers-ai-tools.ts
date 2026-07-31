@@ -211,6 +211,7 @@ export function serializeWorkersAiToolDefinitions(
 export function getWorkersAiToolSettings(
   messages: GhostbuildMessage[],
   currentStepResults: ReadonlyArray<ToolResultEvent> = [],
+  forceValidationAfterMutation = false,
 ): AgentToolSettings {
   const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
   const toolResults = collectToolResults(messages);
@@ -221,7 +222,7 @@ export function getWorkersAiToolSettings(
   const currentTurnLifecycle = analyzeBuildLifecycle(currentTurnResults);
   if (currentTurnLifecycle) {
     if (currentTurnLifecycle.stage === 'needs-validation') {
-      return automaticToolSettings();
+      return forceValidationAfterMutation ? lifecycleToolSettings(currentTurnLifecycle) : automaticToolSettings();
     }
     return lifecycleToolSettings(currentTurnLifecycle);
   }

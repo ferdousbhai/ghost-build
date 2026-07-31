@@ -56,6 +56,27 @@ describe('Workers AI tool lifecycle', () => {
     });
   });
 
+  it('forces the validation checkpoint after the implementation step budget is exhausted', () => {
+    expect(
+      getWorkersAiToolSettings(
+        [
+          user('Build a habit tracker'),
+          toolResult('writeFile', { path: '/home/project/src/router.tsx' }, toolSuccess('wrote')),
+        ],
+        [],
+        true,
+      ),
+    ).toEqual({
+      activeTools: ['validateProject'],
+      toolChoice: 'required',
+    });
+
+    expect(getWorkersAiToolSettings([user('Explain this project')], [], true)).toEqual({
+      activeTools: AUTOMATIC_TOOLS,
+      toolChoice: 'auto',
+    });
+  });
+
   it('lets implementation continue after dependency setup instead of forcing premature validation', () => {
     expect(
       getWorkersAiToolSettings([
