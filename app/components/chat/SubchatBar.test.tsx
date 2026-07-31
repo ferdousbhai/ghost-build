@@ -27,6 +27,18 @@ afterEach(async () => {
 });
 
 describe('SubchatBar', () => {
+  it('keeps chat navigation in the transcript flow instead of floating over messages', () => {
+    document.body.innerHTML = renderSubchatBar({
+      subchats: [subchat(0, 'Initial build')],
+      currentSubchatIndex: 0,
+    });
+
+    const chatNavigation = document.querySelector<HTMLElement>('nav[aria-label="Chat history"]');
+    expect(chatNavigation).not.toBeNull();
+    expect(chatNavigation?.classList).not.toContain('sticky');
+    expect(chatNavigation?.firstElementChild?.classList).not.toContain('backdrop-blur-xl');
+  });
+
   it('does not present a useless history picker or navigation for a single chat', () => {
     const markup = renderSubchatBar({
       subchats: [subchat(0, 'Build a polished Pocket Poll app')],

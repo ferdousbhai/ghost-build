@@ -116,7 +116,7 @@ export function SubchatBar({
   );
 
   return (
-    <div className="sticky top-0 z-[2] mx-auto mb-5 w-full max-w-chat px-3 pt-4 sm:px-0">
+    <nav aria-label="Chat history" className="mx-auto mb-6 w-full max-w-chat px-3 pt-5 sm:px-0">
       <SubchatDialogs
         rewindOpen={isRewindModalOpen}
         createOpen={isAddChatModalOpen}
@@ -175,7 +175,7 @@ export function SubchatBar({
           }
         }}
       />
-      <div className="border-content-secondary/15 bg-background-secondary/85 flex items-center gap-2 rounded-2xl border p-2 shadow-sm backdrop-blur-xl">
+      <div className="border-content-secondary/15 flex items-center gap-2 border-b px-1 pb-4">
         {hasMultipleSubchats && (
           <div className="bg-background-secondary flex shrink-0 rounded-xl border border-bolt-elements-borderColor">
             <Button
@@ -317,6 +317,6 @@ export function SubchatBar({
           )}
         </div>
       </div>
-    </div>
+    </nav>
   );
 }
