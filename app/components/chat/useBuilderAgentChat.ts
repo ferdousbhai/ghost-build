@@ -304,6 +304,14 @@ export function useBuilderAgentChat(args: {
     [args.transcript, builderAgent, chat, seedGateRef, workspaceGateRef],
   );
 
+  const stop = useCallback(() => {
+    chat.stop();
+    toolActivityStore.abortActive();
+    void builderAgent
+      .call('cancelActiveTurn', [], { timeout: AGENT_SEND_READY_TIMEOUT_MS })
+      .catch((error) => logger.error('Failed to durably cancel the active builder turn', error));
+  }, [builderAgent, chat]);
+
   useEffect(() => {
     setMessagesRef.current(initialMessagesRef.current as UIMessage[]);
     contextManager.current.reset();
@@ -311,6 +319,7 @@ export function useBuilderAgentChat(args: {
 
   return {
     ...chat,
+    stop,
     sendMessage,
     messages: chat.messages as GhostbuildMessage[],
     contextManager: contextManager.current,

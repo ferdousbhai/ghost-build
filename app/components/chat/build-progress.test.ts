@@ -15,6 +15,7 @@ describe('getBuildProgress', () => {
     ['writeFile', 'saving', 'Saving changes…'],
     ['edit', 'saving', 'Saving changes…'],
     ['npmInstall', 'installing', 'Installing dependencies…'],
+    ['validateProject', 'validating', 'Validating your project…'],
     ['deploy', 'checking', 'Checking that everything works…'],
   ] as const)('translates %s into concise user-facing progress', (toolName, phase, message) => {
     expect(

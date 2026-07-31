@@ -229,6 +229,18 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (this.state.transcript) {
       await this.advanceTranscriptCheckpoint(this.state.transcript);
     }
+    const lastTurn = this.state.lastCompletedTurn;
+    if (
+      !this.state.activeTurn &&
+      lastTurn?.status === 'aborted' &&
+      (lastTurn.requestId === ctx.requestId || lastTurn.requestId === ctx.recoveryRootRequestId)
+    ) {
+      logger.info('Skipping recovery for a durably cancelled Ghostbuild chat turn', {
+        incidentId: ctx.incidentId,
+        requestId: ctx.requestId,
+      });
+      return { persist: true, continue: false };
+    }
     const ageMs = Date.now() - ctx.createdAt;
     const nextTurn = createRecoveryTurn(ctx, this.state.activeTurn);
     this.setState({
@@ -469,6 +481,20 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   @callable()
   getTurnHistory(limit = 20) {
     return this.turnStore.getHistory(limit);
+  }
+
+  @callable()
+  cancelActiveTurn(): { cancelled: boolean } {
+    const activeTurn = this.state.activeTurn;
+    this.abortAllRequests(new DOMException('Cancelled by the project owner', 'AbortError'));
+    this.resetTurnState();
+    if (activeTurn) {
+      this.finishTurn(activeTurn, {
+        status: 'aborted',
+        error: 'Cancelled by the project owner',
+      });
+    }
+    return { cancelled: activeTurn !== null && activeTurn !== undefined };
   }
 
   @callable()

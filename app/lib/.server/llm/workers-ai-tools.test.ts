@@ -56,6 +56,18 @@ describe('Workers AI tool lifecycle', () => {
     });
   });
 
+  it('lets implementation continue after dependency setup instead of forcing premature validation', () => {
+    expect(
+      getWorkersAiToolSettings([
+        user('Build a Three.js game'),
+        toolResult('npmInstall', { packages: 'three @types/three' }, toolSuccess('installed')),
+      ]),
+    ).toEqual({
+      activeTools: AUTOMATIC_TOOLS,
+      toolChoice: 'auto',
+    });
+  });
+
   it('uses every result in a multi-tool model step', () => {
     expect(
       getWorkersAiToolSettings(

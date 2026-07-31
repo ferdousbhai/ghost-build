@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { advanceTranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 import { isCompleteMessageInfoAtLeast } from './backup-sync-policy';
-import { adoptAdvancedTranscriptCheckpoint, initializeBackupPosition } from './backup-sync-worker';
+import {
+  adoptAdvancedTranscriptCheckpoint,
+  backupRetryDelay,
+  initializeBackupPosition,
+  isTranscriptAdvanceConflict,
+} from './backup-sync-worker';
 import { chatSyncState } from './chatSyncState';
 import { lastCompleteMessageInfoStore } from './messages';
 
@@ -121,5 +126,26 @@ describe('adoptAdvancedTranscriptCheckpoint', () => {
         0,
       ),
     ).resolves.toBe(false);
+  });
+});
+
+describe('chat backup retry policy', () => {
+  it('treats only the expected transcript race as a transient conflict', () => {
+    expect(
+      isTranscriptAdvanceConflict(
+        409,
+        JSON.stringify({ error: 'The agent transcript advanced before this backup was saved.' }),
+      ),
+    ).toBe(true);
+    expect(isTranscriptAdvanceConflict(409, JSON.stringify({ error: 'Chat backup storage quota exceeded.' }))).toBe(
+      false,
+    );
+    expect(isTranscriptAdvanceConflict(500, 'not json')).toBe(false);
+  });
+
+  it('honors bounded Retry-After guidance from the backup endpoint', () => {
+    expect(backupRetryDelay(new Response(null, { headers: { 'Retry-After': '12' } }), 3)).toBe(12_000);
+    expect(backupRetryDelay(new Response(null, { headers: { 'Retry-After': '9999' } }), 3)).toBe(300_000);
+    expect(backupRetryDelay(new Response(null, { headers: { 'Retry-After': 'soon' } }), 3)).toBeGreaterThanOrEqual(0);
   });
 });

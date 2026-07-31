@@ -69,7 +69,7 @@ import server from './server';
 describe('server Agent routing boundary', () => {
   beforeEach(() => {
     tanstackFetch.mockReset();
-    tanstackFetch.mockResolvedValue(new Response('application'));
+    tanstackFetch.mockResolvedValue(new Response('application', { headers: { 'Content-Type': 'text/html' } }));
     getAuthSession.mockReset();
     ensureInitialChat.mockReset();
     routeAgentRequest.mockReset();
@@ -118,8 +118,33 @@ describe('server Agent routing boundary', () => {
     expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000');
     expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(response.headers.get('X-Frame-Options')).toBe('DENY');
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(routeAgentRequest).not.toHaveBeenCalled();
     expect(tanstackFetch).toHaveBeenCalledOnce();
+  });
+
+  it('prevents cached HTML from retaining stale hashed asset references', async () => {
+    tanstackFetch.mockResolvedValueOnce(
+      new Response('<html></html>', {
+        headers: { 'Cache-Control': 'public, max-age=300', 'Content-Type': 'text/html; charset=utf-8' },
+      }),
+    );
+
+    const response = await server.fetch(new Request('https://ghostbuild.dev/chat/project'), {} as Env);
+
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  it('preserves immutable caching for content-addressed static assets', async () => {
+    tanstackFetch.mockResolvedValueOnce(
+      new Response('export {}', {
+        headers: { 'Cache-Control': 'public, max-age=31536000, immutable', 'Content-Type': 'text/javascript' },
+      }),
+    );
+
+    const response = await server.fetch(new Request('https://ghostbuild.dev/assets/app-abc123.js'), {} as Env);
+
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
   });
 
   it('applies the application security policy to exact API responses', async () => {

@@ -8,8 +8,9 @@ import { themeStore } from '~/lib/stores/theme';
 import { stripIndents } from 'ghostbuild-agent/utils/stripIndent';
 import globalStyles from '~/styles/index.css?url';
 
-const inlineThemeCode = stripIndents`
+const inlineBootstrapCode = stripIndents`
   setGhostbuildTheme();
+  installAssetLoadRecovery();
 
   function setGhostbuildTheme() {
     let theme = localStorage.getItem('ghostbuild_theme');
@@ -19,6 +20,33 @@ const inlineThemeCode = stripIndents`
     }
 
     document.documentElement.setAttribute('class', theme);
+  }
+
+  function installAssetLoadRecovery() {
+    var recoveryKey = 'ghostbuild:asset-load-recovery';
+    window.setTimeout(function clearAssetLoadRecovery() {
+      sessionStorage.removeItem(recoveryKey);
+    }, 30000);
+    window.addEventListener('error', function recoverAssetLoad(event) {
+      var target = event.target;
+      var source = target instanceof HTMLScriptElement
+        ? target.src
+        : target instanceof HTMLLinkElement
+          ? target.href
+          : '';
+      if (!source.includes('/assets/')) {
+        return;
+      }
+      var attempts = Number(sessionStorage.getItem(recoveryKey) || '0');
+      if (!Number.isFinite(attempts) || attempts >= 3) {
+        return;
+      }
+      attempts += 1;
+      sessionStorage.setItem(recoveryKey, String(attempts));
+      window.setTimeout(function reloadForCurrentAssets() {
+        window.location.reload();
+      }, attempts * 500);
+    }, true);
   }
 `;
 
@@ -43,7 +71,7 @@ export const Route = createRootRoute({
       },
       { rel: 'stylesheet', href: globalStyles },
     ],
-    scripts: [{ children: inlineThemeCode }],
+    scripts: [{ children: inlineBootstrapCode }],
   }),
   shellComponent: RootDocument,
   component: RootComponent,

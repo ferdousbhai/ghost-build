@@ -352,10 +352,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isMutationResult(result: { toolName: string; result?: unknown }): boolean {
-  return (
-    (result.toolName === 'writeFile' || result.toolName === 'edit' || result.toolName === 'npmInstall') &&
-    toolResultSucceeded(result.result)
-  );
+  return (result.toolName === 'writeFile' || result.toolName === 'edit') && toolResultSucceeded(result.result);
 }
 
 function isSuccessfulValidationResult(result: unknown): boolean {

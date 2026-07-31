@@ -35,7 +35,8 @@ export function outputInstructions() {
     </filesystem_work>
 
     <completion>
-      Any filesystem or dependency mutation must be followed by validateProject in the same response. Treat a failed
+      Finish the requested implementation after dependency setup; installing a package is not evidence that the app is
+      complete. Any filesystem or dependency mutation must be followed by validateProject in the same response. Treat a failed
       check as a bug report: read all relevant structured diagnostics, make the smallest sound repair, and validate again.
       A successful validation is tied to the current workspace revision; any later mutation invalidates it. Continue until
       validation succeeds, then call deploy only when validateProject says nextAction is "prepare-deployment". Stop only after

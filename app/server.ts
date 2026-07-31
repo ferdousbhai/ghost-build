@@ -85,6 +85,11 @@ function withApplicationSecurityHeaders(response: Response, pathname: string) {
   if (pathname === '/connect/return') {
     headers.set('Cache-Control', 'no-store');
     headers.set('Pragma', 'no-cache');
+  } else if (headers.get('Content-Type')?.toLowerCase().includes('text/html')) {
+    // A cached document can reference hashed assets from a deployment that is
+    // no longer current. Always revalidate navigations while immutable assets
+    // remain cacheable by their content hash.
+    headers.set('Cache-Control', 'no-store');
   } else if (pathname.startsWith('/api/') && !headers.has('Cache-Control')) {
     headers.set('Cache-Control', 'no-store');
   }

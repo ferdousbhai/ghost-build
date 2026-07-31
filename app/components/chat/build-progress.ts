@@ -1,6 +1,7 @@
 import type { StreamStatus } from '~/lib/common/types';
 
-export type BuildProgressPhase = 'planning' | 'creating' | 'saving' | 'installing' | 'checking' | 'recovering';
+export type BuildProgressPhase =
+  'planning' | 'creating' | 'saving' | 'installing' | 'validating' | 'checking' | 'recovering';
 
 export type BuildProgress = {
   phase: BuildProgressPhase;
@@ -54,6 +55,9 @@ function buildPhase(args: {
   if (args.activeToolNames.some((name) => name === 'writeFile' || name === 'edit')) {
     return 'saving';
   }
+  if (args.activeToolNames.includes('validateProject')) {
+    return 'validating';
+  }
   if (args.activeToolNames.includes('deploy')) {
     return 'checking';
   }
@@ -70,6 +74,8 @@ function phaseMessage(phase: BuildProgressPhase): string {
       return 'Saving changes…';
     case 'installing':
       return 'Installing dependencies…';
+    case 'validating':
+      return 'Validating your project…';
     case 'checking':
       return 'Checking that everything works…';
     case 'recovering':
@@ -88,6 +94,8 @@ function activityLabel(phase: BuildProgressPhase): string {
       return 'saving changes';
     case 'installing':
       return 'installing dependencies';
+    case 'validating':
+      return 'validating your project';
     case 'checking':
       return 'checking the preview';
     case 'recovering':

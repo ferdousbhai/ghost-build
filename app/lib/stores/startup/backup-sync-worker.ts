@@ -23,6 +23,7 @@ import {
 
 const logger = createScopedLogger('backup-sync-worker');
 const BACKUP_DEBOUNCE_MS = 1000;
+const TRANSCRIPT_ADVANCED_ERROR = 'The agent transcript advanced before this backup was saved.';
 
 interface ChatSyncWorkerOptions {
   chatId: string;
@@ -254,15 +255,18 @@ async function handleSyncFailure(
   if (currentState.chatId !== attemptedChatId || currentState.subchatIndex !== attemptedSubchatIndex) {
     return;
   }
-  if (
-    response?.status === 409 &&
-    (await adoptAdvancedTranscriptCheckpoint(errorText, attemptedChatId, attemptedSubchatIndex))
-  ) {
+  if (isTranscriptAdvanceConflict(response?.status, errorText)) {
+    const adopted = await adoptAdvancedTranscriptCheckpoint(errorText, attemptedChatId, attemptedSubchatIndex);
     if (currentState.numFailures >= 3) {
       toast.dismiss('chat-save-failure');
     }
     chatSyncState.set({ ...currentState, numFailures: 0 });
-    logger.info('Retrying chat backup with the latest durable transcript checkpoint');
+    logger.info('Retrying chat backup after the durable transcript advanced', {
+      attemptedChatId,
+      attemptedSubchatIndex,
+      adoptedCheckpoint: adopted,
+    });
+    await abortableDelay(BACKUP_DEBOUNCE_MS, signal);
     return;
   }
   const failures = currentState.numFailures + 1;
@@ -273,9 +277,40 @@ async function handleSyncFailure(
       duration: Number.POSITIVE_INFINITY,
     });
   }
-  const delay = backoffTime(failures);
-  logger.error(`Failed to save chat (num failures: ${failures}), sleeping for ${delay.toFixed(2)}ms`, errorText);
+  const delay = backupRetryDelay(response, failures);
+  logger.error('Failed to save chat backup', {
+    attemptedChatId,
+    attemptedSubchatIndex,
+    failures,
+    responseStatus: response?.status,
+    retryDelayMs: delay,
+    error: errorText,
+  });
   await abortableDelay(delay, signal);
+}
+
+export function isTranscriptAdvanceConflict(status: number | undefined, responseBody: string): boolean {
+  if (status !== 409) {
+    return false;
+  }
+  try {
+    const value = JSON.parse(responseBody) as unknown;
+    return (
+      typeof value === 'object' &&
+      value !== null &&
+      (value as Record<string, unknown>).error === TRANSCRIPT_ADVANCED_ERROR
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function backupRetryDelay(response: Response | undefined, failures: number): number {
+  const retryAfter = response?.headers.get('Retry-After');
+  if (retryAfter && /^\d+$/.test(retryAfter)) {
+    return Math.min(Number(retryAfter) * 1_000, 5 * 60_000);
+  }
+  return backoffTime(failures);
 }
 
 export async function adoptAdvancedTranscriptCheckpoint(
