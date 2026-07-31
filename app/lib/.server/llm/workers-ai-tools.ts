@@ -220,6 +220,9 @@ export function getWorkersAiToolSettings(
   ];
   const currentTurnLifecycle = analyzeBuildLifecycle(currentTurnResults);
   if (currentTurnLifecycle) {
+    if (currentTurnLifecycle.stage === 'needs-validation') {
+      return automaticToolSettings();
+    }
     return lifecycleToolSettings(currentTurnLifecycle);
   }
 

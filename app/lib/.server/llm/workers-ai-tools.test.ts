@@ -44,15 +44,15 @@ describe('Workers AI tool lifecycle', () => {
     });
   });
 
-  it('requires validation after any successful mutation', () => {
+  it('keeps implementation tools available after a successful mutation in the current turn', () => {
     expect(
       getWorkersAiToolSettings([
         user('Build a habit tracker'),
         toolResult('writeFile', { path: '/home/project/src/router.tsx' }, toolSuccess('wrote')),
       ]),
     ).toEqual({
-      activeTools: ['validateProject'],
-      toolChoice: 'required',
+      activeTools: AUTOMATIC_TOOLS,
+      toolChoice: 'auto',
     });
   });
 
@@ -78,8 +78,8 @@ describe('Workers AI tool lifecycle', () => {
         ],
       ),
     ).toEqual({
-      activeTools: ['validateProject'],
-      toolChoice: 'required',
+      activeTools: AUTOMATIC_TOOLS,
+      toolChoice: 'auto',
     });
   });
 
