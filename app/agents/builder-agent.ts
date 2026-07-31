@@ -96,6 +96,7 @@ const CONTEXT_COMPACTION_FIBER = 'background:context_compaction';
 const PREVIEW_BUILD_FIBER = 'background:builder_preview';
 const PREVIEW_RETRY_DELAYS_MS = [5_000, 15_000, 30_000] as const;
 const PREVIEW_BUILD_LEASE_MS = 12 * 60 * 1000;
+const CHAT_CANCELLATION_SETTLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 type PreviewBuildJob = {
   previewId: string;
@@ -484,17 +485,27 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   @callable()
-  cancelActiveTurn(): { cancelled: boolean } {
+  async cancelActiveTurn(): Promise<unknown> {
     const activeTurn = this.state.activeTurn;
     this.abortAllRequests(new DOMException('Cancelled by the project owner', 'AbortError'));
-    this.resetTurnState();
     if (activeTurn) {
       this.finishTurn(activeTurn, {
         status: 'aborted',
         error: 'Cancelled by the project owner',
       });
     }
-    return { cancelled: activeTurn !== null && activeTurn !== undefined };
+    const settled = await this.waitUntilStable({
+      timeout: CHAT_CANCELLATION_SETTLE_TIMEOUT_MS,
+      pendingInteraction: () => false,
+    });
+    if (!settled) {
+      throw new Error('The cancelled builder turn did not settle before the cancellation timeout.');
+    }
+    const checkpoint = this.state.transcript ? await this.advanceTranscriptCheckpoint(this.state.transcript) : null;
+    return {
+      checkpoint,
+      messages: this.messages as NonNullable<ChatRequestBody['messages']>,
+    };
   }
 
   @callable()

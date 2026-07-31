@@ -33,9 +33,11 @@ import { BuilderWorkspaceSyncController } from '~/lib/stores/builder-workspace-s
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { useQueryClient } from '@tanstack/react-query';
 import { subchatQueryKey } from '~/lib/cloudflare/data-hooks';
+import { settleBuilderStop } from './builder-stop';
 
 const logger = createScopedLogger('BuilderAgentChat');
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
+const AGENT_CANCEL_SETTLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 export function useBuilderAgentChat(args: {
   chatInitialId: string;
@@ -124,6 +126,7 @@ export function useBuilderAgentChat(args: {
     },
   });
   const setMessagesRef = useRef(chat.setMessages);
+  const stopBarrierRef = useRef<Promise<void>>(Promise.resolve());
   const initialMessagesRef = useRef(args.initialMessages);
   setMessagesRef.current = chat.setMessages;
   initialMessagesRef.current = args.initialMessages;
@@ -249,7 +252,7 @@ export function useBuilderAgentChat(args: {
     ) => {
       const gate = seedGateRef.current;
       const workspaceGate = workspaceGateRef.current;
-      await Promise.all([gate.promise, workspaceGate.promise]);
+      await Promise.all([gate.promise, workspaceGate.promise, stopBarrierRef.current]);
       if (gate.error || workspaceGate.error) {
         throw gate.error ?? workspaceGate.error;
       }
@@ -307,9 +310,20 @@ export function useBuilderAgentChat(args: {
   const stop = useCallback(() => {
     chat.stop();
     toolActivityStore.abortActive();
-    void builderAgent
-      .call('cancelActiveTurn', [], { timeout: AGENT_SEND_READY_TIMEOUT_MS })
-      .catch((error) => logger.error('Failed to durably cancel the active builder turn', error));
+    const cancellation = settleBuilderStop({
+      cancel: () => builderAgent.call('cancelActiveTurn', [], { timeout: AGENT_CANCEL_SETTLE_TIMEOUT_MS }),
+      reconcileMessages: (messages) => setMessagesRef.current(messages as UIMessage[]),
+      refreshWorkspace: async () => {
+        await workspaceControllerRef.current?.pull();
+      },
+    })
+      .then(() => undefined)
+      .catch((error) => {
+        logger.error('Failed to durably cancel and reconcile the active builder turn', error);
+        throw error;
+      });
+    stopBarrierRef.current = cancellation;
+    void cancellation.catch(() => undefined);
   }, [builderAgent, chat]);
 
   useEffect(() => {
