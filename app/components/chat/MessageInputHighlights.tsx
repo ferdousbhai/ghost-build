@@ -87,7 +87,7 @@ export const TextareaWithHighlights = memo(function TextareaWithHighlights({
       <textarea
         ref={textareaRef}
         className={classNames(
-          'block w-full appearance-none box-border resize-none border-0 bg-transparent px-3 py-3 text-sm leading-snug text-content-primary outline-none placeholder-content-tertiary',
+          'block w-full appearance-none resize-none bg-transparent px-3 py-3 text-sm leading-snug text-content-primary outline-none placeholder-content-tertiary',
           'transition-opacity',
           'disabled:cursor-not-allowed disabled:opacity-50',
           'scrollbar-thin scrollbar-track-transparent scrollbar-thumb-macosScrollbar-thumb',

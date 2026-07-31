@@ -38,7 +38,6 @@ describe('Modal', () => {
     expect(dialog).not.toBeNull();
     expect(dialog?.className).toContain('inset-4');
     expect(dialog?.className).toContain('m-auto');
-    expect(dialog?.className).toContain('box-border');
     expect(dialog?.className).toContain('h-fit');
     expect(dialog?.className).toContain('max-h-[calc(100dvh-2rem)]');
     expect(dialog?.className).not.toContain('translate');

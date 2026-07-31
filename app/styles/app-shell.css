@@ -24,27 +24,6 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-body,
-button,
-input,
-textarea,
-select {
-  letter-spacing: -0.01em;
-}
-
-button,
-input,
-textarea,
-select {
-  font: inherit;
-}
-
-button {
-  appearance: none;
-  -webkit-appearance: none;
-  border: 0 solid transparent;
-}
-
 button,
 [role='button'] {
   -webkit-tap-highlight-color: transparent;

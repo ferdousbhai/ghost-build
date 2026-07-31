@@ -139,11 +139,6 @@
     }
   }
 
-  img {
-    max-width: 100%;
-    box-sizing: border-box;
-  }
-
   hr {
     height: 0.25em;
     padding: 0;

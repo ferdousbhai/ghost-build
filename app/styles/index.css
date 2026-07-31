@@ -6,13 +6,29 @@
 @import 'components/editor.css';
 @import 'home.css';
 @import 'app-shell.css';
+@tailwind base;
+
+@layer base {
+  body,
+  button,
+  input,
+  textarea,
+  select {
+    letter-spacing: -0.01em;
+  }
+
+  button {
+    appearance: none;
+    -webkit-appearance: none;
+  }
+}
+
 @tailwind utilities;
 
 html,
 body {
   height: 100%;
   width: 100%;
-  margin: 0;
 }
 
 /* Temporary fix to make scrollbars look right in the production build */

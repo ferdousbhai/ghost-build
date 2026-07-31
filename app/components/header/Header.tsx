@@ -55,7 +55,7 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
   return (
     <>
       <header
-        className="ghostbuild-header box-border flex h-[var(--header-height)] items-center overflow-x-auto overflow-y-hidden border-b px-5 py-3"
+        className="ghostbuild-header flex h-[var(--header-height)] items-center overflow-x-auto overflow-y-hidden border-b px-5 py-3"
         data-chat-started={chat.started}
       >
         <div className="z-40 flex items-center gap-3 text-content-primary">

@@ -119,11 +119,6 @@ html.dark {
   box-shadow: var(--ghost-home-shadow);
 }
 
-.ghost-message-input--home,
-.ghost-message-input--home * {
-  box-sizing: border-box;
-}
-
 .ghost-message-input--home::before {
   position: absolute;
   inset: -1px;
