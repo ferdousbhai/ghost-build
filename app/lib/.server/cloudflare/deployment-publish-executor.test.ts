@@ -195,8 +195,7 @@ describe('publishDeploymentBuild', () => {
     expect(sandbox.destroy).toHaveBeenCalledOnce();
   });
 
-  test('resets the deterministic publish workspace before retrying after destroy failure', async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  test('retries cleanup and resets the deterministic publish workspace before a replay', async () => {
     sandbox.destroy.mockRejectedValueOnce(new Error('destroy timed out'));
     const args = {
       env: {
@@ -224,8 +223,7 @@ describe('publishDeploymentBuild', () => {
           command === 'rm -rf /workspace/publish /workspace/build.tar.gz /workspace/wrangler-output.ndjson',
       ),
     ).toHaveLength(2);
-    expect(consoleError).toHaveBeenCalledWith('Unable to destroy deployment publish sandbox', expect.any(Error));
-    consoleError.mockRestore();
+    expect(sandbox.destroy).toHaveBeenCalledTimes(3);
   });
 
   test('rejects missing or ambiguous Wrangler version output after publish', async () => {

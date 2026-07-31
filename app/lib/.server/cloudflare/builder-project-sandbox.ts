@@ -2,6 +2,7 @@ import { getSandbox, type ExecResult } from '@cloudflare/sandbox';
 import type { DeploymentSandbox } from './deployment-sandbox';
 import { buildDeploymentSnapshot, runBoundedDeploymentBuildCommand } from './deployment-build-executor';
 import { inspectDeploymentSnapshot } from './deployment-snapshot';
+import { destroySandboxWithRetries, sandboxExec } from './sandbox-lifecycle';
 import { cancelObjectGcCandidate, queueObjectGcCandidate } from '~/lib/cloudflare/data/object-gc.server';
 
 const PROJECT_DIR = '/workspace/project';
@@ -28,25 +29,25 @@ export async function installBuilderDependencies(args: {
   try {
     args.abortSignal?.throwIfAborted();
     await requireSuccess(
-      await sandbox.exec(`rm -rf ${PROJECT_DIR} ${SOURCE_ARCHIVE}`, {
+      await sandboxExec(sandbox, `rm -rf ${PROJECT_DIR} ${SOURCE_ARCHIVE}`, {
         timeout: 30_000,
       }),
     );
     await sandbox.mkdir(PROJECT_DIR, { recursive: true });
     await sandbox.writeFile(SOURCE_ARCHIVE, new Blob([args.snapshot]).stream());
     await requireSuccess(
-      await sandbox.exec(`unzip -q ${SOURCE_ARCHIVE} -d ${PROJECT_DIR}`, {
+      await sandboxExec(sandbox, `unzip -q ${SOURCE_ARCHIVE} -d ${PROJECT_DIR}`, {
         timeout: 60_000,
       }),
     );
     await sandbox.writeFile(`${PROJECT_DIR}/package.json`, args.packageJson);
     await requireSuccess(
-      await sandbox.exec('ghostbuild-verify-pnpm-workspace pnpm-workspace.yaml', {
+      await sandboxExec(sandbox, 'ghostbuild-verify-pnpm-workspace pnpm-workspace.yaml', {
         cwd: PROJECT_DIR,
         timeout: 30_000,
       }),
     );
-    const pnpm = requireExecutable(await sandbox.exec('command -v pnpm', { timeout: 30_000 }), 'pnpm');
+    const pnpm = requireExecutable(await sandboxExec(sandbox, 'command -v pnpm', { timeout: 30_000 }), 'pnpm');
     await requireSuccess(
       await runBoundedDeploymentBuildCommand(
         sandbox,
@@ -56,7 +57,8 @@ export async function installBuilderDependencies(args: {
       ),
     );
     await requireSuccess(
-      await sandbox.exec(
+      await sandboxExec(
+        sandbox,
         `test "$(stat -c %s package.json)" -le ${MAX_WORKSPACE_FILE_BYTES} && ` +
           `test "$(stat -c %s pnpm-lock.yaml)" -le ${MAX_WORKSPACE_FILE_BYTES}`,
         { cwd: PROJECT_DIR, timeout: 30_000 },
@@ -118,9 +120,7 @@ function abortableSandboxCleanup(
 ): () => Promise<void> {
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = () => {
-    cleanupPromise ??= sandbox
-      .destroy()
-      .catch((error) => console.error(`Unable to destroy ${operation} sandbox`, error));
+    cleanupPromise ??= destroySandboxWithRetries(sandbox, `${operation} sandbox`);
     return cleanupPromise;
   };
   const handleAbort = () => {

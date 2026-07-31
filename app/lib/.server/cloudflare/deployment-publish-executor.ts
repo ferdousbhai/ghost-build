@@ -22,6 +22,7 @@ import {
   DEPLOYMENT_TEMPLATE_SOURCE_BINDING,
   DEPLOYMENT_VERSION_METADATA_BINDING,
 } from './deployment-security-baseline';
+import { destroySandboxWithRetries, sandboxExec } from './sandbox-lifecycle';
 
 const PUBLISH_DIR = '/workspace/publish';
 const BUILD_ARCHIVE = '/workspace/build.tar.gz';
@@ -83,21 +84,23 @@ export async function publishDeploymentBuild(args: {
   let publishedWorkerVersionId: string | null = null;
   try {
     await requireSuccess(
-      await sandbox.exec(`rm -rf ${PUBLISH_DIR} ${BUILD_ARCHIVE} ${WRANGLER_OUTPUT}`, {
+      await sandboxExec(sandbox, `rm -rf ${PUBLISH_DIR} ${BUILD_ARCHIVE} ${WRANGLER_OUTPUT}`, {
         timeout: 30 * 1000,
       }),
     );
     await sandbox.mkdir(PUBLISH_DIR, { recursive: true });
     await sandbox.writeFile(BUILD_ARCHIVE, new Blob([args.build]).stream());
     await requireSuccess(
-      await sandbox.exec(
+      await sandboxExec(
+        sandbox,
         `test "$(gzip -dc ${BUILD_ARCHIVE} | head -c ${MAX_PUBLISH_EXPANDED_BYTES + 1} | wc -c | tr -d ' ')" ` +
           `-le ${MAX_PUBLISH_EXPANDED_BYTES}`,
         { timeout: 2 * 60 * 1000 },
       ),
     );
     await requireSuccess(
-      await sandbox.exec(
+      await sandboxExec(
+        sandbox,
         `tar -tzf ${BUILD_ARCHIVE} | ` +
           `awk 'BEGIN { bad = 0 } ` +
           `{ name = $0; while (substr(name, 1, 2) == "./") name = substr(name, 3); ` +
@@ -110,13 +113,15 @@ export async function publishDeploymentBuild(args: {
       ),
     );
     await requireSuccess(
-      await sandbox.exec(
+      await sandboxExec(
+        sandbox,
         `tar -xzf ${BUILD_ARCHIVE} -C ${PUBLISH_DIR} ` + '--no-same-owner --no-same-permissions --keep-old-files',
         { timeout: 2 * 60 * 1000 },
       ),
     );
     await requireSuccess(
-      await sandbox.exec(
+      await sandboxExec(
+        sandbox,
         `test "$(du -sk --apparent-size ${PUBLISH_DIR} | cut -f1)" -le ${MAX_PUBLISH_EXPANDED_KIB} && ` +
           `test -z "$(find ${PUBLISH_DIR} -type l -print -quit)"`,
         { timeout: 30 * 1000 },
@@ -137,7 +142,7 @@ export async function publishDeploymentBuild(args: {
     );
     if (args.d1DatabaseId) {
       await requireSuccess(
-        await sandbox.exec('wrangler d1 migrations apply DB --remote --config wrangler.json --yes', {
+        await sandboxExec(sandbox, 'wrangler d1 migrations apply DB --remote --config wrangler.json --yes', {
           cwd: PUBLISH_DIR,
           env: commandEnv,
           timeout: 5 * 60 * 1000,
@@ -146,15 +151,19 @@ export async function publishDeploymentBuild(args: {
     }
     if (args.agentSecurityD1DatabaseId) {
       await requireSuccess(
-        await sandbox.exec('wrangler d1 migrations apply AGENT_SECURITY_DB --remote --config wrangler.json --yes', {
-          cwd: PUBLISH_DIR,
-          env: commandEnv,
-          timeout: 5 * 60 * 1000,
-        }),
+        await sandboxExec(
+          sandbox,
+          'wrangler d1 migrations apply AGENT_SECURITY_DB --remote --config wrangler.json --yes',
+          {
+            cwd: PUBLISH_DIR,
+            env: commandEnv,
+            timeout: 5 * 60 * 1000,
+          },
+        ),
       );
     }
     await requireSuccess(
-      await sandbox.exec('wrangler deploy --config wrangler.json', {
+      await sandboxExec(sandbox, 'wrangler deploy --config wrangler.json', {
         cwd: PUBLISH_DIR,
         env: commandEnv,
         timeout: 10 * 60 * 1000,
@@ -163,7 +172,7 @@ export async function publishDeploymentBuild(args: {
     const output = await sandbox.readFile(WRANGLER_OUTPUT, { encoding: 'utf8' });
     publishedWorkerVersionId = parseWranglerDeployVersion(output.content, workerName);
   } finally {
-    await sandbox.destroy().catch((error) => console.error('Unable to destroy deployment publish sandbox', error));
+    await destroySandboxWithRetries(sandbox, 'deployment publish sandbox');
   }
   if (!publishedWorkerVersionId) {
     throw new DeploymentPublishError('Published Worker version identity is unavailable.');

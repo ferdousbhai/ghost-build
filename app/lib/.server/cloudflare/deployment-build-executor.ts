@@ -9,6 +9,7 @@ import {
 import type { DeploymentSandbox } from './deployment-sandbox';
 import { APP_AGENT_PROTECTED_FILE_SHA256 } from './deployment-security-baseline';
 import type { DeploymentProjectProfile } from './deployment-snapshot';
+import { destroySandboxWithRetries, sandboxExec, withSandboxRpcTimeout } from './sandbox-lifecycle';
 
 const PROJECT_DIR = '/workspace/project';
 const SOURCE_DIR = '/workspace/source';
@@ -108,9 +109,7 @@ export async function buildDeploymentSnapshot(args: {
   });
   let destroyPromise: Promise<void> | undefined;
   const destroySandbox = () => {
-    destroyPromise ??= sandbox
-      .destroy()
-      .catch((error) => console.error('Unable to destroy deployment build sandbox', error));
+    destroyPromise ??= destroySandboxWithRetries(sandbox, 'deployment build sandbox');
     return destroyPromise;
   };
   const handleAbort = () => {
@@ -121,18 +120,19 @@ export async function buildDeploymentSnapshot(args: {
   try {
     args.abortSignal?.throwIfAborted();
     await requireSuccess(
-      await sandbox.exec(
+      await sandboxExec(
+        sandbox,
         `rm -rf ${PROJECT_DIR} ${SOURCE_DIR} ${SOURCE_ARCHIVE} ${BUILD_ARCHIVE} ${PACKAGE_DIR} ` +
           `${TRUSTED_BIN_DIR} ${TRUSTED_INPUT_DIR}`,
         { timeout: BUILD_TIMEOUT_MS.workspaceReset },
       ),
     );
     const systemNode = requireSystemExecutable(
-      await sandbox.exec('command -v node', { timeout: BUILD_TIMEOUT_MS.workspacePolicy }),
+      await sandboxExec(sandbox, 'command -v node', { timeout: BUILD_TIMEOUT_MS.workspacePolicy }),
       'Node.js',
     );
     const systemPnpm = requireSystemExecutable(
-      await sandbox.exec('command -v pnpm', { timeout: BUILD_TIMEOUT_MS.workspacePolicy }),
+      await sandboxExec(sandbox, 'command -v pnpm', { timeout: BUILD_TIMEOUT_MS.workspacePolicy }),
       'pnpm',
     );
     await sandbox.mkdir(PROJECT_DIR, { recursive: true });
@@ -140,27 +140,35 @@ export async function buildDeploymentSnapshot(args: {
     await sandbox.writeFile(SOURCE_ARCHIVE, source.body);
     stage = 'source extraction';
     await requireSuccess(
-      await sandbox.exec(`test "$(sha256sum ${SOURCE_ARCHIVE} | cut -d ' ' -f1)" = "${args.expectedSourceSha256}"`, {
-        timeout: BUILD_TIMEOUT_MS.sourceDigest,
-      }),
+      await sandboxExec(
+        sandbox,
+        `test "$(sha256sum ${SOURCE_ARCHIVE} | cut -d ' ' -f1)" = "${args.expectedSourceSha256}"`,
+        {
+          timeout: BUILD_TIMEOUT_MS.sourceDigest,
+        },
+      ),
     );
     await requireSuccess(
-      await sandbox.exec(
+      await sandboxExec(
+        sandbox,
         `test "$(unzip -p ${SOURCE_ARCHIVE} | head -c ${MAX_EXPANDED_BYTES + 1} | wc -c | tr -d ' ')" ` +
           `-le ${MAX_EXPANDED_BYTES}`,
         { timeout: BUILD_TIMEOUT_MS.compressedSize },
       ),
     );
     await requireSuccess(
-      await sandbox.exec(`unzip -q ${SOURCE_ARCHIVE} -d ${SOURCE_DIR}`, { timeout: BUILD_TIMEOUT_MS.extraction }),
+      await sandboxExec(sandbox, `unzip -q ${SOURCE_ARCHIVE} -d ${SOURCE_DIR}`, {
+        timeout: BUILD_TIMEOUT_MS.extraction,
+      }),
     );
     await requireSuccess(
-      await sandbox.exec(`test "$(du -sk ${SOURCE_DIR} | cut -f1)" -le ${MAX_EXPANDED_KIB}`, {
+      await sandboxExec(sandbox, `test "$(du -sk ${SOURCE_DIR} | cut -f1)" -le ${MAX_EXPANDED_KIB}`, {
         timeout: BUILD_TIMEOUT_MS.extractedSize,
       }),
     );
     await requireSuccess(
-      await sandbox.exec(
+      await sandboxExec(
+        sandbox,
         `if [ -f ${SOURCE_DIR}/package.json ]; then cp -a ${SOURCE_DIR}/. ${PROJECT_DIR}/; ` +
           `elif [ -f ${SOURCE_DIR}/project/package.json ]; then cp -a ${SOURCE_DIR}/project/. ${PROJECT_DIR}/; ` +
           `else echo "Deployment snapshot does not contain package.json" >&2; exit 1; fi`,
@@ -169,13 +177,13 @@ export async function buildDeploymentSnapshot(args: {
     );
     stage = 'workspace policy verification';
     await requireSuccess(
-      await sandbox.exec('ghostbuild-verify-pnpm-workspace pnpm-workspace.yaml', {
+      await sandboxExec(sandbox, 'ghostbuild-verify-pnpm-workspace pnpm-workspace.yaml', {
         cwd: PROJECT_DIR,
         timeout: BUILD_TIMEOUT_MS.workspacePolicy,
       }),
     );
     const approvedInputDigests = requireApprovedInputDigests(
-      await sandbox.exec('sha256sum package.json pnpm-lock.yaml wrangler.jsonc pnpm-workspace.yaml', {
+      await sandboxExec(sandbox, 'sha256sum package.json pnpm-lock.yaml wrangler.jsonc pnpm-workspace.yaml', {
         cwd: PROJECT_DIR,
         timeout: BUILD_TIMEOUT_MS.workspacePolicy,
       }),
@@ -184,13 +192,13 @@ export async function buildDeploymentSnapshot(args: {
     const protectedFileDigests = requiresAppAgentSecurity ? APP_AGENT_PROTECTED_FILE_SHA256 : {};
     const projectBoundaryCheck = securityBoundaryVerificationCommand(approvedInputDigests, protectedFileDigests, '.');
     await requireSuccess(
-      await sandbox.exec(projectBoundaryCheck, {
+      await sandboxExec(sandbox, projectBoundaryCheck, {
         cwd: PROJECT_DIR,
         timeout: BUILD_TIMEOUT_MS.packageValidation,
       }),
     );
     await requireSuccess(
-      await sandbox.exec(trustedInputCopyCommand(protectedFileDigests), {
+      await sandboxExec(sandbox, trustedInputCopyCommand(protectedFileDigests), {
         cwd: PROJECT_DIR,
         timeout: BUILD_TIMEOUT_MS.sourceCopy,
       }),
@@ -201,20 +209,22 @@ export async function buildDeploymentSnapshot(args: {
       TRUSTED_INPUT_DIR,
     );
     await requireSuccess(
-      await sandbox.exec(trustedBoundaryCheck, {
+      await sandboxExec(sandbox, trustedBoundaryCheck, {
         timeout: BUILD_TIMEOUT_MS.packageValidation,
       }),
     );
     stage = 'dependency installation';
     await requireSuccess(
-      await sandbox.exec(
+      await sandboxExec(
+        sandbox,
         `${shellQuote(systemPnpm)} install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile ` +
           '--registry=https://registry.npmjs.org/',
         { cwd: PROJECT_DIR, timeout: BUILD_TIMEOUT_MS.install },
       ),
     );
     await requireSuccess(
-      await sandbox.exec(
+      await sandboxExec(
+        sandbox,
         `rm -rf ${TRUSTED_BIN_DIR} && mkdir -p ${TRUSTED_BIN_DIR} && ` +
           `ln -s ${shellQuote(systemNode)} ${TRUSTED_BIN_DIR}/node && ` +
           `ln -s ${shellQuote(systemPnpm)} ${TRUSTED_BIN_DIR}/pnpm && ` +
@@ -286,7 +296,7 @@ export async function buildDeploymentSnapshot(args: {
     await sandbox.killAllProcesses();
     stage = 'security boundary verification';
     await requireSuccess(
-      await sandbox.exec(`${projectBoundaryCheck} && ${trustedBoundaryCheck}`, {
+      await sandboxExec(sandbox, `${projectBoundaryCheck} && ${trustedBoundaryCheck}`, {
         cwd: PROJECT_DIR,
         timeout: BUILD_TIMEOUT_MS.packageValidation,
       }),
@@ -297,7 +307,8 @@ export async function buildDeploymentSnapshot(args: {
     stage = 'build packaging';
     await sandbox.mkdir(PACKAGE_DIR, { recursive: true });
     await requireSuccess(
-      await sandbox.exec(
+      await sandboxExec(
+        sandbox,
         `cp -a ${PROJECT_DIR}/dist ${PROJECT_DIR}/package.json ${PROJECT_DIR}/pnpm-lock.yaml ${PACKAGE_DIR}/ && ` +
           `if [ -d ${PROJECT_DIR}/migrations ]; then cp -a ${PROJECT_DIR}/migrations ${PACKAGE_DIR}/; fi && ` +
           `if [ -d ${PROJECT_DIR}/agent-security-migrations ]; then ` +
@@ -306,17 +317,20 @@ export async function buildDeploymentSnapshot(args: {
       ),
     );
     await requireSuccess(
-      await sandbox.exec(
+      await sandboxExec(
+        sandbox,
         `test "$(du -sk --apparent-size ${PACKAGE_DIR} | cut -f1)" -le ${MAX_BUILD_PACKAGE_KIB} && ` +
           `test -z "$(find ${PACKAGE_DIR} -type l -print -quit)"`,
         { timeout: BUILD_TIMEOUT_MS.packageValidation },
       ),
     );
     await requireSuccess(
-      await sandbox.exec(`tar -czf ${BUILD_ARCHIVE} -C ${PACKAGE_DIR} .`, { timeout: BUILD_TIMEOUT_MS.archive }),
+      await sandboxExec(sandbox, `tar -czf ${BUILD_ARCHIVE} -C ${PACKAGE_DIR} .`, {
+        timeout: BUILD_TIMEOUT_MS.archive,
+      }),
     );
     await requireSuccess(
-      await sandbox.exec(`test "$(stat -c %s ${BUILD_ARCHIVE})" -le ${MAX_BUILD_ARCHIVE_BYTES}`, {
+      await sandboxExec(sandbox, `test "$(stat -c %s ${BUILD_ARCHIVE})" -le ${MAX_BUILD_ARCHIVE_BYTES}`, {
         timeout: BUILD_TIMEOUT_MS.archiveValidation,
       }),
     );
@@ -350,18 +364,22 @@ const APPROVED_INPUT_PATHS = ['package.json', 'pnpm-lock.yaml', 'wrangler.jsonc'
 export async function runBoundedDeploymentBuildCommand(
   sandbox: Pick<ISandbox, 'startProcess' | 'streamProcessLogs' | 'killAllProcesses'>,
   command: string,
-  options: Pick<ProcessOptions, 'cwd' | 'env' | 'timeout'>,
+  options: Pick<ProcessOptions, 'cwd' | 'env'> & { timeout: number },
 ): Promise<ExecResult> {
   const startedAt = Date.now();
   const timestamp = new Date().toISOString();
-  const process = await sandbox.startProcess(command, { ...options, autoCleanup: false });
-  const stream = (await sandbox.streamProcessLogs(process.id)).pipeThrough(
-    limitBuildCommandEventBytes(MAX_DEPLOYMENT_BUILD_COMMAND_EVENT_BYTES),
+  const process = await withSandboxRpcTimeout(
+    sandbox.startProcess(command, { ...options, autoCleanup: false }),
+    options.timeout,
+    'Sandbox process start',
   );
+  const stream = (
+    await withSandboxRpcTimeout(sandbox.streamProcessLogs(process.id), 30_000, 'Sandbox process log connection')
+  ).pipeThrough(limitBuildCommandEventBytes(MAX_DEPLOYMENT_BUILD_COMMAND_EVENT_BYTES));
   let outputBytes = 0;
   let stdout = '';
   let stderr = '';
-  try {
+  const collectResult = async (): Promise<ExecResult> => {
     for await (const event of parseSSEStream<LogEvent>(stream)) {
       if (event.type === 'stdout' || event.type === 'stderr') {
         const data = event.data ?? '';
@@ -395,6 +413,9 @@ export async function runBoundedDeploymentBuildCommand(
       }
     }
     throw new DeploymentBuildError('Production build command stream ended without an exit status.');
+  };
+  try {
+    return await withSandboxRpcTimeout(collectResult(), options.timeout, 'Sandbox process log stream');
   } catch (error) {
     await Promise.allSettled([process.kill('SIGKILL'), sandbox.killAllProcesses()]);
     throw error;

@@ -4,6 +4,7 @@ import {
   BUILDER_PREVIEW_MAX_BUILDS_PER_HOUR,
 } from '~/agents/builder-preview-types';
 import type { DeploymentSandbox } from './deployment-sandbox';
+import { destroySandboxWithRetries } from './sandbox-lifecycle';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const ADMISSION_SWEEP_LIMIT = 8;
@@ -327,7 +328,10 @@ async function destroyPreviewResources(
     enableDefaultSession: false,
     normalizeId: true,
   });
-  await Promise.allSettled([sandbox.destroy(), env.APP_STORAGE.delete(preview.snapshot_key)]);
+  await Promise.allSettled([
+    destroySandboxWithRetries(sandbox, 'Builder preview sandbox'),
+    env.APP_STORAGE.delete(preview.snapshot_key),
+  ]);
 }
 
 export function previewPath(previewId: string, accessToken: string): string {

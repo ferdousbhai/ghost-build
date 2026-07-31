@@ -2,6 +2,7 @@ import { getSandbox, type ExecResult } from '@cloudflare/sandbox';
 import { BUILDER_PREVIEW_PORT, BUILDER_PREVIEW_TTL_MS } from '~/agents/builder-preview-types';
 import type { DeploymentSandbox } from './deployment-sandbox';
 import { runBoundedDeploymentBuildCommand } from './deployment-build-executor';
+import { destroySandboxWithRetries, sandboxExec } from './sandbox-lifecycle';
 
 const PROJECT_DIR = '/workspace/preview-project';
 const SOURCE_ARCHIVE = '/workspace/preview-source.zip';
@@ -30,21 +31,26 @@ export async function buildBuilderPreview(args: {
   try {
     await sandbox.setKeepAlive(false);
     await requireSuccess(
-      await sandbox.exec(`rm -rf ${PROJECT_DIR} ${SOURCE_ARCHIVE} ${TRUSTED_BIN_DIR}`, { timeout: 30_000 }),
+      await sandboxExec(sandbox, `rm -rf ${PROJECT_DIR} ${SOURCE_ARCHIVE} ${TRUSTED_BIN_DIR}`, {
+        timeout: 30_000,
+      }),
     );
     await sandbox.writeFile(SOURCE_ARCHIVE, source.body);
     await sandbox.mkdir(PROJECT_DIR, { recursive: true });
-    await requireSuccess(await sandbox.exec(`unzip -q ${SOURCE_ARCHIVE} -d ${PROJECT_DIR}`, { timeout: 60_000 }));
     await requireSuccess(
-      await sandbox.exec(
+      await sandboxExec(sandbox, `unzip -q ${SOURCE_ARCHIVE} -d ${PROJECT_DIR}`, { timeout: 60_000 }),
+    );
+    await requireSuccess(
+      await sandboxExec(
+        sandbox,
         `test -f package.json && test -f pnpm-lock.yaml && test -f pnpm-workspace.yaml && ` +
           `test "$(du -sk . | cut -f1)" -le ${MAX_EXPANDED_KIB} && ` +
           'ghostbuild-verify-pnpm-workspace pnpm-workspace.yaml',
         { cwd: PROJECT_DIR, timeout: 30_000 },
       ),
     );
-    const node = requireExecutable(await sandbox.exec('command -v node', { timeout: 30_000 }), 'Node.js');
-    const pnpm = requireExecutable(await sandbox.exec('command -v pnpm', { timeout: 30_000 }), 'pnpm');
+    const node = requireExecutable(await sandboxExec(sandbox, 'command -v node', { timeout: 30_000 }), 'Node.js');
+    const pnpm = requireExecutable(await sandboxExec(sandbox, 'command -v pnpm', { timeout: 30_000 }), 'pnpm');
     await requireSuccess(
       await runBoundedDeploymentBuildCommand(
         sandbox,
@@ -54,7 +60,8 @@ export async function buildBuilderPreview(args: {
       ),
     );
     await requireSuccess(
-      await sandbox.exec(
+      await sandboxExec(
+        sandbox,
         `mkdir -p ${TRUSTED_BIN_DIR} && ` +
           `ln -sf ${shellQuote(node)} ${TRUSTED_BIN_DIR}/node && ` +
           `ln -sf ${shellQuote(pnpm)} ${TRUSTED_BIN_DIR}/pnpm`,
@@ -96,7 +103,7 @@ export async function buildBuilderPreview(args: {
     });
     await sandbox.setKeepAlive(true);
   } catch (error) {
-    await sandbox.destroy().catch(() => undefined);
+    await destroySandboxWithRetries(sandbox, 'Builder preview sandbox');
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(message.slice(-MAX_ERROR_BYTES) || 'The isolated preview build failed.', { cause: error });
   }

@@ -91,7 +91,9 @@
       // The lite tier only has 256 MiB RAM and 1/16 vCPU, which is not a
       // production-capable build environment for the supported stack.
       "instance_type": "basic",
-      "max_instances": 2,
+      // Keep preview admission (two instances) from starving validation and
+      // production build/publish work when a container is winding down.
+      "max_instances": 6,
     },
   ],
   "workflows": [
