@@ -97,14 +97,17 @@ export function SubchatBar({
   const chatTitle = sessionId ? (
     <button
       type="button"
-      className="group flex min-w-0 grow items-center gap-1.5 rounded-md text-left text-sm font-medium text-content-primary outline-none focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:opacity-50"
+      className="group flex min-w-0 grow items-center gap-1.5 rounded-md bg-transparent text-left text-sm font-medium text-content-primary outline-none focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:opacity-50"
       title={`${currentSubchatLabel} — click to rename`}
       aria-label={`Rename current chat: ${currentSubchatLabel}`}
       disabled={!isSubchatLoaded || isRenaming}
       onClick={openRenameModal}
     >
       <span className="min-w-0 truncate group-hover:underline">{currentSubchatLabel}</span>
-      <Pencil1Icon className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+      <Pencil1Icon
+        className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+        aria-hidden
+      />
     </button>
   ) : (
     <span className="min-w-0 grow truncate text-sm font-medium text-content-primary" title={currentSubchatLabel}>

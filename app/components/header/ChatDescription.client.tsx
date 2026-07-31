@@ -16,7 +16,7 @@ export function ChatDescription() {
     });
 
   if (!initialDescription) {
-    // doing this to prevent showing edit button until chat description is set
+    // Avoid exposing the rename control until a title is available.
     return null;
   }
 
@@ -36,17 +36,19 @@ export function ChatDescription() {
           <Button variant="neutral" onClick={handleSubmit} icon={<CheckIcon />} inline size="xs" tip="Save title" />
         </form>
       ) : (
-        <>
-          <ProjectTitle className="mr-1 block max-w-64 truncate">{currentDescription}</ProjectTitle>
-          <Button
-            variant="neutral"
-            onClick={toggleEditMode}
-            icon={<Pencil1Icon />}
-            inline
-            size="xs"
-            tip="Rename chat"
+        <button
+          type="button"
+          className="group flex min-w-0 max-w-full items-center gap-1.5 rounded-md bg-transparent px-1.5 py-1 text-sm font-semibold text-content-primary outline-none focus-visible:ring-2 focus-visible:ring-accent-500"
+          title={`${currentDescription} — click to rename`}
+          aria-label={`Rename project: ${currentDescription}`}
+          onClick={toggleEditMode}
+        >
+          <ProjectTitle className="block max-w-64 truncate group-hover:underline">{currentDescription}</ProjectTitle>
+          <Pencil1Icon
+            className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+            aria-hidden
           />
-        </>
+        </button>
       )}
     </div>
   );

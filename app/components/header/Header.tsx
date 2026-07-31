@@ -126,12 +126,6 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
                 <Button variant="ghost" size="xs" onClick={() => void handleLogout()} icon={<ExitIcon />}>
                   Log out
                 </Button>
-                <span
-                  className="ml-1 inline-flex rounded-full ring-1 ring-bolt-elements-borderColor"
-                  title={profile.username ?? 'Signed-in user'}
-                >
-                  <ProfileAvatar avatar={profile.avatar} username={profile.username} />
-                </span>
               </div>
               <div className="lg:hidden">
                 <MenuComponent
