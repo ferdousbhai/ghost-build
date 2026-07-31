@@ -36,6 +36,10 @@ describe('SubchatBar', () => {
     expect(markup).not.toContain('Current chat');
     expect(markup).toContain('Build a polished Pocket Poll app');
     expect(markup).toContain('aria-label="Rename current chat: Build a polished Pocket Poll app"');
+    document.body.innerHTML = markup;
+    expect(
+      document.querySelector<HTMLButtonElement>('button[aria-label^="Rename current chat:"]')?.querySelector('svg'),
+    ).not.toBeNull();
     expect(markup).toContain('aria-label="Start a new chat"');
     expect(markup).not.toContain('aria-label="Previous chat"');
     expect(markup).not.toContain('aria-label="Next chat"');
