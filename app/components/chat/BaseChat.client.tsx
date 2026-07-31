@@ -264,9 +264,11 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                       'z-prompt sticky bottom-0 mx-auto flex w-full max-w-chat flex-col px-3 pb-3 sm:px-0 sm:pb-4',
                     )}
                   >
-                    <div className="mb-2 px-1 text-xs text-content-tertiary" role="status">
-                      {runtimeNotice}
-                    </div>
+                    {runtimeNotice && (
+                      <div className="mb-2 px-1 text-xs text-content-tertiary" role="status">
+                        {runtimeNotice}
+                      </div>
+                    )}
                     {(!subchats || (currentSubchatIndex >= subchats.length - 1 && isSubchatLoaded)) && (
                       <>
                         {shouldShowNudge && sessionId && (

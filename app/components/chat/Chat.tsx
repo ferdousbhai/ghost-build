@@ -234,7 +234,7 @@ const AuthenticatedChat = memo(
             ? 'The code editor could not load. Chat, builds, and remote preview still run from the durable cloud workspace.'
             : workspacePresentationState === 'connecting'
               ? 'Connecting to the durable cloud workspace…'
-              : 'Cloud workspace active · builds and preview run remotely on every browser.'
+              : null
         }
         sendMessageInProgress={sendMessageInProgress}
         onRewindToMessage={rewindToMessage}
