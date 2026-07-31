@@ -1,22 +1,27 @@
+import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import type {
   BuilderWorkspaceApplyResult,
   BuilderWorkspaceClientChange,
   BuilderWorkspaceState,
-  BuilderWorkspaceSyncEntry,
-  BuilderWorkspaceSyncPage,
 } from '~/agents/builder-workspace-types';
+import type { AccountLocalReplica } from '~/lib/cloudflare/account-local-replica';
+import {
+  createBuilderWorkspaceCollection,
+  type BuilderWorkspaceAgent,
+  type BuilderWorkspaceCollection,
+  type BuilderWorkspacePullResult,
+  workspaceCollectionSnapshot,
+} from './builder-workspace-collection.client';
 import { workbenchStore } from './workbench.client';
 
-type BuilderWorkspaceAgent = {
-  call(method: string, args: unknown[], options?: { timeout?: number }): Promise<unknown>;
-};
-
 const WORKSPACE_RPC_TIMEOUT_MS = 30_000;
+const logger = createScopedLogger('BuilderWorkspaceSyncController');
 
 /**
- * Keeps a rebuildable browser presentation cache aligned with the authoritative
- * Durable Object workspace. Browser writes are single-revision CAS operations:
- * conflicts reload server state and never rebase a stale local edit.
+ * Keeps the browser presentation and its persisted TanStack DB collection
+ * aligned with the authoritative Durable Object workspace. Browser writes are
+ * single-revision CAS operations; conflicts reload server state and never
+ * rebase a stale local edit.
  */
 export class BuilderWorkspaceSyncController {
   #revision = 0;
@@ -24,17 +29,45 @@ export class BuilderWorkspaceSyncController {
   #disposed = false;
   readonly #changeListener = (changes: BuilderWorkspaceClientChange[]) => this.push(changes);
 
-  private constructor(private readonly agent: BuilderWorkspaceAgent) {}
+  private constructor(
+    private readonly agent: BuilderWorkspaceAgent,
+    private readonly collection: BuilderWorkspaceCollection,
+    private readonly source: ReturnType<typeof createBuilderWorkspaceCollection>['source'],
+  ) {}
 
-  static async initialize(agent: BuilderWorkspaceAgent): Promise<BuilderWorkspaceSyncController> {
-    const controller = new BuilderWorkspaceSyncController(agent);
-    const state = await controller.#call<BuilderWorkspaceState>('getWorkspaceState', []);
+  static async initialize(
+    agent: BuilderWorkspaceAgent,
+    options: { workspaceId?: string; replica?: AccountLocalReplica | null } = {},
+  ): Promise<BuilderWorkspaceSyncController> {
+    const state = await callAgent<BuilderWorkspaceState>(agent, 'getWorkspaceState', []);
     if (!state.initialized) {
       throw new Error('The durable project workspace is not initialized.');
     }
-    await controller.#replaceFromSnapshot();
+    const { collection, source } = createBuilderWorkspaceCollection({
+      agent,
+      workspaceId: options.workspaceId ?? 'active',
+      replica: options.replica ?? null,
+    });
+    const controller = new BuilderWorkspaceSyncController(agent, collection, source);
     workbenchStore.setWorkspaceChangeListener(controller.#changeListener);
-    return controller;
+    const initialPullOutcome = source.initialPull.then(
+      (pull) => ({ ok: true as const, pull }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    try {
+      await collection.preload();
+      controller.#replacePresentationFromCollection();
+      const initialPull = await initialPullOutcome;
+      if (!initialPull.ok) {
+        throw initialPull.error;
+      }
+      controller.#revision = initialPull.pull.revision;
+      controller.#presentPull(initialPull.pull);
+      return controller;
+    } catch (error) {
+      controller.dispose();
+      throw error;
+    }
   }
 
   get revision(): number {
@@ -44,6 +77,7 @@ export class BuilderWorkspaceSyncController {
   dispose(): void {
     this.#disposed = true;
     workbenchStore.clearWorkspaceChangeListener(this.#changeListener);
+    void this.collection.cleanup();
   }
 
   async push(changes: BuilderWorkspaceClientChange[]): Promise<BuilderWorkspaceApplyResult> {
@@ -66,8 +100,19 @@ export class BuilderWorkspaceSyncController {
         ]);
         if (applied.ok) {
           this.#revision = applied.state.revision;
+          try {
+            const pull = await this.source.pull();
+            this.#revision = pull.revision;
+            this.#presentPull(pull);
+          } catch (error) {
+            // The edit is already durable. Preserve success and let the next
+            // normal reconciliation retry the browser replica update.
+            logger.warn('Failed to refresh the browser workspace replica after a durable edit', error);
+          }
         } else {
-          await this.#replaceFromSnapshot();
+          const pull = await this.source.replaceFromSnapshot();
+          this.#revision = pull.revision;
+          this.#replacePresentationFromCollection();
         }
         resolveResult(applied);
       } catch (error) {
@@ -81,75 +126,27 @@ export class BuilderWorkspaceSyncController {
     if (this.#disposed) {
       return Promise.resolve();
     }
-    return this.#enqueue(() => this.#pullFromRevision());
+    return this.#enqueue(async () => {
+      const pull = await this.source.pull();
+      this.#revision = pull.revision;
+      this.#presentPull(pull);
+    });
   }
 
-  async #pullFromRevision(): Promise<void> {
-    const fromRevision = this.#revision;
-    let targetRevision: number | undefined;
-    let cursor: string | undefined;
-    let snapshotEntries: BuilderWorkspaceSyncEntry[] | null = null;
-    while (true) {
-      const page = await this.#call<BuilderWorkspaceSyncPage>('getWorkspaceSyncPage', [
-        {
-          fromRevision,
-          ...(targetRevision !== undefined ? { targetRevision } : {}),
-          ...(cursor ? { cursor } : {}),
-        },
-      ]);
-      if (page.restart) {
-        await this.#replaceFromSnapshot();
-        return;
-      }
-      targetRevision = page.targetRevision;
-      if (page.mode === 'snapshot') {
-        snapshotEntries ??= [];
-        snapshotEntries.push(...page.entries);
-      } else {
-        workbenchStore.applyWorkspaceSyncEntries(page.entries);
-      }
-      if (!page.nextCursor) {
-        this.#revision = page.targetRevision;
-        if (snapshotEntries) {
-          workbenchStore.replaceWorkspaceSnapshot(snapshotEntries);
-        }
-        return;
-      }
-      cursor = page.nextCursor;
+  #presentPull(pull: BuilderWorkspacePullResult): void {
+    if (pull.mode === 'snapshot') {
+      this.#replacePresentationFromCollection();
+    } else if (pull.entries.length > 0) {
+      workbenchStore.applyWorkspaceSyncEntries(pull.entries);
     }
   }
 
-  async #replaceFromSnapshot(): Promise<void> {
-    let cursor: string | undefined;
-    let targetRevision: number | undefined;
-    const entries: BuilderWorkspaceSyncEntry[] = [];
-    while (true) {
-      const page = await this.#call<BuilderWorkspaceSyncPage>('getWorkspaceSyncPage', [
-        {
-          fromRevision: 0,
-          ...(targetRevision !== undefined ? { targetRevision } : {}),
-          ...(cursor ? { cursor } : {}),
-        },
-      ]);
-      if (page.restart) {
-        cursor = undefined;
-        targetRevision = undefined;
-        entries.length = 0;
-        continue;
-      }
-      targetRevision = page.targetRevision;
-      entries.push(...page.entries);
-      if (!page.nextCursor) {
-        this.#revision = page.targetRevision;
-        workbenchStore.replaceWorkspaceSnapshot(entries);
-        return;
-      }
-      cursor = page.nextCursor;
-    }
+  #replacePresentationFromCollection(): void {
+    workbenchStore.replaceWorkspaceSnapshot(workspaceCollectionSnapshot(this.collection));
   }
 
   async #call<T>(method: string, args: unknown[]): Promise<T> {
-    return (await this.agent.call(method, args, { timeout: WORKSPACE_RPC_TIMEOUT_MS })) as T;
+    return callAgent<T>(this.agent, method, args);
   }
 
   #enqueue(operation: () => Promise<void>): Promise<void> {
@@ -157,4 +154,8 @@ export class BuilderWorkspaceSyncController {
     this.#operationQueue = execution.catch(() => undefined);
     return execution;
   }
+}
+
+async function callAgent<T>(agent: BuilderWorkspaceAgent, method: string, args: unknown[]): Promise<T> {
+  return (await agent.call(method, args, { timeout: WORKSPACE_RPC_TIMEOUT_MS })) as T;
 }

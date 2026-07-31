@@ -5,7 +5,7 @@ import { useStore } from '@nanostores/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BuilderAgent, BuilderAgentState } from '~/agents/builder-agent';
 import { workbenchStore } from '~/lib/stores/workbench.client';
-import { getAuthToken, sessionIdStore } from '~/lib/stores/sessionId';
+import { getAuthToken, sessionIdStore, useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { captureMessage } from '~/lib/telemetry.client';
 import { ChatContextManager } from 'ghostbuild-agent/ChatContextManager';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
@@ -34,6 +34,7 @@ import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { useQueryClient } from '@tanstack/react-query';
 import { subchatQueryKey } from '~/lib/cloudflare/data-hooks';
 import { settleBuilderStop } from './builder-stop';
+import { useAccountLocalReplica } from '~/lib/cloudflare/account-local-replica';
 
 const logger = createScopedLogger('BuilderAgentChat');
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
@@ -47,6 +48,8 @@ export function useBuilderAgentChat(args: {
   seedTranscript: boolean;
 }) {
   const currentSubchatIndex = useStore(subchatIndexStore);
+  const sessionId = useSessionIdOrNullOrLoading();
+  const workspaceReplica = useAccountLocalReplica(sessionId);
   const [workspacePresentationState, setWorkspacePresentationState] = useState<
     'connecting' | 'ready' | 'presentation-error'
   >('connecting');
@@ -184,6 +187,9 @@ export function useBuilderAgentChat(args: {
   }, [args.initialMessages, args.transcript, builderAgent, seedGateRef, seedKey]);
 
   useEffect(() => {
+    if (workspaceReplica === undefined) {
+      return () => undefined;
+    }
     const gate = workspaceGateRef.current;
     if (gate.key !== workspaceKey || gate.started) {
       return () => undefined;
@@ -204,7 +210,10 @@ export function useBuilderAgentChat(args: {
           sendGateResolved = true;
           gate.resolve();
         }
-        const controller = await BuilderWorkspaceSyncController.initialize(builderAgent as never);
+        const controller = await BuilderWorkspaceSyncController.initialize(builderAgent as never, {
+          workspaceId: workspaceKey,
+          replica: workspaceReplica,
+        });
         if (disposed || workspaceGateRef.current !== gate) {
           controller.dispose();
           return;
@@ -242,7 +251,7 @@ export function useBuilderAgentChat(args: {
         workspaceControllerRef.current = null;
       }
     };
-  }, [builderAgent, workspaceGateRef, workspaceKey]);
+  }, [builderAgent, workspaceGateRef, workspaceKey, workspaceReplica]);
 
   const sendMessage = useCallback(
     async (

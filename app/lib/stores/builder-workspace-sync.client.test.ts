@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import type { SyncConfig } from '@tanstack/db';
 import type { BuilderWorkspaceClientChange, BuilderWorkspaceSyncEntry } from '~/agents/builder-workspace-types';
+import type { AccountLocalReplica } from '~/lib/cloudflare/account-local-replica';
+import type { BuilderWorkspaceFileRecord } from './builder-workspace-collection.client';
 
 const workbench = vi.hoisted(() => ({
   setWorkspaceChangeListener: vi.fn(),
@@ -33,6 +36,86 @@ describe('BuilderWorkspaceSyncController', () => {
       'durable project workspace is not initialized',
     );
     expect(workbench.replaceWorkspaceSnapshot).not.toHaveBeenCalled();
+  });
+
+  test('hydrates persisted rows and resumes server sync from the SQLite revision', async () => {
+    let releaseServerPull: () => void = () => undefined;
+    const serverPullBlocked = new Promise<void>((resolve) => {
+      releaseServerPull = resolve;
+    });
+    const cached = fileRecord('/home/project/src/cached.ts', 'cached', 7);
+    const persistedCollectionOptions = vi.fn((options: WorkspaceCollectionOptions) => ({
+      ...options,
+      sync: {
+        ...options.sync,
+        sync: (params: WorkspaceSyncParams) => {
+          params.begin({ immediate: true });
+          params.write({ type: 'update', value: cached });
+          params.commit();
+          if (!params.metadata) {
+            throw new Error('Expected collection metadata support.');
+          }
+          return options.sync.sync({
+            ...params,
+            metadata: {
+              ...params.metadata,
+              collection: {
+                ...params.metadata.collection,
+                get: () => 7,
+              },
+            },
+          });
+        },
+      },
+    }));
+    const replica = {
+      persistence: {},
+      persistedCollectionOptions,
+    } as unknown as AccountLocalReplica;
+    const agent = {
+      call: vi.fn(async (method: string, args: unknown[]) => {
+        switch (method) {
+          case 'getWorkspaceState':
+            return workspaceState(8);
+          case 'getWorkspaceSyncPage': {
+            await serverPullBlocked;
+            const request = args[0] as { fromRevision: number };
+            return syncPage(request.fromRevision, 8, 'delta', [write('/home/project/src/server.ts', 'server', 8)]);
+          }
+          default:
+            throw new Error(`Unexpected RPC: ${method}`);
+        }
+      }),
+    };
+
+    const initializing = BuilderWorkspaceSyncController.initialize(agent, {
+      workspaceId: 'workspace-1',
+      replica,
+    });
+    await vi.waitFor(() =>
+      expect(workbench.replaceWorkspaceSnapshot).toHaveBeenCalledWith([
+        expect.objectContaining({ path: cached.path, content: cached.content }),
+      ]),
+    );
+    releaseServerPull();
+    const controller = await initializing;
+
+    expect(persistedCollectionOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'builder-workspace:workspace-1',
+        schemaVersion: 1,
+      }),
+    );
+    expect(agent.call).toHaveBeenCalledWith(
+      'getWorkspaceSyncPage',
+      [{ fromRevision: 7 }],
+      expect.objectContaining({ timeout: 30_000 }),
+    );
+    expect(workbench.applyWorkspaceSyncEntries).toHaveBeenCalledWith([
+      expect.objectContaining({ path: '/home/project/src/server.ts', content: 'server' }),
+    ]);
+    expect(controller.revision).toBe(8);
+    controller.dispose();
   });
 
   test('rejects a stale manual edit and replaces the presentation cache from the durable snapshot', async () => {
@@ -81,6 +164,50 @@ describe('BuilderWorkspaceSyncController', () => {
     expect(workbench.replaceWorkspaceSnapshot).toHaveBeenLastCalledWith([
       expect.objectContaining({ path: '/home/project/src/local.ts', content: 'server-version' }),
       expect.objectContaining({ path: '/home/project/src/remote.ts', content: 'remote-change' }),
+    ]);
+    expect(controller.revision).toBe(2);
+  });
+
+  test('atomically replaces stale rows when the server restarts a paged delta as a snapshot', async () => {
+    let restarting = false;
+    const agent = {
+      call: vi.fn(async (method: string, args: unknown[]) => {
+        switch (method) {
+          case 'getWorkspaceState':
+            return workspaceState(1);
+          case 'getWorkspaceSyncPage': {
+            const request = args[0] as { fromRevision: number; cursor?: string; targetRevision?: number };
+            if (!restarting && request.fromRevision === 0) {
+              return syncPage(0, 1, 'snapshot', [write('/home/project/src/stale.ts', 'stale', 1)]);
+            }
+            if (request.fromRevision === 1) {
+              restarting = true;
+              return { ...syncPage(1, 2, 'current', []), restart: true };
+            }
+            if (!request.cursor) {
+              return {
+                ...syncPage(0, 2, 'snapshot', [write('/home/project/src/one.ts', 'one', 2)]),
+                nextCursor: '1',
+              };
+            }
+            expect(request).toEqual({ fromRevision: 0, targetRevision: 2, cursor: '1' });
+            return syncPage(0, 2, 'snapshot', [write('/home/project/src/two.ts', 'two', 2)]);
+          }
+          default:
+            throw new Error(`Unexpected RPC: ${method}`);
+        }
+      }),
+    };
+    const controller = await BuilderWorkspaceSyncController.initialize(agent);
+
+    await controller.pull();
+
+    expect(workbench.replaceWorkspaceSnapshot).toHaveBeenLastCalledWith([
+      expect.objectContaining({ path: '/home/project/src/one.ts', content: 'one' }),
+      expect.objectContaining({ path: '/home/project/src/two.ts', content: 'two' }),
+    ]);
+    expect(workbench.replaceWorkspaceSnapshot).not.toHaveBeenLastCalledWith([
+      expect.objectContaining({ path: '/home/project/src/stale.ts' }),
     ]);
     expect(controller.revision).toBe(2);
   });
@@ -211,6 +338,25 @@ function syncPage(
 function write(path: string, content: string, revision: number): BuilderWorkspaceSyncEntry {
   return {
     kind: 'write',
+    path,
+    content,
+    encoding: 'utf8',
+    size: content.length,
+    sha256: `${revision}`,
+    revision,
+  };
+}
+
+type WorkspaceSyncParams = Parameters<SyncConfig<BuilderWorkspaceFileRecord, string>['sync']>[0];
+type WorkspaceCollectionOptions = {
+  id: string;
+  schemaVersion: number;
+  sync: SyncConfig<BuilderWorkspaceFileRecord, string>;
+  [key: string]: unknown;
+};
+
+function fileRecord(path: string, content: string, revision: number): BuilderWorkspaceFileRecord {
+  return {
     path,
     content,
     encoding: 'utf8',
