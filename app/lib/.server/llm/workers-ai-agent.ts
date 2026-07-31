@@ -1,4 +1,4 @@
-import { createUIMessageStream, stepCountIs, streamText, type UIMessage, type UIMessageChunk } from 'ai';
+import { createUIMessageStream, streamText, type UIMessage, type UIMessageChunk } from 'ai';
 import { languageModelId, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { calculatePromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
 import { ROLE_SYSTEM_PROMPT, generalSystemPrompt } from 'ghostbuild-agent/prompts/system';
@@ -25,11 +25,11 @@ import type { BuilderWorkspaceRepository } from '~/agents/builder-workspace';
 type Messages = GhostbuildMessage[];
 // Server-owned validation can legitimately span the bounded production build
 // pipeline (install, typecheck, stack verification, build, and lint).
-const WORKERS_AI_CALL_TIMEOUT_MS = 25 * 60_000;
-// Keep room for a validation checkpoint, a repair, and deployment after the
-// model has had a bounded window to finish a multi-file implementation.
+const WORKERS_AI_CALL_TIMEOUT_MS = 10 * 60 * 60_000;
+// Give the model a bounded implementation window before requiring validation.
+// The overall turn is bounded by WORKERS_AI_CALL_TIMEOUT_MS rather than an
+// arbitrary tool-step count so legitimate validation repair loops can finish.
 const IMPLEMENTATION_TOOL_STEP_BUDGET = 7;
-const MAX_SERVER_TOOL_STEPS = 20;
 
 interface WorkersAiAgentOptions {
   env: Env;
@@ -122,25 +122,22 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     tools: asAiSdkTools(tools),
     toolChoice: toolSettings.toolChoice,
     activeTools: toolSettings.activeTools,
-    stopWhen: [
-      ({ steps }) => {
-        const completion = getValidatedBuildCompletion(
-          messages,
-          steps.flatMap(({ toolResults }) =>
-            toolResults.map(({ toolName, output }) => ({
-              toolName,
-              result: output,
-            })),
-          ),
-        );
-        if (!completion) {
-          return false;
-        }
-        currentValidatedBuildCompletion = completion;
-        return true;
-      },
-      stepCountIs(MAX_SERVER_TOOL_STEPS),
-    ],
+    stopWhen: ({ steps }) => {
+      const completion = getValidatedBuildCompletion(
+        messages,
+        steps.flatMap(({ toolResults }) =>
+          toolResults.map(({ toolName, output }) => ({
+            toolName,
+            result: output,
+          })),
+        ),
+      );
+      if (!completion) {
+        return false;
+      }
+      currentValidatedBuildCompletion = completion;
+      return true;
+    },
     prepareStep: ({ stepNumber, steps }) => {
       if (stepNumber === 0) {
         return undefined;
