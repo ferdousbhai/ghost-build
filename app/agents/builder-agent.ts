@@ -195,14 +195,8 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   async onStart(props?: BuilderAgentProps) {
-    this.ownerId = props?.ownerId ?? null;
-    this.userId = props?.userId ?? null;
-    this.transcriptBinding = this.ownerId
-      ? await loadBuilderTranscriptBinding(this.env.DB, { agentName: this.name, ownerId: this.ownerId })
-      : null;
-    if (this.transcriptBinding) {
-      const workspace = await this.initializeWorkspace(this.transcriptBinding);
-      this.updatePreviewForWorkspace(workspace.revision);
+    if (props) {
+      await this.initializeIdentity(props);
     }
   }
 
@@ -588,6 +582,22 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     };
   }
 
+  /**
+   * Internal Worker RPC used by the authenticated transcript reload endpoint.
+   * Direct namespace RPCs do not carry Agent connection props, so initialize
+   * the same owner-scoped context before reading the durable transcript.
+   */
+  async getTranscriptSnapshotForOwner(
+    identityValue: unknown,
+    ownerId: string,
+  ): ReturnType<BuilderAgent['getTranscriptSnapshot']> {
+    if (typeof ownerId !== 'string' || ownerId.length === 0 || ownerId.length > 512) {
+      throw new Response('Invalid transcript owner', { status: 400 });
+    }
+    await this.initializeIdentity({ ownerId, userId: ownerId });
+    return this.getTranscriptSnapshot(identityValue);
+  }
+
   @callable()
   async getTranscriptCheckpoint(identityValue: unknown): Promise<TranscriptCheckpoint | null> {
     const identity = this.requireTranscriptIdentity(identityValue);
@@ -627,6 +637,24 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
 
   private requireTranscriptIdentity(value: unknown, subchatIndex?: number): TranscriptIdentity {
     return requireBuilderTranscriptIdentity(value, this.transcriptBinding, subchatIndex);
+  }
+
+  private async initializeIdentity(props: BuilderAgentProps): Promise<void> {
+    if (this.ownerId && this.ownerId !== props.ownerId) {
+      throw new Response('Agent not found.', { status: 404 });
+    }
+    const transcriptBinding = await loadBuilderTranscriptBinding(this.env.DB, {
+      agentName: this.name,
+      ownerId: props.ownerId,
+    });
+    if (!transcriptBinding) {
+      throw new Response('Agent not found.', { status: 404 });
+    }
+    this.ownerId = props.ownerId;
+    this.userId = props.userId;
+    this.transcriptBinding = transcriptBinding;
+    const workspace = await this.initializeWorkspace(transcriptBinding);
+    this.updatePreviewForWorkspace(workspace.revision);
   }
 
   private async advanceTranscriptCheckpoint(identity: TranscriptIdentity): Promise<TranscriptCheckpoint> {

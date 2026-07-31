@@ -172,7 +172,7 @@ export async function storeChatAction({ request, env }: { request: Request; env:
         return Response.json({ error: 'Chat not found' }, { status: 404 });
       }
       const transcript = await requireChatTranscript(env.DB, { chatId: chat.id, subchatIndex });
-      const durableBeforeUpload = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript));
+      const durableBeforeUpload = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript), sessionId);
       if (!transcriptCheckpointsEqual(checkpoint, durableBeforeUpload.checkpoint)) {
         return transcriptConflictResponse(durableBeforeUpload.checkpoint);
       }
@@ -221,7 +221,7 @@ export async function storeChatAction({ request, env }: { request: Request; env:
         await putObjectAtKey(env, snapshotKey, snapshotBlob);
       }
 
-      const durableAfterUpload = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript));
+      const durableAfterUpload = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript), sessionId);
       if (!transcriptCheckpointsEqual(checkpoint, durableAfterUpload.checkpoint)) {
         return transcriptConflictResponse(durableAfterUpload.checkpoint);
       }
@@ -275,21 +275,27 @@ function transcriptConflictResponse(checkpoint?: TranscriptCheckpoint | null): R
 function getBuilderTranscriptSnapshot(
   env: Env,
   identity: TranscriptIdentity,
+  ownerId: string,
 ): ReturnType<BuilderAgent['getTranscriptSnapshot']> {
-  const stub = env.BuilderAgent.getByName(identity.agentName) as unknown as Pick<BuilderAgent, 'getTranscriptSnapshot'>;
-  return stub.getTranscriptSnapshot(identity);
+  const stub = env.BuilderAgent.getByName(identity.agentName) as unknown as Pick<
+    BuilderAgent,
+    'getTranscriptSnapshotForOwner'
+  >;
+  return stub.getTranscriptSnapshotForOwner(identity, ownerId);
 }
 
 async function getBuilderTranscriptSnapshotIfReady(
   env: Env,
   identity: TranscriptIdentity,
+  ownerId: string,
 ): Promise<Awaited<ReturnType<BuilderAgent['getTranscriptSnapshot']>> | null> {
   try {
-    return await getBuilderTranscriptSnapshot(env, identity);
+    return await getBuilderTranscriptSnapshot(env, identity, ownerId);
   } catch (error) {
     logger.warn('Durable transcript is unavailable; using generation-scoped materialized chat history', {
       agentName: identity.agentName,
       ...(error instanceof Response ? { status: error.status } : {}),
+      error: error instanceof Error ? error.message : String(error),
     });
     return null;
   }
@@ -333,7 +339,7 @@ export async function initialMessagesAction({ request, env }: { request: Request
       generation: transcript.generation,
       lastMessageRank: chat.last_message_rank ?? undefined,
     });
-    const durable = await getBuilderTranscriptSnapshotIfReady(env, transcriptIdentity(transcript));
+    const durable = await getBuilderTranscriptSnapshotIfReady(env, transcriptIdentity(transcript), session.user.id);
     if (
       durable?.checkpoint &&
       transcriptIdentitiesEqual(durable.checkpoint, transcriptIdentity(transcript)) &&

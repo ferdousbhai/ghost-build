@@ -640,6 +640,32 @@ describe('chat transcript reload', () => {
     expect(objectResponseMock).not.toHaveBeenCalled();
   });
 
+  test('initializes the Durable Object transcript with the authenticated owner', async () => {
+    const messages = [{ id: 'message-1', role: 'user', parts: [{ type: 'text', text: 'Hello' }] }];
+    const getTranscriptSnapshotForOwner = vi.fn(async () => checkpointWithMessages(checkpoint, messages));
+
+    const response = await initialMessagesAction({
+      request: initialMessagesRequest(),
+      env: {
+        DB: {},
+        APP_STORAGE: {},
+        BuilderAgent: {
+          getByName: () => ({ getTranscriptSnapshotForOwner }),
+        },
+      } as unknown as Env,
+    });
+
+    expect(response.status).toBe(200);
+    expect(getTranscriptSnapshotForOwner).toHaveBeenCalledWith(
+      {
+        agentName: checkpoint.agentName,
+        generation: checkpoint.generation,
+        subchatIndex: checkpoint.subchatIndex,
+      },
+      'session',
+    );
+  });
+
   test('uses the materialized R2 history to seed an empty transcript generation', async () => {
     getLatestStorageStateMock.mockResolvedValue({ storage_key: 'history-key' } as never);
     objectResponseMock.mockResolvedValue(new Response('compressed-history'));
@@ -662,7 +688,7 @@ describe('chat transcript reload', () => {
         APP_STORAGE: {},
         BuilderAgent: {
           getByName: () => ({
-            getTranscriptSnapshot: async () => {
+            getTranscriptSnapshotForOwner: async () => {
               // Durable Object RPC serializes a thrown Response into an opaque Error.
               throw new Error('#<Response>');
             },
@@ -760,7 +786,7 @@ function storageEnvWithSnapshots(
     APP_STORAGE: {},
     BuilderAgent: {
       getByName: () => ({
-        getTranscriptSnapshot: async () =>
+        getTranscriptSnapshotForOwner: async () =>
           snapshots[Math.min(call++, snapshots.length - 1)] ?? {
             checkpoint,
             messages: [],
