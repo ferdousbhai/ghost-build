@@ -12,6 +12,8 @@ export type BuildProgress = {
 
 export const BUILD_PROGRESS_DELAY_MS = 45_000;
 export const BUILD_PROGRESS_STALL_MS = 90_000;
+export const VALIDATION_PROGRESS_DELAY_MS = 2 * 60_000;
+export const VALIDATION_PROGRESS_STALL_MS = 8 * 60_000;
 
 export function getBuildProgress(args: {
   streamStatus: StreamStatus;
@@ -24,8 +26,10 @@ export function getBuildProgress(args: {
   }
 
   const phase = buildPhase(args);
-  const delayed = args.inactiveForMs >= BUILD_PROGRESS_DELAY_MS;
-  const stalled = args.inactiveForMs >= BUILD_PROGRESS_STALL_MS;
+  const delayMs = phase === 'validating' ? VALIDATION_PROGRESS_DELAY_MS : BUILD_PROGRESS_DELAY_MS;
+  const stallMs = phase === 'validating' ? VALIDATION_PROGRESS_STALL_MS : BUILD_PROGRESS_STALL_MS;
+  const delayed = args.inactiveForMs >= delayMs;
+  const stalled = args.inactiveForMs >= stallMs;
   const normalMessage = phaseMessage(phase);
   const activity = activityLabel(phase);
 

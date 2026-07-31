@@ -13,6 +13,7 @@ export async function installBuilderDependencies(args: {
   operationId: string;
   snapshot: Uint8Array<ArrayBuffer>;
   packageJson: string;
+  abortSignal?: AbortSignal;
 }): Promise<{ packageJson: string; pnpmLock: string; durationMs: number }> {
   if (!args.env.DeploymentSandbox) {
     throw new Error('Deployment Sandbox binding is unavailable.');
@@ -23,7 +24,9 @@ export async function installBuilderDependencies(args: {
     { transport: 'rpc', enableDefaultSession: false, normalizeId: true },
   );
   const startedAt = Date.now();
+  const cleanup = abortableSandboxCleanup(sandbox, args.abortSignal, 'dependency');
   try {
+    args.abortSignal?.throwIfAborted();
     await requireSuccess(
       await sandbox.exec(`rm -rf ${PROJECT_DIR} ${SOURCE_ARCHIVE}`, {
         timeout: 30_000,
@@ -69,7 +72,7 @@ export async function installBuilderDependencies(args: {
       durationMs: Date.now() - startedAt,
     };
   } finally {
-    await sandbox.destroy().catch((error) => console.error('Unable to destroy dependency sandbox', error));
+    await cleanup();
   }
 }
 
@@ -77,7 +80,9 @@ export async function validateBuilderProject(args: {
   env: Env;
   operationId: string;
   snapshot: Uint8Array<ArrayBuffer>;
+  abortSignal?: AbortSignal;
 }): Promise<{ durationMs: number }> {
+  args.abortSignal?.throwIfAborted();
   const project = await inspectDeploymentSnapshot(args.snapshot.buffer);
   const sourceSha256 = await sha256Bytes(args.snapshot);
   const deploymentId = await deterministicUuid(`validation:${args.operationId}`);
@@ -93,6 +98,7 @@ export async function validateBuilderProject(args: {
       expectedSourceSha256: sourceSha256,
       project,
       validationOnly: true,
+      abortSignal: args.abortSignal,
     });
     return { durationMs: Date.now() - startedAt };
   } finally {
@@ -103,6 +109,28 @@ export async function validateBuilderProject(args: {
       console.error('Unable to remove temporary Builder validation snapshot', error);
     }
   }
+}
+
+function abortableSandboxCleanup(
+  sandbox: Pick<ReturnType<typeof getSandbox>, 'destroy'>,
+  abortSignal: AbortSignal | undefined,
+  operation: string,
+): () => Promise<void> {
+  let cleanupPromise: Promise<void> | undefined;
+  const cleanup = () => {
+    cleanupPromise ??= sandbox
+      .destroy()
+      .catch((error) => console.error(`Unable to destroy ${operation} sandbox`, error));
+    return cleanupPromise;
+  };
+  const handleAbort = () => {
+    void cleanup();
+  };
+  abortSignal?.addEventListener('abort', handleAbort, { once: true });
+  return async () => {
+    abortSignal?.removeEventListener('abort', handleAbort);
+    await cleanup();
+  };
 }
 
 export function deterministicDeploymentId(value: string): Promise<string> {

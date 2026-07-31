@@ -67,7 +67,9 @@ export async function buildDeploymentSnapshot(args: {
   expectedSourceSha256: string;
   project: DeploymentProjectProfile;
   validationOnly?: boolean;
+  abortSignal?: AbortSignal;
 }): Promise<Uint8Array<ArrayBuffer>> {
+  args.abortSignal?.throwIfAborted();
   if (!args.env.DeploymentSandbox) {
     throw new DeploymentBuildError('Deployment Sandbox binding is unavailable.');
   }
@@ -88,8 +90,20 @@ export async function buildDeploymentSnapshot(args: {
     enableDefaultSession: false,
     normalizeId: true,
   });
+  let destroyPromise: Promise<void> | undefined;
+  const destroySandbox = () => {
+    destroyPromise ??= sandbox
+      .destroy()
+      .catch((error) => console.error('Unable to destroy deployment build sandbox', error));
+    return destroyPromise;
+  };
+  const handleAbort = () => {
+    void destroySandbox();
+  };
+  args.abortSignal?.addEventListener('abort', handleAbort, { once: true });
   let stage: BuildStage = 'sandbox initialization';
   try {
+    args.abortSignal?.throwIfAborted();
     await requireSuccess(
       await sandbox.exec(
         `rm -rf ${PROJECT_DIR} ${SOURCE_DIR} ${SOURCE_ARCHIVE} ${BUILD_ARCHIVE} ${PACKAGE_DIR} ` +
@@ -300,6 +314,7 @@ export async function buildDeploymentSnapshot(args: {
     );
     return new Uint8Array(build);
   } catch (error) {
+    args.abortSignal?.throwIfAborted();
     throw new DeploymentBuildError(
       `The isolated production build failed during ${stage}: ${deploymentBuildErrorDetail(error)}`.slice(
         0,
@@ -308,7 +323,8 @@ export async function buildDeploymentSnapshot(args: {
       { cause: error },
     );
   } finally {
-    await sandbox.destroy().catch((error) => console.error('Unable to destroy deployment build sandbox', error));
+    args.abortSignal?.removeEventListener('abort', handleAbort);
+    await destroySandbox();
   }
 }
 

@@ -149,6 +149,41 @@ describe('buildDeploymentSnapshot', () => {
     expect(sandbox.destroy).toHaveBeenCalledOnce();
   });
 
+  test('destroys an in-flight validation sandbox when the builder turn is cancelled', async () => {
+    const controller = new AbortController();
+    sandbox.exec.mockImplementation(async (command: string) => {
+      if (command === 'command -v node') {
+        return { success: true, exitCode: 0, stdout: '/usr/local/bin/node\n', stderr: '', command };
+      }
+      if (command === 'command -v pnpm') {
+        return { success: true, exitCode: 0, stdout: '/usr/local/bin/pnpm\n', stderr: '', command };
+      }
+      if (command.includes('rm -rf /workspace/project')) {
+        controller.abort(new DOMException('Builder turn cancelled.', 'AbortError'));
+        throw new Error('Sandbox RPC connection closed.');
+      }
+      return { success: true, exitCode: 0, stdout: '', stderr: '', command };
+    });
+    const env = {
+      DeploymentSandbox: {},
+      APP_STORAGE: { get: vi.fn(async () => ({ body: stream([1, 2, 3]) })) },
+    } as unknown as Env;
+
+    await expect(
+      buildDeploymentSnapshot({
+        env,
+        deploymentId: 'cancelled-validation',
+        snapshotKey: 'builder-validations/cancelled.zip',
+        expectedSourceSha256: 'a'.repeat(64),
+        project: appAgentWebProject,
+        validationOnly: true,
+        abortSignal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(sandbox.destroy).toHaveBeenCalledOnce();
+  });
+
   test('does not let a Worker project label bypass AppAgent protected entrypoint gates', async () => {
     const env = {
       DeploymentSandbox: {},

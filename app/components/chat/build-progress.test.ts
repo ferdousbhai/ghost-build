@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { BUILD_PROGRESS_DELAY_MS, BUILD_PROGRESS_STALL_MS, getBuildProgress } from './build-progress';
+import {
+  BUILD_PROGRESS_DELAY_MS,
+  BUILD_PROGRESS_STALL_MS,
+  getBuildProgress,
+  VALIDATION_PROGRESS_DELAY_MS,
+  VALIDATION_PROGRESS_STALL_MS,
+} from './build-progress';
 
 describe('getBuildProgress', () => {
   it('shows a meaningful phase instead of an unexplained loader', () => {
@@ -46,6 +52,33 @@ describe('getBuildProgress', () => {
     expect(stalled).toMatchObject({ delayed: true, stalled: true });
     expect(stalled?.message).toBe('This may be stuck — last progress: saving changes');
     expect(stalled?.message).not.toMatch(/(?:request|tool|call)[-_ ]?id/i);
+  });
+
+  it('allows the isolated full validation contract more time than ordinary model activity', () => {
+    expect(
+      getBuildProgress({
+        streamStatus: 'streaming',
+        isRecovering: false,
+        activeToolNames: ['validateProject'],
+        inactiveForMs: BUILD_PROGRESS_STALL_MS,
+      }),
+    ).toMatchObject({ phase: 'validating', delayed: false, stalled: false, message: 'Validating your project…' });
+    expect(
+      getBuildProgress({
+        streamStatus: 'streaming',
+        isRecovering: false,
+        activeToolNames: ['validateProject'],
+        inactiveForMs: VALIDATION_PROGRESS_DELAY_MS,
+      }),
+    ).toMatchObject({ delayed: true, stalled: false });
+    expect(
+      getBuildProgress({
+        streamStatus: 'streaming',
+        isRecovering: false,
+        activeToolNames: ['validateProject'],
+        inactiveForMs: VALIDATION_PROGRESS_STALL_MS,
+      }),
+    ).toMatchObject({ delayed: true, stalled: true });
   });
 
   it('prioritizes recovery and returns nothing after the turn ends', () => {

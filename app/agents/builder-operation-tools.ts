@@ -95,6 +95,7 @@ async function runDependencyInstall(
         operationId: `${args.context.agentName}:${args.toolCallId}`,
         snapshot: snapshot.bytes,
         packageJson: requestedPackageJson,
+        abortSignal: args.abortSignal,
       });
       durationMs = installed.durationMs;
       return [
@@ -136,6 +137,7 @@ async function runValidation(args: Parameters<typeof executeBuilderOperationTool
           env: args.context.env,
           operationId: `${args.context.agentName}:${args.toolCallId}:${snapshot.revision}`,
           snapshot: snapshot.bytes,
+          abortSignal: args.abortSignal,
         });
         args.workspace.recordSuccessfulValidation({
           revision: snapshot.revision,
