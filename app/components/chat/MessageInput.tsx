@@ -102,7 +102,7 @@ export const MessageInput = memo(function MessageInput({
       >
         <div
           className={classNames(
-            'ghost-message-input__editor relative has-[textarea:focus]:border-border-selected border border-bolt-elements-borderColor transition-all',
+            'ghost-message-input__editor relative border border-solid border-bolt-elements-borderColor transition-all has-[textarea:focus]:border-border-selected',
             chatStarted ? 'rounded-2xl' : 'rounded-xl',
           )}
         >
