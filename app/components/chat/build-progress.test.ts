@@ -83,6 +83,22 @@ describe('getBuildProgress', () => {
     ).toMatchObject({ delayed: true, stalled: true });
   });
 
+  it('prioritizes active validation over an overlapping completed mutation', () => {
+    expect(
+      getBuildProgress({
+        streamStatus: 'streaming',
+        isRecovering: false,
+        activeToolNames: ['writeFile', 'validateProject'],
+        inactiveForMs: BUILD_PROGRESS_STALL_MS,
+      }),
+    ).toMatchObject({
+      phase: 'validating',
+      message: 'Validating your project…',
+      delayed: false,
+      stalled: false,
+    });
+  });
+
   it('shows recovered tool activity, then recovery while waiting, and nothing after the turn ends', () => {
     expect(
       getBuildProgress({

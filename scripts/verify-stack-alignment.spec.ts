@@ -227,14 +227,14 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
     const validWorkflow = `
       import { buildApprovedDeploymentArtifact, publishApprovedDeploymentArtifact } from './deployment-executor';
       await step.do('claim, build, and persist approved deployment artifact',
-        { retries: { limit: 0, delay: '1 second' }, timeout: '30 minutes' }, buildApprovedDeploymentArtifact);
+        { retries: { limit: 0, delay: '1 second' }, timeout: '1 hour' }, buildApprovedDeploymentArtifact);
       await step.do('verify artifact, provision, publish, and clean up deployment',
         { retries: { limit: 0, delay: '1 second' }, timeout: '30 minutes' }, publishApprovedDeploymentArtifact);
     `;
     expect(findDeploymentWorkflowErrors(validWorkflow)).toEqual([]);
-    expect(
-      findDeploymentWorkflowErrors(validWorkflow.replaceAll("timeout: '30 minutes'", "timeout: '90 minutes'")),
-    ).toContain('deployment Workflow must give both durable steps an explicit 30-minute timeout.');
+    expect(findDeploymentWorkflowErrors(validWorkflow.replace("timeout: '1 hour'", "timeout: '30 minutes'"))).toContain(
+      'deployment Workflow must give build one hour and publish 30 minutes.',
+    );
     expect(findDeploymentWorkflowErrors(validWorkflow.replace('limit: 0', 'limit: 3'))).toContain(
       'deployment Workflow must disable automatic retries for both provider-sensitive steps.',
     );

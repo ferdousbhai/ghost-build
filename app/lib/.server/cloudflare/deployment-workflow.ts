@@ -11,8 +11,8 @@ type DeploymentWorkflowParams = {
 /**
  * Keeps user-approved production execution alive independently of the browser
  * request that triggered it. The durable R2 receipt separates the isolated
- * build from provider mutations so every step stays within this project's
- * conservative 30-minute operational budget. Retries remain disabled: the
+ * build from provider mutations so each step has an explicit envelope sized
+ * for its bounded commands. Retries remain disabled: the
  * execution generation isolates manual retries, while deterministic provider
  * names support reconciliation of calls that can be billable.
  */
@@ -21,7 +21,7 @@ export class DeploymentWorkflow extends WorkflowEntrypoint<Env, DeploymentWorkfl
     const params = requireWorkflowParams(event.payload);
     const receipt = await step.do(
       'claim, build, and persist approved deployment artifact',
-      { retries: { limit: 0, delay: '1 second' }, timeout: '30 minutes' },
+      { retries: { limit: 0, delay: '1 second' }, timeout: '1 hour' },
       () => buildApprovedDeploymentArtifact({ env: this.env, ...params }),
     );
     return step.do(

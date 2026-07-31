@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DeploymentPlan } from './deployment-plan';
+import { DEPLOYMENT_BUILD_ARTIFACT_LEASE_MS } from '~/lib/cloudflare/data/object-gc.server';
 import {
   APP_AGENT_SECURITY_BOUNDARY_SHA256,
   DEPLOYMENT_SECURITY_BASELINE_VERSION,
@@ -930,7 +931,11 @@ describe('deployment retry and concurrency', () => {
       }),
     ).resolves.toMatchObject({ id: 'deployment-1', status: 'awaiting_approval' });
 
-    expect(reconciliationBind).toHaveBeenCalledWith(2_200_000, 'user-1', 100_000);
+    expect(reconciliationBind).toHaveBeenCalledWith(
+      2_200_000,
+      'user-1',
+      2_200_000 - DEPLOYMENT_BUILD_ARTIFACT_LEASE_MS,
+    );
     expect(retryBind).toHaveBeenCalledWith(
       2_200_000,
       'deployment-1',

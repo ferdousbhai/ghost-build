@@ -43,10 +43,26 @@ const BUILD_TIMEOUT_MS = {
   archiveValidation: 30_000,
   download: 60_000,
 } as const;
-export const DEPLOYMENT_BUILD_STEP_BUDGET_MS = Object.values(BUILD_TIMEOUT_MS).reduce(
-  (total, timeout) => total + timeout,
-  0,
-);
+// Maximum aggregate command time for the longer App Agent web build path.
+// Repeated generated typechecks and build verifiers must each be counted.
+export const DEPLOYMENT_BUILD_STEP_BUDGET_MS =
+  BUILD_TIMEOUT_MS.workspaceReset +
+  BUILD_TIMEOUT_MS.workspacePolicy * 5 +
+  BUILD_TIMEOUT_MS.sourceDigest +
+  BUILD_TIMEOUT_MS.compressedSize +
+  BUILD_TIMEOUT_MS.extraction +
+  BUILD_TIMEOUT_MS.extractedSize +
+  BUILD_TIMEOUT_MS.sourceCopy * 2 +
+  BUILD_TIMEOUT_MS.packageValidation * 4 +
+  BUILD_TIMEOUT_MS.install +
+  BUILD_TIMEOUT_MS.typecheck * 3 +
+  BUILD_TIMEOUT_MS.stackVerification +
+  BUILD_TIMEOUT_MS.build * 3 +
+  BUILD_TIMEOUT_MS.lint +
+  BUILD_TIMEOUT_MS.packageCopy +
+  BUILD_TIMEOUT_MS.archive +
+  BUILD_TIMEOUT_MS.archiveValidation +
+  BUILD_TIMEOUT_MS.download;
 type BuildStage =
   | 'sandbox initialization'
   | 'source extraction'

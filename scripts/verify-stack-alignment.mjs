@@ -173,9 +173,8 @@ export function findDeploymentWorkflowErrors(content) {
       errors.push(`deployment Workflow must include the durable step "${stepName}".`);
     }
   }
-  const thirtyMinuteTimeouts = content.match(/timeout:\s*'30 minutes'/g)?.length ?? 0;
-  if (thirtyMinuteTimeouts !== requiredStepNames.length) {
-    errors.push('deployment Workflow must give both durable steps an explicit 30-minute timeout.');
+  if (!content.includes("timeout: '1 hour'") || !content.includes("timeout: '30 minutes'")) {
+    errors.push('deployment Workflow must give build one hour and publish 30 minutes.');
   }
   const disabledRetries = content.match(/retries:\s*\{\s*limit:\s*0\b/g)?.length ?? 0;
   if (disabledRetries !== requiredStepNames.length) {

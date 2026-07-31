@@ -39,7 +39,9 @@ type TurnToolCallGuard = (
   toolCallId: string,
   workspaceRevision: number,
 ) => string | undefined;
+type TurnStatefulToolCoordinator = <T>(toolName: GhostbuildToolName, operation: () => Promise<T>) => Promise<T>;
 type BuildLifecycle =
+  | { stage: 'needs-implementation' }
   | { stage: 'needs-validation' }
   | { stage: 'validation-failed' }
   | { stage: 'guest-validated' }
@@ -57,12 +59,14 @@ const AUTOMATIC_TOOLS: GhostbuildToolName[] = [
   'npmInstall',
   'validateProject',
 ];
+const IMPLEMENTATION_TOOLS = AUTOMATIC_TOOLS.filter((toolName) => toolName !== 'validateProject');
 
 export function createWorkersAiTools(
   workspace: BuilderWorkspaceRepository,
   operationContext: BuilderOperationContext,
 ): GhostbuildToolSet {
   const guardToolCall = createTurnToolCallGuard();
+  const coordinateStatefulTool = createTurnStatefulToolCoordinator();
   const tools: GhostbuildToolSet = {
     deploy: deployTool,
     edit: editTool,
@@ -75,10 +79,17 @@ export function createWorkersAiTools(
     writeFile: writeFileTool,
   };
   for (const toolName of ['view', 'listFiles', 'searchText', 'edit', 'writeFile'] as const) {
-    tools[toolName] = serverWorkspaceTool(toolName, tools[toolName], workspace, guardToolCall);
+    tools[toolName] = serverWorkspaceTool(toolName, tools[toolName], workspace, guardToolCall, coordinateStatefulTool);
   }
   for (const toolName of ['lookupDocs', 'npmInstall', 'validateProject', 'deploy'] as const) {
-    tools[toolName] = serverOperationTool(toolName, tools[toolName], workspace, operationContext, guardToolCall);
+    tools[toolName] = serverOperationTool(
+      toolName,
+      tools[toolName],
+      workspace,
+      operationContext,
+      guardToolCall,
+      coordinateStatefulTool,
+    );
   }
   return tools;
 }
@@ -89,34 +100,36 @@ function serverOperationTool(
   workspace: BuilderWorkspaceRepository,
   context: BuilderOperationContext,
   guardToolCall: TurnToolCallGuard,
+  coordinateStatefulTool: TurnStatefulToolCoordinator,
 ): Tool {
   return {
     ...definition,
-    execute: async (input, options) => {
-      const duplicate = guardToolCall(toolName, input, options.toolCallId, workspace.getState().revision);
-      if (duplicate) {
-        return toolFailure(duplicate);
-      }
-      try {
-        const { executeBuilderOperationTool } = await import('~/agents/builder-operation-tools');
-        return await executeBuilderOperationTool({
-          context,
-          workspace,
-          toolCallId: options.toolCallId,
-          toolName,
-          input,
-          abortSignal: options.abortSignal,
-        });
-      } catch (error) {
-        options.abortSignal?.throwIfAborted();
-        const message = error instanceof Error ? error.message : String(error);
-        return toolFailure(
-          message.length <= 4_000
-            ? message
-            : `${toolName} failed with an unusually large internal error retained in server logs.`,
-        );
-      }
-    },
+    execute: async (input, options) =>
+      coordinateStatefulTool(toolName, async () => {
+        const duplicate = guardToolCall(toolName, input, options.toolCallId, workspace.getState().revision);
+        if (duplicate) {
+          return toolFailure(duplicate);
+        }
+        try {
+          const { executeBuilderOperationTool } = await import('~/agents/builder-operation-tools');
+          return await executeBuilderOperationTool({
+            context,
+            workspace,
+            toolCallId: options.toolCallId,
+            toolName,
+            input,
+            abortSignal: options.abortSignal,
+          });
+        } catch (error) {
+          options.abortSignal?.throwIfAborted();
+          const message = error instanceof Error ? error.message : String(error);
+          return toolFailure(
+            message.length <= 4_000
+              ? message
+              : `${toolName} failed with an unusually large internal error retained in server logs.`,
+          );
+        }
+      }),
   };
 }
 
@@ -125,32 +138,34 @@ function serverWorkspaceTool(
   definition: Tool,
   workspace: BuilderWorkspaceRepository,
   guardToolCall: TurnToolCallGuard,
+  coordinateStatefulTool: TurnStatefulToolCoordinator,
 ): Tool {
   return {
     ...definition,
-    execute: async (input, options) => {
-      const duplicate = guardToolCall(toolName, input, options.toolCallId, workspace.getState().revision);
-      if (duplicate) {
-        return toolFailure(duplicate);
-      }
-      try {
-        return await executeBuilderWorkspaceTool({
-          workspace,
-          toolCallId: options.toolCallId,
-          toolName,
-          input,
-          abortSignal: options.abortSignal,
-        });
-      } catch (error) {
-        options.abortSignal?.throwIfAborted();
-        const message = error instanceof Error ? error.message : String(error);
-        return toolFailure(
-          message.length <= 4_000
-            ? message
-            : `${toolName} failed with an unusually large internal error retained in server logs.`,
-        );
-      }
-    },
+    execute: async (input, options) =>
+      coordinateStatefulTool(toolName, async () => {
+        const duplicate = guardToolCall(toolName, input, options.toolCallId, workspace.getState().revision);
+        if (duplicate) {
+          return toolFailure(duplicate);
+        }
+        try {
+          return await executeBuilderWorkspaceTool({
+            workspace,
+            toolCallId: options.toolCallId,
+            toolName,
+            input,
+            abortSignal: options.abortSignal,
+          });
+        } catch (error) {
+          options.abortSignal?.throwIfAborted();
+          const message = error instanceof Error ? error.message : String(error);
+          return toolFailure(
+            message.length <= 4_000
+              ? message
+              : `${toolName} failed with an unusually large internal error retained in server logs.`,
+          );
+        }
+      }),
   };
 }
 
@@ -168,6 +183,31 @@ export function createTurnToolCallGuard(): TurnToolCallGuard {
     }
     return 'This exact tool call already ran in the current turn. Use its result or try a different approach.';
   };
+}
+
+export function createTurnStatefulToolCoordinator(): TurnStatefulToolCoordinator {
+  let tail = Promise.resolve();
+  return (toolName, operation) => {
+    if (!isStatefulTool(toolName)) {
+      return operation();
+    }
+    const scheduled = tail.then(operation, operation);
+    tail = scheduled.then(
+      () => undefined,
+      () => undefined,
+    );
+    return scheduled;
+  };
+}
+
+function isStatefulTool(toolName: GhostbuildToolName): boolean {
+  return (
+    toolName === 'edit' ||
+    toolName === 'writeFile' ||
+    toolName === 'npmInstall' ||
+    toolName === 'validateProject' ||
+    toolName === 'deploy'
+  );
 }
 
 function stableJson(value: unknown): string {
@@ -236,6 +276,11 @@ export function getWorkersAiToolSettings(
 
 function currentTurnLifecycleToolSettings(lifecycle: BuildLifecycle): AgentToolSettings {
   switch (lifecycle.stage) {
+    case 'needs-implementation':
+      return {
+        activeTools: [...IMPLEMENTATION_TOOLS],
+        toolChoice: 'required',
+      };
     case 'needs-validation':
     case 'validation-failed':
       return {
@@ -253,10 +298,15 @@ function currentTurnLifecycleToolSettings(lifecycle: BuildLifecycle): AgentToolS
 }
 
 function analyzeBuildLifecycle(toolResults: ReadonlyArray<ToolResultEvent>): BuildLifecycle | undefined {
-  const mutationIndex = toolResults.findLastIndex(isMutationResult);
-  if (mutationIndex === -1) {
+  const implementationIndex = toolResults.findLastIndex(isImplementationMutationResult);
+  const dependencyIndex = toolResults.findLastIndex(isDependencyMutationResult);
+  if (implementationIndex === -1 && dependencyIndex === -1) {
     return undefined;
   }
+  if (implementationIndex === -1) {
+    return { stage: 'needs-implementation' };
+  }
+  const mutationIndex = Math.max(implementationIndex, dependencyIndex);
   const lastValidationIndex = toolResults.findLastIndex(
     ({ toolName }, index) => toolName === 'validateProject' && index > mutationIndex,
   );
@@ -288,6 +338,11 @@ function analyzeBuildLifecycle(toolResults: ReadonlyArray<ToolResultEvent>): Bui
 
 function lifecycleToolSettings(lifecycle: BuildLifecycle): AgentToolSettings {
   switch (lifecycle.stage) {
+    case 'needs-implementation':
+      return {
+        activeTools: [...IMPLEMENTATION_TOOLS],
+        toolChoice: 'required',
+      };
     case 'needs-validation':
       return requiredToolSettings('validateProject');
     case 'validation-failed':
@@ -373,8 +428,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isMutationResult(result: { toolName: string; result?: unknown }): boolean {
+function isImplementationMutationResult(result: { toolName: string; result?: unknown }): boolean {
   return (result.toolName === 'writeFile' || result.toolName === 'edit') && toolResultSucceeded(result.result);
+}
+
+function isDependencyMutationResult(result: { toolName: string; result?: unknown }): boolean {
+  return result.toolName === 'npmInstall' && toolResultSucceeded(result.result);
 }
 
 function isSuccessfulValidationResult(result: unknown): boolean {

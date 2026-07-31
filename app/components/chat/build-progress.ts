@@ -12,8 +12,10 @@ export type BuildProgress = {
 
 export const BUILD_PROGRESS_DELAY_MS = 45_000;
 export const BUILD_PROGRESS_STALL_MS = 90_000;
-export const VALIDATION_PROGRESS_DELAY_MS = 2 * 60_000;
-export const VALIDATION_PROGRESS_STALL_MS = 8 * 60_000;
+// The server's validation-only web-app contract has a 38.5-minute aggregate
+// command budget; leave room for sandbox setup, storage, and RPC overhead.
+export const VALIDATION_PROGRESS_DELAY_MS = 8 * 60_000;
+export const VALIDATION_PROGRESS_STALL_MS = 45 * 60_000;
 export const RECOVERY_PROGRESS_DELAY_MS = 5 * 60_000;
 export const RECOVERY_PROGRESS_STALL_MS = 30 * 60_000;
 
@@ -65,14 +67,14 @@ function buildPhase(args: {
   if (args.activeToolNames.includes('npmInstall')) {
     return 'installing';
   }
-  if (args.activeToolNames.some((name) => name === 'writeFile' || name === 'edit')) {
-    return 'saving';
-  }
   if (args.activeToolNames.includes('validateProject')) {
     return 'validating';
   }
   if (args.activeToolNames.includes('deploy')) {
     return 'checking';
+  }
+  if (args.activeToolNames.some((name) => name === 'writeFile' || name === 'edit')) {
+    return 'saving';
   }
   if (args.isRecovering) {
     return 'recovering';

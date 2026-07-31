@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { GhostbuildMessage, GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
-import { createTurnToolCallGuard, getValidatedBuildCompletion, getWorkersAiToolSettings } from './workers-ai-tools';
+import {
+  createTurnStatefulToolCoordinator,
+  createTurnToolCallGuard,
+  getValidatedBuildCompletion,
+  getWorkersAiToolSettings,
+} from './workers-ai-tools';
 
 const AUTOMATIC_TOOLS = [
   'view',
@@ -15,6 +20,39 @@ const AUTOMATIC_TOOLS = [
 ];
 
 describe('Workers AI tool lifecycle', () => {
+  it('serializes writes and validation in model tool-call order', async () => {
+    const coordinate = createTurnStatefulToolCoordinator();
+    let finishWrite: (() => void) | undefined;
+    const events: string[] = [];
+    const write = coordinate('writeFile', async () => {
+      events.push('write-start');
+      await new Promise<void>((resolve) => {
+        finishWrite = resolve;
+      });
+      events.push('write-end');
+    });
+    const validation = coordinate('validateProject', async () => {
+      events.push('validate-start');
+    });
+
+    await Promise.resolve();
+    expect(events).toEqual(['write-start']);
+    finishWrite?.();
+    await Promise.all([write, validation]);
+    expect(events).toEqual(['write-start', 'write-end', 'validate-start']);
+  });
+
+  it('does not let a failed stateful tool block the remaining turn', async () => {
+    const coordinate = createTurnStatefulToolCoordinator();
+    const failedWrite = coordinate('writeFile', async () => {
+      throw new Error('write failed');
+    });
+    const validation = coordinate('validateProject', async () => 'validated');
+
+    await expect(failedWrite).rejects.toThrow('write failed');
+    await expect(validation).resolves.toBe('validated');
+  });
+
   it('rejects duplicate calls in one turn while allowing durable replay and changed arguments', () => {
     const guard = createTurnToolCallGuard();
     expect(guard('view', { path: '/home/project/package.json', view_range: [1, 20] }, 'call-1', 1)).toBeUndefined();
@@ -56,15 +94,15 @@ describe('Workers AI tool lifecycle', () => {
     });
   });
 
-  it('lets implementation continue after dependency setup instead of forcing premature validation', () => {
+  it('requires implementation work after dependency setup instead of forcing premature validation', () => {
     expect(
       getWorkersAiToolSettings([
         user('Build a Three.js game'),
         toolResult('npmInstall', { packages: 'three @types/three' }, toolSuccess('installed')),
       ]),
     ).toEqual({
-      activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'auto',
+      activeTools: AUTOMATIC_TOOLS.filter((toolName) => toolName !== 'validateProject'),
+      toolChoice: 'required',
     });
   });
 

@@ -9,10 +9,10 @@ import { prepareReleaseThumbnailObjectStatement } from './thumbnail-quota.server
 
 export const OBJECT_GC_GRACE_PERIOD_MS = 5 * 60 * 1000;
 export const OBJECT_GC_SWEEP_LIMIT = 8;
-// Deployment Workflow steps are bounded to 30 minutes. Preserve a live build
-// across that full window plus a five-minute scheduling/commit grace period,
+// The deployment build Workflow step is bounded to one hour. Preserve a live
+// build across that full window plus a five-minute scheduling/commit grace period,
 // then let the durable candidate collect it even if the Workflow hard-stops.
-export const DEPLOYMENT_BUILD_ARTIFACT_LEASE_MS = 35 * 60 * 1000;
+export const DEPLOYMENT_BUILD_ARTIFACT_LEASE_MS = 65 * 60 * 1000;
 
 const logger = createScopedLogger('CloudflareObjectGc');
 

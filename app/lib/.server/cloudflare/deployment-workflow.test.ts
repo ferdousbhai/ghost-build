@@ -50,7 +50,7 @@ describe('DeploymentWorkflow durable boundaries', () => {
 
     expect(step.do).toHaveBeenCalledTimes(2);
     expect(vi.mocked(step.do).mock.calls.map((call) => call[1])).toEqual([
-      { retries: { limit: 0, delay: '1 second' }, timeout: '30 minutes' },
+      { retries: { limit: 0, delay: '1 second' }, timeout: '1 hour' },
       { retries: { limit: 0, delay: '1 second' }, timeout: '30 minutes' },
     ]);
     expect(mocks.publish).toHaveBeenCalledWith(

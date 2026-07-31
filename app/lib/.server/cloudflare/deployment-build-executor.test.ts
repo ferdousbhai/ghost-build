@@ -336,8 +336,9 @@ describe('buildDeploymentSnapshot', () => {
     expect(sandbox.destroy).toHaveBeenCalledOnce();
   });
 
-  test('keeps the aggregate explicit build budget below 25 minutes of a 30-minute Workflow step', () => {
-    expect(DEPLOYMENT_BUILD_STEP_BUDGET_MS).toBeLessThanOrEqual(25 * 60 * 1000);
+  test('accounts for the repeated web build stages within the one-hour Workflow step', () => {
+    expect(DEPLOYMENT_BUILD_STEP_BUDGET_MS).toBe(42.5 * 60 * 1000);
+    expect(DEPLOYMENT_BUILD_STEP_BUDGET_MS).toBeLessThan(60 * 60 * 1000);
   });
 
   test('streams normal Worker build output through the bounded command runner', async () => {
