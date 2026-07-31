@@ -33,8 +33,9 @@ describe('SubchatBar', () => {
       currentSubchatIndex: 0,
     });
 
-    expect(markup).toContain('Current chat');
+    expect(markup).not.toContain('Current chat');
     expect(markup).toContain('Build a polished Pocket Poll app');
+    expect(markup).toContain('aria-label="Rename current chat: Build a polished Pocket Poll app"');
     expect(markup).toContain('aria-label="Start a new chat"');
     expect(markup).not.toContain('aria-label="Previous chat"');
     expect(markup).not.toContain('aria-label="Next chat"');
@@ -50,6 +51,7 @@ describe('SubchatBar', () => {
     expect(markup).toContain('aria-label="Previous chat"');
     expect(markup).toContain('aria-label="Next chat"');
     expect(markup).toContain('aria-label="Switch chat. Chat 2 of 2: Add live voting"');
+    expect(markup).toContain('aria-label="Rename current chat: Add live voting"');
     expect(markup).toContain('Chat 2 of 2');
   });
 
@@ -140,7 +142,7 @@ describe('SubchatBar', () => {
     });
 
     act(() => {
-      document.querySelector<HTMLButtonElement>('button[aria-label="Rename current chat"]')?.click();
+      document.querySelector<HTMLButtonElement>('button[aria-label="Rename current chat: Pocket Poll"]')?.click();
     });
     const input = document.querySelector<HTMLInputElement>('input[aria-label="Chat title"]');
     expect(input?.value).toBe('Pocket Poll');

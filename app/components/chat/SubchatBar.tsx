@@ -6,7 +6,6 @@ import {
   CheckIcon,
   ChevronDownIcon,
   PlusIcon,
-  Pencil1Icon,
   ResetIcon,
 } from '@radix-ui/react-icons';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -89,7 +88,27 @@ export function SubchatBar({
   const visibleSubchatOptions = [...subchatOptions].reverse();
   const currentSubchat = subchatOptions.find((option) => option.value === currentSubchatIndex);
   const currentSubchatLabel = currentSubchat?.label ?? fallbackSubchatLabel;
-  const chatPositionLabel = hasMultipleSubchats ? `Chat ${currentSubchatIndex + 1} of ${subchatCount}` : 'Current chat';
+  const chatPositionLabel = `Chat ${currentSubchatIndex + 1} of ${subchatCount}`;
+  const openRenameModal = () => {
+    setRenameValue(currentSubchatLabel);
+    setIsRenameModalOpen(true);
+  };
+  const chatTitle = sessionId ? (
+    <button
+      type="button"
+      className="min-w-0 grow truncate rounded-md text-left text-sm font-medium text-content-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
+      title={`${currentSubchatLabel} — click to rename`}
+      aria-label={`Rename current chat: ${currentSubchatLabel}`}
+      disabled={!isSubchatLoaded || isRenaming}
+      onClick={openRenameModal}
+    >
+      {currentSubchatLabel}
+    </button>
+  ) : (
+    <span className="min-w-0 grow truncate text-sm font-medium text-content-primary" title={currentSubchatLabel}>
+      {currentSubchatLabel}
+    </span>
+  );
 
   return (
     <div className="sticky top-0 z-[2] mx-auto mb-5 w-full max-w-chat px-3 pt-4 sm:px-0">
@@ -186,24 +205,20 @@ export function SubchatBar({
         <div className="min-w-0 grow">
           {hasMultipleSubchats ? (
             <DropdownMenu.Root>
-              <DropdownMenu.Trigger asChild disabled={interactionsDisabled}>
-                <button
-                  type="button"
-                  className="group flex min-h-11 w-full min-w-0 items-center gap-3 rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3 text-left text-content-primary outline-none transition-colors hover:bg-bolt-elements-background-depth-2 focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:opacity-50"
-                  aria-label={`Switch chat. ${chatPositionLabel}: ${currentSubchatLabel}`}
-                >
-                  <ChatBubbleIcon className="size-4 shrink-0 text-content-secondary" />
-                  <span className="min-w-0 grow">
-                    <span className="block whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.12em] text-content-secondary">
-                      {chatPositionLabel}
-                    </span>
-                    <span className="block truncate text-sm font-medium" title={currentSubchatLabel}>
-                      {currentSubchatLabel}
-                    </span>
-                  </span>
-                  <ChevronDownIcon className="size-4 shrink-0 text-content-secondary transition-transform group-data-[state=open]:rotate-180" />
-                </button>
-              </DropdownMenu.Trigger>
+              <div className="flex min-h-11 w-full min-w-0 items-center gap-3 rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3">
+                <ChatBubbleIcon className="size-4 shrink-0 text-content-secondary" />
+                {chatTitle}
+                <DropdownMenu.Trigger asChild disabled={interactionsDisabled}>
+                  <button
+                    type="button"
+                    className="group flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-content-secondary outline-none transition-colors hover:bg-bolt-elements-background-depth-2 focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label={`Switch chat. ${chatPositionLabel}: ${currentSubchatLabel}`}
+                  >
+                    <span>{chatPositionLabel}</span>
+                    <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+                  </button>
+                </DropdownMenu.Trigger>
+              </div>
               <DropdownMenu.Portal>
                 <DropdownMenu.Content
                   align="start"
@@ -254,14 +269,7 @@ export function SubchatBar({
           ) : (
             <div className="flex min-h-11 min-w-0 items-center gap-3 px-2">
               <ChatBubbleIcon className="size-4 shrink-0 text-content-secondary" />
-              <span className="min-w-0 grow">
-                <span className="block whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.12em] text-content-secondary">
-                  {chatPositionLabel}
-                </span>
-                <span className="block truncate text-sm font-medium text-content-primary" title={currentSubchatLabel}>
-                  {currentSubchatLabel}
-                </span>
-              </span>
+              {chatTitle}
             </div>
           )}
         </div>
@@ -269,22 +277,6 @@ export function SubchatBar({
         {!isSubchatLoaded && <Spinner />}
 
         <div className="flex shrink-0 items-center">
-          {sessionId && (
-            <Button
-              size="sm"
-              variant="neutral"
-              className="mr-2 !size-11 !min-h-11 !px-0"
-              icon={<Pencil1Icon />}
-              inline
-              aria-label="Rename current chat"
-              tip="Rename current chat"
-              disabled={!isSubchatLoaded || isRenaming}
-              onClick={() => {
-                setRenameValue(currentSubchatLabel);
-                setIsRenameModalOpen(true);
-              }}
-            />
-          )}
           {canCreateSubchat ? (
             <Button
               size="sm"
