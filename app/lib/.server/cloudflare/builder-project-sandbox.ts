@@ -2,7 +2,8 @@ import { getSandbox, type ExecResult } from '@cloudflare/sandbox';
 import type { DeploymentSandbox } from './deployment-sandbox';
 import { buildDeploymentSnapshot, runBoundedDeploymentBuildCommand } from './deployment-build-executor';
 import { inspectDeploymentSnapshot } from './deployment-snapshot';
-import { destroySandboxWithRetries, sandboxExec } from './sandbox-lifecycle';
+import { trackSandboxLifecycle, type TrackedSandboxLifecycle } from './sandbox-cleanup';
+import { sandboxExec } from './sandbox-lifecycle';
 import { cancelObjectGcCandidate, queueObjectGcCandidate } from '~/lib/cloudflare/data/object-gc.server';
 
 const PROJECT_DIR = '/workspace/project';
@@ -19,13 +20,20 @@ export async function installBuilderDependencies(args: {
   if (!args.env.DeploymentSandbox) {
     throw new Error('Deployment Sandbox binding is unavailable.');
   }
+  const dependencySandboxId = await sandboxId('dependencies', args.operationId);
   const sandbox = getSandbox(
     args.env.DeploymentSandbox as DurableObjectNamespace<DeploymentSandbox>,
-    await sandboxId('dependencies', args.operationId),
+    dependencySandboxId,
     { transport: 'rpc', enableDefaultSession: false, normalizeId: true },
   );
+  const lifecycle = await trackSandboxLifecycle({
+    db: args.env.DB,
+    sandbox,
+    sandboxId: dependencySandboxId,
+    operation: 'dependency sandbox',
+  });
   const startedAt = Date.now();
-  const cleanup = abortableSandboxCleanup(sandbox, args.abortSignal, 'dependency');
+  const cleanup = abortableSandboxCleanup(lifecycle, args.abortSignal);
   try {
     args.abortSignal?.throwIfAborted();
     await requireSuccess(
@@ -114,13 +122,12 @@ export async function validateBuilderProject(args: {
 }
 
 function abortableSandboxCleanup(
-  sandbox: Pick<ReturnType<typeof getSandbox>, 'destroy'>,
+  lifecycle: TrackedSandboxLifecycle,
   abortSignal: AbortSignal | undefined,
-  operation: string,
 ): () => Promise<void> {
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = () => {
-    cleanupPromise ??= destroySandboxWithRetries(sandbox, `${operation} sandbox`);
+    cleanupPromise ??= lifecycle.destroy();
     return cleanupPromise;
   };
   const handleAbort = () => {

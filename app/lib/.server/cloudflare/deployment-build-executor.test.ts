@@ -11,6 +11,8 @@ const sandbox = vi.hoisted(() => ({
   readFileStream: vi.fn(),
   destroy: vi.fn(),
 }));
+const sandboxLifecycle = vi.hoisted(() => ({ destroy: vi.fn(), stopHeartbeat: vi.fn() }));
+const trackSandboxLifecycle = vi.hoisted(() => vi.fn());
 
 vi.mock('@cloudflare/sandbox', () => ({
   getSandbox: vi.fn(() => sandbox),
@@ -24,6 +26,7 @@ vi.mock('@cloudflare/sandbox', () => ({
     }
   },
 }));
+vi.mock('./sandbox-cleanup', () => ({ trackSandboxLifecycle }));
 
 import {
   buildDeploymentSnapshot,
@@ -70,6 +73,8 @@ describe('buildDeploymentSnapshot', () => {
     sandbox.killAllProcesses.mockResolvedValue(0);
     sandbox.readFileStream.mockResolvedValue(stream([9, 8, 7]));
     sandbox.destroy.mockResolvedValue(undefined);
+    sandboxLifecycle.destroy.mockImplementation(() => sandbox.destroy());
+    trackSandboxLifecycle.mockResolvedValue(sandboxLifecycle);
   });
 
   test('rebuilds an R2 snapshot without passing a Cloudflare credential into the sandbox', async () => {

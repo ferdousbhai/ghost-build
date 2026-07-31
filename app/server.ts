@@ -26,6 +26,10 @@ import { refreshDeploymentSecurityInventoryBestEffort } from './lib/.server/clou
 import { reconcileChatBackupQuotaBestEffort } from './lib/cloudflare/data/chat-backup-quota.server';
 import { reconcileThumbnailQuotaBestEffort } from './lib/cloudflare/data/thumbnail-quota.server';
 import { cleanupExpiredBuilderPreviewsBestEffort } from './lib/.server/cloudflare/builder-preview-repository';
+import {
+  SANDBOX_CLEANUP_CRON,
+  sweepSandboxCleanupCandidatesBestEffort,
+} from './lib/.server/cloudflare/sandbox-cleanup';
 import { matchPreviewRequest, previewAction } from './server-handlers/previews';
 
 export { BuilderAgent } from './agents/builder-agent';
@@ -183,8 +187,12 @@ export default {
     }
     return withApplicationSecurityHeaders(await routeApplicationRequest(request, env, ctx), pathname);
   },
-  scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runScheduledMaintenance(env));
+  scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(
+      controller.cron === SANDBOX_CLEANUP_CRON
+        ? sweepSandboxCleanupCandidatesBestEffort(env)
+        : runScheduledMaintenance(env),
+    );
   },
 } satisfies ExportedHandler<Env>;
 

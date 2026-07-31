@@ -7,6 +7,8 @@ const SANDBOX_DESTROY_RETRY_DELAYS_MS = [250, 1_000] as const;
 type SandboxExecutor = Pick<ISandbox, 'exec'>;
 type SandboxDestroyer = { destroy(): Promise<unknown> };
 
+type SandboxDestroyResult = { destroyed: true } | { destroyed: false; error: unknown };
+
 /**
  * The Sandbox command timeout is enforced inside the container. Bound the RPC
  * itself as well so a reset or a saturated container application cannot leave a
@@ -29,7 +31,10 @@ export function withSandboxRpcTimeout<T>(request: Promise<T>, commandTimeoutMs: 
 }
 
 /** Retry cleanup across transient Durable Object resets before leaving capacity occupied. */
-export async function destroySandboxWithRetries(sandbox: SandboxDestroyer, operation: string): Promise<void> {
+export async function destroySandboxWithRetries(
+  sandbox: SandboxDestroyer,
+  operation: string,
+): Promise<SandboxDestroyResult> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= SANDBOX_DESTROY_RETRY_DELAYS_MS.length; attempt += 1) {
     if (attempt > 0) {
@@ -41,12 +46,13 @@ export async function destroySandboxWithRetries(sandbox: SandboxDestroyer, opera
         SANDBOX_DESTROY_TIMEOUT_MS,
         `Sandbox destroy timed out after ${SANDBOX_DESTROY_TIMEOUT_MS} ms.`,
       );
-      return;
+      return { destroyed: true };
     } catch (error) {
       lastError = error;
     }
   }
   console.error(`Unable to destroy ${operation} after cleanup retries`, lastError);
+  return { destroyed: false, error: lastError };
 }
 
 async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> {

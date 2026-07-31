@@ -977,13 +977,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       const readyAt = Date.now();
       const expiresAt = readyAt + BUILDER_PREVIEW_TTL_MS;
       await markPreviewReady(this.env.DB, job.previewId, readyAt, expiresAt);
-      await this.env.DB.prepare(
-        `UPDATE builder_preview_build_admissions
-         SET expires_at = ?
-         WHERE preview_id = ? AND status = 'active'`,
-      )
-        .bind(expiresAt, job.previewId)
-        .run();
       await this.env.APP_STORAGE.delete(job.snapshotKey).catch(() => undefined);
       const success: BuilderPreviewSuccess = {
         id: job.previewId,

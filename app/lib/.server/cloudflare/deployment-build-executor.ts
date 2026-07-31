@@ -9,7 +9,8 @@ import {
 import type { DeploymentSandbox } from './deployment-sandbox';
 import { APP_AGENT_PROTECTED_FILE_SHA256 } from './deployment-security-baseline';
 import type { DeploymentProjectProfile } from './deployment-snapshot';
-import { destroySandboxWithRetries, sandboxExec, withSandboxRpcTimeout } from './sandbox-lifecycle';
+import { trackSandboxLifecycle } from './sandbox-cleanup';
+import { sandboxExec, withSandboxRpcTimeout } from './sandbox-lifecycle';
 
 const PROJECT_DIR = '/workspace/project';
 const SOURCE_DIR = '/workspace/source';
@@ -107,9 +108,15 @@ export async function buildDeploymentSnapshot(args: {
     enableDefaultSession: false,
     normalizeId: true,
   });
+  const lifecycle = await trackSandboxLifecycle({
+    db: args.env.DB,
+    sandbox,
+    sandboxId,
+    operation: 'deployment build sandbox',
+  });
   let destroyPromise: Promise<void> | undefined;
   const destroySandbox = () => {
-    destroyPromise ??= destroySandboxWithRetries(sandbox, 'deployment build sandbox');
+    destroyPromise ??= lifecycle.destroy();
     return destroyPromise;
   };
   const handleAbort = () => {

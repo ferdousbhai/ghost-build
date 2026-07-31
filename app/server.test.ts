@@ -14,6 +14,7 @@ const pruneCloudflareAuthDataBestEffort = vi.hoisted(() => vi.fn());
 const refreshDeploymentSecurityInventoryBestEffort = vi.hoisted(() => vi.fn());
 const reconcileChatBackupQuotaBestEffort = vi.hoisted(() => vi.fn());
 const reconcileThumbnailQuotaBestEffort = vi.hoisted(() => vi.fn());
+const sweepSandboxCleanupCandidatesBestEffort = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-start/server-entry', () => ({ default: { fetch: tanstackFetch } }));
 vi.mock('agents', () => ({ routeAgentRequest }));
@@ -57,6 +58,10 @@ vi.mock('./lib/.server/cloudflare/deployment-security-inventory', () => ({
 vi.mock('./lib/.server/cloudflare/builder-preview-repository', () => ({
   cleanupExpiredBuilderPreviewsBestEffort,
 }));
+vi.mock('./lib/.server/cloudflare/sandbox-cleanup', () => ({
+  SANDBOX_CLEANUP_CRON: '* * * * *',
+  sweepSandboxCleanupCandidatesBestEffort,
+}));
 vi.mock('./server-handlers/previews', () => ({
   matchPreviewRequest: () => null,
   previewAction: vi.fn(),
@@ -89,6 +94,8 @@ describe('server Agent routing boundary', () => {
     pruneCloudflareAuthDataBestEffort.mockReset().mockResolvedValue(undefined);
     refreshDeploymentSecurityInventoryBestEffort.mockReset().mockResolvedValue(undefined);
     reconcileChatBackupQuotaBestEffort.mockReset().mockResolvedValue(undefined);
+    reconcileThumbnailQuotaBestEffort.mockReset().mockResolvedValue(undefined);
+    sweepSandboxCleanupCandidatesBestEffort.mockReset().mockResolvedValue(undefined);
   });
 
   it.each([
@@ -283,7 +290,9 @@ describe('server Agent routing boundary', () => {
       calls.push('deployment-security-inventory');
     });
 
-    server.scheduled({} as ScheduledController, env, { waitUntil } as unknown as ExecutionContext);
+    server.scheduled({ cron: '*/15 * * * *' } as ScheduledController, env, {
+      waitUntil,
+    } as unknown as ExecutionContext);
 
     expect(waitUntil).toHaveBeenCalledOnce();
     await waitUntil.mock.calls[0][0];
@@ -301,5 +310,19 @@ describe('server Agent routing boundary', () => {
     expect(reconcileChatBackupQuotaBestEffort).toHaveBeenCalledWith(env);
     expect(reconcileThumbnailQuotaBestEffort).toHaveBeenCalledWith(env);
     expect(cleanupExpiredBuilderPreviewsBestEffort).toHaveBeenCalledWith(env);
+  });
+
+  it('runs only the sandbox outbox on the per-minute cleanup schedule', async () => {
+    const waitUntil = vi.fn();
+    const env = { DB: {} as D1Database, DeploymentSandbox: {} } as Env;
+
+    server.scheduled({ cron: '* * * * *' } as ScheduledController, env, {
+      waitUntil,
+    } as unknown as ExecutionContext);
+
+    expect(waitUntil).toHaveBeenCalledOnce();
+    await waitUntil.mock.calls[0][0];
+    expect(sweepSandboxCleanupCandidatesBestEffort).toHaveBeenCalledWith(env);
+    expect(drainDeferredDataGcBestEffort).not.toHaveBeenCalled();
   });
 });

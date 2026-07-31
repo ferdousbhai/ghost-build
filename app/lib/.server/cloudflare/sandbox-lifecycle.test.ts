@@ -28,7 +28,7 @@ describe('sandbox lifecycle', () => {
     const cleanup = destroySandboxWithRetries({ destroy } as never, 'test sandbox');
 
     await vi.advanceTimersByTimeAsync(1_250);
-    await cleanup;
+    await expect(cleanup).resolves.toEqual({ destroyed: true });
 
     expect(destroy).toHaveBeenCalledTimes(3);
   });
@@ -41,7 +41,7 @@ describe('sandbox lifecycle', () => {
     const cleanup = destroySandboxWithRetries({ destroy } as never, 'test sandbox');
 
     await vi.advanceTimersByTimeAsync(1_250);
-    await cleanup;
+    await expect(cleanup).resolves.toEqual({ destroyed: false, error });
 
     expect(destroy).toHaveBeenCalledTimes(3);
     expect(consoleError).toHaveBeenCalledWith('Unable to destroy test sandbox after cleanup retries', error);

@@ -12,9 +12,13 @@ const sandbox = vi.hoisted(() => ({
 const mocks = vi.hoisted(() => ({
   getSandbox: vi.fn((_namespace: unknown, _id: string, _options?: unknown) => sandbox),
 }));
+const sandboxLifecycle = vi.hoisted(() => ({ destroy: vi.fn(), stopHeartbeat: vi.fn() }));
+const trackSandboxLifecycle = vi.hoisted(() => vi.fn());
 vi.mock('@cloudflare/sandbox', () => ({ getSandbox: mocks.getSandbox }));
+vi.mock('./sandbox-cleanup', () => ({ trackSandboxLifecycle }));
 
 import { publishDeploymentBuild } from './deployment-publish-executor';
+import { destroySandboxWithRetries } from './sandbox-lifecycle';
 import {
   APP_AGENT_SECURITY_BOUNDARY_SHA256,
   DEPLOYMENT_SECURITY_BASELINE_VERSION,
@@ -35,6 +39,10 @@ describe('publishDeploymentBuild', () => {
         '{"type":"deploy","version":1,"worker_name":"ghostbuild-deployment-1","version_id":"11111111-1111-4111-8111-111111111111"}\n',
     });
     sandbox.destroy.mockResolvedValue(undefined);
+    sandboxLifecycle.destroy.mockImplementation(async () => {
+      await destroySandboxWithRetries(sandbox, 'test publish sandbox');
+    });
+    trackSandboxLifecycle.mockResolvedValue(sandboxLifecycle);
   });
 
   test('publishes from trusted configuration with only a short-lived proxy token', async () => {

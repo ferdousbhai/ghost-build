@@ -43,6 +43,7 @@ const migrationPolicies = [
       '0022_upload_resource_quotas.sql': '18184f5e2cf43ca247b69922511c2264730488d83f3cebe48e91be526de7c3a8',
       '0023_skill_sync.sql': '17ea5beb522d31c4a0493c6f192e93d80c8d3a72f3d32ec381efae7f2729a17f',
       '0024_builder_previews.sql': 'cd3ecb08cad3ebd14379d047ee040c1cf50061ac8ce2670645ba203747c7f16e',
+      '0025_sandbox_cleanup_outbox.sql': 'a6af35f839b97a5d26b246c7ee998d84628d37f7da0cb83fc0ef5296d029e3ac',
     },
     contractAllowlist: {},
   },

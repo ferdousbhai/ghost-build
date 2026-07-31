@@ -235,6 +235,7 @@ function previewDatabase(): { sqlite: DatabaseSync; db: D1Database } {
     );
   `);
   sqlite.exec(readFileSync(new URL('../../../../migrations/0024_builder_previews.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../../../../migrations/0025_sandbox_cleanup_outbox.sql', import.meta.url), 'utf8'));
   const db = {
     prepare(query: string) {
       const statement = sqlite.prepare(query);
@@ -256,6 +257,9 @@ function previewDatabase(): { sqlite: DatabaseSync; db: D1Database } {
         },
       };
       return prepared;
+    },
+    async batch(statements: Array<{ run(): Promise<D1Result> }>) {
+      return Promise.all(statements.map((statement) => statement.run()));
     },
   } as unknown as D1Database;
   return { sqlite, db };

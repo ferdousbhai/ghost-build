@@ -2,7 +2,8 @@ import { getSandbox, type ExecResult } from '@cloudflare/sandbox';
 import { BUILDER_PREVIEW_PORT, BUILDER_PREVIEW_TTL_MS } from '~/agents/builder-preview-types';
 import type { DeploymentSandbox } from './deployment-sandbox';
 import { runBoundedDeploymentBuildCommand } from './deployment-build-executor';
-import { destroySandboxWithRetries, sandboxExec } from './sandbox-lifecycle';
+import { trackSandboxLifecycle } from './sandbox-cleanup';
+import { sandboxExec } from './sandbox-lifecycle';
 
 const PROJECT_DIR = '/workspace/preview-project';
 const SOURCE_ARCHIVE = '/workspace/preview-source.zip';
@@ -14,7 +15,7 @@ const MAX_EXPANDED_KIB = 250 * 1024;
 const MAX_ERROR_BYTES = 4_000;
 
 export async function buildBuilderPreview(args: {
-  env: Pick<Env, 'APP_STORAGE' | 'DeploymentSandbox'>;
+  env: Pick<Env, 'APP_STORAGE' | 'DB' | 'DeploymentSandbox'>;
   sandboxId: string;
   snapshotKey: string;
   previewBasePath: string;
@@ -27,6 +28,12 @@ export async function buildBuilderPreview(args: {
     transport: 'rpc',
     enableDefaultSession: false,
     normalizeId: true,
+  });
+  const lifecycle = await trackSandboxLifecycle({
+    db: args.env.DB,
+    sandbox,
+    sandboxId: args.sandboxId,
+    operation: 'Builder preview sandbox',
   });
   try {
     await sandbox.setKeepAlive(false);
@@ -102,8 +109,9 @@ export async function buildBuilderPreview(args: {
       timeout: PREVIEW_READY_TIMEOUT_MS,
     });
     await sandbox.setKeepAlive(true);
+    lifecycle.stopHeartbeat();
   } catch (error) {
-    await destroySandboxWithRetries(sandbox, 'Builder preview sandbox');
+    await lifecycle.destroy();
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(message.slice(-MAX_ERROR_BYTES) || 'The isolated preview build failed.', { cause: error });
   }

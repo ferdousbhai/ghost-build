@@ -22,7 +22,8 @@ import {
   DEPLOYMENT_TEMPLATE_SOURCE_BINDING,
   DEPLOYMENT_VERSION_METADATA_BINDING,
 } from './deployment-security-baseline';
-import { destroySandboxWithRetries, sandboxExec } from './sandbox-lifecycle';
+import { trackSandboxLifecycle } from './sandbox-cleanup';
+import { sandboxExec } from './sandbox-lifecycle';
 
 const PUBLISH_DIR = '/workspace/publish';
 const BUILD_ARCHIVE = '/workspace/build.tar.gz';
@@ -75,6 +76,12 @@ export async function publishDeploymentBuild(args: {
     transport: 'rpc',
     enableDefaultSession: false,
     normalizeId: true,
+  });
+  const lifecycle = await trackSandboxLifecycle({
+    db: args.env.DB,
+    sandbox,
+    sandboxId,
+    operation: 'deployment publish sandbox',
   });
   const commandEnv = {
     CLOUDFLARE_ACCOUNT_ID: args.connection.accountId,
@@ -172,7 +179,7 @@ export async function publishDeploymentBuild(args: {
     const output = await sandbox.readFile(WRANGLER_OUTPUT, { encoding: 'utf8' });
     publishedWorkerVersionId = parseWranglerDeployVersion(output.content, workerName);
   } finally {
-    await destroySandboxWithRetries(sandbox, 'deployment publish sandbox');
+    await lifecycle.destroy();
   }
   if (!publishedWorkerVersionId) {
     throw new DeploymentPublishError('Published Worker version identity is unavailable.');

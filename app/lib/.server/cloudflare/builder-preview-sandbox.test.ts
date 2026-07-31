@@ -2,9 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getSandbox = vi.hoisted(() => vi.fn());
 const runBoundedDeploymentBuildCommand = vi.hoisted(() => vi.fn());
+const sandboxLifecycle = vi.hoisted(() => ({ destroy: vi.fn(), stopHeartbeat: vi.fn() }));
+const trackSandboxLifecycle = vi.hoisted(() => vi.fn());
 
 vi.mock('@cloudflare/sandbox', () => ({ getSandbox }));
 vi.mock('./deployment-build-executor', () => ({ runBoundedDeploymentBuildCommand }));
+vi.mock('./sandbox-cleanup', () => ({ trackSandboxLifecycle }));
 
 import { buildBuilderPreview } from './builder-preview-sandbox';
 
@@ -12,6 +15,7 @@ describe('buildBuilderPreview', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     runBoundedDeploymentBuildCommand.mockResolvedValue(success());
+    trackSandboxLifecycle.mockResolvedValue(sandboxLifecycle);
   });
 
   it('builds an immutable R2 snapshot with the static preview config and no plaintext credentials', async () => {
@@ -36,6 +40,7 @@ describe('buildBuilderPreview', () => {
       destroy: vi.fn().mockResolvedValue(undefined),
     };
     getSandbox.mockReturnValue(sandbox);
+    sandboxLifecycle.destroy.mockImplementation(() => sandbox.destroy());
     const source = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new Uint8Array([1, 2, 3]));
@@ -79,6 +84,7 @@ describe('buildBuilderPreview', () => {
       destroy: vi.fn().mockResolvedValue(undefined),
     };
     getSandbox.mockReturnValue(sandbox);
+    sandboxLifecycle.destroy.mockImplementation(() => sandbox.destroy());
 
     await expect(
       buildBuilderPreview({

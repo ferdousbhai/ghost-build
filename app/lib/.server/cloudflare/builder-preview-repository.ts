@@ -1,10 +1,8 @@
-import { getSandbox } from '@cloudflare/sandbox';
 import {
   BUILDER_PREVIEW_GLOBAL_CONCURRENCY,
   BUILDER_PREVIEW_MAX_BUILDS_PER_HOUR,
 } from '~/agents/builder-preview-types';
-import type { DeploymentSandbox } from './deployment-sandbox';
-import { destroySandboxWithRetries } from './sandbox-lifecycle';
+import { destroyRegisteredSandbox } from './sandbox-cleanup';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const ADMISSION_SWEEP_LIMIT = 8;
@@ -180,15 +178,31 @@ export function markPreviewReady(
   previewId: string,
   readyAt: number,
   expiresAt: number,
-): Promise<D1Result> {
-  return db
-    .prepare(
-      `UPDATE builder_previews
+): Promise<D1Result[]> {
+  return db.batch([
+    db
+      .prepare(
+        `UPDATE builder_previews
        SET status = 'ready', ready_at = ?, expires_at = ?, updated_at = ?
        WHERE id = ? AND status = 'building'`,
-    )
-    .bind(readyAt, expiresAt, readyAt, previewId)
-    .run();
+      )
+      .bind(readyAt, expiresAt, readyAt, previewId),
+    db
+      .prepare(
+        `UPDATE sandbox_cleanup_candidates
+         SET not_before = ?, updated_at = ?
+         WHERE sandbox_id = (SELECT sandbox_id FROM builder_previews WHERE id = ?)
+           AND status = 'active'`,
+      )
+      .bind(expiresAt, readyAt, previewId),
+    db
+      .prepare(
+        `UPDATE builder_preview_build_admissions
+         SET expires_at = ?
+         WHERE preview_id = ? AND status = 'active'`,
+      )
+      .bind(expiresAt, previewId),
+  ]);
 }
 
 function markPreviewTerminal(
@@ -320,17 +334,14 @@ export async function retireBuilderPreview(
 }
 
 async function destroyPreviewResources(
-  env: Pick<Env, 'APP_STORAGE' | 'DeploymentSandbox'>,
+  env: Pick<Env, 'APP_STORAGE' | 'DB' | 'DeploymentSandbox'>,
   preview: { sandbox_id: string; snapshot_key: string },
 ): Promise<void> {
-  const sandbox = getSandbox(env.DeploymentSandbox as DurableObjectNamespace<DeploymentSandbox>, preview.sandbox_id, {
-    transport: 'rpc',
-    enableDefaultSession: false,
-    normalizeId: true,
-  });
-  await Promise.allSettled([
-    destroySandboxWithRetries(sandbox, 'Builder preview sandbox'),
-    env.APP_STORAGE.delete(preview.snapshot_key),
+  await Promise.all([
+    destroyRegisteredSandbox(env, preview.sandbox_id, 'Builder preview sandbox'),
+    env.APP_STORAGE.delete(preview.snapshot_key).catch((error) =>
+      console.error('Unable to delete retired Builder preview snapshot', error),
+    ),
   ]);
 }
 
