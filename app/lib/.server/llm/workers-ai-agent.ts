@@ -9,7 +9,7 @@ import { asAiSdkTools, asOriginalMessages } from './message-conversion';
 import { getProvider, type WorkersAiAccountCredentials } from './provider';
 import { prepareModelInput } from './model-input';
 import type { ContextCompaction } from './context-compaction';
-import { normalizeTextPartBoundaries } from './workers-ai-stream';
+import { appendDeterministicCompletion, normalizeTextPartBoundaries } from './workers-ai-stream';
 import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
 import {
   createWorkersAiTools,
@@ -109,6 +109,7 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     activeTools: toolSettings.activeTools,
     toolChoice: toolSettings.toolChoice,
   });
+  let currentValidatedBuildCompletion: string | undefined;
   const result = streamText({
     model: provider.model,
     abortSignal,
@@ -118,7 +119,25 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     tools: asAiSdkTools(tools),
     toolChoice: toolSettings.toolChoice,
     activeTools: toolSettings.activeTools,
-    stopWhen: stepCountIs(MAX_SERVER_TOOL_STEPS),
+    stopWhen: [
+      ({ steps }) => {
+        const completion = getValidatedBuildCompletion(
+          messages,
+          steps.flatMap(({ toolResults }) =>
+            toolResults.map(({ toolName, output }) => ({
+              toolName,
+              result: output,
+            })),
+          ),
+        );
+        if (!completion) {
+          return false;
+        }
+        currentValidatedBuildCompletion = completion;
+        return true;
+      },
+      stepCountIs(MAX_SERVER_TOOL_STEPS),
+    ],
     prepareStep: ({ stepNumber, steps }) => {
       if (stepNumber === 0) {
         return undefined;
@@ -171,7 +190,7 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
       return error instanceof Error ? error.message : 'An error occurred.';
     },
   }) as ReadableStream<UIMessageChunk>;
-  return normalizeTextPartBoundaries(stream);
+  return normalizeTextPartBoundaries(appendDeterministicCompletion(stream, () => currentValidatedBuildCompletion));
 }
 
 function createValidatedBuildCompletionStream(messages: Messages, text: string): ReadableStream<UIMessageChunk> {

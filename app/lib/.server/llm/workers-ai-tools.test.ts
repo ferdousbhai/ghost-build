@@ -185,6 +185,22 @@ describe('Workers AI tool lifecycle', () => {
     );
   });
 
+  it('returns deterministic approval copy from tool results produced in the current model call', () => {
+    expect(
+      getValidatedBuildCompletion(
+        [user('Build a habit tracker')],
+        [
+          { toolName: 'writeFile', result: toolSuccess('wrote') },
+          { toolName: 'validateProject', result: validationResult('prepare-deployment') },
+          {
+            toolName: 'deploy',
+            result: toolSuccess('ready', { state: 'awaiting-approval', revision: 'a'.repeat(64) }),
+          },
+        ],
+      ),
+    ).toBe('Done. I built and validated the app. The production deployment plan is ready for your approval.');
+  });
+
   it('does not complete from an obsolete successful validation receipt', () => {
     const messages = [
       user('Build a habit tracker'),

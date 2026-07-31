@@ -305,15 +305,19 @@ function requiredToolSettings(toolName: GhostbuildToolName): AgentToolSettings {
   };
 }
 
-export function getValidatedBuildCompletion(messages: GhostbuildMessage[]): string | undefined {
+export function getValidatedBuildCompletion(
+  messages: GhostbuildMessage[],
+  currentStepResults: ReadonlyArray<ToolResultEvent> = [],
+): string | undefined {
   const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
   if (lastUserIndex === -1) {
     return undefined;
   }
 
-  const lifecycle = analyzeBuildLifecycle(
-    collectToolResults(messages).filter(({ messageIndex }) => messageIndex > lastUserIndex),
-  );
+  const lifecycle = analyzeBuildLifecycle([
+    ...collectToolResults(messages).filter(({ messageIndex }) => messageIndex > lastUserIndex),
+    ...currentStepResults,
+  ]);
   if (lifecycle?.stage === 'guest-validated') {
     return 'Done. I built and validated the app in the isolated production build environment, and it is ready to preview here. Sign in when you are ready to deploy it to Cloudflare production.';
   }
