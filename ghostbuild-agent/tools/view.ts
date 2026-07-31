@@ -4,15 +4,17 @@ import { z } from 'zod';
 const viewRangeDescription = `
 An optional pair specifying the inclusive start and exclusive end line numbers to view.
 Line numbers are 1-indexed and a request may cover at most 200 lines. The result reports the
-file's exact total line count and exact coverage of the requested range.
+file's exact total line count and exact coverage of the requested range. This parameter is ignored
+when the path is a directory.
 `;
 
 const viewDescription = `
-Read a bounded, explicit line range from one file. Use listFiles for directories and searchText for
-content discovery. Be sure to use this tool when editing a file whose current contents are not known.
+Read a bounded, explicit line range from one file or list the immediate children of a directory. Use
+listFiles for recursive path discovery and searchText for content discovery. Be sure to use this tool
+when editing a file whose current contents are not known.
 
-The result includes exact line and character coverage. Unusually dense requested ranges continue by
-calling view again with the same path, range, and returned revision-bound nextCursor.
+File results include exact line and character coverage. Unusually dense requested ranges continue
+by calling view again with the same path, range, and returned revision-bound nextCursor.
 `;
 
 const viewRangeParameters = z

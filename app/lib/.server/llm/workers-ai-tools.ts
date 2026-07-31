@@ -33,6 +33,12 @@ type ToolResultEvent = {
   toolName: string;
   result: unknown;
 };
+type TurnToolCallGuard = (
+  toolName: GhostbuildToolName,
+  input: unknown,
+  toolCallId: string,
+  workspaceRevision: number,
+) => string | undefined;
 type BuildLifecycle =
   | { stage: 'needs-validation' }
   | { stage: 'validation-failed' }
@@ -56,6 +62,7 @@ export function createWorkersAiTools(
   workspace: BuilderWorkspaceRepository,
   operationContext: BuilderOperationContext,
 ): GhostbuildToolSet {
+  const guardToolCall = createTurnToolCallGuard();
   const tools: GhostbuildToolSet = {
     deploy: deployTool,
     edit: editTool,
@@ -68,10 +75,10 @@ export function createWorkersAiTools(
     writeFile: writeFileTool,
   };
   for (const toolName of ['view', 'listFiles', 'searchText', 'edit', 'writeFile'] as const) {
-    tools[toolName] = serverWorkspaceTool(toolName, tools[toolName], workspace);
+    tools[toolName] = serverWorkspaceTool(toolName, tools[toolName], workspace, guardToolCall);
   }
   for (const toolName of ['lookupDocs', 'npmInstall', 'validateProject', 'deploy'] as const) {
-    tools[toolName] = serverOperationTool(toolName, tools[toolName], workspace, operationContext);
+    tools[toolName] = serverOperationTool(toolName, tools[toolName], workspace, operationContext, guardToolCall);
   }
   return tools;
 }
@@ -81,10 +88,15 @@ function serverOperationTool(
   definition: Tool,
   workspace: BuilderWorkspaceRepository,
   context: BuilderOperationContext,
+  guardToolCall: TurnToolCallGuard,
 ): Tool {
   return {
     ...definition,
     execute: async (input, options) => {
+      const duplicate = guardToolCall(toolName, input, options.toolCallId, workspace.getState().revision);
+      if (duplicate) {
+        return toolFailure(duplicate);
+      }
       try {
         const { executeBuilderOperationTool } = await import('~/agents/builder-operation-tools');
         return await executeBuilderOperationTool({
@@ -112,10 +124,15 @@ function serverWorkspaceTool(
   toolName: ServerWorkspaceToolName,
   definition: Tool,
   workspace: BuilderWorkspaceRepository,
+  guardToolCall: TurnToolCallGuard,
 ): Tool {
   return {
     ...definition,
     execute: async (input, options) => {
+      const duplicate = guardToolCall(toolName, input, options.toolCallId, workspace.getState().revision);
+      if (duplicate) {
+        return toolFailure(duplicate);
+      }
       try {
         return await executeBuilderWorkspaceTool({
           workspace,
@@ -135,6 +152,40 @@ function serverWorkspaceTool(
       }
     },
   };
+}
+
+export function createTurnToolCallGuard(): TurnToolCallGuard {
+  const toolCallIds = new Map<string, string>();
+  return (toolName, input, toolCallId, workspaceRevision) => {
+    const key = `${workspaceRevision}:${toolName}:${stableJson(input)}`;
+    const previousToolCallId = toolCallIds.get(key);
+    if (!previousToolCallId) {
+      toolCallIds.set(key, toolCallId);
+      return undefined;
+    }
+    if (previousToolCallId === toolCallId) {
+      return undefined;
+    }
+    return 'This exact tool call already ran in the current turn. Use its result or try a different approach.';
+  };
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(sortJson(value));
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortJson);
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, sortJson(value[key])]),
+  );
 }
 
 export function serializeWorkersAiToolDefinitions(

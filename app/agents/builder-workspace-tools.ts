@@ -79,7 +79,20 @@ async function runView(
   workspaceRevision: number,
 ): Promise<GhostbuildToolResult> {
   const parsed = viewParameters.parse(input);
-  const file = await workspace.readText(parsed.path);
+  const absolutePath = normalizeProjectPath(parsed.path).absolutePath;
+  const directory = directoryEntries(workspace.listFiles(), absolutePath);
+  if (directory) {
+    const content = `Directory:\n${directory
+      .map((entry) => `- ${entry.name} (${entry.type === 'directory' ? 'dir' : 'file'})`)
+      .join('\n')}`;
+    return toolSuccess(`Returned ${directory.length} entries from ${absolutePath}.`, {
+      path: absolutePath,
+      content,
+      entries: directory,
+      workspaceRevision,
+    });
+  }
+  const file = await workspace.readText(absolutePath);
   const totalLines = file.content.split('\n').length;
   const [requestedStart, requestedEnd] = parsed.view_range;
   if (requestedStart > totalLines) {
@@ -109,6 +122,40 @@ async function runView(
       workspaceRevision,
     },
     pageCoverage(page, nextCursor),
+  );
+}
+
+function directoryEntries(
+  metadata: readonly WorkspaceFileMetadata[],
+  directoryPath: string,
+): Array<{ name: string; path: string; type: 'directory' | 'file' }> | undefined {
+  const prefix = `${directoryPath}/`;
+  const entries = new Map<string, { name: string; path: string; type: 'directory' | 'file' }>();
+  for (const file of metadata) {
+    if (!file.path.startsWith(prefix)) {
+      continue;
+    }
+    const relativePath = file.path.slice(prefix.length);
+    const [name, ...descendants] = relativePath.split('/');
+    if (!name) {
+      continue;
+    }
+    const type = descendants.length > 0 ? 'directory' : 'file';
+    const existing = entries.get(name);
+    if (!existing || type === 'directory') {
+      entries.set(name, {
+        name,
+        path: `${directoryPath}/${name}`,
+        type,
+      });
+    }
+  }
+  if (entries.size === 0) {
+    return undefined;
+  }
+  return [...entries.values()].sort(
+    (left, right) =>
+      Number(left.type === 'file') - Number(right.type === 'file') || left.name.localeCompare(right.name),
   );
 }
 

@@ -6,6 +6,12 @@ import { BuilderWorkspaceRepository } from './builder-workspace';
 import { BUILDER_WORKSPACE_INLINE_BYTES } from './builder-workspace-types';
 import { executeBuilderWorkspaceTool } from './builder-workspace-tools';
 import { createBuilderWorkspaceSnapshot } from './builder-workspace-snapshot';
+import {
+  batchBuilderWorkspaceSeed,
+  builderTemplateSeedId,
+  builderTemplateTotals,
+  loadBuilderTemplate,
+} from './builder-template';
 
 describe('BuilderWorkspaceRepository', () => {
   it('atomically seeds a workspace and returns it as a revisioned snapshot', async () => {
@@ -256,6 +262,109 @@ describe('BuilderWorkspaceRepository', () => {
       ok: true,
       data: { content: 'export const value = 2;\n', workspaceRevision: 2 },
     });
+  });
+
+  it('views directories while preserving binary-file read protection', async () => {
+    const harness = createHarness();
+    await harness.workspace.beginSeed('seed_directory');
+    await harness.workspace.appendSeed('seed_directory', [
+      { path: '/home/project/src/routes/index.tsx', content: 'export default {};\n' },
+      { path: '/home/project/src/router.tsx', content: 'export {};\n' },
+      { path: '/home/project/src/image.bin', content: 'AAECAw==', encoding: 'base64' },
+    ]);
+    await harness.workspace.commitSeed('seed_directory', {
+      fileCount: 3,
+      totalBytes: 34,
+    });
+
+    const directory = await executeBuilderWorkspaceTool({
+      workspace: harness.workspace,
+      toolCallId: 'view-directory',
+      toolName: 'view',
+      input: { path: '/home/project/src' },
+    });
+    expect(directory).toMatchObject({
+      ok: true,
+      data: {
+        path: '/home/project/src',
+        content: 'Directory:\n- routes (dir)\n- image.bin (file)\n- router.tsx (file)',
+        entries: [
+          { name: 'routes', path: '/home/project/src/routes', type: 'directory' },
+          { name: 'image.bin', path: '/home/project/src/image.bin', type: 'file' },
+          { name: 'router.tsx', path: '/home/project/src/router.tsx', type: 'file' },
+        ],
+        workspaceRevision: 1,
+      },
+    });
+
+    await expect(
+      executeBuilderWorkspaceTool({
+        workspace: harness.workspace,
+        toolCallId: 'view-binary',
+        toolName: 'view',
+        input: { path: '/home/project/src/image.bin' },
+      }),
+    ).rejects.toThrow('Cannot read binary file as text: /home/project/src/image.bin');
+  });
+
+  it('seeds the bundled template as viewable and searchable project text', async () => {
+    const harness = createHarness();
+    const entries = await loadBuilderTemplate();
+    const seedId = builderTemplateSeedId();
+    await harness.workspace.beginSeed(seedId);
+    for (const batch of batchBuilderWorkspaceSeed(entries)) {
+      await harness.workspace.appendSeed(seedId, batch);
+    }
+    await harness.workspace.commitSeed(seedId, builderTemplateTotals(entries));
+
+    const manifest = await executeBuilderWorkspaceTool({
+      workspace: harness.workspace,
+      toolCallId: 'view-template-package',
+      toolName: 'view',
+      input: { path: '/home/project/package.json', view_range: [1, 20] },
+    });
+    expect(manifest).toMatchObject({
+      ok: true,
+      data: {
+        content: expect.stringContaining('"name": "ghostbuild-cloudflare-template"'),
+        workspaceRevision: 1,
+      },
+    });
+
+    const routes = await executeBuilderWorkspaceTool({
+      workspace: harness.workspace,
+      toolCallId: 'view-template-routes',
+      toolName: 'view',
+      input: { path: '/home/project/src/routes' },
+    });
+    expect(routes).toMatchObject({
+      ok: true,
+      data: {
+        content: 'Directory:\n- __root.tsx (file)\n- index.tsx (file)',
+        workspaceRevision: 1,
+      },
+    });
+
+    const search = await executeBuilderWorkspaceTool({
+      workspace: harness.workspace,
+      toolCallId: 'search-template-routes',
+      toolName: 'searchText',
+      input: { query: 'createFileRoute', path: '/home/project/src/routes' },
+    });
+    expect(search).toMatchObject({
+      ok: true,
+      data: {
+        workspaceRevision: 1,
+      },
+    });
+    expect((search.data as { records: unknown[] }).records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: '/home/project/src/routes/index.tsx',
+          lineText: expect.stringContaining('createFileRoute'),
+        }),
+      ]),
+    );
   });
 
   it('applies multi-edit calls only through the current server schema', async () => {

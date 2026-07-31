@@ -74,7 +74,7 @@ async function decodeBuilderTemplate(): Promise<BuilderWorkspaceFileInput[]> {
       entry === null ||
       typeof (entry as { path?: unknown }).path !== 'string' ||
       typeof (entry as { content?: unknown }).content !== 'string' ||
-      (entry as { encoding?: unknown }).encoding !== 'base64'
+      ((entry as { encoding?: unknown }).encoding !== 'utf8' && (entry as { encoding?: unknown }).encoding !== 'base64')
     ) {
       throw new Error('The bundled Builder template contains an invalid file.');
     }

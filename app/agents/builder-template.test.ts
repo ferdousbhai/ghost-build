@@ -6,8 +6,14 @@ describe('server Builder template', () => {
   it('initializes the durable workspace from the bundled server template', async () => {
     const entries = await loadBuilderTemplate();
     expect(builderTemplateSeedId()).toBe(`template_${BUILDER_TEMPLATE_SOURCE_SHA256}`);
-    expect(entries.some((entry) => entry.path === '/home/project/package.json')).toBe(true);
-    expect(entries.some((entry) => entry.path === '/home/project/src/routes/index.tsx')).toBe(true);
+    expect(entries.find((entry) => entry.path === '/home/project/package.json')).toMatchObject({
+      encoding: 'utf8',
+      content: expect.stringContaining('"name": "ghostbuild-cloudflare-template"'),
+    });
+    expect(entries.find((entry) => entry.path === '/home/project/src/routes/index.tsx')).toMatchObject({
+      encoding: 'utf8',
+      content: expect.stringContaining('createFileRoute'),
+    });
     expect(builderTemplateTotals(entries)).toMatchObject({
       fileCount: entries.length,
       totalBytes: expect.any(Number),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GhostbuildMessage, GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
-import { getValidatedBuildCompletion, getWorkersAiToolSettings } from './workers-ai-tools';
+import { createTurnToolCallGuard, getValidatedBuildCompletion, getWorkersAiToolSettings } from './workers-ai-tools';
 
 const AUTOMATIC_TOOLS = [
   'view',
@@ -15,6 +15,17 @@ const AUTOMATIC_TOOLS = [
 ];
 
 describe('Workers AI tool lifecycle', () => {
+  it('rejects duplicate calls in one turn while allowing durable replay and changed arguments', () => {
+    const guard = createTurnToolCallGuard();
+    expect(guard('view', { path: '/home/project/package.json', view_range: [1, 20] }, 'call-1', 1)).toBeUndefined();
+    expect(guard('view', { view_range: [1, 20], path: '/home/project/package.json' }, 'call-1', 1)).toBeUndefined();
+    expect(guard('view', { view_range: [1, 20], path: '/home/project/package.json' }, 'call-2', 1)).toBe(
+      'This exact tool call already ran in the current turn. Use its result or try a different approach.',
+    );
+    expect(guard('view', { path: '/home/project/package.json', view_range: [20, 40] }, 'call-3', 1)).toBeUndefined();
+    expect(guard('view', { path: '/home/project/package.json', view_range: [1, 20] }, 'call-4', 2)).toBeUndefined();
+  });
+
   it('gives the model all non-deployment tools before a mutation', () => {
     expect(getWorkersAiToolSettings([user('Build a habit tracker')])).toEqual({
       activeTools: AUTOMATIC_TOOLS,
