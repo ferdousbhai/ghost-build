@@ -29,7 +29,7 @@ const WORKERS_AI_CALL_TIMEOUT_MS = 25 * 60_000;
 // Keep room for a validation checkpoint, a repair, and deployment after the
 // model has had a bounded window to finish a multi-file implementation.
 const IMPLEMENTATION_TOOL_STEP_BUDGET = 7;
-const MAX_SERVER_TOOL_STEPS = 12;
+const MAX_SERVER_TOOL_STEPS = 20;
 
 interface WorkersAiAgentOptions {
   env: Env;
