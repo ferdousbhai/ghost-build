@@ -3,6 +3,8 @@ import {
   BUILD_PROGRESS_DELAY_MS,
   BUILD_PROGRESS_STALL_MS,
   getBuildProgress,
+  RECOVERY_PROGRESS_DELAY_MS,
+  RECOVERY_PROGRESS_STALL_MS,
   VALIDATION_PROGRESS_DELAY_MS,
   VALIDATION_PROGRESS_STALL_MS,
 } from './build-progress';
@@ -90,6 +92,22 @@ describe('getBuildProgress', () => {
         inactiveForMs: 0,
       }),
     ).toMatchObject({ phase: 'recovering', message: 'Recovering the interrupted build…' });
+    expect(
+      getBuildProgress({
+        streamStatus: 'submitted',
+        isRecovering: true,
+        activeToolNames: [],
+        inactiveForMs: RECOVERY_PROGRESS_DELAY_MS,
+      }),
+    ).toMatchObject({ delayed: true, stalled: false });
+    expect(
+      getBuildProgress({
+        streamStatus: 'submitted',
+        isRecovering: true,
+        activeToolNames: [],
+        inactiveForMs: RECOVERY_PROGRESS_STALL_MS,
+      }),
+    ).toMatchObject({ delayed: true, stalled: true });
     expect(
       getBuildProgress({ streamStatus: 'ready', isRecovering: false, activeToolNames: [], inactiveForMs: 0 }),
     ).toBeNull();

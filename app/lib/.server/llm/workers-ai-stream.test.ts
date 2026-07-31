@@ -3,7 +3,7 @@ import type { UIMessageChunk } from 'ai';
 import { appendDeterministicCompletion } from './workers-ai-stream';
 
 describe('appendDeterministicCompletion', () => {
-  it('places server-owned completion copy before the final finish chunk', async () => {
+  it('places server-owned completion copy before a terminal stop chunk', async () => {
     const source = chunks([
       { type: 'start' },
       { type: 'tool-output-available', toolCallId: 'deploy-1', output: { state: 'awaiting-approval' } },
@@ -22,7 +22,7 @@ describe('appendDeterministicCompletion', () => {
         delta: 'The production deployment plan is ready for your approval.',
       },
       { type: 'text-end', id: 'validated-build-completion' },
-      { type: 'finish', finishReason: 'tool-calls' },
+      { type: 'finish', finishReason: 'stop' },
     ]);
   });
 

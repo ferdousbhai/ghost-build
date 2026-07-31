@@ -23,7 +23,8 @@ export function appendDeterministicCompletion(
           controller.enqueue({ type: 'text-end', id });
         }
         if (finishChunk) {
-          controller.enqueue(finishChunk);
+          const terminalFinish = { ...finishChunk, finishReason: 'stop' } as UIMessageChunk;
+          controller.enqueue(text ? terminalFinish : finishChunk);
         }
       },
     }),
