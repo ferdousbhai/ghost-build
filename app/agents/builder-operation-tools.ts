@@ -14,12 +14,14 @@ import { runLookupDocs } from '~/lib/runtime/action-runner/lookup-docs';
 import { createBuilderWorkspaceSnapshot } from './builder-workspace-snapshot';
 import { BuilderWorkspaceConflictError, type BuilderWorkspaceRepository } from './builder-workspace';
 import type { ServerOperationToolName } from './builder-workspace-types';
+import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 type BuilderOperationContext = {
   env: Env;
   userId: string;
   chatInitialId: string;
   agentName: string;
+  onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
 };
 
 export async function executeBuilderOperationTool(args: {
@@ -138,6 +140,7 @@ async function runValidation(args: Parameters<typeof executeBuilderOperationTool
           operationId: `${args.context.agentName}:${args.toolCallId}:${snapshot.revision}`,
           snapshot: snapshot.bytes,
           abortSignal: args.abortSignal,
+          onStage: (stage) => args.context.onValidationStage?.(args.toolCallId, stage),
         });
         args.workspace.recordSuccessfulValidation({
           revision: snapshot.revision,
@@ -182,6 +185,8 @@ async function runValidation(args: Parameters<typeof executeBuilderOperationTool
             ],
           },
         );
+      } finally {
+        args.context.onValidationStage?.(args.toolCallId, null);
       }
     },
   );

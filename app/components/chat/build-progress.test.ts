@@ -113,6 +113,30 @@ describe('getBuildProgress', () => {
     ).toMatchObject({ delayed: true, stalled: true });
   });
 
+  it('shows the current isolated validation stage', () => {
+    expect(
+      getBuildProgress({
+        streamStatus: 'streaming',
+        isRecovering: false,
+        activeToolNames: ['validateProject'],
+        validationStage: 'dependency installation',
+        inactiveForMs: 0,
+      }),
+    ).toMatchObject({ phase: 'validating', message: 'Installing validation dependencies…' });
+    expect(
+      getBuildProgress({
+        streamStatus: 'streaming',
+        isRecovering: false,
+        activeToolNames: ['validateProject'],
+        validationStage: 'application build',
+        inactiveForMs: VALIDATION_PROGRESS_DELAY_MS,
+      }),
+    ).toMatchObject({
+      delayed: true,
+      message: 'Taking longer than usual — still building your project for production',
+    });
+  });
+
   it('prioritizes active validation over an overlapping completed mutation', () => {
     expect(
       getBuildProgress({

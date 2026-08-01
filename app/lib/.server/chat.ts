@@ -7,6 +7,7 @@ import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import type { WorkersAiAccountCredentials } from './llm/provider';
 import type { ContextCompaction } from './llm/context-compaction';
 import type { BuilderWorkspaceRepository } from '~/agents/builder-workspace';
+import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 type Messages = GhostbuildMessage[];
 
@@ -31,6 +32,7 @@ export async function createChatResponseFromBody({
   workspace,
   userId,
   agentName,
+  onValidationStage,
 }: {
   abortSignal?: AbortSignal;
   body: Pick<ChatRequestBody, 'messages' | 'chatInitialId'>;
@@ -49,6 +51,7 @@ export async function createChatResponseFromBody({
   workspace: BuilderWorkspaceRepository;
   userId: string;
   agentName: string;
+  onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
 }) {
   const { messages, chatInitialId } = body;
   const transcriptMessages = messages ?? [];
@@ -69,6 +72,7 @@ export async function createChatResponseFromBody({
       workspace,
       userId,
       agentName,
+      onValidationStage,
     });
 
     return createUIMessageStreamResponse({ stream: dataStream });

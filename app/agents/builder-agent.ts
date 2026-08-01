@@ -87,6 +87,7 @@ import {
   releasePreviewBuildAdmission,
   retireBuilderPreview,
 } from '~/lib/.server/cloudflare/builder-preview-repository';
+import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 const logger = createScopedLogger('BuilderAgent');
 const STALE_CHAT_RECOVERY_MS = 30 * 60 * 1000;
@@ -122,6 +123,11 @@ export type BuilderAgentState = {
   updatedAt?: string;
   transcript?: TranscriptCheckpoint | null;
   preview?: BuilderPreviewState | null;
+  validationProgress?: {
+    toolCallId: string;
+    stage: BuilderValidationStage;
+    updatedAt: string;
+  } | null;
 };
 
 type ChatBody = Partial<ChatRequestBody> & { transcript?: unknown };
@@ -142,6 +148,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     lastCompletedTurn: null,
     transcript: null,
     preview: idleBuilderPreviewState(0),
+    validationProgress: null,
   };
 
   override messageConcurrency = 'drop' as const;
@@ -365,6 +372,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         workspace: this.workspace,
         userId: this.userId,
         agentName: this.name,
+        onValidationStage: (toolCallId, stage) => this.setValidationProgress(toolCallId, stage),
         compaction: {
           current: this.contextCompaction.getCompaction(),
           pending: compactionPending,
@@ -1060,6 +1068,18 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.setState({ ...this.state, preview, updatedAt: preview.updatedAt });
   }
 
+  private setValidationProgress(toolCallId: string, stage: BuilderValidationStage | null): void {
+    if (stage === null && this.state.validationProgress?.toolCallId !== toolCallId) {
+      return;
+    }
+    const updatedAt = new Date().toISOString();
+    this.setState({
+      ...this.state,
+      validationProgress: stage ? { toolCallId, stage, updatedAt } : null,
+      updatedAt,
+    });
+  }
+
   private recordPreviewJob(
     job: PreviewBuildJob,
     status: 'queued' | 'building' | 'ready' | 'failed' | 'cancelled',
@@ -1090,6 +1110,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       ...this.state,
       activeTurn: null,
       lastCompletedTurn: finishedTurn,
+      validationProgress: null,
       updatedAt: finishedTurn.updatedAt,
     });
     this.turnStore.record(finishedTurn);

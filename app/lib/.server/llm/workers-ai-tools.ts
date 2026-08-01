@@ -16,12 +16,14 @@ import type { BuilderWorkspaceRepository } from '~/agents/builder-workspace';
 import { executeBuilderWorkspaceTool } from '~/agents/builder-workspace-tools';
 import type { ServerWorkspaceToolName } from '~/agents/builder-workspace-types';
 import type { ServerOperationToolName } from '~/agents/builder-workspace-types';
+import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 type BuilderOperationContext = {
   env: Env;
   userId: string;
   chatInitialId: string;
   agentName: string;
+  onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
 };
 
 export type AgentToolChoice = 'auto' | 'none' | 'required';

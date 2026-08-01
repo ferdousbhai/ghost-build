@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { getToolInvocation, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { StreamStatus } from '~/lib/common/types';
 import { getBuildProgress } from './build-progress';
+import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 const CLOCK_INTERVAL_MS = 1_000;
 
@@ -10,13 +11,21 @@ export function useBuildProgress(args: {
   isRecovering: boolean;
   isProjectUpdate: boolean;
   activeToolNames: string[];
+  validationStage: BuilderValidationStage | null;
   toolActivityRevision: number;
   messages: GhostbuildMessage[];
 }) {
   const activityKey = useMemo(
     () =>
-      `${messageActivityKey(args.messages)}:${args.toolActivityRevision}:${args.streamStatus}:${args.isRecovering}:${args.isProjectUpdate}`,
-    [args.isProjectUpdate, args.isRecovering, args.messages, args.streamStatus, args.toolActivityRevision],
+      `${messageActivityKey(args.messages)}:${args.toolActivityRevision}:${args.streamStatus}:${args.isRecovering}:${args.isProjectUpdate}:${args.validationStage ?? ''}`,
+    [
+      args.isProjectUpdate,
+      args.isRecovering,
+      args.messages,
+      args.streamStatus,
+      args.toolActivityRevision,
+      args.validationStage,
+    ],
   );
   const lastActivityAt = useRef(Date.now());
   const [now, setNow] = useState(() => Date.now());
@@ -40,6 +49,7 @@ export function useBuildProgress(args: {
     isRecovering: args.isRecovering,
     isProjectUpdate: args.isProjectUpdate,
     activeToolNames: args.activeToolNames,
+    validationStage: args.validationStage,
     inactiveForMs: Math.max(0, now - lastActivityAt.current),
   });
 }

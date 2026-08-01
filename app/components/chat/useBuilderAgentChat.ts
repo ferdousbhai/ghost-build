@@ -351,6 +351,7 @@ export function useBuilderAgentChat(args: {
       builderAgent.state?.transcript && transcriptIdentitiesEqual(builderAgent.state.transcript, args.transcript)
         ? builderAgent.state.transcript
         : null,
+    validationStage: builderAgent.state?.validationProgress?.stage ?? null,
     workspacePresentationState,
   };
 }

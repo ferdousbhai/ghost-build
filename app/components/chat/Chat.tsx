@@ -145,6 +145,7 @@ const AuthenticatedChat = memo(
       streamStatus,
       contextManager,
       transcriptCheckpoint,
+      validationStage,
       workspacePresentationState,
     } = useBuilderAgentChat({
       chatInitialId,
@@ -178,6 +179,7 @@ const AuthenticatedChat = memo(
       isRecovering,
       isProjectUpdate: currentSubchatIndex > 0,
       activeToolNames,
+      validationStage,
       toolActivityRevision: activityRevision,
       messages,
     });

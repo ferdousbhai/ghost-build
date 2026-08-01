@@ -41,8 +41,13 @@ describe('server Builder operation tools', () => {
 
   it('validates the durable snapshot in the server sandbox and records the exact revision', async () => {
     const workspace = workspaceStub();
+    const onValidationStage = vi.fn();
+    mocks.validate.mockImplementationOnce(async ({ onStage }) => {
+      onStage('dependency installation');
+      return { durationMs: 123 };
+    });
     const result = await executeBuilderOperationTool({
-      context: operationContext(),
+      context: { ...operationContext(), onValidationStage },
       workspace: workspace as never,
       toolCallId: 'validation-call',
       toolName: 'validateProject',
@@ -62,6 +67,10 @@ describe('server Builder operation tools', () => {
       revision: 'a'.repeat(64),
       workspaceRevision: 7,
     });
+    expect(onValidationStage.mock.calls).toEqual([
+      ['validation-call', 'dependency installation'],
+      ['validation-call', null],
+    ]);
   });
 
   it('refuses deployment when the requested validation revision differs from the durable source', async () => {

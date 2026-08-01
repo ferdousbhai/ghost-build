@@ -21,6 +21,7 @@ import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/li
 import { fingerprintWorkersAiModelInput } from './workers-ai-prompt-cache';
 import { logProviderFailure } from './provider-error-logging';
 import type { BuilderWorkspaceRepository } from '~/agents/builder-workspace';
+import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 type Messages = GhostbuildMessage[];
 // Server-owned validation can legitimately span the bounded production build
@@ -46,6 +47,7 @@ interface WorkersAiAgentOptions {
   workspace: BuilderWorkspaceRepository;
   userId: string;
   agentName: string;
+  onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
 }
 
 export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<ReadableStream<UIMessageChunk>> {
@@ -62,6 +64,7 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     workspace,
     userId,
     agentName,
+    onValidationStage,
   } = options;
   logger.debug('Starting Workers AI agent');
   const startedAt = Date.now();
@@ -72,6 +75,7 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     userId,
     agentName,
     chatInitialId,
+    onValidationStage,
   });
   const validatedBuildCompletion = getValidatedBuildCompletion(messages);
   if (validatedBuildCompletion) {

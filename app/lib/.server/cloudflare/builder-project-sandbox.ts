@@ -5,6 +5,7 @@ import { inspectDeploymentSnapshot } from './deployment-snapshot';
 import { trackSandboxLifecycle, type TrackedSandboxLifecycle } from './sandbox-cleanup';
 import { sandboxExec } from './sandbox-lifecycle';
 import { cancelObjectGcCandidate, queueObjectGcCandidate } from '~/lib/cloudflare/data/object-gc.server';
+import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 const PROJECT_DIR = '/workspace/project';
 const SOURCE_ARCHIVE = '/workspace/source.zip';
@@ -91,6 +92,7 @@ export async function validateBuilderProject(args: {
   operationId: string;
   snapshot: Uint8Array<ArrayBuffer>;
   abortSignal?: AbortSignal;
+  onStage?: (stage: BuilderValidationStage) => void;
 }): Promise<{ durationMs: number }> {
   args.abortSignal?.throwIfAborted();
   const project = await inspectDeploymentSnapshot(args.snapshot.buffer);
@@ -109,6 +111,7 @@ export async function validateBuilderProject(args: {
       project,
       validationOnly: true,
       abortSignal: args.abortSignal,
+      onStage: args.onStage,
     });
     return { durationMs: Date.now() - startedAt };
   } finally {

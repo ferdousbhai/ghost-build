@@ -11,6 +11,7 @@ import { APP_AGENT_PROTECTED_FILE_SHA256 } from './deployment-security-baseline'
 import type { DeploymentProjectProfile } from './deployment-snapshot';
 import { trackSandboxLifecycle } from './sandbox-cleanup';
 import { sandboxExec, withSandboxRpcTimeout } from './sandbox-lifecycle';
+import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 const PROJECT_DIR = '/workspace/project';
 const SOURCE_DIR = '/workspace/source';
@@ -65,7 +66,7 @@ export const DEPLOYMENT_BUILD_STEP_BUDGET_MS =
   BUILD_TIMEOUT_MS.archive +
   BUILD_TIMEOUT_MS.archiveValidation +
   BUILD_TIMEOUT_MS.download;
-type BuildStage =
+type BuildErrorStage =
   | 'sandbox initialization'
   | 'source extraction'
   | 'workspace policy verification'
@@ -86,6 +87,7 @@ export async function buildDeploymentSnapshot(args: {
   project: DeploymentProjectProfile;
   validationOnly?: boolean;
   abortSignal?: AbortSignal;
+  onStage?: (stage: BuilderValidationStage) => void;
 }): Promise<Uint8Array<ArrayBuffer>> {
   args.abortSignal?.throwIfAborted();
   if (!args.env.DeploymentSandbox) {
@@ -123,7 +125,12 @@ export async function buildDeploymentSnapshot(args: {
     void destroySandbox();
   };
   args.abortSignal?.addEventListener('abort', handleAbort, { once: true });
-  let stage: BuildStage = 'sandbox initialization';
+  let stage: BuildErrorStage = 'sandbox initialization';
+  const setStage = (nextStage: BuilderValidationStage) => {
+    stage = buildErrorStage(nextStage);
+    args.onStage?.(nextStage);
+  };
+  setStage('sandbox initialization');
   try {
     args.abortSignal?.throwIfAborted();
     await requireSuccess(
@@ -145,7 +152,7 @@ export async function buildDeploymentSnapshot(args: {
     await sandbox.mkdir(PROJECT_DIR, { recursive: true });
     await sandbox.mkdir(SOURCE_DIR, { recursive: true });
     await sandbox.writeFile(SOURCE_ARCHIVE, source.body);
-    stage = 'source extraction';
+    setStage('source extraction');
     await requireSuccess(
       await sandboxExec(
         sandbox,
@@ -182,7 +189,7 @@ export async function buildDeploymentSnapshot(args: {
         { timeout: BUILD_TIMEOUT_MS.sourceCopy },
       ),
     );
-    stage = 'workspace policy verification';
+    setStage('workspace policy verification');
     await requireSuccess(
       await sandboxExec(sandbox, 'ghostbuild-verify-pnpm-workspace pnpm-workspace.yaml', {
         cwd: PROJECT_DIR,
@@ -220,7 +227,7 @@ export async function buildDeploymentSnapshot(args: {
         timeout: BUILD_TIMEOUT_MS.packageValidation,
       }),
     );
-    stage = 'dependency installation';
+    setStage('dependency installation');
     await requireSuccess(
       await sandboxExec(
         sandbox,
@@ -250,12 +257,12 @@ export async function buildDeploymentSnapshot(args: {
     const webAppEntrypoints = [
       [
         `${shellQuote(systemNode)} ${TRUSTED_INPUT_DIR}/scripts/cf-typegen.mjs`,
-        'type checking',
+        'worker type generation',
         BUILD_TIMEOUT_MS.typecheck,
       ],
       [
         `${shellQuote(systemNode)} node_modules/@tanstack/router-cli/bin/tsr.cjs generate`,
-        'type checking',
+        'route generation',
         BUILD_TIMEOUT_MS.typecheck,
       ],
       [
@@ -268,12 +275,16 @@ export async function buildDeploymentSnapshot(args: {
         'stack verification',
         BUILD_TIMEOUT_MS.stackVerification,
       ],
-      [`${shellQuote(systemNode)} scripts/verify-production-licenses.mjs`, 'application build', BUILD_TIMEOUT_MS.build],
+      [
+        `${shellQuote(systemNode)} scripts/verify-production-licenses.mjs`,
+        'license verification',
+        BUILD_TIMEOUT_MS.build,
+      ],
       // pnpm supplies the generated shim's NODE_PATH, which Babel uses for virtual plugin resolution.
       [`${shellQuote(systemPnpm)} exec vite build`, 'application build', BUILD_TIMEOUT_MS.build],
       [
         `${shellQuote(systemNode)} scripts/verify-production-licenses.mjs --built`,
-        'application build',
+        'built output verification',
         BUILD_TIMEOUT_MS.build,
       ],
       [
@@ -291,7 +302,7 @@ export async function buildDeploymentSnapshot(args: {
       [`${shellQuote(systemPnpm)} run lint`, 'linting', BUILD_TIMEOUT_MS.lint],
     ] as const;
     for (const [command, scriptStage, timeout] of requiresAppAgentSecurity ? webAppEntrypoints : workerEntrypoints) {
-      stage = scriptStage;
+      setStage(scriptStage);
       await requireSuccess(
         await runBoundedDeploymentBuildCommand(sandbox, verifiedEntrypoint(command), {
           cwd: PROJECT_DIR,
@@ -301,7 +312,7 @@ export async function buildDeploymentSnapshot(args: {
       );
     }
     await sandbox.killAllProcesses();
-    stage = 'security boundary verification';
+    setStage('security boundary verification');
     await requireSuccess(
       await sandboxExec(sandbox, `${projectBoundaryCheck} && ${trustedBoundaryCheck}`, {
         cwd: PROJECT_DIR,
@@ -311,7 +322,7 @@ export async function buildDeploymentSnapshot(args: {
     if (args.validationOnly) {
       return new Uint8Array(0) as Uint8Array<ArrayBuffer>;
     }
-    stage = 'build packaging';
+    setStage('build packaging');
     await sandbox.mkdir(PACKAGE_DIR, { recursive: true });
     await requireSuccess(
       await sandboxExec(
@@ -341,7 +352,7 @@ export async function buildDeploymentSnapshot(args: {
         timeout: BUILD_TIMEOUT_MS.archiveValidation,
       }),
     );
-    stage = 'build download';
+    setStage('build download');
     const build = await withTimeout(
       new Response(
         (await sandbox.readFileStream(BUILD_ARCHIVE)).pipeThrough(limitBuildArchiveBytes(MAX_BUILD_ARCHIVE_BYTES)),
@@ -362,6 +373,19 @@ export async function buildDeploymentSnapshot(args: {
   } finally {
     args.abortSignal?.removeEventListener('abort', handleAbort);
     await destroySandbox();
+  }
+}
+
+function buildErrorStage(stage: BuilderValidationStage): BuildErrorStage {
+  switch (stage) {
+    case 'worker type generation':
+    case 'route generation':
+      return 'type checking';
+    case 'license verification':
+    case 'built output verification':
+      return 'application build';
+    default:
+      return stage;
   }
 }
 

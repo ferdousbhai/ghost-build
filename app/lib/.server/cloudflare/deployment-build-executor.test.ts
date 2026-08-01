@@ -131,6 +131,7 @@ describe('buildDeploymentSnapshot', () => {
   });
 
   test('runs the complete build contract without materializing a deployment artifact during validation', async () => {
+    const onStage = vi.fn();
     const env = {
       DeploymentSandbox: {},
       APP_STORAGE: { get: vi.fn(async () => ({ body: stream([1, 2, 3]) })) },
@@ -144,6 +145,7 @@ describe('buildDeploymentSnapshot', () => {
         expectedSourceSha256: 'a'.repeat(64),
         project: appAgentWebProject,
         validationOnly: true,
+        onStage,
       }),
     ).resolves.toEqual(new Uint8Array());
 
@@ -151,6 +153,21 @@ describe('buildDeploymentSnapshot', () => {
     expect(sandbox.mkdir).toHaveBeenCalledTimes(2);
     expect(sandbox.readFileStream).not.toHaveBeenCalled();
     expect(sandbox.exec.mock.calls.some(([command]) => String(command).startsWith('tar -czf'))).toBe(false);
+    expect(onStage.mock.calls.map(([stage]) => stage)).toEqual([
+      'sandbox initialization',
+      'source extraction',
+      'workspace policy verification',
+      'dependency installation',
+      'worker type generation',
+      'route generation',
+      'type checking',
+      'stack verification',
+      'license verification',
+      'application build',
+      'built output verification',
+      'linting',
+      'security boundary verification',
+    ]);
     expect(sandbox.destroy).toHaveBeenCalledOnce();
   });
 
