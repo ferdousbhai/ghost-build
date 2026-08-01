@@ -11,7 +11,6 @@ import {
   findInternalPackageMetadataErrors,
   findCloudflareAiPeerCompatibilityErrors,
   findDeploymentRuntimePolicyErrors,
-  findDeploymentWorkflowErrors,
   findMissingDependencies,
   findMissingCommandSteps,
   findPackageVersionAlignmentErrors,
@@ -223,26 +222,6 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
     ]);
   });
 
-  it('keeps deployment execution split across bounded non-retrying durable steps', () => {
-    const validWorkflow = `
-      import { buildApprovedDeploymentArtifact, publishApprovedDeploymentArtifact } from './deployment-executor';
-      await step.do('claim, build, and persist approved deployment artifact',
-        { retries: { limit: 0, delay: '1 second' }, timeout: '1 hour' }, buildApprovedDeploymentArtifact);
-      await step.do('verify artifact, provision, publish, and clean up deployment',
-        { retries: { limit: 0, delay: '1 second' }, timeout: '30 minutes' }, publishApprovedDeploymentArtifact);
-    `;
-    expect(findDeploymentWorkflowErrors(validWorkflow)).toEqual([]);
-    expect(findDeploymentWorkflowErrors(validWorkflow.replace("timeout: '1 hour'", "timeout: '30 minutes'"))).toContain(
-      'deployment Workflow must give build one hour and publish 30 minutes.',
-    );
-    expect(findDeploymentWorkflowErrors(validWorkflow.replace('limit: 0', 'limit: 3'))).toContain(
-      'deployment Workflow must disable automatic retries for both provider-sensitive steps.',
-    );
-    expect(
-      findDeploymentWorkflowErrors(validWorkflow.replaceAll('publishApprovedDeploymentArtifact', 'publishDeployment')),
-    ).toContain('deployment Workflow must preserve the R2 receipt boundary between build and publish.');
-  });
-
   it('keeps deployment admission aligned with the generated template compatibility date', () => {
     const runtimePolicy = "export const DEPLOYMENT_COMPATIBILITY_DATE = '2026-07-21';";
     const templateConfig = '{ "compatibility_date": "2026-07-21", }';
@@ -262,9 +241,6 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
   it('keeps only control-plane tables in root D1', () => {
     const requiredTables = [
       'user',
-      'session',
-      'account',
-      'verification',
       'cloudflare_auth_sessions',
       'cloudflare_oauth_states',
       'cloudflare_credentials',
@@ -273,41 +249,13 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
     ]
       .map((table) => `CREATE TABLE IF NOT EXISTS ${table} (id TEXT);`)
       .join('\n');
-    expect(findRootMigrationErrors(requiredTables)).toContain(
-      'root migrations must drop the central chats workload table.',
-    );
+    expect(findRootMigrationErrors(requiredTables)).toEqual([]);
     expect(
       findRootMigrationErrors(
         `${requiredTables}
-         ${[
-           'chats',
-           'chat_message_states',
-           'chat_transcripts',
-           'shares',
-           'social_shares',
-           'object_gc_candidates',
-           'agent_gc_candidates',
-           'deployments',
-           'deployment_resources',
-           'deployment_security_inventory',
-           'chat_backup_admissions',
-           'chat_backup_objects',
-           'chat_backup_object_attributions',
-           'chat_backup_reconciliation_state',
-           'thumbnail_upload_admissions',
-           'thumbnail_objects',
-           'thumbnail_reconciliation_state',
-           'skill_sync_state',
-           'skill_sync_entries',
-           'builder_previews',
-           'builder_preview_build_admissions',
-           'sandbox_cleanup_candidates',
-           'feedback',
-         ]
-           .map((table) => `DROP TABLE IF EXISTS ${table};`)
-           .join('\n')}`,
+         CREATE TABLE chats (id TEXT);`,
       ),
-    ).toEqual([]);
+    ).toContain('root migrations must not create the user-owned chats workload table.');
   });
 
   it('requires the server Builder template to match the current template source', () => {

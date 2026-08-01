@@ -1,23 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  findConnection: vi.fn(),
   createDeployment: vi.fn(),
   requireDeployment: vi.fn(),
   approveDeployment: vi.fn(),
-  adoptExecutionGeneration: vi.fn(),
   executeUserOwnedDeployment: vi.fn(),
 }));
 
-vi.mock('~/lib/.server/cloudflare/cloudflare-connection-repository', () => ({
-  findCloudflareConnectionForUser: mocks.findConnection,
-}));
 vi.mock('~/lib/.server/cloudflare/deployment-repository', async (importOriginal) => ({
   ...(await importOriginal()),
   createDeployment: mocks.createDeployment,
   requireDeploymentForUser: mocks.requireDeployment,
   approveDeployment: mocks.approveDeployment,
-  adoptLegacyApprovedDeploymentExecutionGeneration: mocks.adoptExecutionGeneration,
 }));
 vi.mock('~/lib/.server/cloudflare/user-workspace-deployment-executor', () => ({
   executeUserOwnedDeployment: mocks.executeUserOwnedDeployment,
@@ -67,7 +61,7 @@ function deployment(status = 'awaiting_approval') {
     connectionId: 'connection-1',
     connectionGeneration: 1,
     executionGeneration: 1,
-    snapshotKey: `workspace-runtime:agent-1:7:${revision}`,
+    workspaceReference: `workspace-runtime:agent-1:7:${revision}`,
     status,
     plan,
     planDigest: 'b'.repeat(64),
@@ -76,8 +70,6 @@ function deployment(status = 'awaiting_approval') {
     productionUrl: status === 'succeeded' ? 'https://app.example.workers.dev' : null,
     errorCode: null,
     errorMessage: null,
-    buildArtifactKey: null,
-    buildArtifactGeneration: null,
     createdAt: 1,
     updatedAt: 1,
   };
@@ -86,14 +78,12 @@ function deployment(status = 'awaiting_approval') {
 describe('deployment handlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.findConnection.mockResolvedValue({ id: 'connection-1', status: 'active', generation: 1 });
     mocks.requireDeployment.mockRejectedValue(new Error('not configured'));
     mocks.createDeployment.mockResolvedValue(deployment());
-    mocks.adoptExecutionGeneration.mockImplementation(async ({ deployment: current }) => current);
     mocks.executeUserOwnedDeployment.mockResolvedValue(deployment('succeeded'));
   });
 
-  it('stores only an opaque reference to the exact user-owned backup', async () => {
+  it('stores only an opaque reference to the exact user-owned workspace revision', async () => {
     mocks.requireDeployment.mockRejectedValueOnce(
       new (await import('~/lib/.server/cloudflare/deployment-repository')).DeploymentNotFoundError(),
     );
@@ -103,7 +93,7 @@ describe('deployment handlers', () => {
       })),
     } as unknown as D1Database;
     const result = await createOrReplayDeploymentPlanForUser({
-      env: { DB: db } as Env,
+      env: runtimeEnv(db),
       userId: 'user-1',
       chatId: 'chat-1',
       deploymentId: 'deployment-1',
@@ -114,14 +104,14 @@ describe('deployment handlers', () => {
     });
     expect(result).toMatchObject({ id: 'deployment-1' });
     expect(mocks.createDeployment).toHaveBeenCalledWith(
-      expect.objectContaining({ snapshotKey: `workspace-runtime:agent-1:7:${revision}` }),
+      expect.objectContaining({ workspaceReference: `workspace-runtime:agent-1:7:${revision}` }),
     );
   });
 
   it('executes approved deployment work in the user-owned runtime', async () => {
     const approved = deployment('approved');
     mocks.requireDeployment.mockResolvedValue(approved);
-    const env = { DB: {} } as Env;
+    const env = runtimeEnv({} as D1Database);
     const response = await userRuntimeDeploymentAction({
       request: new Request('https://ghostbuild.dev/api/deployments/deployment-1/execute', { method: 'POST' }),
       env,
@@ -138,16 +128,14 @@ describe('deployment handlers', () => {
       executionGeneration: 1,
     });
   });
-
-  it('does not accept a legacy snapshot argument', async () => {
-    await expect(
-      createOrReplayDeploymentPlanForUser({
-        env: {} as Env,
-        userId: 'user-1',
-        chatId: 'chat-1',
-        deploymentId: 'deployment-1',
-        snapshot: new Blob(['zip']),
-      }),
-    ).rejects.toThrow('Browser-uploaded deployment snapshots are no longer supported.');
-  });
 });
+
+function runtimeEnv(db: D1Database): Env {
+  return {
+    DB: db,
+    GHOSTBUILD_USER_RUNTIME: '1',
+    GHOSTBUILD_USER_ID: 'user-1',
+    GHOSTBUILD_CONNECTION_ID: 'connection-1',
+    GHOSTBUILD_CONNECTION_GENERATION: '1',
+  } as unknown as Env;
+}

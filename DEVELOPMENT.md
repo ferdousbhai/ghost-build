@@ -135,11 +135,12 @@ Run `pnpm run provision:production` separately when bootstrapping production res
 their checked-in identifiers. Cloudflare Workers Builds owns both pull-request validation and production deployment;
 the repository intentionally contains no GitHub Actions workflows.
 
-Generated applications deploy through the server-owned workflow in
-`app/lib/.server/cloudflare/deployment-workflow.ts`. Never route a user's deployment through Ghostbuild's own
-Cloudflare credentials. AppAgent projects provision `DB` for application data and a distinct `AGENT_SECURITY_DB` for
-Agent sessions, retention state, and inference accounting. Deployment readback must attest both database identifiers
-and the complete server-owned security baseline before the deployment is considered successful.
+Generated applications build and deploy inside the user's workspace runtime and Sandbox, using only the user's
+Cloudflare credentials. Ghostbuild retains the approved plan and an opaque workspace revision reference in the
+user-owned D1; it does not upload or retain a deployment archive. AppAgent projects provision `DB` for application data
+and a distinct `AGENT_SECURITY_DB` for Agent sessions, retention state, and inference accounting. Deployment readback
+must attest both database identifiers and the complete security baseline before the deployment is considered
+successful.
 
 ## Historical Evaluations
 

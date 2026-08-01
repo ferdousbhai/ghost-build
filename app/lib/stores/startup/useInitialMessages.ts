@@ -25,7 +25,6 @@ interface InitialMessages {
   loadedSubchatIndex: number;
   transcript: TranscriptIdentity;
   checkpoint: TranscriptCheckpoint | null;
-  seedTranscript: boolean;
 }
 
 type TranscriptSelection = {
@@ -119,7 +118,6 @@ export function useInitialMessages(chatId: string | undefined):
       loadedSubchatIndex: transcript.loadedSubchatIndex,
       transcript: transcript.transcript,
       checkpoint: transcript.checkpoint,
-      seedTranscript: transcript.seedTranscript,
     };
   }, [activeSelection, cached.isLoading, cached.transcript, chatId, sessionId]);
 

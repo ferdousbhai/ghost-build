@@ -1,7 +1,7 @@
 import { atom } from 'nanostores';
 import type { TranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 
-export const chatSyncState = atom<BackupSyncState>({
+export const chatCheckpointSyncState = atom<ChatCheckpointSyncState>({
   chatId: null,
   lastSync: 0,
   numFailures: 0,
@@ -11,7 +11,7 @@ export const chatSyncState = atom<BackupSyncState>({
   subchatIndex: 0,
 });
 
-export type BackupSyncState = {
+export type ChatCheckpointSyncState = {
   chatId: string | null;
   lastSync: number;
   numFailures: number;
@@ -21,7 +21,7 @@ export type BackupSyncState = {
   subchatIndex: number;
 };
 
-export type InitialBackupSyncState = {
+export type InitializedChatCheckpointSyncState = {
   chatId: string;
   lastSync: number;
   numFailures: number;

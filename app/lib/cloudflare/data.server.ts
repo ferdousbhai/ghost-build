@@ -160,14 +160,14 @@ export async function userRuntimeInitialMessagesAction(args: {
     });
     const durable = await getBuilderTranscriptSnapshot(args.env, transcriptIdentity(transcript), args.userId);
     if (!durable.checkpoint || durable.checkpoint.revision === 0) {
-      return new Response(null, { status: 204, headers: transcriptResponseHeaders(transcript, 'empty') });
+      return new Response(null, { status: 204, headers: transcriptResponseHeaders(transcript) });
     }
     if (!transcriptIdentitiesEqual(durable.checkpoint, transcriptIdentity(transcript))) {
       return transcriptConflictResponse(durable.checkpoint);
     }
     return Response.json(
       { version: 2, transcript: durable.checkpoint, messages: durable.messages },
-      { headers: transcriptResponseHeaders(transcript, 'durable') },
+      { headers: transcriptResponseHeaders(transcript) },
     );
   } catch (error) {
     return internalErrorResponse(error, 'Unknown initial messages error');
@@ -196,9 +196,8 @@ function getBuilderTranscriptSnapshot(
   return stub.getTranscriptSnapshotForOwner(identity, ownerId);
 }
 
-function transcriptResponseHeaders(transcript: ChatTranscriptRow, source: 'durable' | 'empty'): Headers {
+function transcriptResponseHeaders(transcript: ChatTranscriptRow): Headers {
   return new Headers({
-    'X-Ghostbuild-Transcript-Source': source,
     'X-Ghostbuild-Transcript-Agent': transcript.agent_name,
     'X-Ghostbuild-Transcript-Generation': transcript.generation.toString(),
     'X-Ghostbuild-Transcript-Subchat': transcript.subchat_index.toString(),

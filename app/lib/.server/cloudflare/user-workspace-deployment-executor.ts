@@ -1,4 +1,3 @@
-import { requireActiveCloudflareConnection } from './cloudflare-connection-repository';
 import { deploymentPlanResourceName, deploymentProjectProfile, isCurrentDeploymentPlan } from './deployment-plan';
 import {
   claimApprovedDeployment,
@@ -8,10 +7,7 @@ import {
   type Deployment,
   type DeploymentStatus,
 } from './deployment-repository';
-import {
-  attestManagedDeploymentSecurity,
-  recordManagedDeploymentSecurityIntent,
-} from './deployment-security-inventory';
+import { attestManagedDeploymentSecurity } from './deployment-security-inventory';
 import { UserCloudflareAccountApi } from './user-account-api';
 
 type UserOwnedDeploymentArgs = {
@@ -28,16 +24,24 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
   let phase: DeploymentStatus = 'approved';
   let providerChangesPossible = false;
   try {
-    const connection = await requireActiveCloudflareConnection(args.env.DB, args.connectionId);
     const runtimeEnv = args.env as Env & {
       GHOSTBUILD_USER_RUNTIME?: string;
       GHOSTBUILD_USER_RUNTIME_ENDPOINT?: string;
       CONTROL_PLANE_SECRET?: string;
       CLOUDFLARE_API_TOKEN?: string;
+      CLOUDFLARE_ACCOUNT_ID?: string;
+      GHOSTBUILD_USER_ID?: string;
+      GHOSTBUILD_CONNECTION_ID?: string;
+      GHOSTBUILD_CONNECTION_GENERATION?: string;
     };
+    const connectionGeneration = Number(runtimeEnv.GHOSTBUILD_CONNECTION_GENERATION);
     if (
       runtimeEnv.GHOSTBUILD_USER_RUNTIME !== '1' ||
-      connection.userId !== args.userId ||
+      runtimeEnv.GHOSTBUILD_USER_ID !== args.userId ||
+      runtimeEnv.GHOSTBUILD_CONNECTION_ID !== args.connectionId ||
+      !Number.isSafeInteger(connectionGeneration) ||
+      connectionGeneration < 1 ||
+      !runtimeEnv.CLOUDFLARE_ACCOUNT_ID ||
       !runtimeEnv.CLOUDFLARE_API_TOKEN ||
       !runtimeEnv.GHOSTBUILD_USER_RUNTIME_ENDPOINT ||
       !runtimeEnv.CONTROL_PLANE_SECRET
@@ -50,13 +54,14 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       db: args.env.DB,
       deploymentId: deployment.id,
       userId: args.userId,
-      connectionId: connection.id,
-      connectionGeneration: connection.generation,
+      connectionId: args.connectionId,
+      connectionGeneration,
       executionGeneration: args.executionGeneration,
     });
     phase = 'provisioning';
     const accessToken = runtimeEnv.CLOUDFLARE_API_TOKEN;
-    const accountApi = new UserCloudflareAccountApi(connection.accountId, accessToken);
+    const accountId = runtimeEnv.CLOUDFLARE_ACCOUNT_ID;
+    const accountApi = new UserCloudflareAccountApi(accountId, accessToken);
 
     const d1Name = deploymentPlanResourceName(deployment.plan, 'd1', 'DB');
     const d1 = d1Name ? await accountApi.ensureD1ForPlan(deployment.plan) : null;
@@ -85,14 +90,8 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
     phase = 'deploying';
     deployment = await requireDeployment(args.env.DB, deployment.id);
     const workerName = requireResourceName(deployment, 'worker', 'app');
-    await recordManagedDeploymentSecurityIntent({
-      db: args.env.DB,
-      deployment,
-      workerName,
-      accountId: connection.accountId,
-    });
     providerChangesPossible = true;
-    const reference = parseWorkspaceReference(deployment.snapshotKey);
+    const reference = parseWorkspaceReference(deployment.workspaceReference);
     if (reference.revision !== deployment.plan.sourceSha256) {
       throw new Error('The approved deployment revision no longer matches its workspace reference.');
     }
@@ -107,7 +106,7 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
           deploymentId: deployment.id,
           revision: reference.revision,
           apiToken: accessToken,
-          accountId: connection.accountId,
+          accountId,
           workerName,
           projectType: profile.type,
           workersAi: profile.bindings.ai,
@@ -133,10 +132,8 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       throw new Error(result?.error || 'The user-owned deployment Sandbox failed.');
     }
     await attestManagedDeploymentSecurity({
-      db: args.env.DB,
       deployment,
       workerName,
-      accountId: connection.accountId,
       accountApi,
       expectedPublishedVersionId: result.workerVersionId,
       expectedAgentSecurityD1DatabaseId: agentD1?.id,

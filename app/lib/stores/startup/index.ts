@@ -1,7 +1,7 @@
 import { useStoreMessageHistory } from './useStoreMessageHistory';
 import { useDiscardEmptyChat, useExistingInitializeChat, useHomepageInitializeChat } from './useInitializeChat';
 import { useInitialMessages } from './useInitialMessages';
-import { useBackupSyncState } from './history';
+import { useChatCheckpointSync } from './history';
 import { useCallback, useEffect, useState } from 'react';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import { useAllSubchats } from '~/lib/cloudflare/data-hooks';
@@ -25,7 +25,7 @@ export function useChatHomepage(chatId: string) {
       void navigateToChat(loaded.urlId);
     }
   }, [loaded?.urlId, navigateToChat]);
-  useBackupSyncState(
+  useChatCheckpointSync(
     chatId,
     loaded?.loadedSubchatIndex ?? (chatInitialized ? 0 : undefined),
     loaded?.deserialized ?? (chatInitialized ? EMPTY_INITIAL_MESSAGES : undefined),
@@ -50,7 +50,6 @@ export function useChatHomepage(chatId: string) {
     initialMessages: loaded?.deserialized ?? EMPTY_INITIAL_MESSAGES,
     subchats,
     transcript,
-    seedTranscript: loaded?.seedTranscript ?? false,
   };
 }
 
@@ -64,7 +63,7 @@ export function useExistingChat(chatId: string) {
       void navigateToChat(initialMessages.urlId);
     }
   }, [initialMessages?.urlId, navigateToChat]);
-  useBackupSyncState(
+  useChatCheckpointSync(
     chatId,
     initialMessages?.loadedSubchatIndex,
     initialMessages?.deserialized,
@@ -82,7 +81,6 @@ export function useExistingChat(chatId: string) {
     storeMessageHistory,
     subchats,
     transcript: initialMessages?.transcript,
-    seedTranscript: initialMessages?.seedTranscript ?? false,
   };
 }
 

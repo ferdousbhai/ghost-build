@@ -6,12 +6,9 @@ import {
   findMissingProvisionScriptPatternErrors,
   findWorkerObservabilityErrors,
   findWorkerOAuthStartRateLimitErrors,
-  findWorkerChatBackupQuotaErrors,
   findWorkerGcScheduleErrors,
-  findSkillSyncWorkflowErrors,
   findWorkerRoutingErrors,
   findWorkerRuntimeSecretErrors,
-  findWorkerTelemetryRateLimitErrors,
   findWorkerVariableSourceErrors,
   verifyProductionConfig,
   workflowPathsFromDirectoryEntries,
@@ -102,51 +99,6 @@ describe('findWorkerGcScheduleErrors', () => {
   });
 });
 
-describe('findSkillSyncWorkflowErrors', () => {
-  it('requires the dedicated weekly Cloudflare Workflow schedule', () => {
-    expect(
-      findSkillSyncWorkflowErrors(
-        {
-          workflows: [
-            {
-              name: 'ghostbuild-skill-sync',
-              binding: 'SkillSyncWorkflow',
-              class_name: 'SkillSyncWorkflow',
-              schedules: ['0 8 * * 1'],
-            },
-          ],
-        },
-        'wrangler.jsonc',
-      ),
-    ).toEqual([]);
-    expect(findSkillSyncWorkflowErrors({}, 'wrangler.jsonc')).toEqual([
-      'wrangler.jsonc must bind the weekly SkillSyncWorkflow.',
-    ]);
-  });
-});
-
-describe('findWorkerTelemetryRateLimitErrors', () => {
-  it('requires a dedicated 30-per-minute binding', () => {
-    expect(
-      findWorkerTelemetryRateLimitErrors(
-        {
-          ratelimits: [
-            {
-              name: 'CLIENT_TELEMETRY_RATE_LIMITER',
-              namespace_id: '1001',
-              simple: { limit: 30, period: 60 },
-            },
-          ],
-        },
-        'wrangler.jsonc',
-      ),
-    ).toEqual([]);
-    expect(findWorkerTelemetryRateLimitErrors({}, 'wrangler.jsonc')).toEqual([
-      'wrangler.jsonc must bind CLIENT_TELEMETRY_RATE_LIMITER.',
-    ]);
-  });
-});
-
 describe('findWorkerOAuthStartRateLimitErrors', () => {
   it('requires a dedicated 10-per-minute namespace', () => {
     expect(
@@ -183,40 +135,6 @@ describe('findWorkerOAuthStartRateLimitErrors', () => {
       'wrangler.jsonc OAuth-start rate-limit namespace_id must be "1002"; found "1001".',
       'wrangler.jsonc OAuth-start rate-limit simple.limit must be 10; found 30.',
       'wrangler.jsonc OAuth-start rate-limit simple.period must be 60; found 10.',
-    ]);
-  });
-});
-
-describe('findWorkerChatBackupQuotaErrors', () => {
-  it('requires the shedding binding and exact D1 policy configuration', () => {
-    expect(
-      findWorkerChatBackupQuotaErrors(
-        {
-          ratelimits: [
-            {
-              name: 'CHAT_BACKUP_RATE_LIMITER',
-              namespace_id: '1003',
-              simple: { limit: 240, period: 60 },
-            },
-          ],
-          vars: {
-            CHAT_BACKUP_STORAGE_QUOTA_MODE: 'shadow',
-            CHAT_BACKUP_STORAGE_LIMIT_BYTES: '1073741824',
-            CHAT_BACKUP_STORAGE_LIMIT_OBJECTS: '4096',
-            CHAT_BACKUP_REQUESTS_PER_MINUTE: '120',
-            CHAT_BACKUP_REQUESTS_PER_DAY: '10000',
-          },
-        },
-        'wrangler.jsonc',
-      ),
-    ).toEqual([]);
-    expect(findWorkerChatBackupQuotaErrors({}, 'wrangler.jsonc')).toEqual([
-      'wrangler.jsonc must bind CHAT_BACKUP_RATE_LIMITER.',
-      'wrangler.jsonc vars.CHAT_BACKUP_STORAGE_QUOTA_MODE must be "shadow" or "enforce".',
-      'wrangler.jsonc vars.CHAT_BACKUP_STORAGE_LIMIT_BYTES must be "1073741824"; found undefined.',
-      'wrangler.jsonc vars.CHAT_BACKUP_STORAGE_LIMIT_OBJECTS must be "4096"; found undefined.',
-      'wrangler.jsonc vars.CHAT_BACKUP_REQUESTS_PER_MINUTE must be "120"; found undefined.',
-      'wrangler.jsonc vars.CHAT_BACKUP_REQUESTS_PER_DAY must be "10000"; found undefined.',
     ]);
   });
 });

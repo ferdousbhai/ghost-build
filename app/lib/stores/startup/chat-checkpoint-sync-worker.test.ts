@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { advanceTranscriptCheckpoint } from 'ghostbuild-agent/transcript';
-import { isCompleteMessageInfoAtLeast } from './backup-sync-policy';
+import { isCompleteMessageInfoAtLeast } from './chat-checkpoint-sync-policy';
 import {
   adoptAdvancedTranscriptCheckpoint,
-  backupRetryDelay,
-  initializeBackupPosition,
+  checkpointRetryDelay,
+  initializeCheckpointPosition,
   isTranscriptAdvanceConflict,
-} from './backup-sync-worker';
-import { chatSyncState } from './chatSyncState';
+} from './chat-checkpoint-sync-worker';
+import { chatCheckpointSyncState } from './chatCheckpointSyncState';
 import { lastCompleteMessageInfoStore } from './messages';
 
 function message(id: string, text: string): GhostbuildMessage {
@@ -16,7 +16,7 @@ function message(id: string, text: string): GhostbuildMessage {
 }
 
 beforeEach(() => {
-  chatSyncState.set({
+  chatCheckpointSyncState.set({
     chatId: null,
     lastSync: 0,
     numFailures: 0,
@@ -40,20 +40,20 @@ describe('isCompleteMessageInfoAtLeast', () => {
   });
 });
 
-describe('initializeBackupPosition', () => {
+describe('initializeCheckpointPosition', () => {
   it('resets message and file checkpoints when navigating to a different chat at the same subchat', () => {
     const firstChatMessages = [message('a-1', 'first'), message('a-2', 'second')];
-    initializeBackupPosition('chat-a', firstChatMessages, 0);
-    chatSyncState.set({
-      ...chatSyncState.get(),
+    initializeCheckpointPosition('chat-a', firstChatMessages, 0);
+    chatCheckpointSyncState.set({
+      ...chatCheckpointSyncState.get(),
       lastSync: 123,
       numFailures: 2,
     });
 
     const secondChatMessages = [message('b-1', 'new chat')];
-    initializeBackupPosition('chat-b', secondChatMessages, 0);
+    initializeCheckpointPosition('chat-b', secondChatMessages, 0);
 
-    expect(chatSyncState.get()).toMatchObject({
+    expect(chatCheckpointSyncState.get()).toMatchObject({
       chatId: 'chat-b',
       lastSync: 0,
       numFailures: 0,
@@ -71,15 +71,15 @@ describe('initializeBackupPosition', () => {
 
   it('preserves progressed checkpoints when the same chat and subchat reinitialize', () => {
     const initialMessages = [message('a-1', 'first')];
-    initializeBackupPosition('chat-a', initialMessages, 0);
-    chatSyncState.set({
-      ...chatSyncState.get(),
+    initializeCheckpointPosition('chat-a', initialMessages, 0);
+    chatCheckpointSyncState.set({
+      ...chatCheckpointSyncState.get(),
       persistedMessageInfo: { messageIndex: 3, partIndex: 2 },
     });
 
-    initializeBackupPosition('chat-a', initialMessages, 0);
+    initializeCheckpointPosition('chat-a', initialMessages, 0);
 
-    expect(chatSyncState.get()).toMatchObject({
+    expect(chatCheckpointSyncState.get()).toMatchObject({
       chatId: 'chat-a',
       persistedMessageInfo: { messageIndex: 3, partIndex: 2 },
     });
@@ -92,7 +92,7 @@ describe('adoptAdvancedTranscriptCheckpoint', () => {
     const identity = { agentName: 'chat-a', generation: 0, subchatIndex: 0 };
     const stale = await advanceTranscriptCheckpoint(null, identity, messages.slice(0, 1));
     const current = await advanceTranscriptCheckpoint(stale, identity, messages);
-    initializeBackupPosition('chat-a', messages, 0, stale);
+    initializeCheckpointPosition('chat-a', messages, 0, stale);
     lastCompleteMessageInfoStore.set({
       messageIndex: 1,
       partIndex: 0,
@@ -111,7 +111,7 @@ describe('adoptAdvancedTranscriptCheckpoint', () => {
     const messages = [message('a-1', 'first')];
     const identity = { agentName: 'chat-a', generation: 0, subchatIndex: 0 };
     const checkpoint = await advanceTranscriptCheckpoint(null, identity, messages);
-    initializeBackupPosition('chat-a', messages, 0, checkpoint);
+    initializeCheckpointPosition('chat-a', messages, 0, checkpoint);
 
     await expect(adoptAdvancedTranscriptCheckpoint('not json', 'chat-a', 0)).resolves.toBe(false);
     await expect(adoptAdvancedTranscriptCheckpoint(JSON.stringify({ checkpoint }), 'chat-b', 0)).resolves.toBe(false);
@@ -127,23 +127,27 @@ describe('adoptAdvancedTranscriptCheckpoint', () => {
   });
 });
 
-describe('chat backup retry policy', () => {
+describe('chat checkpoint retry policy', () => {
   it('treats only the expected transcript race as a transient conflict', () => {
     expect(
       isTranscriptAdvanceConflict(
         409,
-        JSON.stringify({ error: 'The agent transcript advanced before this backup was saved.' }),
+        JSON.stringify({
+          error: 'The agent transcript advanced before this checkpoint was saved. Retry with the latest transcript.',
+        }),
       ),
     ).toBe(true);
-    expect(isTranscriptAdvanceConflict(409, JSON.stringify({ error: 'Chat backup storage quota exceeded.' }))).toBe(
+    expect(isTranscriptAdvanceConflict(409, JSON.stringify({ error: 'Chat checkpoint persistence failed.' }))).toBe(
       false,
     );
     expect(isTranscriptAdvanceConflict(500, 'not json')).toBe(false);
   });
 
-  it('honors bounded Retry-After guidance from the backup endpoint', () => {
-    expect(backupRetryDelay(new Response(null, { headers: { 'Retry-After': '12' } }), 3)).toBe(12_000);
-    expect(backupRetryDelay(new Response(null, { headers: { 'Retry-After': '9999' } }), 3)).toBe(300_000);
-    expect(backupRetryDelay(new Response(null, { headers: { 'Retry-After': 'soon' } }), 3)).toBeGreaterThanOrEqual(0);
+  it('honors bounded Retry-After guidance from the checkpoint endpoint', () => {
+    expect(checkpointRetryDelay(new Response(null, { headers: { 'Retry-After': '12' } }), 3)).toBe(12_000);
+    expect(checkpointRetryDelay(new Response(null, { headers: { 'Retry-After': '9999' } }), 3)).toBe(300_000);
+    expect(checkpointRetryDelay(new Response(null, { headers: { 'Retry-After': 'soon' } }), 3)).toBeGreaterThanOrEqual(
+      0,
+    );
   });
 });

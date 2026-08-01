@@ -33,7 +33,6 @@ export const Chat = memo(
     subchats,
     initialPrompt,
     transcript,
-    seedTranscript,
   }: ChatProps) => {
     const [pendingInitialMessage, setPendingInitialMessage] = useState<string | null>(initialPrompt ?? null);
     const clearPendingInitialMessage = useCallback(() => setPendingInitialMessage(null), []);
@@ -76,7 +75,6 @@ export const Chat = memo(
         pendingInitialMessage={pendingInitialMessage}
         clearPendingInitialMessage={clearPendingInitialMessage}
         transcript={transcript}
-        seedTranscript={seedTranscript}
       />
     );
   },
@@ -95,7 +93,6 @@ const AuthenticatedChat = memo(
     pendingInitialMessage,
     clearPendingInitialMessage,
     transcript,
-    seedTranscript,
   }: Omit<ChatProps, 'isReload' | 'hadSuccessfulDeploy'> & {
     pendingInitialMessage: string | null;
     clearPendingInitialMessage: () => void;
@@ -131,7 +128,6 @@ const AuthenticatedChat = memo(
       initialMessages,
       onSubchatTitle: handleSubchatTitleChange,
       transcript,
-      seedTranscript,
     });
     const parsedMessages = useChatHistoryProcessing({
       messages,

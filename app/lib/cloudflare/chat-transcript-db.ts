@@ -54,7 +54,6 @@ const readyChatTranscriptSchema = z.object({
   transcript: transcriptIdentitySchema,
   checkpoint: transcriptCheckpointSchema.nullable(),
   messages: z.array(serializedMessageSchema),
-  seedTranscript: z.boolean(),
 });
 
 const cachedChatTranscriptSchema = z.discriminatedUnion('status', [
@@ -216,7 +215,6 @@ export function cachePersistedTranscript(args: {
     transcript: transcriptIdentity(args.checkpoint),
     checkpoint: args.checkpoint,
     messages: serializeCompleteMessages(args.messages, args.lastMessageRank, args.partIndex),
-    seedTranscript: false,
   };
   collection.utils.writeBatch(() => {
     collection.utils.writeUpsert({ ...updated, requestKey: exactRequestKey });
@@ -275,8 +273,6 @@ async function loadChatTranscript(
         ? history.checkpoint
         : null,
     messages: history.messages,
-    seedTranscript:
-      response.headers.get('X-Ghostbuild-Transcript-Source') === 'materialized' && history.messages.length > 0,
   };
 }
 

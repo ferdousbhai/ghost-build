@@ -22,5 +22,4 @@ export interface ChatProps {
   subchats?: SubchatSummary[];
   initialPrompt?: string;
   transcript: TranscriptIdentity;
-  seedTranscript: boolean;
 }

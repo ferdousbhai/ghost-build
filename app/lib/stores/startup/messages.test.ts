@@ -25,7 +25,7 @@ describe('serializeMessageForStorage', () => {
     });
   });
 
-  test('removes the ephemeral stale-send checkpoint from materialized history', () => {
+  test('removes the ephemeral stale-send checkpoint from restored history', () => {
     const message = {
       id: 'test',
       role: 'user',

@@ -46,7 +46,6 @@ export function useBuilderAgentChat(args: {
   initialMessages: GhostbuildMessage[];
   onSubchatTitle: (subchatIndex: number, title: string) => void;
   transcript: TranscriptIdentity;
-  seedTranscript: boolean;
 }) {
   const currentSubchatIndex = useStore(subchatIndexStore);
   const sessionId = useSessionIdOrNullOrLoading();
@@ -140,10 +139,6 @@ export function useBuilderAgentChat(args: {
   const initialMessagesRef = useRef(args.initialMessages);
   setMessagesRef.current = chat.setMessages;
   initialMessagesRef.current = args.initialMessages;
-  const seedKey = args.seedTranscript
-    ? `${args.transcript.agentName}:${args.transcript.generation}:${args.transcript.subchatIndex}`
-    : null;
-  const seedGateRef = useAsyncGate(seedKey);
 
   useEffect(() => {
     let disposed = false;
@@ -167,31 +162,6 @@ export function useBuilderAgentChat(args: {
       disconnect();
     };
   }, [builderAgent]);
-
-  useEffect(() => {
-    if (!seedKey) {
-      return;
-    }
-    const gate = seedGateRef.current;
-    if (gate.started) {
-      return;
-    }
-    gate.started = true;
-    void (async () => {
-      try {
-        await waitForAgentSocketOpen(builderAgent, AGENT_SEND_READY_TIMEOUT_MS, { requireIdentity: false });
-        await builderAgent.call('seedTranscript', [args.transcript, args.initialMessages]);
-        if (seedGateRef.current === gate) {
-          setMessagesRef.current(initialMessagesRef.current as UIMessage[]);
-        }
-      } catch (error) {
-        gate.error = error;
-        logger.error('Failed to seed materialized transcript history', error);
-      } finally {
-        gate.resolve();
-      }
-    })();
-  }, [args.initialMessages, args.transcript, builderAgent, seedGateRef, seedKey]);
 
   useEffect(() => {
     if (workspaceReplica === undefined) {
@@ -266,11 +236,10 @@ export function useBuilderAgentChat(args: {
       options?: Parameters<typeof chat.sendMessage>[1],
       onRequestStart?: () => void,
     ) => {
-      const gate = seedGateRef.current;
       const workspaceGate = workspaceGateRef.current;
-      await Promise.all([gate.promise, workspaceGate.promise, stopBarrierRef.current]);
-      if (gate.error || workspaceGate.error) {
-        throw gate.error ?? workspaceGate.error;
+      await Promise.all([workspaceGate.promise, stopBarrierRef.current]);
+      if (workspaceGate.error) {
+        throw workspaceGate.error;
       }
       try {
         await waitForAgentSocketOpen(builderAgent, AGENT_SEND_READY_TIMEOUT_MS, { requireIdentity: false });
@@ -320,7 +289,7 @@ export function useBuilderAgentChat(args: {
       onRequestStart?.();
       return request;
     },
-    [args.transcript, builderAgent, chat, seedGateRef, workspaceGateRef],
+    [args.transcript, builderAgent, chat, workspaceGateRef],
   );
 
   const stop = useCallback(() => {

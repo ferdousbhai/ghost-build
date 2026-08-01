@@ -1,9 +1,7 @@
 import { z } from 'zod';
-import { findCloudflareConnectionForUser } from '~/lib/.server/cloudflare/cloudflare-connection-repository';
 import { buildDeploymentPlanFromSource, isCurrentDeploymentPlan } from '~/lib/.server/cloudflare/deployment-plan';
 import type { DeploymentProjectProfile } from '~/lib/.server/cloudflare/deployment-project-profile';
 import {
-  adoptLegacyApprovedDeploymentExecutionGeneration,
   approveDeployment,
   createDeployment,
   DeploymentApprovalDigestMismatchError,
@@ -11,7 +9,6 @@ import {
   DeploymentConnectionChangedError,
   DeploymentNotFoundError,
   DeploymentStateConflictError,
-  DeploymentSnapshotLimitError,
   prepareDeploymentRetry,
   requireDeploymentForUser,
   type Deployment,
@@ -35,15 +32,10 @@ export async function createOrReplayDeploymentPlanForUser(args: {
   revision?: string;
   workspaceRevision?: number;
   project?: DeploymentProjectProfile;
-  /** @deprecated Accepted only while old callers are removed. */
-  snapshot?: Blob;
 }) {
-  if (args.snapshot) {
-    throw new Error('Browser-uploaded deployment snapshots are no longer supported.');
-  }
   try {
     const existing = await requireDeploymentForUser(args.env.DB, args.deploymentId, args.userId);
-    if (existing.snapshotKey === workspaceReference(requireWorkspaceDeploymentArgs(args))) {
+    if (existing.workspaceReference === workspaceReference(requireWorkspaceDeploymentArgs(args))) {
       return publicDeployment(existing);
     }
   } catch (error) {
@@ -92,10 +84,7 @@ async function createFreshWorkspaceDeploymentPlanForUser(args: {
   workspaceRevision: number;
   project: DeploymentProjectProfile;
 }) {
-  const connection = await findCloudflareConnectionForUser(args.env.DB, args.userId);
-  if (!connection || connection.status !== 'active') {
-    throw new DeploymentConnectionRequiredError();
-  }
+  const connection = runtimeCloudflareIdentity(args.env, args.userId);
   const chat = await args.env.DB.prepare(
     `SELECT id FROM chats
      WHERE creator_id = ? AND (initial_id = ? OR url_id = ?) AND is_deleted = 0
@@ -118,7 +107,7 @@ async function createFreshWorkspaceDeploymentPlanForUser(args: {
     userId: args.userId,
     connectionId: connection.id,
     connectionGeneration: connection.generation,
-    snapshotKey: workspaceReference(args),
+    workspaceReference: workspaceReference(args),
     plan,
     planDigest: digest,
   });
@@ -159,10 +148,7 @@ async function runDeploymentAction(args: {
     return Response.json({ deployment: publicDeployment(deployment) });
   }
 
-  const connection = await findCloudflareConnectionForUser(args.env.DB, userId);
-  if (!connection || connection.status !== 'active') {
-    return Response.json({ error: 'Reconnect Cloudflare before approving this deployment.' }, { status: 409 });
-  }
+  const connection = runtimeCloudflareIdentity(args.env, userId);
   const currentDeployment = await requireDeploymentForUser(args.env.DB, args.deploymentId, userId);
   if (!isCurrentDeploymentPlan(currentDeployment.plan)) {
     return Response.json(
@@ -175,9 +161,6 @@ async function runDeploymentAction(args: {
   }
   if (args.operation === 'retry') {
     const previous = currentDeployment;
-    if (!previous.snapshotKey) {
-      throw new DeploymentStateConflictError(previous.status);
-    }
     if (previous.connectionId !== connection.id || previous.connectionGeneration !== connection.generation) {
       throw new DeploymentConnectionChangedError();
     }
@@ -192,7 +175,7 @@ async function runDeploymentAction(args: {
     return Response.json({ deployment: publicDeployment(retry) }, { status: 201 });
   }
   if (args.operation === 'execute') {
-    let deployment = currentDeployment;
+    const deployment = currentDeployment;
     if (
       deployment.connectionId !== connection.id ||
       deployment.connectionGeneration !== connection.generation ||
@@ -201,7 +184,6 @@ async function runDeploymentAction(args: {
     ) {
       throw new DeploymentStateConflictError(deployment.status);
     }
-    deployment = await adoptLegacyApprovedDeploymentExecutionGeneration({ db: args.env.DB, deployment });
     const completed = await executeUserOwnedDeployment({
       env: args.env,
       deploymentId: deployment.id,
@@ -228,6 +210,26 @@ async function runDeploymentAction(args: {
 class DeploymentConnectionRequiredError extends Error {}
 class DeploymentChatNotFoundError extends Error {}
 
+function runtimeCloudflareIdentity(env: Env, userId: string): { id: string; generation: number } {
+  const runtime = env as Env & {
+    GHOSTBUILD_USER_RUNTIME?: string;
+    GHOSTBUILD_USER_ID?: string;
+    GHOSTBUILD_CONNECTION_ID?: string;
+    GHOSTBUILD_CONNECTION_GENERATION?: string;
+  };
+  const generation = Number(runtime.GHOSTBUILD_CONNECTION_GENERATION);
+  if (
+    runtime.GHOSTBUILD_USER_RUNTIME !== '1' ||
+    runtime.GHOSTBUILD_USER_ID !== userId ||
+    !runtime.GHOSTBUILD_CONNECTION_ID ||
+    !Number.isSafeInteger(generation) ||
+    generation < 1
+  ) {
+    throw new DeploymentConnectionRequiredError();
+  }
+  return { id: runtime.GHOSTBUILD_CONNECTION_ID, generation };
+}
+
 function publicDeployment(deployment: Deployment) {
   return {
     id: deployment.id,
@@ -252,7 +254,7 @@ function deploymentErrorResponse(error: unknown): Response {
     return Response.json({ error: 'Chat not found.' }, { status: 404 });
   }
   if (error instanceof PayloadTooLargeError) {
-    return Response.json({ error: 'Deployment request exceeds the 11 MiB request limit.' }, { status: 413 });
+    return Response.json({ error: error.message }, { status: 413 });
   }
   if (error instanceof InvalidJsonBodyError) {
     return Response.json({ error: 'Invalid deployment request.' }, { status: 400 });
@@ -267,7 +269,6 @@ function deploymentErrorResponse(error: unknown): Response {
     error instanceof DeploymentApprovalDigestMismatchError ||
     error instanceof DeploymentConcurrencyLimitError ||
     error instanceof DeploymentConnectionChangedError ||
-    error instanceof DeploymentSnapshotLimitError ||
     error instanceof DeploymentStateConflictError
   ) {
     return Response.json({ error: error.message }, { status: 409 });

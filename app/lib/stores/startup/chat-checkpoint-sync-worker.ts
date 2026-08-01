@@ -12,8 +12,12 @@ import { cachePersistedTranscript } from '~/lib/cloudflare/chat-transcript-db';
 import { subchatIndexStore, waitForSubchatIndexChanged } from '~/lib/stores/subchats';
 import { waitForStoreValue } from '~/lib/stores/waitForStore';
 import { backoffTime } from '~/utils/constants';
-import { chatSyncState, type BackupSyncState, type InitialBackupSyncState } from './chatSyncState';
-import { isCompleteMessageInfoAtLeast } from './backup-sync-policy';
+import {
+  chatCheckpointSyncState,
+  type ChatCheckpointSyncState,
+  type InitializedChatCheckpointSyncState,
+} from './chatCheckpointSyncState';
+import { isCompleteMessageInfoAtLeast } from './chat-checkpoint-sync-policy';
 import {
   type CompleteMessageInfo,
   lastCompleteMessageInfoStore,
@@ -22,9 +26,10 @@ import {
 } from './messages';
 import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
 
-const logger = createScopedLogger('backup-sync-worker');
-const BACKUP_DEBOUNCE_MS = 1000;
-const TRANSCRIPT_ADVANCED_ERROR = 'The agent transcript advanced before this backup was saved.';
+const logger = createScopedLogger('chat-checkpoint-sync-worker');
+const CHECKPOINT_DEBOUNCE_MS = 1000;
+const TRANSCRIPT_ADVANCED_ERROR =
+  'The agent transcript advanced before this checkpoint was saved. Retry with the latest transcript.';
 
 interface ChatSyncWorkerOptions {
   chatId: string;
@@ -36,7 +41,7 @@ interface ChatSyncWorkerOptions {
 
 let activeWorker: { token: symbol; signal: AbortSignal } | null = null;
 
-export function initializeBackupPosition(
+export function initializeCheckpointPosition(
   chatId: string,
   initialMessages: GhostbuildMessage[],
   loadedSubchatIndex: number,
@@ -47,12 +52,12 @@ export function initializeBackupPosition(
     messageIndex: initialMessages.length - 1,
     partIndex: (lastMessage?.parts?.length ?? 0) - 1,
   };
-  const currentState = chatSyncState.get();
+  const currentState = chatCheckpointSyncState.get();
   const chatChanged = currentState.chatId !== chatId;
   if (!chatChanged && currentState.persistedMessageInfo !== null && loadedSubchatIndex === currentState.subchatIndex) {
     return;
   }
-  chatSyncState.set({
+  chatCheckpointSyncState.set({
     ...currentState,
     chatId,
     ...(chatChanged
@@ -78,11 +83,11 @@ export function initializeBackupPosition(
   }
 }
 
-export function hasPendingBackupWork(
-  currentState: BackupSyncState,
+export function hasPendingCheckpointWork(
+  currentState: ChatCheckpointSyncState,
   completeMessageInfo: CompleteMessageInfo | null,
 ): boolean {
-  return hasPendingMessageBackup(currentState, completeMessageInfo);
+  return hasPendingMessageCheckpoint(currentState, completeMessageInfo);
 }
 
 export async function chatSyncWorker(options: ChatSyncWorkerOptions): Promise<void> {
@@ -104,7 +109,7 @@ export async function chatSyncWorker(options: ChatSyncWorkerOptions): Promise<vo
 
   try {
     const initialState = await waitForInitialized(options.chatId, signal);
-    chatSyncState.set({ ...initialState, started: true, subchatIndex: options.currentSubchatIndex });
+    chatCheckpointSyncState.set({ ...initialState, started: true, subchatIndex: options.currentSubchatIndex });
     while (true) {
       const state = await waitForInitialized(options.chatId, signal);
       const completeMessageInfo = lastCompleteMessageInfoStore.get();
@@ -116,20 +121,20 @@ export async function chatSyncWorker(options: ChatSyncWorkerOptions): Promise<vo
         await waitForNextSyncTrigger(state, completeMessageInfo, signal);
         continue;
       }
-      if (!hasPendingBackupWork(state, completeMessageInfo)) {
+      if (!hasPendingCheckpointWork(state, completeMessageInfo)) {
         await waitForNextSyncTrigger(state, completeMessageInfo, signal);
         // Every wait invalidates the snapshots above. Restart the loop instead
         // of syncing with the state that existed before the trigger.
         continue;
       }
 
-      await waitForBackupDebounce(state.lastSync, signal);
+      await waitForCheckpointDebounce(state.lastSync, signal);
       const latestState = await waitForInitialized(options.chatId, signal);
       const latestCompleteMessageInfo = lastCompleteMessageInfoStore.get();
-      if (latestCompleteMessageInfo === null || !hasPendingBackupWork(latestState, latestCompleteMessageInfo)) {
+      if (latestCompleteMessageInfo === null || !hasPendingCheckpointWork(latestState, latestCompleteMessageInfo)) {
         continue;
       }
-      await syncBackup(options.chatId, options.sessionId, latestState, latestCompleteMessageInfo, signal);
+      await syncCheckpoint(options.chatId, options.sessionId, latestState, latestCompleteMessageInfo, signal);
     }
   } catch (error) {
     if (!signal.aborted) {
@@ -138,16 +143,16 @@ export async function chatSyncWorker(options: ChatSyncWorkerOptions): Promise<vo
   } finally {
     if (activeWorker?.token === workerToken) {
       activeWorker = null;
-      const state = chatSyncState.get();
+      const state = chatCheckpointSyncState.get();
       if (state.chatId === options.chatId) {
-        chatSyncState.set({ ...state, started: false });
+        chatCheckpointSyncState.set({ ...state, started: false });
       }
     }
   }
 }
 
-function hasPendingMessageBackup(
-  currentState: BackupSyncState,
+function hasPendingMessageCheckpoint(
+  currentState: ChatCheckpointSyncState,
   completeMessageInfo: CompleteMessageInfo | null,
 ): boolean {
   return (
@@ -160,10 +165,10 @@ function hasPendingMessageBackup(
   );
 }
 
-async function syncBackup(
+async function syncCheckpoint(
   chatId: string,
   sessionId: string,
-  currentState: InitialBackupSyncState,
+  currentState: InitializedChatCheckpointSyncState,
   completeMessageInfo: CompleteMessageInfo,
   signal: AbortSignal,
 ): Promise<void> {
@@ -181,14 +186,14 @@ async function syncBackup(
     return;
   }
   if (currentState.chatId !== chatId || currentState.subchatIndex !== subchatIndexStore.get()) {
-    const state = chatSyncState.get();
+    const state = chatCheckpointSyncState.get();
     if (state.chatId === chatId) {
-      chatSyncState.set({ ...state, persistedMessageInfo: null });
+      chatCheckpointSyncState.set({ ...state, persistedMessageInfo: null });
     }
     return;
   }
 
-  const formData = buildBackupFormData(update.firstMessage);
+  const formData = buildCheckpointFormData(update.firstMessage);
   let response: Response | undefined;
   let requestError: Error | null = null;
   try {
@@ -203,7 +208,7 @@ async function syncBackup(
     await handleSyncFailure(chatId, currentState.subchatIndex, response, requestError, signal);
     return;
   }
-  const latestState = chatSyncState.get();
+  const latestState = chatCheckpointSyncState.get();
   if (latestState.chatId !== chatId || latestState.subchatIndex !== currentState.subchatIndex) {
     return;
   }
@@ -221,7 +226,7 @@ async function syncBackup(
       checkpoint: completeMessageInfo.transcriptCheckpoint,
     });
   }
-  chatSyncState.set({
+  chatCheckpointSyncState.set({
     ...latestState,
     lastSync: Date.now(),
     numFailures: 0,
@@ -232,7 +237,7 @@ async function syncBackup(
   });
 }
 
-function buildBackupFormData(firstMessage: string | undefined): FormData {
+function buildCheckpointFormData(firstMessage: string | undefined): FormData {
   const formData = new FormData();
   if (firstMessage) {
     formData.append('firstMessage', firstMessage);
@@ -249,7 +254,7 @@ async function handleSyncFailure(
 ): Promise<void> {
   const errorText = response ? await response.text() : (requestError?.message ?? 'Unknown error');
   signal.throwIfAborted();
-  const currentState = chatSyncState.get();
+  const currentState = chatCheckpointSyncState.get();
   if (currentState.chatId !== attemptedChatId || currentState.subchatIndex !== attemptedSubchatIndex) {
     return;
   }
@@ -258,25 +263,25 @@ async function handleSyncFailure(
     if (currentState.numFailures >= 3) {
       toast.dismiss('chat-save-failure');
     }
-    chatSyncState.set({ ...currentState, numFailures: 0 });
-    logger.info('Retrying chat backup after the durable transcript advanced', {
+    chatCheckpointSyncState.set({ ...currentState, numFailures: 0 });
+    logger.info('Retrying chat checkpoint after the durable transcript advanced', {
       attemptedChatId,
       attemptedSubchatIndex,
       adoptedCheckpoint: adopted,
     });
-    await abortableDelay(BACKUP_DEBOUNCE_MS, signal);
+    await abortableDelay(CHECKPOINT_DEBOUNCE_MS, signal);
     return;
   }
   const failures = currentState.numFailures + 1;
-  chatSyncState.set({ ...currentState, numFailures: failures });
+  chatCheckpointSyncState.set({ ...currentState, numFailures: failures });
   if (failures >= 3) {
     toast.error('Your chat is having trouble saving and progress may be lost. Download your code to save it.', {
       id: 'chat-save-failure',
       duration: Number.POSITIVE_INFINITY,
     });
   }
-  const delay = backupRetryDelay(response, failures);
-  logger.error('Failed to save chat backup', {
+  const delay = checkpointRetryDelay(response, failures);
+  logger.error('Failed to save chat checkpoint', {
     attemptedChatId,
     attemptedSubchatIndex,
     failures,
@@ -303,7 +308,7 @@ export function isTranscriptAdvanceConflict(status: number | undefined, response
   }
 }
 
-export function backupRetryDelay(response: Response | undefined, failures: number): number {
+export function checkpointRetryDelay(response: Response | undefined, failures: number): number {
   const retryAfter = response?.headers.get('Retry-After');
   if (retryAfter && /^\d+$/.test(retryAfter)) {
     return Math.min(Number(retryAfter) * 1_000, 5 * 60_000);
@@ -326,7 +331,7 @@ export async function adoptAdvancedTranscriptCheckpoint(
     typeof value === 'object' && value !== null ? (value as Record<string, unknown>).checkpoint : undefined,
   );
   const complete = lastCompleteMessageInfoStore.get();
-  const state = chatSyncState.get();
+  const state = chatCheckpointSyncState.get();
   if (
     !result.success ||
     complete === null ||
@@ -343,7 +348,7 @@ export async function adoptAdvancedTranscriptCheckpoint(
 }
 
 async function waitForNextSyncTrigger(
-  currentState: InitialBackupSyncState,
+  currentState: InitializedChatCheckpointSyncState,
   completeMessageInfo: CompleteMessageInfo,
   signal: AbortSignal,
 ): Promise<void> {
@@ -367,16 +372,16 @@ async function waitForNextSyncTrigger(
   }
 }
 
-async function waitForBackupDebounce(lastSync: number, signal: AbortSignal): Promise<void> {
-  const remaining = lastSync + BACKUP_DEBOUNCE_MS - Date.now();
+async function waitForCheckpointDebounce(lastSync: number, signal: AbortSignal): Promise<void> {
+  const remaining = lastSync + CHECKPOINT_DEBOUNCE_MS - Date.now();
   if (remaining > 0) {
     await abortableDelay(remaining, signal);
   }
 }
 
-function waitForInitialized(chatId: string, signal: AbortSignal): Promise<InitialBackupSyncState> {
+function waitForInitialized(chatId: string, signal: AbortSignal): Promise<InitializedChatCheckpointSyncState> {
   return waitForStoreValue(
-    chatSyncState,
+    chatCheckpointSyncState,
     (state) => {
       if (
         state.chatId !== chatId ||

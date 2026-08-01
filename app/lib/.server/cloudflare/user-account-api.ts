@@ -135,12 +135,7 @@ export class UserCloudflareAccountApi {
     return existing?.uuid ? { id: existing.uuid, name: resourceName } : this.createD1ForPlan(plan, logicalName);
   }
 
-  async createR2ForPlan(plan: DeploymentPlan): Promise<{ id: string; name: string }> {
-    const resourceName = requirePlanResourceName(plan, 'r2', 'APP_STORAGE');
-    return this.createR2Bucket(resourceName);
-  }
-
-  async createR2Bucket(resourceName: string): Promise<{ id: string; name: string }> {
+  private async createR2Bucket(resourceName: string): Promise<{ id: string; name: string }> {
     requireR2BucketName(resourceName);
     const result = await this.call<{ name?: string }>('/r2/buckets', {
       method: 'POST',
@@ -178,46 +173,6 @@ export class UserCloudflareAccountApi {
         return { id: resourceName, name: resourceName };
       }
       throw error;
-    }
-  }
-
-  async putR2Object(bucketName: string, objectKey: string, body: BodyInit, contentType: string): Promise<void> {
-    const response = await this.callRaw(r2ObjectPath(bucketName, objectKey), {
-      method: 'PUT',
-      body,
-      headers: { 'content-type': contentType || 'application/octet-stream' },
-    });
-    if (!response.ok) {
-      throw await cloudflareRawApiError(response);
-    }
-  }
-
-  async getR2Object(bucketName: string, objectKey: string): Promise<Response | null> {
-    const response = await this.callRaw(r2ObjectPath(bucketName, objectKey), { method: 'GET' });
-    if (response.status === 404) {
-      return null;
-    }
-    if (!response.ok) {
-      throw await cloudflareRawApiError(response);
-    }
-    return response;
-  }
-
-  async headR2Object(bucketName: string, objectKey: string): Promise<Response | null> {
-    const response = await this.callRaw(r2ObjectPath(bucketName, objectKey), { method: 'HEAD' });
-    if (response.status === 404) {
-      return null;
-    }
-    if (!response.ok) {
-      throw await cloudflareRawApiError(response);
-    }
-    return response;
-  }
-
-  async deleteR2Object(bucketName: string, objectKey: string): Promise<void> {
-    const response = await this.callRaw(r2ObjectPath(bucketName, objectKey), { method: 'DELETE' });
-    if (response.status !== 404 && !response.ok) {
-      throw await cloudflareRawApiError(response);
     }
   }
 
@@ -263,7 +218,6 @@ export class UserCloudflareAccountApi {
         { type: 'd1', name: 'DB', id: args.databaseId },
         { type: 'ai', name: 'AI' },
         { type: 'r2_bucket', name: 'BACKUP_BUCKET', bucket_name: args.bucketName },
-        { type: 'r2_bucket', name: 'APP_STORAGE', bucket_name: args.bucketName },
         { type: 'secret_text', name: 'CONTROL_PLANE_SECRET', text: args.controlPlaneSecret },
         { type: 'secret_text', name: 'CLOUDFLARE_API_TOKEN', text: args.apiToken },
         { type: 'secret_text', name: 'R2_ACCESS_KEY_ID', text: args.r2AccessKeyId },
@@ -561,22 +515,4 @@ async function parseCloudflareEnvelope<T>(response: Response): Promise<T> {
     );
   }
   return payload.result;
-}
-
-function r2ObjectPath(bucketName: string, objectKey: string): string {
-  requireR2BucketName(bucketName);
-  if (!objectKey || objectKey.length > 1_024) {
-    throw new CloudflareAccountApiError('R2 object key is invalid.');
-  }
-  const encodedKey = objectKey.split('/').map(encodeURIComponent).join('/');
-  return `/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodedKey}`;
-}
-
-async function cloudflareRawApiError(response: Response): Promise<CloudflareAccountApiError> {
-  const payload = (await response
-    .clone()
-    .json()
-    .catch(() => null)) as CloudflareEnvelope<unknown> | null;
-  const providerMessage = payload?.errors?.find((error) => error.message)?.message;
-  return new CloudflareAccountApiError(providerMessage || `Cloudflare API request failed (${response.status}).`);
 }

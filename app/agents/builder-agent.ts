@@ -46,7 +46,6 @@ import {
   loadBuilderTranscriptBinding,
   MAX_BUILDER_AGENT_MESSAGES,
   requireBuilderRequestScope,
-  requireBuilderSeedTranscript,
   requireBuilderTranscriptIdentity,
   type BuilderTranscriptBinding,
 } from './builder-request-policy';
@@ -576,17 +575,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       return this.advanceTranscriptCheckpoint(identity);
     }
     return this.state.transcript ?? null;
-  }
-
-  @callable()
-  async seedTranscript(identityValue: unknown, messagesValue: unknown): Promise<TranscriptCheckpoint> {
-    const identity = this.requireTranscriptIdentity(identityValue);
-    const messages = requireBuilderSeedTranscript(messagesValue);
-    if (this.state.transcript || this.messages.length > 0) {
-      return this.advanceTranscriptCheckpoint(identity);
-    }
-    await this.persistMessages(messages);
-    return this.advanceTranscriptCheckpoint(identity);
   }
 
   protected override sanitizeMessageForPersistence(message: UIMessage): UIMessage {

@@ -1,508 +1,61 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import type { DatabaseSync as DatabaseSyncInstance } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, test } from 'vitest';
 
-describe('Cloudflare data deduplication migrations', () => {
-  test('applies the complete ordered root migration history to a fresh foreign-key-enabled database', () => {
-    const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require('node:sqlite') as {
-      DatabaseSync: new (location: string) => DatabaseSyncInstance;
-    };
+const controlPlaneTables = [
+  'cloudflare_auth_sessions',
+  'cloudflare_connections',
+  'cloudflare_credentials',
+  'cloudflare_oauth_states',
+  'user',
+  'user_workspace_runtimes',
+];
+
+describe('Ghostbuild control-plane D1 schema', () => {
+  test('contains only identity, authentication, Cloudflare connection, and runtime locator metadata', () => {
     const db = new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys = ON');
-    const migrationNames = rootMigrationNames();
+    db.exec(readFileSync('migrations/0001_ghostbuild.sql', 'utf8'));
 
-    expect(migrationNames.map((name) => Number.parseInt(name.slice(0, 4), 10))).toEqual(
-      Array.from({ length: migrationNames.length }, (_, index) => index + 1),
-    );
-    for (const name of migrationNames) {
-      db.exec(migration(name));
-    }
-
+    expect(tableNames(db)).toEqual(controlPlaneTables);
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-    expect(
-      db
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-        .all()
-        .map((row) => String(row.name)),
-    ).toEqual([
-      'account',
-      'cloudflare_auth_sessions',
-      'cloudflare_connection_sessions',
-      'cloudflare_connections',
-      'cloudflare_credentials',
-      'cloudflare_oauth_states',
-      'session',
-      'user',
-      'user_workspace_runtimes',
-      'verification',
-    ]);
   });
 
-  test('preserves applied migration history and repairs the destructive authentication rollout additively', async () => {
-    const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require('node:sqlite') as {
-      DatabaseSync: new (location: string) => DatabaseSyncInstance;
-    };
-    const fresh = new DatabaseSync(':memory:');
-    fresh.exec(migration('0002_better_auth.sql'));
-    fresh.exec(migration('0008_cloudflare_user_infrastructure.sql'));
-    fresh.exec(migration('0011_cloudflare_auth.sql'));
-    fresh.exec(migration('0017_restore_rollout_compatibility.sql'));
-    fresh.exec(migration('0018_cloudflare_oauth_callback_checkpoint.sql'));
-
-    expect(compatibilityTableNames(fresh)).toEqual(ROLLOUT_COMPATIBILITY_TABLES);
-    expect(fresh.prepare('PRAGMA table_info(cloudflare_oauth_states)').all()).toContainEqual(
-      expect.objectContaining({ name: 'authenticated_user_id', notnull: 0 }),
-    );
-    expect(fresh.prepare('PRAGMA foreign_key_list(cloudflare_oauth_states)').all()).toContainEqual(
-      expect.objectContaining({ from: 'authenticated_user_id', table: 'user', on_delete: 'SET NULL' }),
-    );
-
-    const upgraded = new DatabaseSync(':memory:');
-    upgraded.exec(migration('0002_better_auth.sql'));
-    upgraded.exec(migration('0008_cloudflare_user_infrastructure.sql'));
-    for (const table of ROLLOUT_COMPATIBILITY_TABLES.toReversed()) {
-      upgraded.exec(`DROP TABLE ${table}`);
-    }
-    upgraded.exec(migration('0017_restore_rollout_compatibility.sql'));
-
-    expect(compatibilityTableNames(upgraded)).toEqual(ROLLOUT_COMPATIBILITY_TABLES);
-
-    const destructiveMigrations = rootMigrationNames().filter((name) => /\bDROP\s+TABLE\b/i.test(migration(name)));
-    expect(destructiveMigrations).toEqual([
-      '0003_drop_legacy_sessions.sql',
-      '0011_cloudflare_auth.sql',
-      '0027_drop_central_workloads.sql',
-    ]);
-  });
-
-  test('preserves message-state metadata and queues only displaced distinct R2 keys', async () => {
-    const db = await databaseWithBaseSchema();
-    const insert = db.prepare(
-      `INSERT INTO chat_message_states (
-        id, chat_id, storage_key, subchat_index, last_message_rank, part_index,
-        snapshot_key, description, created_at
-      ) VALUES (?, 'chat', ?, 0, 7, ?, ?, ?, ?)`,
-    );
-    insert.run('loser-a', 'history-preserved', 2, 'snapshot-loser', 'description preserved', 20);
-    insert.run('loser-b', 'history-loser', 1, null, null, 10);
-    insert.run('winner', null, 3, 'snapshot-keep', null, 30);
-
-    db.exec(migration('0004_unique_chat_message_state_rank.sql'));
-
-    expect(db.prepare('SELECT * FROM chat_message_states').all()).toEqual([
-      expect.objectContaining({
-        id: 'winner',
-        storage_key: 'history-preserved',
-        snapshot_key: 'snapshot-keep',
-        description: 'description preserved',
-      }),
-    ]);
-    expect(db.prepare('SELECT storage_key FROM object_gc_candidates ORDER BY storage_key').all()).toEqual([
-      { storage_key: 'history-loser' },
-      { storage_key: 'snapshot-loser' },
-    ]);
-    expect(() => insert.run('duplicate', null, 0, null, null, 40)).toThrow(/unique constraint failed/i);
-  });
-
-  test('merges duplicate social-share state and queues losing thumbnails before enforcing chat uniqueness', async () => {
-    const db = await databaseWithBaseSchema();
-    db.exec(migration('0004_unique_chat_message_state_rank.sql'));
-    const insert = db.prepare(
-      `INSERT INTO social_shares (id, chat_id, code, thumbnail_image_key, is_shared)
-       VALUES (?, 'chat', ?, ?, ?)`,
-    );
-    insert.run('old-a', 'code-a', 'thumbnail-retained', 1);
-    insert.run('old-b', 'code-b', 'thumbnail-loser', 0);
-    insert.run('winner', 'code-c', null, 0);
-
-    db.exec(migration('0006_unique_social_share_chat.sql'));
-
-    expect(db.prepare('SELECT * FROM social_shares').all()).toEqual([
-      expect.objectContaining({
-        id: 'winner',
-        code: 'code-c',
-        thumbnail_image_key: 'thumbnail-loser',
-        is_shared: 1,
-      }),
-    ]);
-    expect(db.prepare('SELECT storage_key FROM object_gc_candidates').all()).toEqual([
-      { storage_key: 'thumbnail-retained' },
-    ]);
-    expect(() => insert.run('duplicate', 'code-d', null, 0)).toThrow(/unique constraint failed/i);
-  });
-
-  test('clears duplicate active URL aliases before enforcing owner-scoped uniqueness', async () => {
-    const db = await databaseWithBaseSchema();
-    const insert = db.prepare(
-      `INSERT INTO chats (id, creator_id, initial_id, url_id, timestamp)
-       VALUES (?, ?, ?, ?, ?)`,
-    );
-    insert.run('oldest', 'owner', 'initial-a', 'shared', '2026-01-01T00:00:00.000Z');
-    insert.run('newest', 'owner', 'initial-b', 'shared', '2026-01-02T00:00:00.000Z');
-    insert.run('other-owner', 'other', 'initial-c', 'shared', '2026-01-03T00:00:00.000Z');
-
-    db.exec(migration('0012_unique_active_chat_url.sql'));
-
-    expect(db.prepare(`SELECT id, url_id FROM chats ORDER BY id`).all()).toEqual([
-      { id: 'newest', url_id: null },
-      { id: 'oldest', url_id: 'shared' },
-      { id: 'other-owner', url_id: 'shared' },
-    ]);
-    expect(() => insert.run('duplicate', 'owner', 'initial-d', 'shared', '2026-01-04T00:00:00.000Z')).toThrow(
-      /unique constraint failed/i,
-    );
-  });
-
-  test('backfills one bounded Agent GC generation range for every transcript of a deleted chat', async () => {
-    const db = await databaseWithBaseSchema();
-    db.exec(migration('0004_unique_chat_message_state_rank.sql'));
-    db.prepare(
-      `INSERT INTO chats (id, creator_id, initial_id, timestamp, is_deleted)
-       VALUES ('chat', 'owner', 'initial', '2026-01-01T00:00:00.000Z', 1)`,
-    ).run();
-    db.prepare(
-      `INSERT INTO chat_message_states (
-         id, chat_id, subchat_index, last_message_rank, part_index, created_at
-       ) VALUES ('state', 'chat', 0, 0, 0, 1)`,
-    ).run();
-    db.exec(migration('0010_transcript_reconciliation.sql'));
-    db.prepare(
-      `UPDATE chat_transcripts
-       SET generation = 2, agent_name = 'initial--transcript-0-2'
-       WHERE chat_id = 'chat' AND subchat_index = 0`,
-    ).run();
-    db.prepare(
-      `INSERT INTO chat_transcripts (
-         chat_id, subchat_index, generation, agent_name, transition_token, created_at, updated_at
-       ) VALUES ('chat', 1, 1, 'initial--transcript-1-1', 'transition', 1, 1)`,
-    ).run();
-
-    db.exec(migration('0013_agent_gc_outbox.sql'));
-
-    expect(
-      db
-        .prepare(
-          `SELECT chat_id, initial_id, subchat_index, next_generation, max_generation, attempts,
-                  not_before - created_at AS grace_period_ms
-           FROM agent_gc_candidates ORDER BY subchat_index`,
-        )
-        .all(),
-    ).toEqual([
-      {
-        chat_id: 'chat',
-        initial_id: 'initial',
-        subchat_index: 0,
-        next_generation: 0,
-        max_generation: 2,
-        attempts: 0,
-        grace_period_ms: 30 * 60 * 1000,
-      },
-      {
-        chat_id: 'chat',
-        initial_id: 'initial',
-        subchat_index: 1,
-        next_generation: 0,
-        max_generation: 1,
-        attempts: 0,
-        grace_period_ms: 30 * 60 * 1000,
-      },
-    ]);
-  });
-
-  test('backfills immutable deployment execution generations only for previously approved rows', async () => {
-    const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require('node:sqlite') as {
-      DatabaseSync: new (location: string) => DatabaseSyncInstance;
-    };
+  test('enforces one current Cloudflare connection and runtime per user', () => {
     const db = new DatabaseSync(':memory:');
-    db.exec(`
-      CREATE TABLE deployments (
-        id TEXT PRIMARY KEY,
-        approved_at INTEGER,
-        status TEXT NOT NULL
-      );
-      INSERT INTO deployments (id, approved_at, status) VALUES
-        ('awaiting', NULL, 'awaiting_approval'),
-        ('approved', 100, 'approved'),
-        ('terminal', 200, 'failed');
-    `);
+    db.exec('PRAGMA foreign_keys = ON');
+    db.exec(readFileSync('migrations/0001_ghostbuild.sql', 'utf8'));
+    db.prepare(
+      `INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt, cloudflare_subject)
+       VALUES ('user-1', 'User', 'user@example.com', 1, 1, 1, 'subject-1')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO cloudflare_connections (
+         id, user_id, account_id, status, created_at, updated_at, connection_generation
+       ) VALUES ('connection-1', 'user-1', 'account-1', 'active', 1, 1, 1)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO user_workspace_runtimes (
+         user_id, connection_id, connection_generation, worker_name, bucket_name, endpoint,
+         runtime_version, status, created_at, updated_at
+       ) VALUES ('user-1', 'connection-1', 1, 'worker', 'bucket', 'https://worker.example', 'version', 'ready', 1, 1)`,
+    ).run();
 
-    db.exec(migration('0014_deployment_execution_generation.sql'));
-
-    expect(db.prepare('SELECT id, execution_generation FROM deployments ORDER BY id').all()).toEqual([
-      { id: 'approved', execution_generation: 1 },
-      { id: 'awaiting', execution_generation: 0 },
-      { id: 'terminal', execution_generation: 1 },
-    ]);
-    expect(() => db.prepare(`UPDATE deployments SET execution_generation = -1 WHERE id = 'awaiting'`).run()).toThrow(
-      /check constraint failed/i,
-    );
-
-    db.prepare(`UPDATE deployments SET status = 'approved' WHERE id = 'awaiting'`).run();
-    expect(db.prepare(`SELECT execution_generation FROM deployments WHERE id = 'awaiting'`).get()).toEqual({
-      execution_generation: 1,
-    });
-    db.prepare(`UPDATE deployments SET status = 'awaiting_approval' WHERE id = 'awaiting'`).run();
-
-    db.exec(migration('0015_deployment_build_artifact_lifecycle.sql'));
-
-    expect(
-      db
-        .prepare(
-          `SELECT id, execution_generation, build_artifact_key, build_artifact_generation
-           FROM deployments ORDER BY id`,
-        )
-        .all(),
-    ).toEqual([
-      { id: 'approved', execution_generation: 1, build_artifact_key: null, build_artifact_generation: null },
-      { id: 'awaiting', execution_generation: 1, build_artifact_key: null, build_artifact_generation: null },
-      { id: 'terminal', execution_generation: 1, build_artifact_key: null, build_artifact_generation: null },
-    ]);
     expect(() =>
-      db.prepare(`UPDATE deployments SET build_artifact_generation = 0 WHERE id = 'approved'`).run(),
-    ).toThrow(/check constraint failed/i);
-
-    db.prepare(`UPDATE deployments SET status = 'approved' WHERE id = 'awaiting'`).run();
-    expect(db.prepare(`SELECT execution_generation FROM deployments WHERE id = 'awaiting'`).get()).toEqual({
-      execution_generation: 2,
-    });
-    db.prepare(`UPDATE deployments SET status = 'awaiting_approval' WHERE id = 'awaiting'`).run();
-    db.prepare(
-      `UPDATE deployments SET status = 'approved', execution_generation = execution_generation + 1 WHERE id = 'awaiting'`,
-    ).run();
-    expect(db.prepare(`SELECT execution_generation FROM deployments WHERE id = 'awaiting'`).get()).toEqual({
-      execution_generation: 3,
-    });
-  });
-
-  test('indexes stable chat-history keyset pages across concurrent inserts and cursor-row deletion', async () => {
-    const db = await databaseWithBaseSchema();
-    db.exec(migration('0019_chat_history_pagination.sql'));
-    const insertChat = db.prepare(
-      `INSERT INTO chats (id, creator_id, initial_id, timestamp)
-       VALUES (?, 'owner', ?, ?)`,
-    );
-    const insertState = db.prepare(
-      `INSERT INTO chat_message_states (
-         id, chat_id, subchat_index, last_message_rank, part_index, created_at
-       ) VALUES (?, ?, 0, 0, 0, 1)`,
-    );
-    const tiedTimestamp = '2026-02-03T04:05:06.000Z';
-    for (const id of ['row-a', 'row-b', 'row-c']) {
-      insertChat.run(id, `initial-${id}`, tiedTimestamp);
-      insertState.run(`state-${id}`, id);
-    }
-
-    const firstPageQuery = db.prepare(
-      `SELECT chats.id
-       FROM chats
-       WHERE chats.creator_id = ? AND chats.is_deleted = 0
-         AND EXISTS (
-           SELECT 1 FROM chat_message_states
-           WHERE chat_message_states.chat_id = chats.id
-             AND chat_message_states.last_message_rank >= 0
-         )
-       ORDER BY chats.timestamp DESC, chats.id DESC
-       LIMIT ?`,
-    );
-    const nextPageQuery = db.prepare(
-      `SELECT chats.id
-       FROM chats
-       WHERE chats.creator_id = ? AND chats.is_deleted = 0
-         AND EXISTS (
-           SELECT 1 FROM chat_message_states
-           WHERE chat_message_states.chat_id = chats.id
-             AND chat_message_states.last_message_rank >= 0
-         )
-         AND (chats.timestamp, chats.id) < (?, ?)
-       ORDER BY chats.timestamp DESC, chats.id DESC
-       LIMIT ?`,
-    );
-
-    expect(firstPageQuery.all('owner', 2)).toEqual([{ id: 'row-c' }, { id: 'row-b' }]);
-    db.prepare(`DELETE FROM chats WHERE id = 'row-b'`).run();
-    insertChat.run('row-d', 'initial-row-d', '2026-02-04T04:05:06.000Z');
-    insertState.run('state-row-d', 'row-d');
-
-    expect(nextPageQuery.all('owner', tiedTimestamp, 'row-b', 2)).toEqual([{ id: 'row-a' }]);
-    expect(firstPageQuery.all('owner', 2)).toEqual([{ id: 'row-d' }, { id: 'row-c' }]);
-
-    const plan = db
-      .prepare(
-        `EXPLAIN QUERY PLAN
-         SELECT chats.id
-         FROM chats
-         WHERE chats.creator_id = ? AND chats.is_deleted = 0
-           AND EXISTS (
-             SELECT 1 FROM chat_message_states
-             WHERE chat_message_states.chat_id = chats.id
-               AND chat_message_states.last_message_rank >= 0
-           )
-           AND (chats.timestamp, chats.id) < (?, ?)
-         ORDER BY chats.timestamp DESC, chats.id DESC
-         LIMIT ?`,
-      )
-      .all('owner', tiedTimestamp, 'row-b', 2) as Array<{ detail: string }>;
-    expect(plan.some(({ detail }) => detail.includes('idx_chats_creator_deleted_history'))).toBe(true);
-  });
-
-  test('seeds deployment security inventory from the newest managed redeploy and queues historical discovery', () => {
-    const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require('node:sqlite') as {
-      DatabaseSync: new (location: string) => DatabaseSyncInstance;
-    };
-    const db = new DatabaseSync(':memory:');
-    db.exec(`
-      PRAGMA foreign_keys = ON;
-      CREATE TABLE "user" (id TEXT PRIMARY KEY);
-      CREATE TABLE cloudflare_connections (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL REFERENCES "user"(id),
-        account_id TEXT NOT NULL,
-        status TEXT NOT NULL
-      );
-      CREATE TABLE deployments (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL REFERENCES "user"(id),
-        connection_id TEXT NOT NULL REFERENCES cloudflare_connections(id),
-        status TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-      CREATE TABLE deployment_resources (
-        deployment_id TEXT NOT NULL REFERENCES deployments(id),
-        resource_type TEXT NOT NULL,
-        logical_name TEXT NOT NULL,
-        provider_resource_id TEXT NOT NULL
-      );
-      INSERT INTO "user" (id) VALUES ('owner-1'), ('owner-2');
-      INSERT INTO cloudflare_connections (id, user_id, account_id, status) VALUES
-        ('connection-1', 'owner-1', 'account-1', 'active'),
-        ('connection-2', 'owner-2', 'account-2', 'active');
-      INSERT INTO deployments (id, user_id, connection_id, status, updated_at) VALUES
-        ('deployment-old', 'owner-1', 'connection-1', 'succeeded', 10),
-        ('deployment-new-a', 'owner-1', 'connection-1', 'succeeded', 20),
-        ('deployment-new-z', 'owner-1', 'connection-1', 'succeeded', 20),
-        ('deployment-failed-after-publish', 'owner-2', 'connection-2', 'failed', 30);
-      INSERT INTO deployment_resources (deployment_id, resource_type, logical_name, provider_resource_id) VALUES
-        ('deployment-old', 'worker', 'app', 'ghostbuild-managed-app'),
-        ('deployment-new-a', 'worker', 'app', 'ghostbuild-managed-app'),
-        ('deployment-new-z', 'worker', 'app', 'ghostbuild-managed-app'),
-        ('deployment-failed-after-publish', 'worker', 'app', 'ghostbuild-failed-app');
-    `);
-
-    db.exec(migration('0021_deployment_security_inventory.sql'));
-
-    expect(
       db
         .prepare(
-          `SELECT connection_id, worker_name, managed_deployment_id, status, last_checked_at
-           FROM deployment_security_inventory ORDER BY connection_id, worker_name`,
+          `INSERT INTO cloudflare_connections (
+           id, user_id, account_id, status, created_at, updated_at, connection_generation
+         ) VALUES ('connection-2', 'user-1', 'account-2', 'active', 1, 1, 2)`,
         )
-        .all(),
-    ).toEqual([
-      {
-        connection_id: 'connection-1',
-        worker_name: 'ghostbuild-cloudflare-app',
-        managed_deployment_id: null,
-        status: 'legacy_candidate',
-        last_checked_at: 0,
-      },
-      {
-        connection_id: 'connection-1',
-        worker_name: 'ghostbuild-managed-app',
-        managed_deployment_id: 'deployment-new-z',
-        status: 'legacy_candidate',
-        last_checked_at: 0,
-      },
-      {
-        connection_id: 'connection-2',
-        worker_name: 'ghostbuild-cloudflare-app',
-        managed_deployment_id: null,
-        status: 'legacy_candidate',
-        last_checked_at: 0,
-      },
-      {
-        connection_id: 'connection-2',
-        worker_name: 'ghostbuild-failed-app',
-        managed_deployment_id: 'deployment-failed-after-publish',
-        status: 'legacy_candidate',
-        last_checked_at: 0,
-      },
-    ]);
-    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-  });
-
-  test('indexes every bounded Cloudflare authorization retention predicate', async () => {
-    const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require('node:sqlite') as {
-      DatabaseSync: new (location: string) => DatabaseSyncInstance;
-    };
-    const db = new DatabaseSync(':memory:');
-    db.exec(`
-      CREATE TABLE cloudflare_auth_sessions (id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
-      CREATE TABLE cloudflare_oauth_states (id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
-      CREATE TABLE cloudflare_credentials (handle TEXT PRIMARY KEY, created_at INTEGER NOT NULL);
-      CREATE TABLE cloudflare_connections (id TEXT PRIMARY KEY, credential_handle TEXT);
-    `);
-
-    db.exec(migration('0016_cloudflare_auth_retention.sql'));
-
-    expect(
-      db
-        .prepare(
-          `SELECT name FROM sqlite_master
-           WHERE type = 'index' AND name LIKE 'idx_cloudflare_%'
-           ORDER BY name`,
-        )
-        .all(),
-    ).toEqual([
-      { name: 'idx_cloudflare_auth_sessions_expires' },
-      { name: 'idx_cloudflare_connections_credential_handle' },
-      { name: 'idx_cloudflare_credentials_created' },
-      { name: 'idx_cloudflare_oauth_states_expires' },
-    ]);
+        .run(),
+    ).toThrow(/unique constraint failed/i);
   });
 });
 
-async function databaseWithBaseSchema() {
-  const require = createRequire(import.meta.url);
-  const { DatabaseSync } = require('node:sqlite') as {
-    DatabaseSync: new (location: string) => DatabaseSyncInstance;
-  };
-  const db = new DatabaseSync(':memory:');
-  db.exec(migration('0001_cloudflare_data.sql'));
-  return db;
-}
-
-function migration(name: string): string {
-  return readFileSync(new URL(`../migrations/${name}`, import.meta.url), 'utf8');
-}
-
-function rootMigrationNames(): string[] {
-  return readdirSync(new URL('../migrations/', import.meta.url))
-    .filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/.test(name))
-    .sort();
-}
-
-const ROLLOUT_COMPATIBILITY_TABLES = [
-  'account',
-  'ai_daily_usage',
-  'ai_usage_reservations',
-  'cloudflare_connection_sessions',
-  'session',
-  'verification',
-];
-
-function compatibilityTableNames(db: DatabaseSyncInstance): string[] {
+function tableNames(db: DatabaseSync): string[] {
   return db
-    .prepare(
-      `SELECT name FROM sqlite_master
-       WHERE type = 'table' AND name IN (${ROLLOUT_COMPATIBILITY_TABLES.map(() => '?').join(', ')})
-       ORDER BY name`,
-    )
-    .all(...ROLLOUT_COMPATIBILITY_TABLES)
-    .map((row) => (row as { name: string }).name);
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .all()
+    .map((row) => String(row.name));
 }

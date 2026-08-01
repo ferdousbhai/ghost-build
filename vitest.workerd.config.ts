@@ -10,7 +10,6 @@ const fromRoot = (path: string) => resolve(rootDirectory, path);
 const testSecrets = {
   CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY: 'test-encryption-key',
   CLOUDFLARE_OAUTH_CLIENT_SECRET: 'test-oauth-secret',
-  DEPLOYMENT_PROXY_JWT_SECRET: 'test-deployment-secret',
 };
 
 for (const [name, value] of Object.entries(testSecrets)) {
@@ -21,18 +20,13 @@ const serverDependencyStubs = new Set([
   '@tanstack/react-start/server-entry',
   './agents/builder-agent',
   './lib/.server/agent-request-identity',
-  './lib/.server/cloudflare/deployment-sandbox',
-  './lib/.server/cloudflare/deployment-workflow',
   './lib/cloudflare/data.server',
   './lib/cloudflare/data/cloudflare-auth-retention.server',
   './lib/cloudflare/data/deferred-gc.server',
   './server-handlers/auth',
-  './server-handlers/client-telemetry',
   './server-handlers/cloudflare-integration',
   './server-handlers/deployments',
   './server-handlers/enhance-prompt',
-  './server-handlers/feedback',
-  './server-handlers/scripts',
 ]);
 
 function isolateRootWorkerRoutes(): Plugin {

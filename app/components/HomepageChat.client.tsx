@@ -16,7 +16,6 @@ export function HomepageChat({ initialId, initialPrompt }: { initialId: string; 
     initialMessages,
     subchats,
     transcript,
-    seedTranscript,
   } = useChatHomepage(initialId);
 
   return (
@@ -32,7 +31,6 @@ export function HomepageChat({ initialId, initialPrompt }: { initialId: string; 
       subchats={subchats}
       initialPrompt={initialPrompt}
       transcript={transcript}
-      seedTranscript={seedTranscript}
     />
   );
 }

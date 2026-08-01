@@ -60,14 +60,12 @@ describe('Agent request identity', () => {
   it.each([
     '/agents',
     '/agents/',
-    '/agents/deployment-sandbox/chat',
-    '//agents//deployment-sandbox//chat',
-    '/agents/container-proxy/chat',
-    '/agents/deployment-workflow/chat',
+    '/agents/unrecognized/chat',
+    '//agents//unrecognized//chat',
     '/agents/builder-agent-extra/chat',
     '/agents/BuilderAgent/chat',
     '/agents/%62uilder-agent/chat',
-    '/agents/%64eployment-sandbox/chat',
+    '/agents/%75nrecognized/chat',
     '/agents/builder-agent',
   ])('rejects a non-BuilderAgent namespace or missing name before PartyServer routing: %s', async (pathname) => {
     const result = await routeAuthorizedAgentRequest(new Request(`https://ghostbuild.dev${pathname}`), {} as Env);

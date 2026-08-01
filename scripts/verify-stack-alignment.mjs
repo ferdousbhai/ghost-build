@@ -91,16 +91,13 @@ const requiredPaths = [
 ];
 const requiredMigrationTables = [
   'user',
-  'session',
-  'account',
-  'verification',
   'cloudflare_auth_sessions',
   'cloudflare_oauth_states',
   'cloudflare_credentials',
   'cloudflare_connections',
   'user_workspace_runtimes',
 ];
-const droppedCentralWorkloadTables = [
+const forbiddenCentralWorkloadTables = [
   'chats',
   'chat_message_states',
   'chat_transcripts',
@@ -162,30 +159,6 @@ export function findBuilderTemplateModuleErrors(content, sourceSha256) {
   return content.includes(`export const BUILDER_TEMPLATE_SOURCE_SHA256 = '${sourceSha256}';`)
     ? []
     : ['app/agents/builder-template.generated.ts is stale; run pnpm run rebuild-template.'];
-}
-
-export function findDeploymentWorkflowErrors(content) {
-  const errors = [];
-  const requiredStepNames = [
-    'claim, build, and persist approved deployment artifact',
-    'verify artifact, provision, publish, and clean up deployment',
-  ];
-  for (const stepName of requiredStepNames) {
-    if (!content.includes(`'${stepName}'`)) {
-      errors.push(`deployment Workflow must include the durable step "${stepName}".`);
-    }
-  }
-  if (!content.includes("timeout: '1 hour'") || !content.includes("timeout: '30 minutes'")) {
-    errors.push('deployment Workflow must give build one hour and publish 30 minutes.');
-  }
-  const disabledRetries = content.match(/retries:\s*\{\s*limit:\s*0\b/g)?.length ?? 0;
-  if (disabledRetries !== requiredStepNames.length) {
-    errors.push('deployment Workflow must disable automatic retries for both provider-sensitive steps.');
-  }
-  if (!/\bbuildApprovedDeploymentArtifact\b/.test(content) || !/\bpublishApprovedDeploymentArtifact\b/.test(content)) {
-    errors.push('deployment Workflow must preserve the R2 receipt boundary between build and publish.');
-  }
-  return errors;
 }
 
 export function findDeploymentRuntimePolicyErrors(templateConfigSource, runtimePolicySource) {
@@ -348,9 +321,9 @@ export function findRootMigrationErrors(sql) {
       errors.push(`root migrations must create the ${table} table.`);
     }
   }
-  for (const table of droppedCentralWorkloadTables) {
-    if (!new RegExp(`DROP TABLE IF EXISTS ["']?${table}["']?`, 'i').test(sql)) {
-      errors.push(`root migrations must drop the central ${table} workload table.`);
+  for (const table of forbiddenCentralWorkloadTables) {
+    if (new RegExp(`CREATE TABLE(?: IF NOT EXISTS)? ["']?${table}["']?`, 'i').test(sql)) {
+      errors.push(`root migrations must not create the user-owned ${table} workload table.`);
     }
   }
   return errors;

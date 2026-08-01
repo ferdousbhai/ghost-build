@@ -28,7 +28,7 @@ export async function executeBuilderOperationTool(args: {
   switch (args.toolName) {
     case 'lookupDocs':
       return args.workspace.executeToolOnce(args.toolCallId, args.toolName, args.input, () =>
-        runLookupDocs(invocation(args), args.context.env),
+        runLookupDocs(invocation(args)),
       );
     case 'npmInstall':
       return runDependencyInstall(args);

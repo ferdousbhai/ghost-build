@@ -19,22 +19,22 @@ Work on `main`; no branches, worktrees, or PRs unless asked. Before each commit,
 
 - [app/lib/.server/llm/](app/lib/.server/llm/) — model input, compaction, memory, and Workers AI adapters
 - [ghostbuild-agent/](ghostbuild-agent/) — shared prompts, protocol types, parsing, and tool schemas
-- [app/lib/.server/cloudflare/builder-preview-sandbox.ts](app/lib/.server/cloudflare/builder-preview-sandbox.ts) — isolated remote previews
+- [user-workspace-runtime/src/index.ts](user-workspace-runtime/src/index.ts) — user-owned project storage, Sandboxes,
+  previews, validation, and deployment
 - [app/lib/stores/startup/](app/lib/stores/startup/) — workspace bootstrap and restoration
 - [app/components/editor/codemirror/](app/components/editor/codemirror/) — editor integration
 
 ## Persistence and Deployment
 
 - [app/lib/cloudflare/data.server.ts](app/lib/cloudflare/data.server.ts) — authenticated data facade
-- [app/lib/cloudflare/data/](app/lib/cloudflare/data/) — D1 and R2 repositories and services
-- [app/lib/cloudflare/data/chat-backup-quota.server.ts](app/lib/cloudflare/data/chat-backup-quota.server.ts) — exact
-  tenant backup admission, byte/object quotas, ownership attribution, and reconciliation
+- [app/lib/cloudflare/data/](app/lib/cloudflare/data/) — user-runtime D1 repositories and services
 - [app/lib/cloudflare/data-api.ts](app/lib/cloudflare/data-api.ts) — browser/server operation contract
-- [app/lib/.server/cloudflare/deployment-workflow.ts](app/lib/.server/cloudflare/deployment-workflow.ts) — deployment workflow
+- [app/lib/.server/cloudflare/user-workspace-deployment-executor.ts](app/lib/.server/cloudflare/user-workspace-deployment-executor.ts)
+  — user-owned deployment execution
 - [app/lib/.server/cloudflare/deployment-security-baseline.ts](app/lib/.server/cloudflare/deployment-security-baseline.ts)
   — generated-Worker baseline and readback attestation
 - [app/lib/.server/cloudflare/deployment-security-inventory.ts](app/lib/.server/cloudflare/deployment-security-inventory.ts)
-  — managed deployment inventory and scheduled drift classification
+  — synchronous deployment readback attestation
 - [migrations/](migrations/) — root D1 migrations
 - [wrangler.jsonc](wrangler.jsonc) — root Worker bindings
 

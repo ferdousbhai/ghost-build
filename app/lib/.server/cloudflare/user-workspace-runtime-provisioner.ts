@@ -63,12 +63,6 @@ export async function provisionUserWorkspaceRuntime(args: {
     await accountApi.ensureR2Bucket(bucketName);
     const database = await accountApi.ensureD1Database(databaseName);
     await accountApi.applyD1Migrations(database.id, USER_WORKSPACE_DATA_MIGRATIONS);
-    await seedUserRuntimeData({
-      accountApi,
-      databaseId: database.id,
-      userId: args.userId,
-      connection,
-    });
     const deployed = await accountApi.deployWorkspaceRuntimeWorker({
       workerName,
       source: USER_WORKSPACE_RUNTIME_SOURCE,
@@ -113,44 +107,6 @@ export async function provisionUserWorkspaceRuntime(args: {
     }).catch(() => undefined);
     throw error;
   }
-}
-
-async function seedUserRuntimeData(args: {
-  accountApi: UserCloudflareAccountApi;
-  databaseId: string;
-  userId: string;
-  connection: CloudflareConnection;
-}): Promise<void> {
-  const now = Date.now();
-  await args.accountApi.executeD1(
-    args.databaseId,
-    `INSERT INTO cloudflare_connections (
-       id, user_id, account_id, account_name, status, credential_handle,
-       granted_scopes_json, ai_billing_enabled, connected_at, created_at, updated_at, connection_generation
-     ) VALUES (?, ?, ?, ?, 'active', NULL, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(user_id) DO UPDATE SET
-       id = excluded.id,
-       account_id = excluded.account_id,
-       account_name = excluded.account_name,
-       status = 'active',
-       granted_scopes_json = excluded.granted_scopes_json,
-       ai_billing_enabled = excluded.ai_billing_enabled,
-       connected_at = excluded.connected_at,
-       updated_at = excluded.updated_at,
-       connection_generation = excluded.connection_generation`,
-    [
-      args.connection.id,
-      args.userId,
-      args.connection.accountId,
-      args.connection.accountName,
-      JSON.stringify(args.connection.grantedScopes),
-      args.connection.aiBillingEnabled ? 1 : 0,
-      args.connection.connectedAt,
-      now,
-      now,
-      args.connection.generation,
-    ],
-  );
 }
 
 function requireRuntimeCapabilities(connection: CloudflareConnection): void {

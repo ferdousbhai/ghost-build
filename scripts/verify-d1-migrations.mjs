@@ -7,55 +7,22 @@ import { runVerifierIfMain } from './run-verifier.mjs';
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const migrationNamePattern = /^(\d{4})_[a-z0-9]+(?:_[a-z0-9]+)*\.sql$/;
 
-// D1 records applied migration filenames, so editing an applied file does not
-// update production. Every migration must be checksum-tracked, including new
-// additive migrations. Post-cutoff migrations also remain subject to rollout
-// safety after registration. An approved destructive contract requires a
-// separate exact-digest exception in contractAllowlist.
+// Pre-launch schemas begin at one immutable migration. Future changes remain
+// additive and checksum-tracked so deployed D1 databases can advance safely.
 const migrationPolicies = [
   {
     directory: 'migrations',
-    legacyCutoff: 19,
+    legacyCutoff: 1,
     checksums: {
-      '0001_cloudflare_data.sql': '6ca7bb824bdbaa46bc4aaa782bb95faabe9cb17f52243911456fdac33f3413ce',
-      '0002_better_auth.sql': 'd7f1a7268369f4adf57c578795ae46174e2375f51359692ea42d3d28b72e9104',
-      '0003_drop_legacy_sessions.sql': 'd924c56af3aa34333ffd3a9ae0bd5c13fee61fcc640a436cf0bbe41070d150ec',
-      '0004_unique_chat_message_state_rank.sql': '5fcb1e2c31dbe60c086f9fbe97a058ed36a8cadcd025c3610572bddd8273128d',
-      '0005_unique_active_chat_initial_id.sql': '5b5ce78b3cf7f819785f4f4f796ffc218775300d23f7043e98df89835962ce3c',
-      '0006_unique_social_share_chat.sql': 'c096dfc9eed3e1323d455be4ba71a42366cc992cd0653d6ad72566d172ea7a80',
-      '0007_feedback.sql': '19bba3c1d0daaab636471601a4ef9c2690dfb4ead75f774639a355e360d35758',
-      '0008_cloudflare_user_infrastructure.sql': '309e12d6e6225412391bafb399f601a7f1ec38268e8cc249de2955065756fdc2',
-      '0009_cloudflare_connection_generation.sql': '4fd71327d769ff68d4548cb0f32807a82af279ddca22698d44675a35d9a2960c',
-      '0010_transcript_reconciliation.sql': '534212fa1e4c27aabff30d52adc5afc491dde37023ddbd460631130e0266db73',
-      '0011_cloudflare_auth.sql': '425f407f63282b4cddccea239ca61e16e0138ee2061cb75b9ff2a71a3a3cc274',
-      '0012_unique_active_chat_url.sql': '1ab3e4a44e6520c54a74ae501f0933db5ed11910dc4e3a3deff9089f37eecdcd',
-      '0013_agent_gc_outbox.sql': '8011edd875ea6fb6465f45de7773ff5f17015095a800af2ad0ed090753f3e3eb',
-      '0014_deployment_execution_generation.sql': '659af86e2a456ae0c8e8e74be1057b828812a7b9f14cbd542484a1b801494f9f',
-      '0015_deployment_build_artifact_lifecycle.sql':
-        '0792706bb2d5614f71723fcf4c26a780304ff1fec04ae09f6caa6b5f76ada0e0',
-      '0016_cloudflare_auth_retention.sql': 'cb14b1383e913f614ca7486f5423cfa75ff76bbfcd871724dbfe26d233a855ac',
-      '0017_restore_rollout_compatibility.sql': '40774b13b4743d15c1f920c15ef489ce05e1adf864700dd2ea943a41ac632d29',
-      '0018_cloudflare_oauth_callback_checkpoint.sql':
-        'e56af2fc8eee2940323c4eddedbe908ce50323e0c4332b1e058cf036a7b7f0d5',
-      '0019_chat_history_pagination.sql': '1d8ba57a1a9e0b7366c9577c770118f75692de3dcd30c60af1d4364ddc5f7b18',
-      '0020_chat_backup_quota.sql': '191e1a61edf93e81ac2eefa7e2194213eb8c1cb16060b0623b1b66c75f29a1ec',
-      '0021_deployment_security_inventory.sql': '5e5a4c5e78d03756f2385297f99d705fa1da6ba4377f64b1e0479e219958daed',
-      '0022_upload_resource_quotas.sql': '18184f5e2cf43ca247b69922511c2264730488d83f3cebe48e91be526de7c3a8',
-      '0023_skill_sync.sql': '17ea5beb522d31c4a0493c6f192e93d80c8d3a72f3d32ec381efae7f2729a17f',
-      '0024_builder_previews.sql': 'cd3ecb08cad3ebd14379d047ee040c1cf50061ac8ce2670645ba203747c7f16e',
-      '0025_sandbox_cleanup_outbox.sql': 'a6af35f839b97a5d26b246c7ee998d84628d37f7da0cb83fc0ef5296d029e3ac',
-      '0026_user_workspace_runtimes.sql': 'cbcd89ac76f8980364c67385c593a901a42fb22461c063a1b1638fab1cfa2484',
-      '0027_drop_central_workloads.sql': '2093d7f925f96deecca8f96a60f3ca7c0cdb6d325b3084fa806f49e194ee2a94',
+      '0001_ghostbuild.sql': 'b4ea60ce99e8dafacafc566cdbbf9efdd7668963072b8b5f0860b4cdd8ebdb7a',
     },
-    contractAllowlist: {
-      '0027_drop_central_workloads.sql': '2093d7f925f96deecca8f96a60f3ca7c0cdb6d325b3084fa806f49e194ee2a94',
-    },
+    contractAllowlist: {},
   },
   {
     directory: 'user-workspace-migrations',
     legacyCutoff: 1,
     checksums: {
-      '0001_user_workspace.sql': '1050c6ce89752513293ded143b175c29cb7d91af3a767d96f05f96506438db53',
+      '0001_user_workspace.sql': '6647c65caa6992a4f418813a5682b86e1fb65bc91fe62d1af4d81fc7482f2ed5',
     },
     contractAllowlist: {},
   },

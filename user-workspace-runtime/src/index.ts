@@ -19,7 +19,6 @@ interface RuntimeEnv {
   WORKSPACE_SANDBOX: DurableObjectNamespace<WorkspaceSandbox>;
   BuilderAgent: DurableObjectNamespace<BuilderAgent>;
   DB: D1Database;
-  APP_STORAGE: R2Bucket;
   AI: Ai;
   BACKUP_BUCKET: R2Bucket;
   CONTROL_PLANE_SECRET: string;

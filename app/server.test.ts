@@ -49,12 +49,8 @@ describe('server Agent routing boundary', () => {
     pruneCloudflareAuthDataBestEffort.mockReset().mockResolvedValue(undefined);
   });
 
-  it.each([
-    '/agents/deployment-sandbox/private',
-    '/agents/container-proxy/private',
-    '/agents/deployment-workflow/private',
-    '/agents/skill-sync-workflow/private',
-  ])('leaves Agent-looking routes to the application router: %s', async (pathname) => {
+  it('leaves non-Builder Agent-looking routes to the application router', async () => {
+    const pathname = '/agents/unrecognized/private';
     const response = await server.fetch(new Request(`https://ghostbuild.dev${pathname}`), {} as Env);
 
     expect(response.status).toBe(200);

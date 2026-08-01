@@ -99,20 +99,6 @@ export function findWorkerVariableSourceErrors(config, label) {
   return errors;
 }
 
-export function findWorkerTelemetryRateLimitErrors(config, label) {
-  const errors = [];
-  const binding = findNamedBinding(config?.ratelimits, 'CLIENT_TELEMETRY_RATE_LIMITER');
-  if (!binding) {
-    return [`${label} must bind CLIENT_TELEMETRY_RATE_LIMITER.`];
-  }
-  if (!/^\d+$/.test(binding.namespace_id ?? '') || Number(binding.namespace_id) < 1) {
-    errors.push(`${label} telemetry rate-limit namespace_id must be a positive integer string.`);
-  }
-  requireEqual(errors, `${label} telemetry rate-limit simple.limit`, binding.simple?.limit, 30);
-  requireEqual(errors, `${label} telemetry rate-limit simple.period`, binding.simple?.period, 60);
-  return errors;
-}
-
 export function findWorkerOAuthStartRateLimitErrors(config, label) {
   const errors = [];
   const binding = findNamedBinding(config?.ratelimits, 'CLOUDFLARE_OAUTH_START_RATE_LIMITER');
@@ -125,64 +111,10 @@ export function findWorkerOAuthStartRateLimitErrors(config, label) {
   return errors;
 }
 
-export function findWorkerChatBackupQuotaErrors(config, label) {
-  const errors = [];
-  const binding = findNamedBinding(config?.ratelimits, 'CHAT_BACKUP_RATE_LIMITER');
-  if (!binding) {
-    errors.push(`${label} must bind CHAT_BACKUP_RATE_LIMITER.`);
-  } else {
-    requireEqual(errors, `${label} chat-backup rate-limit namespace_id`, binding.namespace_id, '1003');
-    requireEqual(errors, `${label} chat-backup rate-limit simple.limit`, binding.simple?.limit, 240);
-    requireEqual(errors, `${label} chat-backup rate-limit simple.period`, binding.simple?.period, 60);
-  }
-  if (!['shadow', 'enforce'].includes(config?.vars?.CHAT_BACKUP_STORAGE_QUOTA_MODE)) {
-    errors.push(`${label} vars.CHAT_BACKUP_STORAGE_QUOTA_MODE must be "shadow" or "enforce".`);
-  }
-  requireEqual(
-    errors,
-    `${label} vars.CHAT_BACKUP_STORAGE_LIMIT_BYTES`,
-    config?.vars?.CHAT_BACKUP_STORAGE_LIMIT_BYTES,
-    '1073741824',
-  );
-  requireEqual(
-    errors,
-    `${label} vars.CHAT_BACKUP_STORAGE_LIMIT_OBJECTS`,
-    config?.vars?.CHAT_BACKUP_STORAGE_LIMIT_OBJECTS,
-    '4096',
-  );
-  requireEqual(
-    errors,
-    `${label} vars.CHAT_BACKUP_REQUESTS_PER_MINUTE`,
-    config?.vars?.CHAT_BACKUP_REQUESTS_PER_MINUTE,
-    '120',
-  );
-  requireEqual(
-    errors,
-    `${label} vars.CHAT_BACKUP_REQUESTS_PER_DAY`,
-    config?.vars?.CHAT_BACKUP_REQUESTS_PER_DAY,
-    '10000',
-  );
-  return errors;
-}
-
 export function findWorkerGcScheduleErrors(config, label) {
   return config?.triggers?.crons?.includes('*/15 * * * *')
     ? []
     : [`${label} must schedule bounded authentication-metadata retention every 15 minutes.`];
-}
-
-export function findSkillSyncWorkflowErrors(config, label) {
-  const workflow = findBinding(config?.workflows, 'SkillSyncWorkflow');
-  if (!workflow) {
-    return [`${label} must bind the weekly SkillSyncWorkflow.`];
-  }
-  const errors = [];
-  requireEqual(errors, `${label} SkillSyncWorkflow name`, workflow.name, 'ghostbuild-skill-sync');
-  requireEqual(errors, `${label} SkillSyncWorkflow class_name`, workflow.class_name, 'SkillSyncWorkflow');
-  if (!Array.isArray(workflow.schedules) || !workflow.schedules.includes('0 8 * * 1')) {
-    errors.push(`${label} must schedule SkillSyncWorkflow weekly at 08:00 UTC on Monday.`);
-  }
-  return errors;
 }
 
 export function findDurableObjectLifecycleErrors(config, label, classNames) {

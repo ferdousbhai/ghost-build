@@ -7,14 +7,14 @@ import { useQuery } from '~/lib/cloudflare/data-hooks';
 import { useSessionIdOrNullOrLoading, waitForSessionId } from '~/lib/stores/sessionId';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { workbenchStore } from '~/lib/stores/workbench.client';
-import { chatSyncWorker, hasPendingBackupWork, initializeBackupPosition } from './backup-sync-worker';
-import { chatSyncState } from './chatSyncState';
+import { chatSyncWorker, hasPendingCheckpointWork, initializeCheckpointPosition } from './chat-checkpoint-sync-worker';
+import { chatCheckpointSyncState } from './chatCheckpointSyncState';
 import { lastCompleteMessageInfoStore } from './messages';
 import type { TranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 
-const logger = createScopedLogger('BackupSyncState');
+const logger = createScopedLogger('ChatCheckpointSyncState');
 
-export function useBackupSyncState(
+export function useChatCheckpointSync(
   chatId: string,
   loadedSubchatIndex?: number,
   initialMessages?: GhostbuildMessage[],
@@ -29,13 +29,13 @@ export function useBackupSyncState(
       subchatIndexStore.set(loadedSubchatIndex);
     }
     if (initialMessages !== undefined && loadedSubchatIndex !== undefined) {
-      initializeBackupPosition(chatId, initialMessages, loadedSubchatIndex, checkpoint ?? null);
+      initializeCheckpointPosition(chatId, initialMessages, loadedSubchatIndex, checkpoint ?? null);
     }
   }, [chatId, checkpoint, initialMessages, loadedSubchatIndex]);
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (hasPendingBackupWork(chatSyncState.get(), lastCompleteMessageInfoStore.get())) {
+      if (hasPendingCheckpointWork(chatCheckpointSyncState.get(), lastCompleteMessageInfoStore.get())) {
         event.preventDefault();
         event.returnValue = '';
         return '';
@@ -49,7 +49,7 @@ export function useBackupSyncState(
   useEffect(() => {
     const controller = new AbortController();
     const startWorker = async () => {
-      const activeSessionId = await waitForSessionId('useBackupSyncState');
+      const activeSessionId = await waitForSessionId('useChatCheckpointSync');
       controller.signal.throwIfAborted();
       if (chatInfo && chatInfo.subchatIndex > 0) {
         workbenchStore.showWorkbench.set(true);
@@ -64,7 +64,7 @@ export function useBackupSyncState(
     };
     void startWorker().catch((error) => {
       if (!controller.signal.aborted) {
-        logger.error('Backup worker stopped unexpectedly', error);
+        logger.error('Chat checkpoint worker stopped unexpectedly', error);
       }
     });
     return () => controller.abort();

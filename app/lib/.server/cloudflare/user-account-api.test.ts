@@ -31,22 +31,17 @@ const plan: DeploymentPlan = {
 };
 
 describe('UserCloudflareAccountApi', () => {
-  test('creates only the D1 and R2 names fixed by the approved plan in the connected account', async () => {
+  test('creates only the D1 name fixed by the approved plan in the connected account', async () => {
     const request = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
         Response.json({ success: true, result: { uuid: 'd1-id', name: 'ghostbuild-deployment-1' } }),
       )
-      .mockResolvedValueOnce(Response.json({ success: true, result: { name: 'ghostbuild-deployment-1-storage' } }))
       .mockResolvedValueOnce(Response.json({ success: true, result: { subdomain: 'user-subdomain' } }));
     const authorizeRequest = vi.fn(async () => undefined);
     const api = new UserCloudflareAccountApi('account-1', 'user-token', request, authorizeRequest);
 
     await expect(api.createD1ForPlan(plan)).resolves.toEqual({ id: 'd1-id', name: 'ghostbuild-deployment-1' });
-    await expect(api.createR2ForPlan(plan)).resolves.toEqual({
-      id: 'ghostbuild-deployment-1-storage',
-      name: 'ghostbuild-deployment-1-storage',
-    });
     await expect(api.getWorkersSubdomain()).resolves.toBe('user-subdomain');
 
     expect(request).toHaveBeenNthCalledWith(
@@ -59,13 +54,8 @@ describe('UserCloudflareAccountApi', () => {
         headers: expect.objectContaining({ authorization: 'Bearer user-token' }),
       }),
     );
-    expect(request).toHaveBeenNthCalledWith(
-      2,
-      'https://api.cloudflare.com/client/v4/accounts/account-1/r2/buckets',
-      expect.objectContaining({ body: JSON.stringify({ name: 'ghostbuild-deployment-1-storage' }) }),
-    );
-    expect(request.mock.contexts).toEqual([undefined, undefined, undefined]);
-    expect(authorizeRequest).toHaveBeenCalledTimes(3);
+    expect(request.mock.contexts).toEqual([undefined, undefined]);
+    expect(authorizeRequest).toHaveBeenCalledTimes(2);
     authorizeRequest.mock.invocationCallOrder.forEach((authorizationOrder, index) => {
       expect(authorizationOrder).toBeLessThan(request.mock.invocationCallOrder[index]);
     });
@@ -105,7 +95,7 @@ describe('UserCloudflareAccountApi', () => {
       new UserCloudflareAccountApi('account-1', 'token', request).createD1ForPlan(plan),
     ).rejects.toBeInstanceOf(CloudflareAccountApiError);
     await expect(
-      new UserCloudflareAccountApi('account-1', 'token', request).createR2ForPlan({ ...plan, resources: [] }),
+      new UserCloudflareAccountApi('account-1', 'token', request).ensureR2ForPlan({ ...plan, resources: [] }),
     ).rejects.toBeInstanceOf(CloudflareAccountApiError);
   });
 
@@ -291,56 +281,7 @@ describe('UserCloudflareAccountApi', () => {
     expect(request).toHaveBeenCalledOnce();
   });
 
-  test('ensures the customer bucket and uploads an object with bearer authorization', async () => {
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json({ success: true, result: { name: 'ghostbuild-user-data' } }))
-      .mockResolvedValueOnce(new Response(null, { status: 200 }));
-    const authorizeRequest = vi.fn(async () => undefined);
-    const api = new UserCloudflareAccountApi('account-1', 'secret-token', request, authorizeRequest);
-
-    await api.ensureR2Bucket('ghostbuild-user-data');
-    await api.putR2Object(
-      'ghostbuild-user-data',
-      'customer-r2/v1/owner/snapshots/object',
-      new Blob(['data']),
-      'app/test',
-    );
-
-    expect(authorizeRequest).toHaveBeenCalledTimes(2);
-    expect(request).toHaveBeenNthCalledWith(
-      1,
-      'https://api.cloudflare.com/client/v4/accounts/account-1/r2/buckets/ghostbuild-user-data',
-      expect.objectContaining({
-        method: 'GET',
-        headers: expect.objectContaining({ authorization: 'Bearer secret-token' }),
-      }),
-    );
-    expect(request).toHaveBeenNthCalledWith(
-      2,
-      'https://api.cloudflare.com/client/v4/accounts/account-1/r2/buckets/ghostbuild-user-data/objects/customer-r2/v1/owner/snapshots/object',
-      expect.objectContaining({
-        method: 'PUT',
-        headers: expect.objectContaining({
-          authorization: 'Bearer secret-token',
-          'content-type': 'app/test',
-        }),
-      }),
-    );
-  });
-
-  test('treats a missing customer object as absent and delete as idempotent', async () => {
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response(null, { status: 404 }))
-      .mockResolvedValueOnce(new Response(null, { status: 404 }));
-    const api = new UserCloudflareAccountApi('account-1', 'token', request);
-
-    await expect(api.getR2Object('ghostbuild-user-data', 'missing/key')).resolves.toBeNull();
-    await expect(api.deleteR2Object('ghostbuild-user-data', 'missing/key')).resolves.toBeUndefined();
-  });
-
-  test('deploys the runtime and all project-storage bindings into the user account', async () => {
+  test('deploys only the runtime data and backup bindings into the user account', async () => {
     const request = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ success: true, result: { version_id: 'version-1' } }))
@@ -408,6 +349,9 @@ describe('UserCloudflareAccountApi', () => {
           text: 'user-r2-secret-access-key-that-is-long-enough',
         }),
       ]),
+    );
+    expect(metadata.bindings).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'r2_bucket', name: 'APP_STORAGE' })]),
     );
     expect(metadata.exports).toHaveProperty('WorkspaceSandbox');
   });

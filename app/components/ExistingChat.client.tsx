@@ -37,7 +37,6 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
     onBuilderRequestStart,
     subchats,
     transcript,
-    seedTranscript,
   } = useExistingChat(chatId);
 
   const reloadState = useReloadMessages(initialMessages ?? undefined);
@@ -79,7 +78,6 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
       hadSuccessfulDeploy={hadSuccessfulDeploy}
       subchats={subchats}
       transcript={transcript}
-      seedTranscript={seedTranscript}
     />
   );
 }
