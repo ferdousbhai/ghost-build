@@ -8,13 +8,15 @@ const CLOCK_INTERVAL_MS = 1_000;
 export function useBuildProgress(args: {
   streamStatus: StreamStatus;
   isRecovering: boolean;
+  isProjectUpdate: boolean;
   activeToolNames: string[];
   toolActivityRevision: number;
   messages: GhostbuildMessage[];
 }) {
   const activityKey = useMemo(
-    () => `${messageActivityKey(args.messages)}:${args.toolActivityRevision}:${args.streamStatus}:${args.isRecovering}`,
-    [args.isRecovering, args.messages, args.streamStatus, args.toolActivityRevision],
+    () =>
+      `${messageActivityKey(args.messages)}:${args.toolActivityRevision}:${args.streamStatus}:${args.isRecovering}:${args.isProjectUpdate}`,
+    [args.isProjectUpdate, args.isRecovering, args.messages, args.streamStatus, args.toolActivityRevision],
   );
   const lastActivityAt = useRef(Date.now());
   const [now, setNow] = useState(() => Date.now());
@@ -36,6 +38,7 @@ export function useBuildProgress(args: {
   return getBuildProgress({
     streamStatus: args.streamStatus,
     isRecovering: args.isRecovering,
+    isProjectUpdate: args.isProjectUpdate,
     activeToolNames: args.activeToolNames,
     inactiveForMs: Math.max(0, now - lastActivityAt.current),
   });

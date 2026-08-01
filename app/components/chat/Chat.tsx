@@ -176,6 +176,7 @@ const AuthenticatedChat = memo(
     const buildProgress = useBuildProgress({
       streamStatus,
       isRecovering,
+      isProjectUpdate: currentSubchatIndex > 0,
       activeToolNames,
       toolActivityRevision: activityRevision,
       messages,

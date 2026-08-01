@@ -22,6 +22,7 @@ export const RECOVERY_PROGRESS_STALL_MS = 30 * 60_000;
 export function getBuildProgress(args: {
   streamStatus: StreamStatus;
   isRecovering: boolean;
+  isProjectUpdate?: boolean;
   activeToolNames: string[];
   inactiveForMs: number;
 }): BuildProgress | null {
@@ -44,8 +45,8 @@ export function getBuildProgress(args: {
         : BUILD_PROGRESS_STALL_MS;
   const delayed = args.inactiveForMs >= delayMs;
   const stalled = args.inactiveForMs >= stallMs;
-  const normalMessage = phaseMessage(phase);
-  const activity = activityLabel(phase);
+  const normalMessage = phaseMessage(phase, args.isProjectUpdate === true);
+  const activity = activityLabel(phase, args.isProjectUpdate === true);
 
   return {
     phase,
@@ -82,12 +83,12 @@ function buildPhase(args: {
   return args.streamStatus === 'submitted' ? 'planning' : 'creating';
 }
 
-function phaseMessage(phase: BuildProgressPhase): string {
+function phaseMessage(phase: BuildProgressPhase, isProjectUpdate: boolean): string {
   switch (phase) {
     case 'planning':
-      return 'Planning your project…';
+      return isProjectUpdate ? 'Planning your changes…' : 'Planning your project…';
     case 'creating':
-      return 'Creating your project…';
+      return isProjectUpdate ? 'Updating your project…' : 'Creating your project…';
     case 'saving':
       return 'Saving changes…';
     case 'installing':
@@ -102,12 +103,12 @@ function phaseMessage(phase: BuildProgressPhase): string {
   return 'Building your project…';
 }
 
-function activityLabel(phase: BuildProgressPhase): string {
+function activityLabel(phase: BuildProgressPhase, isProjectUpdate: boolean): string {
   switch (phase) {
     case 'planning':
-      return 'planning your project';
+      return isProjectUpdate ? 'planning your changes' : 'planning your project';
     case 'creating':
-      return 'creating your project';
+      return isProjectUpdate ? 'updating your project' : 'creating your project';
     case 'saving':
       return 'saving changes';
     case 'installing':

@@ -19,6 +19,7 @@ interface StreamingIndicatorProps {
   isRecovering?: boolean;
   currentError?: Error;
   buildProgress: BuildProgress | null;
+  isProjectUpdate: boolean;
   submissionPending: boolean;
   onStop: () => void;
   resendMessage: () => void;
@@ -76,7 +77,7 @@ export default function StreamingIndicator(props: StreamingIndicatorProps) {
 
   if (props.submissionPending && streamStatus === 'ready') {
     icon = <LoadingIcon />;
-    message = 'Preparing your project…';
+    message = props.isProjectUpdate ? 'Preparing your changes…' : 'Preparing your project…';
   } else if (aborted) {
     icon = <WarningIcon />;
     message = STATUS_MESSAGES.stopped;

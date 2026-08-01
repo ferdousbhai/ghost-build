@@ -19,6 +19,36 @@ describe('getBuildProgress', () => {
     ).toMatchObject({ phase: 'creating', message: 'Creating your project…' });
   });
 
+  it('describes work as changes when starting another chat in an existing project', () => {
+    expect(
+      getBuildProgress({
+        streamStatus: 'submitted',
+        isRecovering: false,
+        isProjectUpdate: true,
+        activeToolNames: [],
+        inactiveForMs: 0,
+      }),
+    ).toMatchObject({ phase: 'planning', message: 'Planning your changes…' });
+    expect(
+      getBuildProgress({
+        streamStatus: 'streaming',
+        isRecovering: false,
+        isProjectUpdate: true,
+        activeToolNames: [],
+        inactiveForMs: 0,
+      }),
+    ).toMatchObject({ phase: 'creating', message: 'Updating your project…' });
+    expect(
+      getBuildProgress({
+        streamStatus: 'streaming',
+        isRecovering: false,
+        isProjectUpdate: true,
+        activeToolNames: [],
+        inactiveForMs: BUILD_PROGRESS_DELAY_MS,
+      }),
+    ).toMatchObject({ message: 'Taking longer than usual — still updating your project' });
+  });
+
   it.each([
     ['writeFile', 'saving', 'Saving changes…'],
     ['edit', 'saving', 'Saving changes…'],
