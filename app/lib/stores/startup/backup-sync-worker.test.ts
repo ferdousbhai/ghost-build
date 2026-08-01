@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { advanceTranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 import { isCompleteMessageInfoAtLeast } from './backup-sync-policy';
@@ -10,8 +10,6 @@ import {
 } from './backup-sync-worker';
 import { chatSyncState } from './chatSyncState';
 import { lastCompleteMessageInfoStore } from './messages';
-
-vi.mock('~/lib/compression', () => ({ compressWithLz4: vi.fn() }));
 
 function message(id: string, text: string): GhostbuildMessage {
   return { id, role: 'user', parts: [{ type: 'text', text }] };

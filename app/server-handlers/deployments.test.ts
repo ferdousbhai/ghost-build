@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  resolveIdentity: vi.fn(),
   findConnection: vi.fn(),
   createDeployment: vi.fn(),
   requireDeployment: vi.fn(),
@@ -10,9 +9,6 @@ const mocks = vi.hoisted(() => ({
   executeUserOwnedDeployment: vi.fn(),
 }));
 
-vi.mock('~/lib/.server/agent-request-identity', () => ({
-  resolveAgentRequestIdentity: mocks.resolveIdentity,
-}));
 vi.mock('~/lib/.server/cloudflare/cloudflare-connection-repository', () => ({
   findCloudflareConnectionForUser: mocks.findConnection,
 }));
@@ -32,7 +28,7 @@ import {
   DEPLOYMENT_SECURITY_BASELINE_VERSION,
   TEMPLATE_SOURCE_SHA256,
 } from '~/lib/.server/cloudflare/deployment-security-baseline';
-import { createDeploymentPlanAction, createOrReplayDeploymentPlanForUser, deploymentAction } from './deployments';
+import { createOrReplayDeploymentPlanForUser, userRuntimeDeploymentAction } from './deployments';
 
 const project = { type: 'web_app' as const, bindings: { ai: true, d1: true, r2: true, appAgent: true } };
 const revision = 'a'.repeat(64);
@@ -90,20 +86,11 @@ function deployment(status = 'awaiting_approval') {
 describe('deployment handlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.resolveIdentity.mockResolvedValue({ userId: 'user-1', ownerId: 'user-1' });
     mocks.findConnection.mockResolvedValue({ id: 'connection-1', status: 'active', generation: 1 });
     mocks.requireDeployment.mockRejectedValue(new Error('not configured'));
     mocks.createDeployment.mockResolvedValue(deployment());
     mocks.adoptExecutionGeneration.mockImplementation(async ({ deployment: current }) => current);
     mocks.executeUserOwnedDeployment.mockResolvedValue(deployment('succeeded'));
-  });
-
-  it('rejects browser-uploaded deployment archives', async () => {
-    const response = await createDeploymentPlanAction({
-      request: new Request('https://ghostbuild.dev/api/deployments/plan', { method: 'POST' }),
-      env: {} as Env,
-    });
-    expect(response.status).toBe(410);
   });
 
   it('stores only an opaque reference to the exact user-owned backup', async () => {
@@ -135,11 +122,12 @@ describe('deployment handlers', () => {
     const approved = deployment('approved');
     mocks.requireDeployment.mockResolvedValue(approved);
     const env = { DB: {} } as Env;
-    const response = await deploymentAction({
+    const response = await userRuntimeDeploymentAction({
       request: new Request('https://ghostbuild.dev/api/deployments/deployment-1/execute', { method: 'POST' }),
       env,
       deploymentId: 'deployment-1',
       operation: 'execute',
+      userId: 'user-1',
     });
     expect(response.status).toBe(200);
     expect(mocks.executeUserOwnedDeployment).toHaveBeenCalledWith({

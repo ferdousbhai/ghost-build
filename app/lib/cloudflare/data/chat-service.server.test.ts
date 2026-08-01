@@ -6,12 +6,11 @@ import {
   getAllChats,
   getSubchats,
   removeChat,
-  rewindChat,
   setGeneratedDescriptionIfMissing,
   setGeneratedSubchatDescription,
   setSubchatDescription,
 } from './chat-service.server';
-import type { ChatMessageStateRow, ChatRow, ChatTranscriptRow } from './types';
+import type { ChatRow, ChatTranscriptRow } from './types';
 import { AGENT_GC_GRACE_PERIOD_MS } from './agent-gc.server';
 
 describe('setGeneratedDescriptionIfMissing', () => {
@@ -65,7 +64,7 @@ describe('setGeneratedSubchatDescription', () => {
     ).resolves.toBe(true);
 
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining('SET description = ?'));
-    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('transcript_generation'));
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('UPDATE chat_transcripts'));
     expect(bind).toHaveBeenCalledWith('Pocket Poll', 'user-1', 'chat-1', 'chat-1', 2, 'polling app');
   });
 
@@ -117,7 +116,7 @@ describe('empty chat lifecycle', () => {
       nextCursor: undefined,
     });
 
-    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('chat_message_states.last_message_rank >= 0'));
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('chat_transcripts.head_revision > 0'));
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining('LIMIT ?'));
     expect(bind).toHaveBeenCalledWith('user-1', 51);
   });
@@ -138,7 +137,7 @@ describe('empty chat lifecycle', () => {
 
     expect(statements).toHaveLength(2);
     expect(statements[0].query).toContain('INSERT INTO agent_gc_candidates');
-    expect(statements[0].query).toContain('chat_message_states.last_message_rank >= 0');
+    expect(statements[0].query).toContain('chat_transcripts.head_revision > 0');
     expect(statements[0].query).not.toContain('TRIM(chats.description)');
     expect(Number(statements[0].values[0]) - Number(statements[0].values[1])).toBe(AGENT_GC_GRACE_PERIOD_MS);
     expect(statements[1].query).toContain('SET is_deleted = 1');
@@ -150,29 +149,26 @@ describe('empty chat lifecycle', () => {
     const database = emptyChatDatabase();
     const insertChat = database.sqlite.prepare(
       `INSERT INTO chats (
-         id, creator_id, initial_id, url_id, description, snapshot_key, last_message_rank, is_deleted
-       ) VALUES (?, 'owner', ?, NULL, ?, ?, ?, 0)`,
+         id, creator_id, initial_id, url_id, description, is_deleted
+       ) VALUES (?, 'owner', ?, NULL, ?, 0)`,
     );
-    insertChat.run('empty-row', 'empty', '**Generated title**', null, -1);
-    insertChat.run('snapshot-row', 'snapshot', 'Snapshot project', 'snapshot-key', -1);
-    insertChat.run('message-row', 'message', 'Message project', null, -1);
-    for (const chatId of ['empty-row', 'snapshot-row', 'message-row']) {
+    insertChat.run('empty-row', 'empty', '**Generated title**');
+    insertChat.run('message-row', 'message', 'Message project');
+    for (const chatId of ['empty-row', 'message-row']) {
       database.sqlite
-        .prepare(`INSERT INTO chat_transcripts (chat_id, subchat_index, generation) VALUES (?, 0, 0)`)
-        .run(chatId);
+        .prepare(
+          `INSERT INTO chat_transcripts (chat_id, subchat_index, generation, head_revision)
+           VALUES (?, 0, 0, ?)`,
+        )
+        .run(chatId, chatId === 'message-row' ? 1 : 0);
     }
-    database.sqlite
-      .prepare(`INSERT INTO chat_message_states (chat_id, last_message_rank) VALUES ('message-row', 0)`)
-      .run();
 
     await discardEmptyChat(database.db, { sessionId: 'owner', id: 'empty' });
-    await discardEmptyChat(database.db, { sessionId: 'owner', id: 'snapshot' });
     await discardEmptyChat(database.db, { sessionId: 'owner', id: 'message' });
 
     expect(database.sqlite.prepare(`SELECT id, is_deleted FROM chats ORDER BY id`).all()).toEqual([
       { id: 'empty-row', is_deleted: 1 },
       { id: 'message-row', is_deleted: 0 },
-      { id: 'snapshot-row', is_deleted: 0 },
     ]);
     expect(database.sqlite.prepare(`SELECT chat_id FROM agent_gc_candidates`).all()).toEqual([
       { chat_id: 'empty-row' },
@@ -231,8 +227,6 @@ describe('bounded chat reads', () => {
       url_id: null,
       description: null,
       timestamp: '2026-01-01T00:00:00.000Z',
-      snapshot_key: null,
-      last_message_rank: 0,
       last_subchat_index: 2,
       is_deleted: 0,
     });
@@ -261,7 +255,7 @@ describe('bounded chat reads', () => {
 });
 
 describe('chat deletion', () => {
-  it('queues every R2 reference before atomically clearing a deleted chat', async () => {
+  it('queues BuilderAgent cleanup before atomically clearing chat metadata', async () => {
     const statements: Array<{ query: string; values: unknown[] }> = [];
     const db = {
       prepare: vi.fn((query: string) => ({
@@ -282,39 +276,12 @@ describe('chat deletion', () => {
 
     await removeChat(db, { sessionId: 'owner', id: 'chat' });
 
-    expect(statements).toHaveLength(12);
-    const objectGcStatements = statements.slice(0, 6);
-    expect(objectGcStatements).toHaveLength(6);
-    expect(objectGcStatements.every((statement) => statement.query.includes('INSERT INTO object_gc_candidates'))).toBe(
-      true,
-    );
-    expect(objectGcStatements.every((statement) => !statement.query.includes('UNION'))).toBe(true);
-    expect(objectGcStatements.map((statement) => statement.query)).toEqual([
-      expect.stringContaining('FROM chats'),
-      expect.stringContaining('FROM chat_message_states'),
-      expect.stringContaining('FROM chat_message_states'),
-      expect.stringContaining('FROM shares'),
-      expect.stringContaining('FROM shares'),
-      expect.stringContaining('FROM social_shares'),
-    ]);
-    expect(objectGcStatements.map((statement) => statement.query)).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining('SELECT storage_key, ?, ?, 0'),
-        expect.stringContaining('SELECT chat_history_key, ?, ?, 0'),
-        expect.stringContaining('SELECT thumbnail_image_key, ?, ?, 0'),
-      ]),
-    );
-    expect(statements[6].query).toContain('INSERT INTO agent_gc_candidates');
-    expect(statements[6].query).toContain('JOIN chat_transcripts');
-    expect(Number(statements[6].values[0]) - Number(statements[6].values[1])).toBe(AGENT_GC_GRACE_PERIOD_MS);
-    expect(statements[7].query).toContain("SET status = 'released'");
-    expect(statements[7].query).toContain('SELECT thumbnail_image_key FROM social_shares');
-    expect(statements[8].query).toContain('SET is_deleted = 1, snapshot_key = NULL');
-    expect(statements.slice(9).map((statement) => statement.query)).toEqual([
-      expect.stringContaining('DELETE FROM shares'),
-      expect.stringContaining('DELETE FROM social_shares'),
-      expect.stringContaining('DELETE FROM chat_message_states'),
-    ]);
+    expect(statements).toHaveLength(2);
+    expect(statements[0].query).toContain('INSERT INTO agent_gc_candidates');
+    expect(statements[0].query).toContain('JOIN chat_transcripts');
+    expect(Number(statements[0].values[0]) - Number(statements[0].values[1])).toBe(AGENT_GC_GRACE_PERIOD_MS);
+    expect(statements[1].query).toContain('SET is_deleted = 1');
+    expect(statements[1].query).not.toContain('snapshot_key');
   });
 });
 
@@ -327,8 +294,6 @@ describe('transcript generation transitions', () => {
       url_id: null,
       description: null,
       timestamp: '2026-01-01T00:00:00.000Z',
-      snapshot_key: null,
-      last_message_rank: 0,
       last_subchat_index: 10_000,
       is_deleted: 0,
     });
@@ -358,17 +323,16 @@ describe('transcript generation transitions', () => {
       0,
       2,
       4,
-      7,
+      9,
     ]);
     expect(transcriptInsert.query).toContain('WHERE chat_id = ? AND subchat_index = ? AND generation = ?');
     expect(transcriptInsert.query).toContain('chats.is_deleted = 0');
     expect(transcriptInsert.values.at(-1)).toBe('user-1');
-    expect(database.batchStatements[1].query).toContain('transition_token = ?');
-    expect(database.batchStatements[2].query).toContain('last_subchat_index = ?');
+    expect(database.batchStatements[1].query).toContain('last_subchat_index = ?');
   });
 
   it('rejects subchat creation when the parent generation changes before the batch', async () => {
-    const database = new ChatServiceDatabase([0, 0, 0]);
+    const database = new ChatServiceDatabase([0, 0]);
 
     await expect(createSubchat(database.db, { sessionId: 'user-1', chatId: 'chat' })).rejects.toThrow(
       'Chat transcript changed while creating a subchat',
@@ -376,7 +340,7 @@ describe('transcript generation transitions', () => {
   });
 
   it('adopts an exactly matching subchat transition when D1 commits before losing its acknowledgement', async () => {
-    const database = new ChatServiceDatabase([1, 1, 1], true);
+    const database = new ChatServiceDatabase([1, 1], true);
 
     await expect(createSubchat(database.db, { sessionId: 'user-1', chatId: 'chat' })).resolves.toBe(3);
 
@@ -384,61 +348,11 @@ describe('transcript generation transitions', () => {
     expect(database.receiptStatements).toHaveLength(1);
     expect(database.receiptStatements[0].query).toContain('chats.creator_id = ?');
     expect(database.receiptStatements[0].query).toContain('transcripts.transition_token = ?');
-    expect(database.receiptStatements[0].query).toContain('states.id = ?');
     expect(database.receiptStatements[0].query).toContain('chats.last_subchat_index = ?');
   });
 
-  it('rotates the agent generation and ties every rewind write to one transition token', async () => {
-    const database = new ChatServiceDatabase();
-
-    await expect(
-      rewindChat(database.db, { sessionId: 'user-1', chatId: 'chat', subchatIndex: 2, lastMessageRank: 5 }),
-    ).resolves.toBeNull();
-
-    const [transcriptUpdate, stateInsert, chatUpdate] = database.batchStatements;
-    expect(transcriptUpdate.query).toContain('SET generation = ?');
-    expect(transcriptUpdate.query).toContain('chats.is_deleted = 0');
-    expect(transcriptUpdate.values[1]).toBe('chat--transcript-2-5');
-    const transitionToken = transcriptUpdate.values[5];
-    expect(transitionToken).toEqual(expect.any(String));
-    expect(stateInsert.values.at(-1)).toBe(transitionToken);
-    expect(chatUpdate.values.at(-1)).toBe(transitionToken);
-  });
-
-  it('rejects a rewind that loses the transcript-generation compare-and-swap', async () => {
-    const database = new ChatServiceDatabase([0, 0, 0]);
-
-    await expect(
-      rewindChat(database.db, { sessionId: 'user-1', chatId: 'chat', subchatIndex: 2, lastMessageRank: 5 }),
-    ).rejects.toThrow('Chat transcript changed while rewinding');
-  });
-
-  it('rejects a rewind unless its chat pointer update also commits', async () => {
-    const database = new ChatServiceDatabase([1, 1, 0]);
-
-    await expect(
-      rewindChat(database.db, { sessionId: 'user-1', chatId: 'chat', subchatIndex: 2, lastMessageRank: 5 }),
-    ).rejects.toThrow('Chat transcript changed while rewinding');
-  });
-
-  it('adopts an exactly matching rewind transition when D1 commits before losing its acknowledgement', async () => {
-    const database = new ChatServiceDatabase([1, 1, 1], true);
-
-    await expect(
-      rewindChat(database.db, { sessionId: 'user-1', chatId: 'chat', subchatIndex: 2, lastMessageRank: 5 }),
-    ).resolves.toBeNull();
-
-    expect(database.committedBatch).toBe(true);
-    expect(database.receiptStatements).toHaveLength(1);
-    expect(database.receiptStatements[0].query).toContain('chats.creator_id = ?');
-    expect(database.receiptStatements[0].query).toContain('transcripts.generation = ?');
-    expect(database.receiptStatements[0].query).toContain('transcripts.transition_token = ?');
-    expect(database.receiptStatements[0].query).toContain('states.id = ?');
-    expect(database.receiptStatements[0].query).toContain('chats.last_message_rank = ?');
-  });
-
   it('preserves the batch failure when the transition receipt does not match exactly', async () => {
-    const database = new ChatServiceDatabase([1, 1, 1], true, false);
+    const database = new ChatServiceDatabase([1, 1], true, false);
 
     await expect(createSubchat(database.db, { sessionId: 'user-1', chatId: 'chat' })).rejects.toThrow(
       'D1 acknowledgement lost',
@@ -455,18 +369,13 @@ function emptyChatDatabase(): { sqlite: DatabaseSync; db: D1Database } {
       initial_id TEXT NOT NULL,
       url_id TEXT,
       description TEXT,
-      snapshot_key TEXT,
-      last_message_rank INTEGER,
       is_deleted INTEGER NOT NULL
     );
     CREATE TABLE chat_transcripts (
       chat_id TEXT NOT NULL,
       subchat_index INTEGER NOT NULL,
-      generation INTEGER NOT NULL
-    );
-    CREATE TABLE chat_message_states (
-      chat_id TEXT NOT NULL,
-      last_message_rank INTEGER NOT NULL
+      generation INTEGER NOT NULL,
+      head_revision INTEGER NOT NULL
     );
     CREATE TABLE agent_gc_candidates (
       chat_id TEXT NOT NULL,
@@ -523,8 +432,6 @@ class ChatServiceDatabase {
     url_id: null,
     description: null,
     timestamp: '2026-01-01T00:00:00.000Z',
-    snapshot_key: null,
-    last_message_rank: null,
     last_subchat_index: 2,
     is_deleted: 0,
   };
@@ -537,6 +444,9 @@ class ChatServiceDatabase {
     head_revision: 9,
     head_digest: 'a'.repeat(64),
     head_message_count: 8,
+    last_message_rank: 5,
+    part_index: 1,
+    description: 'Feature',
     parent_subchat_index: 1,
     parent_generation: 0,
     parent_revision: 3,
@@ -545,23 +455,8 @@ class ChatServiceDatabase {
     updated_at: 2,
   };
 
-  private readonly state: ChatMessageStateRow = {
-    id: 'state-row',
-    chat_id: 'chat-row',
-    storage_key: 'history-key',
-    subchat_index: 2,
-    last_message_rank: 5,
-    part_index: 1,
-    snapshot_key: 'snapshot-key',
-    description: 'Feature',
-    created_at: 2,
-    transcript_generation: 4,
-    transcript_revision: 7,
-    transcript_digest: 'b'.repeat(64),
-  };
-
   constructor(
-    private readonly batchChanges = [1, 1, 1],
+    private readonly batchChanges = [1, 1],
     private readonly throwAfterBatchCommit = false,
     private readonly receiptMatches = true,
   ) {}
@@ -594,10 +489,7 @@ class ChatServiceDatabase {
     },
   } as unknown as D1Database;
 
-  private first(
-    query: string,
-    values: unknown[],
-  ): ChatRow | ChatTranscriptRow | ChatMessageStateRow | { found: number } | null {
+  private first(query: string, values: unknown[]): ChatRow | ChatTranscriptRow | { found: number } | null {
     if (query.includes('SELECT 1 AS found')) {
       this.receiptStatements.push({ query, values });
       return this.committedBatch &&
@@ -612,37 +504,11 @@ class ChatServiceDatabase {
     if (query.includes('FROM chat_transcripts')) {
       return this.transcript;
     }
-    if (query.includes('FROM chat_message_states')) {
-      return this.state;
-    }
     return null;
   }
 
   private expectedReceiptValues(statements: BoundStatement[]): unknown[] {
-    const [transcript, state] = statements;
-    if (transcript.query.includes('UPDATE chat_transcripts')) {
-      return [
-        transcript.values[7],
-        transcript.values[10],
-        transcript.values[2],
-        state.values[4],
-        transcript.values[2],
-        transcript.values[0],
-        transcript.values[1],
-        transcript.values[5],
-        transcript.values[2],
-        transcript.values[3],
-        transcript.values[4],
-        state.values[0],
-        state.values[3],
-        state.values[9],
-        state.values[2],
-        state.values[4],
-        state.values[5],
-        state.values[6],
-        state.values[7],
-      ];
-    }
+    const [transcript] = statements;
     return [
       transcript.values[0],
       transcript.values.at(-1),
@@ -653,9 +519,6 @@ class ChatServiceDatabase {
       transcript.values[7],
       transcript.values[8],
       transcript.values[9],
-      state.values[0],
-      state.values[2],
-      state.values[3],
     ];
   }
 }

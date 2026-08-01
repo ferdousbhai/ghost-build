@@ -8,21 +8,30 @@ type Provider = {
   model: LanguageModel;
 };
 
-export type WorkersAiAccountCredentials = {
-  accountId: string;
-  apiKey: string;
-};
+export type WorkersAiAccountCredentials =
+  { accountId: string; apiKey: string; binding?: never } | { binding: Ai; accountId?: never; apiKey?: never };
 
 export function getProvider(
   _env: Env,
   accountCredentials: WorkersAiAccountCredentials,
   modelId = CLOUDFLARE_WORKERS_AI_MODEL,
-  settings?: { sessionAffinity?: string },
+  settings?: { sessionAffinity?: string; feature?: string },
 ): Provider {
-  const cloudflare = createWorkersAI({ accountId: accountCredentials.accountId, apiKey: accountCredentials.apiKey });
+  const cloudflare = createWorkersAI({
+    ...accountCredentials,
+    gateway: { id: 'default', collectLog: true },
+  });
 
   return {
-    model: cloudflare(modelId, { sessionAffinity: settings?.sessionAffinity }),
+    model: cloudflare(modelId, {
+      sessionAffinity: settings?.sessionAffinity,
+      metadata: {
+        ghostbuild_feature: settings?.feature ?? 'supporting-model-call',
+        ghostbuild_source: 'user-runtime',
+      },
+      collectLog: true,
+      extraHeaders: { 'cf-aig-collect-log-payload': 'false' },
+    }),
     maxTokens: MODEL_MAX_OUTPUT_TOKENS,
   };
 }

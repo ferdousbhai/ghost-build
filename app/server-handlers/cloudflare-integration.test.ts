@@ -3,12 +3,6 @@ import type {
   CloudflareConnectionResult,
   CloudflareOrchestrator,
 } from '~/lib/.server/cloudflare/cloudflare-orchestrator';
-import {
-  APP_AGENT_SECURITY_BOUNDARY_SHA256,
-  DEPLOYMENT_SECURITY_BASELINE_VERSION,
-  TEMPLATE_SOURCE_SHA256,
-} from '~/lib/.server/cloudflare/deployment-security-baseline';
-
 const mocks = vi.hoisted(() => ({
   CloudflareConnectionChangedError: class CloudflareConnectionChangedError extends Error {},
   getAuthSession: vi.fn(),
@@ -99,7 +93,13 @@ describe('Cloudflare-only authentication', () => {
     expect(response.status).toBe(401);
   });
 
-  it('returns a bounded owner-scoped deployment security status without provider internals', async () => {
+  it('returns only connection and user-runtime metadata', async () => {
+    const prepare = vi.fn((sql: string) => {
+      if (sql.includes('FROM user_workspace_runtimes')) {
+        return { bind: () => ({ first: async () => null }) };
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
     mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
     mocks.findConnection.mockResolvedValue({
       id: 'connection-1',
@@ -107,345 +107,26 @@ describe('Cloudflare-only authentication', () => {
       accountId: 'account-1',
       accountName: 'User Cloudflare',
       status: 'active',
-      credentialHandle: 'credential-secret',
-      grantedScopes: ['workers'],
-      aiBillingEnabled: false,
+      credentialHandle: 'credential-1',
+      grantedScopes: [],
+      aiBillingEnabled: true,
       connectedAt: 100,
       updatedAt: 100,
       generation: 1,
     });
-    const rows = [
-      deploymentSecurityRow({
-        status: 'current',
-        expected_template_source_sha256: TEMPLATE_SOURCE_SHA256,
-        expected_security_baseline_version: DEPLOYMENT_SECURITY_BASELINE_VERSION,
-        expected_security_boundary_sha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
-      }),
-      deploymentSecurityRow({
-        status: 'current',
-        deployment_id: 'deployment-old',
-        chat_id: 'chat with spaces',
-        expected_template_source_sha256: 'a'.repeat(64),
-      }),
-      deploymentSecurityRow({
-        status: 'current',
-        deployment_id: null,
-        chat_id: null,
-        is_managed: 0,
-        expected_template_source_sha256: TEMPLATE_SOURCE_SHA256,
-        expected_security_baseline_version: DEPLOYMENT_SECURITY_BASELINE_VERSION,
-        expected_security_boundary_sha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
-      }),
-      deploymentSecurityRow({ status: 'unreachable', production_url: 'javascript:alert(1)' }),
-      deploymentSecurityRow({ status: 'not_found', deployment_id: null, is_managed: 0 }),
-    ];
-    const queries: Array<{ sql: string; values: unknown[] }> = [];
-    const env = {
-      DB: {
-        prepare(sql: string) {
-          return {
-            bind(...values: unknown[]) {
-              queries.push({ sql, values });
-              return { all: async () => ({ results: rows }) };
-            },
-          };
-        },
-      },
-    } as unknown as Env;
 
     const response = await cloudflareConnectionStatusAction({
       request: new Request('https://ghostbuild.dev/api/cloudflare/connection'),
-      env,
+      env: { DB: { prepare } } as unknown as Env,
     });
 
     expect(response.status).toBe(200);
-    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
-    const body = await response.json<Record<string, unknown>>();
-    expect(body).toMatchObject({
+    await expect(response.json()).resolves.toMatchObject({
       connected: true,
-      deploymentSecurity: {
-        state: 'action_required',
-        hasMore: false,
-        nextCursor: null,
-        items: [
-          { scope: 'managed', state: 'current', workerName: 'ghostbuild-deployment-1', remediation: null },
-          {
-            scope: 'managed',
-            state: 'upgrade_available',
-            remediation: {
-              kind: 'replace_from_fresh_builder',
-              builderPath: '/',
-              manualCleanupRequired: true,
-            },
-          },
-          {
-            scope: 'historical',
-            state: 'user_action_required',
-            remediation: {
-              kind: 'replace_from_fresh_builder',
-              builderPath: '/',
-              manualCleanupRequired: true,
-            },
-          },
-          {
-            state: 'verification_failed',
-            productionUrl: null,
-            remediation: { kind: 'reauthorize_cloudflare' },
-          },
-          { state: 'not_applicable', remediation: null },
-        ],
-      },
-    });
-    expect(JSON.stringify(body)).not.toContain('credential-secret');
-    expect(JSON.stringify(body)).not.toContain('account-1');
-    expect(JSON.stringify(body)).not.toContain('etag');
-    expect(queries).toHaveLength(2);
-    expect(queries[1]?.values).toEqual(['user-1', 'connection-1', null, null, 26, 'user-1', 'connection-1']);
-    expect(queries[1]!.sql.indexOf('WHERE user_id = ? AND connection_id = ?')).toBeLessThan(
-      queries[1]!.sql.indexOf('LEFT JOIN deployments'),
-    );
-  });
-
-  it('keeps a full current page partial until a drifted continuation row becomes visible', async () => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue({
-      id: 'connection-1',
       status: 'active',
-      accountName: null,
-      aiBillingEnabled: false,
-      connectedAt: 100,
+      workspaceRuntime: { status: 'not_configured', current: false },
     });
-    let preparedSql = '';
-    const currentRow = deploymentSecurityRow({
-      status: 'current',
-      expected_template_source_sha256: TEMPLATE_SOURCE_SHA256,
-      expected_security_baseline_version: DEPLOYMENT_SECURITY_BASELINE_VERSION,
-      expected_security_boundary_sha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
-    });
-    const currentRows = Array.from({ length: 25 }, (_, index) =>
-      deploymentSecurityRow({ ...currentRow, worker_name: `ghostbuild-${String(index + 1).padStart(3, '0')}` }),
-    );
-    const driftedRow = deploymentSecurityRow({ status: 'drifted', worker_name: 'ghostbuild-026' });
-    const env = {
-      DB: {
-        prepare(sql: string) {
-          preparedSql = sql;
-          return {
-            bind(...values: unknown[]) {
-              const cursor = values[2];
-              return {
-                all: async () => ({
-                  results:
-                    cursor === null ? [...currentRows, driftedRow] : cursor === 'ghostbuild-025' ? [driftedRow] : [],
-                }),
-              };
-            },
-          };
-        },
-      },
-    } as unknown as Env;
-
-    const firstResponse = await cloudflareConnectionStatusAction({
-      request: new Request('https://ghostbuild.dev/api/cloudflare/connection'),
-      env,
-    });
-
-    const firstBody = await firstResponse.json<{
-      deploymentSecurity: {
-        state: string;
-        hasMore: boolean;
-        nextCursor: string | null;
-        items: Array<{ state: string; workerName: string | null }>;
-      };
-    }>();
-    expect(firstBody.deploymentSecurity).toMatchObject({
-      state: 'checking',
-      hasMore: true,
-      nextCursor: 'ghostbuild-025',
-    });
-    expect(firstBody.deploymentSecurity.items).toHaveLength(25);
-    expect(firstBody.deploymentSecurity.items.every((item) => item.state === 'current')).toBe(true);
-
-    const continuationResponse = await cloudflareConnectionStatusAction({
-      request: new Request(
-        `https://ghostbuild.dev/api/cloudflare/connection?deploymentSecurityCursor=${firstBody.deploymentSecurity.nextCursor}`,
-      ),
-      env,
-    });
-    const continuationBody = await continuationResponse.json<{
-      deploymentSecurity: {
-        state: string;
-        hasMore: boolean;
-        items: Array<{ state: string; workerName: string | null }>;
-      };
-    }>();
-    expect(continuationBody.deploymentSecurity).toMatchObject({
-      state: 'action_required',
-      hasMore: false,
-      items: [{ state: 'user_action_required', workerName: 'ghostbuild-026' }],
-    });
-    expect(preparedSql).toContain('(? IS NULL OR worker_name > ?)');
-    expect(preparedSql).not.toContain('OFFSET');
-    expect(preparedSql).not.toContain('updated_at DESC');
-  });
-
-  it('returns a bounded owner-scoped continuation page', async () => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue({
-      id: 'connection-1',
-      status: 'active',
-      accountName: null,
-      aiBillingEnabled: false,
-      connectedAt: 100,
-    });
-    const queries: unknown[][] = [];
-    const env = {
-      DB: {
-        prepare() {
-          return {
-            bind(...values: unknown[]) {
-              queries.push(values);
-              return { all: async () => ({ results: [deploymentSecurityRow({ worker_name: 'ghostbuild-next' })] }) };
-            },
-          };
-        },
-      },
-    } as unknown as Env;
-
-    const response = await cloudflareConnectionStatusAction({
-      request: new Request(
-        'https://ghostbuild.dev/api/cloudflare/connection?deploymentSecurityCursor=ghostbuild-cursor',
-      ),
-      env,
-    });
-
-    await expect(response.json()).resolves.toMatchObject({
-      deploymentSecurity: {
-        hasMore: false,
-        nextCursor: null,
-        items: [{ workerName: 'ghostbuild-next' }],
-      },
-    });
-    expect(queries[1]?.slice(0, 4)).toEqual(['user-1', 'connection-1', 'ghostbuild-cursor', 'ghostbuild-cursor']);
-  });
-
-  it('rejects malformed or repeated deployment security cursors before querying inventory', async () => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue({
-      id: 'connection-1',
-      status: 'active',
-      accountName: null,
-      aiBillingEnabled: false,
-      connectedAt: 100,
-    });
-    const prepare = vi.fn();
-    const env = { DB: { prepare } } as unknown as Env;
-
-    for (const query of [
-      'deploymentSecurityCursor=../worker',
-      'deploymentSecurityCursor=worker-a&deploymentSecurityCursor=worker-b',
-    ]) {
-      const response = await cloudflareConnectionStatusAction({
-        request: new Request(`https://ghostbuild.dev/api/cloudflare/connection?${query}`),
-        env,
-      });
-      expect(response.status).toBe(400);
-    }
-    expect(prepare).not.toHaveBeenCalled();
-  });
-
-  it('surfaces known action items while another inventory row is pending discovery', async () => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue({
-      id: 'connection-1',
-      status: 'active',
-      accountName: null,
-      aiBillingEnabled: false,
-      connectedAt: 100,
-    });
-    const rows = [
-      deploymentSecurityRow({ last_checked_at: 0, worker_name: 'ghostbuild-pending' }),
-      deploymentSecurityRow({ status: 'drifted', worker_name: 'ghostbuild-requires-action' }),
-    ];
-    const env = {
-      DB: {
-        prepare() {
-          return { bind: () => ({ all: async () => ({ results: rows }) }) };
-        },
-      },
-    } as unknown as Env;
-
-    const response = await cloudflareConnectionStatusAction({
-      request: new Request('https://ghostbuild.dev/api/cloudflare/connection'),
-      env,
-    });
-
-    await expect(response.json()).resolves.toMatchObject({
-      deploymentSecurity: {
-        state: 'action_required',
-        items: [{ state: 'user_action_required', workerName: 'ghostbuild-requires-action' }],
-      },
-    });
-  });
-
-  it('keeps the connection usable while its deployment inventory is temporarily unavailable', async () => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue({
-      id: 'connection-1',
-      status: 'active',
-      accountName: null,
-      aiBillingEnabled: false,
-      connectedAt: 100,
-    });
-    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const env = {
-      DB: {
-        prepare() {
-          throw new Error('inventory unavailable');
-        },
-      },
-    } as unknown as Env;
-
-    const response = await cloudflareConnectionStatusAction({
-      request: new Request('https://ghostbuild.dev/api/cloudflare/connection'),
-      env,
-    });
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      deploymentSecurity: { state: 'checking', items: [], hasMore: false, nextCursor: null },
-    });
-    errorLog.mockRestore();
-  });
-
-  it.each([
-    { label: 'empty', rows: [] },
-    { label: 'pending discovery', rows: [deploymentSecurityRow({ last_checked_at: 0 })] },
-  ])('reports checking for an $label inventory without exposing an unverified item', async ({ rows }) => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue({
-      id: 'connection-1',
-      status: 'active',
-      accountName: null,
-      aiBillingEnabled: false,
-      connectedAt: 100,
-    });
-    const env = {
-      DB: {
-        prepare() {
-          return { bind: () => ({ all: async () => ({ results: rows }) }) };
-        },
-      },
-    } as unknown as Env;
-
-    const response = await cloudflareConnectionStatusAction({
-      request: new Request('https://ghostbuild.dev/api/cloudflare/connection'),
-      env,
-    });
-
-    await expect(response.json()).resolves.toMatchObject({
-      deploymentSecurity: { state: 'checking', items: [], hasMore: false, nextCursor: null },
-    });
+    expect(prepare).toHaveBeenCalledOnce();
   });
 
   it('starts OAuth before any local session exists and keeps only a same-origin return path', async () => {
@@ -1045,35 +726,6 @@ function fakeOrchestrator(): CloudflareOrchestrator {
         'workers_ai',
       ] as CloudflareConnectionResult['grantedCapabilities'],
     })),
-  };
-}
-
-function deploymentSecurityRow(
-  overrides: Partial<{
-    is_managed: number;
-    deployment_id: string | null;
-    chat_id: string | null;
-    production_url: string | null;
-    status: 'current' | 'legacy_candidate' | 'drifted' | 'unreachable' | 'not_found';
-    expected_template_source_sha256: string | null;
-    expected_security_baseline_version: number | null;
-    expected_security_boundary_sha256: string | null;
-    last_checked_at: number;
-    worker_name: string;
-  }> = {},
-) {
-  return {
-    is_managed: 1,
-    deployment_id: 'deployment-1',
-    chat_id: 'chat-1',
-    production_url: 'https://app.example.com',
-    status: 'legacy_candidate' as const,
-    expected_template_source_sha256: null,
-    expected_security_baseline_version: null,
-    expected_security_boundary_sha256: null,
-    last_checked_at: 1_700_000_000_000,
-    worker_name: 'ghostbuild-deployment-1',
-    ...overrides,
   };
 }
 

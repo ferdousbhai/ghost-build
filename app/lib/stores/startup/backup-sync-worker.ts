@@ -20,6 +20,7 @@ import {
   prepareMessageHistory,
   waitForNewMessages,
 } from './messages';
+import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
 
 const logger = createScopedLogger('backup-sync-worker');
 const BACKUP_DEBOUNCE_MS = 1000;
@@ -176,7 +177,7 @@ async function syncBackup(
   });
   signal.throwIfAborted();
 
-  if (!update?.compressed) {
+  if (!update) {
     return;
   }
   if (currentState.chatId !== chatId || currentState.subchatIndex !== subchatIndexStore.get()) {
@@ -187,11 +188,11 @@ async function syncBackup(
     return;
   }
 
-  const formData = buildBackupFormData(update.compressed, update.firstMessage);
+  const formData = buildBackupFormData(update.firstMessage);
   let response: Response | undefined;
   let requestError: Error | null = null;
   try {
-    response = await fetch(url, { method: 'POST', body: formData, signal });
+    response = await fetchUserRuntime(`/v1/chats/store${url.search}`, { method: 'POST', body: formData, signal });
   } catch (error) {
     if (signal.aborted) {
       throw error;
@@ -231,11 +232,8 @@ async function syncBackup(
   });
 }
 
-function buildBackupFormData(messages: Uint8Array | undefined, firstMessage: string | undefined): FormData {
+function buildBackupFormData(firstMessage: string | undefined): FormData {
   const formData = new FormData();
-  if (messages) {
-    formData.append('messages', blobFromBytes(messages));
-  }
   if (firstMessage) {
     formData.append('firstMessage', firstMessage);
   }
@@ -374,12 +372,6 @@ async function waitForBackupDebounce(lastSync: number, signal: AbortSignal): Pro
   if (remaining > 0) {
     await abortableDelay(remaining, signal);
   }
-}
-
-function blobFromBytes(bytes: Uint8Array): Blob {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return new Blob([copy.buffer]);
 }
 
 function waitForInitialized(chatId: string, signal: AbortSignal): Promise<InitialBackupSyncState> {

@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { getProvider } from '~/lib/.server/llm/provider';
 import { ENHANCE_PROMPT_SYSTEM_PROMPT } from './enhance-prompt-prompt';
-import { resolveAgentRequestIdentity } from '~/lib/.server/agent-request-identity';
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
 import { logProviderFailure } from '~/lib/.server/llm/provider-error-logging';
@@ -14,12 +13,11 @@ const requestSchema = z.object({ prompt: z.string().min(1) });
 const ENHANCE_PROMPT_MAX_OUTPUT_TOKENS = 2_048;
 const MAX_ENHANCE_PROMPT_REQUEST_BYTES = 64 * 1024;
 
-export async function enhancePromptAction({ request, env }: { request: Request; env: Env }) {
-  const identity = await resolveAgentRequestIdentity(request, env);
-  if (!identity) {
-    return Response.json({ error: 'Cloudflare authentication is required.' }, { status: 401 });
-  }
+export async function userRuntimeEnhancePromptAction(args: { request: Request; env: Env; userId: string }) {
+  return enhancePromptForUser(args);
+}
 
+async function enhancePromptForUser({ request, env, userId }: { request: Request; env: Env; userId: string }) {
   try {
     const parsedRequest = requestSchema.safeParse(
       await readJsonBodyWithLimit(request, MAX_ENHANCE_PROMPT_REQUEST_BYTES, 'Prompt enhancement request'),
@@ -28,9 +26,9 @@ export async function enhancePromptAction({ request, env }: { request: Request; 
       return Response.json({ error: 'Invalid prompt' }, { status: 400 });
     }
     const { prompt } = parsedRequest.data;
-    const accountCredentials = await getUserWorkersAiCredentials(env, identity.userId);
+    const accountCredentials = await getUserWorkersAiCredentials(env, userId);
     const completion = await generateText({
-      model: getProvider(env, accountCredentials).model,
+      model: getProvider(env, accountCredentials, undefined, { feature: 'prompt-enhancement' }).model,
       system: ENHANCE_PROMPT_SYSTEM_PROMPT,
       prompt,
       temperature: 0.4,

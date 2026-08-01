@@ -57,6 +57,26 @@ export async function routeAuthorizedAgentRequest(request: Request, env: Env): P
   return (await routeAgentRequest(request, env, { props: authorization.identity })) ?? agentNotFoundResponse();
 }
 
+export async function routeUserRuntimeAgentRequest(
+  request: Request,
+  env: Env,
+  userId: string,
+): Promise<Response | null> {
+  const route = resolveAgentRequestRoute(new URL(request.url).pathname);
+  if (route.kind === 'not-agent') {
+    return null;
+  }
+  if (route.kind === 'rejected') {
+    return agentNotFoundResponse();
+  }
+  const identity = { ownerId: userId, userId };
+  const authorization = await authorizeAgentForIdentity(env, route.canonicalName, identity);
+  if ('response' in authorization) {
+    return authorization.response;
+  }
+  return (await routeAgentRequest(request, env, { props: identity })) ?? agentNotFoundResponse();
+}
+
 export async function authorizeAgentRequest(
   request: Request,
   env: Env,
@@ -67,6 +87,14 @@ export async function authorizeAgentRequest(
     return { response: Response.json({ error: 'Agent authentication is required.' }, { status: 401 }) };
   }
 
+  return authorizeAgentForIdentity(env, agentName, identity);
+}
+
+async function authorizeAgentForIdentity(
+  env: Env,
+  agentName: string,
+  identity: AgentRequestIdentity,
+): Promise<{ identity: AgentRequestIdentity } | { response: Response }> {
   const chat = await env.DB.prepare(
     `SELECT COUNT(*) AS match_count,
             SUM(CASE WHEN chats.is_deleted = 0 THEN 1 ELSE 0 END) AS active_match_count,

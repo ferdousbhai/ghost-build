@@ -4,10 +4,7 @@ import { BuilderWorkspaceRepository } from './builder-workspace';
 import { initializeWorkspaceRuntimeSchema } from './builder-workspace-runtime-schema';
 
 const sandboxMocks = vi.hoisted(() => ({ getSandbox: vi.fn() }));
-const gcMocks = vi.hoisted(() => ({ queue: vi.fn().mockResolvedValue({ id: 'gc' }) }));
-
 vi.mock('@cloudflare/sandbox', () => ({ getSandbox: sandboxMocks.getSandbox }));
-vi.mock('~/lib/cloudflare/data/object-gc.server', () => ({ queueObjectGcCandidate: gcMocks.queue }));
 
 describe('BuilderWorkspaceRepository backup authority', () => {
   beforeEach(() => sandboxMocks.getSandbox.mockReset());

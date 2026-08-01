@@ -368,6 +368,12 @@ describe('UserCloudflareAccountApi', () => {
         r2AccessKeyId: 'user-r2-access-key',
         r2SecretAccessKey: 'user-r2-secret-access-key-that-is-long-enough',
         runtimeVersion: 'a'.repeat(64),
+        databaseId: '0123456789abcdef0123456789abcdef',
+        apiToken: 'user-token',
+        userId: 'user-1',
+        connectionId: 'connection-1',
+        connectionGeneration: 1,
+        endpoint: 'https://ghostbuild-workspace-user.example.workers.dev',
       }),
     ).resolves.toEqual({
       workerVersionId: 'version-1',

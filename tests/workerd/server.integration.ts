@@ -5,8 +5,6 @@ import { applyD1Migrations, type D1Migration } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 type WorkerdTestEnv = {
-  APP_STORAGE: R2Bucket;
-  BuilderAgent: DurableObjectNamespace;
   CLOUDFLARE_OAUTH_SCOPES: string;
   DB: D1Database;
   TEST_MIGRATIONS: D1Migration[];
@@ -39,21 +37,13 @@ describe('root Worker in workerd', () => {
     await expect(response.json()).resolves.toEqual({ error: 'Method not allowed' });
   });
 
-  it('loads the Wrangler bindings and exercises local D1 and R2 storage', async () => {
+  it('loads only the root identity and Cloudflare connection bindings', async () => {
     const migration = await testEnv.DB.prepare('SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1').first<{
       name: string;
     }>();
     expect(migration?.name).toBe(testEnv.TEST_MIGRATIONS.at(-1)?.name);
 
-    const key = 'workerd-tests/binding-check.txt';
-    await testEnv.APP_STORAGE.put(key, 'workerd binding ready');
-    const object = await testEnv.APP_STORAGE.get(key);
-    expect(object).not.toBeNull();
-    await expect(object!.text()).resolves.toBe('workerd binding ready');
-    await testEnv.APP_STORAGE.delete(key);
-
     expect(testEnv.CLOUDFLARE_OAUTH_SCOPES).toContain('workers-scripts.write');
-    expect(testEnv.BuilderAgent.idFromName('binding-check').toString()).toBeTruthy();
   });
 
   it('exposes deployment metadata through the Worker entrypoint', async () => {

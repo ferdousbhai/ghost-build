@@ -23,7 +23,6 @@ const serverDependencyStubs = new Set([
   './lib/.server/agent-request-identity',
   './lib/.server/cloudflare/deployment-sandbox',
   './lib/.server/cloudflare/deployment-workflow',
-  './lib/.server/cloudflare/skill-sync-workflow',
   './lib/cloudflare/data.server',
   './lib/cloudflare/data/cloudflare-auth-retention.server',
   './lib/cloudflare/data/deferred-gc.server',

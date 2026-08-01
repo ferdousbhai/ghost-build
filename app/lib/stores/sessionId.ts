@@ -11,14 +11,6 @@ export function useSessionIdOrNullOrLoading(): GhostbuildSessionId | null | unde
   return useStore(sessionIdStore);
 }
 
-export function useSessionId(): GhostbuildSessionId {
-  const sessionId = useStore(sessionIdStore);
-  if (sessionId === undefined || sessionId === null) {
-    throw new Error('Session ID is not set');
-  }
-  return sessionId;
-}
-
 export async function waitForSessionId(caller?: string): Promise<GhostbuildSessionId> {
   const currentSessionId = sessionIdStore.get();
   if (currentSessionId !== null && currentSessionId !== undefined) {

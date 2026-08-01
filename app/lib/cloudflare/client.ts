@@ -1,4 +1,5 @@
 import type { DataOperationArgs, DataOperationPath, DataOperationResult } from './data-api';
+import { fetchUserRuntime } from './runtime-session';
 
 const DATA_OPERATION_TIMEOUT_MS = 15_000;
 
@@ -21,7 +22,7 @@ export async function executeDataOperation<Path extends DataOperationPath>(
   }, DATA_OPERATION_TIMEOUT_MS);
 
   try {
-    const response = await fetch('/api/data', {
+    const response = await fetchUserRuntime('/v1/data', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

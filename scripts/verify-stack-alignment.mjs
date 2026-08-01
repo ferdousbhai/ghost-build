@@ -94,18 +94,23 @@ const requiredMigrationTables = [
   'session',
   'account',
   'verification',
-  'chats',
-  'chat_message_states',
-  'shares',
-  'social_shares',
-  'object_gc_candidates',
-  'agent_gc_candidates',
   'cloudflare_auth_sessions',
   'cloudflare_oauth_states',
   'cloudflare_credentials',
   'cloudflare_connections',
+  'user_workspace_runtimes',
+];
+const droppedCentralWorkloadTables = [
+  'chats',
+  'chat_message_states',
+  'chat_transcripts',
+  'shares',
+  'social_shares',
+  'object_gc_candidates',
+  'agent_gc_candidates',
   'deployments',
   'deployment_resources',
+  'deployment_security_inventory',
   'chat_backup_admissions',
   'chat_backup_objects',
   'chat_backup_object_attributions',
@@ -113,9 +118,12 @@ const requiredMigrationTables = [
   'thumbnail_upload_admissions',
   'thumbnail_objects',
   'thumbnail_reconciliation_state',
-  'deployment_security_inventory',
+  'skill_sync_state',
+  'skill_sync_entries',
   'builder_previews',
   'builder_preview_build_admissions',
+  'sandbox_cleanup_candidates',
+  'feedback',
 ];
 
 function readJson(path) {
@@ -336,36 +344,14 @@ function verifyRootMigrations(errors) {
 export function findRootMigrationErrors(sql) {
   const errors = [];
   for (const table of requiredMigrationTables) {
-    if (!new RegExp(`CREATE TABLE IF NOT EXISTS ["']?${table}["']?`, 'i').test(sql)) {
+    if (!new RegExp(`CREATE TABLE(?: IF NOT EXISTS)? ["']?${table}["']?`, 'i').test(sql)) {
       errors.push(`root migrations must create the ${table} table.`);
     }
   }
-  if (
-    !/CREATE\s+UNIQUE\s+INDEX[\s\S]*?ON\s+chat_message_states\s*\(\s*chat_id\s*,\s*subchat_index\s*,\s*last_message_rank\s*\)/i.test(
-      sql,
-    )
-  ) {
-    errors.push('root migrations must enforce one chat message state per chat, subchat, and message rank.');
-  }
-  if (
-    !/CREATE\s+UNIQUE\s+INDEX[\s\S]*?ON\s+chats\s*\(\s*creator_id\s*,\s*initial_id\s*\)[\s\S]*?WHERE\s+is_deleted\s*=\s*0/i.test(
-      sql,
-    )
-  ) {
-    errors.push('root migrations must enforce one active chat per creator and initial id.');
-  }
-  if (!/CREATE\s+UNIQUE\s+INDEX[\s\S]*?ON\s+social_shares\s*\(\s*chat_id\s*\)/i.test(sql)) {
-    errors.push('root migrations must enforce one social share per chat.');
-  }
-  if (!/INSERT\s+OR\s+IGNORE\s+INTO\s+object_gc_candidates/i.test(sql) || !/not_before/i.test(sql)) {
-    errors.push('root migrations must defer cleanup of displaced R2 object keys.');
-  }
-  if (
-    !/INSERT\s+OR\s+IGNORE\s+INTO\s+agent_gc_candidates/i.test(sql) ||
-    !/JOIN\s+chat_transcripts/i.test(sql) ||
-    !/max_generation/i.test(sql)
-  ) {
-    errors.push('root migrations must queue every deleted chat transcript generation range for Agent cleanup.');
+  for (const table of droppedCentralWorkloadTables) {
+    if (!new RegExp(`DROP TABLE IF EXISTS ["']?${table}["']?`, 'i').test(sql)) {
+      errors.push(`root migrations must drop the central ${table} workload table.`);
+    }
   }
   return errors;
 }

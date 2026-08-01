@@ -1,4 +1,3 @@
-import { D1CloudflareCredentialVault } from './cloudflare-credential-vault';
 import { requireActiveCloudflareConnection } from './cloudflare-connection-repository';
 import { deploymentPlanResourceName, deploymentProjectProfile, isCurrentDeploymentPlan } from './deployment-plan';
 import {
@@ -14,8 +13,6 @@ import {
   recordManagedDeploymentSecurityIntent,
 } from './deployment-security-inventory';
 import { UserCloudflareAccountApi } from './user-account-api';
-import { findUserWorkspaceRuntime } from './user-workspace-runtime-repository';
-import { deriveUserWorkspaceRuntimeSecret } from './user-workspace-runtime-secret';
 
 type UserOwnedDeploymentArgs = {
   env: Env;
@@ -32,10 +29,18 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
   let providerChangesPossible = false;
   try {
     const connection = await requireActiveCloudflareConnection(args.env.DB, args.connectionId);
+    const runtimeEnv = args.env as Env & {
+      GHOSTBUILD_USER_RUNTIME?: string;
+      GHOSTBUILD_USER_RUNTIME_ENDPOINT?: string;
+      CONTROL_PLANE_SECRET?: string;
+      CLOUDFLARE_API_TOKEN?: string;
+    };
     if (
+      runtimeEnv.GHOSTBUILD_USER_RUNTIME !== '1' ||
       connection.userId !== args.userId ||
-      !connection.credentialHandle ||
-      !args.env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY
+      !runtimeEnv.CLOUDFLARE_API_TOKEN ||
+      !runtimeEnv.GHOSTBUILD_USER_RUNTIME_ENDPOINT ||
+      !runtimeEnv.CONTROL_PLANE_SECRET
     ) {
       throw new Error('Cloudflare connection is unavailable.');
     }
@@ -50,7 +55,7 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       executionGeneration: args.executionGeneration,
     });
     phase = 'provisioning';
-    const accessToken = await D1CloudflareCredentialVault.fromEnv(args.env).resolve(connection.credentialHandle);
+    const accessToken = runtimeEnv.CLOUDFLARE_API_TOKEN;
     const accountApi = new UserCloudflareAccountApi(connection.accountId, accessToken);
 
     const d1Name = deploymentPlanResourceName(deployment.plan, 'd1', 'DB');
@@ -87,28 +92,14 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       accountId: connection.accountId,
     });
     providerChangesPossible = true;
-    const runtime = await findUserWorkspaceRuntime(args.env.DB, args.userId);
-    if (
-      !runtime ||
-      runtime.status !== 'ready' ||
-      runtime.connectionId !== connection.id ||
-      runtime.connectionGeneration !== connection.generation
-    ) {
-      throw new Error('The user-owned workspace runtime is unavailable or stale.');
-    }
     const reference = parseWorkspaceReference(deployment.snapshotKey);
     if (reference.revision !== deployment.plan.sourceSha256) {
       throw new Error('The approved deployment revision no longer matches its workspace reference.');
     }
-    const secret = await deriveUserWorkspaceRuntimeSecret({
-      encryptionKeyBase64: args.env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY,
-      userId: args.userId,
-      accountId: connection.accountId,
-      connectionGeneration: connection.generation,
-    });
+    const secret = runtimeEnv.CONTROL_PLANE_SECRET;
     const profile = deploymentProjectProfile(deployment.plan);
     const response = await (args.request ?? fetch)(
-      `${runtime.endpoint}/v1/projects/${encodeURIComponent(reference.projectId)}/deploy`,
+      `${runtimeEnv.GHOSTBUILD_USER_RUNTIME_ENDPOINT}/v1/projects/${encodeURIComponent(reference.projectId)}/deploy`,
       {
         method: 'POST',
         headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },

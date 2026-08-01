@@ -23,43 +23,13 @@ describe('Cloudflare client telemetry', () => {
     vi.unstubAllGlobals();
   });
 
-  it('uses sendBeacon for fire-and-forget events', async () => {
-    sendBeacon.mockReturnValue(true);
+  it('keeps diagnostics local instead of sending platform telemetry', async () => {
     const { captureMessage } = await import('./telemetry.client');
 
     await captureMessage('Preview base URL unexpectedly had a trailing slash', { level: 'warning' });
 
-    expect(sendBeacon).toHaveBeenCalledWith('/api/client-telemetry', expect.any(Blob));
+    expect(console.warn).toHaveBeenCalled();
+    expect(sendBeacon).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('falls back to a keepalive request when sendBeacon declines the event', async () => {
-    sendBeacon.mockReturnValue(false);
-    const { captureException } = await import('./telemetry.client');
-
-    await captureException('Failed to process chat request', new Error('Build failed'));
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/client-telemetry',
-      expect.objectContaining({ method: 'POST', keepalive: true }),
-    );
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body).toEqual({ kind: 'exception', event: 'Failed to process chat request' });
-  });
-
-  it('omits exception details, identity, and route secrets', async () => {
-    sendBeacon.mockReturnValue(false);
-    const { captureException } = await import('./telemetry.client');
-
-    await captureException('Failed to submit chat message', new Error('secret for person@example.test in chat-1'), {
-      level: 'error',
-    });
-
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body).toEqual({
-      kind: 'exception',
-      event: 'Failed to submit chat message',
-      context: { level: 'error' },
-    });
   });
 });

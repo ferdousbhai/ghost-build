@@ -36,8 +36,7 @@ const workerTargets = [
     name: 'ghostbuild',
     main: 'app/server.ts',
     databaseName: 'ghostbuild',
-    bucketName: 'ghostbuild-app-storage',
-    durableObjects: ['BuilderAgent'],
+    durableObjects: [],
     customDomain: 'ghostbuild.dev',
     allowPlaceholderDatabase: false,
   },
@@ -169,7 +168,7 @@ export function findWorkerChatBackupQuotaErrors(config, label) {
 export function findWorkerGcScheduleErrors(config, label) {
   return config?.triggers?.crons?.includes('*/15 * * * *')
     ? []
-    : [`${label} must schedule the bounded deferred-data GC sweep every 15 minutes.`];
+    : [`${label} must schedule bounded authentication-metadata retention every 15 minutes.`];
 }
 
 export function findSkillSyncWorkflowErrors(config, label) {
@@ -214,9 +213,7 @@ function verifyWorker(errors, config, target) {
   }
   requireEqual(errors, `${label} upload_source_maps`, config?.upload_source_maps, true);
   requireEqual(errors, `${label} version_metadata.binding`, config?.version_metadata?.binding, 'CF_VERSION_METADATA');
-  errors.push(...findWorkerTelemetryRateLimitErrors(config, label));
   errors.push(...findWorkerOAuthStartRateLimitErrors(config, label));
-  errors.push(...findWorkerChatBackupQuotaErrors(config, label));
   requireEqual(
     errors,
     `${label} vars.CLOUDFLARE_OAUTH_SCOPES`,
@@ -228,7 +225,6 @@ function verifyWorker(errors, config, target) {
     ...findWorkerRoutingErrors(config, label, target.customDomain),
     ...findWorkerVariableSourceErrors(config, label),
     ...findWorkerGcScheduleErrors(config, label),
-    ...findSkillSyncWorkflowErrors(config, label),
     ...findDurableObjectLifecycleErrors(config, label, target.durableObjects),
     ...findWorkerRuntimeSecretErrors(config, label, 'configure values as Cloudflare bindings'),
   );
@@ -252,13 +248,6 @@ function verifyWorker(errors, config, target) {
     if (!target.allowPlaceholderDatabase && (!d1.database_id || d1.database_id === PLACEHOLDER_D1_ID)) {
       errors.push(`${label} must contain a provisioned D1 database_id.`);
     }
-  }
-
-  const r2 = findBinding(config?.r2_buckets, 'APP_STORAGE');
-  if (!r2) {
-    errors.push(`${label} must bind R2 as APP_STORAGE.`);
-  } else {
-    requireEqual(errors, `${label} R2 bucket_name`, r2.bucket_name, target.bucketName);
   }
 }
 

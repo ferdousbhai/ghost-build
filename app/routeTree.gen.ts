@@ -11,10 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root';
 import { Route as IndexRouteImport } from './routes/index';
 import { Route as SettingsRouteImport } from './routes/settings';
-import { Route as ShareRouteImport } from './routes/share';
 import { Route as ChatIdRouteImport } from './routes/chat.$id';
-import { Route as CreateShareCodeRouteImport } from './routes/create.$shareCode';
-import { Route as ShareCodeRouteImport } from './routes/share.$code';
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -26,85 +23,40 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any);
-const ShareRoute = ShareRouteImport.update({
-  id: '/share',
-  path: '/share',
-  getParentRoute: () => rootRouteImport,
-} as any);
 const ChatIdRoute = ChatIdRouteImport.update({
   id: '/chat/$id',
   path: '/chat/$id',
   getParentRoute: () => rootRouteImport,
 } as any);
-const CreateShareCodeRoute = CreateShareCodeRouteImport.update({
-  id: '/create/$shareCode',
-  path: '/create/$shareCode',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const ShareCodeRoute = ShareCodeRouteImport.update({
-  id: '/$code',
-  path: '/$code',
-  getParentRoute: () => ShareRoute,
-} as any);
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute;
   '/settings': typeof SettingsRoute;
-  '/share': typeof ShareRouteWithChildren;
   '/chat/$id': typeof ChatIdRoute;
-  '/create/$shareCode': typeof CreateShareCodeRoute;
-  '/share/$code': typeof ShareCodeRoute;
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute;
   '/settings': typeof SettingsRoute;
-  '/share': typeof ShareRouteWithChildren;
   '/chat/$id': typeof ChatIdRoute;
-  '/create/$shareCode': typeof CreateShareCodeRoute;
-  '/share/$code': typeof ShareCodeRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   '/': typeof IndexRoute;
   '/settings': typeof SettingsRoute;
-  '/share': typeof ShareRouteWithChildren;
   '/chat/$id': typeof ChatIdRoute;
-  '/create/$shareCode': typeof CreateShareCodeRoute;
-  '/share/$code': typeof ShareCodeRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths:
-    | '/'
-    | '/settings'
-    | '/share'
-    | '/chat/$id'
-    | '/create/$shareCode'
-    | '/share/$code';
+  fullPaths: '/' | '/settings' | '/chat/$id';
   fileRoutesByTo: FileRoutesByTo;
-  to:
-    | '/'
-    | '/settings'
-    | '/share'
-    | '/chat/$id'
-    | '/create/$shareCode'
-    | '/share/$code';
-  id:
-    | '__root__'
-    | '/'
-    | '/settings'
-    | '/share'
-    | '/chat/$id'
-    | '/create/$shareCode'
-    | '/share/$code';
+  to: '/' | '/settings' | '/chat/$id';
+  id: '__root__' | '/' | '/settings' | '/chat/$id';
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
   SettingsRoute: typeof SettingsRoute;
-  ShareRoute: typeof ShareRouteWithChildren;
   ChatIdRoute: typeof ChatIdRoute;
-  CreateShareCodeRoute: typeof CreateShareCodeRoute;
 }
 
 declare module '@tanstack/react-router' {
@@ -123,13 +75,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    '/share': {
-      id: '/share';
-      path: '/share';
-      fullPath: '/share';
-      preLoaderRoute: typeof ShareRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
     '/chat/$id': {
       id: '/chat/$id';
       path: '/chat/$id';
@@ -137,39 +82,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatIdRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    '/create/$shareCode': {
-      id: '/create/$shareCode';
-      path: '/create/$shareCode';
-      fullPath: '/create/$shareCode';
-      preLoaderRoute: typeof CreateShareCodeRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/share/$code': {
-      id: '/share/$code';
-      path: '/$code';
-      fullPath: '/share/$code';
-      preLoaderRoute: typeof ShareCodeRouteImport;
-      parentRoute: typeof ShareRoute;
-    };
   }
 }
-
-interface ShareRouteChildren {
-  ShareCodeRoute: typeof ShareCodeRoute;
-}
-
-const ShareRouteChildren: ShareRouteChildren = {
-  ShareCodeRoute: ShareCodeRoute,
-};
-
-const ShareRouteWithChildren = ShareRoute._addFileChildren(ShareRouteChildren);
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SettingsRoute: SettingsRoute,
-  ShareRoute: ShareRouteWithChildren,
   ChatIdRoute: ChatIdRoute,
-  CreateShareCodeRoute: CreateShareCodeRoute,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

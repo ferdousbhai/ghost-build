@@ -8,48 +8,23 @@ const healthAction = vi.hoisted(() => vi.fn());
 const completeCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const cloudflareConnectionStatusAction = vi.hoisted(() => vi.fn());
 const startCloudflareConnectionAction = vi.hoisted(() => vi.fn());
-const drainDeferredDataGcBestEffort = vi.hoisted(() => vi.fn());
 const pruneCloudflareAuthDataBestEffort = vi.hoisted(() => vi.fn());
-const refreshDeploymentSecurityInventoryBestEffort = vi.hoisted(() => vi.fn());
-const reconcileChatBackupQuotaBestEffort = vi.hoisted(() => vi.fn());
-const reconcileThumbnailQuotaBestEffort = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-start/server-entry', () => ({ default: { fetch: tanstackFetch } }));
 vi.mock('agents', () => ({ routeAgentRequest }));
 vi.mock('./agents/builder-agent', () => ({ BuilderAgent: class {} }));
 vi.mock('./lib/.server/auth', () => ({ getAuthSession }));
-vi.mock('./lib/.server/cloudflare/skill-sync-workflow', () => ({ SkillSyncWorkflow: class {} }));
 vi.mock('./lib/cloudflare/data/chat-repository.server', () => ({ ensureInitialChat }));
-vi.mock('./lib/cloudflare/data.server', () => ({
-  dataAction: vi.fn(),
-  initialMessagesAction: vi.fn(),
-  storageObjectAction: vi.fn(),
-  storeChatAction: vi.fn(),
-  uploadThumbnailAction: vi.fn(),
-}));
 vi.mock('./server-handlers/auth', () => ({ authSessionAction: vi.fn(), signOutAction: vi.fn() }));
-vi.mock('./server-handlers/client-telemetry', () => ({ clientTelemetryAction: vi.fn() }));
 vi.mock('./server-handlers/cloudflare-integration', () => ({
   CLOUDFLARE_CONNECTION_CALLBACK_METHOD: 'GET',
   cloudflareConnectionStatusAction,
   completeCloudflareConnectionAction,
   startCloudflareConnectionAction,
 }));
-vi.mock('./server-handlers/deployments', () => ({
-  createDeploymentPlanAction: vi.fn(),
-  deploymentAction: vi.fn(),
-}));
-vi.mock('./server-handlers/enhance-prompt', () => ({ enhancePromptAction: vi.fn() }));
-vi.mock('./server-handlers/feedback', () => ({ feedbackAction: vi.fn() }));
 vi.mock('./server-handlers/health', () => ({ healthAction }));
 vi.mock('./server-handlers/version', () => ({ versionAction: vi.fn() }));
-vi.mock('./lib/cloudflare/data/deferred-gc.server', () => ({ drainDeferredDataGcBestEffort }));
 vi.mock('./lib/cloudflare/data/cloudflare-auth-retention.server', () => ({ pruneCloudflareAuthDataBestEffort }));
-vi.mock('./lib/.server/cloudflare/deployment-security-inventory', () => ({
-  refreshDeploymentSecurityInventoryBestEffort,
-}));
-vi.mock('./lib/cloudflare/data/chat-backup-quota.server', () => ({ reconcileChatBackupQuotaBestEffort }));
-vi.mock('./lib/cloudflare/data/thumbnail-quota.server', () => ({ reconcileThumbnailQuotaBestEffort }));
 
 import server from './server';
 
@@ -71,11 +46,7 @@ describe('server Agent routing boundary', () => {
     startCloudflareConnectionAction
       .mockReset()
       .mockResolvedValue(Response.json({ error: 'Invalid request.' }, { status: 400 }));
-    drainDeferredDataGcBestEffort.mockReset().mockResolvedValue(undefined);
     pruneCloudflareAuthDataBestEffort.mockReset().mockResolvedValue(undefined);
-    refreshDeploymentSecurityInventoryBestEffort.mockReset().mockResolvedValue(undefined);
-    reconcileChatBackupQuotaBestEffort.mockReset().mockResolvedValue(undefined);
-    reconcileThumbnailQuotaBestEffort.mockReset().mockResolvedValue(undefined);
   });
 
   it.each([
@@ -83,13 +54,13 @@ describe('server Agent routing boundary', () => {
     '/agents/container-proxy/private',
     '/agents/deployment-workflow/private',
     '/agents/skill-sync-workflow/private',
-  ])('rejects a non-BuilderAgent namespace before either application or PartyServer routing: %s', async (pathname) => {
+  ])('leaves Agent-looking routes to the application router: %s', async (pathname) => {
     const response = await server.fetch(new Request(`https://ghostbuild.dev${pathname}`), {} as Env);
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(200);
     expect(getAuthSession).not.toHaveBeenCalled();
     expect(routeAgentRequest).not.toHaveBeenCalled();
-    expect(tanstackFetch).not.toHaveBeenCalled();
+    expect(tanstackFetch).toHaveBeenCalledOnce();
   });
 
   it('leaves ordinary application routes outside the Agent routing boundary', async () => {
@@ -247,24 +218,12 @@ describe('server Agent routing boundary', () => {
     expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains');
   });
 
-  it('sequences bounded scheduled maintenance to stay within the outgoing-connection budget', async () => {
+  it('limits scheduled maintenance to central authentication metadata', async () => {
     const waitUntil = vi.fn();
     const env = { DB: {} as D1Database } as Env;
     const calls: string[] = [];
-    drainDeferredDataGcBestEffort.mockImplementationOnce(async () => {
-      calls.push('deferred-data-gc');
-    });
     pruneCloudflareAuthDataBestEffort.mockImplementationOnce(async () => {
       calls.push('auth-retention');
-    });
-    reconcileChatBackupQuotaBestEffort.mockImplementationOnce(async () => {
-      calls.push('chat-backup-quota');
-    });
-    reconcileThumbnailQuotaBestEffort.mockImplementationOnce(async () => {
-      calls.push('thumbnail-quota');
-    });
-    refreshDeploymentSecurityInventoryBestEffort.mockImplementationOnce(async () => {
-      calls.push('deployment-security-inventory');
     });
 
     server.scheduled({ cron: '*/15 * * * *' } as ScheduledController, env, {
@@ -273,17 +232,7 @@ describe('server Agent routing boundary', () => {
 
     expect(waitUntil).toHaveBeenCalledOnce();
     await waitUntil.mock.calls[0][0];
-    expect(calls).toEqual([
-      'deferred-data-gc',
-      'auth-retention',
-      'chat-backup-quota',
-      'thumbnail-quota',
-      'deployment-security-inventory',
-    ]);
-    expect(drainDeferredDataGcBestEffort).toHaveBeenCalledOnce();
+    expect(calls).toEqual(['auth-retention']);
     expect(pruneCloudflareAuthDataBestEffort).toHaveBeenCalledWith(env.DB);
-    expect(refreshDeploymentSecurityInventoryBestEffort).toHaveBeenCalledWith(env);
-    expect(reconcileChatBackupQuotaBestEffort).toHaveBeenCalledWith(env);
-    expect(reconcileThumbnailQuotaBestEffort).toHaveBeenCalledWith(env);
   });
 });

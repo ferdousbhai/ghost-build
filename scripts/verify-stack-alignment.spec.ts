@@ -259,14 +259,8 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
     ]);
   });
 
-  it('requires chat persistence uniqueness migrations', () => {
+  it('keeps only control-plane tables in root D1', () => {
     const requiredTables = [
-      'chats',
-      'chat_message_states',
-      'shares',
-      'social_shares',
-      'object_gc_candidates',
-      'agent_gc_candidates',
       'user',
       'session',
       'account',
@@ -275,47 +269,43 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
       'cloudflare_oauth_states',
       'cloudflare_credentials',
       'cloudflare_connections',
-      'deployments',
-      'deployment_resources',
-      'chat_backup_admissions',
-      'chat_backup_objects',
-      'chat_backup_object_attributions',
-      'chat_backup_reconciliation_state',
-      'thumbnail_upload_admissions',
-      'thumbnail_objects',
-      'thumbnail_reconciliation_state',
-      'deployment_security_inventory',
-      'builder_previews',
-      'builder_preview_build_admissions',
+      'user_workspace_runtimes',
     ]
       .map((table) => `CREATE TABLE IF NOT EXISTS ${table} (id TEXT);`)
       .join('\n');
-
     expect(findRootMigrationErrors(requiredTables)).toContain(
-      'root migrations must enforce one chat message state per chat, subchat, and message rank.',
-    );
-    expect(findRootMigrationErrors(requiredTables)).toContain(
-      'root migrations must enforce one active chat per creator and initial id.',
-    );
-    expect(findRootMigrationErrors(requiredTables)).toContain(
-      'root migrations must enforce one social share per chat.',
-    );
-    expect(findRootMigrationErrors(requiredTables)).toContain(
-      'root migrations must defer cleanup of displaced R2 object keys.',
-    );
-    expect(findRootMigrationErrors(requiredTables)).toContain(
-      'root migrations must queue every deleted chat transcript generation range for Agent cleanup.',
+      'root migrations must drop the central chats workload table.',
     );
     expect(
       findRootMigrationErrors(
         `${requiredTables}
-         CREATE UNIQUE INDEX states_rank ON chat_message_states(chat_id, subchat_index, last_message_rank);
-         CREATE UNIQUE INDEX active_chat ON chats(creator_id, initial_id) WHERE is_deleted = 0;
-         CREATE UNIQUE INDEX social_chat ON social_shares(chat_id);
-         INSERT OR IGNORE INTO object_gc_candidates (storage_key, not_before) VALUES ('key', 1);
-         INSERT OR IGNORE INTO agent_gc_candidates (chat_id, max_generation)
-         SELECT chats.id, transcripts.generation FROM chats
-         JOIN chat_transcripts AS transcripts ON transcripts.chat_id = chats.id;`,
+         ${[
+           'chats',
+           'chat_message_states',
+           'chat_transcripts',
+           'shares',
+           'social_shares',
+           'object_gc_candidates',
+           'agent_gc_candidates',
+           'deployments',
+           'deployment_resources',
+           'deployment_security_inventory',
+           'chat_backup_admissions',
+           'chat_backup_objects',
+           'chat_backup_object_attributions',
+           'chat_backup_reconciliation_state',
+           'thumbnail_upload_admissions',
+           'thumbnail_objects',
+           'thumbnail_reconciliation_state',
+           'skill_sync_state',
+           'skill_sync_entries',
+           'builder_previews',
+           'builder_preview_build_admissions',
+           'sandbox_cleanup_candidates',
+           'feedback',
+         ]
+           .map((table) => `DROP TABLE IF EXISTS ${table};`)
+           .join('\n')}`,
       ),
     ).toEqual([]);
   });

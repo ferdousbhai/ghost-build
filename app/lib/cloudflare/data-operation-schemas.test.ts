@@ -2,33 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { dataOperationArgSchemas } from './data-operation-schemas';
 
 describe('data operation argument bounds', () => {
-  it('accepts a valid rewind position', () => {
-    expect(
-      dataOperationArgSchemas['messages.rewindChat'].safeParse({
-        sessionId: 'user-1',
-        chatId: 'chat-1',
-        subchatIndex: 3,
-        lastMessageRank: 12,
-      }).success,
-    ).toBe(true);
-  });
-
-  it.each([
-    { subchatIndex: -1, lastMessageRank: 1 },
-    { subchatIndex: 1.5, lastMessageRank: 1 },
-    { subchatIndex: 10_001, lastMessageRank: 1 },
-    { subchatIndex: 1, lastMessageRank: -1 },
-    { subchatIndex: 1, lastMessageRank: 2.5 },
-  ])('rejects an invalid rewind position: %o', (position) => {
-    expect(
-      dataOperationArgSchemas['messages.rewindChat'].safeParse({
-        sessionId: 'user-1',
-        chatId: 'chat-1',
-        ...position,
-      }).success,
-    ).toBe(false);
-  });
-
   it('rejects empty or oversized identifiers and descriptions', () => {
     expect(
       dataOperationArgSchemas['messages.setDescription'].safeParse({
@@ -48,18 +21,6 @@ describe('data operation argument bounds', () => {
         sessionId: 'user-1',
         id: 'chat-1',
         description: 'x'.repeat(201),
-      }).success,
-    ).toBe(false);
-    expect(
-      dataOperationArgSchemas['share.clone'].safeParse({
-        sessionId: 'user-1',
-        shareCode: '',
-      }).success,
-    ).toBe(false);
-    expect(
-      dataOperationArgSchemas['share.clone'].safeParse({
-        sessionId: 'x'.repeat(513),
-        shareCode: 'share-1',
       }).success,
     ).toBe(false);
   });

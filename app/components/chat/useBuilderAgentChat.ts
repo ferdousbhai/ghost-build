@@ -35,6 +35,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { subchatQueryKey } from '~/lib/cloudflare/data-hooks';
 import { settleBuilderStop } from './builder-stop';
 import { useAccountLocalReplica } from '~/lib/cloudflare/account-local-replica';
+import { getUserRuntimeSession, requireUserRuntimeEndpoint } from '~/lib/cloudflare/runtime-session';
 
 const logger = createScopedLogger('BuilderAgentChat');
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
@@ -62,9 +63,15 @@ export function useBuilderAgentChat(args: {
       () => workbenchStore.userWrites,
     ),
   );
+  const runtimeEndpoint = new URL(requireUserRuntimeEndpoint());
   const builderAgent = useAgent<BuilderAgent, BuilderAgentState>({
     agent: 'BuilderAgent',
     name: args.transcript.agentName,
+    host: runtimeEndpoint.host,
+    protocol: runtimeEndpoint.protocol === 'https:' ? 'wss' : 'ws',
+    query: async () => ({ capability: (await getUserRuntimeSession()).token }),
+    queryDeps: [sessionId, runtimeEndpoint.origin],
+    cacheTtl: 4 * 60_000,
     onStateUpdate: (state) => {
       if (state.preview) {
         workbenchStore.updatePreview(state.preview);

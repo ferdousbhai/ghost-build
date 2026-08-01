@@ -1,14 +1,10 @@
-import { forwardRef, useState, type ForwardedRef } from 'react';
+import { forwardRef, type ForwardedRef } from 'react';
 import { classNames } from '~/utils/classNames';
 import { AssistantMessage } from './AssistantMessage';
 import { UserMessage } from './UserMessage';
 import { useStore } from '@nanostores/react';
 import { profileStore } from '~/lib/stores/profile';
-import { ChatBubbleIcon, PersonIcon, ResetIcon } from '@radix-ui/react-icons';
-import { Button } from '@ui/Button';
-import { Modal } from '@ui/Modal';
-import { useEarliestRewindableMessageRank } from '~/lib/hooks/useEarliestRewindableMessageRank';
-import { subchatIndexStore } from '~/lib/stores/subchats';
+import { ChatBubbleIcon, PersonIcon } from '@radix-ui/react-icons';
 import { messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import styles from './BaseChat.module.css';
 
@@ -17,77 +13,20 @@ interface MessagesProps {
   className?: string;
   messages?: GhostbuildMessage[];
   isStreaming?: boolean;
-  subchatsLength?: number;
-  onRewindToMessage?: (subchatIndex?: number, messageIndex?: number) => void;
 }
 
 export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messages(
-  { id, messages = [], className, isStreaming, onRewindToMessage, subchatsLength }: MessagesProps,
+  { id, messages = [], className, isStreaming }: MessagesProps,
   ref: ForwardedRef<HTMLDivElement> | undefined,
 ) {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedMessageIndex, setSelectedMessageIndex] = useState<number | null>(null);
-  const [selectedSubchatIndex, setSelectedSubchatIndex] = useState<number | undefined>(undefined);
-  const currentSubchatIndex = useStore(subchatIndexStore);
   const profile = useStore(profileStore);
-  const earliestRewindableMessageRank = useEarliestRewindableMessageRank();
-  const lastSubchatIndex = subchatsLength ? subchatsLength - 1 : undefined;
 
   return (
     <div id={id} className={className} ref={ref}>
-      {isModalOpen && selectedMessageIndex !== null && (
-        <Modal
-          onClose={() => {
-            setIsModalOpen(false);
-            setSelectedMessageIndex(null);
-          }}
-          title={<div className="sr-only">Rewind to message</div>}
-        >
-          <div className="flex flex-col gap-2">
-            <h2>Rewind to previous version</h2>
-            <p className="text-content-primary text-sm">
-              This will undo all changes after this message. Your current work will be lost and cannot be recovered.
-            </p>
-            <p className="text-content-primary text-sm">
-              Your stored app data will be unaffected, so you may need to either clear or migrate your data in order to
-              use this previous version.
-            </p>
-            <p className="text-content-primary text-sm">Are you sure you want to continue?</p>
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="neutral"
-                onClick={() => {
-                  setIsModalOpen(false);
-                  setSelectedMessageIndex(null);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="danger"
-                onClick={() => {
-                  setIsModalOpen(false);
-                  onRewindToMessage?.(selectedSubchatIndex, selectedMessageIndex);
-                }}
-              >
-                Rewind
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
       {messages.length > 0 ? (
         messages.map((message, index) => {
           const { role } = message;
           const isUserMessage = role === 'user';
-          const canRewindToMessage =
-            earliestRewindableMessageRank != null &&
-            !isUserMessage &&
-            index >= earliestRewindableMessageRank &&
-            index !== messages.length - 1 &&
-            currentSubchatIndex !== undefined &&
-            lastSubchatIndex !== undefined &&
-            currentSubchatIndex === lastSubchatIndex;
 
           return (
             <div
@@ -116,22 +55,6 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messa
                 <UserMessage content={messageText(message)} />
               ) : (
                 <AssistantMessage message={message} isStreaming={isStreaming && index === messages.length - 1} />
-              )}
-              {canRewindToMessage && (
-                <Button
-                  className="absolute bottom-[-5px] right-[-5px] bg-bolt-elements-background-depth-2 hover:bg-bolt-elements-background-depth-3"
-                  onClick={() => {
-                    setIsModalOpen(true);
-                    setSelectedMessageIndex(index);
-                    setSelectedSubchatIndex(currentSubchatIndex);
-                  }}
-                  variant="neutral"
-                  size="xs"
-                  tip="Rewind to this message"
-                  title="Rewind to here"
-                >
-                  <ResetIcon className="text-content-primary size-4" />
-                </Button>
               )}
             </div>
           );

@@ -1,15 +1,11 @@
 import { atom } from 'nanostores';
-import { compressWithLz4 } from '~/lib/compression';
 import { waitForStoreCondition } from '~/lib/stores/waitForStore';
 import { createdAtMillis, messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import {
-  TRANSCRIPT_HISTORY_FORMAT_VERSION,
   stripTranscriptBaseMetadata,
   transcriptCheckpointsEqual,
   type TranscriptCheckpoint,
 } from 'ghostbuild-agent/transcript';
-
-const textEncoder = new TextEncoder();
 
 export type CompleteMessageInfo = {
   messageIndex: number;
@@ -24,12 +20,6 @@ export type SerializedMessage = Omit<GhostbuildMessage, 'createdAt' | 'content'>
   content?: string;
 };
 
-type StoredMessageHistory = {
-  version: typeof TRANSCRIPT_HISTORY_FORMAT_VERSION;
-  transcript: TranscriptCheckpoint;
-  messages: SerializedMessage[];
-};
-
 export const lastCompleteMessageInfoStore = atom<CompleteMessageInfo | null>(null);
 
 export function prepareMessageHistory(args: {
@@ -42,7 +32,6 @@ export function prepareMessageHistory(args: {
 }): {
   url: URL;
   update: {
-    compressed: Uint8Array;
     messageIndex: number;
     partIndex: number;
     firstMessage: string | undefined;
@@ -76,8 +65,7 @@ export function prepareMessageHistory(args: {
     return { url, update: null };
   }
 
-  const compressed = compressMessages(allMessages, messageIndex, partIndex, checkpoint);
-  return { url, update: { compressed, messageIndex, partIndex, firstMessage } };
+  return { url, update: { messageIndex, partIndex, firstMessage } };
 }
 
 export function waitForNewMessages(
@@ -130,19 +118,4 @@ export function serializeCompleteMessages(
     };
   }
   return slicedMessages.map(serializeMessageForStorage);
-}
-
-function compressMessages(
-  messages: GhostbuildMessage[],
-  lastMessageRank: number,
-  partIndex: number,
-  transcript: TranscriptCheckpoint,
-): Uint8Array {
-  const history: StoredMessageHistory = {
-    version: TRANSCRIPT_HISTORY_FORMAT_VERSION,
-    transcript,
-    messages: serializeCompleteMessages(messages, lastMessageRank, partIndex),
-  };
-  const uint8Array = textEncoder.encode(JSON.stringify(history));
-  return compressWithLz4(uint8Array);
 }

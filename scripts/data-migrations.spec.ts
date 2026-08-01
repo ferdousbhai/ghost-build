@@ -21,6 +21,23 @@ describe('Cloudflare data deduplication migrations', () => {
     }
 
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    expect(
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        .all()
+        .map((row) => String(row.name)),
+    ).toEqual([
+      'account',
+      'cloudflare_auth_sessions',
+      'cloudflare_connection_sessions',
+      'cloudflare_connections',
+      'cloudflare_credentials',
+      'cloudflare_oauth_states',
+      'session',
+      'user',
+      'user_workspace_runtimes',
+      'verification',
+    ]);
   });
 
   test('preserves applied migration history and repairs the destructive authentication rollout additively', async () => {
@@ -54,7 +71,11 @@ describe('Cloudflare data deduplication migrations', () => {
     expect(compatibilityTableNames(upgraded)).toEqual(ROLLOUT_COMPATIBILITY_TABLES);
 
     const destructiveMigrations = rootMigrationNames().filter((name) => /\bDROP\s+TABLE\b/i.test(migration(name)));
-    expect(destructiveMigrations).toEqual(['0003_drop_legacy_sessions.sql', '0011_cloudflare_auth.sql']);
+    expect(destructiveMigrations).toEqual([
+      '0003_drop_legacy_sessions.sql',
+      '0011_cloudflare_auth.sql',
+      '0027_drop_central_workloads.sql',
+    ]);
   });
 
   test('preserves message-state metadata and queues only displaced distinct R2 keys', async () => {

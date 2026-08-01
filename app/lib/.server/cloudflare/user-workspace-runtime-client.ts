@@ -11,8 +11,6 @@ import type {
   BuilderWorkspaceState,
   BuilderWorkspaceSyncPage,
 } from '~/agents/builder-workspace-types';
-import { findUserWorkspaceRuntime } from './user-workspace-runtime-repository';
-import { deriveUserWorkspaceRuntimeSecret } from './user-workspace-runtime-secret';
 
 const MAX_RESPONSE_BYTES = 36 * 1024 * 1024;
 const MAX_TOOL_RESULT_BYTES = 256 * 1024;
@@ -273,30 +271,20 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     if (!userId) {
       throw new Error('Agent authentication is required.');
     }
-    const runtime = await findUserWorkspaceRuntime(this.env.DB, userId);
-    if (!runtime || runtime.status !== 'ready') {
-      throw new Error('Set up the user-owned Cloudflare workspace runtime before opening a project.');
+    const runtime = this.env as Env & {
+      GHOSTBUILD_USER_RUNTIME?: string;
+      GHOSTBUILD_USER_RUNTIME_ENDPOINT?: string;
+      CONTROL_PLANE_SECRET?: string;
+    };
+    if (
+      runtime.GHOSTBUILD_USER_RUNTIME !== '1' ||
+      !runtime.GHOSTBUILD_USER_RUNTIME_ENDPOINT ||
+      !runtime.CONTROL_PLANE_SECRET
+    ) {
+      throw new Error('The user-owned Cloudflare workspace runtime is not configured.');
     }
-    if (!this.env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY) {
-      throw new Error('Cloudflare credential encryption is not configured.');
-    }
-    this.#endpoint = runtime.endpoint;
-    this.#secret = await deriveUserWorkspaceRuntimeSecret({
-      encryptionKeyBase64: this.env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY,
-      userId,
-      accountId: await this.#runtimeAccountId(runtime.connectionId),
-      connectionGeneration: runtime.connectionGeneration,
-    });
-  }
-
-  async #runtimeAccountId(connectionId: string): Promise<string> {
-    const row = await this.env.DB.prepare('SELECT account_id FROM cloudflare_connections WHERE id = ?')
-      .bind(connectionId)
-      .first<{ account_id: string }>();
-    if (!row) {
-      throw new Error('The user-owned workspace runtime connection no longer exists.');
-    }
-    return row.account_id;
+    this.#endpoint = new URL(runtime.GHOSTBUILD_USER_RUNTIME_ENDPOINT).origin;
+    this.#secret = runtime.CONTROL_PLANE_SECRET;
   }
 }
 

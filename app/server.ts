@@ -1,34 +1,16 @@
 import handler from '@tanstack/react-start/server-entry';
-import {
-  dataAction,
-  initialMessagesAction,
-  storageObjectAction,
-  storeChatAction,
-  uploadThumbnailAction,
-} from '~/lib/cloudflare/data.server';
-import { enhancePromptAction } from './server-handlers/enhance-prompt';
 import { healthAction } from './server-handlers/health';
 import { versionAction } from './server-handlers/version';
-import { clientTelemetryAction } from './server-handlers/client-telemetry';
-import { feedbackAction } from './server-handlers/feedback';
 import {
   CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
   cloudflareConnectionStatusAction,
+  cloudflareRuntimeSessionAction,
   completeCloudflareConnectionAction,
   provisionCloudflareWorkspaceRuntimeAction,
   startCloudflareConnectionAction,
 } from './server-handlers/cloudflare-integration';
-import { routeAuthorizedAgentRequest } from './lib/.server/agent-request-identity';
-import { deploymentAction } from './server-handlers/deployments';
 import { authSessionAction, signOutAction } from './server-handlers/auth';
-import { drainDeferredDataGcBestEffort } from './lib/cloudflare/data/deferred-gc.server';
 import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudflare-auth-retention.server';
-import { refreshDeploymentSecurityInventoryBestEffort } from './lib/.server/cloudflare/deployment-security-inventory';
-import { reconcileChatBackupQuotaBestEffort } from './lib/cloudflare/data/chat-backup-quota.server';
-import { reconcileThumbnailQuotaBestEffort } from './lib/cloudflare/data/thumbnail-quota.server';
-
-export { BuilderAgent } from './agents/builder-agent';
-export { SkillSyncWorkflow } from './lib/.server/cloudflare/skill-sync-workflow';
 
 const APPLICATION_CSP_BASELINE = "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
 const HSTS_MIN_AGE_SECONDS = '31536000';
@@ -116,18 +98,6 @@ const exactRoutes: Record<string, ServerRoute> = {
     method: 'POST',
     handler: (request, env) => signOutAction({ request, env }),
   },
-  '/api/enhance-prompt': {
-    method: 'POST',
-    handler: (request, env) => enhancePromptAction({ request, env }),
-  },
-  '/api/client-telemetry': {
-    method: 'POST',
-    handler: (request, env) => clientTelemetryAction({ request, env }),
-  },
-  '/api/feedback': {
-    method: 'POST',
-    handler: (request, env) => feedbackAction({ request, env }),
-  },
   '/api/cloudflare/connection': {
     method: 'GET',
     handler: (request, env) => cloudflareConnectionStatusAction({ request, env }),
@@ -140,39 +110,22 @@ const exactRoutes: Record<string, ServerRoute> = {
     method: 'POST',
     handler: (request, env) => provisionCloudflareWorkspaceRuntimeAction({ request, env }),
   },
+  '/api/cloudflare/runtime-session': {
+    method: 'GET',
+    handler: (request, env) => cloudflareRuntimeSessionAction({ request, env }),
+  },
   '/connect/return': {
     method: CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
     handler: (request, env) => completeCloudflareConnectionAction({ request, env }),
-  },
-  '/api/data': {
-    method: 'POST',
-    handler: (request, env, executionCtx) => dataAction({ request, env, executionCtx }),
   },
   '/api/version': {
     method: 'GET',
     handler: (_request, env) => versionAction({ env }),
   },
-  '/api/chats/store': {
-    method: 'POST',
-    handler: (request, env) => storeChatAction({ request, env }),
-  },
-  '/api/chats/messages': {
-    method: 'POST',
-    handler: (request, env) => initialMessagesAction({ request, env }),
-  },
-  '/api/thumbnails': {
-    method: 'POST',
-    handler: (request, env) => uploadThumbnailAction({ request, env }),
-  },
 };
 
 export default {
   async fetch(request: Request, env: Env, ctx?: ExecutionContext) {
-    const agentResponse = await routeAuthorizedAgentRequest(request, env);
-    if (agentResponse) {
-      return agentResponse;
-    }
-
     const pathname = new URL(request.url).pathname;
     return withApplicationSecurityHeaders(await routeApplicationRequest(request, env, ctx), pathname);
   },
@@ -182,14 +135,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 async function runScheduledMaintenance(env: Env) {
-  // Keep connection-heavy D1, R2, and provider maintenance inside the Worker's
-  // simultaneous-outgoing-connection budget. Each task is independently
-  // bounded and best-effort, so sequencing does not couple their failures.
-  await drainDeferredDataGcBestEffort(env);
   await pruneCloudflareAuthDataBestEffort(env.DB);
-  await reconcileChatBackupQuotaBestEffort(env);
-  await reconcileThumbnailQuotaBestEffort(env);
-  await refreshDeploymentSecurityInventoryBestEffort(env);
 }
 
 async function routeApplicationRequest(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
@@ -200,43 +146,5 @@ async function routeApplicationRequest(request: Request, env: Env, ctx?: Executi
     return requireMethod(request, route.method, () => route.handler(request, env, ctx));
   }
 
-  const deploymentRoute = matchDeploymentRoute(url.pathname);
-  if (deploymentRoute) {
-    const method = deploymentRoute.operation === 'get' ? 'GET' : 'POST';
-    return requireMethod(request, method, () =>
-      deploymentAction({
-        request,
-        env,
-        deploymentId: deploymentRoute.deploymentId,
-        operation: deploymentRoute.operation,
-      }),
-    );
-  }
-
-  if (url.pathname.startsWith('/api/storage/')) {
-    return requireMethod(request, 'GET', () =>
-      storageObjectAction({ request, key: url.pathname.slice('/api/storage/'.length), env }),
-    );
-  }
-
   return handler.fetch(request);
-}
-
-function matchDeploymentRoute(pathname: string): {
-  deploymentId: string;
-  operation: 'get' | 'approve' | 'execute' | 'retry';
-} | null {
-  const match = /^\/api\/deployments\/([^/]+)(?:\/(approve|execute|retry))?$/.exec(pathname);
-  if (!match) {
-    return null;
-  }
-  try {
-    const operation = match[2] as 'approve' | 'execute' | 'retry' | undefined;
-    return {
-      deploymentId: decodeURIComponent(match[1]),
-      operation: operation ?? 'get',
-    };
-  } catch {
-    return null;
-  }
 }

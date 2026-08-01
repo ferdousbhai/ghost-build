@@ -4,15 +4,35 @@ import { addRequestedDependencies } from '../../app/lib/runtime/action-runner/de
 import { toolFailure, toolSuccess, type GhostbuildToolResult } from '../../ghostbuild-agent/tool-result';
 import { parse } from 'jsonc-parser';
 import { initializeWorkspaceRuntimeSchema } from '../../app/agents/builder-workspace-runtime-schema';
+import { BuilderAgent } from '../../app/agents/builder-agent';
+import { routeUserRuntimeAgentRequest } from '../../app/lib/.server/agent-request-identity';
+import {
+  userRuntimeDataAction,
+  userRuntimeInitialMessagesAction,
+  userRuntimeStoreChatAction,
+} from '../../app/lib/cloudflare/data.server';
+import { verifyRuntimeCapability } from '../../app/lib/cloudflare/runtime-capability';
+import { userRuntimeDeploymentAction } from '../../app/server-handlers/deployments';
+import { userRuntimeEnhancePromptAction } from '../../app/server-handlers/enhance-prompt';
 
 interface RuntimeEnv {
   WORKSPACE_SANDBOX: DurableObjectNamespace<WorkspaceSandbox>;
+  BuilderAgent: DurableObjectNamespace<BuilderAgent>;
+  DB: D1Database;
+  APP_STORAGE: R2Bucket;
+  AI: Ai;
   BACKUP_BUCKET: R2Bucket;
   CONTROL_PLANE_SECRET: string;
   R2_ACCESS_KEY_ID: string;
   R2_SECRET_ACCESS_KEY: string;
   BACKUP_BUCKET_NAME: string;
   CLOUDFLARE_ACCOUNT_ID: string;
+  CLOUDFLARE_API_TOKEN: string;
+  GHOSTBUILD_USER_ID: string;
+  GHOSTBUILD_CONNECTION_ID: string;
+  GHOSTBUILD_CONNECTION_GENERATION: string;
+  GHOSTBUILD_USER_RUNTIME: string;
+  GHOSTBUILD_USER_RUNTIME_ENDPOINT: string;
 }
 
 const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
@@ -439,17 +459,15 @@ export class WorkspaceSandbox extends Sandbox<RuntimeEnv> {
 }
 
 export default {
-  async fetch(request: Request, env: RuntimeEnv): Promise<Response> {
-    if (!authorized(request, env.CONTROL_PLANE_SECRET)) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  async fetch(request: Request, env: RuntimeEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    if (request.method === 'GET' && url.pathname === '/v1/health') {
+    const controlPlaneRequest = authorized(request, env.CONTROL_PLANE_SECRET);
+    if (controlPlaneRequest && request.method === 'GET' && url.pathname === '/v1/health') {
       return Response.json({ ok: true, service: 'ghostbuild-user-workspace-runtime', version: 1 });
     }
     const route = parseProjectRoute(url.pathname);
-    if (!route) {
-      return Response.json({ error: 'Not found' }, { status: 404 });
+    if (!route || !controlPlaneRequest) {
+      return handleUserRequest(request, env, url, ctx);
     }
     const id = env.WORKSPACE_SANDBOX.idFromName(route.projectId);
     const project = env.WORKSPACE_SANDBOX.get(id) as unknown as WorkspaceSandbox;
@@ -533,6 +551,87 @@ export default {
     }
   },
 };
+
+async function handleUserRequest(
+  request: Request,
+  env: RuntimeEnv,
+  url: URL,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const origin = request.headers.get('origin');
+  if (request.method === 'OPTIONS') {
+    return origin ? withCors(new Response(null, { status: 204 }), origin) : new Response(null, { status: 400 });
+  }
+  const token = bearerToken(request) ?? url.searchParams.get('capability');
+  const capability = token ? await verifyRuntimeCapability(env.CONTROL_PLANE_SECRET, token, { origin }) : null;
+  if (!capability || capability.subject !== env.GHOSTBUILD_USER_ID) {
+    return withCors(Response.json({ error: 'Unauthorized' }, { status: 401 }), origin);
+  }
+
+  let response: Response;
+  const agentResponse = await routeUserRuntimeAgentRequest(request, env as unknown as Env, capability.subject);
+  if (agentResponse) {
+    response = agentResponse;
+  } else if (request.method === 'POST' && url.pathname === '/v1/data') {
+    response = await userRuntimeDataAction({
+      request,
+      env: env as unknown as Env,
+      userId: capability.subject,
+      executionCtx: ctx,
+    });
+  } else if (request.method === 'POST' && url.pathname === '/v1/chats/store') {
+    response = await userRuntimeStoreChatAction({ request, env: env as unknown as Env, userId: capability.subject });
+  } else if (request.method === 'POST' && url.pathname === '/v1/chats/messages') {
+    response = await userRuntimeInitialMessagesAction({
+      request,
+      env: env as unknown as Env,
+      userId: capability.subject,
+    });
+  } else if (request.method === 'POST' && url.pathname === '/v1/enhance-prompt') {
+    response = await userRuntimeEnhancePromptAction({
+      request,
+      env: env as unknown as Env,
+      userId: capability.subject,
+    });
+  } else {
+    const deployment = /^\/v1\/deployments\/([^/]+)(?:\/(approve|execute|retry))?$/.exec(url.pathname);
+    if (deployment && (request.method === 'GET' || request.method === 'POST')) {
+      const operation =
+        deployment[2] === 'approve' || deployment[2] === 'execute' || deployment[2] === 'retry' ? deployment[2] : 'get';
+      response = await userRuntimeDeploymentAction({
+        request,
+        env: env as unknown as Env,
+        userId: capability.subject,
+        deploymentId: decodeURIComponent(deployment[1]!),
+        operation,
+      });
+    } else {
+      response = Response.json({ error: 'Not found' }, { status: 404 });
+    }
+  }
+  return withCors(response, capability.origin);
+}
+
+function bearerToken(request: Request): string | null {
+  const authorization = request.headers.get('authorization');
+  return authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+}
+
+function withCors(response: Response, origin: string | null): Response {
+  if (!origin || (response as Response & { webSocket?: WebSocket }).webSocket) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  headers.set('Access-Control-Allow-Origin', origin);
+  headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  headers.append('Vary', 'Origin');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 function parseProjectRoute(pathname: string): { projectId: string; operation: string } | null {
   const match = /^\/v1\/projects\/([^/]+)(?:\/(.*))?$/.exec(pathname);
@@ -739,3 +838,5 @@ function authorized(request: Request, expected: string): boolean {
   }
   return mismatch === 0;
 }
+
+export { BuilderAgent };

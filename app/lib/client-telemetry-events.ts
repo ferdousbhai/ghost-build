@@ -5,7 +5,6 @@ export const CLIENT_TELEMETRY_EVENTS = [
   'Failed to enhance prompt',
   'Failed to fetch dashboard version information',
   'Failed to process chat request',
-  'Failed to share project thumbnail',
   'Failed to start Cloudflare authorization',
   'Failed to submit chat message',
   'Preview base URL unexpectedly had a trailing slash',

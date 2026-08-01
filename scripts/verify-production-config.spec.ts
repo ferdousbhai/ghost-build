@@ -94,10 +94,10 @@ describe('findWorkerVariableSourceErrors', () => {
 });
 
 describe('findWorkerGcScheduleErrors', () => {
-  it('requires the bounded deferred-data sweep cron', () => {
+  it('requires the bounded authentication-metadata retention cron', () => {
     expect(findWorkerGcScheduleErrors({ triggers: { crons: ['*/15 * * * *'] } }, 'wrangler.jsonc')).toEqual([]);
     expect(findWorkerGcScheduleErrors({}, 'wrangler.jsonc')).toEqual([
-      'wrangler.jsonc must schedule the bounded deferred-data GC sweep every 15 minutes.',
+      'wrangler.jsonc must schedule bounded authentication-metadata retention every 15 minutes.',
     ]);
   });
 });

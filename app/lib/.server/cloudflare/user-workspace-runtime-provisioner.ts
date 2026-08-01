@@ -1,4 +1,5 @@
 import {
+  USER_WORKSPACE_DATA_MIGRATIONS,
   USER_WORKSPACE_RUNTIME_SHA256,
   USER_WORKSPACE_RUNTIME_SOURCE,
 } from '~/generated/user-workspace-runtime.generated';
@@ -39,6 +40,7 @@ export async function provisionUserWorkspaceRuntime(args: {
   const suffix = (await sha256(`${connection.accountId}:${args.userId}`)).slice(0, 16);
   const workerName = `ghostbuild-workspace-${suffix}`;
   const bucketName = `ghostbuild-workspaces-${suffix}`;
+  const databaseName = `ghostbuild-data-${suffix}`;
   const workersSubdomain = await accountApi.getWorkersSubdomain();
   const endpoint = `https://${workerName}.${workersSubdomain}.workers.dev`;
   const controlPlaneSecret = await deriveUserWorkspaceRuntimeSecret({
@@ -59,6 +61,14 @@ export async function provisionUserWorkspaceRuntime(args: {
   });
   try {
     await accountApi.ensureR2Bucket(bucketName);
+    const database = await accountApi.ensureD1Database(databaseName);
+    await accountApi.applyD1Migrations(database.id, USER_WORKSPACE_DATA_MIGRATIONS);
+    await seedUserRuntimeData({
+      accountApi,
+      databaseId: database.id,
+      userId: args.userId,
+      connection,
+    });
     const deployed = await accountApi.deployWorkspaceRuntimeWorker({
       workerName,
       source: USER_WORKSPACE_RUNTIME_SOURCE,
@@ -67,6 +77,12 @@ export async function provisionUserWorkspaceRuntime(args: {
       r2AccessKeyId: args.r2AccessKeyId,
       r2SecretAccessKey: args.r2SecretAccessKey,
       runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
+      databaseId: database.id,
+      apiToken: accessToken,
+      userId: args.userId,
+      connectionId: connection.id,
+      connectionGeneration: connection.generation,
+      endpoint,
     });
     await accountApi.ensureWorkspaceRuntimeContainer({
       applicationName: workerName,
@@ -99,8 +115,46 @@ export async function provisionUserWorkspaceRuntime(args: {
   }
 }
 
+async function seedUserRuntimeData(args: {
+  accountApi: UserCloudflareAccountApi;
+  databaseId: string;
+  userId: string;
+  connection: CloudflareConnection;
+}): Promise<void> {
+  const now = Date.now();
+  await args.accountApi.executeD1(
+    args.databaseId,
+    `INSERT INTO cloudflare_connections (
+       id, user_id, account_id, account_name, status, credential_handle,
+       granted_scopes_json, ai_billing_enabled, connected_at, created_at, updated_at, connection_generation
+     ) VALUES (?, ?, ?, ?, 'active', NULL, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET
+       id = excluded.id,
+       account_id = excluded.account_id,
+       account_name = excluded.account_name,
+       status = 'active',
+       granted_scopes_json = excluded.granted_scopes_json,
+       ai_billing_enabled = excluded.ai_billing_enabled,
+       connected_at = excluded.connected_at,
+       updated_at = excluded.updated_at,
+       connection_generation = excluded.connection_generation`,
+    [
+      args.connection.id,
+      args.userId,
+      args.connection.accountId,
+      args.connection.accountName,
+      JSON.stringify(args.connection.grantedScopes),
+      args.connection.aiBillingEnabled ? 1 : 0,
+      args.connection.connectedAt,
+      now,
+      now,
+      args.connection.generation,
+    ],
+  );
+}
+
 function requireRuntimeCapabilities(connection: CloudflareConnection): void {
-  const required = ['workers', 'containers', 'r2', 'durable_objects'];
+  const required = ['workers', 'containers', 'd1', 'r2', 'durable_objects', 'workers_ai'];
   const missing = required.filter((capability) => !connection.grantedScopes.includes(capability));
   if (missing.length > 0) {
     throw new Error(`Reconnect Cloudflare with workspace runtime access: ${missing.join(', ')}.`);

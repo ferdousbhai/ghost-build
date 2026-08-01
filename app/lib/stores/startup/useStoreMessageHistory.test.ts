@@ -1,11 +1,6 @@
-import { describe, expect, test, vi } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { getLastCompletePart } from './useStoreMessageHistory';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
-
-vi.mock('lz4-wasm', () => ({
-  compress: (data: Uint8Array) => data,
-  decompress: (data: Uint8Array) => data,
-}));
 
 function createMessage(overrides: Partial<GhostbuildMessage> = {}): GhostbuildMessage {
   return {

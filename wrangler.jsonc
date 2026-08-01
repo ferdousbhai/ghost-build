@@ -30,28 +30,10 @@
   },
   "ratelimits": [
     {
-      "name": "CLIENT_TELEMETRY_RATE_LIMITER",
-      "namespace_id": "1001",
-      "simple": {
-        "limit": 30,
-        "period": 60,
-      },
-    },
-    {
       "name": "CLOUDFLARE_OAUTH_START_RATE_LIMITER",
       "namespace_id": "1002",
       "simple": {
         "limit": 10,
-        "period": 60,
-      },
-    },
-    {
-      // Fast per-location shedding only. Exact per-user rate and byte quotas
-      // are admitted atomically by D1 before any backup reaches R2.
-      "name": "CHAT_BACKUP_RATE_LIMITER",
-      "namespace_id": "1003",
-      "simple": {
-        "limit": 240,
         "period": 60,
       },
     },
@@ -71,44 +53,7 @@
       "migrations_dir": "migrations",
     },
   ],
-  "r2_buckets": [
-    {
-      "binding": "APP_STORAGE",
-      "bucket_name": "ghostbuild-app-storage",
-    },
-  ],
-  "workflows": [
-    {
-      "name": "ghostbuild-skill-sync",
-      "binding": "SkillSyncWorkflow",
-      "class_name": "SkillSyncWorkflow",
-      "schedules": ["0 8 * * 1"],
-    },
-  ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "BuilderAgent",
-        "class_name": "BuilderAgent",
-      },
-    ],
-  },
-  "exports": {
-    "BuilderAgent": {
-      "type": "durable-object",
-      "storage": "sqlite",
-    },
-  },
   "vars": {
     "CLOUDFLARE_OAUTH_SCOPES": "account-settings.read user-details.read workers-scripts.write containers.write d1.write workers-r2.write ai.read",
-    // Exact tenant-wide request limits, retained byte/object quotas, and edge
-    // shedding are enforced after the bounded legacy R2 reconciliation reaches
-    // its fail-closed readiness marker.
-    "CHAT_BACKUP_STORAGE_QUOTA_MODE": "enforce",
-    "CHAT_BACKUP_STORAGE_LIMIT_BYTES": "1073741824",
-    "CHAT_BACKUP_STORAGE_LIMIT_OBJECTS": "4096",
-    "CHAT_BACKUP_REQUESTS_PER_MINUTE": "120",
-    "CHAT_BACKUP_REQUESTS_PER_DAY": "10000",
-    "CLOUDFLARE_R2_ACCOUNT_ID": "0af9e0921b880657d84a6c07307f8aef",
   },
 }

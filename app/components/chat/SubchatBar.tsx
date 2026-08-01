@@ -7,7 +7,6 @@ import {
   ChevronDownIcon,
   Pencil1Icon,
   PlusIcon,
-  ResetIcon,
 } from '@radix-ui/react-icons';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useState } from 'react';
@@ -26,7 +25,6 @@ interface SubchatBarProps {
   handleCreateSubchat: () => Promise<boolean>;
   handleRenameSubchat: (title: string) => Promise<boolean>;
   onSubchatTitleChange?: (subchatIndex: number, title: string) => void;
-  onRewind?: (subchatIndex?: number, messageIndex?: number) => void;
   isSubchatLoaded: boolean;
 }
 
@@ -36,13 +34,11 @@ export function SubchatBar({
   isStreaming,
   chatDisabled,
   sessionId,
-  onRewind,
   handleCreateSubchat,
   handleRenameSubchat,
   onSubchatTitleChange,
   isSubchatLoaded,
 }: SubchatBarProps) {
-  const [isRewindModalOpen, setIsRewindModalOpen] = useState(false);
   const [isAddChatModalOpen, setIsAddChatModalOpen] = useState(false);
   const [isCreatingSubchat, setIsCreatingSubchat] = useState(false);
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
@@ -118,15 +114,12 @@ export function SubchatBar({
   return (
     <nav aria-label="Chat history" className="mx-auto mb-6 w-full max-w-chat px-3 pt-5 sm:px-0">
       <SubchatDialogs
-        rewindOpen={isRewindModalOpen}
         createOpen={isAddChatModalOpen}
         renameOpen={isRenameModalOpen}
         renameValue={renameValue}
         renamePending={isRenaming}
         renameDisabled={!renameValue.trim() || isRenaming}
-        rewindDisabled={interactionsDisabled}
         createDisabled={interactionsDisabled}
-        closeRewind={() => setIsRewindModalOpen(false)}
         closeCreate={() => {
           if (!isCreatingSubchat) {
             setIsAddChatModalOpen(false);
@@ -139,13 +132,6 @@ export function SubchatBar({
         }}
         setRenameValue={setRenameValue}
         createPending={isCreatingSubchat}
-        confirmRewind={() => {
-          if (interactionsDisabled) {
-            return;
-          }
-          setIsRewindModalOpen(false);
-          onRewind?.(currentSubchatIndex, undefined);
-        }}
         confirmCreate={async () => {
           if (interactionsDisabled) {
             return;
@@ -282,7 +268,7 @@ export function SubchatBar({
         {!isSubchatLoaded && <Spinner />}
 
         <div className="flex shrink-0 items-center">
-          {canCreateSubchat ? (
+          {canCreateSubchat && (
             <Button
               size="sm"
               variant="neutral"
@@ -297,22 +283,6 @@ export function SubchatBar({
               }}
             >
               <span className="hidden sm:inline">New chat</span>
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              variant="neutral"
-              className="!min-h-11 rounded-xl !px-3"
-              icon={<ResetIcon />}
-              inline
-              aria-label="Rewind project to this chat"
-              tip={busyTip ?? 'Rewind project to this chat'}
-              disabled={currentSubchatIndex < 0 || interactionsDisabled}
-              onClick={() => {
-                setIsRewindModalOpen(true);
-              }}
-            >
-              <span className="hidden sm:inline">Rewind</span>
             </Button>
           )}
         </div>

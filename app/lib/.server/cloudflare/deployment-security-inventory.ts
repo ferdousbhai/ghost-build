@@ -1,4 +1,3 @@
-import { D1CloudflareCredentialVault } from './cloudflare-credential-vault';
 import {
   APP_AGENT_SECURITY_BOUNDARY_SHA256,
   DEPLOYMENT_SECURITY_BASELINE_BINDING,
@@ -308,6 +307,7 @@ export async function refreshDeploymentSecurityInventoryBestEffort(env: Env): Pr
     return;
   }
 
+  const { D1CloudflareCredentialVault } = await import('./cloudflare-credential-vault');
   const vault = D1CloudflareCredentialVault.fromEnv(env);
   for (let offset = 0; offset < targets.length; offset += INVENTORY_PROVIDER_CONCURRENCY) {
     await Promise.all(

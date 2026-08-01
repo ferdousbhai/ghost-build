@@ -3,19 +3,17 @@ import { lazy, Suspense, useState } from 'react';
 import { chatStore } from '~/lib/stores/chatId';
 import { ChatDescription } from '~/components/header/ChatDescription.client';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
-import { HamburgerMenuIcon, PersonIcon, GearIcon, ExitIcon, Share2Icon } from '@radix-ui/react-icons';
+import { HamburgerMenuIcon, PersonIcon, GearIcon, ExitIcon } from '@radix-ui/react-icons';
 import { LoggedOutHeaderButtons } from './LoggedOutHeaderButtons';
 import { profileStore, setProfile } from '~/lib/stores/profile';
 import { Menu as MenuComponent, MenuItem as MenuItemComponent } from '@ui/Menu';
-import { FeedbackButton } from './FeedbackButton';
-import { signInWithCloudflare, signOutOfGhostbuild } from '~/lib/auth-client';
+import { signOutOfGhostbuild } from '~/lib/auth-client';
 import { BrandLink } from '~/components/BrandLink';
 import { Button } from '@ui/Button';
 import { ThemeSwitch } from '~/components/ui/ThemeSwitch';
 import { toast } from 'sonner';
 
 const DownloadButton = lazy(() => import('./DownloadButton').then((module) => ({ default: module.DownloadButton })));
-const ShareButton = lazy(() => import('./ShareButton').then((module) => ({ default: module.ShareButton })));
 const SidebarMenu = lazy(() => import('~/components/sidebar/Menu.client').then((module) => ({ default: module.Menu })));
 const HeaderActionButtons = lazy(() =>
   import('./HeaderActionButtons.client').then((module) => ({ default: module.HeaderActionButtons })),
@@ -37,14 +35,6 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
       setProfile(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to sign out. Please try again.');
-    }
-  };
-
-  const handleSignIn = async () => {
-    try {
-      await signInWithCloudflare();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to connect Cloudflare. Please try again.');
     }
   };
 
@@ -93,20 +83,6 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
             <>
               <Suspense fallback={null}>
                 <DownloadButton />
-                {isAccountSession ? (
-                  <ShareButton />
-                ) : (
-                  <Button
-                    variant="neutral"
-                    size="xs"
-                    title="Connect Cloudflare to share"
-                    aria-label="Connect Cloudflare to share"
-                    onClick={() => void handleSignIn()}
-                  >
-                    <Share2Icon />
-                    <span className="hidden md:inline">Share</span>
-                  </Button>
-                )}
               </Suspense>
               <Suspense fallback={null}>
                 <div className="mr-1">
@@ -119,7 +95,6 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
           {profile && (
             <>
               <div className="hidden items-center gap-1 lg:flex">
-                <FeedbackButton showInMenu={false} variant="ghost" className="flex" />
                 <Button variant="ghost" size="xs" onClick={handleSettingsClick} icon={<GearIcon />}>
                   Settings
                 </Button>
@@ -137,8 +112,6 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
                     icon: <ProfileAvatar avatar={profile.avatar} username={profile.username} />,
                   }}
                 >
-                  <FeedbackButton showInMenu={true} />
-                  <hr className="my-1 border-bolt-elements-borderColor" />
                   <MenuItemComponent action={handleSettingsClick}>
                     <GearIcon className="text-content-secondary" />
                     Settings

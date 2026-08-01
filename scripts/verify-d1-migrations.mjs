@@ -10,8 +10,8 @@ const migrationNamePattern = /^(\d{4})_[a-z0-9]+(?:_[a-z0-9]+)*\.sql$/;
 // D1 records applied migration filenames, so editing an applied file does not
 // update production. Every migration must be checksum-tracked, including new
 // additive migrations. Post-cutoff migrations also remain subject to rollout
-// safety after registration. A destructive contract requires a separate exact-
-// digest exception; none are currently approved.
+// safety after registration. An approved destructive contract requires a
+// separate exact-digest exception in contractAllowlist.
 const migrationPolicies = [
   {
     directory: 'migrations',
@@ -45,6 +45,17 @@ const migrationPolicies = [
       '0024_builder_previews.sql': 'cd3ecb08cad3ebd14379d047ee040c1cf50061ac8ce2670645ba203747c7f16e',
       '0025_sandbox_cleanup_outbox.sql': 'a6af35f839b97a5d26b246c7ee998d84628d37f7da0cb83fc0ef5296d029e3ac',
       '0026_user_workspace_runtimes.sql': 'cbcd89ac76f8980364c67385c593a901a42fb22461c063a1b1638fab1cfa2484',
+      '0027_drop_central_workloads.sql': '2093d7f925f96deecca8f96a60f3ca7c0cdb6d325b3084fa806f49e194ee2a94',
+    },
+    contractAllowlist: {
+      '0027_drop_central_workloads.sql': '2093d7f925f96deecca8f96a60f3ca7c0cdb6d325b3084fa806f49e194ee2a94',
+    },
+  },
+  {
+    directory: 'user-workspace-migrations',
+    legacyCutoff: 1,
+    checksums: {
+      '0001_user_workspace.sql': '1050c6ce89752513293ded143b175c29cb7d91af3a767d96f05f96506438db53',
     },
     contractAllowlist: {},
   },

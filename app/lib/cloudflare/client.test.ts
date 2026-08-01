@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { executeDataOperation } from './client';
 import { api } from './data-api';
 
+vi.mock('./runtime-session', () => ({
+  fetchUserRuntime: (path: string, init?: RequestInit) => fetch(path, init),
+}));
+
 describe('executeDataOperation', () => {
   afterEach(() => {
     vi.restoreAllMocks();

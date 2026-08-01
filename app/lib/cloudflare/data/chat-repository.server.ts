@@ -1,153 +1,25 @@
-import { transcriptAgentName } from 'ghostbuild-agent/transcript';
+import type { TranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 import type { ChatRow } from './types';
 import { DataNotFoundError } from './errors';
-import { prepareInsertChatTranscript } from './transcript-repository.server';
-import {
-  type UpdateStorageStateArgs,
-  type UpdateStorageStateResult,
-  updateStorageStateWithChatLookup,
-} from './chat-storage-state-repository.server';
-
-export {
-  enforceChatStorageRetention,
-  getLatestStorageState,
-  getLatestStorageStateForGeneration,
-} from './chat-storage-state-repository.server';
+import { checkpointMatchesIdentity, requireChatTranscript } from './transcript-repository.server';
 
 type ChatInsertArgs = {
   id: string;
   creatorId: string;
   initialId: string;
   description?: string | null;
-  snapshotKey?: string | null;
   lastSubchatIndex?: number;
 };
 
-export type ChatInsertAuthorization =
-  | { kind: 'legacy-share'; code: string; parentChatId: string; quotaAdmissionId?: string }
-  | { kind: 'social-share'; code: string; parentChatId: string; quotaAdmissionId?: string };
-
-type ChatInsertTransactionExtension = {
-  prefixStatements: D1PreparedStatement[];
-  suffixStatements: D1PreparedStatement[];
-  validateResults: (prefixResults: D1Result[], suffixResults: D1Result[]) => boolean;
-  verifyReceipt: () => Promise<boolean>;
-};
-
-type ChatMessageStateInsertArgs = {
-  id?: string;
+type UpdateChatCheckpointArgs = {
+  sessionId: string;
   chatId: string;
-  storageKey?: string | null;
-  subchatIndex: number;
   lastMessageRank: number;
+  subchatIndex: number;
   partIndex: number;
-  snapshotKey?: string | null;
-  description?: string | null;
-  transcriptGeneration?: number;
-  transcriptRevision?: number;
-  transcriptDigest?: string | null;
+  initialDescription?: string | null;
+  checkpoint: TranscriptCheckpoint;
 };
-
-export async function insertChatWithState(
-  db: D1Database,
-  chat: ChatInsertArgs,
-  state: Omit<ChatMessageStateInsertArgs, 'chatId'>,
-  authorization?: ChatInsertAuthorization,
-  transaction?: ChatInsertTransactionExtension,
-): Promise<string> {
-  const stateId = state.id ?? crypto.randomUUID();
-  const transitionToken = crypto.randomUUID();
-  let results: D1Result[];
-  try {
-    results = await db.batch([
-      ...(transaction?.prefixStatements ?? []),
-      prepareInsertChat(db, chat, false, authorization),
-      prepareInsertChatTranscript(db, {
-        chatId: chat.id,
-        initialId: chat.initialId,
-        ownerId: chat.creatorId,
-        subchatIndex: state.subchatIndex,
-        generation: state.transcriptGeneration,
-        headRevision: state.transcriptRevision,
-        headDigest: state.transcriptDigest,
-        transitionToken,
-      }),
-      prepareInsertChatMessageState(db, { ...state, id: stateId, chatId: chat.id }, chat.creatorId),
-      ...(transaction?.suffixStatements ?? []),
-    ]);
-  } catch (error) {
-    try {
-      const generation = state.transcriptGeneration ?? 0;
-      const revision = state.transcriptRevision ?? 0;
-      const digest = state.transcriptDigest ?? null;
-      const committed = await db
-        .prepare(
-          `SELECT 1 AS found
-           FROM chats
-           JOIN chat_transcripts AS transcripts
-             ON transcripts.chat_id = chats.id AND transcripts.subchat_index = ?
-           JOIN chat_message_states AS states
-             ON states.chat_id = chats.id AND states.id = ?
-           WHERE chats.id = ? AND chats.creator_id = ? AND chats.initial_id = ? AND chats.is_deleted = 0
-             AND chats.url_id IS NULL AND chats.description IS ? AND chats.snapshot_key IS ?
-             AND chats.last_message_rank IS NULL AND chats.last_subchat_index = ?
-             AND transcripts.generation = ? AND transcripts.agent_name = ?
-             AND transcripts.head_revision = ? AND transcripts.head_digest IS ?
-             AND transcripts.head_message_count = 0 AND transcripts.parent_subchat_index IS NULL
-             AND transcripts.parent_generation IS NULL AND transcripts.parent_revision IS NULL
-             AND transcripts.transition_token = ?
-             AND states.storage_key IS ? AND states.subchat_index = ?
-             AND states.last_message_rank = ? AND states.part_index = ?
-             AND states.snapshot_key IS ? AND states.description IS ?
-             AND states.transcript_generation = ? AND states.transcript_revision = ?
-             AND states.transcript_digest IS ?
-           LIMIT 1`,
-        )
-        .bind(
-          state.subchatIndex,
-          stateId,
-          chat.id,
-          chat.creatorId,
-          chat.initialId,
-          chat.description ?? null,
-          chat.snapshotKey ?? null,
-          chat.lastSubchatIndex ?? 0,
-          generation,
-          transcriptAgentName(chat.initialId, state.subchatIndex, generation),
-          revision,
-          digest,
-          transitionToken,
-          state.storageKey ?? null,
-          state.subchatIndex,
-          state.lastMessageRank,
-          state.partIndex,
-          state.snapshotKey ?? null,
-          state.description ?? null,
-          generation,
-          revision,
-          digest,
-        )
-        .first<{ found: number }>();
-      if (committed && (!transaction || (await transaction.verifyReceipt()))) {
-        return stateId;
-      }
-    } catch {
-      // Preserve the original batch failure when the exact insert receipt cannot be read.
-    }
-    throw error;
-  }
-  const prefixCount = transaction?.prefixStatements.length ?? 0;
-  const coreResults = results.slice(prefixCount, prefixCount + 3);
-  const suffixResults = results.slice(prefixCount + 3);
-  const extensionValid = !transaction || transaction.validateResults(results.slice(0, prefixCount), suffixResults);
-  if (coreResults.some((result) => result.meta.changes !== 1) || !extensionValid) {
-    if (authorization) {
-      throw new DataNotFoundError('Invalid share link');
-    }
-    throw new Error('Unable to create chat');
-  }
-  return stateId;
-}
 
 export async function ensureInitialChat(
   db: D1Database,
@@ -169,18 +41,6 @@ export async function ensureInitialChat(
         ON CONFLICT(chat_id, subchat_index) DO NOTHING`,
       )
       .bind(crypto.randomUUID(), createdAt, createdAt, args.id, args.creatorId, args.initialId),
-    db
-      .prepare(
-        `INSERT INTO chat_message_states (
-          id, chat_id, storage_key, subchat_index, last_message_rank, part_index,
-          snapshot_key, description, created_at
-        )
-        SELECT ?, chats.id, NULL, 0, -1, -1, NULL, NULL, ?
-        FROM chats
-        WHERE chats.id = ? AND chats.creator_id = ? AND chats.initial_id = ? AND chats.is_deleted = 0
-        ON CONFLICT(chat_id, subchat_index, transcript_generation, last_message_rank) DO NOTHING`,
-      )
-      .bind(crypto.randomUUID(), createdAt, args.id, args.creatorId, args.initialId),
   ]);
 
   const chat = await db
@@ -216,47 +76,105 @@ export async function requireChat(db: D1Database, args: { id: string; sessionId:
   return chat;
 }
 
-export function updateStorageState(db: D1Database, args: UpdateStorageStateArgs): Promise<UpdateStorageStateResult> {
-  return updateStorageStateWithChatLookup(db, args, requireChat);
+/** Persist only the current chat catalog checkpoint; message bodies stay in BuilderAgent. */
+export async function updateChatCheckpoint(
+  db: D1Database,
+  args: UpdateChatCheckpointArgs,
+): Promise<{ accepted: boolean }> {
+  const chat = await requireChat(db, { id: args.chatId, sessionId: args.sessionId });
+  const transcript = await requireChatTranscript(db, { chatId: chat.id, subchatIndex: args.subchatIndex });
+  if (!checkpointMatchesIdentity(args.checkpoint, transcript)) {
+    return { accepted: false };
+  }
+  if (
+    transcript.head_revision > args.checkpoint.revision ||
+    transcript.last_message_rank > args.lastMessageRank ||
+    (transcript.last_message_rank === args.lastMessageRank && transcript.part_index > args.partIndex) ||
+    (transcript.head_revision === args.checkpoint.revision &&
+      transcript.head_digest !== null &&
+      transcript.head_digest !== args.checkpoint.digest)
+  ) {
+    return { accepted: false };
+  }
+  if (
+    transcript.head_revision === args.checkpoint.revision &&
+    (transcript.last_message_rank !== args.lastMessageRank || transcript.part_index !== args.partIndex)
+  ) {
+    return { accepted: false };
+  }
+
+  const results = await db.batch([
+    db
+      .prepare(
+        `UPDATE chat_transcripts
+         SET head_revision = ?, head_digest = ?, head_message_count = ?,
+             last_message_rank = ?, part_index = ?, description = COALESCE(description, ?), updated_at = ?
+         WHERE chat_id = ? AND subchat_index = ? AND generation = ? AND agent_name = ?
+           AND head_revision <= ?
+           AND (head_revision < ? OR head_digest IS NULL OR head_digest = ?)
+           AND (last_message_rank < ? OR (last_message_rank = ? AND part_index <= ?))
+           AND EXISTS (
+             SELECT 1 FROM chats
+             WHERE chats.id = chat_transcripts.chat_id AND chats.creator_id = ? AND chats.is_deleted = 0
+           )`,
+      )
+      .bind(
+        args.checkpoint.revision,
+        args.checkpoint.digest,
+        args.checkpoint.messageCount,
+        args.lastMessageRank,
+        args.partIndex,
+        args.initialDescription ?? null,
+        Date.now(),
+        chat.id,
+        args.subchatIndex,
+        args.checkpoint.generation,
+        args.checkpoint.agentName,
+        args.checkpoint.revision,
+        args.checkpoint.revision,
+        args.checkpoint.digest,
+        args.lastMessageRank,
+        args.lastMessageRank,
+        args.partIndex,
+        args.sessionId,
+      ),
+    db
+      .prepare(
+        `UPDATE chats
+         SET last_subchat_index = ?
+         WHERE id = ? AND creator_id = ? AND is_deleted = 0
+           AND EXISTS (
+             SELECT 1 FROM chat_transcripts
+             WHERE chat_id = chats.id AND subchat_index = ? AND generation = ? AND agent_name = ?
+               AND head_revision = ? AND head_digest = ? AND head_message_count = ?
+               AND last_message_rank = ? AND part_index = ?
+           )`,
+      )
+      .bind(
+        args.subchatIndex,
+        chat.id,
+        args.sessionId,
+        args.subchatIndex,
+        args.checkpoint.generation,
+        args.checkpoint.agentName,
+        args.checkpoint.revision,
+        args.checkpoint.digest,
+        args.checkpoint.messageCount,
+        args.lastMessageRank,
+        args.partIndex,
+      ),
+  ]);
+  return { accepted: results.every((result) => result.meta.changes === 1) };
 }
 
-function prepareInsertChat(
-  db: D1Database,
-  args: ChatInsertArgs,
-  ignoreInitialConflict = false,
-  authorization?: ChatInsertAuthorization,
-): D1PreparedStatement {
-  const authorizationSql =
-    authorization?.kind === 'legacy-share'
-      ? `AND EXISTS (
-           SELECT 1 FROM shares
-           JOIN chats AS parent_chat ON parent_chat.id = shares.chat_id
-           WHERE shares.code = ? AND shares.chat_id = ? AND parent_chat.is_deleted = 0
-         )`
-      : authorization?.kind === 'social-share'
-        ? `AND EXISTS (
-             SELECT 1 FROM social_shares
-             JOIN chats AS parent_chat ON parent_chat.id = social_shares.chat_id
-             WHERE social_shares.code = ? AND social_shares.chat_id = ?
-               AND social_shares.is_shared = 1 AND parent_chat.is_deleted = 0
-           )`
-        : '';
-  const quotaAuthorizationSql = authorization?.quotaAdmissionId
-    ? `AND EXISTS (
-         SELECT 1 FROM chat_backup_admissions
-         WHERE id = ? AND owner_id = ? AND chat_id = ? AND status = 'pending'
-       )`
-    : '';
+function prepareInsertChat(db: D1Database, args: ChatInsertArgs, ignoreInitialConflict = false): D1PreparedStatement {
   return db
     .prepare(
       `INSERT INTO chats (
-        id, creator_id, initial_id, url_id, description, timestamp, snapshot_key,
-        last_message_rank, last_subchat_index, is_deleted
+        id, creator_id, initial_id, url_id, description, timestamp, last_subchat_index, is_deleted
       )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?
       WHERE NOT EXISTS (SELECT 1 FROM chats WHERE initial_id = ?)
-      ${authorizationSql}
-      ${quotaAuthorizationSql}
       ${ignoreInitialConflict ? 'ON CONFLICT DO NOTHING' : ''}`,
     )
     .bind(
@@ -266,45 +184,8 @@ function prepareInsertChat(
       null,
       args.description ?? null,
       new Date().toISOString(),
-      args.snapshotKey ?? null,
-      null,
       args.lastSubchatIndex ?? 0,
       0,
       args.initialId,
-      ...(authorization ? [authorization.code, authorization.parentChatId] : []),
-      ...(authorization?.quotaAdmissionId ? [authorization.quotaAdmissionId, args.creatorId, args.id] : []),
-    );
-}
-
-function prepareInsertChatMessageState(
-  db: D1Database,
-  args: ChatMessageStateInsertArgs,
-  ownerId: string,
-): D1PreparedStatement {
-  return db
-    .prepare(
-      `INSERT INTO chat_message_states (
-        id, chat_id, storage_key, subchat_index, last_message_rank, part_index, snapshot_key, description, created_at,
-        transcript_generation, transcript_revision, transcript_digest
-      )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-      FROM chats
-      WHERE chats.id = ? AND chats.creator_id = ? AND chats.is_deleted = 0`,
-    )
-    .bind(
-      args.id ?? crypto.randomUUID(),
-      args.chatId,
-      args.storageKey ?? null,
-      args.subchatIndex,
-      args.lastMessageRank,
-      args.partIndex,
-      args.snapshotKey ?? null,
-      args.description ?? null,
-      Date.now(),
-      args.transcriptGeneration ?? 0,
-      args.transcriptRevision ?? 0,
-      args.transcriptDigest ?? null,
-      args.chatId,
-      ownerId,
     );
 }

@@ -1,7 +1,7 @@
 const MEBIBYTE = 1024 * 1024;
 const LZ4_SIZE_PREFIX_BYTES = 4;
 
-export type Lz4PayloadLimits = {
+type Lz4PayloadLimits = {
   compressedBytes: number;
   decompressedBytes: number;
   label: string;

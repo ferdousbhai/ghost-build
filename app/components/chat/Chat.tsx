@@ -6,9 +6,7 @@ import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { BaseChat } from './BaseChat.client';
 import { toast } from 'sonner';
-import { chatIdStore, initialIdStore } from '~/lib/stores/chatId';
-import { executeDataOperation } from '~/lib/cloudflare/client';
-import { api } from '~/lib/cloudflare/data-api';
+import { initialIdStore } from '~/lib/stores/chatId';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import type { ChatProps } from './chat-types';
 import { UnauthenticatedChat } from './UnauthenticatedChat';
@@ -20,6 +18,7 @@ import { appendPendingUserMessage, useChatMessageSubmission } from './useChatMes
 import { deriveProvisionalTitle } from '@summonghost/title-generation';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { applyLiveSubchatTitle, type LiveSubchatTitle } from './subchat-model';
+import { getUserRuntimeSession, userRuntimeEndpointStore } from '~/lib/cloudflare/runtime-session';
 
 const logger = createScopedLogger('Chat');
 
@@ -39,6 +38,15 @@ export const Chat = memo(
     const [pendingInitialMessage, setPendingInitialMessage] = useState<string | null>(initialPrompt ?? null);
     const clearPendingInitialMessage = useCallback(() => setPendingInitialMessage(null), []);
     const sessionId = useSessionIdOrNullOrLoading();
+    const runtimeEndpoint = useStore(userRuntimeEndpointStore);
+    useEffect(() => {
+      if (typeof sessionId === 'string' && !runtimeEndpoint) {
+        void getUserRuntimeSession().catch((error) => {
+          logger.error('Unable to connect to the user-owned runtime', error);
+          toast.error(error instanceof Error ? error.message : 'Unable to connect to your Cloudflare workspace.');
+        });
+      }
+    }, [runtimeEndpoint, sessionId]);
     if (typeof sessionId !== 'string') {
       return (
         <UnauthenticatedChat
@@ -46,6 +54,13 @@ export const Chat = memo(
           subchats={subchats}
           authLoading={sessionId === undefined}
         />
+      );
+    }
+    if (!runtimeEndpoint) {
+      return (
+        <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-content-secondary">
+          Connecting to your Cloudflare workspace…
+        </div>
       );
     }
 
@@ -85,7 +100,6 @@ const AuthenticatedChat = memo(
     pendingInitialMessage: string | null;
     clearPendingInitialMessage: () => void;
   }) => {
-    const sessionId = useSessionIdOrNullOrLoading();
     const chatInitialId = useStore(initialIdStore);
     const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
     const hasMultipleSubchats = (subchats?.length ?? 0) > 1;
@@ -99,42 +113,7 @@ const AuthenticatedChat = memo(
     );
     const disabledReason = null;
 
-    const rewindToMessage = async (subchatIndex?: number, messageIndex?: number) => {
-      if (sessionId && typeof sessionId === 'string') {
-        const chatId = chatIdStore.get();
-        if (!chatId) {
-          return;
-        }
-        if (subchatIndex === undefined) {
-          return;
-        }
-
-        const url = new URL(window.location.href);
-        url.searchParams.set('rewind', 'true');
-
-        try {
-          await executeDataOperation(api.messages.rewindChat, {
-            sessionId,
-            chatId,
-            subchatIndex,
-            lastMessageRank: messageIndex,
-          });
-          // Reload the chat to show the rewound state
-          window.location.replace(url.href);
-        } catch (error) {
-          logger.error('Failed to rewind chat:', error);
-          toast.error('Failed to rewind chat');
-        }
-      }
-    };
     const { showChat } = useStore(chatStore);
-
-    useEffect(() => {
-      const url = new URL(window.location.href);
-      if (url.searchParams.get('rewind') === 'true') {
-        toast.info('Successfully reverted changes. You may need to clear or migrate your stored app data.');
-      }
-    }, []);
 
     const {
       messages,
@@ -246,7 +225,6 @@ const AuthenticatedChat = memo(
               : null
         }
         sendMessageInProgress={sendMessageInProgress}
-        onRewindToMessage={rewindToMessage}
         subchats={visibleSubchats}
         onSubchatTitleChange={handleSubchatTitleChange}
       />

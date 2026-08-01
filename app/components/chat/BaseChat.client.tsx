@@ -52,9 +52,6 @@ interface BaseChatProps {
   disabledReason: ReactNode | null;
   runtimeNotice: ReactNode;
 
-  // Rewind functionality
-  onRewindToMessage?: (subchatIndex?: number, messageIndex?: number) => void;
-
   // Subchat navigation props
   subchats?: SubchatSummary[];
   onSubchatTitleChange?: (subchatIndex: number, title: string) => void;
@@ -78,7 +75,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       buildProgress,
       disabledReason,
       runtimeNotice,
-      onRewindToMessage,
       subchats,
       onSubchatTitleChange,
     },
@@ -224,7 +220,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                       isStreaming={isStreaming}
                       chatDisabled={disabledReason !== null || messages.length === 0}
                       sessionId={sessionId ?? null}
-                      onRewind={onRewindToMessage}
                       onSubchatTitleChange={onSubchatTitleChange}
                       handleCreateSubchat={handleCreateSubchat}
                       handleRenameSubchat={handleRenameSubchat}
@@ -246,8 +241,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                             className="z-[1] mx-auto flex w-full max-w-chat flex-1 flex-col gap-3 px-3 pb-8 sm:px-0"
                             messages={messages}
                             isStreaming={isStreaming}
-                            onRewindToMessage={onRewindToMessage}
-                            subchatsLength={subchats?.length}
                           />
                         </motion.div>
                       </AnimatePresence>

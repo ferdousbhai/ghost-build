@@ -12,6 +12,9 @@ describe('Workers AI provider', () => {
     const credentials = { accountId: 'account-1', apiKey: 'oauth-token' };
     getProvider({} as Env, credentials, '@cf/zai-org/glm-5.2', { sessionAffinity: 'gb-opaque' });
 
-    expect(createWorkersAI).toHaveBeenCalledWith(credentials);
+    expect(createWorkersAI).toHaveBeenCalledWith({
+      ...credentials,
+      gateway: { id: 'default', collectLog: true },
+    });
   });
 });

@@ -69,7 +69,10 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
   logger.debug('Starting Workers AI agent');
   const startedAt = Date.now();
   let recordedFirstResponse = false;
-  const provider = getProvider(env, accountCredentials, CLOUDFLARE_WORKERS_AI_MODEL, { sessionAffinity });
+  const provider = getProvider(env, accountCredentials, CLOUDFLARE_WORKERS_AI_MODEL, {
+    sessionAffinity,
+    feature: 'builder-chat',
+  });
   const tools = createWorkersAiTools(workspace, {
     env,
     userId,

@@ -12,9 +12,6 @@ import {
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { executeDataOperation } from './client';
 import { api } from './data-api';
-import { readBodyBytesWithLimit } from '~/lib/bounded-body';
-import { decompressWithLz4 } from '~/lib/compression';
-import { MESSAGE_HISTORY_LZ4_LIMITS } from '~/lib/compression-limits';
 import { queryClient } from '~/lib/stores/reactQueryClient';
 import type { SerializedMessage } from '~/lib/stores/startup/messages';
 import { serializeCompleteMessages } from '~/lib/stores/startup/messages';
@@ -23,8 +20,8 @@ import {
   type AccountLocalReplica,
   useAccountLocalReplica,
 } from './account-local-replica';
+import { fetchUserRuntime } from './runtime-session';
 
-const textDecoder = new TextDecoder();
 const TRANSCRIPT_QUERY_KEY_PREFIX = ['ghostbuild-local', 'transcripts'] as const;
 
 const serializedMessageShape = z
@@ -248,7 +245,7 @@ async function loadChatTranscript(
     return { requestKey, status: 'missing' };
   }
   const loadedSubchatIndex = request.subchatIndex ?? chatInfo.subchatIndex;
-  const response = await fetch('/api/chats/messages', {
+  const response = await fetchUserRuntime('/v1/chats/messages', {
     method: 'POST',
     body: JSON.stringify({
       chatId: request.chatId,
@@ -262,13 +259,7 @@ async function loadChatTranscript(
   }
   const responseTranscript = transcriptIdentityFromHeaders(response.headers) ?? chatInfo.transcript;
   const history =
-    response.status === 204
-      ? { messages: [], checkpoint: null }
-      : response.headers.get('content-type')?.includes('application/json')
-        ? parseMessageHistory(await response.json())
-        : decompressMessages(
-            await readBodyBytesWithLimit(response, MESSAGE_HISTORY_LZ4_LIMITS.compressedBytes, 'Message history'),
-          );
+    response.status === 204 ? { messages: [], checkpoint: null } : parseMessageHistory(await response.json());
   signal.throwIfAborted();
   return {
     requestKey,
@@ -308,14 +299,6 @@ function transcriptIdentityFromHeaders(headers: Headers): TranscriptIdentity | n
   return result.success ? result.data : null;
 }
 
-function decompressMessages(compressed: Uint8Array): {
-  messages: SerializedMessage[];
-  checkpoint: TranscriptCheckpoint | null;
-} {
-  const decompressed = decompressWithLz4(compressed, MESSAGE_HISTORY_LZ4_LIMITS);
-  return parseMessageHistory(JSON.parse(textDecoder.decode(decompressed)));
-}
-
 function parseMessageHistory(deserialized: unknown): {
   messages: SerializedMessage[];
   checkpoint: TranscriptCheckpoint | null;
@@ -328,7 +311,7 @@ function parseMessageHistory(deserialized: unknown): {
         checkpoint: transcriptCheckpointSchema.parse(history.transcript),
       };
     }
-    throw new Error('Unexpected state -- decompressed data is not a message history');
+    throw new Error('Unexpected state -- response is not a message history');
   }
   return {
     messages: z.array(serializedMessageSchema).parse(deserialized),

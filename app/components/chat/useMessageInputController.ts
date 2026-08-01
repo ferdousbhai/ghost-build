@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
 import { showWorkersPaidRequiredToast } from '~/lib/workers-paid.client';
 import { captureException } from '~/lib/telemetry.client';
+import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
 import { signInWithCloudflare } from '~/lib/auth-client';
 import { messageInputStore } from '~/lib/stores/messageInput';
 import { getAuthToken } from '~/lib/stores/sessionId';
@@ -95,7 +96,7 @@ export function useMessageInputController({
       if (!getAuthToken()) {
         throw new Error('No auth token');
       }
-      const response = await fetch('/api/enhance-prompt', {
+      const response = await fetchUserRuntime('/v1/enhance-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: input.trim() }),

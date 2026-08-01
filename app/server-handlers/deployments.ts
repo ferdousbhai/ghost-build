@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { resolveAgentRequestIdentity } from '~/lib/.server/agent-request-identity';
 import { findCloudflareConnectionForUser } from '~/lib/.server/cloudflare/cloudflare-connection-repository';
 import { buildDeploymentPlanFromSource, isCurrentDeploymentPlan } from '~/lib/.server/cloudflare/deployment-plan';
 import type { DeploymentProjectProfile } from '~/lib/.server/cloudflare/deployment-project-profile';
@@ -26,14 +25,6 @@ const approvalSchema = z.object({
   confirmCloudflareBilling: z.literal(true),
   confirmWorkersPaidNotAutomatic: z.literal(true),
 });
-
-export async function createDeploymentPlanAction(args: { request: Request; env: Env }): Promise<Response> {
-  void args;
-  return Response.json(
-    { error: 'Browser-uploaded deployment archives are no longer supported. Deploy the validated workspace backup.' },
-    { status: 410 },
-  );
-}
 
 export async function createOrReplayDeploymentPlanForUser(args: {
   env: Env;
@@ -141,97 +132,99 @@ function workspaceReference(args: { projectId: string; revision: string; workspa
   return `workspace-runtime:${encodeURIComponent(args.projectId)}:${args.workspaceRevision}:${args.revision}`;
 }
 
-export async function deploymentAction(args: {
+export async function userRuntimeDeploymentAction(args: {
   request: Request;
   env: Env;
   deploymentId: string;
   operation: 'get' | 'approve' | 'execute' | 'retry';
+  userId: string;
 }): Promise<Response> {
   try {
-    const userId = await requireSignedInUser(args.request, args.env);
-    if (args.operation === 'get') {
-      const deployment = await requireDeploymentForUser(args.env.DB, args.deploymentId, userId);
-      return Response.json({ deployment: publicDeployment(deployment) });
-    }
-
-    const connection = await findCloudflareConnectionForUser(args.env.DB, userId);
-    if (!connection || connection.status !== 'active') {
-      return Response.json({ error: 'Reconnect Cloudflare before approving this deployment.' }, { status: 409 });
-    }
-    const currentDeployment = await requireDeploymentForUser(args.env.DB, args.deploymentId, userId);
-    if (!isCurrentDeploymentPlan(currentDeployment.plan)) {
-      return Response.json(
-        {
-          code: 'deployment_plan_stale',
-          error: 'Deployment plan security baseline is stale. Prepare and approve a new plan.',
-        },
-        { status: 409 },
-      );
-    }
-    if (args.operation === 'retry') {
-      const previous = currentDeployment;
-      if (!previous.snapshotKey) {
-        throw new DeploymentStateConflictError(previous.status);
-      }
-      if (previous.connectionId !== connection.id || previous.connectionGeneration !== connection.generation) {
-        throw new DeploymentConnectionChangedError();
-      }
-      const retry = await prepareDeploymentRetry({
-        db: args.env.DB,
-        deploymentId: previous.id,
-        userId,
-        connectionId: connection.id,
-        connectionGeneration: connection.generation,
-        executionGeneration: previous.executionGeneration,
-      });
-      return Response.json({ deployment: publicDeployment(retry) }, { status: 201 });
-    }
-    if (args.operation === 'execute') {
-      let deployment = currentDeployment;
-      if (
-        deployment.connectionId !== connection.id ||
-        deployment.connectionGeneration !== connection.generation ||
-        deployment.status !== 'approved' ||
-        !deployment.approvedAt
-      ) {
-        throw new DeploymentStateConflictError(deployment.status);
-      }
-      deployment = await adoptLegacyApprovedDeploymentExecutionGeneration({ db: args.env.DB, deployment });
-      const completed = await executeUserOwnedDeployment({
-        env: args.env,
-        deploymentId: deployment.id,
-        userId,
-        connectionId: connection.id,
-        executionGeneration: deployment.executionGeneration,
-      });
-      return Response.json({ deployment: publicDeployment(completed) });
-    }
-    const approval = approvalSchema.parse(
-      await readJsonBodyWithLimit(args.request, MAX_DEPLOYMENT_APPROVAL_BYTES, 'Deployment approval'),
-    );
-    const deployment = await approveDeployment({
-      db: args.env.DB,
-      deploymentId: args.deploymentId,
-      userId,
-      connectionId: connection.id,
-      connectionGeneration: connection.generation,
-      approvedDigest: approval.planDigest,
-    });
-    return Response.json({ deployment: publicDeployment(deployment) });
+    return await runDeploymentAction(args);
   } catch (error) {
     return deploymentErrorResponse(error);
   }
 }
 
-async function requireSignedInUser(request: Request, env: Env): Promise<string> {
-  const identity = await resolveAgentRequestIdentity(request, env);
-  if (!identity?.userId) {
-    throw new DeploymentAuthenticationError();
+async function runDeploymentAction(args: {
+  request: Request;
+  env: Env;
+  deploymentId: string;
+  operation: 'get' | 'approve' | 'execute' | 'retry';
+  userId: string;
+}): Promise<Response> {
+  const userId = args.userId;
+  if (args.operation === 'get') {
+    const deployment = await requireDeploymentForUser(args.env.DB, args.deploymentId, userId);
+    return Response.json({ deployment: publicDeployment(deployment) });
   }
-  return identity.userId;
+
+  const connection = await findCloudflareConnectionForUser(args.env.DB, userId);
+  if (!connection || connection.status !== 'active') {
+    return Response.json({ error: 'Reconnect Cloudflare before approving this deployment.' }, { status: 409 });
+  }
+  const currentDeployment = await requireDeploymentForUser(args.env.DB, args.deploymentId, userId);
+  if (!isCurrentDeploymentPlan(currentDeployment.plan)) {
+    return Response.json(
+      {
+        code: 'deployment_plan_stale',
+        error: 'Deployment plan security baseline is stale. Prepare and approve a new plan.',
+      },
+      { status: 409 },
+    );
+  }
+  if (args.operation === 'retry') {
+    const previous = currentDeployment;
+    if (!previous.snapshotKey) {
+      throw new DeploymentStateConflictError(previous.status);
+    }
+    if (previous.connectionId !== connection.id || previous.connectionGeneration !== connection.generation) {
+      throw new DeploymentConnectionChangedError();
+    }
+    const retry = await prepareDeploymentRetry({
+      db: args.env.DB,
+      deploymentId: previous.id,
+      userId,
+      connectionId: connection.id,
+      connectionGeneration: connection.generation,
+      executionGeneration: previous.executionGeneration,
+    });
+    return Response.json({ deployment: publicDeployment(retry) }, { status: 201 });
+  }
+  if (args.operation === 'execute') {
+    let deployment = currentDeployment;
+    if (
+      deployment.connectionId !== connection.id ||
+      deployment.connectionGeneration !== connection.generation ||
+      deployment.status !== 'approved' ||
+      !deployment.approvedAt
+    ) {
+      throw new DeploymentStateConflictError(deployment.status);
+    }
+    deployment = await adoptLegacyApprovedDeploymentExecutionGeneration({ db: args.env.DB, deployment });
+    const completed = await executeUserOwnedDeployment({
+      env: args.env,
+      deploymentId: deployment.id,
+      userId,
+      connectionId: connection.id,
+      executionGeneration: deployment.executionGeneration,
+    });
+    return Response.json({ deployment: publicDeployment(completed) });
+  }
+  const approval = approvalSchema.parse(
+    await readJsonBodyWithLimit(args.request, MAX_DEPLOYMENT_APPROVAL_BYTES, 'Deployment approval'),
+  );
+  const deployment = await approveDeployment({
+    db: args.env.DB,
+    deploymentId: args.deploymentId,
+    userId,
+    connectionId: connection.id,
+    connectionGeneration: connection.generation,
+    approvedDigest: approval.planDigest,
+  });
+  return Response.json({ deployment: publicDeployment(deployment) });
 }
 
-class DeploymentAuthenticationError extends Error {}
 class DeploymentConnectionRequiredError extends Error {}
 class DeploymentChatNotFoundError extends Error {}
 
@@ -252,9 +245,6 @@ function publicDeployment(deployment: Deployment) {
 }
 
 function deploymentErrorResponse(error: unknown): Response {
-  if (error instanceof DeploymentAuthenticationError) {
-    return Response.json({ error: 'Sign in to deploy to production.' }, { status: 401 });
-  }
   if (error instanceof DeploymentConnectionRequiredError) {
     return Response.json({ error: 'Connect Cloudflare before preparing a production deployment.' }, { status: 409 });
   }

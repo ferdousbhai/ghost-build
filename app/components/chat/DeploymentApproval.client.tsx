@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '~/components/ui/primitives/Button';
 import { Checkbox } from '~/components/ui/primitives/Checkbox';
 import type { PendingDeploymentApproval } from '~/lib/deployment-approval';
+import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
 
 export function DeploymentApproval({ deployment }: { deployment: PendingDeploymentApproval }) {
   const [activeDeployment, setActiveDeployment] = useState(deployment);
@@ -59,7 +60,7 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
     setError(null);
     setCanRetry(false);
     try {
-      const response = await fetch(`/api/deployments/${encodeURIComponent(activeDeployment.id)}/approve`, {
+      const response = await deploymentFetch(activeDeployment.id, 'approve', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -87,7 +88,7 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
     setStatus('retrying');
     setError(null);
     try {
-      const response = await fetch(`/api/deployments/${encodeURIComponent(activeDeployment.id)}/retry`, {
+      const response = await deploymentFetch(activeDeployment.id, 'retry', {
         method: 'POST',
       });
       const payload = (await response.json().catch(() => null)) as {
@@ -195,7 +196,7 @@ async function resumeDeployment(
   }
   onRunning();
   if (current.status === 'approved') {
-    const response = await fetch(`/api/deployments/${encodeURIComponent(deploymentId)}/execute`, {
+    const response = await deploymentFetch(deploymentId, 'execute', {
       method: 'POST',
       signal,
     });
@@ -233,7 +234,7 @@ type DeploymentStatusPayload = {
 };
 
 async function getDeployment(deploymentId: string, signal?: AbortSignal): Promise<DeploymentStatusPayload> {
-  const response = await fetch(`/api/deployments/${encodeURIComponent(deploymentId)}`, { signal });
+  const response = await deploymentFetch(deploymentId, undefined, { signal });
   const payload = (await response.json().catch(() => null)) as {
     deployment?: DeploymentStatusPayload;
     error?: string;
@@ -242,6 +243,11 @@ async function getDeployment(deploymentId: string, signal?: AbortSignal): Promis
     throw new Error(payload?.error || 'Unable to read production deployment status.');
   }
   return payload.deployment;
+}
+
+function deploymentFetch(deploymentId: string, operation?: 'approve' | 'execute' | 'retry', init?: RequestInit) {
+  const suffix = operation ? `/${operation}` : '';
+  return fetchUserRuntime(`/v1/deployments/${encodeURIComponent(deploymentId)}${suffix}`, init);
 }
 
 function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {

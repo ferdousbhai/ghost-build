@@ -14,14 +14,13 @@ const executeDataOperationMock = vi.hoisted(() => vi.fn());
 vi.mock('~/lib/cloudflare/client', () => ({
   executeDataOperation: executeDataOperationMock,
 }));
+vi.mock('~/lib/cloudflare/runtime-session', () => ({
+  fetchUserRuntime: (path: string, init?: RequestInit) => fetch(path, init),
+}));
 vi.mock('~/lib/cloudflare/account-local-replica', () => ({
   ACCOUNT_LOCAL_REPLICA_SCHEMA_VERSION: 1,
   useAccountLocalReplica: () => null,
 }));
-vi.mock('~/lib/compression', () => ({
-  decompressWithLz4: (value: Uint8Array) => value,
-}));
-
 describe('useInitialMessages', () => {
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

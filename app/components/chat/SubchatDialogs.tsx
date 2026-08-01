@@ -4,19 +4,15 @@ import { Modal } from '@ui/Modal';
 import { TextInput } from '@ui/TextInput';
 
 interface SubchatDialogsProps {
-  rewindOpen: boolean;
   createOpen: boolean;
-  rewindDisabled: boolean;
   createDisabled: boolean;
   createPending: boolean;
   renameOpen: boolean;
   renameValue: string;
   renamePending: boolean;
   renameDisabled: boolean;
-  closeRewind: () => void;
   closeCreate: () => void;
   closeRename: () => void;
-  confirmRewind: () => void;
   confirmCreate: () => Promise<void>;
   confirmRename: () => Promise<void>;
   setRenameValue: (value: string) => void;
@@ -25,28 +21,6 @@ interface SubchatDialogsProps {
 export function SubchatDialogs(props: SubchatDialogsProps) {
   return (
     <>
-      {props.rewindOpen && (
-        <Modal onClose={props.closeRewind} title={<div className="sr-only">Rewind to previous chat</div>}>
-          <div className="flex flex-col gap-2">
-            <h2>Rewind to previous chat</h2>
-            <p className="text-content-primary text-sm">
-              This will undo all changes after this chat. Your current work will be lost and cannot be recovered.
-            </p>
-            <p className="text-content-primary text-sm">
-              Your stored app data will be unaffected, so you may need to either clear or migrate your data in order to
-              use this previous version.
-            </p>
-            <p className="text-content-primary text-sm">Are you sure you want to continue?</p>
-            <DialogActions
-              cancel={props.closeRewind}
-              confirm={props.confirmRewind}
-              confirmLabel="Rewind"
-              disabled={props.rewindDisabled}
-              danger
-            />
-          </div>
-        </Modal>
-      )}
       {props.createOpen && (
         <Modal onClose={props.closeCreate} title="Create new chat">
           <div className="flex flex-col gap-2">
@@ -103,14 +77,12 @@ function DialogActions({
   cancel,
   confirm,
   confirmLabel,
-  danger = false,
   disabled = false,
   pending = false,
 }: {
   cancel: () => void;
   confirm: () => void | Promise<void>;
   confirmLabel: string;
-  danger?: boolean;
   disabled?: boolean;
   pending?: boolean;
 }) {
@@ -119,13 +91,7 @@ function DialogActions({
       <Button variant="neutral" onClick={cancel} disabled={pending}>
         Cancel
       </Button>
-      <Button
-        variant={danger ? 'danger' : 'primary'}
-        onClick={confirm}
-        disabled={disabled}
-        loading={pending}
-        aria-busy={pending}
-      >
+      <Button variant="primary" onClick={confirm} disabled={disabled} loading={pending} aria-busy={pending}>
         {confirmLabel}
       </Button>
     </div>

@@ -390,7 +390,9 @@ export function main() {
           binding: config.d1_databases[agentSecurityIndex],
           index: agentSecurityIndex,
         };
-  const r2 = getBinding(config, "r2_buckets", "APP_STORAGE");
+  const r2 = Array.isArray(config.r2_buckets)
+    ? config.r2_buckets.find((binding) => binding?.binding === "APP_STORAGE")
+    : undefined;
 
   const applicationDatabaseId = ensureD1Database(applicationD1);
   const agentSecurityDatabaseId = agentSecurityD1
@@ -419,7 +421,9 @@ export function main() {
       );
     }
   }
-  ensureR2Bucket(r2);
+  if (r2) {
+    ensureR2Bucket({ binding: r2 });
+  }
 }
 
 if (

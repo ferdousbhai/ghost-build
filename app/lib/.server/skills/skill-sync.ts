@@ -128,7 +128,7 @@ export async function inspectCloudflareSkillUpdates(
   return { status: 'changed', treeSha: tree.sha, changed, stored };
 }
 
-export async function recordUnchangedSkillSync(env: Pick<Env, 'DB'>, treeSha: string, now = Date.now()) {
+async function recordUnchangedSkillSync(env: Pick<Env, 'DB'>, treeSha: string, now = Date.now()) {
   await env.DB.prepare(
     `UPDATE skill_sync_state
      SET upstream_tree_sha = ?, status = 'current', last_checked_at = ?, last_error = NULL, updated_at = ?
@@ -265,17 +265,6 @@ export async function activateCloudflareSkillUpdates(
   );
   await env.DB.batch(statements);
   return { changed: downloaded.length, releaseSha256 };
-}
-
-export async function recordSkillSyncFailure(env: Pick<Env, 'DB'>, error: unknown, now = Date.now()): Promise<void> {
-  const message = (error instanceof Error ? error.message : String(error)).slice(0, 1_000);
-  await env.DB.prepare(
-    `UPDATE skill_sync_state
-     SET status = 'failed', last_checked_at = ?, last_error = ?, updated_at = ?
-     WHERE source_id = ?`,
-  )
-    .bind(now, message, now, CLOUDFLARE_SKILL_SOURCE.id)
-    .run();
 }
 
 async function githubJson(response: Response, label: string): Promise<unknown> {

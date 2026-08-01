@@ -1,11 +1,6 @@
-import { expect, test, describe, vi } from 'vitest';
+import { expect, test, describe } from 'vitest';
 import { serializeMessageForStorage } from './messages';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
-
-vi.mock('lz4-wasm', () => ({
-  compress: (data: Uint8Array) => data,
-  decompress: (data: Uint8Array) => data,
-}));
 
 describe('serializeMessageForStorage', () => {
   test('preserves non-text parts', () => {

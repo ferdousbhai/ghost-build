@@ -1,4 +1,3 @@
-import { FeedbackButton } from './FeedbackButton';
 import { Button } from '@ui/Button';
 import { signInWithCloudflare } from '~/lib/auth-client';
 import { toast } from 'sonner';
@@ -13,11 +12,8 @@ export function LoggedOutHeaderButtons() {
   };
 
   return (
-    <>
-      <FeedbackButton showInMenu={false} />
-      <Button variant="neutral" size="xs" onClick={() => void handleSignIn()}>
-        <span>Connect Cloudflare</span>
-      </Button>
-    </>
+    <Button variant="neutral" size="xs" onClick={() => void handleSignIn()}>
+      <span>Connect Cloudflare</span>
+    </Button>
   );
 }

@@ -65,6 +65,63 @@ export class UserCloudflareAccountApi {
     return { id: result.uuid, name: result.name };
   }
 
+  async ensureD1Database(resourceName: string): Promise<{ id: string; name: string }> {
+    requireCloudflareResourceName(resourceName);
+    const databases = await this.call<Array<{ uuid?: string; name?: string }>>(
+      `/d1/database?name=${encodeURIComponent(resourceName)}`,
+      { method: 'GET' },
+    );
+    const existing = databases.find((database) => database.name === resourceName && database.uuid);
+    if (existing?.uuid) {
+      return { id: existing.uuid, name: resourceName };
+    }
+    const result = await this.call<{ uuid?: string; name?: string }>('/d1/database', {
+      method: 'POST',
+      body: JSON.stringify({ name: resourceName }),
+    });
+    if (!result.uuid || result.name !== resourceName) {
+      throw new CloudflareAccountApiError('Cloudflare returned an invalid D1 resource.');
+    }
+    return { id: result.uuid, name: result.name };
+  }
+
+  async executeD1(databaseId: string, sql: string, params: unknown[] = []): Promise<unknown> {
+    if (!/^[0-9a-f-]{32,64}$/i.test(databaseId) || !sql.trim()) {
+      throw new CloudflareAccountApiError('Invalid D1 query.');
+    }
+    return this.call<unknown>(`/d1/database/${encodeURIComponent(databaseId)}/query`, {
+      method: 'POST',
+      body: JSON.stringify({ sql, params }),
+    });
+  }
+
+  async applyD1Migrations(databaseId: string, migrations: readonly { name: string; sql: string }[]): Promise<void> {
+    await this.executeD1(
+      databaseId,
+      `CREATE TABLE IF NOT EXISTS ghostbuild_runtime_migrations (
+         name TEXT PRIMARY KEY NOT NULL,
+         applied_at INTEGER NOT NULL
+       )`,
+    );
+    for (const migration of migrations) {
+      if (!/^\d{4}_.+\.sql$/.test(migration.name) || !migration.sql.trim()) {
+        throw new CloudflareAccountApiError('Invalid user-runtime D1 migration.');
+      }
+      const read = (await this.executeD1(databaseId, 'SELECT name FROM ghostbuild_runtime_migrations WHERE name = ?', [
+        migration.name,
+      ])) as Array<{ results?: unknown[] }>;
+      if (read.some((result) => (result.results?.length ?? 0) > 0)) {
+        continue;
+      }
+      await this.executeD1(databaseId, migration.sql);
+      await this.executeD1(
+        databaseId,
+        'INSERT OR IGNORE INTO ghostbuild_runtime_migrations (name, applied_at) VALUES (?, ?)',
+        [migration.name, Date.now()],
+      );
+    }
+  }
+
   async ensureD1ForPlan(
     plan: DeploymentPlan,
     logicalName: 'DB' | 'AGENT_SECURITY_DB' = 'DB',
@@ -180,13 +237,19 @@ export class UserCloudflareAccountApi {
     r2AccessKeyId: string;
     r2SecretAccessKey: string;
     runtimeVersion: string;
+    databaseId: string;
+    apiToken: string;
+    userId: string;
+    connectionId: string;
+    connectionGeneration: number;
+    endpoint: string;
   }): Promise<{ workerVersionId: string; namespaceId: string }> {
     requireWorkerName(args.workerName);
     requireR2BucketName(args.bucketName);
     if (!/^[a-f0-9]{64}$/.test(args.runtimeVersion) || args.controlPlaneSecret.length < 32) {
       throw new CloudflareAccountApiError('The workspace runtime identity is invalid.');
     }
-    if (!args.r2AccessKeyId || !args.r2SecretAccessKey) {
+    if (!args.r2AccessKeyId || !args.r2SecretAccessKey || !args.apiToken || !args.userId) {
       throw new CloudflareAccountApiError('R2 backup credentials are required.');
     }
     const metadata = {
@@ -196,12 +259,26 @@ export class UserCloudflareAccountApi {
       containers: [{ class_name: 'WorkspaceSandbox' }],
       bindings: [
         { type: 'durable_object_namespace', name: 'WORKSPACE_SANDBOX', class_name: 'WorkspaceSandbox' },
+        { type: 'durable_object_namespace', name: 'BuilderAgent', class_name: 'BuilderAgent' },
+        { type: 'd1', name: 'DB', id: args.databaseId },
+        { type: 'ai', name: 'AI' },
         { type: 'r2_bucket', name: 'BACKUP_BUCKET', bucket_name: args.bucketName },
+        { type: 'r2_bucket', name: 'APP_STORAGE', bucket_name: args.bucketName },
         { type: 'secret_text', name: 'CONTROL_PLANE_SECRET', text: args.controlPlaneSecret },
+        { type: 'secret_text', name: 'CLOUDFLARE_API_TOKEN', text: args.apiToken },
         { type: 'secret_text', name: 'R2_ACCESS_KEY_ID', text: args.r2AccessKeyId },
         { type: 'secret_text', name: 'R2_SECRET_ACCESS_KEY', text: args.r2SecretAccessKey },
         { type: 'plain_text', name: 'BACKUP_BUCKET_NAME', text: args.bucketName },
         { type: 'plain_text', name: 'CLOUDFLARE_ACCOUNT_ID', text: this.accountId },
+        { type: 'plain_text', name: 'GHOSTBUILD_USER_ID', text: args.userId },
+        { type: 'plain_text', name: 'GHOSTBUILD_CONNECTION_ID', text: args.connectionId },
+        {
+          type: 'plain_text',
+          name: 'GHOSTBUILD_CONNECTION_GENERATION',
+          text: String(args.connectionGeneration),
+        },
+        { type: 'plain_text', name: 'GHOSTBUILD_USER_RUNTIME_ENDPOINT', text: args.endpoint },
+        { type: 'plain_text', name: 'GHOSTBUILD_USER_RUNTIME', text: '1' },
         { type: 'plain_text', name: 'GHOSTBUILD_RUNTIME_VERSION', text: args.runtimeVersion },
       ],
       exports: {
@@ -209,6 +286,10 @@ export class UserCloudflareAccountApi {
           type: 'durable-object',
           storage: 'sqlite',
           container: 'WorkspaceSandbox',
+        },
+        BuilderAgent: {
+          type: 'durable-object',
+          storage: 'sqlite',
         },
       },
       observability: { enabled: true, logs: { enabled: true, head_sampling_rate: 1 } },
@@ -463,6 +544,12 @@ function requireR2BucketName(name: string): void {
 function requireWorkerName(name: string): void {
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(name)) {
     throw new CloudflareAccountApiError('Worker name is invalid.');
+  }
+}
+
+function requireCloudflareResourceName(name: string): void {
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(name)) {
+    throw new CloudflareAccountApiError('Cloudflare resource name is invalid.');
   }
 }
 
