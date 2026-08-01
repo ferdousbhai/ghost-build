@@ -11,17 +11,6 @@
   "pathExcludes": [],
   "buildCaching": true,
   "buildTokenName": "account-workers-builds-production",
-  "containerImage": {
-    "reference": "registry.cloudflare.com/0af9e0921b880657d84a6c07307f8aef/ghostbuild-deploymentsandbox@sha256:cc0a20cdff32ba56cabeb43a38ddc5e6001bd765cb019496458d47b4140bde13",
-    "sourceFiles": [
-      "Dockerfile.sandbox",
-      "sandbox-tools/package.json",
-      "sandbox-tools/pnpm-lock.yaml",
-      "sandbox-tools/pnpm-workspace.yaml",
-      "sandbox-tools/verify-pnpm-workspace-policy.mjs"
-    ],
-    "sourceSha256": "f74ca77906993021f79aa1ad8f1c2a4f2ee45fc941322ca16a04add7c206d0d6"
-  },
   "buildVariables": {
     "NODE_VERSION": "26.3.0",
     "PNPM_VERSION": "11.14.0",

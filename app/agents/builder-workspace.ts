@@ -1,10 +1,10 @@
+import type { DirectoryBackup, ISandbox } from '@cloudflare/sandbox';
 import { assertSafeGeneratedPnpmWorkspace } from '~/utils/generatedPnpmWorkspace';
 import { assertValidGeneratedPackageJson } from '~/utils/generatedPackageManifest';
 import { assertNotLocalSecretFilePath } from '~/utils/secretFiles';
 import { normalizeProjectPath } from '~/lib/runtime/action-runner/project-path';
-import { allocateCustomerObjectKey } from '~/lib/cloudflare/data/object-storage.server';
+import { sandboxExec } from '~/lib/.server/cloudflare/sandbox-lifecycle';
 import {
-  BUILDER_WORKSPACE_INLINE_BYTES,
   BUILDER_WORKSPACE_MAX_FILE_BYTES,
   BUILDER_WORKSPACE_MAX_FILES,
   BUILDER_WORKSPACE_MAX_TOTAL_BYTES,
@@ -21,29 +21,31 @@ import {
 } from './builder-workspace-types';
 
 type WorkspaceStorage = Pick<DurableObjectStorage, 'sql' | 'transactionSync'>;
-type WorkspaceObjectStore = {
-  put(key: string, value: Uint8Array): Promise<unknown>;
-  get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>;
-  delete(keys: string | string[]): Promise<unknown>;
+type WorkspaceSandbox = ISandbox & { destroy(): Promise<void> };
+export type BuilderWorkspaceBackend = {
+  sandbox: WorkspaceSandbox;
+  backupBucket: R2Bucket;
+  localBackup: boolean;
+  installDependencies(sandbox: WorkspaceSandbox, projectDir: string): Promise<void>;
+  retireBackup(backup: DirectoryBackup, notBefore: number): Promise<void>;
 };
-
 type WorkspaceMetaRow = {
   initialized: number;
   revision: number;
   reset_revision: number;
   file_count: number;
   total_bytes: number;
+  backup_json: string | null;
+  sandbox_id: string | null;
   seed_id: string | null;
   seed_started_at: number | null;
 };
 
 type WorkspaceFileRow = {
   path: string;
-  content: string | null;
   encoding: BuilderWorkspaceEncoding;
   size: number;
   sha256: string;
-  r2_key: string | null;
   revision: number;
 };
 
@@ -60,6 +62,7 @@ type WorkspaceToolResultRow = {
 };
 
 type PreparedFile = WorkspaceFileRow & {
+  content: string;
   bytes: Uint8Array;
 };
 
@@ -73,6 +76,10 @@ const SEED_STALE_MS = 10 * 60 * 1000;
 const SYNC_PAGE_QUERY_LIMIT = 200;
 const SYNC_PAGE_CHARACTER_LIMIT = 4 * 1024 * 1024;
 const MAX_TOOL_RESULT_BYTES = 2 * 1024 * 1024;
+const PROJECT_DIR = '/workspace/project';
+const RESTORE_MARKER = '/tmp/ghostbuild-project-backup';
+const BACKUP_TTL_SECONDS = 10 * 365 * 24 * 60 * 60;
+const SUPERSEDED_BACKUP_GRACE_MS = 60 * 60 * 1000;
 
 export class BuilderWorkspaceConflictError extends Error {
   constructor(readonly state: BuilderWorkspaceState) {
@@ -82,18 +89,18 @@ export class BuilderWorkspaceConflictError extends Error {
 }
 
 /**
- * Server-authoritative project files colocated with the existing BuilderAgent
- * Durable Object. SQLite owns metadata and ordinary source files; R2 is only
- * used when a single file is too large for a conservative SQLite row.
+ * Authoritative workspace state for the user-owned WorkspaceSandbox Durable
+ * Object. SQLite contains only its manifest/revision protocol; file bytes live
+ * exclusively in the current Sandbox DirectoryBackup in the user's R2 bucket.
  */
 export class BuilderWorkspaceRepository {
   readonly #inFlightTools = new Map<string, { toolName: string; argsJson: string; promise: Promise<unknown> }>();
+  #operationTail: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly storage: WorkspaceStorage,
-    private readonly bucket: WorkspaceObjectStore,
+    private readonly backend: BuilderWorkspaceBackend,
     private readonly durableObjectId: string,
-    private readonly objectOwnerId: () => string | null = () => null,
   ) {}
 
   getState(): BuilderWorkspaceState {
@@ -101,6 +108,10 @@ export class BuilderWorkspaceRepository {
   }
 
   async beginSeed(seedIdValue: unknown): Promise<BuilderWorkspaceSeedStartResult> {
+    return this.#exclusive(() => this.#beginSeed(seedIdValue));
+  }
+
+  async #beginSeed(seedIdValue: unknown): Promise<BuilderWorkspaceSeedStartResult> {
     const seedId = requireSeedId(seedIdValue);
     const meta = this.#meta();
     if (meta.initialized === 1) {
@@ -111,7 +122,6 @@ export class BuilderWorkspaceRepository {
       return { status: 'seeding', state: stateFromMeta(meta) };
     }
     if (meta.seed_id !== seedId) {
-      const staleKeys = this.#seedR2Keys(meta.seed_id);
       this.storage.transactionSync(() => {
         this.storage.sql.exec('DELETE FROM builder_workspace_seed_files');
         this.storage.sql.exec(
@@ -123,12 +133,20 @@ export class BuilderWorkspaceRepository {
           WORKSPACE_META_ID,
         );
       });
-      await this.#deleteR2Keys(staleKeys);
+      const sandbox = this.#sandbox();
+      await sandbox.killAllProcesses();
+      await requireSandboxSuccess(
+        await sandboxExec(sandbox, `rm -rf ${PROJECT_DIR} && mkdir -p ${PROJECT_DIR}`, { timeout: 30_000 }),
+      );
     }
     return { status: 'started', seedId, state: this.getState() };
   }
 
   async appendSeed(seedIdValue: unknown, entriesValue: unknown): Promise<BuilderWorkspaceState> {
+    return this.#exclusive(() => this.#appendSeed(seedIdValue, entriesValue));
+  }
+
+  async #appendSeed(seedIdValue: unknown, entriesValue: unknown): Promise<BuilderWorkspaceState> {
     const seedId = requireSeedId(seedIdValue);
     const entries = requireFileInputs(entriesValue);
     assertSyncBatch(entries);
@@ -140,89 +158,69 @@ export class BuilderWorkspaceRepository {
       throw new Error('The project workspace initialization lease is no longer active.');
     }
     const prepared = await Promise.all(entries.map((entry) => this.#prepareFile(entry)));
-    const uploadedKeys: string[] = [];
-    try {
-      for (const file of prepared) {
-        if (file.r2_key) {
-          await this.bucket.put(file.r2_key, file.bytes);
-          uploadedKeys.push(file.r2_key);
-        }
-      }
-      const displacedKeys: string[] = [];
-      this.storage.transactionSync(() => {
-        const currentMeta = this.#meta();
-        if (currentMeta.initialized === 1 || currentMeta.seed_id !== seedId) {
-          throw new Error('The project workspace initialization lease changed before this batch was committed.');
-        }
-        for (const file of prepared) {
-          const previous = this.#seedFile(seedId, file.path);
-          if (previous?.r2_key && previous.r2_key !== file.r2_key) {
-            displacedKeys.push(previous.r2_key);
-          }
-          this.storage.sql.exec(
-            `INSERT INTO builder_workspace_seed_files
-               (seed_id, path, content, encoding, size, sha256, r2_key)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(seed_id, path) DO UPDATE SET
-               content = excluded.content,
-               encoding = excluded.encoding,
-               size = excluded.size,
-               sha256 = excluded.sha256,
-               r2_key = excluded.r2_key`,
-            seedId,
-            file.path,
-            file.content,
-            file.encoding,
-            file.size,
-            file.sha256,
-            file.r2_key,
-          );
-        }
-        this.storage.sql.exec(
-          `UPDATE builder_workspace_meta
-           SET seed_started_at = ?, updated_at = datetime('now')
-           WHERE id = ?`,
-          Date.now(),
-          WORKSPACE_META_ID,
-        );
-      });
-      await this.#deleteR2Keys(displacedKeys);
-      return this.getState();
-    } catch (error) {
-      await this.#deleteR2Keys(uploadedKeys);
-      throw error;
+    const sandbox = this.#sandbox();
+    for (const file of prepared) {
+      await this.#writeSandboxFile(sandbox, file);
     }
+    this.storage.transactionSync(() => {
+      const currentMeta = this.#meta();
+      if (currentMeta.initialized === 1 || currentMeta.seed_id !== seedId) {
+        throw new Error('The project workspace initialization lease changed before this batch was committed.');
+      }
+      for (const file of prepared) {
+        this.storage.sql.exec(
+          `INSERT INTO builder_workspace_seed_files (seed_id, path, encoding, size, sha256)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(seed_id, path) DO UPDATE SET
+             encoding = excluded.encoding, size = excluded.size, sha256 = excluded.sha256`,
+          seedId,
+          file.path,
+          file.encoding,
+          file.size,
+          file.sha256,
+        );
+      }
+      this.storage.sql.exec(
+        `UPDATE builder_workspace_meta SET seed_started_at = ?, updated_at = datetime('now') WHERE id = ?`,
+        Date.now(),
+        WORKSPACE_META_ID,
+      );
+    });
+    return this.getState();
   }
 
   async commitSeed(seedIdValue: unknown, expectedValue: unknown): Promise<BuilderWorkspaceState> {
+    return this.#exclusive(() => this.#commitSeed(seedIdValue, expectedValue));
+  }
+
+  async #commitSeed(seedIdValue: unknown, expectedValue: unknown): Promise<BuilderWorkspaceState> {
     const seedId = requireSeedId(seedIdValue);
     const expected = requireSeedExpectation(expectedValue);
-    const oldKeys: string[] = [];
+    const meta = this.#meta();
+    if (meta.initialized === 1) {
+      return stateFromMeta(meta);
+    }
+    if (meta.seed_id !== seedId) {
+      throw new Error('The project workspace initialization lease is no longer active.');
+    }
+    const staged = this.#seedSummary(seedId);
+    if (staged.file_count !== expected.fileCount || staged.total_bytes !== expected.totalBytes) {
+      throw new Error(
+        `Project workspace initialization is incomplete: received ${staged.file_count} files and ${staged.total_bytes} bytes.`,
+      );
+    }
+    assertWorkspaceTotals(staged.file_count, staged.total_bytes);
+    const sandbox = this.#sandbox();
+    const backup = await this.#createBackup(sandbox, 1);
     this.storage.transactionSync(() => {
-      const meta = this.#meta();
-      if (meta.initialized === 1) {
-        return;
-      }
-      if (meta.seed_id !== seedId) {
+      const current = this.#meta();
+      if (current.initialized === 1 || current.seed_id !== seedId) {
         throw new Error('The project workspace initialization lease is no longer active.');
       }
-      const staged = this.#seedSummary(seedId);
-      if (staged.file_count !== expected.fileCount || staged.total_bytes !== expected.totalBytes) {
-        throw new Error(
-          `Project workspace initialization is incomplete: received ${staged.file_count} files and ${staged.total_bytes} bytes.`,
-        );
-      }
-      assertWorkspaceTotals(staged.file_count, staged.total_bytes);
-      oldKeys.push(...this.#workspaceR2Keys());
-      const revision = meta.revision + 1;
       this.storage.sql.exec('DELETE FROM builder_workspace_files');
       this.storage.sql.exec(
-        `INSERT INTO builder_workspace_files
-           (path, content, encoding, size, sha256, r2_key, revision)
-         SELECT path, content, encoding, size, sha256, r2_key, ?
-         FROM builder_workspace_seed_files
-         WHERE seed_id = ?`,
-        revision,
+        `INSERT INTO builder_workspace_files (path, encoding, size, sha256, revision)
+         SELECT path, encoding, size, sha256, 1 FROM builder_workspace_seed_files WHERE seed_id = ?`,
         seedId,
       );
       this.storage.sql.exec('DELETE FROM builder_workspace_seed_files WHERE seed_id = ?', seedId);
@@ -230,28 +228,33 @@ export class BuilderWorkspaceRepository {
       this.storage.sql.exec(
         `UPDATE builder_workspace_meta
          SET initialized = 1,
-             revision = ?,
-             reset_revision = ?,
+             revision = 1,
+             reset_revision = 1,
              file_count = ?,
              total_bytes = ?,
+             backup_json = ?,
+             sandbox_id = ?,
              seed_id = NULL,
              seed_started_at = NULL,
              updated_at = datetime('now')
          WHERE id = ?`,
-        revision,
-        revision,
         staged.file_count,
         staged.total_bytes,
+        JSON.stringify(backup),
+        this.#sandboxId(),
         WORKSPACE_META_ID,
       );
     });
-    await this.#deleteR2Keys(oldKeys);
+    await this.#writeRestoreMarker(sandbox, backup.id);
     return this.getState();
   }
 
   async abortSeed(seedIdValue: unknown): Promise<BuilderWorkspaceState> {
+    return this.#exclusive(() => this.#abortSeed(seedIdValue));
+  }
+
+  async #abortSeed(seedIdValue: unknown): Promise<BuilderWorkspaceState> {
     const seedId = requireSeedId(seedIdValue);
-    const keys = this.#seedR2Keys(seedId);
     this.storage.transactionSync(() => {
       const meta = this.#meta();
       if (meta.seed_id !== seedId || meta.initialized === 1) {
@@ -265,11 +268,17 @@ export class BuilderWorkspaceRepository {
         WORKSPACE_META_ID,
       );
     });
-    await this.#deleteR2Keys(keys);
+    const sandbox = this.#sandbox();
+    await sandbox.killAllProcesses();
+    await requireSandboxSuccess(await sandboxExec(sandbox, `rm -rf ${PROJECT_DIR}`, { timeout: 30_000 }));
     return this.getState();
   }
 
   async applyClientChanges(value: unknown): Promise<BuilderWorkspaceApplyResult> {
+    return this.#exclusive(() => this.#applyClientChanges(value));
+  }
+
+  async #applyClientChanges(value: unknown): Promise<BuilderWorkspaceApplyResult> {
     const input = requireClientChangeRequest(value);
     const preparedWrites = new Map<string, PreparedFile>();
     for (const change of input.changes) {
@@ -277,53 +286,48 @@ export class BuilderWorkspaceRepository {
         preparedWrites.set(change.path, await this.#prepareFile(change));
       }
     }
-    const uploadedKeys: string[] = [];
-    try {
-      for (const file of preparedWrites.values()) {
-        if (file.r2_key) {
-          await this.bucket.put(file.r2_key, file.bytes);
-          uploadedKeys.push(file.r2_key);
-        }
+    const meta = this.#meta();
+    if (meta.initialized !== 1) {
+      throw new Error('The project workspace has not been initialized.');
+    }
+    if (meta.revision !== input.baseRevision) {
+      return this.#changesAlreadyApplied(input.changes, preparedWrites)
+        ? { ok: true, state: stateFromMeta(meta), changedPaths: [] }
+        : { ok: false, conflict: true, state: stateFromMeta(meta) };
+    }
+    const mutations = this.#effectiveMutations(input.changes, preparedWrites);
+    if (mutations.length === 0) {
+      return { ok: true, state: stateFromMeta(meta), changedPaths: [] };
+    }
+    const nextFileCount =
+      meta.file_count +
+      mutations.filter((mutation) => mutation.kind === 'write' && !mutation.previous).length -
+      mutations.filter((mutation) => mutation.kind === 'delete').length;
+    const nextTotalBytes =
+      meta.total_bytes +
+      mutations.reduce(
+        (bytes, mutation) =>
+          bytes + (mutation.kind === 'write' ? mutation.file.size : 0) - (mutation.previous?.size ?? 0),
+        0,
+      );
+    assertWorkspaceTotals(nextFileCount, nextTotalBytes);
+    const sandbox = await this.#restoredSandbox(meta);
+    for (const mutation of mutations) {
+      if (mutation.kind === 'delete') {
+        await sandbox.deleteFile(this.#sandboxPath(mutation.path));
+      } else {
+        await this.#writeSandboxFile(sandbox, mutation.file);
       }
-      const displacedKeys: string[] = [];
-      const changedPaths: string[] = [];
-      let conflict = false;
+    }
+    const revision = meta.revision + 1;
+    const backup = await this.#createBackup(sandbox, revision);
+    try {
       this.storage.transactionSync(() => {
-        const meta = this.#meta();
-        if (meta.initialized !== 1) {
-          throw new Error('The project workspace has not been initialized.');
+        const current = this.#meta();
+        if (current.revision !== meta.revision || current.backup_json !== meta.backup_json) {
+          throw new BuilderWorkspaceConflictError(stateFromMeta(current));
         }
-        if (meta.revision !== input.baseRevision) {
-          if (this.#changesAlreadyApplied(input.changes, preparedWrites)) {
-            return;
-          }
-          conflict = true;
-          return;
-        }
-        const mutations = this.#effectiveMutations(input.changes, preparedWrites);
-        if (mutations.length === 0) {
-          return;
-        }
-        const nextFileCount =
-          meta.file_count +
-          mutations.reduce(
-            (count, mutation) => count + (mutation.previous ? 0 : mutation.kind === 'write' ? 1 : 0),
-            0,
-          ) -
-          mutations.reduce((count, mutation) => count + (mutation.kind === 'delete' && mutation.previous ? 1 : 0), 0);
-        const nextTotalBytes =
-          meta.total_bytes +
-          mutations.reduce(
-            (bytes, mutation) =>
-              bytes + (mutation.kind === 'write' ? mutation.file.size : 0) - (mutation.previous?.size ?? 0),
-            0,
-          );
-        assertWorkspaceTotals(nextFileCount, nextTotalBytes);
-        const revision = meta.revision + 1;
         for (const mutation of mutations) {
-          if (mutation.previous?.r2_key && mutation.previous.r2_key !== mutation.file?.r2_key) {
-            displacedKeys.push(mutation.previous.r2_key);
-          }
           if (mutation.kind === 'delete') {
             this.storage.sql.exec('DELETE FROM builder_workspace_files WHERE path = ?', mutation.path);
           } else {
@@ -335,26 +339,23 @@ export class BuilderWorkspaceRepository {
             mutation.path,
             mutation.kind,
           );
-          changedPaths.push(mutation.path);
         }
-        this.#updateMetaAfterMutation(revision, nextFileCount, nextTotalBytes);
+        this.#updateMetaAfterMutation(revision, nextFileCount, nextTotalBytes, backup);
       });
-      if (conflict) {
-        await this.#deleteR2Keys(uploadedKeys);
-        return { ok: false, conflict: true, state: this.getState() };
-      }
-      const retainedKeys = new Set(
-        changedPaths.map((path) => this.#file(path)?.r2_key).filter((key): key is string => Boolean(key)),
-      );
-      await this.#deleteR2Keys([...displacedKeys, ...uploadedKeys.filter((key) => !retainedKeys.has(key))]);
-      return { ok: true, state: this.getState(), changedPaths };
     } catch (error) {
-      await this.#deleteR2Keys(uploadedKeys);
+      await this.#deleteBackup(backup);
       throw error;
     }
+    await this.#writeRestoreMarker(sandbox, backup.id);
+    await this.#retireBackup(this.#backup(meta));
+    return { ok: true, state: this.getState(), changedPaths: mutations.map((mutation) => mutation.path) };
   }
 
   async getSyncPage(value: unknown): Promise<BuilderWorkspaceSyncPage> {
+    return this.#exclusive(() => this.#getSyncPage(value));
+  }
+
+  async #getSyncPage(value: unknown): Promise<BuilderWorkspaceSyncPage> {
     const request = requireSyncPageRequest(value);
     const state = this.getState();
     if (!state.initialized || request.fromRevision === state.revision) {
@@ -428,6 +429,12 @@ export class BuilderWorkspaceRepository {
   async readText(
     pathValue: unknown,
   ): Promise<{ path: string; content: string; size: number; sha256: string; revision: number }> {
+    return this.#exclusive(() => this.#readText(pathValue));
+  }
+
+  async #readText(
+    pathValue: unknown,
+  ): Promise<{ path: string; content: string; size: number; sha256: string; revision: number }> {
     const path = requireWorkspacePath(pathValue);
     const row = this.#file(path);
     if (!row) {
@@ -445,6 +452,17 @@ export class BuilderWorkspaceRepository {
   }
 
   async readFile(pathValue: unknown): Promise<{
+    path: string;
+    bytes: Uint8Array;
+    encoding: BuilderWorkspaceEncoding;
+    size: number;
+    sha256: string;
+    revision: number;
+  }> {
+    return this.#exclusive(() => this.#readFile(pathValue));
+  }
+
+  async #readFile(pathValue: unknown): Promise<{
     path: string;
     bytes: Uint8Array;
     encoding: BuilderWorkspaceEncoding;
@@ -505,13 +523,19 @@ export class BuilderWorkspaceRepository {
     });
   }
 
-  /**
-   * Commit a model-requested text mutation and its replayable tool result in
-   * one SQLite transaction. R2 bytes, when needed, are staged before that
-   * transaction, so a crash can leave an unreferenced object but can never
-   * expose a mutation without the matching durable tool result.
-   */
   async commitTextTool<T>(args: {
+    toolCallId: unknown;
+    toolName: 'edit' | 'writeFile';
+    toolArgs: unknown;
+    path: unknown;
+    content: string;
+    expectedFileSha256?: string | null;
+    result: (context: { path: string; bytes: number; changed: boolean; workspaceRevision: number }) => T;
+  }): Promise<T> {
+    return this.#exclusive(() => this.#commitTextTool(args));
+  }
+
+  async #commitTextTool<T>(args: {
     toolCallId: unknown;
     toolName: 'edit' | 'writeFile';
     toolArgs: unknown;
@@ -530,82 +554,70 @@ export class BuilderWorkspaceRepository {
           content: args.content,
           encoding: 'utf8',
         });
-        if (file.r2_key) {
-          await this.bucket.put(file.r2_key, file.bytes);
+        const meta = this.#meta();
+        if (meta.initialized !== 1) {
+          throw new Error('The project workspace has not been initialized.');
         }
-        let retainedR2Key: string | null = null;
-        let displacedR2Key: string | null = null;
+        const previous = this.#file(file.path);
+        if (args.expectedFileSha256 !== undefined && (previous?.sha256 ?? null) !== args.expectedFileSha256) {
+          throw new BuilderWorkspaceConflictError(stateFromMeta(meta));
+        }
+        const changed = previous?.sha256 !== file.sha256 || previous?.encoding !== file.encoding;
+        const revision = changed ? meta.revision + 1 : meta.revision;
+        const result = args.result({ path: file.path, bytes: file.size, changed, workspaceRevision: revision });
+        const resultJson = boundedToolResultJson(result);
+        if (!changed) {
+          this.#insertToolResult(toolCallId, args.toolName, argsSha256, resultJson);
+          return result;
+        }
+        const nextFileCount = meta.file_count + (previous ? 0 : 1);
+        const nextTotalBytes = meta.total_bytes + file.size - (previous?.size ?? 0);
+        assertWorkspaceTotals(nextFileCount, nextTotalBytes);
+        const sandbox = await this.#restoredSandbox(meta);
+        await this.#writeSandboxFile(sandbox, file);
+        const backup = await this.#createBackup(sandbox, revision);
         try {
-          let result: T | undefined;
           this.storage.transactionSync(() => {
             const replay = this.#toolResult<T>(toolCallId, args.toolName, argsSha256);
             if (replay !== undefined) {
-              result = replay;
-              return;
+              throw new Error('The workspace tool completed concurrently.');
             }
-            const meta = this.#meta();
-            if (meta.initialized !== 1) {
-              throw new Error('The project workspace has not been initialized.');
+            const current = this.#meta();
+            if (current.revision !== meta.revision || current.backup_json !== meta.backup_json) {
+              throw new BuilderWorkspaceConflictError(stateFromMeta(current));
             }
-            const previous = this.#file(file.path);
-            if (args.expectedFileSha256 !== undefined && (previous?.sha256 ?? null) !== args.expectedFileSha256) {
-              throw new BuilderWorkspaceConflictError(stateFromMeta(meta));
-            }
-            const changed = previous?.sha256 !== file.sha256 || previous?.encoding !== file.encoding;
-            const revision = changed ? meta.revision + 1 : meta.revision;
-            if (changed) {
-              const nextFileCount = meta.file_count + (previous ? 0 : 1);
-              const nextTotalBytes = meta.total_bytes + file.size - (previous?.size ?? 0);
-              assertWorkspaceTotals(nextFileCount, nextTotalBytes);
-              this.#upsertFile(file, revision);
-              this.storage.sql.exec(
-                `INSERT INTO builder_workspace_changes (revision, path, kind) VALUES (?, ?, 'write')`,
-                revision,
-                file.path,
-              );
-              this.#updateMetaAfterMutation(revision, nextFileCount, nextTotalBytes);
-              displacedR2Key = previous?.r2_key ?? null;
-              retainedR2Key = file.r2_key;
-            }
-            result = args.result({
-              path: file.path,
-              bytes: file.size,
-              changed,
-              workspaceRevision: revision,
-            });
-            const resultJson = JSON.stringify(result);
-            if (textBytes(resultJson) > MAX_TOOL_RESULT_BYTES) {
-              throw new Error('The workspace tool result exceeded its durable result limit.');
-            }
+            this.#upsertFile(file, revision);
             this.storage.sql.exec(
-              `INSERT INTO builder_workspace_tool_results
-               (tool_call_id, tool_name, args_sha256, result_json)
-             VALUES (?, ?, ?, ?)`,
-              toolCallId,
-              args.toolName,
-              argsSha256,
-              resultJson,
+              `INSERT INTO builder_workspace_changes (revision, path, kind) VALUES (?, ?, 'write')`,
+              revision,
+              file.path,
             );
-            this.#pruneToolResults();
+            this.#updateMetaAfterMutation(revision, nextFileCount, nextTotalBytes, backup);
+            this.#insertToolResult(toolCallId, args.toolName, argsSha256, resultJson);
           });
-          if (displacedR2Key && displacedR2Key !== retainedR2Key) {
-            await this.#deleteR2Keys([displacedR2Key]);
-          }
-          if (file.r2_key && file.r2_key !== retainedR2Key) {
-            await this.#deleteR2Keys([file.r2_key]);
-          }
-          return result as T;
         } catch (error) {
-          if (file.r2_key && file.r2_key !== retainedR2Key) {
-            await this.#deleteR2Keys([file.r2_key]);
-          }
+          await this.#deleteBackup(backup);
           throw error;
         }
+        await this.#writeRestoreMarker(sandbox, backup.id);
+        await this.#retireBackup(this.#backup(meta));
+        return result;
       },
     );
   }
 
   async commitTextFilesTool<T>(args: {
+    toolCallId: unknown;
+    toolName: 'npmInstall';
+    toolArgs: unknown;
+    prepare: () => Promise<Array<{ path: unknown; content: string }>>;
+    expectedWorkspaceRevision: number;
+    result: (context: { changedPaths: string[]; workspaceRevision: number }) => T;
+  }): Promise<T> {
+    return this.#exclusive(() => this.#commitTextFilesTool(args));
+  }
+
+  async #commitTextFilesTool<T>(args: {
     toolCallId: unknown;
     toolName: 'npmInstall';
     toolArgs: unknown;
@@ -631,78 +643,61 @@ export class BuilderWorkspaceRepository {
         if (new Set(prepared.map((file) => file.path)).size !== prepared.length) {
           throw new Error('A dependency operation returned duplicate project files.');
         }
-        const uploadedKeys: string[] = [];
-        for (const file of prepared) {
-          if (file.r2_key) {
-            await this.bucket.put(file.r2_key, file.bytes);
-            uploadedKeys.push(file.r2_key);
-          }
+        const meta = this.#meta();
+        if (meta.initialized !== 1 || meta.revision !== args.expectedWorkspaceRevision) {
+          throw new BuilderWorkspaceConflictError(stateFromMeta(meta));
         }
-        const retainedKeys = new Set<string>();
-        const displacedKeys: string[] = [];
+        const mutations = prepared
+          .map((file) => ({ file, previous: this.#file(file.path) }))
+          .filter(({ file, previous }) => previous?.sha256 !== file.sha256 || previous?.encoding !== file.encoding);
+        const revision = mutations.length > 0 ? meta.revision + 1 : meta.revision;
+        const nextFileCount = meta.file_count + mutations.filter(({ previous }) => !previous).length;
+        const nextTotalBytes =
+          meta.total_bytes +
+          mutations.reduce((total, { file, previous }) => total + file.size - (previous?.size ?? 0), 0);
+        assertWorkspaceTotals(nextFileCount, nextTotalBytes);
+        const result = args.result({
+          changedPaths: mutations.map(({ file }) => file.path),
+          workspaceRevision: revision,
+        });
+        const resultJson = boundedToolResultJson(result);
+        if (mutations.length === 0) {
+          this.#insertToolResult(toolCallId, args.toolName, argsSha256, resultJson);
+          return result;
+        }
+        const sandbox = await this.#restoredSandbox(meta);
+        for (const { file } of mutations) {
+          await this.#writeSandboxFile(sandbox, file);
+        }
+        const backup = await this.#createBackup(sandbox, revision);
         try {
-          let result: T | undefined;
           this.storage.transactionSync(() => {
             const replay = this.#toolResult<T>(toolCallId, args.toolName, argsSha256);
             if (replay !== undefined) {
-              result = replay;
-              return;
+              throw new Error('The workspace tool completed concurrently.');
             }
-            const meta = this.#meta();
-            if (meta.initialized !== 1 || meta.revision !== args.expectedWorkspaceRevision) {
-              throw new BuilderWorkspaceConflictError(stateFromMeta(meta));
+            const current = this.#meta();
+            if (current.revision !== meta.revision || current.backup_json !== meta.backup_json) {
+              throw new BuilderWorkspaceConflictError(stateFromMeta(current));
             }
-            const mutations = prepared
-              .map((file) => ({ file, previous: this.#file(file.path) }))
-              .filter(({ file, previous }) => previous?.sha256 !== file.sha256 || previous?.encoding !== file.encoding);
-            const nextFileCount = meta.file_count + mutations.filter(({ previous }) => !previous).length;
-            const nextTotalBytes =
-              meta.total_bytes +
-              mutations.reduce((total, { file, previous }) => total + file.size - (previous?.size ?? 0), 0);
-            assertWorkspaceTotals(nextFileCount, nextTotalBytes);
-            const revision = mutations.length > 0 ? meta.revision + 1 : meta.revision;
-            for (const { file, previous } of mutations) {
+            for (const { file } of mutations) {
               this.#upsertFile(file, revision);
               this.storage.sql.exec(
                 `INSERT INTO builder_workspace_changes (revision, path, kind) VALUES (?, ?, 'write')`,
                 revision,
                 file.path,
               );
-              if (file.r2_key) {
-                retainedKeys.add(file.r2_key);
-              }
-              if (previous?.r2_key && previous.r2_key !== file.r2_key) {
-                displacedKeys.push(previous.r2_key);
-              }
             }
-            if (mutations.length > 0) {
-              this.#updateMetaAfterMutation(revision, nextFileCount, nextTotalBytes);
-            }
-            result = args.result({
-              changedPaths: mutations.map(({ file }) => file.path),
-              workspaceRevision: revision,
-            });
-            const resultJson = JSON.stringify(result);
-            if (textBytes(resultJson) > MAX_TOOL_RESULT_BYTES) {
-              throw new Error('The workspace tool result exceeded its durable result limit.');
-            }
-            this.storage.sql.exec(
-              `INSERT INTO builder_workspace_tool_results
-                 (tool_call_id, tool_name, args_sha256, result_json)
-               VALUES (?, ?, ?, ?)`,
-              toolCallId,
-              args.toolName,
-              argsSha256,
-              resultJson,
-            );
-            this.#pruneToolResults();
+            this.#updateMetaAfterMutation(revision, nextFileCount, nextTotalBytes, backup);
+            this.#insertToolResult(toolCallId, args.toolName, argsSha256, resultJson);
           });
-          await this.#deleteR2Keys([...displacedKeys, ...uploadedKeys.filter((key) => !retainedKeys.has(key))]);
-          return result as T;
         } catch (error) {
-          await this.#deleteR2Keys(uploadedKeys.filter((key) => !retainedKeys.has(key)));
+          await this.#deleteBackup(backup);
           throw error;
         }
+        await this.#writeRestoreMarker(sandbox, backup.id);
+        await this.#retireBackup(this.#backup(meta));
+        return result;
       },
     );
   }
@@ -778,13 +773,72 @@ export class BuilderWorkspaceRepository {
   }
 
   async deleteExternalObjects(): Promise<void> {
-    await this.#deleteR2Keys([...this.#workspaceR2Keys(), ...this.#seedR2Keys()], true);
+    const backup = this.#backup(this.#meta(), false);
+    if (backup) {
+      await this.#deleteBackup(backup, true);
+    }
+    await this.#sandbox().destroy();
+  }
+
+  getBackupHandle(): DirectoryBackup {
+    return this.#backup(this.#meta());
+  }
+
+  async ensureRuntimeReady(): Promise<DirectoryBackup> {
+    return this.#exclusive(() => this.#ensureRuntimeReady());
+  }
+
+  async #ensureRuntimeReady(): Promise<DirectoryBackup> {
+    const meta = this.#meta();
+    if (meta.initialized !== 1) {
+      throw new Error('The project workspace has not been initialized.');
+    }
+    const sandbox = await this.#restoredSandbox(meta);
+    const ready = await sandboxExec(
+      sandbox,
+      `test -f node_modules/.ghostbuild-lock-sha && ` +
+        `test "$(cat node_modules/.ghostbuild-lock-sha)" = "$(sha256sum pnpm-lock.yaml | cut -d ' ' -f1)"`,
+      { cwd: PROJECT_DIR, timeout: 30_000 },
+    );
+    if (ready.success) {
+      return this.#backup(meta);
+    }
+    const pnpm = await sandboxExec(sandbox, 'command -v pnpm', { timeout: 30_000 });
+    requireSandboxSuccess(pnpm);
+    await this.backend.installDependencies(sandbox, PROJECT_DIR);
+    requireSandboxSuccess(
+      await sandboxExec(sandbox, `sha256sum pnpm-lock.yaml | cut -d ' ' -f1 > node_modules/.ghostbuild-lock-sha`, {
+        cwd: PROJECT_DIR,
+        timeout: 30_000,
+      }),
+    );
+    const backup = await this.#createBackup(sandbox, meta.revision);
+    try {
+      this.storage.transactionSync(() => {
+        const current = this.#meta();
+        if (current.revision !== meta.revision || current.backup_json !== meta.backup_json) {
+          throw new BuilderWorkspaceConflictError(stateFromMeta(current));
+        }
+        this.storage.sql.exec(
+          `UPDATE builder_workspace_meta SET backup_json = ?, updated_at = datetime('now') WHERE id = ?`,
+          JSON.stringify(backup),
+          WORKSPACE_META_ID,
+        );
+      });
+    } catch (error) {
+      await this.#deleteBackup(backup);
+      throw error;
+    }
+    await this.#writeRestoreMarker(sandbox, backup.id);
+    await this.#retireBackup(this.#backup(meta));
+    return backup;
   }
 
   #meta(): WorkspaceMetaRow {
     const row = first(
       this.storage.sql.exec<WorkspaceMetaRow>(
-        `SELECT initialized, revision, reset_revision, file_count, total_bytes, seed_id, seed_started_at
+        `SELECT initialized, revision, reset_revision, file_count, total_bytes, backup_json, sandbox_id,
+                seed_id, seed_started_at
          FROM builder_workspace_meta
          WHERE id = ?`,
         WORKSPACE_META_ID,
@@ -799,21 +853,9 @@ export class BuilderWorkspaceRepository {
   #file(path: string): WorkspaceFileRow | undefined {
     return first(
       this.storage.sql.exec<WorkspaceFileRow>(
-        `SELECT path, content, encoding, size, sha256, r2_key, revision
+        `SELECT path, encoding, size, sha256, revision
          FROM builder_workspace_files
          WHERE path = ?`,
-        path,
-      ),
-    );
-  }
-
-  #seedFile(seedId: string, path: string): WorkspaceFileRow | undefined {
-    return first(
-      this.storage.sql.exec<WorkspaceFileRow>(
-        `SELECT path, content, encoding, size, sha256, r2_key, 0 AS revision
-         FROM builder_workspace_seed_files
-         WHERE seed_id = ? AND path = ?`,
-        seedId,
         path,
       ),
     );
@@ -896,35 +938,31 @@ export class BuilderWorkspaceRepository {
       assertSafeWorkspaceText(path, input.content);
     }
     const sha256 = await sha256Bytes(bytes);
-    const useR2 = bytes.byteLength > BUILDER_WORKSPACE_INLINE_BYTES;
     return {
       path,
-      content: useR2 ? null : input.content,
+      content: input.content,
       encoding,
       size: bytes.byteLength,
       sha256,
-      r2_key: useR2 ? this.#newR2Key() : null,
       revision: 0,
       bytes,
     };
   }
 
   async #readStoredContent(row: WorkspaceFileRow): Promise<string> {
-    if (row.content !== null) {
-      return row.content;
+    const sandbox = await this.#restoredSandbox(this.#meta());
+    const result = await sandbox.readFile(this.#sandboxPath(row.path), {
+      encoding: row.encoding === 'utf8' ? 'utf8' : 'base64',
+    });
+    if (!result.success) {
+      throw new Error(`Project file is missing from the current backup: ${row.path}`);
     }
-    if (!row.r2_key) {
-      throw new Error(`Project file storage pointer is missing: ${row.path}`);
-    }
-    const object = await this.bucket.get(row.r2_key);
-    if (!object) {
-      throw new Error(`Project file object is missing: ${row.path}`);
-    }
-    const bytes = new Uint8Array(await object.arrayBuffer());
+    const content = result.content;
+    const bytes = row.encoding === 'utf8' ? new TextEncoder().encode(content) : decodeBase64(content);
     if (bytes.byteLength !== row.size || (await sha256Bytes(bytes)) !== row.sha256) {
-      throw new Error(`Project file object failed integrity verification: ${row.path}`);
+      throw new Error(`Project file failed backup integrity verification: ${row.path}`);
     }
-    return row.encoding === 'utf8' ? new TextDecoder().decode(bytes) : encodeBase64(bytes);
+    return content;
   }
 
   #effectiveMutations(
@@ -974,27 +1012,23 @@ export class BuilderWorkspaceRepository {
   #upsertFile(file: PreparedFile, revision: number): void {
     this.storage.sql.exec(
       `INSERT INTO builder_workspace_files
-         (path, content, encoding, size, sha256, r2_key, revision, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+         (path, encoding, size, sha256, revision, updated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(path) DO UPDATE SET
-         content = excluded.content,
          encoding = excluded.encoding,
          size = excluded.size,
          sha256 = excluded.sha256,
-         r2_key = excluded.r2_key,
          revision = excluded.revision,
          updated_at = excluded.updated_at`,
       file.path,
-      file.content,
       file.encoding,
       file.size,
       file.sha256,
-      file.r2_key,
       revision,
     );
   }
 
-  #updateMetaAfterMutation(revision: number, fileCount: number, totalBytes: number): void {
+  #updateMetaAfterMutation(revision: number, fileCount: number, totalBytes: number, backup: DirectoryBackup): void {
     const retainedFromRevision = Math.max(0, revision - 2_000);
     this.storage.sql.exec(
       `UPDATE builder_workspace_meta
@@ -1002,12 +1036,16 @@ export class BuilderWorkspaceRepository {
            reset_revision = MAX(reset_revision, ?),
            file_count = ?,
            total_bytes = ?,
+           backup_json = ?,
+           sandbox_id = ?,
            updated_at = datetime('now')
        WHERE id = ?`,
       revision,
       retainedFromRevision,
       fileCount,
       totalBytes,
+      JSON.stringify(backup),
+      this.#sandboxId(),
       WORKSPACE_META_ID,
     );
     this.storage.sql.exec(
@@ -1049,46 +1087,146 @@ export class BuilderWorkspaceRepository {
     );
   }
 
-  #workspaceR2Keys(): string[] {
-    return [
-      ...this.storage.sql.exec<{ r2_key: string }>(
-        `SELECT r2_key FROM builder_workspace_files WHERE r2_key IS NOT NULL`,
-      ),
-    ].map((row) => row.r2_key);
+  #insertToolResult(toolCallId: string, toolName: string, argsSha256: string, resultJson: string): void {
+    this.storage.sql.exec(
+      `INSERT INTO builder_workspace_tool_results (tool_call_id, tool_name, args_sha256, result_json)
+       VALUES (?, ?, ?, ?)`,
+      toolCallId,
+      toolName,
+      argsSha256,
+      resultJson,
+    );
+    this.#pruneToolResults();
   }
 
-  #seedR2Keys(seedId?: string | null): string[] {
-    const query = seedId
-      ? this.storage.sql.exec<{ r2_key: string }>(
-          `SELECT r2_key FROM builder_workspace_seed_files WHERE seed_id = ? AND r2_key IS NOT NULL`,
-          seedId,
-        )
-      : this.storage.sql.exec<{ r2_key: string }>(
-          `SELECT r2_key FROM builder_workspace_seed_files WHERE r2_key IS NOT NULL`,
-        );
-    return [...query].map((row) => row.r2_key);
+  #sandboxId(): string {
+    return `workspace-${this.durableObjectId.replaceAll(/[^a-zA-Z0-9]/g, '').slice(-48)}`;
   }
 
-  #newR2Key(): string {
-    const ownerId = this.objectOwnerId();
-    return ownerId
-      ? allocateCustomerObjectKey(ownerId, 'builder-workspaces')
-      : `builder-workspaces/${encodeURIComponent(this.durableObjectId)}/${crypto.randomUUID()}`;
+  #sandbox(): WorkspaceSandbox {
+    return this.backend.sandbox;
   }
 
-  async #deleteR2Keys(keys: Iterable<string>, strict = false): Promise<void> {
-    const unique = Array.from(new Set(keys));
-    for (let index = 0; index < unique.length; index += 100) {
-      try {
-        await this.bucket.delete(unique.slice(index, index + 100));
-      } catch (error) {
-        if (strict) {
-          throw error;
-        }
-        console.warn('Unable to remove superseded project workspace objects from R2', error);
+  #backup(meta: WorkspaceMetaRow, required?: true): DirectoryBackup;
+  #backup(meta: WorkspaceMetaRow, required: false): DirectoryBackup | null;
+  #backup(meta: WorkspaceMetaRow, required = true): DirectoryBackup | null {
+    if (!meta.backup_json) {
+      if (required) {
+        throw new Error('The project workspace backup is missing.');
       }
+      return null;
+    }
+    const value = JSON.parse(meta.backup_json) as Partial<DirectoryBackup>;
+    if (typeof value.id !== 'string' || value.dir !== PROJECT_DIR) {
+      throw new Error('The project workspace backup handle is invalid.');
+    }
+    return { id: value.id, dir: value.dir, ...(value.localBucket ? { localBucket: true } : {}) };
+  }
+
+  async #restoredSandbox(meta: WorkspaceMetaRow): Promise<WorkspaceSandbox> {
+    const backup = this.#backup(meta);
+    const sandbox = this.#sandbox();
+    const marker = await sandboxExec(
+      sandbox,
+      `test "$(cat ${RESTORE_MARKER} 2>/dev/null)" = ${shellQuote(backup.id)}`,
+      {
+        timeout: 30_000,
+      },
+    );
+    if (!marker.success) {
+      await sandbox.killAllProcesses();
+      const restored = await sandbox.restoreBackup(backup);
+      if (!restored.success) {
+        throw new Error('The project workspace backup could not be restored.');
+      }
+      await this.#writeRestoreMarker(sandbox, backup.id);
+    }
+    return sandbox;
+  }
+
+  async #createBackup(sandbox: WorkspaceSandbox, revision: number): Promise<DirectoryBackup> {
+    return sandbox.createBackup({
+      dir: PROJECT_DIR,
+      name: `ghostbuild-${this.durableObjectId.slice(-24)}-r${revision}`,
+      ttl: BACKUP_TTL_SECONDS,
+      localBucket: this.backend.localBackup,
+      multipart: true,
+    });
+  }
+
+  async #deleteBackup(backup: DirectoryBackup, strict = false): Promise<void> {
+    try {
+      await this.backend.backupBucket.delete([`backups/${backup.id}/data.sqsh`, `backups/${backup.id}/meta.json`]);
+    } catch (error) {
+      if (strict) {
+        throw error;
+      }
+      console.warn('Unable to remove a superseded project backup', error);
     }
   }
+
+  async #retireBackup(backup: DirectoryBackup): Promise<void> {
+    const notBefore = Date.now() + SUPERSEDED_BACKUP_GRACE_MS;
+    try {
+      await this.backend.retireBackup(backup, notBefore);
+    } catch (error) {
+      console.warn('Unable to schedule superseded project backup cleanup', error);
+    }
+  }
+
+  async #writeSandboxFile(sandbox: WorkspaceSandbox, file: PreparedFile): Promise<void> {
+    const path = this.#sandboxPath(file.path);
+    await sandbox.mkdir(path.slice(0, path.lastIndexOf('/')), { recursive: true });
+    const content = file.encoding === 'utf8' ? file.content : new Blob([file.bytes.slice().buffer]).stream();
+    const written = await sandbox.writeFile(path, content);
+    if (!written.success) {
+      throw new Error(`Unable to write project file: ${file.path}`);
+    }
+  }
+
+  #sandboxPath(path: string): string {
+    const normalized = normalizeProjectPath(path);
+    return `${PROJECT_DIR}/${normalized.relativePath}`;
+  }
+
+  async #writeRestoreMarker(sandbox: WorkspaceSandbox, backupId: string): Promise<void> {
+    const result = await sandbox.writeFile(RESTORE_MARKER, backupId);
+    if (!result.success) {
+      throw new Error('Unable to mark the restored project backup.');
+    }
+  }
+
+  async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const predecessor = this.#operationTail;
+    let release!: () => void;
+    this.#operationTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await predecessor;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+}
+
+function boundedToolResultJson(result: unknown): string {
+  const json = JSON.stringify(result);
+  if (textBytes(json) > MAX_TOOL_RESULT_BYTES) {
+    throw new Error('The workspace tool result exceeded its durable result limit.');
+  }
+  return json;
+}
+
+function requireSandboxSuccess(result: { success: boolean; stderr: string; stdout: string }): void {
+  if (!result.success) {
+    throw new Error(`${result.stderr}\n${result.stdout}`.trim() || 'The project sandbox command failed.');
+  }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function stateFromMeta(meta: WorkspaceMetaRow): BuilderWorkspaceState {
@@ -1309,14 +1447,6 @@ function decodeLegacyText(value: string, path: string): string {
   } catch {
     throw new Error(`Cannot read binary file as text: ${path}`);
   }
-}
-
-function encodeBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let index = 0; index < bytes.length; index += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  }
-  return btoa(binary);
 }
 
 async function sha256Text(value: string): Promise<string> {

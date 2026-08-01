@@ -12,6 +12,8 @@
         "**/*.spec.{ts,tsx}",
         "tests/workerd/**/*.integration.ts",
         "tests/workerd/server-dependencies.stub.ts",
+        // Bundled and deployed into each user's Cloudflare account.
+        "user-workspace-runtime/src/index.ts",
         // manual build processes
         "buildSystemPrompts.ts",
         // isolated remote-dev evaluation Workers
@@ -20,8 +22,9 @@
       "project": ["**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!"],
       "ignore": [
         "template/**",
-        // Copied into the Sandbox image and invoked as an executable by tests.
-        "sandbox-tools/verify-pnpm-workspace-policy.mjs",
+        "app/test/cloudflare-workers-shim.ts",
+        // Parsed as source text by scripts/verify-stack-alignment.mjs.
+        "app/lib/.server/cloudflare/deployment-runtime-policy.ts",
       ],
     },
     "ghostbuild-agent": {

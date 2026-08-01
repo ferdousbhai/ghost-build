@@ -19,8 +19,11 @@ import {
   TEMPLATE_SOURCE_SHA256,
 } from '~/lib/.server/cloudflare/deployment-security-baseline';
 import { InvalidJsonBodyError, PayloadTooLargeError, readJsonBodyWithLimit } from '~/lib/bounded-body';
+import { provisionUserWorkspaceRuntime } from '~/lib/.server/cloudflare/user-workspace-runtime-provisioner';
+import { findUserWorkspaceRuntime } from '~/lib/.server/cloudflare/user-workspace-runtime-repository';
+import { USER_WORKSPACE_RUNTIME_SHA256 } from '~/generated/user-workspace-runtime.generated';
 
-const requestedCapabilities = ['workers', 'd1', 'r2', 'durable_objects', 'workers_ai'] as const;
+const requestedCapabilities = ['workers', 'containers', 'd1', 'r2', 'durable_objects', 'workers_ai'] as const;
 export const CLOUDFLARE_CONNECTION_CALLBACK_METHOD = 'GET' as const;
 const OAUTH_STATE_COOKIE = 'ghostbuild_oauth_state';
 const OAUTH_STATE_COOKIE_MAX_AGE_SECONDS = 10 * 60;
@@ -28,8 +31,13 @@ const OAUTH_START_RATE_LIMIT_RETRY_SECONDS = 60;
 const MAX_OAUTH_START_REQUEST_BYTES = 4 * 1024;
 const MAX_OAUTH_CALLBACK_CODE_LENGTH = 4_096;
 const MAX_OAUTH_CALLBACK_TEXT_LENGTH = 2_048;
+const MAX_WORKSPACE_RUNTIME_SETUP_BYTES = 2 * 1024;
 const DEPLOYMENT_SECURITY_PAGE_SIZE = 25;
 const startPayloadSchema = z.object({ callbackURL: z.string().url().max(2_048).optional() });
+const workspaceRuntimeSetupSchema = z.object({
+  r2AccessKeyId: z.string().min(16).max(128),
+  r2SecretAccessKey: z.string().min(32).max(256),
+});
 const callbackPayloadSchema = z
   .object({
     state: z.string().uuid(),
@@ -118,6 +126,7 @@ export async function cloudflareConnectionStatusAction({
   } catch {
     return Response.json({ error: 'Invalid deployment security cursor.' }, { status: 400 });
   }
+  const workspaceRuntime = await findUserWorkspaceRuntime(env.DB, session.user.id).catch(() => null);
   const deploymentSecurity = await readOwnerDeploymentSecurity({
     db: env.DB,
     userId: session.user.id,
@@ -132,10 +141,79 @@ export async function cloudflareConnectionStatusAction({
       accountName: connection.accountName,
       aiBillingEnabled: connection.aiBillingEnabled,
       connectedAt: connection.connectedAt,
+      workspaceRuntime: workspaceRuntime
+        ? {
+            status: workspaceRuntime.status,
+            current:
+              workspaceRuntime.connectionId === connection.id &&
+              workspaceRuntime.connectionGeneration === connection.generation &&
+              workspaceRuntime.runtimeVersion === USER_WORKSPACE_RUNTIME_SHA256,
+            lastError: workspaceRuntime.lastError,
+          }
+        : { status: 'not_configured', current: false, lastError: null },
       deploymentSecurity,
     },
     { headers: { 'Cache-Control': 'private, no-store' } },
   );
+}
+
+export async function provisionCloudflareWorkspaceRuntimeAction(args: {
+  request: Request;
+  env: Env;
+}): Promise<Response> {
+  try {
+    if (!hasSameOrigin(args.request)) {
+      return Response.json({ error: 'Invalid request origin.' }, { status: 403 });
+    }
+    const session = await getAuthSession(args.env, args.request);
+    if (!session) {
+      return Response.json({ error: 'Cloudflare authentication required.' }, { status: 401 });
+    }
+    const connection = await findCloudflareConnectionForUser(args.env.DB, session.user.id);
+    if (!connection || connection.status !== 'active') {
+      return Response.json({ error: 'Connect Cloudflare before configuring project storage.' }, { status: 409 });
+    }
+    const payload = parseIntegrationRequest(
+      workspaceRuntimeSetupSchema,
+      await readJsonBodyWithLimit(
+        args.request,
+        MAX_WORKSPACE_RUNTIME_SETUP_BYTES,
+        'Cloudflare workspace runtime setup',
+      ),
+    );
+    const runtime = await provisionUserWorkspaceRuntime({
+      env: args.env,
+      userId: session.user.id,
+      connectionId: connection.id,
+      r2AccessKeyId: payload.r2AccessKeyId,
+      r2SecretAccessKey: payload.r2SecretAccessKey,
+    });
+    return Response.json(
+      {
+        status: runtime.status,
+        current: runtime.runtimeVersion === USER_WORKSPACE_RUNTIME_SHA256,
+      },
+      { status: 201, headers: { 'Cache-Control': 'private, no-store' } },
+    );
+  } catch (error) {
+    if (error instanceof PayloadTooLargeError) {
+      return Response.json({ error: error.message }, { status: 413 });
+    }
+    if (
+      error instanceof InvalidJsonBodyError ||
+      error instanceof InvalidCloudflareIntegrationRequestError ||
+      error instanceof z.ZodError
+    ) {
+      return Response.json({ error: 'Invalid R2 backup credentials.' }, { status: 400 });
+    }
+    console.error('User-owned Cloudflare workspace runtime provisioning failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return Response.json(
+      { error: error instanceof Error ? error.message : 'Cloudflare workspace runtime provisioning failed.' },
+      { status: 502 },
+    );
+  }
 }
 
 async function readOwnerDeploymentSecurity(args: {

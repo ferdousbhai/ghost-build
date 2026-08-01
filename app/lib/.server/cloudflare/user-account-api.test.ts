@@ -339,4 +339,105 @@ describe('UserCloudflareAccountApi', () => {
     await expect(api.getR2Object('ghostbuild-user-data', 'missing/key')).resolves.toBeNull();
     await expect(api.deleteR2Object('ghostbuild-user-data', 'missing/key')).resolves.toBeUndefined();
   });
+
+  test('deploys the runtime and all project-storage bindings into the user account', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: { version_id: 'version-1' } }))
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [
+            {
+              id: '0123456789abcdef0123456789abcdef',
+              class: 'WorkspaceSandbox',
+              script: 'ghostbuild-workspace-user',
+              use_sqlite: true,
+            },
+          ],
+        }),
+      );
+    const api = new UserCloudflareAccountApi('user-account', 'user-token', request);
+
+    await expect(
+      api.deployWorkspaceRuntimeWorker({
+        workerName: 'ghostbuild-workspace-user',
+        source: 'export default { fetch() { return new Response() } }',
+        bucketName: 'ghostbuild-workspaces-user',
+        controlPlaneSecret: 'control-plane-secret-that-is-long-enough',
+        r2AccessKeyId: 'user-r2-access-key',
+        r2SecretAccessKey: 'user-r2-secret-access-key-that-is-long-enough',
+        runtimeVersion: 'a'.repeat(64),
+      }),
+    ).resolves.toEqual({
+      workerVersionId: 'version-1',
+      namespaceId: '0123456789abcdef0123456789abcdef',
+    });
+
+    const [scriptUrl, scriptInit] = request.mock.calls[0];
+    expect(scriptUrl).toBe(
+      'https://api.cloudflare.com/client/v4/accounts/user-account/workers/scripts/ghostbuild-workspace-user',
+    );
+    expect(scriptInit).toMatchObject({ method: 'PUT', headers: { authorization: 'Bearer user-token' } });
+    const form = scriptInit?.body as FormData;
+    const metadataPart = form.get('metadata');
+    expect(metadataPart).toBeInstanceOf(Blob);
+    const metadata = JSON.parse(await (metadataPart as Blob).text()) as {
+      bindings: Array<Record<string, string>>;
+      containers: Array<{ class_name: string }>;
+      exports: Record<string, unknown>;
+    };
+    expect(metadata.containers).toEqual([{ class_name: 'WorkspaceSandbox' }]);
+    expect(metadata.bindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'r2_bucket',
+          name: 'BACKUP_BUCKET',
+          bucket_name: 'ghostbuild-workspaces-user',
+        }),
+        expect.objectContaining({ type: 'secret_text', name: 'R2_ACCESS_KEY_ID', text: 'user-r2-access-key' }),
+        expect.objectContaining({
+          type: 'secret_text',
+          name: 'R2_SECRET_ACCESS_KEY',
+          text: 'user-r2-secret-access-key-that-is-long-enough',
+        }),
+      ]),
+    );
+    expect(metadata.exports).toHaveProperty('WorkspaceSandbox');
+  });
+
+  test('creates the Sandbox container application in the user account', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json([]))
+      .mockResolvedValueOnce(
+        Response.json({
+          id: 'container-application-1',
+          name: 'ghostbuild-workspace-user',
+          durable_objects: { namespace_id: '0123456789abcdef0123456789abcdef' },
+        }),
+      );
+    const api = new UserCloudflareAccountApi('user-account', 'user-token', request);
+    const image = `docker.io/cloudflare/sandbox:0.12.4@sha256:${'b'.repeat(64)}`;
+
+    await expect(
+      api.ensureWorkspaceRuntimeContainer({
+        applicationName: 'ghostbuild-workspace-user',
+        namespaceId: '0123456789abcdef0123456789abcdef',
+        image,
+      }),
+    ).resolves.toEqual({ id: 'container-application-1', name: 'ghostbuild-workspace-user' });
+
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      'https://api.cloudflare.com/client/v4/accounts/user-account/containers/applications',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    const [, createInit] = request.mock.calls[1];
+    expect(JSON.parse(String(createInit?.body))).toMatchObject({
+      name: 'ghostbuild-workspace-user',
+      configuration: { image, instance_type: 'basic' },
+      durable_objects: { namespace_id: '0123456789abcdef0123456789abcdef' },
+    });
+  });
 });

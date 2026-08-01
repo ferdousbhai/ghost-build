@@ -37,23 +37,17 @@ describe('BuilderAgent schema migrations', () => {
     expect(storage.applied).toEqual([
       { version: 1, name: 'create_builder_turns' },
       { version: 2, name: 'create_builder_context_state' },
-      { version: 3, name: 'create_builder_workspace' },
-      { version: 4, name: 'create_builder_workspace_validations' },
-      { version: 5, name: 'create_builder_preview_jobs' },
+      { version: 3, name: 'create_builder_tool_replays' },
     ]);
-    expect(storage.transactionCount).toBe(5);
+    expect(storage.transactionCount).toBe(3);
     expect(storage.statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS builder_turns'))).toBe(
       true,
     );
     expect(
       storage.statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS builder_context_state')),
     ).toBe(true);
-    expect(
-      storage.statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS builder_workspace_files')),
-    ).toBe(true);
-    expect(
-      storage.statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS builder_preview_jobs')),
-    ).toBe(true);
+    expect(storage.statements.some((statement) => statement.includes('builder_workspace_files'))).toBe(false);
+    expect(storage.statements.some((statement) => statement.includes('builder_preview_jobs'))).toBe(false);
   });
 
   it('is idempotent after the current schema has been recorded', () => {
@@ -89,6 +83,6 @@ describe('BuilderAgent schema migrations', () => {
 
     expect(blockConcurrencyWhile).toHaveBeenCalledOnce();
     await expect(initialization).resolves.toBeUndefined();
-    expect(storage.applied).toHaveLength(5);
+    expect(storage.applied).toHaveLength(3);
   });
 });

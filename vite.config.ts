@@ -46,6 +46,10 @@ export default defineConfig((config) => {
     },
     resolve: {
       tsconfigPaths: true,
+      alias: isTest ? { 'cloudflare:workers': fromRoot('./app/test/cloudflare-workers-shim.ts') } : undefined,
+    },
+    ssr: {
+      noExternal: isTest ? ['@cloudflare/sandbox', '@cloudflare/containers'] : undefined,
     },
     plugins: [
       !isTest && agents(),

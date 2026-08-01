@@ -1,4 +1,4 @@
-import { inspectDeploymentSnapshot, type DeploymentProjectProfile } from './deployment-snapshot';
+import type { DeploymentProjectProfile } from './deployment-project-profile';
 import {
   DEPLOYMENT_SECURITY_BASELINE_VERSION,
   APP_AGENT_SECURITY_BOUNDARY_SHA256,
@@ -32,16 +32,7 @@ export type DeploymentPlan = {
   resources: DeploymentPlanResource[];
 };
 
-export async function buildDeploymentPlan(args: {
-  deploymentId: string;
-  snapshot: Blob;
-}): Promise<{ plan: DeploymentPlan; digest: string }> {
-  const source = await args.snapshot.arrayBuffer();
-  const [sourceSha256, project] = await Promise.all([sha256Hex(source), inspectDeploymentSnapshot(source)]);
-  return buildDeploymentPlanFromSource({ deploymentId: args.deploymentId, sourceSha256, project });
-}
-
-async function buildDeploymentPlanFromSource(args: {
+export async function buildDeploymentPlanFromSource(args: {
   deploymentId: string;
   sourceSha256: string;
   project?: DeploymentProjectProfile;

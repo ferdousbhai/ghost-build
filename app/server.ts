@@ -15,26 +15,19 @@ import {
   CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
   cloudflareConnectionStatusAction,
   completeCloudflareConnectionAction,
+  provisionCloudflareWorkspaceRuntimeAction,
   startCloudflareConnectionAction,
 } from './server-handlers/cloudflare-integration';
 import { routeAuthorizedAgentRequest } from './lib/.server/agent-request-identity';
-import { createDeploymentPlanAction, deploymentAction } from './server-handlers/deployments';
+import { deploymentAction } from './server-handlers/deployments';
 import { authSessionAction, signOutAction } from './server-handlers/auth';
 import { drainDeferredDataGcBestEffort } from './lib/cloudflare/data/deferred-gc.server';
 import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudflare-auth-retention.server';
 import { refreshDeploymentSecurityInventoryBestEffort } from './lib/.server/cloudflare/deployment-security-inventory';
 import { reconcileChatBackupQuotaBestEffort } from './lib/cloudflare/data/chat-backup-quota.server';
 import { reconcileThumbnailQuotaBestEffort } from './lib/cloudflare/data/thumbnail-quota.server';
-import { cleanupExpiredBuilderPreviewsBestEffort } from './lib/.server/cloudflare/builder-preview-repository';
-import {
-  SANDBOX_CLEANUP_CRON,
-  sweepSandboxCleanupCandidatesBestEffort,
-} from './lib/.server/cloudflare/sandbox-cleanup';
-import { matchPreviewRequest, previewAction } from './server-handlers/previews';
 
 export { BuilderAgent } from './agents/builder-agent';
-export { ContainerProxy, DeploymentSandbox } from './lib/.server/cloudflare/deployment-sandbox';
-export { DeploymentWorkflow } from './lib/.server/cloudflare/deployment-workflow';
 export { SkillSyncWorkflow } from './lib/.server/cloudflare/skill-sync-workflow';
 
 const APPLICATION_CSP_BASELINE = "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
@@ -143,13 +136,13 @@ const exactRoutes: Record<string, ServerRoute> = {
     method: 'POST',
     handler: (request, env) => startCloudflareConnectionAction({ request, env }),
   },
+  '/api/cloudflare/workspace-runtime': {
+    method: 'POST',
+    handler: (request, env) => provisionCloudflareWorkspaceRuntimeAction({ request, env }),
+  },
   '/connect/return': {
     method: CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
     handler: (request, env) => completeCloudflareConnectionAction({ request, env }),
-  },
-  '/api/deployments/plan': {
-    method: 'POST',
-    handler: (request, env) => createDeploymentPlanAction({ request, env }),
   },
   '/api/data': {
     method: 'POST',
@@ -181,18 +174,10 @@ export default {
     }
 
     const pathname = new URL(request.url).pathname;
-    const previewRoute = matchPreviewRequest(pathname);
-    if (previewRoute) {
-      return previewAction({ request, env, ...previewRoute });
-    }
     return withApplicationSecurityHeaders(await routeApplicationRequest(request, env, ctx), pathname);
   },
-  scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(
-      controller.cron === SANDBOX_CLEANUP_CRON
-        ? sweepSandboxCleanupCandidatesBestEffort(env)
-        : runScheduledMaintenance(env),
-    );
+  scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(runScheduledMaintenance(env));
   },
 } satisfies ExportedHandler<Env>;
 
@@ -204,7 +189,6 @@ async function runScheduledMaintenance(env: Env) {
   await pruneCloudflareAuthDataBestEffort(env.DB);
   await reconcileChatBackupQuotaBestEffort(env);
   await reconcileThumbnailQuotaBestEffort(env);
-  await cleanupExpiredBuilderPreviewsBestEffort(env);
   await refreshDeploymentSecurityInventoryBestEffort(env);
 }
 

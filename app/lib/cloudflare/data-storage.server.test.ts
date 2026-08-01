@@ -22,7 +22,7 @@ import {
   releaseChatBackupAdmissionBestEffort,
   reserveChatBackupBytes,
 } from './data/chat-backup-quota.server';
-import { MESSAGE_HISTORY_LZ4_LIMITS, PROJECT_SNAPSHOT_LZ4_LIMITS } from '~/lib/compression-limits';
+import { MESSAGE_HISTORY_LZ4_LIMITS } from '~/lib/compression-limits';
 import {
   admitThumbnailUpload,
   releaseThumbnailAdmissionBestEffort,
@@ -211,7 +211,7 @@ describe('chat blob ownership', () => {
     const response = await storeChatAction({ request: storageRequest(), env: storageEnv() });
 
     expect(response.status).toBe(409);
-    expect(queuedObjectKeys()).toEqual(['message-history/new', 'snapshots/new']);
+    expect(queuedObjectKeys()).toEqual(['message-history/new']);
     expect(cancelObjectGcCandidateMock).not.toHaveBeenCalled();
   });
 
@@ -226,7 +226,7 @@ describe('chat blob ownership', () => {
     const response = await storeChatAction({ request: storageRequest(), env: storageEnv() });
 
     expect(response.status).toBe(409);
-    expect(queuedObjectKeys()).toEqual(['message-history/new', 'snapshots/new']);
+    expect(queuedObjectKeys()).toEqual(['message-history/new']);
     expect(cancelObjectGcCandidateMock).not.toHaveBeenCalled();
   });
 
@@ -275,6 +275,17 @@ describe('chat blob ownership', () => {
     expect(enforceChatStorageRetentionMock).not.toHaveBeenCalled();
   });
 
+  test('rejects the retired project snapshot field instead of storing project files in control-plane R2', async () => {
+    const response = await storeChatAction({
+      request: storageRequest({ includeLegacySnapshot: true }),
+      env: storageEnv(),
+    });
+
+    expect(response.status).toBe(400);
+    expect(reserveChatBackupBytesMock).not.toHaveBeenCalled();
+    expect(putObjectAtKeyMock).not.toHaveBeenCalled();
+  });
+
   test('does not upload when checkpoint retention cannot reserve capacity', async () => {
     enforceChatStorageRetentionMock.mockRejectedValueOnce(new ChatStorageRetentionError());
 
@@ -285,11 +296,11 @@ describe('chat blob ownership', () => {
     expect(updateStorageStateMock).not.toHaveBeenCalled();
   });
 
-  test('keeps blobs accepted by the storage-state write', async () => {
+  test('keeps chat history accepted by the storage-state write', async () => {
     updateStorageStateMock.mockResolvedValue({
       accepted: true,
       retainedStorageKey: true,
-      retainedSnapshotKey: true,
+      retainedSnapshotKey: false,
       displacedKeys: [],
     });
 
@@ -297,81 +308,62 @@ describe('chat blob ownership', () => {
 
     expect(response.status).toBe(200);
     expect(allocateCustomerObjectKeyMock).toHaveBeenNthCalledWith(1, 'session', 'message-history');
-    expect(allocateCustomerObjectKeyMock).toHaveBeenNthCalledWith(2, 'session', 'snapshots');
+    expect(allocateCustomerObjectKeyMock).toHaveBeenCalledOnce();
     expect(cancelObjectGcCandidateMock.mock.calls.map(([, receipt]) => receipt.storageKey)).toEqual([
       'message-history/new',
-      'snapshots/new',
     ]);
   });
 
-  test('cancels only the receipt whose uploaded object is proven live', async () => {
+  test('does not cancel the chat-history receipt unless the database proves it live', async () => {
     updateStorageStateMock.mockResolvedValue({
       accepted: true,
       retainedStorageKey: false,
-      retainedSnapshotKey: true,
+      retainedSnapshotKey: false,
       displacedKeys: [],
     });
 
     const response = await storeChatAction({ request: storageRequest(), env: storageEnv() });
 
     expect(response.status).toBe(200);
-    expect(cancelObjectGcCandidateMock).toHaveBeenCalledOnce();
-    expect(cancelObjectGcCandidateMock.mock.calls[0]?.[1]).toEqual({
-      storageKey: 'snapshots/new',
-      notBefore: 123,
-    });
+    expect(cancelObjectGcCandidateMock).not.toHaveBeenCalled();
   });
 
   test('defers displaced-key cleanup and runs a bounded opportunistic sweep', async () => {
     updateStorageStateMock.mockResolvedValue({
       accepted: true,
       retainedStorageKey: true,
-      retainedSnapshotKey: true,
+      retainedSnapshotKey: false,
       displacedKeys: ['message-old', 'snapshot-old'],
     });
     const response = await storeChatAction({ request: storageRequest(), env: storageEnv() });
 
     expect(response.status).toBe(200);
-    expect(cancelObjectGcCandidateMock).toHaveBeenCalledTimes(2);
+    expect(cancelObjectGcCandidateMock).toHaveBeenCalledOnce();
     expect(sweepObjectGcCandidatesBestEffortMock).toHaveBeenCalledOnce();
   });
 
-  test('does not cancel either receipt when the database update fails', async () => {
+  test('does not cancel the receipt when the database update fails', async () => {
     updateStorageStateMock.mockRejectedValue(new Error('database unavailable'));
 
     const response = await storeChatAction({ request: storageRequest(), env: storageEnv() });
 
     expect(response.status).toBe(500);
-    expect(queuedObjectKeys()).toEqual(['message-history/new', 'snapshots/new']);
+    expect(queuedObjectKeys()).toEqual(['message-history/new']);
     expect(cancelObjectGcCandidateMock).not.toHaveBeenCalled();
   });
 
-  test('leaves both receipts queued when the second upload fails', async () => {
-    putObjectAtKeyMock.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('R2 unavailable'));
-
-    const response = await storeChatAction({ request: storageRequest(), env: storageEnv() });
-
-    expect(response.status).toBe(500);
-    expect(queuedObjectKeys()).toEqual(['message-history/new', 'snapshots/new']);
-    expect(registerChatBackupObjectMock).toHaveBeenCalledTimes(2);
-    expect(releaseChatBackupAdmissionBestEffortMock).toHaveBeenCalledOnce();
-    expect(cancelObjectGcCandidateMock).not.toHaveBeenCalled();
-    expect(updateStorageStateMock).not.toHaveBeenCalled();
-  });
-
-  test('preserves receipts when both D1 references commit before their acknowledgement is lost', async () => {
+  test('preserves the receipt when the D1 reference commits before its acknowledgement is lost', async () => {
     const committedReferences = new Set<string>();
     updateStorageStateMock.mockImplementationOnce(async (_db, args) => {
       committedReferences.add(args.storageKey!);
-      committedReferences.add(args.snapshotKey!);
       throw new Error('D1 acknowledgement lost');
     });
 
     const response = await storeChatAction({ request: storageRequest(), env: storageEnv() });
 
     expect(response.status).toBe(500);
-    expect(committedReferences).toEqual(new Set(['message-history/new', 'snapshots/new']));
-    expect(queuedObjectKeys()).toEqual(['message-history/new', 'snapshots/new']);
+    expect(committedReferences).toEqual(new Set(['message-history/new']));
+    expect(queuedObjectKeys()).toEqual(['message-history/new']);
     expect(cancelObjectGcCandidateMock).not.toHaveBeenCalled();
   });
 
@@ -389,29 +381,6 @@ describe('chat blob ownership', () => {
     expect(queuedObjectKeys()).toEqual(['message-history/new']);
     expect(queueObjectGcCandidateMock.mock.invocationCallOrder[0]).toBeLessThan(
       putObjectAtKeyMock.mock.invocationCallOrder[0],
-    );
-    expect(cancelObjectGcCandidateMock).not.toHaveBeenCalled();
-    expect(updateStorageStateMock).not.toHaveBeenCalled();
-  });
-
-  test('keeps both receipts when the snapshot PUT commits before losing its acknowledgement', async () => {
-    const committedObjects = new Set<string>();
-    putObjectAtKeyMock
-      .mockImplementationOnce(async (_env, key) => {
-        committedObjects.add(key);
-      })
-      .mockImplementationOnce(async (_env, key) => {
-        committedObjects.add(key);
-        throw new Error('R2 acknowledgement lost');
-      });
-
-    const response = await storeChatAction({ request: storageRequest(), env: storageEnv() });
-
-    expect(response.status).toBe(500);
-    expect(committedObjects).toEqual(new Set(['message-history/new', 'snapshots/new']));
-    expect(queuedObjectKeys()).toEqual(['message-history/new', 'snapshots/new']);
-    expect(queueObjectGcCandidateMock.mock.invocationCallOrder[1]).toBeLessThan(
-      putObjectAtKeyMock.mock.invocationCallOrder[1],
     );
     expect(cancelObjectGcCandidateMock).not.toHaveBeenCalled();
     expect(updateStorageStateMock).not.toHaveBeenCalled();
@@ -444,7 +413,7 @@ describe('chat blob ownership', () => {
       error: 'The agent transcript advanced before this backup was saved. Retry with the latest transcript.',
       checkpoint: advanced,
     });
-    expect(queuedObjectKeys()).toEqual(['message-history/new', 'snapshots/new']);
+    expect(queuedObjectKeys()).toEqual(['message-history/new']);
     expect(cancelObjectGcCandidateMock).not.toHaveBeenCalled();
     expect(updateStorageStateMock).not.toHaveBeenCalled();
   });
@@ -453,7 +422,7 @@ describe('chat blob ownership', () => {
     updateStorageStateMock.mockResolvedValue({
       accepted: true,
       retainedStorageKey: true,
-      retainedSnapshotKey: true,
+      retainedSnapshotKey: false,
       displacedKeys: [],
     });
     cancelObjectGcCandidateMock.mockRejectedValue(new Error('D1 cleanup unavailable'));
@@ -461,7 +430,7 @@ describe('chat blob ownership', () => {
     const response = await storeChatAction({ request: storageRequest(), env: storageEnv() });
 
     expect(response.status).toBe(200);
-    expect(cancelObjectGcCandidateMock).toHaveBeenCalledTimes(2);
+    expect(cancelObjectGcCandidateMock).toHaveBeenCalledOnce();
   });
 });
 
@@ -706,9 +675,9 @@ function storageRequest(
   options: {
     contentLength?: number;
     messageExpandedBytes?: number;
-    snapshotExpandedBytes?: number;
     messageBlob?: Blob;
     duplicateFirstMessages?: number;
+    includeLegacySnapshot?: boolean;
   } = {},
 ): Request {
   const body = new FormData();
@@ -717,10 +686,9 @@ function storageRequest(
     options.messageBlob ??
       lz4TestBlob(options.messageExpandedBytes ?? 128, MESSAGE_HISTORY_LZ4_LIMITS.decompressedBytes),
   );
-  body.set(
-    'snapshot',
-    lz4TestBlob(options.snapshotExpandedBytes ?? 256, PROJECT_SNAPSHOT_LZ4_LIMITS.decompressedBytes),
-  );
+  if (options.includeLegacySnapshot) {
+    body.set('snapshot', lz4TestBlob(256, 1024));
+  }
   for (let index = 0; index < (options.duplicateFirstMessages ?? 0); index++) {
     body.append('firstMessage', '');
   }

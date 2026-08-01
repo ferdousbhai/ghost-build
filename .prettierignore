@@ -3,6 +3,7 @@ pnpm-lock.yaml
 proxy/proxy.bundled.cjs
 iframe-worker/worker.bundled.mjs
 app/routeTree.gen.ts
+app/generated/user-workspace-runtime.generated.ts
 template/src/routeTree.gen.ts
 worker-configuration.d.ts
 template/worker-configuration.d.ts

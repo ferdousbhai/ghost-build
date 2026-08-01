@@ -12,6 +12,7 @@ const logger = createScopedLogger('CloudflareAgentGc');
 type AgentGcCandidateRow = {
   chat_id: string;
   initial_id: string;
+  owner_id: string;
   subchat_index: number;
   next_generation: number;
   max_generation: number;
@@ -71,10 +72,13 @@ export async function sweepAgentGcCandidates(
   const limit = Math.max(1, Math.min(options.limit ?? AGENT_GC_SWEEP_LIMIT, AGENT_GC_SWEEP_LIMIT));
   const now = options.now ?? Date.now();
   const result = await env.DB.prepare(
-    `SELECT chat_id, initial_id, subchat_index, next_generation, max_generation, not_before, attempts
-     FROM agent_gc_candidates
-     WHERE not_before <= ?
-     ORDER BY not_before, chat_id, subchat_index
+    `SELECT candidates.chat_id, candidates.initial_id, chats.creator_id AS owner_id,
+            candidates.subchat_index, candidates.next_generation, candidates.max_generation,
+            candidates.not_before, candidates.attempts
+     FROM agent_gc_candidates AS candidates
+     INNER JOIN chats ON chats.id = candidates.chat_id
+     WHERE candidates.not_before <= ?
+     ORDER BY candidates.not_before, candidates.chat_id, candidates.subchat_index
      LIMIT ?`,
   )
     .bind(now, limit)
@@ -105,7 +109,7 @@ async function destroyCandidateGeneration(
     // The SDK durably records a condemned marker and alarm before this RPC
     // resolves. Advance the D1 receipt only after that schedule is accepted;
     // the alarm owns the abort-shaped physical teardown and can resume it.
-    await agent.scheduleDestroyForGc();
+    await agent.scheduleDestroyForGc(candidate.owner_id);
     const result =
       candidate.next_generation === candidate.max_generation
         ? await deleteCompletedCandidate(env.DB, candidate)

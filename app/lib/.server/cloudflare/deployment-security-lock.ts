@@ -1,4 +1,4 @@
-export const APP_AGENT_PROTECTED_PACKAGE_REQUIREMENTS = {
+const APP_AGENT_PROTECTED_PACKAGE_REQUIREMENTS = {
   '@babel/core': '^8.0.1',
   '@cloudflare/ai-chat': '^0.9.3',
   '@cloudflare/vite-plugin': '1.45.1',

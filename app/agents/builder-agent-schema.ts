@@ -54,92 +54,15 @@ const migrations: readonly SchemaMigration[] = [
   },
   {
     version: 3,
-    name: 'create_builder_workspace',
+    name: 'create_builder_tool_replays',
     apply(sql) {
       sql.exec(`
-        CREATE TABLE IF NOT EXISTS builder_workspace_meta (
-          id INTEGER PRIMARY KEY CHECK (id = 1),
-          initialized INTEGER NOT NULL DEFAULT 0,
-          revision INTEGER NOT NULL DEFAULT 0,
-          reset_revision INTEGER NOT NULL DEFAULT 0,
-          file_count INTEGER NOT NULL DEFAULT 0,
-          total_bytes INTEGER NOT NULL DEFAULT 0,
-          seed_id TEXT,
-          seed_started_at INTEGER,
-          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        INSERT OR IGNORE INTO builder_workspace_meta (id) VALUES (1);
-
-        CREATE TABLE IF NOT EXISTS builder_workspace_files (
-          path TEXT PRIMARY KEY,
-          content TEXT,
-          encoding TEXT NOT NULL CHECK (encoding IN ('utf8', 'base64')),
-          size INTEGER NOT NULL,
-          sha256 TEXT NOT NULL,
-          r2_key TEXT,
-          revision INTEGER NOT NULL,
-          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-          CHECK ((content IS NULL) != (r2_key IS NULL))
-        );
-
-        CREATE TABLE IF NOT EXISTS builder_workspace_changes (
-          revision INTEGER NOT NULL,
-          path TEXT NOT NULL,
-          kind TEXT NOT NULL CHECK (kind IN ('write', 'delete')),
-          PRIMARY KEY (revision, path)
-        );
-        CREATE INDEX IF NOT EXISTS idx_builder_workspace_changes_path_revision
-          ON builder_workspace_changes(path, revision DESC);
-
-        CREATE TABLE IF NOT EXISTS builder_workspace_seed_files (
-          seed_id TEXT NOT NULL,
-          path TEXT NOT NULL,
-          content TEXT,
-          encoding TEXT NOT NULL CHECK (encoding IN ('utf8', 'base64')),
-          size INTEGER NOT NULL,
-          sha256 TEXT NOT NULL,
-          r2_key TEXT,
-          PRIMARY KEY (seed_id, path),
-          CHECK ((content IS NULL) != (r2_key IS NULL))
-        );
-
         CREATE TABLE IF NOT EXISTS builder_workspace_tool_results (
           tool_call_id TEXT PRIMARY KEY,
           tool_name TEXT NOT NULL,
           args_sha256 TEXT NOT NULL,
           result_json TEXT NOT NULL,
           created_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )
-      `);
-    },
-  },
-  {
-    version: 4,
-    name: 'create_builder_workspace_validations',
-    apply(sql) {
-      sql.exec(`
-        CREATE TABLE IF NOT EXISTS builder_workspace_validations (
-          revision TEXT PRIMARY KEY,
-          workspace_revision INTEGER NOT NULL,
-          created_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )
-      `);
-    },
-  },
-  {
-    version: 5,
-    name: 'create_builder_preview_jobs',
-    apply(sql) {
-      sql.exec(`
-        CREATE TABLE IF NOT EXISTS builder_preview_jobs (
-          id TEXT PRIMARY KEY,
-          sandbox_id TEXT NOT NULL,
-          snapshot_key TEXT NOT NULL,
-          workspace_revision INTEGER NOT NULL,
-          snapshot_revision TEXT NOT NULL,
-          status TEXT NOT NULL CHECK (status IN ('queued', 'building', 'ready', 'failed', 'cancelled')),
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL
         )
       `);
     },

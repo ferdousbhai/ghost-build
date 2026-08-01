@@ -44,6 +44,7 @@ export default [
       'scripts/fixtures/**',
       'template/**',
       '**/*.bundled.*',
+      'app/generated/**',
     ],
   },
   ...blitzPlugin.configs.recommended(),

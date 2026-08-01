@@ -22,23 +22,6 @@ export function addRequestedDependencies(packageJson: string, packageSpecs: stri
   )}\n`;
 }
 
-export function findPackagesNeedingInstall(packageJson: string, packageSpecs: string[]): string[] {
-  const manifest = JSON.parse(packageJson) as PackageManifest & {
-    devDependencies?: Record<string, string>;
-    optionalDependencies?: Record<string, string>;
-  };
-  const installedDependencies = {
-    ...manifest.devDependencies,
-    ...manifest.optionalDependencies,
-    ...manifest.dependencies,
-  };
-  return packageSpecs.filter((spec) => {
-    const [name, selector] = splitRegistryPackageSpec(spec);
-    const installedSelector = installedDependencies[name];
-    return installedSelector === undefined || (selector !== 'latest' && selector !== installedSelector);
-  });
-}
-
 function splitRegistryPackageSpec(spec: string): [name: string, selector: string] {
   const selectorIndex = spec.startsWith('@') ? spec.indexOf('@', spec.indexOf('/') + 1) : spec.indexOf('@');
   return selectorIndex === -1 ? [spec, 'latest'] : [spec.slice(0, selectorIndex), spec.slice(selectorIndex + 1)];

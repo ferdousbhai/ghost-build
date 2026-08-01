@@ -11,16 +11,7 @@ const EXPECTED_BUILD_VARIABLES = {
   SKIP_DEPENDENCY_INSTALL: '1',
 };
 const EXPECTED_REQUIRED_BUILD_VARIABLES = ['CLOUDFLARE_OAUTH_CLIENT_ID'];
-export const WORKERS_BUILDS_CONTAINER_SOURCE_FILES = [
-  'Dockerfile.sandbox',
-  'sandbox-tools/package.json',
-  'sandbox-tools/pnpm-lock.yaml',
-  'sandbox-tools/pnpm-workspace.yaml',
-  'sandbox-tools/verify-pnpm-workspace-policy.mjs',
-];
-const CONTAINER_IMAGE_PATTERN =
-  /^registry\.cloudflare\.com\/0af9e0921b880657d84a6c07307f8aef\/ghostbuild-deploymentsandbox@sha256:[a-f0-9]{64}$/;
-const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+export const WORKERS_BUILDS_CONTAINER_SOURCE_FILES = [];
 
 export function findWorkersBuildsConfigErrors({
   config,
@@ -55,37 +46,12 @@ export function findWorkersBuildsConfigErrors({
     config?.requiredBuildVariables,
     EXPECTED_REQUIRED_BUILD_VARIABLES,
   );
-  requireStringArray(
-    errors,
-    'workers-builds.production.json containerImage.sourceFiles',
-    config?.containerImage?.sourceFiles,
-    WORKERS_BUILDS_CONTAINER_SOURCE_FILES,
-  );
-
-  const containerImageReference = config?.containerImage?.reference;
-  if (typeof containerImageReference !== 'string' || !CONTAINER_IMAGE_PATTERN.test(containerImageReference)) {
-    errors.push(
-      'workers-builds.production.json containerImage.reference must be an immutable ghostbuild-deploymentsandbox image in the production Cloudflare Registry.',
-    );
+  if (config?.containerImage !== undefined) {
+    errors.push('workers-builds.production.json must not build a Ghostbuild-owned Sandbox image.');
   }
-  if (
-    typeof config?.containerImage?.sourceSha256 !== 'string' ||
-    !SHA256_PATTERN.test(config.containerImage.sourceSha256)
-  ) {
-    errors.push('workers-builds.production.json containerImage.sourceSha256 must be a lowercase SHA-256 digest.');
-  } else {
-    requireEqual(
-      errors,
-      'workers-builds.production.json containerImage.sourceSha256',
-      config.containerImage.sourceSha256,
-      containerSourceSha256,
-    );
+  if (Array.isArray(workerConfig?.containers) && workerConfig.containers.length > 0) {
+    errors.push('wrangler.jsonc must not bind Ghostbuild-owned Containers.');
   }
-
-  const workerContainer = Array.isArray(workerConfig?.containers)
-    ? workerConfig.containers.find((container) => container?.class_name === 'DeploymentSandbox')
-    : undefined;
-  requireEqual(errors, 'wrangler.jsonc DeploymentSandbox image', workerContainer?.image, containerImageReference);
 
   if (!isRecord(config?.buildVariables)) {
     errors.push('workers-builds.production.json buildVariables must be an object.');

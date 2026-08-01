@@ -5,7 +5,6 @@ const getAuthSession = vi.hoisted(() => vi.fn());
 const ensureInitialChat = vi.hoisted(() => vi.fn());
 const routeAgentRequest = vi.hoisted(() => vi.fn());
 const healthAction = vi.hoisted(() => vi.fn());
-const cleanupExpiredBuilderPreviewsBestEffort = vi.hoisted(() => vi.fn());
 const completeCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const cloudflareConnectionStatusAction = vi.hoisted(() => vi.fn());
 const startCloudflareConnectionAction = vi.hoisted(() => vi.fn());
@@ -14,17 +13,11 @@ const pruneCloudflareAuthDataBestEffort = vi.hoisted(() => vi.fn());
 const refreshDeploymentSecurityInventoryBestEffort = vi.hoisted(() => vi.fn());
 const reconcileChatBackupQuotaBestEffort = vi.hoisted(() => vi.fn());
 const reconcileThumbnailQuotaBestEffort = vi.hoisted(() => vi.fn());
-const sweepSandboxCleanupCandidatesBestEffort = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-start/server-entry', () => ({ default: { fetch: tanstackFetch } }));
 vi.mock('agents', () => ({ routeAgentRequest }));
 vi.mock('./agents/builder-agent', () => ({ BuilderAgent: class {} }));
 vi.mock('./lib/.server/auth', () => ({ getAuthSession }));
-vi.mock('./lib/.server/cloudflare/deployment-sandbox', () => ({
-  ContainerProxy: class {},
-  DeploymentSandbox: class {},
-}));
-vi.mock('./lib/.server/cloudflare/deployment-workflow', () => ({ DeploymentWorkflow: class {} }));
 vi.mock('./lib/.server/cloudflare/skill-sync-workflow', () => ({ SkillSyncWorkflow: class {} }));
 vi.mock('./lib/cloudflare/data/chat-repository.server', () => ({ ensureInitialChat }));
 vi.mock('./lib/cloudflare/data.server', () => ({
@@ -55,17 +48,6 @@ vi.mock('./lib/cloudflare/data/cloudflare-auth-retention.server', () => ({ prune
 vi.mock('./lib/.server/cloudflare/deployment-security-inventory', () => ({
   refreshDeploymentSecurityInventoryBestEffort,
 }));
-vi.mock('./lib/.server/cloudflare/builder-preview-repository', () => ({
-  cleanupExpiredBuilderPreviewsBestEffort,
-}));
-vi.mock('./lib/.server/cloudflare/sandbox-cleanup', () => ({
-  SANDBOX_CLEANUP_CRON: '* * * * *',
-  sweepSandboxCleanupCandidatesBestEffort,
-}));
-vi.mock('./server-handlers/previews', () => ({
-  matchPreviewRequest: () => null,
-  previewAction: vi.fn(),
-}));
 vi.mock('./lib/cloudflare/data/chat-backup-quota.server', () => ({ reconcileChatBackupQuotaBestEffort }));
 vi.mock('./lib/cloudflare/data/thumbnail-quota.server', () => ({ reconcileThumbnailQuotaBestEffort }));
 
@@ -79,7 +61,6 @@ describe('server Agent routing boundary', () => {
     ensureInitialChat.mockReset();
     routeAgentRequest.mockReset();
     healthAction.mockReset().mockResolvedValue(Response.json({ status: 'ok' }));
-    cleanupExpiredBuilderPreviewsBestEffort.mockReset().mockResolvedValue(undefined);
     completeCloudflareConnectionAction.mockReset().mockImplementation(async () => {
       const headers = new Headers({ Location: 'https://ghostbuild.dev/' });
       headers.append('Set-Cookie', 'ghostbuild_session=session; Path=/; HttpOnly; Secure');
@@ -95,7 +76,6 @@ describe('server Agent routing boundary', () => {
     refreshDeploymentSecurityInventoryBestEffort.mockReset().mockResolvedValue(undefined);
     reconcileChatBackupQuotaBestEffort.mockReset().mockResolvedValue(undefined);
     reconcileThumbnailQuotaBestEffort.mockReset().mockResolvedValue(undefined);
-    sweepSandboxCleanupCandidatesBestEffort.mockReset().mockResolvedValue(undefined);
   });
 
   it.each([
@@ -283,9 +263,6 @@ describe('server Agent routing boundary', () => {
     reconcileThumbnailQuotaBestEffort.mockImplementationOnce(async () => {
       calls.push('thumbnail-quota');
     });
-    cleanupExpiredBuilderPreviewsBestEffort.mockImplementationOnce(async () => {
-      calls.push('builder-previews');
-    });
     refreshDeploymentSecurityInventoryBestEffort.mockImplementationOnce(async () => {
       calls.push('deployment-security-inventory');
     });
@@ -301,7 +278,6 @@ describe('server Agent routing boundary', () => {
       'auth-retention',
       'chat-backup-quota',
       'thumbnail-quota',
-      'builder-previews',
       'deployment-security-inventory',
     ]);
     expect(drainDeferredDataGcBestEffort).toHaveBeenCalledOnce();
@@ -309,20 +285,5 @@ describe('server Agent routing boundary', () => {
     expect(refreshDeploymentSecurityInventoryBestEffort).toHaveBeenCalledWith(env);
     expect(reconcileChatBackupQuotaBestEffort).toHaveBeenCalledWith(env);
     expect(reconcileThumbnailQuotaBestEffort).toHaveBeenCalledWith(env);
-    expect(cleanupExpiredBuilderPreviewsBestEffort).toHaveBeenCalledWith(env);
-  });
-
-  it('runs only the sandbox outbox on the per-minute cleanup schedule', async () => {
-    const waitUntil = vi.fn();
-    const env = { DB: {} as D1Database, DeploymentSandbox: {} } as Env;
-
-    server.scheduled({ cron: '* * * * *' } as ScheduledController, env, {
-      waitUntil,
-    } as unknown as ExecutionContext);
-
-    expect(waitUntil).toHaveBeenCalledOnce();
-    await waitUntil.mock.calls[0][0];
-    expect(sweepSandboxCleanupCandidatesBestEffort).toHaveBeenCalledWith(env);
-    expect(drainDeferredDataGcBestEffort).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 export type CloudflareConnectionRequest = {
   returnUrl: string;
-  requestedCapabilities: Array<'workers' | 'd1' | 'r2' | 'durable_objects' | 'workers_ai'>;
+  requestedCapabilities: Array<'workers' | 'containers' | 'd1' | 'r2' | 'durable_objects' | 'workers_ai'>;
 };
 
 export type CloudflareConnectionChallenge = {

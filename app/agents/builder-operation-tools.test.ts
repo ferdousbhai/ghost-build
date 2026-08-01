@@ -1,23 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  install: vi.fn(),
-  validate: vi.fn(),
-  deploymentId: vi.fn(),
   createDeployment: vi.fn(),
-  snapshot: vi.fn(),
 }));
 
-vi.mock('~/lib/.server/cloudflare/builder-project-sandbox', () => ({
-  installBuilderDependencies: mocks.install,
-  validateBuilderProject: mocks.validate,
-  deterministicDeploymentId: mocks.deploymentId,
-}));
+vi.mock('@cloudflare/sandbox', () => ({ getSandbox: vi.fn() }));
 vi.mock('~/server-handlers/deployments', () => ({
   createOrReplayDeploymentPlanForUser: mocks.createDeployment,
-}));
-vi.mock('./builder-workspace-snapshot', () => ({
-  createBuilderWorkspaceSnapshot: mocks.snapshot,
 }));
 
 import { executeBuilderOperationTool } from './builder-operation-tools';
@@ -25,13 +14,6 @@ import { executeBuilderOperationTool } from './builder-operation-tools';
 describe('server Builder operation tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.snapshot.mockResolvedValue({
-      workspaceRevision: 7,
-      revision: 'a'.repeat(64),
-      bytes: new Uint8Array([1, 2, 3]),
-    });
-    mocks.validate.mockResolvedValue({ durationMs: 123 });
-    mocks.deploymentId.mockResolvedValue('11111111-1111-5111-8111-111111111111');
     mocks.createDeployment.mockResolvedValue({
       id: '11111111-1111-5111-8111-111111111111',
       planDigest: 'b'.repeat(64),
@@ -39,13 +21,9 @@ describe('server Builder operation tools', () => {
     });
   });
 
-  it('validates the durable snapshot in the server sandbox and records the exact revision', async () => {
+  it('validates the exact durable backup in the user-owned runtime', async () => {
     const workspace = workspaceStub();
     const onValidationStage = vi.fn();
-    mocks.validate.mockImplementationOnce(async ({ onStage }) => {
-      onStage('dependency installation');
-      return { durationMs: 123 };
-    });
     const result = await executeBuilderOperationTool({
       context: { ...operationContext(), onValidationStage },
       workspace: workspace as never,
@@ -59,16 +37,12 @@ describe('server Builder operation tools', () => {
       data: {
         revision: 'a'.repeat(64),
         workspaceRevision: 7,
-        buildEnvironment: 'remote-sandbox',
+        buildEnvironment: 'user-cloudflare-sandbox',
       },
     });
-    expect(mocks.validate).toHaveBeenCalledWith(expect.objectContaining({ snapshot: expect.any(Uint8Array) }));
-    expect(workspace.recordSuccessfulValidation).toHaveBeenCalledWith({
-      revision: 'a'.repeat(64),
-      workspaceRevision: 7,
-    });
+    expect(workspace.validate).toHaveBeenCalledWith({ toolCallId: 'validation-call', input: {} });
     expect(onValidationStage.mock.calls).toEqual([
-      ['validation-call', 'dependency installation'],
+      ['validation-call', 'sandbox initialization'],
       ['validation-call', null],
     ]);
   });
@@ -92,7 +66,7 @@ describe('server Builder operation tools', () => {
 
   it('prepares an idempotent deployment plan from the exact durably validated bytes', async () => {
     const workspace = workspaceStub();
-    workspace.hasSuccessfulValidation.mockReturnValue(true);
+    workspace.hasSuccessfulValidation.mockResolvedValue(true);
     const result = await executeBuilderOperationTool({
       context: operationContext(),
       workspace: workspace as never,
@@ -113,8 +87,10 @@ describe('server Builder operation tools', () => {
       expect.objectContaining({
         userId: 'user-1',
         chatId: 'chat-1',
-        deploymentId: '11111111-1111-5111-8111-111111111111',
-        snapshot: expect.any(Blob),
+        deploymentId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        projectId: 'agent-1',
+        revision: 'a'.repeat(64),
+        workspaceRevision: 7,
       }),
     );
   });
@@ -123,9 +99,23 @@ describe('server Builder operation tools', () => {
 function workspaceStub() {
   const workspace = {
     getState: vi.fn(() => ({ initialized: true, revision: 7 })),
+    checkpoint: vi.fn(async () => ({ workspaceRevision: 7, revision: 'a'.repeat(64) })),
     executeToolOnce: vi.fn(async (_id, _name, _args, execute: () => Promise<unknown>) => execute()),
-    recordSuccessfulValidation: vi.fn(),
-    hasSuccessfulValidation: vi.fn(() => false),
+    validate: vi.fn(async () => ({
+      ok: true,
+      message: 'validated',
+      data: {
+        revision: 'a'.repeat(64),
+        workspaceRevision: 7,
+        buildEnvironment: 'user-cloudflare-sandbox',
+      },
+    })),
+    hasSuccessfulValidation: vi.fn(async () => false),
+    prepareDeployment: vi.fn(async () => ({
+      workspaceRevision: 7,
+      revision: 'a'.repeat(64),
+      project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, appAgent: true } },
+    })),
   };
   return workspace;
 }

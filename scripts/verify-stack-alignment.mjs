@@ -21,7 +21,6 @@ import {
 import { runVerifierIfMain } from './run-verifier.mjs';
 import { templateSourceDigest } from './template-source.mjs';
 import { verifyD1MigrationSafety } from './verify-d1-migrations.mjs';
-import { findWorkspacePolicyErrors } from '../sandbox-tools/verify-pnpm-workspace-policy.mjs';
 
 export {
   dependencyNames,
@@ -74,16 +73,11 @@ const requiredPaths = [
   'SECURITY.md',
   'THIRD_PARTY_NOTICES',
   'app/server.ts',
-  'Dockerfile.sandbox',
-  'sandbox-tools/package.json',
-  'sandbox-tools/pnpm-lock.yaml',
-  'sandbox-tools/pnpm-workspace.yaml',
-  'sandbox-tools/verify-pnpm-workspace-policy.mjs',
   'app/agents/builder-agent.ts',
   'app/lib/.server/chat.ts',
-  'app/lib/.server/cloudflare/deployment-build-artifact.ts',
   'app/lib/.server/cloudflare/deployment-runtime-policy.ts',
-  'app/lib/.server/cloudflare/deployment-workflow.ts',
+  'app/lib/.server/cloudflare/user-workspace-deployment-executor.ts',
+  'user-workspace-runtime/src/index.ts',
   'app/lib/workers-ai-model.ts',
   'ghostbuild-agent/package.json',
   'ghostbuild-agent/tsconfig.json',
@@ -438,19 +432,6 @@ export function verifyStackAlignment() {
   verifyRootMigrations(errors);
   errors.push(...verifyD1MigrationSafety(rootDir));
   errors.push(
-    ...findSandboxVersionErrors(
-      rootPackage,
-      readFileSync(resolve(rootDir, 'Dockerfile.sandbox'), 'utf8'),
-      readJson('sandbox-tools/package.json'),
-      readFileSync(resolve(rootDir, 'sandbox-tools/pnpm-lock.yaml'), 'utf8'),
-    ),
-    ...findWorkspacePolicyErrors(
-      readFileSync(resolve(rootDir, 'sandbox-tools/pnpm-workspace.yaml'), 'utf8'),
-      new Set(['esbuild', 'sharp', 'workerd']),
-    ).map((error) => `sandbox-tools/${error}`),
-    ...findDeploymentWorkflowErrors(
-      readFileSync(resolve(rootDir, 'app/lib/.server/cloudflare/deployment-workflow.ts'), 'utf8'),
-    ),
     ...findDeploymentRuntimePolicyErrors(
       readFileSync(resolve(rootDir, 'template/wrangler.jsonc'), 'utf8'),
       readFileSync(resolve(rootDir, 'app/lib/.server/cloudflare/deployment-runtime-policy.ts'), 'utf8'),
@@ -470,7 +451,7 @@ export function verifyStackAlignment() {
     'template/src',
     'vite.config.ts',
     'template/vite.config.ts',
-  ]);
+  ]).filter((path) => !path.endsWith('/app/generated/user-workspace-runtime.generated.ts'));
   errors.push(...findForbiddenImports(sourceFiles), ...findForbiddenRuntimeEnvAccess(sourceFiles));
 
   return errors;

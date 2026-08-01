@@ -6,7 +6,7 @@ import { ContextCompactionUnavailableError, ModelInputBudgetExceededError } from
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import type { WorkersAiAccountCredentials } from './llm/provider';
 import type { ContextCompaction } from './llm/context-compaction';
-import type { BuilderWorkspaceRepository } from '~/agents/builder-workspace';
+import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 type Messages = GhostbuildMessage[];
@@ -48,7 +48,7 @@ export async function createChatResponseFromBody({
   turnContext?: ChatTurnContext;
   accountCredentials: WorkersAiAccountCredentials;
   sessionAffinity: string;
-  workspace: BuilderWorkspaceRepository;
+  workspace: BuilderWorkspaceApi;
   userId: string;
   agentName: string;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;

@@ -1,10 +1,3 @@
-export const BUILDER_PREVIEW_PORT = 4173;
-export const BUILDER_PREVIEW_TTL_MS = 15 * 60 * 1000;
-export const BUILDER_PREVIEW_MAX_ATTEMPTS = 3;
-export const BUILDER_PREVIEW_MAX_BUILDS_PER_HOUR = 8;
-export const BUILDER_PREVIEW_GLOBAL_CONCURRENCY = 2;
-export const BUILDER_PREVIEW_MAX_SOURCE_BYTES = 32 * 1024 * 1024;
-
 export type BuilderPreviewStatus = 'idle' | 'queued' | 'building' | 'ready' | 'failed' | 'cancelled' | 'expired';
 
 export type BuilderPreviewSuccess = {

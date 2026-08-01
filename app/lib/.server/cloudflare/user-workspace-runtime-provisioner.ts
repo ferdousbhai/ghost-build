@@ -1,0 +1,137 @@
+import {
+  USER_WORKSPACE_RUNTIME_SHA256,
+  USER_WORKSPACE_RUNTIME_SOURCE,
+} from '~/generated/user-workspace-runtime.generated';
+import { D1CloudflareCredentialVault } from './cloudflare-credential-vault';
+import { requireActiveCloudflareConnection, type CloudflareConnection } from './cloudflare-connection-repository';
+import {
+  markUserWorkspaceRuntimeError,
+  markUserWorkspaceRuntimeReady,
+  recordUserWorkspaceRuntimeProvisioning,
+  type UserWorkspaceRuntime,
+} from './user-workspace-runtime-repository';
+import { deriveUserWorkspaceRuntimeSecret } from './user-workspace-runtime-secret';
+import { UserCloudflareAccountApi } from './user-account-api';
+
+const USER_WORKSPACE_SANDBOX_IMAGE =
+  'docker.io/cloudflare/sandbox:0.12.4@sha256:e83bb4d6d9748b93a4b876ce0852b5e93d8e0893da10c59d425770aef0d73738';
+const RUNTIME_REQUEST_TIMEOUT_MS = 30_000;
+
+export async function provisionUserWorkspaceRuntime(args: {
+  env: Env;
+  userId: string;
+  connectionId: string;
+  r2AccessKeyId: string;
+  r2SecretAccessKey: string;
+  request?: typeof fetch;
+}): Promise<UserWorkspaceRuntime> {
+  validateR2Credentials(args.r2AccessKeyId, args.r2SecretAccessKey);
+  if (!args.env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY) {
+    throw new Error('Cloudflare credential encryption is not configured.');
+  }
+  const connection = await requireActiveCloudflareConnection(args.env.DB, args.connectionId);
+  if (connection.userId !== args.userId || !connection.credentialHandle) {
+    throw new Error('The active Cloudflare connection does not belong to this user.');
+  }
+  requireRuntimeCapabilities(connection);
+  const accessToken = await D1CloudflareCredentialVault.fromEnv(args.env).resolve(connection.credentialHandle);
+  const accountApi = new UserCloudflareAccountApi(connection.accountId, accessToken);
+  const suffix = (await sha256(`${connection.accountId}:${args.userId}`)).slice(0, 16);
+  const workerName = `ghostbuild-workspace-${suffix}`;
+  const bucketName = `ghostbuild-workspaces-${suffix}`;
+  const workersSubdomain = await accountApi.getWorkersSubdomain();
+  const endpoint = `https://${workerName}.${workersSubdomain}.workers.dev`;
+  const controlPlaneSecret = await deriveUserWorkspaceRuntimeSecret({
+    encryptionKeyBase64: args.env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY,
+    userId: args.userId,
+    accountId: connection.accountId,
+    connectionGeneration: connection.generation,
+  });
+  await recordUserWorkspaceRuntimeProvisioning({
+    db: args.env.DB,
+    userId: args.userId,
+    connectionId: connection.id,
+    connectionGeneration: connection.generation,
+    workerName,
+    bucketName,
+    endpoint,
+    runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
+  });
+  try {
+    await accountApi.ensureR2Bucket(bucketName);
+    const deployed = await accountApi.deployWorkspaceRuntimeWorker({
+      workerName,
+      source: USER_WORKSPACE_RUNTIME_SOURCE,
+      bucketName,
+      controlPlaneSecret,
+      r2AccessKeyId: args.r2AccessKeyId,
+      r2SecretAccessKey: args.r2SecretAccessKey,
+      runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
+    });
+    await accountApi.ensureWorkspaceRuntimeContainer({
+      applicationName: workerName,
+      namespaceId: deployed.namespaceId,
+      image: USER_WORKSPACE_SANDBOX_IMAGE,
+    });
+    await accountApi.enableWorkerSubdomain(workerName);
+    await requireHealthyRuntime({
+      endpoint,
+      controlPlaneSecret,
+      request: args.request ?? fetch,
+    });
+    return markUserWorkspaceRuntimeReady({
+      db: args.env.DB,
+      userId: args.userId,
+      connectionId: connection.id,
+      connectionGeneration: connection.generation,
+      runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
+    });
+  } catch (error) {
+    await markUserWorkspaceRuntimeError({
+      db: args.env.DB,
+      userId: args.userId,
+      connectionId: connection.id,
+      connectionGeneration: connection.generation,
+      runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
+      error: error instanceof Error ? error.message : 'Workspace runtime provisioning failed.',
+    }).catch(() => undefined);
+    throw error;
+  }
+}
+
+function requireRuntimeCapabilities(connection: CloudflareConnection): void {
+  const required = ['workers', 'containers', 'r2', 'durable_objects'];
+  const missing = required.filter((capability) => !connection.grantedScopes.includes(capability));
+  if (missing.length > 0) {
+    throw new Error(`Reconnect Cloudflare with workspace runtime access: ${missing.join(', ')}.`);
+  }
+}
+
+function validateR2Credentials(accessKeyId: string, secretAccessKey: string): void {
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(accessKeyId)) {
+    throw new Error('The R2 Access Key ID is invalid.');
+  }
+  if (!/^[A-Za-z0-9_+/=-]{32,256}$/.test(secretAccessKey)) {
+    throw new Error('The R2 Secret Access Key is invalid.');
+  }
+}
+
+async function requireHealthyRuntime(args: {
+  endpoint: string;
+  controlPlaneSecret: string;
+  request: typeof fetch;
+}): Promise<void> {
+  const response = await args.request(`${args.endpoint}/v1/health`, {
+    headers: { authorization: `Bearer ${args.controlPlaneSecret}` },
+    signal: AbortSignal.timeout(RUNTIME_REQUEST_TIMEOUT_MS),
+  });
+  const payload = (await response.json().catch(() => null)) as { ok?: boolean; service?: string } | null;
+  if (!response.ok || payload?.ok !== true || payload.service !== 'ghostbuild-user-workspace-runtime') {
+    throw new Error('The user-owned workspace runtime did not pass its health check.');
+  }
+}
+
+async function sha256(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}

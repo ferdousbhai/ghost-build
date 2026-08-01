@@ -153,26 +153,6 @@ async function findDeploymentSnapshotCommit(args: {
   return row ? deploymentFromRow(row) : null;
 }
 
-export async function listExpiredDeploymentSnapshots(args: {
-  db: D1Database;
-  userId: string;
-  updatedBefore: number;
-  limit?: number;
-}): Promise<Array<{ deploymentId: string; snapshotKey: string }>> {
-  const result = await args.db
-    .prepare(
-      `SELECT id, snapshot_key
-       FROM deployments
-       WHERE user_id = ? AND snapshot_key IS NOT NULL AND updated_at < ?
-         AND status IN ('awaiting_approval', 'succeeded', 'failed', 'canceled')
-       ORDER BY updated_at ASC
-       LIMIT ?`,
-    )
-    .bind(args.userId, args.updatedBefore, args.limit ?? 20)
-    .all<{ id: string; snapshot_key: string }>();
-  return result.results.map((row) => ({ deploymentId: row.id, snapshotKey: row.snapshot_key }));
-}
-
 export async function claimOldestReplaceableDeploymentSnapshot(args: {
   db: D1Database;
   userId: string;
@@ -202,7 +182,7 @@ export async function claimOldestReplaceableDeploymentSnapshot(args: {
   });
 }
 
-export async function claimDeploymentSnapshotForRelease(args: {
+async function claimDeploymentSnapshotForRelease(args: {
   db: D1Database;
   deploymentId: string;
   snapshotKey: string;
@@ -232,24 +212,6 @@ export async function claimDeploymentSnapshotForRelease(args: {
     )
     .run();
   return result.meta.changes === 1 ? { deploymentId: args.deploymentId, snapshotKey: args.snapshotKey } : null;
-}
-
-export async function clearDeploymentSnapshot(args: {
-  db: D1Database;
-  deploymentId: string;
-  snapshotKey: string;
-  now?: number;
-}): Promise<boolean> {
-  const result = await args.db
-    .prepare(
-      `UPDATE deployments
-       SET snapshot_key = NULL,
-           updated_at = ?
-       WHERE id = ? AND snapshot_key = ?`,
-    )
-    .bind(args.now ?? Date.now(), args.deploymentId, args.snapshotKey)
-    .run();
-  return result.meta.changes === 1;
 }
 
 export async function requireDeploymentForUser(
@@ -735,24 +697,6 @@ export async function recordDeploymentResource(args: {
       args.now ?? Date.now(),
     )
     .run();
-}
-
-export async function listDeploymentResources(
-  db: D1Database,
-  deploymentId: string,
-): Promise<Array<{ resourceType: string; logicalName: string; providerResourceId: string }>> {
-  const result = await db
-    .prepare(
-      `SELECT resource_type, logical_name, provider_resource_id
-       FROM deployment_resources WHERE deployment_id = ? ORDER BY created_at, id`,
-    )
-    .bind(deploymentId)
-    .all<{ resource_type: string; logical_name: string; provider_resource_id: string }>();
-  return result.results.map((row) => ({
-    resourceType: row.resource_type,
-    logicalName: row.logical_name,
-    providerResourceId: row.provider_resource_id,
-  }));
 }
 
 export async function transitionDeployment(args: {

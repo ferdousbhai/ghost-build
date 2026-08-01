@@ -19,6 +19,7 @@ export const REQUIRED_CLOUDFLARE_OAUTH_SCOPES = [
   'account-settings.read',
   'user-details.read',
   'workers-scripts.write',
+  'containers.write',
   'd1.write',
   'workers-r2.write',
   'ai.read',

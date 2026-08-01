@@ -33,10 +33,6 @@ export async function putObjectAtKey(env: ObjectStorageEnv, key: string, blob: B
   });
 }
 
-export async function putObjectBytesAtKey(env: ObjectStorageEnv, key: string, bytes: Uint8Array): Promise<void> {
-  await putObjectAtKey(env, key, new Blob([bytes.slice().buffer], { type: 'application/octet-stream' }));
-}
-
 export async function deleteObject(env: ObjectStorageEnv, key: string): Promise<void> {
   const customer = parseCustomerObjectKey(key);
   if (customer) {

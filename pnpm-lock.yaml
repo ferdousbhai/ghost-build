@@ -24,8 +24,8 @@ importers:
         specifier: ^0.9.3
         version: 0.9.3(@ai-sdk/react@3.0.232(react@19.2.8)(zod@4.4.3))(agents@0.17.4(@ai-sdk/react@3.0.232(react@19.2.8)(zod@4.4.3))(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/workers-types@5.20260718.1)(ai@6.0.234(zod@4.4.3))(react@19.2.8)(rolldown@1.1.5)(vite@8.1.5(@types/node@26.1.1)(esbuild@0.28.1)(jiti@1.21.7)(sass-embedded@1.83.4)(yaml@2.9.0))(zod@4.4.3))(ai@6.0.234(zod@4.4.3))(react@19.2.8)(zod@4.4.3)
       '@cloudflare/sandbox':
-        specifier: 0.12.3
-        version: 0.12.3(@xterm/xterm@6.0.0)
+        specifier: 0.12.4
+        version: 0.12.4(@xterm/xterm@6.0.0)
       '@codemirror/autocomplete':
         specifier: ^6.20.3
         version: 6.20.3
@@ -712,8 +712,8 @@ packages:
     resolution: {integrity: sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg==}
     engines: {node: '>=22.0.0'}
 
-  '@cloudflare/sandbox@0.12.3':
-    resolution: {integrity: sha512-4yx+PtBCZBrS3eZteefwBfGOm+8MTZahLH8/fG/qsvqoNflzno9780FsM6HZf02gGuoDy+s9jQrXbg/h5gEvgw==}
+  '@cloudflare/sandbox@0.12.4':
+    resolution: {integrity: sha512-0gpkd+a58Q5aGjgXvLFZSdIDAZpvh89QlaiHBpTtkDZWqHPKfyISV76/pIUzzo9ACJzVIpUO8hNv2X+LFTTiRQ==}
     peerDependencies:
       '@openai/agents': ^0.3.3
       '@opencode-ai/sdk': ^1.1.40
@@ -6165,7 +6165,7 @@ snapshots:
 
   '@cloudflare/kv-asset-handler@0.5.0': {}
 
-  '@cloudflare/sandbox@0.12.3(@xterm/xterm@6.0.0)':
+  '@cloudflare/sandbox@0.12.4(@xterm/xterm@6.0.0)':
     dependencies:
       '@cloudflare/containers': 0.3.7
       aws4fetch: 1.0.20

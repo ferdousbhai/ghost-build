@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button } from '~/components/ui/primitives/Button';
+import { TextInput } from '~/components/ui/primitives/TextInput';
 import { signInWithCloudflare } from '~/lib/auth-client';
 
 type ConnectionStatus = {
@@ -7,6 +8,11 @@ type ConnectionStatus = {
   status: 'linking' | 'active' | 'revoked' | 'error' | null;
   accountName?: string | null;
   aiBillingEnabled: boolean;
+  workspaceRuntime?: {
+    status: 'not_configured' | 'provisioning' | 'ready' | 'error';
+    current: boolean;
+    lastError: string | null;
+  };
   deploymentSecurity?: DeploymentSecurityStatus;
 };
 
@@ -35,6 +41,9 @@ export function CloudflareCard() {
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [loadingMoreSecurity, setLoadingMoreSecurity] = useState(false);
+  const [configuringRuntime, setConfiguringRuntime] = useState(false);
+  const [r2AccessKeyId, setR2AccessKeyId] = useState('');
+  const [r2SecretAccessKey, setR2SecretAccessKey] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -98,6 +107,35 @@ export function CloudflareCard() {
     }
   };
 
+  const configureWorkspaceRuntime = async () => {
+    setConfiguringRuntime(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/cloudflare/workspace-runtime', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ r2AccessKeyId, r2SecretAccessKey }),
+      });
+      const result = (await response.json().catch(() => null)) as {
+        status?: 'ready';
+        current?: boolean;
+        error?: string;
+      } | null;
+      if (!response.ok || result?.status !== 'ready') {
+        throw new Error(result?.error || 'Unable to configure the user-owned workspace runtime.');
+      }
+      setConnection((current) =>
+        current ? { ...current, workspaceRuntime: { status: 'ready', current: true, lastError: null } } : current,
+      );
+      setR2AccessKeyId('');
+      setR2SecretAccessKey('');
+    } catch (runtimeError) {
+      setError(runtimeError instanceof Error ? runtimeError.message : 'Unable to configure project storage.');
+    } finally {
+      setConfiguringRuntime(false);
+    }
+  };
+
   return (
     <section id="cloudflare" className="app-card w-full p-5 sm:p-6" aria-labelledby="cloudflare-heading">
       <p className="app-page-eyebrow">Authentication and billing</p>
@@ -134,20 +172,102 @@ export function CloudflareCard() {
       </div>
       {error ? <p className="mt-3 text-sm text-bolt-elements-icon-error">{error}</p> : null}
       {connection?.connected ? (
-        <DeploymentSecurityPanel
-          status={connection.deploymentSecurity ?? { state: 'checking', items: [], hasMore: false, nextCursor: null }}
-          connecting={connecting}
-          loadingMore={loadingMoreSecurity}
-          onLoadMore={() => void loadMoreSecurity()}
-          onReauthorize={() => void connect()}
-        />
+        <>
+          <WorkspaceRuntimeSetup
+            runtime={connection.workspaceRuntime}
+            accessKeyId={r2AccessKeyId}
+            secretAccessKey={r2SecretAccessKey}
+            configuring={configuringRuntime}
+            onAccessKeyIdChange={setR2AccessKeyId}
+            onSecretAccessKeyChange={setR2SecretAccessKey}
+            onConfigure={() => void configureWorkspaceRuntime()}
+          />
+          <DeploymentSecurityPanel
+            status={connection.deploymentSecurity ?? { state: 'checking', items: [], hasMore: false, nextCursor: null }}
+            connecting={connecting}
+            loadingMore={loadingMoreSecurity}
+            onLoadMore={() => void loadMoreSecurity()}
+            onReauthorize={() => void connect()}
+          />
+        </>
       ) : null}
       <p className="mt-3 text-xs text-content-tertiary">
-        Project backups and oversized workspace files use the managed ghostbuild-user-data R2 bucket in this account.
-        Public share images and temporary deployment artifacts remain with Ghostbuild. Workers Paid is never enabled
-        automatically.
+        Project backups, Sandboxes, previews, validation, builds, and generated apps run in your Cloudflare account.
+        Ghostbuild retains project names, chat history, and account metadata only. Workers Paid is never enabled
+        automatically; your account must already support Containers.
       </p>
     </section>
+  );
+}
+
+function WorkspaceRuntimeSetup({
+  runtime,
+  accessKeyId,
+  secretAccessKey,
+  configuring,
+  onAccessKeyIdChange,
+  onSecretAccessKeyChange,
+  onConfigure,
+}: {
+  runtime: ConnectionStatus['workspaceRuntime'];
+  accessKeyId: string;
+  secretAccessKey: string;
+  configuring: boolean;
+  onAccessKeyIdChange: (value: string) => void;
+  onSecretAccessKeyChange: (value: string) => void;
+  onConfigure: () => void;
+}) {
+  if (runtime?.status === 'ready' && runtime.current) {
+    return (
+      <div className="mt-4 rounded-lg border border-bolt-elements-borderColor px-4 py-3">
+        <p className="text-sm font-medium text-content-primary">User-owned project runtime is ready</p>
+        <p className="mt-1 text-xs text-content-tertiary">
+          Workspace files and execution stay in this connected Cloudflare account.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-4 rounded-lg border border-bolt-elements-borderColor px-4 py-3">
+      <p className="text-sm font-medium text-content-primary">Configure user-owned project storage</p>
+      <p className="mt-1 text-xs text-content-secondary">
+        Create an R2 API token with Object Read &amp; Write access. Its keys are installed directly as secrets in your
+        workspace Worker and are not retained by Ghostbuild.
+      </p>
+      {runtime?.lastError ? <p className="mt-2 text-xs text-bolt-elements-icon-error">{runtime.lastError}</p> : null}
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <label className="grid gap-1 text-xs text-content-secondary">
+          R2 Access Key ID
+          <TextInput
+            value={accessKeyId}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => onAccessKeyIdChange(event.currentTarget.value)}
+          />
+        </label>
+        <label className="grid gap-1 text-xs text-content-secondary">
+          R2 Secret Access Key
+          <TextInput
+            type="password"
+            value={secretAccessKey}
+            autoComplete="new-password"
+            spellCheck={false}
+            onChange={(event) => onSecretAccessKeyChange(event.currentTarget.value)}
+          />
+        </label>
+      </div>
+      <div className="mt-3">
+        <Button
+          size="xs"
+          variant="primary"
+          loading={configuring}
+          disabled={!accessKeyId || !secretAccessKey}
+          onClick={onConfigure}
+        >
+          Configure project runtime
+        </Button>
+      </div>
+    </div>
   );
 }
 

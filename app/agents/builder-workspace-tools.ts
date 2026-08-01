@@ -15,16 +15,17 @@ import {
 } from '~/lib/runtime/action-runner/bounded-pagination';
 import { runListFiles, runSearchText } from '~/lib/runtime/action-runner/project-navigation';
 import { contentRevision, queryFingerprint } from '~/lib/runtime/action-runner/revision';
-import { BuilderWorkspaceConflictError, type BuilderWorkspaceRepository } from './builder-workspace';
+import { BuilderWorkspaceConflictError } from './builder-workspace';
+import type { BuilderWorkspaceApi, BuilderWorkspaceFileMetadata } from './builder-workspace-api';
 import type { ServerWorkspaceToolName } from './builder-workspace-types';
 import { normalizeProjectPath } from '~/lib/runtime/action-runner/project-path';
 import { isRepositoryRetrievalPath } from '~/lib/runtime/action-runner/repository-path-policy';
 
 const MAX_SERVER_SEARCH_TEXT_BYTES = 24 * 1024 * 1024;
-type WorkspaceFileMetadata = ReturnType<BuilderWorkspaceRepository['listFiles']>[number];
+type WorkspaceFileMetadata = BuilderWorkspaceFileMetadata;
 
 export async function executeBuilderWorkspaceTool(args: {
-  workspace: BuilderWorkspaceRepository;
+  workspace: BuilderWorkspaceApi;
   toolCallId: string;
   toolName: ServerWorkspaceToolName;
   input: unknown;
@@ -74,7 +75,7 @@ export async function executeBuilderWorkspaceTool(args: {
 }
 
 async function runView(
-  workspace: BuilderWorkspaceRepository,
+  workspace: BuilderWorkspaceApi,
   input: unknown,
   workspaceRevision: number,
 ): Promise<GhostbuildToolResult> {
@@ -160,7 +161,7 @@ function directoryEntries(
 }
 
 async function runEdit(
-  workspace: BuilderWorkspaceRepository,
+  workspace: BuilderWorkspaceApi,
   toolCallId: string,
   input: unknown,
 ): Promise<GhostbuildToolResult> {
@@ -193,7 +194,7 @@ async function runEdit(
 }
 
 async function runWriteFile(
-  workspace: BuilderWorkspaceRepository,
+  workspace: BuilderWorkspaceApi,
   toolCallId: string,
   input: unknown,
 ): Promise<GhostbuildToolResult> {
@@ -228,7 +229,7 @@ function workspaceFileMap(metadata: readonly WorkspaceFileMetadata[]): FileMap {
 }
 
 async function searchableWorkspaceFileMap(
-  workspace: BuilderWorkspaceRepository,
+  workspace: BuilderWorkspaceApi,
   input: ReturnType<typeof searchTextParameters.parse>,
   abortSignal?: AbortSignal,
 ): Promise<FileMap> {

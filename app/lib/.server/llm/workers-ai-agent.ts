@@ -20,7 +20,7 @@ import {
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
 import { fingerprintWorkersAiModelInput } from './workers-ai-prompt-cache';
 import { logProviderFailure } from './provider-error-logging';
-import type { BuilderWorkspaceRepository } from '~/agents/builder-workspace';
+import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 type Messages = GhostbuildMessage[];
@@ -44,7 +44,7 @@ interface WorkersAiAgentOptions {
   };
   accountCredentials: WorkersAiAccountCredentials;
   sessionAffinity: string;
-  workspace: BuilderWorkspaceRepository;
+  workspace: BuilderWorkspaceApi;
   userId: string;
   agentName: string;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;

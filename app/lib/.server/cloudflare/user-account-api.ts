@@ -11,6 +11,19 @@ type WorkerBinding = {
   database_id?: string;
 };
 
+type DurableObjectNamespaceReadback = {
+  id?: string;
+  class?: string;
+  script?: string;
+  use_sqlite?: boolean;
+};
+
+type ContainerApplicationReadback = {
+  id?: string;
+  name?: string;
+  durable_objects?: { namespace_id?: string };
+};
+
 export type ActiveWorkerDeploymentReadback = {
   providerDeploymentId: string;
   workerVersionId: string;
@@ -159,6 +172,150 @@ export class UserCloudflareAccountApi {
     return result.subdomain;
   }
 
+  async deployWorkspaceRuntimeWorker(args: {
+    workerName: string;
+    source: string;
+    bucketName: string;
+    controlPlaneSecret: string;
+    r2AccessKeyId: string;
+    r2SecretAccessKey: string;
+    runtimeVersion: string;
+  }): Promise<{ workerVersionId: string; namespaceId: string }> {
+    requireWorkerName(args.workerName);
+    requireR2BucketName(args.bucketName);
+    if (!/^[a-f0-9]{64}$/.test(args.runtimeVersion) || args.controlPlaneSecret.length < 32) {
+      throw new CloudflareAccountApiError('The workspace runtime identity is invalid.');
+    }
+    if (!args.r2AccessKeyId || !args.r2SecretAccessKey) {
+      throw new CloudflareAccountApiError('R2 backup credentials are required.');
+    }
+    const metadata = {
+      main_module: 'workspace-runtime.mjs',
+      compatibility_date: '2026-07-27',
+      compatibility_flags: ['nodejs_compat'],
+      containers: [{ class_name: 'WorkspaceSandbox' }],
+      bindings: [
+        { type: 'durable_object_namespace', name: 'WORKSPACE_SANDBOX', class_name: 'WorkspaceSandbox' },
+        { type: 'r2_bucket', name: 'BACKUP_BUCKET', bucket_name: args.bucketName },
+        { type: 'secret_text', name: 'CONTROL_PLANE_SECRET', text: args.controlPlaneSecret },
+        { type: 'secret_text', name: 'R2_ACCESS_KEY_ID', text: args.r2AccessKeyId },
+        { type: 'secret_text', name: 'R2_SECRET_ACCESS_KEY', text: args.r2SecretAccessKey },
+        { type: 'plain_text', name: 'BACKUP_BUCKET_NAME', text: args.bucketName },
+        { type: 'plain_text', name: 'CLOUDFLARE_ACCOUNT_ID', text: this.accountId },
+        { type: 'plain_text', name: 'GHOSTBUILD_RUNTIME_VERSION', text: args.runtimeVersion },
+      ],
+      exports: {
+        WorkspaceSandbox: {
+          type: 'durable-object',
+          storage: 'sqlite',
+          container: 'WorkspaceSandbox',
+        },
+      },
+      observability: { enabled: true, logs: { enabled: true, head_sampling_rate: 1 } },
+      annotations: {
+        'workers/message': `Ghostbuild user-owned workspace runtime ${args.runtimeVersion.slice(0, 12)}`,
+        'workers/tag': args.runtimeVersion.slice(0, 64),
+      },
+    };
+    const form = new FormData();
+    form.set('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    form.set(
+      'workspace-runtime.mjs',
+      new Blob([args.source], { type: 'application/javascript+module' }),
+      'workspace-runtime.mjs',
+    );
+    const response = await this.callRaw(`/workers/scripts/${encodeURIComponent(args.workerName)}`, {
+      method: 'PUT',
+      body: form,
+    });
+    const result = await parseCloudflareEnvelope<{
+      id?: string;
+      deployment_id?: string;
+      version_id?: string;
+    }>(response);
+    const workerVersionId = result.version_id ?? result.deployment_id ?? result.id;
+    if (!workerVersionId) {
+      throw new CloudflareAccountApiError('Cloudflare did not identify the workspace runtime deployment.');
+    }
+    const namespaces = await this.call<DurableObjectNamespaceReadback[]>(
+      '/workers/durable_objects/namespaces?per_page=1000',
+      { method: 'GET' },
+    );
+    const namespace = namespaces.find(
+      (candidate) =>
+        candidate.script === args.workerName &&
+        candidate.class === 'WorkspaceSandbox' &&
+        candidate.use_sqlite === true &&
+        candidate.id,
+    );
+    if (!namespace?.id) {
+      throw new CloudflareAccountApiError('Cloudflare did not provision the workspace Sandbox namespace.');
+    }
+    return { workerVersionId, namespaceId: namespace.id };
+  }
+
+  async ensureWorkspaceRuntimeContainer(args: {
+    applicationName: string;
+    namespaceId: string;
+    image: string;
+    maxInstances?: number;
+  }): Promise<{ id: string; name: string }> {
+    requireWorkerName(args.applicationName);
+    if (!/^[0-9a-f-]{32,64}$/i.test(args.namespaceId)) {
+      throw new CloudflareAccountApiError('The workspace Sandbox namespace is invalid.');
+    }
+    if (!/^docker\.io\/[a-z0-9._/-]+:[a-zA-Z0-9._-]+@sha256:[a-f0-9]{64}$/.test(args.image)) {
+      throw new CloudflareAccountApiError('The workspace Sandbox image is not immutable.');
+    }
+    const applications = await this.callContainer<ContainerApplicationReadback[]>('/applications', {
+      method: 'GET',
+    });
+    const existing = applications.find((candidate) => candidate.name === args.applicationName);
+    if (existing?.durable_objects?.namespace_id && existing.durable_objects.namespace_id !== args.namespaceId) {
+      throw new CloudflareAccountApiError(
+        'The workspace container name is already attached to a different Durable Object namespace.',
+      );
+    }
+    const configuration = {
+      configuration: {
+        image: args.image,
+        instance_type: 'basic',
+        observability: { logs: { enabled: true } },
+        wrangler_ssh: false,
+      },
+      max_instances: args.maxInstances ?? 10,
+      constraints: { tiers: [1, 2] },
+      scheduling_policy: 'default',
+      rollout_active_grace_period: 0,
+    };
+    const result = existing?.id
+      ? await this.callContainer<ContainerApplicationReadback>(`/applications/${encodeURIComponent(existing.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify(configuration),
+        })
+      : await this.callContainer<ContainerApplicationReadback>('/applications', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: args.applicationName,
+            ...configuration,
+            instances: 0,
+            durable_objects: { namespace_id: args.namespaceId },
+          }),
+        });
+    if (!result.id || result.name !== args.applicationName) {
+      throw new CloudflareAccountApiError('Cloudflare returned an invalid workspace container application.');
+    }
+    return { id: result.id, name: result.name };
+  }
+
+  async enableWorkerSubdomain(workerName: string): Promise<void> {
+    requireWorkerName(workerName);
+    await this.call<unknown>(`/workers/scripts/${encodeURIComponent(workerName)}/subdomain`, {
+      method: 'POST',
+      body: JSON.stringify({ enabled: true, previews_enabled: false }),
+    });
+  }
+
   /** Reads the exact version currently receiving 100% of production traffic. */
   async readActiveWorkerDeployment(workerName: string): Promise<ActiveWorkerDeploymentReadback | null> {
     if (!/^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/.test(workerName)) {
@@ -253,6 +410,33 @@ export class UserCloudflareAccountApi {
       },
     });
   }
+
+  private async callContainer<T>(path: string, init: RequestInit): Promise<T> {
+    const response = await this.callRaw(`/containers${path}`, {
+      ...init,
+      headers: { 'content-type': 'application/json', ...init.headers },
+    });
+    const payload = (await response.json().catch(() => null)) as
+      CloudflareEnvelope<T> | T | { error?: string; message?: string } | null;
+    if (!response.ok || payload === null) {
+      const message =
+        payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? (('message' in payload && typeof payload.message === 'string' ? payload.message : undefined) ??
+            ('error' in payload && typeof payload.error === 'string' ? payload.error : undefined))
+          : undefined;
+      throw new CloudflareAccountApiError(message || `Cloudflare Containers request failed (${response.status}).`);
+    }
+    if (typeof payload === 'object' && !Array.isArray(payload) && 'success' in payload) {
+      const envelope = payload as CloudflareEnvelope<T>;
+      if (envelope.success !== true || envelope.result === undefined) {
+        throw new CloudflareAccountApiError(
+          envelope.errors?.find((error) => error.message)?.message || 'Cloudflare Containers request failed.',
+        );
+      }
+      return envelope.result;
+    }
+    return payload as T;
+  }
 }
 
 export class CloudflareAccountApiError extends Error {
@@ -274,6 +458,22 @@ function requireR2BucketName(name: string): void {
   if (!R2_BUCKET_NAME_PATTERN.test(name)) {
     throw new CloudflareAccountApiError('R2 bucket name is invalid.');
   }
+}
+
+function requireWorkerName(name: string): void {
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(name)) {
+    throw new CloudflareAccountApiError('Worker name is invalid.');
+  }
+}
+
+async function parseCloudflareEnvelope<T>(response: Response): Promise<T> {
+  const payload = (await response.json().catch(() => null)) as CloudflareEnvelope<T> | null;
+  if (!response.ok || payload?.success !== true || payload.result === undefined) {
+    throw new CloudflareAccountApiError(
+      payload?.errors?.find((error) => error.message)?.message || `Cloudflare API request failed (${response.status}).`,
+    );
+  }
+  return payload.result;
 }
 
 function r2ObjectPath(bucketName: string, objectKey: string): string {

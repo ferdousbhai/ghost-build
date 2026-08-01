@@ -22,7 +22,7 @@ export function sandboxExec(
   return withSandboxRpcTimeout(sandbox.exec(command, options), options.timeout, 'Sandbox RPC');
 }
 
-export function withSandboxRpcTimeout<T>(request: Promise<T>, commandTimeoutMs: number, operation: string): Promise<T> {
+function withSandboxRpcTimeout<T>(request: Promise<T>, commandTimeoutMs: number, operation: string): Promise<T> {
   return withTimeout(
     request,
     commandTimeoutMs + SANDBOX_RPC_GRACE_MS,

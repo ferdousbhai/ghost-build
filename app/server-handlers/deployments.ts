@@ -1,39 +1,26 @@
 import { z } from 'zod';
 import { resolveAgentRequestIdentity } from '~/lib/.server/agent-request-identity';
 import { findCloudflareConnectionForUser } from '~/lib/.server/cloudflare/cloudflare-connection-repository';
-import { buildDeploymentPlan, isCurrentDeploymentPlan } from '~/lib/.server/cloudflare/deployment-plan';
-import { DeploymentSnapshotError } from '~/lib/.server/cloudflare/deployment-snapshot';
+import { buildDeploymentPlanFromSource, isCurrentDeploymentPlan } from '~/lib/.server/cloudflare/deployment-plan';
+import type { DeploymentProjectProfile } from '~/lib/.server/cloudflare/deployment-project-profile';
 import {
   adoptLegacyApprovedDeploymentExecutionGeneration,
   approveDeployment,
   createDeployment,
-  clearDeploymentSnapshot,
-  claimDeploymentSnapshotForRelease,
   DeploymentApprovalDigestMismatchError,
   DeploymentConcurrencyLimitError,
   DeploymentConnectionChangedError,
   DeploymentNotFoundError,
   DeploymentStateConflictError,
   DeploymentSnapshotLimitError,
-  claimOldestReplaceableDeploymentSnapshot,
-  listExpiredDeploymentSnapshots,
   prepareDeploymentRetry,
   requireDeploymentForUser,
   type Deployment,
 } from '~/lib/.server/cloudflare/deployment-repository';
 import { InvalidJsonBodyError, PayloadTooLargeError, readJsonBodyWithLimit } from '~/lib/bounded-body';
-import { InvalidMultipartBodyError, readMultipartBodyWithLimits } from '~/lib/bounded-multipart';
-import { deleteObject, putObjectAtKey } from '~/lib/cloudflare/data/object-storage.server';
-import { cancelObjectGcCandidate, queueObjectGcCandidate } from '~/lib/cloudflare/data/object-gc.server';
+import { executeUserOwnedDeployment } from '~/lib/.server/cloudflare/user-workspace-deployment-executor';
 
-const MAX_DEPLOYMENT_SNAPSHOT_BYTES = 10 * 1024 * 1024;
-const MAX_DEPLOYMENT_REQUEST_BYTES = MAX_DEPLOYMENT_SNAPSHOT_BYTES + 1024 * 1024;
 const MAX_DEPLOYMENT_APPROVAL_BYTES = 4 * 1024;
-const DEPLOYMENT_FORM_FIELDS = {
-  snapshot: { kind: 'file', maximumBytes: MAX_DEPLOYMENT_SNAPSHOT_BYTES },
-} as const;
-const DEPLOYMENT_SNAPSHOT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-const createQuerySchema = z.object({ chatId: z.string().min(1).max(200) });
 const approvalSchema = z.object({
   planDigest: z.string().regex(/^[a-f0-9]{64}$/),
   confirmCloudflareBilling: z.literal(true),
@@ -41,38 +28,11 @@ const approvalSchema = z.object({
 });
 
 export async function createDeploymentPlanAction(args: { request: Request; env: Env }): Promise<Response> {
-  try {
-    const userId = await requireSignedInUser(args.request, args.env);
-    const { chatId } = createQuerySchema.parse(Object.fromEntries(new URL(args.request.url).searchParams));
-    const formData = await readBoundedDeploymentFormData(args.request);
-    const snapshot = formData.get('snapshot');
-    if (!(snapshot instanceof Blob) || snapshot.size === 0 || snapshot.size > MAX_DEPLOYMENT_SNAPSHOT_BYTES) {
-      return Response.json(
-        { error: 'A non-empty deployment snapshot of at most 10 MiB is required.' },
-        { status: 400 },
-      );
-    }
-    const deployment = await createDeploymentPlanForUser({
-      env: args.env,
-      userId,
-      chatId,
-      deploymentId: crypto.randomUUID(),
-      snapshot,
-    });
-    return Response.json({ deployment }, { status: 201 });
-  } catch (error) {
-    return deploymentErrorResponse(error);
-  }
-}
-
-async function createDeploymentPlanForUser(args: {
-  env: Env;
-  userId: string;
-  chatId: string;
-  deploymentId: string;
-  snapshot: Blob;
-}) {
-  return createFreshDeploymentPlanForUser(args);
+  void args;
+  return Response.json(
+    { error: 'Browser-uploaded deployment archives are no longer supported. Deploy the validated workspace backup.' },
+    { status: 410 },
+  );
 }
 
 export async function createOrReplayDeploymentPlanForUser(args: {
@@ -80,11 +40,19 @@ export async function createOrReplayDeploymentPlanForUser(args: {
   userId: string;
   chatId: string;
   deploymentId: string;
-  snapshot: Blob;
+  projectId?: string;
+  revision?: string;
+  workspaceRevision?: number;
+  project?: DeploymentProjectProfile;
+  /** @deprecated Accepted only while old callers are removed. */
+  snapshot?: Blob;
 }) {
+  if (args.snapshot) {
+    throw new Error('Browser-uploaded deployment snapshots are no longer supported.');
+  }
   try {
     const existing = await requireDeploymentForUser(args.env.DB, args.deploymentId, args.userId);
-    if (existing.snapshotKey) {
+    if (existing.snapshotKey === workspaceReference(requireWorkspaceDeploymentArgs(args))) {
       return publicDeployment(existing);
     }
   } catch (error) {
@@ -92,15 +60,46 @@ export async function createOrReplayDeploymentPlanForUser(args: {
       throw error;
     }
   }
-  return createFreshDeploymentPlanForUser(args);
+  const workspaceArgs = requireWorkspaceDeploymentArgs(args);
+  return createFreshWorkspaceDeploymentPlanForUser(workspaceArgs);
 }
 
-async function createFreshDeploymentPlanForUser(args: {
+function requireWorkspaceDeploymentArgs(args: {
   env: Env;
   userId: string;
   chatId: string;
   deploymentId: string;
-  snapshot: Blob;
+  projectId?: string;
+  revision?: string;
+  workspaceRevision?: number;
+  project?: DeploymentProjectProfile;
+}) {
+  if (
+    typeof args.projectId !== 'string' ||
+    typeof args.revision !== 'string' ||
+    typeof args.workspaceRevision !== 'number' ||
+    !args.project
+  ) {
+    throw new Error('The user-owned workspace deployment reference is incomplete.');
+  }
+  return {
+    ...args,
+    projectId: args.projectId,
+    revision: args.revision,
+    workspaceRevision: args.workspaceRevision,
+    project: args.project,
+  };
+}
+
+async function createFreshWorkspaceDeploymentPlanForUser(args: {
+  env: Env;
+  userId: string;
+  chatId: string;
+  deploymentId: string;
+  projectId: string;
+  revision: string;
+  workspaceRevision: number;
+  project: DeploymentProjectProfile;
 }) {
   const connection = await findCloudflareConnectionForUser(args.env.DB, args.userId);
   if (!connection || connection.status !== 'active') {
@@ -116,15 +115,11 @@ async function createFreshDeploymentPlanForUser(args: {
   if (!chat) {
     throw new DeploymentChatNotFoundError();
   }
-  await cleanupExpiredDeploymentSnapshots(args.env, args.userId);
-  await releaseOldestReplaceableSnapshot(args.env, args.userId);
-  const { plan, digest } = await buildDeploymentPlan({
+  const { plan, digest } = await buildDeploymentPlanFromSource({
     deploymentId: args.deploymentId,
-    snapshot: args.snapshot,
+    sourceSha256: args.revision,
+    project: args.project,
   });
-  const snapshotKey = `deployment-snapshots/${args.deploymentId}`;
-  const gcReceipt = await queueObjectGcCandidate(args.env.DB, snapshotKey);
-  await putObjectAtKey(args.env, snapshotKey, args.snapshot);
   const deployment = await createDeployment({
     db: args.env.DB,
     id: args.deploymentId,
@@ -132,56 +127,18 @@ async function createFreshDeploymentPlanForUser(args: {
     userId: args.userId,
     connectionId: connection.id,
     connectionGeneration: connection.generation,
-    snapshotKey,
+    snapshotKey: workspaceReference(args),
     plan,
     planDigest: digest,
-  });
-  await cancelObjectGcCandidate(args.env.DB, gcReceipt).catch((error) => {
-    console.warn('Unable to cancel deployment snapshot cleanup receipt', args.deploymentId, error);
   });
   return publicDeployment(deployment);
 }
 
-async function releaseOldestReplaceableSnapshot(env: Env, userId: string): Promise<void> {
-  const snapshot = await claimOldestReplaceableDeploymentSnapshot({ db: env.DB, userId });
-  if (!snapshot) {
-    return;
+function workspaceReference(args: { projectId: string; revision: string; workspaceRevision: number }): string {
+  if (!/^[a-f0-9]{64}$/.test(args.revision) || !Number.isSafeInteger(args.workspaceRevision)) {
+    throw new Error('The user-owned workspace deployment reference is invalid.');
   }
-  await deleteObject(env, snapshot.snapshotKey);
-  await clearDeploymentSnapshot({
-    db: env.DB,
-    deploymentId: snapshot.deploymentId,
-    snapshotKey: snapshot.snapshotKey,
-  });
-}
-
-async function cleanupExpiredDeploymentSnapshots(env: Env, userId: string): Promise<void> {
-  const expired = await listExpiredDeploymentSnapshots({
-    db: env.DB,
-    userId,
-    updatedBefore: Date.now() - DEPLOYMENT_SNAPSHOT_RETENTION_MS,
-  });
-  for (const snapshot of expired) {
-    try {
-      const claimed = await claimDeploymentSnapshotForRelease({
-        db: env.DB,
-        deploymentId: snapshot.deploymentId,
-        snapshotKey: snapshot.snapshotKey,
-        updatedBefore: Date.now() - DEPLOYMENT_SNAPSHOT_RETENTION_MS,
-      });
-      if (!claimed) {
-        continue;
-      }
-      await deleteObject(env, claimed.snapshotKey);
-      await clearDeploymentSnapshot({
-        db: env.DB,
-        deploymentId: claimed.deploymentId,
-        snapshotKey: claimed.snapshotKey,
-      });
-    } catch (error) {
-      console.error('Unable to expire deployment snapshot', snapshot.deploymentId, error);
-    }
-  }
+  return `workspace-runtime:${encodeURIComponent(args.projectId)}:${args.workspaceRevision}:${args.revision}`;
 }
 
 export async function deploymentAction(args: {
@@ -230,9 +187,6 @@ export async function deploymentAction(args: {
       return Response.json({ deployment: publicDeployment(retry) }, { status: 201 });
     }
     if (args.operation === 'execute') {
-      if (!args.env.DeploymentWorkflow) {
-        return Response.json({ error: 'Production deployment Workflow is not configured.' }, { status: 503 });
-      }
       let deployment = currentDeployment;
       if (
         deployment.connectionId !== connection.id ||
@@ -243,30 +197,14 @@ export async function deploymentAction(args: {
         throw new DeploymentStateConflictError(deployment.status);
       }
       deployment = await adoptLegacyApprovedDeploymentExecutionGeneration({ db: args.env.DB, deployment });
-      const workflowId = `${deployment.id}-${deployment.executionGeneration}`;
-      // createBatch is intentionally used instead of create: Cloudflare
-      // idempotently skips a retained instance with this deterministic ID.
-      const createdInstances = await args.env.DeploymentWorkflow.createBatch([
-        {
-          id: workflowId,
-          params: {
-            deploymentId: deployment.id,
-            userId,
-            connectionId: connection.id,
-            executionGeneration: deployment.executionGeneration,
-          },
-        },
-      ]);
-      if (createdInstances.length === 0) {
-        await restartRetainedDeploymentWorkflowIfSafe({
-          db: args.env.DB,
-          workflow: args.env.DeploymentWorkflow,
-          workflowId,
-          expectedDeployment: deployment,
-          userId,
-        });
-      }
-      return Response.json({ deployment: publicDeployment(deployment) }, { status: 202 });
+      const completed = await executeUserOwnedDeployment({
+        env: args.env,
+        deploymentId: deployment.id,
+        userId,
+        connectionId: connection.id,
+        executionGeneration: deployment.executionGeneration,
+      });
+      return Response.json({ deployment: publicDeployment(completed) });
     }
     const approval = approvalSchema.parse(
       await readJsonBodyWithLimit(args.request, MAX_DEPLOYMENT_APPROVAL_BYTES, 'Deployment approval'),
@@ -285,58 +223,6 @@ export async function deploymentAction(args: {
   }
 }
 
-async function restartRetainedDeploymentWorkflowIfSafe(args: {
-  db: D1Database;
-  workflow: Env['DeploymentWorkflow'];
-  workflowId: string;
-  expectedDeployment: Deployment;
-  userId: string;
-}): Promise<void> {
-  const instance = await args.workflow.get(args.workflowId);
-  const initialStatus = (await instance.status()).status;
-  if (initialStatus === 'unknown') {
-    throw new Error(`Unable to determine retained deployment Workflow status for ${args.workflowId}.`);
-  }
-  if (initialStatus !== 'errored' && initialStatus !== 'terminated') {
-    return;
-  }
-
-  const current = await requireDeploymentForUser(args.db, args.expectedDeployment.id, args.userId);
-  if (!isSameApprovedExecution(current, args.expectedDeployment, args.userId)) {
-    return;
-  }
-
-  try {
-    await instance.restart();
-  } catch (error) {
-    // Another repeated execute request may have restarted the same retained
-    // instance after our status check. Treat that race as the same idempotent
-    // success, but preserve genuine restart failures.
-    const statusAfterFailure = (await instance.status()).status;
-    if (statusAfterFailure !== 'errored' && statusAfterFailure !== 'terminated' && statusAfterFailure !== 'unknown') {
-      return;
-    }
-    throw error;
-  }
-}
-
-function isSameApprovedExecution(current: Deployment, expected: Deployment, userId: string): boolean {
-  return (
-    current.id === expected.id &&
-    current.userId === userId &&
-    expected.userId === userId &&
-    current.status === 'approved' &&
-    current.executionGeneration === expected.executionGeneration &&
-    current.approvedAt === expected.approvedAt &&
-    current.approvedDigest === expected.approvedDigest &&
-    current.planDigest === expected.planDigest &&
-    current.snapshotKey === expected.snapshotKey &&
-    current.connectionId === expected.connectionId &&
-    current.connectionGeneration === expected.connectionGeneration &&
-    current.plan.deploymentId === expected.plan.deploymentId
-  );
-}
-
 async function requireSignedInUser(request: Request, env: Env): Promise<string> {
   const identity = await resolveAgentRequestIdentity(request, env);
   if (!identity?.userId) {
@@ -348,20 +234,6 @@ async function requireSignedInUser(request: Request, env: Env): Promise<string> 
 class DeploymentAuthenticationError extends Error {}
 class DeploymentConnectionRequiredError extends Error {}
 class DeploymentChatNotFoundError extends Error {}
-
-async function readBoundedDeploymentFormData(request: Request): Promise<FormData> {
-  const parts = await readMultipartBodyWithLimits(request, {
-    label: 'Deployment request',
-    maximumBytes: MAX_DEPLOYMENT_REQUEST_BYTES,
-    fields: DEPLOYMENT_FORM_FIELDS,
-  });
-  const formData = new FormData();
-  const snapshot = parts.get('snapshot');
-  if (snapshot instanceof Blob) {
-    formData.set('snapshot', snapshot);
-  }
-  return formData;
-}
 
 function publicDeployment(deployment: Deployment) {
   return {
@@ -392,14 +264,11 @@ function deploymentErrorResponse(error: unknown): Response {
   if (error instanceof PayloadTooLargeError) {
     return Response.json({ error: 'Deployment request exceeds the 11 MiB request limit.' }, { status: 413 });
   }
-  if (error instanceof InvalidJsonBodyError || error instanceof InvalidMultipartBodyError) {
+  if (error instanceof InvalidJsonBodyError) {
     return Response.json({ error: 'Invalid deployment request.' }, { status: 400 });
   }
   if (error instanceof z.ZodError) {
     return Response.json({ error: 'Invalid deployment request.', issues: error.issues }, { status: 400 });
-  }
-  if (error instanceof DeploymentSnapshotError) {
-    return Response.json({ error: error.message }, { status: 400 });
   }
   if (error instanceof DeploymentNotFoundError) {
     return Response.json({ error: error.message }, { status: 404 });

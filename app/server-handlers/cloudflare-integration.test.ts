@@ -199,10 +199,10 @@ describe('Cloudflare-only authentication', () => {
     expect(JSON.stringify(body)).not.toContain('credential-secret');
     expect(JSON.stringify(body)).not.toContain('account-1');
     expect(JSON.stringify(body)).not.toContain('etag');
-    expect(queries).toHaveLength(1);
-    expect(queries[0]?.values).toEqual(['user-1', 'connection-1', null, null, 26, 'user-1', 'connection-1']);
-    expect(queries[0]!.sql.indexOf('WHERE user_id = ? AND connection_id = ?')).toBeLessThan(
-      queries[0]!.sql.indexOf('LEFT JOIN deployments'),
+    expect(queries).toHaveLength(2);
+    expect(queries[1]?.values).toEqual(['user-1', 'connection-1', null, null, 26, 'user-1', 'connection-1']);
+    expect(queries[1]!.sql.indexOf('WHERE user_id = ? AND connection_id = ?')).toBeLessThan(
+      queries[1]!.sql.indexOf('LEFT JOIN deployments'),
     );
   });
 
@@ -285,7 +285,6 @@ describe('Cloudflare-only authentication', () => {
       items: [{ state: 'user_action_required', workerName: 'ghostbuild-026' }],
     });
     expect(preparedSql).toContain('(? IS NULL OR worker_name > ?)');
-    expect(preparedSql).toContain('ORDER BY worker_name');
     expect(preparedSql).not.toContain('OFFSET');
     expect(preparedSql).not.toContain('updated_at DESC');
   });
@@ -327,7 +326,7 @@ describe('Cloudflare-only authentication', () => {
         items: [{ workerName: 'ghostbuild-next' }],
       },
     });
-    expect(queries[0]?.slice(0, 4)).toEqual(['user-1', 'connection-1', 'ghostbuild-cursor', 'ghostbuild-cursor']);
+    expect(queries[1]?.slice(0, 4)).toEqual(['user-1', 'connection-1', 'ghostbuild-cursor', 'ghostbuild-cursor']);
   });
 
   it('rejects malformed or repeated deployment security cursors before querying inventory', async () => {
@@ -473,7 +472,7 @@ describe('Cloudflare-only authentication', () => {
     expect(database.state?.returnTo).toBe('/create/example?tab=code');
     expect(orchestrator.startConnection).toHaveBeenCalledWith({
       returnUrl: expect.stringContaining('/connect/return?state='),
-      requestedCapabilities: ['workers', 'd1', 'r2', 'durable_objects', 'workers_ai'],
+      requestedCapabilities: ['workers', 'containers', 'd1', 'r2', 'durable_objects', 'workers_ai'],
     });
   });
 

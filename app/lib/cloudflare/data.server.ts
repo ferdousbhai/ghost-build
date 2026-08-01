@@ -53,12 +53,7 @@ import { getAuthSession } from '~/lib/.server/auth';
 import { MAX_THUMBNAIL_BYTES } from '~/lib/thumbnail-policy';
 import { readBodyBytesWithLimit, readJsonBodyWithLimit } from '~/lib/bounded-body';
 import { readMultipartBodyWithLimits } from '~/lib/bounded-multipart';
-import {
-  assertLz4Payload,
-  MESSAGE_HISTORY_LZ4_LIMITS,
-  PROJECT_SNAPSHOT_LZ4_LIMITS,
-  type Lz4PayloadLimits,
-} from '~/lib/compression-limits';
+import { assertLz4Payload, MESSAGE_HISTORY_LZ4_LIMITS, type Lz4PayloadLimits } from '~/lib/compression-limits';
 import { MAX_SUBCHAT_INDEX } from './data-pagination';
 import {
   admitChatBackupRequest,
@@ -107,7 +102,6 @@ const MAX_FIRST_MESSAGE_BYTES = 64 * 1024;
 const MAX_BACKUP_REQUEST_BYTES = CHAT_BACKUP_MAX_INTAKE_BYTES;
 const CHAT_BACKUP_FIELDS = {
   messages: { kind: 'file', maximumBytes: MESSAGE_HISTORY_LZ4_LIMITS.compressedBytes },
-  snapshot: { kind: 'file', maximumBytes: PROJECT_SNAPSHOT_LZ4_LIMITS.compressedBytes },
   firstMessage: { kind: 'text', maximumBytes: MAX_FIRST_MESSAGE_BYTES },
 } as const;
 
@@ -182,24 +176,19 @@ export async function storeChatAction({ request, env }: { request: Request; env:
         fields: CHAT_BACKUP_FIELDS,
       });
       const messageBlob = parts.get('messages');
-      const snapshotBlob = parts.get('snapshot');
       const firstMessage = parts.get('firstMessage');
       if (messageBlob instanceof Blob) {
         await validateLz4Upload(messageBlob, MESSAGE_HISTORY_LZ4_LIMITS);
       }
-      if (snapshotBlob instanceof Blob) {
-        await validateLz4Upload(snapshotBlob, PROJECT_SNAPSHOT_LZ4_LIMITS);
-      }
       admission = await reserveChatBackupBytes(
         env,
         admission,
-        (messageBlob instanceof Blob ? messageBlob.size : 0) + (snapshotBlob instanceof Blob ? snapshotBlob.size : 0),
-        (messageBlob instanceof Blob ? 1 : 0) + (snapshotBlob instanceof Blob ? 1 : 0),
+        messageBlob instanceof Blob ? messageBlob.size : 0,
+        messageBlob instanceof Blob ? 1 : 0,
       );
       await enforceChatStorageRetention(env.DB, { chatId: chat.id, reserveStates: 1 });
       const initialDescription = typeof firstMessage === 'string' ? deriveProvisionalTitle(firstMessage) : null;
       const storageKey = messageBlob instanceof Blob ? allocateCustomerObjectKey(sessionId, 'message-history') : null;
-      const snapshotKey = snapshotBlob instanceof Blob ? allocateCustomerObjectKey(sessionId, 'snapshots') : null;
       const storageGcReceipt = storageKey ? await queueObjectGcCandidate(env.DB, storageKey) : null;
       if (storageKey && messageBlob instanceof Blob) {
         await registerChatBackupObject(env.DB, {
@@ -209,16 +198,6 @@ export async function storeChatAction({ request, env }: { request: Request; env:
           kind: 'message-history',
         });
         await putObjectAtKey(env, storageKey, messageBlob);
-      }
-      const snapshotGcReceipt = snapshotKey ? await queueObjectGcCandidate(env.DB, snapshotKey) : null;
-      if (snapshotKey && snapshotBlob instanceof Blob) {
-        await registerChatBackupObject(env.DB, {
-          admission,
-          storageKey: snapshotKey,
-          sizeBytes: snapshotBlob.size,
-          kind: 'snapshot',
-        });
-        await putObjectAtKey(env, snapshotKey, snapshotBlob);
       }
 
       const durableAfterUpload = await getBuilderTranscriptSnapshot(env, transcriptIdentity(transcript), sessionId);
@@ -230,7 +209,7 @@ export async function storeChatAction({ request, env }: { request: Request; env:
         sessionId,
         chatId,
         storageKey,
-        snapshotKey,
+        snapshotKey: null,
         lastMessageRank,
         subchatIndex,
         partIndex,
@@ -243,9 +222,6 @@ export async function storeChatAction({ request, env }: { request: Request; env:
       await completeChatBackupAdmission(env.DB, admission);
       if (update.retainedStorageKey && storageGcReceipt) {
         await cancelObjectGcCandidateBestEffort(env.DB, storageGcReceipt);
-      }
-      if (update.retainedSnapshotKey && snapshotGcReceipt) {
-        await cancelObjectGcCandidateBestEffort(env.DB, snapshotGcReceipt);
       }
       try {
         await enforceChatStorageRetention(env.DB, { chatId: chat.id, reserveStates: 0 });

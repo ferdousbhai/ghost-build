@@ -12,7 +12,7 @@ import type { GhostbuildToolName, GhostbuildToolSet } from 'ghostbuild-agent/typ
 import { z, type ZodType } from 'zod';
 import { isGhostbuildToolResult, toolFailure, toolResultSucceeded } from 'ghostbuild-agent/tool-result';
 import type { Tool } from 'ai';
-import type { BuilderWorkspaceRepository } from '~/agents/builder-workspace';
+import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import { executeBuilderWorkspaceTool } from '~/agents/builder-workspace-tools';
 import type { ServerWorkspaceToolName } from '~/agents/builder-workspace-types';
 import type { ServerOperationToolName } from '~/agents/builder-workspace-types';
@@ -64,7 +64,7 @@ const AUTOMATIC_TOOLS: GhostbuildToolName[] = [
 const IMPLEMENTATION_TOOLS = AUTOMATIC_TOOLS.filter((toolName) => toolName !== 'validateProject');
 
 export function createWorkersAiTools(
-  workspace: BuilderWorkspaceRepository,
+  workspace: BuilderWorkspaceApi,
   operationContext: BuilderOperationContext,
 ): GhostbuildToolSet {
   const guardToolCall = createTurnToolCallGuard();
@@ -99,7 +99,7 @@ export function createWorkersAiTools(
 function serverOperationTool(
   toolName: ServerOperationToolName,
   definition: Tool,
-  workspace: BuilderWorkspaceRepository,
+  workspace: BuilderWorkspaceApi,
   context: BuilderOperationContext,
   guardToolCall: TurnToolCallGuard,
   coordinateStatefulTool: TurnStatefulToolCoordinator,
@@ -138,7 +138,7 @@ function serverOperationTool(
 function serverWorkspaceTool(
   toolName: ServerWorkspaceToolName,
   definition: Tool,
-  workspace: BuilderWorkspaceRepository,
+  workspace: BuilderWorkspaceApi,
   guardToolCall: TurnToolCallGuard,
   coordinateStatefulTool: TurnStatefulToolCoordinator,
 ): Tool {

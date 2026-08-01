@@ -13,11 +13,11 @@ describe('BuilderAgent garbage collection', () => {
     const database = new AgentGcDatabase([candidate({ max_generation: 1 })]);
 
     await expect(sweepAgentGcCandidates(database.env, { now: 100 })).resolves.toBe(1);
-    expect(database.scheduleDestroy).toHaveBeenLastCalledWith('chat');
+    expect(database.scheduleDestroy).toHaveBeenLastCalledWith('chat', 'owner');
     expect(database.candidates[0]).toMatchObject({ next_generation: 1, attempts: 0, not_before: 100 });
 
     await expect(sweepAgentGcCandidates(database.env, { now: 100 })).resolves.toBe(1);
-    expect(database.scheduleDestroy).toHaveBeenLastCalledWith('chat--transcript-0-1');
+    expect(database.scheduleDestroy).toHaveBeenLastCalledWith('chat--transcript-0-1', 'owner');
     expect(database.candidates).toEqual([]);
     expect(database.destroy).not.toHaveBeenCalled();
   });
@@ -98,6 +98,7 @@ describe('BuilderAgent garbage collection receipts', () => {
 type Candidate = {
   chat_id: string;
   initial_id: string;
+  owner_id: string;
   subchat_index: number;
   next_generation: number;
   max_generation: number;
@@ -109,6 +110,7 @@ function candidate(overrides: Partial<Candidate> = {}): Candidate {
   return {
     chat_id: 'chat-row',
     initial_id: 'chat',
+    owner_id: 'owner',
     subchat_index: 0,
     next_generation: 0,
     max_generation: 0,
@@ -119,7 +121,9 @@ function candidate(overrides: Partial<Candidate> = {}): Candidate {
 }
 
 class AgentGcDatabase {
-  readonly scheduleDestroy = vi.fn<(name: string) => Promise<void>>(async (_name: string) => undefined);
+  readonly scheduleDestroy = vi.fn<(name: string, ownerId: string) => Promise<void>>(
+    async (_name: string, _ownerId: string) => undefined,
+  );
   readonly destroy = vi.fn(async (_name: string) => undefined);
 
   constructor(readonly candidates: Candidate[]) {}
@@ -135,7 +139,7 @@ class AgentGcDatabase {
     },
     BuilderAgent: {
       getByName: (name: string) => ({
-        scheduleDestroyForGc: () => this.scheduleDestroy(name),
+        scheduleDestroyForGc: (ownerId: string) => this.scheduleDestroy(name, ownerId),
         destroy: () => this.destroy(name),
       }),
     },
