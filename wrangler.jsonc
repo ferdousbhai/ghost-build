@@ -28,6 +28,16 @@
   "version_metadata": {
     "binding": "CF_VERSION_METADATA",
   },
+  "exports": {
+    "BuilderAgent": {
+      "type": "durable-object",
+      "state": "deleted",
+    },
+    "DeploymentSandbox": {
+      "type": "durable-object",
+      "state": "deleted",
+    },
+  },
   "ratelimits": [
     {
       "name": "CLOUDFLARE_OAUTH_START_RATE_LIMITER",
