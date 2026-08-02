@@ -204,15 +204,20 @@ describe('generated app production module security', () => {
     }
   });
 
-  test('allows only the exact reviewed Agents client helper to import partyserver', () => {
+  test('allows only the exact reviewed Agents modules to import partyserver', () => {
     const packageRequire = createRequire(resolve('template/package.json'));
     const agentsEntry = packageRequire.resolve('agents');
-    const reviewedHelper = resolve(agentsEntry, '../client-C7F0MaVz.js');
+    const mcpHelper = resolve(agentsEntry, '../client-zqKcsyFa.js');
     const partyserverEntry = createRequire(agentsEntry).resolve('partyserver');
 
-    expect(findRuntimeModuleImportViolation(reviewedHelper, partyserverEntry, resolve('template'))).toBeNull();
-    expect(() => transformResolvedModule(readFileSync(reviewedHelper, 'utf8'), reviewedHelper)).not.toThrow();
-    expect(() => transformResolvedModule(`${readFileSync(reviewedHelper, 'utf8')}\n`, reviewedHelper)).toThrow(
+    expect(findRuntimeModuleImportViolation(agentsEntry, partyserverEntry, resolve('template'))).toBeNull();
+    expect(findRuntimeModuleImportViolation(mcpHelper, partyserverEntry, resolve('template'))).toBeNull();
+    expect(() => transformResolvedModule(readFileSync(agentsEntry, 'utf8'), agentsEntry)).not.toThrow();
+    expect(() => transformResolvedModule(readFileSync(mcpHelper, 'utf8'), mcpHelper)).not.toThrow();
+    expect(() => transformResolvedModule(`${readFileSync(agentsEntry, 'utf8')}\n`, agentsEntry)).toThrow(
+      'no longer matches its exact security baseline',
+    );
+    expect(() => transformResolvedModule(`${readFileSync(mcpHelper, 'utf8')}\n`, mcpHelper)).toThrow(
       'no longer matches its exact security baseline',
     );
   });

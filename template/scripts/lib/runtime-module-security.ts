@@ -172,9 +172,13 @@ const REVIEWED_MODULE_CAPABILITIES = new Map<
   ReadonlySet<RuntimeCapability>
 >([
   ["project:src/app-bindings.ts", new Set(["ambient-workers-module"])],
-  ["package:agents@0.17.4/dist/index.js", new Set(["ambient-workers-module"])],
+  ["package:agents@0.20.1/dist/index.js", new Set(["ambient-workers-module"])],
   [
-    "package:partyserver@0.5.8/dist/index.js",
+    "package:agents@0.20.1/dist/cloudflare-BduZwmYK.js",
+    new Set(["ambient-workers-module"]),
+  ],
+  [
+    "package:partyserver@0.5.9/dist/index.js",
     new Set(["ambient-workers-module"]),
   ],
   [
@@ -189,12 +193,20 @@ const REVIEWED_MODULE_CAPABILITIES = new Map<
 
 const REVIEWED_PACKAGE_MODULE_SHA256 = new Map([
   [
-    "package:agents@0.17.4/dist/index.js",
-    "e80dca458031bf63d960fdad3881cf062da55512144ed4f5a00aa441586c2a48",
+    "package:agents@0.20.1/dist/index.js",
+    "eae420dafd2dc41cefa369f1d80feefacaa1f11cac6a1becb402c96b21043a4a",
   ],
   [
-    "package:partyserver@0.5.8/dist/index.js",
+    "package:partyserver@0.5.9/dist/index.js",
     "a15a4d1903c1696d288eb793cf29a0bd1fa2105ff10cde41648bb3dc2313bcc5",
+  ],
+  [
+    "package:agents@0.20.1/dist/cloudflare-BduZwmYK.js",
+    "8114fd7ace8e21cc09039e94e04322f265f70b8eb9ff4185f5fa7f5b659e16c0",
+  ],
+  [
+    "package:agents@0.20.1/dist/client-zqKcsyFa.js",
+    "23d25d934bb1a7d4970df286be4e8f1f36cdc4ef1acf93a5dcdf188352e4f2b4",
   ],
   [
     "package:ajv@8.20.0/dist/compile/index.js",
@@ -203,10 +215,6 @@ const REVIEWED_PACKAGE_MODULE_SHA256 = new Map([
   [
     "package:core-js-pure@3.49.0/internals/global-this.js",
     "48246f2542635417cf3f8c6bcf99d7a991668ea1284d869671fcb5b63a4af8c8",
-  ],
-  [
-    "package:agents@0.17.4/dist/client-C7F0MaVz.js",
-    "8d7a5ce2e0a4ea6caadb54b6206f977af9d4506230a4c508571b99cadddecf06",
   ],
 ]);
 
@@ -220,18 +228,19 @@ const REVIEWED_PACKAGE_MODULE_SHA256 = new Map([
 const PRIVILEGED_RUNTIME_MODULES = new Set([
   "project:src/server.ts",
   "project:src/agents/app-agent.ts",
-  "package:agents@0.17.4/dist/index.js",
-  "package:partyserver@0.5.8/dist/index.js",
-  "package:@cloudflare/ai-chat@0.9.3/dist/index.js",
+  "package:agents@0.20.1/dist/index.js",
+  "package:agents@0.20.1/dist/client-zqKcsyFa.js",
+  "package:partyserver@0.5.9/dist/index.js",
+  "package:@cloudflare/ai-chat@0.10.1/dist/index.js",
 ]);
 
 const REVIEWED_PRIVILEGED_IMPORTERS = new Set([
   "project:src/server.ts",
   "project:src/agents/app-agent.ts",
-  "package:agents@0.17.4/dist/index.js",
-  "package:agents@0.17.4/dist/client-C7F0MaVz.js",
-  "package:partyserver@0.5.8/dist/index.js",
-  "package:@cloudflare/ai-chat@0.9.3/dist/index.js",
+  "package:agents@0.20.1/dist/index.js",
+  "package:agents@0.20.1/dist/client-zqKcsyFa.js",
+  "package:partyserver@0.5.9/dist/index.js",
+  "package:@cloudflare/ai-chat@0.10.1/dist/index.js",
 ]);
 
 export function productionModuleSecurityPlugin(projectDir: string): Plugin {
@@ -356,7 +365,7 @@ function importViolationMessage(
 }
 
 function applyReviewedModulePatch(identity: string, source: string): string {
-  if (identity !== "package:partyserver@0.5.8/dist/index.js") {
+  if (identity !== "package:partyserver@0.5.9/dist/index.js") {
     return source;
   }
   const ambientImport =

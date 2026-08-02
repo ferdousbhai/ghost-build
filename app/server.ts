@@ -82,7 +82,7 @@ function withApplicationSecurityHeaders(response: Response, pathname: string) {
 
 type ServerRoute = {
   method: 'GET' | 'POST';
-  handler: (request: Request, env: Env, ctx?: ExecutionContext) => Response | Promise<Response>;
+  handler: (request: Request, env: Env) => Response | Promise<Response>;
 };
 
 const exactRoutes: Record<string, ServerRoute> = {
@@ -125,9 +125,9 @@ const exactRoutes: Record<string, ServerRoute> = {
 };
 
 export default {
-  async fetch(request: Request, env: Env, ctx?: ExecutionContext) {
+  async fetch(request: Request, env: Env) {
     const pathname = new URL(request.url).pathname;
-    return withApplicationSecurityHeaders(await routeApplicationRequest(request, env, ctx), pathname);
+    return withApplicationSecurityHeaders(await routeApplicationRequest(request, env), pathname);
   },
   scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(runScheduledMaintenance(env));
@@ -138,12 +138,12 @@ async function runScheduledMaintenance(env: Env) {
   await pruneCloudflareAuthDataBestEffort(env.DB);
 }
 
-async function routeApplicationRequest(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
+async function routeApplicationRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
 
   const route = exactRoutes[url.pathname];
   if (route) {
-    return requireMethod(request, route.method, () => route.handler(request, env, ctx));
+    return requireMethod(request, route.method, () => route.handler(request, env));
   }
 
   return handler.fetch(request);

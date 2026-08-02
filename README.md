@@ -26,13 +26,13 @@ Production provisioning and the Cloudflare Workers Builds deployment path are do
 
 ## Commands
 
-| Command                     | Purpose                                        |
-| --------------------------- | ---------------------------------------------- |
-| `pnpm run validate`         | Run the complete repository validation         |
-| `pnpm run build`            | Build the root Worker application              |
-| `pnpm run rebuild-template` | Rebuild the bundled durable workspace template |
-| `pnpm run deploy`           | Validate, verify, migrate, and deploy          |
-| `pnpm run sbom:production`  | Print a reproducible production SPDX SBOM      |
+| Command                          | Purpose                                         |
+| -------------------------------- | ----------------------------------------------- |
+| `pnpm run validate`              | Run the complete repository validation          |
+| `pnpm run build`                 | Build the root Worker application               |
+| `pnpm run rebuild-template`      | Rebuild the bundled durable workspace template  |
+| `pnpm run workers-builds:deploy` | Production deploy entrypoint for Workers Builds |
+| `pnpm run sbom:production`       | Print a reproducible production SPDX SBOM       |
 
 Use [AGENTS.md](AGENTS.md) as the source index, [ARCHITECTURE.md](ARCHITECTURE.md) for runtime boundaries, and
 [DEVELOPMENT.md](DEVELOPMENT.md) for contributor workflows.

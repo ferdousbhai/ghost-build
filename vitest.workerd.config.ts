@@ -18,15 +18,9 @@ for (const [name, value] of Object.entries(testSecrets)) {
 
 const serverDependencyStubs = new Set([
   '@tanstack/react-start/server-entry',
-  './agents/builder-agent',
-  './lib/.server/agent-request-identity',
-  './lib/cloudflare/data.server',
   './lib/cloudflare/data/cloudflare-auth-retention.server',
-  './lib/cloudflare/data/deferred-gc.server',
   './server-handlers/auth',
   './server-handlers/cloudflare-integration',
-  './server-handlers/deployments',
-  './server-handlers/enhance-prompt',
 ]);
 
 function isolateRootWorkerRoutes(): Plugin {

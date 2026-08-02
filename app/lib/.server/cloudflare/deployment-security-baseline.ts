@@ -1,6 +1,6 @@
 import { BUILDER_TEMPLATE_SOURCE_SHA256 } from '~/agents/builder-template.generated';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 19 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 20 as const;
 export const DEPLOYMENT_SECURITY_CLEANUP_CRON = '0 3 * * *';
 export const DEPLOYMENT_VERSION_METADATA_BINDING = 'CF_VERSION_METADATA';
 export const DEPLOYMENT_SECURITY_BASELINE_BINDING = 'GHOSTBUILD_SECURITY_BASELINE_VERSION';
@@ -29,7 +29,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'migrations/0001_app_data.sql': '114d3df6142196cb43a95e5896e1b9a8e8753514becf3400884b27acb5793d65',
   'agent-security-migrations/0001_agent_security.sql':
     'cc62c34bcfb5e176155e371a099d000679ae69877facf252fe3d3c7e1190fbeb',
-  'vite.config.ts': '34e780879ba9793aa825fddd08f2a2d773c7fc8773f1f769f1f62dfe923d567c',
+  'vite.config.ts': '37150c806c6cb06cb59a96e000973192e080a43bd64d07fe6b5fd21f77b8d0fe',
   'vite.preview.config.mjs': 'cf4b76fc5b0a6db0a6b97a51dab6b981474c723d960653efcfafc46480d385a3',
   'tsconfig.json': 'a005fcf59f0217cc7486892312d032adad3e400f86c396d4150390247c989b6a',
   'postcss.config.cjs': 'fa650b380adfabb151a0b352f7135e107e6352345f899060f1c5c231228f94bf',
@@ -49,7 +49,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/verify-production-config.mjs': 'b22c025b4c3e4a53aa8c2edca59ead871979dbadad6d575bfb052e44ed645a8d',
   'scripts/verify-production-licenses.mjs': '22952be32b45c416551ca2681a202b72c616aca61c6643ce946868373320a82d',
   'scripts/lib/production-license-artifact.mjs': 'e9ff7fc97973e4299f9a4b3026f148f3e32e6c2ff71d21bdbc40ae1e60d49892',
-  'scripts/lib/runtime-module-security.ts': 'da536c84a63bb5e4c6ad4c301a64d329ac25b870c808f1df54a927022c7d6939',
+  'scripts/lib/runtime-module-security.ts': 'b3bfa3863b861a3d2a6fc068e29c8bbde7c240634058bd3537a124c876dbf8f9',
   'scripts/lib/project-policy.mjs': '5a2e78715a0daf68a7b3781211b0b0deaec04e61bf3e36b98597b9f0b885b32b',
   'scripts/lib/project-policy/dependency-policy.mjs':
     '5ba6a6bd6d2f7ce4d1c64e2238d647d709ed9ea7c35ff312e9eb926606aa2298',
@@ -59,10 +59,10 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/lib/project-policy/workspace-policy.mjs': '237800ac1f899b2c9cf91ec9bc11fb31e2832a5b77922662bc826edfb00ede65',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '39229d42449c80b4a2c1d63a511eb374b60eb633ffdbfe4d901163aa8079fa13';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '9929f2a8c5821a88fa54247b70cdc56ec73dc665389424d752aef53cdf43c765';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
-  '619dcb199e10da6f0f84cbdffdc5551cd388968ed8861cc8cb6310b84bbf463e';
+  'fdb32854a27fb5a6d9d2c191f89bd58a2145b63d1a98cb4e572fbe6cec6f5baf';
 
 export function isCurrentDeploymentSecurityIdentity(value: {
   version?: unknown;

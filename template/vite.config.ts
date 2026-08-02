@@ -20,7 +20,7 @@ async function productionPlugins(): Promise<PluginOption[]> {
     import("@cloudflare/vite-plugin"),
     import("agents/vite"),
     import("@vitejs/plugin-react"),
-    import("./scripts/lib/runtime-module-security"),
+    import("./scripts/lib/runtime-module-security.ts"),
   ]);
 
   return [

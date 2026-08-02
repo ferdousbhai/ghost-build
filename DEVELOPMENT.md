@@ -19,128 +19,98 @@ Run the same complete pipeline used by CI:
 pnpm run validate
 ```
 
-Useful narrower checks are exposed as `validate:root`, `validate:agent`, `validate:template`, `test`, `test:workerd`,
-`typecheck`, and `lint` scripts in `package.json`. Generated files produced by verification must leave the worktree
-clean.
+Useful narrower checks are `validate:root`, `validate:agent`, `validate:template`, `test`, `test:workerd`, `typecheck`,
+and `lint`. Generated files produced by verification must leave the worktree clean.
 
-`pnpm run verify:licenses` checks every installed production dependency against the reviewed license-expression
-allowlist in `scripts/production-license-policy.json` and requires the exact-version
-`public/THIRD_PARTY_LICENSES.txt` artifact to be current. Run `pnpm run licenses:generate` after a production dependency
-change. `pnpm run sbom:production` emits the same lockfile-bound inventory as deterministic SPDX 2.3 JSON; redirect it
-to a release artifact when needed instead of committing a generated copy. These automated checks support license
-diligence but do not replace legal review.
+`pnpm run verify:licenses` checks installed production dependencies against the reviewed license-expression allowlist
+and verifies `public/THIRD_PARTY_LICENSES.txt`. Run `pnpm run licenses:generate` after a root production dependency
+change. `pnpm run sbom:production` prints a deterministic SPDX 2.3 inventory suitable for a release artifact.
 
-The generated-app template keeps an independent inventory at
-`template/public/THIRD_PARTY_LICENSES.txt`. Run `pnpm --dir template run licenses:generate` when its production
-dependency graph changes. Template builds verify both freshness and inclusion in the deployable client output.
+The generated-app template has an independent dependency graph and license artifact. Run
+`pnpm --dir template run licenses:generate` after changing its production dependencies. These automated checks support
+license diligence but do not replace legal review.
 
 ## Configuration
 
-`wrangler.jsonc` is the source of truth for root Worker bindings, non-secret variables, and required secret names.
-Configure secret values as Cloudflare Worker secrets; do not store them in source or local environment files.
+`wrangler.jsonc` is the source of truth for the control-plane Worker. It contains one D1 binding for identity,
+authentication, encrypted Cloudflare credentials, connection metadata, and user-runtime discovery. Configure the two
+declared secret values in Cloudflare; never store them in source or local environment files.
 
 The checked-in D1 ID belongs to Ghostbuild production. Before provisioning a fork in another account, replace it with
-`00000000-0000-0000-0000-000000000000`. The provisioning script refuses to replace an unknown non-placeholder ID.
+`00000000-0000-0000-0000-000000000000`. The provisioner refuses to replace an unknown non-placeholder ID.
 
-Production operations require:
+The OAuth callback is `https://<deployment-origin>/connect/return`. Keep its permissions aligned with
+`CLOUDFLARE_OAUTH_SCOPES` in `wrangler.jsonc`. Those permissions let Ghostbuild create a workspace runtime in the
+connected user's account; they do not add customer storage or compute to the Ghostbuild account.
 
-- the shared `account-workers-builds-production` build token for Workers Builds source deployments, or Wrangler
-  authentication for separate provisioning and emergency rollback operations
-- `CLOUDFLARE_OAUTH_CLIENT_ID` in the deploy environment
-- the Worker secrets declared by `wrangler.jsonc`
+`workers-builds.production.json` is the reviewed contract for Cloudflare dashboard build settings. Cloudflare does not
+read it automatically. Mirror it in the `ghostbuild` Worker's Builds settings:
 
-The OAuth client callback is `https://<deployment-origin>/connect/return`. Keep its permissions aligned with
-`CLOUDFLARE_OAUTH_SCOPES` in `wrangler.jsonc`. The public Ghostbuild client uses
-`https://ghostbuild.dev/ghostbuild-logo.svg` as its logo URL so the Cloudflare consent screen stays aligned with the
-deployed brand asset.
-
-Remote previews use the existing RPC-transport `DeploymentSandbox` binding and Ghostbuild D1/R2 bindings. Apply the
-root D1 migrations before deploying a version that can create previews. Keep `max_instances: 2` aligned with the
-explicit admission limit in `builder-preview-types.ts`; increasing one without reviewing the other does not increase
-safe capacity. Preview URLs are served through the Ghostbuild Worker, so no wildcard DNS route or public Sandbox
-tunnel is required.
-
-`workers-builds.production.json` is the reviewed source-of-truth contract for Cloudflare dashboard build settings. It
-is verified in `pnpm run validate`; Cloudflare does not read it automatically. Mirror it in the `ghostbuild` Worker's
-Build settings:
-
-- connect `ferdousbhai/ghostbuild`, production branch `main`, with non-production branch builds enabled
-- set the build command to `pnpm run workers-builds:build` and the deploy command to
-  `pnpm run workers-builds:deploy`
-- set the non-production branch deploy command to `pnpm run workers-builds:preview`; it uploads a Worker version for
-  review without promoting it to the active deployment
-- use `/` as the root directory, include all paths, and enable build caching
+- connect `ferdousbhai/ghostbuild`, production branch `main`, with non-production builds enabled
+- set the build command to `pnpm run workers-builds:build` and deploy command to `pnpm run workers-builds:deploy`
+- set non-production deploys to `pnpm run workers-builds:preview`
+- use `/` as the root, include all paths, and enable build caching
 - select `account-workers-builds-production`
-- configure `NODE_VERSION=26.3.0`, `PNPM_VERSION=11.14.0`, `SKIP_DEPENDENCY_INSTALL=1`, and the non-secret
+- configure the pinned `NODE_VERSION`, `PNPM_VERSION`, `SKIP_DEPENDENCY_INSTALL=1`, and
   `CLOUDFLARE_OAUTH_CLIENT_ID`
 
-The shared token must retain access to deploy Workers and Containers and to read or update the production D1 and R2
-resources used by the release checks and migrations. Do not add token credentials to source or build variables.
+The Workers Builds token needs only the permissions required to deploy the control-plane Worker, read its deployment,
+and manage the control-plane D1 migrations. User workspace and generated-application resources are provisioned with the
+connected user's authorization.
 
 ## Generated Artifacts
 
-After editing the generated-application source:
+After editing `template/`:
 
 ```bash
 pnpm run rebuild-template
 ```
 
-Do not edit generated route trees, Worker binding types, or the generated Builder template module directly.
+Do not edit generated route trees, Worker binding types, `app/generated/user-workspace-runtime.generated.ts`, or the
+generated Builder template module directly.
 
-Client source maps are generated for internal diagnosis but excluded from the static asset upload by the build-generated
+Client source maps are generated for internal diagnosis but excluded from the static upload by
 `dist/client/.assetsignore`, following Cloudflare's
 [static asset ignore contract](https://developers.cloudflare.com/workers/static-assets/binding/#ignoring-assets).
 Worker source maps remain private Cloudflare uploads through
-[`upload_source_maps`](https://developers.cloudflare.com/workers/observability/source-maps/). The `verify:static-assets`
-check fails if either side of that policy drifts; bundle size accounting excludes the same non-deployable client maps.
+[`upload_source_maps`](https://developers.cloudflare.com/workers/observability/source-maps/). The validation pipeline
+checks both sides of that policy.
+
+## User Workspace Runtime
+
+`pnpm run generate:user-workspace-runtime` bundles the source in `user-workspace-runtime/` together with its migrations.
+The control plane deploys that bundle into each connected user's Cloudflare account and provisions its D1 database, R2
+backup bucket, Agent Durable Objects, Sandbox Durable Objects, and Container application there.
+
+There is intentionally no migration path from retired Ghostbuild-owned project or chat storage. A new deployment of
+the control plane bootstraps its current D1 schema; each newly provisioned user runtime bootstraps the current
+`user-workspace-migrations/` schema. Existing user runtimes are replaced when their recorded bundle digest differs from
+the current digest.
+
+Dependency installation, validation, preview, and generated-app deployment run inside the user's Sandboxes. The current
+project is a Sandbox `DirectoryBackup` in the user's R2 bucket; no ZIP or project copy passes through Ghostbuild.
 
 ## Deployment
 
-Every branch push is built by Cloudflare Workers Builds. The build command installs the locked dependency graph,
-verifies the pinned toolchain, runs the complete validation pipeline, and rejects generated-file drift. Non-production
-branches upload an undeployed Worker version and report the result to the pull request through Cloudflare's GitHub
-check run. The protected `main` branch requires that Cloudflare check instead of a GitHub Actions job.
+Cloudflare Workers Builds validates every push. Non-production branches upload an undeployed Worker version. A push to
+`main` runs the production deploy command only from the exact Workers Builds checkout, applies control-plane D1
+migrations, publishes with the exact 40-character commit ID, and verifies that commit from multiple regions.
 
-Pushes to `main` use the production deploy command. It accepts only a Workers Builds checkout of the exact `main`
-commit and then runs the production release.
-
-Workers Builds does not provide the Docker daemon Wrangler needs to build `Dockerfile.sandbox`. Production therefore
-uses the immutable Cloudflare Registry digest recorded in both `wrangler.jsonc` and `workers-builds.production.json`.
-Validation hashes the Dockerfile and its copied `sandbox-tools` inputs so a Container source change cannot silently
-reuse the old image. To release a Container change, build and push it from an approved Docker-capable environment, then
-update the image digest and `sourceSha256` together before merging.
-
-Production source deploys are accepted only from Cloudflare Workers Builds. There is no local source-build fallback.
-For an emergency rollback from a clean checkout of current `main`, first inspect the immutable version and its
-`COMMIT_SHA`, then promote that exact version:
+Production source deploys are intentionally accepted only from Cloudflare Workers Builds. For an emergency rollback
+from a clean checkout of current `main`, inspect and promote an immutable version:
 
 ```bash
 pnpm exec wrangler versions view '<version-id>' --name ghostbuild --json
 pnpm exec wrangler rollback '<version-id>' --name ghostbuild --message '<reason>'
 ```
 
-Rollback promotes the selected immutable Worker version without changing connected D1 or R2 resources. If a release
-also changed stored data, assess recovery separately using the pre-migration D1 bookmark.
+Rollback changes the Worker version but not D1 data. If a release also changed control-plane data, use the recovery
+bookmark recorded by the release pipeline. Run `pnpm run provision:production` separately only when bootstrapping the
+control-plane D1 or intentionally reconciling its checked-in identifier.
 
-The Workers Builds deploy pipeline validates the repository and confirms that its clean Git commit exactly identifies
-the build before any Cloudflare resource, bookmark, or migration mutation. The preflight also rejects ignored root
-`.env*`, `.dev.vars*`, and `*.vars` files because Vite or Wrangler could otherwise consume uncommitted build inputs.
-The steady-state release checks that the declared Cloudflare resources already exist, verifies production and Workers
-Builds configuration, records a D1 recovery bookmark, applies migrations, publishes the Worker with the exact current
-40-character Git commit ID, and verifies that same commit locally and from multiple regions. A failed publish stops
-before live verification. The bookmark output includes a machine-readable receipt with the commit and Workers Builds
-UUID.
-
-Run `pnpm run provision:production` separately when bootstrapping production resources or intentionally reconciling
-their checked-in identifiers. Cloudflare Workers Builds owns both pull-request validation and production deployment;
-the repository intentionally contains no GitHub Actions workflows.
-
-Generated applications build and deploy inside the user's workspace runtime and Sandbox, using only the user's
-Cloudflare credentials. Ghostbuild retains the approved plan and an opaque workspace revision reference in the
-user-owned D1; it does not upload or retain a deployment archive. AppAgent projects provision `DB` for application data
-and a distinct `AGENT_SECURITY_DB` for Agent sessions, retention state, and inference accounting. Deployment readback
-must attest both database identifiers and the complete security baseline before the deployment is considered
-successful.
+Generated applications deploy independently inside the user workspace runtime. AppAgent projects provision `DB` for
+application data and `AGENT_SECURITY_DB` for Agent sessions, retention, and inference accounting. Deployment readback
+must attest both databases and the complete server-derived security baseline.
 
 ## Historical Evaluations
 

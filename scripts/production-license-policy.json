@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedAt": "2026-07-20",
+  "reviewedAt": "2026-08-02",
   "allowedLicenseExpressions": [
     "(AFL-2.1 OR BSD-3-Clause)",
     "(Apache-2.0 AND BSD-3-Clause)",
@@ -32,10 +32,13 @@
     "@bufbuild/protobuf@2.12.1",
     "@cfworker/json-schema@4.1.1",
     "@cloudflare/containers@0.3.7",
-    "@cloudflare/workers-types@5.20260718.1",
+    "@cloudflare/workers-types@5.20260801.1",
+    "@napi-rs/wasm-runtime@1.2.2",
+    "@rolldown/binding-wasm32-wasi@1.2.1",
+    "@tybys/wasm-util@0.10.3",
     "@uiw/codemirror-theme-vscode@4.25.11",
     "@uiw/codemirror-themes@4.25.11",
-    "partyserver@0.5.8",
+    "partyserver@0.5.9",
     "react-remove-scroll-bar@2.3.8",
     "varint@6.0.0"
   ]

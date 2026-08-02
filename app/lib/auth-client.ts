@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import type { CloudflareAuthSession } from '~/lib/.server/auth';
+import { disposeAccountLocalReplicas } from '~/lib/cloudflare/account-local-replica';
 import { resetUserRuntimeSession } from '~/lib/cloudflare/runtime-session';
 
 type AuthState = {
@@ -77,6 +78,7 @@ export async function signOutOfGhostbuild(callbackURL = window.location.origin) 
     throw new Error(payload?.error ?? 'Unable to sign out of Ghostbuild.');
   }
   setState({ data: null, isPending: false });
+  disposeAccountLocalReplicas();
   resetUserRuntimeSession();
   window.location.assign(callbackURL);
 }

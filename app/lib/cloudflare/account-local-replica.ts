@@ -23,6 +23,7 @@ type OpenAccountLocalReplica = AccountLocalReplica & {
 
 const pendingReplicas = new Map<string, Promise<OpenAccountLocalReplica | null>>();
 const resolvedReplicas = new Map<string, OpenAccountLocalReplica | null>();
+let replicaGeneration = 0;
 
 export function useAccountLocalReplica(sessionId: string | null | undefined): AccountLocalReplica | null | undefined {
   const [replica, setReplica] = useState<OpenAccountLocalReplica | null | undefined>(() =>
@@ -66,14 +67,26 @@ async function openAccountLocalReplica(sessionId: string): Promise<OpenAccountLo
     return existing;
   }
 
+  const generation = replicaGeneration;
   const pending = createAccountLocalReplica(sessionId)
     .catch((error) => {
       logger.warn('Local project persistence is unavailable; continuing with server-backed collections.', error);
       return null;
     })
     .then((replica) => {
+      if (generation !== replicaGeneration) {
+        if (replica) {
+          disposeReplica(replica);
+        }
+        return null;
+      }
       resolvedReplicas.set(sessionId, replica);
       return replica;
+    })
+    .finally(() => {
+      if (generation === replicaGeneration) {
+        pendingReplicas.delete(sessionId);
+      }
     });
   pendingReplicas.set(sessionId, pending);
   return pending;
@@ -92,14 +105,11 @@ async function createAccountLocalReplica(sessionId: string): Promise<OpenAccount
     openBrowserWASQLiteOPFSDatabase,
     persistedCollectionOptions,
   } = await import('@tanstack/browser-db-sqlite-persistence');
-  const database = await openBrowserWASQLiteOPFSDatabase({
-    databaseName: `${databaseBaseName}.sqlite`,
-  });
-  const coordinator = new BrowserCollectionCoordinator({
-    dbName: databaseBaseName,
-  });
+  const database = await openBrowserWASQLiteOPFSDatabase({ databaseName: `${databaseBaseName}.sqlite` });
+  let coordinator: BrowserCollectionCoordinator | undefined;
 
   try {
+    coordinator = new BrowserCollectionCoordinator({ dbName: databaseBaseName });
     const persistence = createBrowserWASQLitePersistence({
       database,
       coordinator,
@@ -111,10 +121,40 @@ async function createAccountLocalReplica(sessionId: string): Promise<OpenAccount
       persistedCollectionOptions,
     };
   } catch (error) {
-    coordinator.dispose();
-    await database.close?.();
+    try {
+      coordinator?.dispose();
+    } catch (disposeError) {
+      logger.warn('Unable to dispose the local project coordinator cleanly.', disposeError);
+    }
+    try {
+      await database.close?.();
+    } catch (closeError) {
+      logger.warn('Unable to close the local project database cleanly.', closeError);
+    }
     throw error;
   }
+}
+
+export function disposeAccountLocalReplicas(): void {
+  replicaGeneration += 1;
+  pendingReplicas.clear();
+  for (const replica of resolvedReplicas.values()) {
+    if (replica) {
+      disposeReplica(replica);
+    }
+  }
+  resolvedReplicas.clear();
+}
+
+function disposeReplica(replica: OpenAccountLocalReplica): void {
+  try {
+    replica.coordinator.dispose();
+  } catch (error) {
+    logger.warn('Unable to dispose the local project coordinator cleanly.', error);
+  }
+  void Promise.resolve(replica.database.close?.()).catch((error: unknown) => {
+    logger.warn('Unable to close the local project database cleanly.', error);
+  });
 }
 
 async function hashAccountKey(sessionId: string): Promise<string> {

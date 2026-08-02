@@ -1,8 +1,9 @@
 {
   "schemaVersion": 1,
-  "reviewedAt": "2026-07-20",
+  "reviewedAt": "2026-08-02",
   "allowedLicenseExpressions": [
     "(AFL-2.1 OR BSD-3-Clause)",
+    "0BSD",
     "Apache-2.0",
     "BlueOak-1.0.0",
     "BSD-2-Clause",
@@ -18,7 +19,10 @@
   "metadataOnlyPackageAllowlist": [
     "@ai-sdk/provider-utils@4.0.40",
     "@cfworker/json-schema@4.1.1",
-    "@cloudflare/workers-types@5.20260718.1",
-    "partyserver@0.5.8"
+    "@cloudflare/workers-types@5.20260801.1",
+    "@napi-rs/wasm-runtime@1.2.2",
+    "@rolldown/binding-wasm32-wasi@1.2.1",
+    "@tybys/wasm-util@0.10.3",
+    "partyserver@0.5.9"
   ]
 }
