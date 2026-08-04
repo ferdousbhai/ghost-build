@@ -227,6 +227,7 @@ export class UserCloudflareAccountApi {
         { type: 'plain_text', name: 'GHOSTBUILD_USER_RUNTIME_ENDPOINT', text: args.endpoint },
         { type: 'plain_text', name: 'GHOSTBUILD_USER_RUNTIME', text: '1' },
         { type: 'plain_text', name: 'GHOSTBUILD_RUNTIME_VERSION', text: args.runtimeVersion },
+        { type: 'plain_text', name: 'SANDBOX_TRANSPORT', text: 'rpc' },
       ],
       exports: {
         ProjectWorkspace: {

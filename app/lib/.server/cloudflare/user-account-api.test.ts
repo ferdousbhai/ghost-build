@@ -342,6 +342,7 @@ describe('UserCloudflareAccountApi', () => {
           class_name: 'ProjectWorkspace',
         }),
         expect.objectContaining({ type: 'worker_loader', name: 'LOADER' }),
+        expect.objectContaining({ type: 'plain_text', name: 'SANDBOX_TRANSPORT', text: 'rpc' }),
       ]),
     );
     expect(metadata.bindings).not.toEqual(expect.arrayContaining([expect.objectContaining({ type: 'r2_bucket' })]));

@@ -17,6 +17,12 @@ import { Sandbox } from '@cloudflare/sandbox';
 import { parse } from 'jsonc-parser';
 import { BuilderAgent } from '../../app/agents/builder-agent';
 import { routeUserRuntimeAgentRequest } from '../../app/lib/.server/agent-request-identity';
+import { createTrustedDeploymentConfig } from '../../app/lib/.server/cloudflare/deployment-config';
+import {
+  DEPLOYMENT_PROJECT_ROOT,
+  DEPLOYMENT_WRANGLER_CONFIG_PATH,
+  DEPLOYMENT_WRANGLER_OUTPUT_PATH,
+} from '../../app/lib/.server/cloudflare/deployment-runtime-policy';
 import { addRequestedDependencies } from '../../app/lib/runtime/action-runner/dependency-manifest';
 import {
   userRuntimeDataAction,
@@ -27,6 +33,7 @@ import { verifyRuntimeCapability } from '../../app/lib/cloudflare/runtime-capabi
 import { userRuntimeDeploymentAction } from '../../app/server-handlers/deployments';
 import { userRuntimeEnhancePromptAction } from '../../app/server-handlers/enhance-prompt';
 import { toolFailure, toolSuccess, type GhostbuildToolResult } from '../../ghostbuild-agent/tool-result';
+import { openPreviewQuickTunnel } from './preview-tunnel';
 
 export { WorkspaceProxy, WorkspaceServiceProxy };
 
@@ -44,9 +51,10 @@ interface RuntimeEnv {
   GHOSTBUILD_CONNECTION_GENERATION: string;
   GHOSTBUILD_USER_RUNTIME: string;
   GHOSTBUILD_USER_RUNTIME_ENDPOINT: string;
+  SANDBOX_TRANSPORT: 'rpc';
 }
 
-const PROJECT_ROOT = '/home/project';
+const PROJECT_ROOT = DEPLOYMENT_PROJECT_ROOT;
 const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
@@ -706,7 +714,7 @@ export class ProjectWorkspace extends withWorkspace(ComputerSandboxBase, compute
     });
     await waitForHttpPort(this.ctx.container!.getTcpPort(PREVIEW_PORT));
     await this.setKeepAlive(true);
-    const tunnel = await this.tunnels.get(PREVIEW_PORT, { name: `preview-${previewId.slice(0, 32)}` });
+    const tunnel = await openPreviewQuickTunnel(this.tunnels, PREVIEW_PORT);
     await this.schedule(PREVIEW_TTL_MS / 1_000, 'expirePreview', { previewId });
     const now = Date.now();
     return {
@@ -757,13 +765,13 @@ export class ProjectWorkspace extends withWorkspace(ComputerSandboxBase, compute
           }),
         );
       }
-      const configPath = '/home/.ghostbuild-deploy.json';
-      const outputPath = '/home/.ghostbuild-wrangler-output.ndjson';
+      const configPath = DEPLOYMENT_WRANGLER_CONFIG_PATH;
+      const outputPath = DEPLOYMENT_WRANGLER_OUTPUT_PATH;
       await writeWorkspaceFile(
         workspace,
         configPath,
         new TextEncoder().encode(
-          JSON.stringify(trustedDeploymentConfig({ ...input, accountId, workerName, projectType })),
+          JSON.stringify(createTrustedDeploymentConfig({ ...input, accountId, workerName, projectType })),
         ),
         false,
       );
@@ -1432,71 +1440,6 @@ function requireCloudflareName(value: unknown, name: string): string {
     throw new SyntaxError(`Invalid ${name}.`);
   }
   return result;
-}
-
-function trustedDeploymentConfig(
-  args: Record<string, unknown> & { accountId: string; workerName: string; projectType: 'web_app' | 'worker' },
-) {
-  const config: Record<string, unknown> = {
-    name: args.workerName,
-    account_id: args.accountId,
-    main: args.projectType === 'worker' ? 'dist/worker/server.js' : 'dist/server/index.js',
-    no_bundle: true,
-    compatibility_date: '2026-07-21',
-    compatibility_flags: ['nodejs_compat'],
-    observability: {
-      enabled: true,
-      logs: { enabled: true, head_sampling_rate: 0.6 },
-      traces: { enabled: true, head_sampling_rate: 0.05 },
-    },
-    upload_source_maps: true,
-    workers_dev: true,
-    version_metadata: { binding: 'CF_VERSION_METADATA' },
-    vars: {
-      GHOSTBUILD_DEPLOYMENT_SECURITY_BASELINE: requireString(
-        args.securityBaselineVersion,
-        'securityBaselineVersion',
-        32,
-      ),
-      GHOSTBUILD_APP_AGENT_SECURITY_BOUNDARY_SHA256: requireString(
-        args.securityBoundarySha256,
-        'securityBoundarySha256',
-        64,
-      ),
-      GHOSTBUILD_TEMPLATE_SOURCE_SHA256: requireString(args.templateSourceSha256, 'templateSourceSha256', 64),
-    },
-  };
-  if (args.projectType === 'web_app') config.assets = { directory: 'dist/client' };
-  if (args.workersAi === true) config.ai = { binding: 'AI' };
-  const d1Databases: Record<string, string>[] = [];
-  if (typeof args.d1DatabaseId === 'string') {
-    d1Databases.push({
-      binding: 'DB',
-      database_name: requireCloudflareName(args.d1DatabaseName, 'd1DatabaseName'),
-      database_id: requireString(args.d1DatabaseId, 'd1DatabaseId', 64),
-      migrations_dir: 'migrations',
-    });
-  }
-  if (typeof args.agentSecurityD1DatabaseId === 'string') {
-    d1Databases.push({
-      binding: 'AGENT_SECURITY_DB',
-      database_name: requireCloudflareName(args.agentSecurityD1DatabaseName, 'agentSecurityD1DatabaseName'),
-      database_id: requireString(args.agentSecurityD1DatabaseId, 'agentSecurityD1DatabaseId', 64),
-      migrations_dir: 'agent-security-migrations',
-    });
-  }
-  if (d1Databases.length > 0) config.d1_databases = d1Databases;
-  if (typeof args.r2BucketName === 'string') {
-    config.r2_buckets = [
-      { binding: 'APP_STORAGE', bucket_name: requireCloudflareName(args.r2BucketName, 'r2BucketName') },
-    ];
-  }
-  if (args.appAgent === true) {
-    config.durable_objects = { bindings: [{ name: 'AppAgent', class_name: 'AppAgent' }] };
-    config.exports = { AppAgent: { type: 'durable-object', storage: 'sqlite' } };
-    config.triggers = { crons: ['17 3 * * *'] };
-  }
-  return config;
 }
 
 function parseWranglerVersion(content: string, workerName: string): string {

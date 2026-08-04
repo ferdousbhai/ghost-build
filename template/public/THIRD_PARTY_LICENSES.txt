@@ -7,8 +7,8 @@ A package whose package-level evidence is <not published> remains exact-version 
 This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-08-02
-Production packages: 294
-Inventory SHA-256: 14b5057ab90acc811fe4a61f26721ea478239ce51c26eb917140b948be8847a3
+Production packages: 295
+Inventory SHA-256: c6db7b294e390305cdf166da135d90da674ef08243f04a4e4fa241f435d76bd2
 
 PACKAGE INVENTORY
 =================
@@ -525,10 +525,10 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 2088f55c6731498410b20c95ebd345ed4a4a800bf74c0fba4d282fd2a021daaa)
 
-@hono/node-server@1.19.14
+@hono/node-server@2.0.10
 Declared license: MIT
 Author: Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)
-Repository: {"type":"git","url":"https://github.com/honojs/node-server.git"}
+Repository: {"type":"git","url":"git+https://github.com/honojs/node-server.git"}
 Homepage: https://github.com/honojs/node-server
 Package-level license evidence: published
 Published license/notice files:
@@ -1449,7 +1449,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a)
 
-fast-uri@3.1.4
+fast-uri@3.1.5
 Declared license: BSD-3-Clause
 Author: Vincent Le Goff <vince.legoff@gmail.com> (https://github.com/zekth)
 Repository: {"type":"git","url":"git+https://github.com/fastify/fast-uri.git"}
@@ -1593,7 +1593,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 bf9b0d665be2a689851eea667ca9f42066ea1d903b38349c51e6a44b2577680a)
 
-hono@4.12.27
+hono@4.12.34
 Declared license: MIT
 Author: Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)
 Repository: {"type":"git","url":"git+https://github.com/honojs/hono.git"}
@@ -1638,10 +1638,10 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 5ffe28e7ade7d8f10d85d5337a73fd793dac5c462fb9a28fbf8c5046c7fbca3b)
 
-ip-address@10.2.0
+ip-address@10.3.1
 Declared license: MIT
 Author: Beau Gunderson <beau@beaugunderson.com> (https://beaugunderson.com/)
-Repository: {"type":"git","url":"git://github.com/beaugunderson/ip-address.git"}
+Repository: {"type":"git","url":"https://github.com/beaugunderson/ip-address.git"}
 Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
@@ -1682,6 +1682,15 @@ Homepage: https://github.com/isaacs/isexe#readme
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b)
+
+jiti@1.21.7
+Declared license: MIT
+Author: <not published>
+Repository: unjs/jiti
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 46231df5a7733c3f52f11b71f3df61813007745b62b09031acfb45fb42d75082)
 
 jiti@2.7.0
 Declared license: MIT
@@ -6570,6 +6579,7 @@ THE SOFTWARE.
 SHA-256 46231df5a7733c3f52f11b71f3df61813007745b62b09031acfb45fb42d75082
 Used by:
 - h3@2.0.1-rc.20:LICENSE
+- jiti@1.21.7:LICENSE
 - jiti@2.7.0:LICENSE
 - rou3@0.8.1:LICENSE
 - srvx@0.11.22:LICENSE
@@ -7894,7 +7904,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 SHA-256 6895190430d809c4c57a7582ecc2f99acbc2ea39a5dfad20262a41d5b3e91733
 Used by:
-- @hono/node-server@1.19.14:LICENSE
+- @hono/node-server@2.0.10:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 
@@ -8877,7 +8887,7 @@ SOFTWARE.
 
 SHA-256 a6ab98e5c77b9070c443eaff2ff81034a6f8cc05a7524d5098eb0f24defa0115
 Used by:
-- hono@4.12.27:LICENSE
+- hono@4.12.34:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 
@@ -9103,7 +9113,7 @@ SOFTWARE.
 
 SHA-256 b010b0dfdfdb23d7396e03b82cd4621fc9bb8f95d6b0aea70b9c24e12074c786
 Used by:
-- fast-uri@3.1.4:LICENSE
+- fast-uri@3.1.5:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 Copyright (c) 2011-2021, Gary Court until https://github.com/garycourt/uri-js/commit/a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae
 Copyright (c) 2021-present The Fastify team <https://github.com/fastify/fastify#team>
@@ -11332,7 +11342,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 SHA-256 f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a
 Used by:
-- ip-address@10.2.0:LICENSE
+- ip-address@10.3.1:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 Copyright (C) 2011 by Beau Gunderson
 

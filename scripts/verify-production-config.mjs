@@ -190,6 +190,7 @@ function verifyScripts(errors, pkg, label) {
     return;
   }
   const requiredNames = [
+    'audit:production',
     'build',
     'd1:bookmark:production',
     'workers-builds:build',
@@ -215,6 +216,13 @@ function verifyScripts(errors, pkg, label) {
   }
 
   errors.push(
+    ...findMissingCommandSteps(scripts['audit:production'], `${label} production audit script`, [
+      'pnpm audit',
+      '--prod',
+      '--audit-level moderate',
+    ]),
+  );
+  errors.push(
     ...findMissingCommandSteps(scripts['workers-builds:deploy'], `${label} Workers Builds deploy script`, [
       'scripts/deploy-production.mjs --check-workers-builds',
       'provision:production:check',
@@ -232,6 +240,9 @@ function verifyScripts(errors, pkg, label) {
       'validate',
       'git diff --exit-code',
     ]),
+  );
+  errors.push(
+    ...findMissingCommandSteps(scripts['validate:root'], `${label} root validation script`, ['audit:production']),
   );
 
   for (const [name, command] of Object.entries(scripts)) {

@@ -3,10 +3,15 @@ import { isAlias, isMap, isScalar, isSeq, parseDocument, visit } from 'yaml';
 const MAX_PNPM_WORKSPACE_POLICY_BYTES = 64 * 1024;
 const APPROVED_GENERATED_BUILD_DEPENDENCIES = ['core-js-pure', 'esbuild', 'sharp', 'workerd'] as const;
 const APPROVED_GENERATED_OVERRIDES = new Map([
-  ['brace-expansion@<1.1.16', '1.1.16'],
-  ['brace-expansion@>=2.0.0 <2.1.2', '2.1.2'],
-  ['fast-uri@>=3.0.0 <=3.1.3', '3.1.4'],
+  ['brace-expansion@<1.1.18', '1.1.18'],
+  ['brace-expansion@>=2.0.0 <2.1.4', '2.1.4'],
+  ['brace-expansion@>=4.0.0 <5.0.9', '5.0.9'],
+  ['@hono/node-server@<2.0.10', '2.0.10'],
+  ['fast-uri@>=3.0.0 <3.1.5', '3.1.5'],
+  ['hono@<4.12.34', '4.12.34'],
+  ['ip-address@<=10.3.0', '10.3.1'],
   ['sharp@<0.35.0', '0.35.3'],
+  ['undici@>=7.0.0 <7.29.0', '7.29.0'],
 ]);
 const ALLOWED_POLICY_KEYS = new Set([
   'packages',

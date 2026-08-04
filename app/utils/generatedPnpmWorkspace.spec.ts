@@ -21,13 +21,13 @@ describe('assertSafeGeneratedPnpmWorkspace', () => {
     safePolicy.replace('minimumReleaseAgeIgnoreMissingTime: false', 'minimumReleaseAgeIgnoreMissingTime: true'),
     safePolicy.replace('minimumReleaseAgeStrict: true', 'minimumReleaseAgeStrict: false'),
     safePolicy.replace('blockExoticSubdeps: true', 'blockExoticSubdeps: false'),
-    safePolicy.replace("  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'", "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.3'"),
-    safePolicy.replace("  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\n", ''),
+    safePolicy.replace("  'fast-uri@>=3.0.0 <3.1.5': '3.1.5'", "  'fast-uri@>=3.0.0 <3.1.5': '3.1.4'"),
+    safePolicy.replace("  'fast-uri@>=3.0.0 <3.1.5': '3.1.5'\n", ''),
     safePolicy.replace("  'sharp@<0.35.0': '0.35.3'", "  'sharp@<0.35.0': '0.34.5'"),
     safePolicy.replace("  'sharp@<0.35.0': '0.35.3'\n", ''),
     safePolicy.replace(
-      "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\n",
-      "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\n  'malicious-package@*': 'file:../outside'\n",
+      "  'fast-uri@>=3.0.0 <3.1.5': '3.1.5'\n",
+      "  'fast-uri@>=3.0.0 <3.1.5': '3.1.5'\n  'malicious-package@*': 'file:../outside'\n",
     ),
     `${safePolicy}trustLockfile: true\n`,
     `${safePolicy}minimumReleaseAgeExclude:\n  - malicious-package\n`,
@@ -83,8 +83,13 @@ const safePolicy =
   'packages:\n  - .\nignoreWorkspaceRootCheck: true\nminimumReleaseAge: 1440\n' +
   'minimumReleaseAgeIgnoreMissingTime: false\nminimumReleaseAgeStrict: true\n' +
   'strictDepBuilds: true\nblockExoticSubdeps: true\noverrides:\n' +
-  "  'brace-expansion@<1.1.16': '1.1.16'\n" +
-  "  'brace-expansion@>=2.0.0 <2.1.2': '2.1.2'\n" +
-  "  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'\n" +
+  "  'brace-expansion@<1.1.18': '1.1.18'\n" +
+  "  'brace-expansion@>=2.0.0 <2.1.4': '2.1.4'\n" +
+  "  'brace-expansion@>=4.0.0 <5.0.9': '5.0.9'\n" +
+  "  '@hono/node-server@<2.0.10': '2.0.10'\n" +
+  "  'fast-uri@>=3.0.0 <3.1.5': '3.1.5'\n" +
+  "  'hono@<4.12.34': '4.12.34'\n" +
+  "  'ip-address@<=10.3.0': '10.3.1'\n" +
   "  'sharp@<0.35.0': '0.35.3'\n" +
+  "  'undici@>=7.0.0 <7.29.0': '7.29.0'\n" +
   'allowBuilds:\n  core-js-pure: true\n  esbuild: true\n  sharp: true\n  workerd: true\n';

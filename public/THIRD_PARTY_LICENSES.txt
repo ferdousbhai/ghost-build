@@ -8,7 +8,7 @@ This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-08-04
 Production packages: 621
-Inventory SHA-256: 309913bc1913f05862ed1ce857bd99489e12c9dc0e0376cc4d7bd6814634cb88
+Inventory SHA-256: ba0eddaff6da284ec1e63e7af1448ff170e6da14626ea2b7ad8a0b8d147b93ee
 
 PACKAGE INVENTORY
 =================
@@ -747,10 +747,10 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 60e0b68c0f35c078eef3a5d29419d0b03ff84ec1df9c3f9d6e39a519a5ae7985)
 
-@hono/node-server@1.19.14
+@hono/node-server@2.0.10
 Declared license: MIT
 Author: Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)
-Repository: {"type":"git","url":"https://github.com/honojs/node-server.git"}
+Repository: {"type":"git","url":"git+https://github.com/honojs/node-server.git"}
 Homepage: https://github.com/honojs/node-server
 Package-level license evidence: published
 Published license/notice files:
@@ -2118,7 +2118,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 23d466b1b134b415b66fa50c6526b4cf3e7b9258554da88d3abb371721e7ce68)
 
-brace-expansion@5.0.7
+brace-expansion@5.0.9
 Declared license: MIT
 Author: <not published>
 Repository: {"type":"git","url":"git+https://github.com/juliangruber/brace-expansion.git"}
@@ -2757,7 +2757,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a)
 
-fast-uri@3.1.4
+fast-uri@3.1.5
 Declared license: BSD-3-Clause
 Author: Vincent Le Goff <vince.legoff@gmail.com> (https://github.com/zekth)
 Repository: {"type":"git","url":"git+https://github.com/fastify/fast-uri.git"}
@@ -3072,7 +3072,7 @@ Package-level license evidence: published
 Published license/notice files:
 - license (SHA-256 dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb)
 
-hono@4.12.31
+hono@4.12.34
 Declared license: MIT
 Author: Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)
 Repository: {"type":"git","url":"git+https://github.com/honojs/hono.git"}
@@ -3189,10 +3189,10 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 395c95f20598da653ff1eb1cb9d74947c7fac689697147f1d192fd0242a0e635)
 
-ip-address@10.2.0
+ip-address@10.3.1
 Declared license: MIT
 Author: Beau Gunderson <beau@beaugunderson.com> (https://beaugunderson.com/)
-Repository: {"type":"git","url":"git://github.com/beaugunderson/ip-address.git"}
+Repository: {"type":"git","url":"https://github.com/beaugunderson/ip-address.git"}
 Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
@@ -5244,7 +5244,7 @@ Package-level license evidence: published
 Published license/notice files:
 - license (SHA-256 5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3)
 
-undici@7.28.0
+undici@7.29.0
 Declared license: MIT
 Author: <not published>
 Repository: {"type":"git","url":"git+https://github.com/nodejs/undici.git"}
@@ -13391,7 +13391,7 @@ SOFTWARE.
 
 SHA-256 6895190430d809c4c57a7582ecc2f99acbc2ea39a5dfad20262a41d5b3e91733
 Used by:
-- @hono/node-server@1.19.14:LICENSE
+- @hono/node-server@2.0.10:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 
@@ -15147,7 +15147,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 SHA-256 9c63a23124d68cd30cd316a94a1a0bca34f032786df6df69fc4b5f136bac8d2e
 Used by:
-- brace-expansion@5.0.7:LICENSE
+- brace-expansion@5.0.9:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 
@@ -15591,7 +15591,7 @@ express Statement of Purpose.
 
 SHA-256 a21d6c8d3fc631198b97e57584697f7f9c37805c71c6cf9a12e4442b40394b88
 Used by:
-- undici@7.28.0:lib/web/fetch/LICENSE
+- undici@7.29.0:lib/web/fetch/LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 
@@ -15927,7 +15927,7 @@ Apache License
 
 SHA-256 a6ab98e5c77b9070c443eaff2ff81034a6f8cc05a7524d5098eb0f24defa0115
 Used by:
-- hono@4.12.31:LICENSE
+- hono@4.12.34:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 
@@ -15956,7 +15956,7 @@ SOFTWARE.
 SHA-256 a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27
 Used by:
 - undici-types@8.3.0:LICENSE
-- undici@7.28.0:LICENSE
+- undici@7.29.0:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 
@@ -16310,7 +16310,7 @@ SOFTWARE.
 
 SHA-256 b010b0dfdfdb23d7396e03b82cd4621fc9bb8f95d6b0aea70b9c24e12074c786
 Used by:
-- fast-uri@3.1.4:LICENSE
+- fast-uri@3.1.5:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 Copyright (c) 2011-2021, Gary Court until https://github.com/garycourt/uri-js/commit/a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae
 Copyright (c) 2021-present The Fastify team <https://github.com/fastify/fastify#team>
@@ -19513,7 +19513,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 SHA-256 f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a
 Used by:
-- ip-address@10.2.0:LICENSE
+- ip-address@10.3.1:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 Copyright (C) 2011 by Beau Gunderson
 

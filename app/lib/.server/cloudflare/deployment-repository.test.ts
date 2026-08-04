@@ -11,6 +11,7 @@ import {
   transitionDeployment,
 } from './deployment-repository';
 import type { DeploymentPlan } from './deployment-plan';
+import { DEPLOYMENT_SECURITY_BASELINE_VERSION } from './deployment-security-baseline';
 
 const sourceSha256 = 'a'.repeat(64);
 const planDigest = 'b'.repeat(64);
@@ -19,7 +20,7 @@ const plan: DeploymentPlan = {
   deploymentId: 'deployment-1',
   sourceSha256,
   templateSourceSha256: 'c'.repeat(64),
-  securityBaselineVersion: 21,
+  securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
   securityBoundarySha256: 'd'.repeat(64),
   project: { type: 'web_app', bindings: { ai: false, d1: false, r2: false, appAgent: false } },
   billing: {

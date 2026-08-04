@@ -20,12 +20,7 @@
         "scripts/evaluations/*.worker.ts",
       ],
       "project": ["**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!"],
-      "ignore": [
-        "template/**",
-        "app/test/cloudflare-workers-shim.ts",
-        // Parsed as source text by scripts/verify-stack-alignment.mjs.
-        "app/lib/.server/cloudflare/deployment-runtime-policy.ts",
-      ],
+      "ignore": ["template/**", "app/test/cloudflare-workers-shim.ts"],
     },
     "ghostbuild-agent": {
       "entry": ["**/*.test.ts"],
@@ -38,9 +33,6 @@
   },
 
   "ignoreDependencies": [
-    // supplied transitively by the runtime toolchain
-    "events",
-
     // satisfies the Cloudflare Agents decorator transform peer dependency
     "@babel/core",
     "@babel/plugin-proposal-decorators",

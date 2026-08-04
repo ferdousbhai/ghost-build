@@ -173,11 +173,10 @@ dangerouslyAllowAllBuilds: true
     );
   });
 
-  it('allows only reviewed exact-version Ghostkit release-age exemptions', () => {
+  it('allows only the reviewed exact-version Computer release-age exemption', () => {
     const workspace = `${workspacePolicyFixture(['ghostbuild-agent', 'template'])}
 minimumReleaseAgeExclude:
-  - '@summonghost/compaction@0.1.2'
-  - '@summonghost/title-generation@0.1.0'
+  - '@cloudflare/computer@0.1.1'
 `;
 
     expect(findBuildApprovalErrors(workspace, 'pnpm-workspace.yaml')).toEqual([]);
@@ -227,26 +226,36 @@ ${weakening}
   it('allows only the reviewed transitive vulnerability overrides', () => {
     const reviewed = `${workspacePolicyFixture(['ghostbuild-agent', 'template'])}
 overrides:
-  'brace-expansion@<1.1.16': '1.1.16'
-  'brace-expansion@>=2.0.0 <2.1.2': '2.1.2'
-  'fast-uri@>=3.0.0 <=3.1.3': '3.1.4'
+  'brace-expansion@<1.1.18': '1.1.18'
+  'brace-expansion@>=2.0.0 <2.1.4': '2.1.4'
+  'brace-expansion@>=4.0.0 <5.0.9': '5.0.9'
+  '@hono/node-server@<2.0.10': '2.0.10'
+  'fast-uri@>=3.0.0 <3.1.5': '3.1.5'
+  'hono@<4.12.34': '4.12.34'
+  'ip-address@<=10.3.0': '10.3.1'
   'sharp@<0.35.0': '0.35.3'
+  'undici@>=7.0.0 <7.29.0': '7.29.0'
 `;
     expect(findBuildApprovalErrors(reviewed, 'pnpm-workspace.yaml')).toEqual([]);
 
     const unreviewed = `${workspacePolicyFixture(['ghostbuild-agent', 'template'])}
 overrides:
-  'brace-expansion@<1.1.16': '1.1.15'
+  'brace-expansion@<1.1.18': '1.1.17'
   'malicious-package@*': 'file:../outside'
 `;
     expect(findBuildApprovalErrors(unreviewed, 'pnpm-workspace.yaml')).toEqual(
       expect.arrayContaining([
-        'pnpm-workspace.yaml overrides must not change unreviewed dependency brace-expansion@<1.1.16.',
+        'pnpm-workspace.yaml overrides must not change unreviewed dependency brace-expansion@<1.1.18.',
         'pnpm-workspace.yaml overrides must not change unreviewed dependency malicious-package@*.',
-        'pnpm-workspace.yaml overrides must pin brace-expansion@<1.1.16 to 1.1.16.',
-        'pnpm-workspace.yaml overrides must pin brace-expansion@>=2.0.0 <2.1.2 to 2.1.2.',
-        'pnpm-workspace.yaml overrides must pin fast-uri@>=3.0.0 <=3.1.3 to 3.1.4.',
+        'pnpm-workspace.yaml overrides must pin brace-expansion@<1.1.18 to 1.1.18.',
+        'pnpm-workspace.yaml overrides must pin brace-expansion@>=2.0.0 <2.1.4 to 2.1.4.',
+        'pnpm-workspace.yaml overrides must pin brace-expansion@>=4.0.0 <5.0.9 to 5.0.9.',
+        'pnpm-workspace.yaml overrides must pin @hono/node-server@<2.0.10 to 2.0.10.',
+        'pnpm-workspace.yaml overrides must pin fast-uri@>=3.0.0 <3.1.5 to 3.1.5.',
+        'pnpm-workspace.yaml overrides must pin hono@<4.12.34 to 4.12.34.',
+        'pnpm-workspace.yaml overrides must pin ip-address@<=10.3.0 to 10.3.1.',
         'pnpm-workspace.yaml overrides must pin sharp@<0.35.0 to 0.35.3.',
+        'pnpm-workspace.yaml overrides must pin undici@>=7.0.0 <7.29.0 to 7.29.0.',
       ]),
     );
   });
