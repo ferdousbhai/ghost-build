@@ -13,25 +13,21 @@ import { getRelativePath } from 'ghostbuild-agent/utils/workDir';
 import { loggingSafeParse } from 'ghostbuild-agent/utils/zodUtil';
 import { validateProjectParameters } from 'ghostbuild-agent/tools/validateProject';
 import type { GhostbuildToolName } from 'ghostbuild-agent/types';
+import { COMPUTER_TOOL_INPUT_SCHEMAS } from 'ghostbuild-agent/cloudflare-computer-inputs';
 import {
   isGhostbuildToolResult,
   toolFailure,
   toolResultSucceeded,
   toolResultSummary,
 } from 'ghostbuild-agent/tool-result';
-import { z } from 'zod';
 
-const pathSchema = z.object({ path: z.string() });
-const readSchema = pathSchema.extend({ offset: z.number().optional(), limit: z.number().optional() });
-const writeSchema = pathSchema.extend({ content: z.string() });
-const editSchema = pathSchema.extend({
-  edits: z.array(z.object({ oldText: z.string(), newText: z.string() })),
-});
-const execSchema = z.object({
-  command: z.string(),
-  cwd: z.string().optional(),
-  backend: z.enum(['worker-shell', 'container-shell']).optional(),
-});
+const {
+  edit: editSchema,
+  exec: execSchema,
+  ls: pathSchema,
+  read: readSchema,
+  write: writeSchema,
+} = COMPUTER_TOOL_INPUT_SCHEMAS;
 
 const ghostbuildIcon = (
   <span aria-hidden className="mr-1 text-base leading-none">
@@ -50,14 +46,10 @@ const emptyInvocation: GhostbuildToolInvocation = {
 
 const TOOL_INPUT_SCHEMAS: Record<GhostbuildToolName, ZodType> = {
   deploy: deployToolInputParameters,
-  edit: editSchema,
-  exec: execSchema,
-  ls: pathSchema,
+  ...COMPUTER_TOOL_INPUT_SCHEMAS,
   lookupDocs: lookupDocsParameters,
   npmInstall: npmInstallToolParameters,
-  read: readSchema,
   validateProject: validateProjectParameters,
-  write: writeSchema,
 };
 
 export function normalizeToolInvocation(invocation: GhostbuildToolInvocation | undefined): GhostbuildToolInvocation {

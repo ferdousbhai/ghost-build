@@ -26,4 +26,11 @@ describe('standalone template verification source', () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  test('preview compiles Tailwind locally without a runtime CDN dependency', () => {
+    const previewConfig = readFileSync('template/vite.preview.config.mjs', 'utf8');
+
+    expect(previewConfig).not.toContain('cdn.tailwindcss.com');
+    expect(previewConfig).not.toContain('postcss: { plugins: [] }');
+  });
 });

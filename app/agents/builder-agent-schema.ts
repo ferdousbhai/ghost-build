@@ -53,6 +53,8 @@ const migrations: readonly SchemaMigration[] = [
     },
   },
   {
+    // Published migration history is immutable even though replay ownership
+    // has moved to the user-owned ProjectWorkspace Durable Object.
     version: 3,
     name: 'create_builder_tool_replays',
     apply(sql) {
@@ -65,6 +67,13 @@ const migrations: readonly SchemaMigration[] = [
           created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
       `);
+    },
+  },
+  {
+    version: 4,
+    name: 'remove_builder_tool_replays',
+    apply(sql) {
+      sql.exec('DROP TABLE IF EXISTS builder_workspace_tool_results');
     },
   },
 ];

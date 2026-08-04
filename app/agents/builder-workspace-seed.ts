@@ -2,6 +2,13 @@ import type { BuilderWorkspaceApi } from './builder-workspace-api';
 import type { BuilderWorkspaceFileInput, BuilderWorkspaceState } from './builder-workspace-types';
 import { batchBuilderWorkspaceSeed, builderTemplateTotals } from './builder-template';
 
+export function parentBuilderWorkspaceSeedId(targetRevision: number): string {
+  if (!Number.isSafeInteger(targetRevision) || targetRevision < 0) {
+    throw new Error('The parent workspace revision is invalid.');
+  }
+  return `parent_${targetRevision}`;
+}
+
 /**
  * Seed a workspace from the beginning. Replaying every batch is intentional:
  * Computer writes are replacements, so the same durable seed can resume after

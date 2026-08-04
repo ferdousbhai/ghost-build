@@ -12,15 +12,11 @@ import type {
 } from '~/agents/builder-workspace-types';
 
 const MAX_RESPONSE_BYTES = 36 * 1024 * 1024;
-// Computer's read tool can return 256 KiB of file content plus structured
-// metadata. Leave enough room to durably cache the complete official result.
-const MAX_TOOL_RESULT_BYTES = 512 * 1024;
 
-type ToolResultRow = {
-  tool_name: string;
-  args_sha256: string;
-  result_json: string;
-};
+type ToolOperationStartResult =
+  | { status: 'execute' }
+  | { status: 'completed'; result: unknown }
+  | { status: 'failed' | 'indeterminate'; error: string };
 
 export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
   readonly #inFlight = new Map<string, { toolName: string; argsJson: string; promise: Promise<unknown> }>();
@@ -83,7 +79,6 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
 
   constructor(
     private readonly env: Env,
-    private readonly storage: DurableObjectStorage,
     private readonly projectId: string,
     private readonly getUserId: () => string | null,
     private readonly request: typeof fetch = fetch,
@@ -224,34 +219,27 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
   }
 
   async #executeTool<T>(toolCallId: string, toolName: string, argsJson: string, execute: () => Promise<T>) {
-    const argsSha256 = await sha256(argsJson);
-    const stored = first(
-      this.storage.sql.exec<ToolResultRow>(
-        `SELECT tool_name, args_sha256, result_json
-         FROM builder_workspace_tool_results WHERE tool_call_id = ?`,
-        toolCallId,
-      ),
-    );
-    if (stored) {
-      if (stored.tool_name !== toolName || stored.args_sha256 !== argsSha256) {
-        throw new Error('A workspace tool-call identifier was reused with different arguments.');
-      }
-      return JSON.parse(stored.result_json) as T;
-    }
-    const result = await execute();
-    const resultJson = JSON.stringify(result);
-    if (new TextEncoder().encode(resultJson).byteLength > MAX_TOOL_RESULT_BYTES) {
-      throw new Error('The workspace tool result exceeded its durable result limit.');
-    }
-    this.storage.sql.exec(
-      `INSERT INTO builder_workspace_tool_results (tool_call_id, tool_name, args_sha256, result_json)
-       VALUES (?, ?, ?, ?) ON CONFLICT(tool_call_id) DO NOTHING`,
+    const started = await this.#post<ToolOperationStartResult>('tool-operation/begin', {
       toolCallId,
       toolName,
-      argsSha256,
-      resultJson,
-    );
-    return result;
+      argsJson,
+    });
+    if (started.status === 'completed') {
+      return started.result as T;
+    }
+    if (started.status === 'failed' || started.status === 'indeterminate') {
+      throw new Error(started.error);
+    }
+    try {
+      const result = await execute();
+      return await this.#post<T>('tool-operation/complete', { toolCallId, result });
+    } catch (error) {
+      await this.#post('tool-operation/fail', {
+        toolCallId,
+        error: error instanceof Error ? error.message : String(error),
+      }).catch(() => undefined);
+      throw error;
+    }
   }
 
   #setState(value: unknown): BuilderWorkspaceState {
@@ -351,18 +339,6 @@ function stableValue(value: unknown): unknown {
     );
   }
   return value;
-}
-
-function first<T>(rows: Iterable<T>): T | undefined {
-  for (const row of rows) {
-    return row;
-  }
-  return undefined;
-}
-
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function decodeBase64(value: string): Uint8Array {

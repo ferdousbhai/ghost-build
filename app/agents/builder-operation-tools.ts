@@ -27,9 +27,7 @@ export async function executeBuilderOperationTool(args: {
 }): Promise<GhostbuildToolResult> {
   switch (args.toolName) {
     case 'lookupDocs':
-      return args.workspace.executeToolOnce(args.toolCallId, args.toolName, args.input, () =>
-        runLookupDocs(invocation(args)),
-      );
+      return runLookupDocs(invocation(args));
     case 'npmInstall':
       return runDependencyInstall(args);
     case 'validateProject':

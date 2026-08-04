@@ -6,6 +6,7 @@ import {
   DEPLOYMENT_SECURITY_BASELINE_VERSION,
   TEMPLATE_SOURCE_SHA256,
 } from './deployment-security-baseline';
+import { USER_WORKSPACE_RUNTIME_GC_CRON } from './user-workspace-runtime-policy';
 
 const plan: DeploymentPlan = {
   version: 2,
@@ -200,6 +201,80 @@ describe('UserCloudflareAccountApi', () => {
     await expect(
       new UserCloudflareAccountApi('account-1', 'secret-token', request).createD1ForPlan(plan),
     ).rejects.toThrow('permission denied');
+  });
+
+  test('replaces runtime schedules with exactly one deterministic GC trigger', async () => {
+    const authorizeRequest = vi.fn(async () => undefined);
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      Response.json({
+        success: true,
+        result: {
+          schedules: [
+            {
+              cron: USER_WORKSPACE_RUNTIME_GC_CRON,
+              created_on: '2026-08-04T10:00:00Z',
+              modified_on: '2026-08-04T10:00:00Z',
+            },
+          ],
+        },
+      }),
+    );
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request, authorizeRequest).configureWorkspaceRuntimeGcSchedule(
+        'ghostbuild-workspace-1',
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(request).toHaveBeenCalledWith(
+      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-workspace-1/schedules',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify([{ cron: '*/15 * * * *' }]),
+        headers: expect.objectContaining({
+          authorization: 'Bearer token',
+          'content-type': 'application/json',
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(authorizeRequest).toHaveBeenCalledOnce();
+  });
+
+  test.each([
+    ['missing schedule collection', {}],
+    ['no schedule', { schedules: [] }],
+    ['an additional schedule', { schedules: [{ cron: USER_WORKSPACE_RUNTIME_GC_CRON }, { cron: '0 0 * * *' }] }],
+    ['a changed schedule', { schedules: [{ cron: '0 0 * * *' }] }],
+    ['invalid schedule metadata', { schedules: [{ cron: USER_WORKSPACE_RUNTIME_GC_CRON, created_on: 1 }] }],
+  ])('rejects schedule readback with %s', async (_label, result) => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ success: true, result }));
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).configureWorkspaceRuntimeGcSchedule(
+        'ghostbuild-workspace-1',
+      ),
+    ).rejects.toThrow('invalid workspace runtime schedules');
+
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  test('rejects an unsuccessful schedule update envelope', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        success: false,
+        errors: [{ code: 1000, message: 'schedule update rejected' }],
+        result: { schedules: [{ cron: USER_WORKSPACE_RUNTIME_GC_CRON }] },
+      }),
+    );
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).configureWorkspaceRuntimeGcSchedule(
+        'ghostbuild-workspace-1',
+      ),
+    ).rejects.toThrow('schedule update rejected');
+
+    expect(request).toHaveBeenCalledOnce();
   });
 
   test('reads the exact active Worker version, its bindings, and cleanup schedules', async () => {

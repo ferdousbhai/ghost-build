@@ -1,5 +1,6 @@
 import type { AbsolutePath } from './utils/workDir.js';
 import type { Tool } from 'ai';
+import type { ComputerToolName } from './cloudflare-computer.js';
 
 export interface EditorDocument {
   value: string;
@@ -23,16 +24,11 @@ interface Folder {
   type: 'folder';
 }
 
-export type GhostbuildToolSet = {
+export type GhostbuildToolSet = Record<ComputerToolName, Tool> & {
   deploy: Tool;
-  edit: Tool;
-  exec: Tool;
-  ls: Tool;
   lookupDocs: Tool;
   npmInstall: Tool;
-  read: Tool;
   validateProject: Tool;
-  write: Tool;
 };
 
 export type GhostbuildToolName = keyof GhostbuildToolSet;

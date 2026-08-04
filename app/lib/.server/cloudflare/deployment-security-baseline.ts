@@ -1,6 +1,6 @@
 import { BUILDER_TEMPLATE_SOURCE_SHA256 } from '~/agents/builder-template.generated';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 23 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 24 as const;
 export {
   DEPLOYMENT_SECURITY_BASELINE_BINDING,
   DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
@@ -32,7 +32,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'agent-security-migrations/0001_agent_security.sql':
     'cc62c34bcfb5e176155e371a099d000679ae69877facf252fe3d3c7e1190fbeb',
   'vite.config.ts': '37150c806c6cb06cb59a96e000973192e080a43bd64d07fe6b5fd21f77b8d0fe',
-  'vite.preview.config.mjs': 'cf4b76fc5b0a6db0a6b97a51dab6b981474c723d960653efcfafc46480d385a3',
+  'vite.preview.config.mjs': 'd4dbf528e6a88f47fd25e9968f28c1627458f2a4384e93957bd908eb95511a76',
   'tsconfig.json': 'a005fcf59f0217cc7486892312d032adad3e400f86c396d4150390247c989b6a',
   'postcss.config.cjs': 'fa650b380adfabb151a0b352f7135e107e6352345f899060f1c5c231228f94bf',
   'tailwind.config.js': 'c43ce7f83ee3ef0259121fa47ebc98dcb67a25a106aea5318fb0559ce72bc558',
@@ -61,7 +61,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/lib/project-policy/workspace-policy.mjs': 'a5eacb15e4145864b70dbfc04b27990356c153003d48b31c93326e8018969963',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'fb4f472c185854d60ba50f964ef89d49139ca3af095a8b3ec1fd38c2a54c153a';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '6d841af52d5142c7528c55947e52766b1467fc13faecf3877997fc60a2b17763';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
   '79358ea38b428afca1d89125f5520419a635201264bfb54a2675287737460ea2';

@@ -4,6 +4,7 @@ import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
 import type { Tool, ToolExecutionOptions } from 'ai';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { ZodType } from 'zod';
+import { COMPUTER_TOOL_NAMES } from 'ghostbuild-agent/cloudflare-computer';
 import {
   createWorkersAiTools,
   createTurnStatefulToolCoordinator,
@@ -11,7 +12,7 @@ import {
   getWorkersAiToolSettings,
 } from './workers-ai-tools';
 
-const AUTOMATIC_TOOLS = ['read', 'ls', 'edit', 'write', 'exec', 'lookupDocs', 'npmInstall', 'validateProject'];
+const AUTOMATIC_TOOLS = [...COMPUTER_TOOL_NAMES, 'lookupDocs', 'npmInstall', 'validateProject'];
 
 describe('Workers AI tool lifecycle', () => {
   it('exposes the clean-break Cloudflare Computer filesystem schemas', () => {

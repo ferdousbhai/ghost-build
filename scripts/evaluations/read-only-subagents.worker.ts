@@ -41,14 +41,14 @@ Legacy backups have messages but no revision and are treated as revision zero.
   },
   {
     role: 'verifier',
-    request: 'Review a repository search change for boundedness and stale-result safety.',
+    request: 'Review the Cloudflare Computer read/edit contract for boundedness and safe follow-up edits.',
     context: `
-searchText caps matches at 10,000 and returns 50 per page.
-Each result includes a content-derived fileRevision.
-Binary, generated, dependency, and build-output paths are excluded.
-Callers must re-read the current range before editing when fileRevision changed.
+read returns at most 2,000 lines or 256 KiB and includes nextOffset when truncated.
+edit reads at most 2 MiB, matches every oldText against the original file, and rejects overlapping edits.
+write and edit preserve an existing file's executable mode.
+The agent must inspect current contents before constructing exact replacements.
 `,
-    expected: ['10,000', '50', 'fileRevision', 're-read'],
+    expected: ['2,000', '256 KiB', '2 MiB', 'original file', 'overlapping', 'executable mode'],
   },
 ] as const;
 

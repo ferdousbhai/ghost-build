@@ -36,23 +36,6 @@ export default {
         }
       },
     },
-    {
-      name: "ghostbuild-preview-tailwind",
-      transformIndexHtml: {
-        order: "pre",
-        handler() {
-          return [
-            {
-              tag: "script",
-              attrs: {
-                src: "https://cdn.tailwindcss.com/3.4.17",
-              },
-              injectTo: "head",
-            },
-          ];
-        },
-      },
-    },
   ],
   esbuild: {
     tsconfigRaw: JSON.stringify({
@@ -66,7 +49,6 @@ export default {
       },
     }),
   },
-  css: { postcss: { plugins: [] } },
   resolve: {
     alias: {
       "@": path.resolve(projectDir, "./src"),

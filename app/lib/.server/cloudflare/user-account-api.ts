@@ -1,4 +1,5 @@
 import { deploymentPlanResourceName, type DeploymentPlan, type DeploymentResourceType } from './deployment-plan';
+import { USER_WORKSPACE_RUNTIME_GC_CRON } from './user-workspace-runtime-policy';
 
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
 const CLOUDFLARE_API_TIMEOUT_MS = 30_000;
@@ -345,6 +346,27 @@ export class UserCloudflareAccountApi {
     });
   }
 
+  /** Replace every trigger with Ghostbuild's single deterministic runtime-GC schedule. */
+  async configureWorkspaceRuntimeGcSchedule(workerName: string): Promise<void> {
+    requireWorkerName(workerName);
+    const result = await this.call<unknown>(`/workers/scripts/${encodeURIComponent(workerName)}/schedules`, {
+      method: 'PUT',
+      body: JSON.stringify([{ cron: USER_WORKSPACE_RUNTIME_GC_CRON }]),
+    });
+    if (!isRecord(result) || !Array.isArray(result.schedules) || result.schedules.length !== 1) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid workspace runtime schedules.');
+    }
+    const schedule = result.schedules[0];
+    if (
+      !isRecord(schedule) ||
+      schedule.cron !== USER_WORKSPACE_RUNTIME_GC_CRON ||
+      (schedule.created_on !== undefined && typeof schedule.created_on !== 'string') ||
+      (schedule.modified_on !== undefined && typeof schedule.modified_on !== 'string')
+    ) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid workspace runtime schedules.');
+    }
+  }
+
   /** Reads the exact version currently receiving 100% of production traffic. */
   async readActiveWorkerDeployment(workerName: string): Promise<ActiveWorkerDeploymentReadback | null> {
     if (!/^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/.test(workerName)) {
@@ -499,6 +521,10 @@ function requireCloudflareResourceName(name: string): void {
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(name)) {
     throw new CloudflareAccountApiError('Cloudflare resource name is invalid.');
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 async function parseCloudflareEnvelope<T>(response: Response): Promise<T> {

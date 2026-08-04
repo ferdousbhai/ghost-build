@@ -3,9 +3,9 @@ import {
   getWorkspace,
   type WorkspaceClient,
   type WorkspaceOptions,
+  Workspace,
   WorkspaceProxy,
   WorkspaceServiceProxy,
-  withWorkspace,
 } from '@cloudflare/computer';
 import {
   CloudflareContainerBackend,
@@ -35,6 +35,9 @@ import { userRuntimeDeploymentAction } from '../../app/server-handlers/deploymen
 import { userRuntimeEnhancePromptAction } from '../../app/server-handlers/enhance-prompt';
 import { toolFailure, toolSuccess, type GhostbuildToolResult } from '../../ghostbuild-agent/tool-result';
 import { openPreviewQuickTunnel } from './preview-tunnel';
+import { applyAtomicWorkspaceChanges } from './atomic-workspace-changes';
+import { scheduleUserWorkspaceRuntimeMaintenance } from './scheduled-maintenance';
+import { ToolOperationJournal, type ToolOperationStartResult } from './tool-operation-journal';
 
 export { WorkspaceProxy, WorkspaceServiceProxy };
 
@@ -212,9 +215,15 @@ function computerWorkspaceOptions(self: InstanceType<typeof ComputerSandboxBase>
   };
 }
 
-export class ProjectWorkspace extends withWorkspace(ComputerSandboxBase, computerWorkspaceOptions) {
+export class ProjectWorkspace extends ComputerSandboxBase {
+  readonly #workspace: Workspace;
+  readonly #toolOperations: ToolOperationJournal;
+
   constructor(ctx: DurableObjectState<{}>, env: RuntimeEnv) {
     super(ctx, env);
+    this.#workspace = new Workspace(computerWorkspaceOptions(this));
+    this.#toolOperations = new ToolOperationJournal(ctx.storage);
+    this.#toolOperations.initialize();
     this.ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS ghostbuild_workspace_state (
          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -240,6 +249,39 @@ export class ProjectWorkspace extends withWorkspace(ComputerSandboxBase, compute
 
   override fetch(request: Request): Promise<Response> {
     return this.containerBackend.handleFetch(request);
+  }
+
+  async __getWorkspaceStub() {
+    await this.#workspace.ready();
+    return this.#workspace.stub();
+  }
+
+  async beginToolOperation(value: unknown): Promise<ToolOperationStartResult> {
+    const input = record(value);
+    const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
+    const toolName = requireRemoteToolName(input.toolName);
+    const argsJson = requireString(input.argsJson, 'argsJson', MAX_REQUEST_BYTES);
+    return this.#toolOperations.begin({
+      toolCallId,
+      toolName,
+      argsSha256: await sha256Text(argsJson),
+    });
+  }
+
+  completeToolOperation(value: unknown): unknown {
+    const input = record(value);
+    return this.#toolOperations.complete({
+      toolCallId: requireString(input.toolCallId, 'toolCallId', 512),
+      result: input.result,
+    });
+  }
+
+  failToolOperation(value: unknown): void {
+    const input = record(value);
+    this.#toolOperations.fail({
+      toolCallId: requireString(input.toolCallId, 'toolCallId', 512),
+      error: requireString(input.error, 'error', 4_000),
+    });
   }
 
   async getWorkspaceState(): Promise<WorkspaceState> {
@@ -333,7 +375,9 @@ export class ProjectWorkspace extends withWorkspace(ComputerSandboxBase, compute
     for (const change of changes) {
       if (change.kind === 'delete') {
         for (const path of projectedFiles.keys()) {
-          if (path === change.path || path.startsWith(`${change.path}/`)) projectedFiles.delete(path);
+          if (path === change.path || path.startsWith(`${change.path}/`)) {
+            projectedFiles.delete(path);
+          }
         }
         continue;
       }
@@ -351,18 +395,18 @@ export class ProjectWorkspace extends withWorkspace(ComputerSandboxBase, compute
     ) {
       throw new Error('The project workspace exceeds its size limit.');
     }
-    const changedPaths: string[] = [];
-    await this.withComputer(async (workspace) => {
-      for (const change of changes) {
-        if (change.kind === 'delete') {
-          await workspace.fs.rm(change.path, { recursive: true, force: true });
-        } else {
-          const write = decodedWrites.get(change.path)!;
-          await writeWorkspaceFile(workspace, change.path, write.bytes, true, write.mode);
-        }
-        changedPaths.push(change.path);
-      }
-    });
+    const changedPaths = applyAtomicWorkspaceChanges(
+      this.#workspace,
+      changes.map((change) =>
+        change.kind === 'delete'
+          ? change
+          : {
+              kind: 'write' as const,
+              path: change.path,
+              ...decodedWrites.get(change.path)!,
+            },
+      ),
+    );
     const state = await this.getWorkspaceState();
     return { ok: true as const, state, changedPaths };
   }
@@ -461,7 +505,9 @@ export class ProjectWorkspace extends withWorkspace(ComputerSandboxBase, compute
       const reader = (await workspace.fs.readFile(path)).getReader();
       let disposed = false;
       const dispose = () => {
-        if (disposed) return;
+        if (disposed) {
+          return;
+        }
         disposed = true;
         reader.releaseLock();
         workspace[Symbol.dispose]();
@@ -545,96 +591,108 @@ export class ProjectWorkspace extends withWorkspace(ComputerSandboxBase, compute
 
   async installDependenciesTool(value: unknown): Promise<GhostbuildToolResult> {
     const input = record(value);
+    const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
     const mode = input.mode === 'sync-lockfile' ? 'sync-lockfile' : input.mode === 'add' ? 'add' : null;
     const packages = requireStringArray(input.packages, 'packages', 100);
     if (!mode) {
       throw new SyntaxError('Invalid dependency installation mode.');
     }
-    const startedAt = Date.now();
-    await this.withComputer(async (workspace) => {
-      const packagePath = `${PROJECT_ROOT}/package.json`;
-      const current = decodeUtf8((await readWorkspaceFile(workspace, packagePath)).bytes);
-      const next = mode === 'sync-lockfile' ? current : addRequestedDependencies(current, packages);
-      await writeWorkspaceFile(workspace, packagePath, new TextEncoder().encode(next));
-      requireCommandSuccess(
-        await runCommand(
-          workspace,
-          'pnpm install --lockfile-only --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
-          { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 4 * 60_000 },
-        ),
-      );
-    });
-    const state = await this.getWorkspaceState();
-    return toolSuccess(
-      mode === 'sync-lockfile'
-        ? 'Synchronized the durable project lockfile with package.json.'
-        : `Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'} in the durable project.`,
-      {
-        mode,
-        workspaceRevision: state.revision,
-        buildEnvironment: 'cloudflare-computer-container',
-        durationMs: Date.now() - startedAt,
-      },
-    );
-  }
-
-  async validateTool(): Promise<GhostbuildToolResult> {
-    const before = await this.checkpoint();
-    const startedAt = Date.now();
-    try {
+    return this.runToolOperation(toolCallId, 'npmInstall', { input: input.input, mode, packages }, async () => {
+      const startedAt = Date.now();
       await this.withComputer(async (workspace) => {
+        const packagePath = `${PROJECT_ROOT}/package.json`;
+        const current = decodeUtf8((await readWorkspaceFile(workspace, packagePath)).bytes);
+        const next = mode === 'sync-lockfile' ? current : addRequestedDependencies(current, packages);
+        await writeWorkspaceFile(workspace, packagePath, new TextEncoder().encode(next));
         requireCommandSuccess(
           await runCommand(
             workspace,
-            'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
+            'pnpm install --lockfile-only --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
             { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 4 * 60_000 },
           ),
         );
-        for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
-          requireCommandSuccess(
-            await runCommand(workspace, command, {
-              cwd: PROJECT_ROOT,
-              backend: 'container-shell',
-              timeoutMs: 5 * 60_000,
-            }),
-          );
-        }
-        await removeDerivedFiles(workspace);
       });
-      const after = await this.checkpoint();
-      if (after.revision !== before.revision) {
-        throw new Error('The project changed while validation was running. Validate the new revision.');
-      }
-      this.ctx.storage.sql.exec(
-        `INSERT INTO ghostbuild_validations (revision, workspace_revision, validated_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT(revision) DO UPDATE SET workspace_revision = excluded.workspace_revision,
-           validated_at = excluded.validated_at`,
-        after.revision,
-        after.workspaceRevision,
-        Date.now(),
+      const state = await this.getWorkspaceState();
+      return toolSuccess(
+        mode === 'sync-lockfile'
+          ? 'Synchronized the durable project lockfile with package.json.'
+          : `Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'} in the durable project.`,
+        {
+          mode,
+          workspaceRevision: state.revision,
+          buildEnvironment: 'cloudflare-computer-container',
+          durationMs: Date.now() - startedAt,
+        },
       );
-      return toolSuccess(`Project validation passed at durable source revision ${after.revision}.`, {
-        level: 'full',
-        revision: after.revision,
-        workspaceRevision: after.workspaceRevision,
-        buildEnvironment: 'cloudflare-computer-container',
-        checks: ['workspace-policy', 'dependency-installation', 'typecheck', 'stack-verification', 'build', 'lint'].map(
-          (name) => ({ name, status: 'passed' as const }),
-        ),
-        durationMs: Date.now() - startedAt,
-        nextAction: 'prepare-deployment',
-      });
-    } catch (error) {
-      return toolFailure(error instanceof Error ? error.message.slice(-4_000) : 'User-owned validation failed.', {
-        level: 'full',
-        revision: before.revision,
-        workspaceRevision: before.workspaceRevision,
-        currentWorkspaceRevision: this.currentRevision(),
-        buildEnvironment: 'cloudflare-computer-container',
-        checks: [{ name: 'production-build', status: 'failed' as const }],
-      });
-    }
+    });
+  }
+
+  async validateTool(value: unknown): Promise<GhostbuildToolResult> {
+    const input = record(value);
+    const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
+    return this.runToolOperation(toolCallId, 'validateProject', input.input, async () => {
+      const before = await this.checkpoint();
+      const startedAt = Date.now();
+      try {
+        await this.withComputer(async (workspace) => {
+          requireCommandSuccess(
+            await runCommand(
+              workspace,
+              'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
+              { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 4 * 60_000 },
+            ),
+          );
+          for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
+            requireCommandSuccess(
+              await runCommand(workspace, command, {
+                cwd: PROJECT_ROOT,
+                backend: 'container-shell',
+                timeoutMs: 5 * 60_000,
+              }),
+            );
+          }
+          await removeDerivedFiles(workspace);
+        });
+        const after = await this.checkpoint();
+        if (after.revision !== before.revision) {
+          throw new Error('The project changed while validation was running. Validate the new revision.');
+        }
+        this.ctx.storage.sql.exec(
+          `INSERT INTO ghostbuild_validations (revision, workspace_revision, validated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(revision) DO UPDATE SET workspace_revision = excluded.workspace_revision,
+             validated_at = excluded.validated_at`,
+          after.revision,
+          after.workspaceRevision,
+          Date.now(),
+        );
+        return toolSuccess(`Project validation passed at durable source revision ${after.revision}.`, {
+          level: 'full',
+          revision: after.revision,
+          workspaceRevision: after.workspaceRevision,
+          buildEnvironment: 'cloudflare-computer-container',
+          checks: [
+            'workspace-policy',
+            'dependency-installation',
+            'typecheck',
+            'stack-verification',
+            'build',
+            'lint',
+          ].map((name) => ({ name, status: 'passed' as const })),
+          durationMs: Date.now() - startedAt,
+          nextAction: 'prepare-deployment',
+        });
+      } catch (error) {
+        return toolFailure(error instanceof Error ? error.message.slice(-4_000) : 'User-owned validation failed.', {
+          level: 'full',
+          revision: before.revision,
+          workspaceRevision: before.workspaceRevision,
+          currentWorkspaceRevision: this.currentRevision(),
+          buildEnvironment: 'cloudflare-computer-container',
+          checks: [{ name: 'production-build', status: 'failed' as const }],
+        });
+      }
+    });
   }
 
   validationStatus(revision: unknown) {
@@ -743,6 +801,13 @@ export class ProjectWorkspace extends withWorkspace(ComputerSandboxBase, compute
 
   async deploy(value: unknown) {
     const input = record(value);
+    const deploymentId = requireString(input.deploymentId, 'deploymentId', 512);
+    return this.runToolOperation(`production-deploy:${deploymentId}`, 'productionDeploy', input, () =>
+      this.deployOnce(input),
+    );
+  }
+
+  private async deployOnce(input: Record<string, unknown>) {
     const revision = requireString(input.revision, 'revision', 64);
     if (!/^[a-f0-9]{64}$/.test(revision) || !this.hasSuccessfulValidation(revision)) {
       throw new Error('Deployment requires successful validation of this exact revision.');
@@ -910,6 +975,40 @@ export class ProjectWorkspace extends withWorkspace(ComputerSandboxBase, compute
     };
   }
 
+  private async runToolOperation<T>(
+    toolCallId: string,
+    toolName: string,
+    args: unknown,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const argsJson = JSON.stringify(stableValue(args)) ?? 'null';
+    const started = this.#toolOperations.begin({
+      toolCallId,
+      toolName,
+      argsSha256: await sha256Text(argsJson),
+    });
+    if (started.status === 'completed') {
+      return started.result as T;
+    }
+    if (started.status === 'failed' || started.status === 'indeterminate') {
+      throw new Error(started.error);
+    }
+    try {
+      const result = await operation();
+      return this.#toolOperations.complete({ toolCallId, result }) as T;
+    } catch (error) {
+      try {
+        this.#toolOperations.fail({
+          toolCallId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } catch {
+        // A completed journal row wins if its acknowledgement was interrupted.
+      }
+      throw error;
+    }
+  }
+
   private async withComputer<T>(operation: (workspace: WorkspaceClient) => Promise<T>): Promise<T> {
     const workspace = await getWorkspace(this as unknown as Parameters<typeof getWorkspace>[0]);
     try {
@@ -993,6 +1092,16 @@ export default {
         );
         return Response.json(result);
       }
+      if (request.method === 'POST' && route.operation === 'tool-operation/begin') {
+        return Response.json(await project.beginToolOperation(await readJson(request)));
+      }
+      if (request.method === 'POST' && route.operation === 'tool-operation/complete') {
+        return Response.json(await project.completeToolOperation(await readJson(request)));
+      }
+      if (request.method === 'POST' && route.operation === 'tool-operation/fail') {
+        await project.failToolOperation(await readJson(request));
+        return new Response(null, { status: 204 });
+      }
       if (request.method === 'POST' && route.operation === 'checkpoint') {
         return Response.json(await project.checkpoint());
       }
@@ -1000,7 +1109,7 @@ export default {
         return Response.json(await project.installDependenciesTool(await readJson(request)));
       }
       if (request.method === 'POST' && route.operation === 'validate') {
-        return Response.json(await project.validateTool());
+        return Response.json(await project.validateTool(await readJson(request)));
       }
       if (request.method === 'POST' && route.operation === 'validation-status') {
         return Response.json(await project.validationStatus(record(await readJson(request)).revision));
@@ -1029,6 +1138,9 @@ export default {
         { status: error instanceof SyntaxError ? 400 : 409 },
       );
     }
+  },
+  scheduled(controller: ScheduledController, env: RuntimeEnv, ctx: ExecutionContext): void {
+    scheduleUserWorkspaceRuntimeMaintenance(controller, env, ctx);
   },
 };
 
@@ -1095,7 +1207,9 @@ async function readProjectFiles(workspace: WorkspaceClient): Promise<WorkspaceFi
   try {
     await workspace.fs.stat(PROJECT_ROOT);
   } catch (error) {
-    if (isMissingPath(error)) return [];
+    if (isMissingPath(error)) {
+      return [];
+    }
     throw error;
   }
   const entries = (await workspace.fs.find(PROJECT_ROOT)).filter(
@@ -1299,6 +1413,13 @@ function requireBackend(value: unknown): 'worker-shell' | 'container-shell' {
   throw new SyntaxError('Invalid Computer execution backend.');
 }
 
+function requireRemoteToolName(value: unknown): 'write' | 'edit' | 'exec' | 'deploy' {
+  if (value === 'write' || value === 'edit' || value === 'exec' || value === 'deploy') {
+    return value;
+  }
+  throw new SyntaxError('Invalid stateful workspace tool name.');
+}
+
 function decodeFileContent(content: string, encoding: 'utf8' | 'base64'): Uint8Array {
   return encoding === 'base64' ? decodeBase64(content) : new TextEncoder().encode(content);
 }
@@ -1333,7 +1454,9 @@ async function readStream(stream: ReadableStream<Uint8Array>, expectedBytes: num
   let offset = 0;
   while (true) {
     const { value, done } = await reader.read();
-    if (done) break;
+    if (done) {
+      break;
+    }
     if (offset + value.byteLength > result.byteLength) {
       throw new Error('Workspace file changed while it was read.');
     }
@@ -1391,7 +1514,9 @@ function withCors(response: Response, origin: string | null): Response {
 
 function parseProjectRoute(pathname: string): { projectId: string; operation: string } | null {
   const match = /^\/v1\/projects\/([^/]+)(?:\/(.*))?$/.exec(pathname);
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
   let projectId: string;
   try {
     projectId = decodeURIComponent(match[1]!);
@@ -1422,6 +1547,20 @@ function record(value: unknown): Record<string, unknown> {
 
 function recordOrNull(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stableValue);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableValue((value as Record<string, unknown>)[key])]),
+    );
+  }
+  return value;
 }
 
 function requireString(value: unknown, name: string, maxLength: number): string {
@@ -1459,7 +1598,9 @@ function parseWranglerVersion(content: string, workerName: string): string {
   }
   const versions: string[] = [];
   for (const line of content.split('\n')) {
-    if (!line.trim()) continue;
+    if (!line.trim()) {
+      continue;
+    }
     const entry = JSON.parse(line) as Record<string, unknown>;
     if (
       entry.type === 'deploy' &&
@@ -1496,7 +1637,9 @@ function sha256Text(value: string): Promise<string> {
 }
 
 function first<T>(rows: Iterable<T>): T | undefined {
-  for (const row of rows) return row;
+  for (const row of rows) {
+    return row;
+  }
   return undefined;
 }
 
@@ -1512,9 +1655,13 @@ function isMissingPath(error: unknown): boolean {
 
 function authorized(request: Request, expected: string): boolean {
   const value = request.headers.get('authorization');
-  if (!value?.startsWith('Bearer ') || expected.length < 32) return false;
+  if (!value?.startsWith('Bearer ') || expected.length < 32) {
+    return false;
+  }
   const supplied = value.slice('Bearer '.length);
-  if (supplied.length !== expected.length) return false;
+  if (supplied.length !== expected.length) {
+    return false;
+  }
   let mismatch = 0;
   for (let index = 0; index < supplied.length; index += 1) {
     mismatch |= supplied.charCodeAt(index) ^ expected.charCodeAt(index);

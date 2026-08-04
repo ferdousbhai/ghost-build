@@ -13,11 +13,10 @@ import {
 } from './user-workspace-runtime-repository';
 import { deriveUserWorkspaceRuntimeSecret } from './user-workspace-runtime-secret';
 import { UserCloudflareAccountApi } from './user-account-api';
-import { requireExpectedUserWorkspaceRuntimeHealth } from './user-workspace-runtime-health';
+import { waitForUserWorkspaceRuntimeReadiness } from './user-workspace-runtime-readiness';
 
 const USER_WORKSPACE_SANDBOX_IMAGE =
   'docker.io/cloudflare/sandbox:0.12.4@sha256:e83bb4d6d9748b93a4b876ce0852b5e93d8e0893da10c59d425770aef0d73738';
-const RUNTIME_REQUEST_TIMEOUT_MS = 30_000;
 
 export async function provisionUserWorkspaceRuntime(args: {
   env: Env;
@@ -70,13 +69,14 @@ export async function provisionUserWorkspaceRuntime(args: {
       connectionGeneration: connection.generation,
       endpoint,
     });
+    await accountApi.configureWorkspaceRuntimeGcSchedule(workerName);
     await accountApi.ensureWorkspaceRuntimeContainer({
       applicationName: workerName,
       namespaceId: deployed.namespaceId,
       image: USER_WORKSPACE_SANDBOX_IMAGE,
     });
     await accountApi.enableWorkerSubdomain(workerName);
-    await requireHealthyRuntime({
+    await waitForUserWorkspaceRuntimeReadiness({
       endpoint,
       controlPlaneSecret,
       runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
@@ -108,23 +108,6 @@ function requireRuntimeCapabilities(connection: CloudflareConnection): void {
   if (missing.length > 0) {
     throw new Error(`Reconnect Cloudflare with workspace runtime access: ${missing.join(', ')}.`);
   }
-}
-
-async function requireHealthyRuntime(args: {
-  endpoint: string;
-  controlPlaneSecret: string;
-  runtimeVersion: string;
-  request: typeof fetch;
-}): Promise<void> {
-  const response = await args.request(`${args.endpoint}/v1/health`, {
-    headers: { authorization: `Bearer ${args.controlPlaneSecret}` },
-    signal: AbortSignal.timeout(RUNTIME_REQUEST_TIMEOUT_MS),
-  });
-  const payload: unknown = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error('The user-owned workspace runtime did not pass its health check.');
-  }
-  requireExpectedUserWorkspaceRuntimeHealth(payload, args.runtimeVersion);
 }
 
 async function sha256(value: string): Promise<string> {

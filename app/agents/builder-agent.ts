@@ -59,7 +59,7 @@ import type {
   BuilderWorkspaceSyncPage,
 } from './builder-workspace-types';
 import { builderTemplateSeedId, loadBuilderTemplate } from './builder-template';
-import { seedBuilderWorkspace } from './builder-workspace-seed';
+import { parentBuilderWorkspaceSeedId, seedBuilderWorkspace } from './builder-workspace-seed';
 import { deriveProvisionalTitle } from '@summonghost/title-generation';
 import {
   failedBuilderPreviewState,
@@ -147,7 +147,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     initializeBuilderAgentSchema(ctx);
-    this.workspace = new UserWorkspaceRuntimeClient(env, ctx.storage, ctx.id.toString(), () => this.userId);
+    this.workspace = new UserWorkspaceRuntimeClient(env, ctx.id.toString(), () => this.userId);
   }
 
   async onStart(props?: BuilderAgentProps) {
@@ -701,14 +701,16 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       return current;
     }
     if (binding.parentAgentName) {
-      const parentEntries = await this.loadParentWorkspace(binding.parentAgentName);
-      return this.seedWorkspace(`parent_${crypto.randomUUID()}`, parentEntries);
+      const parent = await this.loadParentWorkspace(binding.parentAgentName);
+      return this.seedWorkspace(parentBuilderWorkspaceSeedId(parent.targetRevision), parent.entries);
     }
     const template = await loadBuilderTemplate();
     return this.seedWorkspace(builderTemplateSeedId(), template);
   }
 
-  private async loadParentWorkspace(parentAgentName: string): Promise<BuilderWorkspaceFileInput[]> {
+  private async loadParentWorkspace(
+    parentAgentName: string,
+  ): Promise<{ entries: BuilderWorkspaceFileInput[]; targetRevision: number }> {
     const parent = this.env.BuilderAgent.getByName(parentAgentName) as unknown as Pick<
       BuilderAgent,
       'getWorkspaceState' | 'getWorkspaceSyncPage'
@@ -739,7 +741,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         }
       }
       if (!page.nextCursor) {
-        return entries;
+        return { entries, targetRevision: page.targetRevision };
       }
       cursor = page.nextCursor;
     }

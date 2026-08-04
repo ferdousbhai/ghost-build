@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -67,8 +67,25 @@ export async function verifyTemplate() {
     await verifyResolvedProductionModulePolicy(tempDir);
     run(tempDir, ['exec', 'wrangler', 'deploy', '--dry-run']);
     run(tempDir, ['exec', 'vite', 'build', '--config', 'vite.preview.config.mjs']);
+    await verifyPreviewStyles(tempDir);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function verifyPreviewStyles(tempDir) {
+  const previewHtml = await readFile(join(tempDir, 'dist/index.html'), 'utf8');
+  if (previewHtml.includes('cdn.tailwindcss.com')) {
+    throw new Error('Template preview must not load Tailwind from a third-party CDN.');
+  }
+  const assetDir = join(tempDir, 'dist/assets');
+  const cssFiles = (await readdir(assetDir)).filter((name) => name.endsWith('.css'));
+  if (cssFiles.length === 0) {
+    throw new Error('Template preview build did not emit compiled CSS.');
+  }
+  const previewCss = (await Promise.all(cssFiles.map((name) => readFile(join(assetDir, name), 'utf8')))).join('\n');
+  if (/@tailwind\s/.test(previewCss) || !previewCss.includes('.min-h-screen')) {
+    throw new Error('Template preview did not compile its local Tailwind stylesheet.');
   }
 }
 

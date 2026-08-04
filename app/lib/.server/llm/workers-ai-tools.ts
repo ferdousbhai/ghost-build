@@ -3,13 +3,18 @@ import { deployTool } from 'ghostbuild-agent/tools/deploy';
 import { lookupDocsTool } from 'ghostbuild-agent/tools/lookupDocs';
 import { npmInstallTool } from 'ghostbuild-agent/tools/npmInstall';
 import { validateProjectTool } from 'ghostbuild-agent/tools/validateProject';
+import {
+  COMPUTER_SHELL_TOOL_OPTIONS,
+  COMPUTER_TOOL_NAMES,
+  type ComputerToolName,
+} from 'ghostbuild-agent/cloudflare-computer';
 import { createAITools } from '@cloudflare/computer/tools';
 import type { GhostbuildToolName, GhostbuildToolSet } from 'ghostbuild-agent/types';
 import { z, type ZodType } from 'zod';
 import { isGhostbuildToolResult, toolFailure, toolResultSucceeded } from 'ghostbuild-agent/tool-result';
 import type { Tool } from 'ai';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
-import type { ServerOperationToolName, ServerWorkspaceToolName } from '~/agents/builder-workspace-types';
+import type { ServerOperationToolName } from '~/agents/builder-workspace-types';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 type BuilderOperationContext = {
@@ -39,16 +44,7 @@ type BuildLifecycle =
   | { stage: 'deploy-failed' }
   | { stage: 'deployment-ready'; production: boolean };
 
-const AUTOMATIC_TOOLS: GhostbuildToolName[] = [
-  'read',
-  'ls',
-  'edit',
-  'write',
-  'exec',
-  'lookupDocs',
-  'npmInstall',
-  'validateProject',
-];
+const AUTOMATIC_TOOLS: GhostbuildToolName[] = [...COMPUTER_TOOL_NAMES, 'lookupDocs', 'npmInstall', 'validateProject'];
 const IMPLEMENTATION_TOOLS = AUTOMATIC_TOOLS.filter((toolName) => toolName !== 'validateProject');
 
 export function createWorkersAiTools(
@@ -58,17 +54,7 @@ export function createWorkersAiTools(
   const coordinateStatefulTool = createTurnStatefulToolCoordinator();
   const computerTools = createAITools({
     workspace: workspace.computer,
-    shell: {
-      backends: {
-        'worker-shell': {
-          description: 'Fast isolated shell for common text, file, and JavaScript commands.',
-        },
-        'container-shell': {
-          description: 'Full Linux environment with Node.js, pnpm, git, Wrangler, network access, and build tools.',
-        },
-      },
-      defaultBackend: 'worker-shell',
-    },
+    shell: COMPUTER_SHELL_TOOL_OPTIONS,
   });
   const tools: GhostbuildToolSet = {
     deploy: deployTool,
@@ -81,7 +67,7 @@ export function createWorkersAiTools(
     validateProject: validateProjectTool,
     write: computerTools.write!,
   };
-  for (const toolName of ['read', 'ls', 'write', 'edit', 'exec'] as const) {
+  for (const toolName of COMPUTER_TOOL_NAMES) {
     tools[toolName] = computerWorkspaceTool(toolName, tools[toolName], workspace, coordinateStatefulTool);
   }
   for (const toolName of ['lookupDocs', 'npmInstall', 'validateProject', 'deploy'] as const) {
@@ -131,7 +117,7 @@ function serverOperationTool(
 }
 
 function computerWorkspaceTool(
-  toolName: ServerWorkspaceToolName,
+  toolName: ComputerToolName,
   definition: Tool,
   workspace: BuilderWorkspaceApi,
   coordinateStatefulTool: TurnStatefulToolCoordinator,
@@ -145,9 +131,10 @@ function computerWorkspaceTool(
           if (!execute) {
             throw new Error(`${toolName} is not executable.`);
           }
-          const result = await workspace.executeToolOnce(options.toolCallId, toolName, input, () =>
-            execute(input, options),
-          );
+          const result =
+            toolName === 'read' || toolName === 'ls'
+              ? await execute(input, options)
+              : await workspace.executeToolOnce(options.toolCallId, toolName, input, () => execute(input, options));
           if (toolName === 'exec') {
             await workspace.refresh();
           }
