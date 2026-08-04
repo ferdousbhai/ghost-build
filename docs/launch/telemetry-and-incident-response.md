@@ -36,9 +36,16 @@ engineering objectives:
 - Error-budget burn alerts at 2% over one hour and 5% over 15 minutes, grouped by event and failure reason and
   deduplicated by the per-event ID.
 
-The exact latency budget, dashboard URLs, alert destinations, paging schedule, named primary owner, and backup owner are
-external operational configuration and remain launch blockers until recorded here. Production log retention, access
-groups, and deletion policy must likewise be approved and recorded; see `user-data-inventory.json`.
+Cloudflare Workers Logs automatically retains data for three days on Workers Free or seven days on Workers Paid, with a
+maximum retention of seven days. Ghostbuild does not copy these logs to another store. An August 4, 2026 account-member
+readback showed one member, the sole Super Administrator, so no other account member currently has log access. Recheck
+both facts whenever the plan or account membership changes.
+
+The exact latency budget, dashboard URLs, alert destinations, paging schedule, and backup owner are external operational
+configuration and remain launch blockers until recorded here. `ferdousbhai` is the public-beta primary owner. The
+twice-weekday contact-channel inspection and remaining notification drills are recorded in
+`contact-channel-operations.md`. If the configured abuse alias becomes Cloudflare's account abuse contact, its separate
+daily-monitoring and 24-hour response obligation applies as documented there; it does not create a public SLA.
 
 ## Incident procedure
 

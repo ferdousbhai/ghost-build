@@ -35,7 +35,7 @@ function SupportPage() {
         <p>
           Start with the public support form and include only the request type and your GitHub handle. If a private
           method can be arranged, a maintainer will identify it in the issue; until then, do not provide sensitive
-          information. Ghostbuild does not yet provide a dedicated confidential support or privacy inbox, so never place
+          information. Ghostbuild does not yet provide a verified confidential support or privacy inbox, so never place
           identity documents, account details, or other private information in the issue. Applicable statutory deadlines
           govern privacy-rights requests regardless of the public-beta target above.
         </p>

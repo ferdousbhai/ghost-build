@@ -119,12 +119,13 @@ function TermsPage() {
       </TrustSection>
       <TrustSection title="Changes, notices, and general terms">
         <p>
-          Changes apply prospectively. Material changes will be published with an updated version and effective date,
-          and Ghostbuild will provide reasonable advance notice through the service when the change may adversely affect
-          users. You may stop using Ghostbuild and revoke its Cloudflare authorization before the new terms take effect.
-          Continued signed-in use after the effective date accepts the updated Terms where applicable law permits. If
-          any provision is unenforceable, the rest remains effective, and a failure to enforce a provision is not a
-          waiver. Use <a href="/support">Support</a> for notices or questions.
+          Changes apply prospectively. When reasonably practical, material changes will be published on this page with
+          an updated version, effective date, and advance notice before they take effect. Urgent changes needed for
+          security, safety, legal compliance, or third-party platform requirements may take effect sooner. You may stop
+          using Ghostbuild and revoke its Cloudflare authorization before a later effective date. Continued signed-in
+          use after that date accepts the updated Terms where applicable law permits. If any provision is unenforceable,
+          the rest remains effective, and a failure to enforce a provision is not a waiver. Use{' '}
+          <a href="/support">Support</a> for notices or questions.
         </p>
       </TrustSection>
     </TrustPage>

@@ -35,6 +35,9 @@ test('hydrates the built landing page without replacing meaningful SSR content',
   await expect(page.getByRole('heading', { name: /If you can dream it/i })).toBeVisible();
   await expect(page.getByPlaceholder(/Describe the app, workflow, and data/i)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connect Cloudflare' }).first()).toBeVisible();
+  const legalNotice = page.getByTestId('cloudflare-connect-legal-notice');
+  await expect(legalNotice).toBeVisible();
+  await expect(legalNotice.getByRole('link', { name: 'Terms' })).toBeVisible();
   expect(await page.locator('header').evaluate((header) => header.scrollWidth <= header.clientWidth)).toBe(true);
   await assertClean();
 });
@@ -81,6 +84,13 @@ test('renders the public trust routes and persists the telemetry choice', async 
       await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
     ).toBe(true);
   }
+
+  const securityTxt = await page.request.get('/.well-known/security.txt');
+  expect(securityTxt.status()).toBe(200);
+  expect(securityTxt.headers()['content-type']).toContain('text/plain');
+  expect(await securityTxt.text()).toContain(
+    'Contact: https://github.com/ferdousbhai/ghost-build/security/advisories/new',
+  );
 
   await page.goto('/privacy');
   await expect(page.getByRole('heading', { name: 'How Ghostbuild handles your data.' })).toBeVisible();

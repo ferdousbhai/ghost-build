@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "reviewedAgainstCommit": "working-tree-2026-08-04",
-  "policyStatus": "engineering inventory; the 2026-08-04 public-beta notice draft discloses current retention gaps, but definitive retention, legal-hold, and external-resource disposition still require explicit owner approval",
+  "policyStatus": "engineering inventory; the 2026-08-04 public-beta notice adopts enforced lifetimes and active-account/verified-request retention criteria, while complete account lifecycle tooling, jurisdiction-specific legal holds, and external-resource disposition remain explicit limitations",
   "systems": [
     {
       "system": "Ghostbuild control-plane D1",
@@ -14,9 +14,9 @@
         "Computer runtime locators"
       ],
       "secrets": "OAuth tokens are encrypted; ciphertext, IVs, session token hashes, and credential handles must never be exported",
-      "currentRetention": "Expired authentication and OAuth metadata is pruned by scheduled maintenance; no approved retention or legal-hold schedule exists for other records",
-      "currentExport": "no self-service account export exists; users can download individual project source and contact Support about a privacy or account-data request",
-      "currentDeletion": "no self-service account deletion exists; users can remove individual projects, revoke Cloudflare authorization, and start a sanitized public Support request about deletion of reachable Ghostbuild-held control-plane data; no dedicated confidential privacy inbox exists"
+      "currentRetention": "OAuth state expires after 10 minutes, authentication sessions after 30 days, and unreferenced credentials become eligible after 24 hours; 15-minute bounded maintenance can be delayed by backlog or retries; other records remain while the account/service is active or until no longer needed or a verified request is fulfilled, with no inactivity purge",
+      "currentExport": "no self-service account export exists; users can download individual project source and start a privacy or account-data request through the sanitized public Support form, after which a maintainer may arrange a private method",
+      "currentDeletion": "no self-service account deletion exists; users can remove individual projects, revoke Cloudflare authorization, and start a deletion request through the sanitized public Support form; deleted D1 state remains provider-recoverable through the current Paid-plan 30-day Time Travel window and must not be intentionally restored after erasure"
     },
     {
       "system": "User-owned workspace runtime D1",
@@ -30,14 +30,14 @@
       "secrets": "runtime capabilities and Cloudflare access tokens must never be exported",
       "currentRetention": "individual chat deletion is soft deletion followed by bounded Agent garbage collection; no account-wide retention schedule exists",
       "currentExport": "individual project source can be downloaded; no account-wide export exists",
-      "currentDeletion": "individual project removal exists; no account-wide user-runtime deletion operation exists"
+      "currentDeletion": "project removal soft-deletes the chat catalog and asynchronously destroys Agent/workspace state, but chat catalog, transcript, and deployment D1 rows remain; no account-wide user-runtime deletion operation exists; D1 Time Travel recovery can retain deleted state for 7 days on Free or 30 days on Paid and an erasure must be reapplied after any broader recovery"
     },
     {
       "system": "BuilderAgent Durable Objects",
       "owner": "user Cloudflare account",
       "categories": ["chat transcripts", "turn recovery state", "compaction state", "generated titles"],
       "secrets": "credentials and access tokens are not transcript export fields",
-      "currentRetention": "deleted project Agents are removed by the user-runtime garbage collector after its grace period",
+      "currentRetention": "deleted project Agents become eligible for bounded user-runtime garbage collection no earlier than 30 minutes after removal; batch limits, backlog, or retries can delay teardown",
       "currentExport": "not implemented",
       "currentDeletion": "project-scoped garbage collection exists; no account-wide runtime deletion operation or deletion-status result exists"
     },
@@ -75,26 +75,41 @@
       "currentDeletion": "retained in the user Cloudflare account; deployment approval, Terms, and Privacy state that resources may continue to incur charges until the user removes them"
     },
     {
+      "system": "Cloudflare Email Routing and HEY contact mailbox",
+      "owner": "Ghostbuild operator",
+      "categories": [
+        "sender and recipient addresses",
+        "support, privacy, and abuse message content and attachments",
+        "routing and delivery metadata",
+        "case identifiers and response history"
+      ],
+      "secrets": "once activated, requesters will be instructed not to send credentials, recovery codes, identity documents, exploit payloads, illegal imagery, or unnecessary project content; the private forwarding destination must never be committed",
+      "currentRetention": "once activated, closed support email will be reviewed after 90 days and deleted when no longer needed; privacy, abuse, and security case content will be minimized and reviewed annually while a legal, safety, fraud, or claims need remains; provider backup and routing metadata follow provider controls",
+      "currentExport": "provisioned before launch but not advertised or accepted as rights-request intake until an external receive/reply drill passes; once activated, requests are handled manually after proportionate identity verification",
+      "currentDeletion": "no case data is expected before activation; once activated, deletion is handled manually subject to identity verification, provider controls, and lawful retention exceptions"
+    },
+    {
       "system": "Cloudflare Worker observability",
       "owner": "Ghostbuild operator Cloudflare account",
       "categories": [
+        "sampled request method and path, Cloudflare request metadata, response status, timing, binding activity, and diagnostic metadata",
         "allowlisted product events",
         "opaque journey and per-error-event IDs",
         "status and bounded numeric metrics",
         "transient Cloudflare client IP used as the 60-second telemetry rate-limit key"
       ],
       "secrets": "telemetry requests omit browser credentials; prompts, code, credentials, tokens, URLs, user identifiers, raw tool output, and the client IP rate-limit key are rejected or omitted from the application event log",
-      "currentRetention": "the client IP keys the configured 60-second rate-limit window; application event retention is controlled by Cloudflare observability settings and the production value is not declared in this repository",
+      "currentRetention": "the client IP keys the configured 60-second rate-limit window; the verified production plan retains sampled Workers Logs and traces for seven days, aggregate Worker metrics can remain up to three months, and Ghostbuild has no Logpush destination or tail consumer and does not copy logs or traces to another store",
       "currentExport": "no self-service account export exists",
-      "currentDeletion": "application event payloads contain no account identifier; Cloudflare still processes network metadata, and operator retention and deletion policy requires approval"
+      "currentDeletion": "Cloudflare automatically deletes logs at the plan retention boundary; application telemetry payloads contain no account identifier; an August 4, 2026 readback showed access limited to the sole account administrator"
     }
   ],
   "launchBlockers": [
-    "choose and document retention and legal-hold rules with qualified counsel/owner",
+    "drill the manual privacy-rights checklist across every system and document jurisdiction-specific legal-hold rules",
     "approve the explicit retain-in-user-account policy for deployed resources",
     "implement and verify the bounded user-runtime export primitive for chat metadata, Agent transcripts, project files, approvals, and deployment records",
     "implement and verify the idempotent user-runtime account-delete primitive across D1, BuilderAgent, ProjectWorkspace, and Computer state",
     "confirm supported-browser coverage and manual instructions for browser storage APIs that cannot enumerate OPFS or IndexedDB",
-    "set and record production observability retention and access controls"
+    "complete external receive/reply drills for support@, privacy@, and abuse@ and confirm mailbox deletion behavior"
   ]
 }

@@ -3,6 +3,8 @@ description: Get product help or start an account or privacy request without sen
 title: '[Support]: '
 labels:
   - support
+assignees:
+  - ferdousbhai
 body:
   - type: markdown
     attributes:
@@ -10,9 +12,9 @@ body:
         This issue is public. Do not include prompts, source code, Cloudflare account IDs, credentials, tokens,
         personal data, or vulnerability details. For an account or privacy request, include only the request type and
         your GitHub handle. If a private method can be arranged, a maintainer will identify it in the issue; until then,
-        do not provide sensitive information. Ghostbuild aims to review and acknowledge reports within two weekdays, but
-        this is not a guarantee or contractual service level. For immediate danger contact local emergency services. For
-        a compromised Cloudflare account use
+        do not provide sensitive information. Ghostbuild aims to review and acknowledge reports within two weekdays,
+        but this is not a guarantee or contractual service level. For immediate danger contact local emergency
+        services. For a compromised Cloudflare account use
         https://developers.cloudflare.com/support/contacting-cloudflare-support/.
   - type: dropdown
     id: category

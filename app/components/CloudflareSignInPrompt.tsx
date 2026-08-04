@@ -4,6 +4,7 @@ import { BrandLink } from '~/components/BrandLink';
 import { Button } from '@ui/Button';
 import { createCloudflareSetupCallbackURL, signInWithCloudflare } from '~/lib/auth-client';
 import { TrustLinks } from '~/components/trust/TrustLinks';
+import { CloudflareConnectLegalNotice } from '~/components/CloudflareConnectLegalNotice';
 
 export function CloudflareSignInPrompt({
   eyebrow = 'Cloudflare account required',
@@ -50,17 +51,7 @@ export function CloudflareSignInPrompt({
             Back to Ghostbuild
           </Button>
         </div>
-        <p className="mt-6 text-xs leading-relaxed text-content-tertiary">
-          By connecting Cloudflare, you authorize the account access described in our{' '}
-          <a href="/privacy" className="underline underline-offset-4">
-            Privacy notice
-          </a>{' '}
-          and agree to the{' '}
-          <a href="/terms" className="underline underline-offset-4">
-            Terms
-          </a>
-          .
-        </p>
+        <CloudflareConnectLegalNotice className="mt-6 text-xs leading-relaxed text-content-tertiary" />
         <TrustLinks className="mt-4" />
       </section>
     </div>

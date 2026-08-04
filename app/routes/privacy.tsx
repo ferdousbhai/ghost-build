@@ -50,9 +50,17 @@ function PrivacyPage() {
             provide, but Ghostbuild cannot perform a requested build without the content needed for that request.
           </li>
           <li>
-            <strong>Security, support, and legal records:</strong> operational metadata and reports you submit. These
-            are used for the operator’s legitimate interests in protecting users and infrastructure, answering requests,
-            enforcing the Terms, and establishing or defending legal claims, or to meet a legal obligation.
+            <strong>Service and security logs:</strong> sampled Worker invocation and trace metadata can include request
+            method and path, Cloudflare request metadata, response status, timing, binding activity, and exception or
+            diagnostic metadata. Ghostbuild samples 60% of logs and 5% of traces to operate, troubleshoot, and protect
+            the service under the operator’s legitimate interests. Prompts, source code, credentials, and raw tool
+            output are not intended log fields.
+          </li>
+          <li>
+            <strong>Support, abuse, privacy, and legal records:</strong> contact details, message contents, attachments,
+            case metadata, and reports you submit. These are used for the operator’s legitimate interests in answering
+            requests, protecting users and infrastructure, enforcing the Terms, and establishing or defending legal
+            claims, or to meet a legal obligation.
           </li>
           <li>
             <strong>Optional product telemetry:</strong> allowlisted events, opaque journey or error-event identifiers,
@@ -122,23 +130,39 @@ function PrivacyPage() {
 
       <TrustSection title="Retention, removal, and deletion">
         <p>
-          Authentication sessions expire after 30 days. Expired authentication and OAuth records are removed by bounded
-          maintenance, and unreferenced encrypted credential records are eligible for removal after 24 hours. Other
-          control-plane, project, transcript, deployment, runtime, and observability records do not yet have a fixed
-          deletion schedule. There is no self-service or account-wide export or deletion workflow during public beta;
-          requests are assessed manually and available legal rights still apply.
+          OAuth authorization state expires after 10 minutes, authentication sessions after 30 days, and unreferenced
+          encrypted credential records become eligible for removal after 24 hours. Maintenance runs every 15 minutes in
+          bounded batches, so backlog or retries can delay physical removal. Account, connection, project, transcript,
+          deployment, and runtime records are retained while the account and service remain active or until they are no
+          longer needed or a verified request is fulfilled. There is no automatic inactive-account purge and no
+          self-service or complete account-wide export or deletion operation during public beta; requests are assessed
+          manually and available legal rights still apply.
         </p>
         <p>
-          Removing a project hides it from the active project list and schedules its Agent and workspace for teardown no
-          earlier than 30 minutes later. It is not complete erasure: catalog, transcript, deployment, observability,
-          browser, and customer-controlled Cloudflare records remain unless removed through a separate applicable
-          process. You can download individual project source before removal. Resources deployed to your Cloudflare
-          account remain until you remove them there, and browser data remains until you clear it.
+          The current Cloudflare plan retains sampled Workers Logs and traces for seven days. Ghostbuild does not copy
+          them to another log or trace store, and access is currently limited to the sole Cloudflare account
+          administrator. Cloudflare may retain aggregate Worker metrics for up to three months; those metrics are not a
+          user-addressable event ledger.
+        </p>
+        <p>
+          <a href="https://developers.cloudflare.com/d1/reference/time-travel/">Cloudflare D1 Time Travel</a> keeps
+          control-plane database changes recoverable for up to 30 days under the current plan. User-owned D1 recovery
+          windows depend on the user’s Cloudflare plan. Ghostbuild will not intentionally restore erased records from
+          recovery history. If broader disaster recovery reintroduces them, the erasure must be reapplied unless a
+          lawful retention exception governs.
+        </p>
+        <p>
+          Removing a project hides it from the active project list and makes its Agent and workspace eligible for
+          teardown no earlier than 30 minutes later; cleanup can be delayed and retried. It is not complete erasure:
+          catalog, transcript, deployment, observability, browser, and customer-controlled Cloudflare records remain
+          unless removed through a separate applicable process. You can download individual project source before
+          removal. Resources deployed to your Cloudflare account remain until you remove them there, and browser data
+          remains until you clear it.
         </p>
         <p>
           GitHub retains public support and abuse issues and private security reports according to its policies and
           repository controls. Records may also need to remain for security, fraud prevention, legal compliance,
-          disputes, or backups. A definitive retention and legal-hold schedule has not yet been adopted.
+          disputes, or backups.
         </p>
       </TrustSection>
 
@@ -146,10 +170,10 @@ function PrivacyPage() {
         <p>
           Depending on applicable law, you may request access, correction, portability, restriction, objection, or
           erasure and may complain to the data-protection authority responsible where you live or where an alleged
-          infringement occurred. Start through <a href="/support">Support</a> with only the request type and your GitHub
-          handle. The issue is public, so do not include account details, identity documents, personal data, or project
-          content. If a private method can be arranged, a maintainer will identify it in the issue; until then, do not
-          provide sensitive information. Ghostbuild does not yet provide a dedicated confidential privacy inbox.
+          infringement occurred. Start with the public <a href="/support">Support</a> form and include only the request
+          type and your GitHub handle. If a private method can be arranged, a maintainer will identify it in the issue;
+          until then, do not provide sensitive information. Ghostbuild does not yet provide a verified confidential
+          privacy inbox.
         </p>
         <p>
           Ghostbuild may request proportionate information to verify control of the relevant Cloudflare identity before
@@ -172,8 +196,8 @@ function PrivacyPage() {
       <TrustSection title="Changes and contact">
         <p>
           Material changes will be published with an updated version and effective date and, when practical, additional
-          notice in the service. Use <a href="/support">Support</a> to start a privacy question without including
-          sensitive details in the public issue.
+          notice in the service. Use <a href="/support">Support</a> for privacy questions, sharing only the request type
+          and your GitHub handle in the public form.
         </p>
       </TrustSection>
     </TrustPage>

@@ -4,6 +4,7 @@ import { Button } from '@ui/Button';
 import { KeyboardShortcut } from '@ui/KeyboardShortcut';
 import { Spinner } from '@ui/Spinner';
 import { Tooltip } from '@ui/Tooltip';
+import { CloudflareConnectLegalNotice } from '~/components/CloudflareConnectLegalNotice';
 import { classNames } from '~/utils/classNames';
 import { EnhancePromptButton } from './EnhancePromptButton.client';
 import { MESSAGE_INPUT_HIGHLIGHTS, TextareaWithHighlights } from './MessageInputHighlights';
@@ -127,6 +128,9 @@ export const MessageInput = memo(function MessageInput({
           </div>
         )}
       </div>
+      {authState.kind === 'unauthenticated' && (
+        <CloudflareConnectLegalNotice className="mx-auto mt-2 max-w-2xl px-2 text-center text-[11px] leading-relaxed text-content-tertiary" />
+      )}
     </div>
   );
 });
