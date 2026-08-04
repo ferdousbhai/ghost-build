@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { GhostbuildMessage, GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
+import type { Tool, ToolExecutionOptions } from 'ai';
+import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
+import type { ZodType } from 'zod';
 import {
+  createWorkersAiTools,
   createTurnStatefulToolCoordinator,
-  createTurnToolCallGuard,
   getValidatedBuildCompletion,
   getWorkersAiToolSettings,
 } from './workers-ai-tools';
@@ -11,6 +14,81 @@ import {
 const AUTOMATIC_TOOLS = ['read', 'ls', 'edit', 'write', 'exec', 'lookupDocs', 'npmInstall', 'validateProject'];
 
 describe('Workers AI tool lifecycle', () => {
+  it('exposes the clean-break Cloudflare Computer filesystem schemas', () => {
+    const tools = createWorkersAiTools(
+      workspaceStub(async () => ({ result: async () => ({ exitCode: 0, stdout: '', stderr: '' }) })),
+      operationContext(),
+    );
+
+    expect(
+      toolInputSchema(tools.read).safeParse({ path: '/home/project/package.json', offset: 1, limit: 20 }).success,
+    ).toBe(true);
+    expect(toolInputSchema(tools.ls).safeParse({ path: '/home/project/src' }).success).toBe(true);
+    expect(toolInputSchema(tools.write).safeParse({ path: '/home/project/new.ts', content: 'export {}' }).success).toBe(
+      true,
+    );
+    expect(
+      toolInputSchema(tools.edit).safeParse({
+        path: '/home/project/app.ts',
+        edits: [{ oldText: 'const before = true;', newText: 'const after = true;' }],
+      }).success,
+    ).toBe(true);
+    expect(
+      toolInputSchema(tools.edit).safeParse({
+        path: '/home/project/app.ts',
+        edits: [{ old: 'const before = true;', new: 'const after = true;' }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('uses the official Computer exec contract and forwards the selected backend', async () => {
+    const runtimeExec = vi.fn(async () => ({
+      result: async () => ({ exitCode: 0, stdout: 'checked\n', stderr: '' }),
+    }));
+    const workspace = workspaceStub(runtimeExec);
+    const tools = createWorkersAiTools(workspace, operationContext());
+    const input = {
+      command: 'pnpm test',
+      cwd: '/home/project',
+      backend: 'container-shell',
+    };
+
+    await expect(executeTool(tools.exec, input)).resolves.toEqual({
+      ...input,
+      exitCode: 0,
+      stdout: 'checked\n',
+      stderr: '',
+    });
+    expect(runtimeExec).toHaveBeenCalledWith('pnpm test', {
+      cwd: '/home/project',
+      encoding: 'utf8',
+      backend: 'container-shell',
+    });
+    expect(workspace.executeToolOnce).toHaveBeenCalledWith('tool-call', 'exec', input, expect.any(Function));
+    expect(workspace.refresh).toHaveBeenCalledOnce();
+  });
+
+  it('defaults Computer exec to worker-shell without changing its result shape', async () => {
+    const runtimeExec = vi.fn(async () => ({
+      result: async () => ({ exitCode: 0, stdout: 'src\n', stderr: '' }),
+    }));
+    const tools = createWorkersAiTools(workspaceStub(runtimeExec), operationContext());
+
+    await expect(executeTool(tools.exec, { command: 'ls /home/project' })).resolves.toEqual({
+      command: 'ls /home/project',
+      cwd: null,
+      backend: 'worker-shell',
+      exitCode: 0,
+      stdout: 'src\n',
+      stderr: '',
+    });
+    expect(runtimeExec).toHaveBeenCalledWith('ls /home/project', {
+      cwd: undefined,
+      encoding: 'utf8',
+      backend: 'worker-shell',
+    });
+  });
+
   it('serializes writes and validation in model tool-call order', async () => {
     const coordinate = createTurnStatefulToolCoordinator();
     let finishWrite: (() => void) | undefined;
@@ -44,17 +122,6 @@ describe('Workers AI tool lifecycle', () => {
     await expect(validation).resolves.toBe('validated');
   });
 
-  it('rejects duplicate calls in one turn while allowing durable replay and changed arguments', () => {
-    const guard = createTurnToolCallGuard();
-    expect(guard('read', { path: '/home/project/package.json', offset: 1, limit: 20 }, 'call-1', 1)).toBeUndefined();
-    expect(guard('read', { limit: 20, path: '/home/project/package.json', offset: 1 }, 'call-1', 1)).toBeUndefined();
-    expect(guard('read', { limit: 20, path: '/home/project/package.json', offset: 1 }, 'call-2', 1)).toBe(
-      'This exact tool call already ran in the current turn. Use its result or try a different approach.',
-    );
-    expect(guard('read', { path: '/home/project/package.json', offset: 20, limit: 20 }, 'call-3', 1)).toBeUndefined();
-    expect(guard('read', { path: '/home/project/package.json', offset: 1, limit: 20 }, 'call-4', 2)).toBeUndefined();
-  });
-
   it('gives the model all non-deployment tools before a mutation', () => {
     expect(getWorkersAiToolSettings([user('Build a habit tracker')])).toEqual({
       activeTools: AUTOMATIC_TOOLS,
@@ -85,29 +152,13 @@ describe('Workers AI tool lifecycle', () => {
     });
   });
 
-  it('treats exec as implementation only when Computer reports a workspace mutation', () => {
+  it('does not invent mutation metadata for successful Computer exec results', () => {
     expect(
       getWorkersAiToolSettings([
         user('Explain the project'),
-        toolResult('exec', { command: 'rg TODO' }, { exitCode: 0, stdout: '', stderr: '', workspaceChanged: false }),
+        toolResult('exec', { command: 'rg TODO' }, { exitCode: 0, stdout: '', stderr: '' }),
       ]),
     ).toEqual({ activeTools: AUTOMATIC_TOOLS, toolChoice: 'auto' });
-
-    expect(
-      getWorkersAiToolSettings([
-        user('Update the project'),
-        toolResult(
-          'exec',
-          { command: 'pnpm lint --fix' },
-          {
-            exitCode: 0,
-            stdout: '',
-            stderr: '',
-            workspaceChanged: true,
-          },
-        ),
-      ]),
-    ).toEqual({ activeTools: AUTOMATIC_TOOLS, toolChoice: 'required' });
   });
 
   it('requires implementation work after dependency setup instead of forcing premature validation', () => {
@@ -304,4 +355,59 @@ function validationResult(nextAction: 'sign-in-required' | 'prepare-deployment',
 
 function writeResult() {
   return { path: '/home/project/src/routes/index.tsx', bytesWritten: 42 };
+}
+
+function operationContext() {
+  return {
+    env: {} as Env,
+    userId: 'user',
+    chatInitialId: 'chat',
+    agentName: 'agent',
+  };
+}
+
+function workspaceStub(
+  runtimeExec: (
+    command: string,
+    options: { cwd?: string; encoding: 'utf8'; backend?: string },
+  ) => Promise<{
+    result(): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  }>,
+): BuilderWorkspaceApi {
+  const state = {
+    initialized: true,
+    revision: 1,
+    resetRevision: 0,
+    fileCount: 0,
+    totalBytes: 0,
+    seeding: false,
+  };
+  return {
+    computer: {
+      fs: {
+        stat: vi.fn(),
+        readFile: vi.fn(),
+        writeFile: vi.fn(),
+        mkdir: vi.fn(),
+        rm: vi.fn(),
+        readdir: vi.fn(),
+      },
+      runtime: { exec: runtimeExec },
+    },
+    refresh: vi.fn(async () => state),
+    getState: vi.fn(() => state),
+    executeToolOnce: vi.fn(async (_toolCallId, _toolName, _input, execute) => execute()),
+  } as unknown as BuilderWorkspaceApi;
+}
+
+async function executeTool(definition: Tool, input: unknown) {
+  if (!definition.execute) {
+    throw new Error('Expected an executable tool.');
+  }
+  const options: ToolExecutionOptions = { toolCallId: 'tool-call', messages: [] };
+  return definition.execute(input as never, options);
+}
+
+function toolInputSchema(definition: Tool): ZodType {
+  return definition.inputSchema as ZodType;
 }

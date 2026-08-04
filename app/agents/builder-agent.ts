@@ -58,12 +58,8 @@ import type {
   BuilderWorkspaceState,
   BuilderWorkspaceSyncPage,
 } from './builder-workspace-types';
-import {
-  batchBuilderWorkspaceSeed,
-  builderTemplateSeedId,
-  builderTemplateTotals,
-  loadBuilderTemplate,
-} from './builder-template';
+import { builderTemplateSeedId, loadBuilderTemplate } from './builder-template';
+import { seedBuilderWorkspace } from './builder-workspace-seed';
 import { deriveProvisionalTitle } from '@summonghost/title-generation';
 import {
   failedBuilderPreviewState,
@@ -239,6 +235,11 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       logger.warn('Skipping automatic continuation for stale Ghostbuild chat turn', {
         incidentId: ctx.incidentId,
         ageMs,
+      });
+      this.finishTurn(nextTurn, {
+        requestId: ctx.requestId,
+        status: 'aborted',
+        error: 'Automatic recovery expired before the interrupted turn could continue.',
       });
       return { persist: true, continue: false };
     }
@@ -571,7 +572,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   @callable()
   async getTranscriptCheckpoint(identityValue: unknown): Promise<TranscriptCheckpoint | null> {
     const identity = this.requireTranscriptIdentity(identityValue);
-    if (!this.state.transcript && this.messages.length > 0) {
+    if (this.messages.length > 0) {
       return this.advanceTranscriptCheckpoint(identity);
     }
     return this.state.transcript ?? null;
@@ -745,22 +746,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   private async seedWorkspace(seedId: string, entries: BuilderWorkspaceFileInput[]): Promise<BuilderWorkspaceState> {
-    const started = await this.workspace.beginSeed(seedId);
-    if (started.status === 'initialized') {
-      return started.state;
-    }
-    if (started.status === 'seeding' && started.state.seeding) {
-      throw new Error('The durable project workspace is already being initialized.');
-    }
-    try {
-      for (const batch of batchBuilderWorkspaceSeed(entries)) {
-        await this.workspace.appendSeed(seedId, batch);
-      }
-      return await this.workspace.commitSeed(seedId, builderTemplateTotals(entries));
-    } catch (error) {
-      await this.workspace.abortSeed(seedId).catch(() => undefined);
-      throw error;
-    }
+    return seedBuilderWorkspace(this.workspace, seedId, entries);
   }
 
   private async requestPreviewInternal(): Promise<BuilderPreviewState> {

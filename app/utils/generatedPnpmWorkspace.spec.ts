@@ -90,6 +90,7 @@ const safePolicy =
   "  'fast-uri@>=3.0.0 <3.1.5': '3.1.5'\n" +
   "  'hono@<4.12.34': '4.12.34'\n" +
   "  'ip-address@<=10.3.0': '10.3.1'\n" +
+  "  'postcss@<=8.5.22': '8.5.25'\n" +
   "  'sharp@<0.35.0': '0.35.3'\n" +
   "  'undici@>=7.0.0 <7.29.0': '7.29.0'\n" +
   'allowBuilds:\n  core-js-pure: true\n  esbuild: true\n  sharp: true\n  workerd: true\n';

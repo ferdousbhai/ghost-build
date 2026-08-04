@@ -378,7 +378,7 @@ export function verifyStackAlignment() {
       'verify:stack',
       'verify:production-config',
       'verify:licenses',
-      'audit:production',
+      'audit:dependencies',
       'typecheck',
       'lint',
       'test',

@@ -1,5 +1,5 @@
 import { useStore } from '@nanostores/react';
-import { createRootRoute, HeadContent, Outlet, Scripts, ScrollRestoration } from '@tanstack/react-router';
+import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
 import { useEffect, type ReactNode } from 'react';
 import { ClientAppProviders } from '~/components/ClientRouteComponents';
 import { ClientOnly } from '~/components/ClientOnly';
@@ -88,7 +88,6 @@ function RootDocument({ children }: { children: ReactNode }) {
         <div id="root" className="size-full">
           {children}
         </div>
-        <ScrollRestoration />
         <Scripts />
       </body>
     </html>

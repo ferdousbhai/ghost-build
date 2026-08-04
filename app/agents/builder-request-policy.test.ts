@@ -101,7 +101,7 @@ describe('BuilderAgent request policy', () => {
       parts: [
         {
           type: 'dynamic-tool' as const,
-          toolName: 'write_file',
+          toolName: 'write',
           toolCallId: 'call',
           state: 'input-available' as const,
           input: { content: 'x'.repeat(40_000) },

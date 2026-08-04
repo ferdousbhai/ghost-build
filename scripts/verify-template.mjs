@@ -47,9 +47,8 @@ export async function verifyTemplate() {
     if (existsSync(generatedBindingsPath)) {
       throw new Error('The canonical template source must not contain generated Worker binding types.');
     }
-    runExecutable('npm', tempDir, ['ci', '--ignore-scripts', '--no-audit', '--no-fund']);
-    await rm(join(tempDir, 'node_modules'), { recursive: true, force: true });
     run(tempDir, ['install', '--frozen-lockfile']);
+    run(tempDir, ['audit', '--audit-level', 'moderate']);
     // Typecheck owns route and Worker-binding generation. Run it before stack
     // verification so a fresh snapshot does not depend on ignored local files.
     run(tempDir, ['run', 'typecheck']);
@@ -117,9 +116,9 @@ export async function verifyWorkerTemplateProfile() {
     requireFailure(tempDir, ['run', 'verify:stack']);
     await rm(join(tempDir, 'worker-configuration.d.ts'), { force: true });
     await convertToWorkerProfile(tempDir);
-    runExecutable('npm', tempDir, ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund']);
     run(tempDir, ['install', '--lockfile-only']);
     run(tempDir, ['install', '--frozen-lockfile']);
+    run(tempDir, ['audit', '--audit-level', 'moderate']);
     run(tempDir, ['run', 'typecheck']);
     run(tempDir, ['run', 'verify:stack']);
     run(tempDir, ['run', 'lint']);

@@ -1,6 +1,6 @@
 import { BUILDER_TEMPLATE_SOURCE_SHA256 } from '~/agents/builder-template.generated';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 22 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 23 as const;
 export {
   DEPLOYMENT_SECURITY_BASELINE_BINDING,
   DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
@@ -47,7 +47,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/cf-typegen.mjs': '6c82a0afdb50c32b205dbe4677b207337a38ad7ea70950a3e63758f0c04e1ae7',
   'scripts/provision-cloudflare-production.mjs': '5e55ec67b6aec6395b01119b8b18ff76d3c37cc03c448153647e8d2348edebbf',
   'scripts/vite-dev.mjs': '7470bae2236ca6eda89c4eb2ac99563124d35c70fbaf102ddd9dcb19ebb8f559',
-  'scripts/verify-stack-alignment.mjs': '1edce336ae3716686e2cc771f67dd81453f359e414564938921e0f8f228eadc0',
+  'scripts/verify-stack-alignment.mjs': '9b9ff8cd82f351fd1cd54a96a13ffa8c8f18ed793fa35a49942e388a8c8b6c0a',
   'scripts/verify-production-config.mjs': 'b22c025b4c3e4a53aa8c2edca59ead871979dbadad6d575bfb052e44ed645a8d',
   'scripts/verify-production-licenses.mjs': '22952be32b45c416551ca2681a202b72c616aca61c6643ce946868373320a82d',
   'scripts/lib/production-license-artifact.mjs': 'e9ff7fc97973e4299f9a4b3026f148f3e32e6c2ff71d21bdbc40ae1e60d49892',
@@ -58,13 +58,13 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/lib/project-policy/source-policy.mjs': 'deed7d40e7c9c1bca8cfb3dbf46503f9dc89a4004988f8ef55871b7ed0c24f86',
   'scripts/lib/project-policy/worker-policy.mjs': '9f908807030d1a91c99b442b41488048d2e49b996783a18900b413e046f3edbc',
   'scripts/lib/project-policy/workflow-policy.mjs': 'e4c172b80ffe2f551a4ca25d4f8a4d0ea19195a7cef0ee056536e331d3993fab',
-  'scripts/lib/project-policy/workspace-policy.mjs': 'e799832445db629cb7c4c833c09da26efba804d6983379df16082308964cc185',
+  'scripts/lib/project-policy/workspace-policy.mjs': 'a5eacb15e4145864b70dbfc04b27990356c153003d48b31c93326e8018969963',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '43d243158e087c4582941e434b8156adb98acca0eb7aae921bc76ce0579caf7f';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'fb4f472c185854d60ba50f964ef89d49139ca3af095a8b3ec1fd38c2a54c153a';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
-  'd6b12f336c260b9fb12381a436f1d8aa540c856d9d7748d677b3280e71b8cf8e';
+  '79358ea38b428afca1d89125f5520419a635201264bfb54a2675287737460ea2';
 
 export function isCurrentDeploymentSecurityIdentity(value: {
   version?: unknown;

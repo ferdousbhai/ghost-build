@@ -9,8 +9,7 @@ import { z, type ZodType } from 'zod';
 import { isGhostbuildToolResult, toolFailure, toolResultSucceeded } from 'ghostbuild-agent/tool-result';
 import type { Tool } from 'ai';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
-import type { ServerWorkspaceToolName } from '~/agents/builder-workspace-types';
-import type { ServerOperationToolName } from '~/agents/builder-workspace-types';
+import type { ServerOperationToolName, ServerWorkspaceToolName } from '~/agents/builder-workspace-types';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 type BuilderOperationContext = {
@@ -30,12 +29,6 @@ type ToolResultEvent = {
   toolName: string;
   result: unknown;
 };
-type TurnToolCallGuard = (
-  toolName: GhostbuildToolName,
-  input: unknown,
-  toolCallId: string,
-  workspaceRevision: number,
-) => string | undefined;
 type TurnStatefulToolCoordinator = <T>(toolName: GhostbuildToolName, operation: () => Promise<T>) => Promise<T>;
 type BuildLifecycle =
   | { stage: 'needs-implementation' }
@@ -62,7 +55,6 @@ export function createWorkersAiTools(
   workspace: BuilderWorkspaceApi,
   operationContext: BuilderOperationContext,
 ): GhostbuildToolSet {
-  const guardToolCall = createTurnToolCallGuard();
   const coordinateStatefulTool = createTurnStatefulToolCoordinator();
   const computerTools = createAITools({
     workspace: workspace.computer,
@@ -90,13 +82,7 @@ export function createWorkersAiTools(
     write: computerTools.write!,
   };
   for (const toolName of ['read', 'ls', 'write', 'edit', 'exec'] as const) {
-    tools[toolName] = computerWorkspaceTool(
-      toolName,
-      tools[toolName],
-      workspace,
-      guardToolCall,
-      coordinateStatefulTool,
-    );
+    tools[toolName] = computerWorkspaceTool(toolName, tools[toolName], workspace, coordinateStatefulTool);
   }
   for (const toolName of ['lookupDocs', 'npmInstall', 'validateProject', 'deploy'] as const) {
     tools[toolName] = serverOperationTool(
@@ -104,7 +90,6 @@ export function createWorkersAiTools(
       tools[toolName],
       workspace,
       operationContext,
-      guardToolCall,
       coordinateStatefulTool,
     );
   }
@@ -116,17 +101,12 @@ function serverOperationTool(
   definition: Tool,
   workspace: BuilderWorkspaceApi,
   context: BuilderOperationContext,
-  guardToolCall: TurnToolCallGuard,
   coordinateStatefulTool: TurnStatefulToolCoordinator,
 ): Tool {
   return {
     ...definition,
     execute: async (input, options) =>
       coordinateStatefulTool(toolName, async () => {
-        const duplicate = guardToolCall(toolName, input, options.toolCallId, workspace.getState().revision);
-        if (duplicate) {
-          return toolFailure(duplicate);
-        }
         try {
           const { executeBuilderOperationTool } = await import('~/agents/builder-operation-tools');
           return await executeBuilderOperationTool({
@@ -154,62 +134,35 @@ function computerWorkspaceTool(
   toolName: ServerWorkspaceToolName,
   definition: Tool,
   workspace: BuilderWorkspaceApi,
-  guardToolCall: TurnToolCallGuard,
   coordinateStatefulTool: TurnStatefulToolCoordinator,
 ): Tool {
   return {
     ...definition,
     execute: async (input, options) =>
       coordinateStatefulTool(toolName, async () => {
-        const duplicate = guardToolCall(toolName, input, options.toolCallId, workspace.getState().revision);
-        if (duplicate) {
-          return toolFailure(duplicate);
-        }
         try {
-          if (!definition.execute) {
+          const execute = definition.execute;
+          if (!execute) {
             throw new Error(`${toolName} is not executable.`);
           }
-          const result = await workspace.executeToolOnce(options.toolCallId, toolName, input, async () => {
-            const revisionBefore = workspace.getState().revision;
-            const officialResult = await definition.execute!(input, options);
-            if (toolName !== 'exec') {
-              return officialResult;
-            }
-            await workspace.refresh();
-            return isRecord(officialResult)
-              ? { ...officialResult, workspaceChanged: workspace.getState().revision !== revisionBefore }
-              : officialResult;
-          });
-          if (toolName === 'write' || toolName === 'edit') {
+          const result = await workspace.executeToolOnce(options.toolCallId, toolName, input, () =>
+            execute(input, options),
+          );
+          if (toolName === 'exec') {
             await workspace.refresh();
           }
           return result;
         } catch (error) {
           options.abortSignal?.throwIfAborted();
           const message = error instanceof Error ? error.message : String(error);
-          return toolFailure(
-            message.length <= 4_000
-              ? message
-              : `${toolName} failed with an unusually large internal error retained in server logs.`,
-          );
+          return {
+            error:
+              message.length <= 4_000
+                ? message
+                : `${toolName} failed with an unusually large internal error retained in server logs.`,
+          };
         }
       }),
-  };
-}
-
-export function createTurnToolCallGuard(): TurnToolCallGuard {
-  const toolCallIds = new Map<string, string>();
-  return (toolName, input, toolCallId, workspaceRevision) => {
-    const key = `${workspaceRevision}:${toolName}:${stableJson(input)}`;
-    const previousToolCallId = toolCallIds.get(key);
-    if (!previousToolCallId) {
-      toolCallIds.set(key, toolCallId);
-      return undefined;
-    }
-    if (previousToolCallId === toolCallId) {
-      return undefined;
-    }
-    return 'This exact tool call already ran in the current turn. Use its result or try a different approach.';
   };
 }
 
@@ -236,24 +189,6 @@ function isStatefulTool(toolName: GhostbuildToolName): boolean {
     toolName === 'npmInstall' ||
     toolName === 'validateProject' ||
     toolName === 'deploy'
-  );
-}
-
-function stableJson(value: unknown): string {
-  return JSON.stringify(sortJson(value));
-}
-
-function sortJson(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(sortJson);
-  }
-  if (!isRecord(value)) {
-    return value;
-  }
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => [key, sortJson(value[key])]),
   );
 }
 
@@ -463,8 +398,7 @@ function isImplementationMutationResult(result: { toolName: string; result?: unk
   }
   return (
     (result.toolName === 'write' && typeof result.result.bytesWritten === 'number') ||
-    (result.toolName === 'edit' && typeof result.result.editsApplied === 'number') ||
-    (result.toolName === 'exec' && result.result.exitCode === 0 && result.result.workspaceChanged === true)
+    (result.toolName === 'edit' && typeof result.result.editsApplied === 'number')
   );
 }
 

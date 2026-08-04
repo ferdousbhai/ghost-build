@@ -190,7 +190,7 @@ function verifyScripts(errors, pkg, label) {
     return;
   }
   const requiredNames = [
-    'audit:production',
+    'audit:dependencies',
     'build',
     'd1:bookmark:production',
     'workers-builds:build',
@@ -216,9 +216,8 @@ function verifyScripts(errors, pkg, label) {
   }
 
   errors.push(
-    ...findMissingCommandSteps(scripts['audit:production'], `${label} production audit script`, [
+    ...findMissingCommandSteps(scripts['audit:dependencies'], `${label} dependency audit script`, [
       'pnpm audit',
-      '--prod',
       '--audit-level moderate',
     ]),
   );
@@ -242,7 +241,7 @@ function verifyScripts(errors, pkg, label) {
     ]),
   );
   errors.push(
-    ...findMissingCommandSteps(scripts['validate:root'], `${label} root validation script`, ['audit:production']),
+    ...findMissingCommandSteps(scripts['validate:root'], `${label} root validation script`, ['audit:dependencies']),
   );
 
   for (const [name, command] of Object.entries(scripts)) {

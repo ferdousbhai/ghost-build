@@ -18,6 +18,7 @@ import { parse } from 'jsonc-parser';
 import { BuilderAgent } from '../../app/agents/builder-agent';
 import { routeUserRuntimeAgentRequest } from '../../app/lib/.server/agent-request-identity';
 import { createTrustedDeploymentConfig } from '../../app/lib/.server/cloudflare/deployment-config';
+import { readUserWorkspaceRuntimeHealth } from '../../app/lib/.server/cloudflare/user-workspace-runtime-health';
 import {
   DEPLOYMENT_PROJECT_ROOT,
   DEPLOYMENT_WRANGLER_CONFIG_PATH,
@@ -51,6 +52,7 @@ interface RuntimeEnv {
   GHOSTBUILD_CONNECTION_GENERATION: string;
   GHOSTBUILD_USER_RUNTIME: string;
   GHOSTBUILD_USER_RUNTIME_ENDPOINT: string;
+  GHOSTBUILD_RUNTIME_VERSION: string;
   SANDBOX_TRANSPORT: 'rpc';
 }
 
@@ -923,7 +925,16 @@ export default {
     const url = new URL(request.url);
     const controlPlaneRequest = authorized(request, env.CONTROL_PLANE_SECRET);
     if (controlPlaneRequest && request.method === 'GET' && url.pathname === '/v1/health') {
-      return Response.json({ ok: true, service: 'ghostbuild-user-workspace-runtime', version: 2 });
+      try {
+        return Response.json(await readUserWorkspaceRuntimeHealth(env), {
+          headers: { 'cache-control': 'no-store' },
+        });
+      } catch {
+        return Response.json(
+          { ok: false, service: 'ghostbuild-user-workspace-runtime' },
+          { status: 503, headers: { 'cache-control': 'no-store' } },
+        );
+      }
     }
     const route = parseProjectRoute(url.pathname);
     if (!route || !controlPlaneRequest) {

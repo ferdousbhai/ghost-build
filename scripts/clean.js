@@ -12,7 +12,6 @@ const generatedPaths = [
   'template/.tanstack',
   'template/.wrangler',
   'template/dist',
-  'template/package-lock.json',
   'template/worker-configuration.d.ts',
 ];
 

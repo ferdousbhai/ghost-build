@@ -11,6 +11,8 @@ describe('standalone template verification source', () => {
       await copyCanonicalTemplateSource(tempDir);
 
       expect(existsSync(join(tempDir, 'package.json'))).toBe(true);
+      expect(existsSync(join(tempDir, 'package-lock.json'))).toBe(false);
+      expect(existsSync(join(tempDir, 'preview-runtime'))).toBe(false);
       expect(existsSync(join(tempDir, 'worker-configuration.d.ts'))).toBe(false);
 
       const pkg = JSON.parse(readFileSync(join(tempDir, 'package.json'), 'utf8')) as {

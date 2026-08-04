@@ -54,6 +54,11 @@ export function verifyStackAlignment() {
   const errors = [];
   const packageJson = readJson("package.json");
   const type = projectType(packageJson);
+  if (existsSync(resolve(rootDir, "package-lock.json"))) {
+    errors.push(
+      "package-lock.json is not allowed; generated projects use the pinned pnpm toolchain only.",
+    );
+  }
   errors.push(
     ...findForbiddenDependencies(packageJson, "package.json"),
     ...findMissingDependencies(
