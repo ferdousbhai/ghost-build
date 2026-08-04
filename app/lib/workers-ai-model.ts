@@ -37,7 +37,7 @@ export const WORKERS_AI_MODELS = [
   {
     id: 'deepseek/deepseek-v4-pro',
     label: 'DeepSeek V4 Pro',
-    description: 'Experimental partner model served by Fireworks through Cloudflare.',
+    description: 'Partner model served by Fireworks; requires Cloudflare AI Gateway balance or BYOK.',
     availability: 'cloudflare-partner',
     contextTokens: 131_072,
   },

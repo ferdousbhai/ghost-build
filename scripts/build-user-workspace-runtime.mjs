@@ -12,14 +12,22 @@ const result = await build({
   write: false,
   format: 'esm',
   platform: 'node',
+  mainFields: ['module', 'main'],
   target: 'es2022',
   minify: true,
   legalComments: 'none',
+  define: { 'import.meta.url': JSON.stringify('file:///bundle/workspace-runtime.mjs') },
+  banner: {
+    js: 'import { createRequire as __ghostbuildCreateRequire } from "node:module"; const require = __ghostbuildCreateRequire("file:///bundle/workspace-runtime.mjs");',
+  },
   external: ['cloudflare:*', 'node:*'],
 });
 const source = result.outputFiles[0]?.text;
 if (!source) {
   throw new Error('The user-owned workspace runtime bundle was not generated.');
+}
+if (source.includes('import.meta.url')) {
+  throw new Error('The user-owned workspace runtime bundle contains an unsupported import.meta.url reference.');
 }
 const sha256 = createHash('sha256').update(source).digest('hex');
 const migrationDirectory = resolve(root, 'user-workspace-migrations');

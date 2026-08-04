@@ -12,7 +12,12 @@ import type { ContextCompaction } from './context-compaction';
 import { appendDeterministicCompletion, normalizeTextPartBoundaries } from './workers-ai-stream';
 import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
 import { createWorkersAiTools, getValidatedBuildCompletion, getWorkersAiToolSettings } from './workers-ai-tools';
-import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
+import {
+  cloudflareAiFundingRequiredMessage,
+  isCloudflareAiFundingError,
+  isWorkersAiFreeAllocationError,
+  workersPaidRequiredMessage,
+} from '~/lib/workers-paid';
 import { logProviderFailure } from './provider-error-logging';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
@@ -185,6 +190,9 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
       }
       if (isWorkersAiFreeAllocationError(error)) {
         return workersPaidRequiredMessage();
+      }
+      if (isCloudflareAiFundingError(error)) {
+        return cloudflareAiFundingRequiredMessage();
       }
       return error instanceof Error ? error.message : 'An error occurred.';
     },

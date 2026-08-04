@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'vitest';
-import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from './workers-paid';
+import {
+  CLOUDFLARE_AI_FUNDING_REQUIRED_MARKER,
+  cloudflareAiFundingRequiredMessage,
+  isCloudflareAiFundingError,
+  isWorkersAiFreeAllocationError,
+  workersPaidRequiredMessage,
+} from './workers-paid';
 
 describe('Workers Paid consent boundary', () => {
   test('recognizes free Workers AI allocation exhaustion without treating generic failures as billing prompts', () => {
@@ -12,5 +18,22 @@ describe('Workers Paid consent boundary', () => {
   test('states that Ghostbuild did not authorize the paid plan', () => {
     expect(workersPaidRequiredMessage()).toContain('explicitly authorize Workers Paid');
     expect(workersPaidRequiredMessage()).toContain('Ghostbuild did not upgrade your plan');
+  });
+
+  test('recognizes partner-model funding failures without conflating them with Workers Paid', () => {
+    const error = {
+      responseBody: JSON.stringify({
+        errors: [{ code: 2021, message: 'Insufficient balance; add money to your gateway or use BYOK' }],
+      }),
+    };
+
+    expect(isCloudflareAiFundingError(error)).toBe(true);
+    expect(isWorkersAiFreeAllocationError(error)).toBe(false);
+    expect(cloudflareAiFundingRequiredMessage()).toContain(CLOUDFLARE_AI_FUNDING_REQUIRED_MARKER);
+    expect(cloudflareAiFundingRequiredMessage()).toContain('Ghostbuild did not make a purchase');
+  });
+
+  test('does not treat unrelated provider failures as AI Gateway funding failures', () => {
+    expect(isCloudflareAiFundingError(new Error('Provider timed out'))).toBe(false);
   });
 });

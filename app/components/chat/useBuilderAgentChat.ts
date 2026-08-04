@@ -14,8 +14,8 @@ import { STATUS_MESSAGES } from './StreamingIndicator';
 import { recordChatFailure, resetChatRetryState } from './chat-retry';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { waitForAgentSocketOpen } from './agent-connection';
-import { WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
-import { showWorkersPaidRequiredToast } from '~/lib/workers-paid.client';
+import { CLOUDFLARE_AI_FUNDING_REQUIRED_MARKER, WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
+import { showCloudflareAiFundingRequiredToast, showWorkersPaidRequiredToast } from '~/lib/workers-paid.client';
 import { refreshChatHistory } from '~/lib/cloudflare/chat-history-db';
 import { chatIdStore } from '~/lib/stores/chatId';
 import { executeDataOperation } from '~/lib/cloudflare/client';
@@ -123,6 +123,8 @@ export function useBuilderAgentChat(args: {
       toolActivityStore.abortActive();
       if (error.message.includes(WORKERS_PAID_REQUIRED_MARKER)) {
         showWorkersPaidRequiredToast();
+      } else if (error.message.includes(CLOUDFLARE_AI_FUNDING_REQUIRED_MARKER)) {
+        showCloudflareAiFundingRequiredToast();
       }
       void refreshProjectMetadata();
     },
