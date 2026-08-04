@@ -774,20 +774,25 @@ export class UserCloudflareAccountApi {
     return response;
   }
 
-  private executeRaw(path: string, init: RequestInit, bearer: string): Promise<Response> {
+  private async executeRaw(path: string, init: RequestInit, bearer: string): Promise<Response> {
     if (!path.startsWith('/') || path.startsWith('//')) {
       throw new CloudflareAccountApiError('Cloudflare API path is invalid.');
     }
     const execute = this.request;
-    return execute(`${API_ROOT}/accounts/${encodeURIComponent(this.accountId)}${path}`, {
+    const response = await execute(`${API_ROOT}/accounts/${encodeURIComponent(this.accountId)}${path}`, {
       ...init,
-      redirect: 'error',
+      redirect: 'manual',
       signal: init.signal ?? AbortSignal.timeout(CLOUDFLARE_API_TIMEOUT_MS),
       headers: {
         ...init.headers,
         authorization: `Bearer ${bearer}`,
       },
     });
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new CloudflareAccountApiError('Cloudflare API request redirected unexpectedly.');
+    }
+    return response;
   }
 
   private async callContainer<T>(path: string, init: RequestInit): Promise<T> {

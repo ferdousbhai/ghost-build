@@ -231,9 +231,13 @@ export async function resolveFreshCloudflareAccessToken(
       connectionGeneration,
       forceRefresh,
     }),
-    redirect: 'error',
+    redirect: 'manual',
     signal: AbortSignal.timeout(30_000),
   });
+  if (response.status >= 300 && response.status < 400) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error('Cloudflare connection is unavailable.');
+  }
   const cacheControl = response.headers.get('Cache-Control') ?? '';
   if (!containsNoStore(cacheControl)) {
     throw new Error('Cloudflare connection is unavailable.');

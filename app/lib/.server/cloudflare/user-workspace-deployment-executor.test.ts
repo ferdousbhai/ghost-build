@@ -23,7 +23,7 @@ describe('resolveFreshCloudflareAccessToken', () => {
       'https://ghostbuild.dev/api/cloudflare/runtime-credential',
       expect.objectContaining({
         method: 'POST',
-        redirect: 'error',
+        redirect: 'manual',
         headers: expect.objectContaining({
           authorization: 'Bearer runtime-secret-that-is-long-enough',
           'content-type': 'application/json',
@@ -73,6 +73,7 @@ describe('resolveFreshCloudflareAccessToken', () => {
       'an oversized token',
       Response.json({ accessToken: 'a'.repeat(4_097) }, { headers: { 'Cache-Control': 'no-store' } }),
     ],
+    ['an unexpected redirect', new Response(null, { status: 302, headers: { location: 'https://attacker.example' } })],
   ])('fails closed on %s', async (_label, response) => {
     await expect(
       resolveFreshCloudflareAccessToken(runtimeEnv, vi.fn<typeof fetch>().mockResolvedValue(response)),

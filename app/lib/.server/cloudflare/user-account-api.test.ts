@@ -62,6 +62,7 @@ describe('UserCloudflareAccountApi', () => {
       'https://api.cloudflare.com/client/v4/accounts/account-1/d1/database',
       expect.objectContaining({
         method: 'POST',
+        redirect: 'manual',
         body: JSON.stringify({ name: 'ghostbuild-deployment-1' }),
         signal: expect.any(AbortSignal),
         headers: expect.objectContaining({ authorization: 'Bearer user-token' }),
@@ -72,6 +73,23 @@ describe('UserCloudflareAccountApi', () => {
     authorizeRequest.mock.invocationCallOrder.forEach((authorizationOrder, index) => {
       expect(authorizationOrder).toBeLessThan(request.mock.invocationCallOrder[index]);
     });
+  });
+
+  test('fails closed instead of following a redirected Cloudflare API response', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(null, {
+        status: 307,
+        headers: { location: 'https://attacker.example/collect' },
+      }),
+    );
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'user-token', request).createD1ForPlan(plan),
+    ).rejects.toThrow('Cloudflare API request redirected unexpectedly.');
+    expect(request).toHaveBeenCalledWith(
+      'https://api.cloudflare.com/client/v4/accounts/account-1/d1/database',
+      expect.objectContaining({ redirect: 'manual' }),
+    );
   });
 
   test('creates the protected D1 only under its independently approved plan name', async () => {
@@ -491,7 +509,7 @@ describe('UserCloudflareAccountApi', () => {
       'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/deployments',
       `https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/deployments/${providerDeploymentId}`,
     ]);
-    expect(request.mock.calls.every(([, init]) => init?.redirect === 'error')).toBe(true);
+    expect(request.mock.calls.every(([, init]) => init?.redirect === 'manual')).toBe(true);
     expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({
       manifest: {
         '/index.html': { hash: assetHash, size: asset.size },
