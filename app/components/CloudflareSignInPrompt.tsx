@@ -2,27 +2,26 @@ import { useState } from 'react';
 import { ArrowLeftIcon } from '@radix-ui/react-icons';
 import { BrandLink } from '~/components/BrandLink';
 import { Button } from '@ui/Button';
-import { createCloudflareSetupCallbackURL, signInWithCloudflare } from '~/lib/auth-client';
-import { TrustLinks } from '~/components/trust/TrustLinks';
+import { createCloudflareReturnURL, signInWithCloudflare } from '~/lib/auth-client';
 import { CloudflareConnectLegalNotice } from '~/components/CloudflareConnectLegalNotice';
 
 export function CloudflareSignInPrompt({
-  eyebrow = 'Cloudflare account required',
   title,
   description,
+  initialError = null,
 }: {
-  eyebrow?: string;
   title: string;
-  description: string;
+  description?: string;
+  initialError?: string | null;
 }) {
   const [connecting, setConnecting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
 
   const connect = async () => {
     setConnecting(true);
     setError(null);
     try {
-      await signInWithCloudflare(createCloudflareSetupCallbackURL());
+      await signInWithCloudflare(createCloudflareReturnURL());
     } catch (connectionError) {
       setError(connectionError instanceof Error ? connectionError.message : 'Unable to connect Cloudflare.');
       setConnecting(false);
@@ -33,11 +32,10 @@ export function CloudflareSignInPrompt({
     <div className="app-page-shell flex min-h-full items-center px-4 py-10">
       <section className="app-error-card app-card mx-auto" aria-labelledby="cloudflare-sign-in-heading">
         <BrandLink />
-        <p className="app-page-eyebrow mt-8">{eyebrow}</p>
-        <h1 id="cloudflare-sign-in-heading" className="app-page-title !text-[clamp(34px,6vw,52px)]">
+        <h1 id="cloudflare-sign-in-heading" className="app-page-title mt-8 !text-[clamp(34px,6vw,52px)]">
           {title}
         </h1>
-        <p className="app-page-lede">{description}</p>
+        {description ? <p className="app-page-lede">{description}</p> : null}
         {error && (
           <p className="mt-4 text-sm text-content-error" role="alert">
             {error}
@@ -52,7 +50,6 @@ export function CloudflareSignInPrompt({
           </Button>
         </div>
         <CloudflareConnectLegalNotice className="mt-6 text-xs leading-relaxed text-content-tertiary" />
-        <TrustLinks className="mt-4" />
       </section>
     </div>
   );

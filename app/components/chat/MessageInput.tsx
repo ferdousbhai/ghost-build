@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useEffect, useRef, type ChangeEventHandler, type KeyboardEventHandler } from 'react';
 import { ArrowRightIcon, ExclamationTriangleIcon, StopIcon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
 import { KeyboardShortcut } from '@ui/KeyboardShortcut';
@@ -6,8 +6,8 @@ import { Spinner } from '@ui/Spinner';
 import { Tooltip } from '@ui/Tooltip';
 import { CloudflareConnectLegalNotice } from '~/components/CloudflareConnectLegalNotice';
 import { classNames } from '~/utils/classNames';
+import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import { EnhancePromptButton } from './EnhancePromptButton.client';
-import { MESSAGE_INPUT_HIGHLIGHTS, TextareaWithHighlights } from './MessageInputHighlights';
 import { getMessageInputPrimaryActionLabel, useMessageInputController } from './useMessageInputController';
 import { BuilderModelSelector } from './BuilderModelSelector.client';
 
@@ -108,7 +108,7 @@ export const MessageInput = memo(function MessageInput({
             chatStarted ? 'rounded-2xl' : 'rounded-xl',
           )}
         >
-          <TextareaWithHighlights
+          <PromptTextarea
             onKeyDown={controller.handleKeyDown}
             onChange={controller.handleChange}
             value={input}
@@ -116,7 +116,6 @@ export const MessageInput = memo(function MessageInput({
             maxHeight={chatStarted ? 400 : 180}
             placeholder={placeholder}
             disabled={disabled}
-            highlights={MESSAGE_INPUT_HIGHLIGHTS}
             contentClassName={chatStarted ? 'pb-14' : undefined}
           />
           {chatStarted && (
@@ -142,6 +141,58 @@ export const MessageInput = memo(function MessageInput({
     </div>
   );
 });
+
+function PromptTextarea({
+  onKeyDown,
+  onChange,
+  value,
+  minHeight,
+  maxHeight,
+  placeholder,
+  disabled,
+  contentClassName,
+}: {
+  onKeyDown: KeyboardEventHandler<HTMLTextAreaElement>;
+  onChange: ChangeEventHandler<HTMLTextAreaElement>;
+  value: string;
+  minHeight: number;
+  maxHeight: number;
+  placeholder: string;
+  disabled: boolean;
+  contentClassName?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.style.height = 'auto';
+      ref.current.style.height = `${ref.current.scrollHeight}px`;
+    }
+  }, [value]);
+
+  return (
+    <div className="relative overflow-y-auto" style={{ minHeight, maxHeight }}>
+      <textarea
+        ref={ref}
+        className={classNames(
+          'block w-full appearance-none resize-none bg-transparent px-3 py-3 text-sm leading-snug text-content-primary outline-none placeholder-content-tertiary',
+          'disabled:cursor-not-allowed disabled:opacity-50',
+          'scrollbar-thin scrollbar-track-transparent scrollbar-thumb-macosScrollbar-thumb',
+          contentClassName,
+        )}
+        disabled={disabled}
+        onKeyDown={onKeyDown}
+        onChange={onChange}
+        value={value}
+        style={{ minHeight }}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        translate="no"
+        data-gramm="false"
+        maxLength={MAX_USER_MESSAGE_CHARACTERS}
+      />
+    </div>
+  );
+}
 
 function NewLineShortcut() {
   return (

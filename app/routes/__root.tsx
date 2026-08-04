@@ -139,11 +139,9 @@ export function RootNotFoundComponent() {
           <BrandLink />
           <span className="app-status-badge">404</span>
         </div>
-        <p className="app-page-eyebrow">Wrong turn</p>
         <h1 id="not-found-heading" className="app-page-title !text-[clamp(34px,6vw,52px)]">
           This page does not exist.
         </h1>
-        <p className="app-page-lede">The link may be outdated, or the page may have moved.</p>
         <div className="mt-7">
           <Button href="/">Back to Ghostbuild</Button>
         </div>

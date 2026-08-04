@@ -72,9 +72,10 @@ export const ClientExistingChat = createClientComponent<{ chatId: string }>(getC
   <Loading message="Loading project…" />
 ));
 
-export const ClientSettingsContent = createClientComponent<EmptyProps>(getClientSettingsContent, () => (
-  <Loading message="Loading settings…" />
-));
+export const ClientSettingsContent = createClientComponent<{ authorizationError?: string | null }>(
+  getClientSettingsContent,
+  () => <Loading message="Loading settings…" />,
+);
 export const ClientTelemetryPreference = createClientComponent<EmptyProps>(getClientTelemetryPreference);
 
 function HeaderLoadingFallback() {

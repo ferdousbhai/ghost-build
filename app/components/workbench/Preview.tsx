@@ -58,8 +58,8 @@ export function Preview() {
         <PreviewBadge status={status} stale={state.stale} />
         <div className="min-w-0 flex-1 truncate text-xs text-content-secondary" aria-live="polite">
           {preview
-            ? `Durable revision ${preview.workspaceRevision}${expiresAt ? ` · expires ${expiresAt.toLocaleTimeString()}` : ''}`
-            : `Durable revision ${state.currentWorkspaceRevision}`}
+            ? `Revision ${preview.workspaceRevision}${expiresAt ? ` · expires ${expiresAt.toLocaleTimeString()}` : ''}`
+            : `Revision ${state.currentWorkspaceRevision}`}
         </div>
         <IconButton
           icon={<ReloadIcon />}
@@ -115,8 +115,8 @@ export function Preview() {
           <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center p-3">
             <div className="rounded-full border border-border-transparent bg-bolt-elements-background-depth-2/95 px-3 py-1.5 text-xs text-content-secondary shadow-lg backdrop-blur">
               {state.status === 'queued'
-                ? 'Preview queued — isolated capacity is bounded.'
-                : `Building revision ${state.workspaceRevision ?? state.currentWorkspaceRevision} in an isolated sandbox…`}
+                ? 'Preview queued…'
+                : `Building revision ${state.workspaceRevision ?? state.currentWorkspaceRevision}…`}
             </div>
           </div>
         )}
@@ -157,12 +157,9 @@ function PreviewEmpty({
     <div className="flex size-full items-center justify-center p-6 text-center">
       <div className="max-w-sm">
         <p className="font-medium text-content-primary">
-          {status === 'failed' ? 'Remote preview build failed' : 'Build a remote preview'}
+          {status === 'failed' ? 'Preview build failed' : 'Build preview'}
         </p>
-        <p className="mt-2 text-sm text-content-secondary">
-          {error ??
-            'Ghostbuild will capture the exact durable workspace revision and run it in a short-lived, isolated Cloudflare Sandbox.'}
-        </p>
+        <p className="mt-2 text-sm text-content-secondary">{error ?? 'Build the current project revision.'}</p>
         <Button className="mt-4" size="sm" disabled={disabled} onClick={onRequest}>
           Build preview
         </Button>

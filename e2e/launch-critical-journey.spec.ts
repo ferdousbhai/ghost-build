@@ -25,17 +25,13 @@ test('authenticated build, edit, preview, approval, and production journey', asy
 
   const connectionResponse = await page.request.get('/api/cloudflare/connection');
   expect(connectionResponse.ok()).toBe(true);
-  const connection = (await connectionResponse.json()) as {
-    accountId?: string;
-    workspaceRuntime?: { status?: string; current?: boolean };
-  };
+  const connection = (await connectionResponse.json()) as { accountId?: string };
   if (connection.accountId !== environment.stagingAccountId) {
     throw new Error('The authenticated Cloudflare connection does not match the isolated staging account.');
   }
-  if (connection.workspaceRuntime?.status !== 'ready' || connection.workspaceRuntime.current !== true) {
-    throw new Error('The isolated Cloudflare Computer runtime is not ready for the current release candidate.');
-  }
-  const runtimeSessionResponse = await page.request.get('/api/cloudflare/runtime-session');
+  const runtimeSessionResponse = await page.request.post('/api/cloudflare/runtime-session', {
+    headers: { Origin: new URL(environment.baseUrl).origin },
+  });
   if (!runtimeSessionResponse.ok()) {
     throw new Error('The isolated Cloudflare Computer runtime session preflight failed.');
   }
@@ -115,7 +111,7 @@ function requireCriticalJourneyEnvironment() {
   if (!/^[a-f0-9]{40}$/.test(candidateSha)) {
     throw new Error('E2E_CANDIDATE_SHA must be the exact lowercase 40-character release commit SHA.');
   }
-  return { candidateSha, stagingAccountId };
+  return { baseUrl: baseUrl.toString(), candidateSha, stagingAccountId };
 }
 
 function validatedAuthStatePath(value: string | undefined): string | undefined {

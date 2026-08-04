@@ -116,8 +116,8 @@ describe('SubchatBar', () => {
     expect(openButton).not.toBeNull();
     act(() => openButton?.click());
 
-    const createButton = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-      button.textContent?.includes('Create Chat'),
+    const createButton = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(
+      (button) => button.textContent === 'New chat',
     );
     const cancelButton = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent === 'Cancel',

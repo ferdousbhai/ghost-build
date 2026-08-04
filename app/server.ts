@@ -6,7 +6,6 @@ import {
   cloudflareConnectionStatusAction,
   cloudflareRuntimeSessionAction,
   completeCloudflareConnectionAction,
-  provisionCloudflareWorkspaceRuntimeAction,
   startCloudflareConnectionAction,
 } from './server-handlers/cloudflare-integration';
 import { authSessionAction, signOutAction } from './server-handlers/auth';
@@ -137,12 +136,8 @@ const exactRoutes: Record<string, ServerRoute> = {
     method: 'POST',
     handler: (request, env) => startCloudflareConnectionAction({ request, env }),
   },
-  '/api/cloudflare/workspace-runtime': {
-    method: 'POST',
-    handler: (request, env) => provisionCloudflareWorkspaceRuntimeAction({ request, env }),
-  },
   '/api/cloudflare/runtime-session': {
-    method: 'GET',
+    method: 'POST',
     handler: (request, env) => cloudflareRuntimeSessionAction({ request, env }),
   },
   '/api/cloudflare/runtime-credential': {

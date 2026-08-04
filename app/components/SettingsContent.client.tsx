@@ -7,7 +7,7 @@ import { BrandLink } from '~/components/BrandLink';
 import { CloudflareCard } from '~/components/settings/CloudflareCard.client';
 import { TrustFooter } from '~/components/trust/TrustLinks';
 
-export function SettingsContent() {
+export function SettingsContent({ authorizationError }: { authorizationError?: string | null }) {
   return (
     <UserProvider>
       <div className="app-page-shell">
@@ -23,7 +23,7 @@ export function SettingsContent() {
 
           <div className="app-page-content !mt-0 grid gap-5">
             <ProfileCard />
-            <CloudflareCard />
+            <CloudflareCard initialError={authorizationError} />
           </div>
         </div>
         <TrustFooter className="mt-10" />

@@ -27,7 +27,7 @@ export function UnauthenticatedChat({
       toolStatus={{}}
       messages={initialMessages}
       disabledReason={authLoading ? 'Loading account...' : null}
-      runtimeNotice="Connect Cloudflare to use the durable cloud workspace and remote preview."
+      runtimeNotice="Connect Cloudflare to build and preview."
       sendMessageInProgress={false}
       subchats={subchats}
       onSend={async () => {

@@ -10,10 +10,7 @@ export function Loading(props: { message?: string }) {
       <div className="app-loading-mark" aria-hidden>
         <Spinner />
       </div>
-      <div>
-        <p className="font-display text-sm font-black text-content-primary">Preparing Ghostbuild</p>
-        <p className="mt-1 text-sm text-content-secondary">{props.message ?? 'Loading…'}</p>
-      </div>
+      <p className="text-sm text-content-secondary">{props.message ?? 'Loading…'}</p>
     </div>
   );
 }

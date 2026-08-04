@@ -1,4 +1,3 @@
-import { ArrowLeftIcon, ArrowRightIcon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
 import { Modal } from '@ui/Modal';
 import { TextInput } from '@ui/TextInput';
@@ -25,18 +24,12 @@ export function SubchatDialogs(props: SubchatDialogsProps) {
         <Modal onClose={props.closeCreate} title="Create new chat">
           <div className="flex flex-col gap-2">
             <p className="text-content-primary text-sm">
-              This will create a new chat with fresh context. This can be useful for starting work on a new feature of
-              your app, or fixing a bug unrelated to your recent changes. You can always navigate back to previous chats
-              using{' '}
-              <ArrowLeftIcon className="border-content-secondary/20 bg-background-secondary inline size-5 rounded border p-0.5" />{' '}
-              <ArrowRightIcon className="border-content-secondary/20 bg-background-secondary inline size-5 rounded border p-0.5" />{' '}
-              to view your chat history, but you won&apos;t be able to send more messages in previous chats.
+              New chats start with fresh context. Previous chats remain readable.
             </p>
-            <p className="text-content-primary text-sm">Are you sure you want to continue?</p>
             <DialogActions
               cancel={props.closeCreate}
               confirm={props.confirmCreate}
-              confirmLabel="Create Chat"
+              confirmLabel="New chat"
               disabled={props.createDisabled}
               pending={props.createPending}
             />

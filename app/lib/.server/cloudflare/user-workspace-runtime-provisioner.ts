@@ -6,9 +6,9 @@ import {
 import { D1CloudflareCredentialVault } from './cloudflare-credential-vault';
 import { requireActiveCloudflareConnection, type CloudflareConnection } from './cloudflare-connection-repository';
 import {
+  claimUserWorkspaceRuntimeProvisioning,
   markUserWorkspaceRuntimeError,
   markUserWorkspaceRuntimeReady,
-  recordUserWorkspaceRuntimeProvisioning,
   type UserWorkspaceRuntime,
 } from './user-workspace-runtime-repository';
 import { deriveUserWorkspaceRuntimeSecret } from './user-workspace-runtime-secret';
@@ -17,6 +17,14 @@ import { waitForUserWorkspaceRuntimeReadiness } from './user-workspace-runtime-r
 
 const USER_WORKSPACE_SANDBOX_IMAGE =
   'docker.io/cloudflare/sandbox:0.12.4@sha256:e83bb4d6d9748b93a4b876ce0852b5e93d8e0893da10c59d425770aef0d73738';
+const PROVISIONING_LEASE_MS = 15 * 60_000;
+
+export class UserWorkspaceRuntimeProvisioningInProgressError extends Error {
+  constructor() {
+    super('The project workspace is already being prepared.');
+    this.name = 'UserWorkspaceRuntimeProvisioningInProgressError';
+  }
+}
 
 export async function provisionUserWorkspaceRuntime(args: {
   env: Env;
@@ -45,7 +53,8 @@ export async function provisionUserWorkspaceRuntime(args: {
     accountId: connection.accountId,
     connectionGeneration: connection.generation,
   });
-  await recordUserWorkspaceRuntimeProvisioning({
+  const attemptId = crypto.randomUUID();
+  const claim = await claimUserWorkspaceRuntimeProvisioning({
     db: args.env.DB,
     userId: args.userId,
     connectionId: connection.id,
@@ -53,7 +62,15 @@ export async function provisionUserWorkspaceRuntime(args: {
     workerName,
     endpoint,
     runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
+    attemptId,
+    leaseExpiresAt: Date.now() + PROVISIONING_LEASE_MS,
   });
+  if (!claim.claimed) {
+    if (claim.runtime.status === 'ready') {
+      return claim.runtime;
+    }
+    throw new UserWorkspaceRuntimeProvisioningInProgressError();
+  }
   try {
     const database = await accountApi.ensureD1Database(databaseName);
     await accountApi.applyD1Migrations(database.id, USER_WORKSPACE_DATA_MIGRATIONS);
@@ -87,6 +104,7 @@ export async function provisionUserWorkspaceRuntime(args: {
       connectionId: connection.id,
       connectionGeneration: connection.generation,
       runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
+      attemptId,
     });
   } catch (error) {
     await markUserWorkspaceRuntimeError({
@@ -95,6 +113,7 @@ export async function provisionUserWorkspaceRuntime(args: {
       connectionId: connection.id,
       connectionGeneration: connection.generation,
       runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
+      attemptId,
       error: error instanceof Error ? error.message : 'Workspace runtime provisioning failed.',
     }).catch(() => undefined);
     throw error;

@@ -4,6 +4,7 @@ import type { CloudflareAuthSession } from '~/lib/.server/auth';
 import { disposeAccountLocalReplicas } from '~/lib/cloudflare/account-local-replica';
 import { resetUserRuntimeSession } from '~/lib/cloudflare/runtime-session';
 import { captureProductEvent } from '~/lib/telemetry.client';
+import { CLOUDFLARE_AUTHORIZATION_ERROR_PARAM } from '~/lib/cloudflare/authorization-recovery';
 
 const captureCloudflareConnectStarted = createClientOnlyFn(() => {
   void captureProductEvent('cloudflare_connect_started');
@@ -78,35 +79,28 @@ export async function signInWithCloudflare(callbackURL = window.location.href) {
   window.location.assign(payload.authorizationUrl);
 }
 
-export function createCloudflareSetupCallbackURL(
-  continueURL = window.location.href,
-  origin = window.location.origin,
-): string {
+export function createCloudflareReturnURL(returnURL = window.location.href, origin = window.location.origin): string {
   const expectedOrigin = new URL(origin).origin;
-  let continuation = '/';
   try {
-    const requested = new URL(continueURL, expectedOrigin);
-    if (requested.origin === expectedOrigin) {
-      continuation =
-        requested.pathname === '/settings'
-          ? resolveCloudflareSetupContinuation(requested.search)
-          : `${requested.pathname}${requested.search}${requested.hash}`;
+    const requested = new URL(returnURL, expectedOrigin);
+    if (requested.origin === expectedOrigin && !requested.pathname.startsWith('//')) {
+      requested.searchParams.delete(CLOUDFLARE_AUTHORIZATION_ERROR_PARAM);
+      if (requested.pathname === '/settings') {
+        const continuation = requested.searchParams.get('continue');
+        if (continuation && continuation.startsWith('/') && !continuation.startsWith('//')) {
+          const target = new URL(continuation, expectedOrigin);
+          if (target.origin === expectedOrigin && !target.pathname.startsWith('//')) {
+            return target.toString();
+          }
+        }
+        requested.searchParams.delete('continue');
+      }
+      return requested.toString();
     }
   } catch {
-    // An invalid or external continuation falls back to the public builder.
+    // Invalid and external destinations return to the public builder.
   }
-
-  const callback = new URL('/settings', expectedOrigin);
-  callback.searchParams.set('continue', continuation);
-  callback.hash = 'cloudflare';
-  return callback.toString();
-}
-
-export function resolveCloudflareSetupContinuation(search = window.location.search): string {
-  const continuation = new URLSearchParams(search).get('continue');
-  return continuation && continuation.length <= 2_048 && continuation.startsWith('/') && !continuation.startsWith('//')
-    ? continuation
-    : '/';
+  return `${expectedOrigin}/`;
 }
 
 export async function signOutOfGhostbuild(callbackURL = window.location.origin) {

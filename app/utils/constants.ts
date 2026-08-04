@@ -1,7 +1,6 @@
 import { WORK_DIR } from 'ghostbuild-agent/constants';
 import { LOCAL_SECRET_FILE_EXPORT_EXCLUDES, LOCAL_SECRET_FILE_IGNORE_PATHS } from './secretFiles';
 
-export const LEGACY_PROMPT_COOKIE_KEY = 'cachedPrompt';
 export const PENDING_PROMPT_STORAGE_KEY = 'ghostbuild:pending-prompt';
 
 const IGNORED_RELATIVE_DIRECTORIES = ['dist', 'node_modules', '.output', '.tanstack', '.wrangler', '.git'] as const;

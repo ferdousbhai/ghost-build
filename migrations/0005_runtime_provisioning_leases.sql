@@ -1,0 +1,2 @@
+ALTER TABLE user_computer_runtimes ADD COLUMN provisioning_attempt_id TEXT;
+ALTER TABLE user_computer_runtimes ADD COLUMN provisioning_lease_expires_at INTEGER;

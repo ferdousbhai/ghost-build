@@ -48,7 +48,7 @@ export function ExistingChatSessionView({
     return (
       <CloudflareSignInPrompt
         title="Connect Cloudflare to open this project."
-        description="Projects are private to the Cloudflare account that owns their durable workspace. Connect the correct account to continue."
+        description="Connect the Cloudflare account that owns this project."
       />
     );
   }
@@ -75,15 +75,15 @@ function AuthenticatedExistingChat({ chatId }: { chatId: string }) {
 
   // Download the account-owned chat after the session gate above has passed.
   if (initialMessages === undefined) {
-    return <Loading message="Loading chat messages..." />;
+    return <Loading message="Loading project…" />;
   }
   if (!transcript) {
-    return <Loading message="Loading transcript..." />;
+    return <Loading message="Loading project…" />;
   }
   // Once we have the chat messages, we can populate the workbench state.
   // Note that this doesn't actually run any actions.
   if (reloadState === undefined) {
-    return <Loading message="Parsing chat messages..." />;
+    return <Loading message="Loading project…" />;
   }
   const hadSuccessfulDeploy = initialMessages.some(
     (message) =>

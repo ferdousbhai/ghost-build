@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CloudflareSignInPrompt } from './CloudflareSignInPrompt';
 
 const auth = vi.hoisted(() => ({
-  createCloudflareSetupCallbackURL: vi.fn(() => 'http://localhost/settings?continue=%2F#cloudflare'),
+  createCloudflareReturnURL: vi.fn(() => 'http://localhost/'),
   signInWithCloudflare: vi.fn(),
 }));
 
@@ -16,7 +16,7 @@ let root: Root | undefined;
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  auth.createCloudflareSetupCallbackURL.mockClear();
+  auth.createCloudflareReturnURL.mockClear();
   auth.signInWithCloudflare.mockReset();
 });
 
@@ -29,7 +29,7 @@ afterEach(async () => {
 });
 
 describe('CloudflareSignInPrompt', () => {
-  it('routes authentication through explicit runtime setup', async () => {
+  it('returns authentication directly to the requested page', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -44,7 +44,7 @@ describe('CloudflareSignInPrompt', () => {
     );
     await act(async () => connect?.click());
 
-    expect(auth.createCloudflareSetupCallbackURL).toHaveBeenCalledOnce();
-    expect(auth.signInWithCloudflare).toHaveBeenCalledWith('http://localhost/settings?continue=%2F#cloudflare');
+    expect(auth.createCloudflareReturnURL).toHaveBeenCalledOnce();
+    expect(auth.signInWithCloudflare).toHaveBeenCalledWith('http://localhost/');
   });
 });

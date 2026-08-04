@@ -64,10 +64,7 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messa
           <div className="mb-6 flex size-[64px] shrink-0 items-center justify-center rounded-full text-gray-600 dark:text-gray-500">
             <ChatBubbleIcon className="size-8" />
           </div>
-          <h3 className="text-content-primary mb-2 text-xl font-semibold">
-            Ready to build a new feature or fix a bug?
-          </h3>
-          <p className="text-content-secondary max-w-md">Send a message below to start on your next task!</p>
+          <h3 className="text-content-primary text-xl font-semibold">What should Ghostbuild change?</h3>
         </div>
       )}
     </div>

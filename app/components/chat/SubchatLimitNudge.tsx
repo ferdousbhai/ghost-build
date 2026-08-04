@@ -17,8 +17,7 @@ export function SubchatLimitNudge({ messageCount, handleCreateSubchat }: Subchat
           <div>
             <h3 className="font-medium text-orange-800 dark:text-orange-200">Create a new chat</h3>
             <p className="mt-1 text-sm text-orange-700 dark:text-orange-300">
-              Your conversation has reached {messageCount} messages. For better performance, we recommend creating a new
-              chat. This will preserve your current work, but provide you with a clean context.
+              This chat has {messageCount} messages. Start fresh; your work stays intact.
             </p>
           </div>
           <Button
@@ -29,7 +28,7 @@ export function SubchatLimitNudge({ messageCount, handleCreateSubchat }: Subchat
             disabled={areFilesSaving}
             onClick={handleCreateSubchat}
           >
-            Start New Chat
+            New chat
           </Button>
         </div>
       </div>

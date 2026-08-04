@@ -6,11 +6,11 @@ import { WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
 import { showWorkersPaidRequiredToast } from '~/lib/workers-paid.client';
 import { captureException } from '~/lib/telemetry.client';
 import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
-import { createCloudflareSetupCallbackURL, signInWithCloudflare } from '~/lib/auth-client';
+import { createCloudflareReturnURL, signInWithCloudflare } from '~/lib/auth-client';
 import { messageInputStore } from '~/lib/stores/messageInput';
 import { getAuthToken } from '~/lib/stores/sessionId';
 import { debounce } from '~/utils/debounce';
-import { LEGACY_PROMPT_COOKIE_KEY, PENDING_PROMPT_STORAGE_KEY } from '~/utils/constants';
+import { PENDING_PROMPT_STORAGE_KEY } from '~/utils/constants';
 import { useGhostbuildAuth } from './GhostbuildAuthWrapper';
 
 interface MessageInputControllerOptions {
@@ -32,8 +32,6 @@ export function useMessageInputController({
   const input = useStore(messageInputStore);
   const search = useSearch({ strict: false }) as { prefill?: string };
 
-  useEffect(clearLegacyPromptCookie, []);
-
   useEffect(() => {
     if (!prefillEnabled) {
       return;
@@ -53,7 +51,6 @@ export function useMessageInputController({
     await submitMessageInput(input, onSend, () => {
       cachePrompt.cancel();
       removePendingPrompt();
-      clearLegacyPromptCookie();
       messageInputStore.set('');
     });
   }, [input, onSend]);
@@ -61,7 +58,7 @@ export function useMessageInputController({
   const signIn = useCallback(async () => {
     preservePromptForAuthentication(input);
     try {
-      await signInWithCloudflare(createCloudflareSetupCallbackURL());
+      await signInWithCloudflare(createCloudflareReturnURL());
     } catch (error) {
       captureException('Failed to start Cloudflare authorization', error, { level: 'error' });
       toast.error(error instanceof Error ? error.message : 'Unable to connect Cloudflare. Please try again.');
@@ -203,14 +200,6 @@ const cachePrompt = debounce(function cachePrompt(prompt: string) {
 export function preservePromptForAuthentication(input: string): void {
   cachePrompt.cancel();
   storePendingPrompt(input.trim());
-  clearLegacyPromptCookie();
-}
-
-export function clearLegacyPromptCookie(): void {
-  if (typeof document === 'undefined') {
-    return;
-  }
-  document.cookie = `${LEGACY_PROMPT_COOKIE_KEY}=; Path=/; Max-Age=0; SameSite=Lax`;
 }
 
 function readPendingPrompt(): string | null {

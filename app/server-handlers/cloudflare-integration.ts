@@ -14,12 +14,22 @@ import {
   type CloudflareOrchestrator,
 } from '~/lib/.server/cloudflare/cloudflare-orchestrator';
 import { InvalidJsonBodyError, PayloadTooLargeError, readJsonBodyWithLimit } from '~/lib/bounded-body';
-import { provisionUserWorkspaceRuntime } from '~/lib/.server/cloudflare/user-workspace-runtime-provisioner';
-import { findUserWorkspaceRuntime } from '~/lib/.server/cloudflare/user-workspace-runtime-repository';
+import {
+  provisionUserWorkspaceRuntime,
+  UserWorkspaceRuntimeProvisioningInProgressError,
+} from '~/lib/.server/cloudflare/user-workspace-runtime-provisioner';
+import {
+  findUserWorkspaceRuntime,
+  type UserWorkspaceRuntime,
+} from '~/lib/.server/cloudflare/user-workspace-runtime-repository';
 import { USER_WORKSPACE_RUNTIME_SHA256 } from '~/generated/user-workspace-runtime.generated';
 import { deriveUserWorkspaceRuntimeSecret } from '~/lib/.server/cloudflare/user-workspace-runtime-secret';
 import { mintRuntimeCapability } from '~/lib/cloudflare/runtime-capability';
 import { computerRolloutUnavailableResponse, resolveComputerRollout } from '~/lib/.server/cloudflare/computer-rollout';
+import {
+  CLOUDFLARE_AUTHORIZATION_ERROR_PARAM,
+  CLOUDFLARE_AUTHORIZATION_ERROR_VALUE,
+} from '~/lib/cloudflare/authorization-recovery';
 
 const requestedCapabilities = ['workers', 'containers', 'd1', 'r2', 'durable_objects', 'workers_ai'] as const;
 export const CLOUDFLARE_CONNECTION_CALLBACK_METHOD = 'GET' as const;
@@ -29,9 +39,7 @@ const OAUTH_START_RATE_LIMIT_RETRY_SECONDS = 60;
 const MAX_OAUTH_START_REQUEST_BYTES = 4 * 1024;
 const MAX_OAUTH_CALLBACK_CODE_LENGTH = 4_096;
 const MAX_OAUTH_CALLBACK_TEXT_LENGTH = 2_048;
-const MAX_WORKSPACE_RUNTIME_SETUP_BYTES = 2 * 1024;
 const startPayloadSchema = z.object({ callbackURL: z.string().url().max(2_048).optional() });
-const workspaceRuntimeSetupSchema = z.object({}).strict();
 const callbackPayloadSchema = z
   .object({
     state: z.string().uuid(),
@@ -88,26 +96,10 @@ export async function cloudflareConnectionStatusAction({
     return Response.json({ error: 'An active Cloudflare account is required.' }, { status: 401 });
   }
 
-  const workspaceRuntime = await findUserWorkspaceRuntime(env.DB, session.user.id);
-
   return Response.json(
     {
-      connected: true,
-      status: connection.status,
       accountId: connection.accountId,
       accountName: connection.accountName,
-      aiBillingEnabled: connection.aiBillingEnabled,
-      connectedAt: connection.connectedAt,
-      workspaceRuntime: workspaceRuntime
-        ? {
-            status: workspaceRuntime.status,
-            current:
-              workspaceRuntime.connectionId === connection.id &&
-              workspaceRuntime.connectionGeneration === connection.generation &&
-              workspaceRuntime.runtimeVersion === USER_WORKSPACE_RUNTIME_SHA256,
-            lastError: workspaceRuntime.lastError,
-          }
-        : { status: 'not_configured', current: false, lastError: null },
     },
     { headers: { 'Cache-Control': 'private, no-store' } },
   );
@@ -116,10 +108,15 @@ export async function cloudflareConnectionStatusAction({
 export async function cloudflareRuntimeSessionAction({
   request,
   env,
+  provision = provisionUserWorkspaceRuntime,
 }: {
   request: Request;
   env: Env;
+  provision?: typeof provisionUserWorkspaceRuntime;
 }): Promise<Response> {
+  if (!hasSameOrigin(request)) {
+    return Response.json({ error: 'Invalid request origin.' }, { status: 403 });
+  }
   const session = await getAuthSession(env, request);
   if (!session) {
     return Response.json({ error: 'Cloudflare authentication required.' }, { status: 401 });
@@ -127,32 +124,54 @@ export async function cloudflareRuntimeSessionAction({
   if (!(await resolveComputerRollout(env.DB, session.user.id)).enabled) {
     return computerRolloutUnavailableResponse();
   }
-  const [connection, runtime] = await Promise.all([
-    findCloudflareConnectionForUser(env.DB, session.user.id),
-    findUserWorkspaceRuntime(env.DB, session.user.id),
-  ]);
-  if (
-    !connection ||
-    connection.status !== 'active' ||
-    !runtime ||
-    runtime.status !== 'ready' ||
-    runtime.connectionId !== connection.id ||
-    runtime.connectionGeneration !== connection.generation ||
-    runtime.runtimeVersion !== USER_WORKSPACE_RUNTIME_SHA256
-  ) {
-    return Response.json(
-      { error: 'Set up the current user-owned Ghostbuild runtime before opening a project.' },
-      { status: 409 },
-    );
+  const connection = await findCloudflareConnectionForUser(env.DB, session.user.id);
+  if (!connection || connection.status !== 'active') {
+    return Response.json({ error: 'Connect Cloudflare before opening a project.' }, { status: 409 });
   }
   if (!env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY) {
     return Response.json({ error: 'Runtime authorization is unavailable.' }, { status: 503 });
   }
+  const runtime = await findUserWorkspaceRuntime(env.DB, session.user.id);
+  if (!isCurrentWorkspaceRuntime(runtime, connection)) {
+    try {
+      await provision({
+        env,
+        userId: session.user.id,
+        connectionId: connection.id,
+      });
+    } catch (error) {
+      if (error instanceof UserWorkspaceRuntimeProvisioningInProgressError) {
+        return Response.json(
+          { code: 'workspace_preparing', error: error.message },
+          { status: 409, headers: { 'Cache-Control': 'private, no-store' } },
+        );
+      }
+      console.error('User-owned Cloudflare workspace runtime provisioning failed');
+      return Response.json(
+        { error: error instanceof Error ? error.message : 'Unable to prepare the project workspace.' },
+        { status: 502, headers: { 'Cache-Control': 'private, no-store' } },
+      );
+    }
+  }
+  const [currentConnection, currentRuntime] = await Promise.all([
+    findCloudflareConnectionForUser(env.DB, session.user.id),
+    findUserWorkspaceRuntime(env.DB, session.user.id),
+  ]);
+  if (
+    !currentConnection ||
+    currentConnection.status !== 'active' ||
+    !isCurrentWorkspaceRuntime(currentRuntime, currentConnection)
+  ) {
+    return Response.json(
+      { error: 'The Cloudflare account changed while Ghostbuild prepared the workspace. Try again.' },
+      { status: 409, headers: { 'Cache-Control': 'private, no-store' } },
+    );
+  }
   const secret = await deriveUserWorkspaceRuntimeSecret({
     encryptionKeyBase64: env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY,
     userId: session.user.id,
-    accountId: connection.accountId,
-    connectionGeneration: connection.generation,
+    accountId: currentConnection.accountId,
+    connectionGeneration: currentConnection.generation,
   });
   const capability = await mintRuntimeCapability({
     secret,
@@ -160,67 +179,21 @@ export async function cloudflareRuntimeSessionAction({
     origin: new URL(request.url).origin,
   });
   return Response.json(
-    { endpoint: runtime.endpoint, ...capability },
+    { endpoint: currentRuntime.endpoint, ...capability },
     { headers: { 'Cache-Control': 'private, no-store' } },
   );
 }
 
-export async function provisionCloudflareWorkspaceRuntimeAction(args: {
-  request: Request;
-  env: Env;
-}): Promise<Response> {
-  try {
-    if (!hasSameOrigin(args.request)) {
-      return Response.json({ error: 'Invalid request origin.' }, { status: 403 });
-    }
-    const session = await getAuthSession(args.env, args.request);
-    if (!session) {
-      return Response.json({ error: 'Cloudflare authentication required.' }, { status: 401 });
-    }
-    if (!(await resolveComputerRollout(args.env.DB, session.user.id)).enabled) {
-      return computerRolloutUnavailableResponse();
-    }
-    const connection = await findCloudflareConnectionForUser(args.env.DB, session.user.id);
-    if (!connection || connection.status !== 'active') {
-      return Response.json({ error: 'Connect Cloudflare before configuring project storage.' }, { status: 409 });
-    }
-    parseIntegrationRequest(
-      workspaceRuntimeSetupSchema,
-      await readJsonBodyWithLimit(
-        args.request,
-        MAX_WORKSPACE_RUNTIME_SETUP_BYTES,
-        'Cloudflare workspace runtime setup',
-      ),
-    );
-    const runtime = await provisionUserWorkspaceRuntime({
-      env: args.env,
-      userId: session.user.id,
-      connectionId: connection.id,
-    });
-    return Response.json(
-      {
-        status: runtime.status,
-        current: runtime.runtimeVersion === USER_WORKSPACE_RUNTIME_SHA256,
-      },
-      { status: 201, headers: { 'Cache-Control': 'private, no-store' } },
-    );
-  } catch (error) {
-    if (error instanceof PayloadTooLargeError) {
-      return Response.json({ error: error.message }, { status: 413 });
-    }
-    if (
-      error instanceof InvalidJsonBodyError ||
-      error instanceof InvalidCloudflareIntegrationRequestError ||
-      error instanceof z.ZodError
-    ) {
-      return Response.json({ error: 'Invalid workspace runtime request.' }, { status: 400 });
-    }
-    console.error('User-owned Cloudflare workspace runtime provisioning failed');
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Cloudflare workspace runtime provisioning failed.' },
-      { status: 502 },
-    );
-  }
+function isCurrentWorkspaceRuntime(
+  runtime: UserWorkspaceRuntime | null,
+  connection: CloudflareConnection,
+): runtime is UserWorkspaceRuntime {
+  return (
+    runtime?.status === 'ready' &&
+    runtime.connectionId === connection.id &&
+    runtime.connectionGeneration === connection.generation &&
+    runtime.runtimeVersion === USER_WORKSPACE_RUNTIME_SHA256
+  );
 }
 
 export async function startCloudflareConnectionAction(args: {
@@ -298,7 +271,7 @@ export async function completeCloudflareConnectionAction(args: {
   orchestrator?: CloudflareOrchestrator;
 }): Promise<Response> {
   try {
-    const { state, callbackUrl } = await readCloudflareCallback(args.request);
+    const { state, callbackUrl, providerRejectedAuthorization } = await readCloudflareCallback(args.request);
     if (readCookie(args.request, OAUTH_STATE_COOKIE) !== state) {
       return Response.json({ error: 'Cloudflare authorization browser state did not match.' }, { status: 400 });
     }
@@ -320,6 +293,10 @@ export async function completeCloudflareConnectionAction(args: {
         .bind(Date.now(), state)
         .run();
       return Response.json({ error: 'Cloudflare authorization session expired.' }, { status: 410 });
+    }
+    if (providerRejectedAuthorization) {
+      await failOAuthState({ db: args.env.DB, stateId: state, expected: oauthState });
+      return cloudflareAuthorizationRecoveryResponse(args.request, oauthState.return_to);
     }
     if (!args.env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY) {
       throw new Error('Cloudflare credential encryption is not configured.');
@@ -449,12 +426,16 @@ async function checkpointAuthenticatedOAuthUser(args: {
       return;
     }
   } catch (error) {
-    if (await isExactOAuthCheckpoint(args.db, args.stateId, args.expected, args.userId, updatedAt).catch(() => false)) {
+    if (
+      await isExactOAuthState(args.db, args.stateId, args.expected, 'pending', args.userId, updatedAt).catch(
+        () => false,
+      )
+    ) {
       return;
     }
     throw error;
   }
-  if (await isExactOAuthCheckpoint(args.db, args.stateId, args.expected, args.userId, updatedAt)) {
+  if (await isExactOAuthState(args.db, args.stateId, args.expected, 'pending', args.userId, updatedAt)) {
     return;
   }
   throw new Error('Cloudflare authorization state changed while authentication was being checkpointed.');
@@ -488,44 +469,77 @@ async function completeOAuthState(args: {
     }
   } catch (error) {
     if (
-      await isExactCompletedOAuthState(args.db, args.stateId, args.expected, args.userId, updatedAt).catch(() => false)
+      await isExactOAuthState(args.db, args.stateId, args.expected, 'completed', args.userId, updatedAt).catch(
+        () => false,
+      )
     ) {
       return;
     }
     throw error;
   }
-  if (await isExactCompletedOAuthState(args.db, args.stateId, args.expected, args.userId, updatedAt)) {
+  if (await isExactOAuthState(args.db, args.stateId, args.expected, 'completed', args.userId, updatedAt)) {
     return;
   }
   throw new Error('Cloudflare authorization state changed while completion was being persisted.');
 }
 
-async function isExactOAuthCheckpoint(
-  db: D1Database,
-  stateId: string,
-  expected: PendingOAuthState,
-  userId: string,
-  updatedAt: number,
-): Promise<boolean> {
-  const row = await readOAuthState(db, stateId);
-  if (!row) {
-    return false;
+async function failOAuthState(args: { db: D1Database; stateId: string; expected: PendingOAuthState }): Promise<void> {
+  const updatedAt = Date.now();
+  try {
+    const result = await args.db
+      .prepare(
+        `UPDATE cloudflare_oauth_states SET status = 'error', updated_at = ?
+         WHERE id = ? AND status = 'pending' AND provider_session_id = ? AND return_to = ?
+           AND expires_at = ? AND authenticated_user_id IS ?`,
+      )
+      .bind(
+        updatedAt,
+        args.stateId,
+        args.expected.provider_session_id,
+        args.expected.return_to,
+        args.expected.expires_at,
+        args.expected.authenticated_user_id,
+      )
+      .run();
+    if (result.meta.changes === 1) {
+      return;
+    }
+  } catch (error) {
+    if (
+      await isExactOAuthState(
+        args.db,
+        args.stateId,
+        args.expected,
+        'error',
+        args.expected.authenticated_user_id,
+        updatedAt,
+      ).catch(() => false)
+    ) {
+      return;
+    }
+    throw error;
   }
-  return (
-    row.provider_session_id === expected.provider_session_id &&
-    row.return_to === expected.return_to &&
-    row.status === 'pending' &&
-    row.expires_at === expected.expires_at &&
-    row.authenticated_user_id === userId &&
-    row.updated_at === updatedAt
-  );
+  if (
+    await isExactOAuthState(
+      args.db,
+      args.stateId,
+      args.expected,
+      'error',
+      args.expected.authenticated_user_id,
+      updatedAt,
+    )
+  ) {
+    return;
+  }
+  throw new Error('Cloudflare authorization state changed while the provider error was being persisted.');
 }
 
-async function isExactCompletedOAuthState(
+async function isExactOAuthState(
   db: D1Database,
   stateId: string,
   expected: PendingOAuthState,
-  userId: string,
+  status: 'pending' | 'completed' | 'error',
+  authenticatedUserId: string | null,
   updatedAt: number,
 ): Promise<boolean> {
   const row = await readOAuthState(db, stateId);
@@ -535,9 +549,9 @@ async function isExactCompletedOAuthState(
   return (
     row.provider_session_id === expected.provider_session_id &&
     row.return_to === expected.return_to &&
-    row.status === 'completed' &&
+    row.status === status &&
     row.expires_at === expected.expires_at &&
-    row.authenticated_user_id === userId &&
+    row.authenticated_user_id === authenticatedUserId &&
     row.updated_at === updatedAt
   );
 }
@@ -553,7 +567,9 @@ async function readOAuthState(db: D1Database, stateId: string) {
     .first<PendingOAuthState & { status: string; updated_at: number }>();
 }
 
-async function readCloudflareCallback(request: Request): Promise<{ state: string; callbackUrl: string }> {
+async function readCloudflareCallback(
+  request: Request,
+): Promise<{ state: string; callbackUrl: string; providerRejectedAuthorization: boolean }> {
   const requestUrl = new URL(request.url);
   const payload = parseIntegrationRequest(callbackPayloadSchema, Object.fromEntries(requestUrl.searchParams));
   const callbackUrl = new URL(requestUrl.pathname, requestUrl.origin);
@@ -563,7 +579,31 @@ async function readCloudflareCallback(request: Request): Promise<{ state: string
       callbackUrl.searchParams.set(key, value);
     }
   }
-  return { state: payload.state, callbackUrl: callbackUrl.toString() };
+  return {
+    state: payload.state,
+    callbackUrl: callbackUrl.toString(),
+    providerRejectedAuthorization: Boolean(payload.error),
+  };
+}
+
+function cloudflareAuthorizationRecoveryResponse(request: Request, returnTo: string): Response {
+  const requestUrl = new URL(request.url);
+  const continuation = safeReturnTo(returnTo, requestUrl.origin);
+  const originalTarget = new URL(continuation, requestUrl.origin);
+  const recoveryTarget =
+    originalTarget.pathname === '/settings' ? originalTarget : new URL('/settings', requestUrl.origin);
+  if (originalTarget.pathname !== '/settings') {
+    recoveryTarget.searchParams.set('continue', continuation);
+  }
+  recoveryTarget.searchParams.set(CLOUDFLARE_AUTHORIZATION_ERROR_PARAM, CLOUDFLARE_AUTHORIZATION_ERROR_VALUE);
+  recoveryTarget.hash = 'cloudflare';
+  return new Response(null, {
+    status: 303,
+    headers: {
+      Location: recoveryTarget.toString(),
+      'Set-Cookie': oauthStateCookie('', 0, request),
+    },
+  });
 }
 
 function parseIntegrationRequest<T>(schema: z.ZodType<T>, value: unknown): T {

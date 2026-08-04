@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  clearLegacyPromptCookie,
   getMessageInputPrimaryAction,
   getMessageInputPrimaryActionLabel,
   preservePromptForAuthentication,
@@ -59,7 +58,6 @@ describe('preservePromptForAuthentication', () => {
         removeItem: (key: string) => storage.delete(key),
       },
     });
-    vi.stubGlobal('document', { cookie: '' });
     const prompt = `A todo app ${'x'.repeat(16_000)}`;
 
     preservePromptForAuthentication(`  ${prompt}  `);
@@ -79,15 +77,6 @@ describe('preservePromptForAuthentication', () => {
     preservePromptForAuthentication('   ');
 
     expect(storage.has(PENDING_PROMPT_STORAGE_KEY)).toBe(false);
-  });
-
-  it('expires the legacy prompt cookie', () => {
-    const cookieDocument = { cookie: 'cachedPrompt=legacy' };
-    vi.stubGlobal('document', cookieDocument);
-
-    clearLegacyPromptCookie();
-
-    expect(cookieDocument.cookie).toBe('cachedPrompt=; Path=/; Max-Age=0; SameSite=Lax');
   });
 });
 

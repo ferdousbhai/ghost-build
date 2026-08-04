@@ -3,6 +3,8 @@ import type {
   CloudflareConnectionResult,
   CloudflareOrchestrator,
 } from '~/lib/.server/cloudflare/cloudflare-orchestrator';
+import { USER_WORKSPACE_RUNTIME_SHA256 } from '~/generated/user-workspace-runtime.generated';
+import { UserWorkspaceRuntimeProvisioningInProgressError } from '~/lib/.server/cloudflare/user-workspace-runtime-provisioner';
 const mocks = vi.hoisted(() => ({
   CloudflareConnectionChangedError: class CloudflareConnectionChangedError extends Error {},
   getAuthSession: vi.fn(),
@@ -48,7 +50,6 @@ import {
   cloudflareConnectionStatusAction,
   cloudflareRuntimeSessionAction,
   completeCloudflareConnectionAction,
-  provisionCloudflareWorkspaceRuntimeAction,
   startCloudflareConnectionAction,
 } from './cloudflare-integration';
 
@@ -102,18 +103,13 @@ describe('Cloudflare-only authentication', () => {
     expect(response.status).toBe(401);
   });
 
-  it.each([
-    ['runtime capability', cloudflareRuntimeSessionAction, 'GET'],
-    ['runtime provisioning', provisionCloudflareWorkspaceRuntimeAction, 'POST'],
-  ])('applies the mutable Computer rollout gate before %s', async (_label, action, method) => {
+  it('applies the mutable Computer rollout gate before preparing a runtime session', async () => {
     mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
     mocks.resolveComputerRollout.mockResolvedValueOnce({ enabled: false, mode: 'off' });
-    const response = await action({
+    const response = await cloudflareRuntimeSessionAction({
       request: new Request('https://ghostbuild.dev/api/cloudflare/runtime', {
-        method,
-        ...(method === 'POST'
-          ? { headers: { Origin: 'https://ghostbuild.dev', 'Content-Type': 'application/json' }, body: '{}' }
-          : {}),
+        method: 'POST',
+        headers: { Origin: 'https://ghostbuild.dev' },
       }),
       env: { DB: {} } as Env,
     });
@@ -124,67 +120,128 @@ describe('Cloudflare-only authentication', () => {
     expect(mocks.findConnection).not.toHaveBeenCalled();
   });
 
-  it('returns only connection and user-runtime metadata', async () => {
-    const prepare = vi.fn((sql: string) => {
-      if (sql.includes('FROM user_computer_runtimes')) {
-        return { bind: () => ({ first: async () => null }) };
-      }
-      throw new Error(`Unexpected SQL: ${sql}`);
+  it('rejects runtime preparation without a same-origin browser request', async () => {
+    const response = await cloudflareRuntimeSessionAction({
+      request: new Request('https://ghostbuild.dev/api/cloudflare/runtime-session', { method: 'POST' }),
+      env: { DB: {} } as Env,
     });
+
+    expect(response.status).toBe(403);
+    expect(mocks.getAuthSession).not.toHaveBeenCalled();
+  });
+
+  it('returns only connection metadata needed by settings and the isolated-staging guard', async () => {
     mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue({
-      id: 'connection-1',
-      userId: 'user-1',
-      accountId: 'account-1',
-      accountName: 'User Cloudflare',
-      status: 'active',
-      credentialHandle: 'credential-1',
-      grantedScopes: [],
-      aiBillingEnabled: true,
-      connectedAt: 100,
-      updatedAt: 100,
-      generation: 1,
-    });
+    mocks.findConnection.mockResolvedValue(activeConnection());
 
     const response = await cloudflareConnectionStatusAction({
       request: new Request('https://ghostbuild.dev/api/cloudflare/connection'),
-      env: { DB: { prepare } } as unknown as Env,
+      env: { DB: {} } as Env,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      accountId: 'account-1',
+      accountName: 'User Cloudflare',
+    });
+  });
+
+  it.each([
+    ['absent', null],
+    ['failed', runtimeRow({ status: 'error' })],
+    ['stale connection', runtimeRow({ connectionGeneration: 0 })],
+    ['stale version', runtimeRow({ runtimeVersion: '0'.repeat(64) })],
+  ])('automatically provisions an %s runtime before minting a capability', async (_case, initialRuntime) => {
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection());
+    const provision = vi.fn().mockResolvedValue(runtimeRecord());
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([initialRuntime, runtimeRow()]),
+      provision,
     });
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      connected: true,
-      status: 'active',
-      accountId: 'account-1',
-      workspaceRuntime: { status: 'not_configured', current: false },
+      endpoint: 'https://workspace.example',
+      token: expect.any(String),
     });
-    expect(prepare).toHaveBeenCalledOnce();
+    expect(provision).toHaveBeenCalledWith({
+      env: expect.anything(),
+      userId: 'user-1',
+      connectionId: 'connection-1',
+    });
   });
 
-  it('does not report a failed user-runtime lookup as an unconfigured runtime', async () => {
-    const failure = new Error('runtime lookup failed');
-    const prepare = vi.fn(() => ({ bind: () => ({ first: async () => Promise.reject(failure) }) }));
+  it('reuses a current runtime without provisioning', async () => {
     mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue({
-      id: 'connection-1',
-      userId: 'user-1',
-      accountId: 'account-1',
-      accountName: 'User Cloudflare',
-      status: 'active',
-      credentialHandle: 'credential-1',
-      grantedScopes: [],
-      aiBillingEnabled: true,
-      connectedAt: 100,
-      updatedAt: 100,
-      generation: 1,
+    mocks.findConnection.mockResolvedValue(activeConnection());
+    const provision = vi.fn();
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([runtimeRow(), runtimeRow()]),
+      provision,
     });
 
-    await expect(
-      cloudflareConnectionStatusAction({
-        request: new Request('https://ghostbuild.dev/api/cloudflare/connection'),
-        env: { DB: { prepare } } as unknown as Env,
-      }),
-    ).rejects.toBe(failure);
+    expect(response.status).toBe(200);
+    expect(provision).not.toHaveBeenCalled();
+  });
+
+  it('returns no capability when automatic provisioning fails', async () => {
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection());
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([null]),
+      provision: vi.fn().mockRejectedValue(new Error('Cloudflare rejected the runtime deployment.')),
+    });
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ error: 'Cloudflare rejected the runtime deployment.' });
+  });
+
+  it('tells the client to wait when another request owns the provisioning lease', async () => {
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection());
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([null]),
+      provision: vi.fn().mockRejectedValue(new UserWorkspaceRuntimeProvisioningInProgressError()),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      code: 'workspace_preparing',
+      error: 'The project workspace is already being prepared.',
+    });
+  });
+
+  it('does not mint an old-generation capability when the connection changes during provisioning', async () => {
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValueOnce(activeConnection(1)).mockResolvedValueOnce(activeConnection(2));
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([null, runtimeRow({ connectionGeneration: 1 })]),
+      provision: vi.fn().mockResolvedValue(runtimeRecord({ connectionGeneration: 1 })),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: 'The Cloudflare account changed while Ghostbuild prepared the workspace. Try again.',
+    });
+  });
+
+  it('does not mint a capability when provisioning returns before a ready runtime is persisted', async () => {
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection());
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([null, null]),
+      provision: vi.fn().mockResolvedValue(runtimeRecord()),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.not.toHaveProperty('token');
   });
 
   it('starts OAuth before any local session exists and keeps only a same-origin return path', async () => {
@@ -385,6 +442,96 @@ describe('Cloudflare-only authentication', () => {
       orchestrator: fakeOrchestrator(),
     });
     expect(replay.status).toBe(404);
+  });
+
+  it('turns a provider rejection into a safe, retryable settings redirect', async () => {
+    const database = oauthDatabase();
+    const orchestrator = fakeOrchestrator();
+    const start = await startCloudflareConnectionAction({
+      request: new Request('https://ghostbuild.dev/api/cloudflare/connection/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://ghostbuild.dev' },
+        body: JSON.stringify({ callbackURL: 'https://ghostbuild.dev/chat/project?panel=code#preview' }),
+      }),
+      env: database.env,
+      orchestrator,
+    });
+    const stateCookie = start.headers.get('set-cookie')!.split(';', 1)[0];
+    const callback = new URL('https://ghostbuild.dev/connect/return');
+    callback.searchParams.set('state', database.state!.id);
+    callback.searchParams.set('error', 'invalid_scope');
+    callback.searchParams.set('error_description', '<script>steal()</script>');
+
+    const response = await completeCloudflareConnectionAction({
+      request: new Request(callback, { headers: { cookie: stateCookie } }),
+      env: database.env,
+      orchestrator,
+    });
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe(
+      'https://ghostbuild.dev/settings?continue=%2Fchat%2Fproject%3Fpanel%3Dcode%23preview&cloudflare_authorization=failed#cloudflare',
+    );
+    expect(response.headers.get('location')).not.toContain('script');
+    expect(response.headers.get('set-cookie')).toContain('ghostbuild_oauth_state=');
+    expect(response.headers.get('set-cookie')).toContain('Max-Age=0');
+    expect(database.state?.status).toBe('error');
+    expect(orchestrator.completeConnection).not.toHaveBeenCalled();
+    expect(mocks.createAuthSession).not.toHaveBeenCalled();
+  });
+
+  it('validates browser state before showing provider-error recovery', async () => {
+    const database = oauthDatabase();
+    const orchestrator = fakeOrchestrator();
+    await startCloudflareConnectionAction({
+      request: new Request('https://ghostbuild.dev/api/cloudflare/connection/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://ghostbuild.dev' },
+        body: '{}',
+      }),
+      env: database.env,
+      orchestrator,
+    });
+
+    const response = await completeCloudflareConnectionAction({
+      request: new Request(`https://ghostbuild.dev/connect/return?state=${database.state!.id}&error=access_denied`),
+      env: database.env,
+      orchestrator,
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Cloudflare authorization browser state did not match.',
+    });
+    expect(database.state?.status).toBe('pending');
+    expect(orchestrator.completeConnection).not.toHaveBeenCalled();
+  });
+
+  it('recovers when provider rejection persistence commits before acknowledgement fails', async () => {
+    const database = oauthDatabase({ providerErrorAfterCommit: new Error('D1 acknowledgement lost') });
+    const orchestrator = fakeOrchestrator();
+    const start = await startCloudflareConnectionAction({
+      request: new Request('https://ghostbuild.dev/api/cloudflare/connection/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://ghostbuild.dev' },
+        body: '{}',
+      }),
+      env: database.env,
+      orchestrator,
+    });
+    const stateCookie = start.headers.get('set-cookie')!.split(';', 1)[0];
+
+    const response = await completeCloudflareConnectionAction({
+      request: new Request(`https://ghostbuild.dev/connect/return?state=${database.state!.id}&error=access_denied`, {
+        headers: { cookie: stateCookie },
+      }),
+      env: database.env,
+      orchestrator,
+    });
+
+    expect(response.status).toBe(303);
+    expect(database.state?.status).toBe('error');
+    expect(database.exactCompletionRead).toHaveBeenCalledOnce();
   });
 
   it('rejects an oversized OAuth callback field before provider or persistence work', async () => {
@@ -757,6 +904,87 @@ describe('Cloudflare-only authentication', () => {
   });
 });
 
+function activeConnection(generation = 1) {
+  return {
+    id: 'connection-1',
+    userId: 'user-1',
+    accountId: 'account-1',
+    accountName: 'User Cloudflare',
+    status: 'active' as const,
+    credentialHandle: 'credential-1',
+    grantedScopes: ['workers', 'containers', 'd1', 'r2', 'durable_objects', 'workers_ai'],
+    aiBillingEnabled: true,
+    connectedAt: 100,
+    updatedAt: 100,
+    generation,
+  };
+}
+
+function runtimeRow(
+  overrides: {
+    status?: 'provisioning' | 'ready' | 'error';
+    connectionGeneration?: number;
+    runtimeVersion?: string;
+  } = {},
+) {
+  return {
+    user_id: 'user-1',
+    connection_id: 'connection-1',
+    connection_generation: overrides.connectionGeneration ?? 1,
+    worker_name: 'ghostbuild-workspace-test',
+    endpoint: 'https://workspace.example',
+    runtime_version: overrides.runtimeVersion ?? USER_WORKSPACE_RUNTIME_SHA256,
+    status: overrides.status ?? ('ready' as const),
+    last_error: overrides.status === 'error' ? 'Previous provisioning failed.' : null,
+    provisioning_attempt_id: null,
+    provisioning_lease_expires_at: null,
+    created_at: 100,
+    updated_at: 100,
+  };
+}
+
+function runtimeRecord(overrides: { connectionGeneration?: number } = {}) {
+  return {
+    userId: 'user-1',
+    connectionId: 'connection-1',
+    connectionGeneration: overrides.connectionGeneration ?? 1,
+    workerName: 'ghostbuild-workspace-test',
+    endpoint: 'https://workspace.example',
+    runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
+    status: 'ready' as const,
+    lastError: null,
+    provisioningAttemptId: null,
+    provisioningLeaseExpiresAt: null,
+    createdAt: 100,
+    updatedAt: 100,
+  };
+}
+
+function runtimeSessionRequest() {
+  return new Request('https://ghostbuild.dev/api/cloudflare/runtime-session', {
+    method: 'POST',
+    headers: { Origin: 'https://ghostbuild.dev' },
+  });
+}
+
+function runtimeEnv(rows: Array<ReturnType<typeof runtimeRow> | null>): Env {
+  const queue = [...rows];
+  const db = {
+    prepare(sql: string) {
+      if (!sql.includes('FROM user_computer_runtimes')) {
+        throw new Error(`Unexpected SQL: ${sql}`);
+      }
+      return {
+        bind: () => ({ first: async () => queue.shift() ?? null }),
+      };
+    },
+  } as unknown as D1Database;
+  return {
+    DB: db,
+    CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(1))),
+  } as unknown as Env;
+}
+
 function fakeOrchestrator(): CloudflareOrchestrator {
   return {
     startConnection: vi.fn(async () => ({
@@ -794,13 +1022,14 @@ function oauthDatabase(
     checkpointMismatchAfterCommit?: boolean;
     completionErrorAfterCommit?: Error;
     completionMismatchAfterCommit?: boolean;
+    providerErrorAfterCommit?: Error;
   } = {},
 ) {
   type State = {
     id: string;
     providerSessionId: string;
     returnTo: string;
-    status: 'pending' | 'completed' | 'expired';
+    status: 'pending' | 'completed' | 'expired' | 'error';
     expiresAt: number;
     authenticatedUserId: string | null;
     updatedAt: number;
@@ -894,6 +1123,21 @@ function oauthDatabase(
                 }
               } else if (sql.includes("status = 'expired'") && state) {
                 state = { ...state, status: 'expired', updatedAt: values[0] as number };
+              } else if (sql.includes("status = 'error'") && state) {
+                const matches =
+                  state.status === 'pending' &&
+                  values[1] === state.id &&
+                  values[2] === state.providerSessionId &&
+                  values[3] === state.returnTo &&
+                  values[4] === state.expiresAt &&
+                  values[5] === state.authenticatedUserId;
+                if (!matches) {
+                  return { success: true, meta: { changes: 0 } };
+                }
+                state = { ...state, status: 'error', updatedAt: values[0] as number };
+                if (options.providerErrorAfterCommit) {
+                  throw options.providerErrorAfterCommit;
+                }
               }
               return { success: true, meta: { changes: 1 } };
             },

@@ -23,9 +23,8 @@ isolated-staging inputs are absent:
   to continue against any other deployment.
 - Optional `E2E_BUILD_PROMPT`: a deterministic prompt maintained with the staging fixture.
 
-Before prompting, the journey also requires the connected workspace runtime to be current and ready and requires a
-successful runtime-session response. These cheap checks prevent an expensive journey from starting against a stale or
-incomplete Computer installation.
+Before prompting, the journey opens a runtime session. Ghostbuild automatically creates or reconciles the isolated
+Computer runtime when needed, then verifies it before the build starts.
 
 The candidate journey has a one-hour whole-test budget because validation, preview, and deployment each cross isolated
 Cloudflare build/runtime boundaries. The deterministic built-browser smoke keeps the normal 60-second Playwright

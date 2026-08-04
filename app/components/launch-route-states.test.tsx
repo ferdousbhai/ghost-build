@@ -14,6 +14,19 @@ describe('launch route states', () => {
     expect(html).toContain('Back to Ghostbuild');
   });
 
+  it('gives a failed Cloudflare authorization a safe retry path', () => {
+    const html = renderToStaticMarkup(
+      <SettingsRouteView
+        authKind="unauthenticated"
+        authorizationError="Cloudflare couldn't authorize this connection. Please try again."
+      />,
+    );
+
+    expect(html).toContain('Cloudflare couldn&#x27;t authorize this connection. Please try again.');
+    expect(html).toContain('Connect Cloudflare');
+    expect(html).toContain('Back to Ghostbuild');
+  });
+
   it('distinguishes session loading from a signed-out direct project link', () => {
     expect(renderToStaticMarkup(<ExistingChatSessionView chatId="project-1" sessionId={undefined} />)).toContain(
       'Checking your Cloudflare session',
@@ -45,7 +58,6 @@ describe('launch route states', () => {
     const html = renderToStaticMarkup(<CloudflareCard />);
 
     expect(html).toContain('Cloudflare Computer 0.1.1');
-    expect(html).toContain('preview with an unstable API');
-    expect(html).toContain('does not designate for production use');
+    expect(html).toContain('preview software not designated for production');
   });
 });

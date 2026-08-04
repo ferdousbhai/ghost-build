@@ -102,8 +102,7 @@ function PrivacyPage() {
         <p>
           Essential browser storage includes a 30-day authentication cookie, short-lived OAuth and recovery state,
           account-local project replicas, theme and builder-model preferences, and a pending prompt in tab-scoped
-          session storage. Project replicas and preferences remain until replaced or cleared in your browser. The
-          retired prompt cookie is expired if found.
+          session storage. Project replicas and preferences remain until replaced or cleared in your browser.
         </p>
         <p>
           Optional product telemetry is off until you allow it. Your choice is stored locally. Ghostbuild also honors

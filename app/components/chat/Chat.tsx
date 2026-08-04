@@ -75,7 +75,7 @@ export const Chat = memo(
           onRetry={() => setRuntimeConnectionAttempt((attempt) => attempt + 1)}
         />
       ) : (
-        <Loading message="Connecting to your Cloudflare workspace…" />
+        <Loading message="Preparing your workspace…" />
       );
     }
 
@@ -101,9 +101,8 @@ function WorkspaceRuntimeConnectionError({ message, onRetry }: { message: string
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center p-5">
       <section className="app-card w-full max-w-lg p-6 text-center" aria-labelledby="workspace-connection-heading">
-        <p className="app-page-eyebrow">Workspace unavailable</p>
-        <h1 id="workspace-connection-heading" className="mt-2 font-display text-3xl font-black text-content-primary">
-          Ghostbuild could not connect to your project workspace.
+        <h1 id="workspace-connection-heading" className="font-display text-3xl font-black text-content-primary">
+          Ghostbuild could not prepare your workspace.
         </h1>
         <p className="mt-3 break-words text-sm text-content-secondary" role="alert">
           {message}
@@ -111,7 +110,7 @@ function WorkspaceRuntimeConnectionError({ message, onRetry }: { message: string
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           <Button onClick={onRetry}>Try again</Button>
           <Button href="/settings#cloudflare" variant="neutral">
-            Check Cloudflare settings
+            Cloudflare account
           </Button>
         </div>
       </section>
@@ -253,9 +252,9 @@ const AuthenticatedChat = memo(
         disabledReason={disabledReason}
         runtimeNotice={
           workspacePresentationState === 'presentation-error'
-            ? 'The code editor could not load. Chat, builds, and remote preview still run from the durable cloud workspace.'
+            ? 'Editor unavailable. Chat, builds, and previews still work.'
             : workspacePresentationState === 'connecting'
-              ? 'Connecting to the durable cloud workspace…'
+              ? 'Loading project files…'
               : null
         }
         sendMessageInProgress={sendMessageInProgress}
