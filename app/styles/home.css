@@ -1,7 +1,6 @@
 :root,
 html.light {
   --ghost-home-bg: rgb(255, 249, 252);
-  --ghost-home-bg-top: rgb(255, 252, 248);
   --ghost-home-surface: rgba(255, 255, 255, 0.92);
   --ghost-home-input: rgb(255, 255, 255);
   --ghost-home-ink: rgb(35, 24, 43);
@@ -18,7 +17,6 @@ html.light {
 
 html.dark {
   --ghost-home-bg: rgb(24, 16, 30);
-  --ghost-home-bg-top: rgb(31, 19, 38);
   --ghost-home-surface: rgba(45, 31, 54, 0.94);
   --ghost-home-input: rgb(35, 24, 43);
   --ghost-home-ink: rgb(255, 247, 252);
@@ -70,13 +68,10 @@ html.dark {
   color: var(--ghost-home-ink);
 }
 
-.ghost-home-grid {
+.ghost-home-copy {
   width: 100%;
   max-width: 880px;
   margin: 0 auto;
-}
-
-.ghost-home-copy {
   padding-top: clamp(24px, 7vh, 72px);
 }
 
@@ -130,71 +125,6 @@ html.dark {
   max-width: 800px;
   margin-top: 28px;
   animation-delay: 80ms;
-}
-
-.ghost-home-starters {
-  margin-top: 22px;
-}
-
-.ghost-home-starters__label {
-  margin: 0 0 10px 2px;
-  color: var(--ghost-home-soft);
-  font-size: 12px;
-  font-weight: 850;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.ghost-home-starters__grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.ghost-home-starter {
-  min-height: 108px;
-  border: 1px solid var(--ghost-home-border);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--ghost-home-surface) 76%, transparent);
-  color: var(--ghost-home-ink);
-  padding: 14px;
-  text-align: left;
-  transition:
-    border-color 180ms ease,
-    background-color 180ms ease,
-    transform 180ms ease;
-}
-
-.ghost-home-starter:hover:not(:disabled) {
-  transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--ghost-home-accent) 52%, var(--ghost-home-border));
-  background: color-mix(in srgb, var(--ghost-home-surface) 94%, transparent);
-}
-
-.ghost-home-starter:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.ghost-home-starter__title,
-.ghost-home-starter__copy {
-  display: block;
-}
-
-.ghost-home-starter__title {
-  font-size: 14px;
-  font-weight: 850;
-}
-
-.ghost-home-starter__copy {
-  display: -webkit-box;
-  margin-top: 6px;
-  overflow: hidden;
-  color: var(--ghost-home-muted);
-  font-size: 12px;
-  line-height: 1.45;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
 }
 
 .ghost-message-input--home {
@@ -298,14 +228,6 @@ html.dark {
   .ghost-home-lede {
     font-size: 16px;
   }
-
-  .ghost-home-starters__grid {
-    grid-template-columns: 1fr;
-  }
-
-  .ghost-home-starter {
-    min-height: 44px;
-  }
 }
 
 @media (max-width: 460px) {
@@ -322,9 +244,5 @@ html.dark {
 @media (prefers-reduced-motion: reduce) {
   .ghost-home-reveal {
     animation: none;
-  }
-
-  .ghost-home-starter {
-    transition: none;
   }
 }

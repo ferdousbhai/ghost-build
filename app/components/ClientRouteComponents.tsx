@@ -95,30 +95,28 @@ function HeaderLoadingFallback() {
 function HomepageLoadingFallback() {
   return (
     <div className="ghost-home-shell grow p-4 sm:px-6 lg:px-8 lg:py-5">
-      <div className="ghost-home-grid">
-        <section className="ghost-home-copy min-w-0" aria-labelledby="loading-intro">
-          <div>
-            <p className="ghost-home-beta">Public beta · Cloudflare Computer preview</p>
-            <h1 id="loading-intro" className="ghost-home-title">
-              If you can dream it,
-              <br />
-              <span>the ghost will build it. ✨</span>
-            </h1>
-            <p className="ghost-home-lede">{HOME_AI_DISCLOSURE}</p>
-            <p className="ghost-home-ownership">
-              Your Cloudflare account owns the workspace, and every production deploy waits for your approval. Requires
-              Workers Paid and Containers.
-            </p>
-          </div>
-          <div
-            className="ghost-message-input--home mt-7 flex min-h-16 items-center px-5 text-sm text-content-secondary"
-            role="status"
-            aria-live="polite"
-          >
-            Loading the prompt editor…
-          </div>
-        </section>
-      </div>
+      <section className="ghost-home-copy min-w-0" aria-labelledby="loading-intro">
+        <div>
+          <p className="ghost-home-beta">Public beta · Cloudflare Computer preview</p>
+          <h1 id="loading-intro" className="ghost-home-title">
+            If you can dream it,
+            <br />
+            <span>the ghost will build it. ✨</span>
+          </h1>
+          <p className="ghost-home-lede">{HOME_AI_DISCLOSURE}</p>
+          <p className="ghost-home-ownership">
+            Your Cloudflare account owns the workspace, and every production deploy waits for your approval. Requires
+            Workers Paid and Containers.
+          </p>
+        </div>
+        <div
+          className="ghost-message-input--home mt-7 flex min-h-16 items-center px-5 text-sm text-content-secondary"
+          role="status"
+          aria-live="polite"
+        >
+          Loading the prompt editor…
+        </div>
+      </section>
     </div>
   );
 }
