@@ -1,34 +1,34 @@
-const APP_AGENT_PROTECTED_PACKAGE_REQUIREMENTS = {
-  '@babel/core': '^8.0.1',
-  '@cloudflare/ai-chat': '^0.9.3',
-  '@cloudflare/vite-plugin': '1.45.1',
-  '@cloudflare/workers-types': '5.20260718.1',
-  '@eslint/js': '^10.0.1',
-  '@tanstack/react-router': '^1.170.18',
-  '@tanstack/react-start': '^1.168.32',
-  '@tanstack/router-cli': '^1.167.21',
-  '@types/node': '^26.1.1',
-  '@types/react': '^19.2.17',
-  '@types/react-dom': '^19.2.3',
-  '@vitejs/plugin-react': '^6.0.4',
-  agents: '^0.17.4',
-  ai: '^6.0.234',
-  autoprefixer: '~10.5.4',
-  eslint: '^10.7.0',
-  'eslint-plugin-react-hooks': '^7.1.1',
-  'eslint-plugin-react-refresh': '^0.5.3',
-  globals: '^17.7.0',
-  'jsonc-parser': '^3.3.1',
-  postcss: '~8.5.22',
-  tailwindcss: '~3.4.19',
-  typescript: '~6.0.3',
-  'typescript-eslint': '^8.64.0',
-  vite: '^8.1.5',
-  'workers-ai-provider': '^3.3.1',
-  wrangler: '4.112.0',
-  yaml: '2.9.0',
-  zod: '^4.4.3',
-} as const;
+const APP_AGENT_PROTECTED_PACKAGES = [
+  '@babel/core',
+  '@cloudflare/ai-chat',
+  '@cloudflare/vite-plugin',
+  '@cloudflare/workers-types',
+  '@eslint/js',
+  '@tanstack/react-router',
+  '@tanstack/react-start',
+  '@tanstack/router-cli',
+  '@types/node',
+  '@types/react',
+  '@types/react-dom',
+  '@vitejs/plugin-react',
+  'agents',
+  'ai',
+  'autoprefixer',
+  'eslint',
+  'eslint-plugin-react-hooks',
+  'eslint-plugin-react-refresh',
+  'globals',
+  'jsonc-parser',
+  'postcss',
+  'tailwindcss',
+  'typescript',
+  'typescript-eslint',
+  'vite',
+  'workers-ai-provider',
+  'wrangler',
+  'yaml',
+  'zod',
+] as const;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -58,8 +58,8 @@ export async function createAppAgentProtectedLockIdentity(lock: JsonRecord): Pro
   const dependencies = record(importer.dependencies);
   const devDependencies = record(importer.devDependencies);
   const pending: string[] = [];
-  const roots = Object.keys(APP_AGENT_PROTECTED_PACKAGE_REQUIREMENTS)
-    .sort()
+  const roots = [...APP_AGENT_PROTECTED_PACKAGES]
+    .sort((left, right) => left.localeCompare(right))
     .map((name) => {
       const dependency = dependencies[name];
       const devDependency = devDependencies[name];

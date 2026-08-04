@@ -1,4 +1,3 @@
-import Cookies from 'js-cookie';
 import { useStore } from '@nanostores/react';
 import { useSearch } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState, type ChangeEventHandler, type KeyboardEventHandler } from 'react';
@@ -11,7 +10,7 @@ import { signInWithCloudflare } from '~/lib/auth-client';
 import { messageInputStore } from '~/lib/stores/messageInput';
 import { getAuthToken } from '~/lib/stores/sessionId';
 import { debounce } from '~/utils/debounce';
-import { PROMPT_COOKIE_KEY } from '~/utils/constants';
+import { LEGACY_PROMPT_COOKIE_KEY, PENDING_PROMPT_STORAGE_KEY } from '~/utils/constants';
 import { useGhostbuildAuth } from './GhostbuildAuthWrapper';
 
 interface MessageInputControllerOptions {
@@ -33,12 +32,14 @@ export function useMessageInputController({
   const input = useStore(messageInputStore);
   const search = useSearch({ strict: false }) as { prefill?: string };
 
+  useEffect(clearLegacyPromptCookie, []);
+
   useEffect(() => {
     if (!prefillEnabled) {
       return;
     }
 
-    messageInputStore.set(search.prefill || Cookies.get(PROMPT_COOKIE_KEY) || '');
+    messageInputStore.set(search.prefill || readPendingPrompt() || '');
   }, [prefillEnabled, search.prefill]);
 
   useEffect(
@@ -51,18 +52,41 @@ export function useMessageInputController({
   const send = useCallback(async () => {
     await submitMessageInput(input, onSend, () => {
       cachePrompt.cancel();
-      Cookies.remove(PROMPT_COOKIE_KEY);
+      removePendingPrompt();
+      clearLegacyPromptCookie();
       messageInputStore.set('');
     });
   }, [input, onSend]);
 
-  const handleButtonClick = useCallback(() => {
-    if (isStreaming) {
-      onStop();
-      return;
+  const signIn = useCallback(async () => {
+    preservePromptForAuthentication(input);
+    try {
+      await signInWithCloudflare();
+    } catch (error) {
+      captureException('Failed to start Cloudflare authorization', error, { level: 'error' });
+      toast.error(error instanceof Error ? error.message : 'Unable to connect Cloudflare. Please try again.');
     }
-    void send();
-  }, [isStreaming, onStop, send]);
+  }, [input]);
+
+  const runPrimaryAction = useCallback(() => {
+    switch (getMessageInputPrimaryAction(authState.kind, isStreaming)) {
+      case 'stop':
+        onStop();
+        return;
+      case 'sign-in':
+        void signIn();
+        return;
+      case 'send':
+        void send();
+        return;
+      case 'wait':
+        return;
+    }
+  }, [authState.kind, isStreaming, onStop, send, signIn]);
+
+  const handleButtonClick = useCallback(() => {
+    runPrimaryAction();
+  }, [runPrimaryAction]);
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = useCallback(
     (event) => {
@@ -70,15 +94,11 @@ export function useMessageInputController({
         return;
       }
       event.preventDefault();
-      if (isStreaming) {
-        onStop();
-        return;
-      }
       if (!event.nativeEvent.isComposing) {
-        void send();
+        runPrimaryAction();
       }
     },
-    [isStreaming, onStop, send],
+    [runPrimaryAction],
   );
 
   const handleChange: ChangeEventHandler<HTMLTextAreaElement> = useCallback((event) => {
@@ -131,16 +151,6 @@ export function useMessageInputController({
     }
   }, [input]);
 
-  const signIn = useCallback(async () => {
-    preservePromptForAuthentication(input);
-    try {
-      await signInWithCloudflare();
-    } catch (error) {
-      captureException('Failed to start Cloudflare authorization', error, { level: 'error' });
-      toast.error(error instanceof Error ? error.message : 'Unable to connect Cloudflare. Please try again.');
-    }
-  }, [input]);
-
   return {
     authState,
     enhancePrompt,
@@ -151,6 +161,27 @@ export function useMessageInputController({
     isEnhancing,
     signIn,
   };
+}
+
+export function getMessageInputPrimaryAction(
+  authKind: 'loading' | 'unauthenticated' | 'fullyLoggedIn',
+  isStreaming: boolean,
+): 'stop' | 'sign-in' | 'send' | 'wait' {
+  if (isStreaming) {
+    return 'stop';
+  }
+  if (authKind === 'loading') {
+    return 'wait';
+  }
+  return authKind === 'unauthenticated' ? 'sign-in' : 'send';
+}
+
+export function getMessageInputPrimaryActionLabel(
+  authKind: 'loading' | 'unauthenticated' | 'fullyLoggedIn',
+  isStreaming: boolean,
+): 'Stop' | 'Connect Cloudflare' | 'Send' {
+  const action = getMessageInputPrimaryAction(authKind, isStreaming);
+  return action === 'stop' ? 'Stop' : action === 'sign-in' ? 'Connect Cloudflare' : 'Send';
 }
 
 export function replacePromptIfUnchanged(sourceInput: string, enhancedPrompt: string): boolean {
@@ -166,14 +197,47 @@ function isAbortError(error: unknown): boolean {
 }
 
 const cachePrompt = debounce(function cachePrompt(prompt: string) {
-  Cookies.set(PROMPT_COOKIE_KEY, prompt.trim(), { expires: 30 });
+  storePendingPrompt(prompt.trim());
 }, 1000);
 
 export function preservePromptForAuthentication(input: string): void {
   cachePrompt.cancel();
-  const prompt = input.trim();
-  if (prompt) {
-    Cookies.set(PROMPT_COOKIE_KEY, prompt, { expires: 30 });
+  storePendingPrompt(input.trim());
+  clearLegacyPromptCookie();
+}
+
+export function clearLegacyPromptCookie(): void {
+  if (typeof document === 'undefined') {
+    return;
+  }
+  document.cookie = `${LEGACY_PROMPT_COOKIE_KEY}=; Path=/; Max-Age=0; SameSite=Lax`;
+}
+
+function readPendingPrompt(): string | null {
+  try {
+    return window.sessionStorage.getItem(PENDING_PROMPT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function storePendingPrompt(prompt: string): void {
+  try {
+    if (prompt) {
+      window.sessionStorage.setItem(PENDING_PROMPT_STORAGE_KEY, prompt);
+    } else {
+      window.sessionStorage.removeItem(PENDING_PROMPT_STORAGE_KEY);
+    }
+  } catch {
+    // Prompt handoff remains best-effort when browser storage is unavailable.
+  }
+}
+
+function removePendingPrompt(): void {
+  try {
+    window.sessionStorage.removeItem(PENDING_PROMPT_STORAGE_KEY);
+  } catch {
+    // Browser storage can be unavailable in privacy-restricted contexts.
   }
 }
 

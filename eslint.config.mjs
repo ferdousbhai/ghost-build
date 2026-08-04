@@ -201,4 +201,11 @@ export default [
       'unicorn/prefer-node-protocol': 'off',
     },
   },
+  {
+    files: ['playwright.config.ts', 'e2e/**/*.ts'],
+    rules: {
+      // Playwright configuration and test runners execute in Node, not in a Worker.
+      'local/no-direct-process-env': 'off',
+    },
+  },
 ];

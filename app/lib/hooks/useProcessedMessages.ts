@@ -14,23 +14,19 @@ function isPartMaybeEqual(a: Part, b: Part): boolean {
   const aInvocation = getToolInvocation(a);
   const bInvocation = getToolInvocation(b);
   if (aInvocation && bInvocation) {
-    if (aInvocation.state === 'result' && bInvocation.state === 'result') {
-      return aInvocation.toolCallId === bInvocation.toolCallId;
+    if (aInvocation.state.startsWith('output-') && bInvocation.state.startsWith('output-')) {
+      return aInvocation.toolCallId === bInvocation.toolCallId && aInvocation.state === bInvocation.state;
     }
   }
   return false;
 }
 
-function processToolInvocationPart(partId: PartId, part: Part): Part | null {
+function recordToolPart(partId: PartId, part: Part): void {
   const toolInvocation = getToolInvocation(part);
   if (!toolInvocation) {
-    return null;
+    return;
   }
   toolActivityStore.record(partId, toolInvocation);
-  return {
-    type: 'tool-invocation',
-    toolInvocation,
-  };
 }
 
 export function processMessage(
@@ -54,7 +50,10 @@ export function processMessage(
       hits++;
       continue;
     }
-    const newPart = isToolPart(part) ? (processToolInvocationPart(partId, part) ?? part) : part;
+    if (isToolPart(part)) {
+      recordToolPart(partId, part);
+    }
+    const newPart = part;
     parsedParts.push(newPart);
     previousParts.set(partId, { original: part, parsed: newPart });
   }

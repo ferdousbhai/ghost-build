@@ -1,12 +1,7 @@
 import { isGhostbuildToolResult } from 'ghostbuild-agent/tool-result';
+import type { PendingDeploymentApproval } from 'ghostbuild-agent/ai-compat';
 
-export const DEPLOYMENT_PLAN_MARKER = 'GHOSTBUILD_DEPLOYMENT_PLAN:';
-
-export type PendingDeploymentApproval = {
-  id: string;
-  planDigest: string;
-  resources: Array<{ type: string; logicalName: string; proposedName: string }>;
-};
+export type { PendingDeploymentApproval } from 'ghostbuild-agent/ai-compat';
 
 export function parsePendingDeploymentApproval(result: unknown): PendingDeploymentApproval | null {
   if (isGhostbuildToolResult(result) && result.ok && isRecord(result.data)) {
@@ -15,30 +10,7 @@ export function parsePendingDeploymentApproval(result: unknown): PendingDeployme
     }
     return null;
   }
-  if (typeof result !== 'string') {
-    return null;
-  }
-  const markerLine = result.split('\n').find((line) => line.startsWith(DEPLOYMENT_PLAN_MARKER));
-  if (!markerLine) {
-    return null;
-  }
-  try {
-    return parseDeployment(JSON.parse(markerLine.slice(DEPLOYMENT_PLAN_MARKER.length)));
-  } catch {
-    return null;
-  }
-}
-
-export function deploymentApprovalMarker(deployment: PendingDeploymentApproval): string {
-  return `${DEPLOYMENT_PLAN_MARKER}${JSON.stringify(deployment)}`;
-}
-
-export function stripPendingDeploymentApprovalMarker(text: string): string {
-  return text
-    .split('\n')
-    .filter((line) => !line.startsWith(DEPLOYMENT_PLAN_MARKER))
-    .join('\n')
-    .trim();
+  return null;
 }
 
 function parseDeployment(value: unknown): PendingDeploymentApproval | null {

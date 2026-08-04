@@ -1,9 +1,8 @@
-import { lazy, memo, Suspense } from 'react';
+import { lazy, memo, Suspense, useEffect } from 'react';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
-import { DeploymentApproval } from './DeploymentApproval.client';
-import { parsePendingDeploymentApproval } from '~/lib/deployment-approval';
 import { isGhostbuildToolResult, toolResultSummary } from 'ghostbuild-agent/tool-result';
 import { ToolResultFrame } from './ToolResultFrame';
+import { captureProductEvent } from '~/lib/telemetry.client';
 
 const ToolLookupDocsResult = lazy(() =>
   import('./ToolLookupDocsResult').then((module) => ({ default: module.ToolLookupDocsResult })),
@@ -12,12 +11,7 @@ const ToolLookupDocsResult = lazy(() =>
 export const ToolUseContents = memo(function ToolUseContents({ invocation }: { invocation: GhostbuildToolInvocation }) {
   switch (invocation.toolName) {
     case 'deploy':
-      return (
-        <>
-          <StructuredResultTool invocation={invocation} />
-          <DeploymentApprovalForResult result={invocation.result} />
-        </>
-      );
+      return <StructuredResultTool invocation={invocation} />;
     case 'npmInstall':
     case 'validateProject':
     case 'ls':
@@ -38,27 +32,43 @@ export const ToolUseContents = memo(function ToolUseContents({ invocation }: { i
   }
 });
 
-function DeploymentApprovalForResult({ result }: { result: unknown }) {
-  const deployment = parsePendingDeploymentApproval(result);
-  return deployment ? <DeploymentApproval deployment={deployment} /> : null;
-}
-
 function StructuredResultTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
+  const complete = !isToolInvocationInProgress(invocation);
+  const succeeded =
+    invocation.state === 'output-available' && isGhostbuildToolResult(invocation.output) && invocation.output.ok;
+  useEffect(() => {
+    if (!complete) {
+      return;
+    }
+    void captureProductEvent('first_tool_completed', {
+      outcome: succeeded ? 'success' : invocation.state === 'output-denied' ? 'cancelled' : 'failure',
+    });
+    if (invocation.toolName === 'validateProject' && succeeded) {
+      void captureProductEvent('validation_succeeded', { outcome: 'success' });
+    }
+  }, [complete, invocation.state, invocation.toolCallId, invocation.toolName, succeeded]);
+
   if (isToolInvocationInProgress(invocation)) {
     return null;
   }
-  if (!isGhostbuildToolResult(invocation.result)) {
-    return <ToolResultFrame>{toolResultSummary(invocation.result)}</ToolResultFrame>;
+  if (invocation.state === 'output-error') {
+    return <ToolResultFrame>{invocation.errorText}</ToolResultFrame>;
+  }
+  if (invocation.state === 'output-denied') {
+    return <ToolResultFrame>{invocation.approval.reason ?? 'Tool execution was denied.'}</ToolResultFrame>;
+  }
+  if (!isGhostbuildToolResult(invocation.output)) {
+    return <ToolResultFrame>{toolResultSummary(invocation.output)}</ToolResultFrame>;
   }
   return (
     <ToolResultFrame>
       <div className="space-y-2">
-        <div>{invocation.result.summary}</div>
-        {invocation.result.coverage !== undefined ? (
-          <pre className="whitespace-pre-wrap">{JSON.stringify(invocation.result.coverage, null, 2)}</pre>
+        <div>{invocation.output.summary}</div>
+        {invocation.output.coverage !== undefined ? (
+          <pre className="whitespace-pre-wrap">{JSON.stringify(invocation.output.coverage, null, 2)}</pre>
         ) : null}
-        {invocation.result.data !== undefined ? (
-          <pre className="whitespace-pre-wrap">{JSON.stringify(invocation.result.data, null, 2)}</pre>
+        {invocation.output.data !== undefined ? (
+          <pre className="whitespace-pre-wrap">{JSON.stringify(invocation.output.data, null, 2)}</pre>
         ) : null}
       </div>
     </ToolResultFrame>

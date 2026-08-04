@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   createAuthSession: vi.fn(),
   upsertCloudflareUser: vi.fn(),
   findConnection: vi.fn(),
+  resolveComputerRollout: vi.fn(),
   activateConnection: vi.fn(),
   vault: {
     storeOAuthCredential: vi.fn(),
@@ -36,11 +37,18 @@ vi.mock('~/lib/.server/cloudflare/cloudflare-credential-vault', () => ({
     }
   },
 }));
+vi.mock('~/lib/.server/cloudflare/computer-rollout', () => ({
+  resolveComputerRollout: mocks.resolveComputerRollout,
+  computerRolloutUnavailableResponse: () =>
+    Response.json({ code: 'computer_preview_unavailable' }, { status: 503, headers: { 'Cache-Control': 'no-store' } }),
+}));
 
 import {
   CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
   cloudflareConnectionStatusAction,
+  cloudflareRuntimeSessionAction,
   completeCloudflareConnectionAction,
+  provisionCloudflareWorkspaceRuntimeAction,
   startCloudflareConnectionAction,
 } from './cloudflare-integration';
 
@@ -63,6 +71,7 @@ describe('Cloudflare-only authentication', () => {
       image: null,
     });
     mocks.findConnection.mockResolvedValue(null);
+    mocks.resolveComputerRollout.mockResolvedValue({ enabled: true, mode: 'all' });
     mocks.vault.storeOAuthCredential.mockResolvedValue('credential-1');
     mocks.vault.deleteIfUnreferenced.mockResolvedValue(true);
     mocks.activateConnection.mockResolvedValue({
@@ -91,6 +100,28 @@ describe('Cloudflare-only authentication', () => {
       env: { DB: {} } as Env,
     });
     expect(response.status).toBe(401);
+  });
+
+  it.each([
+    ['runtime capability', cloudflareRuntimeSessionAction, 'GET'],
+    ['runtime provisioning', provisionCloudflareWorkspaceRuntimeAction, 'POST'],
+  ])('applies the mutable Computer rollout gate before %s', async (_label, action, method) => {
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.resolveComputerRollout.mockResolvedValueOnce({ enabled: false, mode: 'off' });
+    const response = await action({
+      request: new Request('https://ghostbuild.dev/api/cloudflare/runtime', {
+        method,
+        ...(method === 'POST'
+          ? { headers: { Origin: 'https://ghostbuild.dev', 'Content-Type': 'application/json' }, body: '{}' }
+          : {}),
+      }),
+      env: { DB: {} } as Env,
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ code: 'computer_preview_unavailable' });
+    expect(mocks.resolveComputerRollout).toHaveBeenCalledWith(expect.anything(), 'user-1');
+    expect(mocks.findConnection).not.toHaveBeenCalled();
   });
 
   it('returns only connection and user-runtime metadata', async () => {
@@ -124,6 +155,7 @@ describe('Cloudflare-only authentication', () => {
     await expect(response.json()).resolves.toMatchObject({
       connected: true,
       status: 'active',
+      accountId: 'account-1',
       workspaceRuntime: { status: 'not_configured', current: false },
     });
     expect(prepare).toHaveBeenCalledOnce();

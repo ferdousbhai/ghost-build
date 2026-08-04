@@ -46,6 +46,8 @@ describe('trusted deployment config', () => {
       providerDeploymentId: 'provider-deployment-1',
       workerVersionId: 'worker-version-1',
       scriptEtag: 'etag-1',
+      compatibilityDate: '2026-07-21',
+      compatibilityFlags: ['nodejs_compat'],
       bindings: [
         ...Object.entries(config.vars).map(([name, text]) => ({ name, type: 'plain_text' as const, text })),
         { name: config.version_metadata.binding, type: 'version_metadata' },

@@ -5,6 +5,7 @@ import { UserProvider } from '~/components/UserProvider';
 import { Button } from '@ui/Button';
 import { BrandLink } from '~/components/BrandLink';
 import { CloudflareCard } from '~/components/settings/CloudflareCard.client';
+import { TrustFooter } from '~/components/trust/TrustLinks';
 
 export function SettingsContent() {
   return (
@@ -25,6 +26,7 @@ export function SettingsContent() {
             <CloudflareCard />
           </div>
         </div>
+        <TrustFooter className="mt-10" />
         <Toaster />
       </div>
     </UserProvider>

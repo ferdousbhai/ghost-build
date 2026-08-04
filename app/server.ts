@@ -10,6 +10,8 @@ import {
   startCloudflareConnectionAction,
 } from './server-handlers/cloudflare-integration';
 import { authSessionAction, signOutAction } from './server-handlers/auth';
+import { runtimeCredentialAction } from './server-handlers/runtime-credential';
+import { clientTelemetryAction } from './server-handlers/client-telemetry';
 import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudflare-auth-retention.server';
 
 const APPLICATION_CSP_BASELINE = "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
@@ -23,14 +25,28 @@ function requireMethod(request: Request, method: string, handler: () => Response
   return request.method === method ? handler() : methodNotAllowed(method);
 }
 
-function applyContentSecurityPolicyBaseline(headers: Headers) {
+function applyContentSecurityPolicyBaseline(headers: Headers, nonce?: string) {
+  const applicationPolicy = nonce
+    ? [
+        "default-src 'self'",
+        `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: https:",
+        "font-src 'self' data:",
+        "connect-src 'self' https://*.workers.dev wss://*.workers.dev",
+        'frame-src https:',
+        "worker-src 'self' blob:",
+        "manifest-src 'self'",
+        APPLICATION_CSP_BASELINE,
+      ].join('; ')
+    : APPLICATION_CSP_BASELINE;
   const current = headers.get('Content-Security-Policy');
   if (!current) {
-    headers.set('Content-Security-Policy', APPLICATION_CSP_BASELINE);
-  } else if (!current.split(',').some((policy) => policy.trim() === APPLICATION_CSP_BASELINE)) {
+    headers.set('Content-Security-Policy', applicationPolicy);
+  } else if (!current.split(',').some((policy) => policy.trim() === applicationPolicy)) {
     // A CSP list enforces every policy independently. Appending keeps a
     // response's stricter resource policy while making this baseline mandatory.
-    headers.append('Content-Security-Policy', APPLICATION_CSP_BASELINE);
+    headers.append('Content-Security-Policy', applicationPolicy);
   }
 }
 
@@ -54,9 +70,19 @@ function applyHstsFloor(headers: Headers) {
   headers.set('Strict-Transport-Security', [`max-age=${HSTS_MIN_AGE_SECONDS}`, ...retainedDirectives].join('; '));
 }
 
-function withApplicationSecurityHeaders(response: Response, pathname: string) {
+async function withApplicationSecurityHeaders(response: Response, pathname: string) {
   const headers = new Headers(response.headers);
-  applyContentSecurityPolicyBaseline(headers);
+  const isHtml = headers.get('Content-Type')?.toLowerCase().includes('text/html') ?? false;
+  let body: BodyInit | null = response.body;
+  if (isHtml) {
+    const html = await response.text();
+    const nonce = /<meta\s+property="csp-nonce"\s+content="([0-9a-f-]{36})"\s*\/?>/i.exec(html)?.[1];
+    applyContentSecurityPolicyBaseline(headers, nonce);
+    headers.delete('Content-Length');
+    body = html;
+  } else {
+    applyContentSecurityPolicyBaseline(headers);
+  }
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   applyHstsFloor(headers);
   headers.set('X-Content-Type-Options', 'nosniff');
@@ -64,7 +90,7 @@ function withApplicationSecurityHeaders(response: Response, pathname: string) {
   if (pathname === '/connect/return') {
     headers.set('Cache-Control', 'no-store');
     headers.set('Pragma', 'no-cache');
-  } else if (headers.get('Content-Type')?.toLowerCase().includes('text/html')) {
+  } else if (isHtml) {
     // A cached document can reference hashed assets from a deployment that is
     // no longer current. Always revalidate navigations while immutable assets
     // remain cacheable by their content hash.
@@ -73,7 +99,7 @@ function withApplicationSecurityHeaders(response: Response, pathname: string) {
     headers.set('Cache-Control', 'no-store');
   }
 
-  return new Response(response.body, {
+  return new Response(body, {
     status: response.status,
     statusText: response.statusText,
     headers,
@@ -89,6 +115,10 @@ const exactRoutes: Record<string, ServerRoute> = {
   '/api/health': {
     method: 'GET',
     handler: () => healthAction(),
+  },
+  '/api/client-telemetry': {
+    method: 'POST',
+    handler: (request, env) => clientTelemetryAction({ request, env }),
   },
   '/api/auth/session': {
     method: 'GET',
@@ -113,6 +143,10 @@ const exactRoutes: Record<string, ServerRoute> = {
   '/api/cloudflare/runtime-session': {
     method: 'GET',
     handler: (request, env) => cloudflareRuntimeSessionAction({ request, env }),
+  },
+  '/api/cloudflare/runtime-credential': {
+    method: 'POST',
+    handler: (request, env) => runtimeCredentialAction({ request, env }),
   },
   '/connect/return': {
     method: CLOUDFLARE_CONNECTION_CALLBACK_METHOD,

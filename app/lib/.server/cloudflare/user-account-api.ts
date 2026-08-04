@@ -1,8 +1,28 @@
 import { deploymentPlanResourceName, type DeploymentPlan, type DeploymentResourceType } from './deployment-plan';
-import { USER_WORKSPACE_RUNTIME_GC_CRON } from './user-workspace-runtime-policy';
+import { deploymentAssetExtension, deploymentAssetHash, type DeploymentArtifactFile } from './deployment-artifact';
+import {
+  APP_AGENT_DECLARATIVE_EXPORT,
+  DEPLOYMENT_COMPATIBILITY_DATE,
+  DEPLOYMENT_COMPATIBILITY_FLAGS,
+  DEPLOYMENT_OBSERVABILITY,
+  DEPLOYMENT_SECURITY_BASELINE_BINDING,
+  DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
+  DEPLOYMENT_SECURITY_CLEANUP_CRON,
+  DEPLOYMENT_TEMPLATE_SOURCE_BINDING,
+  DEPLOYMENT_VERSION_METADATA_BINDING,
+} from './deployment-runtime-policy';
+import {
+  PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE,
+  PROJECT_WORKSPACE_CONTAINER_MAX_INSTANCES,
+} from './project-workspace-container-policy';
+import { GHOSTBUILD_CONTROL_PLANE_ENDPOINT, USER_WORKSPACE_RUNTIME_GC_CRON } from './user-workspace-runtime-policy';
 
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
 const CLOUDFLARE_API_TIMEOUT_MS = 30_000;
+const MAX_CLOUDFLARE_RESPONSE_BYTES = 1024 * 1024;
+const MAX_ASSET_UPLOAD_JWT_BYTES = 16 * 1024;
+const ASSET_HASH_PATTERN = /^[a-f0-9]{32}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const R2_BUCKET_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 
 type WorkerBinding = {
@@ -31,6 +51,8 @@ export type ActiveWorkerDeploymentReadback = {
   scriptEtag: string;
   bindings: WorkerBinding[];
   crons: string[];
+  compatibilityDate: string;
+  compatibilityFlags: string[];
 };
 
 type CloudflareEnvelope<T> = {
@@ -39,12 +61,18 @@ type CloudflareEnvelope<T> = {
   errors?: Array<{ code?: number; message?: string }>;
 };
 
+type D1QueryResult = {
+  success?: boolean;
+  results?: unknown[];
+};
+
 export class UserCloudflareAccountApi {
   constructor(
     private readonly accountId: string,
-    private readonly accessToken: string,
+    private accessToken: string,
     private readonly request: typeof fetch = fetch,
     private readonly authorizeRequest?: () => Promise<void>,
+    private readonly refreshAccessToken?: () => Promise<string>,
   ) {
     if (!accountId || !accessToken) {
       throw new Error('Cloudflare account credentials are required.');
@@ -86,14 +114,44 @@ export class UserCloudflareAccountApi {
     return { id: result.uuid, name: result.name };
   }
 
-  async executeD1(databaseId: string, sql: string, params: unknown[] = []): Promise<unknown> {
-    if (!/^[0-9a-f-]{32,64}$/i.test(databaseId) || !sql.trim()) {
+  async executeD1(databaseId: string, sql: string, params: unknown[] = []): Promise<D1QueryResult[]> {
+    if (!sql.trim()) {
       throw new CloudflareAccountApiError('Invalid D1 query.');
     }
-    return this.call<unknown>(`/d1/database/${encodeURIComponent(databaseId)}/query`, {
-      method: 'POST',
-      body: JSON.stringify({ sql, params }),
+    return this.executeD1Payload(databaseId, { sql, params });
+  }
+
+  private async executeD1Batch(
+    databaseId: string,
+    batch: readonly { sql: string; params?: unknown[] }[],
+  ): Promise<D1QueryResult[]> {
+    if (batch.length === 0 || batch.some((statement) => !statement.sql.trim())) {
+      throw new CloudflareAccountApiError('Invalid D1 query batch.');
+    }
+    return this.executeD1Payload(databaseId, {
+      batch: batch.map((statement) => ({ sql: statement.sql, params: statement.params ?? [] })),
     });
+  }
+
+  private async executeD1Payload(databaseId: string, payload: Record<string, unknown>): Promise<D1QueryResult[]> {
+    if (!/^[0-9a-f-]{32,64}$/i.test(databaseId)) {
+      throw new CloudflareAccountApiError('Invalid D1 query.');
+    }
+    const result = await this.call<unknown>(`/d1/database/${encodeURIComponent(databaseId)}/query`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    if (
+      !Array.isArray(result) ||
+      result.length === 0 ||
+      result.some(
+        (query) =>
+          !isRecord(query) || query.success !== true || (query.results !== undefined && !Array.isArray(query.results)),
+      )
+    ) {
+      throw new CloudflareAccountApiError('Cloudflare returned an unsuccessful D1 query result.');
+    }
+    return result as D1QueryResult[];
   }
 
   async applyD1Migrations(databaseId: string, migrations: readonly { name: string; sql: string }[]): Promise<void> {
@@ -108,18 +166,34 @@ export class UserCloudflareAccountApi {
       if (!/^\d{4}_.+\.sql$/.test(migration.name) || !migration.sql.trim()) {
         throw new CloudflareAccountApiError('Invalid user-runtime D1 migration.');
       }
-      const read = (await this.executeD1(databaseId, 'SELECT name FROM ghostbuild_runtime_migrations WHERE name = ?', [
+      const read = await this.executeD1(databaseId, 'SELECT name FROM ghostbuild_runtime_migrations WHERE name = ?', [
         migration.name,
-      ])) as Array<{ results?: unknown[] }>;
+      ]);
       if (read.some((result) => (result.results?.length ?? 0) > 0)) {
         continue;
       }
-      await this.executeD1(databaseId, migration.sql);
-      await this.executeD1(
-        databaseId,
-        'INSERT OR IGNORE INTO ghostbuild_runtime_migrations (name, applied_at) VALUES (?, ?)',
-        [migration.name, Date.now()],
-      );
+      try {
+        await this.executeD1Batch(databaseId, [
+          { sql: migration.sql },
+          {
+            sql: 'INSERT OR IGNORE INTO ghostbuild_runtime_migrations (name, applied_at) VALUES (?, ?)',
+            params: [migration.name, Date.now()],
+          },
+        ]);
+      } catch (error) {
+        // A lost acknowledgement after D1 commits must not replay a
+        // non-idempotent migration. Resolve the ambiguity by reading its
+        // transactional marker before surfacing the original failure.
+        const committed = await this.executeD1(
+          databaseId,
+          'SELECT name FROM ghostbuild_runtime_migrations WHERE name = ?',
+          [migration.name],
+        ).catch(() => []);
+        if (committed.some((result) => (result.results?.length ?? 0) > 0)) {
+          continue;
+        }
+        throw error;
+      }
     }
   }
 
@@ -177,6 +251,229 @@ export class UserCloudflareAccountApi {
     }
   }
 
+  /** Upload an immutable, server-owned Worker version and promote exactly it to production. */
+  async deployManagedWorker(args: {
+    workerName: string;
+    projectType: 'web_app' | 'worker';
+    sourceSha256: string;
+    mainModule: string;
+    modules: readonly DeploymentArtifactFile[];
+    assets: readonly DeploymentArtifactFile[];
+    workersAi: boolean;
+    appAgent: boolean;
+    d1DatabaseId?: string;
+    agentSecurityD1DatabaseId?: string;
+    r2BucketName?: string;
+    securityBaselineVersion: string;
+    securityBoundarySha256: string;
+    templateSourceSha256: string;
+  }): Promise<{ workerVersionId: string }> {
+    requireWorkerName(args.workerName);
+    const expectedMain = args.projectType === 'worker' ? 'server.js' : 'index.js';
+    if (
+      args.mainModule !== expectedMain ||
+      !/^[a-f0-9]{64}$/.test(args.sourceSha256) ||
+      args.modules.filter((module) => module.path === expectedMain).length !== 1 ||
+      (args.projectType === 'worker' && args.assets.length !== 0)
+    ) {
+      throw new CloudflareAccountApiError('Managed Worker deployment artifact is invalid.');
+    }
+
+    const assetJwt =
+      args.projectType === 'web_app' ? await this.uploadStaticAssets(args.workerName, args.assets) : undefined;
+    const bindings: Array<Record<string, unknown>> = [
+      { type: 'version_metadata', name: DEPLOYMENT_VERSION_METADATA_BINDING },
+      { type: 'plain_text', name: DEPLOYMENT_SECURITY_BASELINE_BINDING, text: args.securityBaselineVersion },
+      { type: 'plain_text', name: DEPLOYMENT_SECURITY_BOUNDARY_BINDING, text: args.securityBoundarySha256 },
+      { type: 'plain_text', name: DEPLOYMENT_TEMPLATE_SOURCE_BINDING, text: args.templateSourceSha256 },
+      ...(args.workersAi ? [{ type: 'ai', name: 'AI' }] : []),
+      ...(args.d1DatabaseId ? [{ type: 'd1', name: 'DB', id: args.d1DatabaseId }] : []),
+      ...(args.agentSecurityD1DatabaseId
+        ? [{ type: 'd1', name: 'AGENT_SECURITY_DB', id: args.agentSecurityD1DatabaseId }]
+        : []),
+      ...(args.r2BucketName ? [{ type: 'r2_bucket', name: 'APP_STORAGE', bucket_name: args.r2BucketName }] : []),
+      ...(args.appAgent ? [{ type: 'durable_object_namespace', name: 'AppAgent', class_name: 'AppAgent' }] : []),
+    ];
+    const metadata = {
+      main_module: expectedMain,
+      compatibility_date: DEPLOYMENT_COMPATIBILITY_DATE,
+      compatibility_flags: [...DEPLOYMENT_COMPATIBILITY_FLAGS],
+      bindings,
+      ...(assetJwt ? { assets: { jwt: assetJwt } } : {}),
+      ...(args.appAgent ? { exports: { AppAgent: APP_AGENT_DECLARATIVE_EXPORT } } : {}),
+      observability: DEPLOYMENT_OBSERVABILITY,
+      annotations: {
+        'workers/message': `Ghostbuild approved revision ${args.sourceSha256.slice(0, 12)}`,
+        'workers/tag': args.sourceSha256,
+      },
+    };
+    const form = new FormData();
+    form.set('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    for (const module of args.modules) {
+      form.set(
+        module.path,
+        new Blob([new Uint8Array(module.bytes).buffer], { type: workerModuleContentType(module.path) }),
+        module.path,
+      );
+    }
+    const version = await parseCloudflareEnvelope<{ id?: string }>(
+      await this.callRaw(`/workers/scripts/${encodeURIComponent(args.workerName)}/versions`, {
+        method: 'POST',
+        body: form,
+      }),
+    );
+    if (!version.id || !UUID_PATTERN.test(version.id)) {
+      throw new CloudflareAccountApiError('Cloudflare returned an invalid Worker version identity.');
+    }
+    await this.promoteWorkerVersion(args.workerName, version.id, args.sourceSha256);
+    return { workerVersionId: version.id };
+  }
+
+  /** Replace every trigger with the one server-owned AppAgent cleanup schedule, or none. */
+  async configureManagedWorkerSchedule(workerName: string, appAgent: boolean): Promise<void> {
+    requireWorkerName(workerName);
+    const expected = appAgent ? [DEPLOYMENT_SECURITY_CLEANUP_CRON] : [];
+    const result = await this.call<{ schedules?: Array<{ cron?: string }> }>(
+      `/workers/scripts/${encodeURIComponent(workerName)}/schedules`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(expected.map((cron) => ({ cron }))),
+      },
+    );
+    requireExactSchedules(result, expected);
+    const readback = await this.call<{ schedules?: Array<{ cron?: string }> }>(
+      `/workers/scripts/${encodeURIComponent(workerName)}/schedules`,
+      { method: 'GET' },
+    );
+    requireExactSchedules(readback, expected);
+  }
+
+  private async readExactWorkerSubdomainState(workerName: string): Promise<void> {
+    const state = await this.call<{ enabled?: boolean; previews_enabled?: boolean }>(
+      `/workers/scripts/${encodeURIComponent(workerName)}/subdomain`,
+      { method: 'GET' },
+    );
+    if (state.enabled !== true || state.previews_enabled !== false) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid managed Worker subdomain state.');
+    }
+  }
+
+  private async uploadStaticAssets(workerName: string, assets: readonly DeploymentArtifactFile[]): Promise<string> {
+    try {
+      return await this.uploadStaticAssetsOnce(workerName, assets);
+    } catch (error) {
+      if (!(error instanceof AssetUploadSessionExpiredError)) {
+        throw error;
+      }
+      return this.uploadStaticAssetsOnce(workerName, assets);
+    }
+  }
+
+  private async uploadStaticAssetsOnce(workerName: string, assets: readonly DeploymentArtifactFile[]): Promise<string> {
+    const byHash = new Map<string, DeploymentArtifactFile>();
+    const manifest: Record<string, { hash: string; size: number }> = {};
+    for (const asset of assets) {
+      const hash = await deploymentAssetHash(asset);
+      const existing = byHash.get(hash);
+      if (
+        !ASSET_HASH_PATTERN.test(hash) ||
+        (existing !== undefined &&
+          (deploymentAssetExtension(existing.path) !== deploymentAssetExtension(asset.path) ||
+            !equalBytes(existing.bytes, asset.bytes)))
+      ) {
+        throw new CloudflareAccountApiError('Managed Worker assets contain an invalid content hash collision.');
+      }
+      if (!existing) {
+        byHash.set(hash, asset);
+      }
+      manifest[`/${asset.path}`] = { hash, size: asset.size };
+    }
+    const session = await this.call<{ jwt?: string; buckets?: unknown }>(
+      `/workers/scripts/${encodeURIComponent(workerName)}/assets-upload-session`,
+      { method: 'POST', body: JSON.stringify({ manifest }) },
+    );
+    let completionJwt = requireAssetUploadJwt(session.jwt);
+    if (!Array.isArray(session.buckets) || session.buckets.length > byHash.size) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid asset upload buckets.');
+    }
+    const requested = new Set<string>();
+    let receivedCompletionJwt = session.buckets.length === 0;
+    for (const [bucketIndex, rawBucket] of session.buckets.entries()) {
+      if (!Array.isArray(rawBucket) || rawBucket.length === 0 || rawBucket.length > byHash.size) {
+        throw new CloudflareAccountApiError('Cloudflare returned invalid asset upload buckets.');
+      }
+      const form = new FormData();
+      for (const rawHash of rawBucket) {
+        if (typeof rawHash !== 'string' || !ASSET_HASH_PATTERN.test(rawHash) || requested.has(rawHash)) {
+          throw new CloudflareAccountApiError('Cloudflare returned invalid asset upload buckets.');
+        }
+        const asset = byHash.get(rawHash);
+        if (!asset) {
+          throw new CloudflareAccountApiError('Cloudflare requested an unknown managed Worker asset.');
+        }
+        requested.add(rawHash);
+        form.set(
+          rawHash,
+          new Blob([bytesToBase64(asset.bytes)], { type: staticAssetContentType(asset.path) }),
+          rawHash,
+        );
+      }
+      const response = await this.executeRaw(
+        '/workers/assets/upload?base64=true',
+        { method: 'POST', body: form },
+        completionJwt,
+      );
+      if (response.status === 401) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new AssetUploadSessionExpiredError();
+      }
+      const finalBucket = bucketIndex === session.buckets.length - 1;
+      if (response.status !== (finalBucket ? 201 : 200)) {
+        throw new CloudflareAccountApiError('Cloudflare returned an invalid asset upload status sequence.');
+      }
+      const uploaded = await parseCloudflareEnvelope<{ jwt?: string }>(response);
+      if (!finalBucket && uploaded.jwt !== undefined) {
+        throw new CloudflareAccountApiError('Cloudflare returned an invalid asset upload identity sequence.');
+      }
+      if (finalBucket) {
+        completionJwt = requireAssetUploadJwt(uploaded.jwt);
+        receivedCompletionJwt = true;
+      }
+    }
+    if (!receivedCompletionJwt) {
+      throw new CloudflareAccountApiError('Cloudflare did not return the completed asset upload identity.');
+    }
+    return completionJwt;
+  }
+
+  private async promoteWorkerVersion(workerName: string, workerVersionId: string, sourceSha256: string): Promise<void> {
+    const promoted = await this.call<{ id?: string; versions?: Array<{ percentage?: number; version_id?: string }> }>(
+      `/workers/scripts/${encodeURIComponent(workerName)}/deployments`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          strategy: 'percentage',
+          versions: [{ percentage: 100, version_id: workerVersionId }],
+          annotations: { 'workers/message': `Ghostbuild approved revision ${sourceSha256.slice(0, 12)}` },
+        }),
+      },
+    );
+    requireExactDeploymentVersion(promoted.versions, workerVersionId);
+    if (!promoted.id || !UUID_PATTERN.test(promoted.id)) {
+      throw new CloudflareAccountApiError('Cloudflare did not read back the promoted Worker deployment.');
+    }
+    const readback = await this.call<{
+      id?: string;
+      versions?: Array<{ percentage?: number; version_id?: string }>;
+    }>(`/workers/scripts/${encodeURIComponent(workerName)}/deployments/${encodeURIComponent(promoted.id)}`, {
+      method: 'GET',
+    });
+    if (readback.id !== promoted.id) {
+      throw new CloudflareAccountApiError('Cloudflare did not read back the promoted Worker deployment.');
+    }
+    requireExactDeploymentVersion(readback.versions, workerVersionId);
+  }
+
   async getWorkersSubdomain(): Promise<string> {
     const result = await this.call<{ subdomain?: string }>('/workers/subdomain', { method: 'GET' });
     if (!result.subdomain || !/^[a-z0-9-]+$/.test(result.subdomain)) {
@@ -191,7 +488,6 @@ export class UserCloudflareAccountApi {
     controlPlaneSecret: string;
     runtimeVersion: string;
     databaseId: string;
-    apiToken: string;
     userId: string;
     connectionId: string;
     connectionGeneration: number;
@@ -201,7 +497,7 @@ export class UserCloudflareAccountApi {
     if (!/^[a-f0-9]{64}$/.test(args.runtimeVersion) || args.controlPlaneSecret.length < 32) {
       throw new CloudflareAccountApiError('The workspace runtime identity is invalid.');
     }
-    if (!args.apiToken || !args.userId) {
+    if (!args.userId) {
       throw new CloudflareAccountApiError('Workspace runtime credentials are required.');
     }
     const metadata = {
@@ -216,7 +512,6 @@ export class UserCloudflareAccountApi {
         { type: 'ai', name: 'AI' },
         { type: 'worker_loader', name: 'LOADER' },
         { type: 'secret_text', name: 'CONTROL_PLANE_SECRET', text: args.controlPlaneSecret },
-        { type: 'secret_text', name: 'CLOUDFLARE_API_TOKEN', text: args.apiToken },
         { type: 'plain_text', name: 'CLOUDFLARE_ACCOUNT_ID', text: this.accountId },
         { type: 'plain_text', name: 'GHOSTBUILD_USER_ID', text: args.userId },
         { type: 'plain_text', name: 'GHOSTBUILD_CONNECTION_ID', text: args.connectionId },
@@ -226,6 +521,7 @@ export class UserCloudflareAccountApi {
           text: String(args.connectionGeneration),
         },
         { type: 'plain_text', name: 'GHOSTBUILD_USER_RUNTIME_ENDPOINT', text: args.endpoint },
+        { type: 'plain_text', name: 'GHOSTBUILD_CONTROL_PLANE_ENDPOINT', text: GHOSTBUILD_CONTROL_PLANE_ENDPOINT },
         { type: 'plain_text', name: 'GHOSTBUILD_USER_RUNTIME', text: '1' },
         { type: 'plain_text', name: 'GHOSTBUILD_RUNTIME_VERSION', text: args.runtimeVersion },
         { type: 'plain_text', name: 'SANDBOX_TRANSPORT', text: 'rpc' },
@@ -254,19 +550,16 @@ export class UserCloudflareAccountApi {
       new Blob([args.source], { type: 'application/javascript+module' }),
       'workspace-runtime.mjs',
     );
-    const response = await this.callRaw(`/workers/scripts/${encodeURIComponent(args.workerName)}`, {
-      method: 'PUT',
-      body: form,
-    });
-    const result = await parseCloudflareEnvelope<{
-      id?: string;
-      deployment_id?: string;
-      version_id?: string;
-    }>(response);
-    const workerVersionId = result.version_id ?? result.deployment_id ?? result.id;
-    if (!workerVersionId) {
-      throw new CloudflareAccountApiError('Cloudflare did not identify the workspace runtime deployment.');
+    const version = await parseCloudflareEnvelope<{ id?: string }>(
+      await this.callRaw(`/workers/scripts/${encodeURIComponent(args.workerName)}/versions`, {
+        method: 'POST',
+        body: form,
+      }),
+    );
+    if (!version.id || !UUID_PATTERN.test(version.id)) {
+      throw new CloudflareAccountApiError('Cloudflare did not identify the workspace runtime version.');
     }
+    await this.promoteWorkerVersion(args.workerName, version.id, args.runtimeVersion);
     const namespaces = await this.call<DurableObjectNamespaceReadback[]>(
       '/workers/durable_objects/namespaces?per_page=1000',
       { method: 'GET' },
@@ -281,7 +574,7 @@ export class UserCloudflareAccountApi {
     if (!namespace?.id) {
       throw new CloudflareAccountApiError('Cloudflare did not provision the Computer workspace namespace.');
     }
-    return { workerVersionId, namespaceId: namespace.id };
+    return { workerVersionId: version.id, namespaceId: namespace.id };
   }
 
   async ensureWorkspaceRuntimeContainer(args: {
@@ -309,11 +602,11 @@ export class UserCloudflareAccountApi {
     const configuration = {
       configuration: {
         image: args.image,
-        instance_type: 'basic',
+        instance_type: PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE,
         observability: { logs: { enabled: true } },
         wrangler_ssh: false,
       },
-      max_instances: args.maxInstances ?? 10,
+      max_instances: args.maxInstances ?? PROJECT_WORKSPACE_CONTAINER_MAX_INSTANCES,
       constraints: { tiers: [1, 2] },
       scheduling_policy: 'default',
       rollout_active_grace_period: 0,
@@ -340,10 +633,17 @@ export class UserCloudflareAccountApi {
 
   async enableWorkerSubdomain(workerName: string): Promise<void> {
     requireWorkerName(workerName);
-    await this.call<unknown>(`/workers/scripts/${encodeURIComponent(workerName)}/subdomain`, {
-      method: 'POST',
-      body: JSON.stringify({ enabled: true, previews_enabled: false }),
-    });
+    const state = await this.call<{ enabled?: boolean; previews_enabled?: boolean }>(
+      `/workers/scripts/${encodeURIComponent(workerName)}/subdomain`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ enabled: true, previews_enabled: false }),
+      },
+    );
+    if (state.enabled !== true || state.previews_enabled !== false) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid managed Worker subdomain state.');
+    }
+    await this.readExactWorkerSubdomainState(workerName);
   }
 
   /** Replace every trigger with Ghostbuild's single deterministic runtime-GC schedule. */
@@ -393,7 +693,11 @@ export class UserCloudflareAccountApi {
     const [version, schedules] = await Promise.all([
       this.call<{
         id?: string;
-        resources?: { bindings?: WorkerBinding[]; script?: { etag?: string } };
+        resources?: {
+          bindings?: WorkerBinding[];
+          script?: { etag?: string };
+          script_runtime?: { compatibility_date?: string; compatibility_flags?: string[] };
+        };
       }>(`/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(workerVersionId)}`, {
         method: 'GET',
       }),
@@ -407,7 +711,10 @@ export class UserCloudflareAccountApi {
       !Array.isArray(version.resources?.bindings) ||
       typeof version.resources.script?.etag !== 'string' ||
       version.resources.script.etag.length < 1 ||
-      version.resources.script.etag.length > 256
+      version.resources.script.etag.length > 256 ||
+      typeof version.resources.script_runtime?.compatibility_date !== 'string' ||
+      !Array.isArray(version.resources.script_runtime.compatibility_flags) ||
+      version.resources.script_runtime.compatibility_flags.some((flag) => typeof flag !== 'string')
     ) {
       throw new CloudflareAccountApiError('Cloudflare returned invalid active Worker version metadata.');
     }
@@ -419,6 +726,8 @@ export class UserCloudflareAccountApi {
       crons: (schedules.schedules ?? []).flatMap((schedule) =>
         typeof schedule.cron === 'string' ? [schedule.cron] : [],
       ),
+      compatibilityDate: version.resources.script_runtime.compatibility_date,
+      compatibilityFlags: version.resources.script_runtime.compatibility_flags,
     };
   }
 
@@ -438,7 +747,7 @@ export class UserCloudflareAccountApi {
         ...init.headers,
       },
     });
-    const payload = (await response.json().catch(() => null)) as CloudflareEnvelope<T> | null;
+    const payload = await readBoundedJson<CloudflareEnvelope<T>>(response);
     if (response.status === 404) {
       return null;
     }
@@ -451,13 +760,32 @@ export class UserCloudflareAccountApi {
 
   private async callRaw(path: string, init: RequestInit): Promise<Response> {
     await this.authorizeRequest?.();
+    let response = await this.executeRaw(path, init, this.accessToken);
+    if (response.status === 401 && this.refreshAccessToken) {
+      await response.body?.cancel().catch(() => undefined);
+      const refreshed = await this.refreshAccessToken();
+      if (!refreshed || refreshed.length > 4_096) {
+        throw new CloudflareAccountApiError('Cloudflare connection is unavailable.');
+      }
+      this.accessToken = refreshed;
+      await this.authorizeRequest?.();
+      response = await this.executeRaw(path, init, refreshed);
+    }
+    return response;
+  }
+
+  private executeRaw(path: string, init: RequestInit, bearer: string): Promise<Response> {
+    if (!path.startsWith('/') || path.startsWith('//')) {
+      throw new CloudflareAccountApiError('Cloudflare API path is invalid.');
+    }
     const execute = this.request;
     return execute(`${API_ROOT}/accounts/${encodeURIComponent(this.accountId)}${path}`, {
       ...init,
+      redirect: 'error',
       signal: init.signal ?? AbortSignal.timeout(CLOUDFLARE_API_TIMEOUT_MS),
       headers: {
-        authorization: `Bearer ${this.accessToken}`,
         ...init.headers,
+        authorization: `Bearer ${bearer}`,
       },
     });
   }
@@ -467,8 +795,7 @@ export class UserCloudflareAccountApi {
       ...init,
       headers: { 'content-type': 'application/json', ...init.headers },
     });
-    const payload = (await response.json().catch(() => null)) as
-      CloudflareEnvelope<T> | T | { error?: string; message?: string } | null;
+    const payload = await readBoundedJson<CloudflareEnvelope<T> | T | { error?: string; message?: string }>(response);
     if (!response.ok || payload === null) {
       const message =
         payload && typeof payload === 'object' && !Array.isArray(payload)
@@ -496,6 +823,8 @@ export class CloudflareAccountApiError extends Error {
     this.name = 'CloudflareAccountApiError';
   }
 }
+
+class AssetUploadSessionExpiredError extends Error {}
 
 function requirePlanResourceName(plan: DeploymentPlan, type: DeploymentResourceType, logicalName: string): string {
   const name = deploymentPlanResourceName(plan, type, logicalName);
@@ -528,11 +857,128 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 async function parseCloudflareEnvelope<T>(response: Response): Promise<T> {
-  const payload = (await response.json().catch(() => null)) as CloudflareEnvelope<T> | null;
+  const payload = await readBoundedJson<CloudflareEnvelope<T>>(response);
   if (!response.ok || payload?.success !== true || payload.result === undefined) {
     throw new CloudflareAccountApiError(
       payload?.errors?.find((error) => error.message)?.message || `Cloudflare API request failed (${response.status}).`,
     );
   }
   return payload.result;
+}
+
+async function readBoundedJson<T>(response: Response): Promise<T | null> {
+  const contentLength = Number(response.headers.get('Content-Length') ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_CLOUDFLARE_RESPONSE_BYTES) {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+  const text = await readBoundedResponseText(response, MAX_CLOUDFLARE_RESPONSE_BYTES);
+  if (text === null) {
+    return null;
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function readBoundedResponseText(response: Response, limit: number): Promise<string | null> {
+  if (!response.body) {
+    return '';
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      total += value.byteLength;
+      if (total > limit) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function requireAssetUploadJwt(value: unknown): string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > MAX_ASSET_UPLOAD_JWT_BYTES) {
+    throw new CloudflareAccountApiError('Cloudflare returned an invalid asset upload identity.');
+  }
+  return value;
+}
+
+function requireExactDeploymentVersion(
+  versions: Array<{ percentage?: number; version_id?: string }> | undefined,
+  expectedVersionId: string,
+): void {
+  if (versions?.length !== 1 || versions[0]?.percentage !== 100 || versions[0]?.version_id !== expectedVersionId) {
+    throw new CloudflareAccountApiError('Cloudflare returned an ambiguous Worker deployment.');
+  }
+}
+
+function requireExactSchedules(result: { schedules?: Array<{ cron?: string }> }, expected: readonly string[]): void {
+  const observed = result.schedules?.map((schedule) => schedule.cron) ?? [];
+  if (observed.length !== expected.length || observed.some((cron, index) => cron !== expected[index])) {
+    throw new CloudflareAccountApiError('Cloudflare returned invalid managed Worker schedules.');
+  }
+}
+
+function workerModuleContentType(path: string): string {
+  return path.endsWith('.wasm') ? 'application/wasm' : 'application/javascript+module';
+}
+
+function staticAssetContentType(path: string): string {
+  const extension = path.includes('.') ? path.slice(path.lastIndexOf('.') + 1).toLowerCase() : '';
+  return (
+    (
+      {
+        css: 'text/css',
+        gif: 'image/gif',
+        html: 'text/html',
+        ico: 'image/x-icon',
+        jpeg: 'image/jpeg',
+        jpg: 'image/jpeg',
+        js: 'text/javascript',
+        json: 'application/json',
+        map: 'application/json',
+        mjs: 'text/javascript',
+        png: 'image/png',
+        svg: 'image/svg+xml',
+        txt: 'text/plain',
+        wasm: 'application/wasm',
+        webmanifest: 'application/manifest+json',
+        webp: 'image/webp',
+        woff: 'font/woff',
+        woff2: 'font/woff2',
+        xml: 'application/xml',
+      } as Record<string, string>
+    )[extension] ?? 'application/octet-stream'
+  );
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 32_768) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 32_768));
+  }
+  return btoa(binary);
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
 }

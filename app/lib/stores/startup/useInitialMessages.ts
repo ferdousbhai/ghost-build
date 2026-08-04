@@ -1,12 +1,7 @@
 import { useStore } from '@nanostores/react';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import {
-  getToolInvocation,
-  isToolInvocationInProgress,
-  messageText,
-  type GhostbuildMessage,
-} from 'ghostbuild-agent/ai-compat';
+import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { TranscriptCheckpoint, TranscriptIdentity } from 'ghostbuild-agent/transcript';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { useCachedChatTranscript } from '~/lib/cloudflare/chat-transcript-db';
@@ -110,7 +105,7 @@ export function useInitialMessages(chatId: string | undefined):
     if (transcript.status === 'missing') {
       return null;
     }
-    const deserialized = transcript.messages.map(markInterruptedToolCalls).map(deserializeMessageFromStorage);
+    const deserialized = transcript.messages.map(deserializeMessageFromStorage);
     return {
       loadedChatId: transcript.loadedChatId,
       ...(transcript.urlId ? { urlId: transcript.urlId } : {}),
@@ -127,37 +122,9 @@ export function useInitialMessages(chatId: string | undefined):
   return initialMessages;
 }
 
-function markInterruptedToolCalls(message: SerializedMessage): SerializedMessage {
-  if (!message.parts) {
-    return message;
-  }
-  return {
-    ...message,
-    parts: message.parts.map((part) => {
-      if (part.type !== 'tool-invocation') {
-        return part;
-      }
-      const invocation = getToolInvocation(part);
-      if (!invocation || !isToolInvocationInProgress(invocation)) {
-        return part;
-      }
-      return {
-        ...part,
-        toolInvocation: {
-          ...invocation,
-          state: 'result' as const,
-          result: 'Error: Tool call was interrupted',
-        },
-      };
-    }),
-  };
-}
-
 function deserializeMessageFromStorage(message: SerializedMessage): GhostbuildMessage {
-  const content = messageText(message as GhostbuildMessage);
   return {
     ...message,
-    createdAt: message.createdAt ? new Date(message.createdAt) : undefined,
-    content,
+    createdAt: message.createdAt === undefined ? undefined : new Date(message.createdAt),
   };
 }

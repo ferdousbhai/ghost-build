@@ -76,6 +76,25 @@ const migrations: readonly SchemaMigration[] = [
       sql.exec('DROP TABLE IF EXISTS builder_workspace_tool_results');
     },
   },
+  {
+    version: 5,
+    name: 'persist_builder_identity',
+    apply(sql) {
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS builder_identity (
+          id TEXT PRIMARY KEY CHECK (id = 'active'),
+          owner_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          agent_name TEXT NOT NULL,
+          chat_initial_id TEXT NOT NULL,
+          generation INTEGER NOT NULL,
+          subchat_index INTEGER NOT NULL,
+          parent_agent_name TEXT,
+          created_at TEXT NOT NULL
+        )
+      `);
+    },
+  },
 ];
 
 type AppliedMigration = {

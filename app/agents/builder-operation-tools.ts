@@ -1,4 +1,3 @@
-import type { GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { deployToolParameters } from 'ghostbuild-agent/tools/deploy';
 import { npmInstallToolParameters, splitPackageSpecs } from 'ghostbuild-agent/tools/npmInstall';
 import { validateProjectParameters } from 'ghostbuild-agent/tools/validateProject';
@@ -27,7 +26,7 @@ export async function executeBuilderOperationTool(args: {
 }): Promise<GhostbuildToolResult> {
   switch (args.toolName) {
     case 'lookupDocs':
-      return runLookupDocs(invocation(args));
+      return runLookupDocs(args.input);
     case 'npmInstall':
       return runDependencyInstall(args);
     case 'validateProject':
@@ -119,15 +118,6 @@ async function runDeployment(args: Parameters<typeof executeBuilderOperationTool
       );
     },
   );
-}
-
-function invocation(args: Parameters<typeof executeBuilderOperationTool>[0]): GhostbuildToolInvocation {
-  return {
-    toolCallId: args.toolCallId,
-    toolName: args.toolName,
-    args: args.input,
-    state: 'call',
-  };
 }
 
 async function deterministicDeploymentId(value: string): Promise<string> {

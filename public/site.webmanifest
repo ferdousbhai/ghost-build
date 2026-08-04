@@ -1,0 +1,16 @@
+{
+  "name": "Ghostbuild",
+  "short_name": "Ghostbuild",
+  "description": "Build and ship Cloudflare apps with a full-stack AI coding agent.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fff9fc",
+  "theme_color": "#18101e",
+  "icons": [
+    {
+      "src": "/ghostbuild-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

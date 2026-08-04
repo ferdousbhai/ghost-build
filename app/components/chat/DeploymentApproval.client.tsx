@@ -3,6 +3,7 @@ import { Button } from '~/components/ui/primitives/Button';
 import { Checkbox } from '~/components/ui/primitives/Checkbox';
 import type { PendingDeploymentApproval } from '~/lib/deployment-approval';
 import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
+import { captureProductEvent } from '~/lib/telemetry.client';
 
 export function DeploymentApproval({ deployment }: { deployment: PendingDeploymentApproval }) {
   const [activeDeployment, setActiveDeployment] = useState(deployment);
@@ -16,6 +17,10 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
     status === 'submitting' || status === 'retrying' || status === 'deploying' || status === 'deployed';
 
   useEffect(() => {
+    void captureProductEvent('deployment_approval_presented');
+  }, []);
+
+  useEffect(() => {
     const abort = new AbortController();
     void resumeDeployment(activeDeployment.id, abort.signal, () => setStatus('deploying'))
       .then((current) => {
@@ -24,6 +29,7 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
         }
         setProductionUrl(current.productionUrl ?? null);
         setStatus('deployed');
+        void captureProductEvent('deployment_succeeded', { outcome: 'success' });
       })
       .catch((resumeError) => {
         if (abort.signal.aborted) {
@@ -48,6 +54,7 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
       }
       setProductionUrl(completed.productionUrl ?? null);
       setStatus('deployed');
+      void captureProductEvent('deployment_succeeded', { outcome: 'success' });
     } catch (deploymentError) {
       setCanRetry(deploymentError instanceof DeploymentTerminalError);
       setError(deploymentError instanceof Error ? deploymentError.message : 'Unable to resume the deployment.');
@@ -76,6 +83,7 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
       if (!response.ok || payload?.deployment?.status !== 'approved') {
         throw new Error(payload?.error || 'Unable to approve the deployment.');
       }
+      void captureProductEvent('deployment_approved', { outcome: 'success' });
       await continueDeployment();
     } catch (approvalError) {
       setCanRetry(approvalError instanceof DeploymentTerminalError);
@@ -132,6 +140,22 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
         />
         <span>I approve Cloudflare billing my account for this project&apos;s infrastructure and inference.</span>
       </label>
+      <p className="text-xs leading-relaxed text-content-tertiary">
+        Deployment creates customer-owned Cloudflare resources that remain in your account until you remove them. Review
+        the{' '}
+        <a className="underline underline-offset-4" href="/terms">
+          Terms
+        </a>
+        ,{' '}
+        <a className="underline underline-offset-4" href="/privacy">
+          Privacy notice
+        </a>
+        , and{' '}
+        <a className="underline underline-offset-4" href="/support">
+          Support
+        </a>{' '}
+        before approval.
+      </p>
       <label className="text-content-primary flex items-start gap-2">
         <Checkbox
           checked={paidPolicyUnderstood}

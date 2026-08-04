@@ -5,8 +5,10 @@ import {
 } from "@cloudflare/ai-chat";
 import {
   convertToModelMessages,
+  createUIMessageStreamResponse,
   pruneMessages,
   streamText,
+  toUIMessageStream,
   type UIMessage,
 } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
@@ -87,7 +89,7 @@ export class AppAgent extends AIChatAgent<Env> {
       model: workersAi(WORKERS_AI_CODING_MODEL),
       abortSignal: options?.abortSignal,
       maxOutputTokens: MAX_AGENT_OUTPUT_TOKENS,
-      system:
+      instructions:
         "You are a concise coding assistant running on Cloudflare Workers AI. Prefer TanStack Start, Cloudflare Workers, Workers AI, Cloudflare D1, R2, and Cloudflare Agents patterns.",
       messages: pruneMessages({
         messages: modelMessages,
@@ -96,6 +98,11 @@ export class AppAgent extends AIChatAgent<Env> {
       }),
     });
 
-    return result.toUIMessageStreamResponse();
+    return createUIMessageStreamResponse({
+      stream: toUIMessageStream({
+        stream: result.stream,
+        originalMessages: this.messages,
+      }),
+    });
   }
 }

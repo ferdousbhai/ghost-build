@@ -1,17 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-describe('Cloudflare client telemetry', () => {
-  const sendBeacon = vi.fn();
-  const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+describe('privacy-safe client telemetry', () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+  const storage = new Map<string, string>();
 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    vi.stubGlobal('navigator', { sendBeacon });
+    storage.clear();
+    fetchMock.mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal('navigator', { doNotTrack: '0', globalPrivacyControl: false });
     vi.stubGlobal('window', {
-      location: { href: 'https://ghostbuild.dev/share/secret?token=credential' },
-      prompt: vi.fn(),
+      location: {
+        href: 'https://ghostbuild.dev/chat/private-project?token=credential',
+        pathname: '/chat/private-project',
+      },
+      sessionStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+      },
     });
     vi.stubGlobal('fetch', fetchMock);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -23,13 +30,59 @@ describe('Cloudflare client telemetry', () => {
     vi.unstubAllGlobals();
   });
 
-  it('keeps diagnostics local instead of sending platform telemetry', async () => {
+  it('sends only allowlisted structured fields and never includes the current URL', async () => {
     const { captureMessage } = await import('./telemetry.client');
 
-    await captureMessage('Preview base URL unexpectedly had a trailing slash', { level: 'warning' });
+    await captureMessage('Failed to fetch dashboard version information', {
+      level: 'warning',
+      durationMs: 42,
+    });
 
-    expect(console.warn).toHaveBeenCalled();
-    expect(sendBeacon).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(payload).toMatchObject({
+      schemaVersion: 1,
+      event: 'Failed to fetch dashboard version information',
+      level: 'warning',
+      page: 'chat',
+      context: { durationMs: 42 },
+    });
+    expect(JSON.stringify(payload)).not.toContain('private-project');
+    expect(JSON.stringify(payload)).not.toContain('credential');
+  });
+
+  it('records an opaque error-event ID without serializing exception details', async () => {
+    const { captureException } = await import('./telemetry.client');
+
+    await captureException(
+      'Failed to start Cloudflare authorization',
+      new Error('token=secret and user prompt contents'),
+    );
+
+    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(payload.errorEventId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(payload.context).toEqual({ outcome: 'failure' });
+    expect(JSON.stringify(payload)).not.toContain('token=secret');
+    expect(JSON.stringify(payload)).not.toContain('user prompt contents');
+  });
+
+  it('honors Global Privacy Control and browser telemetry opt-out', async () => {
+    vi.stubGlobal('navigator', { globalPrivacyControl: true });
+    const { captureProductEvent } = await import('./telemetry.client');
+
+    await captureProductEvent('landing_viewed');
+
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('uses a credential-free keepalive request', async () => {
+    const { captureProductEvent } = await import('./telemetry.client');
+
+    await captureProductEvent('prompt_submitted');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/client-telemetry',
+      expect.objectContaining({ method: 'POST', keepalive: true, credentials: 'omit' }),
+    );
   });
 });

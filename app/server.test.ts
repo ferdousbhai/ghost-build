@@ -9,6 +9,8 @@ const completeCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const cloudflareConnectionStatusAction = vi.hoisted(() => vi.fn());
 const startCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const pruneCloudflareAuthDataBestEffort = vi.hoisted(() => vi.fn());
+const runtimeCredentialAction = vi.hoisted(() => vi.fn());
+const clientTelemetryAction = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-start/server-entry', () => ({ default: { fetch: tanstackFetch } }));
 vi.mock('agents', () => ({ routeAgentRequest }));
@@ -24,6 +26,8 @@ vi.mock('./server-handlers/cloudflare-integration', () => ({
 }));
 vi.mock('./server-handlers/health', () => ({ healthAction }));
 vi.mock('./server-handlers/version', () => ({ versionAction: vi.fn() }));
+vi.mock('./server-handlers/runtime-credential', () => ({ runtimeCredentialAction }));
+vi.mock('./server-handlers/client-telemetry', () => ({ clientTelemetryAction }));
 vi.mock('./lib/cloudflare/data/cloudflare-auth-retention.server', () => ({ pruneCloudflareAuthDataBestEffort }));
 
 import server from './server';
@@ -47,6 +51,8 @@ describe('server Agent routing boundary', () => {
       .mockReset()
       .mockResolvedValue(Response.json({ error: 'Invalid request.' }, { status: 400 }));
     pruneCloudflareAuthDataBestEffort.mockReset().mockResolvedValue(undefined);
+    runtimeCredentialAction.mockReset().mockResolvedValue(Response.json({ accessToken: 'fresh' }));
+    clientTelemetryAction.mockReset().mockResolvedValue(new Response(null, { status: 202 }));
   });
 
   it('leaves non-Builder Agent-looking routes to the application router', async () => {
@@ -156,6 +162,34 @@ describe('server Agent routing boundary', () => {
     const response = await server.fetch(new Request(`https://ghostbuild.dev${pathname}`, { method }), {} as Env);
 
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  it('routes only POST requests to the private runtime credential broker', async () => {
+    const env = {} as Env;
+    const request = new Request('https://ghostbuild.dev/api/cloudflare/runtime-credential', { method: 'POST' });
+
+    const response = await server.fetch(request, env);
+
+    expect(response.status).toBe(200);
+    expect(runtimeCredentialAction).toHaveBeenCalledWith({ request, env });
+
+    const rejected = await server.fetch(new Request('https://ghostbuild.dev/api/cloudflare/runtime-credential'), env);
+    expect(rejected.status).toBe(405);
+    expect(rejected.headers.get('Allow')).toBe('POST');
+    expect(runtimeCredentialAction).toHaveBeenCalledOnce();
+  });
+
+  it('routes only POST requests to privacy-safe client telemetry ingestion', async () => {
+    const request = new Request('https://ghostbuild.dev/api/client-telemetry', { method: 'POST' });
+
+    const response = await server.fetch(request, {} as Env);
+
+    expect(response.status).toBe(202);
+    expect(clientTelemetryAction).toHaveBeenCalledWith({ request, env: {} });
+    const rejected = await server.fetch(new Request('https://ghostbuild.dev/api/client-telemetry'), {} as Env);
+    expect(rejected.status).toBe(405);
+    expect(rejected.headers.get('Allow')).toBe('POST');
+    expect(clientTelemetryAction).toHaveBeenCalledOnce();
   });
 
   it('preserves an explicit application cache policy', async () => {

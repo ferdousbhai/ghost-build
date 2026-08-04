@@ -5,7 +5,6 @@ import { chatStore } from '~/lib/stores/chatId';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { BaseChat } from './BaseChat.client';
-import { toast } from 'sonner';
 import { initialIdStore } from '~/lib/stores/chatId';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
 import type { ChatProps } from './chat-types';
@@ -19,6 +18,8 @@ import { deriveProvisionalTitle } from '@summonghost/title-generation';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { applyLiveSubchatTitle, type LiveSubchatTitle } from './subchat-model';
 import { getUserRuntimeSession, userRuntimeEndpointStore } from '~/lib/cloudflare/runtime-session';
+import { Loading } from '~/components/Loading';
+import { Button } from '@ui/Button';
 
 const logger = createScopedLogger('Chat');
 
@@ -38,14 +39,26 @@ export const Chat = memo(
     const clearPendingInitialMessage = useCallback(() => setPendingInitialMessage(null), []);
     const sessionId = useSessionIdOrNullOrLoading();
     const runtimeEndpoint = useStore(userRuntimeEndpointStore);
+    const [runtimeConnectionError, setRuntimeConnectionError] = useState<string | null>(null);
+    const [runtimeConnectionAttempt, setRuntimeConnectionAttempt] = useState(0);
     useEffect(() => {
-      if (typeof sessionId === 'string' && !runtimeEndpoint) {
-        void getUserRuntimeSession().catch((error) => {
-          logger.error('Unable to connect to the user-owned runtime', error);
-          toast.error(error instanceof Error ? error.message : 'Unable to connect to your Cloudflare workspace.');
-        });
+      if (typeof sessionId !== 'string' || runtimeEndpoint) {
+        return undefined;
       }
-    }, [runtimeEndpoint, sessionId]);
+      let canceled = false;
+      setRuntimeConnectionError(null);
+      void getUserRuntimeSession().catch((error) => {
+        if (!canceled) {
+          logger.error('Unable to connect to the user-owned runtime', error);
+          setRuntimeConnectionError(
+            error instanceof Error ? error.message : 'Unable to connect to your Cloudflare workspace.',
+          );
+        }
+      });
+      return () => {
+        canceled = true;
+      };
+    }, [runtimeConnectionAttempt, runtimeEndpoint, sessionId]);
     if (typeof sessionId !== 'string') {
       return (
         <UnauthenticatedChat
@@ -56,10 +69,13 @@ export const Chat = memo(
       );
     }
     if (!runtimeEndpoint) {
-      return (
-        <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-content-secondary">
-          Connecting to your Cloudflare workspace…
-        </div>
+      return runtimeConnectionError ? (
+        <WorkspaceRuntimeConnectionError
+          message={runtimeConnectionError}
+          onRetry={() => setRuntimeConnectionAttempt((attempt) => attempt + 1)}
+        />
+      ) : (
+        <Loading message="Connecting to your Cloudflare workspace…" />
       );
     }
 
@@ -80,6 +96,28 @@ export const Chat = memo(
   },
 );
 Chat.displayName = 'Chat';
+
+function WorkspaceRuntimeConnectionError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center p-5">
+      <section className="app-card w-full max-w-lg p-6 text-center" aria-labelledby="workspace-connection-heading">
+        <p className="app-page-eyebrow">Workspace unavailable</p>
+        <h1 id="workspace-connection-heading" className="mt-2 font-display text-3xl font-black text-content-primary">
+          Ghostbuild could not connect to your project workspace.
+        </h1>
+        <p className="mt-3 break-words text-sm text-content-secondary" role="alert">
+          {message}
+        </p>
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <Button onClick={onRetry}>Try again</Button>
+          <Button href="/settings#cloudflare" variant="neutral">
+            Check Cloudflare settings
+          </Button>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 const AuthenticatedChat = memo(
   ({

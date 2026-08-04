@@ -22,6 +22,26 @@ export const Route = createRootRoute({
         name: "description",
         content: "A TanStack Start app running on Cloudflare Workers.",
       },
+      { property: "og:title", content: "Ghostbuild Cloudflare App" },
+      {
+        property: "og:description",
+        content: "A TanStack Start app running on Cloudflare Workers.",
+      },
+      { property: "og:type", content: "website" },
+      {
+        property: "og:image",
+        content: "https://ghostbuild.dev/social-preview-share-v2.png",
+      },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "Ghostbuild Cloudflare App" },
+      {
+        name: "twitter:description",
+        content: "A TanStack Start app running on Cloudflare Workers.",
+      },
+      {
+        name: "twitter:image",
+        content: "https://ghostbuild.dev/social-preview-share-v2.png",
+      },
     ],
     links: [{ rel: "stylesheet", href: appCss }],
   }),

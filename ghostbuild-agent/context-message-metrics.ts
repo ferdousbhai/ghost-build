@@ -32,10 +32,7 @@ export function calculatePromptCharacterCounts(
 }
 
 function messageCharacterCount(message: GhostbuildMessage): number {
-  const textSize =
-    typeof message.content === 'string' && message.content.length > 0
-      ? message.content.length
-      : message.parts.reduce((total, part) => total + (part.type === 'text' ? part.text.length : 0), 0);
+  const textSize = message.parts.reduce((total, part) => total + (part.type === 'text' ? part.text.length : 0), 0);
   const nonTextSize = message.parts.reduce(
     (total, part) => total + (part.type === 'text' ? 0 : partCharacterCount(part)),
     0,
@@ -61,9 +58,15 @@ function partCharacterCount(part: GhostbuildPart): number {
       if (!invocation) {
         return stringifyLength(part);
       }
-      return (
-        stringifyLength(invocation.args) + (invocation.state === 'result' ? stringifyLength(invocation.result) : 0)
-      );
+      const terminalSize =
+        invocation.state === 'output-available'
+          ? stringifyLength(invocation.output)
+          : invocation.state === 'output-error'
+            ? invocation.errorText.length
+            : invocation.state === 'output-denied'
+              ? stringifyLength(invocation.approval.reason)
+              : 0;
+      return stringifyLength(invocation.input) + terminalSize;
     }
   }
 }

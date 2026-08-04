@@ -1,0 +1,40 @@
+name: Abuse report
+description: Report harmful or prohibited use of Ghostbuild
+title: '[Abuse]: '
+labels:
+  - abuse
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        This issue is public. Do not include credentials, private personal data, exploit details, or confidential
+        project content. Report security vulnerabilities through GitHub private vulnerability reporting.
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Harmful content
+        - Impersonation or fraud
+        - Unauthorized automation or access
+        - Policy or safeguard evasion
+        - Misuse of a generated application
+        - Other prohibited use
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Report
+      description: Give enough non-sensitive context to locate and assess the concern.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed credentials, private personal data, exploit details, and confidential project content.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

@@ -21,7 +21,7 @@ async function generateWorkersAiText(
   const maxOutputTokens = options.maxTokens ?? CONTEXT_SUMMARY_MAX_TOKENS;
   const result = await generateText({
     model: getProvider(env, accountCredentials).model,
-    system: options.system,
+    instructions: options.system,
     prompt: options.user,
     maxOutputTokens,
     temperature: options.temperature,

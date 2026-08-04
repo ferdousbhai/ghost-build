@@ -8,19 +8,21 @@ describe('ToolActivityStore', () => {
     const partId = 'message:0' as PartId;
 
     store.record(partId, {
-      state: 'call',
+      type: 'dynamic-tool',
+      state: 'input-available',
       toolCallId: 'tool-1',
       toolName: 'write',
-      args: { path: 'src/index.ts' },
+      input: { path: 'src/index.ts' },
     });
     expect(store.activities.get()[partId]?.status).toBe('running');
 
     store.record(partId, {
-      state: 'result',
+      type: 'dynamic-tool',
+      state: 'output-available',
       toolCallId: 'tool-1',
       toolName: 'write',
-      args: { path: 'src/index.ts' },
-      result: { ok: true },
+      input: { path: 'src/index.ts' },
+      output: { ok: true },
     });
     expect(store.activities.get()[partId]?.status).toBe('complete');
   });
@@ -31,18 +33,20 @@ describe('ToolActivityStore', () => {
     const latePart = 'message:1' as PartId;
 
     store.record(firstPart, {
-      state: 'partial-call',
+      type: 'dynamic-tool',
+      state: 'input-streaming',
       toolCallId: 'tool-1',
       toolName: 'deploy',
-      args: {},
+      input: undefined,
     });
     store.abortActive();
     store.record(latePart, {
-      state: 'result',
+      type: 'dynamic-tool',
+      state: 'output-available',
       toolCallId: 'tool-2',
       toolName: 'deploy',
-      args: {},
-      result: { ok: true },
+      input: {},
+      output: { ok: true },
     });
 
     expect(store.activities.get()[firstPart]?.status).toBe('aborted');
@@ -50,10 +54,11 @@ describe('ToolActivityStore', () => {
 
     store.startTurn();
     store.record(latePart, {
-      state: 'call',
+      type: 'dynamic-tool',
+      state: 'input-available',
       toolCallId: 'tool-2',
       toolName: 'edit',
-      args: {},
+      input: {},
     });
     expect(store.activities.get()[latePart]?.status).toBe('running');
   });

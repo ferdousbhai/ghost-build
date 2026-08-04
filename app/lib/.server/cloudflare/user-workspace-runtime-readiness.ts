@@ -1,8 +1,8 @@
 import { readJsonBodyWithLimit } from '~/lib/bounded-body';
-import { parseUserWorkspaceRuntimeHealth } from './user-workspace-runtime-health';
+import { parseUserWorkspaceRuntimeReadiness } from './user-workspace-runtime-health';
 
-const READINESS_DEADLINE_MS = 90_000;
-const READINESS_REQUEST_TIMEOUT_MS = 10_000;
+const READINESS_DEADLINE_MS = 10 * 60_000;
+const READINESS_REQUEST_TIMEOUT_MS = 8 * 60_000;
 const READINESS_MAX_ATTEMPTS = 30;
 const READINESS_INITIAL_BACKOFF_MS = 500;
 const READINESS_MAX_BACKOFF_MS = 5_000;
@@ -60,8 +60,8 @@ export async function waitForUserWorkspaceRuntimeReadiness(
         }
       } else {
         const payload = await readJsonBodyWithLimit(response, MAX_HEALTH_RESPONSE_BYTES, 'Workspace runtime health');
-        const health = parseUserWorkspaceRuntimeHealth(payload);
-        if (health.runtimeVersion === args.runtimeVersion) {
+        const health = parseUserWorkspaceRuntimeReadiness(payload);
+        if (health.ok && health.runtimeVersion === args.runtimeVersion) {
           return;
         }
         // A well-formed response from the previous source digest can be served
@@ -105,7 +105,7 @@ export class UserWorkspaceRuntimeReadinessError extends Error {
 function runtimeHealthUrl(endpoint: string): string {
   let url: URL;
   try {
-    url = new URL('/v1/health', endpoint.endsWith('/') ? endpoint : `${endpoint}/`);
+    url = new URL('/v1/readiness', endpoint.endsWith('/') ? endpoint : `${endpoint}/`);
   } catch {
     throw new UserWorkspaceRuntimeReadinessError('The workspace runtime endpoint is invalid.');
   }

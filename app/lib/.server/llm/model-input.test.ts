@@ -43,8 +43,9 @@ describe('prepareModelInput', () => {
     expect(result.contextCompacted).toBe(false);
     expect(result.nextCompaction).toBeNull();
     expect(result.promptMessages).toBe(messages);
-    expect(result.messages.map((item) => item.role)).toEqual(['system', 'user', 'user']);
+    expect(result.messages.map((item) => item.role)).toEqual(['user', 'user']);
     expect(JSON.stringify(result.messages)).toContain('earlier requirement');
+    expect(JSON.stringify(result.messages)).not.toContain('System');
     expect(summarize).not.toHaveBeenCalled();
   });
 
@@ -64,6 +65,17 @@ describe('prepareModelInput', () => {
     expect(result.nextCompaction?.summary).toContain('Compacted');
     expect(result.contextCompacted).toBe(true);
     expect(result.promptMessages.length).toBeLessThan(48);
+    expect(result.estimatedTokens).toBeLessThanOrEqual(MAX_ESTIMATED_MODEL_INPUT_TOKENS);
+  });
+
+  test('compacts a valid transcript larger than four MiB before enforcing the provider limit', async () => {
+    const messages = largeHistory(220);
+    expect(new TextEncoder().encode(JSON.stringify(messages)).byteLength).toBeGreaterThan(4 * 1024 * 1024);
+
+    const result = await prepare(messages);
+
+    expect(result.contextCompacted).toBe(true);
+    expect(result.nextCompaction).not.toBeNull();
     expect(result.estimatedTokens).toBeLessThanOrEqual(MAX_ESTIMATED_MODEL_INPUT_TOKENS);
   });
 

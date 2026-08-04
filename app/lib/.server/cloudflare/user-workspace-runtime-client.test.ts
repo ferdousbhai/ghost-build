@@ -1,45 +1,113 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { UserWorkspaceRuntimeClient } from './user-workspace-runtime-client';
 
-describe('UserWorkspaceRuntimeClient tool operation journal', () => {
-  it('returns a completed result without executing the operation again', async () => {
+describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
+  it('returns a completed journal receipt without executing the operation again', async () => {
     const execute = vi.fn(async () => ({ shouldNotRun: true }));
-    const { client, requests } = harness(() => json({ status: 'completed', result: { path: '/project/a.ts' } }));
+    const { client, calls } = harness((operation) =>
+      operation === 'beginToolOperation' ? { status: 'completed', result: { path: '/project/a.ts' } } : undefined,
+    );
 
     await expect(client.executeToolOnce('call-1', 'write', { path: '/project/a.ts' }, execute)).resolves.toEqual({
       path: '/project/a.ts',
     });
     expect(execute).not.toHaveBeenCalled();
-    expect(requests.map((request) => request.operation)).toEqual(['tool-operation/begin']);
+    expect(calls.map((request) => request.operation)).toEqual(['initializeProjectIdentity', 'beginToolOperation']);
   });
 
-  it('fails closed when the remote journal reports an indeterminate operation', async () => {
+  it('terminalizes a committed mutation whose display acknowledgement was interrupted', async () => {
+    const pending = {
+      kind: 'workspace-mutation-receipt',
+      version: 1,
+      committed: true,
+      acknowledgement: 'pending',
+      tool: 'write',
+      files: [],
+    };
+    const completed = { ...pending, acknowledgement: 'complete' };
     const execute = vi.fn(async () => ({ shouldNotRun: true }));
-    const { client, requests } = harness(() =>
-      json({ status: 'indeterminate', error: 'The operation may already have changed the workspace.' }),
+    const { client, stub } = harness((operation) => {
+      if (operation === 'beginToolOperation') {
+        return { status: 'completed', result: pending };
+      }
+      if (operation === 'completeToolOperation') {
+        return completed;
+      }
+      return undefined;
+    });
+
+    await expect(client.executeToolOnce('call-1', 'write', { path: '/project/a.ts' }, execute)).resolves.toEqual(
+      completed,
+    );
+    expect(execute).not.toHaveBeenCalled();
+    expect(stub.completeToolOperation).toHaveBeenCalledWith({ toolCallId: 'call-1', result: pending });
+  });
+
+  it('recovers a lost acknowledgement response after one write without executing it twice', async () => {
+    const pending = {
+      kind: 'workspace-mutation-receipt',
+      version: 1,
+      committed: true,
+      acknowledgement: 'pending',
+      tool: 'write',
+      files: [{ path: '/project/a.ts' }],
+    };
+    const completed = { ...pending, acknowledgement: 'complete' };
+    let begins = 0;
+    let completions = 0;
+    const execute = vi.fn(async () => ({ path: '/project/a.ts', bytesWritten: 12 }));
+    const { client } = harness((operation) => {
+      if (operation === 'beginToolOperation') {
+        begins += 1;
+        return begins === 1 ? { status: 'execute' } : { status: 'completed', result: pending };
+      }
+      if (operation === 'completeToolOperation') {
+        completions += 1;
+        if (completions === 1) {
+          throw new Error('RPC response lost after durable commit');
+        }
+        return completed;
+      }
+      return undefined;
+    });
+
+    await expect(client.executeToolOnce('call-1', 'write', { path: '/project/a.ts' }, execute)).resolves.toEqual(
+      completed,
+    );
+    expect(execute).toHaveBeenCalledOnce();
+    expect(begins).toBe(2);
+    expect(completions).toBe(2);
+  });
+
+  it('fails closed when the durable journal reports an indeterminate operation', async () => {
+    const execute = vi.fn(async () => ({ shouldNotRun: true }));
+    const { client } = harness((operation) =>
+      operation === 'beginToolOperation'
+        ? { status: 'indeterminate', error: 'The operation may already have changed the workspace.' }
+        : undefined,
     );
 
     await expect(client.executeToolOnce('call-1', 'exec', { command: 'npm test' }, execute)).rejects.toThrow(
       'may already have changed the workspace',
     );
     expect(execute).not.toHaveBeenCalled();
-    expect(requests.map((request) => request.operation)).toEqual(['tool-operation/begin']);
   });
 
-  it('coalesces concurrent calls with the same identifier, tool, and arguments', async () => {
+  it('coalesces concurrent calls with the same identifier and native RPC values', async () => {
     let resolveExecution!: (value: { exitCode: number }) => void;
     const execution = new Promise<{ exitCode: number }>((resolve) => {
       resolveExecution = resolve;
     });
     const execute = vi.fn(() => execution);
-    const { client, requests } = harness((request) => {
-      if (request.operation === 'tool-operation/begin') {
-        return json({ status: 'execute' });
+    const { client, calls } = harness((operation, value) => {
+      if (operation === 'beginToolOperation') {
+        return { status: 'execute' };
       }
-      if (request.operation === 'tool-operation/complete') {
-        return json(request.body.result);
+      if (operation === 'completeToolOperation') {
+        return record(value).result;
       }
-      throw new Error(`Unexpected operation: ${request.operation}`);
+      return undefined;
     });
 
     const first = client.executeToolOnce('call-1', 'exec', { cwd: '/', command: 'pwd' }, execute);
@@ -48,7 +116,11 @@ describe('UserWorkspaceRuntimeClient tool operation journal', () => {
     resolveExecution({ exitCode: 0 });
 
     await expect(Promise.all([first, second])).resolves.toEqual([{ exitCode: 0 }, { exitCode: 0 }]);
-    expect(requests.map((request) => request.operation)).toEqual(['tool-operation/begin', 'tool-operation/complete']);
+    expect(calls.map((request) => request.operation)).toEqual([
+      'initializeProjectIdentity',
+      'beginToolOperation',
+      'completeToolOperation',
+    ]);
   });
 
   it('rejects concurrent identifier reuse with different arguments', async () => {
@@ -57,8 +129,8 @@ describe('UserWorkspaceRuntimeClient tool operation journal', () => {
       resolveExecution = resolve;
     });
     const execute = vi.fn(() => execution);
-    const { client } = harness((request) =>
-      request.operation === 'tool-operation/begin' ? json({ status: 'execute' }) : json(request.body.result),
+    const { client } = harness((operation, value) =>
+      operation === 'beginToolOperation' ? { status: 'execute' } : record(value).result,
     );
 
     const first = client.executeToolOnce('call-1', 'write', { path: '/project/a.ts' }, execute);
@@ -69,76 +141,138 @@ describe('UserWorkspaceRuntimeClient tool operation journal', () => {
     await expect(first).resolves.toEqual({ ok: true });
   });
 
-  it('records the exact successful result with the remote journal', async () => {
-    const result = { path: '/project/a.ts', bytesWritten: 12 };
-    const { client, requests } = harness((request) => {
-      if (request.operation === 'tool-operation/begin') {
-        return json({ status: 'execute' });
-      }
-      if (request.operation === 'tool-operation/complete') {
-        return json(request.body.result);
-      }
-      throw new Error(`Unexpected operation: ${request.operation}`);
-    });
-
-    await expect(client.executeToolOnce('call-1', 'write', { path: result.path }, async () => result)).resolves.toEqual(
-      result,
-    );
-    expect(requests[1]).toMatchObject({
-      operation: 'tool-operation/complete',
-      body: { toolCallId: 'call-1', result },
-    });
-  });
-
-  it('records a failed execution and preserves the original error', async () => {
+  it('propagates typed stub failures and preserves the original tool error', async () => {
     const failure = new Error('command failed');
-    const { client, requests } = harness((request) => {
-      if (request.operation === 'tool-operation/begin') {
-        return json({ status: 'execute' });
-      }
-      if (request.operation === 'tool-operation/fail') {
-        return new Response(null, { status: 204 });
-      }
-      throw new Error(`Unexpected operation: ${request.operation}`);
-    });
+    const { client, stub } = harness((operation) =>
+      operation === 'beginToolOperation' ? { status: 'execute' } : undefined,
+    );
 
     await expect(
       client.executeToolOnce('call-1', 'exec', { command: 'false' }, async () => {
         throw failure;
       }),
     ).rejects.toBe(failure);
-    expect(requests[1]).toMatchObject({
-      operation: 'tool-operation/fail',
-      body: { toolCallId: 'call-1', error: 'command failed' },
+    expect(stub.failToolOperation).toHaveBeenCalledWith({ toolCallId: 'call-1', error: 'command failed' });
+  });
+
+  it('does not mark a command failed when RPC preserved only the pending-sync message marker', async () => {
+    const rpcError = new Error('[workspace_sync_pending] Computer synchronization is pending.');
+    rpcError.name = 'Error';
+    const { client, stub } = harness((operation) =>
+      operation === 'beginToolOperation' ? { status: 'execute' } : undefined,
+    );
+
+    await expect(
+      client.executeToolOnce('call-1', 'exec', { command: 'touch file' }, async () => {
+        throw rpcError;
+      }),
+    ).rejects.toBe(rpcError);
+
+    expect(stub.failToolOperation).not.toHaveBeenCalled();
+  });
+
+  it('rejects the normal error object returned by the official Computer exec wrapper without closing the journal', async () => {
+    const { client, stub } = harness((operation) =>
+      operation === 'beginToolOperation' ? { status: 'execute' } : undefined,
+    );
+
+    await expect(
+      client.executeToolOnce('call-1', 'exec', { command: 'touch file' }, async () => ({
+        command: 'touch file',
+        backend: 'container-shell',
+        error: '[workspace_sync_pending] Computer synchronization is pending.',
+      })),
+    ).rejects.toMatchObject({ code: 'workspace_sync_pending' });
+
+    expect(stub.completeToolOperation).not.toHaveBeenCalled();
+    expect(stub.failToolOperation).not.toHaveBeenCalled();
+  });
+
+  it('uses RPC-native bytes and streams and performs no internal HTTP fetch', async () => {
+    const bytes = new Uint8Array([0, 1, 2, 255]);
+    const stream = new Blob([bytes]).stream();
+    const { client, stub, namespace } = harness((operation) => {
+      if (operation === 'readWorkspaceFile') {
+        return {
+          path: '/home/project/blob.bin',
+          bytes,
+          encoding: 'base64',
+          size: bytes.byteLength,
+          mode: 0o100644,
+          sha256: 'a'.repeat(64),
+          revision: 1,
+        };
+      }
+      if (operation === 'streamWorkspaceFile') {
+        return stream;
+      }
+      return undefined;
     });
+
+    await expect(client.readFile('/home/project/blob.bin')).resolves.toMatchObject({ bytes });
+    await expect(client.computer.fs.readFile('/home/project/blob.bin')).resolves.toBe(stream);
+    expect(namespace.idFromName).toHaveBeenCalledWith('project-1');
+    expect(stub.initializeProjectIdentity).toHaveBeenCalledWith({ projectId: 'project-1', userId: 'user-1' });
+
+    const source = readFileSync(new URL('./user-workspace-runtime-client.ts', import.meta.url), 'utf8');
+    expect(source).not.toContain('fetch(');
+    expect(source).not.toContain('authorization');
+    expect(source).not.toContain('base64');
+    expect(source).not.toContain('/v1/projects/');
+  });
+
+  it('rejects a user mismatch before resolving a project stub', async () => {
+    const { namespace } = harness(() => undefined, 'different-user');
+    const client = new UserWorkspaceRuntimeClient(
+      {
+        GHOSTBUILD_USER_RUNTIME: '1',
+        GHOSTBUILD_USER_ID: 'user-1',
+        PROJECT_WORKSPACE: namespace,
+      } as unknown as Env,
+      'project-1',
+      () => 'different-user',
+    );
+
+    await expect(client.readText('/home/project/a.ts')).rejects.toThrow('not configured for this project owner');
+    expect(namespace.get).not.toHaveBeenCalled();
   });
 });
 
-type JournalRequest = { operation: string; body: Record<string, unknown> };
+type RpcCall = { operation: string; value: unknown };
 
-function harness(respond: (request: JournalRequest) => Response | Promise<Response>) {
-  const requests: JournalRequest[] = [];
-  const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-    const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
-    const operation = url.pathname.split('/').slice(4).join('/');
-    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
-    const journalRequest = { operation, body };
-    requests.push(journalRequest);
-    return respond(journalRequest);
-  });
+function harness(respond: (operation: string, value: unknown) => unknown, userId = 'user-1') {
+  const calls: RpcCall[] = [];
+  const method = (operation: string) =>
+    vi.fn(async (value?: unknown, second?: unknown) => {
+      const payload = second === undefined ? value : [value, second];
+      calls.push({ operation, value: payload });
+      return respond(operation, payload);
+    });
+  const stub = {
+    initializeProjectIdentity: method('initializeProjectIdentity'),
+    beginToolOperation: method('beginToolOperation'),
+    completeToolOperation: method('completeToolOperation'),
+    failToolOperation: method('failToolOperation'),
+    readWorkspaceFile: method('readWorkspaceFile'),
+    streamWorkspaceFile: method('streamWorkspaceFile'),
+  };
+  const namespace = {
+    idFromName: vi.fn(() => ({ id: 'project-do-id' })),
+    get: vi.fn(() => stub),
+  };
   const env = {
     GHOSTBUILD_USER_RUNTIME: '1',
-    GHOSTBUILD_USER_RUNTIME_ENDPOINT: 'https://workspace.example',
-    CONTROL_PLANE_SECRET: 'secret',
+    GHOSTBUILD_USER_ID: userId,
+    PROJECT_WORKSPACE: namespace,
   } as unknown as Env;
   return {
-    client: new UserWorkspaceRuntimeClient(env, 'project-1', () => 'user-1', request as unknown as typeof fetch),
-    requests,
+    client: new UserWorkspaceRuntimeClient(env, 'project-1', () => userId),
+    calls,
+    stub,
+    namespace,
   };
 }
 
-function json(value: unknown): Response {
-  return new Response(JSON.stringify(value), {
-    headers: { 'content-type': 'application/json' },
-  });
+function record(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
 }

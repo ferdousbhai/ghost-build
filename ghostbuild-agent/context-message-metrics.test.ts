@@ -3,12 +3,11 @@ import type { GhostbuildMessage } from './ai-compat.js';
 import { calculatePromptCharacterCounts } from './context-message-metrics.js';
 
 describe('calculatePromptCharacterCounts', () => {
-  test('does not count legacy content and mirrored text parts twice', () => {
+  test('counts text from native message parts', () => {
     const messages: GhostbuildMessage[] = [
       {
         id: 'history',
         role: 'assistant',
-        content: 'stored text',
         parts: [{ type: 'text', text: 'stored text' }],
       },
       {
@@ -30,17 +29,13 @@ describe('calculatePromptCharacterCounts', () => {
       {
         id: 'tool',
         role: 'assistant',
-        content: '',
         parts: [
           {
-            type: 'tool-invocation',
-            toolInvocation: {
-              state: 'result',
-              toolCallId: 'call',
-              toolName: 'read',
-              args: { path: 'a' },
-              result: 'ok',
-            },
+            type: 'tool-read',
+            state: 'output-available',
+            toolCallId: 'call',
+            input: { path: 'a' },
+            output: 'ok',
           },
         ],
       },
@@ -49,12 +44,11 @@ describe('calculatePromptCharacterCounts', () => {
     expect(calculatePromptCharacterCounts(messages).messageHistoryChars).toBeGreaterThan(0);
   });
 
-  test('uses text parts when a modern message carries an empty legacy content field', () => {
+  test('uses text parts for the current turn', () => {
     const messages: GhostbuildMessage[] = [
       {
         id: 'turn',
         role: 'user',
-        content: '',
         parts: [{ type: 'text', text: 'modern text' }],
       },
     ];

@@ -1,5 +1,5 @@
 const EXPECTED_WORKER = 'ghostbuild';
-const EXPECTED_REPOSITORY = 'ferdousbhai/ghostbuild';
+const EXPECTED_REPOSITORY = 'ferdousbhai/ghost-build';
 const EXPECTED_BRANCH = 'main';
 const EXPECTED_BUILD_COMMAND = 'pnpm run workers-builds:build';
 const EXPECTED_DEPLOY_COMMAND = 'pnpm run workers-builds:deploy';

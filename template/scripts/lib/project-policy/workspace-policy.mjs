@@ -1,47 +1,26 @@
 import { isAlias, isMap, isScalar, isSeq, parseDocument, visit } from "yaml";
+import generatedProjectDependencyPolicy from "./generated-project-dependency-policy.json" with { type: "json" };
 
-export const APPROVED_BUILD_DEPENDENCIES = [
-  "core-js-pure",
-  "esbuild",
-  "sharp",
-  "workerd",
-];
+export const GENERATED_PROJECT_DEPENDENCY_POLICY =
+  generatedProjectDependencyPolicy;
+export const APPROVED_BUILD_DEPENDENCIES =
+  generatedProjectDependencyPolicy.approvedBuildDependencies;
 
-const APPROVED_PNPM_OVERRIDES = new Map([
-  ["brace-expansion@<1.1.18", "1.1.18"],
-  ["brace-expansion@>=2.0.0 <2.1.4", "2.1.4"],
-  ["brace-expansion@>=4.0.0 <5.0.9", "5.0.9"],
-  ["@hono/node-server@<2.0.10", "2.0.10"],
-  ["fast-uri@>=3.0.0 <3.1.5", "3.1.5"],
-  ["hono@<4.12.34", "4.12.34"],
-  ["ip-address@<=10.3.0", "10.3.1"],
-  ["postcss@<=8.5.22", "8.5.25"],
-  ["sharp@<0.35.0", "0.35.3"],
-  ["undici@>=7.0.0 <7.29.0", "7.29.0"],
-]);
-
-const APPROVED_MINIMUM_RELEASE_AGE_EXCLUSIONS = new Set([
-  "@cloudflare/computer@0.1.1",
-]);
-
-const MAX_PNPM_WORKSPACE_POLICY_BYTES = 64 * 1024;
-const ALLOWED_PNPM_WORKSPACE_KEYS = new Set([
-  "packages",
-  "ignoreWorkspaceRootCheck",
-  "minimumReleaseAge",
-  "minimumReleaseAgeExclude",
-  "minimumReleaseAgeIgnoreMissingTime",
-  "minimumReleaseAgeStrict",
-  "strictDepBuilds",
-  "blockExoticSubdeps",
-  "overrides",
-  "allowBuilds",
-  "peerDependencyRules",
-]);
-const FORBIDDEN_PNPM_WORKSPACE_KEYS = new Set([
-  "dangerouslyAllowAllBuilds",
-  "trustLockfile",
-]);
+const APPROVED_PNPM_OVERRIDES = new Map(
+  Object.entries(generatedProjectDependencyPolicy.approvedOverrides),
+);
+const APPROVED_MINIMUM_RELEASE_AGE_EXCLUSIONS = new Set(
+  generatedProjectDependencyPolicy.profiles.repository
+    .minimumReleaseAgeExclusions,
+);
+const MAX_PNPM_WORKSPACE_POLICY_BYTES =
+  generatedProjectDependencyPolicy.maximumWorkspacePolicyBytes;
+const ALLOWED_PNPM_WORKSPACE_KEYS = new Set(
+  generatedProjectDependencyPolicy.allowedWorkspaceKeys,
+);
+const FORBIDDEN_PNPM_WORKSPACE_KEYS = new Set(
+  generatedProjectDependencyPolicy.forbiddenWorkspaceKeys,
+);
 
 export function findBuildApprovalErrors(workspace, label) {
   if (exceedsPolicySizeLimit(workspace)) {
@@ -105,8 +84,8 @@ export function findBuildApprovalErrors(workspace, label) {
   requirePlainScalar(
     root,
     "minimumReleaseAge",
-    1440,
-    `${label} must set minimumReleaseAge to 1440 minutes.`,
+    generatedProjectDependencyPolicy.minimumReleaseAgeMinutes,
+    `${label} must set minimumReleaseAge to ${generatedProjectDependencyPolicy.minimumReleaseAgeMinutes} minutes.`,
     errors,
   );
   findMinimumReleaseAgeExclusionErrors(root, label, errors);

@@ -133,6 +133,75 @@ describe('deployment repository', () => {
     ).rejects.toBeInstanceOf(DeploymentConcurrencyLimitError);
   });
 
+  it('recovers exact deployment writes when D1 commits before losing the acknowledgement', async () => {
+    const created = await create(1);
+    const approved = await approveDeployment({
+      db: d1(sqlite, true),
+      deploymentId: created.id,
+      userId: created.userId,
+      connectionId: created.connectionId,
+      connectionGeneration: created.connectionGeneration,
+      approvedDigest: created.planDigest,
+      now: 20,
+    });
+    expect(approved).toMatchObject({ status: 'approved', executionGeneration: 1, approvedAt: 20 });
+
+    const claimed = await claimApprovedDeployment({
+      db: d1(sqlite, true),
+      deploymentId: approved.id,
+      userId: approved.userId,
+      connectionId: approved.connectionId,
+      connectionGeneration: approved.connectionGeneration,
+      executionGeneration: approved.executionGeneration,
+      now: 30,
+    });
+    expect(claimed).toMatchObject({ status: 'provisioning', updatedAt: 30 });
+
+    await expect(
+      transitionDeployment({
+        db: d1(sqlite, true),
+        deploymentId: claimed.id,
+        executionGeneration: claimed.executionGeneration,
+        expectedStatus: 'provisioning',
+        nextStatus: 'deploying',
+        now: 40,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(requireDeploymentForUser(db, claimed.id, claimed.userId)).resolves.toMatchObject({
+      status: 'deploying',
+      updatedAt: 40,
+    });
+
+    await transitionDeployment({
+      db,
+      deploymentId: claimed.id,
+      executionGeneration: claimed.executionGeneration,
+      expectedStatus: 'deploying',
+      nextStatus: 'failed',
+      errorCode: 'deployment_failed',
+      errorMessage: 'failed',
+      now: 50,
+    });
+    await expect(
+      prepareDeploymentRetry({
+        db: d1(sqlite, true),
+        deploymentId: claimed.id,
+        userId: claimed.userId,
+        connectionId: claimed.connectionId,
+        connectionGeneration: claimed.connectionGeneration,
+        executionGeneration: claimed.executionGeneration,
+        now: 60,
+      }),
+    ).resolves.toMatchObject({
+      status: 'awaiting_approval',
+      approvedDigest: null,
+      approvedAt: null,
+      errorCode: null,
+      errorMessage: null,
+      updatedAt: 60,
+    });
+  });
+
   it('returns a failed deployment to approval without artifact cleanup', async () => {
     const approved = await approvedDeployment(1);
     await claimApprovedDeployment({
@@ -203,15 +272,21 @@ async function approvedDeployment(index: number) {
   });
 }
 
-function d1(database: DatabaseSync): D1Database {
+function d1(database: DatabaseSync, throwAfterNextRun = false): D1Database {
   return {
     prepare(query: string) {
-      return prepared(database.prepare(query));
+      return prepared(database.prepare(query), () => {
+        if (!throwAfterNextRun) {
+          return;
+        }
+        throwAfterNextRun = false;
+        throw new Error('D1 acknowledgement lost');
+      });
     },
   } as unknown as D1Database;
 }
 
-function prepared(statement: StatementSync) {
+function prepared(statement: StatementSync, afterRun?: () => void) {
   let values: SQLInputValue[] = [];
   return {
     bind(...next: SQLInputValue[]) {
@@ -220,6 +295,7 @@ function prepared(statement: StatementSync) {
     },
     async run() {
       const result = statement.run(...values);
+      afterRun?.();
       return { meta: { changes: Number(result.changes) } };
     },
     async first<T>() {

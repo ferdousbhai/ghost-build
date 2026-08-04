@@ -2,7 +2,7 @@ import { cloudflare } from '@cloudflare/vite-plugin';
 import agents from 'agents/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { configDefaults, defineConfig } from 'vitest/config';
 import { optimizeCssModules } from 'vite-plugin-optimize-css-modules';
 import wasm from 'vite-plugin-wasm';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +50,9 @@ export default defineConfig((config) => {
     },
     ssr: {
       noExternal: isTest ? ['@cloudflare/sandbox', '@cloudflare/containers'] : undefined,
+    },
+    test: {
+      exclude: [...configDefaults.exclude, 'e2e/**'],
     },
     plugins: [
       !isTest && agents(),

@@ -4,7 +4,7 @@ import { findWorkersBuildsConfigErrors } from './workers-builds-config.mjs';
 const containerSourceSha256 = 'b'.repeat(64);
 const validConfig = {
   worker: 'ghostbuild',
-  repository: 'ferdousbhai/ghostbuild',
+  repository: 'ferdousbhai/ghost-build',
   productionBranch: 'main',
   rootDirectory: '/',
   buildCommand: 'pnpm run workers-builds:build',

@@ -23,8 +23,9 @@ export function HeaderActionButtons() {
             }
           }}
           variant="neutral"
-          className="rounded-r-none border-r-0"
+          className="!size-11 !min-h-11 rounded-r-none border-r-0 !px-0 sm:!size-auto sm:!min-h-9 sm:!px-3"
           icon={<ChatBubbleIcon className="my-px" />}
+          aria-label={showChat ? 'Hide chat' : 'Show chat'}
         />
         <Button
           onClick={() => {
@@ -35,8 +36,9 @@ export function HeaderActionButtons() {
             workbenchStore.showWorkbench.set(!showWorkbench);
           }}
           variant="neutral"
-          className="rounded-l-none"
+          className="!size-11 !min-h-11 rounded-l-none !px-0 sm:!size-auto sm:!min-h-9 sm:!px-3"
           icon={<CodeIcon className="my-px" />}
+          aria-label={showWorkbench ? 'Hide workbench' : 'Show workbench'}
           tip={showWorkbench ? 'Hide workbench' : 'Show workbench'}
         />
       </div>

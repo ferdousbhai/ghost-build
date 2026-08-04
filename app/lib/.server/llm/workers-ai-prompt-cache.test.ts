@@ -16,33 +16,35 @@ describe('Workers AI prompt-cache identity', () => {
     const base = {
       privacySalt: 'opaque-session-affinity',
       model: '@cf/zai-org/glm-5.2',
-      messages: [
-        { role: 'system', content: 'stable' },
-        { role: 'user', content: 'project instructions A' },
-      ],
+      instructions: 'stable',
+      messages: [{ role: 'user', content: 'project instructions A' }],
       tools: { read: { description: 'read' } },
       activeTools: ['read'],
       toolChoice: 'auto',
     };
     const fingerprint = await fingerprintWorkersAiModelInput(base);
 
+    await expect(fingerprintWorkersAiModelInput(base)).resolves.toBe(fingerprint);
+    await expect(
+      fingerprintWorkersAiModelInput({ ...base, privacySalt: 'different-transcript-generation' }),
+    ).resolves.not.toBe(fingerprint);
+
     await expect(fingerprintWorkersAiModelInput({ ...base, model: '@cf/zai-org/glm-next' })).resolves.not.toBe(
       fingerprint,
     );
-    await expect(
-      fingerprintWorkersAiModelInput({ ...base, messages: [{ role: 'system', content: 'changed prompt' }] }),
-    ).resolves.not.toBe(fingerprint);
+    await expect(fingerprintWorkersAiModelInput({ ...base, instructions: 'changed prompt' })).resolves.not.toBe(
+      fingerprint,
+    );
     await expect(
       fingerprintWorkersAiModelInput({ ...base, tools: { read: { description: 'changed schema' } } }),
     ).resolves.not.toBe(fingerprint);
     await expect(
       fingerprintWorkersAiModelInput({
         ...base,
-        messages: [
-          { role: 'system', content: 'stable' },
-          { role: 'user', content: 'project instructions B' },
-        ],
+        messages: [{ role: 'user', content: 'project instructions B' }],
       }),
     ).resolves.not.toBe(fingerprint);
+    await expect(fingerprintWorkersAiModelInput({ ...base, activeTools: [] })).resolves.not.toBe(fingerprint);
+    await expect(fingerprintWorkersAiModelInput({ ...base, toolChoice: 'required' })).resolves.not.toBe(fingerprint);
   });
 });

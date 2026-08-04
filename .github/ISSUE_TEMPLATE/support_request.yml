@@ -1,0 +1,39 @@
+name: Support request
+description: Get product, account, export, deletion, or privacy help
+title: '[Support]: '
+labels:
+  - support
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        This issue is public. Do not include prompts, source code, Cloudflare account IDs, credentials, tokens,
+        personal data, or vulnerability details. Use private vulnerability reporting for security issues.
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Product help
+        - Account and privacy
+        - Data export
+        - Account deletion
+        - Cloudflare connection
+    validations:
+      required: true
+  - type: textarea
+    id: request
+    attributes:
+      label: How can we help?
+      description: Describe the outcome you need using non-sensitive details.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed credentials, personal data, private project content, and Cloudflare account identifiers.
+          required: true
+        - label: This is not a security vulnerability or abuse report.
+          required: true

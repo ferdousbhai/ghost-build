@@ -7,8 +7,14 @@ export function ToolLookupDocsResult({ invocation }: { invocation: GhostbuildToo
   if (invocation.toolName !== 'lookupDocs' || isToolInvocationInProgress(invocation)) {
     return null;
   }
-  const resultText = toolResultContent(invocation.result) ?? toolResultSummary(invocation.result);
-  return !toolResultSucceeded(invocation.result) ? (
+  if (invocation.state === 'output-error') {
+    return <ToolResultFrame>{invocation.errorText}</ToolResultFrame>;
+  }
+  if (invocation.state === 'output-denied') {
+    return <ToolResultFrame>{invocation.approval.reason ?? 'Documentation lookup was denied.'}</ToolResultFrame>;
+  }
+  const resultText = toolResultContent(invocation.output) ?? toolResultSummary(invocation.output);
+  return !toolResultSucceeded(invocation.output) ? (
     <ToolResultFrame>
       <pre>{resultText}</pre>
     </ToolResultFrame>

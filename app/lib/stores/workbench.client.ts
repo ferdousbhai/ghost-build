@@ -1,5 +1,5 @@
 import { atom, type ReadableAtom, type WritableAtom } from 'nanostores';
-import type { EditorDocument, FileMap, ScrollPosition } from 'ghostbuild-agent/types';
+import type { EditorDocument, File, FileMap, ScrollPosition } from 'ghostbuild-agent/types';
 import type { AbsolutePath } from 'ghostbuild-agent/utils/workDir';
 import { getAbsolutePath } from 'ghostbuild-agent/utils/workDir';
 import type {
@@ -18,10 +18,11 @@ export type { WorkbenchViewType } from './workbench-ui-state';
 
 type WorkspaceChangeListener = (changes: BuilderWorkspaceClientChange[]) => Promise<BuilderWorkspaceApplyResult>;
 
-class WorkbenchStore {
+export class WorkbenchStore {
   #previewsStore = new PreviewsStore();
   #filesStore = new FilesStore();
   #editorStore = new EditorStore();
+  #flushPendingEditorChange: (() => void) | null = null;
   showWorkbench: WritableAtom<boolean> = import.meta.hot?.data.showWorkbench ?? atom(false);
   currentView = workbenchCurrentView;
   unsavedFiles: WritableAtom<Set<AbsolutePath>> = import.meta.hot?.data.unsavedFiles ?? atom(new Set<AbsolutePath>());
@@ -85,14 +86,58 @@ class WorkbenchStore {
     this.#filesStore.clearWorkspaceChangeListener(listener);
   }
 
+  registerPendingEditorChangeFlusher(flush: () => void): () => void {
+    this.#flushPendingEditorChange = flush;
+    return () => {
+      if (this.#flushPendingEditorChange === flush) {
+        this.#flushPendingEditorChange = null;
+      }
+    };
+  }
+
+  flushPendingEditorChange(): void {
+    this.#flushPendingEditorChange?.();
+  }
+
   applyWorkspaceSyncEntries(entries: BuilderWorkspaceSyncEntry[]): void {
+    this.flushPendingEditorChange();
     this.#filesStore.applyWorkspaceSyncEntries(entries);
     this.setDocuments(this.#filesStore.files.get());
   }
 
   replaceWorkspaceSnapshot(entries: BuilderWorkspaceSyncEntry[]): void {
+    this.flushPendingEditorChange();
+
+    const unsavedFiles = this.unsavedFiles.get();
+    const unsavedDocuments = new Map(
+      [...unsavedFiles]
+        .map((filePath) => [filePath, this.#editorStore.documents.get()[filePath]] as const)
+        .filter(
+          (entry): entry is readonly [AbsolutePath, EditorDocument] => entry[1] !== undefined && !entry[1].isBinary,
+        ),
+    );
+
     this.#filesStore.replaceWorkspaceSnapshot(entries);
-    this.unsavedFiles.set(new Set());
+
+    const durableFiles = this.#filesStore.files.get();
+    const nextUnsavedFiles = new Set<AbsolutePath>();
+
+    for (const [filePath, document] of unsavedDocuments) {
+      const durableFile = durableFiles[filePath];
+      if (durableFile?.type === 'file' && !durableFile.isBinary) {
+        if (durableFile.content !== document.value) {
+          nextUnsavedFiles.add(filePath);
+        }
+        continue;
+      }
+
+      // A full snapshot can race a local edit with a remote deletion. Keep the
+      // local text as an unsaved recreation instead of silently discarding it.
+      this.#filesStore.stageUnsavedTextFile(filePath, document.value);
+      nextUnsavedFiles.add(filePath);
+    }
+
+    this.unsavedFiles.set(nextUnsavedFiles);
     this.setDocuments(this.#filesStore.files.get());
   }
 
@@ -105,6 +150,7 @@ class WorkbenchStore {
   }
 
   setDocuments(files: FileMap): void {
+    this.flushPendingEditorChange();
     this.#editorStore.setDocuments(files, this.unsavedFiles.get());
     if (this.currentDocument.get() !== undefined) {
       return;
@@ -119,9 +165,9 @@ class WorkbenchStore {
     this.setSelectedFile(firstFile?.[0] as AbsolutePath | undefined);
   }
 
-  setCurrentDocumentContent(newContent: string): void {
-    const filePath = this.currentDocument.get()?.filePath;
-    if (!filePath) {
+  setDocumentContent(filePath: AbsolutePath, newContent: string): void {
+    const document = this.#editorStore.documents.get()[filePath];
+    if (!document || document.isBinary) {
       return;
     }
     const originalContent = this.#filesStore.getFile(filePath)?.content;
@@ -144,10 +190,12 @@ class WorkbenchStore {
   }
 
   setSelectedFile(filePath: AbsolutePath | undefined): void {
+    this.flushPendingEditorChange();
     this.#editorStore.setSelectedFile(filePath);
   }
 
   async saveFile(filePath: string): Promise<void> {
+    this.flushPendingEditorChange();
     const absolutePath = getAbsolutePath(filePath);
     const document = this.#editorStore.documents.get()[absolutePath];
     if (!document) {
@@ -167,15 +215,21 @@ class WorkbenchStore {
   }
 
   resetCurrentDocument(): void {
+    this.flushPendingEditorChange();
     const current = this.currentDocument.get();
     const file = current && this.#filesStore.getFile(current.filePath);
     if (current && file) {
-      this.setCurrentDocumentContent(file.content);
+      this.setDocumentContent(getAbsolutePath(current.filePath), file.content);
     }
   }
 
-  getModifiedFiles() {
-    return this.#filesStore.getModifiedFiles();
+  getModifiedFiles(): Record<string, File> | undefined {
+    this.flushPendingEditorChange();
+    const modifiedFiles = {
+      ...(this.#filesStore.getModifiedFiles() ?? {}),
+      ...this.#visibleUnsavedTextFiles(),
+    };
+    return Object.keys(modifiedFiles).length > 0 ? modifiedFiles : undefined;
   }
 
   resetAllFileModifications(): void {
@@ -183,7 +237,19 @@ class WorkbenchStore {
   }
 
   async downloadZip(): Promise<void> {
-    await downloadProject(this.files.get(), description.value ?? 'project');
+    this.flushPendingEditorChange();
+    await downloadProject({ ...this.files.get(), ...this.#visibleUnsavedTextFiles() }, description.value ?? 'project');
+  }
+
+  #visibleUnsavedTextFiles(): Record<string, File> {
+    const visibleFiles: Record<string, File> = {};
+    for (const filePath of this.unsavedFiles.get()) {
+      const document = this.#editorStore.documents.get()[filePath];
+      if (document && !document.isBinary) {
+        visibleFiles[filePath] = { type: 'file', content: document.value, isBinary: false };
+      }
+    }
+    return visibleFiles;
   }
 }
 

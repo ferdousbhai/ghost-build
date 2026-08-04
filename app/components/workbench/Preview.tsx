@@ -6,6 +6,7 @@ import { IconButton } from '~/components/ui/IconButton';
 import { Button } from '@ui/Button';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { classNames } from '~/utils/classNames';
+import { captureProductEvent } from '~/lib/telemetry.client';
 
 export function Preview() {
   const state = useStore(workbenchStore.previewState);
@@ -30,6 +31,15 @@ export function Preview() {
     const timeout = setTimeout(() => setExpirationTick((value) => value + 1), Math.min(remaining + 10, 2_147_483_647));
     return () => clearTimeout(timeout);
   }, [candidate]);
+
+  useEffect(() => {
+    if (status === 'ready' && preview) {
+      void captureProductEvent('preview_ready', {
+        outcome: 'success',
+        workspaceRevision: preview.workspaceRevision,
+      });
+    }
+  }, [preview, status]);
 
   const requestPreview = async () => {
     setRequesting(true);

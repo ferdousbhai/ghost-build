@@ -10,10 +10,12 @@ import type {
 } from '~/components/editor/codemirror/CodeMirrorEditor';
 import useViewport from '~/lib/hooks/useViewport';
 import { workbenchStore, type WorkbenchViewType } from '~/lib/stores/workbench.client';
+import { initialIdStore } from '~/lib/stores/chatId';
 
 const logger = createScopedLogger('WorkbenchController');
 
 export function useWorkbenchController(isStreaming?: boolean) {
+  const projectId = useStore(initialIdStore);
   const previews = useStore(workbenchStore.previews);
   const showWorkbench = useStore(workbenchStore.showWorkbench);
   const selectedFile = useStore(workbenchStore.selectedFile);
@@ -41,19 +43,16 @@ export function useWorkbenchController(isStreaming?: boolean) {
     workbenchStore.setDocuments(files);
   }, [files]);
 
-  const currentDocumentPath = currentDocument?.filePath;
   const onEditorChange = useCallback<OnEditorChange>(
     (update) => {
       const updatePath = getAbsolutePath(update.filePath);
-      if (currentDocumentPath !== updatePath) {
-        logger.debug(
-          `Editor update ignored for stale document, changed: ${updatePath} current: ${currentDocumentPath}`,
-        );
+      if (update.projectId !== projectId) {
+        logger.debug(`Editor update ignored for stale project, changed: ${update.projectId} current: ${projectId}`);
         return;
       }
-      workbenchStore.setCurrentDocumentContent(update.content);
+      workbenchStore.setDocumentContent(updatePath, update.content);
     },
-    [currentDocumentPath],
+    [projectId],
   );
 
   const onEditorScroll = useCallback<OnEditorScroll>(
@@ -62,10 +61,12 @@ export function useWorkbenchController(isStreaming?: boolean) {
   );
   const onEditorWheel = useCallback<OnEditorWheel>(() => workbenchStore.stopFollowingStreamedCode(), []);
   const onFileSelect = useCallback((filePath: string | undefined) => {
+    workbenchStore.flushPendingEditorChange();
     workbenchStore.followingStreamedCode.set(false);
     workbenchStore.setSelectedFile(filePath ? getAbsolutePath(filePath) : undefined);
   }, []);
   const onFileSave = useCallback(() => {
+    workbenchStore.flushPendingEditorChange();
     void workbenchStore.saveCurrentDocument().catch((error) => {
       logger.error('Failed to update file content', error);
       toast.error('Failed to update file content');
@@ -85,6 +86,7 @@ export function useWorkbenchController(isStreaming?: boolean) {
     onFileReset: () => workbenchStore.resetCurrentDocument(),
     onFileSave,
     onFileSelect,
+    projectId,
     selectedFile,
     selectedView,
     setSelectedView: (view: WorkbenchViewType) => workbenchStore.currentView.set(view),

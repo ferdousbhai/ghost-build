@@ -6,6 +6,7 @@
 @import 'components/editor.css';
 @import 'home.css';
 @import 'app-shell.css';
+@import 'trust.css';
 @tailwind base;
 
 @layer base {

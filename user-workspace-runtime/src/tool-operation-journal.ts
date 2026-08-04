@@ -3,6 +3,8 @@ const MAX_INDETERMINATE_TOOL_OPERATIONS = 50;
 const MAX_TOOL_RESULT_BYTES = 512 * 1024;
 const MAX_TOOL_ERROR_LENGTH = 4_000;
 
+import { acknowledgeMutationReceipt, isMutationReceipt, type MutationReceipt } from './mutation-receipt';
+
 type ToolOperationStorage = Pick<DurableObjectStorage, 'sql' | 'transactionSync'>;
 
 type ToolOperationRow = {
@@ -11,6 +13,23 @@ type ToolOperationRow = {
   status: 'running' | 'completed' | 'failed';
   result_json: string | null;
   error: string | null;
+};
+
+type PendingToolOperationRow = {
+  tool_call_id: string;
+  result_json: string;
+};
+
+type PendingCommandEnvelope = {
+  kind: 'workspace-sync-pending';
+  backend: string;
+  result: unknown;
+};
+
+type PendingToolOperation = {
+  backend: string;
+  toolCallId: string;
+  result: unknown;
 };
 
 export type ToolOperationStartResult =
@@ -81,10 +100,7 @@ export class ToolOperationJournal {
   }
 
   complete(args: { toolCallId: string; result: unknown; now?: number }): unknown {
-    const resultJson = JSON.stringify(args.result);
-    if (resultJson === undefined || new TextEncoder().encode(resultJson).byteLength > MAX_TOOL_RESULT_BYTES) {
-      throw new Error('The workspace tool result exceeded its durable result limit.');
-    }
+    const resultJson = encodeResult(args.result);
     return this.storage.transactionSync(() => {
       const existing = this.require(args.toolCallId);
       if (existing.status === 'completed') {
@@ -105,6 +121,109 @@ export class ToolOperationJournal {
         args.toolCallId,
       );
       return JSON.parse(resultJson) as unknown;
+    });
+  }
+
+  commitMutation(args: { toolCallId: string; receipt: MutationReceipt; now?: number }): MutationReceipt {
+    return this.complete({ toolCallId: args.toolCallId, result: args.receipt, now: args.now }) as MutationReceipt;
+  }
+
+  acknowledgeMutation(args: { toolCallId: string; result: unknown; now?: number }): MutationReceipt {
+    return this.storage.transactionSync(() => {
+      const existing = this.require(args.toolCallId);
+      if (existing.status !== 'completed' || existing.result_json === null) {
+        throw new Error('The workspace mutation was not durably committed.');
+      }
+      const receipt: unknown = JSON.parse(existing.result_json);
+      if (!isMutationReceipt(receipt)) {
+        throw new Error('The completed workspace operation is not a mutation receipt.');
+      }
+      if (receipt.acknowledgement === 'complete') {
+        return receipt;
+      }
+      const acknowledged = acknowledgeMutationReceipt(receipt, args.result);
+      const resultJson = JSON.stringify(acknowledged);
+      this.storage.sql.exec(
+        `UPDATE ghostbuild_tool_operations
+         SET result_json = ?, updated_at = ?
+         WHERE tool_call_id = ? AND status = 'completed'`,
+        resultJson,
+        args.now ?? Date.now(),
+        args.toolCallId,
+      );
+      return acknowledged;
+    });
+  }
+
+  toolName(toolCallId: string): string {
+    return this.require(toolCallId).tool_name;
+  }
+
+  mutationReceipt(toolCallId: string): MutationReceipt | null {
+    const existing = this.require(toolCallId);
+    if (existing.status !== 'completed' || existing.result_json === null) {
+      return null;
+    }
+    const result: unknown = JSON.parse(existing.result_json);
+    return isMutationReceipt(result) ? result : null;
+  }
+
+  registerPending(args: { backend: string; toolCallId: string; result: unknown; now?: number }): void {
+    const resultJson = encodeResult({
+      kind: 'workspace-sync-pending',
+      backend: args.backend,
+      result: args.result,
+    } satisfies PendingCommandEnvelope);
+    this.storage.transactionSync(() => {
+      const operation = this.require(args.toolCallId);
+      if (operation.status !== 'running') {
+        throw new Error('Only a running workspace tool operation can wait for synchronization.');
+      }
+      const existing = this.pending().find((pending) => pending.backend === args.backend);
+      if (existing && (existing.toolCallId !== args.toolCallId || operation.result_json !== resultJson)) {
+        throw new Error('A Computer backend already has a different pending tool operation.');
+      }
+      this.storage.sql.exec(
+        `UPDATE ghostbuild_tool_operations
+         SET result_json = ?, updated_at = ?
+         WHERE tool_call_id = ? AND status = 'running'`,
+        resultJson,
+        args.now ?? Date.now(),
+        args.toolCallId,
+      );
+    });
+  }
+
+  pending(): PendingToolOperation[] {
+    return [
+      ...this.storage.sql.exec<PendingToolOperationRow>(
+        `SELECT tool_call_id, result_json
+       FROM ghostbuild_tool_operations
+       WHERE status = 'running' AND result_json IS NOT NULL
+       ORDER BY tool_call_id`,
+      ),
+    ].flatMap((row) => {
+      const envelope = pendingEnvelope(row.result_json);
+      return envelope ? [{ backend: envelope.backend, toolCallId: row.tool_call_id, result: envelope.result }] : [];
+    });
+  }
+
+  completePending(backend: string, overrideResult?: unknown): boolean {
+    return this.storage.transactionSync(() => {
+      const pending = this.pending().find((operation) => operation.backend === backend);
+      if (!pending) {
+        return false;
+      }
+      const resultJson = encodeResult(overrideResult === undefined ? pending.result : overrideResult);
+      this.storage.sql.exec(
+        `UPDATE ghostbuild_tool_operations
+         SET status = 'completed', result_json = ?, error = NULL, updated_at = ?
+         WHERE tool_call_id = ? AND status = 'running'`,
+        resultJson,
+        Date.now(),
+        pending.toolCallId,
+      );
+      return true;
     });
   }
 
@@ -162,6 +281,27 @@ function startResult(row: ToolOperationRow): ToolOperationStartResult {
     status: 'indeterminate',
     error: 'The workspace tool operation was interrupted after it started and will not be repeated automatically.',
   };
+}
+
+function pendingEnvelope(resultJson: string): PendingCommandEnvelope | null {
+  const value: unknown = JSON.parse(resultJson);
+  return typeof value === 'object' &&
+    value !== null &&
+    'kind' in value &&
+    value.kind === 'workspace-sync-pending' &&
+    'backend' in value &&
+    typeof value.backend === 'string' &&
+    'result' in value
+    ? (value as PendingCommandEnvelope)
+    : null;
+}
+
+function encodeResult(result: unknown): string {
+  const resultJson = JSON.stringify(result);
+  if (resultJson === undefined || new TextEncoder().encode(resultJson).byteLength > MAX_TOOL_RESULT_BYTES) {
+    throw new Error('The workspace tool result exceeded its durable result limit.');
+  }
+  return resultJson;
 }
 
 function first<T>(rows: Iterable<T>): T | undefined {

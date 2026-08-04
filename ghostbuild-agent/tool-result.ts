@@ -70,5 +70,5 @@ export function toolResultSucceeded(value: unknown): boolean {
       return result.exitCode === 0;
     }
   }
-  return typeof value !== 'string' || !value.startsWith('Error:');
+  return true;
 }

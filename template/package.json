@@ -8,9 +8,10 @@
     "#/*": "./src/*"
   },
   "scripts": {
-    "dev": "node scripts/vite-dev.mjs",
+    "dev": "vite dev --host 0.0.0.0",
     "generate-routes": "tsr generate",
     "build": "pnpm run verify:licenses && vite build && pnpm run verify:licenses:built",
+    "build:isolated-preview": "pnpm run verify:licenses && vite build --mode ghostbuild-isolated-preview && pnpm run verify:licenses:built",
     "preview": "vite preview --host 0.0.0.0",
     "deploy": "pnpm run typecheck && pnpm run verify:stack && pnpm run provision:production && pnpm run verify:production-config && pnpm run build && pnpm run lint && pnpm run d1:migrations:apply:production && wrangler deploy",
     "d1:migrations:apply:production": "wrangler d1 migrations apply DB --remote && wrangler d1 migrations apply AGENT_SECURITY_DB --remote",
@@ -25,18 +26,18 @@
     "lint": "eslint src vite.config.ts scripts/verify-production-licenses.mjs scripts/lib/runtime-module-security.ts scripts/lib/production-license-artifact.mjs --max-warnings=0"
   },
   "dependencies": {
-    "@ai-sdk/provider": "^3.0.14",
-    "@ai-sdk/react": "^3.0.232",
+    "@ai-sdk/provider": "4.0.4",
+    "@ai-sdk/react": "4.0.51",
     "@cloudflare/ai-chat": "^0.10.1",
     "@tanstack/react-router": "^1.170.18",
     "@tanstack/react-start": "^1.168.34",
     "agents": "^0.20.1",
-    "ai": "^6.0.234",
+    "ai": "7.0.48",
     "lucide-react": "1.28.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "three": "^0.179.1",
-    "workers-ai-provider": "^3.3.1",
+    "workers-ai-provider": "4.0.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

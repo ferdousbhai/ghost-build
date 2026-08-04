@@ -133,21 +133,19 @@ describe('Cloudflare-native context compaction', () => {
     ).toBe(true);
   });
 
-  test('normalizes tool results for Cloudflare token accounting', () => {
+  test('preserves native AI SDK tool outputs for Cloudflare token accounting', () => {
     const messages: GhostbuildMessage[] = [
       {
         id: 'tool-1',
         role: 'assistant',
         parts: [
           {
-            type: 'tool-invocation',
-            toolInvocation: {
-              state: 'result',
-              toolCallId: 'call-1',
-              toolName: 'read',
-              args: { path: '/src/app.ts' },
-              result: 'z'.repeat(4_000),
-            },
+            type: 'dynamic-tool',
+            state: 'output-available',
+            toolCallId: 'call-1',
+            toolName: 'read',
+            input: { path: '/src/app.ts' },
+            output: 'z'.repeat(4_000),
           },
         ],
       },
@@ -158,6 +156,7 @@ describe('Cloudflare-native context compaction', () => {
       type: 'dynamic-tool',
       toolCallId: 'call-1',
       toolName: 'read',
+      state: 'output-available',
       output: expect.any(String),
     });
   });

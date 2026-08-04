@@ -7,6 +7,8 @@ import {
 } from './deployment-security-baseline';
 import type { Deployment } from './deployment-repository';
 import type { ActiveWorkerDeploymentReadback, UserCloudflareAccountApi } from './user-account-api';
+import { deploymentProjectProfile } from './deployment-plan';
+import { DEPLOYMENT_COMPATIBILITY_DATE, DEPLOYMENT_COMPATIBILITY_FLAGS } from './deployment-runtime-policy';
 
 const MANAGED_ATTESTATION_ATTEMPTS = 6;
 const MANAGED_ATTESTATION_RETRY_MS = 1_000;
@@ -34,6 +36,9 @@ export function evaluateDeploymentSecurityAttestation(args: {
   expectedAgentSecurityD1DatabaseId?: string;
   requireExpectedAgentSecurityD1Identity?: boolean;
   requiresAgentCleanup: boolean;
+  expectedBindings?: ReadonlyArray<{ name: string; type: string }>;
+  expectedCompatibilityDate?: string;
+  expectedCompatibilityFlags?: readonly string[];
 }): DeploymentSecurityAttestation {
   const observedTemplateSourceSha256 = plainTextBinding(args.readback, DEPLOYMENT_TEMPLATE_SOURCE_BINDING);
   const rawBaseline = plainTextBinding(args.readback, DEPLOYMENT_SECURITY_BASELINE_BINDING);
@@ -63,6 +68,11 @@ export function evaluateDeploymentSecurityAttestation(args: {
     hasVersionMetadata &&
     hasCleanup &&
     hasAgentSecurityDb &&
+    (!args.expectedBindings || exactBindingInventory(args.readback.bindings, args.expectedBindings)) &&
+    (args.expectedCompatibilityDate === undefined ||
+      args.readback.compatibilityDate === args.expectedCompatibilityDate) &&
+    (args.expectedCompatibilityFlags === undefined ||
+      exactStrings(args.readback.compatibilityFlags, args.expectedCompatibilityFlags)) &&
     (args.expectedWorkerVersionId === undefined || args.readback.workerVersionId === args.expectedWorkerVersionId) &&
     (args.expectedScriptEtag === undefined || args.readback.scriptEtag === args.expectedScriptEtag);
   return {
@@ -90,6 +100,7 @@ export async function attestManagedDeploymentSecurity(args: {
   retryDelay?: (milliseconds: number) => Promise<void>;
 }): Promise<DeploymentSecurityAttestation> {
   const requiresAgentSecurityDb = args.deployment.plan.project?.bindings.appAgent ?? true;
+  const profile = deploymentProjectProfile(args.deployment.plan);
   if (requiresAgentSecurityDb && !args.expectedAgentSecurityD1DatabaseId) {
     throw new DeploymentSecurityAttestationError(
       'Published AppAgent Worker is missing its provisioned agent security D1 identity.',
@@ -111,6 +122,9 @@ export async function attestManagedDeploymentSecurity(args: {
         expectedAgentSecurityD1DatabaseId: args.expectedAgentSecurityD1DatabaseId,
         requireExpectedAgentSecurityD1Identity: requiresAgentSecurityDb,
         requiresAgentCleanup: requiresAgentSecurityDb,
+        expectedBindings: expectedManagedBindings(profile.bindings),
+        expectedCompatibilityDate: DEPLOYMENT_COMPATIBILITY_DATE,
+        expectedCompatibilityFlags: DEPLOYMENT_COMPATIBILITY_FLAGS,
       });
       if (lastAttestation.status === 'current') {
         return lastAttestation;
@@ -124,6 +138,43 @@ export async function attestManagedDeploymentSecurity(args: {
     throw new DeploymentSecurityAttestationError('Published Worker is unavailable for security attestation.');
   }
   throw new DeploymentSecurityAttestationError('Published Worker security metadata did not match its approved plan.');
+}
+
+function expectedManagedBindings(bindings: {
+  ai: boolean;
+  d1: boolean;
+  r2: boolean;
+  appAgent: boolean;
+}): Array<{ name: string; type: string }> {
+  return [
+    { name: DEPLOYMENT_VERSION_METADATA_BINDING, type: 'version_metadata' },
+    { name: DEPLOYMENT_SECURITY_BASELINE_BINDING, type: 'plain_text' },
+    { name: DEPLOYMENT_SECURITY_BOUNDARY_BINDING, type: 'plain_text' },
+    { name: DEPLOYMENT_TEMPLATE_SOURCE_BINDING, type: 'plain_text' },
+    ...(bindings.ai ? [{ name: 'AI', type: 'ai' }] : []),
+    ...(bindings.d1 ? [{ name: 'DB', type: 'd1' }] : []),
+    ...(bindings.appAgent ? [{ name: 'AGENT_SECURITY_DB', type: 'd1' }] : []),
+    ...(bindings.r2 ? [{ name: 'APP_STORAGE', type: 'r2_bucket' }] : []),
+    ...(bindings.appAgent ? [{ name: 'AppAgent', type: 'durable_object_namespace' }] : []),
+  ];
+}
+
+function exactBindingInventory(
+  observed: ReadonlyArray<{ name?: string; type?: string }>,
+  expected: ReadonlyArray<{ name: string; type: string }>,
+): boolean {
+  return exactStrings(
+    observed.map((binding) => `${binding.name ?? ''}:${binding.type ?? ''}`),
+    expected.map((binding) => `${binding.name}:${binding.type}`),
+  );
+}
+
+function exactStrings(observed: readonly string[], expected: readonly string[]): boolean {
+  if (observed.length !== expected.length) {
+    return false;
+  }
+  const expectedSorted = [...expected].sort();
+  return [...observed].sort().every((value, index) => value === expectedSorted[index]);
 }
 
 function plainTextBinding(readback: ActiveWorkerDeploymentReadback, name: string): string | null {

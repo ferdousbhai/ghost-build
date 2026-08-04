@@ -4,15 +4,17 @@ import { lookupDocsTool } from 'ghostbuild-agent/tools/lookupDocs';
 import { npmInstallTool } from 'ghostbuild-agent/tools/npmInstall';
 import { validateProjectTool } from 'ghostbuild-agent/tools/validateProject';
 import {
-  COMPUTER_SHELL_TOOL_OPTIONS,
+  COMPUTER_AI_TOOL_OPTIONS,
+  COMPUTER_EXEC_APPLICATION_POLICY,
   COMPUTER_TOOL_NAMES,
+  computerSyncUnconfirmedToolResult,
   type ComputerToolName,
 } from 'ghostbuild-agent/cloudflare-computer';
 import { createAITools } from '@cloudflare/computer/tools';
 import type { GhostbuildToolName, GhostbuildToolSet } from 'ghostbuild-agent/types';
 import { z, type ZodType } from 'zod';
-import { isGhostbuildToolResult, toolFailure, toolResultSucceeded } from 'ghostbuild-agent/tool-result';
-import type { Tool } from 'ai';
+import { isGhostbuildToolResult, toolFailure } from 'ghostbuild-agent/tool-result';
+import type { Tool, ToolSet } from 'ai';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { ServerOperationToolName } from '~/agents/builder-workspace-types';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
@@ -52,20 +54,18 @@ export function createWorkersAiTools(
   operationContext: BuilderOperationContext,
 ): GhostbuildToolSet {
   const coordinateStatefulTool = createTurnStatefulToolCoordinator();
-  const computerTools = createAITools({
-    workspace: workspace.computer,
-    shell: COMPUTER_SHELL_TOOL_OPTIONS,
-  });
+  const computerTools = requireComputerTools(
+    createAITools({
+      workspace: workspace.computer,
+      ...COMPUTER_AI_TOOL_OPTIONS,
+    }),
+  );
   const tools: GhostbuildToolSet = {
+    ...computerTools,
     deploy: deployTool,
-    edit: computerTools.edit!,
-    exec: computerTools.exec!,
-    ls: computerTools.ls!,
     lookupDocs: lookupDocsTool(),
     npmInstall: npmInstallTool,
-    read: computerTools.read!,
     validateProject: validateProjectTool,
-    write: computerTools.write!,
   };
   for (const toolName of COMPUTER_TOOL_NAMES) {
     tools[toolName] = computerWorkspaceTool(toolName, tools[toolName], workspace, coordinateStatefulTool);
@@ -82,6 +82,18 @@ export function createWorkersAiTools(
   return tools;
 }
 
+function requireComputerTools(tools: ToolSet): Record<ComputerToolName, Tool> {
+  return Object.fromEntries(
+    COMPUTER_TOOL_NAMES.map((toolName) => {
+      const definition = tools[toolName];
+      if (!definition) {
+        throw new Error(`Cloudflare Computer did not expose the required ${toolName} tool.`);
+      }
+      return [toolName, definition];
+    }),
+  ) as Record<ComputerToolName, Tool>;
+}
+
 function serverOperationTool(
   toolName: ServerOperationToolName,
   definition: Tool,
@@ -91,8 +103,10 @@ function serverOperationTool(
 ): Tool {
   return {
     ...definition,
-    execute: async (input, options) =>
-      coordinateStatefulTool(toolName, async () => {
+    execute: async (input, options) => {
+      options.abortSignal?.throwIfAborted();
+      return coordinateStatefulTool(toolName, async () => {
+        options.abortSignal?.throwIfAborted();
         try {
           const { executeBuilderOperationTool } = await import('~/agents/builder-operation-tools');
           return await executeBuilderOperationTool({
@@ -105,14 +119,19 @@ function serverOperationTool(
           });
         } catch (error) {
           options.abortSignal?.throwIfAborted();
+          const syncResult = computerSyncUnconfirmedToolResult(error);
+          if (syncResult) {
+            return syncResult;
+          }
           const message = error instanceof Error ? error.message : String(error);
           return toolFailure(
             message.length <= 4_000
               ? message
-              : `${toolName} failed with an unusually large internal error retained in server logs.`,
+              : `${toolName} failed; its unusually large internal error was omitted from the model response.`,
           );
         }
-      }),
+      });
+    },
   };
 }
 
@@ -122,10 +141,19 @@ function computerWorkspaceTool(
   workspace: BuilderWorkspaceApi,
   coordinateStatefulTool: TurnStatefulToolCoordinator,
 ): Tool {
+  if (definition.type === 'provider') {
+    throw new TypeError(`Computer tool ${toolName} must be executed by Ghostbuild, not by the model provider.`);
+  }
   return {
     ...definition,
-    execute: async (input, options) =>
-      coordinateStatefulTool(toolName, async () => {
+    description:
+      toolName === 'exec'
+        ? `${definition.description ?? 'Run a shell command in the workspace.'}\n\n${COMPUTER_EXEC_APPLICATION_POLICY}`
+        : definition.description,
+    execute: async (input, options) => {
+      options.abortSignal?.throwIfAborted();
+      return coordinateStatefulTool(toolName, async () => {
+        options.abortSignal?.throwIfAborted();
         try {
           const execute = definition.execute;
           if (!execute) {
@@ -141,15 +169,20 @@ function computerWorkspaceTool(
           return result;
         } catch (error) {
           options.abortSignal?.throwIfAborted();
+          const syncResult = computerSyncUnconfirmedToolResult(error);
+          if (syncResult) {
+            return syncResult;
+          }
           const message = error instanceof Error ? error.message : String(error);
           return {
             error:
               message.length <= 4_000
                 ? message
-                : `${toolName} failed with an unusually large internal error retained in server logs.`,
+                : `${toolName} failed; its unusually large internal error was omitted from the model response.`,
           };
         }
-      }),
+      });
+    },
   };
 }
 
@@ -361,14 +394,14 @@ function collectToolResults(messages: GhostbuildMessage[]): Array<{
   return messages.flatMap((message, messageIndex) =>
     message.parts.flatMap((part) => {
       const invocation = getToolInvocation(part);
-      if (invocation?.state !== 'result') {
+      if (invocation?.state !== 'output-available') {
         return [];
       }
       return [
         {
           messageIndex,
           toolName: invocation.toolName,
-          result: invocation.result,
+          result: invocation.output,
         },
       ];
     }),
@@ -380,17 +413,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isImplementationMutationResult(result: { toolName: string; result?: unknown }): boolean {
-  if (!isRecord(result.result) || typeof result.result.error === 'string') {
+  if (result.toolName === 'exec') {
+    // Official Computer exec is intentionally arbitrary. A command may write
+    // source before succeeding, failing, timing out, or returning pending sync.
+    return true;
+  }
+  if (result.toolName !== 'write' && result.toolName !== 'edit') {
     return false;
   }
   return (
-    (result.toolName === 'write' && typeof result.result.bytesWritten === 'number') ||
-    (result.toolName === 'edit' && typeof result.result.editsApplied === 'number')
+    isRecord(result.result) &&
+    result.result.kind === 'workspace-mutation-receipt' &&
+    result.result.version === 1 &&
+    result.result.committed === true &&
+    result.result.acknowledgement === 'complete' &&
+    result.result.tool === result.toolName
   );
 }
 
 function isDependencyMutationResult(result: { toolName: string; result?: unknown }): boolean {
-  return result.toolName === 'npmInstall' && toolResultSucceeded(result.result);
+  return result.toolName === 'npmInstall';
 }
 
 function isSuccessfulValidationResult(result: unknown): boolean {
@@ -420,25 +462,15 @@ function validationNextAction(result: unknown): 'sign-in-required' | 'prepare-de
 }
 
 function isSuccessfulDeployResult(result: unknown, expectedRevision?: string): boolean {
-  if (isGhostbuildToolResult(result)) {
-    return (
-      result.ok &&
-      isRecord(result.data) &&
-      result.data.state === 'awaiting-approval' &&
-      (expectedRevision === undefined || result.data.revision === expectedRevision)
-    );
-  }
   return (
-    typeof result === 'string' &&
-    (result.includes('Deployment plan ready for your approval') || isProductionDeployResult(result))
+    isGhostbuildToolResult(result) &&
+    result.ok &&
+    isRecord(result.data) &&
+    result.data.state === 'awaiting-approval' &&
+    (expectedRevision === undefined || result.data.revision === expectedRevision)
   );
 }
 
 function isProductionDeployResult(result: unknown): boolean {
-  if (isGhostbuildToolResult(result)) {
-    return result.ok && isRecord(result.data) && result.data.state === 'deployed';
-  }
-  return (
-    typeof result === 'string' && (result.includes('Uploaded ghostbuild') || result.includes('Deployed ghostbuild'))
-  );
+  return isGhostbuildToolResult(result) && result.ok && isRecord(result.data) && result.data.state === 'deployed';
 }

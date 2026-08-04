@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, test } from 'vitest';
 
@@ -7,27 +7,36 @@ const controlPlaneTables = [
   'cloudflare_connections',
   'cloudflare_credentials',
   'cloudflare_oauth_states',
+  'launch_controls',
   'user',
   'user_computer_runtimes',
-  'user_workspace_runtimes',
 ];
 
+function applyControlPlaneMigrations(db: DatabaseSync): void {
+  for (const migration of readdirSync('migrations')
+    .filter((file) => file.endsWith('.sql'))
+    .sort()) {
+    db.exec(readFileSync(`migrations/${migration}`, 'utf8'));
+  }
+}
+
 describe('Ghostbuild control-plane D1 schema', () => {
-  test('contains only identity, authentication, Cloudflare connection, and runtime locator metadata', () => {
+  test('ends with only the current control-plane and Computer locator schema', () => {
     const db = new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys = ON');
-    db.exec(readFileSync('migrations/0001_ghostbuild.sql', 'utf8'));
-    db.exec(readFileSync('migrations/0002_user_computer_runtimes.sql', 'utf8'));
+    applyControlPlaneMigrations(db);
 
     expect(tableNames(db)).toEqual(controlPlaneTables);
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    expect(
+      db.prepare("SELECT mode, cohort_basis_points FROM launch_controls WHERE key = 'cloudflare_computer'").get(),
+    ).toEqual({ mode: 'off', cohort_basis_points: 0 });
   });
 
   test('enforces one current Cloudflare connection and runtime per user', () => {
     const db = new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys = ON');
-    db.exec(readFileSync('migrations/0001_ghostbuild.sql', 'utf8'));
-    db.exec(readFileSync('migrations/0002_user_computer_runtimes.sql', 'utf8'));
+    applyControlPlaneMigrations(db);
     db.prepare(
       `INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt, cloudflare_subject)
        VALUES ('user-1', 'User', 'user@example.com', 1, 1, 1, 'subject-1')`,

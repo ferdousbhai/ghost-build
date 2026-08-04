@@ -10,6 +10,10 @@ node_modules
 .pnpm-store/
 dist
 dist-ssr
+*.tsbuildinfo
+playwright-report/
+test-results/
+/playwright/.auth/
 .tanstack
 ghostbuild-system-prompts.txt
 *.local
@@ -51,8 +55,6 @@ app/commit.json
 .cursorrules
 
 package-lock.json
-!template/package-lock.json
-!template/preview-runtime/package-lock.json
 vite.config.ts.timestamp-*.mjs
 
 # Sentry Config File

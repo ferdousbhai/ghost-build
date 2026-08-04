@@ -119,6 +119,11 @@ export class FilesStore {
     this.applyWorkspaceSyncEntries(entries);
   }
 
+  stageUnsavedTextFile(filePath: AbsolutePath, content: string): void {
+    ensureParentFolders(this.files, filePath);
+    this.files.setKey(filePath, { type: 'file', content, isBinary: false });
+  }
+
   #removeTrackedPath(filePath: AbsolutePath): void {
     this.files.setKey(filePath, undefined);
     const childPrefix = `${filePath}/`;

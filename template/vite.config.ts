@@ -7,8 +7,9 @@ const baseAlias: Record<string, string> = {
   "@": path.resolve(projectDir, "./src"),
   "#": path.resolve(projectDir, "./src"),
 };
-
-async function productionPlugins(): Promise<PluginOption[]> {
+async function productionPlugins(
+  isolatedPreview: boolean,
+): Promise<PluginOption[]> {
   const [
     { tanstackStart },
     { cloudflare },
@@ -28,14 +29,17 @@ async function productionPlugins(): Promise<PluginOption[]> {
     agents(),
     cloudflare({
       viteEnvironment: { name: "ssr" },
+      ...(isolatedPreview
+        ? { configPath: "./wrangler.preview.jsonc", remoteBindings: false }
+        : {}),
     }),
     tanstackStart(),
     react(),
   ];
 }
 
-export default defineConfig(async () => ({
-  plugins: await productionPlugins(),
+export default defineConfig(async ({ mode }) => ({
+  plugins: await productionPlugins(mode === "ghostbuild-isolated-preview"),
   resolve: {
     alias: baseAlias,
   },

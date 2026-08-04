@@ -51,6 +51,9 @@ export function HomeIntro({
               <span>the ghost will build it. ✨</span>
             </h1>
             <p className="ghost-home-lede">Turn a simple prompt into a real, shareable Cloudflare project.</p>
+            <p className="ghost-home-ownership">
+              Your Cloudflare account owns the workspace, and every production deploy waits for your approval.
+            </p>
           </div>
 
           <div className="ghost-home-reveal ghost-home-composer-stack">

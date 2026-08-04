@@ -1,43 +1,30 @@
-import { type UIDataTypes, type UIMessage, type UIMessagePart, type UITools } from 'ai';
+import {
+  getToolName,
+  isToolUIPart,
+  type DynamicToolUIPart,
+  type UIMessage,
+  type UIMessagePart,
+  type UITools,
+} from 'ai';
 
-export type GhostbuildToolInvocation = {
-  state: 'partial-call' | 'call' | 'result';
-  toolCallId: string;
-  toolName: string;
-  args: unknown;
-  result?: unknown;
+export type PendingDeploymentApproval = {
+  id: string;
+  planDigest: string;
+  resources: Array<{ type: string; logicalName: string; proposedName: string }>;
 };
 
-type StoredToolInvocationPart = {
-  type: 'tool-invocation';
-  toolInvocation: GhostbuildToolInvocation;
+export type GhostbuildDataTypes = {
+  'deployment-approval': PendingDeploymentApproval;
 };
 
-type AiSdkToolPartRecord = {
-  toolName?: unknown;
-  toolCallId?: unknown;
-  state?: unknown;
-  input?: unknown;
-  output?: unknown;
-  errorText?: unknown;
-};
+export type GhostbuildPart = UIMessagePart<GhostbuildDataTypes, UITools>;
+export type GhostbuildToolInvocation = DynamicToolUIPart;
 
-export type GhostbuildPart = UIMessagePart<UIDataTypes, UITools> | StoredToolInvocationPart;
-
-type GhostbuildToolPart = GhostbuildPart & {
-  type: 'tool-invocation' | 'dynamic-tool' | `tool-${string}`;
-};
-
-export type GhostbuildMessage = Omit<UIMessage, 'parts'> & {
-  parts: GhostbuildPart[];
-  content?: string;
+export type GhostbuildMessage = UIMessage<unknown, GhostbuildDataTypes, UITools> & {
   createdAt?: Date | number | string;
 };
 
-export function messageText(message: Pick<GhostbuildMessage, 'content' | 'parts'>): string {
-  if (typeof message.content === 'string' && message.content.length > 0) {
-    return message.content;
-  }
+export function messageText(message: Pick<GhostbuildMessage, 'parts'>): string {
   return message.parts.map((part) => (part.type === 'text' ? part.text : '')).join('');
 }
 
@@ -81,7 +68,13 @@ function findNumericCacheRead(value: unknown, seen: WeakSet<object>): number | u
 
   const record = value as Record<string, unknown>;
   let observedZero = false;
-  for (const key of ['cachedPromptTokens', 'cachedInputTokens', 'cacheReadInputTokens', 'cacheRead']) {
+  for (const key of [
+    'cachedPromptTokens',
+    'cachedInputTokens',
+    'cacheReadInputTokens',
+    'cacheReadTokens',
+    'cacheRead',
+  ]) {
     const candidate = record[key];
     if (isPositiveSafeInteger(candidate)) {
       return candidate;
@@ -113,59 +106,34 @@ function isPositiveSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
 
-function isStoredToolInvocationPart(part: GhostbuildPart): part is StoredToolInvocationPart {
-  return part.type === 'tool-invocation';
-}
-
-export function isToolPart(part: GhostbuildPart): part is GhostbuildToolPart {
-  return isStoredToolInvocationPart(part) || part.type === 'dynamic-tool' || part.type.startsWith('tool-');
+export function isToolPart(part: GhostbuildPart): boolean {
+  return isToolUIPart(part);
 }
 
 export function getToolInvocation(part: GhostbuildPart): GhostbuildToolInvocation | null {
-  if (isStoredToolInvocationPart(part)) {
-    return part.toolInvocation;
-  }
-  if (part.type !== 'dynamic-tool' && !part.type.startsWith('tool-')) {
+  if (!isToolUIPart(part)) {
     return null;
   }
-
-  const toolPart = part as unknown as AiSdkToolPartRecord;
-  const toolName =
-    part.type === 'dynamic-tool' && typeof toolPart.toolName === 'string'
-      ? toolPart.toolName
-      : part.type.slice('tool-'.length);
-  const toolCallId = typeof toolPart.toolCallId === 'string' ? toolPart.toolCallId : '';
-  const args = toolPart.input;
-  const base = {
-    toolCallId,
-    toolName,
-    args,
-  };
-
-  if (toolPart.state === 'input-streaming') {
-    return { ...base, state: 'partial-call' };
+  if (part.type === 'dynamic-tool') {
+    return part;
   }
-  if (
-    toolPart.state === 'input-available' ||
-    toolPart.state === 'approval-requested' ||
-    toolPart.state === 'approval-responded'
-  ) {
-    return { ...base, state: 'call' };
-  }
-  if (toolPart.state === 'output-error') {
-    const errorText = typeof toolPart.errorText === 'string' ? toolPart.errorText : 'Tool output failed.';
-    return { ...base, state: 'result', result: `Error: ${errorText}` };
-  }
-  if (toolPart.state === 'output-denied') {
-    return { ...base, state: 'result', result: 'Error: Tool output denied.' };
-  }
-  return { ...base, state: 'result', result: toolPart.output };
+  return {
+    ...part,
+    type: 'dynamic-tool',
+    toolName: getToolName(part),
+  } as GhostbuildToolInvocation;
 }
 
 export function isToolResult(part: GhostbuildPart): boolean {
-  return getToolInvocation(part)?.state === 'result';
+  const state = getToolInvocation(part)?.state;
+  return state === 'output-available' || state === 'output-error' || state === 'output-denied';
 }
 
 export function isToolInvocationInProgress(invocation: Pick<GhostbuildToolInvocation, 'state'>): boolean {
-  return invocation.state === 'partial-call' || invocation.state === 'call';
+  return (
+    invocation.state === 'input-streaming' ||
+    invocation.state === 'input-available' ||
+    invocation.state === 'approval-requested' ||
+    invocation.state === 'approval-responded'
+  );
 }

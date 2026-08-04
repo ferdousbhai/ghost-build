@@ -26,6 +26,11 @@ describe('deployment security attestation', () => {
     ],
     ['an added schedule', (value: ReturnType<typeof readback>) => value.crons.push('*/5 * * * *')],
     [
+      'an unexpected binding',
+      (value: ReturnType<typeof readback>) => value.bindings.push({ name: 'UNAPPROVED', type: 'plain_text' }),
+    ],
+    ['changed compatibility flags', (value: ReturnType<typeof readback>) => value.compatibilityFlags.push('unsafe')],
+    [
       'the wrong security D1',
       (value: ReturnType<typeof readback>) => {
         const binding = value.bindings.find((candidate) => candidate.name === 'AGENT_SECURITY_DB');
@@ -84,6 +89,18 @@ function evaluate(value: ReturnType<typeof readback>) {
     expectedAgentSecurityD1DatabaseId: 'agent-security-d1-id',
     requireExpectedAgentSecurityD1Identity: true,
     requiresAgentCleanup: true,
+    expectedCompatibilityDate: '2026-07-21',
+    expectedCompatibilityFlags: ['nodejs_compat'],
+    expectedBindings: [
+      { name: 'GHOSTBUILD_TEMPLATE_SOURCE_SHA256', type: 'plain_text' },
+      { name: 'GHOSTBUILD_SECURITY_BASELINE_VERSION', type: 'plain_text' },
+      { name: 'GHOSTBUILD_SECURITY_BOUNDARY_SHA256', type: 'plain_text' },
+      { name: 'CF_VERSION_METADATA', type: 'version_metadata' },
+      { name: 'AI', type: 'ai' },
+      { name: 'DB', type: 'd1' },
+      { name: 'AGENT_SECURITY_DB', type: 'd1' },
+      { name: 'AppAgent', type: 'durable_object_namespace' },
+    ],
   });
 }
 
@@ -92,6 +109,8 @@ function readback(): ActiveWorkerDeploymentReadback {
     providerDeploymentId: 'provider-deployment-1',
     workerVersionId: 'worker-version-1',
     scriptEtag: 'etag-1',
+    compatibilityDate: '2026-07-21',
+    compatibilityFlags: ['nodejs_compat'],
     bindings: [
       { name: 'GHOSTBUILD_TEMPLATE_SOURCE_SHA256', type: 'plain_text', text: TEMPLATE_SOURCE_SHA256 },
       {
@@ -105,7 +124,10 @@ function readback(): ActiveWorkerDeploymentReadback {
         text: APP_AGENT_SECURITY_BOUNDARY_SHA256,
       },
       { name: 'CF_VERSION_METADATA', type: 'version_metadata' },
+      { name: 'AI', type: 'ai' },
+      { name: 'DB', type: 'd1', database_id: 'application-d1-id' },
       { name: 'AGENT_SECURITY_DB', type: 'd1', database_id: 'agent-security-d1-id' },
+      { name: 'AppAgent', type: 'durable_object_namespace' },
     ],
     crons: ['0 3 * * *'],
   };

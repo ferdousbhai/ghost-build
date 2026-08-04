@@ -1,11 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { UIMessage } from 'ai';
 import {
-  assertBuilderModelTranscriptWithinLimit,
   boundBuilderMessageForPersistence,
   loadBuilderTranscriptBinding,
   MAX_BUILDER_AGENT_MESSAGES,
-  MAX_BUILDER_MODEL_TRANSCRIPT_BYTES,
   requireBuilderRequestScope,
   requireBuilderTranscriptIdentity,
   type BuilderTranscriptBinding,
@@ -111,11 +109,5 @@ describe('BuilderAgent request policy', () => {
 
     expect(user.parts[0]).toMatchObject({ type: 'text', text: 'x'.repeat(32_000) });
     expect(boundBuilderMessageForPersistence(assistant)).toBe(assistant);
-  });
-
-  it('rejects a transcript above the pre-model byte budget', () => {
-    expect(() => assertBuilderModelTranscriptWithinLimit(['x'.repeat(MAX_BUILDER_MODEL_TRANSCRIPT_BYTES)])).toThrow(
-      expect.objectContaining({ status: 413 }),
-    );
   });
 });

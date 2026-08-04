@@ -145,40 +145,42 @@ export async function approveDeployment(args: {
     throw new DeploymentStateConflictError(expected.status);
   }
   const now = args.now ?? Date.now();
-  const result = await args.db
-    .prepare(
-      `UPDATE deployments
-       SET status = 'approved', approved_digest = ?, approved_at = ?,
-           execution_generation = execution_generation + 1, updated_at = ?
-       WHERE id = ? AND user_id = ? AND connection_id = ? AND connection_generation = ?
-         AND execution_generation = ? AND status = 'awaiting_approval' AND updated_at = ?
-         AND plan_digest = ? AND workspace_reference = ?
-         AND approved_digest IS NULL AND approved_at IS NULL`,
-    )
-    .bind(
-      args.approvedDigest,
-      now,
-      now,
-      expected.id,
-      expected.userId,
-      expected.connectionId,
-      expected.connectionGeneration,
-      expected.executionGeneration,
-      expected.updatedAt,
-      expected.planDigest,
-      expected.workspaceReference,
-    )
-    .run();
+  let result: D1Result;
+  try {
+    result = await args.db
+      .prepare(
+        `UPDATE deployments
+         SET status = 'approved', approved_digest = ?, approved_at = ?,
+             execution_generation = execution_generation + 1, updated_at = ?
+         WHERE id = ? AND user_id = ? AND connection_id = ? AND connection_generation = ?
+           AND execution_generation = ? AND status = 'awaiting_approval' AND updated_at = ?
+           AND plan_digest = ? AND workspace_reference = ?
+           AND approved_digest IS NULL AND approved_at IS NULL`,
+      )
+      .bind(
+        args.approvedDigest,
+        now,
+        now,
+        expected.id,
+        expected.userId,
+        expected.connectionId,
+        expected.connectionGeneration,
+        expected.executionGeneration,
+        expected.updatedAt,
+        expected.planDigest,
+        expected.workspaceReference,
+      )
+      .run();
+  } catch (error) {
+    const committed = await requireDeploymentForUser(args.db, expected.id, expected.userId).catch(() => null);
+    if (committed && isExactDeploymentApproval(committed, expected, args.approvedDigest, now)) {
+      return committed;
+    }
+    throw error;
+  }
   if (result.meta.changes !== 1) {
     const committed = await requireDeploymentForUser(args.db, expected.id, expected.userId);
-    if (
-      committed.executionGeneration === expected.executionGeneration + 1 &&
-      committed.status === 'approved' &&
-      committed.approvedDigest === args.approvedDigest &&
-      committed.approvedAt === now &&
-      committed.updatedAt === now &&
-      sameDeploymentIdentity(committed, expected)
-    ) {
+    if (isExactDeploymentApproval(committed, expected, args.approvedDigest, now)) {
       return committed;
     }
     throw new DeploymentStateConflictError(committed.status);
@@ -212,31 +214,45 @@ export async function claimApprovedDeployment(args: {
     throw new DeploymentStateConflictError(expected.status);
   }
   const now = args.now ?? Date.now();
-  const result = await args.db
-    .prepare(
-      `UPDATE deployments
-       SET status = 'provisioning', updated_at = ?
-       WHERE id = ? AND user_id = ? AND connection_id = ? AND connection_generation = ?
-         AND execution_generation = ? AND status = 'approved' AND updated_at = ?
-         AND approved_digest = plan_digest
-         AND NOT EXISTS (
-           SELECT 1 FROM deployments AS active
-           WHERE active.user_id = ? AND active.id <> ?
-             AND active.status IN ('provisioning', 'deploying')
-         )`,
-    )
-    .bind(
-      now,
-      expected.id,
-      expected.userId,
-      expected.connectionId,
-      expected.connectionGeneration,
-      expected.executionGeneration,
-      expected.updatedAt,
-      expected.userId,
-      expected.id,
-    )
-    .run();
+  let result: D1Result;
+  try {
+    result = await args.db
+      .prepare(
+        `UPDATE deployments
+         SET status = 'provisioning', updated_at = ?
+         WHERE id = ? AND user_id = ? AND connection_id = ? AND connection_generation = ?
+           AND execution_generation = ? AND status = 'approved' AND updated_at = ?
+           AND approved_digest = plan_digest
+           AND NOT EXISTS (
+             SELECT 1 FROM deployments AS active
+             WHERE active.user_id = ? AND active.id <> ?
+               AND active.status IN ('provisioning', 'deploying')
+           )`,
+      )
+      .bind(
+        now,
+        expected.id,
+        expected.userId,
+        expected.connectionId,
+        expected.connectionGeneration,
+        expected.executionGeneration,
+        expected.updatedAt,
+        expected.userId,
+        expected.id,
+      )
+      .run();
+  } catch (error) {
+    const committed = await requireDeploymentForUser(args.db, expected.id, expected.userId).catch(() => null);
+    if (
+      committed?.status === 'provisioning' &&
+      committed.updatedAt === now &&
+      committed.executionGeneration === expected.executionGeneration &&
+      sameDeploymentIdentity(committed, expected)
+    ) {
+      return committed;
+    }
+    throw error;
+  }
   if (result.meta.changes !== 1) {
     const active = await args.db
       .prepare(
@@ -281,38 +297,39 @@ export async function prepareDeploymentRetry(args: {
     throw new DeploymentStateConflictError(expected.status);
   }
   const now = args.now ?? Date.now();
-  const result = await args.db
-    .prepare(
-      `UPDATE deployments
-       SET status = 'awaiting_approval', approved_digest = NULL, approved_at = NULL,
-           production_url = NULL, error_code = NULL, error_message = NULL, updated_at = ?
-       WHERE id = ? AND user_id = ? AND connection_id = ? AND connection_generation = ?
-         AND execution_generation = ? AND status = 'failed' AND updated_at = ?
-         AND plan_digest = ? AND workspace_reference = ?`,
-    )
-    .bind(
-      now,
-      expected.id,
-      expected.userId,
-      expected.connectionId,
-      expected.connectionGeneration,
-      expected.executionGeneration,
-      expected.updatedAt,
-      expected.planDigest,
-      expected.workspaceReference,
-    )
-    .run();
+  let result: D1Result;
+  try {
+    result = await args.db
+      .prepare(
+        `UPDATE deployments
+         SET status = 'awaiting_approval', approved_digest = NULL, approved_at = NULL,
+             production_url = NULL, error_code = NULL, error_message = NULL, updated_at = ?
+         WHERE id = ? AND user_id = ? AND connection_id = ? AND connection_generation = ?
+           AND execution_generation = ? AND status = 'failed' AND updated_at = ?
+           AND plan_digest = ? AND workspace_reference = ?`,
+      )
+      .bind(
+        now,
+        expected.id,
+        expected.userId,
+        expected.connectionId,
+        expected.connectionGeneration,
+        expected.executionGeneration,
+        expected.updatedAt,
+        expected.planDigest,
+        expected.workspaceReference,
+      )
+      .run();
+  } catch (error) {
+    const committed = await requireDeploymentForUser(args.db, expected.id, expected.userId).catch(() => null);
+    if (committed && isExactDeploymentRetry(committed, expected, now)) {
+      return committed;
+    }
+    throw error;
+  }
   if (result.meta.changes !== 1) {
     const committed = await requireDeploymentForUser(args.db, expected.id, expected.userId);
-    if (
-      committed.status === 'awaiting_approval' &&
-      committed.approvedDigest === null &&
-      committed.approvedAt === null &&
-      committed.errorCode === null &&
-      committed.errorMessage === null &&
-      committed.updatedAt === now &&
-      sameDeploymentIdentity(committed, expected)
-    ) {
+    if (isExactDeploymentRetry(committed, expected, now)) {
       return committed;
     }
     throw new DeploymentStateConflictError(committed.status);
@@ -368,38 +385,90 @@ export async function transitionDeployment(args: {
   now?: number;
 }): Promise<void> {
   const now = args.now ?? Date.now();
-  const result = await args.db
-    .prepare(
-      `UPDATE deployments
-       SET status = ?, production_url = ?, error_code = ?, error_message = ?, updated_at = ?
-       WHERE id = ? AND execution_generation = ? AND status = ?`,
-    )
-    .bind(
-      args.nextStatus,
-      args.productionUrl ?? null,
-      args.errorCode ?? null,
-      args.errorMessage ?? null,
-      now,
-      args.deploymentId,
-      args.executionGeneration,
-      args.expectedStatus,
-    )
-    .run();
+  let result: D1Result;
+  try {
+    result = await args.db
+      .prepare(
+        `UPDATE deployments
+         SET status = ?, production_url = ?, error_code = ?, error_message = ?, updated_at = ?
+         WHERE id = ? AND execution_generation = ? AND status = ?`,
+      )
+      .bind(
+        args.nextStatus,
+        args.productionUrl ?? null,
+        args.errorCode ?? null,
+        args.errorMessage ?? null,
+        now,
+        args.deploymentId,
+        args.executionGeneration,
+        args.expectedStatus,
+      )
+      .run();
+  } catch (error) {
+    const committed = await requireDeployment(args.db, args.deploymentId).catch(() => null);
+    if (committed && isExactDeploymentTransition(committed, args, now)) {
+      return;
+    }
+    throw error;
+  }
   if (result.meta.changes === 1) {
     return;
   }
   const committed = await requireDeployment(args.db, args.deploymentId);
-  if (
-    committed.executionGeneration === args.executionGeneration &&
-    committed.status === args.nextStatus &&
-    committed.productionUrl === (args.productionUrl ?? null) &&
-    committed.errorCode === (args.errorCode ?? null) &&
-    committed.errorMessage === (args.errorMessage ?? null) &&
-    committed.updatedAt === now
-  ) {
+  if (isExactDeploymentTransition(committed, args, now)) {
     return;
   }
   throw new DeploymentStateConflictError(committed.status);
+}
+
+function isExactDeploymentTransition(
+  deployment: Deployment,
+  args: {
+    executionGeneration: number;
+    nextStatus: DeploymentStatus;
+    productionUrl?: string | null;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+  },
+  now: number,
+): boolean {
+  return (
+    deployment.executionGeneration === args.executionGeneration &&
+    deployment.status === args.nextStatus &&
+    deployment.productionUrl === (args.productionUrl ?? null) &&
+    deployment.errorCode === (args.errorCode ?? null) &&
+    deployment.errorMessage === (args.errorMessage ?? null) &&
+    deployment.updatedAt === now
+  );
+}
+
+function isExactDeploymentApproval(
+  deployment: Deployment,
+  expected: Deployment,
+  approvedDigest: string,
+  now: number,
+): boolean {
+  return (
+    deployment.executionGeneration === expected.executionGeneration + 1 &&
+    deployment.status === 'approved' &&
+    deployment.approvedDigest === approvedDigest &&
+    deployment.approvedAt === now &&
+    deployment.updatedAt === now &&
+    sameDeploymentIdentity(deployment, expected)
+  );
+}
+
+function isExactDeploymentRetry(deployment: Deployment, expected: Deployment, now: number): boolean {
+  return (
+    deployment.status === 'awaiting_approval' &&
+    deployment.approvedDigest === null &&
+    deployment.approvedAt === null &&
+    deployment.productionUrl === null &&
+    deployment.errorCode === null &&
+    deployment.errorMessage === null &&
+    deployment.updatedAt === now &&
+    sameDeploymentIdentity(deployment, expected)
+  );
 }
 
 function requireCurrentConnection(

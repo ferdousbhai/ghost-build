@@ -1,12 +1,39 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { assertSafeGeneratedPnpmWorkspace } from './generatedPnpmWorkspace';
+import {
+  GENERATED_PROJECT_DEPENDENCY_POLICY as browserPolicy,
+  assertSafeGeneratedPnpmWorkspace,
+} from './generatedPnpmWorkspace';
+// Exercise the exact template verifier against the same standalone policy source.
+// eslint-disable-next-line no-restricted-imports
+import {
+  GENERATED_PROJECT_DEPENDENCY_POLICY as verifierPolicy,
+  findBuildApprovalErrors,
+} from '../../template/scripts/lib/project-policy/workspace-policy.mjs';
 
 describe('assertSafeGeneratedPnpmWorkspace', () => {
   test('accepts the canonical generated template policy', () => {
     expect(() =>
       assertSafeGeneratedPnpmWorkspace('pnpm-workspace.yaml', readFileSync('template/pnpm-workspace.yaml', 'utf8')),
     ).not.toThrow();
+  });
+
+  test('shares one dependency policy with root and template verification', () => {
+    expect(browserPolicy).toEqual(verifierPolicy);
+    expect(browserPolicy.profiles.generatedProject.minimumReleaseAgeExclusions).toEqual([]);
+    expect(browserPolicy.profiles.repository).toMatchObject({
+      minimumReleaseAgeExclusions: ['@cloudflare/computer@0.1.1'],
+    });
+    expect(browserPolicy.profiles.repository.minimumReleaseAgeExclusionReason).toContain('preview dependency');
+
+    const rootWorkspace = readFileSync('pnpm-workspace.yaml', 'utf8').replace(
+      /^  (?:'@journeyapps\/wa-sqlite'|'@mongodb-js\/zstd'|node-liblzma): false$/gm,
+      '',
+    );
+    expect(findBuildApprovalErrors(rootWorkspace, 'pnpm-workspace.yaml')).toEqual([]);
+    expect(findBuildApprovalErrors(readFileSync('template/pnpm-workspace.yaml', 'utf8'), 'template policy')).toEqual(
+      [],
+    );
   });
 
   test('accepts the canonical cooling period and explicit dependency build approvals', () => {

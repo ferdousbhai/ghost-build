@@ -101,6 +101,7 @@ function ReadyWorkbench({ isStreaming }: Pick<WorkbenchProps, 'isStreaming'>) {
       <>
         <View {...slidingPosition({ view: 'code', selectedView: controller.selectedView })}>
           <EditorPanel
+            projectId={controller.projectId}
             editorDocument={controller.currentDocument}
             isStreaming={isStreaming}
             scrollToDocAppend={controller.scrollToDocAppend}
@@ -155,6 +156,8 @@ function WorkbenchFrame({
       variants={workbenchVariants}
       className={classNames('z-workbench', { 'pointer-events-none': !visible })}
       style={isSmallViewport ? ({ '--workbench-width': '100vw' } as CSSProperties) : undefined}
+      role="complementary"
+      aria-label="Project workbench"
       aria-hidden={!visible}
       inert={!visible}
     >

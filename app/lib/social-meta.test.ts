@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createSocialPageHead } from './social-meta';
+import { createPrivatePageHead, createSocialPageHead } from './social-meta';
 
 describe('createSocialPageHead', () => {
   it('returns complete metadata with absolute canonical and image URLs', () => {
@@ -22,5 +22,17 @@ describe('createSocialPageHead', () => {
         { name: 'twitter:image', content: 'https://ghostbuild.dev/social-preview-share-v2.png' },
       ]),
     );
+  });
+});
+
+describe('createPrivatePageHead', () => {
+  it('keeps account and project routes out of search indexes', () => {
+    expect(createPrivatePageHead('Settings | Ghostbuild', 'Manage your account.')).toEqual({
+      meta: [
+        { title: 'Settings | Ghostbuild' },
+        { name: 'description', content: 'Manage your account.' },
+        { name: 'robots', content: 'noindex, nofollow' },
+      ],
+    });
   });
 });

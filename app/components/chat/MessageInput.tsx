@@ -7,7 +7,7 @@ import { Tooltip } from '@ui/Tooltip';
 import { classNames } from '~/utils/classNames';
 import { EnhancePromptButton } from './EnhancePromptButton.client';
 import { MESSAGE_INPUT_HIGHLIGHTS, TextareaWithHighlights } from './MessageInputHighlights';
-import { useMessageInputController } from './useMessageInputController';
+import { getMessageInputPrimaryActionLabel, useMessageInputController } from './useMessageInputController';
 
 const PROMPT_LENGTH_WARNING_THRESHOLD = 2000;
 
@@ -32,6 +32,7 @@ export const MessageInput = memo(function MessageInput({
 }: MessageInputProps) {
   const controller = useMessageInputController({ isStreaming, onStop, onSend, prefillEnabled: !chatStarted });
   const { authState, input } = controller;
+  const primaryActionLabel = getMessageInputPrimaryActionLabel(authState.kind, isStreaming);
   const hasActiveSession = authState.kind === 'fullyLoggedIn';
   const placeholder = chatStarted
     ? numMessages !== undefined && numMessages > 0
@@ -66,14 +67,10 @@ export const MessageInput = memo(function MessageInput({
           disabled
         }
         tip={authState.kind === 'unauthenticated' ? 'Connect Cloudflare to continue' : undefined}
-        onClick={
-          !chatStarted && authState.kind === 'unauthenticated'
-            ? () => void controller.signIn()
-            : controller.handleButtonClick
-        }
+        onClick={controller.handleButtonClick}
         size="xs"
         className={classNames('ml-1 h-8 min-w-8 rounded-full', !chatStarted ? 'ghost-message-input__send' : '')}
-        aria-label={isStreaming ? 'Stop' : 'Send'}
+        aria-label={primaryActionLabel}
         icon={
           sendMessageInProgress && !isStreaming ? (
             <Spinner className="text-white" />

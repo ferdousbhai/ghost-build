@@ -1,11 +1,10 @@
-import type { GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { docs, lookupDocsParameters, type DocKey } from 'ghostbuild-agent/tools/lookupDocs';
 import { toolSuccess } from 'ghostbuild-agent/tool-result';
 import { continuationCursor, continuationOffset, pageCoverage, textPage } from './bounded-pagination';
 import { contentRevision, queryFingerprint } from './revision';
 
-export async function runLookupDocs(invocation: GhostbuildToolInvocation) {
-  const args = lookupDocsParameters.parse(invocation.args);
+export async function runLookupDocs(input: unknown) {
+  const args = lookupDocsParameters.parse(input);
   const selected = args.docs
     .map((doc) => {
       if (!(doc in docs)) {

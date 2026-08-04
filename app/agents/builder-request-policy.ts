@@ -5,7 +5,6 @@ import type { UIMessage } from 'ai';
 export const MAX_BUILDER_AGENT_MESSAGES = 500;
 const MAX_BUILDER_AGENT_NAME_LENGTH = 512;
 const MAX_BUILDER_SUBCHAT_INDEX = 10_000;
-export const MAX_BUILDER_MODEL_TRANSCRIPT_BYTES = 4 * 1024 * 1024;
 
 export type BuilderTranscriptBinding = {
   agentName: string;
@@ -123,19 +122,6 @@ export function boundBuilderMessageForPersistence(message: UIMessage): UIMessage
         : part,
     ),
   };
-}
-
-export function assertBuilderModelTranscriptWithinLimit(messages: unknown[]): void {
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(messages);
-  } catch {
-    throw new Response('Transcript messages must be JSON serializable', { status: 400 });
-  }
-  const bytes = new TextEncoder().encode(serialized).byteLength;
-  if (bytes > MAX_BUILDER_MODEL_TRANSCRIPT_BYTES) {
-    throw new Response('Transcript is too large for a builder turn', { status: 413 });
-  }
 }
 
 function parseBuilderSubchatIndex(value: unknown): number {

@@ -8,7 +8,9 @@ import {
   type DeploymentStatus,
 } from './deployment-repository';
 import { attestManagedDeploymentSecurity } from './deployment-security-inventory';
+import { validatePreparedDeploymentArtifact } from './deployment-artifact';
 import { UserCloudflareAccountApi } from './user-account-api';
+import { GHOSTBUILD_CONTROL_PLANE_ENDPOINT } from './user-workspace-runtime-policy';
 
 type UserOwnedDeploymentArgs = {
   env: Env;
@@ -23,17 +25,9 @@ type UserOwnedDeploymentArgs = {
 export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs): Promise<Deployment> {
   let phase: DeploymentStatus = 'approved';
   let providerChangesPossible = false;
+  let deploymentSession: { finish(status: 'completed' | 'failed'): Promise<void> } | null = null;
   try {
-    const runtimeEnv = args.env as Env & {
-      GHOSTBUILD_USER_RUNTIME?: string;
-      GHOSTBUILD_USER_RUNTIME_ENDPOINT?: string;
-      CONTROL_PLANE_SECRET?: string;
-      CLOUDFLARE_API_TOKEN?: string;
-      CLOUDFLARE_ACCOUNT_ID?: string;
-      GHOSTBUILD_USER_ID?: string;
-      GHOSTBUILD_CONNECTION_ID?: string;
-      GHOSTBUILD_CONNECTION_GENERATION?: string;
-    };
+    const runtimeEnv = args.env;
     const connectionGeneration = Number(runtimeEnv.GHOSTBUILD_CONNECTION_GENERATION);
     if (
       runtimeEnv.GHOSTBUILD_USER_RUNTIME !== '1' ||
@@ -42,9 +36,9 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       !Number.isSafeInteger(connectionGeneration) ||
       connectionGeneration < 1 ||
       !runtimeEnv.CLOUDFLARE_ACCOUNT_ID ||
-      !runtimeEnv.CLOUDFLARE_API_TOKEN ||
-      !runtimeEnv.GHOSTBUILD_USER_RUNTIME_ENDPOINT ||
-      !runtimeEnv.CONTROL_PLANE_SECRET
+      runtimeEnv.GHOSTBUILD_CONTROL_PLANE_ENDPOINT !== GHOSTBUILD_CONTROL_PLANE_ENDPOINT ||
+      !runtimeEnv.CONTROL_PLANE_SECRET ||
+      !runtimeEnv.PROJECT_WORKSPACE
     ) {
       throw new Error('Cloudflare connection is unavailable.');
     }
@@ -59,27 +53,48 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       executionGeneration: args.executionGeneration,
     });
     phase = 'provisioning';
-    const accessToken = runtimeEnv.CLOUDFLARE_API_TOKEN;
+    const request = args.request ?? fetch;
     const accountId = runtimeEnv.CLOUDFLARE_ACCOUNT_ID;
-    const accountApi = new UserCloudflareAccountApi(accountId, accessToken);
+    const accountApi = await createUserAccountApi(runtimeEnv, request);
+    const reference = parseWorkspaceReference(deployment.workspaceReference);
+    if (reference.revision !== deployment.plan.sourceSha256) {
+      throw new Error('The approved deployment revision no longer matches its workspace reference.');
+    }
+    const workspace = runtimeEnv.PROJECT_WORKSPACE.get(runtimeEnv.PROJECT_WORKSPACE.idFromName(reference.projectId));
+    const sessionId = (
+      await workspace.beginDeploymentSession({
+        operationId: `${deployment.id}:${args.executionGeneration}`,
+        expectedWorkspaceRevision: reference.workspaceRevision,
+        expectedSnapshotRevision: reference.revision,
+      })
+    ).sessionId;
+    let sessionFinished = false;
+    deploymentSession = {
+      async finish(status) {
+        if (sessionFinished) {
+          return;
+        }
+        await workspace.finishDeploymentSession({ sessionId, status });
+        sessionFinished = true;
+      },
+    };
 
     const d1Name = deploymentPlanResourceName(deployment.plan, 'd1', 'DB');
+    const agentD1Name = deploymentPlanResourceName(deployment.plan, 'd1', 'AGENT_SECURITY_DB');
+    const r2Name = deploymentPlanResourceName(deployment.plan, 'r2', 'APP_STORAGE');
+    providerChangesPossible = Boolean(d1Name || agentD1Name || r2Name);
     const d1 = d1Name ? await accountApi.ensureD1ForPlan(deployment.plan) : null;
     if (d1) {
       await recordResource(args.env.DB, deployment.id, 'd1', 'DB', d1.id);
     }
-    const agentD1Name = deploymentPlanResourceName(deployment.plan, 'd1', 'AGENT_SECURITY_DB');
     const agentD1 = agentD1Name ? await accountApi.ensureD1ForPlan(deployment.plan, 'AGENT_SECURITY_DB') : null;
     if (agentD1) {
       await recordResource(args.env.DB, deployment.id, 'd1', 'AGENT_SECURITY_DB', agentD1.id);
     }
-    const r2Name = deploymentPlanResourceName(deployment.plan, 'r2', 'APP_STORAGE');
     const r2 = r2Name ? await accountApi.ensureR2ForPlan(deployment.plan) : null;
     if (r2) {
       await recordResource(args.env.DB, deployment.id, 'r2', 'APP_STORAGE', r2.id);
     }
-    providerChangesPossible = Boolean(d1Name || agentD1Name || r2Name);
-
     await transitionDeployment({
       db: args.env.DB,
       deploymentId: deployment.id,
@@ -90,56 +105,67 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
     phase = 'deploying';
     deployment = await requireDeployment(args.env.DB, deployment.id);
     const workerName = requireResourceName(deployment, 'worker', 'app');
-    providerChangesPossible = true;
-    const reference = parseWorkspaceReference(deployment.workspaceReference);
-    if (reference.revision !== deployment.plan.sourceSha256) {
-      throw new Error('The approved deployment revision no longer matches its workspace reference.');
-    }
-    const secret = runtimeEnv.CONTROL_PLANE_SECRET;
     const profile = deploymentProjectProfile(deployment.plan);
-    const response = await (args.request ?? fetch)(
-      `${runtimeEnv.GHOSTBUILD_USER_RUNTIME_ENDPOINT}/v1/projects/${encodeURIComponent(reference.projectId)}/deploy`,
-      {
-        method: 'POST',
-        headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          deploymentId: deployment.id,
-          revision: reference.revision,
-          apiToken: accessToken,
-          accountId,
-          workerName,
-          projectType: profile.type,
-          workersAi: profile.bindings.ai,
-          appAgent: profile.bindings.appAgent,
-          d1DatabaseId: d1?.id,
-          d1DatabaseName: d1?.name,
-          agentSecurityD1DatabaseId: agentD1?.id,
-          agentSecurityD1DatabaseName: agentD1?.name,
-          r2BucketName: r2?.name,
-          securityBaselineVersion: String(deployment.plan.securityBaselineVersion),
-          securityBoundarySha256: deployment.plan.securityBoundarySha256,
-          templateSourceSha256: deployment.plan.templateSourceSha256,
-        }),
-        signal: AbortSignal.timeout(30 * 60_000),
-      },
+    const artifact = await validatePreparedDeploymentArtifact(
+      await workspace.prepareDeploymentArtifact({
+        sessionId,
+        revision: reference.revision,
+        accountId,
+        workerName,
+        projectType: profile.type,
+        workersAi: profile.bindings.ai,
+        appAgent: profile.bindings.appAgent,
+        d1DatabaseId: d1?.id,
+        d1DatabaseName: d1?.name,
+        agentSecurityD1DatabaseId: agentD1?.id,
+        agentSecurityD1DatabaseName: agentD1?.name,
+        r2BucketName: r2?.name,
+        securityBaselineVersion: String(deployment.plan.securityBaselineVersion),
+        securityBoundarySha256: deployment.plan.securityBoundarySha256,
+        templateSourceSha256: deployment.plan.templateSourceSha256,
+      }),
+      { revision: reference.revision, projectType: profile.type },
     );
-    const result = (await response.json().catch(() => null)) as {
-      workerName?: string;
-      workerVersionId?: string;
-      error?: string;
-    } | null;
-    if (!response.ok || result?.workerName !== workerName || typeof result.workerVersionId !== 'string') {
-      throw new Error(result?.error || 'The user-owned deployment Sandbox failed.');
+
+    // The build may take several minutes. Resolve again at the authenticated
+    // boundary and force OAuth refresh, then retry once if Cloudflare still
+    // reports that the access token expired.
+    const publishApi = await createUserAccountApi(runtimeEnv, request, true);
+    await workspace.assertDeploymentSession({ sessionId });
+    if (d1) {
+      await publishApi.applyD1Migrations(d1.id, artifact.migrations.DB);
     }
+    if (agentD1) {
+      await publishApi.applyD1Migrations(agentD1.id, artifact.migrations.AGENT_SECURITY_DB);
+    }
+    providerChangesPossible = true;
+    const result = await publishApi.deployManagedWorker({
+      workerName,
+      projectType: profile.type,
+      sourceSha256: reference.revision,
+      mainModule: artifact.mainModule,
+      modules: artifact.modules,
+      assets: artifact.assets,
+      workersAi: profile.bindings.ai,
+      appAgent: profile.bindings.appAgent,
+      d1DatabaseId: d1?.id,
+      agentSecurityD1DatabaseId: agentD1?.id,
+      r2BucketName: r2?.name,
+      securityBaselineVersion: String(deployment.plan.securityBaselineVersion),
+      securityBoundarySha256: deployment.plan.securityBoundarySha256,
+      templateSourceSha256: deployment.plan.templateSourceSha256,
+    });
+    await publishApi.configureManagedWorkerSchedule(workerName, profile.bindings.appAgent);
+    await publishApi.enableWorkerSubdomain(workerName);
     await attestManagedDeploymentSecurity({
       deployment,
       workerName,
-      accountApi,
+      accountApi: publishApi,
       expectedPublishedVersionId: result.workerVersionId,
       expectedAgentSecurityD1DatabaseId: agentD1?.id,
     });
     await recordResource(args.env.DB, deployment.id, 'worker', 'app', workerName);
-    const workersSubdomain = await accountApi.getWorkersSubdomain();
+    const workersSubdomain = await publishApi.getWorkersSubdomain();
     await transitionDeployment({
       db: args.env.DB,
       deploymentId: deployment.id,
@@ -148,6 +174,7 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       nextStatus: 'succeeded',
       productionUrl: `https://${workerName}.${workersSubdomain}.workers.dev`,
     });
+    await deploymentSession.finish('completed');
     return requireDeployment(args.env.DB, deployment.id);
   } catch (error) {
     if (phase !== 'approved') {
@@ -162,7 +189,135 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       }).catch((transitionError) => console.error('Unable to persist user-owned deployment failure', transitionError));
     }
     throw error;
+  } finally {
+    await deploymentSession
+      ?.finish('failed')
+      .catch((error) => console.error('Unable to finalize ProjectWorkspace deployment session', error));
   }
+}
+
+export async function resolveFreshCloudflareAccessToken(
+  env: {
+    GHOSTBUILD_CONTROL_PLANE_ENDPOINT?: string;
+    CONTROL_PLANE_SECRET?: string;
+    GHOSTBUILD_USER_ID?: string;
+    GHOSTBUILD_CONNECTION_ID?: string;
+    GHOSTBUILD_CONNECTION_GENERATION?: string;
+  },
+  request: typeof fetch = fetch,
+  forceRefresh = false,
+): Promise<string> {
+  if (
+    env.GHOSTBUILD_CONTROL_PLANE_ENDPOINT !== GHOSTBUILD_CONTROL_PLANE_ENDPOINT ||
+    !env.CONTROL_PLANE_SECRET ||
+    !env.GHOSTBUILD_USER_ID ||
+    !env.GHOSTBUILD_CONNECTION_ID
+  ) {
+    throw new Error('Cloudflare connection is unavailable.');
+  }
+  const connectionGeneration = Number(env.GHOSTBUILD_CONNECTION_GENERATION);
+  if (!Number.isSafeInteger(connectionGeneration) || connectionGeneration < 1) {
+    throw new Error('Cloudflare connection is unavailable.');
+  }
+  const response = await request(`${GHOSTBUILD_CONTROL_PLANE_ENDPOINT}/api/cloudflare/runtime-credential`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${env.CONTROL_PLANE_SECRET}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      userId: env.GHOSTBUILD_USER_ID,
+      connectionId: env.GHOSTBUILD_CONNECTION_ID,
+      connectionGeneration,
+      forceRefresh,
+    }),
+    redirect: 'error',
+    signal: AbortSignal.timeout(30_000),
+  });
+  const cacheControl = response.headers.get('Cache-Control') ?? '';
+  if (!containsNoStore(cacheControl)) {
+    throw new Error('Cloudflare connection is unavailable.');
+  }
+  const body = await readBoundedCredentialResponse(response);
+  if (
+    !response.ok ||
+    !body ||
+    typeof body.accessToken !== 'string' ||
+    body.accessToken.length < 1 ||
+    body.accessToken.length > 4_096
+  ) {
+    throw new Error('Cloudflare connection is unavailable.');
+  }
+  return body.accessToken;
+}
+
+async function createUserAccountApi(
+  env: {
+    GHOSTBUILD_CONTROL_PLANE_ENDPOINT?: string;
+    CONTROL_PLANE_SECRET?: string;
+    GHOSTBUILD_USER_ID?: string;
+    GHOSTBUILD_CONNECTION_ID?: string;
+    GHOSTBUILD_CONNECTION_GENERATION?: string;
+    CLOUDFLARE_ACCOUNT_ID?: string;
+  },
+  request: typeof fetch,
+  forceRefresh = false,
+): Promise<UserCloudflareAccountApi> {
+  if (!env.CLOUDFLARE_ACCOUNT_ID) {
+    throw new Error('Cloudflare connection is unavailable.');
+  }
+  const accessToken = await resolveFreshCloudflareAccessToken(env, request, forceRefresh);
+  return new UserCloudflareAccountApi(env.CLOUDFLARE_ACCOUNT_ID, accessToken, request, undefined, () =>
+    resolveFreshCloudflareAccessToken(env, request, true),
+  );
+}
+
+async function readBoundedCredentialResponse(response: Response): Promise<Record<string, unknown> | null> {
+  const contentLength = Number(response.headers.get('Content-Length') ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > 8 * 1024) {
+    return null;
+  }
+  if (!response.body) {
+    return null;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      total += value.byteLength;
+      if (total > 8 * 1024) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    const value: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function containsNoStore(value: string): boolean {
+  return value
+    .toLowerCase()
+    .split(',')
+    .some((directive) => directive.trim() === 'no-store');
 }
 
 function requireExecutionIdentity(deployment: Deployment, args: UserOwnedDeploymentArgs): void {

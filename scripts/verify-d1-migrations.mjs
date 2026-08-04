@@ -16,8 +16,14 @@ const migrationPolicies = [
     checksums: {
       '0001_ghostbuild.sql': 'b4ea60ce99e8dafacafc566cdbbf9efdd7668963072b8b5f0860b4cdd8ebdb7a',
       '0002_user_computer_runtimes.sql': 'a9056622b927693b1dbe19669a6442af96388e8ca8b7ca1e55d1e087419ea3ed',
+      '0003_launch_controls.sql': 'a9aaab709aabf2db221379e2449c78602aa1d44730f0d9984f185fa2dbad4bd3',
+      '0004_remove_legacy_workspace_runtime.sql': 'fd0a0a6a4297ccc046216ff11216bb217afaaeb399548501a2581f7e4450ae5f',
     },
-    contractAllowlist: {},
+    contractAllowlist: {
+      // Explicit pre-launch clean break: the Computer locator replaced this
+      // unused table, and keeping it would preserve a false compatibility path.
+      '0004_remove_legacy_workspace_runtime.sql': 'fd0a0a6a4297ccc046216ff11216bb217afaaeb399548501a2581f7e4450ae5f',
+    },
   },
   {
     directory: 'user-workspace-migrations',

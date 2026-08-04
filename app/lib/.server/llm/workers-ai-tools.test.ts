@@ -4,7 +4,8 @@ import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
 import type { Tool, ToolExecutionOptions } from 'ai';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { ZodType } from 'zod';
-import { COMPUTER_TOOL_NAMES } from 'ghostbuild-agent/cloudflare-computer';
+import { COMPUTER_EXEC_APPLICATION_POLICY, COMPUTER_TOOL_NAMES } from 'ghostbuild-agent/cloudflare-computer';
+import { UserWorkspaceRuntimeClient } from '~/lib/.server/cloudflare/user-workspace-runtime-client';
 import {
   createWorkersAiTools,
   createTurnStatefulToolCoordinator,
@@ -54,6 +55,8 @@ describe('Workers AI tool lifecycle', () => {
       backend: 'container-shell',
     };
 
+    expect(tools.exec.description).toContain(COMPUTER_EXEC_APPLICATION_POLICY);
+
     await expect(executeTool(tools.exec, input)).resolves.toEqual({
       ...input,
       exitCode: 0,
@@ -88,6 +91,58 @@ describe('Workers AI tool lifecycle', () => {
       encoding: 'utf8',
       backend: 'worker-shell',
     });
+  });
+
+  it('turns the official Computer exec error wrapper into a typed nonterminal sync result', async () => {
+    const completeToolOperation = vi.fn();
+    const failToolOperation = vi.fn();
+    const stub = {
+      initializeProjectIdentity: vi.fn(),
+      beginToolOperation: vi.fn().mockResolvedValue({ status: 'execute' }),
+      completeToolOperation,
+      failToolOperation,
+      execute: vi.fn().mockRejectedValue(new Error('[workspace_sync_pending] Computer synchronization is pending.')),
+      getWorkspaceState: vi.fn(),
+      listWorkspaceFiles: vi.fn(),
+    };
+    const workspace = new UserWorkspaceRuntimeClient(
+      {
+        GHOSTBUILD_USER_RUNTIME: '1',
+        GHOSTBUILD_USER_ID: 'user-1',
+        PROJECT_WORKSPACE: {
+          idFromName: vi.fn(() => ({ id: 'project-1' })),
+          get: vi.fn(() => stub),
+        },
+      } as unknown as Env,
+      'project-1',
+      () => 'user-1',
+    );
+    const tools = createWorkersAiTools(workspace, operationContext());
+
+    await expect(executeTool(tools.exec, { command: 'touch marker', backend: 'container-shell' })).resolves.toEqual({
+      kind: 'workspace-sync-unconfirmed',
+      version: 1,
+      acknowledgement: 'pending',
+      status: 'pending',
+      code: 'workspace_sync_pending',
+      error: '[workspace_sync_pending] Computer synchronization is pending.',
+    });
+    expect(completeToolOperation).not.toHaveBeenCalled();
+    expect(failToolOperation).not.toHaveBeenCalled();
+  });
+
+  it('does not start a queued Computer tool after the turn is aborted', async () => {
+    const runtimeExec = vi.fn();
+    const workspace = workspaceStub(runtimeExec);
+    const tools = createWorkersAiTools(workspace, operationContext());
+    const controller = new AbortController();
+    controller.abort(new Error('turn aborted'));
+
+    await expect(executeTool(tools.read, { path: '/home/project/source.ts' }, controller.signal)).rejects.toThrow(
+      'turn aborted',
+    );
+    expect(workspace.computer.fs.stat).not.toHaveBeenCalled();
+    expect(runtimeExec).not.toHaveBeenCalled();
   });
 
   it('serializes writes and validation in model tool-call order', async () => {
@@ -153,13 +208,38 @@ describe('Workers AI tool lifecycle', () => {
     });
   });
 
-  it('does not invent mutation metadata for successful Computer exec results', () => {
-    expect(
-      getWorkersAiToolSettings([
-        user('Explain the project'),
-        toolResult('exec', { command: 'rg TODO' }, { exitCode: 0, stdout: '', stderr: '' }),
-      ]),
-    ).toEqual({ activeTools: AUTOMATIC_TOOLS, toolChoice: 'auto' });
+  it('does not treat legacy, pending, or failed write output as a committed implementation mutation', () => {
+    const base = [user('Build a habit tracker')];
+    for (const result of [
+      { path: '/home/project/a.ts', bytesWritten: 42 },
+      { ...writeResult(), acknowledgement: 'pending' },
+      { ...writeResult(), committed: false },
+      { error: 'write failed' },
+    ]) {
+      expect(getWorkersAiToolSettings([...base, toolResult('write', {}, result)])).toEqual({
+        activeTools: AUTOMATIC_TOOLS,
+        toolChoice: 'auto',
+      });
+    }
+  });
+
+  it('conservatively requires validation after every attempted model-facing Computer exec', () => {
+    for (const result of [
+      { exitCode: 0, stdout: '', stderr: '' },
+      { exitCode: 1, stdout: '', stderr: 'failed after writing' },
+      { error: 'timed out after writing' },
+      {
+        kind: 'workspace-sync-unconfirmed',
+        version: 1,
+        acknowledgement: 'pending',
+        status: 'pending',
+        code: 'workspace_sync_pending',
+      },
+    ]) {
+      expect(
+        getWorkersAiToolSettings([user('Explain the project'), toolResult('exec', { command: 'rg TODO' }, result)]),
+      ).toEqual({ activeTools: AUTOMATIC_TOOLS, toolChoice: 'required' });
+    }
   });
 
   it('requires implementation work after dependency setup instead of forcing premature validation', () => {
@@ -167,6 +247,18 @@ describe('Workers AI tool lifecycle', () => {
       getWorkersAiToolSettings([
         user('Build a Three.js game'),
         toolResult('npmInstall', { packages: 'three @types/three' }, toolSuccess('installed')),
+      ]),
+    ).toEqual({
+      activeTools: AUTOMATIC_TOOLS.filter((toolName) => toolName !== 'validateProject'),
+      toolChoice: 'required',
+    });
+  });
+
+  it('invalidates validation when dependency installation fails after a possible manifest or lockfile write', () => {
+    expect(
+      getWorkersAiToolSettings([
+        user('Add a chart'),
+        toolResult('npmInstall', { packages: 'recharts' }, toolFailure('pnpm failed after updating the lockfile')),
       ]),
     ).toEqual({
       activeTools: AUTOMATIC_TOOLS.filter((toolName) => toolName !== 'validateProject'),
@@ -333,16 +425,17 @@ function user(text: string): GhostbuildMessage {
 
 function toolResult(toolName: string, args: unknown, result: unknown): GhostbuildMessage {
   const invocation: GhostbuildToolInvocation = {
-    state: 'result',
+    type: 'dynamic-tool',
+    state: 'output-available',
     toolCallId: crypto.randomUUID(),
     toolName,
-    args,
-    result,
+    input: args,
+    output: result,
   };
   return {
     id: crypto.randomUUID(),
     role: 'assistant',
-    parts: [{ type: 'tool-invocation', toolInvocation: invocation }],
+    parts: [invocation],
   };
 }
 
@@ -355,7 +448,25 @@ function validationResult(nextAction: 'sign-in-required' | 'prepare-deployment',
 }
 
 function writeResult() {
-  return { path: '/home/project/src/routes/index.tsx', bytesWritten: 42 };
+  return {
+    kind: 'workspace-mutation-receipt',
+    version: 1,
+    committed: true,
+    acknowledgement: 'complete',
+    tool: 'write',
+    files: [
+      {
+        path: '/home/project/src/routes/index.tsx',
+        revision: 2,
+        size: 42,
+        sha256: 'a'.repeat(64),
+        deleted: false,
+      },
+    ],
+    changedRanges: [],
+    diffSummary: null,
+    truncated: { result: false, diff: false, paths: false, omittedBytes: 0 },
+  };
 }
 
 function operationContext() {
@@ -401,11 +512,16 @@ function workspaceStub(
   } as unknown as BuilderWorkspaceApi;
 }
 
-async function executeTool(definition: Tool, input: unknown) {
+async function executeTool(definition: Tool, input: unknown, abortSignal?: AbortSignal) {
   if (!definition.execute) {
     throw new Error('Expected an executable tool.');
   }
-  const options: ToolExecutionOptions = { toolCallId: 'tool-call', messages: [] };
+  const options: ToolExecutionOptions<unknown> = {
+    toolCallId: 'tool-call',
+    messages: [],
+    abortSignal,
+    context: undefined,
+  };
   return definition.execute(input as never, options);
 }
 

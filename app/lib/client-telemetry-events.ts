@@ -1,17 +1,27 @@
 export const CLIENT_TELEMETRY_EVENTS = [
-  'Builder client tool call failed',
   'Builder connection was not ready before send',
-  'Failed to deliver Builder tool output for continuation',
   'Failed to enhance prompt',
   'Failed to fetch dashboard version information',
   'Failed to process chat request',
   'Failed to start Cloudflare authorization',
   'Failed to submit chat message',
-  'Preview base URL unexpectedly had a trailing slash',
-  'Preview key event arrived before base URL',
-  'Preview key event arrived before iframe URL',
   'Unknown assistant message part',
   'User tried to send message but Ghostbuild is too busy',
 ] as const;
 
 export type ClientTelemetryEvent = (typeof CLIENT_TELEMETRY_EVENTS)[number];
+
+export const PRODUCT_TELEMETRY_EVENTS = [
+  'landing_viewed',
+  'cloudflare_connect_started',
+  'prompt_submitted',
+  'first_tool_completed',
+  'validation_succeeded',
+  'preview_ready',
+  'deployment_approval_presented',
+  'deployment_approved',
+  'deployment_succeeded',
+] as const;
+
+export type ProductTelemetryEvent = (typeof PRODUCT_TELEMETRY_EVENTS)[number];
+export const ALL_CLIENT_TELEMETRY_EVENTS = [...CLIENT_TELEMETRY_EVENTS, ...PRODUCT_TELEMETRY_EVENTS] as const;

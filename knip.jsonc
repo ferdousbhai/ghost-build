@@ -16,8 +16,6 @@
         "user-workspace-runtime/src/index.ts",
         // manual build processes
         "buildSystemPrompts.ts",
-        // isolated remote-dev evaluation Workers
-        "scripts/evaluations/*.worker.ts",
       ],
       "project": ["**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!"],
       "ignore": ["template/**", "app/test/cloudflare-workers-shim.ts"],

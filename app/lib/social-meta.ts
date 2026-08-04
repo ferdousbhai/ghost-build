@@ -37,3 +37,9 @@ export function createSocialPageHead({ title, description, path, imagePath, imag
     links: [{ rel: 'canonical', href: url }],
   };
 }
+
+export function createPrivatePageHead(title: string, description: string) {
+  return {
+    meta: [{ title }, { name: 'description', content: description }, { name: 'robots', content: 'noindex, nofollow' }],
+  };
+}

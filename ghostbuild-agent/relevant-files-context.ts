@@ -86,7 +86,7 @@ export class RelevantFilesContext {
     const filesTouched = new Map<AbsolutePath, number>();
     message.parts.forEach((part, partIndex) => {
       const invocation = getToolInvocation(part);
-      if (!invocation || invocation.state === 'partial-call') {
+      if (!invocation || invocation.state === 'input-streaming') {
         return;
       }
       const filePath = invocationFilePath(invocation);
@@ -105,7 +105,7 @@ function invocationFilePath(invocation: NonNullable<ReturnType<typeof getToolInv
     case 'read':
     case 'edit':
     case 'write': {
-      const args = invocation.args as { path?: unknown } | null;
+      const args = invocation.input as { path?: unknown } | null;
       return args && typeof args === 'object' && typeof args.path === 'string' ? args.path : undefined;
     }
     default:
@@ -136,7 +136,7 @@ function createBoundedRelevantFilesContent(args: {
     return true;
   };
 
-  if (args.currentDocument) {
+  if (args.currentDocument && !args.currentDocument.isBinary) {
     const section = renderFileContext(args.currentDocument.filePath, args.currentDocument.value);
     if (append(section)) {
       fileCount++;
@@ -148,7 +148,7 @@ function createBoundedRelevantFilesContent(args: {
       break;
     }
     const entry = args.files[filePath];
-    if (entry?.type !== 'file') {
+    if (entry?.type !== 'file' || entry.isBinary) {
       continue;
     }
     if (append(renderFileContext(filePath, entry.content))) {
@@ -210,12 +210,11 @@ function renderPathSummary(allPaths: string[], maximumCharacters: number): strin
 function makeRelevantFilesMessage(content: string, id: string): GhostbuildMessage {
   return {
     id,
-    content: '',
     role: 'user',
     parts: [{ type: 'text', text: content }],
   };
 }
 
 function emptyUserMessage(id: string): GhostbuildMessage {
-  return { id, content: '', role: 'user', parts: [] };
+  return { id, role: 'user', parts: [] };
 }

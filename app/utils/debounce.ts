@@ -1,20 +1,28 @@
 type Debounced<Args extends unknown[]> = ((...args: Args) => void) & {
   cancel: () => void;
+  flush: () => void;
+  pending: () => boolean;
 };
 
 export function debounce<Args extends unknown[]>(func: (...args: Args) => unknown, wait: number): Debounced<Args> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
+  let pendingArgs: Args | undefined;
+
+  const invoke = () => {
+    const args = pendingArgs;
+    pendingArgs = undefined;
+    timeout = undefined;
+    if (args) {
+      func(...args);
+    }
+  };
 
   const debounced = function executedFunction(...args: Args) {
-    const later = () => {
-      timeout = undefined;
-      func(...args);
-    };
-
     if (timeout !== undefined) {
       clearTimeout(timeout);
     }
-    timeout = setTimeout(later, wait);
+    pendingArgs = args;
+    timeout = setTimeout(invoke, wait);
   };
 
   debounced.cancel = () => {
@@ -22,7 +30,18 @@ export function debounce<Args extends unknown[]>(func: (...args: Args) => unknow
       clearTimeout(timeout);
       timeout = undefined;
     }
+    pendingArgs = undefined;
   };
+
+  debounced.flush = () => {
+    if (timeout === undefined) {
+      return;
+    }
+    clearTimeout(timeout);
+    invoke();
+  };
+
+  debounced.pending = () => timeout !== undefined;
 
   return debounced;
 }

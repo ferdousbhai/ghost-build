@@ -50,11 +50,7 @@ export const FileBreadcrumb = memo<FileBreadcrumbProps>(function FileBreadcrumb(
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
 
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
-  const segmentRefs = useRef<(HTMLSpanElement | null)[]>([]);
-
-  const handleSegmentClick = (index: number) => {
-    setActiveIndex((prevIndex) => (prevIndex === index ? null : index));
-  };
+  const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -93,22 +89,29 @@ export const FileBreadcrumb = memo<FileBreadcrumbProps>(function FileBreadcrumb(
 
         return (
           <div key={index} className="relative flex items-center">
-            <DropdownMenu.Root open={isActive} modal={false}>
+            <DropdownMenu.Root
+              open={isActive}
+              onOpenChange={(open) => {
+                setActiveIndex((current) => (open ? index : current === index ? null : current));
+              }}
+              modal={false}
+            >
               <DropdownMenu.Trigger asChild>
-                <span
+                <button
+                  type="button"
                   ref={(ref) => {
                     segmentRefs.current[index] = ref;
                   }}
-                  className={classNames('flex items-center gap-1.5 cursor-pointer shrink-0', {
+                  className={classNames('flex shrink-0 cursor-pointer items-center gap-1.5 rounded bg-transparent', {
                     'text-content-tertiary hover:text-content-primary': !isActive,
                     'text-content-primary underline': isActive,
                     'pr-4': isLast,
                   })}
-                  onClick={() => handleSegmentClick(index)}
+                  aria-label={`Browse ${segment}`}
                 >
                   {isLast && <FileIcon />}
                   {segment}
-                </span>
+                </button>
               </DropdownMenu.Trigger>
               {index > 0 && !isLast && <ChevronRightIcon className="mx-1 inline-block" />}
               <AnimatePresence>

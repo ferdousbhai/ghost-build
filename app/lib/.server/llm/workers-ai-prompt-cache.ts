@@ -15,6 +15,7 @@ export async function createWorkersAiSessionAffinity(identity: TranscriptIdentit
 export async function fingerprintWorkersAiModelInput(input: {
   privacySalt: string;
   model: string;
+  instructions: unknown;
   messages: unknown;
   tools: unknown;
   activeTools: unknown;

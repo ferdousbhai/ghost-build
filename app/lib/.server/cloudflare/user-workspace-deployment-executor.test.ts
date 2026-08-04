@@ -1,0 +1,107 @@
+import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolveFreshCloudflareAccessToken } from './user-workspace-deployment-executor';
+
+const runtimeEnv = {
+  GHOSTBUILD_CONTROL_PLANE_ENDPOINT: 'https://ghostbuild.dev',
+  CONTROL_PLANE_SECRET: 'runtime-secret-that-is-long-enough',
+  GHOSTBUILD_USER_ID: 'user-1',
+  GHOSTBUILD_CONNECTION_ID: 'connection-1',
+  GHOSTBUILD_CONNECTION_GENERATION: '3',
+};
+
+describe('resolveFreshCloudflareAccessToken', () => {
+  it('requests a non-cacheable token for the exact runtime identity', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        Response.json({ accessToken: 'fresh-access-token' }, { headers: { 'Cache-Control': 'private, no-store' } }),
+      );
+
+    await expect(resolveFreshCloudflareAccessToken(runtimeEnv, request)).resolves.toBe('fresh-access-token');
+    expect(request).toHaveBeenCalledWith(
+      'https://ghostbuild.dev/api/cloudflare/runtime-credential',
+      expect.objectContaining({
+        method: 'POST',
+        redirect: 'error',
+        headers: expect.objectContaining({
+          authorization: 'Bearer runtime-secret-that-is-long-enough',
+          'content-type': 'application/json',
+        }),
+        body: JSON.stringify({
+          userId: 'user-1',
+          connectionId: 'connection-1',
+          connectionGeneration: 3,
+          forceRefresh: false,
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it('can force OAuth refresh at a new authenticated deployment phase', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        Response.json({ accessToken: 'refreshed-access-token' }, { headers: { 'Cache-Control': 'no-store' } }),
+      );
+
+    await expect(resolveFreshCloudflareAccessToken(runtimeEnv, request, true)).resolves.toBe('refreshed-access-token');
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toMatchObject({ forceRefresh: true });
+  });
+
+  it.each([
+    ['a redirectable endpoint', { ...runtimeEnv, GHOSTBUILD_CONTROL_PLANE_ENDPOINT: 'https://attacker.example' }],
+    ['a stale generation', { ...runtimeEnv, GHOSTBUILD_CONNECTION_GENERATION: '0' }],
+    ['a missing runtime secret', { ...runtimeEnv, CONTROL_PLANE_SECRET: undefined }],
+  ])('rejects %s before making a request', async (_label, env) => {
+    const request = vi.fn<typeof fetch>();
+
+    await expect(resolveFreshCloudflareAccessToken(env, request)).rejects.toThrow(
+      'Cloudflare connection is unavailable',
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a cacheable response', Response.json({ accessToken: 'token' })],
+    [
+      'a provider failure',
+      Response.json({ error: 'provider detail' }, { status: 503, headers: { 'Cache-Control': 'no-store' } }),
+    ],
+    [
+      'an oversized token',
+      Response.json({ accessToken: 'a'.repeat(4_097) }, { headers: { 'Cache-Control': 'no-store' } }),
+    ],
+  ])('fails closed on %s', async (_label, response) => {
+    await expect(
+      resolveFreshCloudflareAccessToken(runtimeEnv, vi.fn<typeof fetch>().mockResolvedValue(response)),
+    ).rejects.toThrow('Cloudflare connection is unavailable');
+  });
+});
+
+describe('deployment credential boundary', () => {
+  it('keeps provider credentials out of ProjectWorkspace input and every untrusted build command environment', () => {
+    const executorSource = readFileSync(new URL('./user-workspace-deployment-executor.ts', import.meta.url), 'utf8');
+    const inputStart = executorSource.indexOf('await workspace.prepareDeploymentArtifact({');
+    const inputEnd = executorSource.indexOf('}),\n      { revision:', inputStart);
+    expect(inputStart).toBeGreaterThan(0);
+    expect(inputEnd).toBeGreaterThan(inputStart);
+    const projectInput = executorSource.slice(inputStart, inputEnd);
+    expect(projectInput).not.toMatch(/accessToken|apiToken|CONTROL_PLANE_SECRET|authorization/i);
+
+    const runtimeSource = readFileSync(
+      new URL('../../../../user-workspace-runtime/src/index.ts', import.meta.url),
+      'utf8',
+    );
+    const methodStart = runtimeSource.indexOf('async prepareDeploymentArtifact(');
+    const methodEnd = runtimeSource.indexOf('async deleteProject(', methodStart);
+    expect(methodStart).toBeGreaterThan(0);
+    expect(methodEnd).toBeGreaterThan(methodStart);
+    const preparation = runtimeSource.slice(methodStart, methodEnd);
+    expect(preparation).toContain('wrangler deploy --dry-run');
+    expect(preparation).toContain("backend: 'container-shell'");
+    expect(preparation).not.toMatch(/apiToken|CLOUDFLARE_API_TOKEN|authorization|env\s*:/i);
+    expect(runtimeSource).not.toContain("route.operation === 'deploy'");
+  });
+});

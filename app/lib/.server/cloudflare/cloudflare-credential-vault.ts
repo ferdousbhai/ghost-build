@@ -62,7 +62,7 @@ export class D1CloudflareCredentialVault {
     return this.store(JSON.stringify({ version: 1, ...credential }), now);
   }
 
-  async resolve(credentialHandle: string): Promise<string> {
+  async resolve(credentialHandle: string, options: { forceRefresh?: boolean } = {}): Promise<string> {
     const row = await this.readCredentialRow(credentialHandle);
     if (!row) {
       throw new Error('Cloudflare credential is unavailable.');
@@ -72,7 +72,7 @@ export class D1CloudflareCredentialVault {
     if (!oauthCredential) {
       return value;
     }
-    if (oauthCredential.expiresAt > Date.now() + 60_000) {
+    if (!options.forceRefresh && oauthCredential.expiresAt > Date.now() + 60_000) {
       return oauthCredential.accessToken;
     }
     return this.refreshOAuthCredential(credentialHandle, oauthCredential, row);

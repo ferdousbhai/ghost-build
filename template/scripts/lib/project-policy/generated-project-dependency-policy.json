@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "maximumWorkspacePolicyBytes": 65536,
+  "minimumReleaseAgeMinutes": 1440,
+  "approvedBuildDependencies": ["core-js-pure", "esbuild", "sharp", "workerd"],
+  "approvedOverrides": {
+    "brace-expansion@<1.1.18": "1.1.18",
+    "brace-expansion@>=2.0.0 <2.1.4": "2.1.4",
+    "brace-expansion@>=4.0.0 <5.0.9": "5.0.9",
+    "@hono/node-server@<2.0.10": "2.0.10",
+    "fast-uri@>=3.0.0 <3.1.5": "3.1.5",
+    "hono@<4.12.34": "4.12.34",
+    "ip-address@<=10.3.0": "10.3.1",
+    "postcss@<=8.5.22": "8.5.25",
+    "sharp@<0.35.0": "0.35.3",
+    "undici@>=7.0.0 <7.29.0": "7.29.0"
+  },
+  "allowedWorkspaceKeys": [
+    "packages",
+    "ignoreWorkspaceRootCheck",
+    "minimumReleaseAge",
+    "minimumReleaseAgeExclude",
+    "minimumReleaseAgeIgnoreMissingTime",
+    "minimumReleaseAgeStrict",
+    "strictDepBuilds",
+    "blockExoticSubdeps",
+    "overrides",
+    "allowBuilds",
+    "peerDependencyRules"
+  ],
+  "forbiddenWorkspaceKeys": ["dangerouslyAllowAllBuilds", "trustLockfile"],
+  "profiles": {
+    "generatedProject": {
+      "packages": ["."],
+      "minimumReleaseAgeExclusions": []
+    },
+    "repository": {
+      "minimumReleaseAgeExclusions": ["@cloudflare/computer@0.1.1"],
+      "minimumReleaseAgeExclusionReason": "Reviewed preview dependency adopted during the Cloudflare Computer cutover before the normal release-age gate."
+    }
+  }
+}

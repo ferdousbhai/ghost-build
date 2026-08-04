@@ -28,8 +28,8 @@ describe('userRuntimeEnhancePromptAction billing', () => {
     mocks.getCredentials.mockResolvedValue({ accountId: 'account-1', apiKey: 'token' });
     mocks.generateText.mockResolvedValue({
       text: 'Build a detailed calendar',
-      totalUsage: { inputTokens: 20, outputTokens: 10 },
-      providerMetadata: {},
+      usage: { inputTokens: 20, outputTokens: 10 },
+      finalStep: { providerMetadata: {} },
     });
   });
 

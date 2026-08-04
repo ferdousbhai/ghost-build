@@ -104,6 +104,14 @@ html.dark {
   line-height: 1.5;
 }
 
+.ghost-home-ownership {
+  max-width: 620px;
+  margin-top: 8px;
+  color: var(--ghost-home-soft);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .ghost-home-composer-stack {
   max-width: 800px;
   margin-top: 28px;

@@ -63,7 +63,6 @@ export async function provisionUserWorkspaceRuntime(args: {
       controlPlaneSecret,
       runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
       databaseId: database.id,
-      apiToken: accessToken,
       userId: args.userId,
       connectionId: connection.id,
       connectionGeneration: connection.generation,

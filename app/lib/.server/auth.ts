@@ -13,6 +13,7 @@ export type CloudflareAuthSession = {
     id: string;
     userId: string;
     expiresAt: number;
+    createdAt: number;
   };
   user: CloudflareAuthUser;
 };
@@ -37,6 +38,7 @@ type SessionRow = {
   session_id: string;
   user_id: string;
   expires_at: number;
+  created_at: number;
   name: string;
   email: string;
   image: string | null;
@@ -54,7 +56,7 @@ export async function getAuthSession(env: Env, request: Request): Promise<Cloudf
   const tokenHash = await sha256(token);
   const now = Date.now();
   const row = await env.DB.prepare(
-    `SELECT auth.id AS session_id, auth.user_id, auth.expires_at,
+    `SELECT auth.id AS session_id, auth.user_id, auth.expires_at, auth.created_at,
             users.name, users.email, users.image
      FROM cloudflare_auth_sessions AS auth
      JOIN "user" AS users ON users.id = auth.user_id
@@ -68,7 +70,7 @@ export async function getAuthSession(env: Env, request: Request): Promise<Cloudf
     return null;
   }
   return {
-    session: { id: row.session_id, userId: row.user_id, expiresAt: row.expires_at },
+    session: { id: row.session_id, userId: row.user_id, expiresAt: row.expires_at, createdAt: row.created_at },
     user: { id: row.user_id, name: row.name, email: row.email, image: row.image },
   };
 }

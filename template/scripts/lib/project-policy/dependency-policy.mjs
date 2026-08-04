@@ -25,6 +25,13 @@ export const REQUIRED_NODE_ENGINE = ">=26.0.0";
 export const REQUIRED_NODE_TYPES_MAJOR = "^26.";
 export const REQUIRED_PNPM_VERSION = "11.14.0";
 
+const REQUIRED_AI_SDK_VERSIONS = {
+  ai: "7.0.48",
+  "@ai-sdk/react": "4.0.51",
+  "@ai-sdk/provider": "4.0.4",
+  "workers-ai-provider": "4.0.0",
+};
+
 export const APP_REQUIRED_PACKAGES = [
   "@ai-sdk/provider",
   "@ai-sdk/react",
@@ -116,20 +123,18 @@ export function findCloudflareAiPeerCompatibilityErrors(pkg, label) {
     return [];
   }
 
-  return [
-    ["ai", "^6.", "^6.0.0"],
-    ["@ai-sdk/react", "^3.", "^3.0.204"],
-    ["@ai-sdk/provider", "^3.", "^3.0.0"],
-  ].flatMap(([name, prefix, peerRange]) => {
-    const version = packageDependencyVersion(pkg, name);
-    return version && !version.startsWith(prefix)
-      ? [
-          `${label} must keep ${name} on ${prefix}x while ${peers.join(
-            ", ",
-          )} require ${name} ${peerRange}; found ${version}.`,
-        ]
-      : [];
-  });
+  return Object.entries(REQUIRED_AI_SDK_VERSIONS).flatMap(
+    ([name, expected]) => {
+      const version = packageDependencyVersion(pkg, name);
+      return version && version !== expected
+        ? [
+            `${label} must pin the tested AI SDK 7 family ${name}@${expected} for ${peers.join(
+              ", ",
+            )}; found ${version}.`,
+          ]
+        : [];
+    },
+  );
 }
 
 export function findRuntimePinErrors(pkg, label) {

@@ -35,14 +35,8 @@ export {
 };
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SANDBOX_IMAGE_DIGEST = 'sha256:23f67e16131b780865a5fa5aa3c8607408a730105c248836409f4e02bb6bf042';
-const SANDBOX_NODE_ENGINE = '>=22.0.0';
-const runtimeEnvAccessAllowlist = [
-  { pathSuffix: 'app/components/ErrorComponent.tsx', snippet: 'import.meta.env.DEV' },
-  { pathSuffix: 'template/scripts/vite-dev.mjs', snippet: 'process.env.GHOSTBUILD_PREVIEW' },
-];
+const runtimeEnvAccessAllowlist = [{ pathSuffix: 'app/components/ErrorComponent.tsx', snippet: 'import.meta.env.DEV' }];
 const agentRequiredPackages = ['ai', 'zod'];
-const SANDBOX_YAML_VERSION = '2.9.0';
 const forbiddenLockfiles = ['package-lock.json'];
 const forbiddenDependencyUpdateConfigs = ['.github/dependabot.yml', '.github/dependabot.yaml'];
 const forbiddenLegacyPaths = [
@@ -95,8 +89,8 @@ const requiredMigrationTables = [
   'cloudflare_oauth_states',
   'cloudflare_credentials',
   'cloudflare_connections',
-  'user_workspace_runtimes',
   'user_computer_runtimes',
+  'launch_controls',
 ];
 const forbiddenCentralWorkloadTables = [
   'chats',
@@ -191,90 +185,6 @@ function verifyPackage(errors, pkg, label, requiredPackages, checkAiPeers = fals
 
 export function findInternalPackageMetadataErrors(pkg, label) {
   return pkg?.private === true ? [] : [`${label} must set private to true so it cannot be published accidentally.`];
-}
-
-export function findSandboxVersionErrors(pkg, dockerfile, toolsPackage, toolsLockfile, label = 'Dockerfile.sandbox') {
-  const errors = [];
-  const sandboxVersion = packageDependencyVersion(pkg, '@cloudflare/sandbox');
-  if (!/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(sandboxVersion ?? '')) {
-    return ['package.json must pin @cloudflare/sandbox to an exact version.'];
-  }
-
-  const expectedImage = `FROM docker.io/cloudflare/sandbox:${sandboxVersion}@${SANDBOX_IMAGE_DIGEST}`;
-  if (!dockerfile.split('\n').includes(expectedImage)) {
-    errors.push(`${label} must use ${expectedImage} so the image matches the Sandbox SDK.`);
-  }
-  const packageManager = pkg?.packageManager;
-  const pnpmVersion = /^pnpm@(\d+\.\d+\.\d+)$/.exec(packageManager ?? '')?.[1];
-  if (!pnpmVersion || !dockerfile.includes(`pnpm@${pnpmVersion}`)) {
-    errors.push(`${label} must install ${packageManager ?? 'the package.json pnpm version'} to match packageManager.`);
-  }
-  if (
-    pnpmVersion &&
-    !dockerfile.includes(`npm install --global pnpm@${pnpmVersion} --ignore-scripts --no-audit --no-fund`)
-  ) {
-    errors.push(`${label} must install pnpm without running registry package lifecycle scripts or audit requests.`);
-  }
-  const wranglerVersion = packageDependencyVersion(pkg, 'wrangler');
-  if (toolsPackage?.private !== true) {
-    errors.push('sandbox-tools/package.json must set private to true.');
-  }
-  if (toolsPackage?.license !== 'Apache-2.0') {
-    errors.push('sandbox-tools/package.json must declare the repository Apache-2.0 license.');
-  }
-  if (toolsPackage?.engines?.node !== SANDBOX_NODE_ENGINE) {
-    errors.push(
-      `sandbox-tools/package.json must support the pinned Cloudflare Sandbox Node ${SANDBOX_NODE_ENGINE} runtime.`,
-    );
-  }
-  if (toolsPackage?.packageManager !== packageManager) {
-    errors.push(
-      `sandbox-tools/package.json packageManager must match package.json ${packageManager ?? '<missing>'}; found ${toolsPackage?.packageManager ?? '<missing>'}.`,
-    );
-  }
-  if (!wranglerVersion || toolsPackage?.dependencies?.wrangler !== wranglerVersion) {
-    errors.push(
-      `sandbox-tools/package.json must pin wrangler to package.json ${wranglerVersion ?? '<missing>'}; found ${toolsPackage?.dependencies?.wrangler ?? '<missing>'}.`,
-    );
-  }
-  if (toolsPackage?.dependencies?.yaml !== SANDBOX_YAML_VERSION) {
-    errors.push(
-      `sandbox-tools/package.json must pin yaml ${SANDBOX_YAML_VERSION}; found ${toolsPackage?.dependencies?.yaml ?? '<missing>'}.`,
-    );
-  }
-  if (
-    !dockerfile.includes(
-      'COPY sandbox-tools/package.json sandbox-tools/pnpm-lock.yaml sandbox-tools/pnpm-workspace.yaml sandbox-tools/verify-pnpm-workspace-policy.mjs /opt/ghostbuild-tools/',
-    )
-  ) {
-    errors.push(`${label} must copy the sandbox tool manifest and lockfile into the image.`);
-  }
-  if (!dockerfile.includes('pnpm --dir /opt/ghostbuild-tools install --prod --frozen-lockfile')) {
-    errors.push(`${label} must install sandbox tools from the frozen pnpm lockfile.`);
-  }
-  if (!dockerfile.includes('ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:${PATH}"')) {
-    errors.push(`${label} must expose lockfile-installed sandbox tools on PATH.`);
-  }
-  if (!dockerfile.includes('ghostbuild-verify-pnpm-workspace')) {
-    errors.push(`${label} must install the trusted pnpm workspace policy validator.`);
-  }
-  if (wranglerVersion) {
-    const escapedVersion = wranglerVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const lockedImporter = new RegExp(
-      `wrangler:\\s*\\n\\s*specifier: ${escapedVersion}\\s*\\n\\s*version: ${escapedVersion}(?:\\s|$)`,
-    );
-    if (!lockedImporter.test(toolsLockfile ?? '')) {
-      errors.push(`sandbox-tools/pnpm-lock.yaml must lock wrangler ${wranglerVersion}.`);
-    }
-  }
-  const escapedYamlVersion = SANDBOX_YAML_VERSION.replaceAll('.', '\\.');
-  const lockedYamlImporter = new RegExp(
-    `yaml:\\s*\\n\\s*specifier: ${escapedYamlVersion}\\s*\\n\\s*version: ${escapedYamlVersion}(?:\\s|$)`,
-  );
-  if (!lockedYamlImporter.test(toolsLockfile ?? '')) {
-    errors.push(`sandbox-tools/pnpm-lock.yaml must lock yaml ${SANDBOX_YAML_VERSION}.`);
-  }
-  return errors;
 }
 
 function verifyWorkspace(errors) {
@@ -384,8 +294,15 @@ export function verifyStackAlignment() {
       'test',
       'knip',
       'build',
+      'verify:built-ssr',
       'verify:static-assets',
       'bundle:check',
+    ]),
+    ...findMissingCommandSteps(rootPackage.scripts?.['validate:launch'], 'package.json scripts.validate:launch', [
+      'build',
+      'verify:built-ssr',
+      'verify:built-browser',
+      'test:e2e:critical',
     ]),
     ...findMissingCommandSteps(rootPackage.scripts?.['validate:template'], 'package.json scripts.validate:template', [
       'scripts/verify-template.mjs',

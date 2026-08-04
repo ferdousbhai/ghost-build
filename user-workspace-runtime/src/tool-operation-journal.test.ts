@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ToolOperationJournal } from './tool-operation-journal';
+import { requireWorkspaceSyncBarrier, WorkspaceSyncPendingError } from './workspace-sync-retry';
 
 describe('ToolOperationJournal', () => {
   it('replays the exact completed result without executing the operation again', () => {
@@ -71,6 +72,146 @@ describe('ToolOperationJournal', () => {
     );
     expect(() => journal.begin({ ...invocation(), toolName: 'exec' })).toThrow('reused with different arguments');
   });
+
+  it('replays a bounded committed mutation when its large display acknowledgement is interrupted', () => {
+    const journal = new ToolOperationJournal(new TestStorage() as never);
+    journal.initialize();
+    journal.begin(invocation());
+    const receipt = {
+      kind: 'workspace-mutation-receipt' as const,
+      version: 1 as const,
+      committed: true as const,
+      acknowledgement: 'pending' as const,
+      tool: 'write' as const,
+      files: [
+        {
+          path: '/home/project/a.ts',
+          revision: 2,
+          size: 2 * 1024 * 1024 - 1,
+          sha256: 'c'.repeat(64),
+          deleted: false,
+        },
+      ],
+      changedRanges: [{ path: '/home/project/a.ts', startLine: 1, endLine: 1 }],
+      diffSummary: null,
+      truncated: { result: false, diff: false, paths: false, omittedBytes: 0 },
+    };
+
+    journal.commitMutation({ toolCallId: 'call-1', receipt, now: 2 });
+
+    expect(journal.begin(invocation())).toEqual({ status: 'completed', result: receipt });
+    const acknowledged = journal.acknowledgeMutation({
+      toolCallId: 'call-1',
+      result: { diff: 'x'.repeat(700_000), patch: 'y'.repeat(700_000) },
+      now: 3,
+    });
+    expect(acknowledged).toMatchObject({
+      committed: true,
+      acknowledgement: 'complete',
+      truncated: { result: true, diff: true },
+    });
+    expect(journal.begin(invocation())).toEqual({ status: 'completed', result: acknowledged });
+  });
+
+  it('distinguishes a mutation that failed before its first durable write', () => {
+    const journal = new ToolOperationJournal(new TestStorage() as never);
+    journal.initialize();
+    journal.begin(invocation());
+
+    expect(journal.mutationReceipt('call-1')).toBeNull();
+    expect(journal.complete({ toolCallId: 'call-1', result: { error: 'path does not exist' } })).toEqual({
+      error: 'path does not exist',
+    });
+    expect(journal.mutationReceipt('call-1')).toBeNull();
+  });
+
+  it('terminalizes more than fifty pending commands without consuming the indeterminate-operation budget', () => {
+    const storage = new TestStorage();
+    const journal = new ToolOperationJournal(storage as never);
+    journal.initialize();
+
+    for (let index = 0; index < 60; index += 1) {
+      const toolCallId = `pending-${index}`;
+      expect(journal.begin({ toolCallId, toolName: 'exec', argsSha256: `sha-${index}` })).toEqual({
+        status: 'execute',
+      });
+      journal.registerPending({
+        backend: 'container-shell',
+        toolCallId,
+        result: { command: `command-${index}`, exitCode: 0 },
+      });
+      expect(journal.completePending('container-shell')).toBe(true);
+    }
+
+    expect(journal.pending()).toEqual([]);
+    expect(journal.begin({ toolCallId: 'after-pending', toolName: 'exec', argsSha256: 'after' })).toEqual({
+      status: 'execute',
+    });
+  });
+
+  it('replays completed and exhausted pending commands after restart without rerunning them', () => {
+    const storage = new TestStorage();
+    const beforeRestart = new ToolOperationJournal(storage as never);
+    beforeRestart.initialize();
+    beforeRestart.begin({ toolCallId: 'pending-complete', toolName: 'exec', argsSha256: 'complete' });
+    beforeRestart.registerPending({
+      backend: 'container-shell',
+      toolCallId: 'pending-complete',
+      result: { command: 'touch file', exitCode: 0 },
+    });
+
+    const afterRestart = new ToolOperationJournal(storage as never);
+    afterRestart.initialize();
+    expect(afterRestart.completePending('container-shell')).toBe(true);
+    expect(afterRestart.begin({ toolCallId: 'pending-complete', toolName: 'exec', argsSha256: 'complete' })).toEqual({
+      status: 'completed',
+      result: { command: 'touch file', exitCode: 0 },
+    });
+
+    afterRestart.begin({ toolCallId: 'pending-exhausted', toolName: 'exec', argsSha256: 'exhausted' });
+    afterRestart.registerPending({
+      backend: 'worker-shell',
+      toolCallId: 'pending-exhausted',
+      result: { command: 'touch other', exitCode: 0 },
+    });
+    const exhausted = { kind: 'workspace-sync-unconfirmed', status: 'exhausted' };
+    expect(afterRestart.completePending('worker-shell', exhausted)).toBe(true);
+    expect(afterRestart.begin({ toolCallId: 'pending-exhausted', toolName: 'exec', argsSha256: 'exhausted' })).toEqual({
+      status: 'completed',
+      result: exhausted,
+    });
+  });
+
+  it('blocks new work after restart when a pending continuation has no Computer retry row', () => {
+    const storage = new TestStorage();
+    const beforeRestart = new ToolOperationJournal(storage as never);
+    beforeRestart.initialize();
+    beforeRestart.begin({ toolCallId: 'pending-restart', toolName: 'exec', argsSha256: 'restart' });
+    beforeRestart.registerPending({
+      backend: 'container-shell',
+      toolCallId: 'pending-restart',
+      result: { command: 'touch file', exitCode: 0 },
+    });
+
+    const afterRestart = new ToolOperationJournal(storage as never);
+    afterRestart.initialize();
+    expect(() => requireWorkspaceSyncBarrier(afterRestart.pending(), () => null, 1_000)).toThrow(
+      WorkspaceSyncPendingError,
+    );
+    try {
+      requireWorkspaceSyncBarrier(afterRestart.pending(), () => null, 1_000);
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: 'workspace_sync_pending',
+        backend: 'container-shell',
+        attempt: 1,
+        notBefore: 2_000,
+      });
+    }
+
+    expect(afterRestart.completePending('container-shell')).toBe(true);
+    expect(() => requireWorkspaceSyncBarrier(afterRestart.pending(), () => null, 1_000)).not.toThrow();
+  });
 });
 
 function invocation() {
@@ -98,6 +239,11 @@ class TestStorage {
       if (normalized.startsWith('SELECT COUNT(*)')) {
         return [{ count: [...this.rows.values()].filter((row) => row.status === 'running').length }] as T[];
       }
+      if (normalized.startsWith('SELECT tool_call_id')) {
+        return [...this.rows]
+          .filter(([, row]) => row.status === 'running' && row.result_json !== null)
+          .map(([tool_call_id, row]) => ({ tool_call_id, result_json: row.result_json })) as T[];
+      }
       if (normalized.startsWith('INSERT INTO ghostbuild_tool_operations')) {
         this.rows.set(String(bindings[0]), {
           tool_name: String(bindings[1]),
@@ -123,6 +269,13 @@ class TestStorage {
           status: 'failed',
           result_json: null,
           error: String(bindings[0]),
+          updated_at: Number(bindings[1]),
+        });
+      } else if (normalized.includes('SET result_json = ?')) {
+        const row = this.rows.get(String(bindings[2]))!;
+        this.rows.set(String(bindings[2]), {
+          ...row,
+          result_json: String(bindings[0]),
           updated_at: Number(bindings[1]),
         });
       }

@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /chat/
+Disallow: /connect/
+Disallow: /settings
+
+Sitemap: https://ghostbuild.dev/sitemap.xml

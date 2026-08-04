@@ -1,7 +1,0 @@
-{
-  "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "ghostbuild-read-only-subagent-evaluation",
-  "main": "./read-only-subagents.worker.ts",
-  "compatibility_date": "2026-07-18",
-  "ai": { "binding": "AI" },
-}

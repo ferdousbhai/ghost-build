@@ -85,7 +85,10 @@ export const Button = forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonPr
   const content = (
     <>
       {loading ? (
-        <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        <span
+          className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+          aria-hidden="true"
+        />
       ) : (
         icon
       )}
@@ -117,6 +120,7 @@ export const Button = forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonPr
       className={classes}
       title={tip ?? buttonProps.title}
       disabled={disabled || loading}
+      aria-busy={loading || undefined}
     >
       {content}
     </button>

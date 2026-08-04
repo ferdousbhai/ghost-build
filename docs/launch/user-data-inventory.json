@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 2,
+  "reviewedAgainstCommit": "working-tree-2026-08-04",
+  "policyStatus": "engineering inventory only; retention, legal-hold, and external-resource disposition require owner and counsel approval before launch",
+  "systems": [
+    {
+      "system": "Ghostbuild control-plane D1",
+      "owner": "Ghostbuild operator",
+      "categories": [
+        "account identity and profile",
+        "authentication sessions and OAuth state",
+        "encrypted Cloudflare credential records",
+        "Cloudflare account connection metadata and granted scopes",
+        "Computer runtime locators"
+      ],
+      "secrets": "OAuth tokens are encrypted; ciphertext, IVs, session token hashes, and credential handles must never be exported",
+      "currentRetention": "Expired authentication and OAuth metadata is pruned by scheduled maintenance; no approved retention or legal-hold schedule exists for other records",
+      "currentExport": "no self-service account export exists; users can download individual project source and contact Support about a privacy or account-data request",
+      "currentDeletion": "no self-service account deletion exists; users can delete individual projects, revoke Cloudflare authorization, and contact Support about deletion of reachable Ghostbuild-held control-plane data"
+    },
+    {
+      "system": "User-owned workspace runtime D1",
+      "owner": "user Cloudflare account",
+      "categories": [
+        "chat catalog and subchat metadata",
+        "transcript identities and checkpoints",
+        "deployment plans, approvals, status, resources, and errors",
+        "agent garbage-collection candidates"
+      ],
+      "secrets": "runtime capabilities and Cloudflare access tokens must never be exported",
+      "currentRetention": "individual chat deletion is soft deletion followed by bounded Agent garbage collection; no account-wide retention schedule exists",
+      "currentExport": "individual project source can be downloaded; no account-wide export exists",
+      "currentDeletion": "individual project removal exists; no account-wide user-runtime deletion operation exists"
+    },
+    {
+      "system": "BuilderAgent Durable Objects",
+      "owner": "user Cloudflare account",
+      "categories": ["chat transcripts", "turn recovery state", "compaction state", "generated titles"],
+      "secrets": "credentials and access tokens are not transcript export fields",
+      "currentRetention": "deleted project Agents are removed by the user-runtime garbage collector after its grace period",
+      "currentExport": "not implemented",
+      "currentDeletion": "project-scoped garbage collection exists; no account-wide runtime deletion operation or deletion-status result exists"
+    },
+    {
+      "system": "ProjectWorkspace Durable Objects and Cloudflare Computer",
+      "owner": "user Cloudflare account",
+      "categories": ["project files and revisions", "preview state", "validation state", "ephemeral process output"],
+      "secrets": "local secret paths, runtime capabilities, and raw command output must never be included in any future account export",
+      "currentRetention": "workspace files persist in the user-owned Durable Object; preview processes and tunnels are bounded by runtime lifecycle",
+      "currentExport": "project source ZIP only",
+      "currentDeletion": "project-scoped teardown is not exposed as an account-wide operation"
+    },
+    {
+      "system": "Browser storage",
+      "owner": "user device",
+      "categories": [
+        "OPFS account-local chat/transcript replicas",
+        "theme preference",
+        "pending prompt in tab-scoped session storage",
+        "asset-recovery and telemetry journey session state"
+      ],
+      "secrets": "the pending prompt can contain user content; it remains in tab-scoped session storage and the retired prompt cookie is expired when the message input loads",
+      "currentRetention": "browser-controlled; pending-prompt and recovery session state lasts until the tab session ends, while OPFS and local storage persist until cleared or replaced",
+      "currentExport": "no server export includes browser-owned data",
+      "currentDeletion": "users must clear Ghostbuild site data with browser controls; no server-side request can enumerate or erase all browser-owned storage"
+    },
+    {
+      "system": "User-owned deployed Cloudflare resources",
+      "owner": "user Cloudflare account",
+      "categories": ["Workers", "D1 databases", "R2 buckets", "Containers", "Durable Objects", "Agents"],
+      "secrets": "deployed bindings and secrets must never be exported by Ghostbuild",
+      "currentRetention": "resources remain in the user's account until explicitly changed or removed",
+      "currentExport": "deployment inventory is not available as an account export",
+      "currentDeletion": "retained in the user Cloudflare account; deployment approval, Terms, and Privacy state that resources may continue to incur charges until the user removes them"
+    },
+    {
+      "system": "Cloudflare Worker observability",
+      "owner": "Ghostbuild operator Cloudflare account",
+      "categories": [
+        "allowlisted product events",
+        "opaque journey and per-error-event IDs",
+        "status and bounded numeric metrics",
+        "transient Cloudflare client IP used as the 60-second telemetry rate-limit key"
+      ],
+      "secrets": "telemetry requests omit browser credentials; prompts, code, credentials, tokens, URLs, user identifiers, raw tool output, and the client IP rate-limit key are rejected or omitted from the application event log",
+      "currentRetention": "the client IP keys the configured 60-second rate-limit window; application event retention is controlled by Cloudflare observability settings and the production value is not declared in this repository",
+      "currentExport": "no self-service account export exists",
+      "currentDeletion": "application event payloads contain no account identifier; Cloudflare still processes network metadata, and operator retention and deletion policy requires approval"
+    }
+  ],
+  "launchBlockers": [
+    "choose and document retention and legal-hold rules with qualified counsel/owner",
+    "approve the explicit retain-in-user-account policy for deployed resources",
+    "implement and verify the bounded user-runtime export primitive for chat metadata, Agent transcripts, project files, approvals, and deployment records",
+    "implement and verify the idempotent user-runtime account-delete primitive across D1, BuilderAgent, ProjectWorkspace, and Computer state",
+    "confirm supported-browser coverage and manual instructions for browser storage APIs that cannot enumerate OPFS or IndexedDB",
+    "set and record production observability retention and access controls"
+  ]
+}

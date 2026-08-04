@@ -144,12 +144,10 @@ async function assembleModelInput(
     toolCalls: 'before-last-2-messages',
     emptyMessages: 'remove',
   });
-  const messages: ModelMessage[] = [
-    ...args.systemPrompts.map((content): ModelMessage => ({ role: 'system', content })),
-    ...history,
-  ];
+  const messages: ModelMessage[] = history;
   const estimatedTokens = estimateStringTokens(
     JSON.stringify({
+      instructions: args.systemPrompts,
       messages,
       activeTools: args.activeTools,
       tools: serializeWorkersAiToolDefinitions(args.tools, args.activeTools),

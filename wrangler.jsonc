@@ -37,6 +37,14 @@
         "period": 60,
       },
     },
+    {
+      "name": "CLIENT_TELEMETRY_RATE_LIMITER",
+      "namespace_id": "1003",
+      "simple": {
+        "limit": 120,
+        "period": 60,
+      },
+    },
   ],
   "secrets": {
     "required": ["CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY", "CLOUDFLARE_OAUTH_CLIENT_SECRET"],

@@ -10,7 +10,6 @@ import {
 } from 'ghostbuild-agent/ai-compat';
 import { captureMessage } from '~/lib/telemetry.client';
 import { DeploymentApproval } from './DeploymentApproval.client';
-import { parsePendingDeploymentApproval, stripPendingDeploymentApprovalMarker } from '~/lib/deployment-approval';
 
 interface AssistantMessageProps {
   message: GhostbuildMessage;
@@ -57,20 +56,14 @@ function AssistantMessagePart({
   }
 
   if (part.type === 'text') {
-    const deployment = parsePendingDeploymentApproval(part.text);
-    if (deployment) {
-      const visibleText = stripPendingDeploymentApprovalMarker(part.text);
-      return (
-        <>
-          {visibleText ? <Markdown html>{visibleText}</Markdown> : null}
-          <DeploymentApproval deployment={deployment} />
-        </>
-      );
-    }
     return <Markdown html>{part.text}</Markdown>;
   }
 
-  if (part.type === 'step-start' || part.type === 'reasoning') {
+  if (part.type === 'data-deployment-approval') {
+    return <DeploymentApproval deployment={part.data} />;
+  }
+
+  if (part.type === 'step-start' || part.type === 'reasoning' || part.type === 'reasoning-file') {
     return null;
   }
 

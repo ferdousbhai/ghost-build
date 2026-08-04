@@ -1,7 +1,13 @@
+import { createClientOnlyFn } from '@tanstack/react-start';
 import { useEffect, useSyncExternalStore } from 'react';
 import type { CloudflareAuthSession } from '~/lib/.server/auth';
 import { disposeAccountLocalReplicas } from '~/lib/cloudflare/account-local-replica';
 import { resetUserRuntimeSession } from '~/lib/cloudflare/runtime-session';
+import { captureProductEvent } from '~/lib/telemetry.client';
+
+const captureCloudflareConnectStarted = createClientOnlyFn(() => {
+  void captureProductEvent('cloudflare_connect_started');
+});
 
 type AuthState = {
   data: CloudflareAuthSession | null;
@@ -58,6 +64,7 @@ export const authClient = {
 };
 
 export async function signInWithCloudflare(callbackURL = window.location.href) {
+  captureCloudflareConnectStarted();
   const response = await fetch('/api/cloudflare/connection/start', {
     method: 'POST',
     credentials: 'same-origin',

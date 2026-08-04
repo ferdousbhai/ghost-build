@@ -144,6 +144,26 @@ describe('D1CloudflareCredentialVault', () => {
     expect(JSON.stringify(rows.get(handle))).not.toContain('fresh-access');
   });
 
+  it('forces refresh of a still-valid OAuth access token at an authenticated phase boundary', async () => {
+    const { db } = createDb();
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ access_token: 'forced-fresh-access', expires_in: 3600 }));
+    const vault = new D1CloudflareCredentialVault(db, encryptionKey(), {
+      clientId: 'client-1',
+      clientSecret: 'client-secret',
+      request,
+    });
+    const handle = await vault.storeOAuthCredential({
+      accessToken: 'still-valid-access',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 60 * 60_000,
+    });
+
+    await expect(vault.resolve(handle, { forceRefresh: true })).resolves.toBe('forced-fresh-access');
+    expect(request).toHaveBeenCalledOnce();
+  });
+
   it('adopts only the exact OAuth refresh rotation that committed before acknowledgement failed', async () => {
     const acknowledgementError = new Error('credential rotation acknowledgement failed');
     const exact = createDb({ updateErrorAfterCommit: acknowledgementError });

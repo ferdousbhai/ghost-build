@@ -1,6 +1,6 @@
 {
   "worker": "ghostbuild",
-  "repository": "ferdousbhai/ghostbuild",
+  "repository": "ferdousbhai/ghost-build",
   "productionBranch": "main",
   "rootDirectory": "/",
   "buildCommand": "pnpm run workers-builds:build",

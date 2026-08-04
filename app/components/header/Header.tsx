@@ -45,14 +45,14 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
   return (
     <>
       <header
-        className="ghostbuild-header flex h-[var(--header-height)] items-center overflow-x-auto overflow-y-hidden border-b px-5 py-3"
+        className="ghostbuild-header flex h-[var(--header-height)] items-center overflow-x-auto overflow-y-hidden border-b px-3 py-1.5 sm:px-5 sm:py-3"
         data-chat-started={chat.started}
       >
         <div className="z-40 flex items-center gap-3 text-content-primary">
           {showSidebarIcon && (
             <button
               type="button"
-              className="ghostbuild-header__menu-button"
+              className="ghostbuild-header__menu-button !size-11 sm:!size-9"
               data-hamburger-menu
               aria-label={isMenuOpen ? 'Close project menu' : 'Open project menu'}
               aria-expanded={isMenuOpen}
@@ -104,7 +104,7 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
           >
             <span className="hidden sm:inline">Sponsor</span>
           </Button>
-          <ThemeSwitch />
+          <ThemeSwitch className="!size-11 !min-h-11 sm:!size-auto sm:!min-h-9" />
           {profile && (
             <>
               <div className="hidden items-center gap-1 lg:flex">
@@ -121,7 +121,7 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
                     variant: 'neutral',
                     title: 'User menu',
                     inline: true,
-                    className: 'rounded-full',
+                    className: '!size-11 !min-h-11 rounded-full !p-1.5',
                     icon: <ProfileAvatar avatar={profile.avatar} username={profile.username} />,
                   }}
                 >

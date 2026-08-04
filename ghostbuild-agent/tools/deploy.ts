@@ -28,9 +28,6 @@ export const deployToolParameters = z.object({
     .describe('The exact workspace revision from the latest successful full validateProject result.'),
 });
 
-/** Accepts pre-revision stored deployment calls for transcript rendering only. */
-export const deployToolInputParameters = z.union([deployToolParameters, z.object({}).strict()]);
-
 export const deployTool: Tool = {
   description: deployToolDescription,
   inputSchema: deployToolParameters,

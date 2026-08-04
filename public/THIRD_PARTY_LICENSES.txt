@@ -7,13 +7,13 @@ A package whose package-level evidence is <not published> remains exact-version 
 This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-08-04
-Production packages: 621
-Inventory SHA-256: de09fff6343aefcacf8e589423f5f6e42ad7d96db5796e3836c725cd85d55f0c
+Production packages: 620
+Inventory SHA-256: f21c052433e03ed461b216090bc9ea64afdde23e0001c3e6c2c096e99cfe4256
 
 PACKAGE INVENTORY
 =================
 
-@ai-sdk/gateway@3.0.153
+@ai-sdk/gateway@4.0.37
 Declared license: Apache-2.0
 Author: <not published>
 Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/gateway"}
@@ -22,16 +22,16 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529)
 
-@ai-sdk/gateway@3.0.156
+@ai-sdk/mcp@2.0.22
 Declared license: Apache-2.0
 Author: <not published>
-Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/gateway"}
+Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/mcp"}
 Homepage: https://ai-sdk.dev/docs
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529)
 
-@ai-sdk/provider@3.0.14
+@ai-sdk/provider@4.0.4
 Declared license: Apache-2.0
 Author: <not published>
 Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/provider"}
@@ -40,7 +40,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529)
 
-@ai-sdk/provider-utils@4.0.40
+@ai-sdk/provider-utils@5.0.18
 Declared license: Apache-2.0
 Author: <not published>
 Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/provider-utils"}
@@ -50,7 +50,7 @@ Published license/notice files:
 - src/to-json-schema/zod3-to-json-schema/LICENSE (SHA-256 6dd0d97acd4d13f4608a0f530f0487e0ff20812888bd1803aecfaaa17ff0f849)
 - src/to-json-schema/zod3-to-json-schema/README.md (SHA-256 5f123b645cb66faeec8c0ab6a252722372e58832d41449cd5ce50709203bdf89)
 
-@ai-sdk/react@3.0.232
+@ai-sdk/react@4.0.51
 Declared license: Apache-2.0
 Author: <not published>
 Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/react"}
@@ -1034,6 +1034,15 @@ Homepage: https://napi.rs/
 Package-level license evidence: <not published>
 Published license/notice files: <not published>
 
+@noble/hashes@2.2.0
+Declared license: MIT
+Author: Paul Miller (https://paulmillr.com)
+Repository: {"type":"git","url":"git+https://github.com/paulmillr/noble-hashes.git"}
+Homepage: https://paulmillr.com/noble/
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 4f221aee6e072336700c408c68ab3b96a3fc09f6aebe6f48f1bd99e5ef13faec)
+
 @nodable/entities@3.0.0
 Declared license: MIT
 Author: Amit Gupta (https://solothought.com)
@@ -1077,15 +1086,6 @@ Homepage: http://github.com/oozcitak/util
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 05affe7628defe07716fc2159a1f5e137b51381de0f33b5ae77f36108736a628)
-
-@opentelemetry/api@1.9.1
-Declared license: Apache-2.0
-Author: OpenTelemetry Authors
-Repository: open-telemetry/opentelemetry-js
-Homepage: https://github.com/open-telemetry/opentelemetry-js/tree/main/api
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4)
 
 @oxc-project/types@0.142.0
 Declared license: MIT
@@ -1920,6 +1920,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 b070d77bfb2c52a1dd6996de0ce5f64c49a0ca55c889b163a963ddf5cb001ee2)
 
+@workflow/serde@4.1.0
+Declared license: Apache-2.0
+Author: <not published>
+Repository: {"type":"git","url":"https://github.com/vercel/workflow.git","directory":"packages/serde"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE.md (SHA-256 39248a57eaac37e120c65bae851c6382bf722fc87c3452bf6a245caef96db739)
+
 @xterm/xterm@6.0.0
 Declared license: MIT
 Author: <not published>
@@ -1956,16 +1965,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 b33ae783f02478cd31787cd07cbf61cd3a6fbee1a50b2baf832b8f0fb7c600f7)
 
-ai@6.0.230
-Declared license: Apache-2.0
-Author: <not published>
-Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/ai"}
-Homepage: https://ai-sdk.dev/docs
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529)
-
-ai@6.0.234
+ai@7.0.48
 Declared license: Apache-2.0
 Author: <not published>
 Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/ai"}
@@ -3332,15 +3332,6 @@ Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE.md (SHA-256 fcf06aacb36ee29237110d6b3a9fbd6296e85ad4324263abf5f8a5cfb5706c81)
-
-js-cookie@3.0.8
-Declared license: MIT
-Author: Klaus Hartl
-Repository: {"type":"git","url":"git://github.com/js-cookie/js-cookie.git"}
-Homepage: <not published>
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 eff040f4184445a6d1f7f76d918101d631402436ff12256b924fb68e4df28a94)
 
 js-tokens@10.0.0
 Declared license: MIT
@@ -5478,7 +5469,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b)
 
-workers-ai-provider@3.3.1
+workers-ai-provider@4.0.0
 Declared license: MIT
 Author: <not published>
 Repository: {"type":"git","url":"git://github.com/cloudflare/ai.git"}
@@ -7940,6 +7931,16 @@ Used by:
 
    END OF TERMS AND CONDITIONS
 
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 39248a57eaac37e120c65bae851c6382bf722fc87c3452bf6a245caef96db739
+Used by:
+- @workflow/serde@4.1.0:LICENSE.md
+----- BEGIN VERBATIM CONTENT -----
+Apache License 2.0
+
+See the LICENSE file in the root of this repository.
 
 ----- END VERBATIM CONTENT -----
 
@@ -11170,6 +11171,33 @@ THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 4f221aee6e072336700c408c68ab3b96a3fc09f6aebe6f48f1bd99e5ef13faec
+Used by:
+- @noble/hashes@2.2.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright (c) 2022 Paul Miller (https://paulmillr.com)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the “Software”), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+----- END VERBATIM CONTENT -----
+
 SHA-256 512cfa4d5e7a7569c7ae4dd95241cb6ae2aaf648ef9ebd080c01bd24868d26e9
 Used by:
 - statuses@2.0.2:LICENSE
@@ -11437,7 +11465,7 @@ THE SOFTWARE.
 SHA-256 5514f48637fa1d8fed2256d12d322009a75962e6111370755fc5b20773db67ad
 Used by:
 - capnweb@0.8.0:LICENSE.txt
-- workers-ai-provider@3.3.1:LICENSE
+- workers-ai-provider@4.0.0:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 
@@ -12815,7 +12843,7 @@ defined by the Mozilla Public License, v. 2.0.
 
 SHA-256 5f123b645cb66faeec8c0ab6a252722372e58832d41449cd5ce50709203bdf89
 Used by:
-- @ai-sdk/provider-utils@4.0.40:src/to-json-schema/zod3-to-json-schema/README.md
+- @ai-sdk/provider-utils@5.0.18:src/to-json-schema/zod3-to-json-schema/README.md
 ----- BEGIN VERBATIM CONTENT -----
 # `zod-to-json-schema`
 
@@ -13516,7 +13544,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 SHA-256 6dd0d97acd4d13f4608a0f530f0487e0ff20812888bd1803aecfaaa17ff0f849
 Used by:
-- @ai-sdk/provider-utils@4.0.40:src/to-json-schema/zod3-to-json-schema/LICENSE
+- @ai-sdk/provider-utils@5.0.18:src/to-json-schema/zod3-to-json-schema/LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 ISC License
 
@@ -16911,12 +16939,11 @@ SOFTWARE.
 
 SHA-256 b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529
 Used by:
-- @ai-sdk/gateway@3.0.153:LICENSE
-- @ai-sdk/gateway@3.0.156:LICENSE
-- @ai-sdk/provider@3.0.14:LICENSE
-- @ai-sdk/react@3.0.232:LICENSE
-- ai@6.0.230:LICENSE
-- ai@6.0.234:LICENSE
+- @ai-sdk/gateway@4.0.37:LICENSE
+- @ai-sdk/mcp@2.0.22:LICENSE
+- @ai-sdk/provider@4.0.4:LICENSE
+- @ai-sdk/react@4.0.51:LICENSE
+- ai@7.0.48:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 Copyright 2023 Vercel, Inc.
 
@@ -17521,7 +17548,6 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 SHA-256 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
 Used by:
-- @opentelemetry/api@1.9.1:LICENSE
 - baseline-browser-mapping@2.10.43:LICENSE.txt
 ----- BEGIN VERBATIM CONTENT -----
                                  Apache License
@@ -19281,34 +19307,6 @@ The MIT License (MIT)
 Copyright © 2025-PRESENT Kevin Deng (https://github.com/sxzz)
 Copyright (c) 2014-2017 TJ Holowaychuk <tj@vision-media.ca>
 Copyright (c) 2018-2021 Josh Junon
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
------ END VERBATIM CONTENT -----
-
-SHA-256 eff040f4184445a6d1f7f76d918101d631402436ff12256b924fb68e4df28a94
-Used by:
-- js-cookie@3.0.8:LICENSE
------ BEGIN VERBATIM CONTENT -----
-MIT License
-
-Copyright (c) 2018 Copyright 2018 Klaus Hartl, Fagner Brack, GitHub Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

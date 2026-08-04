@@ -1,15 +1,19 @@
-import Cookies from 'js-cookie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  clearLegacyPromptCookie,
+  getMessageInputPrimaryAction,
+  getMessageInputPrimaryActionLabel,
   preservePromptForAuthentication,
   replacePromptIfUnchanged,
   submitMessageInput,
 } from './useMessageInputController';
 import { messageInputStore } from '~/lib/stores/messageInput';
+import { PENDING_PROMPT_STORAGE_KEY } from '~/utils/constants';
 
 afterEach(() => {
   messageInputStore.set('');
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('submitMessageInput', () => {
@@ -33,13 +37,57 @@ describe('submitMessageInput', () => {
   });
 });
 
+describe('getMessageInputPrimaryAction', () => {
+  it('routes keyboard and button submission through authentication before starting a chat', () => {
+    expect(getMessageInputPrimaryAction('loading', false)).toBe('wait');
+    expect(getMessageInputPrimaryAction('unauthenticated', false)).toBe('sign-in');
+    expect(getMessageInputPrimaryAction('fullyLoggedIn', false)).toBe('send');
+    expect(getMessageInputPrimaryAction('unauthenticated', true)).toBe('stop');
+    expect(getMessageInputPrimaryActionLabel('unauthenticated', false)).toBe('Connect Cloudflare');
+    expect(getMessageInputPrimaryActionLabel('fullyLoggedIn', false)).toBe('Send');
+    expect(getMessageInputPrimaryActionLabel('unauthenticated', true)).toBe('Stop');
+  });
+});
+
 describe('preservePromptForAuthentication', () => {
-  it('writes the current prompt synchronously before OAuth navigation', () => {
-    const setCookie = vi.spyOn(Cookies, 'set').mockReturnValue('');
+  it('writes the complete current prompt to tab-local storage before OAuth navigation', () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('window', {
+      sessionStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+      },
+    });
+    vi.stubGlobal('document', { cookie: '' });
+    const prompt = `A todo app ${'x'.repeat(16_000)}`;
 
-    preservePromptForAuthentication('  A todo app  ');
+    preservePromptForAuthentication(`  ${prompt}  `);
 
-    expect(setCookie).toHaveBeenCalledWith('cachedPrompt', 'A todo app', { expires: 30 });
+    expect(storage.get(PENDING_PROMPT_STORAGE_KEY)).toBe(prompt);
+  });
+
+  it('removes a stale handoff when the current prompt is empty', () => {
+    const storage = new Map([[PENDING_PROMPT_STORAGE_KEY, 'stale prompt']]);
+    vi.stubGlobal('window', {
+      sessionStorage: {
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+      },
+    });
+
+    preservePromptForAuthentication('   ');
+
+    expect(storage.has(PENDING_PROMPT_STORAGE_KEY)).toBe(false);
+  });
+
+  it('expires the legacy prompt cookie', () => {
+    const cookieDocument = { cookie: 'cachedPrompt=legacy' };
+    vi.stubGlobal('document', cookieDocument);
+
+    clearLegacyPromptCookie();
+
+    expect(cookieDocument.cookie).toBe('cachedPrompt=; Path=/; Max-Age=0; SameSite=Lax');
   });
 });
 

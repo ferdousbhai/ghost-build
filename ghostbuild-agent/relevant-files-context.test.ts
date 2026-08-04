@@ -50,4 +50,21 @@ describe('RelevantFilesContext', () => {
       expect(part.text).not.toContain('boltArtifact');
     }
   });
+
+  test('never injects binary file bodies into model context', () => {
+    const binaryPath = getAbsolutePath('public/image.png');
+    const recentBinaryPath = getAbsolutePath('public/archive.zip');
+    const binaryMarker = 'binary-payload-must-not-enter-the-prompt';
+    const context = new RelevantFilesContext(
+      () => ({ filePath: binaryPath, value: binaryMarker, isBinary: true }),
+      () => ({
+        [binaryPath]: { type: 'file', content: binaryMarker, isBinary: true },
+        [recentBinaryPath]: { type: 'file', content: binaryMarker, isBinary: true },
+      }),
+      () => new Map([[recentBinaryPath, Date.now()]]),
+    );
+
+    const message = context.build([], 'context', 1_000);
+    expect(message.parts.every((part) => part.type !== 'text' || !part.text.includes(binaryMarker))).toBe(true);
+  });
 });

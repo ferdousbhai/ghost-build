@@ -2,8 +2,9 @@ import { useStore } from '@nanostores/react';
 import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
 import { useEffect, type ReactNode } from 'react';
 import { ClientAppProviders } from '~/components/ClientRouteComponents';
-import { ClientOnly } from '~/components/ClientOnly';
 import { ErrorDisplay } from '~/components/ErrorComponent';
+import { BrandLink } from '~/components/BrandLink';
+import { Button } from '@ui/Button';
 import { themeStore } from '~/lib/stores/theme';
 import { stripIndents } from 'ghostbuild-agent/utils/stripIndent';
 import globalStyles from '~/styles/index.css?url';
@@ -62,6 +63,10 @@ export const Route = createRootRoute({
         name: 'description',
         content: 'Build and ship Cloudflare apps with Ghostbuild, the full-stack AI coding agent.',
       },
+      { name: 'application-name', content: 'Ghostbuild' },
+      { name: 'color-scheme', content: 'light dark' },
+      { name: 'theme-color', content: '#fff9fc', media: '(prefers-color-scheme: light)' },
+      { name: 'theme-color', content: '#18101e', media: '(prefers-color-scheme: dark)' },
     ],
     links: [
       {
@@ -69,6 +74,7 @@ export const Route = createRootRoute({
         href: '/ghostbuild-logo.svg',
         type: 'image/svg+xml',
       },
+      { rel: 'manifest', href: '/site.webmanifest' },
       { rel: 'stylesheet', href: globalStyles },
     ],
     scripts: [{ children: inlineBootstrapCode }],
@@ -76,6 +82,7 @@ export const Route = createRootRoute({
   shellComponent: RootDocument,
   component: RootComponent,
   errorComponent: RootErrorComponent,
+  notFoundComponent: RootNotFoundComponent,
 });
 
 function RootDocument({ children }: { children: ReactNode }) {
@@ -112,7 +119,7 @@ function Layout({ children }: { children: ReactNode }) {
   useDynamicImportRecovery();
 
   return (
-    <ClientOnly>
+    <>
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
@@ -121,7 +128,28 @@ function Layout({ children }: { children: ReactNode }) {
           {children}
         </main>
       </ClientAppProviders>
-    </ClientOnly>
+    </>
+  );
+}
+
+export function RootNotFoundComponent() {
+  return (
+    <div className="app-page-shell flex min-h-svh items-center px-4 py-10">
+      <section className="app-error-card app-card mx-auto" aria-labelledby="not-found-heading">
+        <div className="mb-8 flex items-center justify-between gap-4">
+          <BrandLink />
+          <span className="app-status-badge">404</span>
+        </div>
+        <p className="app-page-eyebrow">Wrong turn</p>
+        <h1 id="not-found-heading" className="app-page-title !text-[clamp(34px,6vw,52px)]">
+          This page does not exist.
+        </h1>
+        <p className="app-page-lede">The link may be outdated, or the page may have moved.</p>
+        <div className="mt-7">
+          <Button href="/">Back to Ghostbuild</Button>
+        </div>
+      </section>
+    </div>
   );
 }
 

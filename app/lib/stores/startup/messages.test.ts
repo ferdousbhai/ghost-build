@@ -7,7 +7,6 @@ describe('serializeMessageForStorage', () => {
     const message: GhostbuildMessage = {
       id: 'test',
       role: 'user',
-      content: '',
       parts: [
         {
           type: 'text',

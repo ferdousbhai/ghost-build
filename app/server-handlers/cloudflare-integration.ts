@@ -19,6 +19,7 @@ import { findUserWorkspaceRuntime } from '~/lib/.server/cloudflare/user-workspac
 import { USER_WORKSPACE_RUNTIME_SHA256 } from '~/generated/user-workspace-runtime.generated';
 import { deriveUserWorkspaceRuntimeSecret } from '~/lib/.server/cloudflare/user-workspace-runtime-secret';
 import { mintRuntimeCapability } from '~/lib/cloudflare/runtime-capability';
+import { computerRolloutUnavailableResponse, resolveComputerRollout } from '~/lib/.server/cloudflare/computer-rollout';
 
 const requestedCapabilities = ['workers', 'containers', 'd1', 'r2', 'durable_objects', 'workers_ai'] as const;
 export const CLOUDFLARE_CONNECTION_CALLBACK_METHOD = 'GET' as const;
@@ -82,7 +83,6 @@ export async function cloudflareConnectionStatusAction({
   if (!session) {
     return Response.json({ error: 'Cloudflare authentication required.' }, { status: 401 });
   }
-
   const connection = await findCloudflareConnectionForUser(env.DB, session.user.id);
   if (!connection || connection.status !== 'active') {
     return Response.json({ error: 'An active Cloudflare account is required.' }, { status: 401 });
@@ -94,6 +94,7 @@ export async function cloudflareConnectionStatusAction({
     {
       connected: true,
       status: connection.status,
+      accountId: connection.accountId,
       accountName: connection.accountName,
       aiBillingEnabled: connection.aiBillingEnabled,
       connectedAt: connection.connectedAt,
@@ -122,6 +123,9 @@ export async function cloudflareRuntimeSessionAction({
   const session = await getAuthSession(env, request);
   if (!session) {
     return Response.json({ error: 'Cloudflare authentication required.' }, { status: 401 });
+  }
+  if (!(await resolveComputerRollout(env.DB, session.user.id)).enabled) {
+    return computerRolloutUnavailableResponse();
   }
   const [connection, runtime] = await Promise.all([
     findCloudflareConnectionForUser(env.DB, session.user.id),
@@ -172,6 +176,9 @@ export async function provisionCloudflareWorkspaceRuntimeAction(args: {
     const session = await getAuthSession(args.env, args.request);
     if (!session) {
       return Response.json({ error: 'Cloudflare authentication required.' }, { status: 401 });
+    }
+    if (!(await resolveComputerRollout(args.env.DB, session.user.id)).enabled) {
+      return computerRolloutUnavailableResponse();
     }
     const connection = await findCloudflareConnectionForUser(args.env.DB, session.user.id);
     if (!connection || connection.status !== 'active') {

@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { ClientHeader, ClientHomepage } from '~/components/ClientRouteComponents';
 import { createSocialPageHead } from '~/lib/social-meta';
+import { TrustFooter } from '~/components/trust/TrustLinks';
 
 export const Route = createFileRoute('/')({
   head: () => ({
@@ -28,6 +29,7 @@ function Index() {
     <div className="flex size-full flex-col bg-bolt-elements-background-depth-1">
       <ClientHeader />
       <ClientHomepage />
+      <TrustFooter />
     </div>
   );
 }

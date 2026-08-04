@@ -5,6 +5,7 @@ import { signInWithCloudflare } from '~/lib/auth-client';
 type ConnectionStatus = {
   connected: boolean;
   status: 'linking' | 'active' | 'revoked' | 'error' | null;
+  accountId?: string;
   accountName?: string | null;
   aiBillingEnabled: boolean;
   workspaceRuntime?: {
@@ -97,7 +98,9 @@ export function CloudflareCard() {
             Cloudflare account
           </h2>
           {loading ? (
-            <p className="mt-1 text-sm text-content-secondary">Checking connection…</p>
+            <p className="mt-1 text-sm text-content-secondary" role="status">
+              Checking connection…
+            </p>
           ) : connection?.connected ? (
             <p className="mt-1 text-sm text-content-secondary">
               Connected{connection.accountName ? ` to ${connection.accountName}` : ''}. Cloudflare bills this account
@@ -122,7 +125,11 @@ export function CloudflareCard() {
           </Button>
         ) : null}
       </div>
-      {error ? <p className="mt-3 text-sm text-bolt-elements-icon-error">{error}</p> : null}
+      {error ? (
+        <p className="mt-3 text-sm text-bolt-elements-icon-error" role="alert">
+          {error}
+        </p>
+      ) : null}
       {connection?.connected ? (
         <>
           <WorkspaceRuntimeSetup
@@ -134,8 +141,21 @@ export function CloudflareCard() {
       ) : null}
       <p className="mt-3 text-xs text-content-tertiary">
         Computer workspaces, Sandboxes, previews, validation, builds, and generated apps run in your Cloudflare account.
-        Ghostbuild retains only your identity, encrypted Cloudflare connection metadata, and the user-runtime locator.
-        Workers Paid is never enabled automatically; your account must already support Containers.
+        Ghostbuild&apos;s control plane retains account and session records, encrypted Cloudflare authorization and
+        connection metadata, runtime locators, and privacy-filtered operational events. Workers Paid is never enabled
+        automatically; your account must already support Containers. Ghostbuild currently uses Cloudflare Computer
+        0.1.1, which Cloudflare publishes as a preview with an unstable API and does not designate for production use.
+      </p>
+      <p className="mt-2 text-xs text-content-tertiary">
+        See{' '}
+        <a className="underline underline-offset-4" href="/privacy">
+          Privacy
+        </a>{' '}
+        for data locations and retention, and{' '}
+        <a className="underline underline-offset-4" href="/terms">
+          Terms
+        </a>{' '}
+        for billing and generated-code risk.
       </p>
     </section>
   );
@@ -166,7 +186,11 @@ function WorkspaceRuntimeSetup({
       <p className="mt-1 text-xs text-content-secondary">
         Create the durable Cloudflare Computer workspace and its isolated execution backends in your account.
       </p>
-      {runtime?.lastError ? <p className="mt-2 text-xs text-bolt-elements-icon-error">{runtime.lastError}</p> : null}
+      {runtime?.lastError ? (
+        <p className="mt-2 text-xs text-bolt-elements-icon-error" role="alert">
+          {runtime.lastError}
+        </p>
+      ) : null}
       <div className="mt-3">
         <Button size="xs" variant="primary" loading={configuring} onClick={onConfigure}>
           Configure project runtime

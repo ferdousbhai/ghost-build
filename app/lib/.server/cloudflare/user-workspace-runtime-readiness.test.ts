@@ -34,7 +34,7 @@ describe('user workspace runtime readiness', () => {
     expect(clock.sleep).toHaveBeenCalledTimes(2);
     expect(clock.delays).toEqual([375, 750]);
     for (const [url, init] of request.mock.calls) {
-      expect(url).toBe('https://workspace-runtime.example/v1/health');
+      expect(url).toBe('https://workspace-runtime.example/v1/readiness');
       expect(init).toMatchObject({ headers: { authorization: `Bearer ${controlPlaneSecret}` } });
       expect(init?.signal).toBeInstanceOf(AbortSignal);
     }
@@ -151,10 +151,23 @@ describe('user workspace runtime readiness', () => {
 });
 
 function healthy(version: string) {
+  const check = { ok: true, code: 'ready', durationMs: 1 };
   return {
     ok: true,
     service: 'ghostbuild-user-workspace-runtime',
     runtimeVersion: version,
+    checkedAt: '2026-08-04T00:00:00.000Z',
+    components: {
+      runtime: check,
+      database: check,
+      projectWorkspaceRpc: check,
+      durableVfs: check,
+      workerShell: check,
+      container: check,
+      fuse: check,
+      sync: check,
+      cleanup: check,
+    },
   } as const;
 }
 

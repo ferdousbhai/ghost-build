@@ -5,7 +5,7 @@ import type { ChatContextManager } from 'ghostbuild-agent/ChatContextManager';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { filesToTurnContext } from '~/utils/fileUtils';
-import { captureMessage } from '~/lib/telemetry.client';
+import { captureMessage, captureProductEvent } from '~/lib/telemetry.client';
 import { isStreamStatusActive, type StreamStatus } from '~/lib/common/types';
 import { chatStore } from '~/lib/stores/chatId';
 import { workbenchStore } from '~/lib/stores/workbench.client';
@@ -218,6 +218,8 @@ async function submitMessage(
   onRequestStart: () => void,
 ): Promise<void> {
   const id = `${Date.now()}`;
+  workbenchStore.flushPendingEditorChange();
+  void captureProductEvent('prompt_submitted');
   const modifiedFiles = chatStarted ? workbenchStore.getModifiedFiles() : undefined;
   const modifiedContext = modifiedFiles ? filesToTurnContext(modifiedFiles) : '';
   const separatorCharacters = modifiedContext ? 2 : 0;

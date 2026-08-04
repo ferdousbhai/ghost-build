@@ -1,6 +1,7 @@
 import type { GhostbuildToolResult } from 'ghostbuild-agent/tool-result';
 import type { CreateAIToolsOptions } from '@cloudflare/computer/tools';
 import type { DeploymentProjectProfile } from '~/lib/.server/cloudflare/deployment-project-profile';
+import type { PreparedDeploymentArtifact } from '~/lib/.server/cloudflare/deployment-artifact';
 import type { BuilderPreviewSuccess } from './builder-preview-types';
 import type {
   BuilderWorkspaceApplyResult,
@@ -22,6 +23,55 @@ export type BuilderWorkspaceCheckpoint = {
   workspaceRevision: number;
   revision: string;
 };
+
+export interface ProjectWorkspaceRpc extends Rpc.DurableObjectBranded {
+  initializeProjectIdentity(value: { projectId: string; userId: string }): void | Promise<void>;
+  beginToolOperation(
+    value: unknown,
+  ): Promise<
+    | { status: 'execute' }
+    | { status: 'completed'; result: unknown }
+    | { status: 'failed' | 'indeterminate'; error: string }
+  >;
+  completeToolOperation(value: unknown): unknown | Promise<unknown>;
+  failToolOperation(value: unknown): void | Promise<void>;
+  getWorkspaceState(): Promise<BuilderWorkspaceState>;
+  getWorkspaceSnapshot(): Promise<{ state: BuilderWorkspaceState; files: BuilderWorkspaceFileMetadata[] }>;
+  beginSeed(seedId: unknown): Promise<BuilderWorkspaceSeedStartResult>;
+  appendSeed(seedId: unknown, entries: unknown): Promise<BuilderWorkspaceState>;
+  commitSeed(seedId: unknown, expected: unknown): Promise<BuilderWorkspaceState>;
+  abortSeed(seedId: unknown): Promise<BuilderWorkspaceState>;
+  applyChanges(value: unknown): Promise<BuilderWorkspaceApplyResult>;
+  getSyncPage(value: unknown): Promise<BuilderWorkspaceSyncPage>;
+  readText(path: unknown): ReturnType<BuilderWorkspaceApi['readText']>;
+  readWorkspaceFile(path: unknown): ReturnType<BuilderWorkspaceApi['readFile']>;
+  streamWorkspaceFile(path: unknown): Promise<ReadableStream<Uint8Array>>;
+  listWorkspaceFiles(): Promise<BuilderWorkspaceFileMetadata[]>;
+  readDirectory(path: unknown): Promise<Array<{ name: string; isFile: boolean; isDirectory: boolean }>>;
+  makeDirectory(path: unknown): Promise<void>;
+  execute(value: unknown): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  checkpoint(): Promise<BuilderWorkspaceCheckpoint>;
+  installDependenciesTool(value: unknown): Promise<GhostbuildToolResult>;
+  validateTool(value: unknown): Promise<GhostbuildToolResult>;
+  validationStatus(revision: unknown): { valid: boolean } | Promise<{ valid: boolean }>;
+  deploymentPlan(revision: unknown): ReturnType<BuilderWorkspaceApi['prepareDeployment']>;
+  beginDeploymentSession(value: {
+    operationId: string;
+    expectedWorkspaceRevision: number;
+    expectedSnapshotRevision: string;
+  }): Promise<{ sessionId: string }>;
+  assertDeploymentSession(value: { sessionId: string }): Promise<BuilderWorkspaceCheckpoint>;
+  prepareDeploymentArtifact(
+    value: Record<string, unknown> & { sessionId: string },
+  ): Promise<PreparedDeploymentArtifact>;
+  finishDeploymentSession(value: {
+    sessionId: string;
+    status: 'completed' | 'failed';
+  }): Promise<{ status: 'completed' | 'failed' }>;
+  createPreview(value: unknown): Promise<BuilderPreviewSuccess>;
+  stopPreview(previewId: unknown): Promise<void>;
+  deleteProject(): Promise<void>;
+}
 
 /**
  * Project workspace operations available to the Ghostbuild control plane.
@@ -72,11 +122,11 @@ export interface BuilderWorkspaceApi {
     revision: string;
     project: DeploymentProjectProfile;
   }>;
-  createPreview(previewId: string): Promise<BuilderPreviewSuccess>;
+  createPreview(args: {
+    previewId: string;
+    expectedWorkspaceRevision: number;
+    expectedSnapshotRevision: string;
+  }): Promise<BuilderPreviewSuccess>;
   stopPreview(previewId: string): Promise<void>;
-  deploy(args: Record<string, unknown> & { revision: string; deploymentId: string }): Promise<{
-    workerName: string;
-    workerVersionId: string;
-  }>;
   deleteProject(): Promise<void>;
 }

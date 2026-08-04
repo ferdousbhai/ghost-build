@@ -1,4 +1,4 @@
-import { createUIMessageStream, streamText, type UIMessage, type UIMessageChunk } from 'ai';
+import { createUIMessageStream, streamText, toUIMessageStream, type UIMessage, type UIMessageChunk } from 'ai';
 import { languageModelId, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { calculatePromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
 import { ROLE_SYSTEM_PROMPT, generalSystemPrompt } from 'ghostbuild-agent/prompts/system';
@@ -22,12 +22,14 @@ import { fingerprintWorkersAiModelInput } from './workers-ai-prompt-cache';
 import { logProviderFailure } from './provider-error-logging';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
+import {
+  BUILDER_TURN_TIMEOUTS,
+  BuilderTurnBudgetExceededError,
+  builderTurnStepBudgetExceeded,
+  classifyBuilderTimeout,
+} from './builder-turn-budget';
 
 type Messages = GhostbuildMessage[];
-// Server-owned validation can legitimately span the bounded production build
-// pipeline (install, typecheck, stack verification, build, and lint).
-const WORKERS_AI_CALL_TIMEOUT_MS = 5 * 60 * 60_000;
-
 interface WorkersAiAgentOptions {
   env: Env;
   abortSignal?: AbortSignal;
@@ -110,6 +112,7 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
   const modelInputFingerprint = await fingerprintWorkersAiModelInput({
     privacySalt: sessionAffinity,
     model: providerModel,
+    instructions: systemPrompts,
     messages: modelInput.messages,
     tools: serializedTools,
     activeTools: toolSettings.activeTools,
@@ -119,8 +122,9 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
   const result = streamText({
     model: provider.model,
     abortSignal,
-    timeout: WORKERS_AI_CALL_TIMEOUT_MS,
+    timeout: BUILDER_TURN_TIMEOUTS,
     maxOutputTokens: provider.maxTokens,
+    instructions: systemPrompts.join('\n\n'),
     messages: modelInput.messages,
     tools: asAiSdkTools(tools),
     toolChoice: toolSettings.toolChoice,
@@ -136,6 +140,9 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
         ),
       );
       if (!completion) {
+        if (builderTurnStepBudgetExceeded(steps.length, false)) {
+          throw new BuilderTurnBudgetExceededError('model_steps');
+        }
         return false;
       }
       currentValidatedBuildCompletion = completion;
@@ -165,7 +172,7 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
         recordFirstWorkersAiResponse(chatInitialId, startedAt);
       }
     },
-    onFinish: (finishResult) => {
+    onEnd: (finishResult) => {
       recordWorkersAiFinish({
         result: finishResult,
         chatInitialId,
@@ -180,13 +187,18 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
       });
     },
     onError: ({ error }) => {
-      logProviderFailure(logger, 'Workers AI request failed.', error);
+      logProviderFailure(logger, 'Workers AI request failed.', classifyBuilderTimeout(error) ?? error);
     },
   });
 
-  const stream = result.toUIMessageStream({
+  const stream = toUIMessageStream({
+    stream: result.stream,
     originalMessages: asOriginalMessages(messages),
     onError: (error) => {
+      const budgetError = error instanceof BuilderTurnBudgetExceededError ? error : classifyBuilderTimeout(error);
+      if (budgetError) {
+        return budgetError.message;
+      }
       if (isWorkersAiFreeAllocationError(error)) {
         return workersPaidRequiredMessage();
       }

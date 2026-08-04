@@ -6,7 +6,7 @@ import { Spinner } from '@ui/Spinner';
 import type { ToolActivityStatus } from '~/lib/common/types';
 import { classNames } from '~/utils/classNames';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
-import { deployToolInputParameters } from 'ghostbuild-agent/tools/deploy';
+import { deployToolParameters } from 'ghostbuild-agent/tools/deploy';
 import { lookupDocsParameters } from 'ghostbuild-agent/tools/lookupDocs';
 import { npmInstallToolParameters } from 'ghostbuild-agent/tools/npmInstall';
 import { getRelativePath } from 'ghostbuild-agent/utils/workDir';
@@ -38,30 +38,33 @@ const ghostbuildIcon = (
 const validationIcon = <FileIcon className="mr-1 size-4 text-content-secondary" />;
 
 const emptyInvocation: GhostbuildToolInvocation = {
-  state: 'partial-call',
+  type: 'dynamic-tool',
+  state: 'input-streaming',
   toolCallId: '',
   toolName: '',
-  args: {},
+  input: {},
 };
 
 const TOOL_INPUT_SCHEMAS: Record<GhostbuildToolName, ZodType> = {
-  deploy: deployToolInputParameters,
+  deploy: deployToolParameters,
   ...COMPUTER_TOOL_INPUT_SCHEMAS,
   lookupDocs: lookupDocsParameters,
   npmInstall: npmInstallToolParameters,
   validateProject: validateProjectParameters,
 };
 
+const MAX_TOOL_TITLE_VALUE_CHARACTERS = 160;
+
 export function normalizeToolInvocation(invocation: GhostbuildToolInvocation | undefined): GhostbuildToolInvocation {
   if (!invocation) {
     return emptyInvocation;
   }
-  if (invocation.state !== 'result' || isErrorResult(invocation)) {
+  if (invocation.state !== 'output-available' || isErrorResult(invocation)) {
     return invocation;
   }
   const error = toolArgumentError(invocation);
   if (error) {
-    return { ...invocation, result: toolFailure(`Could not parse arguments: ${error.message}`) };
+    return { ...invocation, output: toolFailure(`Could not parse arguments: ${error.message}`) };
   }
   return invocation;
 }
@@ -85,7 +88,7 @@ export function statusIcon(status: ToolActivityStatus, invocation: GhostbuildToo
 }
 
 export function toolTitle(invocation: GhostbuildToolInvocation): ReactNode {
-  const resultText = toolResultSummary(invocation.result);
+  const resultText = toolInvocationResultSummary(invocation);
   switch (invocation.toolName) {
     case 'read':
       return readTitle(invocation);
@@ -98,21 +101,24 @@ export function toolTitle(invocation: GhostbuildToolInvocation): ReactNode {
     case 'write':
       return writeTitle(invocation);
     case 'lookupDocs': {
-      const args = loggingSafeParse(lookupDocsParameters, invocation.args);
+      const args = loggingSafeParse(lookupDocsParameters, invocation.input);
       return args.success
         ? titleRow(`Looked up documentation for: ${args.data.docs.join(', ')}`, <FileIcon />)
         : 'Looking up documentation...';
     }
     case 'ls': {
-      const args = loggingSafeParse(pathSchema, invocation.args);
+      const args = loggingSafeParse(pathSchema, invocation.input);
       return titleRow(
-        `Listed ${args.success ? getRelativePath(args.data.path) || '/home/project' : 'project files'}`,
+        `Listed ${args.success ? compactToolLabel(getRelativePath(args.data.path) || '/home/project') : 'project files'}`,
         <FolderIcon className="size-4" />,
       );
     }
     case 'exec': {
-      const args = loggingSafeParse(execSchema, invocation.args);
-      return titleRow(args.success ? `Ran ${args.data.command}` : 'Ran a workspace command', <FileIcon />);
+      const args = loggingSafeParse(execSchema, invocation.input);
+      return titleRow(
+        args.success ? `Ran ${compactToolLabel(args.data.command)}` : 'Ran a workspace command',
+        <FileIcon />,
+      );
     }
     case 'validateProject':
       return titleRow(
@@ -133,7 +139,7 @@ function toolArgumentError(invocation: GhostbuildToolInvocation): ZodError | nul
   if (!schema) {
     return null;
   }
-  const result = loggingSafeParse(schema, invocation.args);
+  const result = loggingSafeParse(schema, invocation.input);
   return result.success ? null : result.error;
 }
 
@@ -142,7 +148,21 @@ function icon(content: ReactNode, color: string): ReactNode {
 }
 
 function isErrorResult(invocation: GhostbuildToolInvocation): boolean {
-  return invocation.state === 'result' && !toolResultSucceeded(invocation.result);
+  return (
+    invocation.state === 'output-error' ||
+    invocation.state === 'output-denied' ||
+    (invocation.state === 'output-available' && !toolResultSucceeded(invocation.output))
+  );
+}
+
+function toolInvocationResultSummary(invocation: GhostbuildToolInvocation): string {
+  if (invocation.state === 'output-error') {
+    return invocation.errorText;
+  }
+  if (invocation.state === 'output-denied') {
+    return invocation.approval.reason ?? 'Tool execution was denied.';
+  }
+  return invocation.state === 'output-available' ? toolResultSummary(invocation.output) : '';
 }
 
 function titleRow(children: ReactNode, iconContent?: ReactNode): ReactNode {
@@ -155,8 +175,8 @@ function titleRow(children: ReactNode, iconContent?: ReactNode): ReactNode {
 }
 
 function readTitle(invocation: GhostbuildToolInvocation): ReactNode {
-  const args = loggingSafeParse(readSchema, invocation.args);
-  const renderedPath = args.success ? getRelativePath(args.data.path) || '/home/project' : 'a file';
+  const args = loggingSafeParse(readSchema, invocation.input);
+  const renderedPath = args.success ? compactToolLabel(getRelativePath(args.data.path) || '/home/project') : 'a file';
   const extra = args.success && args.data.offset ? ` (from line ${args.data.offset})` : '';
   return titleRow(
     `Read ${renderedPath}${extra}`,
@@ -173,7 +193,7 @@ function packageTitle(invocation: GhostbuildToolInvocation): ReactNode {
   if (isErrorResult(invocation)) {
     return 'Failed to install dependencies';
   }
-  const args = loggingSafeParse(npmInstallToolParameters, invocation.args);
+  const args = loggingSafeParse(npmInstallToolParameters, invocation.input);
   return args.success ? (
     <span className="font-mono text-sm">
       {args.data.mode === 'sync-lockfile' ? 'pnpm install --lockfile-only' : `pnpm add ${args.data.packages}`}
@@ -197,8 +217,11 @@ function deployTitle(invocation: GhostbuildToolInvocation, resultText: string): 
     return titleRow('Cloudflare deploy failed');
   }
   const state =
-    isGhostbuildToolResult(invocation.result) && typeof invocation.result.data === 'object' && invocation.result.data
-      ? (invocation.result.data as { state?: unknown }).state
+    invocation.state === 'output-available' &&
+    isGhostbuildToolResult(invocation.output) &&
+    typeof invocation.output.data === 'object' &&
+    invocation.output.data
+      ? (invocation.output.data as { state?: unknown }).state
       : undefined;
   return state === 'awaiting-approval' || resultText.includes('Deployment plan ready for your approval')
     ? titleRow('Deployment ready for approval', ghostbuildIcon)
@@ -206,9 +229,9 @@ function deployTitle(invocation: GhostbuildToolInvocation, resultText: string): 
 }
 
 function editTitle(invocation: GhostbuildToolInvocation): ReactNode {
-  const args = loggingSafeParse(editSchema, invocation.args);
+  const args = loggingSafeParse(editSchema, invocation.input);
   return titleRow(
-    `Edited ${args.success ? getRelativePath(args.data.path) || args.data.path : 'a file'}`,
+    `Edited ${args.success ? compactToolLabel(getRelativePath(args.data.path) || args.data.path) : 'a file'}`,
     <Pencil1Icon className="text-content-secondary" />,
   );
 }
@@ -217,9 +240,16 @@ function writeTitle(invocation: GhostbuildToolInvocation): ReactNode {
   if (isToolInvocationInProgress(invocation)) {
     return titleRow('Writing a file...', <FileIcon className="text-content-secondary" />);
   }
-  const args = writeSchema.safeParse(invocation.args);
+  const args = writeSchema.safeParse(invocation.input);
   return titleRow(
-    `Wrote ${args.success ? getRelativePath(args.data.path) || args.data.path : 'a file'}`,
+    `Wrote ${args.success ? compactToolLabel(getRelativePath(args.data.path) || args.data.path) : 'a file'}`,
     <FileIcon className="text-content-secondary" />,
   );
+}
+
+export function compactToolLabel(value: string): string {
+  const singleLine = value.replace(/\s+/g, ' ').trim();
+  return singleLine.length <= MAX_TOOL_TITLE_VALUE_CHARACTERS
+    ? singleLine
+    : `${singleLine.slice(0, MAX_TOOL_TITLE_VALUE_CHARACTERS - 1)}…`;
 }

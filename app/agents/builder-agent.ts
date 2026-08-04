@@ -22,13 +22,13 @@ import { summarizeBuilderContext } from '~/lib/.server/llm/workers-ai-text';
 import { chatTurnContextSchema, type ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from 'ai';
-import { latestPendingDeploymentPlanMarker } from './deployment-continuation';
+import { latestPendingDeploymentPlan } from './deployment-continuation';
 import { generateProjectTitle } from '~/lib/.server/llm/project-title';
 import {
   setGeneratedDescriptionIfMissing,
   setGeneratedSubchatDescription,
 } from '~/lib/cloudflare/data/chat-service.server';
-import { messageText } from 'ghostbuild-agent/ai-compat';
+import { messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import {
   transcriptCheckpointSchema,
   transcriptCheckpointsEqual,
@@ -41,7 +41,6 @@ import {
 } from 'ghostbuild-agent/transcript';
 import { createWorkersAiSessionAffinity } from '~/lib/.server/llm/workers-ai-prompt-cache';
 import {
-  assertBuilderModelTranscriptWithinLimit,
   boundBuilderMessageForPersistence,
   loadBuilderTranscriptBinding,
   MAX_BUILDER_AGENT_MESSAGES,
@@ -50,6 +49,12 @@ import {
   type BuilderTranscriptBinding,
 } from './builder-request-policy';
 import { initializeBuilderAgentSchema } from './builder-agent-schema';
+import {
+  BuilderAgentIdentityMismatchError,
+  BuilderAgentIdentityRepository,
+  builderAgentIdentitiesEqual,
+  type BuilderAgentDurableIdentity,
+} from './builder-agent-identity';
 import type { BuilderWorkspaceApi } from './builder-workspace-api';
 import { UserWorkspaceRuntimeClient } from '~/lib/.server/cloudflare/user-workspace-runtime-client';
 import type {
@@ -139,6 +144,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
 
   private readonly turnStore = new BuilderTurnStore(this);
   private readonly contextCompaction = new DurableObjectContextCompactionRepository(this);
+  private readonly identityRepository: BuilderAgentIdentityRepository;
   private readonly workspace: BuilderWorkspaceApi;
   private ownerId: string | null = null;
   private userId: string | null = null;
@@ -147,13 +153,16 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     initializeBuilderAgentSchema(ctx);
+    this.identityRepository = new BuilderAgentIdentityRepository(ctx.storage);
     this.workspace = new UserWorkspaceRuntimeClient(env, ctx.id.toString(), () => this.userId);
   }
 
   async onStart(props?: BuilderAgentProps) {
     if (props) {
       await this.initializeIdentity(props);
+      return;
     }
+    await this.hydrateDurableIdentity({ required: false, reason: 'agent_start' });
   }
 
   /**
@@ -197,6 +206,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   override async onChatRecovery(ctx: ChatRecoveryContext): Promise<ChatRecoveryOptions> {
+    await this.hydrateDurableIdentity({ required: true, reason: 'chat_recovery', incidentId: ctx.incidentId });
     if (this.state.transcript) {
       await this.advanceTranscriptCheckpoint(this.state.transcript);
     }
@@ -248,6 +258,11 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   override async onFiberRecovered(ctx: FiberRecoveryContext): Promise<void | FiberRecoveryResult> {
+    await this.hydrateDurableIdentity({
+      required: true,
+      reason: 'fiber_recovery',
+      incidentId: typeof ctx.id === 'string' ? ctx.id : undefined,
+    });
     if (ctx.name === PREVIEW_BUILD_FIBER) {
       const job = parsePreviewBuildJob(ctx.metadata);
       if (!job) {
@@ -272,29 +287,25 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     _onFinish?: unknown,
     options?: { requestId?: string; body?: Record<string, unknown>; continuation?: boolean; abortSignal?: AbortSignal },
   ) {
-    if (!this.ownerId || !this.userId) {
-      throw new Response('Agent authentication is required.', { status: 401 });
+    const durableIdentity = await this.hydrateDurableIdentity({ required: true, reason: 'chat_message' });
+    if (!durableIdentity) {
+      this.rejectIdentity('chat_message_missing', undefined, 401);
     }
     const body = (options?.body ?? {}) as ChatBody;
     const messages = this.messages as NonNullable<ChatRequestBody['messages']>;
-    const { chatInitialId, subchatIndex, transcript } = requireBuilderRequestScope(body, this.transcriptBinding);
-    assertBuilderModelTranscriptWithinLimit(messages);
-    const pendingDeploymentPlanMarker = options?.continuation ? latestPendingDeploymentPlanMarker(messages) : null;
-    if (pendingDeploymentPlanMarker) {
+    const { chatInitialId, subchatIndex, transcript } = requireBuilderRequestScope(body, durableIdentity.transcript);
+    const pendingDeploymentPlan = options?.continuation ? latestPendingDeploymentPlan(messages) : null;
+    if (pendingDeploymentPlan) {
       console.info({
         event: 'builder_deployment_plan_continuation_stopped',
       });
       return createUIMessageStreamResponse({
-        stream: createUIMessageStream({
+        stream: createUIMessageStream<GhostbuildMessage>({
           execute: ({ writer }) => {
-            const id = 'deployment-approval-ready';
-            writer.write({ type: 'text-start', id });
             writer.write({
-              type: 'text-delta',
-              id,
-              delta: `The production plan is ready. Review the Cloudflare resources and approve billing below.\n\n${pendingDeploymentPlanMarker}`,
+              type: 'data-deployment-approval',
+              data: pendingDeploymentPlan,
             });
-            writer.write({ type: 'text-end', id });
           },
         }),
       });
@@ -328,7 +339,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.turnStore.record(turn);
 
     try {
-      const accountCredentials = await getUserWorkersAiCredentials(this.env, this.userId);
+      const accountCredentials = await getUserWorkersAiCredentials(this.env, durableIdentity.userId);
       if (firstPrompt) {
         this.ctx.waitUntil(
           this.generateTitlesForFirstPrompt(chatInitialId, subchatIndex, messageText(firstPrompt), accountCredentials),
@@ -344,7 +355,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         accountCredentials,
         sessionAffinity: await createWorkersAiSessionAffinity(transcript),
         workspace: this.workspace,
-        userId: this.userId,
+        userId: durableIdentity.userId,
         agentName: this.name,
         onValidationStage: (toolCallId, stage) => this.setValidationProgress(toolCallId, stage),
         compaction: {
@@ -600,7 +611,13 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   private async initializeIdentity(props: BuilderAgentProps): Promise<void> {
-    if (this.ownerId && this.ownerId !== props.ownerId) {
+    if (
+      typeof props.ownerId !== 'string' ||
+      !props.ownerId ||
+      props.ownerId.length > 512 ||
+      typeof props.userId !== 'string' ||
+      props.userId !== props.ownerId
+    ) {
       throw new Response('Agent not found.', { status: 404 });
     }
     const transcriptBinding = await loadBuilderTranscriptBinding(this.env.DB, {
@@ -610,11 +627,82 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (!transcriptBinding) {
       throw new Response('Agent not found.', { status: 404 });
     }
-    this.ownerId = props.ownerId;
-    this.userId = props.userId;
-    this.transcriptBinding = transcriptBinding;
+    const identity: BuilderAgentDurableIdentity = {
+      ownerId: props.ownerId,
+      userId: props.userId,
+      transcript: transcriptBinding,
+    };
+    try {
+      this.identityRepository.claim(identity);
+    } catch (error) {
+      if (error instanceof BuilderAgentIdentityMismatchError) {
+        this.rejectIdentity('connection_identity_mismatch');
+      }
+      throw error;
+    }
+    this.applyIdentity(identity);
     const workspace = await this.initializeWorkspace(transcriptBinding);
     this.updatePreviewForWorkspace(workspace.revision);
+  }
+
+  private async hydrateDurableIdentity(args: {
+    required: boolean;
+    reason: string;
+    incidentId?: string;
+  }): Promise<BuilderAgentDurableIdentity | null> {
+    const stored = this.identityRepository.get();
+    if (!stored) {
+      if (args.required) {
+        this.rejectIdentity(`${args.reason}_missing`, args.incidentId, 401);
+      }
+      return null;
+    }
+    const activeTranscript = await loadBuilderTranscriptBinding(this.env.DB, {
+      agentName: this.name,
+      ownerId: stored.ownerId,
+    });
+    if (
+      !activeTranscript ||
+      !builderAgentIdentitiesEqual(stored, {
+        ownerId: stored.ownerId,
+        userId: stored.userId,
+        transcript: activeTranscript,
+      })
+    ) {
+      this.rejectIdentity(`${args.reason}_stale`, args.incidentId);
+    }
+    this.applyIdentity(stored);
+    return stored;
+  }
+
+  private applyIdentity(identity: BuilderAgentDurableIdentity): void {
+    if (
+      (this.ownerId && this.ownerId !== identity.ownerId) ||
+      (this.userId && this.userId !== identity.userId) ||
+      (this.transcriptBinding &&
+        !builderAgentIdentitiesEqual(
+          {
+            ownerId: this.ownerId ?? identity.ownerId,
+            userId: this.userId ?? identity.userId,
+            transcript: this.transcriptBinding,
+          },
+          identity,
+        ))
+    ) {
+      this.rejectIdentity('memory_identity_mismatch');
+    }
+    this.ownerId = identity.ownerId;
+    this.userId = identity.userId;
+    this.transcriptBinding = identity.transcript;
+  }
+
+  private rejectIdentity(reason: string, incidentId: string = crypto.randomUUID(), status = 404): never {
+    logger.error('Rejected BuilderAgent durable identity', {
+      incidentId,
+      reason,
+      agentName: this.name,
+    });
+    throw new Response(status === 401 ? 'Agent authentication is required.' : 'Agent not found.', { status });
   }
 
   private async advanceTranscriptCheckpoint(identity: TranscriptIdentity): Promise<TranscriptCheckpoint> {
@@ -757,6 +845,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
     const workspace = await this.initializeWorkspace(this.transcriptBinding);
     const current = this.currentPreviewState();
+    const snapshot = await this.workspace.checkpoint();
     if (
       current.workspaceRevision === workspace.revision &&
       (current.status === 'queued' || current.status === 'building')
@@ -765,7 +854,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
     if (
       current.status === 'ready' &&
-      current.active?.workspaceRevision === workspace.revision &&
+      current.active?.snapshotRevision === snapshot.revision &&
       Date.parse(current.active.expiresAt) > Date.now()
     ) {
       return current;
@@ -774,7 +863,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       await this.cancelPreview();
     }
 
-    const snapshot = await this.workspace.checkpoint();
     const previewId = crypto.randomUUID();
     const requestedAt = Date.now();
     const job: PreviewBuildJob = {
@@ -832,20 +920,24 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         startedAt: new Date(startedAt).toISOString(),
         updatedAt: new Date(startedAt).toISOString(),
       });
-      const success = await this.workspace.createPreview(job.previewId);
+      const success = await this.workspace.createPreview({
+        previewId: job.previewId,
+        expectedWorkspaceRevision: job.workspaceRevision,
+        expectedSnapshotRevision: job.snapshotRevision,
+      });
       if (!this.isCurrentPreviewJob(job.previewId)) {
         await this.workspace.stopPreview(job.previewId).catch(() => undefined);
         return;
       }
       const readyAt = Date.parse(success.readyAt);
       const previous = this.currentPreviewState().lastSuccessful;
-      const currentRevision = (await this.workspace.refresh()).revision;
+      const currentSnapshot = await this.workspace.checkpoint();
       this.setPreviewState({
         status: 'ready',
         pendingId: null,
         workspaceRevision: job.workspaceRevision,
-        currentWorkspaceRevision: currentRevision,
-        stale: currentRevision !== job.workspaceRevision,
+        currentWorkspaceRevision: currentSnapshot.workspaceRevision,
+        stale: currentSnapshot.revision !== job.snapshotRevision,
         attempt: this.currentPreviewState().attempt,
         requestedAt: new Date(job.requestedAt).toISOString(),
         startedAt: new Date(startedAt).toISOString(),
@@ -893,7 +985,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       ...stored,
       status: expired && stored.status === 'ready' ? 'expired' : stored.status,
       currentWorkspaceRevision: revision,
-      stale: Boolean(successful) && successful!.workspaceRevision !== revision,
+      stale: stored.stale,
       active: expired ? null : stored.active,
     };
   }

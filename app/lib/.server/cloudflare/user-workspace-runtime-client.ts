@@ -1,8 +1,10 @@
 import type { GhostbuildToolResult } from 'ghostbuild-agent/tool-result';
+import { computerSyncUnconfirmedError, isComputerSyncUnconfirmedError } from 'ghostbuild-agent/cloudflare-computer';
 import type {
   BuilderWorkspaceApi,
   BuilderWorkspaceCheckpoint,
   BuilderWorkspaceFileMetadata,
+  ProjectWorkspaceRpc,
 } from '~/agents/builder-workspace-api';
 import type {
   BuilderWorkspaceApplyResult,
@@ -10,20 +12,20 @@ import type {
   BuilderWorkspaceState,
   BuilderWorkspaceSyncPage,
 } from '~/agents/builder-workspace-types';
-
-const MAX_RESPONSE_BYTES = 36 * 1024 * 1024;
+type ProjectWorkspaceStub = DurableObjectStub<ProjectWorkspaceRpc>;
 
 type ToolOperationStartResult =
   | { status: 'execute' }
   | { status: 'completed'; result: unknown }
   | { status: 'failed' | 'indeterminate'; error: string };
 
+/** Typed in-process facade over the co-deployed ProjectWorkspace Durable Object. */
 export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
   readonly #inFlight = new Map<string, { toolName: string; argsJson: string; promise: Promise<unknown> }>();
   #state: BuilderWorkspaceState | null = null;
   #files: BuilderWorkspaceFileMetadata[] = [];
-  #endpoint: string | null = null;
-  #secret: string | null = null;
+  #stubPromise: Promise<ProjectWorkspaceStub> | null = null;
+  #activeTool: { toolCallId: string; toolName: string } | null = null;
 
   readonly computer: BuilderWorkspaceApi['computer'] = {
     fs: {
@@ -42,37 +44,47 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
           isDirectory: false,
         };
       },
-      readFile: (path) => this.#readStream(path),
+      readFile: async (path) => (await this.#stub()).streamWorkspaceFile(path),
       writeFile: async (path, content, options) => {
         const text = new TextDecoder('utf-8', { fatal: true }).decode(content);
         const result = await this.applyClientChanges({
           baseRevision: this.getState().revision,
           changes: [{ kind: 'write', path, content: text, mode: options?.mode }],
+          ...(this.#activeTool
+            ? { operationKey: `tool:${this.#activeTool.toolCallId}`, toolCallId: this.#activeTool.toolCallId }
+            : {}),
         });
         if (!result.ok) {
           throw new Error('The project changed while the file was being written. Retry the operation.');
         }
       },
       mkdir: async (path) => {
-        await this.#post('mkdir', { path });
-        // Creating a previously missing parent advances the Computer VFS
-        // revision. Refresh before the following write performs its CAS.
+        await (await this.#stub()).makeDirectory(path);
         await this.refresh();
       },
       rm: async (path) => {
         const result = await this.applyClientChanges({
           baseRevision: this.getState().revision,
           changes: [{ kind: 'delete', path }],
+          ...(this.#activeTool
+            ? { operationKey: `tool:${this.#activeTool.toolCallId}`, toolCallId: this.#activeTool.toolCallId }
+            : {}),
         });
         if (!result.ok) {
           throw new Error('The project changed while the path was being removed. Retry the operation.');
         }
       },
-      readdir: (path) => this.#post('directory', { path }),
+      readdir: async (path) => (await this.#stub()).readDirectory(path),
     },
     runtime: {
       exec: async (command, options) => ({
-        result: () => this.#post('exec', { command, cwd: options.cwd, backend: options.backend }),
+        result: async () =>
+          (await this.#stub()).execute({
+            command,
+            cwd: options.cwd,
+            backend: options.backend,
+            ...(this.#activeTool ? { operationKey: `tool:${this.#activeTool.toolCallId}` } : {}),
+          }),
       }),
     },
   };
@@ -81,17 +93,14 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     private readonly env: Env,
     private readonly projectId: string,
     private readonly getUserId: () => string | null,
-    private readonly request: typeof fetch = fetch,
   ) {}
 
   async refresh(): Promise<BuilderWorkspaceState> {
-    const [state, files] = await Promise.all([
-      this.#call<BuilderWorkspaceState>('state', { method: 'GET' }),
-      this.#call<BuilderWorkspaceFileMetadata[]>('files', { method: 'GET' }),
-    ]);
-    this.#state = state;
-    this.#files = files;
-    return state;
+    const stub = await this.#stub();
+    const snapshot = await stub.getWorkspaceSnapshot();
+    this.#state = snapshot.state;
+    this.#files = snapshot.files;
+    return snapshot.state;
   }
 
   getState(): BuilderWorkspaceState {
@@ -102,27 +111,27 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
   }
 
   async beginSeed(seedId: unknown): Promise<BuilderWorkspaceSeedStartResult> {
-    const result = await this.#post<BuilderWorkspaceSeedStartResult>('seed/begin', { seedId });
+    const result = await (await this.#stub()).beginSeed(seedId);
     this.#state = result.state;
     return result;
   }
 
   async appendSeed(seedId: unknown, entries: unknown): Promise<BuilderWorkspaceState> {
-    return this.#setState(await this.#post('seed/append', { seedId, entries }));
+    return this.#setState(await (await this.#stub()).appendSeed(seedId, entries));
   }
 
   async commitSeed(seedId: unknown, expected: unknown): Promise<BuilderWorkspaceState> {
-    const state = this.#setState(await this.#post('seed/commit', { seedId, expected }));
+    const state = this.#setState(await (await this.#stub()).commitSeed(seedId, expected));
     await this.refresh();
     return state;
   }
 
   async abortSeed(seedId: unknown): Promise<BuilderWorkspaceState> {
-    return this.#setState(await this.#post('seed/abort', { seedId }));
+    return this.#setState(await (await this.#stub()).abortSeed(seedId));
   }
 
   async applyClientChanges(value: unknown): Promise<BuilderWorkspaceApplyResult> {
-    const result = await this.#post<BuilderWorkspaceApplyResult>('changes', value);
+    const result = await (await this.#stub()).applyChanges(value);
     this.#state = result.state;
     if (result.ok && result.changedPaths.length > 0) {
       await this.refresh();
@@ -131,22 +140,17 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
   }
 
   async getSyncPage(value: unknown): Promise<BuilderWorkspaceSyncPage> {
-    const page = await this.#post<BuilderWorkspaceSyncPage>('sync', value);
+    const page = await (await this.#stub()).getSyncPage(value);
     this.#state = page.state;
     return page;
   }
 
   readText(path: unknown) {
-    return this.#post<Awaited<ReturnType<BuilderWorkspaceApi['readText']>>>('read-text', { path });
+    return this.#stub().then((stub) => stub.readText(path));
   }
 
-  async readFile(path: unknown): Promise<Awaited<ReturnType<BuilderWorkspaceApi['readFile']>>> {
-    const result = await this.#post<
-      Omit<Awaited<ReturnType<BuilderWorkspaceApi['readFile']>>, 'bytes'> & {
-        bytes: string;
-      }
-    >('read-file', { path });
-    return { ...result, bytes: decodeBase64(result.bytes) };
+  readFile(path: unknown) {
+    return this.#stub().then((stub) => stub.readWorkspaceFile(path));
   }
 
   listFiles(): BuilderWorkspaceFileMetadata[] {
@@ -154,7 +158,7 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
   }
 
   checkpoint(): Promise<BuilderWorkspaceCheckpoint> {
-    return this.#post('checkpoint', {});
+    return this.#stub().then((stub) => stub.checkpoint());
   }
 
   async executeToolOnce<T>(toolCallIdValue: unknown, toolName: string, args: unknown, execute: () => Promise<T>) {
@@ -182,142 +186,139 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     mode: 'add' | 'sync-lockfile';
     packages: string[];
   }): Promise<GhostbuildToolResult> {
-    return this.#post<GhostbuildToolResult>('dependencies', args).then(async (result) => {
-      await this.refresh();
-      return result;
-    });
+    return this.#stub()
+      .then((stub) => stub.installDependenciesTool(args))
+      .then(async (result) => {
+        await this.refresh();
+        return result;
+      });
   }
 
   validate(args: { toolCallId: string; input: unknown }): Promise<GhostbuildToolResult> {
-    return this.#post('validate', args);
+    return this.#stub().then((stub) => stub.validateTool(args));
   }
 
   hasSuccessfulValidation(revision: string): Promise<boolean> {
-    return this.#post<{ valid: boolean }>('validation-status', { revision }).then((result) => result.valid);
+    return this.#stub()
+      .then((stub) => stub.validationStatus(revision))
+      .then((result) => result.valid);
   }
 
   prepareDeployment(revision: string): ReturnType<BuilderWorkspaceApi['prepareDeployment']> {
-    return this.#post('deployment-plan', { revision });
+    return this.#stub().then((stub) => stub.deploymentPlan(revision));
   }
 
-  async createPreview(previewId: string): ReturnType<BuilderWorkspaceApi['createPreview']> {
-    return this.#post('preview', { previewId });
+  createPreview(args: {
+    previewId: string;
+    expectedWorkspaceRevision: number;
+    expectedSnapshotRevision: string;
+  }): ReturnType<BuilderWorkspaceApi['createPreview']> {
+    return this.#stub().then((stub) => stub.createPreview(args));
   }
 
   async stopPreview(previewId: string): Promise<void> {
-    await this.#post('preview/stop', { previewId });
-  }
-
-  deploy(args: Record<string, unknown> & { revision: string; deploymentId: string }) {
-    return this.#post<{ workerName: string; workerVersionId: string }>('deploy', args);
+    await (await this.#stub()).stopPreview(previewId);
   }
 
   async deleteProject(): Promise<void> {
-    await this.#call('', { method: 'DELETE' });
+    await (await this.#stub()).deleteProject();
     this.#state = null;
     this.#files = [];
   }
 
   async #executeTool<T>(toolCallId: string, toolName: string, argsJson: string, execute: () => Promise<T>) {
-    const started = await this.#post<ToolOperationStartResult>('tool-operation/begin', {
-      toolCallId,
-      toolName,
-      argsJson,
-    });
+    const stub = await this.#stub();
+    const started = (await stub.beginToolOperation({ toolCallId, toolName, argsJson })) as ToolOperationStartResult;
     if (started.status === 'completed') {
+      if (isPendingMutationReceipt(started.result)) {
+        return (await stub.completeToolOperation({ toolCallId, result: started.result })) as T;
+      }
       return started.result as T;
     }
     if (started.status === 'failed' || started.status === 'indeterminate') {
       throw new Error(started.error);
     }
+    if (this.#activeTool) {
+      throw new Error('ProjectWorkspace tools are serialized; a second mutation cannot start concurrently.');
+    }
+    this.#activeTool = { toolCallId, toolName };
     try {
       const result = await execute();
-      return await this.#post<T>('tool-operation/complete', { toolCallId, result });
+      const syncError = computerSyncUnconfirmedError(result);
+      if (syncError) {
+        throw syncError;
+      }
+      try {
+        return (await stub.completeToolOperation({ toolCallId, result })) as T;
+      } catch (error) {
+        if (toolName !== 'write' && toolName !== 'edit') {
+          throw error;
+        }
+        const replay = (await stub.beginToolOperation({ toolCallId, toolName, argsJson })) as ToolOperationStartResult;
+        if (replay.status !== 'completed') {
+          throw error;
+        }
+        return (
+          isPendingMutationReceipt(replay.result)
+            ? await stub.completeToolOperation({ toolCallId, result: replay.result })
+            : replay.result
+        ) as T;
+      }
     } catch (error) {
-      await this.#post('tool-operation/fail', {
-        toolCallId,
-        error: error instanceof Error ? error.message : String(error),
-      }).catch(() => undefined);
+      if (!isComputerSyncUnconfirmedError(error)) {
+        await stub
+          .failToolOperation({
+            toolCallId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+          .catch(() => undefined);
+      }
+      throw error;
+    } finally {
+      this.#activeTool = null;
+    }
+  }
+
+  #setState(value: BuilderWorkspaceState): BuilderWorkspaceState {
+    this.#state = value;
+    return value;
+  }
+
+  async #stub(): Promise<ProjectWorkspaceStub> {
+    if (this.#stubPromise) {
+      return this.#stubPromise;
+    }
+    this.#stubPromise = this.#resolveStub();
+    try {
+      return await this.#stubPromise;
+    } catch (error) {
+      this.#stubPromise = null;
       throw error;
     }
   }
 
-  #setState(value: unknown): BuilderWorkspaceState {
-    this.#state = value as BuilderWorkspaceState;
-    return this.#state;
-  }
-
-  #post<T>(operation: string, body: unknown): Promise<T> {
-    return this.#call(operation, { method: 'POST', body: JSON.stringify(body) });
-  }
-
-  async #call<T>(operation: string, init: RequestInit): Promise<T> {
-    await this.#resolveRuntime();
-    const url = `${this.#endpoint}/v1/projects/${encodeURIComponent(this.projectId)}${operation ? `/${operation}` : ''}`;
-    const response = await this.request(url, {
-      ...init,
-      headers: {
-        authorization: `Bearer ${this.#secret}`,
-        ...(init.body ? { 'content-type': 'application/json' } : {}),
-      },
-      signal: AbortSignal.timeout(5 * 60_000),
-    });
-    if (response.status === 204) {
-      return undefined as T;
-    }
-    const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) {
-      throw new Error('The user-owned workspace runtime response is too large.');
-    }
-    const payload = text ? (JSON.parse(text) as { error?: string }) : null;
-    if (!response.ok) {
-      throw new Error(payload?.error || `User-owned workspace operation failed (${response.status}).`);
-    }
-    return payload as T;
-  }
-
-  async #readStream(path: string): Promise<ReadableStream<Uint8Array>> {
-    await this.#resolveRuntime();
-    const url = `${this.#endpoint}/v1/projects/${encodeURIComponent(this.projectId)}/read-file-stream`;
-    const response = await this.request(url, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${this.#secret}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ path }),
-      signal: AbortSignal.timeout(5 * 60_000),
-    });
-    if (!response.ok || !response.body) {
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(payload?.error || `User-owned workspace file read failed (${response.status}).`);
-    }
-    return response.body;
-  }
-
-  async #resolveRuntime(): Promise<void> {
-    if (this.#endpoint && this.#secret) {
-      return;
-    }
+  async #resolveStub(): Promise<ProjectWorkspaceStub> {
     const userId = this.getUserId();
     if (!userId) {
       throw new Error('Agent authentication is required.');
     }
-    const runtime = this.env as Env & {
-      GHOSTBUILD_USER_RUNTIME?: string;
-      GHOSTBUILD_USER_RUNTIME_ENDPOINT?: string;
-      CONTROL_PLANE_SECRET?: string;
-    };
-    if (
-      runtime.GHOSTBUILD_USER_RUNTIME !== '1' ||
-      !runtime.GHOSTBUILD_USER_RUNTIME_ENDPOINT ||
-      !runtime.CONTROL_PLANE_SECRET
-    ) {
-      throw new Error('The user-owned Cloudflare workspace runtime is not configured.');
+    if (this.env.GHOSTBUILD_USER_RUNTIME !== '1' || this.env.GHOSTBUILD_USER_ID !== userId) {
+      throw new Error('The user-owned Cloudflare workspace runtime is not configured for this project owner.');
     }
-    this.#endpoint = new URL(runtime.GHOSTBUILD_USER_RUNTIME_ENDPOINT).origin;
-    this.#secret = runtime.CONTROL_PLANE_SECRET;
+    const stub = this.env.PROJECT_WORKSPACE.get(this.env.PROJECT_WORKSPACE.idFromName(this.projectId));
+    await stub.initializeProjectIdentity({ projectId: this.projectId, userId });
+    return stub;
   }
+}
+
+function isPendingMutationReceipt(value: unknown): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === 'workspace-mutation-receipt' &&
+    (value as { committed?: unknown }).committed === true &&
+    (value as { acknowledgement?: unknown }).acknowledgement === 'pending'
+  );
 }
 
 function requireToolCallId(value: unknown): string {
@@ -339,9 +340,4 @@ function stableValue(value: unknown): unknown {
     );
   }
   return value;
-}
-
-function decodeBase64(value: string): Uint8Array {
-  const binary = atob(value);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }

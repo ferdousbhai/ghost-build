@@ -17,7 +17,7 @@ export const APP_AGENT_DECLARATIVE_EXPORT = {
  */
 export const DEPLOYMENT_PROJECT_ROOT = '/home/project';
 export const DEPLOYMENT_WRANGLER_CONFIG_PATH = '/home/.ghostbuild-deploy.json';
-export const DEPLOYMENT_WRANGLER_OUTPUT_PATH = '/home/.ghostbuild-wrangler-output.ndjson';
+export const DEPLOYMENT_ARTIFACT_ROOT = '/home/.ghostbuild-deployment-artifact';
 export const DEPLOYMENT_VERSION_METADATA_BINDING = 'CF_VERSION_METADATA';
 export const DEPLOYMENT_SECURITY_BASELINE_BINDING = 'GHOSTBUILD_SECURITY_BASELINE_VERSION';
 export const DEPLOYMENT_TEMPLATE_SOURCE_BINDING = 'GHOSTBUILD_TEMPLATE_SOURCE_SHA256';

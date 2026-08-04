@@ -46,7 +46,7 @@ connected user's account; they do not add customer storage or compute to the Gho
 `workers-builds.production.json` is the reviewed contract for Cloudflare dashboard build settings. Cloudflare does not
 read it automatically. Mirror it in the `ghostbuild` Worker's Builds settings:
 
-- connect `ferdousbhai/ghostbuild`, production branch `main`, with non-production builds enabled
+- connect `ferdousbhai/ghost-build`, production branch `main`, with non-production builds enabled
 - set the build command to `pnpm run workers-builds:build` and deploy command to `pnpm run workers-builds:deploy`
 - set non-production deploys to `pnpm run workers-builds:preview`
 - use `/` as the root, include all paths, and enable build caching
@@ -68,6 +68,11 @@ pnpm run rebuild-template
 
 Do not edit generated route trees, Worker binding types, `app/generated/user-workspace-runtime.generated.ts`, or the
 generated Builder template module directly.
+
+`template/scripts/lib/project-policy/generated-project-dependency-policy.json` is the single machine-readable source
+for generated-project pnpm cooling, lifecycle-build approvals, and security overrides. Both the browser write guard and
+the root/template verifiers import it. The repository-only early-release exception for the pinned Computer preview is
+an explicitly named profile difference; generated projects do not inherit it.
 
 Client source maps are generated for internal diagnosis but excluded from the static upload by
 `dist/client/.assetsignore`, following Cloudflare's
@@ -118,5 +123,6 @@ must attest both databases and the complete server-derived security baseline.
 
 ## Historical Evaluations
 
-Reproducible, dated agent and prompt-cache experiments live in `scripts/evaluations/`. They are evidence, not current
-architecture requirements.
+Experiment conclusions that still constrain the product are summarized in `scripts/evaluations/DECISIONS.md`. The
+repository does not ship or support one-off remote evaluation Workers. Run launch-capacity measurements against the
+exact release candidate in isolated staging infrastructure and retain provider telemetry with the release evidence.

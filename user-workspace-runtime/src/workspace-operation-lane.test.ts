@@ -1,0 +1,131 @@
+import { describe, expect, it } from 'vitest';
+import {
+  WorkspaceOperationConflictError,
+  WorkspaceOperationIndeterminateError,
+  WorkspaceOperationLane,
+} from './workspace-operation-lane';
+
+describe('WorkspaceOperationLane', () => {
+  it('rejects simultaneous stateful operations with observable retry timing', () => {
+    const storage = new TestStorage();
+    const lane = new WorkspaceOperationLane(storage as never);
+    lane.initialize();
+    lane.acquire(operation('validate', 'validation-a', 100));
+
+    expect(() => lane.acquire(operation('editor-write', 'write-b', 200))).toThrow(WorkspaceOperationConflictError);
+    try {
+      lane.acquire(operation('editor-write', 'write-b', 200));
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'workspace_operation_conflict', retryAfterMs: 1_000 });
+    }
+  });
+
+  it('recovers a stale owner for a different operation but never replays the stale idempotency key', () => {
+    const lane = createLane();
+    lane.acquire(operation('exec', 'tool-a', 100, 50));
+
+    expect(() => lane.acquire(operation('exec', 'tool-a', 151))).toThrow(WorkspaceOperationIndeterminateError);
+
+    const recovered = lane.acquire(operation('delete', 'delete-b', 152));
+    expect(recovered.recoveredOwner).toBe('owner-exec-tool-a');
+  });
+
+  it('never treats a still-executing owner as stale solely because its deadline passed', () => {
+    let activeOwner: string | null = 'owner-deployment-deploy-a';
+    const storage = new TestStorage();
+    const lane = new WorkspaceOperationLane(storage as never, (owner) => owner === activeOwner);
+    lane.initialize();
+    lane.acquire(operation('deployment', 'deploy-a', 0, 15 * 60_000));
+
+    expect(() => lane.acquire(operation('write', 'write-b', 16 * 60_000))).toThrow(WorkspaceOperationConflictError);
+
+    activeOwner = null;
+    expect(lane.acquire(operation('write', 'write-b', 16 * 60_000))).toMatchObject({
+      recoveredOwner: 'owner-deployment-deploy-a',
+    });
+  });
+
+  it('releases only the current owner and permits the next operation', () => {
+    const lane = createLane();
+    const first = lane.acquire(operation('preview', 'preview-a', 100));
+    lane.release({ ...first, owner: 'not-the-owner' });
+    expect(() => lane.acquire(operation('write', 'write-b', 111))).toThrow(WorkspaceOperationConflictError);
+
+    lane.release(first);
+    expect(lane.acquire(operation('write', 'write-b', 113))).toMatchObject({ kind: 'write' });
+  });
+
+  it('finds and renews a durable external-operation lease without changing its owner', () => {
+    const lane = createLane();
+    const lease = lane.acquire(operation('deployment', 'deploy-a', 100, 1_000));
+
+    expect(lane.find('deploy-a', 'owner-deployment-deploy-a')).toEqual(lease);
+    const renewed = lane.renew(lease, 5_000, 500);
+    expect(renewed.deadline).toBe(5_500);
+    expect(lane.find('deploy-a', lease.owner)).toEqual(renewed);
+  });
+});
+
+function operation(kind: string, idempotencyKey: string, now: number, leaseMs = 1_000) {
+  return { kind, idempotencyKey, owner: `owner-${kind}-${idempotencyKey}`, now, leaseMs };
+}
+
+function createLane() {
+  const lane = new WorkspaceOperationLane(new TestStorage() as never);
+  lane.initialize();
+  return lane;
+}
+
+type LaneRow = {
+  owner: string | null;
+  idempotency_key: string | null;
+  kind: string | null;
+  acquired_at: number | null;
+  deadline: number | null;
+};
+
+class TestStorage {
+  row: LaneRow = {
+    owner: null,
+    idempotency_key: null,
+    kind: null,
+    acquired_at: null,
+    deadline: null,
+  };
+  readonly sql = {
+    exec: <T>(query: string, ...bindings: unknown[]): T[] => {
+      const normalized = query.replace(/\s+/g, ' ').trim();
+      if (normalized.startsWith('SELECT owner')) {
+        return [{ ...this.row }] as T[];
+      }
+      if (normalized.startsWith('UPDATE ghostbuild_operation_lane SET owner = ?')) {
+        this.row = {
+          owner: String(bindings[0]),
+          idempotency_key: String(bindings[1]),
+          kind: String(bindings[2]),
+          acquired_at: Number(bindings[3]),
+          deadline: Number(bindings[4]),
+        };
+      } else if (normalized.startsWith('UPDATE ghostbuild_operation_lane SET owner = NULL')) {
+        if (this.row.owner === bindings[0]) {
+          this.row = { ...this.row, owner: null, idempotency_key: null, kind: null, acquired_at: null, deadline: null };
+        }
+      } else if (normalized.startsWith('UPDATE ghostbuild_operation_lane SET deadline = ?')) {
+        if (this.row.owner === bindings[1] && this.row.idempotency_key === bindings[2]) {
+          this.row = { ...this.row, deadline: Number(bindings[0]) };
+        }
+      }
+      return [];
+    },
+  };
+
+  transactionSync<T>(closure: () => T): T {
+    const row = { ...this.row };
+    try {
+      return closure();
+    } catch (error) {
+      this.row = row;
+      throw error;
+    }
+  }
+}

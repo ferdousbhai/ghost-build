@@ -1,13 +1,13 @@
 import { cachedPromptTokenCount } from 'ghostbuild-agent/ai-compat';
 import type { PromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
-import type { OnFinishEvent, ToolSet } from 'ai';
+import type { GenerateTextEndEvent, ToolSet } from 'ai';
 import type { WorkersAiPromptCacheStatus } from './workers-ai-prompt-cache';
 
 const GLM_5_2_NANODOLLARS_PER_INPUT_TOKEN = 1_400;
 const GLM_5_2_NANODOLLARS_PER_CACHED_INPUT_TOKEN = 260;
 
 interface FinishTelemetryOptions {
-  result: OnFinishEvent<ToolSet>;
+  result: GenerateTextEndEvent<ToolSet>;
   chatInitialId: string;
   firstUserMessage: boolean;
   contextReduced: boolean;
@@ -21,13 +21,17 @@ interface FinishTelemetryOptions {
 
 export function recordWorkersAiFinish(options: FinishTelemetryOptions): void {
   const { result } = options;
-  const finalUsage = result.totalUsage;
+  const finalUsage = result.usage;
   const usage = {
     outputTokens: normalizeUsage(finalUsage.outputTokens),
     inputTokens: normalizeUsage(finalUsage.inputTokens),
     totalTokens: normalizeUsage(finalUsage.totalTokens),
   };
-  const cache = workersAiPromptCacheTelemetry(result.providerMetadata, options.promptCacheAttempted, usage.inputTokens);
+  const cache = workersAiPromptCacheTelemetry(
+    [result.usage, result.finalStep.providerMetadata],
+    options.promptCacheAttempted,
+    usage.inputTokens,
+  );
   const event = {
     event: 'workers_ai_finished',
     chatInitialId: options.chatInitialId,
@@ -46,7 +50,7 @@ export function recordWorkersAiFinish(options: FinishTelemetryOptions): void {
 }
 
 export function workersAiPromptCacheTelemetry(
-  providerMetadata: unknown,
+  usageAndProviderMetadata: unknown,
   attempted: boolean,
   inputTokens: number,
 ): {
@@ -55,13 +59,22 @@ export function workersAiPromptCacheTelemetry(
   cachedInputTokens: number;
   estimatedSavingsNanodollars: number;
 } {
-  const reportedCachedTokens = cachedPromptTokenCount(providerMetadata);
-  const cachedInputTokens = Math.min(inputTokens, reportedCachedTokens ?? 0);
+  const normalizedInputTokens = normalizeUsage(inputTokens);
+  if (!attempted) {
+    return {
+      attempted: false,
+      status: 'unavailable',
+      cachedInputTokens: 0,
+      estimatedSavingsNanodollars: 0,
+    };
+  }
+  const reportedCachedTokens = cachedPromptTokenCount(usageAndProviderMetadata);
+  const cachedInputTokens = Math.min(normalizedInputTokens, reportedCachedTokens ?? 0);
   const status: WorkersAiPromptCacheStatus =
     reportedCachedTokens === undefined ? 'unavailable' : cachedInputTokens > 0 ? 'hit' : 'miss';
-  const uncachedCost = inputTokens * GLM_5_2_NANODOLLARS_PER_INPUT_TOKEN;
+  const uncachedCost = normalizedInputTokens * GLM_5_2_NANODOLLARS_PER_INPUT_TOKEN;
   const actualCost =
-    (inputTokens - cachedInputTokens) * GLM_5_2_NANODOLLARS_PER_INPUT_TOKEN +
+    (normalizedInputTokens - cachedInputTokens) * GLM_5_2_NANODOLLARS_PER_INPUT_TOKEN +
     cachedInputTokens * GLM_5_2_NANODOLLARS_PER_CACHED_INPUT_TOKEN;
   return {
     attempted,
@@ -82,5 +95,5 @@ export function recordFirstWorkersAiResponse(chatInitialId: string, startedAt: n
 }
 
 function normalizeUsage(usage: number | undefined): number {
-  return usage === undefined || Number.isNaN(usage) ? 0 : usage;
+  return usage === undefined || !Number.isFinite(usage) || usage < 0 ? 0 : usage;
 }

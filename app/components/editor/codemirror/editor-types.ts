@@ -9,6 +9,7 @@ export interface EditorUpdate {
   selection: EditorSelection;
   content: string;
   filePath: string;
+  projectId: string;
 }
 
 export type OnChangeCallback = (update: EditorUpdate) => void;

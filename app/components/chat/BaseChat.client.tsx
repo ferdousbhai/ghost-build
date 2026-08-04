@@ -11,7 +11,7 @@ import styles from './BaseChat.module.css';
 import { DisabledChatMessageSheet } from './DisabledChatMessageSheet';
 import { HomeIntro } from './HomeIntro.client';
 import StreamingIndicator from './StreamingIndicator';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, MotionConfig } from 'framer-motion';
 import { useStore } from '@nanostores/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -185,7 +185,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
         await onSend(messageText(lastUserMessage));
       }
     }, [lastUserMessage, onSend]);
-    return (
+    const content = (
       <div
         ref={ref}
         className={classNames(styles.BaseChat, 'relative flex h-full w-full overflow-hidden')}
@@ -311,6 +311,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
         </div>
       </div>
     );
+    return <MotionConfig reducedMotion="user">{content}</MotionConfig>;
   },
 );
 BaseChat.displayName = 'BaseChat';

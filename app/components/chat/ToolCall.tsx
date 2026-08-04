@@ -40,7 +40,7 @@ export const ToolCall = memo(function ToolCall({
       }
       onOpen={() => workbenchStore.showWorkbench.set(!workbenchStore.showWorkbench.get())}
       onToggle={toggleAction}
-      toggleDisabled={invocation.state === 'partial-call'}
+      toggleDisabled={invocation.state === 'input-streaming'}
       body={
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           <ul className="list-none space-y-2.5">

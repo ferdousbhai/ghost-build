@@ -15,7 +15,6 @@ import {
   findMissingCommandSteps,
   findPackageVersionAlignmentErrors,
   findRuntimePinErrors,
-  findSandboxVersionErrors,
   findRootMigrationErrors,
   findBuilderTemplateModuleErrors,
   packageDependencyVersion,
@@ -60,25 +59,25 @@ describe('stack alignment verification helpers', () => {
     const pkg = {
       dependencies: {
         '@cloudflare/ai-chat': '^0.9.1',
-        '@ai-sdk/provider': '^3.0.12',
+        '@ai-sdk/provider': '4.0.4',
         '@tanstack/react-start': '^1.168.26',
         agents: '^0.17.1',
-        ai: '^6.0.216',
-        'workers-ai-provider': '^3.3.0',
+        ai: '7.0.48',
+        'workers-ai-provider': '4.0.0',
         zod: '^4.4.3',
       },
       devDependencies: {
-        '@ai-sdk/react': '^3.0.218',
+        '@ai-sdk/react': '4.0.51',
         wrangler: '^4.105.0',
       },
     };
 
-    expect(packageDependencyVersion(pkg, '@ai-sdk/react')).toBe('^3.0.218');
+    expect(packageDependencyVersion(pkg, '@ai-sdk/react')).toBe('4.0.51');
     expect(findCloudflareAiPeerCompatibilityErrors(pkg, 'package.json')).toEqual([]);
     expect(findPackageVersionAlignmentErrors(pkg, pkg, 'template/package.json', ['ai', 'zod'])).toEqual([]);
     expect(
-      findPackageVersionAlignmentErrors(pkg, { dependencies: { ai: '^6.0.217' } }, 'template/package.json', ['ai']),
-    ).toEqual(['template/package.json must align ai with package.json ^6.0.216; found ^6.0.217.']);
+      findPackageVersionAlignmentErrors(pkg, { dependencies: { ai: '7.0.49' } }, 'template/package.json', ['ai']),
+    ).toEqual(['template/package.json must align ai with package.json 7.0.48; found 7.0.49.']);
   });
 
   it('keeps AI SDK packages on the current Cloudflare-compatible peer line', () => {
@@ -86,20 +85,21 @@ describe('stack alignment verification helpers', () => {
       findCloudflareAiPeerCompatibilityErrors(
         {
           dependencies: {
-            '@ai-sdk/provider': '^4.0.0',
-            '@ai-sdk/react': '^4.0.7',
+            '@ai-sdk/provider': '4.0.0',
+            '@ai-sdk/react': '4.0.7',
             '@cloudflare/ai-chat': '^0.9.1',
             agents: '^0.17.1',
-            ai: '^7.0.6',
+            ai: '7.0.6',
             'workers-ai-provider': '^3.3.0',
           },
         },
         'package.json',
       ),
     ).toEqual([
-      'package.json must keep ai on ^6.x while agents, @cloudflare/ai-chat, workers-ai-provider require ai ^6.0.0; found ^7.0.6.',
-      'package.json must keep @ai-sdk/react on ^3.x while agents, @cloudflare/ai-chat, workers-ai-provider require @ai-sdk/react ^3.0.204; found ^4.0.7.',
-      'package.json must keep @ai-sdk/provider on ^3.x while agents, @cloudflare/ai-chat, workers-ai-provider require @ai-sdk/provider ^3.0.0; found ^4.0.0.',
+      'package.json must pin the tested AI SDK 7 family ai@7.0.48 for agents, @cloudflare/ai-chat, workers-ai-provider; found 7.0.6.',
+      'package.json must pin the tested AI SDK 7 family @ai-sdk/react@4.0.51 for agents, @cloudflare/ai-chat, workers-ai-provider; found 4.0.7.',
+      'package.json must pin the tested AI SDK 7 family @ai-sdk/provider@4.0.4 for agents, @cloudflare/ai-chat, workers-ai-provider; found 4.0.0.',
+      'package.json must pin the tested AI SDK 7 family workers-ai-provider@4.0.0 for agents, @cloudflare/ai-chat, workers-ai-provider; found ^3.3.0.',
     ]);
   });
 
@@ -140,81 +140,6 @@ describe('stack alignment verification helpers', () => {
     ]);
   });
 
-  it('keeps the Cloudflare Sandbox image aligned with the exact SDK version', () => {
-    const pkg = {
-      packageManager: 'pnpm@11.14.0',
-      dependencies: { '@cloudflare/sandbox': '0.12.3' },
-      devDependencies: { wrangler: '4.112.0' },
-    };
-    const digest = 'sha256:23f67e16131b780865a5fa5aa3c8607408a730105c248836409f4e02bb6bf042';
-    const dockerfile = `FROM docker.io/cloudflare/sandbox:0.12.3@${digest}
-COPY sandbox-tools/package.json sandbox-tools/pnpm-lock.yaml sandbox-tools/pnpm-workspace.yaml sandbox-tools/verify-pnpm-workspace-policy.mjs /opt/ghostbuild-tools/
-RUN npm install --global pnpm@11.14.0 --ignore-scripts --no-audit --no-fund && \\
-    pnpm --dir /opt/ghostbuild-tools install --prod --frozen-lockfile && \\
-    ln -s /opt/ghostbuild-tools/verify-pnpm-workspace-policy.mjs /usr/local/bin/ghostbuild-verify-pnpm-workspace
-ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
-`;
-    const toolsPackage = {
-      private: true,
-      license: 'Apache-2.0',
-      engines: { node: '>=22.0.0' },
-      packageManager: 'pnpm@11.14.0',
-      dependencies: { wrangler: '4.112.0', yaml: '2.9.0' },
-    };
-    const toolsLockfile = `wrangler:
-        specifier: 4.112.0
-        version: 4.112.0
-      yaml:
-        specifier: 2.9.0
-        version: 2.9.0
-`;
-    expect(findSandboxVersionErrors(pkg, dockerfile, toolsPackage, toolsLockfile)).toEqual([]);
-    expect(
-      findSandboxVersionErrors(
-        pkg,
-        dockerfile.replace('sandbox:0.12.3', 'sandbox:0.12.2'),
-        toolsPackage,
-        toolsLockfile,
-      ),
-    ).toEqual([
-      `Dockerfile.sandbox must use FROM docker.io/cloudflare/sandbox:0.12.3@${digest} so the image matches the Sandbox SDK.`,
-    ]);
-    expect(
-      findSandboxVersionErrors(
-        pkg,
-        dockerfile.replace(' --ignore-scripts --no-audit --no-fund', ''),
-        toolsPackage,
-        toolsLockfile,
-      ),
-    ).toContain(
-      'Dockerfile.sandbox must install pnpm without running registry package lifecycle scripts or audit requests.',
-    );
-    expect(findSandboxVersionErrors({ dependencies: { '@cloudflare/sandbox': '^0.12.3' } }, '', {}, '')).toEqual([
-      'package.json must pin @cloudflare/sandbox to an exact version.',
-    ]);
-  });
-
-  it('requires lockfile-backed sandbox tools aligned with the root toolchain', () => {
-    const pkg = {
-      packageManager: 'pnpm@11.14.0',
-      dependencies: { '@cloudflare/sandbox': '0.12.3' },
-      devDependencies: { wrangler: '4.112.0' },
-    };
-
-    expect(findSandboxVersionErrors(pkg, '', {}, '')).toContain(
-      'sandbox-tools/pnpm-lock.yaml must lock wrangler 4.112.0.',
-    );
-    expect(findSandboxVersionErrors(pkg, '', { packageManager: 'pnpm@10.0.0' }, '')).toContain(
-      'sandbox-tools/package.json packageManager must match package.json pnpm@11.14.0; found pnpm@10.0.0.',
-    );
-    expect(findSandboxVersionErrors(pkg, '', { private: true, packageManager: 'pnpm@11.14.0' }, '')).toEqual(
-      expect.arrayContaining([
-        'sandbox-tools/package.json must declare the repository Apache-2.0 license.',
-        'sandbox-tools/package.json must support the pinned Cloudflare Sandbox Node >=22.0.0 runtime.',
-      ]),
-    );
-  });
-
   it('prevents accidental publication of internal workspace packages', () => {
     expect(findInternalPackageMetadataErrors({ private: true }, 'ghostbuild-agent/package.json')).toEqual([]);
     expect(findInternalPackageMetadataErrors({}, 'ghostbuild-agent/package.json')).toEqual([
@@ -245,8 +170,8 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
       'cloudflare_oauth_states',
       'cloudflare_credentials',
       'cloudflare_connections',
-      'user_workspace_runtimes',
       'user_computer_runtimes',
+      'launch_controls',
     ]
       .map((table) => `CREATE TABLE IF NOT EXISTS ${table} (id TEXT);`)
       .join('\n');

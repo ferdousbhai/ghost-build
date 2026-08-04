@@ -1,8 +1,10 @@
 import {
   type DurableObjectStorageLike,
   getWorkspace,
+  type SyncRetryScheduler,
   type WorkspaceClient,
   type WorkspaceOptions,
+  type WorkspaceRuntimeResult,
   Workspace,
   WorkspaceProxy,
   WorkspaceServiceProxy,
@@ -18,12 +20,22 @@ import { parse } from 'jsonc-parser';
 import { BuilderAgent } from '../../app/agents/builder-agent';
 import { routeUserRuntimeAgentRequest } from '../../app/lib/.server/agent-request-identity';
 import { createTrustedDeploymentConfig } from '../../app/lib/.server/cloudflare/deployment-config';
-import { readUserWorkspaceRuntimeHealth } from '../../app/lib/.server/cloudflare/user-workspace-runtime-health';
 import {
+  type UserWorkspaceReadinessCheck,
+  type UserWorkspaceReadinessComponent,
+} from '../../app/lib/.server/cloudflare/user-workspace-runtime-health';
+import {
+  DEPLOYMENT_ARTIFACT_ROOT,
   DEPLOYMENT_PROJECT_ROOT,
   DEPLOYMENT_WRANGLER_CONFIG_PATH,
-  DEPLOYMENT_WRANGLER_OUTPUT_PATH,
 } from '../../app/lib/.server/cloudflare/deployment-runtime-policy';
+import {
+  MAX_DEPLOYMENT_ARTIFACT_BYTES,
+  MAX_DEPLOYMENT_ARTIFACT_FILES,
+  type DeploymentArtifactFile,
+  type PreparedDeploymentArtifact,
+  validatePreparedDeploymentArtifact,
+} from '../../app/lib/.server/cloudflare/deployment-artifact';
 import { addRequestedDependencies } from '../../app/lib/runtime/action-runner/dependency-manifest';
 import {
   userRuntimeDataAction,
@@ -34,10 +46,34 @@ import { verifyRuntimeCapability } from '../../app/lib/cloudflare/runtime-capabi
 import { userRuntimeDeploymentAction } from '../../app/server-handlers/deployments';
 import { userRuntimeEnhancePromptAction } from '../../app/server-handlers/enhance-prompt';
 import { toolFailure, toolSuccess, type GhostbuildToolResult } from '../../ghostbuild-agent/tool-result';
+import { computerSyncUnconfirmedToolResult } from '../../ghostbuild-agent/cloudflare-computer';
 import { openPreviewQuickTunnel } from './preview-tunnel';
 import { applyAtomicWorkspaceChanges } from './atomic-workspace-changes';
+import { routeUserWorkspaceRuntimeControlPlaneRequest } from './readiness-route';
 import { scheduleUserWorkspaceRuntimeMaintenance } from './scheduled-maintenance';
 import { ToolOperationJournal, type ToolOperationStartResult } from './tool-operation-journal';
+import { createCommittedMutationReceipt } from './mutation-receipt';
+import {
+  assertPreviewSourceCheckpoint,
+  assertPreviewPublicationAllowed,
+  createPreviewSnapshotCommand,
+  PREVIEW_SNAPSHOT_ROOT,
+  PREVIEW_TTL_MS,
+  previewPort,
+} from './preview-lifecycle';
+import {
+  WorkspaceOperationConflictError,
+  WorkspaceOperationIndeterminateError,
+  WorkspaceOperationLane,
+  type WorkspaceOperationLease,
+} from './workspace-operation-lane';
+import {
+  DurableWorkspaceSyncRetryScheduler,
+  requireDurableCommandResult,
+  requireWorkspaceSyncBarrier,
+  WorkspaceSyncPendingError,
+} from './workspace-sync-retry';
+import { stableWorkspaceRead } from './stable-workspace-read';
 
 export { WorkspaceProxy, WorkspaceServiceProxy };
 
@@ -49,32 +85,42 @@ interface RuntimeEnv {
   LOADER: unknown;
   CONTROL_PLANE_SECRET: string;
   CLOUDFLARE_ACCOUNT_ID: string;
-  CLOUDFLARE_API_TOKEN: string;
   GHOSTBUILD_USER_ID: string;
   GHOSTBUILD_CONNECTION_ID: string;
   GHOSTBUILD_CONNECTION_GENERATION: string;
   GHOSTBUILD_USER_RUNTIME: string;
   GHOSTBUILD_USER_RUNTIME_ENDPOINT: string;
+  GHOSTBUILD_CONTROL_PLANE_ENDPOINT: string;
   GHOSTBUILD_RUNTIME_VERSION: string;
   SANDBOX_TRANSPORT: 'rpc';
 }
 
 const PROJECT_ROOT = DEPLOYMENT_PROJECT_ROOT;
+const READINESS_ROOT = '/home/.ghostbuild-readiness';
 const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const MAX_FILES = 10_000;
 const SYNC_BATCH_BYTES = 4 * 1024 * 1024;
 const SYNC_BATCH_FILES = 100;
-const PROJECT_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,256}$/;
 const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.tanstack', '.wrangler']);
 const DERIVED_PATHS = ['dist', '.output', '.tanstack', '.wrangler'].map((name) => `${PROJECT_ROOT}/${name}`);
-const PREVIEW_PORT = 4173;
-const PREVIEW_TTL_MS = 15 * 60_000;
 const COMPUTERD_PROCESS_ID = 'ghostbuild-computerd';
 const COMPUTERD_ROOT = '/tmp/ghostbuild-computer';
 const COMPUTERD_BINARY = `${COMPUTERD_ROOT}/usr/local/bin/computerd`;
 const COMPUTERD_LAYER_DIGEST = 'sha256:4034b86577bc36e9f089df87960e9249e1f05c77edaa52783da7d6142d07bb81';
+const OPERATION_LEASE_MS = {
+  seed: 10 * 60_000,
+  write: 10 * 60_000,
+  exec: 10 * 60_000,
+  install: 15 * 60_000,
+  validate: 30 * 60_000,
+  preview: 30 * 60_000,
+  deployment: 45 * 60_000,
+  delete: 15 * 60_000,
+} as const;
+
+type StatefulOperationKind = keyof typeof OPERATION_LEASE_MS;
 
 type WorkspaceFile = {
   path: string;
@@ -91,6 +137,35 @@ type WorkspaceState = {
   fileCount: number;
   totalBytes: number;
   seeding: boolean;
+};
+
+type ActivePreviewRow = {
+  preview_id: string;
+  exec_id: string;
+  port: number;
+  snapshot_root: string;
+  snapshot_revision: string;
+  workspace_revision: number;
+};
+
+type PreviewResultRow = {
+  preview_id: string;
+  url: string;
+  snapshot_revision: string;
+  workspace_revision: number;
+  ready_at: number;
+  expires_at: number;
+};
+
+type DeploymentSessionRow = {
+  operation_id: string;
+  owner: string;
+  idempotency_key: string;
+  expected_workspace_revision: number;
+  expected_snapshot_revision: string;
+  acquired_at: number;
+  deadline: number;
+  status: 'active' | 'completed' | 'failed' | 'indeterminate';
 };
 
 class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
@@ -206,32 +281,64 @@ class SandboxComputerHost implements IWorkspaceContainerAPI {
   }
 }
 
-function computerWorkspaceOptions(self: InstanceType<typeof ComputerSandboxBase>): WorkspaceOptions {
+function computerWorkspaceOptions(
+  self: InstanceType<typeof ComputerSandboxBase>,
+  retryScheduler: SyncRetryScheduler,
+): WorkspaceOptions {
   const { ctx } = self as unknown as { ctx: DurableObjectState };
   return {
     storage: ctx.storage as unknown as DurableObjectStorageLike,
     backends: [self.workerShellBackend, self.containerBackend],
     waitUntil: (promise) => ctx.waitUntil(promise),
+    retryScheduler,
+    retry: { initialDelayMs: 1_000, maxDelayMs: 60_000, maxAttempts: 5 },
   };
 }
 
 export class ProjectWorkspace extends ComputerSandboxBase {
   readonly #workspace: Workspace;
   readonly #toolOperations: ToolOperationJournal;
+  readonly #operationLane: WorkspaceOperationLane;
+  readonly #syncRetries: DurableWorkspaceSyncRetryScheduler;
+  readonly #activeOperationOwners = new Set<string>();
 
   constructor(ctx: DurableObjectState<{}>, env: RuntimeEnv) {
     super(ctx, env);
-    this.#workspace = new Workspace(computerWorkspaceOptions(this));
+    this.#syncRetries = new DurableWorkspaceSyncRetryScheduler(ctx.storage, async (intent) => {
+      const schedule = this.schedule as unknown as (
+        when: number,
+        callback: string,
+        payload: unknown,
+        options: { idempotent: true },
+      ) => Promise<unknown>;
+      await schedule.call(
+        this,
+        Math.max(0, Math.ceil((intent.notBefore - Date.now()) / 1_000)),
+        'retryPendingComputerSync',
+        { backend: intent.backend },
+        { idempotent: true },
+      );
+    });
+    this.#syncRetries.initialize();
+    this.ctx.waitUntil(
+      this.#syncRetries
+        .reconcile()
+        .catch((error) => console.error('Unable to reconcile persisted Computer sync retries', error)),
+    );
+    this.#workspace = new Workspace(computerWorkspaceOptions(this, this.#syncRetries));
     this.#toolOperations = new ToolOperationJournal(ctx.storage);
     this.#toolOperations.initialize();
+    if (this.#toolOperations.pending().length > 0) {
+      this.ctx.waitUntil(this.reconcilePendingCommands());
+    }
+    this.#operationLane = new WorkspaceOperationLane(ctx.storage, (owner) => this.#activeOperationOwners.has(owner));
+    this.#operationLane.initialize();
     this.ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS ghostbuild_workspace_state (
          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
          initialized INTEGER NOT NULL DEFAULT 0,
          seed_id TEXT,
-         reset_revision INTEGER NOT NULL DEFAULT 0,
-         preview_id TEXT,
-         preview_exec_id TEXT
+         reset_revision INTEGER NOT NULL DEFAULT 0
        )`,
     );
     this.ctx.storage.sql.exec(
@@ -243,6 +350,55 @@ export class ProjectWorkspace extends ComputerSandboxBase {
          revision TEXT PRIMARY KEY,
          workspace_revision INTEGER NOT NULL,
          validated_at INTEGER NOT NULL
+      )`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ghostbuild_workspace_identity (
+         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+         project_id TEXT NOT NULL,
+         user_id TEXT NOT NULL,
+         initialized_at INTEGER NOT NULL
+       )`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ghostbuild_active_preview (
+         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+         preview_id TEXT NOT NULL UNIQUE,
+         exec_id TEXT NOT NULL,
+         port INTEGER NOT NULL,
+         snapshot_root TEXT NOT NULL,
+         snapshot_revision TEXT NOT NULL,
+         workspace_revision INTEGER NOT NULL,
+         activated_at INTEGER NOT NULL
+       )`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ghostbuild_deployment_sessions (
+         operation_id TEXT PRIMARY KEY,
+         owner TEXT NOT NULL,
+         idempotency_key TEXT NOT NULL UNIQUE,
+         expected_workspace_revision INTEGER NOT NULL,
+         expected_snapshot_revision TEXT NOT NULL,
+         acquired_at INTEGER NOT NULL,
+         deadline INTEGER NOT NULL,
+         status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'failed', 'indeterminate')),
+         updated_at INTEGER NOT NULL
+       )`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ghostbuild_preview_cancellations (
+         preview_id TEXT PRIMARY KEY,
+         cancelled_at INTEGER NOT NULL
+       )`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ghostbuild_preview_results (
+         preview_id TEXT PRIMARY KEY,
+         url TEXT NOT NULL,
+         snapshot_revision TEXT NOT NULL,
+         workspace_revision INTEGER NOT NULL,
+         ready_at INTEGER NOT NULL,
+         expires_at INTEGER NOT NULL
        )`,
     );
   }
@@ -256,7 +412,129 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     return this.#workspace.stub();
   }
 
+  initializeProjectIdentity(value: unknown): void {
+    const input = record(value);
+    const projectId = requireString(input.projectId, 'projectId', 256);
+    const userId = requireString(input.userId, 'userId', 256);
+    if (userId !== this.env.GHOSTBUILD_USER_ID) {
+      throw new Error('ProjectWorkspace user isolation check failed.');
+    }
+    this.ctx.storage.transactionSync(() => {
+      const existing = first(
+        this.ctx.storage.sql.exec<{ project_id: string; user_id: string }>(
+          `SELECT project_id, user_id FROM ghostbuild_workspace_identity WHERE singleton = 1`,
+        ),
+      );
+      if (existing && (existing.project_id !== projectId || existing.user_id !== userId)) {
+        throw new Error('ProjectWorkspace identity does not match its durable owner.');
+      }
+      if (!existing) {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO ghostbuild_workspace_identity (singleton, project_id, user_id, initialized_at)
+           VALUES (1, ?, ?, ?)`,
+          projectId,
+          userId,
+          Date.now(),
+        );
+      }
+    });
+  }
+
+  async retryPendingComputerSync(value: unknown): Promise<void> {
+    const backend = requireBackend(record(value).backend);
+    const state = this.#syncRetries.state(backend);
+    if (!state) {
+      return;
+    }
+    if (state.exhausted) {
+      this.finishPendingCommand(backend, {
+        exhausted: true,
+        attempt: state.attempt,
+        error: state.lastError,
+      });
+      console.info('ProjectWorkspace Computer sync retry is exhausted', {
+        backend,
+        attempt: state.attempt,
+        ageMs: Math.max(0, Date.now() - state.createdAt),
+        exhaustion: true,
+      });
+      return;
+    }
+    const now = Date.now();
+    if (state.notBefore > now) {
+      await this.#syncRetries.schedule({ backend, attempt: state.attempt, notBefore: state.notBefore });
+      return;
+    }
+    const result = await this.#workspace.retryPendingSync(backend);
+    const event = {
+      backend,
+      attempt: state.attempt,
+      ageMs: Math.max(0, now - state.createdAt),
+      cause: state.lastError ? 'post_command_pull_failed' : 'post_command_pull_pending',
+      completion: result.status,
+      exhaustion: result.status === 'exhausted',
+    };
+    if (result.status === 'pending' || result.status === 'exhausted') {
+      this.#syncRetries.recordFailure(backend, result.error, result.status === 'exhausted');
+    }
+    if (result.status === 'complete' || result.status === 'idle') {
+      this.finishPendingCommand(backend);
+      await this.cleanupReadinessRoot().catch(() => undefined);
+    } else if (result.status === 'exhausted') {
+      this.finishPendingCommand(backend, {
+        exhausted: true,
+        attempt: result.attempt,
+        error: result.error,
+      });
+    }
+    console.info('ProjectWorkspace Computer sync retry', event);
+  }
+
+  /**
+   * A command continuation owns its own recovery wake. Computer clears its
+   * retry intent before returning a successful retry, so its scheduler row
+   * cannot be the only durable evidence that the original tool still needs
+   * terminalization.
+   */
+  async reconcilePendingCommands(): Promise<void> {
+    let retryAt = Number.POSITIVE_INFINITY;
+    for (const continuation of this.#toolOperations.pending()) {
+      const state = this.#syncRetries.state(continuation.backend);
+      try {
+        if (state) {
+          if (state.exhausted) {
+            this.finishPendingCommand(continuation.backend, {
+              exhausted: true,
+              attempt: state.attempt,
+              error: state.lastError,
+            });
+            continue;
+          }
+          if (state.notBefore > Date.now()) {
+            retryAt = Math.min(retryAt, state.notBefore);
+            continue;
+          }
+          await this.retryPendingComputerSync({ backend: continuation.backend });
+        } else {
+          // Absence of Computer's retry row is not proof of success: the
+          // package intentionally swallows host scheduling failures after a
+          // command. An ordinary pull is idempotent and proves remote changes
+          // reached the durable VFS before the tool result is exposed.
+          await this.#workspace.pull(continuation.backend);
+          this.finishPendingCommand(continuation.backend);
+          await this.cleanupReadinessRoot().catch(() => undefined);
+        }
+      } catch {
+        retryAt = Math.min(retryAt, Date.now() + 1_000);
+      }
+    }
+    if (this.#toolOperations.pending().length > 0) {
+      await this.schedulePendingCommandRecovery(Number.isFinite(retryAt) ? Math.max(0, retryAt - Date.now()) : 1_000);
+    }
+  }
+
   async beginToolOperation(value: unknown): Promise<ToolOperationStartResult> {
+    this.requireCompletedComputerSync();
     const input = record(value);
     const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
     const toolName = requireRemoteToolName(input.toolName);
@@ -270,8 +548,16 @@ export class ProjectWorkspace extends ComputerSandboxBase {
 
   completeToolOperation(value: unknown): unknown {
     const input = record(value);
+    const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
+    const toolName = this.#toolOperations.toolName(toolCallId);
+    if (toolName === 'write' || toolName === 'edit') {
+      const receipt = this.#toolOperations.mutationReceipt(toolCallId);
+      if (receipt) {
+        return this.#toolOperations.acknowledgeMutation({ toolCallId, result: input.result });
+      }
+    }
     return this.#toolOperations.complete({
-      toolCallId: requireString(input.toolCallId, 'toolCallId', 512),
+      toolCallId,
       result: input.result,
     });
   }
@@ -285,130 +571,299 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   }
 
   async getWorkspaceState(): Promise<WorkspaceState> {
-    return this.withComputer(async (workspace) => this.stateFromFiles(await readProjectFiles(workspace)));
+    const snapshot = await this.stableProjectRead(readProjectFiles);
+    return this.stateFromFiles(snapshot.value, snapshot.revision);
+  }
+
+  async runReadinessProbe() {
+    const components = {} as Partial<Record<UserWorkspaceReadinessComponent, UserWorkspaceReadinessCheck>>;
+    const nonce = crypto.randomUUID();
+    const path = `${READINESS_ROOT}/${nonce}.txt`;
+    let blocked = false;
+    let syncPending = false;
+    const check = async (
+      name: UserWorkspaceReadinessComponent,
+      operation: () => Promise<void>,
+      successCode: string,
+    ): Promise<boolean> => {
+      if (blocked) {
+        components[name] = { ok: false, code: 'blocked_by_dependency', durationMs: 0 };
+        return false;
+      }
+      const startedAt = Date.now();
+      try {
+        await operation();
+        components[name] = { ok: true, code: successCode, durationMs: Date.now() - startedAt };
+        return true;
+      } catch (error) {
+        const pendingError = error instanceof WorkspaceSyncPendingError ? error : null;
+        syncPending = pendingError !== null;
+        components[name] = {
+          ok: false,
+          code: pendingError?.code ?? 'unavailable',
+          durationMs: Date.now() - startedAt,
+        };
+        blocked = true;
+        return false;
+      }
+    };
+
+    await check(
+      'durableVfs',
+      () =>
+        this.withComputer(async (workspace) => {
+          await workspace.fs.rm(READINESS_ROOT, { recursive: true, force: true });
+          await writeWorkspaceFile(workspace, path, new TextEncoder().encode(nonce), false);
+          if (decodeUtf8((await readWorkspaceFile(workspace, path)).bytes) !== nonce) {
+            throw new Error('Durable VFS sentinel mismatch.');
+          }
+        }),
+      'read_write_ready',
+    );
+    await check(
+      'workerShell',
+      () =>
+        this.withComputer(async (workspace) => {
+          requireCommandSuccess(
+            await runCommand(workspace, `test "$(cat ${shellQuote(path)})" = ${shellQuote(nonce)}`, {
+              cwd: '/home',
+              backend: 'worker-shell',
+              timeoutMs: 30_000,
+            }),
+          );
+        }),
+      'loader_ready',
+    );
+    const containerNonce = `${nonce}-container`;
+    await check(
+      'container',
+      () =>
+        this.withComputer(async (workspace) => {
+          requireCommandSuccess(
+            await runCommand(workspace, `printf %s ${shellQuote(containerNonce)} > ${shellQuote(path)}`, {
+              cwd: '/home',
+              backend: 'container-shell',
+              timeoutMs: 7 * 60_000,
+            }),
+          );
+        }),
+      'computerd_ready',
+    );
+    await check(
+      'fuse',
+      async () => {
+        const snapshot = await this.stableProjectRead((workspace) => readWorkspaceFile(workspace, path));
+        if (decodeUtf8(snapshot.value.bytes) !== containerNonce) {
+          throw new Error('FUSE sentinel mismatch.');
+        }
+      },
+      'container_write_visible',
+    );
+    components.sync = blocked
+      ? {
+          ok: false,
+          code: syncPending ? 'workspace_sync_pending' : 'dependency_failed',
+          durationMs: 0,
+        }
+      : { ok: true, code: 'completed', durationMs: 0 };
+
+    const cleanupStartedAt = Date.now();
+    if (syncPending) {
+      components.cleanup = { ok: false, code: 'deferred_until_sync_retry', durationMs: 0 };
+    } else {
+      try {
+        await this.cleanupReadinessRoot();
+        components.cleanup = { ok: true, code: 'removed', durationMs: Date.now() - cleanupStartedAt };
+      } catch {
+        components.cleanup = { ok: false, code: 'cleanup_failed', durationMs: Date.now() - cleanupStartedAt };
+      }
+    }
+    return {
+      ok: ['durableVfs', 'workerShell', 'container', 'fuse', 'sync', 'cleanup'].every(
+        (name) => components[name as UserWorkspaceReadinessComponent]?.ok === true,
+      ),
+      components,
+    };
+  }
+
+  async getWorkspaceSnapshot() {
+    const snapshot = await this.stableProjectRead(readProjectFiles);
+    return {
+      state: this.stateFromFiles(snapshot.value, snapshot.revision),
+      files: snapshot.value.map((file) => workspaceFileMetadata(file, snapshot.revision)),
+    };
   }
 
   async beginSeed(seedIdValue: unknown) {
     const seedId = requireString(seedIdValue, 'seedId', 256);
-    const row = this.workspaceRow();
-    if (row.initialized === 1) {
-      return { status: 'initialized' as const, state: await this.getWorkspaceState() };
-    }
-    if (row.seed_id === seedId) {
-      return { status: 'seeding' as const, state: await this.getWorkspaceState() };
-    }
-    await this.withComputer(async (workspace) => {
-      await workspace.fs.rm(PROJECT_ROOT, { recursive: true, force: true });
-      await workspace.fs.mkdir(PROJECT_ROOT, { recursive: true });
+    return this.withStatefulOperation('seed', `seed:begin:${seedId}`, async () => {
+      const row = this.workspaceRow();
+      if (row.initialized === 1) {
+        return { status: 'initialized' as const, state: await this.getWorkspaceState() };
+      }
+      if (row.seed_id === seedId) {
+        return { status: 'seeding' as const, state: await this.getWorkspaceState() };
+      }
+      await this.withComputer(async (workspace) => {
+        await workspace.fs.rm(PROJECT_ROOT, { recursive: true, force: true });
+        await workspace.fs.mkdir(PROJECT_ROOT, { recursive: true });
+      });
+      this.ctx.storage.sql.exec(
+        `UPDATE ghostbuild_workspace_state
+         SET initialized = 0, seed_id = ?, reset_revision = ?
+         WHERE singleton = 1`,
+        seedId,
+        this.currentRevision(),
+      );
+      return { status: 'started' as const, seedId, state: await this.getWorkspaceState() };
     });
-    this.ctx.storage.sql.exec(
-      `UPDATE ghostbuild_workspace_state
-       SET initialized = 0, seed_id = ?, reset_revision = ?
-       WHERE singleton = 1`,
-      seedId,
-      this.currentRevision(),
-    );
-    return { status: 'started' as const, seedId, state: await this.getWorkspaceState() };
   }
 
   async appendSeed(seedIdValue: unknown, entriesValue: unknown) {
     const seedId = requireString(seedIdValue, 'seedId', 256);
-    if (this.workspaceRow().seed_id !== seedId) {
-      throw new Error('The workspace seed is no longer active.');
-    }
     const entries = requireFileInputs(entriesValue);
-    await this.withComputer(async (workspace) => {
-      for (const entry of entries) {
-        await writeWorkspaceFile(workspace, entry.path, decodeFileContent(entry.content, entry.encoding));
+    const key = `seed:append:${seedId}:${await sha256Text(JSON.stringify(entries))}`;
+    return this.withStatefulOperation('seed', key, async () => {
+      if (this.workspaceRow().seed_id !== seedId) {
+        throw new Error('The workspace seed is no longer active.');
       }
+      await this.withComputer(async (workspace) => {
+        for (const entry of entries) {
+          await writeWorkspaceFile(workspace, entry.path, decodeFileContent(entry.content, entry.encoding));
+        }
+      });
+      return this.getWorkspaceState();
     });
-    return this.getWorkspaceState();
   }
 
   async commitSeed(seedIdValue: unknown, expectedValue: unknown) {
     const seedId = requireString(seedIdValue, 'seedId', 256);
-    if (this.workspaceRow().seed_id !== seedId) {
-      throw new Error('The workspace seed is no longer active.');
-    }
     const expected = record(expectedValue);
     const expectedFiles = requireInteger(expected.fileCount, 'fileCount', MAX_FILES);
     const expectedBytes = requireInteger(expected.totalBytes, 'totalBytes', MAX_TOTAL_BYTES);
-    const files = await this.withComputer(readProjectFiles);
-    if (files.length !== expectedFiles || totalFileBytes(files) !== expectedBytes) {
-      throw new Error('The workspace seed did not match the expected template.');
-    }
-    const revision = this.currentRevision();
-    this.ctx.storage.sql.exec(
-      `UPDATE ghostbuild_workspace_state
-       SET initialized = 1, seed_id = NULL, reset_revision = ?
-       WHERE singleton = 1`,
-      revision,
-    );
-    return this.stateFromFiles(files);
+    return this.withStatefulOperation('seed', `seed:commit:${seedId}:${expectedFiles}:${expectedBytes}`, async () => {
+      if (this.workspaceRow().seed_id !== seedId) {
+        throw new Error('The workspace seed is no longer active.');
+      }
+      const files = await this.withComputer(readProjectFiles);
+      if (files.length !== expectedFiles || totalFileBytes(files) !== expectedBytes) {
+        throw new Error('The workspace seed did not match the expected template.');
+      }
+      const revision = this.currentRevision();
+      this.ctx.storage.sql.exec(
+        `UPDATE ghostbuild_workspace_state
+         SET initialized = 1, seed_id = NULL, reset_revision = ?
+         WHERE singleton = 1`,
+        revision,
+      );
+      return this.stateFromFiles(files);
+    });
   }
 
   async abortSeed(seedIdValue: unknown) {
     const seedId = requireString(seedIdValue, 'seedId', 256);
-    if (this.workspaceRow().seed_id === seedId) {
-      await this.withComputer((workspace) => workspace.fs.rm(PROJECT_ROOT, { recursive: true, force: true }));
-      this.ctx.storage.sql.exec(
-        `UPDATE ghostbuild_workspace_state SET initialized = 0, seed_id = NULL, reset_revision = ? WHERE singleton = 1`,
-        this.currentRevision(),
-      );
-    }
-    return this.getWorkspaceState();
+    return this.withStatefulOperation('seed', `seed:abort:${seedId}`, async () => {
+      if (this.workspaceRow().seed_id === seedId) {
+        await this.withComputer((workspace) => workspace.fs.rm(PROJECT_ROOT, { recursive: true, force: true }));
+        this.ctx.storage.sql.exec(
+          `UPDATE ghostbuild_workspace_state SET initialized = 0, seed_id = NULL, reset_revision = ? WHERE singleton = 1`,
+          this.currentRevision(),
+        );
+      }
+      return this.getWorkspaceState();
+    });
   }
 
   async applyChanges(value: unknown) {
     const input = record(value);
     const baseRevision = requireInteger(input.baseRevision, 'baseRevision', Number.MAX_SAFE_INTEGER);
     const changes = requireChanges(input.changes);
-    if (baseRevision !== this.currentRevision()) {
-      return { ok: false as const, conflict: true as const, state: await this.getWorkspaceState() };
-    }
-    const existingFiles = await this.withComputer(readProjectFiles);
-    if (baseRevision !== this.currentRevision()) {
-      return { ok: false as const, conflict: true as const, state: await this.getWorkspaceState() };
-    }
-    const projectedFiles = new Map(existingFiles.map((file) => [file.path, { size: file.size, mode: file.mode }]));
-    const decodedWrites = new Map<string, { bytes: Uint8Array; mode?: number }>();
-    for (const change of changes) {
-      if (change.kind === 'delete') {
-        for (const path of projectedFiles.keys()) {
-          if (path === change.path || path.startsWith(`${change.path}/`)) {
-            projectedFiles.delete(path);
+    const operationKey =
+      typeof input.operationKey === 'string'
+        ? requireString(input.operationKey, 'operationKey', 512)
+        : `change:${baseRevision}:${await sha256Text(JSON.stringify(changes))}`;
+    return this.withStatefulOperation('write', operationKey, async () => {
+      if (this.workspaceRow().seed_id !== null) {
+        throw new WorkspaceOperationConflictError('seed', 1_000);
+      }
+      if (baseRevision !== this.currentRevision()) {
+        return { ok: false as const, conflict: true as const, state: await this.getWorkspaceState() };
+      }
+      const existingFiles = await this.withComputer(readProjectFiles);
+      if (baseRevision !== this.currentRevision()) {
+        return { ok: false as const, conflict: true as const, state: await this.getWorkspaceState() };
+      }
+      const projectedFiles = new Map(existingFiles.map((file) => [file.path, { size: file.size, mode: file.mode }]));
+      const decodedWrites = new Map<string, { bytes: Uint8Array; mode?: number; sha256: string }>();
+      for (const change of changes) {
+        if (change.kind === 'delete') {
+          for (const path of projectedFiles.keys()) {
+            if (path === change.path || path.startsWith(`${change.path}/`)) {
+              projectedFiles.delete(path);
+            }
           }
+          continue;
         }
-        continue;
+        const bytes = decodeFileContent(change.content, change.encoding);
+        if (bytes.byteLength > MAX_FILE_BYTES) {
+          throw new Error(`Workspace file exceeds ${MAX_FILE_BYTES} bytes.`);
+        }
+        const mode = change.mode ?? projectedFiles.get(change.path)?.mode;
+        decodedWrites.set(change.path, { bytes, mode, sha256: await sha256Bytes(bytes) });
+        projectedFiles.set(change.path, { size: bytes.byteLength, mode: mode ?? 0o644 });
       }
-      const bytes = decodeFileContent(change.content, change.encoding);
-      if (bytes.byteLength > MAX_FILE_BYTES) {
-        throw new Error(`Workspace file exceeds ${MAX_FILE_BYTES} bytes.`);
+      if (
+        projectedFiles.size > MAX_FILES ||
+        [...projectedFiles.values()].reduce((sum, file) => sum + file.size, 0) > MAX_TOTAL_BYTES
+      ) {
+        throw new Error('The project workspace exceeds its size limit.');
       }
-      const mode = change.mode ?? projectedFiles.get(change.path)?.mode;
-      decodedWrites.set(change.path, { bytes, mode });
-      projectedFiles.set(change.path, { size: bytes.byteLength, mode: mode ?? 0o644 });
-    }
-    if (
-      projectedFiles.size > MAX_FILES ||
-      [...projectedFiles.values()].reduce((sum, file) => sum + file.size, 0) > MAX_TOTAL_BYTES
-    ) {
-      throw new Error('The project workspace exceeds its size limit.');
-    }
-    const changedPaths = applyAtomicWorkspaceChanges(
-      this.#workspace,
-      changes.map((change) =>
-        change.kind === 'delete'
-          ? change
-          : {
-              kind: 'write' as const,
-              path: change.path,
-              ...decodedWrites.get(change.path)!,
-            },
-      ),
-    );
-    const state = await this.getWorkspaceState();
-    return { ok: true as const, state, changedPaths };
+      const changedPaths = applyAtomicWorkspaceChanges(
+        this.#workspace,
+        changes.map((change) =>
+          change.kind === 'delete'
+            ? change
+            : {
+                kind: 'write' as const,
+                path: change.path,
+                ...decodedWrites.get(change.path)!,
+              },
+        ),
+      );
+      const committedRevision = this.currentRevision();
+      if (typeof input.toolCallId === 'string') {
+        const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
+        const toolName = this.#toolOperations.toolName(toolCallId);
+        if (toolName === 'write' || toolName === 'edit') {
+          this.#toolOperations.commitMutation({
+            toolCallId,
+            receipt: createCommittedMutationReceipt({
+              tool: toolName,
+              files: changes.map((change) => {
+                const write = change.kind === 'write' ? decodedWrites.get(change.path)! : null;
+                return {
+                  path: change.path,
+                  revision: committedRevision,
+                  size: write?.bytes.byteLength ?? 0,
+                  sha256: write?.sha256 ?? null,
+                  deleted: change.kind === 'delete',
+                  ...(write
+                    ? {
+                        changedRange: {
+                          startLine: 1,
+                          endLine: canDecodeUtf8(write.bytes) ? decodeUtf8(write.bytes).split('\n').length : 1,
+                        },
+                      }
+                    : {}),
+                };
+              }),
+            }),
+          });
+        }
+      }
+      const state = await this.getWorkspaceState();
+      return { ok: true as const, state, changedPaths };
+    });
   }
 
   async getSyncPage(value: unknown) {
@@ -468,7 +923,8 @@ export class ProjectWorkspace extends ComputerSandboxBase {
 
   async readText(pathValue: unknown) {
     const path = requireProjectPath(pathValue);
-    const file = await this.withComputer((workspace) => readWorkspaceFile(workspace, path));
+    const snapshot = await this.stableProjectRead((workspace) => readWorkspaceFile(workspace, path));
+    const file = snapshot.value;
     const content = decodeUtf8(file.bytes);
     return {
       path,
@@ -476,13 +932,14 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       encoding: 'utf8' as const,
       size: file.size,
       sha256: file.sha256,
-      revision: this.currentRevision(),
+      revision: snapshot.revision,
     };
   }
 
   async readWorkspaceFile(pathValue: unknown) {
     const path = requireProjectPath(pathValue);
-    const file = await this.withComputer((workspace) => readWorkspaceFile(workspace, path));
+    const snapshot = await this.stableProjectRead((workspace) => readWorkspaceFile(workspace, path));
+    const file = snapshot.value;
     return {
       path,
       bytes: file.bytes,
@@ -490,91 +947,75 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       size: file.size,
       mode: file.mode,
       sha256: file.sha256,
-      revision: this.currentRevision(),
+      revision: snapshot.revision,
     };
   }
 
   async streamWorkspaceFile(pathValue: unknown): Promise<ReadableStream<Uint8Array>> {
     const path = requireProjectPath(pathValue);
-    const workspace = await getWorkspace(this as unknown as Parameters<typeof getWorkspace>[0]);
-    try {
-      const stat = await workspace.fs.stat(path);
-      if (!stat.isFile || stat.size > MAX_FILE_BYTES) {
-        throw new Error(`Workspace file is invalid or too large: ${path}`);
-      }
-      const reader = (await workspace.fs.readFile(path)).getReader();
-      let disposed = false;
-      const dispose = () => {
-        if (disposed) {
-          return;
-        }
-        disposed = true;
-        reader.releaseLock();
-        workspace[Symbol.dispose]();
-      };
-      return new ReadableStream<Uint8Array>({
-        async pull(controller) {
-          try {
-            const { value, done } = await reader.read();
-            if (done) {
-              dispose();
-              controller.close();
-            } else {
-              controller.enqueue(value);
-            }
-          } catch (error) {
-            dispose();
-            controller.error(error);
-          }
-        },
-        async cancel(reason) {
-          try {
-            await reader.cancel(reason);
-          } finally {
-            dispose();
-          }
-        },
-      });
-    } catch (error) {
-      workspace[Symbol.dispose]();
-      throw error;
-    }
+    const snapshot = await this.stableProjectRead((workspace) => readWorkspaceFile(workspace, path));
+    return new Blob([new Uint8Array(snapshot.value.bytes)]).stream();
   }
 
   async listWorkspaceFiles() {
-    const revision = this.currentRevision();
-    return (await this.withComputer(readProjectFiles)).map((file) => ({
-      path: file.path,
-      encoding: canDecodeUtf8(file.bytes) ? ('utf8' as const) : ('base64' as const),
-      size: file.size,
-      mode: file.mode,
-      sha256: file.sha256,
-      revision,
-    }));
+    const snapshot = await this.stableProjectRead(readProjectFiles);
+    return snapshot.value.map((file) => workspaceFileMetadata(file, snapshot.revision));
   }
 
   async readDirectory(pathValue: unknown) {
     const path = requireProjectPath(pathValue, true);
-    return this.withComputer(async (workspace) =>
-      (await workspace.fs.readdir(path)).map((entry) => ({
-        name: entry.name,
-        isFile: entry.isFile,
-        isDirectory: entry.isDirectory,
-      })),
-    );
+    const snapshot = await this.stableProjectRead((workspace) => workspace.fs.readdir(path));
+    return snapshot.value.map((entry) => ({
+      name: entry.name,
+      isFile: entry.isFile,
+      isDirectory: entry.isDirectory,
+    }));
   }
 
   async makeDirectory(pathValue: unknown) {
     const path = requireProjectPath(pathValue, true);
-    await this.withComputer((workspace) => workspace.fs.mkdir(path, { recursive: true }));
+    await this.withStatefulOperation('write', `mkdir:${path}`, () =>
+      this.withComputer((workspace) => workspace.fs.mkdir(path, { recursive: true })),
+    );
   }
 
-  async execute(value: unknown) {
+  async execute(value: unknown): Promise<WorkspaceRuntimeResult<'utf8'>> {
     const input = record(value);
     const command = requireString(input.command, 'command', 64 * 1024);
     const cwd = input.cwd === undefined ? PROJECT_ROOT : requireProjectPath(input.cwd, true);
     const backend = requireBackend(input.backend);
-    return this.withComputer((workspace) => runCommand(workspace, command, { cwd, backend, timeoutMs: 5 * 60_000 }));
+    const operationKey =
+      typeof input.operationKey === 'string'
+        ? requireString(input.operationKey, 'operationKey', 512)
+        : `exec:${await sha256Text(JSON.stringify([command, cwd, backend]))}`;
+    const toolCallId = operationKey.startsWith('tool:') ? operationKey.slice('tool:'.length) : null;
+    return this.withStatefulOperation('exec', operationKey, () =>
+      this.withComputer((workspace) =>
+        runCommand(workspace, command, {
+          cwd,
+          backend,
+          timeoutMs: 5 * 60_000,
+          ...(toolCallId
+            ? {
+                onSyncPending: (result: WorkspaceRuntimeResult<'utf8'>) => {
+                  this.registerPendingCommand({
+                    backend,
+                    toolCallId,
+                    result: {
+                      command,
+                      cwd,
+                      backend,
+                      exitCode: result.exitCode,
+                      stdout: result.stdout,
+                      stderr: result.stderr,
+                    },
+                  });
+                },
+              }
+            : {}),
+        }),
+      ),
+    );
   }
 
   async checkpoint() {
@@ -597,102 +1038,109 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     if (!mode) {
       throw new SyntaxError('Invalid dependency installation mode.');
     }
-    return this.runToolOperation(toolCallId, 'npmInstall', { input: input.input, mode, packages }, async () => {
-      const startedAt = Date.now();
-      await this.withComputer(async (workspace) => {
-        const packagePath = `${PROJECT_ROOT}/package.json`;
-        const current = decodeUtf8((await readWorkspaceFile(workspace, packagePath)).bytes);
-        const next = mode === 'sync-lockfile' ? current : addRequestedDependencies(current, packages);
-        await writeWorkspaceFile(workspace, packagePath, new TextEncoder().encode(next));
-        requireCommandSuccess(
-          await runCommand(
-            workspace,
-            'pnpm install --lockfile-only --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
-            { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 4 * 60_000 },
-          ),
+    return this.runToolOperation(toolCallId, 'npmInstall', { input: input.input, mode, packages }, () =>
+      this.withStatefulOperation('install', `tool:${toolCallId}`, async () => {
+        const startedAt = Date.now();
+        await this.withComputer(async (workspace) => {
+          const packagePath = `${PROJECT_ROOT}/package.json`;
+          const current = decodeUtf8((await readWorkspaceFile(workspace, packagePath)).bytes);
+          const next = mode === 'sync-lockfile' ? current : addRequestedDependencies(current, packages);
+          await writeWorkspaceFile(workspace, packagePath, new TextEncoder().encode(next));
+          requireCommandSuccess(
+            await runCommand(
+              workspace,
+              'pnpm install --lockfile-only --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
+              { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 4 * 60_000 },
+            ),
+          );
+        });
+        const state = await this.getWorkspaceState();
+        return toolSuccess(
+          mode === 'sync-lockfile'
+            ? 'Synchronized the durable project lockfile with package.json.'
+            : `Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'} in the durable project.`,
+          {
+            mode,
+            workspaceRevision: state.revision,
+            buildEnvironment: 'cloudflare-computer-container',
+            durationMs: Date.now() - startedAt,
+          },
         );
-      });
-      const state = await this.getWorkspaceState();
-      return toolSuccess(
-        mode === 'sync-lockfile'
-          ? 'Synchronized the durable project lockfile with package.json.'
-          : `Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'} in the durable project.`,
-        {
-          mode,
-          workspaceRevision: state.revision,
-          buildEnvironment: 'cloudflare-computer-container',
-          durationMs: Date.now() - startedAt,
-        },
-      );
-    });
+      }),
+    );
   }
 
   async validateTool(value: unknown): Promise<GhostbuildToolResult> {
     const input = record(value);
     const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
-    return this.runToolOperation(toolCallId, 'validateProject', input.input, async () => {
-      const before = await this.checkpoint();
-      const startedAt = Date.now();
-      try {
-        await this.withComputer(async (workspace) => {
-          requireCommandSuccess(
-            await runCommand(
-              workspace,
-              'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
-              { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 4 * 60_000 },
-            ),
-          );
-          for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
+    return this.runToolOperation(toolCallId, 'validateProject', input.input, () =>
+      this.withStatefulOperation('validate', `tool:${toolCallId}`, async () => {
+        const before = await this.checkpoint();
+        const startedAt = Date.now();
+        try {
+          await this.withComputer(async (workspace) => {
             requireCommandSuccess(
-              await runCommand(workspace, command, {
-                cwd: PROJECT_ROOT,
-                backend: 'container-shell',
-                timeoutMs: 5 * 60_000,
-              }),
+              await runCommand(
+                workspace,
+                'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
+                { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 4 * 60_000 },
+              ),
             );
+            for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
+              requireCommandSuccess(
+                await runCommand(workspace, command, {
+                  cwd: PROJECT_ROOT,
+                  backend: 'container-shell',
+                  timeoutMs: 5 * 60_000,
+                }),
+              );
+            }
+            await removeDerivedFiles(workspace);
+          });
+          const after = await this.checkpoint();
+          if (after.revision !== before.revision) {
+            throw new Error('The project changed while validation was running. Validate the new revision.');
           }
-          await removeDerivedFiles(workspace);
-        });
-        const after = await this.checkpoint();
-        if (after.revision !== before.revision) {
-          throw new Error('The project changed while validation was running. Validate the new revision.');
-        }
-        this.ctx.storage.sql.exec(
-          `INSERT INTO ghostbuild_validations (revision, workspace_revision, validated_at)
+          this.ctx.storage.sql.exec(
+            `INSERT INTO ghostbuild_validations (revision, workspace_revision, validated_at)
            VALUES (?, ?, ?)
            ON CONFLICT(revision) DO UPDATE SET workspace_revision = excluded.workspace_revision,
              validated_at = excluded.validated_at`,
-          after.revision,
-          after.workspaceRevision,
-          Date.now(),
-        );
-        return toolSuccess(`Project validation passed at durable source revision ${after.revision}.`, {
-          level: 'full',
-          revision: after.revision,
-          workspaceRevision: after.workspaceRevision,
-          buildEnvironment: 'cloudflare-computer-container',
-          checks: [
-            'workspace-policy',
-            'dependency-installation',
-            'typecheck',
-            'stack-verification',
-            'build',
-            'lint',
-          ].map((name) => ({ name, status: 'passed' as const })),
-          durationMs: Date.now() - startedAt,
-          nextAction: 'prepare-deployment',
-        });
-      } catch (error) {
-        return toolFailure(error instanceof Error ? error.message.slice(-4_000) : 'User-owned validation failed.', {
-          level: 'full',
-          revision: before.revision,
-          workspaceRevision: before.workspaceRevision,
-          currentWorkspaceRevision: this.currentRevision(),
-          buildEnvironment: 'cloudflare-computer-container',
-          checks: [{ name: 'production-build', status: 'failed' as const }],
-        });
-      }
-    });
+            after.revision,
+            after.workspaceRevision,
+            Date.now(),
+          );
+          return toolSuccess(`Project validation passed at durable source revision ${after.revision}.`, {
+            level: 'full',
+            revision: after.revision,
+            workspaceRevision: after.workspaceRevision,
+            buildEnvironment: 'cloudflare-computer-container',
+            checks: [
+              'workspace-policy',
+              'dependency-installation',
+              'typecheck',
+              'stack-verification',
+              'build',
+              'lint',
+            ].map((name) => ({ name, status: 'passed' as const })),
+            durationMs: Date.now() - startedAt,
+            nextAction: 'prepare-deployment',
+          });
+        } catch (error) {
+          if (error instanceof WorkspaceSyncPendingError) {
+            throw error;
+          }
+          return toolFailure(error instanceof Error ? error.message.slice(-4_000) : 'User-owned validation failed.', {
+            level: 'full',
+            revision: before.revision,
+            workspaceRevision: before.workspaceRevision,
+            currentWorkspaceRevision: this.currentRevision(),
+            buildEnvironment: 'cloudflare-computer-container',
+            checks: [{ name: 'production-build', status: 'failed' as const }],
+          });
+        }
+      }),
+    );
   }
 
   validationStatus(revision: unknown) {
@@ -741,186 +1189,475 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     };
   }
 
-  async createPreview(value: unknown) {
-    const previewId = requireString(record(value).previewId, 'previewId', 128);
-    const checkpoint = await this.checkpoint();
-    await this.stopActivePreview();
-    await this.withComputer(async (workspace) => {
-      requireCommandSuccess(
-        await runCommand(workspace, 'pnpm exec vite build --config vite.preview.config.mjs', {
-          cwd: PROJECT_ROOT,
-          backend: 'container-shell',
-          timeoutMs: 5 * 60_000,
-        }),
-      );
-      const execId = `preview-${previewId}`;
-      await workspace.runtime.disposeExec(execId, { backend: 'container-shell' }).catch(() => undefined);
-      const handle = await workspace.runtime.exec(
-        `pnpm exec vite preview --config vite.preview.config.mjs --host 0.0.0.0 --port ${PREVIEW_PORT} --strictPort`,
-        {
-          cwd: PROJECT_ROOT,
-          backend: 'container-shell',
-          id: execId,
-          timeoutMs: PREVIEW_TTL_MS,
-          encoding: 'utf8',
-        },
-      );
-      handle[Symbol.dispose]();
-      this.ctx.storage.sql.exec(
-        `UPDATE ghostbuild_workspace_state SET preview_id = ?, preview_exec_id = ? WHERE singleton = 1`,
-        previewId,
-        execId,
-      );
+  async beginDeploymentSession(value: unknown) {
+    this.requireCompletedComputerSync();
+    const input = record(value);
+    const operationId = requireString(input.operationId, 'operationId', 256);
+    const expectedWorkspaceRevision = requireInteger(
+      input.expectedWorkspaceRevision,
+      'expectedWorkspaceRevision',
+      Number.MAX_SAFE_INTEGER,
+    );
+    const expectedSnapshotRevision = requireSnapshotRevision(input.expectedSnapshotRevision);
+    const idempotencyKey = `deployment-session:${operationId}`;
+    const owner = `deployment:${operationId}`;
+    const existing = this.deploymentSessionRow(operationId);
+    if (existing) {
+      assertDeploymentSessionIdentity(existing, expectedWorkspaceRevision, expectedSnapshotRevision);
+      if (existing.status !== 'active') {
+        throw new WorkspaceOperationIndeterminateError('deployment');
+      }
+      const lease = this.#operationLane.find(existing.idempotency_key, existing.owner);
+      if (!lease || lease.deadline <= Date.now()) {
+        this.ctx.storage.sql.exec(
+          `UPDATE ghostbuild_deployment_sessions SET status = 'indeterminate', updated_at = ?
+           WHERE operation_id = ? AND status = 'active'`,
+          Date.now(),
+          operationId,
+        );
+        throw new WorkspaceOperationIndeterminateError('deployment');
+      }
+      await this.assertDeploymentSession({ sessionId: operationId });
+      return { sessionId: operationId };
+    }
+
+    const lease = this.#operationLane.acquire({
+      owner,
+      idempotencyKey,
+      kind: 'deployment',
+      leaseMs: OPERATION_LEASE_MS.deployment,
     });
-    await waitForHttpPort(this.ctx.container!.getTcpPort(PREVIEW_PORT));
-    await this.setKeepAlive(true);
-    const tunnel = await openPreviewQuickTunnel(this.tunnels, PREVIEW_PORT);
-    await this.schedule(PREVIEW_TTL_MS / 1_000, 'expirePreview', { previewId });
-    const now = Date.now();
-    return {
-      id: previewId,
-      url: tunnel.url,
-      workspaceRevision: checkpoint.workspaceRevision,
-      snapshotRevision: checkpoint.revision,
-      readyAt: new Date(now).toISOString(),
-      expiresAt: new Date(now + PREVIEW_TTL_MS).toISOString(),
-    };
+    this.ctx.storage.sql.exec(
+      `INSERT INTO ghostbuild_deployment_sessions (
+         operation_id, owner, idempotency_key, expected_workspace_revision,
+         expected_snapshot_revision, acquired_at, deadline, status, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+      operationId,
+      owner,
+      idempotencyKey,
+      expectedWorkspaceRevision,
+      expectedSnapshotRevision,
+      lease.acquiredAt,
+      lease.deadline,
+      lease.acquiredAt,
+    );
+    try {
+      await this.assertDeploymentSession({ sessionId: operationId });
+      return { sessionId: operationId };
+    } catch (error) {
+      await this.finishDeploymentSession({ sessionId: operationId, status: 'failed' }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async assertDeploymentSession(value: unknown) {
+    this.requireCompletedComputerSync();
+    const sessionId = requireString(record(value).sessionId, 'sessionId', 256);
+    const session = this.requireActiveDeploymentSession(sessionId);
+    this.#activeOperationOwners.add(session.owner);
+    try {
+      const lease = this.deploymentSessionLease(session);
+      const renewed = this.#operationLane.renew(lease, OPERATION_LEASE_MS.deployment);
+      this.ctx.storage.sql.exec(
+        `UPDATE ghostbuild_deployment_sessions SET deadline = ?, updated_at = ?
+         WHERE operation_id = ? AND status = 'active'`,
+        renewed.deadline,
+        Date.now(),
+        sessionId,
+      );
+      const checkpoint = await this.checkpoint();
+      if (checkpoint.revision !== session.expected_snapshot_revision) {
+        throw new Error('The project changed during its deployment session. Publication was cancelled.');
+      }
+      return checkpoint;
+    } finally {
+      this.#activeOperationOwners.delete(session.owner);
+    }
+  }
+
+  async finishDeploymentSession(value: unknown) {
+    const input = record(value);
+    const sessionId = requireString(input.sessionId, 'sessionId', 256);
+    const status = input.status === 'completed' ? 'completed' : input.status === 'failed' ? 'failed' : null;
+    if (!status) {
+      throw new SyntaxError('Invalid deployment session status.');
+    }
+    const session = this.deploymentSessionRow(sessionId);
+    if (!session) {
+      throw new Error('The deployment session does not exist.');
+    }
+    if (session.status === status) {
+      const lease = this.#operationLane.find(session.idempotency_key, session.owner);
+      if (lease) {
+        this.#operationLane.release(lease);
+      }
+      this.#activeOperationOwners.delete(session.owner);
+      return { status };
+    }
+    if (session.status !== 'active') {
+      throw new WorkspaceOperationIndeterminateError('deployment');
+    }
+    const lease = this.#operationLane.find(session.idempotency_key, session.owner);
+    if (lease) {
+      this.#operationLane.release(lease);
+    }
+    this.ctx.storage.sql.exec(
+      `UPDATE ghostbuild_deployment_sessions SET status = ?, updated_at = ?
+       WHERE operation_id = ? AND status = 'active'`,
+      status,
+      Date.now(),
+      sessionId,
+    );
+    this.#activeOperationOwners.delete(session.owner);
+    return { status };
+  }
+
+  async createPreview(value: unknown) {
+    const input = record(value);
+    const previewId = requirePreviewId(input.previewId);
+    const expectedWorkspaceRevision = requireInteger(
+      input.expectedWorkspaceRevision,
+      'expectedWorkspaceRevision',
+      Number.MAX_SAFE_INTEGER,
+    );
+    const expectedSnapshotRevision = requireSnapshotRevision(input.expectedSnapshotRevision);
+    const replay = this.previewResultRow(previewId);
+    if (replay) {
+      if (
+        replay.snapshot_revision !== expectedSnapshotRevision ||
+        replay.workspace_revision !== expectedWorkspaceRevision
+      ) {
+        throw new WorkspaceOperationIndeterminateError('preview');
+      }
+      if (replay.expires_at > Date.now()) {
+        return previewSuccess(replay);
+      }
+      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_preview_results WHERE preview_id = ?', previewId);
+    }
+    return this.withStatefulOperation(
+      'preview',
+      `preview:${previewId}:${expectedWorkspaceRevision}:${expectedSnapshotRevision}`,
+      async () => {
+        await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, true);
+        this.requirePreviewNotCancelled(previewId);
+        const previous = this.activePreviewRow();
+        const port = previewPort(previewId, previous?.port);
+        const execId = `preview-${previewId}`;
+        const snapshotRoot = `${PREVIEW_SNAPSHOT_ROOT}/${previewId}`;
+        const pending: ActivePreviewRow = {
+          preview_id: previewId,
+          exec_id: execId,
+          port,
+          snapshot_root: snapshotRoot,
+          snapshot_revision: expectedSnapshotRevision,
+          workspace_revision: expectedWorkspaceRevision,
+        };
+        let published = false;
+        try {
+          await this.withComputer(async (workspace) => {
+            requireCommandSuccess(
+              await runCommand(workspace, 'pnpm run build:isolated-preview', {
+                cwd: PROJECT_ROOT,
+                backend: 'container-shell',
+                timeoutMs: 5 * 60_000,
+              }),
+            );
+            await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
+            await cleanupPreviewProcess(workspace, pending);
+            requireCommandSuccess(
+              await runCommand(
+                workspace,
+                createPreviewSnapshotCommand({ projectRoot: PROJECT_ROOT, snapshotRoot, quote: shellQuote }),
+                {
+                  cwd: PROJECT_ROOT,
+                  backend: 'container-shell',
+                  timeoutMs: 2 * 60_000,
+                },
+              ),
+            );
+            await removeDerivedFiles(workspace);
+            await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
+            const handle = await workspace.runtime.exec(
+              `pnpm exec vite preview --mode ghostbuild-isolated-preview --host 0.0.0.0 --port ${port} --strictPort`,
+              {
+                cwd: snapshotRoot,
+                backend: 'container-shell',
+                id: execId,
+                timeoutMs: PREVIEW_TTL_MS,
+                encoding: 'utf8',
+              },
+            );
+            handle[Symbol.dispose]();
+          });
+          await waitForHttpPort(this.ctx.container!.getTcpPort(port));
+          const tunnel = await openPreviewQuickTunnel(this.tunnels, port);
+          await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
+          this.requirePreviewNotCancelled(previewId);
+          await this.setKeepAlive(true);
+          await this.schedule(PREVIEW_TTL_MS / 1_000, 'expirePreview', { previewId });
+          this.requirePreviewNotCancelled(previewId);
+          const now = Date.now();
+          this.ctx.storage.transactionSync(() => {
+            this.ctx.storage.sql.exec(
+              `INSERT INTO ghostbuild_active_preview (
+               singleton, preview_id, exec_id, port, snapshot_root, snapshot_revision,
+               workspace_revision, activated_at
+             ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(singleton) DO UPDATE SET
+               preview_id = excluded.preview_id,
+               exec_id = excluded.exec_id,
+               port = excluded.port,
+               snapshot_root = excluded.snapshot_root,
+               snapshot_revision = excluded.snapshot_revision,
+               workspace_revision = excluded.workspace_revision,
+               activated_at = excluded.activated_at`,
+              previewId,
+              execId,
+              port,
+              snapshotRoot,
+              expectedSnapshotRevision,
+              expectedWorkspaceRevision,
+              now,
+            );
+            this.ctx.storage.sql.exec(
+              `INSERT INTO ghostbuild_preview_results (
+                 preview_id, url, snapshot_revision, workspace_revision, ready_at, expires_at
+               ) VALUES (?, ?, ?, ?, ?, ?)`,
+              previewId,
+              tunnel.url,
+              expectedSnapshotRevision,
+              expectedWorkspaceRevision,
+              now,
+              now + PREVIEW_TTL_MS,
+            );
+          });
+          published = true;
+          if (previous && previous.preview_id !== previewId) {
+            await this.cleanupPreviewResources(previous).catch((error) =>
+              console.warn('Unable to retire the superseded ProjectWorkspace preview', {
+                previewId: previous.preview_id,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+          }
+          return {
+            id: previewId,
+            url: tunnel.url,
+            workspaceRevision: expectedWorkspaceRevision,
+            snapshotRevision: expectedSnapshotRevision,
+            readyAt: new Date(now).toISOString(),
+            expiresAt: new Date(now + PREVIEW_TTL_MS).toISOString(),
+          };
+        } finally {
+          if (!published) {
+            await this.cleanupPreviewResources(pending).catch(() => undefined);
+            if (!previous) {
+              await this.setKeepAlive(false).catch(() => undefined);
+            }
+          }
+        }
+      },
+    );
   }
 
   async stopPreview(previewIdValue: unknown) {
-    const previewId = requireString(previewIdValue, 'previewId', 128);
-    const row = this.workspaceRow();
-    if (row.preview_id === previewId) {
-      await this.stopActivePreview();
-    }
+    const previewId = requirePreviewId(previewIdValue);
+    this.ctx.storage.sql.exec(
+      `INSERT INTO ghostbuild_preview_cancellations (preview_id, cancelled_at) VALUES (?, ?)
+       ON CONFLICT(preview_id) DO UPDATE SET cancelled_at = excluded.cancelled_at`,
+      previewId,
+      Date.now(),
+    );
+    this.ctx.storage.sql.exec('DELETE FROM ghostbuild_preview_results WHERE preview_id = ?', previewId);
+    this.ctx.storage.sql.exec(
+      `DELETE FROM ghostbuild_preview_cancellations WHERE preview_id IN (
+         SELECT preview_id FROM ghostbuild_preview_cancellations
+         ORDER BY cancelled_at DESC LIMIT -1 OFFSET 500
+       )`,
+    );
+    await this.withStatefulOperation('preview', `preview:stop:${previewId}`, async () => {
+      const row = this.activePreviewRow();
+      if (row?.preview_id === previewId) {
+        await this.stopActivePreview();
+      }
+    });
   }
 
   async expirePreview(value: unknown) {
     await this.stopPreview(record(value).previewId);
   }
 
-  async deploy(value: unknown) {
+  async prepareDeploymentArtifact(value: unknown): Promise<PreparedDeploymentArtifact> {
+    this.requireCompletedComputerSync();
     const input = record(value);
-    const deploymentId = requireString(input.deploymentId, 'deploymentId', 512);
-    return this.runToolOperation(`production-deploy:${deploymentId}`, 'productionDeploy', input, () =>
-      this.deployOnce(input),
-    );
-  }
-
-  private async deployOnce(input: Record<string, unknown>) {
+    const sessionId = requireString(input.sessionId, 'sessionId', 256);
     const revision = requireString(input.revision, 'revision', 64);
-    if (!/^[a-f0-9]{64}$/.test(revision) || !this.hasSuccessfulValidation(revision)) {
-      throw new Error('Deployment requires successful validation of this exact revision.');
+    const session = this.requireActiveDeploymentSession(sessionId);
+    if (revision !== session.expected_snapshot_revision) {
+      throw new Error('The deployment artifact revision does not match its active deployment session.');
     }
-    if ((await this.checkpoint()).revision !== revision) {
-      throw new Error('The durable project changed after validation. Run full validation again.');
-    }
-    const apiToken = requireString(input.apiToken, 'apiToken', 4096);
-    const accountId = requireString(input.accountId, 'accountId', 64);
-    const workerName = requireCloudflareName(input.workerName, 'workerName');
-    const projectType = input.projectType === 'worker' ? 'worker' : input.projectType === 'web_app' ? 'web_app' : null;
-    if (!projectType) {
-      throw new SyntaxError('Invalid deployment project type.');
-    }
-    return this.withComputer(async (workspace) => {
-      for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
-        requireCommandSuccess(
-          await runCommand(workspace, command, {
-            cwd: PROJECT_ROOT,
-            backend: 'container-shell',
-            timeoutMs: 5 * 60_000,
-          }),
-        );
+    this.#activeOperationOwners.add(session.owner);
+    return (async () => {
+      await this.assertDeploymentSession({ sessionId });
+      if (!/^[a-f0-9]{64}$/.test(revision) || !this.hasSuccessfulValidation(revision)) {
+        throw new Error('Deployment requires successful validation of this exact revision.');
       }
-      const configPath = DEPLOYMENT_WRANGLER_CONFIG_PATH;
-      const outputPath = DEPLOYMENT_WRANGLER_OUTPUT_PATH;
-      await writeWorkspaceFile(
-        workspace,
-        configPath,
-        new TextEncoder().encode(
-          JSON.stringify(createTrustedDeploymentConfig({ ...input, accountId, workerName, projectType })),
-        ),
-        false,
-      );
-      const env = {
-        CLOUDFLARE_ACCOUNT_ID: accountId,
-        CLOUDFLARE_API_TOKEN: apiToken,
-        WRANGLER_OUTPUT_FILE_PATH: outputPath,
-      };
+      if ((await this.checkpoint()).revision !== revision) {
+        throw new Error('The durable project changed after validation. Run full validation again.');
+      }
+      const accountId = requireString(input.accountId, 'accountId', 64);
+      const workerName = requireCloudflareName(input.workerName, 'workerName');
+      const projectType =
+        input.projectType === 'worker' ? 'worker' : input.projectType === 'web_app' ? 'web_app' : null;
+      if (!projectType) {
+        throw new SyntaxError('Invalid deployment project type.');
+      }
+      let artifact: PreparedDeploymentArtifact;
       try {
-        if (typeof input.d1DatabaseId === 'string') {
-          requireCommandSuccess(
-            await runCommand(
-              workspace,
-              `pnpm exec wrangler d1 migrations apply DB --remote --config ${configPath} --yes`,
-              {
+        artifact = await this.withComputer(async (workspace) => {
+          for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
+            requireCommandSuccess(
+              await runCommand(workspace, command, {
                 cwd: PROJECT_ROOT,
                 backend: 'container-shell',
                 timeoutMs: 5 * 60_000,
-                env,
-              },
+              }),
+            );
+          }
+          await writeWorkspaceFile(
+            workspace,
+            DEPLOYMENT_WRANGLER_CONFIG_PATH,
+            new TextEncoder().encode(
+              JSON.stringify(createTrustedDeploymentConfig({ ...input, accountId, workerName, projectType })),
             ),
+            false,
           );
-        }
-        if (typeof input.agentSecurityD1DatabaseId === 'string') {
+          await workspace.fs.rm(DEPLOYMENT_ARTIFACT_ROOT, { recursive: true, force: true });
           requireCommandSuccess(
             await runCommand(
               workspace,
-              `pnpm exec wrangler d1 migrations apply AGENT_SECURITY_DB --remote --config ${configPath} --yes`,
-              { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 5 * 60_000, env },
+              `pnpm exec wrangler deploy --dry-run --outdir ${DEPLOYMENT_ARTIFACT_ROOT} --config ${DEPLOYMENT_WRANGLER_CONFIG_PATH}`,
+              { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 10 * 60_000 },
             ),
           );
-        }
-        requireCommandSuccess(
-          await runCommand(workspace, `pnpm exec wrangler deploy --config ${configPath}`, {
-            cwd: PROJECT_ROOT,
-            backend: 'container-shell',
-            timeoutMs: 10 * 60_000,
-            env,
-          }),
-        );
-        const output = decodeUtf8((await readWorkspaceFile(workspace, outputPath)).bytes);
-        return { workerName, workerVersionId: parseWranglerVersion(output, workerName) };
+          return {
+            revision,
+            mainModule: projectType === 'worker' ? 'server.js' : 'index.js',
+            modules: await collectDeploymentArtifactFiles(workspace, DEPLOYMENT_ARTIFACT_ROOT, (path) =>
+              /\.(?:js|mjs|wasm)$/.test(path),
+            ),
+            assets:
+              projectType === 'web_app'
+                ? await collectDeploymentArtifactFiles(
+                    workspace,
+                    `${PROJECT_ROOT}/dist/client`,
+                    (path) => path !== '.assetsignore' && !path.endsWith('.map'),
+                  )
+                : [],
+            migrations: {
+              DB:
+                typeof input.d1DatabaseId === 'string'
+                  ? await collectDeploymentMigrations(workspace, `${PROJECT_ROOT}/migrations`)
+                  : [],
+              AGENT_SECURITY_DB:
+                typeof input.agentSecurityD1DatabaseId === 'string'
+                  ? await collectDeploymentMigrations(workspace, `${PROJECT_ROOT}/agent-security-migrations`)
+                  : [],
+            },
+          };
+        });
       } finally {
-        await workspace.fs.rm(configPath, { force: true }).catch(() => undefined);
-        await workspace.fs.rm(outputPath, { force: true }).catch(() => undefined);
-        await removeDerivedFiles(workspace);
+        await this.withComputer(async (workspace) => {
+          await workspace.fs.rm(DEPLOYMENT_WRANGLER_CONFIG_PATH, { force: true }).catch(() => undefined);
+          await workspace.fs.rm(DEPLOYMENT_ARTIFACT_ROOT, { recursive: true, force: true }).catch(() => undefined);
+          await removeDerivedFiles(workspace);
+        }).catch(() => undefined);
       }
-    });
+      if ((await this.checkpoint()).revision !== revision) {
+        throw new Error('The project changed while its deployment artifact was prepared. Validate the new revision.');
+      }
+      await this.assertDeploymentSession({ sessionId });
+      return validatePreparedDeploymentArtifact(artifact, { revision, projectType });
+    })().finally(() => this.#activeOperationOwners.delete(session.owner));
   }
 
   async deleteProject() {
-    await this.stopActivePreview();
-    await this.withComputer((workspace) => workspace.fs.rm(PROJECT_ROOT, { recursive: true, force: true }));
-    this.ctx.storage.sql.exec('DELETE FROM ghostbuild_validations');
-    this.ctx.storage.sql.exec(
-      `UPDATE ghostbuild_workspace_state
-       SET initialized = 0, seed_id = NULL, reset_revision = ?, preview_id = NULL, preview_exec_id = NULL
-       WHERE singleton = 1`,
-      this.currentRevision(),
-    );
+    await this.withStatefulOperation('delete', 'delete:project', async () => {
+      await this.stopActivePreview();
+      await this.withComputer((workspace) => workspace.fs.rm(PROJECT_ROOT, { recursive: true, force: true }));
+      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_validations');
+      this.ctx.storage.sql.exec(
+        `UPDATE ghostbuild_workspace_state
+         SET initialized = 0, seed_id = NULL, reset_revision = ?
+         WHERE singleton = 1`,
+        this.currentRevision(),
+      );
+    });
     await this.destroy().catch(() => undefined);
   }
 
   private async stopActivePreview() {
-    const row = this.workspaceRow();
+    const row = this.activePreviewRow();
     this.deleteSchedules('expirePreview');
-    if (row.preview_exec_id) {
-      await this.withComputer(async (workspace) => {
-        await workspace.runtime
-          .killExec(row.preview_exec_id!, { backend: 'container-shell', signal: 'SIGKILL' })
-          .catch(() => undefined);
-        await workspace.runtime
-          .disposeExec(row.preview_exec_id!, { backend: 'container-shell' })
-          .catch(() => undefined);
-        await removeDerivedFiles(workspace);
-      });
+    if (row) {
+      await this.cleanupPreviewResources(row);
     }
-    await this.tunnels.destroy(PREVIEW_PORT).catch(() => undefined);
     await this.setKeepAlive(false).catch(() => undefined);
-    this.ctx.storage.sql.exec(
-      'UPDATE ghostbuild_workspace_state SET preview_id = NULL, preview_exec_id = NULL WHERE singleton = 1',
+    this.ctx.storage.sql.exec('DELETE FROM ghostbuild_active_preview WHERE singleton = 1');
+  }
+
+  private async cleanupPreviewResources(row: ActivePreviewRow): Promise<void> {
+    await this.tunnels.destroy(row.port).catch(() => undefined);
+    await this.withComputer((workspace) => cleanupPreviewProcess(workspace, row));
+  }
+
+  private activePreviewRow(): ActivePreviewRow | null {
+    return (
+      first(
+        this.ctx.storage.sql.exec<ActivePreviewRow>(
+          `SELECT preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision
+           FROM ghostbuild_active_preview WHERE singleton = 1`,
+        ),
+      ) ?? null
     );
+  }
+
+  private previewResultRow(previewId: string): PreviewResultRow | null {
+    return (
+      first(
+        this.ctx.storage.sql.exec<PreviewResultRow>(
+          `SELECT preview_id, url, snapshot_revision, workspace_revision, ready_at, expires_at
+           FROM ghostbuild_preview_results WHERE preview_id = ?`,
+          previewId,
+        ),
+      ) ?? null
+    );
+  }
+
+  private async assertPreviewCheckpoint(
+    expectedWorkspaceRevision: number,
+    expectedSnapshotRevision: string,
+    requireWorkspaceRevision: boolean,
+  ) {
+    const checkpoint = await this.checkpoint();
+    return assertPreviewSourceCheckpoint(
+      checkpoint,
+      {
+        workspaceRevision: expectedWorkspaceRevision,
+        revision: expectedSnapshotRevision,
+      },
+      requireWorkspaceRevision,
+    );
+  }
+
+  private requirePreviewNotCancelled(previewId: string): void {
+    const cancelled = first(
+      this.ctx.storage.sql.exec<{ found: number }>(
+        'SELECT 1 AS found FROM ghostbuild_preview_cancellations WHERE preview_id = ? LIMIT 1',
+        previewId,
+      ),
+    );
+    assertPreviewPublicationAllowed(Boolean(cancelled));
   }
 
   private hasSuccessfulValidation(revision: string): boolean {
@@ -934,6 +1671,35 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     );
   }
 
+  private deploymentSessionRow(operationId: string): DeploymentSessionRow | null {
+    return (
+      first(
+        this.ctx.storage.sql.exec<DeploymentSessionRow>(
+          `SELECT operation_id, owner, idempotency_key, expected_workspace_revision,
+                  expected_snapshot_revision, acquired_at, deadline, status
+           FROM ghostbuild_deployment_sessions WHERE operation_id = ?`,
+          operationId,
+        ),
+      ) ?? null
+    );
+  }
+
+  private requireActiveDeploymentSession(operationId: string): DeploymentSessionRow {
+    const session = this.deploymentSessionRow(operationId);
+    if (!session || session.status !== 'active') {
+      throw new WorkspaceOperationIndeterminateError('deployment');
+    }
+    return session;
+  }
+
+  private deploymentSessionLease(session: DeploymentSessionRow): WorkspaceOperationLease {
+    const lease = this.#operationLane.find(session.idempotency_key, session.owner);
+    if (!lease) {
+      throw new WorkspaceOperationIndeterminateError('deployment');
+    }
+    return lease;
+  }
+
   private currentRevision(): number {
     return first(this.ctx.storage.sql.exec<{ v: number }>("SELECT v FROM vfs_meta WHERE k = 'rev'"))?.v ?? 0;
   }
@@ -942,18 +1708,14 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     initialized: number;
     seed_id: string | null;
     reset_revision: number;
-    preview_id: string | null;
-    preview_exec_id: string | null;
   } {
     const row = first(
       this.ctx.storage.sql.exec<{
         initialized: number;
         seed_id: string | null;
         reset_revision: number;
-        preview_id: string | null;
-        preview_exec_id: string | null;
       }>(
-        `SELECT initialized, seed_id, reset_revision, preview_id, preview_exec_id
+        `SELECT initialized, seed_id, reset_revision
          FROM ghostbuild_workspace_state WHERE singleton = 1`,
       ),
     );
@@ -963,16 +1725,26 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     return row;
   }
 
-  private stateFromFiles(files: WorkspaceFile[]): WorkspaceState {
+  private stateFromFiles(files: WorkspaceFile[], revision = this.currentRevision()): WorkspaceState {
     const row = this.workspaceRow();
     return {
       initialized: row.initialized === 1,
-      revision: this.currentRevision(),
+      revision,
       resetRevision: row.reset_revision,
       fileCount: files.length,
       totalBytes: totalFileBytes(files),
       seeding: row.seed_id !== null,
     };
+  }
+
+  private async stableProjectRead<T>(read: (workspace: WorkspaceClient) => Promise<T>): Promise<{
+    value: T;
+    revision: number;
+  }> {
+    return stableWorkspaceRead(
+      () => this.currentRevision(),
+      () => this.withComputer(read),
+    );
   }
 
   private async runToolOperation<T>(
@@ -981,6 +1753,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     args: unknown,
     operation: () => Promise<T>,
   ): Promise<T> {
+    this.requireCompletedComputerSync();
     const argsJson = JSON.stringify(stableValue(args)) ?? 'null';
     const started = this.#toolOperations.begin({
       toolCallId,
@@ -997,6 +1770,20 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       const result = await operation();
       return this.#toolOperations.complete({ toolCallId, result }) as T;
     } catch (error) {
+      if (error instanceof WorkspaceSyncPendingError) {
+        const result =
+          toolName === 'npmInstall'
+            ? toolSuccess('Dependency installation completed after the project filesystem was durably synchronized.', {
+                buildEnvironment: 'cloudflare-computer-container',
+                nextAction: 'validate-project',
+              })
+            : toolFailure(
+                'Validation stopped while the project filesystem was being synchronized. Run full validation again.',
+                { buildEnvironment: 'cloudflare-computer-container', nextAction: 'validate-project' },
+              );
+        this.registerPendingCommand({ backend: error.backend, toolCallId, result });
+        throw error;
+      }
       try {
         this.#toolOperations.fail({
           toolCallId,
@@ -1007,6 +1794,78 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       }
       throw error;
     }
+  }
+
+  private async withStatefulOperation<T>(
+    kind: StatefulOperationKind,
+    idempotencyKey: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    this.requireCompletedComputerSync();
+    const owner = crypto.randomUUID();
+    const lease = this.#operationLane.acquire({
+      owner,
+      idempotencyKey,
+      kind,
+      leaseMs: OPERATION_LEASE_MS[kind],
+    });
+    this.#activeOperationOwners.add(owner);
+    if (lease.recoveredOwner) {
+      console.info('ProjectWorkspace operation lease recovered', {
+        kind,
+      });
+    }
+    try {
+      return await operation();
+    } finally {
+      this.#operationLane.release(lease);
+      this.#activeOperationOwners.delete(owner);
+    }
+  }
+
+  private requireCompletedComputerSync(): void {
+    requireWorkspaceSyncBarrier(this.#toolOperations.pending(), (backend) => this.#syncRetries.state(backend));
+  }
+
+  private finishPendingCommand(
+    backend: string,
+    exhausted?: { exhausted: true; attempt: number; error: string | null },
+  ): void {
+    const continuation = this.#toolOperations.pending().find((operation) => operation.backend === backend);
+    if (!continuation) {
+      return;
+    }
+    const result = exhausted
+      ? computerSyncUnconfirmedToolResult(
+          new WorkspaceSyncPendingError(backend, exhausted.attempt, Date.now(), true, exhausted.error),
+        )
+      : continuation.result;
+    this.#toolOperations.completePending(backend, result);
+  }
+
+  private registerPendingCommand(args: { backend: string; toolCallId: string; result: unknown }): void {
+    this.#toolOperations.registerPending(args);
+    this.ctx.waitUntil(this.reconcilePendingCommands());
+  }
+
+  private async schedulePendingCommandRecovery(delayMs: number): Promise<void> {
+    const schedule = this.schedule as unknown as (
+      when: number,
+      callback: string,
+      payload: unknown,
+      options: { idempotent: true },
+    ) => Promise<unknown>;
+    await schedule.call(
+      this,
+      Math.max(0, Math.ceil(delayMs / 1_000)),
+      'reconcilePendingCommands',
+      {},
+      { idempotent: true },
+    );
+  }
+
+  private async cleanupReadinessRoot(): Promise<void> {
+    await this.withComputer((workspace) => workspace.fs.rm(READINESS_ROOT, { recursive: true, force: true }));
   }
 
   private async withComputer<T>(operation: (workspace: WorkspaceClient) => Promise<T>): Promise<T> {
@@ -1022,122 +1881,11 @@ export class ProjectWorkspace extends ComputerSandboxBase {
 export default {
   async fetch(request: Request, env: RuntimeEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    const controlPlaneRequest = authorized(request, env.CONTROL_PLANE_SECRET);
-    if (controlPlaneRequest && request.method === 'GET' && url.pathname === '/v1/health') {
-      try {
-        return Response.json(await readUserWorkspaceRuntimeHealth(env), {
-          headers: { 'cache-control': 'no-store' },
-        });
-      } catch {
-        return Response.json(
-          { ok: false, service: 'ghostbuild-user-workspace-runtime' },
-          { status: 503, headers: { 'cache-control': 'no-store' } },
-        );
-      }
+    const controlPlaneResponse = await routeUserWorkspaceRuntimeControlPlaneRequest(request, env);
+    if (controlPlaneResponse) {
+      return controlPlaneResponse;
     }
-    const route = parseProjectRoute(url.pathname);
-    if (!route || !controlPlaneRequest) {
-      return handleUserRequest(request, env, url, ctx);
-    }
-    const project = env.PROJECT_WORKSPACE.get(env.PROJECT_WORKSPACE.idFromName(route.projectId));
-    try {
-      if (request.method === 'GET' && route.operation === 'state') {
-        return Response.json(await project.getWorkspaceState());
-      }
-      if (request.method === 'POST' && route.operation === 'seed/begin') {
-        return Response.json(await project.beginSeed(record(await readJson(request)).seedId));
-      }
-      if (request.method === 'POST' && route.operation === 'seed/append') {
-        const body = record(await readJson(request));
-        return Response.json(await project.appendSeed(body.seedId, body.entries));
-      }
-      if (request.method === 'POST' && route.operation === 'seed/commit') {
-        const body = record(await readJson(request));
-        return Response.json(await project.commitSeed(body.seedId, body.expected));
-      }
-      if (request.method === 'POST' && route.operation === 'seed/abort') {
-        return Response.json(await project.abortSeed(record(await readJson(request)).seedId));
-      }
-      if (request.method === 'POST' && route.operation === 'changes') {
-        return Response.json(await project.applyChanges(await readJson(request)));
-      }
-      if (request.method === 'POST' && route.operation === 'sync') {
-        return Response.json(await project.getSyncPage(await readJson(request)));
-      }
-      if (request.method === 'POST' && route.operation === 'read-text') {
-        return Response.json(await project.readText(record(await readJson(request)).path));
-      }
-      if (request.method === 'POST' && route.operation === 'read-file') {
-        const file = await project.readWorkspaceFile(record(await readJson(request)).path);
-        return Response.json({ ...file, bytes: encodeBase64(file.bytes) });
-      }
-      if (request.method === 'POST' && route.operation === 'read-file-stream') {
-        return new Response(await project.streamWorkspaceFile(record(await readJson(request)).path), {
-          headers: { 'content-type': 'application/octet-stream' },
-        });
-      }
-      if (request.method === 'GET' && route.operation === 'files') {
-        return Response.json(await project.listWorkspaceFiles());
-      }
-      if (request.method === 'POST' && route.operation === 'directory') {
-        return Response.json(await project.readDirectory(record(await readJson(request)).path));
-      }
-      if (request.method === 'POST' && route.operation === 'mkdir') {
-        await project.makeDirectory(record(await readJson(request)).path);
-        return new Response(null, { status: 204 });
-      }
-      if (request.method === 'POST' && route.operation === 'exec') {
-        const result: unknown = await (project as unknown as { execute(value: unknown): Promise<unknown> }).execute(
-          await readJson(request),
-        );
-        return Response.json(result);
-      }
-      if (request.method === 'POST' && route.operation === 'tool-operation/begin') {
-        return Response.json(await project.beginToolOperation(await readJson(request)));
-      }
-      if (request.method === 'POST' && route.operation === 'tool-operation/complete') {
-        return Response.json(await project.completeToolOperation(await readJson(request)));
-      }
-      if (request.method === 'POST' && route.operation === 'tool-operation/fail') {
-        await project.failToolOperation(await readJson(request));
-        return new Response(null, { status: 204 });
-      }
-      if (request.method === 'POST' && route.operation === 'checkpoint') {
-        return Response.json(await project.checkpoint());
-      }
-      if (request.method === 'POST' && route.operation === 'dependencies') {
-        return Response.json(await project.installDependenciesTool(await readJson(request)));
-      }
-      if (request.method === 'POST' && route.operation === 'validate') {
-        return Response.json(await project.validateTool(await readJson(request)));
-      }
-      if (request.method === 'POST' && route.operation === 'validation-status') {
-        return Response.json(await project.validationStatus(record(await readJson(request)).revision));
-      }
-      if (request.method === 'POST' && route.operation === 'deployment-plan') {
-        return Response.json(await project.deploymentPlan(record(await readJson(request)).revision));
-      }
-      if (request.method === 'POST' && route.operation === 'preview') {
-        return Response.json(await project.createPreview(await readJson(request)));
-      }
-      if (request.method === 'POST' && route.operation === 'preview/stop') {
-        await project.stopPreview(record(await readJson(request)).previewId);
-        return new Response(null, { status: 204 });
-      }
-      if (request.method === 'POST' && route.operation === 'deploy') {
-        return Response.json(await project.deploy(await readJson(request)));
-      }
-      if (request.method === 'DELETE' && route.operation === '') {
-        await project.deleteProject();
-        return new Response(null, { status: 204 });
-      }
-      return Response.json({ error: 'Method not allowed' }, { status: 405 });
-    } catch (error) {
-      return Response.json(
-        { error: error instanceof Error ? error.message.slice(-4_000) : 'Workspace operation failed.' },
-        { status: error instanceof SyntaxError ? 400 : 409 },
-      );
-    }
+    return handleUserRequest(request, env, url, ctx);
   },
   scheduled(controller: ScheduledController, env: RuntimeEnv, ctx: ExecutionContext): void {
     scheduleUserWorkspaceRuntimeMaintenance(controller, env, ctx);
@@ -1242,6 +1990,56 @@ async function readWorkspaceFile(workspace: WorkspaceClient, path: string): Prom
   return { path, bytes, size: bytes.byteLength, mode: stat.mode, sha256: await sha256Bytes(bytes) };
 }
 
+async function collectDeploymentArtifactFiles(
+  workspace: WorkspaceClient,
+  root: string,
+  include: (relativePath: string) => boolean,
+): Promise<DeploymentArtifactFile[]> {
+  const entries = (await workspace.fs.find(root)).filter((entry) => entry.type === 'file');
+  if (entries.length > MAX_DEPLOYMENT_ARTIFACT_FILES) {
+    throw new Error('The prepared deployment artifact has too many files.');
+  }
+  const files: DeploymentArtifactFile[] = [];
+  let totalBytes = 0;
+  for (const entry of entries) {
+    const relativePath = entry.path.slice(root.length).replace(/^\/+/, '');
+    if (!relativePath || !include(relativePath)) {
+      continue;
+    }
+    const file = await readWorkspaceFile(workspace, entry.path);
+    totalBytes += file.size;
+    if (totalBytes > MAX_DEPLOYMENT_ARTIFACT_BYTES) {
+      throw new Error('The prepared deployment artifact exceeds its aggregate size limit.');
+    }
+    files.push({ path: relativePath, bytes: file.bytes, size: file.size, sha256: file.sha256 });
+  }
+  return files.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+async function collectDeploymentMigrations(
+  workspace: WorkspaceClient,
+  root: string,
+): Promise<Array<{ name: string; sql: string }>> {
+  let entries;
+  try {
+    entries = (await workspace.fs.find(root)).filter((entry) => entry.type === 'file');
+  } catch (error) {
+    if (isMissingPath(error)) {
+      return [];
+    }
+    throw error;
+  }
+  const migrations: Array<{ name: string; sql: string }> = [];
+  for (const entry of entries) {
+    const name = entry.path.slice(root.length).replace(/^\/+/, '');
+    if (!/^\d{4}_[a-zA-Z0-9._-]+\.sql$/.test(name)) {
+      continue;
+    }
+    migrations.push({ name, sql: decodeUtf8((await readWorkspaceFile(workspace, entry.path)).bytes) });
+  }
+  return migrations.sort((left, right) => left.name.localeCompare(right.name));
+}
+
 async function writeWorkspaceFile(
   workspace: WorkspaceClient,
   pathValue: unknown,
@@ -1272,8 +2070,9 @@ async function runCommand(
     backend: 'worker-shell' | 'container-shell';
     timeoutMs: number;
     env?: Record<string, string>;
+    onSyncPending?: (result: WorkspaceRuntimeResult<'utf8'>) => void;
   },
-) {
+): Promise<WorkspaceRuntimeResult<'utf8'>> {
   const handle = await workspace.runtime.exec(command, {
     cwd: options.cwd,
     backend: options.backend,
@@ -1282,7 +2081,11 @@ async function runCommand(
     env: options.env,
   });
   try {
-    return await handle.result();
+    const result = await handle.result();
+    if (result.sync.status === 'pending') {
+      options.onSyncPending?.(result);
+    }
+    return requireDurableCommandResult(result, options.backend);
   } finally {
     const id = handle.id;
     handle[Symbol.dispose]();
@@ -1290,7 +2093,7 @@ async function runCommand(
   }
 }
 
-function requireCommandSuccess(result: { exitCode: number; stdout: string; stderr: string }): void {
+function requireCommandSuccess(result: WorkspaceRuntimeResult<'utf8'>): void {
   if (result.exitCode !== 0) {
     throw new Error(`${result.stderr}\n${result.stdout}`.trim().slice(-4_000) || 'The Computer command failed.');
   }
@@ -1339,6 +2142,28 @@ function fileSyncEntry(file: WorkspaceFile, revision: number) {
     size: file.size,
     sha256: file.sha256,
     revision,
+  };
+}
+
+function workspaceFileMetadata(file: WorkspaceFile, revision: number) {
+  return {
+    path: file.path,
+    encoding: canDecodeUtf8(file.bytes) ? ('utf8' as const) : ('base64' as const),
+    size: file.size,
+    mode: file.mode,
+    sha256: file.sha256,
+    revision,
+  };
+}
+
+function previewSuccess(row: PreviewResultRow) {
+  return {
+    id: row.preview_id,
+    url: row.url,
+    workspaceRevision: row.workspace_revision,
+    snapshotRevision: row.snapshot_revision,
+    readyAt: new Date(row.ready_at).toISOString(),
+    expiresAt: new Date(row.expires_at).toISOString(),
   };
 }
 
@@ -1512,32 +2337,6 @@ function withCors(response: Response, origin: string | null): Response {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-function parseProjectRoute(pathname: string): { projectId: string; operation: string } | null {
-  const match = /^\/v1\/projects\/([^/]+)(?:\/(.*))?$/.exec(pathname);
-  if (!match) {
-    return null;
-  }
-  let projectId: string;
-  try {
-    projectId = decodeURIComponent(match[1]!);
-  } catch {
-    return null;
-  }
-  return PROJECT_ID_PATTERN.test(projectId) ? { projectId, operation: match[2] ?? '' } : null;
-}
-
-async function readJson(request: Request): Promise<unknown> {
-  const length = Number(request.headers.get('content-length') ?? 0);
-  if (Number.isFinite(length) && length > MAX_REQUEST_BYTES) {
-    throw new SyntaxError('Workspace request is too large.');
-  }
-  const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_REQUEST_BYTES) {
-    throw new SyntaxError('Workspace request is too large.');
-  }
-  return JSON.parse(text);
-}
-
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new SyntaxError('Workspace request must be an object.');
@@ -1592,29 +2391,33 @@ function requireCloudflareName(value: unknown, name: string): string {
   return result;
 }
 
-function parseWranglerVersion(content: string, workerName: string): string {
-  if (new TextEncoder().encode(content).byteLength > 32 * 1024) {
-    throw new Error('Wrangler structured output exceeds the size limit.');
+function requirePreviewId(value: unknown): string {
+  const previewId = requireString(value, 'previewId', 128);
+  if (!/^[a-zA-Z0-9_-]+$/.test(previewId)) {
+    throw new SyntaxError('Invalid previewId.');
   }
-  const versions: string[] = [];
-  for (const line of content.split('\n')) {
-    if (!line.trim()) {
-      continue;
-    }
-    const entry = JSON.parse(line) as Record<string, unknown>;
-    if (
-      entry.type === 'deploy' &&
-      entry.version === 1 &&
-      entry.worker_name === workerName &&
-      typeof entry.version_id === 'string'
-    ) {
-      versions.push(entry.version_id);
-    }
+  return previewId;
+}
+
+function requireSnapshotRevision(value: unknown): string {
+  const revision = requireString(value, 'expectedSnapshotRevision', 64);
+  if (!/^[a-f0-9]{64}$/.test(revision)) {
+    throw new SyntaxError('Invalid expectedSnapshotRevision.');
   }
-  if (versions.length !== 1 || !/^[0-9a-f-]{32,64}$/i.test(versions[0]!)) {
-    throw new Error('Wrangler did not identify exactly one published Worker version.');
+  return revision;
+}
+
+function assertDeploymentSessionIdentity(
+  session: DeploymentSessionRow,
+  expectedWorkspaceRevision: number,
+  expectedSnapshotRevision: string,
+): void {
+  if (
+    session.expected_workspace_revision !== expectedWorkspaceRevision ||
+    session.expected_snapshot_revision !== expectedSnapshotRevision
+  ) {
+    throw new Error('A deployment operation identifier was reused for a different workspace revision.');
   }
-  return versions[0]!;
 }
 
 function requireSandboxExecSuccess(result: { success: boolean; stdout: string; stderr: string }): void {
@@ -1625,6 +2428,22 @@ function requireSandboxExecSuccess(result: { success: boolean; stdout: string; s
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+async function cleanupPreviewProcess(
+  workspace: WorkspaceClient,
+  row: Pick<ActivePreviewRow, 'exec_id' | 'snapshot_root'>,
+) {
+  await workspace.runtime
+    .killExec(row.exec_id, { backend: 'container-shell', signal: 'SIGKILL' })
+    .catch(() => undefined);
+  await workspace.runtime.disposeExec(row.exec_id, { backend: 'container-shell' }).catch(() => undefined);
+  const result = await runCommand(workspace, `rm -rf ${shellQuote(row.snapshot_root)}`, {
+    cwd: '/tmp',
+    backend: 'container-shell',
+    timeoutMs: 30_000,
+  });
+  requireCommandSuccess(result);
 }
 
 async function sha256Bytes(value: Uint8Array): Promise<string> {
@@ -1651,22 +2470,6 @@ function isMissingPath(error: unknown): boolean {
       (typeof (error as { message?: unknown }).message === 'string' &&
         /ENOENT|no such path/i.test((error as { message: string }).message)))
   );
-}
-
-function authorized(request: Request, expected: string): boolean {
-  const value = request.headers.get('authorization');
-  if (!value?.startsWith('Bearer ') || expected.length < 32) {
-    return false;
-  }
-  const supplied = value.slice('Bearer '.length);
-  if (supplied.length !== expected.length) {
-    return false;
-  }
-  let mismatch = 0;
-  for (let index = 0; index < supplied.length; index += 1) {
-    mismatch |= supplied.charCodeAt(index) ^ expected.charCodeAt(index);
-  }
-  return mismatch === 0;
 }
 
 export { BuilderAgent };

@@ -10,7 +10,12 @@
 
 import { Route as rootRouteImport } from './routes/__root';
 import { Route as IndexRouteImport } from './routes/index';
+import { Route as AbuseRouteImport } from './routes/abuse';
+import { Route as PrivacyRouteImport } from './routes/privacy';
+import { Route as SecurityRouteImport } from './routes/security';
 import { Route as SettingsRouteImport } from './routes/settings';
+import { Route as SupportRouteImport } from './routes/support';
+import { Route as TermsRouteImport } from './routes/terms';
 import { Route as ChatIdRouteImport } from './routes/chat.$id';
 
 const IndexRoute = IndexRouteImport.update({
@@ -18,9 +23,34 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any);
+const AbuseRoute = AbuseRouteImport.update({
+  id: '/abuse',
+  path: '/abuse',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const SecurityRoute = SecurityRouteImport.update({
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => rootRouteImport,
+} as any);
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const SupportRoute = SupportRouteImport.update({
+  id: '/support',
+  path: '/support',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any);
 const ChatIdRoute = ChatIdRouteImport.update({
@@ -31,31 +61,76 @@ const ChatIdRoute = ChatIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute;
+  '/abuse': typeof AbuseRoute;
+  '/privacy': typeof PrivacyRoute;
+  '/security': typeof SecurityRoute;
   '/settings': typeof SettingsRoute;
+  '/support': typeof SupportRoute;
+  '/terms': typeof TermsRoute;
   '/chat/$id': typeof ChatIdRoute;
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute;
+  '/abuse': typeof AbuseRoute;
+  '/privacy': typeof PrivacyRoute;
+  '/security': typeof SecurityRoute;
   '/settings': typeof SettingsRoute;
+  '/support': typeof SupportRoute;
+  '/terms': typeof TermsRoute;
   '/chat/$id': typeof ChatIdRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   '/': typeof IndexRoute;
+  '/abuse': typeof AbuseRoute;
+  '/privacy': typeof PrivacyRoute;
+  '/security': typeof SecurityRoute;
   '/settings': typeof SettingsRoute;
+  '/support': typeof SupportRoute;
+  '/terms': typeof TermsRoute;
   '/chat/$id': typeof ChatIdRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths: '/' | '/settings' | '/chat/$id';
+  fullPaths:
+    | '/'
+    | '/abuse'
+    | '/privacy'
+    | '/security'
+    | '/settings'
+    | '/support'
+    | '/terms'
+    | '/chat/$id';
   fileRoutesByTo: FileRoutesByTo;
-  to: '/' | '/settings' | '/chat/$id';
-  id: '__root__' | '/' | '/settings' | '/chat/$id';
+  to:
+    | '/'
+    | '/abuse'
+    | '/privacy'
+    | '/security'
+    | '/settings'
+    | '/support'
+    | '/terms'
+    | '/chat/$id';
+  id:
+    | '__root__'
+    | '/'
+    | '/abuse'
+    | '/privacy'
+    | '/security'
+    | '/settings'
+    | '/support'
+    | '/terms'
+    | '/chat/$id';
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
+  AbuseRoute: typeof AbuseRoute;
+  PrivacyRoute: typeof PrivacyRoute;
+  SecurityRoute: typeof SecurityRoute;
   SettingsRoute: typeof SettingsRoute;
+  SupportRoute: typeof SupportRoute;
+  TermsRoute: typeof TermsRoute;
   ChatIdRoute: typeof ChatIdRoute;
 }
 
@@ -68,11 +143,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    '/abuse': {
+      id: '/abuse';
+      path: '/abuse';
+      fullPath: '/abuse';
+      preLoaderRoute: typeof AbuseRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/privacy': {
+      id: '/privacy';
+      path: '/privacy';
+      fullPath: '/privacy';
+      preLoaderRoute: typeof PrivacyRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/security': {
+      id: '/security';
+      path: '/security';
+      fullPath: '/security';
+      preLoaderRoute: typeof SecurityRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/settings': {
       id: '/settings';
       path: '/settings';
       fullPath: '/settings';
       preLoaderRoute: typeof SettingsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/support': {
+      id: '/support';
+      path: '/support';
+      fullPath: '/support';
+      preLoaderRoute: typeof SupportRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/terms': {
+      id: '/terms';
+      path: '/terms';
+      fullPath: '/terms';
+      preLoaderRoute: typeof TermsRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/chat/$id': {
@@ -87,7 +197,12 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AbuseRoute: AbuseRoute,
+  PrivacyRoute: PrivacyRoute,
+  SecurityRoute: SecurityRoute,
   SettingsRoute: SettingsRoute,
+  SupportRoute: SupportRoute,
+  TermsRoute: TermsRoute,
   ChatIdRoute: ChatIdRoute,
 };
 export const routeTree = rootRouteImport

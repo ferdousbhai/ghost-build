@@ -1,32 +1,18 @@
 import { isAlias, isMap, isScalar, isSeq, parseDocument, visit } from 'yaml';
+// The template-owned JSON is the standalone generated-project policy source of truth.
+// eslint-disable-next-line no-restricted-imports
+import generatedProjectDependencyPolicy from '../../template/scripts/lib/project-policy/generated-project-dependency-policy.json';
 
-const MAX_PNPM_WORKSPACE_POLICY_BYTES = 64 * 1024;
-const APPROVED_GENERATED_BUILD_DEPENDENCIES = ['core-js-pure', 'esbuild', 'sharp', 'workerd'] as const;
-const APPROVED_GENERATED_OVERRIDES = new Map([
-  ['brace-expansion@<1.1.18', '1.1.18'],
-  ['brace-expansion@>=2.0.0 <2.1.4', '2.1.4'],
-  ['brace-expansion@>=4.0.0 <5.0.9', '5.0.9'],
-  ['@hono/node-server@<2.0.10', '2.0.10'],
-  ['fast-uri@>=3.0.0 <3.1.5', '3.1.5'],
-  ['hono@<4.12.34', '4.12.34'],
-  ['ip-address@<=10.3.0', '10.3.1'],
-  ['postcss@<=8.5.22', '8.5.25'],
-  ['sharp@<0.35.0', '0.35.3'],
-  ['undici@>=7.0.0 <7.29.0', '7.29.0'],
+export const GENERATED_PROJECT_DEPENDENCY_POLICY = generatedProjectDependencyPolicy;
+
+const MAX_PNPM_WORKSPACE_POLICY_BYTES = generatedProjectDependencyPolicy.maximumWorkspacePolicyBytes;
+const APPROVED_GENERATED_BUILD_DEPENDENCIES = generatedProjectDependencyPolicy.approvedBuildDependencies;
+const APPROVED_GENERATED_OVERRIDES = new Map(Object.entries(generatedProjectDependencyPolicy.approvedOverrides));
+const ALLOWED_POLICY_KEYS = new Set(generatedProjectDependencyPolicy.allowedWorkspaceKeys);
+const FORBIDDEN_POLICY_KEYS = new Set([
+  ...generatedProjectDependencyPolicy.forbiddenWorkspaceKeys,
+  'minimumReleaseAgeExclude',
 ]);
-const ALLOWED_POLICY_KEYS = new Set([
-  'packages',
-  'ignoreWorkspaceRootCheck',
-  'minimumReleaseAge',
-  'minimumReleaseAgeIgnoreMissingTime',
-  'minimumReleaseAgeStrict',
-  'strictDepBuilds',
-  'blockExoticSubdeps',
-  'overrides',
-  'allowBuilds',
-  'peerDependencyRules',
-]);
-const FORBIDDEN_POLICY_KEYS = new Set(['dangerouslyAllowAllBuilds', 'trustLockfile', 'minimumReleaseAgeExclude']);
 
 export function assertSafeGeneratedPnpmWorkspace(filePath: string, content: string): void {
   const normalizedPath = filePath.replaceAll('\\', '/').replace(/^\.\/+/, '');
@@ -85,7 +71,13 @@ function findGeneratedPnpmWorkspacePolicyErrors(content: string, label: string):
     }
   }
 
-  requirePlainScalar(root, 'minimumReleaseAge', 1440, `${label} must set minimumReleaseAge to 1440 minutes.`, errors);
+  requirePlainScalar(
+    root,
+    'minimumReleaseAge',
+    generatedProjectDependencyPolicy.minimumReleaseAgeMinutes,
+    `${label} must set minimumReleaseAge to ${generatedProjectDependencyPolicy.minimumReleaseAgeMinutes} minutes.`,
+    errors,
+  );
   requirePlainScalar(root, 'ignoreWorkspaceRootCheck', true, `${label} must enable ignoreWorkspaceRootCheck.`, errors);
   requirePlainScalar(
     root,
@@ -105,7 +97,7 @@ function findGeneratedPnpmWorkspacePolicyErrors(content: string, label: string):
     !isSeq(packages) ||
     packages.items.length !== 1 ||
     !isScalar(packages.items[0]) ||
-    packages.items[0].value !== '.'
+    packages.items[0].value !== generatedProjectDependencyPolicy.profiles.generatedProject.packages[0]
   ) {
     errors.push(`${label} must scope packages to the generated project root only.`);
   }

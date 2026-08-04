@@ -39,8 +39,9 @@ describe('BuilderAgent schema migrations', () => {
       { version: 2, name: 'create_builder_context_state' },
       { version: 3, name: 'create_builder_tool_replays' },
       { version: 4, name: 'remove_builder_tool_replays' },
+      { version: 5, name: 'persist_builder_identity' },
     ]);
-    expect(storage.transactionCount).toBe(4);
+    expect(storage.transactionCount).toBe(5);
     expect(storage.statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS builder_turns'))).toBe(
       true,
     );
@@ -50,6 +51,9 @@ describe('BuilderAgent schema migrations', () => {
     expect(storage.statements.some((statement) => statement.includes('builder_workspace_files'))).toBe(false);
     expect(storage.statements.some((statement) => statement.includes('builder_preview_jobs'))).toBe(false);
     expect(storage.statements).toContain('DROP TABLE IF EXISTS builder_workspace_tool_results');
+    expect(
+      storage.statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS builder_identity')),
+    ).toBe(true);
   });
 
   it('is idempotent after the current schema has been recorded', () => {
@@ -74,8 +78,11 @@ describe('BuilderAgent schema migrations', () => {
 
     runBuilderAgentSchemaMigrations(storage as never);
 
-    expect(storage.applied.at(-1)).toEqual({ version: 4, name: 'remove_builder_tool_replays' });
-    expect(storage.transactionCount).toBe(1);
+    expect(storage.applied.slice(-2)).toEqual([
+      { version: 4, name: 'remove_builder_tool_replays' },
+      { version: 5, name: 'persist_builder_identity' },
+    ]);
+    expect(storage.transactionCount).toBe(2);
     expect(storage.statements).toContain('DROP TABLE IF EXISTS builder_workspace_tool_results');
   });
 
@@ -100,6 +107,6 @@ describe('BuilderAgent schema migrations', () => {
 
     expect(blockConcurrencyWhile).toHaveBeenCalledOnce();
     await expect(initialization).resolves.toBeUndefined();
-    expect(storage.applied).toHaveLength(4);
+    expect(storage.applied).toHaveLength(5);
   });
 });

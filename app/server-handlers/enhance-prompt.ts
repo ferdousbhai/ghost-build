@@ -29,7 +29,7 @@ async function enhancePromptForUser({ request, env, userId }: { request: Request
     const accountCredentials = await getUserWorkersAiCredentials(env, userId);
     const completion = await generateText({
       model: getProvider(env, accountCredentials, undefined, { feature: 'prompt-enhancement' }).model,
-      system: ENHANCE_PROMPT_SYSTEM_PROMPT,
+      instructions: ENHANCE_PROMPT_SYSTEM_PROMPT,
       prompt,
       temperature: 0.4,
       maxOutputTokens: ENHANCE_PROMPT_MAX_OUTPUT_TOKENS,

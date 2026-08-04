@@ -8,6 +8,8 @@ import { useReloadMessages } from '~/lib/stores/startup/reloadMessages';
 import { UserProvider } from '~/components/UserProvider';
 import { Toaster } from '~/components/ui/Toaster';
 import { getToolInvocation } from 'ghostbuild-agent/ai-compat';
+import { CloudflareSignInPrompt } from '~/components/CloudflareSignInPrompt';
+import { Button } from '@ui/Button';
 
 export function ExistingChat({ chatId }: { chatId: string }) {
   // Fill in the chatID store from props early in app initialization. If this
@@ -17,7 +19,7 @@ export function ExistingChat({ chatId }: { chatId: string }) {
 
   return (
     <>
-      <GhostbuildAuthProvider redirectIfUnauthenticated={false}>
+      <GhostbuildAuthProvider>
         <UserProvider>
           <ExistingChatWrapper chatId={chatId} />
         </UserProvider>
@@ -29,6 +31,32 @@ export function ExistingChat({ chatId }: { chatId: string }) {
 
 function ExistingChatWrapper({ chatId }: { chatId: string }) {
   const sessionId = useSessionIdOrNullOrLoading();
+  return <ExistingChatSessionView chatId={chatId} sessionId={sessionId} />;
+}
+
+export function ExistingChatSessionView({
+  chatId,
+  sessionId,
+}: {
+  chatId: string;
+  sessionId: string | null | undefined;
+}) {
+  if (sessionId === undefined) {
+    return <Loading message="Checking your Cloudflare session…" />;
+  }
+  if (sessionId === null) {
+    return (
+      <CloudflareSignInPrompt
+        title="Connect Cloudflare to open this project."
+        description="Projects are private to the Cloudflare account that owns their durable workspace. Connect the correct account to continue."
+      />
+    );
+  }
+
+  return <AuthenticatedExistingChat chatId={chatId} />;
+}
+
+function AuthenticatedExistingChat({ chatId }: { chatId: string }) {
   const {
     initialMessages,
     storeMessageHistory,
@@ -45,11 +73,7 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
     return <NotFound />;
   }
 
-  // First, we need a Cloudflare-backed account session ID.
-  if (!sessionId) {
-    return <Loading message="Starting session..." />;
-  }
-  // Then, we need to download the chat messages from the server.
+  // Download the account-owned chat after the session gate above has passed.
   if (initialMessages === undefined) {
     return <Loading message="Loading chat messages..." />;
   }
@@ -84,17 +108,22 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
 
 function NotFound() {
   return (
-    <div className="flex h-full flex-col items-center justify-center p-8 text-center">
-      <h1 className="text-content-primary mb-4 font-display text-4xl font-bold tracking-tight">Not found</h1>
-      <p className="text-content-secondary mb-4 text-balance">
-        The Ghostbuild project you’re looking for can’t be found. Maybe it was deleted or created with another account?
-      </p>
-      <a
-        href="/"
-        className="inline-flex items-center gap-2 rounded-lg bg-bolt-elements-button-primary-background px-4 py-2 text-bolt-elements-button-primary-text transition-colors hover:bg-bolt-elements-button-primary-backgroundHover"
-      >
-        <span className="text-sm font-medium">Return home</span>
-      </a>
+    <div className="flex h-full items-center justify-center p-5">
+      <section className="app-card w-full max-w-xl p-6 text-center sm:p-8" aria-labelledby="project-not-found-heading">
+        <p className="app-page-eyebrow">Project unavailable</p>
+        <h1
+          id="project-not-found-heading"
+          className="mt-2 font-display text-4xl font-black tracking-tight text-content-primary"
+        >
+          This project could not be found.
+        </h1>
+        <p className="mx-auto mt-4 max-w-md text-balance text-content-secondary">
+          It may have been deleted, or it may belong to a different Cloudflare account.
+        </p>
+        <Button href="/" className="mt-6">
+          Start a new project
+        </Button>
+      </section>
     </div>
   );
 }

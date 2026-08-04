@@ -31,7 +31,7 @@
     "@journeyapps/wa-sqlite@1.7.2": "MIT"
   },
   "metadataOnlyPackageAllowlist": [
-    "@ai-sdk/provider-utils@4.0.40",
+    "@ai-sdk/provider-utils@5.0.18",
     "@bufbuild/protobuf@2.12.1",
     "@cfworker/json-schema@4.1.1",
     "@cloudflare/computer@0.1.1",

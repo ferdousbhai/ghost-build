@@ -15,9 +15,8 @@ export type CompleteMessageInfo = {
   transcriptCheckpoint: TranscriptCheckpoint | null;
 };
 
-export type SerializedMessage = Omit<GhostbuildMessage, 'createdAt' | 'content'> & {
+export type SerializedMessage = Omit<GhostbuildMessage, 'createdAt'> & {
   createdAt: number | undefined;
-  content?: string;
 };
 
 export const lastCompleteMessageInfoStore = atom<CompleteMessageInfo | null>(null);
@@ -84,18 +83,7 @@ export function waitForNewMessages(
 }
 
 export function serializeMessageForStorage(message: GhostbuildMessage) {
-  // `content` + `toolInvocations` are duplicated in `parts`; annotations are legacy metadata.
-  // We should avoid storing them since we already store `parts`.
-  const {
-    content: _content,
-    toolInvocations: _toolInvocations,
-    annotations: _annotations,
-    parts,
-    ...rest
-  } = stripTranscriptBaseMetadata(message) as GhostbuildMessage & {
-    annotations?: unknown[];
-    toolInvocations?: unknown[];
-  };
+  const { parts, ...rest } = stripTranscriptBaseMetadata(message);
 
   return {
     ...rest,

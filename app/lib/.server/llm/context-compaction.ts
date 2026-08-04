@@ -1,6 +1,6 @@
 import type { SessionMessage, SessionMessagePart } from 'agents/experimental/memory/session';
 import { COMPACTION_PREFIX, createCompactFunction } from 'agents/experimental/memory/utils';
-import { getToolInvocation, type GhostbuildMessage, type GhostbuildPart } from 'ghostbuild-agent/ai-compat';
+import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 
 const AUTO_COMPACTION_PROTECTED_HEAD = 3;
 const AUTO_COMPACTION_TAIL_TOKENS = 32_000;
@@ -83,31 +83,10 @@ export async function compactContext(args: {
   };
 }
 
-/** Normalize legacy stored tool parts so Cloudflare can count and align them. */
 export function toSessionMessages(messages: GhostbuildMessage[]): SessionMessage[] {
   return messages.map((message) => ({
     id: message.id,
     role: message.role,
-    parts: message.parts.map(toSessionPart),
+    parts: message.parts as SessionMessagePart[],
   }));
-}
-
-function toSessionPart(part: GhostbuildPart): SessionMessagePart {
-  if (part.type !== 'tool-invocation') {
-    return part as SessionMessagePart;
-  }
-
-  const invocation = getToolInvocation(part);
-  if (!invocation) {
-    return part as SessionMessagePart;
-  }
-
-  return {
-    type: 'dynamic-tool',
-    toolCallId: invocation.toolCallId,
-    toolName: invocation.toolName,
-    state: invocation.state === 'result' ? 'output-available' : 'input-available',
-    input: invocation.args,
-    ...(invocation.state === 'result' ? { output: invocation.result } : {}),
-  };
 }

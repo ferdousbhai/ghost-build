@@ -12,7 +12,7 @@ export function LoggedOutHeaderButtons() {
   };
 
   return (
-    <Button variant="neutral" size="xs" onClick={() => void handleSignIn()}>
+    <Button variant="neutral" size="xs" className="!min-h-11 sm:!min-h-7" onClick={() => void handleSignIn()}>
       <span>Connect Cloudflare</span>
     </Button>
   );

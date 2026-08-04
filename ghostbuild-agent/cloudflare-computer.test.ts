@@ -5,11 +5,14 @@ import { describe, expect, it } from 'vitest';
 import { z, type ZodType } from 'zod';
 import {
   CLOUDFLARE_COMPUTER_VERSION,
+  COMPUTER_AI_TOOL_OPTIONS,
   COMPUTER_CONTAINER_SHELL_BACKEND,
   COMPUTER_DEFAULT_SHELL_BACKEND,
   COMPUTER_SHELL_BACKEND_IDS,
   COMPUTER_SHELL_TOOL_OPTIONS,
+  COMPUTER_TOOL_LIMITS,
   COMPUTER_TOOL_NAMES,
+  computerSyncUnconfirmedToolResult,
 } from './cloudflare-computer.js';
 import { COMPUTER_TOOL_INPUT_SCHEMAS } from './cloudflare-computer-inputs.js';
 
@@ -22,6 +25,18 @@ const EXPECTED_TOOL_SCHEMA = {
 } as const;
 
 describe('Cloudflare Computer preview contract', () => {
+  it('recognizes both thrown and official wrapped pending-sync failures', () => {
+    const message = '[workspace_sync_pending] Computer synchronization is pending.';
+    expect(computerSyncUnconfirmedToolResult(new Error(message))).toMatchObject({
+      status: 'pending',
+      acknowledgement: 'pending',
+    });
+    expect(computerSyncUnconfirmedToolResult({ error: message })).toMatchObject({
+      code: 'workspace_sync_pending',
+      error: message,
+    });
+    expect(computerSyncUnconfirmedToolResult({ error: 'ordinary failure' })).toBeNull();
+  });
   it('pins the reviewed preview package in dependency and release-age configuration', () => {
     const rootPackage = jsonFile<{ dependencies?: Record<string, string> }>('../package.json');
     const installedPackage = jsonFile<{ version?: string }>('../node_modules/@cloudflare/computer/package.json');
@@ -38,8 +53,7 @@ describe('Cloudflare Computer preview contract', () => {
   it('canaries the published AI SDK tool names and input schemas', () => {
     const tools = createAITools({
       workspace: workspaceStub(),
-      assets: false,
-      shell: COMPUTER_SHELL_TOOL_OPTIONS,
+      ...COMPUTER_AI_TOOL_OPTIONS,
     });
 
     expect(Object.keys(tools).sort()).toEqual([...COMPUTER_TOOL_NAMES].sort());
@@ -66,6 +80,16 @@ describe('Cloudflare Computer preview contract', () => {
   });
 
   it('keeps backend selection explicit and inspection-only mode non-executable', () => {
+    expect(COMPUTER_AI_TOOL_OPTIONS).toMatchObject({
+      assets: false,
+      read: {
+        maxBytes: COMPUTER_TOOL_LIMITS.readMaxBytes,
+        maxLines: COMPUTER_TOOL_LIMITS.readMaxLines,
+      },
+      write: { maxBytes: COMPUTER_TOOL_LIMITS.mutationMaxBytes },
+      edit: { maxBytes: COMPUTER_TOOL_LIMITS.mutationMaxBytes },
+      shell: { maxBytes: COMPUTER_TOOL_LIMITS.execMaxBytesPerStream },
+    });
     expect(COMPUTER_SHELL_TOOL_OPTIONS.defaultBackend).toBe(COMPUTER_DEFAULT_SHELL_BACKEND);
     expect(COMPUTER_CONTAINER_SHELL_BACKEND).not.toBe(COMPUTER_DEFAULT_SHELL_BACKEND);
     expect(Object.keys(COMPUTER_SHELL_TOOL_OPTIONS.backends)).toEqual(COMPUTER_SHELL_BACKEND_IDS);
@@ -83,21 +107,7 @@ describe('Cloudflare Computer preview contract', () => {
 });
 
 function workspaceStub(): CreateAIToolsOptions['workspace'] {
-  return {
-    fs: {
-      stat: async () => ({ size: 0, mtime: 0, mode: 0o100644, isFile: true, isDirectory: false }),
-      readFile: async () => new ReadableStream<Uint8Array>(),
-      writeFile: async () => undefined,
-      mkdir: async () => undefined,
-      rm: async () => undefined,
-      readdir: async () => [],
-    },
-    runtime: {
-      exec: async () => ({
-        result: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
-      }),
-    },
-  };
+  return {} as CreateAIToolsOptions['workspace'];
 }
 
 function requireTool(tool: Tool | undefined, name: string): Tool {

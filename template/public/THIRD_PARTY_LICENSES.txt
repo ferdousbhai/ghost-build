@@ -8,12 +8,12 @@ This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-08-02
 Production packages: 295
-Inventory SHA-256: 33f6c42a2f407c782155579ec2566f07a0d850b72f0ba9f8800f17e9ae7254e5
+Inventory SHA-256: 3c3196551c09b3d91c2cac93f20367390263e1d05471bf7f36be823f9b53598b
 
 PACKAGE INVENTORY
 =================
 
-@ai-sdk/gateway@3.0.153
+@ai-sdk/gateway@4.0.37
 Declared license: Apache-2.0
 Author: <not published>
 Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/gateway"}
@@ -22,16 +22,16 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529)
 
-@ai-sdk/gateway@3.0.156
+@ai-sdk/mcp@2.0.22
 Declared license: Apache-2.0
 Author: <not published>
-Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/gateway"}
+Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/mcp"}
 Homepage: https://ai-sdk.dev/docs
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529)
 
-@ai-sdk/provider@3.0.14
+@ai-sdk/provider@4.0.4
 Declared license: Apache-2.0
 Author: <not published>
 Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/provider"}
@@ -40,7 +40,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529)
 
-@ai-sdk/provider-utils@4.0.40
+@ai-sdk/provider-utils@5.0.18
 Declared license: Apache-2.0
 Author: <not published>
 Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/provider-utils"}
@@ -50,7 +50,7 @@ Published license/notice files:
 - src/to-json-schema/zod3-to-json-schema/LICENSE (SHA-256 6dd0d97acd4d13f4608a0f530f0487e0ff20812888bd1803aecfaaa17ff0f849)
 - src/to-json-schema/zod3-to-json-schema/README.md (SHA-256 5f123b645cb66faeec8c0ab6a252722372e58832d41449cd5ce50709203bdf89)
 
-@ai-sdk/react@3.0.232
+@ai-sdk/react@4.0.51
 Declared license: Apache-2.0
 Author: <not published>
 Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/react"}
@@ -659,15 +659,6 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 05affe7628defe07716fc2159a1f5e137b51381de0f33b5ae77f36108736a628)
 
-@opentelemetry/api@1.9.1
-Declared license: Apache-2.0
-Author: OpenTelemetry Authors
-Repository: open-telemetry/opentelemetry-js
-Homepage: https://github.com/open-telemetry/opentelemetry-js/tree/main/api
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4)
-
 @oxc-project/types@0.142.0
 Declared license: MIT
 Author: Boshen and oxc contributors
@@ -918,6 +909,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 b070d77bfb2c52a1dd6996de0ce5f64c49a0ca55c889b163a963ddf5cb001ee2)
 
+@workflow/serde@4.1.0
+Declared license: Apache-2.0
+Author: <not published>
+Repository: {"type":"git","url":"https://github.com/vercel/workflow.git","directory":"packages/serde"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE.md (SHA-256 39248a57eaac37e120c65bae851c6382bf722fc87c3452bf6a245caef96db739)
+
 accepts@2.0.0
 Declared license: MIT
 Author: <not published>
@@ -936,16 +936,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 b33ae783f02478cd31787cd07cbf61cd3a6fbee1a50b2baf832b8f0fb7c600f7)
 
-ai@6.0.230
-Declared license: Apache-2.0
-Author: <not published>
-Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/ai"}
-Homepage: https://ai-sdk.dev/docs
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529)
-
-ai@6.0.234
+ai@7.0.48
 Declared license: Apache-2.0
 Author: <not published>
 Repository: {"type":"git","url":"https://github.com/vercel/ai","directory":"packages/ai"}
@@ -2476,6 +2467,16 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 46231df5a7733c3f52f11b71f3df61813007745b62b09031acfb45fb42d75082)
 
+undici@7.29.0
+Declared license: MIT
+Author: <not published>
+Repository: {"type":"git","url":"git+https://github.com/nodejs/undici.git"}
+Homepage: https://undici.nodejs.org
+Package-level license evidence: published
+Published license/notice files:
+- lib/web/fetch/LICENSE (SHA-256 a21d6c8d3fc631198b97e57584697f7f9c37805c71c6cf9a12e4442b40394b88)
+- LICENSE (SHA-256 a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27)
+
 undici-types@8.3.0
 Declared license: MIT
 Author: <not published>
@@ -2566,7 +2567,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b)
 
-workers-ai-provider@3.3.1
+workers-ai-provider@4.0.0
 Declared license: MIT
 Author: <not published>
 Repository: {"type":"git","url":"git://github.com/cloudflare/ai.git"}
@@ -4081,6 +4082,16 @@ Used by:
 
    END OF TERMS AND CONDITIONS
 
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 39248a57eaac37e120c65bae851c6382bf722fc87c3452bf6a245caef96db739
+Used by:
+- @workflow/serde@4.1.0:LICENSE.md
+----- BEGIN VERBATIM CONTENT -----
+Apache License 2.0
+
+See the LICENSE file in the root of this repository.
 
 ----- END VERBATIM CONTENT -----
 
@@ -7173,7 +7184,7 @@ SOFTWARE.
 
 SHA-256 5514f48637fa1d8fed2256d12d322009a75962e6111370755fc5b20773db67ad
 Used by:
-- workers-ai-provider@3.3.1:LICENSE
+- workers-ai-provider@4.0.0:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 
@@ -7743,7 +7754,7 @@ defined by the Mozilla Public License, v. 2.0.
 
 SHA-256 5f123b645cb66faeec8c0ab6a252722372e58832d41449cd5ce50709203bdf89
 Used by:
-- @ai-sdk/provider-utils@4.0.40:src/to-json-schema/zod3-to-json-schema/README.md
+- @ai-sdk/provider-utils@5.0.18:src/to-json-schema/zod3-to-json-schema/README.md
 ----- BEGIN VERBATIM CONTENT -----
 # `zod-to-json-schema`
 
@@ -8001,7 +8012,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 SHA-256 6dd0d97acd4d13f4608a0f530f0487e0ff20812888bd1803aecfaaa17ff0f849
 Used by:
-- @ai-sdk/provider-utils@4.0.40:src/to-json-schema/zod3-to-json-schema/LICENSE
+- @ai-sdk/provider-utils@5.0.18:src/to-json-schema/zod3-to-json-schema/LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 ISC License
 
@@ -8842,6 +8853,34 @@ SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 a21d6c8d3fc631198b97e57584697f7f9c37805c71c6cf9a12e4442b40394b88
+Used by:
+- undici@7.29.0:lib/web/fetch/LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright (c) 2020 Ethan Arrowood
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7
 Used by:
 - @tanstack/history@1.162.0:LICENSE
@@ -8916,6 +8955,7 @@ SOFTWARE.
 SHA-256 a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27
 Used by:
 - undici-types@8.3.0:LICENSE
+- undici@7.29.0:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 
@@ -9714,12 +9754,11 @@ SOFTWARE.
 
 SHA-256 b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529
 Used by:
-- @ai-sdk/gateway@3.0.153:LICENSE
-- @ai-sdk/gateway@3.0.156:LICENSE
-- @ai-sdk/provider@3.0.14:LICENSE
-- @ai-sdk/react@3.0.232:LICENSE
-- ai@6.0.230:LICENSE
-- ai@6.0.234:LICENSE
+- @ai-sdk/gateway@4.0.37:LICENSE
+- @ai-sdk/mcp@2.0.22:LICENSE
+- @ai-sdk/provider@4.0.4:LICENSE
+- @ai-sdk/react@4.0.51:LICENSE
+- ai@7.0.48:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 Copyright 2023 Vercel, Inc.
 
@@ -10143,7 +10182,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 SHA-256 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
 Used by:
-- @opentelemetry/api@1.9.1:LICENSE
 - baseline-browser-mapping@2.10.43:LICENSE.txt
 - baseline-browser-mapping@2.11.9:LICENSE.txt
 ----- BEGIN VERBATIM CONTENT -----

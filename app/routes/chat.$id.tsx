@@ -1,10 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { ClientExistingChat, ClientHeader } from '~/components/ClientRouteComponents';
+import { createPrivatePageHead } from '~/lib/social-meta';
 
 export const Route = createFileRoute('/chat/$id')({
-  head: () => ({
-    meta: [{ title: 'Ghostbuild' }],
-  }),
+  head: () => createPrivatePageHead('Project | Ghostbuild', 'Open a private Ghostbuild project workspace.'),
   component: ChatRoute,
 });
 

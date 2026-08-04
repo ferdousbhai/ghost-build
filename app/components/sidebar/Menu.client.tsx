@@ -1,4 +1,4 @@
-import { motion, type Variants } from 'framer-motion';
+import { motion, MotionConfig, type Variants } from 'framer-motion';
 import { memo, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ConfirmationDialog } from '@ui/ConfirmationDialog';
@@ -119,7 +119,7 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
     return null;
   }
 
-  return (
+  const content = (
     <motion.aside
       id="project-sidebar"
       aria-label="Projects"
@@ -206,6 +206,7 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
       </div>
     </motion.aside>
   );
+  return <MotionConfig reducedMotion="user">{content}</MotionConfig>;
 });
 
 Menu.displayName = 'Menu';

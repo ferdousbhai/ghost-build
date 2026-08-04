@@ -52,11 +52,15 @@ export class ToolActivityStore {
 
 export function invocationStatus(invocation: GhostbuildToolInvocation): ToolActivityStatus {
   switch (invocation.state) {
-    case 'partial-call':
+    case 'input-streaming':
       return 'pending';
-    case 'call':
+    case 'input-available':
+    case 'approval-requested':
+    case 'approval-responded':
       return 'running';
-    case 'result':
+    case 'output-available':
+    case 'output-error':
+    case 'output-denied':
       return 'complete';
   }
   throw new Error(`Unsupported tool invocation state: ${String((invocation as { state?: unknown }).state)}`);

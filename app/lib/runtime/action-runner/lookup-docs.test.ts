@@ -4,12 +4,7 @@ import { runLookupDocs } from './lookup-docs';
 
 describe('lookupDocs', () => {
   it('returns the bundled guidance', async () => {
-    const result = await runLookupDocs({
-      state: 'call',
-      toolCallId: 'tool-1',
-      toolName: 'lookupDocs',
-      args: { docs: ['cloudflarePlatform'] },
-    });
+    const result = await runLookupDocs({ docs: ['cloudflarePlatform'] });
 
     expect(toolResultContent(result)).toContain('Official Cloudflare skill: cloudflare');
   });

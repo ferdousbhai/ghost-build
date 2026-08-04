@@ -1,9 +1,10 @@
-import { lazy, Suspense, useCallback, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { GhostbuildAuthProvider } from './chat/GhostbuildAuthWrapper';
 import { HomeIntro } from './chat/HomeIntro.client';
 import { Toaster } from '~/components/ui/Toaster';
 import { getPageLoadChatId, setPageLoadChatId } from '~/lib/stores/chatId';
 import { UserProvider } from '~/components/UserProvider';
+import { captureProductEvent } from '~/lib/telemetry.client';
 
 const HomepageChat = lazy(() => import('./HomepageChat.client').then((module) => ({ default: module.HomepageChat })));
 
@@ -23,6 +24,9 @@ export function Homepage() {
   const initialId = getOrCreateHomepageInitialId();
   const [initialPrompt, setInitialPrompt] = useState<string | null>(null);
   const initialPromptRef = useRef<string | null>(null);
+  useEffect(() => {
+    void captureProductEvent('landing_viewed');
+  }, []);
   const startChat = useCallback(async (prompt: string) => {
     if (initialPromptRef.current !== null) {
       return false;
@@ -45,7 +49,7 @@ export function Homepage() {
 
   return (
     <>
-      <GhostbuildAuthProvider redirectIfUnauthenticated={false}>
+      <GhostbuildAuthProvider>
         <UserProvider>
           {initialPrompt === null ? (
             homeIntro

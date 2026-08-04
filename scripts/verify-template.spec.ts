@@ -27,10 +27,19 @@ describe('standalone template verification source', () => {
     }
   });
 
-  test('preview compiles Tailwind locally without a runtime CDN dependency', () => {
-    const previewConfig = readFileSync('template/vite.preview.config.mjs', 'utf8');
+  test('uses only the canonical Cloudflare Vite plugin configuration for dev, build, and preview', () => {
+    const viteConfig = readFileSync('template/vite.config.ts', 'utf8');
+    const server = readFileSync('template/src/server.ts', 'utf8');
+    const pkg = JSON.parse(readFileSync('template/package.json', 'utf8')) as { scripts: Record<string, string> };
 
-    expect(previewConfig).not.toContain('cdn.tailwindcss.com');
-    expect(previewConfig).not.toContain('postcss: { plugins: [] }');
+    expect(server).toContain('handler.fetch(request)');
+    expect(server).toContain('routeAppAgentRequest');
+    expect(viteConfig).toContain('cloudflare({');
+    expect(viteConfig).toContain('tanstackStart()');
+    expect(pkg.scripts.dev).toBe('vite dev --host 0.0.0.0');
+    expect(pkg.scripts.preview).toBe('vite preview --host 0.0.0.0');
+    expect(existsSync('template/vite.preview.config.mjs')).toBe(false);
+    expect(existsSync('template/src/preview')).toBe(false);
+    expect(existsSync('template/index.html')).toBe(false);
   });
 });
