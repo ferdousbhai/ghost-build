@@ -88,7 +88,7 @@ function summarizeToolArgs(toolName: string, args: unknown) {
 
   const record = args as Record<string, unknown>;
   switch (toolName) {
-    case 'writeFile': {
+    case 'write': {
       const content = typeof record.content === 'string' ? record.content : '';
       return JSON.stringify({
         path: typeof record.path === 'string' ? record.path : undefined,
@@ -99,14 +99,14 @@ function summarizeToolArgs(toolName: string, args: unknown) {
       const edits = Array.isArray(record.edits) ? record.edits : [];
       return JSON.stringify({
         path: typeof record.path === 'string' ? record.path : undefined,
-        replacements: edits.length || (typeof record.old === 'string' && typeof record.new === 'string' ? 1 : 0),
+        replacements: edits.length,
       });
     }
-    case 'view':
+    case 'read':
       return JSON.stringify({
         path: typeof record.path === 'string' ? record.path : undefined,
-        viewRange: record.view_range,
-        cursor: record.cursor,
+        offset: record.offset,
+        limit: record.limit,
       });
     case 'deploy':
       return JSON.stringify({ validatedRevision: record.validatedRevision });

@@ -10,7 +10,7 @@ describe('ToolActivityStore', () => {
     store.record(partId, {
       state: 'call',
       toolCallId: 'tool-1',
-      toolName: 'writeFile',
+      toolName: 'write',
       args: { path: 'src/index.ts' },
     });
     expect(store.activities.get()[partId]?.status).toBe('running');
@@ -18,7 +18,7 @@ describe('ToolActivityStore', () => {
     store.record(partId, {
       state: 'result',
       toolCallId: 'tool-1',
-      toolName: 'writeFile',
+      toolName: 'write',
       args: { path: 'src/index.ts' },
       result: { ok: true },
     });

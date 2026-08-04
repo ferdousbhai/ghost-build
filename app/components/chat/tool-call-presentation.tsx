@@ -7,15 +7,10 @@ import type { ToolActivityStatus } from '~/lib/common/types';
 import { classNames } from '~/utils/classNames';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { deployToolInputParameters } from 'ghostbuild-agent/tools/deploy';
-import { editToolParameters } from 'ghostbuild-agent/tools/edit';
 import { lookupDocsParameters } from 'ghostbuild-agent/tools/lookupDocs';
 import { npmInstallToolParameters } from 'ghostbuild-agent/tools/npmInstall';
-import { viewToolInputParameters } from 'ghostbuild-agent/tools/view';
-import { writeFileParameters } from 'ghostbuild-agent/tools/writeFile';
 import { getRelativePath } from 'ghostbuild-agent/utils/workDir';
 import { loggingSafeParse } from 'ghostbuild-agent/utils/zodUtil';
-import { listFilesParameters } from 'ghostbuild-agent/tools/listFiles';
-import { searchTextParameters } from 'ghostbuild-agent/tools/searchText';
 import { validateProjectParameters } from 'ghostbuild-agent/tools/validateProject';
 import type { GhostbuildToolName } from 'ghostbuild-agent/types';
 import {
@@ -24,6 +19,19 @@ import {
   toolResultSucceeded,
   toolResultSummary,
 } from 'ghostbuild-agent/tool-result';
+import { z } from 'zod';
+
+const pathSchema = z.object({ path: z.string() });
+const readSchema = pathSchema.extend({ offset: z.number().optional(), limit: z.number().optional() });
+const writeSchema = pathSchema.extend({ content: z.string() });
+const editSchema = pathSchema.extend({
+  edits: z.array(z.object({ oldText: z.string(), newText: z.string() })),
+});
+const execSchema = z.object({
+  command: z.string(),
+  cwd: z.string().optional(),
+  backend: z.enum(['worker-shell', 'container-shell']).optional(),
+});
 
 const ghostbuildIcon = (
   <span aria-hidden className="mr-1 text-base leading-none">
@@ -42,14 +50,14 @@ const emptyInvocation: GhostbuildToolInvocation = {
 
 const TOOL_INPUT_SCHEMAS: Record<GhostbuildToolName, ZodType> = {
   deploy: deployToolInputParameters,
-  edit: editToolParameters,
-  listFiles: listFilesParameters,
+  edit: editSchema,
+  exec: execSchema,
+  ls: pathSchema,
   lookupDocs: lookupDocsParameters,
   npmInstall: npmInstallToolParameters,
-  searchText: searchTextParameters,
+  read: readSchema,
   validateProject: validateProjectParameters,
-  view: viewToolInputParameters,
-  writeFile: writeFileParameters,
+  write: writeSchema,
 };
 
 export function normalizeToolInvocation(invocation: GhostbuildToolInvocation | undefined): GhostbuildToolInvocation {
@@ -87,35 +95,32 @@ export function statusIcon(status: ToolActivityStatus, invocation: GhostbuildToo
 export function toolTitle(invocation: GhostbuildToolInvocation): ReactNode {
   const resultText = toolResultSummary(invocation.result);
   switch (invocation.toolName) {
-    case 'view':
-      return viewTitle(invocation);
+    case 'read':
+      return readTitle(invocation);
     case 'npmInstall':
       return packageTitle(invocation);
     case 'deploy':
       return deployTitle(invocation, resultText);
     case 'edit':
       return editTitle(invocation);
-    case 'writeFile':
-      return writeFileTitle(invocation);
+    case 'write':
+      return writeTitle(invocation);
     case 'lookupDocs': {
       const args = loggingSafeParse(lookupDocsParameters, invocation.args);
       return args.success
         ? titleRow(`Looked up documentation for: ${args.data.docs.join(', ')}`, <FileIcon />)
         : 'Looking up documentation...';
     }
-    case 'listFiles': {
-      const args = loggingSafeParse(listFilesParameters, invocation.args);
+    case 'ls': {
+      const args = loggingSafeParse(pathSchema, invocation.args);
       return titleRow(
-        `Listed ${args.success ? getRelativePath(args.data.path ?? '/home/project') || '/home/project' : 'project files'}`,
+        `Listed ${args.success ? getRelativePath(args.data.path) || '/home/project' : 'project files'}`,
         <FolderIcon className="size-4" />,
       );
     }
-    case 'searchText': {
-      const args = loggingSafeParse(searchTextParameters, invocation.args);
-      return titleRow(
-        args.success ? `Searched for ${JSON.stringify(args.data.query)}` : 'Searched project text',
-        <FileIcon />,
-      );
+    case 'exec': {
+      const args = loggingSafeParse(execSchema, invocation.args);
+      return titleRow(args.success ? `Ran ${args.data.command}` : 'Ran a workspace command', <FileIcon />);
     }
     case 'validateProject':
       return titleRow(
@@ -157,11 +162,10 @@ function titleRow(children: ReactNode, iconContent?: ReactNode): ReactNode {
   );
 }
 
-function viewTitle(invocation: GhostbuildToolInvocation): ReactNode {
-  const args = loggingSafeParse(viewToolInputParameters, invocation.args);
+function readTitle(invocation: GhostbuildToolInvocation): ReactNode {
+  const args = loggingSafeParse(readSchema, invocation.args);
   const renderedPath = args.success ? getRelativePath(args.data.path) || '/home/project' : 'a file';
-  const range = args.success ? args.data.view_range : undefined;
-  const extra = range ? ` (lines ${range[0]} - ${range[1] === -1 ? 'end' : range[1]})` : '';
+  const extra = args.success && args.data.offset ? ` (from line ${args.data.offset})` : '';
   return titleRow(
     `Read ${renderedPath}${extra}`,
     <div className="text-content-secondary">
@@ -210,18 +214,18 @@ function deployTitle(invocation: GhostbuildToolInvocation, resultText: string): 
 }
 
 function editTitle(invocation: GhostbuildToolInvocation): ReactNode {
-  const args = loggingSafeParse(editToolParameters, invocation.args);
+  const args = loggingSafeParse(editSchema, invocation.args);
   return titleRow(
     `Edited ${args.success ? getRelativePath(args.data.path) || args.data.path : 'a file'}`,
     <Pencil1Icon className="text-content-secondary" />,
   );
 }
 
-function writeFileTitle(invocation: GhostbuildToolInvocation): ReactNode {
+function writeTitle(invocation: GhostbuildToolInvocation): ReactNode {
   if (isToolInvocationInProgress(invocation)) {
     return titleRow('Writing a file...', <FileIcon className="text-content-secondary" />);
   }
-  const args = writeFileParameters.safeParse(invocation.args);
+  const args = writeSchema.safeParse(invocation.args);
   return titleRow(
     `Wrote ${args.success ? getRelativePath(args.data.path) || args.data.path : 'a file'}`,
     <FileIcon className="text-content-secondary" />,

@@ -96,6 +96,7 @@ const requiredMigrationTables = [
   'cloudflare_credentials',
   'cloudflare_connections',
   'user_workspace_runtimes',
+  'user_computer_runtimes',
 ];
 const forbiddenCentralWorkloadTables = [
   'chats',
@@ -283,12 +284,16 @@ function verifyWorkspace(errors) {
       errors.push(`pnpm-workspace.yaml must include ${packagePath}.`);
     }
   }
-  const blockedWASQLite = /^  '@journeyapps\/wa-sqlite': false$/gm;
-  const blockedWASQLiteEntries = workspace.match(blockedWASQLite) ?? [];
+  const blockedOptionalBuilds = /^  (?:'@journeyapps\/wa-sqlite'|'@mongodb-js\/zstd'|node-liblzma): false$/gm;
+  const blockedWASQLiteEntries = workspace.match(/^  '@journeyapps\/wa-sqlite': false$/gm) ?? [];
   if (blockedWASQLiteEntries.length !== 1) {
     errors.push("pnpm-workspace.yaml must explicitly block '@journeyapps/wa-sqlite' exactly once.");
   }
-  errors.push(...findBuildApprovalErrors(workspace.replace(blockedWASQLite, ''), 'pnpm-workspace.yaml'));
+  const blockedComputerBuildEntries = workspace.match(/^  (?:'@mongodb-js\/zstd'|node-liblzma): false$/gm) ?? [];
+  if (blockedComputerBuildEntries.length !== 2) {
+    errors.push('pnpm-workspace.yaml must explicitly block both optional Computer native compression builds.');
+  }
+  errors.push(...findBuildApprovalErrors(workspace.replace(blockedOptionalBuilds, ''), 'pnpm-workspace.yaml'));
   if (/set this to true or false/i.test(workspace)) {
     errors.push('pnpm-workspace.yaml must not contain unresolved build-approval placeholders.');
   }

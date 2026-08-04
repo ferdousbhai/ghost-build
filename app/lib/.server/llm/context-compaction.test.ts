@@ -133,7 +133,7 @@ describe('Cloudflare-native context compaction', () => {
     ).toBe(true);
   });
 
-  test('normalizes legacy tool results for Cloudflare token accounting', () => {
+  test('normalizes tool results for Cloudflare token accounting', () => {
     const messages: GhostbuildMessage[] = [
       {
         id: 'tool-1',
@@ -144,7 +144,7 @@ describe('Cloudflare-native context compaction', () => {
             toolInvocation: {
               state: 'result',
               toolCallId: 'call-1',
-              toolName: 'view',
+              toolName: 'read',
               args: { path: '/src/app.ts' },
               result: 'z'.repeat(4_000),
             },
@@ -157,7 +157,7 @@ describe('Cloudflare-native context compaction', () => {
     expect(normalized[0].parts[0]).toMatchObject({
       type: 'dynamic-tool',
       toolCallId: 'call-1',
-      toolName: 'view',
+      toolName: 'read',
       output: expect.any(String),
     });
   });

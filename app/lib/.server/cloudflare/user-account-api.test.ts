@@ -281,7 +281,7 @@ describe('UserCloudflareAccountApi', () => {
     expect(request).toHaveBeenCalledOnce();
   });
 
-  test('deploys only the runtime data and backup bindings into the user account', async () => {
+  test('deploys the Computer workspace and execution bindings into the user account', async () => {
     const request = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ success: true, result: { version_id: 'version-1' } }))
@@ -291,7 +291,7 @@ describe('UserCloudflareAccountApi', () => {
           result: [
             {
               id: '0123456789abcdef0123456789abcdef',
-              class: 'WorkspaceSandbox',
+              class: 'ProjectWorkspace',
               script: 'ghostbuild-workspace-user',
               use_sqlite: true,
             },
@@ -304,10 +304,7 @@ describe('UserCloudflareAccountApi', () => {
       api.deployWorkspaceRuntimeWorker({
         workerName: 'ghostbuild-workspace-user',
         source: 'export default { fetch() { return new Response() } }',
-        bucketName: 'ghostbuild-workspaces-user',
         controlPlaneSecret: 'control-plane-secret-that-is-long-enough',
-        r2AccessKeyId: 'user-r2-access-key',
-        r2SecretAccessKey: 'user-r2-secret-access-key-that-is-long-enough',
         runtimeVersion: 'a'.repeat(64),
         databaseId: '0123456789abcdef0123456789abcdef',
         apiToken: 'user-token',
@@ -331,29 +328,24 @@ describe('UserCloudflareAccountApi', () => {
     expect(metadataPart).toBeInstanceOf(Blob);
     const metadata = JSON.parse(await (metadataPart as Blob).text()) as {
       bindings: Array<Record<string, string>>;
+      compatibility_flags: string[];
       containers: Array<{ class_name: string }>;
       exports: Record<string, unknown>;
     };
-    expect(metadata.containers).toEqual([{ class_name: 'WorkspaceSandbox' }]);
+    expect(metadata.compatibility_flags).toEqual(expect.arrayContaining(['nodejs_compat', 'experimental']));
+    expect(metadata.containers).toEqual([{ class_name: 'ProjectWorkspace' }]);
     expect(metadata.bindings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          type: 'r2_bucket',
-          name: 'BACKUP_BUCKET',
-          bucket_name: 'ghostbuild-workspaces-user',
+          type: 'durable_object_namespace',
+          name: 'PROJECT_WORKSPACE',
+          class_name: 'ProjectWorkspace',
         }),
-        expect.objectContaining({ type: 'secret_text', name: 'R2_ACCESS_KEY_ID', text: 'user-r2-access-key' }),
-        expect.objectContaining({
-          type: 'secret_text',
-          name: 'R2_SECRET_ACCESS_KEY',
-          text: 'user-r2-secret-access-key-that-is-long-enough',
-        }),
+        expect.objectContaining({ type: 'worker_loader', name: 'LOADER' }),
       ]),
     );
-    expect(metadata.bindings).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ type: 'r2_bucket', name: 'APP_STORAGE' })]),
-    );
-    expect(metadata.exports).toHaveProperty('WorkspaceSandbox');
+    expect(metadata.bindings).not.toEqual(expect.arrayContaining([expect.objectContaining({ type: 'r2_bucket' })]));
+    expect(metadata.exports).toHaveProperty('ProjectWorkspace');
   });
 
   test('creates the Sandbox container application in the user account', async () => {

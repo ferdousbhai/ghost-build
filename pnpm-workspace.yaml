@@ -4,6 +4,9 @@ packages:
 ignoreWorkspaceRootCheck: true
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
+  # Reviewed preview dependency. Ghostbuild intentionally adopts this exact
+  # release before the normal age gate as part of the Computer runtime cutover.
+  - '@cloudflare/computer@0.1.1'
   # Reviewed, exact-version Ghostkit releases pinned by lockfile integrity.
   - '@summonghost/compaction@0.1.2'
   - '@summonghost/title-generation@0.1.0'
@@ -25,8 +28,12 @@ allowBuilds:
   # The OPFS adapter uses wa-sqlite's published dist artifacts. Its postinstall
   # only downloads the unrelated optional PowerSync core.
   '@journeyapps/wa-sqlite': false
+  # Computer's shell emulation treats these native compression bindings as
+  # optional. Keep their install scripts disabled in the Worker build.
+  '@mongodb-js/zstd': false
   core-js-pure: true
   esbuild: true
+  node-liblzma: false
   sharp: true
   workerd: true
 peerDependencyRules:

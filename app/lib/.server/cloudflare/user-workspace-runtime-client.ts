@@ -1,5 +1,4 @@
 import type { GhostbuildToolResult } from 'ghostbuild-agent/tool-result';
-import { BuilderWorkspaceConflictError } from '~/agents/builder-workspace';
 import type {
   BuilderWorkspaceApi,
   BuilderWorkspaceCheckpoint,
@@ -13,7 +12,9 @@ import type {
 } from '~/agents/builder-workspace-types';
 
 const MAX_RESPONSE_BYTES = 36 * 1024 * 1024;
-const MAX_TOOL_RESULT_BYTES = 256 * 1024;
+// Computer's read tool can return 256 KiB of file content plus structured
+// metadata. Leave enough room to durably cache the complete official result.
+const MAX_TOOL_RESULT_BYTES = 512 * 1024;
 
 type ToolResultRow = {
   tool_name: string;
@@ -27,6 +28,58 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
   #files: BuilderWorkspaceFileMetadata[] = [];
   #endpoint: string | null = null;
   #secret: string | null = null;
+
+  readonly computer: BuilderWorkspaceApi['computer'] = {
+    fs: {
+      stat: async (path) => {
+        const file = this.#files.find((candidate) => candidate.path === path);
+        if (!file) {
+          const error = new Error(`ENOENT: no such file: ${path}`) as Error & { code: string };
+          error.code = 'ENOENT';
+          throw error;
+        }
+        return {
+          size: file.size,
+          mtime: file.revision,
+          mode: file.mode,
+          isFile: true,
+          isDirectory: false,
+        };
+      },
+      readFile: (path) => this.#readStream(path),
+      writeFile: async (path, content, options) => {
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(content);
+        const result = await this.applyClientChanges({
+          baseRevision: this.getState().revision,
+          changes: [{ kind: 'write', path, content: text, mode: options?.mode }],
+        });
+        if (!result.ok) {
+          throw new Error('The project changed while the file was being written. Retry the operation.');
+        }
+      },
+      mkdir: async (path) => {
+        await this.#post('mkdir', { path });
+        // Creating a previously missing parent advances the Computer VFS
+        // revision. Refresh before the following write performs its CAS.
+        await this.refresh();
+      },
+      rm: async (path) => {
+        const result = await this.applyClientChanges({
+          baseRevision: this.getState().revision,
+          changes: [{ kind: 'delete', path }],
+        });
+        if (!result.ok) {
+          throw new Error('The project changed while the path was being removed. Retry the operation.');
+        }
+      },
+      readdir: (path) => this.#post('directory', { path }),
+    },
+    runtime: {
+      exec: async (command, options) => ({
+        result: () => this.#post('exec', { command, cwd: options.cwd, backend: options.backend }),
+      }),
+    },
+  };
 
   constructor(
     private readonly env: Env,
@@ -126,34 +179,6 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     } finally {
       this.#inFlight.delete(toolCallId);
     }
-  }
-
-  async commitTextTool<T>(args: {
-    toolCallId: unknown;
-    toolName: 'edit' | 'writeFile';
-    toolArgs: unknown;
-    path: unknown;
-    content: string;
-    expectedFileSha256?: string | null;
-    result: (context: { path: string; bytes: number; changed: boolean; workspaceRevision: number }) => T;
-  }): Promise<T> {
-    return this.executeToolOnce(args.toolCallId, args.toolName, args.toolArgs, async () => {
-      const starting = this.getState();
-      const existing = this.#files.find((file) => file.path === args.path);
-      if (args.expectedFileSha256 !== undefined && (existing?.sha256 ?? null) !== args.expectedFileSha256) {
-        throw new BuilderWorkspaceConflictError(starting);
-      }
-      const bytes = new TextEncoder().encode(args.content).byteLength;
-      const result = await this.applyClientChanges({
-        baseRevision: starting.revision,
-        changes: [{ kind: 'write', path: args.path, content: args.content }],
-      });
-      if (!result.ok) {
-        throw new BuilderWorkspaceConflictError(result.state);
-      }
-      const changed = result.changedPaths.length > 0;
-      return args.result({ path: String(args.path), bytes, changed, workspaceRevision: result.state.revision });
-    });
   }
 
   installDependencies(args: {
@@ -261,6 +286,25 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       throw new Error(payload?.error || `User-owned workspace operation failed (${response.status}).`);
     }
     return payload as T;
+  }
+
+  async #readStream(path: string): Promise<ReadableStream<Uint8Array>> {
+    await this.#resolveRuntime();
+    const url = `${this.#endpoint}/v1/projects/${encodeURIComponent(this.projectId)}/read-file-stream`;
+    const response = await this.request(url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${this.#secret}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ path }),
+      signal: AbortSignal.timeout(5 * 60_000),
+    });
+    if (!response.ok || !response.body) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(payload?.error || `User-owned workspace file read failed (${response.status}).`);
+    }
+    return response.body;
   }
 
   async #resolveRuntime(): Promise<void> {

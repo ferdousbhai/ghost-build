@@ -1,14 +1,10 @@
 import { lazy, memo, Suspense } from 'react';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
-import { editToolParameters } from 'ghostbuild-agent/tools/edit';
-import { writeFileParameters } from 'ghostbuild-agent/tools/writeFile';
-import { loggingSafeParse } from 'ghostbuild-agent/utils/zodUtil';
 import { DeploymentApproval } from './DeploymentApproval.client';
 import { parsePendingDeploymentApproval } from '~/lib/deployment-approval';
 import { isGhostbuildToolResult, toolResultSummary } from 'ghostbuild-agent/tool-result';
 import { ToolResultFrame } from './ToolResultFrame';
 
-const ToolViewResult = lazy(() => import('./ToolViewResult').then((module) => ({ default: module.ToolViewResult })));
 const ToolLookupDocsResult = lazy(() =>
   import('./ToolLookupDocsResult').then((module) => ({ default: module.ToolLookupDocsResult })),
 );
@@ -24,19 +20,13 @@ export const ToolUseContents = memo(function ToolUseContents({ invocation }: { i
       );
     case 'npmInstall':
     case 'validateProject':
-    case 'listFiles':
-    case 'searchText':
+    case 'ls':
+    case 'exec':
+    case 'read':
       return <StructuredResultTool invocation={invocation} />;
-    case 'view':
-      return (
-        <Suspense fallback={null}>
-          <ToolViewResult invocation={invocation} />
-        </Suspense>
-      );
     case 'edit':
-      return <EditTool invocation={invocation} />;
-    case 'writeFile':
-      return <WriteFileTool invocation={invocation} />;
+    case 'write':
+      return <StructuredResultTool invocation={invocation} />;
     case 'lookupDocs':
       return (
         <Suspense fallback={null}>
@@ -51,40 +41,6 @@ export const ToolUseContents = memo(function ToolUseContents({ invocation }: { i
 function DeploymentApprovalForResult({ result }: { result: unknown }) {
   const deployment = parsePendingDeploymentApproval(result);
   return deployment ? <DeploymentApproval deployment={deployment} /> : null;
-}
-
-function EditTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
-  if (invocation.toolName !== 'edit' || invocation.state === 'partial-call') {
-    return null;
-  }
-  const args = loggingSafeParse(editToolParameters, invocation.args);
-  if (!args.success) {
-    return null;
-  }
-  return (
-    <ToolResultFrame>
-      <div className="space-y-2 overflow-x-auto">
-        {args.data.edits.map((edit, index) => (
-          <div key={index} className="space-y-2">
-            <pre className="text-bolt-elements-icon-error">{edit.old}</pre>
-            <pre className="text-bolt-elements-icon-success">{edit.new}</pre>
-          </div>
-        ))}
-      </div>
-    </ToolResultFrame>
-  );
-}
-
-function WriteFileTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
-  if (invocation.toolName !== 'writeFile' || invocation.state === 'partial-call') {
-    return null;
-  }
-  const args = loggingSafeParse(writeFileParameters, invocation.args);
-  return args.success ? (
-    <ToolResultFrame>
-      <pre>{args.data.content}</pre>
-    </ToolResultFrame>
-  ) : null;
 }
 
 function StructuredResultTool({ invocation }: { invocation: GhostbuildToolInvocation }) {

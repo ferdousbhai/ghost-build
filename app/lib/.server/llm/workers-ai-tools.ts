@@ -1,19 +1,14 @@
 import { getToolInvocation, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { deployTool } from 'ghostbuild-agent/tools/deploy';
-import { editTool } from 'ghostbuild-agent/tools/edit';
 import { lookupDocsTool } from 'ghostbuild-agent/tools/lookupDocs';
 import { npmInstallTool } from 'ghostbuild-agent/tools/npmInstall';
-import { viewTool } from 'ghostbuild-agent/tools/view';
-import { writeFileTool } from 'ghostbuild-agent/tools/writeFile';
-import { listFilesTool } from 'ghostbuild-agent/tools/listFiles';
-import { searchTextTool } from 'ghostbuild-agent/tools/searchText';
 import { validateProjectTool } from 'ghostbuild-agent/tools/validateProject';
+import { createAITools } from '@cloudflare/computer/tools';
 import type { GhostbuildToolName, GhostbuildToolSet } from 'ghostbuild-agent/types';
 import { z, type ZodType } from 'zod';
 import { isGhostbuildToolResult, toolFailure, toolResultSucceeded } from 'ghostbuild-agent/tool-result';
 import type { Tool } from 'ai';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
-import { executeBuilderWorkspaceTool } from '~/agents/builder-workspace-tools';
 import type { ServerWorkspaceToolName } from '~/agents/builder-workspace-types';
 import type { ServerOperationToolName } from '~/agents/builder-workspace-types';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
@@ -52,11 +47,11 @@ type BuildLifecycle =
   | { stage: 'deployment-ready'; production: boolean };
 
 const AUTOMATIC_TOOLS: GhostbuildToolName[] = [
-  'view',
-  'listFiles',
-  'searchText',
+  'read',
+  'ls',
   'edit',
-  'writeFile',
+  'write',
+  'exec',
   'lookupDocs',
   'npmInstall',
   'validateProject',
@@ -69,19 +64,39 @@ export function createWorkersAiTools(
 ): GhostbuildToolSet {
   const guardToolCall = createTurnToolCallGuard();
   const coordinateStatefulTool = createTurnStatefulToolCoordinator();
+  const computerTools = createAITools({
+    workspace: workspace.computer,
+    shell: {
+      backends: {
+        'worker-shell': {
+          description: 'Fast isolated shell for common text, file, and JavaScript commands.',
+        },
+        'container-shell': {
+          description: 'Full Linux environment with Node.js, pnpm, git, Wrangler, network access, and build tools.',
+        },
+      },
+      defaultBackend: 'worker-shell',
+    },
+  });
   const tools: GhostbuildToolSet = {
     deploy: deployTool,
-    edit: editTool,
-    listFiles: listFilesTool,
+    edit: computerTools.edit!,
+    exec: computerTools.exec!,
+    ls: computerTools.ls!,
     lookupDocs: lookupDocsTool(),
     npmInstall: npmInstallTool,
-    searchText: searchTextTool,
+    read: computerTools.read!,
     validateProject: validateProjectTool,
-    view: viewTool,
-    writeFile: writeFileTool,
+    write: computerTools.write!,
   };
-  for (const toolName of ['view', 'listFiles', 'searchText', 'edit', 'writeFile'] as const) {
-    tools[toolName] = serverWorkspaceTool(toolName, tools[toolName], workspace, guardToolCall, coordinateStatefulTool);
+  for (const toolName of ['read', 'ls', 'write', 'edit', 'exec'] as const) {
+    tools[toolName] = computerWorkspaceTool(
+      toolName,
+      tools[toolName],
+      workspace,
+      guardToolCall,
+      coordinateStatefulTool,
+    );
   }
   for (const toolName of ['lookupDocs', 'npmInstall', 'validateProject', 'deploy'] as const) {
     tools[toolName] = serverOperationTool(
@@ -135,7 +150,7 @@ function serverOperationTool(
   };
 }
 
-function serverWorkspaceTool(
+function computerWorkspaceTool(
   toolName: ServerWorkspaceToolName,
   definition: Tool,
   workspace: BuilderWorkspaceApi,
@@ -151,13 +166,24 @@ function serverWorkspaceTool(
           return toolFailure(duplicate);
         }
         try {
-          return await executeBuilderWorkspaceTool({
-            workspace,
-            toolCallId: options.toolCallId,
-            toolName,
-            input,
-            abortSignal: options.abortSignal,
+          if (!definition.execute) {
+            throw new Error(`${toolName} is not executable.`);
+          }
+          const result = await workspace.executeToolOnce(options.toolCallId, toolName, input, async () => {
+            const revisionBefore = workspace.getState().revision;
+            const officialResult = await definition.execute!(input, options);
+            if (toolName !== 'exec') {
+              return officialResult;
+            }
+            await workspace.refresh();
+            return isRecord(officialResult)
+              ? { ...officialResult, workspaceChanged: workspace.getState().revision !== revisionBefore }
+              : officialResult;
           });
+          if (toolName === 'write' || toolName === 'edit') {
+            await workspace.refresh();
+          }
+          return result;
         } catch (error) {
           options.abortSignal?.throwIfAborted();
           const message = error instanceof Error ? error.message : String(error);
@@ -205,7 +231,8 @@ export function createTurnStatefulToolCoordinator(): TurnStatefulToolCoordinator
 function isStatefulTool(toolName: GhostbuildToolName): boolean {
   return (
     toolName === 'edit' ||
-    toolName === 'writeFile' ||
+    toolName === 'write' ||
+    toolName === 'exec' ||
     toolName === 'npmInstall' ||
     toolName === 'validateProject' ||
     toolName === 'deploy'
@@ -431,7 +458,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isImplementationMutationResult(result: { toolName: string; result?: unknown }): boolean {
-  return (result.toolName === 'writeFile' || result.toolName === 'edit') && toolResultSucceeded(result.result);
+  if (!isRecord(result.result) || typeof result.result.error === 'string') {
+    return false;
+  }
+  return (
+    (result.toolName === 'write' && typeof result.result.bytesWritten === 'number') ||
+    (result.toolName === 'edit' && typeof result.result.editsApplied === 'number') ||
+    (result.toolName === 'exec' && result.result.exitCode === 0 && result.result.workspaceChanged === true)
+  );
 }
 
 function isDependencyMutationResult(result: { toolName: string; result?: unknown }): boolean {

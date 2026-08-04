@@ -1,4 +1,5 @@
 import type { GhostbuildToolResult } from 'ghostbuild-agent/tool-result';
+import type { CreateAIToolsOptions } from '@cloudflare/computer/tools';
 import type { DeploymentProjectProfile } from '~/lib/.server/cloudflare/deployment-project-profile';
 import type { BuilderPreviewSuccess } from './builder-preview-types';
 import type {
@@ -12,6 +13,7 @@ export type BuilderWorkspaceFileMetadata = {
   path: string;
   encoding: 'utf8' | 'base64';
   size: number;
+  mode: number;
   sha256: string;
   revision: number;
 };
@@ -24,10 +26,11 @@ export type BuilderWorkspaceCheckpoint = {
 /**
  * Project workspace operations available to the Ghostbuild control plane.
  *
- * Deliberately excludes DirectoryBackup and raw archive access. Those values
- * never cross out of the user's Cloudflare account.
+ * The Cloudflare Computer VFS remains the sole source of truth. This facade
+ * exposes product operations without exposing the underlying DO storage.
  */
 export interface BuilderWorkspaceApi {
+  readonly computer: CreateAIToolsOptions['workspace'];
   refresh(): Promise<BuilderWorkspaceState>;
   getState(): BuilderWorkspaceState;
   beginSeed(seedId: unknown): Promise<BuilderWorkspaceSeedStartResult>;
@@ -49,21 +52,13 @@ export interface BuilderWorkspaceApi {
     bytes: Uint8Array;
     encoding: 'utf8' | 'base64';
     size: number;
+    mode: number;
     sha256: string;
     revision: number;
   }>;
   listFiles(): BuilderWorkspaceFileMetadata[];
   checkpoint(): Promise<BuilderWorkspaceCheckpoint>;
   executeToolOnce<T>(toolCallId: unknown, toolName: string, args: unknown, execute: () => Promise<T>): Promise<T>;
-  commitTextTool<T>(args: {
-    toolCallId: unknown;
-    toolName: 'edit' | 'writeFile';
-    toolArgs: unknown;
-    path: unknown;
-    content: string;
-    expectedFileSha256?: string | null;
-    result: (context: { path: string; bytes: number; changed: boolean; workspaceRevision: number }) => T;
-  }): Promise<T>;
   installDependencies(args: {
     toolCallId: string;
     input: unknown;

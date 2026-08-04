@@ -246,6 +246,7 @@ ENV PATH="/opt/ghostbuild-tools/node_modules/.bin:\${PATH}"
       'cloudflare_credentials',
       'cloudflare_connections',
       'user_workspace_runtimes',
+      'user_computer_runtimes',
     ]
       .map((table) => `CREATE TABLE IF NOT EXISTS ${table} (id TEXT);`)
       .join('\n');

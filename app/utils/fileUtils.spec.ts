@@ -22,7 +22,7 @@ export const value = 1;`,
     expect(result.length).toBeLessThanOrEqual(300);
     expect(result).toMatch(/^User-modified workspace files:/);
     expect(result).toContain('src/large.ts');
-    expect(result).toContain('use view to inspect');
+    expect(result).toContain('use read to inspect');
   });
 
   it('quotes unusual file paths without legacy artifact markup', () => {

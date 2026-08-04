@@ -187,10 +187,7 @@ export class UserCloudflareAccountApi {
   async deployWorkspaceRuntimeWorker(args: {
     workerName: string;
     source: string;
-    bucketName: string;
     controlPlaneSecret: string;
-    r2AccessKeyId: string;
-    r2SecretAccessKey: string;
     runtimeVersion: string;
     databaseId: string;
     apiToken: string;
@@ -200,29 +197,25 @@ export class UserCloudflareAccountApi {
     endpoint: string;
   }): Promise<{ workerVersionId: string; namespaceId: string }> {
     requireWorkerName(args.workerName);
-    requireR2BucketName(args.bucketName);
     if (!/^[a-f0-9]{64}$/.test(args.runtimeVersion) || args.controlPlaneSecret.length < 32) {
       throw new CloudflareAccountApiError('The workspace runtime identity is invalid.');
     }
-    if (!args.r2AccessKeyId || !args.r2SecretAccessKey || !args.apiToken || !args.userId) {
-      throw new CloudflareAccountApiError('R2 backup credentials are required.');
+    if (!args.apiToken || !args.userId) {
+      throw new CloudflareAccountApiError('Workspace runtime credentials are required.');
     }
     const metadata = {
       main_module: 'workspace-runtime.mjs',
       compatibility_date: '2026-07-27',
-      compatibility_flags: ['nodejs_compat'],
-      containers: [{ class_name: 'WorkspaceSandbox' }],
+      compatibility_flags: ['nodejs_compat', 'experimental'],
+      containers: [{ class_name: 'ProjectWorkspace' }],
       bindings: [
-        { type: 'durable_object_namespace', name: 'WORKSPACE_SANDBOX', class_name: 'WorkspaceSandbox' },
+        { type: 'durable_object_namespace', name: 'PROJECT_WORKSPACE', class_name: 'ProjectWorkspace' },
         { type: 'durable_object_namespace', name: 'BuilderAgent', class_name: 'BuilderAgent' },
         { type: 'd1', name: 'DB', id: args.databaseId },
         { type: 'ai', name: 'AI' },
-        { type: 'r2_bucket', name: 'BACKUP_BUCKET', bucket_name: args.bucketName },
+        { type: 'worker_loader', name: 'LOADER' },
         { type: 'secret_text', name: 'CONTROL_PLANE_SECRET', text: args.controlPlaneSecret },
         { type: 'secret_text', name: 'CLOUDFLARE_API_TOKEN', text: args.apiToken },
-        { type: 'secret_text', name: 'R2_ACCESS_KEY_ID', text: args.r2AccessKeyId },
-        { type: 'secret_text', name: 'R2_SECRET_ACCESS_KEY', text: args.r2SecretAccessKey },
-        { type: 'plain_text', name: 'BACKUP_BUCKET_NAME', text: args.bucketName },
         { type: 'plain_text', name: 'CLOUDFLARE_ACCOUNT_ID', text: this.accountId },
         { type: 'plain_text', name: 'GHOSTBUILD_USER_ID', text: args.userId },
         { type: 'plain_text', name: 'GHOSTBUILD_CONNECTION_ID', text: args.connectionId },
@@ -236,10 +229,10 @@ export class UserCloudflareAccountApi {
         { type: 'plain_text', name: 'GHOSTBUILD_RUNTIME_VERSION', text: args.runtimeVersion },
       ],
       exports: {
-        WorkspaceSandbox: {
+        ProjectWorkspace: {
           type: 'durable-object',
           storage: 'sqlite',
-          container: 'WorkspaceSandbox',
+          container: 'ProjectWorkspace',
         },
         BuilderAgent: {
           type: 'durable-object',
@@ -279,12 +272,12 @@ export class UserCloudflareAccountApi {
     const namespace = namespaces.find(
       (candidate) =>
         candidate.script === args.workerName &&
-        candidate.class === 'WorkspaceSandbox' &&
+        candidate.class === 'ProjectWorkspace' &&
         candidate.use_sqlite === true &&
         candidate.id,
     );
     if (!namespace?.id) {
-      throw new CloudflareAccountApiError('Cloudflare did not provision the workspace Sandbox namespace.');
+      throw new CloudflareAccountApiError('Cloudflare did not provision the Computer workspace namespace.');
     }
     return { workerVersionId, namespaceId: namespace.id };
   }

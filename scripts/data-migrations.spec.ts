@@ -8,6 +8,7 @@ const controlPlaneTables = [
   'cloudflare_credentials',
   'cloudflare_oauth_states',
   'user',
+  'user_computer_runtimes',
   'user_workspace_runtimes',
 ];
 
@@ -16,6 +17,7 @@ describe('Ghostbuild control-plane D1 schema', () => {
     const db = new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys = ON');
     db.exec(readFileSync('migrations/0001_ghostbuild.sql', 'utf8'));
+    db.exec(readFileSync('migrations/0002_user_computer_runtimes.sql', 'utf8'));
 
     expect(tableNames(db)).toEqual(controlPlaneTables);
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
@@ -25,6 +27,7 @@ describe('Ghostbuild control-plane D1 schema', () => {
     const db = new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys = ON');
     db.exec(readFileSync('migrations/0001_ghostbuild.sql', 'utf8'));
+    db.exec(readFileSync('migrations/0002_user_computer_runtimes.sql', 'utf8'));
     db.prepare(
       `INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt, cloudflare_subject)
        VALUES ('user-1', 'User', 'user@example.com', 1, 1, 1, 'subject-1')`,
@@ -35,10 +38,10 @@ describe('Ghostbuild control-plane D1 schema', () => {
        ) VALUES ('connection-1', 'user-1', 'account-1', 'active', 1, 1, 1)`,
     ).run();
     db.prepare(
-      `INSERT INTO user_workspace_runtimes (
-         user_id, connection_id, connection_generation, worker_name, bucket_name, endpoint,
+      `INSERT INTO user_computer_runtimes (
+         user_id, connection_id, connection_generation, worker_name, endpoint,
          runtime_version, status, created_at, updated_at
-       ) VALUES ('user-1', 'connection-1', 1, 'worker', 'bucket', 'https://worker.example', 'version', 'ready', 1, 1)`,
+       ) VALUES ('user-1', 'connection-1', 1, 'worker', 'https://worker.example', 'version', 'ready', 1, 1)`,
     ).run();
 
     expect(() =>

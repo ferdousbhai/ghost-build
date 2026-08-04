@@ -1,12 +1,8 @@
 import { createdAtMillis, getToolInvocation, type GhostbuildMessage } from './ai-compat.js';
 import { PREWARM_PATHS } from './constants.js';
-import { editToolParameters } from './tools/edit.js';
-import { viewToolInputParameters } from './tools/view.js';
-import { writeFileParameters } from './tools/writeFile.js';
 import type { EditorDocument, FileMap } from './types.js';
 import { renderFile } from './utils/renderFile.js';
 import { type AbsolutePath, getAbsolutePath } from './utils/workDir.js';
-import { loggingSafeParse } from './utils/zodUtil.js';
 
 const MAX_RELEVANT_FILES = 16;
 const MAX_PROJECT_PATHS = 200;
@@ -106,17 +102,11 @@ export class RelevantFilesContext {
 
 function invocationFilePath(invocation: NonNullable<ReturnType<typeof getToolInvocation>>): string | undefined {
   switch (invocation.toolName) {
-    case 'view': {
-      const args = loggingSafeParse(viewToolInputParameters, invocation.args);
-      return args.success ? args.data.path : undefined;
-    }
-    case 'edit': {
-      const args = loggingSafeParse(editToolParameters, invocation.args);
-      return args.success ? args.data.path : undefined;
-    }
-    case 'writeFile': {
-      const args = loggingSafeParse(writeFileParameters, invocation.args);
-      return args.success ? args.data.path : undefined;
+    case 'read':
+    case 'edit':
+    case 'write': {
+      const args = invocation.args as { path?: unknown } | null;
+      return args && typeof args === 'object' && typeof args.path === 'string' ? args.path : undefined;
     }
     default:
       return undefined;
@@ -203,13 +193,13 @@ function renderPathSummary(allPaths: string[], maximumCharacters: number): strin
     return '';
   }
   let omitted = allPaths.length - included;
-  let suffix = omitted > 0 ? `\n- ... ${omitted} more paths (use view to inspect)` : '';
+  let suffix = omitted > 0 ? `\n- ... ${omitted} more paths (use read to inspect)` : '';
   while (suffix && lines.length > 1 && size + suffix.length > maximumCharacters) {
     const removed = lines.pop();
     size -= removed?.length ?? 0;
     included--;
     omitted = allPaths.length - included;
-    suffix = `\n- ... ${omitted} more paths (use view to inspect)`;
+    suffix = `\n- ... ${omitted} more paths (use read to inspect)`;
   }
   if (suffix && size + suffix.length <= maximumCharacters) {
     lines.push(suffix);

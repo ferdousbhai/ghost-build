@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Button } from '~/components/ui/primitives/Button';
-import { TextInput } from '~/components/ui/primitives/TextInput';
 import { signInWithCloudflare } from '~/lib/auth-client';
 
 type ConnectionStatus = {
@@ -20,8 +19,6 @@ export function CloudflareCard() {
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [configuringRuntime, setConfiguringRuntime] = useState(false);
-  const [r2AccessKeyId, setR2AccessKeyId] = useState('');
-  const [r2SecretAccessKey, setR2SecretAccessKey] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -71,7 +68,7 @@ export function CloudflareCard() {
       const response = await fetch('/api/cloudflare/workspace-runtime', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ r2AccessKeyId, r2SecretAccessKey }),
+        body: JSON.stringify({}),
       });
       const result = (await response.json().catch(() => null)) as {
         status?: 'ready';
@@ -84,8 +81,6 @@ export function CloudflareCard() {
       setConnection((current) =>
         current ? { ...current, workspaceRuntime: { status: 'ready', current: true, lastError: null } } : current,
       );
-      setR2AccessKeyId('');
-      setR2SecretAccessKey('');
     } catch (runtimeError) {
       setError(runtimeError instanceof Error ? runtimeError.message : 'Unable to configure project storage.');
     } finally {
@@ -132,17 +127,13 @@ export function CloudflareCard() {
         <>
           <WorkspaceRuntimeSetup
             runtime={connection.workspaceRuntime}
-            accessKeyId={r2AccessKeyId}
-            secretAccessKey={r2SecretAccessKey}
             configuring={configuringRuntime}
-            onAccessKeyIdChange={setR2AccessKeyId}
-            onSecretAccessKeyChange={setR2SecretAccessKey}
             onConfigure={() => void configureWorkspaceRuntime()}
           />
         </>
       ) : null}
       <p className="mt-3 text-xs text-content-tertiary">
-        Project backups, Sandboxes, previews, validation, builds, and generated apps run in your Cloudflare account.
+        Computer workspaces, Sandboxes, previews, validation, builds, and generated apps run in your Cloudflare account.
         Ghostbuild retains only your identity, encrypted Cloudflare connection metadata, and the user-runtime locator.
         Workers Paid is never enabled automatically; your account must already support Containers.
       </p>
@@ -152,19 +143,11 @@ export function CloudflareCard() {
 
 function WorkspaceRuntimeSetup({
   runtime,
-  accessKeyId,
-  secretAccessKey,
   configuring,
-  onAccessKeyIdChange,
-  onSecretAccessKeyChange,
   onConfigure,
 }: {
   runtime: ConnectionStatus['workspaceRuntime'];
-  accessKeyId: string;
-  secretAccessKey: string;
   configuring: boolean;
-  onAccessKeyIdChange: (value: string) => void;
-  onSecretAccessKeyChange: (value: string) => void;
   onConfigure: () => void;
 }) {
   if (runtime?.status === 'ready' && runtime.current) {
@@ -181,39 +164,11 @@ function WorkspaceRuntimeSetup({
     <div className="mt-4 rounded-lg border border-bolt-elements-borderColor px-4 py-3">
       <p className="text-sm font-medium text-content-primary">Configure user-owned project storage</p>
       <p className="mt-1 text-xs text-content-secondary">
-        Create an R2 API token with Object Read &amp; Write access. Its keys are installed directly as secrets in your
-        workspace Worker and are not retained by Ghostbuild.
+        Create the durable Cloudflare Computer workspace and its isolated execution backends in your account.
       </p>
       {runtime?.lastError ? <p className="mt-2 text-xs text-bolt-elements-icon-error">{runtime.lastError}</p> : null}
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <label className="grid gap-1 text-xs text-content-secondary">
-          R2 Access Key ID
-          <TextInput
-            value={accessKeyId}
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => onAccessKeyIdChange(event.currentTarget.value)}
-          />
-        </label>
-        <label className="grid gap-1 text-xs text-content-secondary">
-          R2 Secret Access Key
-          <TextInput
-            type="password"
-            value={secretAccessKey}
-            autoComplete="new-password"
-            spellCheck={false}
-            onChange={(event) => onSecretAccessKeyChange(event.currentTarget.value)}
-          />
-        </label>
-      </div>
       <div className="mt-3">
-        <Button
-          size="xs"
-          variant="primary"
-          loading={configuring}
-          disabled={!accessKeyId || !secretAccessKey}
-          onClick={onConfigure}
-        >
+        <Button size="xs" variant="primary" loading={configuring} onClick={onConfigure}>
           Configure project runtime
         </Button>
       </div>

@@ -5,7 +5,6 @@ export type UserWorkspaceRuntime = {
   connectionId: string;
   connectionGeneration: number;
   workerName: string;
-  bucketName: string;
   endpoint: string;
   runtimeVersion: string;
   status: UserWorkspaceRuntimeStatus;
@@ -19,7 +18,6 @@ type UserWorkspaceRuntimeRow = {
   connection_id: string;
   connection_generation: number;
   worker_name: string;
-  bucket_name: string;
   endpoint: string;
   runtime_version: string;
   status: UserWorkspaceRuntimeStatus;
@@ -29,16 +27,15 @@ type UserWorkspaceRuntimeRow = {
 };
 
 export async function findUserWorkspaceRuntime(db: D1Database, userId: string): Promise<UserWorkspaceRuntime | null> {
-  const result = await db
+  const row = await db
     .prepare(
-      `SELECT user_id, connection_id, connection_generation, worker_name, bucket_name,
+      `SELECT user_id, connection_id, connection_generation, worker_name,
               endpoint, runtime_version, status, last_error, created_at, updated_at
-       FROM user_workspace_runtimes
+       FROM user_computer_runtimes
        WHERE user_id = ?`,
     )
     .bind(userId)
-    .all<UserWorkspaceRuntimeRow>();
-  const row = result.results[0];
+    .first<UserWorkspaceRuntimeRow>();
   return row ? runtimeFromRow(row) : null;
 }
 
@@ -48,7 +45,6 @@ export async function recordUserWorkspaceRuntimeProvisioning(args: {
   connectionId: string;
   connectionGeneration: number;
   workerName: string;
-  bucketName: string;
   endpoint: string;
   runtimeVersion: string;
   now?: number;
@@ -56,21 +52,20 @@ export async function recordUserWorkspaceRuntimeProvisioning(args: {
   const now = args.now ?? Date.now();
   const row = await args.db
     .prepare(
-      `INSERT INTO user_workspace_runtimes (
-         user_id, connection_id, connection_generation, worker_name, bucket_name,
+      `INSERT INTO user_computer_runtimes (
+         user_id, connection_id, connection_generation, worker_name,
          endpoint, runtime_version, status, last_error, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'provisioning', NULL, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, 'provisioning', NULL, ?, ?)
        ON CONFLICT(user_id) DO UPDATE SET
          connection_id = excluded.connection_id,
          connection_generation = excluded.connection_generation,
          worker_name = excluded.worker_name,
-         bucket_name = excluded.bucket_name,
          endpoint = excluded.endpoint,
          runtime_version = excluded.runtime_version,
          status = 'provisioning',
          last_error = NULL,
          updated_at = excluded.updated_at
-       RETURNING user_id, connection_id, connection_generation, worker_name, bucket_name,
+       RETURNING user_id, connection_id, connection_generation, worker_name,
                  endpoint, runtime_version, status, last_error, created_at, updated_at`,
     )
     .bind(
@@ -78,7 +73,6 @@ export async function recordUserWorkspaceRuntimeProvisioning(args: {
       args.connectionId,
       args.connectionGeneration,
       args.workerName,
-      args.bucketName,
       args.endpoint,
       args.runtimeVersion,
       now,
@@ -128,10 +122,10 @@ async function transitionRuntime(
 ): Promise<UserWorkspaceRuntime> {
   const row = await args.db
     .prepare(
-      `UPDATE user_workspace_runtimes
+      `UPDATE user_computer_runtimes
        SET status = ?, last_error = ?, updated_at = ?
        WHERE user_id = ? AND connection_id = ? AND connection_generation = ? AND runtime_version = ?
-       RETURNING user_id, connection_id, connection_generation, worker_name, bucket_name,
+       RETURNING user_id, connection_id, connection_generation, worker_name,
                  endpoint, runtime_version, status, last_error, created_at, updated_at`,
     )
     .bind(
@@ -156,7 +150,6 @@ function runtimeFromRow(row: UserWorkspaceRuntimeRow): UserWorkspaceRuntime {
     connectionId: row.connection_id,
     connectionGeneration: row.connection_generation,
     workerName: row.worker_name,
-    bucketName: row.bucket_name,
     endpoint: row.endpoint,
     runtimeVersion: row.runtime_version,
     status: row.status,

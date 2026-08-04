@@ -1,7 +1,7 @@
 import type { ToolResultCoverage } from 'ghostbuild-agent/tool-result';
 
 export const TOOL_PAGE_SERIALIZED_CHARACTERS = 12_000;
-export const TOOL_PAGE_RECORDS = 40;
+const TOOL_PAGE_RECORDS = 40;
 const CURSOR_HASH_CHARACTERS = 16;
 
 type Page = {

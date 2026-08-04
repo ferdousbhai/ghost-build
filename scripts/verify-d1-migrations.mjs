@@ -15,6 +15,7 @@ const migrationPolicies = [
     legacyCutoff: 1,
     checksums: {
       '0001_ghostbuild.sql': 'b4ea60ce99e8dafacafc566cdbbf9efdd7668963072b8b5f0860b4cdd8ebdb7a',
+      '0002_user_computer_runtimes.sql': 'a9056622b927693b1dbe19669a6442af96388e8ca8b7ca1e55d1e087419ea3ed',
     },
     contractAllowlist: {},
   },

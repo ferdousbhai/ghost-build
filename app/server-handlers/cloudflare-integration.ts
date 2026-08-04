@@ -30,10 +30,7 @@ const MAX_OAUTH_CALLBACK_CODE_LENGTH = 4_096;
 const MAX_OAUTH_CALLBACK_TEXT_LENGTH = 2_048;
 const MAX_WORKSPACE_RUNTIME_SETUP_BYTES = 2 * 1024;
 const startPayloadSchema = z.object({ callbackURL: z.string().url().max(2_048).optional() });
-const workspaceRuntimeSetupSchema = z.object({
-  r2AccessKeyId: z.string().min(16).max(128),
-  r2SecretAccessKey: z.string().min(32).max(256),
-});
+const workspaceRuntimeSetupSchema = z.object({}).strict();
 const callbackPayloadSchema = z
   .object({
     state: z.string().uuid(),
@@ -180,7 +177,7 @@ export async function provisionCloudflareWorkspaceRuntimeAction(args: {
     if (!connection || connection.status !== 'active') {
       return Response.json({ error: 'Connect Cloudflare before configuring project storage.' }, { status: 409 });
     }
-    const payload = parseIntegrationRequest(
+    parseIntegrationRequest(
       workspaceRuntimeSetupSchema,
       await readJsonBodyWithLimit(
         args.request,
@@ -192,8 +189,6 @@ export async function provisionCloudflareWorkspaceRuntimeAction(args: {
       env: args.env,
       userId: session.user.id,
       connectionId: connection.id,
-      r2AccessKeyId: payload.r2AccessKeyId,
-      r2SecretAccessKey: payload.r2SecretAccessKey,
     });
     return Response.json(
       {
@@ -211,7 +206,7 @@ export async function provisionCloudflareWorkspaceRuntimeAction(args: {
       error instanceof InvalidCloudflareIntegrationRequestError ||
       error instanceof z.ZodError
     ) {
-      return Response.json({ error: 'Invalid R2 backup credentials.' }, { status: 400 });
+      return Response.json({ error: 'Invalid workspace runtime request.' }, { status: 400 });
     }
     console.error('User-owned Cloudflare workspace runtime provisioning failed', {
       error: error instanceof Error ? error.message : String(error),

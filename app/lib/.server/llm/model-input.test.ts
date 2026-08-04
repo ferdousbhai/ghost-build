@@ -7,8 +7,8 @@ import { ModelInputBudgetExceededError, prepareModelInput } from './model-input'
 import type { ContextCompactionUnavailableError } from './model-input';
 
 const tools = {
-  view: { description: 'Read a file', inputSchema: z.object({ path: z.string() }) },
-  writeFile: {
+  read: { description: 'Read a file', inputSchema: z.object({ path: z.string() }) },
+  write: {
     description: 'Write a file with a deliberately longer definition',
     inputSchema: z.object({ path: z.string(), content: z.string() }),
   },
@@ -50,12 +50,12 @@ describe('prepareModelInput', () => {
 
   test('estimates only tool definitions enabled for the provider call', async () => {
     const allTools = await prepare([message('user-1', 'Inspect it')]);
-    const viewOnly = await prepare([message('user-1', 'Inspect it')], {
+    const readOnly = await prepare([message('user-1', 'Inspect it')], {
       toolChoice: 'required',
-      activeTools: ['view'],
+      activeTools: ['read'],
     });
 
-    expect(viewOnly.estimatedTokens).toBeLessThan(allTools.estimatedTokens);
+    expect(readOnly.estimatedTokens).toBeLessThan(allTools.estimatedTokens);
   });
 
   test('compacts once after the actual provider input crosses 100K', async () => {

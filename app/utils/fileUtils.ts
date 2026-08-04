@@ -28,7 +28,7 @@ export function filesToTurnContext(
   }
 
   if (omittedPaths.length > 0) {
-    const header = 'Modified files omitted from this context; use view to inspect them:';
+    const header = 'Modified files omitted from this context; use read to inspect them:';
     const lines = [header];
     let summarySize = header.length;
     for (const filePath of omittedPaths) {

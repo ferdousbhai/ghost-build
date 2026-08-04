@@ -8,7 +8,7 @@ export function renderFile(content: string, viewRange?: [number, number]) {
 
   const selectedLines = lines.slice(startLine - 1, endLine === -1 ? undefined : endLine);
 
-  //  The view tool result includes file contents with line numbers prepended to each line
+  // File context includes line numbers prepended to each line.
   // (e.g., “1: def is_prime(n):”). Line numbers are not required, but they are essential
   // for successfully using the view_range parameter to examine specific sections of files
   // and the insert_line parameter to add content at precise locations.

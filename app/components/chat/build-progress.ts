@@ -76,7 +76,7 @@ function buildPhase(args: {
   if (args.activeToolNames.includes('deploy')) {
     return 'checking';
   }
-  if (args.activeToolNames.some((name) => name === 'writeFile' || name === 'edit')) {
+  if (args.activeToolNames.some((name) => name === 'write' || name === 'edit' || name === 'exec')) {
     return 'saving';
   }
   if (args.isRecovering) {

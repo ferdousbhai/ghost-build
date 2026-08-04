@@ -26,23 +26,18 @@ interface Folder {
 export type GhostbuildToolSet = {
   deploy: Tool;
   edit: Tool;
-  listFiles: Tool;
+  exec: Tool;
+  ls: Tool;
   lookupDocs: Tool;
   npmInstall: Tool;
-  searchText: Tool;
+  read: Tool;
   validateProject: Tool;
-  view: Tool;
-  writeFile: Tool;
+  write: Tool;
 };
 
 export type GhostbuildToolName = keyof GhostbuildToolSet;
 
-export const READ_ONLY_TOOL_NAMES = [
-  'view',
-  'listFiles',
-  'searchText',
-  'lookupDocs',
-] as const satisfies readonly GhostbuildToolName[];
+export const READ_ONLY_TOOL_NAMES = ['read', 'ls', 'lookupDocs'] as const satisfies readonly GhostbuildToolName[];
 
 export function isReadOnlyToolName(toolName: string): boolean {
   return (READ_ONLY_TOOL_NAMES as readonly string[]).includes(toolName);

@@ -22,7 +22,7 @@ describe('summarizeToolInvocationForPrompt', () => {
   it('preserves guest preview success markers without including full file writes in args', () => {
     const summary = summarizeToolInvocationForPrompt({
       toolCallId: 'write-1',
-      toolName: 'writeFile',
+      toolName: 'write',
       args: {
         path: '/home/project/src/routes/index.tsx',
         content: 'x'.repeat(20_000),
@@ -39,9 +39,9 @@ describe('summarizeToolInvocationForPrompt', () => {
   it('preserves complete bounded structured results without taking another excerpt', () => {
     const content = `${'x'.repeat(10_000)}complete-tail`;
     const summary = summarizeToolInvocationForPrompt({
-      toolCallId: 'view-1',
-      toolName: 'view',
-      args: { path: '/home/project/src/app.ts', view_range: [1, 201] },
+      toolCallId: 'read-1',
+      toolName: 'read',
+      args: { path: '/home/project/src/app.ts', offset: 1, limit: 200 },
       state: 'result',
       result: toolSuccess('bounded page', { content }),
     });

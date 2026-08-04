@@ -37,7 +37,7 @@ describe('calculatePromptCharacterCounts', () => {
             toolInvocation: {
               state: 'result',
               toolCallId: 'call',
-              toolName: 'view',
+              toolName: 'read',
               args: { path: 'a' },
               result: 'ok',
             },

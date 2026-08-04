@@ -8,23 +8,14 @@ import {
   getWorkersAiToolSettings,
 } from './workers-ai-tools';
 
-const AUTOMATIC_TOOLS = [
-  'view',
-  'listFiles',
-  'searchText',
-  'edit',
-  'writeFile',
-  'lookupDocs',
-  'npmInstall',
-  'validateProject',
-];
+const AUTOMATIC_TOOLS = ['read', 'ls', 'edit', 'write', 'exec', 'lookupDocs', 'npmInstall', 'validateProject'];
 
 describe('Workers AI tool lifecycle', () => {
   it('serializes writes and validation in model tool-call order', async () => {
     const coordinate = createTurnStatefulToolCoordinator();
     let finishWrite: (() => void) | undefined;
     const events: string[] = [];
-    const write = coordinate('writeFile', async () => {
+    const write = coordinate('write', async () => {
       events.push('write-start');
       await new Promise<void>((resolve) => {
         finishWrite = resolve;
@@ -44,7 +35,7 @@ describe('Workers AI tool lifecycle', () => {
 
   it('does not let a failed stateful tool block the remaining turn', async () => {
     const coordinate = createTurnStatefulToolCoordinator();
-    const failedWrite = coordinate('writeFile', async () => {
+    const failedWrite = coordinate('write', async () => {
       throw new Error('write failed');
     });
     const validation = coordinate('validateProject', async () => 'validated');
@@ -55,13 +46,13 @@ describe('Workers AI tool lifecycle', () => {
 
   it('rejects duplicate calls in one turn while allowing durable replay and changed arguments', () => {
     const guard = createTurnToolCallGuard();
-    expect(guard('view', { path: '/home/project/package.json', view_range: [1, 20] }, 'call-1', 1)).toBeUndefined();
-    expect(guard('view', { view_range: [1, 20], path: '/home/project/package.json' }, 'call-1', 1)).toBeUndefined();
-    expect(guard('view', { view_range: [1, 20], path: '/home/project/package.json' }, 'call-2', 1)).toBe(
+    expect(guard('read', { path: '/home/project/package.json', offset: 1, limit: 20 }, 'call-1', 1)).toBeUndefined();
+    expect(guard('read', { limit: 20, path: '/home/project/package.json', offset: 1 }, 'call-1', 1)).toBeUndefined();
+    expect(guard('read', { limit: 20, path: '/home/project/package.json', offset: 1 }, 'call-2', 1)).toBe(
       'This exact tool call already ran in the current turn. Use its result or try a different approach.',
     );
-    expect(guard('view', { path: '/home/project/package.json', view_range: [20, 40] }, 'call-3', 1)).toBeUndefined();
-    expect(guard('view', { path: '/home/project/package.json', view_range: [1, 20] }, 'call-4', 2)).toBeUndefined();
+    expect(guard('read', { path: '/home/project/package.json', offset: 20, limit: 20 }, 'call-3', 1)).toBeUndefined();
+    expect(guard('read', { path: '/home/project/package.json', offset: 1, limit: 20 }, 'call-4', 2)).toBeUndefined();
   });
 
   it('gives the model all non-deployment tools before a mutation', () => {
@@ -73,7 +64,7 @@ describe('Workers AI tool lifecycle', () => {
     expect(
       getWorkersAiToolSettings([
         user('Build a habit tracker'),
-        toolResult('view', {}, toolSuccess('viewed')),
+        toolResult('read', {}, { path: '/home/project/package.json', content: '{}' }),
         toolResult('lookupDocs', {}, toolSuccess('looked up guidance')),
       ]),
     ).toEqual({
@@ -86,12 +77,37 @@ describe('Workers AI tool lifecycle', () => {
     expect(
       getWorkersAiToolSettings([
         user('Build a habit tracker'),
-        toolResult('writeFile', { path: '/home/project/src/router.tsx' }, toolSuccess('wrote')),
+        toolResult('write', { path: '/home/project/src/router.tsx' }, writeResult()),
       ]),
     ).toEqual({
       activeTools: AUTOMATIC_TOOLS,
       toolChoice: 'required',
     });
+  });
+
+  it('treats exec as implementation only when Computer reports a workspace mutation', () => {
+    expect(
+      getWorkersAiToolSettings([
+        user('Explain the project'),
+        toolResult('exec', { command: 'rg TODO' }, { exitCode: 0, stdout: '', stderr: '', workspaceChanged: false }),
+      ]),
+    ).toEqual({ activeTools: AUTOMATIC_TOOLS, toolChoice: 'auto' });
+
+    expect(
+      getWorkersAiToolSettings([
+        user('Update the project'),
+        toolResult(
+          'exec',
+          { command: 'pnpm lint --fix' },
+          {
+            exitCode: 0,
+            stdout: '',
+            stderr: '',
+            workspaceChanged: true,
+          },
+        ),
+      ]),
+    ).toEqual({ activeTools: AUTOMATIC_TOOLS, toolChoice: 'required' });
   });
 
   it('requires implementation work after dependency setup instead of forcing premature validation', () => {
@@ -111,8 +127,8 @@ describe('Workers AI tool lifecycle', () => {
       getWorkersAiToolSettings(
         [user('Build a habit tracker')],
         [
-          { toolName: 'writeFile', result: toolSuccess('wrote') },
-          { toolName: 'view', result: toolSuccess('viewed') },
+          { toolName: 'write', result: writeResult() },
+          { toolName: 'read', result: { path: '/home/project/package.json', content: '{}' } },
         ],
       ),
     ).toEqual({
@@ -125,7 +141,7 @@ describe('Workers AI tool lifecycle', () => {
     expect(
       getWorkersAiToolSettings([
         user('Build a habit tracker'),
-        toolResult('writeFile', { path: '/home/project/src/routes/index.tsx' }, toolSuccess('wrote')),
+        toolResult('write', { path: '/home/project/src/routes/index.tsx' }, writeResult()),
         { ...user('Is it ready?'), id: 'user-2' },
       ]),
     ).toEqual({
@@ -138,7 +154,7 @@ describe('Workers AI tool lifecycle', () => {
     expect(
       getWorkersAiToolSettings([
         user('Explain the project'),
-        toolResult('view', {}, toolFailure('Unable to read that range')),
+        toolResult('read', {}, { error: 'Unable to read that range' }),
       ]),
     ).toEqual({
       activeTools: AUTOMATIC_TOOLS,
@@ -148,7 +164,7 @@ describe('Workers AI tool lifecycle', () => {
     expect(
       getWorkersAiToolSettings([
         user('Build a habit tracker'),
-        toolResult('writeFile', {}, toolSuccess('wrote')),
+        toolResult('write', {}, writeResult()),
         toolResult('validateProject', {}, toolFailure('Preview validation failed')),
       ]),
     ).toEqual({
@@ -159,7 +175,7 @@ describe('Workers AI tool lifecycle', () => {
     expect(
       getWorkersAiToolSettings([
         user('Build a habit tracker'),
-        toolResult('writeFile', {}, toolSuccess('wrote')),
+        toolResult('write', {}, writeResult()),
         toolResult('validateProject', {}, toolSuccess('missing next action', { level: 'full', revision: 'abc' })),
       ]),
     ).toEqual({
@@ -171,7 +187,7 @@ describe('Workers AI tool lifecycle', () => {
   it('prepares deployment only after exact-revision validation', () => {
     const messages = [
       user('Build a habit tracker'),
-      toolResult('writeFile', {}, toolSuccess('wrote')),
+      toolResult('write', {}, writeResult()),
       toolResult('validateProject', {}, validationResult('prepare-deployment', 'abc')),
     ];
     expect(getWorkersAiToolSettings(messages)).toEqual({
@@ -205,7 +221,7 @@ describe('Workers AI tool lifecycle', () => {
     expect(
       getWorkersAiToolSettings([
         user('Build a habit tracker'),
-        toolResult('writeFile', {}, toolSuccess('wrote')),
+        toolResult('write', {}, writeResult()),
         toolResult('validateProject', {}, validationResult('sign-in-required')),
       ]),
     ).toEqual({ toolChoice: 'none' });
@@ -215,7 +231,7 @@ describe('Workers AI tool lifecycle', () => {
     expect(
       getValidatedBuildCompletion([
         user('Build a habit tracker'),
-        toolResult('writeFile', {}, toolSuccess('wrote')),
+        toolResult('write', {}, writeResult()),
         toolResult('validateProject', {}, validationResult('sign-in-required')),
       ]),
     ).toBe(
@@ -228,7 +244,7 @@ describe('Workers AI tool lifecycle', () => {
       getValidatedBuildCompletion(
         [user('Build a habit tracker')],
         [
-          { toolName: 'writeFile', result: toolSuccess('wrote') },
+          { toolName: 'write', result: writeResult() },
           { toolName: 'validateProject', result: validationResult('prepare-deployment') },
           {
             toolName: 'deploy',
@@ -242,7 +258,7 @@ describe('Workers AI tool lifecycle', () => {
   it('does not complete from an obsolete successful validation receipt', () => {
     const messages = [
       user('Build a habit tracker'),
-      toolResult('writeFile', {}, toolSuccess('wrote')),
+      toolResult('write', {}, writeResult()),
       toolResult('validateProject', {}, validationResult('sign-in-required')),
       toolResult('validateProject', {}, toolFailure('The project no longer validates')),
     ];
@@ -284,4 +300,8 @@ function validationResult(nextAction: 'sign-in-required' | 'prepare-deployment',
     revision,
     nextAction,
   });
+}
+
+function writeResult() {
+  return { path: '/home/project/src/routes/index.tsx', bytesWritten: 42 };
 }

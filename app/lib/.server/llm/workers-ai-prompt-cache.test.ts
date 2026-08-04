@@ -20,8 +20,8 @@ describe('Workers AI prompt-cache identity', () => {
         { role: 'system', content: 'stable' },
         { role: 'user', content: 'project instructions A' },
       ],
-      tools: { view: { description: 'read' } },
-      activeTools: ['view'],
+      tools: { read: { description: 'read' } },
+      activeTools: ['read'],
       toolChoice: 'auto',
     };
     const fingerprint = await fingerprintWorkersAiModelInput(base);
@@ -33,7 +33,7 @@ describe('Workers AI prompt-cache identity', () => {
       fingerprintWorkersAiModelInput({ ...base, messages: [{ role: 'system', content: 'changed prompt' }] }),
     ).resolves.not.toBe(fingerprint);
     await expect(
-      fingerprintWorkersAiModelInput({ ...base, tools: { view: { description: 'changed schema' } } }),
+      fingerprintWorkersAiModelInput({ ...base, tools: { read: { description: 'changed schema' } } }),
     ).resolves.not.toBe(fingerprint);
     await expect(
       fingerprintWorkersAiModelInput({

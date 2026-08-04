@@ -95,7 +95,7 @@ describe('Cloudflare-only authentication', () => {
 
   it('returns only connection and user-runtime metadata', async () => {
     const prepare = vi.fn((sql: string) => {
-      if (sql.includes('FROM user_workspace_runtimes')) {
+      if (sql.includes('FROM user_computer_runtimes')) {
         return { bind: () => ({ first: async () => null }) };
       }
       throw new Error(`Unexpected SQL: ${sql}`);

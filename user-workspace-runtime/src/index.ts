@@ -1,11 +1,23 @@
-import { Sandbox, type DirectoryBackup } from '@cloudflare/sandbox';
-import { BuilderWorkspaceRepository, type BuilderWorkspaceBackend } from '../../app/agents/builder-workspace';
-import { addRequestedDependencies } from '../../app/lib/runtime/action-runner/dependency-manifest';
-import { toolFailure, toolSuccess, type GhostbuildToolResult } from '../../ghostbuild-agent/tool-result';
+import {
+  type DurableObjectStorageLike,
+  getWorkspace,
+  type WorkspaceClient,
+  type WorkspaceOptions,
+  WorkspaceProxy,
+  WorkspaceServiceProxy,
+  withWorkspace,
+} from '@cloudflare/computer';
+import {
+  CloudflareContainerBackend,
+  type IWorkspaceContainerAPI,
+  type WorkspaceRef,
+} from '@cloudflare/computer/backends/container';
+import { WorkerShellBackend } from '@cloudflare/computer/backends/worker-shell';
+import { Sandbox } from '@cloudflare/sandbox';
 import { parse } from 'jsonc-parser';
-import { initializeWorkspaceRuntimeSchema } from '../../app/agents/builder-workspace-runtime-schema';
 import { BuilderAgent } from '../../app/agents/builder-agent';
 import { routeUserRuntimeAgentRequest } from '../../app/lib/.server/agent-request-identity';
+import { addRequestedDependencies } from '../../app/lib/runtime/action-runner/dependency-manifest';
 import {
   userRuntimeDataAction,
   userRuntimeInitialMessagesAction,
@@ -14,17 +26,17 @@ import {
 import { verifyRuntimeCapability } from '../../app/lib/cloudflare/runtime-capability';
 import { userRuntimeDeploymentAction } from '../../app/server-handlers/deployments';
 import { userRuntimeEnhancePromptAction } from '../../app/server-handlers/enhance-prompt';
+import { toolFailure, toolSuccess, type GhostbuildToolResult } from '../../ghostbuild-agent/tool-result';
+
+export { WorkspaceProxy, WorkspaceServiceProxy };
 
 interface RuntimeEnv {
-  WORKSPACE_SANDBOX: DurableObjectNamespace<WorkspaceSandbox>;
+  PROJECT_WORKSPACE: DurableObjectNamespace<ProjectWorkspace>;
   BuilderAgent: DurableObjectNamespace<BuilderAgent>;
   DB: D1Database;
   AI: Ai;
-  BACKUP_BUCKET: R2Bucket;
+  LOADER: unknown;
   CONTROL_PLANE_SECRET: string;
-  R2_ACCESS_KEY_ID: string;
-  R2_SECRET_ACCESS_KEY: string;
-  BACKUP_BUCKET_NAME: string;
   CLOUDFLARE_ACCOUNT_ID: string;
   CLOUDFLARE_API_TOKEN: string;
   GHOSTBUILD_USER_ID: string;
@@ -34,241 +46,594 @@ interface RuntimeEnv {
   GHOSTBUILD_USER_RUNTIME_ENDPOINT: string;
 }
 
+const PROJECT_ROOT = '/home/project';
 const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
+const MAX_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
+const MAX_FILES = 10_000;
+const SYNC_BATCH_BYTES = 4 * 1024 * 1024;
+const SYNC_BATCH_FILES = 100;
 const PROJECT_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,256}$/;
 const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.tanstack', '.wrangler']);
+const DERIVED_PATHS = ['dist', '.output', '.tanstack', '.wrangler'].map((name) => `${PROJECT_ROOT}/${name}`);
 const PREVIEW_PORT = 4173;
 const PREVIEW_TTL_MS = 15 * 60_000;
+const COMPUTERD_PROCESS_ID = 'ghostbuild-computerd';
+const COMPUTERD_ROOT = '/tmp/ghostbuild-computer';
+const COMPUTERD_BINARY = `${COMPUTERD_ROOT}/usr/local/bin/computerd`;
+const COMPUTERD_LAYER_DIGEST = 'sha256:4034b86577bc36e9f089df87960e9249e1f05c77edaa52783da7d6142d07bb81';
 
-export class WorkspaceSandbox extends Sandbox<RuntimeEnv> {
-  readonly #workspace: BuilderWorkspaceRepository;
+type WorkspaceFile = {
+  path: string;
+  bytes: Uint8Array;
+  size: number;
+  mode: number;
+  sha256: string;
+};
 
+type WorkspaceState = {
+  initialized: boolean;
+  revision: number;
+  resetRevision: number;
+  fileCount: number;
+  totalBytes: number;
+  seeding: boolean;
+};
+
+class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
+  readonly containerBackend = new CloudflareContainerBackend({
+    container: () => this,
+    workspace: { binding: 'PROJECT_WORKSPACE', id: this.ctx.id.toString() },
+    containerEnv: { MOUNT_POINT: '/home', FUSE_MOUNT: 'auto' },
+    connectTimeoutMs: 2 * 60_000,
+    id: 'container-shell',
+  });
+
+  readonly workerShellBackend = new WorkerShellBackend({
+    loader: this.env.LOADER as never,
+    workspace: { binding: 'PROJECT_WORKSPACE', id: this.ctx.id.toString() },
+    ctx: this.ctx,
+    id: 'worker-shell',
+  });
+
+  readonly #computerHost = new SandboxComputerHost(this);
+
+  getWorkspaceContainer(): IWorkspaceContainerAPI {
+    return this.#computerHost;
+  }
+
+  async startComputerd(env: Record<string, string>): Promise<void> {
+    const existing = await this.getProcess(COMPUTERD_PROCESS_ID).catch(() => null);
+    if (existing && (existing.status === 'starting' || existing.status === 'running')) {
+      return;
+    }
+    await this.cleanupCompletedProcesses().catch(() => undefined);
+    const ready = await this.exec(`test -x ${shellQuote(COMPUTERD_BINARY)}`, { timeout: 30_000 });
+    if (!ready.success) {
+      requireSandboxExecSuccess(await this.exec(computerdBootstrapCommand(), { timeout: 5 * 60_000 }));
+    }
+    await this.startProcess(shellQuote(COMPUTERD_BINARY), {
+      processId: COMPUTERD_PROCESS_ID,
+      autoCleanup: false,
+      env: { ...env, FUSE_MOUNT: 'auto' },
+    });
+  }
+
+  async restartComputerd(env: Record<string, string>): Promise<void> {
+    const existing = await this.getProcess(COMPUTERD_PROCESS_ID).catch(() => null);
+    await existing?.kill('SIGKILL').catch(() => undefined);
+    await this.exec('fusermount3 -uz /home >/dev/null 2>&1 || true', { timeout: 30_000 }).catch(() => undefined);
+    await this.cleanupCompletedProcesses().catch(() => undefined);
+    await this.startComputerd(env);
+  }
+
+  async computerdStatus(): Promise<{ running: boolean; exit: { exitedAt: number; reason: string } | null }> {
+    const process = await this.getProcess(COMPUTERD_PROCESS_ID).catch(() => null);
+    if (!process) {
+      return { running: false, exit: null };
+    }
+    const status = await process.getStatus().catch(() => process.status);
+    const running = status === 'starting' || status === 'running';
+    return {
+      running,
+      exit: running
+        ? null
+        : {
+            exitedAt: process.endTime?.getTime() ?? Date.now(),
+            reason: `computerd ${status}${process.exitCode === undefined ? '' : ` (${process.exitCode})`}`,
+          },
+    };
+  }
+
+  interceptWorkspaceOutbound(host: string, ref: WorkspaceRef): Promise<void> {
+    const exports = this.ctx.exports as unknown as {
+      WorkspaceProxy(options: { props: WorkspaceRef }): Fetcher;
+    };
+    return this.ctx.container!.interceptOutboundHttp(host, exports.WorkspaceProxy({ props: ref }));
+  }
+
+  fetchComputerPort(port: number, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    return this.ctx.container!.getTcpPort(port).fetch(input, init);
+  }
+
+  computerPort(port: number): Fetcher {
+    return this.ctx.container!.getTcpPort(port);
+  }
+}
+
+class SandboxComputerHost implements IWorkspaceContainerAPI {
+  constructor(private readonly sandbox: ComputerSandboxBase) {}
+
+  start(env: Record<string, string>): Promise<void> {
+    return this.sandbox.startComputerd(env);
+  }
+
+  restart(env: Record<string, string>): Promise<void> {
+    return this.sandbox.restartComputerd(env);
+  }
+
+  interceptOutboundHttp(host: string, workspace: WorkspaceRef): Promise<void> {
+    return this.sandbox.interceptWorkspaceOutbound(host, workspace);
+  }
+
+  fetchPort(port: number, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    return this.sandbox.fetchComputerPort(port, input, init);
+  }
+
+  port(port: number): Fetcher {
+    return this.sandbox.computerPort(port);
+  }
+
+  status() {
+    return this.sandbox.computerdStatus();
+  }
+
+  async exitInfo() {
+    return (await this.sandbox.computerdStatus()).exit;
+  }
+}
+
+function computerWorkspaceOptions(self: InstanceType<typeof ComputerSandboxBase>): WorkspaceOptions {
+  const { ctx } = self as unknown as { ctx: DurableObjectState };
+  return {
+    storage: ctx.storage as unknown as DurableObjectStorageLike,
+    backends: [self.workerShellBackend, self.containerBackend],
+    waitUntil: (promise) => ctx.waitUntil(promise),
+  };
+}
+
+export class ProjectWorkspace extends withWorkspace(ComputerSandboxBase, computerWorkspaceOptions) {
   constructor(ctx: DurableObjectState<{}>, env: RuntimeEnv) {
     super(ctx, env);
-    initializeWorkspaceRuntimeSchema(ctx.storage);
-    const backend: BuilderWorkspaceBackend = {
-      sandbox: this as unknown as BuilderWorkspaceBackend['sandbox'],
-      backupBucket: env.BACKUP_BUCKET,
-      localBackup: false,
-      installDependencies: async (sandbox, projectDir) => {
-        const pnpm = await sandbox.exec('command -v pnpm', { timeout: 30_000 });
-        requireExecSuccess(pnpm);
-        const installed = await sandbox.exec(
-          `${shellQuote(pnpm.stdout.trim())} install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile ` +
-            '--registry=https://registry.npmjs.org/',
-          { cwd: projectDir, timeout: 4 * 60_000 },
-        );
-        requireExecSuccess(installed);
-      },
-      retireBackup: async (backup, notBefore) => {
-        ctx.storage.sql.exec(
-          `INSERT INTO retired_backups (backup_id, delete_after) VALUES (?, ?)
-           ON CONFLICT(backup_id) DO UPDATE SET delete_after = MAX(delete_after, excluded.delete_after)`,
-          backup.id,
-          notBefore,
-        );
-      },
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ghostbuild_workspace_state (
+         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+         initialized INTEGER NOT NULL DEFAULT 0,
+         seed_id TEXT,
+         reset_revision INTEGER NOT NULL DEFAULT 0,
+         preview_id TEXT,
+         preview_exec_id TEXT
+       )`,
+    );
+    this.ctx.storage.sql.exec(
+      `INSERT OR IGNORE INTO ghostbuild_workspace_state (singleton, initialized, reset_revision)
+       VALUES (1, 0, 0)`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ghostbuild_validations (
+         revision TEXT PRIMARY KEY,
+         workspace_revision INTEGER NOT NULL,
+         validated_at INTEGER NOT NULL
+       )`,
+    );
+  }
+
+  override fetch(request: Request): Promise<Response> {
+    return this.containerBackend.handleFetch(request);
+  }
+
+  async getWorkspaceState(): Promise<WorkspaceState> {
+    return this.withComputer(async (workspace) => this.stateFromFiles(await readProjectFiles(workspace)));
+  }
+
+  async beginSeed(seedIdValue: unknown) {
+    const seedId = requireString(seedIdValue, 'seedId', 256);
+    const row = this.workspaceRow();
+    if (row.initialized === 1) {
+      return { status: 'initialized' as const, state: await this.getWorkspaceState() };
+    }
+    if (row.seed_id === seedId) {
+      return { status: 'seeding' as const, state: await this.getWorkspaceState() };
+    }
+    await this.withComputer(async (workspace) => {
+      await workspace.fs.rm(PROJECT_ROOT, { recursive: true, force: true });
+      await workspace.fs.mkdir(PROJECT_ROOT, { recursive: true });
+    });
+    this.ctx.storage.sql.exec(
+      `UPDATE ghostbuild_workspace_state
+       SET initialized = 0, seed_id = ?, reset_revision = ?
+       WHERE singleton = 1`,
+      seedId,
+      this.currentRevision(),
+    );
+    return { status: 'started' as const, seedId, state: await this.getWorkspaceState() };
+  }
+
+  async appendSeed(seedIdValue: unknown, entriesValue: unknown) {
+    const seedId = requireString(seedIdValue, 'seedId', 256);
+    if (this.workspaceRow().seed_id !== seedId) {
+      throw new Error('The workspace seed is no longer active.');
+    }
+    const entries = requireFileInputs(entriesValue);
+    await this.withComputer(async (workspace) => {
+      for (const entry of entries) {
+        await writeWorkspaceFile(workspace, entry.path, decodeFileContent(entry.content, entry.encoding));
+      }
+    });
+    return this.getWorkspaceState();
+  }
+
+  async commitSeed(seedIdValue: unknown, expectedValue: unknown) {
+    const seedId = requireString(seedIdValue, 'seedId', 256);
+    if (this.workspaceRow().seed_id !== seedId) {
+      throw new Error('The workspace seed is no longer active.');
+    }
+    const expected = record(expectedValue);
+    const expectedFiles = requireInteger(expected.fileCount, 'fileCount', MAX_FILES);
+    const expectedBytes = requireInteger(expected.totalBytes, 'totalBytes', MAX_TOTAL_BYTES);
+    const files = await this.withComputer(readProjectFiles);
+    if (files.length !== expectedFiles || totalFileBytes(files) !== expectedBytes) {
+      throw new Error('The workspace seed did not match the expected template.');
+    }
+    const revision = this.currentRevision();
+    this.ctx.storage.sql.exec(
+      `UPDATE ghostbuild_workspace_state
+       SET initialized = 1, seed_id = NULL, reset_revision = ?
+       WHERE singleton = 1`,
+      revision,
+    );
+    return this.stateFromFiles(files);
+  }
+
+  async abortSeed(seedIdValue: unknown) {
+    const seedId = requireString(seedIdValue, 'seedId', 256);
+    if (this.workspaceRow().seed_id === seedId) {
+      await this.withComputer((workspace) => workspace.fs.rm(PROJECT_ROOT, { recursive: true, force: true }));
+      this.ctx.storage.sql.exec(
+        `UPDATE ghostbuild_workspace_state SET initialized = 0, seed_id = NULL, reset_revision = ? WHERE singleton = 1`,
+        this.currentRevision(),
+      );
+    }
+    return this.getWorkspaceState();
+  }
+
+  async applyChanges(value: unknown) {
+    const input = record(value);
+    const baseRevision = requireInteger(input.baseRevision, 'baseRevision', Number.MAX_SAFE_INTEGER);
+    const changes = requireChanges(input.changes);
+    if (baseRevision !== this.currentRevision()) {
+      return { ok: false as const, conflict: true as const, state: await this.getWorkspaceState() };
+    }
+    const existingFiles = await this.withComputer(readProjectFiles);
+    if (baseRevision !== this.currentRevision()) {
+      return { ok: false as const, conflict: true as const, state: await this.getWorkspaceState() };
+    }
+    const projectedFiles = new Map(existingFiles.map((file) => [file.path, { size: file.size, mode: file.mode }]));
+    const decodedWrites = new Map<string, { bytes: Uint8Array; mode?: number }>();
+    for (const change of changes) {
+      if (change.kind === 'delete') {
+        for (const path of projectedFiles.keys()) {
+          if (path === change.path || path.startsWith(`${change.path}/`)) projectedFiles.delete(path);
+        }
+        continue;
+      }
+      const bytes = decodeFileContent(change.content, change.encoding);
+      if (bytes.byteLength > MAX_FILE_BYTES) {
+        throw new Error(`Workspace file exceeds ${MAX_FILE_BYTES} bytes.`);
+      }
+      const mode = change.mode ?? projectedFiles.get(change.path)?.mode;
+      decodedWrites.set(change.path, { bytes, mode });
+      projectedFiles.set(change.path, { size: bytes.byteLength, mode: mode ?? 0o644 });
+    }
+    if (
+      projectedFiles.size > MAX_FILES ||
+      [...projectedFiles.values()].reduce((sum, file) => sum + file.size, 0) > MAX_TOTAL_BYTES
+    ) {
+      throw new Error('The project workspace exceeds its size limit.');
+    }
+    const changedPaths: string[] = [];
+    await this.withComputer(async (workspace) => {
+      for (const change of changes) {
+        if (change.kind === 'delete') {
+          await workspace.fs.rm(change.path, { recursive: true, force: true });
+        } else {
+          const write = decodedWrites.get(change.path)!;
+          await writeWorkspaceFile(workspace, change.path, write.bytes, true, write.mode);
+        }
+        changedPaths.push(change.path);
+      }
+    });
+    const state = await this.getWorkspaceState();
+    return { ok: true as const, state, changedPaths };
+  }
+
+  async getSyncPage(value: unknown) {
+    const input = record(value);
+    const fromRevision = requireInteger(input.fromRevision, 'fromRevision', Number.MAX_SAFE_INTEGER);
+    const cursor = typeof input.cursor === 'string' ? decodeSyncCursor(input.cursor) : null;
+    const targetRevision = cursor?.revision ?? this.currentRevision();
+    const state = await this.getWorkspaceState();
+    if (state.revision !== targetRevision) {
+      return {
+        state,
+        fromRevision,
+        targetRevision: state.revision,
+        mode: 'snapshot' as const,
+        entries: [],
+        restart: true,
+      };
+    }
+    if (!cursor && fromRevision === targetRevision) {
+      return { state, fromRevision, targetRevision, mode: 'current' as const, entries: [] };
+    }
+    const files = await this.withComputer(readProjectFiles);
+    const observedRevision = this.currentRevision();
+    if (observedRevision !== targetRevision) {
+      const currentState = await this.getWorkspaceState();
+      return {
+        state: currentState,
+        fromRevision,
+        targetRevision: currentState.revision,
+        mode: 'snapshot' as const,
+        entries: [],
+        restart: true,
+      };
+    }
+    const start = cursor?.index ?? 0;
+    const page: WorkspaceFile[] = [];
+    let bytes = 0;
+    for (const file of files.slice(start)) {
+      if (page.length >= SYNC_BATCH_FILES || (page.length > 0 && bytes + file.size > SYNC_BATCH_BYTES)) {
+        break;
+      }
+      page.push(file);
+      bytes += file.size;
+    }
+    const nextIndex = start + page.length;
+    return {
+      state,
+      fromRevision,
+      targetRevision,
+      mode: 'snapshot' as const,
+      entries: page.map((file) => fileSyncEntry(file, targetRevision)),
+      ...(nextIndex < files.length
+        ? { nextCursor: encodeSyncCursor({ revision: targetRevision, index: nextIndex }) }
+        : {}),
     };
-    this.#workspace = new BuilderWorkspaceRepository(ctx.storage, backend, ctx.id.toString());
   }
 
-  getWorkspaceState() {
-    return this.#workspace.getState();
+  async readText(pathValue: unknown) {
+    const path = requireProjectPath(pathValue);
+    const file = await this.withComputer((workspace) => readWorkspaceFile(workspace, path));
+    const content = decodeUtf8(file.bytes);
+    return {
+      path,
+      content,
+      encoding: 'utf8' as const,
+      size: file.size,
+      sha256: file.sha256,
+      revision: this.currentRevision(),
+    };
   }
 
-  beginSeed(seedId: unknown) {
-    return this.#workspace.beginSeed(seedId);
+  async readWorkspaceFile(pathValue: unknown) {
+    const path = requireProjectPath(pathValue);
+    const file = await this.withComputer((workspace) => readWorkspaceFile(workspace, path));
+    return {
+      path,
+      bytes: file.bytes,
+      encoding: canDecodeUtf8(file.bytes) ? ('utf8' as const) : ('base64' as const),
+      size: file.size,
+      mode: file.mode,
+      sha256: file.sha256,
+      revision: this.currentRevision(),
+    };
   }
 
-  appendSeed(seedId: unknown, entries: unknown) {
-    return this.#workspace.appendSeed(seedId, entries);
+  async streamWorkspaceFile(pathValue: unknown): Promise<ReadableStream<Uint8Array>> {
+    const path = requireProjectPath(pathValue);
+    const workspace = await getWorkspace(this as unknown as Parameters<typeof getWorkspace>[0]);
+    try {
+      const stat = await workspace.fs.stat(path);
+      if (!stat.isFile || stat.size > MAX_FILE_BYTES) {
+        throw new Error(`Workspace file is invalid or too large: ${path}`);
+      }
+      const reader = (await workspace.fs.readFile(path)).getReader();
+      let disposed = false;
+      const dispose = () => {
+        if (disposed) return;
+        disposed = true;
+        reader.releaseLock();
+        workspace[Symbol.dispose]();
+      };
+      return new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          try {
+            const { value, done } = await reader.read();
+            if (done) {
+              dispose();
+              controller.close();
+            } else {
+              controller.enqueue(value);
+            }
+          } catch (error) {
+            dispose();
+            controller.error(error);
+          }
+        },
+        async cancel(reason) {
+          try {
+            await reader.cancel(reason);
+          } finally {
+            dispose();
+          }
+        },
+      });
+    } catch (error) {
+      workspace[Symbol.dispose]();
+      throw error;
+    }
   }
 
-  commitSeed(seedId: unknown, expected: unknown) {
-    return this.#workspace.commitSeed(seedId, expected);
+  async listWorkspaceFiles() {
+    const revision = this.currentRevision();
+    return (await this.withComputer(readProjectFiles)).map((file) => ({
+      path: file.path,
+      encoding: canDecodeUtf8(file.bytes) ? ('utf8' as const) : ('base64' as const),
+      size: file.size,
+      mode: file.mode,
+      sha256: file.sha256,
+      revision,
+    }));
   }
 
-  abortSeed(seedId: unknown) {
-    return this.#workspace.abortSeed(seedId);
+  async readDirectory(pathValue: unknown) {
+    const path = requireProjectPath(pathValue, true);
+    return this.withComputer(async (workspace) =>
+      (await workspace.fs.readdir(path)).map((entry) => ({
+        name: entry.name,
+        isFile: entry.isFile,
+        isDirectory: entry.isDirectory,
+      })),
+    );
   }
 
-  applyChanges(request: unknown) {
-    return this.#workspace.applyClientChanges(request);
+  async makeDirectory(pathValue: unknown) {
+    const path = requireProjectPath(pathValue, true);
+    await this.withComputer((workspace) => workspace.fs.mkdir(path, { recursive: true }));
   }
 
-  getSyncPage(request: unknown) {
-    return this.#workspace.getSyncPage(request);
-  }
-
-  readText(path: unknown) {
-    return this.#workspace.readText(path);
-  }
-
-  readWorkspaceFile(path: unknown) {
-    return this.#workspace.readFile(path);
-  }
-
-  listWorkspaceFiles() {
-    return this.#workspace.listFiles();
+  async execute(value: unknown) {
+    const input = record(value);
+    const command = requireString(input.command, 'command', 64 * 1024);
+    const cwd = input.cwd === undefined ? PROJECT_ROOT : requireProjectPath(input.cwd, true);
+    const backend = requireBackend(input.backend);
+    return this.withComputer((workspace) => runCommand(workspace, command, { cwd, backend, timeoutMs: 5 * 60_000 }));
   }
 
   async checkpoint() {
-    await this.#workspace.ensureRuntimeReady();
-    const state = this.#workspace.getState();
-    if (!state.initialized) {
-      throw new Error('The project workspace is not initialized.');
-    }
-    const files = this.#workspace
-      .listFiles()
-      .map((file) => ({ ...file, relativePath: relativeProjectPath(file.path) }))
-      .filter((file) => !CHECKPOINT_EXCLUDED_ROOTS.has(file.relativePath.split('/')[0] ?? ''))
-      .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
-    const revision = await sha256(JSON.stringify(files.map((file) => [file.relativePath, file.sha256])));
-    const current = this.#workspace.getState();
-    if (current.revision !== state.revision) {
+    const initialRevision = this.currentRevision();
+    const files = await this.withComputer(readProjectFiles);
+    const revision = await sha256Text(
+      JSON.stringify(files.map((file) => [relativeProjectPath(file.path), file.mode, file.sha256])),
+    );
+    if (this.currentRevision() !== initialRevision) {
       throw new Error('The project workspace changed while its checkpoint was created.');
     }
-    return { workspaceRevision: state.revision, revision };
-  }
-
-  async checkpointWithBackup() {
-    const checkpoint = await this.checkpoint();
-    return { ...checkpoint, backup: this.#workspace.getBackupHandle() };
+    return { workspaceRevision: initialRevision, revision };
   }
 
   async installDependenciesTool(value: unknown): Promise<GhostbuildToolResult> {
     const input = record(value);
-    const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
     const mode = input.mode === 'sync-lockfile' ? 'sync-lockfile' : input.mode === 'add' ? 'add' : null;
     const packages = requireStringArray(input.packages, 'packages', 100);
     if (!mode) {
       throw new SyntaxError('Invalid dependency installation mode.');
     }
-    const checkpoint = await this.checkpointWithBackup();
-    const packageFile = await this.#workspace.readText('/home/project/package.json');
-    const packageJson =
-      mode === 'sync-lockfile' ? packageFile.content : addRequestedDependencies(packageFile.content, packages);
-    const operation = this.env.WORKSPACE_SANDBOX.get(
-      this.env.WORKSPACE_SANDBOX.idFromName(`dependencies:${this.ctx.id.toString()}:${toolCallId}`),
-    ) as unknown as WorkspaceSandbox;
     const startedAt = Date.now();
-    return this.#workspace.commitTextFilesTool({
-      toolCallId,
-      toolName: 'npmInstall',
-      toolArgs: input.input,
-      expectedWorkspaceRevision: checkpoint.workspaceRevision,
-      prepare: () => operation.prepareDependencyFiles(checkpoint.backup, packageJson),
-      result: ({ changedPaths, workspaceRevision }) =>
-        toolSuccess(
-          mode === 'sync-lockfile'
-            ? 'Synchronized the durable project lockfile with package.json in the user-owned Sandbox.'
-            : `Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'} in the durable project.`,
-          {
-            mode,
-            changedPaths,
-            workspaceRevision,
-            buildEnvironment: 'user-cloudflare-sandbox',
-            durationMs: Date.now() - startedAt,
-          },
+    await this.withComputer(async (workspace) => {
+      const packagePath = `${PROJECT_ROOT}/package.json`;
+      const current = decodeUtf8((await readWorkspaceFile(workspace, packagePath)).bytes);
+      const next = mode === 'sync-lockfile' ? current : addRequestedDependencies(current, packages);
+      await writeWorkspaceFile(workspace, packagePath, new TextEncoder().encode(next));
+      requireCommandSuccess(
+        await runCommand(
+          workspace,
+          'pnpm install --lockfile-only --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
+          { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 4 * 60_000 },
         ),
+      );
     });
-  }
-
-  async prepareDependencyFiles(backup: DirectoryBackup, packageJson: string) {
-    await this.killAllProcesses();
-    const restored = await this.restoreBackup({ ...backup, dir: '/home/project' });
-    if (!restored.success) {
-      throw new Error('The project backup could not be restored for dependency installation.');
-    }
-    await this.writeFile('/home/project/package.json', packageJson);
-    const pnpm = await this.exec('command -v pnpm', { timeout: 30_000 });
-    requireExecSuccess(pnpm);
-    requireExecSuccess(
-      await this.exec(
-        `${shellQuote(pnpm.stdout.trim())} install --lockfile-only --ignore-scripts=true --ignore-pnpmfile ` +
-          '--registry=https://registry.npmjs.org/',
-        { cwd: '/home/project', timeout: 4 * 60_000 },
-      ),
+    const state = await this.getWorkspaceState();
+    return toolSuccess(
+      mode === 'sync-lockfile'
+        ? 'Synchronized the durable project lockfile with package.json.'
+        : `Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'} in the durable project.`,
+      {
+        mode,
+        workspaceRevision: state.revision,
+        buildEnvironment: 'cloudflare-computer-container',
+        durationMs: Date.now() - startedAt,
+      },
     );
-    const [nextPackageJson, pnpmLock] = await Promise.all([
-      this.readFile('/home/project/package.json', { encoding: 'utf8' }),
-      this.readFile('/home/project/pnpm-lock.yaml', { encoding: 'utf8' }),
-    ]);
-    return [
-      { path: '/home/project/package.json', content: nextPackageJson.content },
-      { path: '/home/project/pnpm-lock.yaml', content: pnpmLock.content },
-    ];
   }
 
-  async validateTool(value: unknown): Promise<GhostbuildToolResult> {
-    const input = record(value);
-    const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
-    const checkpoint = await this.checkpointWithBackup();
-    return this.#workspace.executeToolOnce(toolCallId, 'validateProject', input.input, async () => {
-      const operation = this.env.WORKSPACE_SANDBOX.get(
-        this.env.WORKSPACE_SANDBOX.idFromName(`validation:${this.ctx.id.toString()}:${checkpoint.revision}`),
-      ) as unknown as WorkspaceSandbox;
-      const startedAt = Date.now();
-      try {
-        await operation.validateBackup(checkpoint.backup);
-        const current = this.#workspace.getState();
-        if (current.revision !== checkpoint.workspaceRevision) {
-          return toolFailure('The durable project changed while validation was running. Validate the new revision.', {
-            level: 'full',
-            revision: checkpoint.revision,
-            workspaceRevision: checkpoint.workspaceRevision,
-            currentWorkspaceRevision: current.revision,
-            buildEnvironment: 'user-cloudflare-sandbox',
-          });
+  async validateTool(): Promise<GhostbuildToolResult> {
+    const before = await this.checkpoint();
+    const startedAt = Date.now();
+    try {
+      await this.withComputer(async (workspace) => {
+        requireCommandSuccess(
+          await runCommand(
+            workspace,
+            'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
+            { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 4 * 60_000 },
+          ),
+        );
+        for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
+          requireCommandSuccess(
+            await runCommand(workspace, command, {
+              cwd: PROJECT_ROOT,
+              backend: 'container-shell',
+              timeoutMs: 5 * 60_000,
+            }),
+          );
         }
-        this.#workspace.recordSuccessfulValidation(checkpoint);
-        return toolSuccess(`Project validation passed at durable workspace revision ${checkpoint.revision}.`, {
-          level: 'full',
-          revision: checkpoint.revision,
-          workspaceRevision: checkpoint.workspaceRevision,
-          buildEnvironment: 'user-cloudflare-sandbox',
-          checks: [
-            'workspace-policy',
-            'dependency-installation',
-            'typecheck',
-            'stack-verification',
-            'build',
-            'lint',
-          ].map((name) => ({ name, status: 'passed' as const })),
-          durationMs: Date.now() - startedAt,
-          nextAction: 'prepare-deployment',
-        });
-      } catch (error) {
-        return toolFailure(error instanceof Error ? error.message.slice(-4_000) : 'User-owned validation failed.', {
-          level: 'full',
-          revision: checkpoint.revision,
-          workspaceRevision: checkpoint.workspaceRevision,
-          currentWorkspaceRevision: this.#workspace.getState().revision,
-          buildEnvironment: 'user-cloudflare-sandbox',
-          checks: [{ name: 'production-build', status: 'failed' as const }],
-        });
+        await removeDerivedFiles(workspace);
+      });
+      const after = await this.checkpoint();
+      if (after.revision !== before.revision) {
+        throw new Error('The project changed while validation was running. Validate the new revision.');
       }
-    });
-  }
-
-  async validateBackup(backup: DirectoryBackup): Promise<void> {
-    await this.killAllProcesses();
-    const restored = await this.restoreBackup({ ...backup, dir: '/home/project' });
-    if (!restored.success) {
-      throw new Error('The exact project backup could not be restored for validation.');
-    }
-    const commands = ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint'];
-    for (const command of commands) {
-      requireExecSuccess(await this.exec(command, { cwd: '/home/project', timeout: 5 * 60_000 }));
+      this.ctx.storage.sql.exec(
+        `INSERT INTO ghostbuild_validations (revision, workspace_revision, validated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(revision) DO UPDATE SET workspace_revision = excluded.workspace_revision,
+           validated_at = excluded.validated_at`,
+        after.revision,
+        after.workspaceRevision,
+        Date.now(),
+      );
+      return toolSuccess(`Project validation passed at durable source revision ${after.revision}.`, {
+        level: 'full',
+        revision: after.revision,
+        workspaceRevision: after.workspaceRevision,
+        buildEnvironment: 'cloudflare-computer-container',
+        checks: ['workspace-policy', 'dependency-installation', 'typecheck', 'stack-verification', 'build', 'lint'].map(
+          (name) => ({ name, status: 'passed' as const }),
+        ),
+        durationMs: Date.now() - startedAt,
+        nextAction: 'prepare-deployment',
+      });
+    } catch (error) {
+      return toolFailure(error instanceof Error ? error.message.slice(-4_000) : 'User-owned validation failed.', {
+        level: 'full',
+        revision: before.revision,
+        workspaceRevision: before.workspaceRevision,
+        currentWorkspaceRevision: this.currentRevision(),
+        buildEnvironment: 'cloudflare-computer-container',
+        checks: [{ name: 'production-build', status: 'failed' as const }],
+      });
     }
   }
 
   validationStatus(revision: unknown) {
-    return { valid: typeof revision === 'string' && this.#workspace.hasSuccessfulValidation(revision) };
+    return { valid: typeof revision === 'string' && this.hasSuccessfulValidation(revision) };
   }
 
-  async deploymentPlan(revision: unknown) {
-    if (typeof revision !== 'string' || !this.#workspace.hasSuccessfulValidation(revision)) {
+  async deploymentPlan(revisionValue: unknown) {
+    const revision = requireString(revisionValue, 'revision', 64);
+    if (!this.hasSuccessfulValidation(revision)) {
       throw new Error('Deployment requires successful validation of this exact revision.');
     }
     const checkpoint = await this.checkpoint();
@@ -276,8 +641,8 @@ export class WorkspaceSandbox extends Sandbox<RuntimeEnv> {
       throw new Error('The durable project changed after validation. Run full validation again.');
     }
     const [packageFile, wranglerFile] = await Promise.all([
-      this.#workspace.readText('/home/project/package.json'),
-      this.#workspace.readText('/home/project/wrangler.jsonc'),
+      this.readText(`${PROJECT_ROOT}/package.json`),
+      this.readText(`${PROJECT_ROOT}/wrangler.jsonc`),
     ]);
     const packageJson = JSON.parse(packageFile.content) as { ghostbuild?: { projectType?: unknown } };
     const configuredType = packageJson.ghostbuild?.projectType;
@@ -290,34 +655,63 @@ export class WorkspaceSandbox extends Sandbox<RuntimeEnv> {
     }
     const hasArrayBinding = (value: unknown, binding: string) =>
       Array.isArray(value) && value.some((entry) => recordOrNull(entry)?.binding === binding);
-    const bindings = {
-      ai: recordOrNull(wrangler.ai)?.binding === 'AI',
-      d1: hasArrayBinding(wrangler.d1_databases, 'DB'),
-      r2: hasArrayBinding(wrangler.r2_buckets, 'APP_STORAGE'),
-      appAgent:
-        Array.isArray(recordOrNull(wrangler.durable_objects)?.bindings) &&
-        (recordOrNull(wrangler.durable_objects)?.bindings as unknown[]).some(
-          (entry) => recordOrNull(entry)?.name === 'AppAgent',
-        ),
-    };
     return {
       ...checkpoint,
-      project: { type: configuredType === 'worker' ? ('worker' as const) : ('web_app' as const), bindings },
+      project: {
+        type: configuredType === 'worker' ? ('worker' as const) : ('web_app' as const),
+        bindings: {
+          ai: recordOrNull(wrangler.ai)?.binding === 'AI',
+          d1: hasArrayBinding(wrangler.d1_databases, 'DB'),
+          r2: hasArrayBinding(wrangler.r2_buckets, 'APP_STORAGE'),
+          appAgent:
+            Array.isArray(recordOrNull(wrangler.durable_objects)?.bindings) &&
+            (recordOrNull(wrangler.durable_objects)?.bindings as unknown[]).some(
+              (entry) => recordOrNull(entry)?.name === 'AppAgent',
+            ),
+        },
+      },
     };
   }
 
   async createPreview(value: unknown) {
-    const input = record(value);
-    const previewId = requireString(input.previewId, 'previewId', 128);
-    const checkpoint = await this.checkpointWithBackup();
-    const preview = this.env.WORKSPACE_SANDBOX.get(
-      this.env.WORKSPACE_SANDBOX.idFromName(`preview:${this.ctx.id.toString()}:${previewId}`),
-    ) as unknown as WorkspaceSandbox;
-    const url = await preview.startPreview(checkpoint.backup, previewId);
+    const previewId = requireString(record(value).previewId, 'previewId', 128);
+    const checkpoint = await this.checkpoint();
+    await this.stopActivePreview();
+    await this.withComputer(async (workspace) => {
+      requireCommandSuccess(
+        await runCommand(workspace, 'pnpm exec vite build --config vite.preview.config.mjs', {
+          cwd: PROJECT_ROOT,
+          backend: 'container-shell',
+          timeoutMs: 5 * 60_000,
+        }),
+      );
+      const execId = `preview-${previewId}`;
+      await workspace.runtime.disposeExec(execId, { backend: 'container-shell' }).catch(() => undefined);
+      const handle = await workspace.runtime.exec(
+        `pnpm exec vite preview --config vite.preview.config.mjs --host 0.0.0.0 --port ${PREVIEW_PORT} --strictPort`,
+        {
+          cwd: PROJECT_ROOT,
+          backend: 'container-shell',
+          id: execId,
+          timeoutMs: PREVIEW_TTL_MS,
+          encoding: 'utf8',
+        },
+      );
+      handle[Symbol.dispose]();
+      this.ctx.storage.sql.exec(
+        `UPDATE ghostbuild_workspace_state SET preview_id = ?, preview_exec_id = ? WHERE singleton = 1`,
+        previewId,
+        execId,
+      );
+    });
+    await waitForHttpPort(this.ctx.container!.getTcpPort(PREVIEW_PORT));
+    await this.setKeepAlive(true);
+    const tunnel = await this.tunnels.get(PREVIEW_PORT, { name: `preview-${previewId.slice(0, 32)}` });
+    await this.schedule(PREVIEW_TTL_MS / 1_000, 'expirePreview', { previewId });
     const now = Date.now();
     return {
       id: previewId,
-      url,
+      url: tunnel.url,
       workspaceRevision: checkpoint.workspaceRevision,
       snapshotRevision: checkpoint.revision,
       readyAt: new Date(now).toISOString(),
@@ -325,135 +719,194 @@ export class WorkspaceSandbox extends Sandbox<RuntimeEnv> {
     };
   }
 
-  async startPreview(backup: DirectoryBackup, previewId: string): Promise<string> {
-    await this.killAllProcesses();
-    const restored = await this.restoreBackup({ ...backup, dir: '/home/project' });
-    if (!restored.success) {
-      throw new Error('The exact project backup could not be restored for preview.');
+  async stopPreview(previewIdValue: unknown) {
+    const previewId = requireString(previewIdValue, 'previewId', 128);
+    const row = this.workspaceRow();
+    if (row.preview_id === previewId) {
+      await this.stopActivePreview();
     }
-    for (const command of ['pnpm exec vite build --config vite.preview.config.mjs']) {
-      requireExecSuccess(await this.exec(command, { cwd: '/home/project', timeout: 5 * 60_000 }));
-    }
-    const process = await this.startProcess(
-      `pnpm exec vite preview --config vite.preview.config.mjs --host 0.0.0.0 --port ${PREVIEW_PORT} --strictPort`,
-      {
-        cwd: '/home/project',
-        timeout: PREVIEW_TTL_MS,
-        autoCleanup: false,
-        processId: 'ghostbuild-preview',
-      },
-    );
-    await process.waitForPort(PREVIEW_PORT, { mode: 'http', status: { min: 200, max: 399 }, timeout: 45_000 });
-    await this.setKeepAlive(true);
-    const tunnel = await this.tunnels.get(PREVIEW_PORT, { name: `preview-${previewId.slice(0, 32)}` });
-    await this.schedule(PREVIEW_TTL_MS / 1_000, 'expirePreview', { previewId });
-    return tunnel.url;
   }
 
-  async stopPreview(previewId: unknown) {
-    const id = requireString(previewId, 'previewId', 128);
-    this.deleteSchedules('expirePreview');
-    await this.expirePreview({ previewId: id });
-    await this.destroy();
-  }
-
-  async expirePreview(value: unknown): Promise<void> {
-    requireString(record(value).previewId, 'previewId', 128);
-    await this.tunnels.destroy(PREVIEW_PORT).catch(() => undefined);
-    await this.killAllProcesses().catch(() => undefined);
-    await this.setKeepAlive(false);
+  async expirePreview(value: unknown) {
+    await this.stopPreview(record(value).previewId);
   }
 
   async deploy(value: unknown) {
     const input = record(value);
     const revision = requireString(input.revision, 'revision', 64);
-    if (!/^[a-f0-9]{64}$/.test(revision) || !this.#workspace.hasSuccessfulValidation(revision)) {
+    if (!/^[a-f0-9]{64}$/.test(revision) || !this.hasSuccessfulValidation(revision)) {
       throw new Error('Deployment requires successful validation of this exact revision.');
     }
-    const checkpoint = await this.checkpointWithBackup();
-    if (checkpoint.revision !== revision) {
+    if ((await this.checkpoint()).revision !== revision) {
       throw new Error('The durable project changed after validation. Run full validation again.');
     }
-    const deploymentId = requireString(input.deploymentId, 'deploymentId', 128);
-    const operation = this.env.WORKSPACE_SANDBOX.get(
-      this.env.WORKSPACE_SANDBOX.idFromName(`deployment:${this.ctx.id.toString()}:${deploymentId}`),
-    ) as unknown as WorkspaceSandbox;
-    return operation.deployBackup(checkpoint.backup, input);
-  }
-
-  async deployBackup(backup: DirectoryBackup, value: Record<string, unknown>) {
-    const apiToken = requireString(value.apiToken, 'apiToken', 4096);
-    const accountId = requireString(value.accountId, 'accountId', 64);
-    const workerName = requireCloudflareName(value.workerName, 'workerName');
-    const projectType = value.projectType === 'worker' ? 'worker' : value.projectType === 'web_app' ? 'web_app' : null;
+    const apiToken = requireString(input.apiToken, 'apiToken', 4096);
+    const accountId = requireString(input.accountId, 'accountId', 64);
+    const workerName = requireCloudflareName(input.workerName, 'workerName');
+    const projectType = input.projectType === 'worker' ? 'worker' : input.projectType === 'web_app' ? 'web_app' : null;
     if (!projectType) {
       throw new SyntaxError('Invalid deployment project type.');
     }
-    const restored = await this.restoreBackup({ ...backup, dir: '/home/project' });
-    if (!restored.success) {
-      throw new Error('The exact validated backup could not be restored for deployment.');
-    }
-    for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
-      requireExecSuccess(await this.exec(command, { cwd: '/home/project', timeout: 5 * 60_000 }));
-    }
-    const config = trustedDeploymentConfig({ ...value, accountId, workerName, projectType });
-    const configPath = '/home/project/.ghostbuild-deploy.json';
-    const outputPath = '/tmp/ghostbuild-wrangler-output.ndjson';
-    await this.writeFile(configPath, JSON.stringify(config));
-    const commandEnv = {
-      CLOUDFLARE_ACCOUNT_ID: accountId,
-      CLOUDFLARE_API_TOKEN: apiToken,
-      WRANGLER_OUTPUT_FILE_PATH: outputPath,
-    };
-    if (typeof value.d1DatabaseId === 'string') {
-      requireExecSuccess(
-        await this.exec(`pnpm exec wrangler d1 migrations apply DB --remote --config ${configPath} --yes`, {
-          cwd: '/home/project',
-          env: commandEnv,
-          timeout: 5 * 60_000,
-        }),
-      );
-    }
-    if (typeof value.agentSecurityD1DatabaseId === 'string') {
-      requireExecSuccess(
-        await this.exec(
-          `pnpm exec wrangler d1 migrations apply AGENT_SECURITY_DB --remote --config ${configPath} --yes`,
-          { cwd: '/home/project', env: commandEnv, timeout: 5 * 60_000 },
+    return this.withComputer(async (workspace) => {
+      for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
+        requireCommandSuccess(
+          await runCommand(workspace, command, {
+            cwd: PROJECT_ROOT,
+            backend: 'container-shell',
+            timeoutMs: 5 * 60_000,
+          }),
+        );
+      }
+      const configPath = '/home/.ghostbuild-deploy.json';
+      const outputPath = '/home/.ghostbuild-wrangler-output.ndjson';
+      await writeWorkspaceFile(
+        workspace,
+        configPath,
+        new TextEncoder().encode(
+          JSON.stringify(trustedDeploymentConfig({ ...input, accountId, workerName, projectType })),
         ),
+        false,
       );
-    }
-    requireExecSuccess(
-      await this.exec(`pnpm exec wrangler deploy --config ${configPath}`, {
-        cwd: '/home/project',
-        env: commandEnv,
-        timeout: 10 * 60_000,
-      }),
+      const env = {
+        CLOUDFLARE_ACCOUNT_ID: accountId,
+        CLOUDFLARE_API_TOKEN: apiToken,
+        WRANGLER_OUTPUT_FILE_PATH: outputPath,
+      };
+      try {
+        if (typeof input.d1DatabaseId === 'string') {
+          requireCommandSuccess(
+            await runCommand(
+              workspace,
+              `pnpm exec wrangler d1 migrations apply DB --remote --config ${configPath} --yes`,
+              {
+                cwd: PROJECT_ROOT,
+                backend: 'container-shell',
+                timeoutMs: 5 * 60_000,
+                env,
+              },
+            ),
+          );
+        }
+        if (typeof input.agentSecurityD1DatabaseId === 'string') {
+          requireCommandSuccess(
+            await runCommand(
+              workspace,
+              `pnpm exec wrangler d1 migrations apply AGENT_SECURITY_DB --remote --config ${configPath} --yes`,
+              { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 5 * 60_000, env },
+            ),
+          );
+        }
+        requireCommandSuccess(
+          await runCommand(workspace, `pnpm exec wrangler deploy --config ${configPath}`, {
+            cwd: PROJECT_ROOT,
+            backend: 'container-shell',
+            timeoutMs: 10 * 60_000,
+            env,
+          }),
+        );
+        const output = decodeUtf8((await readWorkspaceFile(workspace, outputPath)).bytes);
+        return { workerName, workerVersionId: parseWranglerVersion(output, workerName) };
+      } finally {
+        await workspace.fs.rm(configPath, { force: true }).catch(() => undefined);
+        await workspace.fs.rm(outputPath, { force: true }).catch(() => undefined);
+        await removeDerivedFiles(workspace);
+      }
+    });
+  }
+
+  async deleteProject() {
+    await this.stopActivePreview();
+    await this.withComputer((workspace) => workspace.fs.rm(PROJECT_ROOT, { recursive: true, force: true }));
+    this.ctx.storage.sql.exec('DELETE FROM ghostbuild_validations');
+    this.ctx.storage.sql.exec(
+      `UPDATE ghostbuild_workspace_state
+       SET initialized = 0, seed_id = NULL, reset_revision = ?, preview_id = NULL, preview_exec_id = NULL
+       WHERE singleton = 1`,
+      this.currentRevision(),
     );
-    const output = await this.readFile(outputPath, { encoding: 'utf8' });
-    return { workerName, workerVersionId: parseWranglerVersion(output.content, workerName) };
+    await this.destroy().catch(() => undefined);
   }
 
-  async cleanupRetiredBackups(now = Date.now()): Promise<number> {
-    const due = [
-      ...this.ctx.storage.sql.exec<{ backup_id: string }>(
-        `SELECT backup_id FROM retired_backups WHERE delete_after <= ? ORDER BY delete_after LIMIT 100`,
-        now,
+  private async stopActivePreview() {
+    const row = this.workspaceRow();
+    this.deleteSchedules('expirePreview');
+    if (row.preview_exec_id) {
+      await this.withComputer(async (workspace) => {
+        await workspace.runtime
+          .killExec(row.preview_exec_id!, { backend: 'container-shell', signal: 'SIGKILL' })
+          .catch(() => undefined);
+        await workspace.runtime
+          .disposeExec(row.preview_exec_id!, { backend: 'container-shell' })
+          .catch(() => undefined);
+        await removeDerivedFiles(workspace);
+      });
+    }
+    await this.tunnels.destroy(PREVIEW_PORT).catch(() => undefined);
+    await this.setKeepAlive(false).catch(() => undefined);
+    this.ctx.storage.sql.exec(
+      'UPDATE ghostbuild_workspace_state SET preview_id = NULL, preview_exec_id = NULL WHERE singleton = 1',
+    );
+  }
+
+  private hasSuccessfulValidation(revision: string): boolean {
+    return (
+      first(
+        this.ctx.storage.sql.exec<{ found: number }>(
+          'SELECT 1 AS found FROM ghostbuild_validations WHERE revision = ? LIMIT 1',
+          revision,
+        ),
+      )?.found === 1
+    );
+  }
+
+  private currentRevision(): number {
+    return first(this.ctx.storage.sql.exec<{ v: number }>("SELECT v FROM vfs_meta WHERE k = 'rev'"))?.v ?? 0;
+  }
+
+  private workspaceRow(): {
+    initialized: number;
+    seed_id: string | null;
+    reset_revision: number;
+    preview_id: string | null;
+    preview_exec_id: string | null;
+  } {
+    const row = first(
+      this.ctx.storage.sql.exec<{
+        initialized: number;
+        seed_id: string | null;
+        reset_revision: number;
+        preview_id: string | null;
+        preview_exec_id: string | null;
+      }>(
+        `SELECT initialized, seed_id, reset_revision, preview_id, preview_exec_id
+         FROM ghostbuild_workspace_state WHERE singleton = 1`,
       ),
-    ];
-    for (const row of due) {
-      await this.env.BACKUP_BUCKET.delete([`backups/${row.backup_id}/data.sqsh`, `backups/${row.backup_id}/meta.json`]);
-      this.ctx.storage.sql.exec('DELETE FROM retired_backups WHERE backup_id = ?', row.backup_id);
+    );
+    if (!row) {
+      throw new Error('The Computer workspace state is unavailable.');
     }
-    return due.length;
+    return row;
   }
 
-  async deleteProject(): Promise<void> {
-    const retired = [...this.ctx.storage.sql.exec<{ backup_id: string }>('SELECT backup_id FROM retired_backups')];
-    for (const row of retired) {
-      await this.env.BACKUP_BUCKET.delete([`backups/${row.backup_id}/data.sqsh`, `backups/${row.backup_id}/meta.json`]);
+  private stateFromFiles(files: WorkspaceFile[]): WorkspaceState {
+    const row = this.workspaceRow();
+    return {
+      initialized: row.initialized === 1,
+      revision: this.currentRevision(),
+      resetRevision: row.reset_revision,
+      fileCount: files.length,
+      totalBytes: totalFileBytes(files),
+      seeding: row.seed_id !== null,
+    };
+  }
+
+  private async withComputer<T>(operation: (workspace: WorkspaceClient) => Promise<T>): Promise<T> {
+    const workspace = await getWorkspace(this as unknown as Parameters<typeof getWorkspace>[0]);
+    try {
+      return await operation(workspace);
+    } finally {
+      workspace[Symbol.dispose]();
     }
-    this.ctx.storage.sql.exec('DELETE FROM retired_backups');
-    await this.#workspace.deleteExternalObjects();
   }
 }
 
@@ -462,22 +915,19 @@ export default {
     const url = new URL(request.url);
     const controlPlaneRequest = authorized(request, env.CONTROL_PLANE_SECRET);
     if (controlPlaneRequest && request.method === 'GET' && url.pathname === '/v1/health') {
-      return Response.json({ ok: true, service: 'ghostbuild-user-workspace-runtime', version: 1 });
+      return Response.json({ ok: true, service: 'ghostbuild-user-workspace-runtime', version: 2 });
     }
     const route = parseProjectRoute(url.pathname);
     if (!route || !controlPlaneRequest) {
       return handleUserRequest(request, env, url, ctx);
     }
-    const id = env.WORKSPACE_SANDBOX.idFromName(route.projectId);
-    const project = env.WORKSPACE_SANDBOX.get(id) as unknown as WorkspaceSandbox;
+    const project = env.PROJECT_WORKSPACE.get(env.PROJECT_WORKSPACE.idFromName(route.projectId));
     try {
-      await project.cleanupRetiredBackups().catch(() => 0);
       if (request.method === 'GET' && route.operation === 'state') {
         return Response.json(await project.getWorkspaceState());
       }
       if (request.method === 'POST' && route.operation === 'seed/begin') {
-        const body = await readJson(request);
-        return Response.json(await project.beginSeed(record(body).seedId));
+        return Response.json(await project.beginSeed(record(await readJson(request)).seedId));
       }
       if (request.method === 'POST' && route.operation === 'seed/append') {
         const body = record(await readJson(request));
@@ -488,8 +938,7 @@ export default {
         return Response.json(await project.commitSeed(body.seedId, body.expected));
       }
       if (request.method === 'POST' && route.operation === 'seed/abort') {
-        const body = record(await readJson(request));
-        return Response.json(await project.abortSeed(body.seedId));
+        return Response.json(await project.abortSeed(record(await readJson(request)).seedId));
       }
       if (request.method === 'POST' && route.operation === 'changes') {
         return Response.json(await project.applyChanges(await readJson(request)));
@@ -504,8 +953,26 @@ export default {
         const file = await project.readWorkspaceFile(record(await readJson(request)).path);
         return Response.json({ ...file, bytes: encodeBase64(file.bytes) });
       }
+      if (request.method === 'POST' && route.operation === 'read-file-stream') {
+        return new Response(await project.streamWorkspaceFile(record(await readJson(request)).path), {
+          headers: { 'content-type': 'application/octet-stream' },
+        });
+      }
       if (request.method === 'GET' && route.operation === 'files') {
         return Response.json(await project.listWorkspaceFiles());
+      }
+      if (request.method === 'POST' && route.operation === 'directory') {
+        return Response.json(await project.readDirectory(record(await readJson(request)).path));
+      }
+      if (request.method === 'POST' && route.operation === 'mkdir') {
+        await project.makeDirectory(record(await readJson(request)).path);
+        return new Response(null, { status: 204 });
+      }
+      if (request.method === 'POST' && route.operation === 'exec') {
+        const result: unknown = await (project as unknown as { execute(value: unknown): Promise<unknown> }).execute(
+          await readJson(request),
+        );
+        return Response.json(result);
       }
       if (request.method === 'POST' && route.operation === 'checkpoint') {
         return Response.json(await project.checkpoint());
@@ -514,7 +981,7 @@ export default {
         return Response.json(await project.installDependenciesTool(await readJson(request)));
       }
       if (request.method === 'POST' && route.operation === 'validate') {
-        return Response.json(await project.validateTool(await readJson(request)));
+        return Response.json(await project.validateTool());
       }
       if (request.method === 'POST' && route.operation === 'validation-status') {
         return Response.json(await project.validationStatus(record(await readJson(request)).revision));
@@ -526,12 +993,7 @@ export default {
         return Response.json(await project.createPreview(await readJson(request)));
       }
       if (request.method === 'POST' && route.operation === 'preview/stop') {
-        const body = record(await readJson(request));
-        const previewId = requireString(body.previewId, 'previewId', 128);
-        const preview = env.WORKSPACE_SANDBOX.get(
-          env.WORKSPACE_SANDBOX.idFromName(`preview:${id.toString()}:${previewId}`),
-        ) as unknown as WorkspaceSandbox;
-        await preview.stopPreview(previewId);
+        await project.stopPreview(record(await readJson(request)).previewId);
         return new Response(null, { status: 204 });
       }
       if (request.method === 'POST' && route.operation === 'deploy') {
@@ -566,7 +1028,6 @@ async function handleUserRequest(
   if (!capability || capability.subject !== env.GHOSTBUILD_USER_ID) {
     return withCors(Response.json({ error: 'Unauthorized' }, { status: 401 }), origin);
   }
-
   let response: Response;
   const agentResponse = await routeUserRuntimeAgentRequest(request, env as unknown as Env, capability.subject);
   if (agentResponse) {
@@ -611,6 +1072,287 @@ async function handleUserRequest(
   return withCors(response, capability.origin);
 }
 
+async function readProjectFiles(workspace: WorkspaceClient): Promise<WorkspaceFile[]> {
+  try {
+    await workspace.fs.stat(PROJECT_ROOT);
+  } catch (error) {
+    if (isMissingPath(error)) return [];
+    throw error;
+  }
+  const entries = (await workspace.fs.find(PROJECT_ROOT)).filter(
+    (entry) =>
+      entry.type === 'file' && !CHECKPOINT_EXCLUDED_ROOTS.has(relativeProjectPath(entry.path).split('/')[0] ?? ''),
+  );
+  if (entries.length > MAX_FILES) {
+    throw new Error('The project workspace has too many files.');
+  }
+  const files: WorkspaceFile[] = [];
+  let totalBytes = 0;
+  for (const entry of entries) {
+    const file = await readWorkspaceFile(workspace, entry.path);
+    totalBytes += file.size;
+    if (totalBytes > MAX_TOTAL_BYTES) {
+      throw new Error('The project workspace exceeds its size limit.');
+    }
+    files.push(file);
+  }
+  return files.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+async function readWorkspaceFile(workspace: WorkspaceClient, path: string): Promise<WorkspaceFile> {
+  const stat = await workspace.fs.stat(path);
+  if (!stat.isFile || stat.size > MAX_FILE_BYTES) {
+    throw new Error(`Workspace file is invalid or too large: ${path}`);
+  }
+  const stream = await workspace.fs.readFile(path);
+  const bytes = await readStream(stream, stat.size);
+  return { path, bytes, size: bytes.byteLength, mode: stat.mode, sha256: await sha256Bytes(bytes) };
+}
+
+async function writeWorkspaceFile(
+  workspace: WorkspaceClient,
+  pathValue: unknown,
+  bytes: Uint8Array,
+  projectOnly = true,
+  mode?: number,
+): Promise<void> {
+  const path = projectOnly ? requireProjectPath(pathValue) : requireAbsolutePath(pathValue);
+  if (bytes.byteLength > MAX_FILE_BYTES) {
+    throw new Error(`Workspace file exceeds ${MAX_FILE_BYTES} bytes.`);
+  }
+  const slash = path.lastIndexOf('/');
+  await workspace.fs.mkdir(path.slice(0, slash) || '/', { recursive: true });
+  await workspace.fs.writeFile(path, bytes, mode === undefined ? undefined : { mode });
+}
+
+async function removeDerivedFiles(workspace: WorkspaceClient): Promise<void> {
+  for (const path of DERIVED_PATHS) {
+    await workspace.fs.rm(path, { recursive: true, force: true });
+  }
+}
+
+async function runCommand(
+  workspace: WorkspaceClient,
+  command: string,
+  options: {
+    cwd: string;
+    backend: 'worker-shell' | 'container-shell';
+    timeoutMs: number;
+    env?: Record<string, string>;
+  },
+) {
+  const handle = await workspace.runtime.exec(command, {
+    cwd: options.cwd,
+    backend: options.backend,
+    encoding: 'utf8',
+    timeoutMs: options.timeoutMs,
+    env: options.env,
+  });
+  try {
+    return await handle.result();
+  } finally {
+    const id = handle.id;
+    handle[Symbol.dispose]();
+    await workspace.runtime.disposeExec(id, { backend: options.backend }).catch(() => undefined);
+  }
+}
+
+function requireCommandSuccess(result: { exitCode: number; stdout: string; stderr: string }): void {
+  if (result.exitCode !== 0) {
+    throw new Error(`${result.stderr}\n${result.stdout}`.trim().slice(-4_000) || 'The Computer command failed.');
+  }
+}
+
+function computerdBootstrapCommand(): string {
+  const tokenUrl =
+    'https://ghcr.io/token?service=ghcr.io&scope=repository:cloudflare/computer-computerd-linux-x64:pull';
+  const blobUrl = `https://ghcr.io/v2/cloudflare/computer-computerd-linux-x64/blobs/${COMPUTERD_LAYER_DIGEST}`;
+  return [
+    'set -eu',
+    `mkdir -p ${shellQuote(COMPUTERD_ROOT)}`,
+    `token="$(curl -fsSL ${shellQuote(tokenUrl)} | jq -er .token)"`,
+    `curl -fsSL -H "Authorization: Bearer $token" -o ${shellQuote(`${COMPUTERD_ROOT}/layer.tgz`)} ${shellQuote(blobUrl)}`,
+    `echo ${shellQuote(`${COMPUTERD_LAYER_DIGEST.slice('sha256:'.length)}  ${COMPUTERD_ROOT}/layer.tgz`)} | sha256sum -c -`,
+    `tar -xzf ${shellQuote(`${COMPUTERD_ROOT}/layer.tgz`)} -C ${shellQuote(COMPUTERD_ROOT)}`,
+    `chmod 0755 ${shellQuote(COMPUTERD_BINARY)}`,
+  ].join('\n');
+}
+
+async function waitForHttpPort(port: Fetcher): Promise<void> {
+  const deadline = Date.now() + 45_000;
+  let lastError = 'not ready';
+  while (Date.now() < deadline) {
+    try {
+      const response = await port.fetch('http://container/');
+      if (response.status >= 200 && response.status < 400) {
+        return;
+      }
+      lastError = `HTTP ${response.status}`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await scheduler.wait(500);
+  }
+  throw new Error(`Preview did not become ready: ${lastError}`);
+}
+
+function fileSyncEntry(file: WorkspaceFile, revision: number) {
+  const utf8 = canDecodeUtf8(file.bytes);
+  return {
+    kind: 'write' as const,
+    path: file.path,
+    content: utf8 ? decodeUtf8(file.bytes) : encodeBase64(file.bytes),
+    encoding: utf8 ? ('utf8' as const) : ('base64' as const),
+    size: file.size,
+    sha256: file.sha256,
+    revision,
+  };
+}
+
+function requireFileInputs(value: unknown): Array<{ path: string; content: string; encoding: 'utf8' | 'base64' }> {
+  if (!Array.isArray(value) || value.length > SYNC_BATCH_FILES) {
+    throw new SyntaxError('Invalid workspace seed entries.');
+  }
+  return value.map((entryValue) => {
+    const entry = record(entryValue);
+    return {
+      path: requireProjectPath(entry.path),
+      content:
+        typeof entry.content === 'string' ? entry.content : requireString(entry.content, 'content', MAX_FILE_BYTES),
+      encoding: entry.encoding === 'base64' ? 'base64' : 'utf8',
+    };
+  });
+}
+
+function requireChanges(
+  value: unknown,
+): Array<
+  | { kind: 'delete'; path: string }
+  | { kind: 'write'; path: string; content: string; encoding: 'utf8' | 'base64'; mode?: number }
+> {
+  if (!Array.isArray(value) || value.length > SYNC_BATCH_FILES) {
+    throw new SyntaxError('Invalid workspace changes.');
+  }
+  return value.map((changeValue) => {
+    const change = record(changeValue);
+    const path = requireProjectPath(change.path);
+    if (change.kind === 'delete') {
+      return { kind: 'delete' as const, path };
+    }
+    if (change.kind !== 'write' || typeof change.content !== 'string') {
+      throw new SyntaxError('Invalid workspace change.');
+    }
+    return {
+      kind: 'write' as const,
+      path,
+      content: change.content,
+      encoding: change.encoding === 'base64' ? 'base64' : 'utf8',
+      ...(change.mode === undefined ? {} : { mode: requireInteger(change.mode, 'mode', 0o7777) }),
+    };
+  });
+}
+
+function requireProjectPath(value: unknown, allowRoot = false): string {
+  const path = requireAbsolutePath(value);
+  if ((allowRoot && path === PROJECT_ROOT) || path.startsWith(`${PROJECT_ROOT}/`)) {
+    return path;
+  }
+  throw new SyntaxError(`Path must be under ${PROJECT_ROOT}.`);
+}
+
+function requireAbsolutePath(value: unknown): string {
+  const path = requireString(value, 'path', 1_024)
+    .replaceAll('\\', '/')
+    .replace(/\/{2,}/g, '/');
+  if (!path.startsWith('/') || path.split('/').includes('..') || path.includes('\0')) {
+    throw new SyntaxError('Invalid absolute workspace path.');
+  }
+  return path.length > 1 ? path.replace(/\/$/, '') : path;
+}
+
+function requireBackend(value: unknown): 'worker-shell' | 'container-shell' {
+  if (value === undefined || value === 'worker-shell') {
+    return 'worker-shell';
+  }
+  if (value === 'container-shell') {
+    return value;
+  }
+  throw new SyntaxError('Invalid Computer execution backend.');
+}
+
+function decodeFileContent(content: string, encoding: 'utf8' | 'base64'): Uint8Array {
+  return encoding === 'base64' ? decodeBase64(content) : new TextEncoder().encode(content);
+}
+
+function totalFileBytes(files: WorkspaceFile[]): number {
+  return files.reduce((total, file) => total + file.size, 0);
+}
+
+function relativeProjectPath(path: string): string {
+  return path.slice(PROJECT_ROOT.length).replace(/^\/+/, '');
+}
+
+function encodeSyncCursor(cursor: { revision: number; index: number }): string {
+  return btoa(JSON.stringify(cursor));
+}
+
+function decodeSyncCursor(value: string): { revision: number; index: number } {
+  try {
+    const cursor = record(JSON.parse(atob(value)));
+    return {
+      revision: requireInteger(cursor.revision, 'cursor revision', Number.MAX_SAFE_INTEGER),
+      index: requireInteger(cursor.index, 'cursor index', MAX_FILES),
+    };
+  } catch {
+    throw new SyntaxError('Invalid workspace sync cursor.');
+  }
+}
+
+async function readStream(stream: ReadableStream<Uint8Array>, expectedBytes: number): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const result = new Uint8Array(expectedBytes);
+  let offset = 0;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (offset + value.byteLength > result.byteLength) {
+      throw new Error('Workspace file changed while it was read.');
+    }
+    result.set(value, offset);
+    offset += value.byteLength;
+  }
+  if (offset !== expectedBytes) {
+    throw new Error('Workspace file changed while it was read.');
+  }
+  return result;
+}
+
+function canDecodeUtf8(bytes: Uint8Array): boolean {
+  try {
+    decodeUtf8(bytes);
+    return !bytes.includes(0);
+  } catch {
+    return false;
+  }
+}
+
+function decodeUtf8(bytes: Uint8Array): string {
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+}
+
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
+}
+
+function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
 function bearerToken(request: Request): string | null {
   const authorization = request.headers.get('authorization');
   return authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
@@ -625,28 +1367,19 @@ function withCors(response: Response, origin: string | null): Response {
   headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
   headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   headers.append('Vary', 'Origin');
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 function parseProjectRoute(pathname: string): { projectId: string; operation: string } | null {
   const match = /^\/v1\/projects\/([^/]+)(?:\/(.*))?$/.exec(pathname);
-  if (!match) {
-    return null;
-  }
+  if (!match) return null;
   let projectId: string;
   try {
     projectId = decodeURIComponent(match[1]!);
   } catch {
     return null;
   }
-  if (!PROJECT_ID_PATTERN.test(projectId)) {
-    return null;
-  }
-  return { projectId, operation: match[2] ?? '' };
+  return PROJECT_ID_PATTERN.test(projectId) ? { projectId, operation: match[2] ?? '' } : null;
 }
 
 async function readJson(request: Request): Promise<unknown> {
@@ -686,6 +1419,13 @@ function requireStringArray(value: unknown, name: string, maxLength: number): st
   return value as string[];
 }
 
+function requireInteger(value: unknown, name: string, max: number): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > max) {
+    throw new SyntaxError(`Invalid ${name}.`);
+  }
+  return value;
+}
+
 function requireCloudflareName(value: unknown, name: string): string {
   const result = requireString(value, name, 64);
   if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(result)) {
@@ -695,11 +1435,7 @@ function requireCloudflareName(value: unknown, name: string): string {
 }
 
 function trustedDeploymentConfig(
-  args: Record<string, unknown> & {
-    accountId: string;
-    workerName: string;
-    projectType: 'web_app' | 'worker';
-  },
+  args: Record<string, unknown> & { accountId: string; workerName: string; projectType: 'web_app' | 'worker' },
 ) {
   const config: Record<string, unknown> = {
     name: args.workerName,
@@ -730,12 +1466,8 @@ function trustedDeploymentConfig(
       GHOSTBUILD_TEMPLATE_SOURCE_SHA256: requireString(args.templateSourceSha256, 'templateSourceSha256', 64),
     },
   };
-  if (args.projectType === 'web_app') {
-    config.assets = { directory: 'dist/client' };
-  }
-  if (args.workersAi === true) {
-    config.ai = { binding: 'AI' };
-  }
+  if (args.projectType === 'web_app') config.assets = { directory: 'dist/client' };
+  if (args.workersAi === true) config.ai = { binding: 'AI' };
   const d1Databases: Record<string, string>[] = [];
   if (typeof args.d1DatabaseId === 'string') {
     d1Databases.push({
@@ -753,9 +1485,7 @@ function trustedDeploymentConfig(
       migrations_dir: 'agent-security-migrations',
     });
   }
-  if (d1Databases.length > 0) {
-    config.d1_databases = d1Databases;
-  }
+  if (d1Databases.length > 0) config.d1_databases = d1Databases;
   if (typeof args.r2BucketName === 'string') {
     config.r2_buckets = [
       { binding: 'APP_STORAGE', bucket_name: requireCloudflareName(args.r2BucketName, 'r2BucketName') },
@@ -775,9 +1505,7 @@ function parseWranglerVersion(content: string, workerName: string): string {
   }
   const versions: string[] = [];
   for (const line of content.split('\n')) {
-    if (!line.trim()) {
-      continue;
-    }
+    if (!line.trim()) continue;
     const entry = JSON.parse(line) as Record<string, unknown>;
     if (
       entry.type === 'deploy' &&
@@ -794,14 +1522,9 @@ function parseWranglerVersion(content: string, workerName: string): string {
   return versions[0]!;
 }
 
-function relativeProjectPath(path: string): string {
-  const normalized = path.replaceAll('\\', '/');
-  return normalized.replace(/^\/?(?:home\/project|workspace\/project)\/?/, '').replace(/^\/+/, '');
-}
-
-function requireExecSuccess(result: { success: boolean; stdout: string; stderr: string }): void {
+function requireSandboxExecSuccess(result: { success: boolean; stdout: string; stderr: string }): void {
   if (!result.success) {
-    throw new Error(`${result.stderr}\n${result.stdout}`.trim() || 'The project Sandbox command failed.');
+    throw new Error(`${result.stderr}\n${result.stdout}`.trim() || 'The Sandbox bootstrap command failed.');
   }
 }
 
@@ -809,28 +1532,35 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+async function sha256Bytes(value: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(value).buffer);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function encodeBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let index = 0; index < bytes.length; index += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  }
-  return btoa(binary);
+function sha256Text(value: string): Promise<string> {
+  return sha256Bytes(new TextEncoder().encode(value));
+}
+
+function first<T>(rows: Iterable<T>): T | undefined {
+  for (const row of rows) return row;
+  return undefined;
+}
+
+function isMissingPath(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    ((error as { code?: unknown }).code === 'ENOENT' ||
+      (typeof (error as { message?: unknown }).message === 'string' &&
+        /ENOENT|no such path/i.test((error as { message: string }).message)))
+  );
 }
 
 function authorized(request: Request, expected: string): boolean {
   const value = request.headers.get('authorization');
-  if (!value?.startsWith('Bearer ') || expected.length < 32) {
-    return false;
-  }
+  if (!value?.startsWith('Bearer ') || expected.length < 32) return false;
   const supplied = value.slice('Bearer '.length);
-  if (supplied.length !== expected.length) {
-    return false;
-  }
+  if (supplied.length !== expected.length) return false;
   let mismatch = 0;
   for (let index = 0; index < supplied.length; index += 1) {
     mismatch |= supplied.charCodeAt(index) ^ expected.charCodeAt(index);

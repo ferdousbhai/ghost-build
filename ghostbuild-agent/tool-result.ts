@@ -61,5 +61,14 @@ export function toolResultSucceeded(value: unknown): boolean {
   if (isGhostbuildToolResult(value)) {
     return value.ok;
   }
+  if (typeof value === 'object' && value !== null) {
+    const result = value as { error?: unknown; exitCode?: unknown };
+    if (typeof result.error === 'string') {
+      return false;
+    }
+    if (typeof result.exitCode === 'number') {
+      return result.exitCode === 0;
+    }
+  }
   return typeof value !== 'string' || !value.startsWith('Error:');
 }

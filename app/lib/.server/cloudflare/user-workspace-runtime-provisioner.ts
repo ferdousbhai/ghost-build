@@ -22,11 +22,8 @@ export async function provisionUserWorkspaceRuntime(args: {
   env: Env;
   userId: string;
   connectionId: string;
-  r2AccessKeyId: string;
-  r2SecretAccessKey: string;
   request?: typeof fetch;
 }): Promise<UserWorkspaceRuntime> {
-  validateR2Credentials(args.r2AccessKeyId, args.r2SecretAccessKey);
   if (!args.env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY) {
     throw new Error('Cloudflare credential encryption is not configured.');
   }
@@ -39,7 +36,6 @@ export async function provisionUserWorkspaceRuntime(args: {
   const accountApi = new UserCloudflareAccountApi(connection.accountId, accessToken);
   const suffix = (await sha256(`${connection.accountId}:${args.userId}`)).slice(0, 16);
   const workerName = `ghostbuild-workspace-${suffix}`;
-  const bucketName = `ghostbuild-workspaces-${suffix}`;
   const databaseName = `ghostbuild-data-${suffix}`;
   const workersSubdomain = await accountApi.getWorkersSubdomain();
   const endpoint = `https://${workerName}.${workersSubdomain}.workers.dev`;
@@ -55,21 +51,16 @@ export async function provisionUserWorkspaceRuntime(args: {
     connectionId: connection.id,
     connectionGeneration: connection.generation,
     workerName,
-    bucketName,
     endpoint,
     runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
   });
   try {
-    await accountApi.ensureR2Bucket(bucketName);
     const database = await accountApi.ensureD1Database(databaseName);
     await accountApi.applyD1Migrations(database.id, USER_WORKSPACE_DATA_MIGRATIONS);
     const deployed = await accountApi.deployWorkspaceRuntimeWorker({
       workerName,
       source: USER_WORKSPACE_RUNTIME_SOURCE,
-      bucketName,
       controlPlaneSecret,
-      r2AccessKeyId: args.r2AccessKeyId,
-      r2SecretAccessKey: args.r2SecretAccessKey,
       runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
       databaseId: database.id,
       apiToken: accessToken,
@@ -114,15 +105,6 @@ function requireRuntimeCapabilities(connection: CloudflareConnection): void {
   const missing = required.filter((capability) => !connection.grantedScopes.includes(capability));
   if (missing.length > 0) {
     throw new Error(`Reconnect Cloudflare with workspace runtime access: ${missing.join(', ')}.`);
-  }
-}
-
-function validateR2Credentials(accessKeyId: string, secretAccessKey: string): void {
-  if (!/^[A-Za-z0-9_-]{16,128}$/.test(accessKeyId)) {
-    throw new Error('The R2 Access Key ID is invalid.');
-  }
-  if (!/^[A-Za-z0-9_+/=-]{32,256}$/.test(secretAccessKey)) {
-    throw new Error('The R2 Secret Access Key is invalid.');
   }
 }
 

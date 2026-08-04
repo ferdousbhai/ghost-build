@@ -6,9 +6,9 @@ Host-restricted native build-tool binaries are excluded because they are not dis
 A package whose package-level evidence is <not published> remains exact-version allowlisted for legal review; nested component notices are still reproduced.
 This automated artifact supports diligence but does not replace legal review.
 
-Policy reviewed: 2026-08-02
-Production packages: 550
-Inventory SHA-256: 87fd31c154e98ae71ebe523c8c9fed7b28c3f87d921f4070d782b35a3b258c06
+Policy reviewed: 2026-08-04
+Production packages: 621
+Inventory SHA-256: 309913bc1913f05862ed1ce857bd99489e12c9dc0e0376cc4d7bd6814634cb88
 
 PACKAGE INVENTORY
 =================
@@ -455,6 +455,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76)
 
+@borewit/text-codec@0.2.2
+Declared license: MIT
+Author: {"name":"Borewit","url":"https://github.com/Borewit"}
+Repository: {"type":"git","url":"git+https://github.com/Borewit/text-codec.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE.txt (SHA-256 5b3af80f317313a8b8c227b0c8bffae67728cfec1786137b0553e625f2affec9)
+
 @bufbuild/protobuf@2.12.1
 Declared license: (Apache-2.0 AND BSD-3-Clause)
 Author: <not published>
@@ -479,6 +488,14 @@ Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 b33ae783f02478cd31787cd07cbf61cd3a6fbee1a50b2baf832b8f0fb7c600f7)
+
+@cloudflare/computer@0.1.1
+Declared license: MIT
+Author: <not published>
+Repository: {"directory":"packages/computer","type":"git","url":"git+https://github.com/cloudflare/computer.git"}
+Homepage: <not published>
+Package-level license evidence: <not published>
+Published license/notice files: <not published>
 
 @cloudflare/containers@0.3.7
 Declared license: MIT OR Apache-2.0
@@ -739,6 +756,51 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 6895190430d809c4c57a7582ecc2f99acbc2ea39a5dfad20262a41d5b3e91733)
 
+@jitl/quickjs-ffi-types@0.32.0
+Declared license: MIT
+Author: {"name":"Jake Teton-Landis","url":"https://jake.tl"}
+Repository: {"type":"git","url":"https://github.com/justjake/quickjs-emscripten"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 3c6040aa318612a234cc951609b640c0c63d85ae5a98a9330d3116f1553a79db)
+
+@jitl/quickjs-wasmfile-debug-asyncify@0.32.0
+Declared license: MIT
+Author: {"name":"Jake Teton-Landis","url":"https://jake.tl"}
+Repository: {"type":"git","url":"https://github.com/justjake/quickjs-emscripten"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 446a69ae534aa8612d8b16d3bfc670c5a5050597dca3ce9820441a60d5d04fbb)
+
+@jitl/quickjs-wasmfile-debug-sync@0.32.0
+Declared license: MIT
+Author: {"name":"Jake Teton-Landis","url":"https://jake.tl"}
+Repository: {"type":"git","url":"https://github.com/justjake/quickjs-emscripten"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 446a69ae534aa8612d8b16d3bfc670c5a5050597dca3ce9820441a60d5d04fbb)
+
+@jitl/quickjs-wasmfile-release-asyncify@0.32.0
+Declared license: MIT
+Author: {"name":"Jake Teton-Landis","url":"https://jake.tl"}
+Repository: {"type":"git","url":"https://github.com/justjake/quickjs-emscripten"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 446a69ae534aa8612d8b16d3bfc670c5a5050597dca3ce9820441a60d5d04fbb)
+
+@jitl/quickjs-wasmfile-release-sync@0.32.0
+Declared license: MIT
+Author: {"name":"Jake Teton-Landis","url":"https://jake.tl"}
+Repository: {"type":"git","url":"https://github.com/justjake/quickjs-emscripten"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 446a69ae534aa8612d8b16d3bfc670c5a5050597dca3ce9820441a60d5d04fbb)
+
 @journeyapps/wa-sqlite@1.7.2
 Declared license: MIT
 Author: <not published>
@@ -901,6 +963,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 9360b00fdd091f05c783b568bdd46c679c41b72415599252de98949462ea1acb)
 
+@mixmark-io/domino@2.2.0
+Declared license: BSD-2-Clause
+Author: Felix Gnass <fgnass@gmail.com>
+Repository: {"type":"git","url":"https://github.com/mixmark-io/domino.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 9672b5ea831c360425e95b806b302e502582dd9718b056f29c40cf241daecb68)
+
 @modelcontextprotocol/client@2.0.0
 Declared license: MIT
 Author: Anthropic, PBC (https://anthropic.com)
@@ -937,6 +1008,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 0382b0057770ca05e9c350a50aa3b1c1fea84da0bc81d723bf00b9aa841be58a)
 
+@mongodb-js/zstd@7.0.0
+Declared license: Apache-2.0
+Author: <not published>
+Repository: https://github.com/mongodb-js/zstd
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE.md (SHA-256 a5fa667ca7b41aa4c715772c98c7c0794364bfc6b2a6dab35cb18a341a4d03e3)
+
 @nanostores/react@0.8.4
 Declared license: MIT
 Author: Andrey Sitnik <andrey@sitnik.ru>
@@ -951,6 +1031,14 @@ Declared license: MIT
 Author: {"name":"LongYinan","url":"https://github.com/Brooooooklyn"}
 Repository: {"type":"git","url":"git+https://github.com/napi-rs/napi-rs.git","directory":"wasm-runtime"}
 Homepage: https://napi.rs/
+Package-level license evidence: <not published>
+Published license/notice files: <not published>
+
+@nodable/entities@3.0.0
+Declared license: MIT
+Author: Amit Gupta (https://solothought.com)
+Repository: {"type":"git","url":"git+https://github.com/nodable/val-parsers.git"}
+Homepage: <not published>
 Package-level license evidence: <not published>
 Published license/notice files: <not published>
 
@@ -1637,6 +1725,24 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7)
 
+@tokenizer/inflate@0.4.1
+Declared license: MIT
+Author: {"name":"Borewit","url":"https://github.com/Borewit"}
+Repository: {"type":"git","url":"https://github.com/Borewit/tokenizer-inflate.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 5bb0e8b566dee0e946cafd9bbed359eb0494580df86457876b4f41bba5c77b25)
+
+@tokenizer/token@0.3.0
+Declared license: MIT
+Author: {"name":"Borewit","url":"https://github.com/Borewit"}
+Repository: {"type":"git","url":"https://github.com/Borewit/tokenizer-token.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- README.md (SHA-256 a88c936c259cc261d5b37a2433735e9819e01f824bdc26e644d46ccd3055c8d7)
+
 @tybys/wasm-util@0.10.3
 Declared license: MIT
 Author: toyobayashi
@@ -1832,6 +1938,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 71f83c4c0621102a56d9853812777b85751bce7e9726f686f5b056c1f8a4b0e6)
 
+acorn@8.17.0
+Declared license: MIT
+Author: <not published>
+Repository: {"type":"git","url":"git+https://github.com/acornjs/acorn.git"}
+Homepage: https://github.com/acornjs/acorn
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 76a876cf886ff9be2a8b5e2e86514fed06223c8c9f0c1e9ee9606e93841e00b7)
+
 agents@0.20.1
 Declared license: MIT
 Author: Cloudflare Inc.
@@ -1904,6 +2019,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 d80713a740590fd03323d00397b0a21a1093ba4c0149d7e5a3849735c6084ae4)
 
+anynum@1.0.1
+Declared license: MIT
+Author: Amit Gupta (https://solothought.work/)
+Repository: {"type":"git","url":"https://github.com/NaturalIntelligence/anynum"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 8e75fc0e776c62ccadb8178ece8d3daa9ba7601fb0a49b2dfb0ea9a7a5c0aa07)
+
 argparse@2.0.1
 Declared license: Python-2.0
 Author: <not published>
@@ -1949,6 +2073,24 @@ Package-level license evidence: published
 Published license/notice files:
 - license (SHA-256 63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf)
 
+balanced-match@4.0.4
+Declared license: MIT
+Author: <not published>
+Repository: {"type":"git","url":"git://github.com/juliangruber/balanced-match.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE.md (SHA-256 d408f38ffa3355c5faec517153295338892eb0f1ea43f57874bb23c6075979b5)
+
+base64-js@1.5.1
+Declared license: MIT
+Author: T. Jameson Little <t.jameson.little@gmail.com>
+Repository: {"type":"git","url":"git://github.com/beatgammit/base64-js.git"}
+Homepage: https://github.com/beatgammit/base64-js
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 5b37224c080cdcc97c871ada971c224e9926370fe74f11b539aa1cf9f3b1aca1)
+
 baseline-browser-mapping@2.10.43
 Declared license: Apache-2.0
 Author: <not published>
@@ -1957,6 +2099,15 @@ Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE.txt (SHA-256 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4)
+
+bl@4.1.0
+Declared license: MIT
+Author: <not published>
+Repository: {"type":"git","url":"https://github.com/rvagg/bl.git"}
+Homepage: https://github.com/rvagg/bl
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE.md (SHA-256 9377db95383c8befacf05c6e465d969d756edf178487ca1344fdf3ba147c596f)
 
 body-parser@2.3.0
 Declared license: MIT
@@ -1967,6 +2118,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 23d466b1b134b415b66fa50c6526b4cf3e7b9258554da88d3abb371721e7ce68)
 
+brace-expansion@5.0.7
+Declared license: MIT
+Author: <not published>
+Repository: {"type":"git","url":"git+https://github.com/juliangruber/brace-expansion.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 9c63a23124d68cd30cd316a94a1a0bca34f032786df6df69fc4b5f136bac8d2e)
+
 browserslist@4.28.6
 Declared license: MIT
 Author: Andrey Sitnik <andrey@sitnik.es>
@@ -1975,6 +2135,15 @@ Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 21c2679a63d7699c0e644409e2f17d0adbc7a965003feb06b3ff4b833d21f722)
+
+buffer@5.7.1
+Declared license: MIT
+Author: {"name":"Feross Aboukhadijeh","email":"feross@feross.org","url":"https://feross.org"}
+Repository: {"type":"git","url":"git://github.com/feross/buffer.git"}
+Homepage: https://github.com/feross/buffer
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 06bafa45fdad2579ba0e43b0c9b2c6290287c99c4203c300254a462b38a307f6)
 
 buffer-builder@0.2.0
 Declared license: MIT/X11
@@ -2084,6 +2253,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 bdfd5e0edb6089e6586c8f15e6a86fab83ffbeeda3b3b7b33734ccb8c5906965)
 
+chownr@1.1.4
+Declared license: ISC
+Author: Isaac Z. Schlueter <i@izs.me> (http://blog.izs.me/)
+Repository: {"type":"git","url":"git://github.com/isaacs/chownr.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b)
+
 cliui@9.0.1
 Declared license: ISC
 Author: Ben Coe <ben@npmjs.com>
@@ -2110,6 +2288,15 @@ Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
 - license (SHA-256 ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d)
+
+commander@6.2.1
+Declared license: MIT
+Author: TJ Holowaychuk <tj@vision-media.ca>
+Repository: {"type":"git","url":"https://github.com/tj/commander.js.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 04512a63dce4d2d506ad612dc0bd7681ccf6e3655f7b6eaef7dfac8323d1ec0b)
 
 content-disposition@1.1.0
 Declared license: MIT
@@ -2264,6 +2451,24 @@ Package-level license evidence: published
 Published license/notice files:
 - license (SHA-256 dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb)
 
+decompress-response@6.0.0
+Declared license: MIT
+Author: {"name":"Sindre Sorhus","email":"sindresorhus@gmail.com","url":"https://sindresorhus.com"}
+Repository: sindresorhus/decompress-response
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- license (SHA-256 5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3)
+
+deep-extend@0.6.0
+Declared license: MIT
+Author: Viacheslav Lotsmanov <lotsmanov89@gmail.com>
+Repository: {"type":"git","url":"git://github.com/unclechu/node-deep-extend.git"}
+Homepage: https://github.com/unclechu/node-deep-extend
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 e17120ad3deff741c2ca5cbe511971ca33971a1ba6e49694c6498309bb2680b9)
+
 depd@2.0.0
 Declared license: MIT
 Author: Douglas Christopher Wilson <doug@somethingdoug.com>
@@ -2371,6 +2576,15 @@ Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 7585ea7bba616ccbbe43cb54ecb67956688c3c5641bb84f3099a652a73193afe)
+
+end-of-stream@1.4.5
+Declared license: MIT
+Author: Mathias Buus <mathiasbuus@gmail.com>
+Repository: {"type":"git","url":"git://github.com/mafintosh/end-of-stream.git"}
+Homepage: https://github.com/mafintosh/end-of-stream
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 3fe8d55a98dbf260eace67c00cf9bc53edb46234e840098a0b93df3096b97fb6)
 
 entities@6.0.1
 Declared license: BSD-2-Clause
@@ -2489,6 +2703,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 835eb611a23301b27115ca1be9f754c876e643ceb7fe63049c6b50609a1cafeb)
 
+expand-template@2.0.3
+Declared license: (MIT OR WTFPL)
+Author: LM <ralphtheninja@riseup.net>
+Repository: {"type":"git","url":"https://github.com/ralphtheninja/expand-template.git"}
+Homepage: https://github.com/ralphtheninja/expand-template
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 0967624813244bf47da346449804af853437433cbdeb8c977f1e0d4bd14e0a3b)
+
 express@5.2.1
 Declared license: MIT
 Author: TJ Holowaychuk <tj@vision-media.ca>
@@ -2543,6 +2766,24 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 b010b0dfdfdb23d7396e03b82cd4621fc9bb8f95d6b0aea70b9c24e12074c786)
 
+fast-xml-builder@1.3.0
+Declared license: MIT
+Author: Amit Gupta (https://solothought.com)
+Repository: {"type":"git","url":"git+https://github.com/NaturalIntelligence/fast-xml-builder.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 8e75fc0e776c62ccadb8178ece8d3daa9ba7601fb0a49b2dfb0ea9a7a5c0aa07)
+
+fast-xml-parser@5.10.1
+Declared license: MIT
+Author: Amit Gupta (https://solothought.com)
+Repository: {"type":"git","url":"git+https://github.com/NaturalIntelligence/fast-xml-parser.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 7883225d5e84a6bbb9b170c3d891b4bf6d6259cee869c86bd86381a927071745)
+
 fdir@6.5.0
 Declared license: MIT
 Author: thecodrr <thecodrr@protonmail.com>
@@ -2569,6 +2810,15 @@ Homepage: https://github.com/eligrey/FileSaver.js#readme
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE.md (SHA-256 2d1d7a93b46e4274355ac2904428707c4ee47ee8c6029fa394ebf405648d3f63)
+
+file-type@21.3.4
+Declared license: MIT
+Author: {"name":"Sindre Sorhus","email":"sindresorhus@gmail.com","url":"https://sindresorhus.com"}
+Repository: sindresorhus/file-type
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- license (SHA-256 5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3)
 
 finalhandler@2.1.1
 Declared license: MIT
@@ -2614,6 +2864,15 @@ Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 a0ec0dab16b3666f24950f86d257930ac2ad475557b4bfe245620e0817d8a45d)
+
+fs-constants@1.0.0
+Declared license: MIT
+Author: Mathias Buus (@mafintosh)
+Repository: {"type":"git","url":"https://github.com/mafintosh/fs-constants.git"}
+Homepage: https://github.com/mafintosh/fs-constants
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 2281f2db407bdbb54f069eec38128b2dee2c0c952f52b786ef1faecb81767b3c)
 
 function-bind@1.1.2
 Declared license: MIT
@@ -2677,6 +2936,15 @@ Homepage: https://github.com/ljharb/get-proto#readme
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 be46ce1e3b0479af9ce82d22b465a6d7d2ff084fca0aaf3d54172da2b5eb5781)
+
+github-from-package@0.0.0
+Declared license: MIT
+Author: {"name":"James Halliday","email":"mail@substack.net","url":"http://substack.net"}
+Repository: {"type":"git","url":"git://github.com/substack/github-from-package.git"}
+Homepage: https://github.com/substack/github-from-package
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 435a6722c786b0a56fbe7387028f1d9d3f3a2d0fb615bb8fee118727c3f59b7b)
 
 gopd@1.2.0
 Declared license: MIT
@@ -2849,6 +3117,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 ac779f7314c74f232ef847ea86e714abe25cf6eeb5cc97b69451b74e2af6492d)
 
+ieee754@1.2.1
+Declared license: BSD-3-Clause
+Author: {"name":"Feross Aboukhadijeh","email":"feross@feross.org","url":"https://feross.org"}
+Repository: {"type":"git","url":"git://github.com/feross/ieee754.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 18d45466ba3253deae04667e267a91ea8de8548f18c1125264d1c9db28194cc1)
+
 immediate@3.0.6
 Declared license: MIT
 Author: <not published>
@@ -2884,6 +3161,24 @@ Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 5ffe28e7ade7d8f10d85d5337a73fd793dac5c462fb9a28fbf8c5046c7fbca3b)
+
+ini@1.3.8
+Declared license: ISC
+Author: Isaac Z. Schlueter <i@izs.me> (http://blog.izs.me/)
+Repository: {"type":"git","url":"git://github.com/isaacs/ini.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b)
+
+ini@6.0.0
+Declared license: ISC
+Author: GitHub Inc.
+Repository: {"type":"git","url":"git+https://github.com/npm/ini.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b)
 
 inline-style-parser@0.2.7
 Declared license: MIT
@@ -2965,6 +3260,15 @@ Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 44191656d296391e0ec97e32f5385f0d02b6f2992694082d22ea04ba0f66f9e4)
+
+is-unsafe@2.0.0
+Declared license: MIT
+Author: Amit Gupta (https://solothought.work/)
+Repository: {"type":"git","url":"https://github.com/NaturalIntelligence/is-unsafe"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 8e75fc0e776c62ccadb8178ece8d3daa9ba7601fb0a49b2dfb0ea9a7a5c0aa07)
 
 isarray@1.0.0
 Declared license: MIT
@@ -3119,6 +3423,15 @@ Package-level license evidence: published
 Published license/notice files:
 - lib/license_header.js (SHA-256 27873abeec2df3693480a8d1b8fe17dd61bee843d1b39c1c9cfab57ffe93099e)
 - LICENSE.markdown (SHA-256 566c953c6090b1218ca6217dd7359d45dde46581968586dc607d59a78af6a9c4)
+
+just-bash@3.2.0
+Declared license: Apache-2.0
+Author: Malte and Claude
+Repository: {"type":"git","url":"git+https://github.com/vercel-labs/just-bash.git"}
+Homepage: https://github.com/vercel-labs/just-bash#readme
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 014bb31e83d5c2e76aea1cc6e82217346ab41362f32cb355ad0f5c10aa0aeaff)
 
 lie@3.3.0
 Declared license: MIT
@@ -3651,6 +3964,51 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 70ad882b7c88dc00cf04032220e098f467638d6874609fbf9d6f561f456cda58)
 
+mimic-response@3.1.0
+Declared license: MIT
+Author: {"name":"Sindre Sorhus","email":"sindresorhus@gmail.com","url":"https://sindresorhus.com"}
+Repository: sindresorhus/mimic-response
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- license (SHA-256 5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3)
+
+minimatch@10.2.5
+Declared license: BlueOak-1.0.0
+Author: Isaac Z. Schlueter <i@izs.me> (http://blog.izs.me)
+Repository: {"type":"git","url":"git@github.com:isaacs/minimatch"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE.md (SHA-256 2c7c5d22ed5a8ee968c64757710979afcd77438c48b4a265b94e615babd8a901)
+
+minimist@1.2.8
+Declared license: MIT
+Author: {"name":"James Halliday","email":"mail@substack.net","url":"http://substack.net"}
+Repository: {"type":"git","url":"git://github.com/minimistjs/minimist.git"}
+Homepage: https://github.com/minimistjs/minimist
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 435a6722c786b0a56fbe7387028f1d9d3f3a2d0fb615bb8fee118727c3f59b7b)
+
+mkdirp-classic@0.5.3
+Declared license: MIT
+Author: Mathias Buus (@mafintosh)
+Repository: {"type":"git","url":"https://github.com/mafintosh/mkdirp-classic.git"}
+Homepage: https://github.com/mafintosh/mkdirp-classic
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 a255b85c1a510ecfe660c4d442ecdbc1e9d07f4b4d3d7f90443f7e5570591e0a)
+
+modern-tar@0.7.7
+Declared license: MIT
+Author: Ayuhito <hello@ayuhito.com>
+Repository: {"type":"git","url":"git+https://github.com/ayuhito/modern-tar.git"}
+Homepage: https://github.com/ayuhito/modern-tar
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 dbcbef54fa7e111b69b12a9787051f31f5378b40711b6c57c5a82d99dc8a9e0d)
+
 motion-dom@11.18.1
 Declared license: MIT
 Author: Matt Perry
@@ -3705,6 +4063,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 9b9624d7c0473fd0acec70ae0499bbcb11bb30bbba7746ebad9c9d69a97cff94)
 
+napi-build-utils@2.0.0
+Declared license: MIT
+Author: Jim Schlight
+Repository: {"type":"git","url":"git+https://github.com/inspiredware/napi-build-utils.git"}
+Homepage: https://github.com/inspiredware/napi-build-utils#readme
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 9c6a91d2847bd9bfd493c1ca87b9c3f96302cfd069667e6dd4a6278e69a33a31)
+
 negotiator@1.0.0
 Declared license: MIT
 Author: <not published>
@@ -3713,6 +4080,42 @@ Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 553d4d20029a24e315b428a1a54a9e109eaa340f2e958a4f50a92362c2c4070b)
+
+node-abi@3.94.0
+Declared license: MIT
+Author: Lukas Geiger
+Repository: {"type":"git","url":"git+https://github.com/electron/node-abi.git"}
+Homepage: https://github.com/electron/node-abi#readme
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 9a508cd4122f2dc1cc39f8ab0b6950efbc49fb087a581c7177a4b8c9d5d0d6a1)
+
+node-addon-api@8.9.1
+Declared license: MIT
+Author: <not published>
+Repository: {"type":"git","url":"git://github.com/nodejs/node-addon-api.git"}
+Homepage: https://github.com/nodejs/node-addon-api
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE.md (SHA-256 89024017b88a9f2b763f79b941a4f2db3b4428edfcacdc0b23866b2da633ad0c)
+
+node-gyp-build@4.8.4
+Declared license: MIT
+Author: Mathias Buus (@mafintosh)
+Repository: {"type":"git","url":"https://github.com/prebuild/node-gyp-build.git"}
+Homepage: https://github.com/prebuild/node-gyp-build
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 7b3638496004b2daed183a91c4ba45d3ef6331db6c9d0eb1dd882a505630c172)
+
+node-liblzma@2.2.0
+Declared license: LGPL-3.0
+Author: Olivier ORABONA
+Repository: {"type":"git","url":"https://github.com/oorabona/node-liblzma"}
+Homepage: https://github.com/oorabona/node-liblzma
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 f97bc4bb9b7ae8a653941073678b5c7775e8de44a01c3bcc21e7cdc148b90e61)
 
 node-releases@2.0.51
 Declared license: MIT
@@ -3795,6 +4198,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 a04665b3b2de56c66730c1f720f528175739e4104f79073614aa611da1e85539)
 
+papaparse@5.5.4
+Declared license: MIT
+Author: {"name":"Matthew Holt","url":"https://twitter.com/mholt6"}
+Repository: {"type":"git","url":"git+https://github.com/mholt/PapaParse.git"}
+Homepage: https://www.papaparse.com/
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 99aa68e4b42758b09828a46515f70369e5463458ab7a990189f641af2b8d9b4e)
+
 parse-entities@4.0.2
 Declared license: MIT
 Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
@@ -3847,6 +4259,15 @@ Homepage: https://github.com/browserify/path-browserify
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 a22b9d5763f574e5db347c30acc0b33eaf4846767c03d2e27d012e864e79a824)
+
+path-expression-matcher@1.6.2
+Declared license: MIT
+Author: Amit Gupta (https://solothought.com)
+Repository: {"type":"git","url":"https://github.com/NaturalIntelligence/path-expression-matcher"}
+Homepage: https://github.com/NaturalIntelligence/path-expression-matcher#readme
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 75486ea0af9309140ca6e2c401d7e67bea8f4892344e5707f6394dc5e83dfc44)
 
 path-key@3.1.1
 Declared license: MIT
@@ -3911,6 +4332,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 5be1f3465bba68a626777f984878814aaf35e7ef8e9fd314d469bcf887050fb8)
 
+prebuild-install@7.1.3
+Declared license: MIT
+Author: Mathias Buus (@mafintosh)
+Repository: {"type":"git","url":"https://github.com/prebuild/prebuild-install.git"}
+Homepage: https://github.com/prebuild/prebuild-install
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 0aa9add6a9158efad3e6649e3affd607c7e2629f6677af19f9988c8fbb0757b0)
+
 prettier@3.9.6
 Declared license: MIT
 Author: James Long
@@ -3947,6 +4377,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 a7996721249a136fbcfc1c201bcb5f414f38a701d4a24f28abe65e16cfcce813)
 
+pump@3.0.4
+Declared license: MIT
+Author: Mathias Buus Madsen <mathiasbuus@gmail.com>
+Repository: git://github.com/mafintosh/pump.git
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 3fe8d55a98dbf260eace67c00cf9bc53edb46234e840098a0b93df3096b97fb6)
+
 qs@6.15.3
 Declared license: BSD-3-Clause
 Author: <not published>
@@ -3955,6 +4394,24 @@ Homepage: https://github.com/ljharb/qs
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE.md (SHA-256 e7dc37bf662d7f786efcb46c545615e70c1daf458a38385521c63cf6607cdfe1)
+
+quickjs-emscripten@0.32.0
+Declared license: MIT
+Author: {"name":"Jake Teton-Landis","url":"https://jake.tl"}
+Repository: {"type":"git","url":"https://github.com/justjake/quickjs-emscripten"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 3c6040aa318612a234cc951609b640c0c63d85ae5a98a9330d3116f1553a79db)
+
+quickjs-emscripten-core@0.32.0
+Declared license: MIT
+Author: {"name":"Jake Teton-Landis","url":"https://jake.tl"}
+Repository: {"type":"git","url":"https://github.com/justjake/quickjs-emscripten"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 3c6040aa318612a234cc951609b640c0c63d85ae5a98a9330d3116f1553a79db)
 
 range-parser@1.3.0
 Declared license: MIT
@@ -3973,6 +4430,26 @@ Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 37876d7de8bdf5e5b9b58a697ebc34044624e493e6f49eff5c938e5226dcac6b)
+
+rc@1.2.8
+Declared license: (BSD-2-Clause OR MIT OR Apache-2.0)
+Author: Dominic Tarr <dominic.tarr@gmail.com> (dominictarr.com)
+Repository: {"type":"git","url":"https://github.com/dominictarr/rc.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE.APACHE2 (SHA-256 e8734448285a2dd773d40136ed5d5e8163a70701dd540cdc796cfca232f67d55)
+- LICENSE.BSD (SHA-256 65e7e4d223688c601f42959defde380f8c4aa677fa4706da3b4a53f129bd78a3)
+- LICENSE.MIT (SHA-256 d72dea1a8cdf3f4dfa2f594253d0c5b37baefc76e806f5ecb0e426393edcd505)
+
+re2js@1.3.3
+Declared license: MIT
+Author: Alexey Vasiliev
+Repository: github:le0pard/re2js
+Homepage: https://github.com/le0pard/re2js#readme
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 46b087b030414ec0af1adfd5940c72eaf67d2610bb8f71269b841c7601936b83)
 
 react@19.2.8
 Declared license: MIT
@@ -4028,6 +4505,15 @@ Published license/notice files:
 - LICENSE (SHA-256 30f0cfddf483d1128e3610205020f2041a6c5e837aa999e0aa82e5576187d4a9)
 
 readable-stream@2.3.8
+Declared license: MIT
+Author: <not published>
+Repository: {"type":"git","url":"git://github.com/nodejs/readable-stream"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 ec62dc96da0099b87f4511736c87309335527fb7031639493e06c95728dc8c54)
+
+readable-stream@3.6.2
 Declared license: MIT
 Author: <not published>
 Repository: {"type":"git","url":"git://github.com/nodejs/readable-stream"}
@@ -4216,6 +4702,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93)
 
+seek-bzip@2.0.0
+Declared license: MIT
+Author: <not published>
+Repository: {"type":"git","url":"https://github.com/cscott/seek-bzip.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 d14894ed4184c6a1ce6d0ad5a091c24e0552b08dda48562f3fae97812321f650)
+
 semver@6.3.1
 Declared license: ISC
 Author: GitHub Inc.
@@ -4360,6 +4855,33 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 cfc3f455254c0af0655cc3ff46a41ed644b67599f6043346169d285bf2b3cf3b)
 
+simple-concat@1.0.1
+Declared license: MIT
+Author: {"name":"Feross Aboukhadijeh","email":"feross@feross.org","url":"https://feross.org"}
+Repository: {"type":"git","url":"git://github.com/feross/simple-concat.git"}
+Homepage: https://github.com/feross/simple-concat
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 d4c2065e2b936e62a4eb400efb4576edec9ca1388a9f78aa288e147275e7bc8b)
+
+simple-get@4.0.1
+Declared license: MIT
+Author: {"name":"Feross Aboukhadijeh","email":"feross@feross.org","url":"https://feross.org"}
+Repository: {"type":"git","url":"git://github.com/feross/simple-get.git"}
+Homepage: https://github.com/feross/simple-get
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 d4c2065e2b936e62a4eb400efb4576edec9ca1388a9f78aa288e147275e7bc8b)
+
+smol-toml@1.7.0
+Declared license: BSD-3-Clause
+Author: Cynthia Rey <cynthia@cynthia.dev>
+Repository: {"type":"git","url":"github:squirrelchat/smol-toml"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 fa5659948374d4f555594f47f6da073b40dc503e921aeeece30df4362b3051a5)
+
 sonner@2.0.7
 Declared license: MIT
 Author: Emil Kowalski <e@emilkowal.ski>
@@ -4404,6 +4926,24 @@ Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
 - license (SHA-256 ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d)
+
+sprintf-js@1.1.3
+Declared license: BSD-3-Clause
+Author: Alexandru Mărășteanu <hello@alexei.ro>
+Repository: {"type":"git","url":"https://github.com/alexei/sprintf.js.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 f8287e4dd9480be58c56aca4a55c23b782c43a86e69aabad78fff4df0d29edef)
+
+sql.js@1.14.1
+Declared license: MIT
+Author: <not published>
+Repository: {"type":"git","url":"http://github.com/sql-js/sql.js.git"}
+Homepage: http://github.com/sql-js/sql.js
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 60a3f6e4d7b29b4321359e683b36cf198d24f58e24582070f56e6fa89d5ee2be)
 
 srvx@0.11.22
 Declared license: MIT
@@ -4468,6 +5008,33 @@ Package-level license evidence: published
 Published license/notice files:
 - license (SHA-256 5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3)
 
+strip-json-comments@2.0.1
+Declared license: MIT
+Author: {"name":"Sindre Sorhus","email":"sindresorhus@gmail.com","url":"sindresorhus.com"}
+Repository: sindresorhus/strip-json-comments
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- license (SHA-256 6fb9754611c20f6649f68805e8c990e83261f29316e29de9e6cedae607b8634c)
+
+strnum@2.4.1
+Declared license: MIT
+Author: Amit Gupta (https://solothought.work/)
+Repository: {"type":"git","url":"https://github.com/NaturalIntelligence/strnum"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 2aa16be0f4fad003a352a955a43314e9d1d8deef7034060a82ac9c49f32b81e2)
+
+strtok3@10.3.5
+Declared license: MIT
+Author: {"name":"Borewit","url":"https://github.com/Borewit"}
+Repository: {"type":"git","url":"git+https://github.com/Borewit/strtok3.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE.txt (SHA-256 c77d564d48f13e7ece47d5dcc57102810744828d5f5af5826808a0320de3bb76)
+
 style-mod@4.1.3
 Declared license: MIT
 Author: Marijn Haverbeke <marijn@haverbeke.berlin>
@@ -4531,6 +5098,24 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 4b475c59ec30975f43a6581375e01346fd918fc40c9809a43f86f11fe9f78ed2)
 
+tar-fs@2.1.5
+Declared license: MIT
+Author: Mathias Buus
+Repository: {"type":"git","url":"https://github.com/mafintosh/tar-fs.git"}
+Homepage: https://github.com/mafintosh/tar-fs
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 3fe8d55a98dbf260eace67c00cf9bc53edb46234e840098a0b93df3096b97fb6)
+
+tar-stream@2.2.0
+Declared license: MIT
+Author: Mathias Buus <mathiasbuus@gmail.com>
+Repository: {"type":"git","url":"git+https://github.com/mafintosh/tar-stream.git"}
+Homepage: https://github.com/mafintosh/tar-stream
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 3fe8d55a98dbf260eace67c00cf9bc53edb46234e840098a0b93df3096b97fb6)
+
 three@0.179.1
 Declared license: MIT
 Author: mrdoob
@@ -4569,6 +5154,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 a832d679750e49ab433626ab196350b89964b60eb0d3edd3341887c7d5f4c128)
 
+token-types@6.1.2
+Declared license: MIT
+Author: {"name":"Borewit","url":"https://github.com/Borewit"}
+Repository: {"type":"git","url":"git+https://github.com/Borewit/token-types.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE.txt (SHA-256 eb0bff8faaba4581e0f09c962e0f795f1f8810191c9d616f3f66f36be4b3a5dc)
+
 trim-lines@3.0.1
 Declared license: MIT
 Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
@@ -4596,6 +5190,24 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE.txt (SHA-256 210b19e543130388c68654b7497e967119ce17145f66ab7d85688fbd70f08751)
 
+tunnel-agent@0.6.0
+Declared license: Apache-2.0
+Author: Mikeal Rogers <mikeal.rogers@gmail.com> (http://www.futurealoof.com)
+Repository: {"url":"https://github.com/mikeal/tunnel-agent"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 d446a8c73d7bbe4872d6524b15ae206f9a2d7eb53f8c9cb6e6c893a43acc5276)
+
+turndown@7.2.4
+Declared license: MIT
+Author: Dom Christie
+Repository: {"type":"git","url":"https://github.com/mixmark-io/turndown.git"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 a055e3a15db4b4cbb5af381230eba085603126d7d5d8c4dae45ee85b877a9729)
+
 type-is@2.1.0
 Declared license: MIT
 Author: <not published>
@@ -4622,6 +5234,25 @@ Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 46231df5a7733c3f52f11b71f3df61813007745b62b09031acfb45fb42d75082)
+
+uint8array-extras@1.5.0
+Declared license: MIT
+Author: {"name":"Sindre Sorhus","email":"sindresorhus@gmail.com","url":"https://sindresorhus.com"}
+Repository: sindresorhus/uint8array-extras
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- license (SHA-256 5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3)
+
+undici@7.28.0
+Declared license: MIT
+Author: <not published>
+Repository: {"type":"git","url":"git+https://github.com/nodejs/undici.git"}
+Homepage: https://undici.nodejs.org
+Package-level license evidence: published
+Published license/notice files:
+- lib/web/fetch/LICENSE (SHA-256 a21d6c8d3fc631198b97e57584697f7f9c37805c71c6cf9a12e4442b40394b88)
+- LICENSE (SHA-256 a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27)
 
 undici-types@8.3.0
 Declared license: MIT
@@ -4874,6 +5505,15 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b)
 
+xml-naming@0.3.0
+Declared license: MIT
+Author: Amit Gupta (https://solothought.com)
+Repository: {"type":"git","url":"https://github.com/NaturalIntelligence/xml-naming"}
+Homepage: <not published>
+Package-level license evidence: published
+Published license/notice files:
+- LICENSE (SHA-256 8e75fc0e776c62ccadb8178ece8d3daa9ba7601fb0a49b2dfb0ea9a7a5c0aa07)
+
 xmlbuilder2@4.0.3
 Declared license: MIT
 Author: Ozgur Ozcitak <oozcitak@gmail.com>
@@ -4957,6 +5597,214 @@ Published license/notice files:
 
 VERBATIM LICENSE AND NOTICE TEXTS
 =================================
+
+SHA-256 014bb31e83d5c2e76aea1cc6e82217346ab41362f32cb355ad0f5c10aa0aeaff
+Used by:
+- just-bash@3.2.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1.  Definitions.
+
+    "License" shall mean the terms and conditions for use, reproduction,
+    and distribution as defined by Sections 1 through 9 of this document.
+
+    "Licensor" shall mean the copyright owner or entity authorized by
+    the copyright owner that is granting the License.
+
+    "Legal Entity" shall mean the union of the acting entity and all
+    other entities that control, are controlled by, or are under common
+    control with that entity. For the purposes of this definition,
+    "control" means (i) the power, direct or indirect, to cause the
+    direction or management of such entity, whether by contract or
+    otherwise, or (ii) ownership of fifty percent (50%) or more of the
+    outstanding shares, or (iii) beneficial ownership of such entity.
+
+    "You" (or "Your") shall mean an individual or Legal Entity
+    exercising permissions granted by this License.
+
+    "Source" form shall mean the preferred form for making modifications,
+    including but not limited to software source code, documentation
+    source, and configuration files.
+
+    "Object" form shall mean any form resulting from mechanical
+    transformation or translation of a Source form, including but
+    not limited to compiled object code, generated documentation,
+    and conversions to other media types.
+
+    "Work" shall mean the work of authorship, whether in Source or
+    Object form, made available under the License, as indicated by a
+    copyright notice that is included in or attached to the work
+    (an example is provided in the Appendix below).
+
+    "Derivative Works" shall mean any work, whether in Source or Object
+    form, that is based on (or derived from) the Work and for which the
+    editorial revisions, annotations, elaborations, or other modifications
+    represent, as a whole, an original work of authorship. For the purposes
+    of this License, Derivative Works shall not include works that remain
+    separable from, or merely link (or bind by name) to the interfaces of,
+    the Work and Derivative Works thereof.
+
+    "Contribution" shall mean any work of authorship, including
+    the original version of the Work and any modifications or additions
+    to that Work or Derivative Works thereof, that is intentionally
+    submitted to Licensor for inclusion in the Work by the copyright owner
+    or by an individual or Legal Entity authorized to submit on behalf of
+    the copyright owner. For the purposes of this definition, "submitted"
+    means any form of electronic, verbal, or written communication sent
+    to the Licensor or its representatives, including but not limited to
+    communication on electronic mailing lists, source code control systems,
+    and issue tracking systems that are managed by, or on behalf of, the
+    Licensor for the purpose of discussing and improving the Work, but
+    excluding communication that is conspicuously marked or otherwise
+    designated in writing by the copyright owner as "Not a Contribution."
+
+    "Contributor" shall mean Licensor and any individual or Legal Entity
+    on behalf of whom a Contribution has been received by Licensor and
+    subsequently incorporated within the Work.
+
+2.  Grant of Copyright License. Subject to the terms and conditions of
+    this License, each Contributor hereby grants to You a perpetual,
+    worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+    copyright license to reproduce, prepare Derivative Works of,
+    publicly display, publicly perform, sublicense, and distribute the
+    Work and such Derivative Works in Source or Object form.
+
+3.  Grant of Patent License. Subject to the terms and conditions of
+    this License, each Contributor hereby grants to You a perpetual,
+    worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+    (except as stated in this section) patent license to make, have made,
+    use, offer to sell, sell, import, and otherwise transfer the Work,
+    where such license applies only to those patent claims licensable
+    by such Contributor that are necessarily infringed by their
+    Contribution(s) alone or by combination of their Contribution(s)
+    with the Work to which such Contribution(s) was submitted. If You
+    institute patent litigation against any entity (including a
+    cross-claim or counterclaim in a lawsuit) alleging that the Work
+    or a Contribution incorporated within the Work constitutes direct
+    or contributory patent infringement, then any patent licenses
+    granted to You under this License for that Work shall terminate
+    as of the date such litigation is filed.
+
+4.  Redistribution. You may reproduce and distribute copies of the
+    Work or Derivative Works thereof in any medium, with or without
+    modifications, and in Source or Object form, provided that You
+    meet the following conditions:
+
+    (a) You must give any other recipients of the Work or
+    Derivative Works a copy of this License; and
+
+    (b) You must cause any modified files to carry prominent notices
+    stating that You changed the files; and
+
+    (c) You must retain, in the Source form of any Derivative Works
+    that You distribute, all copyright, patent, trademark, and
+    attribution notices from the Source form of the Work,
+    excluding those notices that do not pertain to any part of
+    the Derivative Works; and
+
+    (d) If the Work includes a "NOTICE" text file as part of its
+    distribution, then any Derivative Works that You distribute must
+    include a readable copy of the attribution notices contained
+    within such NOTICE file, excluding those notices that do not
+    pertain to any part of the Derivative Works, in at least one
+    of the following places: within a NOTICE text file distributed
+    as part of the Derivative Works; within the Source form or
+    documentation, if provided along with the Derivative Works; or,
+    within a display generated by the Derivative Works, if and
+    wherever such third-party notices normally appear. The contents
+    of the NOTICE file are for informational purposes only and
+    do not modify the License. You may add Your own attribution
+    notices within Derivative Works that You distribute, alongside
+    or as an addendum to the NOTICE text from the Work, provided
+    that such additional attribution notices cannot be construed
+    as modifying the License.
+
+    You may add Your own copyright statement to Your modifications and
+    may provide additional or different license terms and conditions
+    for use, reproduction, or distribution of Your modifications, or
+    for any such Derivative Works as a whole, provided Your use,
+    reproduction, and distribution of the Work otherwise complies with
+    the conditions stated in this License.
+
+5.  Submission of Contributions. Unless You explicitly state otherwise,
+    any Contribution intentionally submitted for inclusion in the Work
+    by You to the Licensor shall be under the terms and conditions of
+    this License, without any additional terms or conditions.
+    Notwithstanding the above, nothing herein shall supersede or modify
+    the terms of any separate license agreement you may have executed
+    with Licensor regarding such Contributions.
+
+6.  Trademarks. This License does not grant permission to use the trade
+    names, trademarks, service marks, or product names of the Licensor,
+    except as required for reasonable and customary use in describing the
+    origin of the Work and reproducing the content of the NOTICE file.
+
+7.  Disclaimer of Warranty. Unless required by applicable law or
+    agreed to in writing, Licensor provides the Work (and each
+    Contributor provides its Contributions) on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+    implied, including, without limitation, any warranties or conditions
+    of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+    PARTICULAR PURPOSE. You are solely responsible for determining the
+    appropriateness of using or redistributing the Work and assume any
+    risks associated with Your exercise of permissions under this License.
+
+8.  Limitation of Liability. In no event and under no legal theory,
+    whether in tort (including negligence), contract, or otherwise,
+    unless required by applicable law (such as deliberate and grossly
+    negligent acts) or agreed to in writing, shall any Contributor be
+    liable to You for damages, including any direct, indirect, special,
+    incidental, or consequential damages of any character arising as a
+    result of this License or out of the use or inability to use the
+    Work (including but not limited to damages for loss of goodwill,
+    work stoppage, computer failure or malfunction, or any and all
+    other commercial damages or losses), even if such Contributor
+    has been advised of the possibility of such damages.
+
+9.  Accepting Warranty or Additional Liability. While redistributing
+    the Work or Derivative Works thereof, You may choose to offer,
+    and charge a fee for, acceptance of support, warranty, indemnity,
+    or other liability obligations and/or rights consistent with this
+    License. However, in accepting such obligations, You may act only
+    on Your own behalf and on Your sole responsibility, not on behalf
+    of any other Contributor, and only if You agree to indemnify,
+    defend, and hold each Contributor harmless for any liability
+    incurred by, or claims asserted against, such Contributor by reason
+    of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+Copyright 2025 Vercel Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+----- END VERBATIM CONTENT -----
 
 SHA-256 0154425673db15cdfa80ecba2c9b1f1a867f7197a006764712849bfc3a93cbb7
 Used by:
@@ -5214,6 +6062,35 @@ the full license text.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 04512a63dce4d2d506ad612dc0bd7681ccf6e3655f7b6eaef7dfac8323d1ec0b
+Used by:
+- commander@6.2.1:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+(The MIT License)
+
+Copyright (c) 2011 TJ Holowaychuk <tj@vision-media.ca>
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+'Software'), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 05811400116ed61f1a7693b78fe8ca6598c155a12f3978e609db4df648a4cb3d
 Used by:
 - unified@11.0.5:license
@@ -5298,6 +6175,89 @@ Used by:
 MIT License
 
 Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 06bafa45fdad2579ba0e43b0c9b2c6290287c99c4203c300254a462b38a307f6
+Used by:
+- buffer@5.7.1:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright (c) Feross Aboukhadijeh, and other contributors.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 0967624813244bf47da346449804af853437433cbdeb8c977f1e0d4bd14e0a3b
+Used by:
+- expand-template@2.0.3:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright (c) 2018 Lars-Magnus Skog
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+----- END VERBATIM CONTENT -----
+
+SHA-256 0aa9add6a9158efad3e6649e3affd607c7e2629f6677af19f9988c8fbb0757b0
+Used by:
+- prebuild-install@7.1.3:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright (c) 2015 Mathias Buus
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -5695,6 +6655,24 @@ SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 18d45466ba3253deae04667e267a91ea8de8548f18c1125264d1c9db28194cc1
+Used by:
+- ieee754@1.2.1:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+Copyright 2008 Fair Oaks Labs, Inc.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 1a526fbe8d8577f5a4b1c2821842b55b7c0e18862531c62ae4ce69c9b19b74b6
 Used by:
 - unpipe@1.0.0:LICENSE
@@ -6005,6 +6983,34 @@ THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 2281f2db407bdbb54f069eec38128b2dee2c0c952f52b786ef1faecb81767b3c
+Used by:
+- fs-constants@1.0.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright (c) 2018 Mathias Buus
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 22c68811e174cbbfb3813d4135918df4f540959c14d872e601d9abe83d3cde8f
 Used by:
 - tinyglobby@0.2.17:LICENSE
@@ -6243,6 +7249,34 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 2aa16be0f4fad003a352a955a43314e9d1d8deef7034060a82ac9c49f32b81e2
+Used by:
+- strnum@2.4.1:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright (c) 2021 Natural Intelligence
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 2b770a704c15de238c3f622b01b0044ddd60b49ee30608ea6991ebf19db7a7a1
 Used by:
 - dunder-proto@1.0.1:LICENSE
@@ -6313,6 +7347,68 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice (including the next paragraph) shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+----- END VERBATIM CONTENT -----
+
+SHA-256 2c7c5d22ed5a8ee968c64757710979afcd77438c48b4a265b94e615babd8a901
+Used by:
+- minimatch@10.2.5:LICENSE.md
+----- BEGIN VERBATIM CONTENT -----
+# Blue Oak Model License
+
+Version 1.0.0
+
+## Purpose
+
+This license gives everyone as much permission to work with
+this software as possible, while protecting contributors
+from liability.
+
+## Acceptance
+
+In order to receive this license, you must agree to its
+rules. The rules of this license are both obligations
+under that agreement and conditions to your license.
+You must not do anything with this software that triggers
+a rule that you cannot or will not follow.
+
+## Copyright
+
+Each contributor licenses you to do everything with this
+software that would otherwise infringe that contributor's
+copyright in it.
+
+## Notices
+
+You must ensure that everyone who gets a copy of
+any part of this software from you, with or without
+changes, also gets the text of this license or a link to
+<https://blueoakcouncil.org/license/1.0.0>.
+
+## Excuse
+
+If anyone notifies you in writing that you have not
+complied with [Notices](#notices), you can keep your
+license by taking all practical steps to comply within 30
+days after the notice. If you do not do so, your license
+ends immediately.
+
+## Patent
+
+Each contributor licenses you to do everything with this
+software that would otherwise infringe any patent claims
+they can license or become able to license.
+
+## Reliability
+
+No contributor can revoke this license.
+
+## No Liability
+
+**_As far as the law allows, this software comes as is,
+without any warranty or condition, and no contributor
+will be liable to anyone for any damages related to this
+software or this license, under any kind of legal claim._**
+
 ----- END VERBATIM CONTENT -----
 
 SHA-256 2d1d7a93b46e4274355ac2904428707c4ee47ee8c6029fa394ebf405648d3f63
@@ -6943,6 +8039,36 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 3c6040aa318612a234cc951609b640c0c63d85ae5a98a9330d3116f1553a79db
+Used by:
+- @jitl/quickjs-ffi-types@0.32.0:LICENSE
+- quickjs-emscripten-core@0.32.0:LICENSE
+- quickjs-emscripten@0.32.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+The MIT License
+
+quickjs-emscripten copyright (c) 2019-2024 Jake Teton-Landis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
@@ -9332,6 +10458,36 @@ SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 3fe8d55a98dbf260eace67c00cf9bc53edb46234e840098a0b93df3096b97fb6
+Used by:
+- end-of-stream@1.4.5:LICENSE
+- pump@3.0.4:LICENSE
+- tar-fs@2.1.5:LICENSE
+- tar-stream@2.2.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright (c) 2014 Mathias Buus
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+----- END VERBATIM CONTENT -----
+
 SHA-256 413654b0a78b98661dce96d2aff2e4d075603d220b8483e28b1aa010ccc138b4
 Used by:
 - remark-parse@11.0.0:license
@@ -9358,6 +10514,32 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 435a6722c786b0a56fbe7387028f1d9d3f3a2d0fb615bb8fee118727c3f59b7b
+Used by:
+- github-from-package@0.0.0:LICENSE
+- minimist@1.2.8:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+This software is released under the MIT license:
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
@@ -9413,6 +10595,63 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ----- END VERBATIM CONTENT -----
 
+SHA-256 446a69ae534aa8612d8b16d3bfc670c5a5050597dca3ce9820441a60d5d04fbb
+Used by:
+- @jitl/quickjs-wasmfile-debug-asyncify@0.32.0:LICENSE
+- @jitl/quickjs-wasmfile-debug-sync@0.32.0:LICENSE
+- @jitl/quickjs-wasmfile-release-asyncify@0.32.0:LICENSE
+- @jitl/quickjs-wasmfile-release-sync@0.32.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+quickjs-emscripten:
+The MIT License
+
+quickjs-emscripten copyright (c) 2019-2024 Jake Teton-Landis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+quickjs:
+QuickJS Javascript Engine
+
+Copyright (c) 2017-2021 Fabrice Bellard
+Copyright (c) 2017-2021 Charlie Gordon
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 46231df5a7733c3f52f11b71f3df61813007745b62b09031acfb45fb42d75082
 Used by:
 - h3@2.0.1-rc.20:LICENSE
@@ -9425,6 +10664,34 @@ Used by:
 MIT License
 
 Copyright (c) Pooya Parsa <pooya@pi0.io>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 46b087b030414ec0af1adfd5940c72eaf67d2610bb8f71269b841c7601936b83
+Used by:
+- re2js@1.3.3:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright (c) 2023 Alexey Vasiliev
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -9845,6 +11112,9 @@ permission of its copyright owner.
 
 SHA-256 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 Used by:
+- chownr@1.1.4:LICENSE
+- ini@1.3.8:LICENSE
+- ini@6.0.0:LICENSE
 - isexe@2.0.0:LICENSE
 - lru-cache@5.1.1:LICENSE
 - once@1.4.0:LICENSE
@@ -10916,6 +12186,71 @@ THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 5b37224c080cdcc97c871ada971c224e9926370fe74f11b539aa1cf9f3b1aca1
+Used by:
+- base64-js@1.5.1:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright (c) 2014 Jameson Little
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 5b3af80f317313a8b8c227b0c8bffae67728cfec1786137b0553e625f2affec9
+Used by:
+- @borewit/text-codec@0.2.2:LICENSE.txt
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright © 2025 Borewit
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 5bb0e8b566dee0e946cafd9bbed359eb0494580df86457876b4f41bba5c77b25
+Used by:
+- @tokenizer/inflate@0.4.1:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+Copyright (c) 2024, Borewit
+All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+----- END VERBATIM CONTENT -----
+
 SHA-256 5bba27375d93e9119f76c1015f7672cf9ad5f70952296e0842fb2243d6376869
 Used by:
 - yaml@2.9.0:LICENSE
@@ -10981,13 +12316,17 @@ SHA-256 5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3
 Used by:
 - ansi-regex@6.2.2:license
 - ansi-styles@6.2.3:license
+- decompress-response@6.0.0:license
 - escape-string-regexp@5.0.0:license
+- file-type@21.3.4:license
 - get-east-asian-width@1.6.0:license
 - is-plain-obj@4.1.0:license
+- mimic-response@3.1.0:license
 - string-width@7.2.0:license
 - string-width@8.2.2:license
 - strip-ansi@7.2.0:license
 - supports-color@8.1.1:license
+- uint8array-extras@1.5.0:license
 - wrap-ansi@9.0.2:license
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
@@ -11584,6 +12923,56 @@ PERFORMANCE OF THIS SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 60a3f6e4d7b29b4321359e683b36cf198d24f58e24582070f56e6fa89d5ee2be
+Used by:
+- sql.js@1.14.1:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT license
+===========
+
+Copyright (c) 2017 sql.js authors (see AUTHORS)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+
+# Some portions of the Makefile taken from:
+Copyright 2017 Ryusei Yamaguchi
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+----- END VERBATIM CONTENT -----
+
 SHA-256 60e0b68c0f35c078eef3a5d29419d0b03ff84ec1df9c3f9d6e39a519a5ae7985
 Used by:
 - @heroicons/react@2.2.0:LICENSE
@@ -11939,6 +13328,39 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 65e7e4d223688c601f42959defde380f8c4aa677fa4706da3b4a53f129bd78a3
+Used by:
+- rc@1.2.8:LICENSE.BSD
+----- BEGIN VERBATIM CONTENT -----
+Copyright (c) 2013, Dominic Tarr
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met: 
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer. 
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution. 
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+The views and conclusions contained in the software and documentation are those
+of the authors and should not be interpreted as representing official policies, 
+either expressed or implied, of the FreeBSD Project.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 66fc8a9b85af6a102720d445a0a49faff7b1a3fe815d9ead09dee2480afd4340
 Used by:
 - sorted-btree@1.8.1:LICENSE
@@ -12174,6 +13596,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 SHA-256 6fb9754611c20f6649f68805e8c990e83261f29316e29de9e6cedae607b8634c
 Used by:
 - object-assign@4.1.1:license
+- strip-json-comments@2.0.1:license
 ----- BEGIN VERBATIM CONTENT -----
 The MIT License (MIT)
 
@@ -12277,6 +13700,34 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 75486ea0af9309140ca6e2c401d7e67bea8f4892344e5707f6394dc5e83dfc44
+Used by:
+- path-expression-matcher@1.6.2:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright (c) 2024
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 7585ea7bba616ccbbe43cb54ecb67956688c3c5641bb84f3099a652a73193afe
 Used by:
 - encodeurl@2.0.0:LICENSE
@@ -12332,6 +13783,34 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 76a876cf886ff9be2a8b5e2e86514fed06223c8c9f0c1e9ee9606e93841e00b7
+Used by:
+- acorn@8.17.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright (C) 2012-2022 by various contributors (see AUTHORS)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
@@ -12410,6 +13889,34 @@ SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 7883225d5e84a6bbb9b170c3d891b4bf6d6259cee869c86bd86381a927071745
+Used by:
+- fast-xml-parser@5.10.1:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright (c) 2017 Amit Kumar Gupta
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 7a9d8d01038aeacf9e5bcdabbddf2a7815200dce9fc1118468cc553e00ae3eee
 Used by:
 - @shikijs/core@4.4.1:LICENSE
@@ -12443,6 +13950,34 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 7b3638496004b2daed183a91c4ba45d3ef6331db6c9d0eb1dd882a505630c172
+Used by:
+- node-gyp-build@4.8.4:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright (c) 2017 Mathias Buus
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
@@ -13010,6 +14545,22 @@ IN THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 89024017b88a9f2b763f79b941a4f2db3b4428edfcacdc0b23866b2da633ad0c
+Used by:
+- node-addon-api@8.9.1:LICENSE.md
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright (c) 2017 [Node.js API collaborators](https://github.com/nodejs/node-addon-api#collaborators)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 896c9fd6b5fc48ac31800b9d29a6e3ffcb0c2d534ed077ebfa5c2fa388cc38b7
 Used by:
 - style-to-object@1.0.14:LICENSE
@@ -13210,6 +14761,37 @@ SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 8e75fc0e776c62ccadb8178ece8d3daa9ba7601fb0a49b2dfb0ea9a7a5c0aa07
+Used by:
+- anynum@1.0.1:LICENSE
+- fast-xml-builder@1.3.0:LICENSE
+- is-unsafe@2.0.0:LICENSE
+- xml-naming@0.3.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright (c) 2026 Natural Intelligence
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 90021adfb24b0a7af5754cebc6085e2560555f74d29a6d44a7f9a32125f8b348
 Used by:
 - express-rate-limit@8.5.2:license.md
@@ -13275,6 +14857,26 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 9377db95383c8befacf05c6e465d969d756edf178487ca1344fdf3ba147c596f
+Used by:
+- bl@4.1.0:LICENSE.md
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+=====================
+
+Copyright (c) 2013-2019 bl contributors
+----------------------------------
+
+*bl contributors listed at <https://github.com/rvagg/bl#contributors>*
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
@@ -13367,6 +14969,38 @@ THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 9672b5ea831c360425e95b806b302e502582dd9718b056f29c40cf241daecb68
+Used by:
+- @mixmark-io/domino@2.2.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+Copyright (c) 2011 The Mozilla Foundation.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+    Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+    Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 97af7428f93afbab9bf79cd09254da1357161794f4255eb1b4599f04dd2d2e7c
 Used by:
 - extend@3.0.2:LICENSE
@@ -13397,6 +15031,33 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 99aa68e4b42758b09828a46515f70369e5463458ab7a990189f641af2b8d9b4e
+Used by:
+- papaparse@5.5.4:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright (c) 2015 Matthew Holt
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 9a39f2aadab11a3697edd668ff2d8ad885b649737b7ab4d3bf12b34e5ada0c86
 Used by:
 - fdir@6.5.0:LICENSE
@@ -13408,6 +15069,34 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 9a508cd4122f2dc1cc39f8ab0b6950efbc49fb087a581c7177a4b8c9d5d0d6a1
+Used by:
+- node-abi@3.94.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright (c) 2016 Lukas Geiger
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
@@ -13453,6 +15142,64 @@ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 9c63a23124d68cd30cd316a94a1a0bca34f032786df6df69fc4b5f136bac8d2e
+Used by:
+- brace-expansion@5.0.7:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright Julian Gruber <julian@juliangruber.com>
+
+TypeScript port Copyright Isaac Z. Schlueter <i@izs.me>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 9c6a91d2847bd9bfd493c1ca87b9c3f96302cfd069667e6dd4a6278e69a33a31
+Used by:
+- napi-build-utils@2.0.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright (c) 2018 inspiredware
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
@@ -13597,6 +15344,34 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 a055e3a15db4b4cbb5af381230eba085603126d7d5d8c4dae45ee85b877a9729
+Used by:
+- turndown@7.2.4:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright (c) 2017 Dom Christie
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
@@ -13814,6 +15589,34 @@ express Statement of Purpose.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 a21d6c8d3fc631198b97e57584697f7f9c37805c71c6cf9a12e4442b40394b88
+Used by:
+- undici@7.28.0:lib/web/fetch/LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright (c) 2020 Ethan Arrowood
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 a22b9d5763f574e5db347c30acc0b33eaf4846767c03d2e27d012e864e79a824
 Used by:
 - path-browserify@1.0.1:LICENSE
@@ -13838,6 +15641,34 @@ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 a255b85c1a510ecfe660c4d442ecdbc1e9d07f4b4d3d7f90443f7e5570591e0a
+Used by:
+- mkdirp-classic@0.5.3:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright (c) 2020 James Halliday (mail@substack.net) and Mathias Buus
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
@@ -13886,6 +15717,214 @@ SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 a5fa667ca7b41aa4c715772c98c7c0794364bfc6b2a6dab35cb18a341a4d03e3
+Used by:
+- @mongodb-js/zstd@7.0.0:LICENSE.md
+----- BEGIN VERBATIM CONTENT -----
+Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "{}"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright 2022 MongoDB
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 a6ab98e5c77b9070c443eaff2ff81034a6f8cc05a7524d5098eb0f24defa0115
 Used by:
 - hono@4.12.31:LICENSE
@@ -13917,6 +15956,7 @@ SOFTWARE.
 SHA-256 a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27
 Used by:
 - undici-types@8.3.0:LICENSE
+- undici@7.28.0:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 
@@ -14059,6 +16099,32 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 a88c936c259cc261d5b37a2433735e9819e01f824bdc26e644d46ccd3055c8d7
+Used by:
+- @tokenizer/token@0.3.0:README.md
+----- BEGIN VERBATIM CONTENT -----
+[![npm version](https://badge.fury.io/js/%40tokenizer%2Ftoken.svg)](https://www.npmjs.com/package/@tokenizer/token)
+[![npm downloads](http://img.shields.io/npm/dm/@tokenizer/token.svg)](https://npmcharts.com/compare/@tokenizer/token?interval=30)
+
+# @tokenizer/token
+
+TypeScript definition of an [strtok3](https://github.com/Borewit/strtok3) token.
+
+## Licence
+
+(The MIT License)
+
+Copyright (c) 2020 Borewit
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the 'Software'), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 
 ----- END VERBATIM CONTENT -----
 
@@ -15662,6 +17728,34 @@ Used by:
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 c77d564d48f13e7ece47d5dcc57102810744828d5f5af5826808a0320de3bb76
+Used by:
+- strtok3@10.3.5:LICENSE.txt
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright © 2026 Borewit
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 c7cc929b57080f4b9d0c6cf57669f0463fc5b39906344dfc8d3bc43426b30eac
 Used by:
 - safe-buffer@5.1.2:LICENSE
@@ -15926,6 +18020,39 @@ THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 d14894ed4184c6a1ce6d0ad5a091c24e0552b08dda48562f3fae97812321f650
+Used by:
+- seek-bzip@2.0.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright &copy; 2013-2015 C. Scott Ananian
+
+Copyright &copy; 2012-2015 Eli Skeggs
+
+Copyright &copy; 2011 Kevin Kwok
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 d37af134e0d0b998393188394202052e2ff6cd5d18efb2fcc81ba7b00ad77b75
 Used by:
 - exsolve@1.1.1:LICENSE
@@ -16044,6 +18171,156 @@ IN THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 d408f38ffa3355c5faec517153295338892eb0f1ea43f57874bb23c6075979b5
+Used by:
+- balanced-match@4.0.4:LICENSE.md
+----- BEGIN VERBATIM CONTENT -----
+(MIT)
+
+Original code Copyright Julian Gruber <julian@juliangruber.com>
+
+Port to TypeScript Copyright Isaac Z. Schlueter <i@izs.me>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 d446a8c73d7bbe4872d6524b15ae206f9a2d7eb53f8c9cb6e6c893a43acc5276
+Used by:
+- tunnel-agent@0.6.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+Apache License
+
+Version 2.0, January 2004
+
+http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+"License" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
+
+"Licensor" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
+
+"Legal Entity" shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, "control" means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.
+
+"You" (or "Your") shall mean an individual or Legal Entity exercising permissions granted by this License.
+
+"Source" form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.
+
+"Object" form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.
+
+"Work" shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).
+
+"Derivative Works" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.
+
+"Contribution" shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, "submitted" means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as "Not a Contribution."
+
+"Contributor" shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:
+
+You must give any other recipients of the Work or Derivative Works a copy of this License; and
+
+You must cause any modified files to carry prominent notices stating that You changed the files; and
+
+You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and
+
+If the Work includes a "NOTICE" text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License. You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+----- END VERBATIM CONTENT -----
+
+SHA-256 d4c2065e2b936e62a4eb400efb4576edec9ca1388a9f78aa288e147275e7bc8b
+Used by:
+- simple-concat@1.0.1:LICENSE
+- simple-get@4.0.1:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright (c) Feross Aboukhadijeh
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 d72dea1a8cdf3f4dfa2f594253d0c5b37baefc76e806f5ecb0e426393edcd505
+Used by:
+- rc@1.2.8:LICENSE.MIT
+----- BEGIN VERBATIM CONTENT -----
+The MIT License
+
+Copyright (c) 2011 Dominic Tarr
+
+Permission is hereby granted, free of charge, 
+to any person obtaining a copy of this software and 
+associated documentation files (the "Software"), to 
+deal in the Software without restriction, including 
+without limitation the rights to use, copy, modify, 
+merge, publish, distribute, sublicense, and/or sell 
+copies of the Software, and to permit persons to whom 
+the Software is furnished to do so, 
+subject to the following conditions:
+
+The above copyright notice and this permission notice 
+shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 d80713a740590fd03323d00397b0a21a1093ba4c0149d7e5a3849735c6084ae4
 Used by:
 - ansis@4.3.1:LICENSE
@@ -16158,6 +18435,34 @@ Used by:
 MIT License
 
 Copyright (c) 2023 Emil Kowalski
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 dbcbef54fa7e111b69b12a9787051f31f5378b40711b6c57c5a82d99dc8a9e0d
+Used by:
+- modern-tar@0.7.7:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+MIT License
+
+Copyright (c) 2025 Ayuhito
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -16620,6 +18925,33 @@ SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 e17120ad3deff741c2ca5cbe511971ca33971a1ba6e49694c6498309bb2680b9
+Used by:
+- deep-extend@0.6.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright (c) 2013-2018, Viacheslav Lotsmanov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 e18cf5173e928f808f0cd208097fee8fbec9d28fc0255213938e4c559e29ff58
 Used by:
 - html-url-attributes@3.0.1:license
@@ -16757,9 +19089,48 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 e8734448285a2dd773d40136ed5d5e8163a70701dd540cdc796cfca232f67d55
+Used by:
+- rc@1.2.8:LICENSE.APACHE2
+----- BEGIN VERBATIM CONTENT -----
+Apache License, Version 2.0
+
+Copyright (c) 2011 Dominic Tarr
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 eb0bff8faaba4581e0f09c962e0f795f1f8810191c9d616f3f66f36be4b3a5dc
+Used by:
+- token-types@6.1.2:LICENSE.txt
+----- BEGIN VERBATIM CONTENT -----
+The MIT License (MIT)
+
+Copyright © 2026 Borewit
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 ec62dc96da0099b87f4511736c87309335527fb7031639493e06c95728dc8c54
 Used by:
 - readable-stream@2.3.8:LICENSE
+- readable-stream@3.6.2:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 Node.js is licensed for use as follows:
 
@@ -17109,6 +19480,37 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
+SHA-256 f8287e4dd9480be58c56aca4a55c23b782c43a86e69aabad78fff4df0d29edef
+Used by:
+- sprintf-js@1.1.3:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+Copyright (c) 2007-present, Alexandru Mărășteanu <hello@alexei.ro>
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+* Redistributions of source code must retain the above copyright
+  notice, this list of conditions and the following disclaimer.
+* Redistributions in binary form must reproduce the above copyright
+  notice, this list of conditions and the following disclaimer in the
+  documentation and/or other materials provided with the distribution.
+* Neither the name of this software nor the names of its contributors may be
+  used to endorse or promote products derived from this software without
+  specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+----- END VERBATIM CONTENT -----
+
 SHA-256 f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a
 Used by:
 - ip-address@10.2.0:LICENSE
@@ -17132,6 +19534,178 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 f97bc4bb9b7ae8a653941073678b5c7775e8de44a01c3bcc21e7cdc148b90e61
+Used by:
+- node-liblzma@2.2.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+GNU LESSER GENERAL PUBLIC LICENSE
+                       Version 3, 29 June 2007
+
+ Copyright (C) 2007 Free Software Foundation, Inc. <http://fsf.org/>
+ Everyone is permitted to copy and distribute verbatim copies
+ of this license document, but changing it is not allowed.
+
+
+  This version of the GNU Lesser General Public License incorporates
+the terms and conditions of version 3 of the GNU General Public
+License, supplemented by the additional permissions listed below.
+
+  0. Additional Definitions.
+
+  As used herein, "this License" refers to version 3 of the GNU Lesser
+General Public License, and the "GNU GPL" refers to version 3 of the GNU
+General Public License.
+
+  "The Library" refers to a covered work governed by this License,
+other than an Application or a Combined Work as defined below.
+
+  An "Application" is any work that makes use of an interface provided
+by the Library, but which is not otherwise based on the Library.
+Defining a subclass of a class defined by the Library is deemed a mode
+of using an interface provided by the Library.
+
+  A "Combined Work" is a work produced by combining or linking an
+Application with the Library.  The particular version of the Library
+with which the Combined Work was made is also called the "Linked
+Version".
+
+  The "Minimal Corresponding Source" for a Combined Work means the
+Corresponding Source for the Combined Work, excluding any source code
+for portions of the Combined Work that, considered in isolation, are
+based on the Application, and not on the Linked Version.
+
+  The "Corresponding Application Code" for a Combined Work means the
+object code and/or source code for the Application, including any data
+and utility programs needed for reproducing the Combined Work from the
+Application, but excluding the System Libraries of the Combined Work.
+
+  1. Exception to Section 3 of the GNU GPL.
+
+  You may convey a covered work under sections 3 and 4 of this License
+without being bound by section 3 of the GNU GPL.
+
+  2. Conveying Modified Versions.
+
+  If you modify a copy of the Library, and, in your modifications, a
+facility refers to a function or data to be supplied by an Application
+that uses the facility (other than as an argument passed when the
+facility is invoked), then you may convey a copy of the modified
+version:
+
+   a) under this License, provided that you make a good faith effort to
+   ensure that, in the event an Application does not supply the
+   function or data, the facility still operates, and performs
+   whatever part of its purpose remains meaningful, or
+
+   b) under the GNU GPL, with none of the additional permissions of
+   this License applicable to that copy.
+
+  3. Object Code Incorporating Material from Library Header Files.
+
+  The object code form of an Application may incorporate material from
+a header file that is part of the Library.  You may convey such object
+code under terms of your choice, provided that, if the incorporated
+material is not limited to numerical parameters, data structure
+layouts and accessors, or small macros, inline functions and templates
+(ten or fewer lines in length), you do both of the following:
+
+   a) Give prominent notice with each copy of the object code that the
+   Library is used in it and that the Library and its use are
+   covered by this License.
+
+   b) Accompany the object code with a copy of the GNU GPL and this license
+   document.
+
+  4. Combined Works.
+
+  You may convey a Combined Work under terms of your choice that,
+taken together, effectively do not restrict modification of the
+portions of the Library contained in the Combined Work and reverse
+engineering for debugging such modifications, if you also do each of
+the following:
+
+   a) Give prominent notice with each copy of the Combined Work that
+   the Library is used in it and that the Library and its use are
+   covered by this License.
+
+   b) Accompany the Combined Work with a copy of the GNU GPL and this license
+   document.
+
+   c) For a Combined Work that displays copyright notices during
+   execution, include the copyright notice for the Library among
+   these notices, as well as a reference directing the user to the
+   copies of the GNU GPL and this license document.
+
+   d) Do one of the following:
+
+       0) Convey the Minimal Corresponding Source under the terms of this
+       License, and the Corresponding Application Code in a form
+       suitable for, and under terms that permit, the user to
+       recombine or relink the Application with a modified version of
+       the Linked Version to produce a modified Combined Work, in the
+       manner specified by section 6 of the GNU GPL for conveying
+       Corresponding Source.
+
+       1) Use a suitable shared library mechanism for linking with the
+       Library.  A suitable mechanism is one that (a) uses at run time
+       a copy of the Library already present on the user's computer
+       system, and (b) will operate properly with a modified version
+       of the Library that is interface-compatible with the Linked
+       Version.
+
+   e) Provide Installation Information, but only if you would otherwise
+   be required to provide such information under section 6 of the
+   GNU GPL, and only to the extent that such information is
+   necessary to install and execute a modified version of the
+   Combined Work produced by recombining or relinking the
+   Application with a modified version of the Linked Version. (If
+   you use option 4d0, the Installation Information must accompany
+   the Minimal Corresponding Source and Corresponding Application
+   Code. If you use option 4d1, you must provide the Installation
+   Information in the manner specified by section 6 of the GNU GPL
+   for conveying Corresponding Source.)
+
+  5. Combined Libraries.
+
+  You may place library facilities that are a work based on the
+Library side by side in a single library together with other library
+facilities that are not Applications and are not covered by this
+License, and convey such a combined library under terms of your
+choice, if you do both of the following:
+
+   a) Accompany the combined library with a copy of the same work based
+   on the Library, uncombined with any other library facilities,
+   conveyed under the terms of this License.
+
+   b) Give prominent notice with the combined library that part of it
+   is a work based on the Library, and explaining where to find the
+   accompanying uncombined form of the same work.
+
+  6. Revised Versions of the GNU Lesser General Public License.
+
+  The Free Software Foundation may publish revised and/or new versions
+of the GNU Lesser General Public License from time to time. Such new
+versions will be similar in spirit to the present version, but may
+differ in detail to address new problems or concerns.
+
+  Each version is given a distinguishing version number. If the
+Library as you received it specifies that a certain numbered version
+of the GNU Lesser General Public License "or any later version"
+applies to it, you have the option of following the terms and
+conditions either of that published version or of any later version
+published by the Free Software Foundation. If the Library as you
+received it does not specify a version number of the GNU Lesser
+General Public License, you may choose any version of the GNU Lesser
+General Public License ever published by the Free Software Foundation.
+
+  If the Library as you received it specifies that a proxy can decide
+whether future versions of the GNU Lesser General Public License shall
+apply, that proxy's public statement of acceptance of any version is
+permanent authorization for you to choose that version for the
+Library.
 
 ----- END VERBATIM CONTENT -----
 
@@ -17818,6 +20392,37 @@ Repository: https://github.com/yargs/yargs-parser.git
 > OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
 > WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
 > ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+----- END VERBATIM CONTENT -----
+
+SHA-256 fa5659948374d4f555594f47f6da073b40dc503e921aeeece30df4362b3051a5
+Used by:
+- smol-toml@1.7.0:LICENSE
+----- BEGIN VERBATIM CONTENT -----
+Copyright (c) Squirrel Chat et al., All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software without
+   specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ----- END VERBATIM CONTENT -----
 

@@ -50,7 +50,7 @@ describe('getBuildProgress', () => {
   });
 
   it.each([
-    ['writeFile', 'saving', 'Saving changes…'],
+    ['write', 'saving', 'Saving changes…'],
     ['edit', 'saving', 'Saving changes…'],
     ['npmInstall', 'installing', 'Installing dependencies…'],
     ['validateProject', 'validating', 'Validating your project…'],
@@ -70,13 +70,13 @@ describe('getBuildProgress', () => {
     const delayed = getBuildProgress({
       streamStatus: 'streaming',
       isRecovering: false,
-      activeToolNames: ['writeFile'],
+      activeToolNames: ['write'],
       inactiveForMs: BUILD_PROGRESS_DELAY_MS,
     });
     const stalled = getBuildProgress({
       streamStatus: 'streaming',
       isRecovering: false,
-      activeToolNames: ['writeFile'],
+      activeToolNames: ['write'],
       inactiveForMs: BUILD_PROGRESS_STALL_MS,
     });
     expect(delayed).toMatchObject({ delayed: true, stalled: false });
@@ -142,7 +142,7 @@ describe('getBuildProgress', () => {
       getBuildProgress({
         streamStatus: 'streaming',
         isRecovering: false,
-        activeToolNames: ['writeFile', 'validateProject'],
+        activeToolNames: ['write', 'validateProject'],
         inactiveForMs: BUILD_PROGRESS_STALL_MS,
       }),
     ).toMatchObject({
@@ -158,7 +158,7 @@ describe('getBuildProgress', () => {
       getBuildProgress({
         streamStatus: 'submitted',
         isRecovering: true,
-        activeToolNames: ['writeFile'],
+        activeToolNames: ['write'],
         inactiveForMs: 0,
       }),
     ).toMatchObject({ phase: 'saving', message: 'Saving changes…' });

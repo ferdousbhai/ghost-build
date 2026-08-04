@@ -19,7 +19,7 @@ const plan: DeploymentPlan = {
   deploymentId: 'deployment-1',
   sourceSha256,
   templateSourceSha256: 'c'.repeat(64),
-  securityBaselineVersion: 20,
+  securityBaselineVersion: 21,
   securityBoundarySha256: 'd'.repeat(64),
   project: { type: 'web_app', bindings: { ai: false, d1: false, r2: false, appAgent: false } },
   billing: {
