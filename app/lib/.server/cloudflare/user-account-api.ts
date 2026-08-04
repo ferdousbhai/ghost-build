@@ -320,17 +320,13 @@ export class UserCloudflareAccountApi {
         module.path,
       );
     }
-    const version = await parseCloudflareEnvelope<{ id?: string }>(
-      await this.callRaw(`/workers/scripts/${encodeURIComponent(args.workerName)}/versions`, {
-        method: 'POST',
-        body: form,
-      }),
-    );
-    if (!version.id || !UUID_PATTERN.test(version.id)) {
-      throw new CloudflareAccountApiError('Cloudflare returned an invalid Worker version identity.');
-    }
-    await this.promoteWorkerVersion(args.workerName, version.id, args.sourceSha256);
-    return { workerVersionId: version.id };
+    const workerVersionId = await this.uploadAndDeployWorker({
+      workerName: args.workerName,
+      form,
+      sourceSha256: args.sourceSha256,
+      directUpload: args.appAgent,
+    });
+    return { workerVersionId };
   }
 
   /** Replace every trigger with the one server-owned AppAgent cleanup schedule, or none. */
@@ -478,6 +474,55 @@ export class UserCloudflareAccountApi {
     requireExactDeploymentVersion(readback.versions, workerVersionId);
   }
 
+  private async uploadAndDeployWorker(args: {
+    workerName: string;
+    form: FormData;
+    sourceSha256: string;
+    directUpload: boolean;
+  }): Promise<string> {
+    const directUpload = args.directUpload || !(await this.hasWorkerDeployment(args.workerName));
+    if (!directUpload) {
+      const version = await parseCloudflareEnvelope<{ id?: string }>(
+        await this.callRaw(`/workers/scripts/${encodeURIComponent(args.workerName)}/versions`, {
+          method: 'POST',
+          body: args.form,
+        }),
+      );
+      if (!version.id || !UUID_PATTERN.test(version.id)) {
+        throw new CloudflareAccountApiError('Cloudflare returned an invalid Worker version identity.');
+      }
+      await this.promoteWorkerVersion(args.workerName, version.id, args.sourceSha256);
+      return version.id;
+    }
+
+    const uploaded = await parseCloudflareEnvelope<{ id?: string; etag?: string }>(
+      await this.callRaw(
+        `/workers/scripts/${encodeURIComponent(args.workerName)}?excludeScript=true&bindings_inherit=strict`,
+        { method: 'PUT', body: args.form },
+      ),
+    );
+    if (
+      uploaded.id !== args.workerName ||
+      typeof uploaded.etag !== 'string' ||
+      uploaded.etag.length < 1 ||
+      uploaded.etag.length > 256
+    ) {
+      throw new CloudflareAccountApiError('Cloudflare did not read back the deployed Worker.');
+    }
+    const active = await this.readActiveWorkerDeployment(args.workerName);
+    if (!active || !UUID_PATTERN.test(active.workerVersionId) || active.scriptEtag !== uploaded.etag) {
+      throw new CloudflareAccountApiError('Cloudflare did not read back the deployed Worker.');
+    }
+    return active.workerVersionId;
+  }
+
+  private async hasWorkerDeployment(workerName: string): Promise<boolean> {
+    const listed = await this.callOptional<unknown>(`/workers/scripts/${encodeURIComponent(workerName)}/deployments`, {
+      method: 'GET',
+    });
+    return listed !== null && requireWorkerDeployments(listed).length > 0;
+  }
+
   async getWorkersSubdomain(): Promise<string> {
     const result = await this.call<{ subdomain?: string }>('/workers/subdomain', { method: 'GET' });
     if (!result.subdomain || !/^[a-z0-9-]+$/.test(result.subdomain)) {
@@ -554,16 +599,12 @@ export class UserCloudflareAccountApi {
       new Blob([args.source], { type: 'application/javascript+module' }),
       'workspace-runtime.mjs',
     );
-    const version = await parseCloudflareEnvelope<{ id?: string }>(
-      await this.callRaw(`/workers/scripts/${encodeURIComponent(args.workerName)}/versions`, {
-        method: 'POST',
-        body: form,
-      }),
-    );
-    if (!version.id || !UUID_PATTERN.test(version.id)) {
-      throw new CloudflareAccountApiError('Cloudflare did not identify the workspace runtime version.');
-    }
-    await this.promoteWorkerVersion(args.workerName, version.id, args.runtimeVersion);
+    const workerVersionId = await this.uploadAndDeployWorker({
+      workerName: args.workerName,
+      form,
+      sourceSha256: args.runtimeVersion,
+      directUpload: true,
+    });
     const namespaces = await this.call<DurableObjectNamespaceReadback[]>(
       '/workers/durable_objects/namespaces?per_page=1000',
       { method: 'GET' },
@@ -578,7 +619,7 @@ export class UserCloudflareAccountApi {
     if (!namespace?.id) {
       throw new CloudflareAccountApiError('Cloudflare did not provision the Computer workspace namespace.');
     }
-    return { workerVersionId: version.id, namespaceId: namespace.id };
+    return { workerVersionId, namespaceId: namespace.id };
   }
 
   async ensureWorkspaceRuntimeContainer(args: {

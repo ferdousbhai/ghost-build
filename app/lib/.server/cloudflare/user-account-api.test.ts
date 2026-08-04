@@ -493,7 +493,7 @@ describe('UserCloudflareAccountApi', () => {
     expect(request).toHaveBeenCalledOnce();
   });
 
-  test('uploads assets, creates an immutable version, and promotes only that UUID at 100 percent', async () => {
+  test('creates a Worker with assets and reads back the exact active version', async () => {
     const module = await artifactFile('index.js', 'export default { fetch() { return new Response("ok") } }');
     const asset = await artifactFile('index.html', '<h1>Ghostbuild</h1>');
     const duplicateAsset = await artifactFile('nested/index.html', '<h1>Ghostbuild</h1>');
@@ -507,9 +507,29 @@ describe('UserCloudflareAccountApi', () => {
         Response.json({ success: true, result: { jwt: 'asset-session-jwt', buckets: [[assetHash]] } }),
       )
       .mockResolvedValueOnce(Response.json({ success: true, result: { jwt: 'asset-completion-jwt' } }, { status: 201 }))
-      .mockResolvedValueOnce(Response.json({ success: true, result: { id: workerVersionId } }))
-      .mockResolvedValueOnce(Response.json({ success: true, result: { id: providerDeploymentId, versions } }))
-      .mockResolvedValueOnce(Response.json({ success: true, result: { id: providerDeploymentId, versions } }));
+      .mockResolvedValueOnce(Response.json({ success: true, result: { id: 'ghostbuild-app', etag: 'managed-etag' } }))
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: {
+            deployments: [{ id: providerDeploymentId, created_on: '2026-07-21T00:00:00Z', versions }],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: {
+            id: workerVersionId,
+            resources: {
+              bindings: [],
+              script: { etag: 'managed-etag' },
+              script_runtime: { compatibility_date: '2026-07-21', compatibility_flags: ['nodejs_compat'] },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: { schedules: [] } }));
     const api = new UserCloudflareAccountApi('account-1', 'oauth-token', request);
 
     await expect(
@@ -534,9 +554,10 @@ describe('UserCloudflareAccountApi', () => {
     expect(request.mock.calls.map(([url]) => String(url))).toEqual([
       'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/assets-upload-session',
       'https://api.cloudflare.com/client/v4/accounts/account-1/workers/assets/upload?base64=true',
-      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/versions',
+      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app?excludeScript=true&bindings_inherit=strict',
       'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/deployments',
-      `https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/deployments/${providerDeploymentId}`,
+      `https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/versions/${workerVersionId}`,
+      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/schedules',
     ]);
     expect(request.mock.calls.every(([, init]) => init?.redirect === 'manual')).toBe(true);
     expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({
@@ -547,19 +568,67 @@ describe('UserCloudflareAccountApi', () => {
     });
     expect(request.mock.calls[1]?.[1]?.headers).toMatchObject({ authorization: 'Bearer asset-session-jwt' });
     expect([...(request.mock.calls[1]?.[1]?.body as FormData).keys()]).toEqual([assetHash]);
-    const versionForm = request.mock.calls[2]?.[1]?.body as FormData;
-    const metadata = JSON.parse(await (versionForm.get('metadata') as Blob).text()) as Record<string, unknown>;
+    const workerForm = request.mock.calls[2]?.[1]?.body as FormData;
+    expect(request.mock.calls[2]?.[1]?.method).toBe('PUT');
+    const metadata = JSON.parse(await (workerForm.get('metadata') as Blob).text()) as Record<string, unknown>;
     expect(metadata).toMatchObject({
       main_module: 'index.js',
       assets: { jwt: 'asset-completion-jwt' },
       compatibility_date: '2026-07-21',
     });
     expect(JSON.stringify(metadata)).not.toMatch(/oauth-token|CLOUDFLARE_API_TOKEN|apiToken/);
-    expect(versionForm.get('index.js')).toBeInstanceOf(Blob);
-    expect(JSON.parse(String(request.mock.calls[3]?.[1]?.body))).toMatchObject({
-      strategy: 'percentage',
-      versions,
-    });
+    expect(workerForm.get('index.js')).toBeInstanceOf(Blob);
+  });
+
+  test('promotes an immutable version when a plain Worker already exists', async () => {
+    const module = await artifactFile('server.js', 'export default { fetch() { return new Response("ok") } }');
+    const previousVersionId = '11111111-1111-4111-8111-111111111111';
+    const workerVersionId = '22222222-2222-4222-8222-222222222222';
+    const providerDeploymentId = '33333333-3333-4333-8333-333333333333';
+    const versions = [{ percentage: 100, version_id: workerVersionId }];
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: {
+            deployments: [
+              {
+                id: '44444444-4444-4444-8444-444444444444',
+                created_on: '2026-07-20T00:00:00Z',
+                versions: [{ percentage: 100, version_id: previousVersionId }],
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: { id: workerVersionId } }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: { id: providerDeploymentId, versions } }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: { id: providerDeploymentId, versions } }));
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).deployManagedWorker({
+        workerName: 'ghostbuild-worker',
+        projectType: 'worker',
+        sourceSha256: 'a'.repeat(64),
+        mainModule: 'server.js',
+        modules: [module],
+        assets: [],
+        workersAi: false,
+        appAgent: false,
+        securityBaselineVersion: '24',
+        securityBoundarySha256: 'b'.repeat(64),
+        templateSourceSha256: 'c'.repeat(64),
+      }),
+    ).resolves.toEqual({ workerVersionId });
+
+    expect(request.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/deployments',
+      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/versions',
+      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/deployments',
+      `https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/deployments/${providerDeploymentId}`,
+    ]);
+    expect(request.mock.calls.map(([, init]) => init?.method)).toEqual(['GET', 'POST', 'POST', 'GET']);
   });
 
   test('rejects unknown asset bucket hashes and a missing final completion JWT', async () => {
@@ -656,9 +725,34 @@ describe('UserCloudflareAccountApi', () => {
     const versions = [{ percentage: 100, version_id: workerVersionId }];
     const request = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json({ success: true, result: { id: workerVersionId } }))
-      .mockResolvedValueOnce(Response.json({ success: true, result: { id: providerDeploymentId, versions } }))
-      .mockResolvedValueOnce(Response.json({ success: true, result: { id: providerDeploymentId, versions } }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: { id: 'ghostbuild-workspace-user', etag: 'runtime-etag' } }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: {
+            deployments: [{ id: providerDeploymentId, created_on: '2026-07-27T00:00:00Z', versions }],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: {
+            id: workerVersionId,
+            resources: {
+              bindings: [],
+              script: { etag: 'runtime-etag' },
+              script_runtime: {
+                compatibility_date: '2026-07-27',
+                compatibility_flags: ['nodejs_compat', 'experimental'],
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: { schedules: [] } }))
       .mockResolvedValueOnce(
         Response.json({
           success: true,
@@ -693,9 +787,9 @@ describe('UserCloudflareAccountApi', () => {
 
     const [scriptUrl, scriptInit] = request.mock.calls[0];
     expect(scriptUrl).toBe(
-      'https://api.cloudflare.com/client/v4/accounts/user-account/workers/scripts/ghostbuild-workspace-user/versions',
+      'https://api.cloudflare.com/client/v4/accounts/user-account/workers/scripts/ghostbuild-workspace-user?excludeScript=true&bindings_inherit=strict',
     );
-    expect(scriptInit).toMatchObject({ method: 'POST', headers: { authorization: 'Bearer user-token' } });
+    expect(scriptInit).toMatchObject({ method: 'PUT', headers: { authorization: 'Bearer user-token' } });
     const form = scriptInit?.body as FormData;
     const metadataPart = form.get('metadata');
     expect(metadataPart).toBeInstanceOf(Blob);
