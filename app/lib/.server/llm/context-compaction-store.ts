@@ -63,8 +63,11 @@ export class DurableObjectContextCompactionRepository {
       WHERE id = ${id}
       LIMIT 1
     `[0];
-    if (!row?.summary || !row.from_message_id || !row.to_message_id) {
+    if (!row) {
       return null;
+    }
+    if (!row.summary || !row.from_message_id || !row.to_message_id) {
+      throw new Error('Stored context compaction is invalid.');
     }
     return {
       summary: row.summary,

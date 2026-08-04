@@ -213,10 +213,14 @@ function connectionFromRow(row: CloudflareConnectionRow): CloudflareConnection {
 }
 
 function parseGrantedScopes(value: string): string[] {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.filter((scope): scope is string => typeof scope === 'string') : [];
-  } catch {
-    return [];
+    parsed = JSON.parse(value);
+  } catch (error) {
+    throw new Error('Stored Cloudflare connection scopes are invalid.', { cause: error });
   }
+  if (!Array.isArray(parsed) || parsed.some((scope) => typeof scope !== 'string' || scope.length === 0)) {
+    throw new Error('Stored Cloudflare connection scopes are invalid.');
+  }
+  return parsed;
 }

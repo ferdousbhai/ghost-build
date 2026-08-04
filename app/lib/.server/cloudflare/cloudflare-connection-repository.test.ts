@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { activateCloudflareConnection, CloudflareConnectionChangedError } from './cloudflare-connection-repository';
+import {
+  activateCloudflareConnection,
+  CloudflareConnectionChangedError,
+  findCloudflareConnectionForUser,
+} from './cloudflare-connection-repository';
 
 describe('activateCloudflareConnection', () => {
   it('rejects a stale OAuth completion instead of overwriting the winning credential handle', async () => {
@@ -155,6 +159,29 @@ describe('activateCloudflareConnection', () => {
       credentialHandle: 'credential-new',
       generation: 1,
     });
+  });
+
+  it('rejects corrupt persisted capability scopes instead of silently removing them', async () => {
+    const row = {
+      id: 'connection-1',
+      user_id: 'user-1',
+      account_id: 'account-1',
+      account_name: 'Account',
+      status: 'active',
+      credential_handle: 'credential-1',
+      granted_scopes_json: '{invalid',
+      ai_billing_enabled: 0,
+      connected_at: 1,
+      updated_at: 1,
+      connection_generation: 1,
+    };
+    const db = {
+      prepare: () => ({ bind: () => ({ first: async () => row }) }),
+    } as unknown as D1Database;
+
+    await expect(findCloudflareConnectionForUser(db, 'user-1')).rejects.toThrow(
+      'Stored Cloudflare connection scopes are invalid',
+    );
   });
 });
 

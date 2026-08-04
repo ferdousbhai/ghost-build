@@ -150,6 +150,17 @@ describe('UserCloudflareAccountApi', () => {
     expect(request.mock.calls.every((call) => call[1]?.method === 'GET')).toBe(true);
   });
 
+  test('rejects a matching D1 readback without an identity instead of creating a replacement', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ name: 'ghostbuild-deployment-1' }] }));
+
+    await expect(new UserCloudflareAccountApi('account-1', 'token', request).ensureD1ForPlan(plan)).rejects.toThrow(
+      'invalid D1 resource',
+    );
+    expect(request).toHaveBeenCalledOnce();
+  });
+
   test('revalidates authorization for the create request after an ensure lookup', async () => {
     let generation = 1;
     const authorizeRequest = vi.fn(async () => {
@@ -220,6 +231,15 @@ describe('UserCloudflareAccountApi', () => {
       name: 'ghostbuild-user-data',
     });
     expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  test('rejects malformed R2 readback instead of creating a replacement bucket', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ success: true, result: {} }));
+
+    await expect(new UserCloudflareAccountApi('account-1', 'token', request).ensureR2ForPlan(plan)).rejects.toThrow(
+      'invalid R2 resource',
+    );
+    expect(request).toHaveBeenCalledOnce();
   });
 
   test('does not leak the connected token through provider errors', async () => {
@@ -464,6 +484,15 @@ describe('UserCloudflareAccountApi', () => {
     expect(request).toHaveBeenCalledOnce();
   });
 
+  test('rejects a malformed Worker deployment collection', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ success: true, result: {} }));
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).readActiveWorkerDeployment('worker-name'),
+    ).rejects.toThrow('invalid Worker deployments');
+    expect(request).toHaveBeenCalledOnce();
+  });
+
   test('uploads assets, creates an immutable version, and promotes only that UUID at 100 percent', async () => {
     const module = await artifactFile('index.js', 'export default { fetch() { return new Response("ok") } }');
     const asset = await artifactFile('index.html', '<h1>Ghostbuild</h1>');
@@ -607,6 +636,20 @@ describe('UserCloudflareAccountApi', () => {
     expect(request.mock.calls.map(([, init]) => init?.method)).toEqual(['PUT', 'GET', 'POST', 'GET']);
   });
 
+  test('rejects missing schedule readback when the expected schedule set is empty', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: {} }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: {} }));
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).configureManagedWorkerSchedule(
+        'ghostbuild-app',
+        false,
+      ),
+    ).rejects.toThrow('invalid managed Worker schedules');
+  });
+
   test('deploys the Computer workspace and execution bindings into the user account', async () => {
     const workerVersionId = '33333333-3333-4333-8333-333333333333';
     const providerDeploymentId = '44444444-4444-4444-8444-444444444444';
@@ -726,5 +769,19 @@ describe('UserCloudflareAccountApi', () => {
       max_instances: 10,
       durable_objects: { namespace_id: '0123456789abcdef0123456789abcdef' },
     });
+  });
+
+  test('rejects a matching container application without provider identity', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json([{ name: 'ghostbuild-workspace-user' }]));
+    const api = new UserCloudflareAccountApi('user-account', 'user-token', request);
+
+    await expect(
+      api.ensureWorkspaceRuntimeContainer({
+        applicationName: 'ghostbuild-workspace-user',
+        namespaceId: '0123456789abcdef0123456789abcdef',
+        image: `docker.io/cloudflare/sandbox:0.12.4@sha256:${'b'.repeat(64)}`,
+      }),
+    ).rejects.toThrow('invalid workspace container application');
+    expect(request).toHaveBeenCalledOnce();
   });
 });

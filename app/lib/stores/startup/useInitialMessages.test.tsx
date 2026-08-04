@@ -29,7 +29,17 @@ describe('useInitialMessages', () => {
     executeDataOperationMock.mockReset();
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(null, { status: 204 })),
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { chatId: string; subchatIndex: number };
+        return new Response(null, {
+          status: 204,
+          headers: {
+            'X-Ghostbuild-Transcript-Agent': `${body.chatId}--transcript-${body.subchatIndex}-0`,
+            'X-Ghostbuild-Transcript-Generation': '0',
+            'X-Ghostbuild-Transcript-Subchat': body.subchatIndex.toString(),
+          },
+        });
+      }),
     );
   });
 

@@ -82,6 +82,15 @@ describe('userRuntimeEnhancePromptAction billing', () => {
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain('provider failure');
     consoleError.mockRestore();
   });
+
+  it('rejects an empty provider result instead of returning the original prompt as a successful enhancement', async () => {
+    mocks.generateText.mockResolvedValue({ text: '   ' });
+
+    const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: 'Error enhancing prompt' });
+  });
 });
 
 function userRuntimeEnhPrompt(args: { request: Request; env: Env }) {

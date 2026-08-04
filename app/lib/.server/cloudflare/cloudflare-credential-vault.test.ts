@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { D1CloudflareCredentialVault } from './cloudflare-credential-vault';
+import { D1CloudflareCredentialVault, parseStoredOAuthCredential } from './cloudflare-credential-vault';
 
 function createDb(
   options: {
@@ -94,6 +94,24 @@ describe('D1CloudflareCredentialVault', () => {
     const { db } = createDb();
     const vault = new D1CloudflareCredentialVault(db, btoa('too-short'));
     await expect(vault.store('token')).rejects.toThrow('exactly 32 bytes');
+  });
+
+  it('rejects partial OAuth refresh configuration', () => {
+    expect(() =>
+      D1CloudflareCredentialVault.fromEnv({
+        DB: createDb().db,
+        CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY: encryptionKey(),
+        CLOUDFLARE_OAUTH_CLIENT_ID: 'client-1',
+      } as unknown as Env),
+    ).toThrow('OAuth refresh configuration is incomplete');
+  });
+
+  it('rejects malformed structured OAuth credentials without treating them as legacy API tokens', () => {
+    expect(parseStoredOAuthCredential('legacy-api-token')).toBeNull();
+    expect(() => parseStoredOAuthCredential('{invalid')).toThrow('Stored Cloudflare OAuth credential is invalid');
+    expect(() => parseStoredOAuthCredential(JSON.stringify({ version: 1, accessToken: 'token' }))).toThrow(
+      'Stored Cloudflare OAuth credential is invalid',
+    );
   });
 
   it('adopts only the exact credential insert that committed before acknowledgement failed', async () => {

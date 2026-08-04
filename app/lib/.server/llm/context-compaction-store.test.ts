@@ -61,6 +61,19 @@ describe('DurableObjectContextCompactionRepository', () => {
     });
   });
 
+  test('rejects a partial persisted summary instead of treating it as absent', () => {
+    const db = new TestSqlProvider();
+    db.rows.set('active', {
+      summary: 'summary',
+      from_message_id: 'm-1',
+      to_message_id: null,
+    });
+
+    expect(() => new DurableObjectContextCompactionRepository(db).getCompaction()).toThrow(
+      'Stored context compaction is invalid',
+    );
+  });
+
   test('does not let a stale background compaction overwrite a newer checkpoint', () => {
     const repository = new DurableObjectContextCompactionRepository(new TestSqlProvider());
     const first = { summary: 'first', fromMessageId: 'm-1', toMessageId: 'm-3' };

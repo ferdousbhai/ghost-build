@@ -19,10 +19,12 @@ export class D1CloudflareCredentialVault {
     if (!env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY) {
       throw new Error('Cloudflare credential encryption is not configured.');
     }
-    const oauth =
-      env.CLOUDFLARE_OAUTH_CLIENT_ID && env.CLOUDFLARE_OAUTH_CLIENT_SECRET
-        ? { clientId: env.CLOUDFLARE_OAUTH_CLIENT_ID, clientSecret: env.CLOUDFLARE_OAUTH_CLIENT_SECRET }
-        : undefined;
+    const clientId = env.CLOUDFLARE_OAUTH_CLIENT_ID;
+    const clientSecret = env.CLOUDFLARE_OAUTH_CLIENT_SECRET;
+    if (Boolean(clientId) !== Boolean(clientSecret)) {
+      throw new Error('Cloudflare OAuth refresh configuration is incomplete.');
+    }
+    const oauth = clientId && clientSecret ? { clientId, clientSecret } : undefined;
     return new D1CloudflareCredentialVault(env.DB, env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY, oauth);
   }
 
@@ -68,7 +70,7 @@ export class D1CloudflareCredentialVault {
       throw new Error('Cloudflare credential is unavailable.');
     }
     const value = await this.decryptCredentialRow(row);
-    const oauthCredential = parseOAuthCredential(value);
+    const oauthCredential = parseStoredOAuthCredential(value);
     if (!oauthCredential) {
       return value;
     }
@@ -210,7 +212,7 @@ export class D1CloudflareCredentialVault {
     ) {
       return null;
     }
-    const credential = parseOAuthCredential(await this.decryptCredentialRow(current));
+    const credential = parseStoredOAuthCredential(await this.decryptCredentialRow(current));
     return credential && credential.expiresAt > Date.now() + 60_000 ? credential.accessToken : null;
   }
 
@@ -276,21 +278,28 @@ type OAuthCredential = {
   expiresAt: number;
 };
 
-function parseOAuthCredential(value: string): OAuthCredential | null {
-  try {
-    const parsed = JSON.parse(value) as Partial<OAuthCredential>;
-    return parsed.version === 1 &&
-      typeof parsed.accessToken === 'string' &&
-      parsed.accessToken.length > 0 &&
-      typeof parsed.refreshToken === 'string' &&
-      parsed.refreshToken.length > 0 &&
-      typeof parsed.expiresAt === 'number' &&
-      Number.isFinite(parsed.expiresAt)
-      ? (parsed as OAuthCredential)
-      : null;
-  } catch {
+export function parseStoredOAuthCredential(value: string): OAuthCredential | null {
+  if (!value.trimStart().startsWith('{')) {
     return null;
   }
+  let parsed: Partial<OAuthCredential>;
+  try {
+    parsed = JSON.parse(value) as Partial<OAuthCredential>;
+  } catch (error) {
+    throw new Error('Stored Cloudflare OAuth credential is invalid.', { cause: error });
+  }
+  if (
+    parsed.version !== 1 ||
+    typeof parsed.accessToken !== 'string' ||
+    parsed.accessToken.length === 0 ||
+    typeof parsed.refreshToken !== 'string' ||
+    parsed.refreshToken.length === 0 ||
+    typeof parsed.expiresAt !== 'number' ||
+    !Number.isFinite(parsed.expiresAt)
+  ) {
+    throw new Error('Stored Cloudflare OAuth credential is invalid.');
+  }
+  return parsed as OAuthCredential;
 }
 
 async function importEncryptionKey(value: string, usages: KeyUsage[]): Promise<CryptoKey> {

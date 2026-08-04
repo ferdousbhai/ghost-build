@@ -202,9 +202,12 @@ export class ToolOperationJournal {
        WHERE status = 'running' AND result_json IS NOT NULL
        ORDER BY tool_call_id`,
       ),
-    ].flatMap((row) => {
+    ].map((row) => {
       const envelope = pendingEnvelope(row.result_json);
-      return envelope ? [{ backend: envelope.backend, toolCallId: row.tool_call_id, result: envelope.result }] : [];
+      if (!envelope) {
+        throw new Error('A pending workspace tool operation has invalid recovery state.');
+      }
+      return { backend: envelope.backend, toolCallId: row.tool_call_id, result: envelope.result };
     });
   }
 

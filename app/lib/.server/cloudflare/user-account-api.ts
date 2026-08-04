@@ -96,13 +96,12 @@ export class UserCloudflareAccountApi {
 
   async ensureD1Database(resourceName: string): Promise<{ id: string; name: string }> {
     requireCloudflareResourceName(resourceName);
-    const databases = await this.call<Array<{ uuid?: string; name?: string }>>(
-      `/d1/database?name=${encodeURIComponent(resourceName)}`,
-      { method: 'GET' },
-    );
-    const existing = databases.find((database) => database.name === resourceName && database.uuid);
-    if (existing?.uuid) {
-      return { id: existing.uuid, name: resourceName };
+    const databases = await this.call<unknown>(`/d1/database?name=${encodeURIComponent(resourceName)}`, {
+      method: 'GET',
+    });
+    const existingId = existingD1DatabaseId(databases, resourceName);
+    if (existingId) {
+      return { id: existingId, name: resourceName };
     }
     const result = await this.call<{ uuid?: string; name?: string }>('/d1/database', {
       method: 'POST',
@@ -202,12 +201,11 @@ export class UserCloudflareAccountApi {
     logicalName: 'DB' | 'AGENT_SECURITY_DB' = 'DB',
   ): Promise<{ id: string; name: string }> {
     const resourceName = requirePlanResourceName(plan, 'd1', logicalName);
-    const databases = await this.call<Array<{ uuid?: string; name?: string }>>(
-      `/d1/database?name=${encodeURIComponent(resourceName)}`,
-      { method: 'GET' },
-    );
-    const existing = databases.find((database) => database.name === resourceName && database.uuid);
-    return existing?.uuid ? { id: existing.uuid, name: resourceName } : this.createD1ForPlan(plan, logicalName);
+    const databases = await this.call<unknown>(`/d1/database?name=${encodeURIComponent(resourceName)}`, {
+      method: 'GET',
+    });
+    const existingId = existingD1DatabaseId(databases, resourceName);
+    return existingId ? { id: existingId, name: resourceName } : this.createD1ForPlan(plan, logicalName);
   }
 
   private async createR2Bucket(resourceName: string): Promise<{ id: string; name: string }> {
@@ -232,7 +230,10 @@ export class UserCloudflareAccountApi {
     const existing = await this.callOptional<{ name?: string }>(`/r2/buckets/${encodeURIComponent(resourceName)}`, {
       method: 'GET',
     });
-    if (existing?.name === resourceName) {
+    if (existing !== null && existing.name !== resourceName) {
+      throw new CloudflareAccountApiError('Cloudflare returned an invalid R2 resource.');
+    }
+    if (existing) {
       return { id: resourceName, name: resourceName };
     }
     try {
@@ -244,7 +245,10 @@ export class UserCloudflareAccountApi {
       const raced = await this.callOptional<{ name?: string }>(`/r2/buckets/${encodeURIComponent(resourceName)}`, {
         method: 'GET',
       });
-      if (raced?.name === resourceName) {
+      if (raced !== null && raced.name !== resourceName) {
+        throw new CloudflareAccountApiError('Cloudflare returned an invalid R2 resource.');
+      }
+      if (raced) {
         return { id: resourceName, name: resourceName };
       }
       throw error;
@@ -590,11 +594,11 @@ export class UserCloudflareAccountApi {
     if (!/^docker\.io\/[a-z0-9._/-]+:[a-zA-Z0-9._-]+@sha256:[a-f0-9]{64}$/.test(args.image)) {
       throw new CloudflareAccountApiError('The workspace Sandbox image is not immutable.');
     }
-    const applications = await this.callContainer<ContainerApplicationReadback[]>('/applications', {
+    const applications = await this.callContainer<unknown>('/applications', {
       method: 'GET',
     });
-    const existing = applications.find((candidate) => candidate.name === args.applicationName);
-    if (existing?.durable_objects?.namespace_id && existing.durable_objects.namespace_id !== args.namespaceId) {
+    const existing = existingContainerApplication(applications, args.applicationName);
+    if (existing && existing.durable_objects.namespace_id !== args.namespaceId) {
       throw new CloudflareAccountApiError(
         'The workspace container name is already attached to a different Durable Object namespace.',
       );
@@ -611,7 +615,7 @@ export class UserCloudflareAccountApi {
       scheduling_policy: 'default',
       rollout_active_grace_period: 0,
     };
-    const result = existing?.id
+    const result = existing
       ? await this.callContainer<ContainerApplicationReadback>(`/applications/${encodeURIComponent(existing.id)}`, {
           method: 'PATCH',
           body: JSON.stringify(configuration),
@@ -672,20 +676,16 @@ export class UserCloudflareAccountApi {
     if (!/^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/.test(workerName)) {
       throw new CloudflareAccountApiError('Worker name is invalid.');
     }
-    const listed = await this.callOptional<{
-      deployments?: Array<{
-        id?: string;
-        created_on?: string;
-        versions?: Array<{ percentage?: number; version_id?: string }>;
-      }>;
-    }>(`/workers/scripts/${encodeURIComponent(workerName)}/deployments`, { method: 'GET' });
+    const listed = await this.callOptional<unknown>(`/workers/scripts/${encodeURIComponent(workerName)}/deployments`, {
+      method: 'GET',
+    });
     if (listed === null) {
       return null;
     }
-    const active = [...(listed.deployments ?? [])].sort((left, right) =>
-      (right.created_on ?? '').localeCompare(left.created_on ?? ''),
+    const active = requireWorkerDeployments(listed).sort((left, right) =>
+      right.created_on.localeCompare(left.created_on),
     )[0];
-    const activeVersions = active?.versions?.filter((version) => version.percentage === 100) ?? [];
+    const activeVersions = active?.versions.filter((version) => version.percentage === 100) ?? [];
     if (!active?.id || activeVersions.length !== 1 || !activeVersions[0]?.version_id) {
       throw new CloudflareAccountApiError('Cloudflare returned an ambiguous active Worker deployment.');
     }
@@ -701,10 +701,7 @@ export class UserCloudflareAccountApi {
       }>(`/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(workerVersionId)}`, {
         method: 'GET',
       }),
-      this.call<{ schedules?: Array<{ cron?: string }> }>(
-        `/workers/scripts/${encodeURIComponent(workerName)}/schedules`,
-        { method: 'GET' },
-      ),
+      this.call<unknown>(`/workers/scripts/${encodeURIComponent(workerName)}/schedules`, { method: 'GET' }),
     ]);
     if (
       version.id !== workerVersionId ||
@@ -718,14 +715,14 @@ export class UserCloudflareAccountApi {
     ) {
       throw new CloudflareAccountApiError('Cloudflare returned invalid active Worker version metadata.');
     }
+    const bindings = requireWorkerBindings(version.resources.bindings);
+    const crons = requireSchedules(schedules);
     return {
       providerDeploymentId: active.id,
       workerVersionId,
       scriptEtag: version.resources.script.etag,
-      bindings: version.resources.bindings,
-      crons: (schedules.schedules ?? []).flatMap((schedule) =>
-        typeof schedule.cron === 'string' ? [schedule.cron] : [],
-      ),
+      bindings,
+      crons,
       compatibilityDate: version.resources.script_runtime.compatibility_date,
       compatibilityFlags: version.resources.script_runtime.compatibility_flags,
     };
@@ -936,11 +933,138 @@ function requireExactDeploymentVersion(
   }
 }
 
-function requireExactSchedules(result: { schedules?: Array<{ cron?: string }> }, expected: readonly string[]): void {
-  const observed = result.schedules?.map((schedule) => schedule.cron) ?? [];
+function requireExactSchedules(result: unknown, expected: readonly string[]): void {
+  const observed = requireSchedules(result);
   if (observed.length !== expected.length || observed.some((cron, index) => cron !== expected[index])) {
     throw new CloudflareAccountApiError('Cloudflare returned invalid managed Worker schedules.');
   }
+}
+
+function requireSchedules(value: unknown): string[] {
+  if (!isRecord(value) || !Array.isArray(value.schedules)) {
+    throw new CloudflareAccountApiError('Cloudflare returned invalid managed Worker schedules.');
+  }
+  return value.schedules.map((schedule) => {
+    if (!isRecord(schedule) || typeof schedule.cron !== 'string' || schedule.cron.length === 0) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid managed Worker schedules.');
+    }
+    return schedule.cron;
+  });
+}
+
+function existingD1DatabaseId(value: unknown, resourceName: string): string | null {
+  if (!Array.isArray(value)) {
+    throw new CloudflareAccountApiError('Cloudflare returned an invalid D1 resource list.');
+  }
+  const databases = value.map((database) => {
+    if (
+      !isRecord(database) ||
+      typeof database.name !== 'string' ||
+      database.name.length === 0 ||
+      typeof database.uuid !== 'string' ||
+      database.uuid.length === 0 ||
+      database.uuid.length > 256
+    ) {
+      throw new CloudflareAccountApiError('Cloudflare returned an invalid D1 resource.');
+    }
+    return { name: database.name, uuid: database.uuid };
+  });
+  const matches = databases.filter((database) => database.name === resourceName);
+  if (matches.length > 1) {
+    throw new CloudflareAccountApiError('Cloudflare returned an ambiguous D1 resource list.');
+  }
+  const existing = matches[0];
+  if (!existing) {
+    return null;
+  }
+  return existing.uuid;
+}
+
+function requireWorkerDeployments(value: unknown): Array<{
+  id: string;
+  created_on: string;
+  versions: Array<{ percentage: number; version_id: string }>;
+}> {
+  if (!isRecord(value) || !Array.isArray(value.deployments)) {
+    throw new CloudflareAccountApiError('Cloudflare returned invalid Worker deployments.');
+  }
+  return value.deployments.map((deployment) => {
+    if (
+      !isRecord(deployment) ||
+      typeof deployment.id !== 'string' ||
+      deployment.id.length === 0 ||
+      typeof deployment.created_on !== 'string' ||
+      deployment.created_on.length === 0 ||
+      !Array.isArray(deployment.versions)
+    ) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid Worker deployments.');
+    }
+    const versions = deployment.versions.map((version) => {
+      if (
+        !isRecord(version) ||
+        typeof version.percentage !== 'number' ||
+        !Number.isFinite(version.percentage) ||
+        typeof version.version_id !== 'string' ||
+        version.version_id.length === 0
+      ) {
+        throw new CloudflareAccountApiError('Cloudflare returned invalid Worker deployments.');
+      }
+      return { percentage: version.percentage, version_id: version.version_id };
+    });
+    return { id: deployment.id, created_on: deployment.created_on, versions };
+  });
+}
+
+function requireWorkerBindings(value: unknown[]): WorkerBinding[] {
+  return value.map((binding) => {
+    if (
+      !isRecord(binding) ||
+      typeof binding.name !== 'string' ||
+      binding.name.length === 0 ||
+      typeof binding.type !== 'string' ||
+      binding.type.length === 0
+    ) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid active Worker bindings.');
+    }
+    return binding;
+  });
+}
+
+function existingContainerApplication(
+  value: unknown,
+  applicationName: string,
+): Required<Pick<ContainerApplicationReadback, 'id' | 'name' | 'durable_objects'>> | null {
+  if (!Array.isArray(value)) {
+    throw new CloudflareAccountApiError('Cloudflare returned invalid workspace container applications.');
+  }
+  const applications = value.map((application) => {
+    if (!isRecord(application) || typeof application.name !== 'string' || application.name.length === 0) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid workspace container applications.');
+    }
+    return application;
+  });
+  const matches = applications.filter((application) => application.name === applicationName);
+  if (matches.length > 1) {
+    throw new CloudflareAccountApiError('Cloudflare returned ambiguous workspace container applications.');
+  }
+  const existing = matches[0];
+  if (!existing) {
+    return null;
+  }
+  if (
+    typeof existing.id !== 'string' ||
+    existing.id.length === 0 ||
+    !isRecord(existing.durable_objects) ||
+    typeof existing.durable_objects.namespace_id !== 'string' ||
+    existing.durable_objects.namespace_id.length === 0
+  ) {
+    throw new CloudflareAccountApiError('Cloudflare returned invalid workspace container application.');
+  }
+  return {
+    id: existing.id,
+    name: applicationName,
+    durable_objects: { namespace_id: existing.durable_objects.namespace_id },
+  };
 }
 
 function workerModuleContentType(path: string): string {

@@ -255,7 +255,7 @@ async function loadChatTranscript(
   if (!response.ok) {
     throw new Error('Failed to fetch initial messages');
   }
-  const responseTranscript = transcriptIdentityFromHeaders(response.headers) ?? chatInfo.transcript;
+  const responseTranscript = transcriptIdentityFromHeaders(response.headers);
   const history =
     response.status === 204 ? { messages: [], checkpoint: null } : parseMessageHistory(await response.json());
   signal.throwIfAborted();
@@ -284,15 +284,26 @@ function transcriptIdentity(checkpoint: TranscriptCheckpoint): TranscriptIdentit
   };
 }
 
-function transcriptIdentityFromHeaders(headers: Headers): TranscriptIdentity | null {
+export function transcriptIdentityFromHeaders(headers: Headers): TranscriptIdentity {
   const generation = headers.get('X-Ghostbuild-Transcript-Generation');
   const subchatIndex = headers.get('X-Ghostbuild-Transcript-Subchat');
   const result = transcriptIdentitySchema.safeParse({
     agentName: headers.get('X-Ghostbuild-Transcript-Agent'),
-    generation: generation === null ? Number.NaN : Number(generation),
-    subchatIndex: subchatIndex === null ? Number.NaN : Number(subchatIndex),
+    generation: parseTranscriptHeaderInteger(generation),
+    subchatIndex: parseTranscriptHeaderInteger(subchatIndex),
   });
-  return result.success ? result.data : null;
+  if (!result.success) {
+    throw new Error('The user runtime returned invalid transcript identity headers.');
+  }
+  return result.data;
+}
+
+function parseTranscriptHeaderInteger(value: string | null): number {
+  if (value === null || !/^(?:0|[1-9]\d*)$/.test(value)) {
+    return Number.NaN;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : Number.NaN;
 }
 
 function parseMessageHistory(deserialized: unknown): {

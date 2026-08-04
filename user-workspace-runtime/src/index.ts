@@ -74,6 +74,7 @@ import {
   WorkspaceSyncPendingError,
 } from './workspace-sync-retry';
 import { stableWorkspaceRead } from './stable-workspace-read';
+import { requireDeploymentMigrationName, requireWorkspaceFileEncoding } from './workspace-input';
 
 export { WorkspaceProxy, WorkspaceServiceProxy };
 
@@ -2031,11 +2032,12 @@ async function collectDeploymentMigrations(
   }
   const migrations: Array<{ name: string; sql: string }> = [];
   for (const entry of entries) {
-    const name = entry.path.slice(root.length).replace(/^\/+/, '');
-    if (!/^\d{4}_[a-zA-Z0-9._-]+\.sql$/.test(name)) {
-      continue;
+    const name = requireDeploymentMigrationName(entry.path.slice(root.length).replace(/^\/+/, ''));
+    const sql = decodeUtf8((await readWorkspaceFile(workspace, entry.path)).bytes);
+    if (!sql.trim()) {
+      throw new Error(`Deployment migration is empty: ${name}`);
     }
-    migrations.push({ name, sql: decodeUtf8((await readWorkspaceFile(workspace, entry.path)).bytes) });
+    migrations.push({ name, sql });
   }
   return migrations.sort((left, right) => left.name.localeCompare(right.name));
 }
@@ -2177,7 +2179,7 @@ function requireFileInputs(value: unknown): Array<{ path: string; content: strin
       path: requireProjectPath(entry.path),
       content:
         typeof entry.content === 'string' ? entry.content : requireString(entry.content, 'content', MAX_FILE_BYTES),
-      encoding: entry.encoding === 'base64' ? 'base64' : 'utf8',
+      encoding: requireWorkspaceFileEncoding(entry.encoding),
     };
   });
 }
@@ -2204,7 +2206,7 @@ function requireChanges(
       kind: 'write' as const,
       path,
       content: change.content,
-      encoding: change.encoding === 'base64' ? 'base64' : 'utf8',
+      encoding: requireWorkspaceFileEncoding(change.encoding),
       ...(change.mode === undefined ? {} : { mode: requireInteger(change.mode, 'mode', 0o7777) }),
     };
   });

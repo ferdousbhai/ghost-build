@@ -34,7 +34,11 @@ async function enhancePromptForUser({ request, env, userId }: { request: Request
       temperature: 0.4,
       maxOutputTokens: ENHANCE_PROMPT_MAX_OUTPUT_TOKENS,
     });
-    return Response.json({ enhancedPrompt: completion.text || prompt });
+    const enhancedPrompt = completion.text.trim();
+    if (!enhancedPrompt) {
+      throw new Error('Workers AI returned an empty enhanced prompt.');
+    }
+    return Response.json({ enhancedPrompt });
   } catch (error) {
     if (error instanceof PayloadTooLargeError) {
       return Response.json({ error: error.message }, { status: 413 });

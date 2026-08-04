@@ -212,6 +212,16 @@ describe('ToolOperationJournal', () => {
     expect(afterRestart.completePending('container-shell')).toBe(true);
     expect(() => requireWorkspaceSyncBarrier(afterRestart.pending(), () => null, 1_000)).not.toThrow();
   });
+
+  it('rejects corrupted pending recovery state instead of omitting the operation', () => {
+    const storage = new TestStorage();
+    const journal = new ToolOperationJournal(storage as never);
+    journal.initialize();
+    journal.begin({ toolCallId: 'pending-corrupt', toolName: 'exec', argsSha256: 'corrupt' });
+    storage.rows.get('pending-corrupt')!.result_json = JSON.stringify({ kind: 'unknown' });
+
+    expect(() => journal.pending()).toThrow('invalid recovery state');
+  });
 });
 
 function invocation() {
