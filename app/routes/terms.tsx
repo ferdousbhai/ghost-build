@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
-import { createPublicBetaTrustPageHead } from '~/lib/trust';
+import { GHOSTBUILD_OPERATOR, createPublicBetaTrustPageHead } from '~/lib/trust';
 
 export const Route = createFileRoute('/terms')({
   head: () =>
@@ -21,12 +21,14 @@ function TermsPage() {
     >
       <TrustSection title="Operator, acceptance, and eligibility">
         <p>
-          Ghostbuild is operated by the owner of the{' '}
-          <a href="https://github.com/ferdousbhai">ferdousbhai GitHub account</a>, which maintains the{' '}
-          <a href="https://github.com/ferdousbhai/ghost-build">Ghostbuild repository</a>. These Terms form an agreement
-          between you and the operator. By connecting Cloudflare or using the signed-in service, you agree to these
-          Terms. You must be at least 18, able to form a binding agreement, and authorized to act for any organization
-          or Cloudflare account you use.
+          Ghostbuild is operated by {GHOSTBUILD_OPERATOR.legalName}, an {GHOSTBUILD_OPERATOR.legalForm} (Ontario
+          Corporation No. {GHOSTBUILD_OPERATOR.registrationNumber}), with a business correspondence address at{' '}
+          {GHOSTBUILD_OPERATOR.correspondenceAddress}. The{' '}
+          <a href="https://github.com/ferdousbhai/ghost-build">Ghostbuild repository</a> is maintained through the{' '}
+          <a href="https://github.com/ferdousbhai">ferdousbhai GitHub account</a>. These Terms form an agreement between
+          you and {GHOSTBUILD_OPERATOR.legalName}. By connecting Cloudflare or using the signed-in service, you agree to
+          these Terms. You must be at least 18, able to form a binding agreement, and authorized to act for any
+          organization or Cloudflare account you use.
         </p>
       </TrustSection>
       <TrustSection title="Public-beta service and account access">
@@ -41,7 +43,7 @@ function TermsPage() {
       <TrustSection title="Your inputs and generated output">
         <p>
           You keep your rights in prompts, files, and other material you provide. You give Ghostbuild a limited license
-          to host, copy, transmit, and transform that material only as needed to provide, secure, troubleshoot, and
+          to process, copy, transmit, and transform that material only as needed to provide, secure, troubleshoot, and
           maintain the service. You must have the rights and permissions needed to provide it.
         </p>
         <p>

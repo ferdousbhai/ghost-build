@@ -1,11 +1,11 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "reviewedAgainstCommit": "working-tree-2026-08-04",
   "policyStatus": "engineering inventory; the 2026-08-04 public-beta notice adopts enforced lifetimes and active-account/verified-request retention criteria, while complete account lifecycle tooling, jurisdiction-specific legal holds, and external-resource disposition remain explicit limitations",
   "systems": [
     {
       "system": "Ghostbuild control-plane D1",
-      "owner": "Ghostbuild operator",
+      "owner": "DOUS SOFTWARE INC. (controller)",
       "categories": [
         "account identity and profile",
         "authentication sessions and OAuth state",
@@ -115,7 +115,7 @@
     },
     {
       "system": "GitHub support, abuse, and private security intake",
-      "owner": "Ghostbuild operator GitHub repository",
+      "owner": "DOUS SOFTWARE INC. (controller); repository maintained through ferdousbhai",
       "categories": [
         "GitHub account and issue or report metadata",
         "public support and abuse issue content and attachments",
@@ -129,7 +129,7 @@
     },
     {
       "system": "Cloudflare Email Routing and HEY contact mailbox",
-      "owner": "Ghostbuild operator",
+      "owner": "DOUS SOFTWARE INC. (controller)",
       "categories": [
         "sender and recipient addresses",
         "support, privacy, and abuse message content and attachments",
@@ -143,7 +143,7 @@
     },
     {
       "system": "Ghostbuild control-plane Worker observability",
-      "owner": "Ghostbuild operator Cloudflare account",
+      "owner": "DOUS SOFTWARE INC. (controller); held in the operator Cloudflare account",
       "categories": [
         "sampled request method and path, Cloudflare request metadata, response status, timing, binding activity, and diagnostic metadata",
         "allowlisted product events",
@@ -158,10 +158,12 @@
     }
   ],
   "launchBlockers": [
-    "drill the manual privacy-rights checklist across every system and document jurisdiction-specific legal-hold rules",
-    "implement and drill a bounded operator-only export path for control-plane records, user-runtime metadata, Agent transcripts and state, Computer project files, approvals, and deployment records",
-    "implement and drill an idempotent operator-only account-deletion path across control-plane D1, user-runtime D1, BuilderAgent, ProjectWorkspace, and Computer state",
-    "document verified browser-specific clearing instructions for OPFS SQLite, localStorage, and sessionStorage that server-side deletion cannot reach",
+    "drill one synthetic privacy-rights request for the narrow operator-held D1 dataset, including identity verification, secret exclusion, case evidence, and Time Travel recovery boundaries",
+    "publish tested instructions for project download, user-owned Cloudflare resource management, and clearing OPFS SQLite, localStorage, and sessionStorage that server-side deletion cannot reach",
     "complete external receive/reply drills for support@, privacy@, and abuse@ and confirm mailbox deletion behavior"
+  ],
+  "postLaunchHardening": [
+    "evaluate self-service export and deletion for operator-held account and connection records after the manual process is proven",
+    "improve user-owned runtime cleanup, receipts, and status without silently deleting generated deployments or other customer-controlled resources"
   ]
 }

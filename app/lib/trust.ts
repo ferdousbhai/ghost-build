@@ -1,13 +1,18 @@
 import { createSocialPageHead } from './social-meta';
 
 const GHOSTBUILD_REPOSITORY_URL = 'https://github.com/ferdousbhai/ghost-build';
-export const GHOSTBUILD_OPERATOR_URL = 'https://github.com/ferdousbhai';
 export const GHOSTBUILD_SUPPORT_URL = `${GHOSTBUILD_REPOSITORY_URL}/issues/new?template=support_request.yml`;
 export const GHOSTBUILD_ABUSE_URL = `${GHOSTBUILD_REPOSITORY_URL}/issues/new?template=abuse_report.yml`;
 export const GHOSTBUILD_SECURITY_URL = `${GHOSTBUILD_REPOSITORY_URL}/security/advisories/new`;
 export const CLOUDFLARE_ABUSE_URL = 'https://abuse.cloudflare.com/';
+export const GHOSTBUILD_OPERATOR = {
+  legalName: 'DOUS SOFTWARE INC.',
+  legalForm: 'Ontario corporation',
+  registrationNumber: '1001622428',
+  correspondenceAddress: '350 Bay Street, Suite 1300B, Toronto, Ontario M5H 2S6, Canada',
+} as const;
 
-export const TRUST_DOCUMENT_VERSION = '1.3 public beta';
+export const TRUST_DOCUMENT_VERSION = '1.4 public beta';
 export const TRUST_DOCUMENT_EFFECTIVE_ISO_DATE = '2026-08-04';
 export const TRUST_DOCUMENT_EFFECTIVE_DATE = 'August 4, 2026';
 export const TRUST_DOCUMENT_STATUS =

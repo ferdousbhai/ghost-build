@@ -86,6 +86,9 @@ test('renders the public trust routes and persists the telemetry choice', async 
     ).toBe(true);
   }
 
+  await page.goto('/terms');
+  await expect(page.getByText(/Ghostbuild is operated by DOUS SOFTWARE INC\./)).toBeVisible();
+
   const securityTxt = await page.request.get('/.well-known/security.txt');
   expect(securityTxt.status()).toBe(200);
   expect(securityTxt.headers()['content-type']).toBe('text/plain; charset=utf-8');
@@ -95,6 +98,7 @@ test('renders the public trust routes and persists the telemetry choice', async 
 
   await page.goto('/privacy');
   await expect(page.getByRole('heading', { name: 'How Ghostbuild handles your data.' })).toBeVisible();
+  await expect(page.getByText(/DOUS SOFTWARE INC\..*is the controller for personal data/)).toBeVisible();
   await expect(page.getByText('Product telemetry is disabled on this browser.')).toBeVisible();
 
   await page.getByRole('button', { name: 'Allow telemetry' }).click();

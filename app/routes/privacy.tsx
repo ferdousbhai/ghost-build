@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { ClientTelemetryPreference } from '~/components/ClientRouteComponents';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
-import { GHOSTBUILD_OPERATOR_URL, createPublicBetaTrustPageHead } from '~/lib/trust';
+import { GHOSTBUILD_OPERATOR, createPublicBetaTrustPageHead } from '~/lib/trust';
 
 export const Route = createFileRoute('/privacy')({
   head: () =>
@@ -18,15 +18,18 @@ function PrivacyPage() {
     <TrustPage
       eyebrow="Privacy"
       title="How Ghostbuild handles your data."
-      summary="Ghostbuild operates a small control plane while project workspaces, builds, previews, and deployments run primarily in the Cloudflare account you connect."
+      summary="Ghostbuild stores only narrow account and control-plane records. Server-side project and conversation data stays in the Cloudflare account you connect; your browser may keep an account-local replica."
     >
       <TrustSection title="Operator, scope, and roles">
         <p>
-          Ghostbuild is operated by the owner of the <a href={GHOSTBUILD_OPERATOR_URL}>ferdousbhai GitHub account</a>.
-          The operator controls Ghostbuild service processing, including account, project, conversation, support,
-          security, and optional product-telemetry data. You separately control your connected Cloudflare account and
-          are responsible for processing performed by applications you publish. Cloudflare and GitHub also process data
-          under their own terms and privacy roles.
+          {GHOSTBUILD_OPERATOR.legalName}, an {GHOSTBUILD_OPERATOR.legalForm} (Ontario Corporation No.{' '}
+          {GHOSTBUILD_OPERATOR.registrationNumber}), operates Ghostbuild and is the controller for personal data
+          Ghostbuild processes to operate the service. Its business correspondence address is{' '}
+          {GHOSTBUILD_OPERATOR.correspondenceAddress}. This includes account, authentication, Cloudflare-connection,
+          requested AI-building workflow, support, security, abuse, and optional product-telemetry processing.
+          Persistent server-side project and conversation state remains in the connected Cloudflare account. You control
+          that account and are responsible for processing performed by applications you publish. Cloudflare and GitHub
+          also process data under their own terms and privacy roles.
         </p>
       </TrustSection>
 
@@ -45,9 +48,11 @@ function PrivacyPage() {
           </li>
           <li>
             <strong>Projects and conversations:</strong> chat metadata, transcripts, generated files, revisions,
-            validation receipts, deployment plans, approvals, and deployment status. These are processed to generate,
-            recover, validate, and deploy your project under the service agreement. You choose what project content to
-            provide, but Ghostbuild cannot perform a requested build without the content needed for that request.
+            validation receipts, deployment plans, approvals, and deployment status. These are processed and stored in
+            the connected Cloudflare account to generate, recover, validate, and deploy your project under the service
+            agreement. The operator’s control-plane database does not store prompt or transcript bodies, project source,
+            or deployment plans. You choose what project content to provide, but Ghostbuild cannot perform a requested
+            build without the content needed for that request.
           </li>
           <li>
             <strong>Service and security logs:</strong> sampled Worker invocation, Container, and trace metadata can
@@ -76,12 +81,12 @@ function PrivacyPage() {
 
       <TrustSection title="AI processing">
         <p>
-          Prompts, conversation context, and project files needed for a request are sent to Cloudflare Workers AI to
-          generate a response. Ghostbuild does not place prompt or source payloads in optional product telemetry. For
-          these calls, Ghostbuild disables AI Gateway request logging at the gateway, model-request, and request-header
-          layers, so it does not use AI Gateway to retain request payloads or request metadata. This does not change the
-          transient processing needed for Workers AI inference. Cloudflare describes its handling of Workers AI content
-          in its{' '}
+          The user-owned workspace runtime sends the prompt, conversation context, and project files needed for a
+          request to Cloudflare Workers AI through the AI binding in the connected account. Ghostbuild does not place
+          prompt or source payloads in optional product telemetry. For these calls, Ghostbuild disables AI Gateway
+          request logging at the gateway, model-request, and request-header layers, so it does not use AI Gateway to
+          retain request payloads or request metadata. This does not change the transient processing needed for Workers
+          AI inference. Cloudflare describes its handling of Workers AI content in its{' '}
           <a href="https://developers.cloudflare.com/workers-ai/platform/data-usage/">Workers AI data-usage notice</a>.
           Ghostbuild does not use AI to make decisions that produce legal or similarly significant effects about you.
         </p>
@@ -105,10 +110,12 @@ function PrivacyPage() {
 
       <TrustSection title="Where data is held and disclosed">
         <p>
-          Ghostbuild control-plane records are held in Cloudflare D1. Workspace metadata, Agent transcripts, project
-          files, Computer state, previews, and generated infrastructure are held primarily in the connected Cloudflare
-          account. Data is disclosed only as needed to operate the service, follow your instructions, protect the
-          service, or comply with law.
+          The operator’s Cloudflare D1 stores account, authentication, encrypted Cloudflare-connection, and runtime
+          locator records. It does not store prompts, chat transcripts, project source, deployment plans, or generated
+          application data. Workspace metadata, Agent transcripts, project files, Computer state, previews, and
+          generated infrastructure remain in the connected Cloudflare account. Your browser may keep account-local
+          transcript and project-file replicas. Data is disclosed only as needed to operate the service, follow your
+          instructions, protect the service, or comply with law.
         </p>
         <p>
           Cloudflare provides authentication integration, Workers, D1, R2, Durable Objects, Containers, Computer,
@@ -136,13 +143,20 @@ function PrivacyPage() {
 
       <TrustSection title="Retention, removal, and deletion">
         <p>
-          OAuth authorization state expires after 10 minutes, authentication sessions after 30 days, and unreferenced
-          encrypted credential records become eligible for removal after 24 hours. Maintenance runs every 15 minutes in
-          bounded batches, so backlog or retries can delay physical removal. Account, connection, project, transcript,
-          deployment, and runtime records are retained while the account and service remain active or until they are no
-          longer needed or a verified request is fulfilled. There is no automatic inactive-account purge and no
-          self-service or complete account-wide export or deletion operation during public beta; requests are assessed
-          manually and available legal rights still apply.
+          In the operator control plane, OAuth authorization state expires after 10 minutes, authentication sessions
+          after 30 days, and unreferenced encrypted credential records become eligible for removal after 24 hours.
+          Maintenance runs every 15 minutes in bounded batches, so backlog or retries can delay physical removal.
+          Account, connection, and runtime-locator records remain while the account and service are active or until they
+          are no longer needed or a verified request is fulfilled. There is no automatic inactive-account purge or
+          self-service export or deletion during public beta; requests are assessed manually and available legal rights
+          still apply.
+        </p>
+        <p>
+          Project, transcript, deployment, Agent, and workspace records remain in the connected Cloudflare account under
+          that account’s controls. Ghostbuild provides project-level download and removal, but no single action erases
+          operator records, user-owned Cloudflare state, and browser replicas together. You can revoke Ghostbuild’s
+          authorization, manage or remove Cloudflare resources in your account, and clear Ghostbuild site data in each
+          browser you use.
         </p>
         <p>
           The operator’s current Cloudflare plan retains sampled control-plane Workers Logs and traces for seven days.

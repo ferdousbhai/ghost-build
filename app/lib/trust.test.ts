@@ -4,6 +4,7 @@ import { parse } from 'yaml';
 import {
   CLOUDFLARE_ABUSE_URL,
   GHOSTBUILD_ABUSE_URL,
+  GHOSTBUILD_OPERATOR,
   GHOSTBUILD_SECURITY_URL,
   GHOSTBUILD_SUPPORT_URL,
   TRUST_CHANNEL_STATUS,
@@ -11,6 +12,15 @@ import {
 } from './trust';
 
 describe('public trust contract', () => {
+  it('identifies the accountable public-beta operator without private tax identifiers', () => {
+    expect(GHOSTBUILD_OPERATOR).toEqual({
+      legalName: 'DOUS SOFTWARE INC.',
+      legalForm: 'Ontario corporation',
+      registrationNumber: '1001622428',
+      correspondenceAddress: '350 Bay Street, Suite 1300B, Toronto, Ontario M5H 2S6, Canada',
+    });
+  });
+
   it('keeps public support and abuse separate from private vulnerability reporting', () => {
     expect(new Set([GHOSTBUILD_SUPPORT_URL, GHOSTBUILD_ABUSE_URL, GHOSTBUILD_SECURITY_URL]).size).toBe(3);
     expect(GHOSTBUILD_SUPPORT_URL).toContain('support_request.yml');
@@ -23,6 +33,13 @@ describe('public trust contract', () => {
     expect(TRUST_CHANNEL_STATUS).toContain('not guarantees');
     expect(TRUST_CHANNEL_STATUS).toContain('not monitored continuously');
     expect(TRUST_CHANNEL_STATUS).toContain('does not provide 24/7');
+  });
+
+  it('keeps operator storage distinct from user-owned project data', () => {
+    const privacy = readFileSync('app/routes/privacy.tsx', 'utf8');
+    expect(privacy).toContain('control-plane database does not store prompt or transcript bodies');
+    expect(privacy).toContain('remain in the connected Cloudflare account');
+    expect(privacy).toContain('browser may keep account-local');
   });
 
   it('keeps the public issue forms explicit about sensitive data and emergencies', () => {
