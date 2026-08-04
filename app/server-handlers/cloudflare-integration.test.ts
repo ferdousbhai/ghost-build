@@ -161,6 +161,32 @@ describe('Cloudflare-only authentication', () => {
     expect(prepare).toHaveBeenCalledOnce();
   });
 
+  it('does not report a failed user-runtime lookup as an unconfigured runtime', async () => {
+    const failure = new Error('runtime lookup failed');
+    const prepare = vi.fn(() => ({ bind: () => ({ first: async () => Promise.reject(failure) }) }));
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue({
+      id: 'connection-1',
+      userId: 'user-1',
+      accountId: 'account-1',
+      accountName: 'User Cloudflare',
+      status: 'active',
+      credentialHandle: 'credential-1',
+      grantedScopes: [],
+      aiBillingEnabled: true,
+      connectedAt: 100,
+      updatedAt: 100,
+      generation: 1,
+    });
+
+    await expect(
+      cloudflareConnectionStatusAction({
+        request: new Request('https://ghostbuild.dev/api/cloudflare/connection'),
+        env: { DB: { prepare } } as unknown as Env,
+      }),
+    ).rejects.toBe(failure);
+  });
+
   it('starts OAuth before any local session exists and keeps only a same-origin return path', async () => {
     const database = oauthDatabase();
     const orchestrator = fakeOrchestrator();

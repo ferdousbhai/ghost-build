@@ -88,7 +88,7 @@ export async function cloudflareConnectionStatusAction({
     return Response.json({ error: 'An active Cloudflare account is required.' }, { status: 401 });
   }
 
-  const workspaceRuntime = await findUserWorkspaceRuntime(env.DB, session.user.id).catch(() => null);
+  const workspaceRuntime = await findUserWorkspaceRuntime(env.DB, session.user.id);
 
   return Response.json(
     {
