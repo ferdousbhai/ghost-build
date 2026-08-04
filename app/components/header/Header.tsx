@@ -3,7 +3,7 @@ import { lazy, Suspense, useState } from 'react';
 import { chatStore } from '~/lib/stores/chatId';
 import { ChatDescription } from '~/components/header/ChatDescription.client';
 import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
-import { HamburgerMenuIcon, PersonIcon, GearIcon, ExitIcon } from '@radix-ui/react-icons';
+import { HamburgerMenuIcon, PersonIcon, GearIcon, ExitIcon, HeartFilledIcon } from '@radix-ui/react-icons';
 import { LoggedOutHeaderButtons } from './LoggedOutHeaderButtons';
 import { profileStore, setProfile } from '~/lib/stores/profile';
 import { Menu as MenuComponent, MenuItem as MenuItemComponent } from '@ui/Menu';
@@ -91,6 +91,19 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
               </Suspense>
             </>
           )}
+          <Button
+            href="https://github.com/sponsors/ferdousbhai?metadata_campaign=ghostbuild-app"
+            target="_blank"
+            rel="noopener noreferrer"
+            variant="neutral"
+            size="xs"
+            className="!size-11 !min-h-11 !p-0 sm:!size-auto sm:!min-h-7 sm:!px-2"
+            aria-label="Sponsor Ghostbuild on GitHub"
+            tip="Sponsor Ghostbuild on GitHub"
+            icon={<HeartFilledIcon className="text-[#bf3989]" aria-hidden />}
+          >
+            <span className="hidden sm:inline">Sponsor</span>
+          </Button>
           <ThemeSwitch />
           {profile && (
             <>
