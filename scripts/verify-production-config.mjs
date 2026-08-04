@@ -37,7 +37,7 @@ const workerTargets = [
     main: 'app/server.ts',
     databaseName: 'ghostbuild',
     durableObjects: [],
-    customDomain: 'ghostbuild.dev',
+    customDomains: ['ghostbuild.dev', 'www.ghostbuild.dev'],
     allowPlaceholderDatabase: false,
   },
 ];
@@ -74,16 +74,18 @@ function findNamedBinding(collection, name) {
   return Array.isArray(collection) ? collection.find((item) => item?.name === name) : undefined;
 }
 
-export function findWorkerRoutingErrors(config, label, customDomain) {
+export function findWorkerRoutingErrors(config, label, customDomains) {
   const errors = [];
   if (config?.workers_dev !== false) {
     errors.push(`${label} workers_dev must be false so production is served only from the custom domain.`);
   }
-  const customRoute = Array.isArray(config?.routes)
-    ? config.routes.find((route) => route?.pattern === customDomain && route?.custom_domain === true)
-    : undefined;
-  if (!customRoute) {
-    errors.push(`${label} must configure ${JSON.stringify(customDomain)} as a custom domain.`);
+  for (const customDomain of customDomains) {
+    const customRoute = Array.isArray(config?.routes)
+      ? config.routes.find((route) => route?.pattern === customDomain && route?.custom_domain === true)
+      : undefined;
+    if (!customRoute) {
+      errors.push(`${label} must configure ${JSON.stringify(customDomain)} as a custom domain.`);
+    }
   }
   return errors;
 }
@@ -154,7 +156,7 @@ function verifyWorker(errors, config, target) {
   );
   errors.push(
     ...findWorkerObservabilityErrors(config, label),
-    ...findWorkerRoutingErrors(config, label, target.customDomain),
+    ...findWorkerRoutingErrors(config, label, target.customDomains),
     ...findWorkerVariableSourceErrors(config, label),
     ...findWorkerGcScheduleErrors(config, label),
     ...findDurableObjectLifecycleErrors(config, label, target.durableObjects),

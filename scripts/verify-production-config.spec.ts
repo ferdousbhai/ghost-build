@@ -59,18 +59,22 @@ describe('findWorkerRoutingErrors', () => {
       findWorkerRoutingErrors(
         {
           workers_dev: false,
-          routes: [{ pattern: 'ghostbuild.dev', custom_domain: true }],
+          routes: [
+            { pattern: 'ghostbuild.dev', custom_domain: true },
+            { pattern: 'www.ghostbuild.dev', custom_domain: true },
+          ],
         },
         'wrangler.jsonc',
-        'ghostbuild.dev',
+        ['ghostbuild.dev', 'www.ghostbuild.dev'],
       ),
     ).toEqual([]);
   });
 
   it('rejects a missing custom domain and public workers.dev endpoint', () => {
-    expect(findWorkerRoutingErrors({}, 'wrangler.jsonc', 'ghostbuild.dev')).toEqual([
+    expect(findWorkerRoutingErrors({}, 'wrangler.jsonc', ['ghostbuild.dev', 'www.ghostbuild.dev'])).toEqual([
       'wrangler.jsonc workers_dev must be false so production is served only from the custom domain.',
       'wrangler.jsonc must configure "ghostbuild.dev" as a custom domain.',
+      'wrangler.jsonc must configure "www.ghostbuild.dev" as a custom domain.',
     ]);
   });
 });
