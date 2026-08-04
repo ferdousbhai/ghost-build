@@ -33,6 +33,7 @@ test('hydrates the built landing page without replacing meaningful SSR content',
 
   await expect(page).toHaveTitle(/Ghostbuild/);
   await expect(page.getByRole('heading', { name: /If you can dream it/i })).toBeVisible();
+  await expect(page.getByText(/You are interacting with Ghostbuild, an AI coding agent/i)).toBeVisible();
   await expect(page.getByPlaceholder(/Describe the app, workflow, and data/i)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connect Cloudflare' }).first()).toBeVisible();
   const legalNotice = page.getByTestId('cloudflare-connect-legal-notice');

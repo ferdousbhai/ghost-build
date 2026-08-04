@@ -3,6 +3,7 @@ import { ClientOnly } from '@tanstack/react-router';
 import { lazy, Suspense, type ComponentType, type ReactNode } from 'react';
 import { BrandLink } from '~/components/BrandLink';
 import { Loading } from '~/components/Loading';
+import { HOME_AI_DISCLOSURE } from '~/lib/trust';
 
 type MaybeComponent<TProps> = ComponentType<TProps> | undefined;
 type EmptyProps = Record<string, never>;
@@ -103,7 +104,7 @@ function HomepageLoadingFallback() {
               <br />
               <span>the ghost will build it. ✨</span>
             </h1>
-            <p className="ghost-home-lede">Turn a simple prompt into a shareable Cloudflare project in your account.</p>
+            <p className="ghost-home-lede">{HOME_AI_DISCLOSURE}</p>
             <p className="ghost-home-ownership">
               Your Cloudflare account owns the workspace, and every production deploy waits for your approval. Requires
               Workers Paid and Containers.

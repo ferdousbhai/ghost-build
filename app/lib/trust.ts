@@ -14,6 +14,8 @@ export const TRUST_DOCUMENT_STATUS =
   'These pages describe the current service, its public-beta limitations, and the channels that are actually available.';
 export const TRUST_CHANNEL_STATUS =
   'Ghostbuild aims to review and acknowledge reports submitted through its published support and abuse forms within two weekdays and private security reports within one weekday. These public-beta targets are not guarantees or contractual service levels. Channels are not monitored continuously, and Ghostbuild does not provide 24/7 or real-time emergency response.';
+export const HOME_AI_DISCLOSURE =
+  'You are interacting with Ghostbuild, an AI coding agent. Describe what you want, and it will build a shareable Cloudflare project in your account.';
 
 export const TRUST_LINKS = [
   { href: '/privacy', label: 'Privacy' },

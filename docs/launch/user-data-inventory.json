@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "reviewedAgainstCommit": "working-tree-2026-08-04",
   "policyStatus": "engineering inventory; the 2026-08-04 public-beta notice adopts enforced lifetimes and active-account/verified-request retention criteria, while complete account lifecycle tooling, jurisdiction-specific legal holds, and external-resource disposition remain explicit limitations",
   "systems": [
@@ -80,14 +80,14 @@
       "system": "Browser storage",
       "owner": "user device",
       "categories": [
-        "OPFS account-local chat/transcript replicas",
+        "OPFS account-local chat metadata, full transcripts, and workspace file content",
         "theme preference",
         "pending prompt in tab-scoped session storage",
         "asset-recovery and telemetry journey session state",
         "optional product-telemetry preference"
       ],
       "secrets": "the pending prompt can contain user content; it remains in tab-scoped session storage and the retired prompt cookie is expired when the message input loads",
-      "currentRetention": "browser-controlled; pending-prompt and recovery session state lasts until the tab session ends, while OPFS and local storage persist until cleared or replaced",
+      "currentRetention": "browser-controlled; pending-prompt and other sessionStorage state lasts until the tab session ends, while OPFS SQLite and localStorage persist until cleared or replaced",
       "currentExport": "no server export includes browser-owned data",
       "currentDeletion": "users must clear Ghostbuild site data with browser controls; no server-side request can enumerate or erase all browser-owned storage"
     },
@@ -159,10 +159,9 @@
   ],
   "launchBlockers": [
     "drill the manual privacy-rights checklist across every system and document jurisdiction-specific legal-hold rules",
-    "approve the explicit retain-in-user-account policy for deployed resources",
-    "implement and verify the bounded user-runtime export primitive for chat metadata, Agent transcripts, project files, approvals, and deployment records",
-    "implement and verify the idempotent user-runtime account-delete primitive across D1, BuilderAgent, ProjectWorkspace, and Computer state",
-    "confirm supported-browser coverage and manual instructions for browser storage APIs that cannot enumerate OPFS or IndexedDB",
+    "implement and drill a bounded operator-only export path for control-plane records, user-runtime metadata, Agent transcripts and state, Computer project files, approvals, and deployment records",
+    "implement and drill an idempotent operator-only account-deletion path across control-plane D1, user-runtime D1, BuilderAgent, ProjectWorkspace, and Computer state",
+    "document verified browser-specific clearing instructions for OPFS SQLite, localStorage, and sessionStorage that server-side deletion cannot reach",
     "complete external receive/reply drills for support@, privacy@, and abuse@ and confirm mailbox deletion behavior"
   ]
 }

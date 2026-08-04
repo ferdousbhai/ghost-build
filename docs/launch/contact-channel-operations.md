@@ -5,14 +5,14 @@ service-level agreement.
 
 ## Channel map
 
-| Concern                           | Published route                 | Provisioned or private route             | Primary owner | Coverage                                                  |
-| --------------------------------- | ------------------------------- | ---------------------------------------- | ------------- | --------------------------------------------------------- |
-| Product support                   | GitHub support issue            | `support@ghostbuild.dev` (not activated) | `ferdousbhai` | Twice each weekday; no 24/7 coverage                      |
-| Privacy rights                    | Sanitized GitHub request start  | `privacy@ghostbuild.dev` (not activated) | `ferdousbhai` | Twice each weekday; statutory deadlines govern            |
-| Ghostbuild-specific abuse         | GitHub abuse issue              | `abuse@ghostbuild.dev` (not activated)   | `ferdousbhai` | Twice each weekday; no public emergency response          |
-| Security vulnerability            | `/security` (no report details) | GitHub private vulnerability reporting   | `ferdousbhai` | One-weekday acknowledgement target; no emergency response |
-| Cloudflare Trust & Safety notices | None                            | Account abuse contact (not configured)   | `ferdousbhai` | Once configured: inspect and respond within 24 hours      |
-| Live Cloudflare-hosted abuse      | None                            | Cloudflare abuse form                    | Cloudflare    | Cloudflare's published process applies                    |
+| Concern                           | Published route                 | Provisioned or private route                                   | Primary owner | Coverage                                                  |
+| --------------------------------- | ------------------------------- | -------------------------------------------------------------- | ------------- | --------------------------------------------------------- |
+| Product support                   | GitHub support issue            | `support@ghostbuild.dev` (enabled, unpublished; drill pending) | `ferdousbhai` | Twice each weekday; no 24/7 coverage                      |
+| Privacy rights                    | Sanitized GitHub request start  | `privacy@ghostbuild.dev` (enabled, unpublished; drill pending) | `ferdousbhai` | Twice each weekday; statutory deadlines govern            |
+| Ghostbuild-specific abuse         | GitHub abuse issue              | `abuse@ghostbuild.dev` (enabled, unpublished; drill pending)   | `ferdousbhai` | Twice each weekday; no public emergency response          |
+| Security vulnerability            | `/security` (no report details) | GitHub private vulnerability reporting                         | `ferdousbhai` | One-weekday acknowledgement target; no emergency response |
+| Cloudflare Trust & Safety notices | None                            | Account abuse contact (not configured)                         | `ferdousbhai` | Once configured: inspect and respond within 24 hours      |
+| Live Cloudflare-hosted abuse      | None                            | Cloudflare abuse form                                          | Cloudflare    | Cloudflare's published process applies                    |
 
 The email aliases use Cloudflare Email Routing and forward to an already-verified HEY destination. Catch-all routing is
 disabled. The destination address is private operational configuration and must not be committed or exposed in reports.

@@ -1,5 +1,6 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { messageInputStore } from '~/lib/stores/messageInput';
+import { HOME_AI_DISCLOSURE } from '~/lib/trust';
 import { MessageInput } from './MessageInput';
 
 const DisabledChatMessageSheet = lazy(() =>
@@ -51,7 +52,7 @@ export function HomeIntro({
               <br />
               <span>the ghost will build it. ✨</span>
             </h1>
-            <p className="ghost-home-lede">Turn a simple prompt into a shareable Cloudflare project in your account.</p>
+            <p className="ghost-home-lede">{HOME_AI_DISCLOSURE}</p>
             <p className="ghost-home-ownership">
               Your Cloudflare account owns the workspace, and every production deploy waits for your approval. Requires
               Workers Paid and Containers.
