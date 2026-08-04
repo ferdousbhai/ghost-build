@@ -24,7 +24,7 @@ describe('chat provider error boundary', () => {
 
     await expect(
       createChatResponseFromBody({
-        body: { chatInitialId: 'chat-id', messages: [] },
+        body: { chatInitialId: 'chat-id', messages: [], modelId: '@cf/zai-org/glm-5.2' },
         compaction: {
           current: null,
           pending: false,
@@ -44,5 +44,28 @@ describe('chat provider error boundary', () => {
     expect(logger.error).toHaveBeenCalledWith('Workers AI chat request failed');
     expect(JSON.stringify(logger.error.mock.calls)).not.toContain('SECRET_PROVIDER_PROMPT');
     expect(JSON.stringify(logger.error.mock.calls)).not.toContain('private request values');
+  });
+
+  it('forwards the selected allowlisted model to the builder agent', async () => {
+    workersAiAgent.mockResolvedValueOnce(new ReadableStream());
+
+    await createChatResponseFromBody({
+      body: { chatInitialId: 'chat-id', messages: [], modelId: 'deepseek/deepseek-v4-pro' },
+      compaction: {
+        current: null,
+        pending: false,
+        summarize: vi.fn(),
+        save: vi.fn(),
+      },
+      env: {} as Env,
+      firstUserMessage: true,
+      accountCredentials: { binding: {} as Ai },
+      sessionAffinity: 'session',
+      workspace: {} as never,
+      userId: 'user-id',
+      agentName: 'agent',
+    });
+
+    expect(workersAiAgent).toHaveBeenCalledWith(expect.objectContaining({ modelId: 'deepseek/deepseek-v4-pro' }));
   });
 });

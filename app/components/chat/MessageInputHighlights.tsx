@@ -10,7 +10,6 @@ import {
   type RefObject,
 } from 'react';
 import { Tooltip } from '@ui/Tooltip';
-import { CLOUDFLARE_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';
 import { classNames } from '~/utils/classNames';
 import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 
@@ -22,7 +21,7 @@ export interface MessageInputHighlight {
 export const MESSAGE_INPUT_HIGHLIGHTS: MessageInputHighlight[] = [
   {
     text: 'ai chat',
-    tooltip: `Ghostbuild will prototype AI features with Cloudflare Workers AI and ${CLOUDFLARE_WORKERS_AI_MODEL}.`,
+    tooltip: 'Ghostbuild will prototype AI features with Cloudflare Workers AI and your selected builder model.',
   },
   {
     text: 'collaborative text editor',

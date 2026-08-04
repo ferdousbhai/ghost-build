@@ -36,6 +36,8 @@ import { subchatQueryKey } from '~/lib/cloudflare/data-hooks';
 import { settleBuilderStop } from './builder-stop';
 import { useAccountLocalReplica } from '~/lib/cloudflare/account-local-replica';
 import { getUserRuntimeSession, requireUserRuntimeEndpoint } from '~/lib/cloudflare/runtime-session';
+import { builderModelStore } from '~/lib/stores/builder-model.client';
+import { isWorkersAiModelId } from '~/lib/workers-ai-model';
 
 const logger = createScopedLogger('BuilderAgentChat');
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
@@ -106,6 +108,7 @@ export function useBuilderAgentChat(args: {
       return {
         body: {
           ...body,
+          modelId: isWorkersAiModelId(body?.modelId) ? body.modelId : builderModelStore.get(),
           chatInitialId: args.chatInitialId,
           subchatIndex: subchatIndexStore.get() ?? 0,
           transcript: args.transcript,

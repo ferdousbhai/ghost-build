@@ -82,11 +82,17 @@ function PrivacyPage() {
       <TrustSection title="AI processing">
         <p>
           The user-owned workspace runtime sends the prompt, conversation context, and project files needed for a
-          request to Cloudflare Workers AI through the AI binding in the connected account. Ghostbuild does not place
-          prompt or source payloads in optional product telemetry. For these calls, Ghostbuild disables AI Gateway
-          request logging at the gateway, model-request, and request-header layers, so it does not use AI Gateway to
-          retain request payloads or request metadata. This does not change the transient processing needed for Workers
-          AI inference. Cloudflare describes its handling of Workers AI content in its{' '}
+          request to the builder model you select through Cloudflare AI in the connected account. The selector
+          distinguishes Cloudflare-hosted models from partner models. If you select DeepSeek V4 Pro, Cloudflare lists it
+          as a{' '}
+          <a href="https://developers.cloudflare.com/ai/models/deepseek/deepseek-v4-pro/">
+            third-party model served by Fireworks
+          </a>
+          , so Fireworks also processes the request content needed for inference. Ghostbuild does not place prompt or
+          source payloads in optional product telemetry. For these calls, Ghostbuild disables AI Gateway request logging
+          at the gateway, model-request, and request-header layers, so it does not use AI Gateway to retain request
+          payloads or request metadata. This does not change the transient processing needed for inference. Cloudflare
+          describes its handling of Workers AI content in its{' '}
           <a href="https://developers.cloudflare.com/workers-ai/platform/data-usage/">Workers AI data-usage notice</a>.
           Ghostbuild does not use AI to make decisions that produce legal or similarly significant effects about you.
         </p>
@@ -95,9 +101,9 @@ function PrivacyPage() {
       <TrustSection title="Browser storage and telemetry choice">
         <p>
           Essential browser storage includes a 30-day authentication cookie, short-lived OAuth and recovery state,
-          account-local project replicas, theme preference, and a pending prompt in tab-scoped session storage. Project
-          replicas and preferences remain until replaced or cleared in your browser. The retired prompt cookie is
-          expired if found.
+          account-local project replicas, theme and builder-model preferences, and a pending prompt in tab-scoped
+          session storage. Project replicas and preferences remain until replaced or cleared in your browser. The
+          retired prompt cookie is expired if found.
         </p>
         <p>
           Optional product telemetry is off until you allow it. Your choice is stored locally. Ghostbuild also honors
@@ -119,11 +125,12 @@ function PrivacyPage() {
         </p>
         <p>
           Cloudflare provides authentication integration, Workers, D1, R2, Durable Objects, Containers, Computer,
-          Workers AI, observability, and related infrastructure. GitHub processes information submitted through public
-          support and abuse issues or private security reports. Control-plane observability is held in the operator’s
-          Cloudflare account; workspace, Computer, and generated-application observability is held in your connected
-          Cloudflare account. Ghostbuild does not sell personal data, share it for cross-context behavioral advertising,
-          or use it for targeted advertising.
+          Workers AI, the Cloudflare AI model catalog, observability, and related infrastructure. A model provider
+          listed in the selector also processes the request when you choose its partner-hosted model. GitHub processes
+          information submitted through public support and abuse issues or private security reports. Control-plane
+          observability is held in the operator’s Cloudflare account; workspace, Computer, and generated-application
+          observability is held in your connected Cloudflare account. Ghostbuild does not sell personal data, share it
+          for cross-context behavioral advertising, or use it for targeted advertising.
         </p>
       </TrustSection>
 

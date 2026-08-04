@@ -14,6 +14,8 @@ import { getChatRetryState, MAX_CHAT_RETRIES } from './chat-retry';
 import { MAX_EPHEMERAL_CONTEXT_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
+import { builderModelStore } from '~/lib/stores/builder-model.client';
+import type { WorkersAiModelId } from '~/lib/workers-ai-model';
 
 const logger = createScopedLogger('ChatMessageSubmission');
 
@@ -26,7 +28,7 @@ export function useChatMessageSubmission(args: {
   discardEmptyChat: () => Promise<void>;
   sendChatMessage: (
     message: { text: string },
-    options?: { body?: { turnContext?: ChatTurnContext } },
+    options?: { body?: { turnContext?: ChatTurnContext; modelId?: WorkersAiModelId } },
     onRequestStart?: () => void,
   ) => Promise<unknown>;
   enableAutoScroll: () => void;
@@ -65,6 +67,7 @@ export function useChatMessageSubmission(args: {
       return false;
     }
     try {
+      const modelId = builderModelStore.get();
       sendMessageInProgressRef.current = true;
       setSendMessageInProgress(true);
       setPendingUserMessage({
@@ -87,6 +90,7 @@ export function useChatMessageSubmission(args: {
             args.contextManager,
             messageInput,
             args.chatStarted,
+            modelId,
             args.sendChatMessage,
             onRequestStart,
           ),
@@ -210,9 +214,10 @@ async function submitMessage(
   contextManager: ChatContextManager,
   messageInput: string,
   chatStarted: boolean,
+  modelId: WorkersAiModelId,
   sendChatMessage: (
     message: { text: string },
-    options?: { body?: { turnContext?: ChatTurnContext } },
+    options?: { body?: { turnContext?: ChatTurnContext; modelId?: WorkersAiModelId } },
     onRequestStart?: () => void,
   ) => Promise<unknown>,
   onRequestStart: () => void,
@@ -233,7 +238,7 @@ async function submitMessage(
 
   toolActivityStore.startTurn();
   chatStore.setKey('aborted', false);
-  await sendChatMessage({ text: messageInput }, { body: { turnContext } }, onRequestStart);
+  await sendChatMessage({ text: messageInput }, { body: { turnContext, modelId } }, onRequestStart);
   if (modifiedFiles) {
     workbenchStore.resetAllFileModifications();
   }

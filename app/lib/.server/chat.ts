@@ -9,6 +9,7 @@ import type { ContextCompaction } from './llm/context-compaction';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 import { logProviderFailure } from './llm/provider-error-logging';
+import type { WorkersAiModelId } from '~/lib/workers-ai-model';
 
 type Messages = GhostbuildMessage[];
 
@@ -19,6 +20,7 @@ export type ChatRequestBody = {
   chatInitialId: string;
   subchatIndex: number;
   turnContext?: ChatTurnContext;
+  modelId: WorkersAiModelId;
 };
 
 export async function createChatResponseFromBody({
@@ -36,7 +38,7 @@ export async function createChatResponseFromBody({
   onValidationStage,
 }: {
   abortSignal?: AbortSignal;
-  body: Pick<ChatRequestBody, 'messages' | 'chatInitialId'>;
+  body: Pick<ChatRequestBody, 'messages' | 'chatInitialId' | 'modelId'>;
   compaction: {
     current: ContextCompaction | null;
     pending: boolean;
@@ -54,10 +56,10 @@ export async function createChatResponseFromBody({
   agentName: string;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
 }) {
-  const { messages, chatInitialId } = body;
+  const { messages, chatInitialId, modelId } = body;
   const transcriptMessages = messages ?? [];
 
-  logger.info('Using Cloudflare Workers AI');
+  logger.info('Using Cloudflare AI');
 
   try {
     const dataStream = await workersAiAgent({
@@ -66,6 +68,7 @@ export async function createChatResponseFromBody({
       chatInitialId,
       firstUserMessage,
       messages: transcriptMessages,
+      modelId,
       turnContext,
       compaction,
       accountCredentials,

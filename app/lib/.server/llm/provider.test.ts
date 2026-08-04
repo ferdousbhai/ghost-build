@@ -33,4 +33,16 @@ describe('Workers AI provider', () => {
       },
     });
   });
+
+  test('passes a Cloudflare catalog partner slug through unchanged', () => {
+    getProvider({} as Env, { accountId: 'account-1', apiKey: 'oauth-token' }, 'deepseek/deepseek-v4-pro', {
+      sessionAffinity: 'gb-opaque',
+      feature: 'builder-chat',
+    });
+
+    expect(createLanguageModel).toHaveBeenCalledWith(
+      'deepseek/deepseek-v4-pro',
+      expect.objectContaining({ sessionAffinity: 'gb-opaque' }),
+    );
+  });
 });

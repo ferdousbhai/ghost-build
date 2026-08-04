@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   steps: [] as TestStep[],
   streamText: vi.fn(),
   getValidatedBuildCompletion: vi.fn(),
+  getProvider: vi.fn(() => ({ model: { modelId: 'test-workers-ai' }, maxTokens: 1_000 })),
 }));
 
 vi.mock('ai', () => ({
@@ -38,7 +39,7 @@ vi.mock('ai', () => ({
 }));
 
 vi.mock('./provider', () => ({
-  getProvider: vi.fn(() => ({ model: { modelId: 'test-workers-ai' }, maxTokens: 1_000 })),
+  getProvider: mocks.getProvider,
 }));
 vi.mock('./message-conversion', () => ({
   asAiSdkTools: (tools: unknown) => tools,
@@ -94,6 +95,17 @@ describe('workersAiAgent turn budgets', () => {
     expect(chunks.some((chunk) => 'id' in chunk && chunk.id === 'validated-build-completion')).toBe(false);
   });
 
+  it('routes the validated model selection to the provider', async () => {
+    await collectChunks(await createAgentStream('deepseek/deepseek-v4-pro'));
+
+    expect(mocks.getProvider).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'deepseek/deepseek-v4-pro',
+      expect.objectContaining({ feature: 'builder-chat' }),
+    );
+  });
+
   it('preserves validated completion on the final allowed model step', async () => {
     mocks.completion = 'Validated on the final allowed step.';
     mocks.steps = Array.from({ length: BUILDER_TURN_MAX_MODEL_STEPS }, (_, index) => ({
@@ -128,12 +140,13 @@ describe('workersAiAgent turn budgets', () => {
   });
 });
 
-function createAgentStream() {
+function createAgentStream(modelId: Parameters<typeof workersAiAgent>[0]['modelId'] = '@cf/zai-org/glm-5.2') {
   return workersAiAgent({
     env: {} as Env,
     chatInitialId: 'chat-1',
     firstUserMessage: false,
     messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'Build it' }] }],
+    modelId,
     compaction: {
       current: null,
       pending: false,

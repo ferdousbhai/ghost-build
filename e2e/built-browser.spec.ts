@@ -35,11 +35,20 @@ test('hydrates the built landing page without replacing meaningful SSR content',
   await expect(page.getByRole('heading', { name: /If you can dream it/i })).toBeVisible();
   await expect(page.getByText(/You are interacting with Ghostbuild, an AI coding agent/i)).toBeVisible();
   await expect(page.getByPlaceholder(/Describe the app, workflow, and data/i)).toBeVisible();
+  const modelSelector = page.getByRole('combobox', { name: /Builder model/i });
+  await expect(modelSelector).toBeVisible();
+  await modelSelector.selectOption('deepseek/deepseek-v4-pro');
+  await expect(modelSelector).toHaveValue('deepseek/deepseek-v4-pro');
+  await page.reload();
+  await expect(page.getByRole('combobox', { name: /Builder model/i })).toHaveValue('deepseek/deepseek-v4-pro');
   await expect(page.getByRole('button', { name: 'Connect Cloudflare' }).first()).toBeVisible();
   const legalNotice = page.getByTestId('cloudflare-connect-legal-notice');
   await expect(legalNotice).toBeVisible();
   await expect(legalNotice.getByRole('link', { name: 'Terms' })).toBeVisible();
   expect(await page.locator('header').evaluate((header) => header.scrollWidth <= header.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(
+    true,
+  );
   await assertClean();
 });
 

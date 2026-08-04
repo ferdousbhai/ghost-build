@@ -3,9 +3,6 @@ import type { PromptCharacterCounts } from 'ghostbuild-agent/context-message-met
 import type { GenerateTextEndEvent, ToolSet } from 'ai';
 import type { WorkersAiPromptCacheStatus } from './workers-ai-prompt-cache';
 
-const GLM_5_2_NANODOLLARS_PER_INPUT_TOKEN = 1_400;
-const GLM_5_2_NANODOLLARS_PER_CACHED_INPUT_TOKEN = 260;
-
 interface FinishTelemetryOptions {
   result: GenerateTextEndEvent<ToolSet>;
   firstUserMessage: boolean;
@@ -53,7 +50,6 @@ export function workersAiPromptCacheTelemetry(
   attempted: boolean;
   status: WorkersAiPromptCacheStatus;
   cachedInputTokens: number;
-  estimatedSavingsNanodollars: number;
 } {
   const normalizedInputTokens = normalizeUsage(inputTokens);
   if (!attempted) {
@@ -61,22 +57,16 @@ export function workersAiPromptCacheTelemetry(
       attempted: false,
       status: 'unavailable',
       cachedInputTokens: 0,
-      estimatedSavingsNanodollars: 0,
     };
   }
   const reportedCachedTokens = cachedPromptTokenCount(usageAndProviderMetadata);
   const cachedInputTokens = Math.min(normalizedInputTokens, reportedCachedTokens ?? 0);
   const status: WorkersAiPromptCacheStatus =
     reportedCachedTokens === undefined ? 'unavailable' : cachedInputTokens > 0 ? 'hit' : 'miss';
-  const uncachedCost = normalizedInputTokens * GLM_5_2_NANODOLLARS_PER_INPUT_TOKEN;
-  const actualCost =
-    (normalizedInputTokens - cachedInputTokens) * GLM_5_2_NANODOLLARS_PER_INPUT_TOKEN +
-    cachedInputTokens * GLM_5_2_NANODOLLARS_PER_CACHED_INPUT_TOKEN;
   return {
     attempted,
     status,
     cachedInputTokens,
-    estimatedSavingsNanodollars: uncachedCost - actualCost,
   };
 }
 
@@ -85,7 +75,7 @@ export function recordFirstWorkersAiResponse(startedAt: number): void {
   console.info({
     event: 'workers_ai_first_response',
     timeToFirstResponseMs: timeToFirstResponse,
-    provider: 'Cloudflare',
+    platform: 'Cloudflare AI',
   });
 }
 

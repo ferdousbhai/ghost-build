@@ -1,13 +1,18 @@
 import type { TranscriptIdentity } from 'ghostbuild-agent/transcript';
+import type { WorkersAiModelId } from '~/lib/workers-ai-model';
 
 export type WorkersAiPromptCacheStatus = 'hit' | 'miss' | 'unavailable';
 
-export async function createWorkersAiSessionAffinity(identity: TranscriptIdentity): Promise<string> {
+export async function createWorkersAiSessionAffinity(
+  identity: TranscriptIdentity,
+  modelId: WorkersAiModelId,
+): Promise<string> {
   return `gb-${await sha256Hex(
     JSON.stringify({
       agentName: identity.agentName,
       subchatIndex: identity.subchatIndex,
       generation: identity.generation,
+      modelId,
     }),
   )}`;
 }

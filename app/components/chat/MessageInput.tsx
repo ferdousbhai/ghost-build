@@ -9,6 +9,7 @@ import { classNames } from '~/utils/classNames';
 import { EnhancePromptButton } from './EnhancePromptButton.client';
 import { MESSAGE_INPUT_HIGHLIGHTS, TextareaWithHighlights } from './MessageInputHighlights';
 import { getMessageInputPrimaryActionLabel, useMessageInputController } from './useMessageInputController';
+import { BuilderModelSelector } from './BuilderModelSelector.client';
 
 const PROMPT_LENGTH_WARNING_THRESHOLD = 2000;
 
@@ -35,6 +36,9 @@ export const MessageInput = memo(function MessageInput({
   const { authState, input } = controller;
   const primaryActionLabel = getMessageInputPrimaryActionLabel(authState.kind, isStreaming);
   const hasActiveSession = authState.kind === 'fullyLoggedIn';
+  const modelSelector = (!chatStarted || hasActiveSession) && (
+    <BuilderModelSelector compact={chatStarted} disabled={disabled || isStreaming || sendMessageInProgress} />
+  );
   const placeholder = chatStarted
     ? numMessages !== undefined && numMessages > 0
       ? 'Request changes by sending another message…'
@@ -117,13 +121,17 @@ export const MessageInput = memo(function MessageInput({
           />
           {chatStarted && (
             <div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex items-end gap-2">
-              <div className="pointer-events-auto min-w-0 flex-1 pl-1">{inputStatus}</div>
+              <div className="pointer-events-auto flex min-w-0 flex-1 items-center gap-2 pl-1">
+                {modelSelector}
+                <div className="hidden min-w-0 sm:block">{inputStatus}</div>
+              </div>
               <div className="pointer-events-auto ml-auto flex items-center gap-1">{actions}</div>
             </div>
           )}
         </div>
         {!chatStarted && (
           <div className="ghost-message-input__footer flex flex-wrap items-center gap-2 rounded-b-xl border border-t-0 border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-1.5 text-sm">
+            {modelSelector}
             <div className="ml-auto flex items-center gap-1">{actions}</div>
           </div>
         )}

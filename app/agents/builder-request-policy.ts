@@ -1,6 +1,7 @@
 import { transcriptIdentitySchema, type TranscriptIdentity } from 'ghostbuild-agent/transcript';
 import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import type { UIMessage } from 'ai';
+import { isWorkersAiModelId, type WorkersAiModelId } from '~/lib/workers-ai-model';
 
 export const MAX_BUILDER_AGENT_MESSAGES = 500;
 const MAX_BUILDER_AGENT_NAME_LENGTH = 512;
@@ -66,6 +67,7 @@ export function requireBuilderRequestScope(
   chatInitialId: string;
   subchatIndex: number;
   transcript: TranscriptIdentity;
+  modelId: WorkersAiModelId;
 } {
   if (
     typeof body.chatInitialId !== 'string' ||
@@ -76,6 +78,9 @@ export function requireBuilderRequestScope(
   }
   const subchatIndex = parseBuilderSubchatIndex(body.subchatIndex);
   const transcript = requireBuilderTranscriptIdentity(body.transcript, binding, subchatIndex);
+  if (!isWorkersAiModelId(body.modelId)) {
+    throw new Response('Invalid builder model', { status: 400 });
+  }
   if (body.chatInitialId !== binding?.chatInitialId) {
     throw new Response('Initial chat identifier does not match this transcript', { status: 409 });
   }
@@ -83,6 +88,7 @@ export function requireBuilderRequestScope(
     chatInitialId: body.chatInitialId,
     subchatIndex,
     transcript,
+    modelId: body.modelId,
   };
 }
 

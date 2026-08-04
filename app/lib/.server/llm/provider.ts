@@ -14,7 +14,7 @@ export type WorkersAiAccountCredentials =
 export function getProvider(
   _env: Env,
   accountCredentials: WorkersAiAccountCredentials,
-  modelId = CLOUDFLARE_WORKERS_AI_MODEL,
+  modelId: string = CLOUDFLARE_WORKERS_AI_MODEL,
   settings?: { sessionAffinity?: string; feature?: string },
 ): Provider {
   const cloudflare = createWorkersAI({

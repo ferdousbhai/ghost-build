@@ -51,7 +51,7 @@
       "currentDeletion": "project-scoped teardown is not exposed as an account-wide operation"
     },
     {
-      "system": "Cloudflare Workers AI inference and AI Gateway request path",
+      "system": "Cloudflare AI inference and AI Gateway request path",
       "owner": "user Cloudflare account; Cloudflare processes inference as the infrastructure provider",
       "categories": [
         "prompts and conversation context needed for the request",
@@ -59,7 +59,7 @@
         "model responses and usage metadata"
       ],
       "secrets": "Ghostbuild disables AI Gateway request logging at the gateway, model-request, and request-header layers; credentials and capability secrets must never be model inputs",
-      "currentRetention": "Workers AI transiently processes request content to perform inference under Cloudflare's service controls; Ghostbuild does not enable AI Gateway request logging and does not use AI Gateway to retain request payloads or request metadata; transcript and project copies remain in their separately inventoried stores",
+      "currentRetention": "Cloudflare AI transiently processes request content to perform inference under Cloudflare's service controls; when the user selects a partner-labeled model, the listed model provider also transiently processes the content needed for inference; Ghostbuild does not enable AI Gateway request logging and does not use AI Gateway to retain request payloads or request metadata; transcript and project copies remain in their separately inventoried stores",
       "currentExport": "there is no AI Gateway log export because request logging is disabled; persisted transcript and project records are subject to the separate incomplete account-export process",
       "currentDeletion": "there is no Ghostbuild AI Gateway request log to delete; persisted source records and provider handling remain subject to their separately described controls"
     },
@@ -81,7 +81,7 @@
       "owner": "user device",
       "categories": [
         "OPFS account-local chat metadata, full transcripts, and workspace file content",
-        "theme preference",
+        "theme and builder-model preferences",
         "pending prompt in tab-scoped session storage",
         "asset-recovery and telemetry journey session state",
         "optional product-telemetry preference"

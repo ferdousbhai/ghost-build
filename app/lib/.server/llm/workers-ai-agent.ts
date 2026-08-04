@@ -4,7 +4,7 @@ import { calculatePromptCharacterCounts } from 'ghostbuild-agent/context-message
 import { ROLE_SYSTEM_PROMPT, generalSystemPrompt } from 'ghostbuild-agent/prompts/system';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { logger } from 'ghostbuild-agent/utils/logger';
-import { CLOUDFLARE_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';
+import type { WorkersAiModelId } from '~/lib/workers-ai-model';
 import { asAiSdkTools, asOriginalMessages } from './message-conversion';
 import { getProvider, type WorkersAiAccountCredentials } from './provider';
 import { prepareModelInput } from './model-input';
@@ -30,6 +30,7 @@ interface WorkersAiAgentOptions {
   chatInitialId: string;
   firstUserMessage: boolean;
   messages: Messages;
+  modelId: WorkersAiModelId;
   turnContext?: ChatTurnContext;
   compaction: {
     current: ContextCompaction | null;
@@ -53,6 +54,7 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     chatInitialId,
     firstUserMessage,
     messages,
+    modelId,
     turnContext,
     compaction,
     accountCredentials,
@@ -65,7 +67,7 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
   logger.debug('Starting Workers AI agent');
   const startedAt = Date.now();
   let recordedFirstResponse = false;
-  const provider = getProvider(env, accountCredentials, CLOUDFLARE_WORKERS_AI_MODEL, {
+  const provider = getProvider(env, accountCredentials, modelId, {
     sessionAffinity,
     feature: 'builder-chat',
   });
@@ -101,7 +103,7 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     compaction.save(modelInput.nextCompaction);
   }
   const promptCharacterCounts = calculatePromptCharacterCounts(modelInput.promptMessages, systemPrompts);
-  const providerModel = languageModelId(provider.model, CLOUDFLARE_WORKERS_AI_MODEL);
+  const providerModel = languageModelId(provider.model, modelId);
   let currentValidatedBuildCompletion: string | undefined;
   const result = streamText({
     model: provider.model,

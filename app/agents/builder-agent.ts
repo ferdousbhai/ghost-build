@@ -289,7 +289,10 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
     const body = (options?.body ?? {}) as ChatBody;
     const messages = this.messages as NonNullable<ChatRequestBody['messages']>;
-    const { chatInitialId, subchatIndex, transcript } = requireBuilderRequestScope(body, durableIdentity.transcript);
+    const { chatInitialId, subchatIndex, transcript, modelId } = requireBuilderRequestScope(
+      body,
+      durableIdentity.transcript,
+    );
     const pendingDeploymentPlan = options?.continuation ? latestPendingDeploymentPlan(messages) : null;
     if (pendingDeploymentPlan) {
       console.info({
@@ -346,7 +349,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         firstUserMessage,
         turnContext,
         accountCredentials,
-        sessionAffinity: await createWorkersAiSessionAffinity(transcript),
+        sessionAffinity: await createWorkersAiSessionAffinity(transcript, modelId),
         workspace: this.workspace,
         userId: durableIdentity.userId,
         agentName: this.name,
@@ -381,6 +384,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         body: {
           messages,
           chatInitialId,
+          modelId,
         },
       });
     } catch (error) {

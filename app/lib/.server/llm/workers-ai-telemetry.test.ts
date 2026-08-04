@@ -11,7 +11,6 @@ describe('Workers AI prompt-cache telemetry', () => {
       attempted: true,
       status: 'hit',
       cachedInputTokens: 800,
-      estimatedSavingsNanodollars: 912_000,
     });
     expect(workersAiPromptCacheTelemetry({ inputTokenDetails: { cacheReadTokens: 0 } }, true, 1_000)).toMatchObject({
       attempted: true,
@@ -36,18 +35,16 @@ describe('Workers AI prompt-cache telemetry', () => {
     });
   });
 
-  test('does not infer a cache attempt or savings and clamps invalid input usage', () => {
+  test('does not infer a cache attempt and clamps invalid input usage', () => {
     expect(workersAiPromptCacheTelemetry({ inputTokenDetails: { cacheReadTokens: 120 } }, false, 200)).toEqual({
       attempted: false,
       status: 'unavailable',
       cachedInputTokens: 0,
-      estimatedSavingsNanodollars: 0,
     });
     expect(workersAiPromptCacheTelemetry({ inputTokenDetails: { cacheReadTokens: 120 } }, true, -20)).toEqual({
       attempted: true,
       status: 'miss',
       cachedInputTokens: 0,
-      estimatedSavingsNanodollars: 0,
     });
   });
 
@@ -85,7 +82,6 @@ describe('Workers AI prompt-cache telemetry', () => {
           attempted: true,
           status: 'hit',
           cachedInputTokens: 800,
-          estimatedSavingsNanodollars: 912_000,
         },
       }),
     );
@@ -103,7 +99,7 @@ describe('Workers AI prompt-cache telemetry', () => {
     expect(info).toHaveBeenCalledWith({
       event: 'workers_ai_first_response',
       timeToFirstResponseMs: expect.any(Number),
-      provider: 'Cloudflare',
+      platform: 'Cloudflare AI',
     });
     expect(info.mock.calls[0]?.[0]).not.toHaveProperty('chatInitialId');
     info.mockRestore();
