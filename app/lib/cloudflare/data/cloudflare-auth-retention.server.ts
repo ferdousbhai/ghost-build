@@ -74,7 +74,7 @@ export async function pruneCloudflareAuthData(args: {
 export async function pruneCloudflareAuthDataBestEffort(db: D1Database): Promise<void> {
   try {
     await pruneCloudflareAuthData({ db });
-  } catch (error) {
-    console.error('Unable to prune expired Cloudflare authorization data', error);
+  } catch {
+    console.error('Unable to prune expired Cloudflare authorization data');
   }
 }

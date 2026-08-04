@@ -7,7 +7,7 @@ export const GHOSTBUILD_ABUSE_URL = `${GHOSTBUILD_REPOSITORY_URL}/issues/new?tem
 export const GHOSTBUILD_SECURITY_URL = `${GHOSTBUILD_REPOSITORY_URL}/security/advisories/new`;
 export const CLOUDFLARE_ABUSE_URL = 'https://abuse.cloudflare.com/';
 
-export const TRUST_DOCUMENT_VERSION = '1.2 public beta';
+export const TRUST_DOCUMENT_VERSION = '1.3 public beta';
 export const TRUST_DOCUMENT_EFFECTIVE_ISO_DATE = '2026-08-04';
 export const TRUST_DOCUMENT_EFFECTIVE_DATE = 'August 4, 2026';
 export const TRUST_DOCUMENT_STATUS =

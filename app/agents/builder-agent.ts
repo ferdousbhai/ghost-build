@@ -218,7 +218,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     ) {
       logger.info('Skipping recovery for a durably cancelled Ghostbuild chat turn', {
         incidentId: ctx.incidentId,
-        requestId: ctx.requestId,
       });
       return { persist: true, continue: false };
     }
@@ -234,17 +233,14 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     logger.warn('Recovering interrupted Ghostbuild chat turn', {
       incidentId: nextTurn.recovery?.incidentId,
       recoveryKind: ctx.recoveryKind,
-      requestId: nextTurn.requestId,
       attempt: ctx.attempt,
-      ageMs,
-      partialTextLength: ctx.partialText.length,
+      hasPartialOutput: ctx.partialText.length > 0,
       hasRecoveryData: ctx.recoveryData !== undefined,
     });
 
     if (ageMs > STALE_CHAT_RECOVERY_MS) {
       logger.warn('Skipping automatic continuation for stale Ghostbuild chat turn', {
         incidentId: ctx.incidentId,
-        ageMs,
       });
       this.finishTurn(nextTurn, {
         requestId: ctx.requestId,
@@ -325,11 +321,8 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     });
     console.info({
       event: 'builder_chat_turn_started',
-      requestId: turn.requestId,
-      chatInitialId,
       continuation: options?.continuation === true,
       firstUserMessage,
-      messageCount: messages.length,
     });
     this.setState({
       ...this.state,
@@ -458,11 +451,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       error: result.error,
     });
     if (status === 'completed') {
-      await this.requestPreviewInternal().catch((error) =>
-        logger.warn('Unable to queue the automatic remote preview', {
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
+      await this.requestPreviewInternal().catch(() => logger.warn('Unable to queue the automatic remote preview'));
     }
   }
 
@@ -700,7 +689,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     logger.error('Rejected BuilderAgent durable identity', {
       incidentId,
       reason,
-      agentName: this.name,
     });
     throw new Response(status === 401 ? 'Agent authentication is required.' : 'Agent not found.', { status });
   }
@@ -726,10 +714,8 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
           contextSource: 'durable AIChatAgent transcript plus this turn checkpoint',
         },
       });
-    } catch (error) {
-      logger.warn('Unable to stash Ghostbuild chat turn recovery context', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+    } catch {
+      logger.warn('Unable to stash Ghostbuild chat turn recovery context');
     }
   }
 
@@ -770,16 +756,11 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         });
       }
       logger.info('Generated titles for first prompt', {
-        chatInitialId,
-        subchatIndex,
         savedProjectTitle,
         savedSubchatTitle,
       });
-    } catch (error) {
-      logger.warn('Title generation failed; keeping first-prompt fallback', {
-        chatInitialId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+    } catch {
+      logger.warn('Title generation failed; keeping first-prompt fallback');
     }
   }
 
@@ -949,7 +930,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       if (previous && previous.id !== success.id) {
         await this.workspace
           .stopPreview(previous.id)
-          .catch((error) => logger.warn('Unable to retire the superseded remote preview', { error }));
+          .catch(() => logger.warn('Unable to retire the superseded remote preview'));
       }
     } catch (error) {
       await this.failPreviewJob(

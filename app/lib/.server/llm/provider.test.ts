@@ -9,7 +9,7 @@ import { getProvider } from './provider';
 describe('Workers AI provider', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  test('always uses the connected account credential rather than an AI binding', () => {
+  test('uses the connected account credential with AI Gateway logging disabled at every request layer', () => {
     const credentials = { accountId: 'account-1', apiKey: 'oauth-token' };
     getProvider({} as Env, credentials, '@cf/zai-org/glm-5.2', {
       sessionAffinity: 'gb-opaque',
@@ -18,7 +18,7 @@ describe('Workers AI provider', () => {
 
     expect(createWorkersAI).toHaveBeenCalledWith({
       ...credentials,
-      gateway: { id: 'default', collectLog: true },
+      gateway: { id: 'default', collectLog: false },
     });
     expect(createLanguageModel).toHaveBeenCalledWith('@cf/zai-org/glm-5.2', {
       sessionAffinity: 'gb-opaque',
@@ -26,8 +26,11 @@ describe('Workers AI provider', () => {
         ghostbuild_feature: 'builder-chat',
         ghostbuild_source: 'user-runtime',
       },
-      collectLog: true,
-      extraHeaders: { 'cf-aig-collect-log-payload': 'false' },
+      collectLog: false,
+      extraHeaders: {
+        'cf-aig-collect-log': 'false',
+        'cf-aig-collect-log-payload': 'false',
+      },
     });
   });
 });

@@ -8,6 +8,7 @@ import type { WorkersAiAccountCredentials } from './llm/provider';
 import type { ContextCompaction } from './llm/context-compaction';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
+import { logProviderFailure } from './llm/provider-error-logging';
 
 type Messages = GhostbuildMessage[];
 
@@ -77,7 +78,7 @@ export async function createChatResponseFromBody({
 
     return createUIMessageStreamResponse({ stream: dataStream });
   } catch (error: unknown) {
-    logger.error('Workers AI chat request failed', error);
+    logProviderFailure(logger, 'Workers AI chat request failed', error);
 
     if (error instanceof ModelInputBudgetExceededError) {
       throw new Response(error.message, {

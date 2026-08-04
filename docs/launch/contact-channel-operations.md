@@ -31,6 +31,7 @@ On August 4, 2026:
   Cloudflare DKIM records were also present.
 - GitHub private vulnerability reporting was enabled.
 - GitHub support and abuse forms assigned new issues to `ferdousbhai`.
+- The owner account subscribed to repository activity; an external notification-delivery drill remains pending.
 
 An external send/receipt/reply drill is still required for each alias. Send from an address different from the forwarding
 destination, confirm receipt and reply behavior, and record only the date, channel, result, and owner here—never message
@@ -38,7 +39,7 @@ contents or the private destination address. Do not advertise any alias until it
 the abuse alias as the Cloudflare account abuse contact until its drill passes and the operator can inspect it at least
 once every 24 hours.
 
-GitHub repository watching and account-level notification delivery are not yet verified. Until they are, the primary
+GitHub repository watching is enabled, but web/email notification delivery is not yet verified. Until it is, the primary
 owner must manually inspect open support/abuse issues and private vulnerability reports during both weekday inbox checks.
 If `abuse@ghostbuild.dev` becomes the Cloudflare account abuse contact, Cloudflare's separate provider requirement to
 actively monitor that address and respond to forwarded reports within 24 hours applies every day. That provider duty is
@@ -74,8 +75,7 @@ if disaster recovery reintroduces fulfilled deletion data, reapply the deletion 
 ## Remaining operator actions
 
 - Confirm receipt and reply for all three aliases from a different external mailbox.
-- In GitHub, enable repository watching for Issues and Security alerts and verify web/email delivery with harmless test
-  reports.
+- Verify GitHub web/email notification delivery with harmless test reports.
 - After the abuse-alias delivery drill passes and daily monitoring is committed, set the Cloudflare account abuse
   contact to `abuse@ghostbuild.dev` in the dashboard. The current API credential has read access and confirmed the field
   is unset, but does not have Account Settings Write permission. Once configured, inspect it at least every 24 hours and

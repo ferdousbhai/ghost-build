@@ -11,14 +11,8 @@ import { prepareModelInput } from './model-input';
 import type { ContextCompaction } from './context-compaction';
 import { appendDeterministicCompletion, normalizeTextPartBoundaries } from './workers-ai-stream';
 import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
-import {
-  createWorkersAiTools,
-  getValidatedBuildCompletion,
-  getWorkersAiToolSettings,
-  serializeWorkersAiToolDefinitions,
-} from './workers-ai-tools';
+import { createWorkersAiTools, getValidatedBuildCompletion, getWorkersAiToolSettings } from './workers-ai-tools';
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
-import { fingerprintWorkersAiModelInput } from './workers-ai-prompt-cache';
 import { logProviderFailure } from './provider-error-logging';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
@@ -84,7 +78,7 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
   });
   const validatedBuildCompletion = getValidatedBuildCompletion(messages);
   if (validatedBuildCompletion) {
-    logger.info('Returning validated build completion without another model turn', { chatInitialId });
+    logger.info('Returning validated build completion without another model turn');
     return createValidatedBuildCompletionStream(messages, validatedBuildCompletion);
   }
 
@@ -108,16 +102,6 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
   }
   const promptCharacterCounts = calculatePromptCharacterCounts(modelInput.promptMessages, systemPrompts);
   const providerModel = languageModelId(provider.model, CLOUDFLARE_WORKERS_AI_MODEL);
-  const serializedTools = serializeWorkersAiToolDefinitions(tools, toolSettings.activeTools);
-  const modelInputFingerprint = await fingerprintWorkersAiModelInput({
-    privacySalt: sessionAffinity,
-    model: providerModel,
-    instructions: systemPrompts,
-    messages: modelInput.messages,
-    tools: serializedTools,
-    activeTools: toolSettings.activeTools,
-    toolChoice: toolSettings.toolChoice,
-  });
   let currentValidatedBuildCompletion: string | undefined;
   const result = streamText({
     model: provider.model,
@@ -169,20 +153,18 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     onChunk: () => {
       if (!recordedFirstResponse) {
         recordedFirstResponse = true;
-        recordFirstWorkersAiResponse(chatInitialId, startedAt);
+        recordFirstWorkersAiResponse(startedAt);
       }
     },
     onEnd: (finishResult) => {
       recordWorkersAiFinish({
         result: finishResult,
-        chatInitialId,
         firstUserMessage,
         contextReduced: modelInput.contextCompacted,
         estimatedContextTokens: modelInput.estimatedTokens,
         promptCharacterCounts,
         providerModel,
         promptCacheAttempted: true,
-        modelInputFingerprint,
         startedAt,
       });
     },

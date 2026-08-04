@@ -19,7 +19,7 @@ export function getProvider(
 ): Provider {
   const cloudflare = createWorkersAI({
     ...accountCredentials,
-    gateway: { id: 'default', collectLog: true },
+    gateway: { id: 'default', collectLog: false },
   });
 
   return {
@@ -29,8 +29,11 @@ export function getProvider(
         ghostbuild_feature: settings?.feature ?? 'supporting-model-call',
         ghostbuild_source: 'user-runtime',
       },
-      collectLog: true,
-      extraHeaders: { 'cf-aig-collect-log-payload': 'false' },
+      collectLog: false,
+      extraHeaders: {
+        'cf-aig-collect-log': 'false',
+        'cf-aig-collect-log-payload': 'false',
+      },
     }),
     maxTokens: MODEL_MAX_OUTPUT_TOKENS,
   };

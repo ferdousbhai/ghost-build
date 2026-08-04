@@ -8,14 +8,12 @@ const GLM_5_2_NANODOLLARS_PER_CACHED_INPUT_TOKEN = 260;
 
 interface FinishTelemetryOptions {
   result: GenerateTextEndEvent<ToolSet>;
-  chatInitialId: string;
   firstUserMessage: boolean;
   contextReduced: boolean;
   estimatedContextTokens?: number;
   promptCharacterCounts: PromptCharacterCounts;
   providerModel: string;
   promptCacheAttempted: boolean;
-  modelInputFingerprint: string;
   startedAt: number;
 }
 
@@ -34,7 +32,6 @@ export function recordWorkersAiFinish(options: FinishTelemetryOptions): void {
   );
   const event = {
     event: 'workers_ai_finished',
-    chatInitialId: options.chatInitialId,
     firstUserMessage: options.firstUserMessage,
     model: options.providerModel,
     finishReason: result.finishReason,
@@ -43,7 +40,6 @@ export function recordWorkersAiFinish(options: FinishTelemetryOptions): void {
     estimatedContextTokens: options.estimatedContextTokens,
     promptCharacterCounts: options.promptCharacterCounts,
     durationMs: Date.now() - options.startedAt,
-    modelInputFingerprint: options.modelInputFingerprint,
     promptCache: cache,
   };
   console.info(event);
@@ -84,13 +80,12 @@ export function workersAiPromptCacheTelemetry(
   };
 }
 
-export function recordFirstWorkersAiResponse(chatInitialId: string, startedAt: number): void {
+export function recordFirstWorkersAiResponse(startedAt: number): void {
   const timeToFirstResponse = Date.now() - startedAt;
   console.info({
     event: 'workers_ai_first_response',
     timeToFirstResponseMs: timeToFirstResponse,
     provider: 'Cloudflare',
-    chatInitialId,
   });
 }
 

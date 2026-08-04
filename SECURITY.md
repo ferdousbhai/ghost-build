@@ -13,9 +13,6 @@ Use [GitHub private vulnerability reporting](https://github.com/ferdousbhai/ghos
 include the affected component, impact, reproduction steps or proof of concept, and any suggested mitigation. Remove
 credentials, personal data, and other third-party secrets from the report.
 
-If private vulnerability reporting is unavailable, open a public issue containing no vulnerability details and ask the
-maintainer for a private contact channel.
-
 Ghostbuild aims to review and acknowledge a report within one weekday and provide an initial triage update within three
 weekdays. These are public-beta targets, not guarantees, contractual service levels, or a promise that a fix will be
 available by a particular date. This channel is not monitored continuously and must not be relied on for immediate

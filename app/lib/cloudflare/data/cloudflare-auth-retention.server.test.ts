@@ -66,7 +66,8 @@ describe('Cloudflare authorization retention', () => {
     } as unknown as D1Database;
 
     await expect(pruneCloudflareAuthDataBestEffort(db)).resolves.toBeUndefined();
-    expect(log).toHaveBeenCalledWith('Unable to prune expired Cloudflare authorization data', error);
+    expect(log).toHaveBeenCalledWith('Unable to prune expired Cloudflare authorization data');
+    expect(JSON.stringify(log.mock.calls)).not.toContain('D1 unavailable');
     log.mockRestore();
   });
 });

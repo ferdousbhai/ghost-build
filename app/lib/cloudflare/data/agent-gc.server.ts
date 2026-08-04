@@ -93,8 +93,8 @@ export async function sweepAgentGcCandidates(
 export async function sweepAgentGcCandidatesBestEffort(env: Pick<Env, 'BuilderAgent' | 'DB'>): Promise<void> {
   try {
     await sweepAgentGcCandidates(env);
-  } catch (error) {
-    logger.warn('Unable to sweep deferred BuilderAgent state', { error });
+  } catch {
+    logger.warn('Unable to sweep deferred BuilderAgent state');
   }
 }
 
@@ -115,7 +115,7 @@ async function destroyCandidateGeneration(
         ? await deleteCompletedCandidate(env.DB, candidate)
         : await advanceCompletedCandidate(env.DB, candidate, now);
     return result.meta.changes > 0 ? 1 : 0;
-  } catch (error) {
+  } catch {
     const retryAt = now + retryDelay(candidate.attempts);
     await env.DB.prepare(
       `UPDATE agent_gc_candidates
@@ -127,7 +127,6 @@ async function destroyCandidateGeneration(
     logger.warn('Unable to destroy deferred BuilderAgent generation', {
       subchatIndex: candidate.subchat_index,
       generation: candidate.next_generation,
-      error,
     });
     return 0;
   }

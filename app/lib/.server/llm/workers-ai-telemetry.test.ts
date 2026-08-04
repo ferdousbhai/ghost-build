@@ -1,5 +1,9 @@
 import { describe, expect, test, vi } from 'vitest';
-import { recordWorkersAiFinish, workersAiPromptCacheTelemetry } from './workers-ai-telemetry';
+import {
+  recordFirstWorkersAiResponse,
+  recordWorkersAiFinish,
+  workersAiPromptCacheTelemetry,
+} from './workers-ai-telemetry';
 
 describe('Workers AI prompt-cache telemetry', () => {
   test('distinguishes hit, miss, and unavailable AI SDK usage', () => {
@@ -60,19 +64,23 @@ describe('Workers AI prompt-cache telemetry', () => {
         },
         finalStep: { providerMetadata: undefined },
       } as never,
-      chatInitialId: 'chat',
       firstUserMessage: false,
       contextReduced: false,
       estimatedContextTokens: 900,
       promptCharacterCounts: { messageHistoryChars: 30, currentTurnChars: 20, totalPromptChars: 60 },
       providerModel: '@cf/zai-org/glm-5.2',
       promptCacheAttempted: true,
-      modelInputFingerprint: 'opaque',
       startedAt: Date.now(),
     });
 
     expect(info).toHaveBeenCalledWith(
       expect.objectContaining({
+        usage: {
+          inputTokens: 1_000,
+          outputTokens: 20,
+          totalTokens: 1_020,
+        },
+        durationMs: expect.any(Number),
         promptCache: {
           attempted: true,
           status: 'hit',
@@ -81,6 +89,23 @@ describe('Workers AI prompt-cache telemetry', () => {
         },
       }),
     );
+    const loggedEvent = info.mock.calls[0]?.[0];
+    expect(loggedEvent).not.toHaveProperty('chatInitialId');
+    expect(loggedEvent).not.toHaveProperty('modelInputFingerprint');
+    info.mockRestore();
+  });
+
+  test('records first-response latency without a chat-linkable identifier', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+
+    recordFirstWorkersAiResponse(Date.now());
+
+    expect(info).toHaveBeenCalledWith({
+      event: 'workers_ai_first_response',
+      timeToFirstResponseMs: expect.any(Number),
+      provider: 'Cloudflare',
+    });
+    expect(info.mock.calls[0]?.[0]).not.toHaveProperty('chatInitialId');
     info.mockRestore();
   });
 });

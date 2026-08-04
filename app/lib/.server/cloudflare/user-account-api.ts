@@ -537,7 +537,7 @@ export class UserCloudflareAccountApi {
           storage: 'sqlite',
         },
       },
-      observability: { enabled: true, logs: { enabled: true, head_sampling_rate: 1 } },
+      observability: { enabled: true, logs: { enabled: true, head_sampling_rate: 0.6 } },
       annotations: {
         'workers/message': `Ghostbuild user-owned workspace runtime ${args.runtimeVersion.slice(0, 12)}`,
         'workers/tag': args.runtimeVersion.slice(0, 64),

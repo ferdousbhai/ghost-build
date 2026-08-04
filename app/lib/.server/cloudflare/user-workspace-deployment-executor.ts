@@ -186,13 +186,13 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
         nextStatus: 'failed',
         errorCode: providerChangesPossible ? 'cloudflare_cleanup_required' : `deployment_${phase}_failed`,
         errorMessage: safeError(error),
-      }).catch((transitionError) => console.error('Unable to persist user-owned deployment failure', transitionError));
+      }).catch(() => console.error('Unable to persist user-owned deployment failure'));
     }
     throw error;
   } finally {
     await deploymentSession
       ?.finish('failed')
-      .catch((error) => console.error('Unable to finalize ProjectWorkspace deployment session', error));
+      .catch(() => console.error('Unable to finalize ProjectWorkspace deployment session'));
   }
 }
 

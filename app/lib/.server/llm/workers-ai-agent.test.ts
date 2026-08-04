@@ -57,16 +57,11 @@ vi.mock('./workers-ai-tools', () => ({
   createWorkersAiTools: vi.fn(() => ({})),
   getValidatedBuildCompletion: mocks.getValidatedBuildCompletion,
   getWorkersAiToolSettings: vi.fn(() => ({ activeTools: [], toolChoice: 'none' })),
-  serializeWorkersAiToolDefinitions: vi.fn(() => ({})),
 }));
 vi.mock('./workers-ai-telemetry', () => ({
   recordFirstWorkersAiResponse: vi.fn(),
   recordWorkersAiFinish: vi.fn(),
 }));
-vi.mock('./workers-ai-prompt-cache', () => ({
-  fingerprintWorkersAiModelInput: vi.fn(async () => 'fingerprint'),
-}));
-
 import { workersAiAgent } from './workers-ai-agent';
 
 describe('workersAiAgent turn budgets', () => {

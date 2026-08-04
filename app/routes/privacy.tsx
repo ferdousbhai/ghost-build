@@ -50,11 +50,13 @@ function PrivacyPage() {
             provide, but Ghostbuild cannot perform a requested build without the content needed for that request.
           </li>
           <li>
-            <strong>Service and security logs:</strong> sampled Worker invocation and trace metadata can include request
-            method and path, Cloudflare request metadata, response status, timing, binding activity, and exception or
-            diagnostic metadata. Ghostbuild samples 60% of logs and 5% of traces to operate, troubleshoot, and protect
-            the service under the operator’s legitimate interests. Prompts, source code, credentials, and raw tool
-            output are not intended log fields.
+            <strong>Service and security logs:</strong> sampled Worker invocation, Container, and trace metadata can
+            include request method and path, Cloudflare request metadata, response status, timing, binding activity, and
+            exception or diagnostic metadata. The Ghostbuild control plane samples 60% of Worker logs and 5% of traces.
+            In your connected Cloudflare account, the workspace runtime samples 60% of Worker logs and enables Computer
+            container logs; generated applications sample 60% of Worker logs and 5% of traces. These settings support
+            operation, troubleshooting, and security under the operator’s legitimate interests. Prompts, source code,
+            credentials, and raw tool output are not intended log fields.
           </li>
           <li>
             <strong>Support, abuse, privacy, and legal records:</strong> contact details, message contents, attachments,
@@ -75,9 +77,11 @@ function PrivacyPage() {
       <TrustSection title="AI processing">
         <p>
           Prompts, conversation context, and project files needed for a request are sent to Cloudflare Workers AI to
-          generate a response. Ghostbuild does not place prompt or source payloads in optional product telemetry and
-          requests that AI Gateway not log request payloads. Cloudflare describes its handling of Workers AI content in
-          its{' '}
+          generate a response. Ghostbuild does not place prompt or source payloads in optional product telemetry. For
+          these calls, Ghostbuild disables AI Gateway request logging at the gateway, model-request, and request-header
+          layers, so it does not use AI Gateway to retain request payloads or request metadata. This does not change the
+          transient processing needed for Workers AI inference. Cloudflare describes its handling of Workers AI content
+          in its{' '}
           <a href="https://developers.cloudflare.com/workers-ai/platform/data-usage/">Workers AI data-usage notice</a>.
           Ghostbuild does not use AI to make decisions that produce legal or similarly significant effects about you.
         </p>
@@ -109,8 +113,10 @@ function PrivacyPage() {
         <p>
           Cloudflare provides authentication integration, Workers, D1, R2, Durable Objects, Containers, Computer,
           Workers AI, observability, and related infrastructure. GitHub processes information submitted through public
-          support and abuse issues or private security reports. Ghostbuild does not sell personal data, share it for
-          cross-context behavioral advertising, or use it for targeted advertising.
+          support and abuse issues or private security reports. Control-plane observability is held in the operator’s
+          Cloudflare account; workspace, Computer, and generated-application observability is held in your connected
+          Cloudflare account. Ghostbuild does not sell personal data, share it for cross-context behavioral advertising,
+          or use it for targeted advertising.
         </p>
       </TrustSection>
 
@@ -139,10 +145,16 @@ function PrivacyPage() {
           manually and available legal rights still apply.
         </p>
         <p>
-          The current Cloudflare plan retains sampled Workers Logs and traces for seven days. Ghostbuild does not copy
-          them to another log or trace store, and access is currently limited to the sole Cloudflare account
-          administrator. Cloudflare may retain aggregate Worker metrics for up to three months; those metrics are not a
-          user-addressable event ledger.
+          The operator’s current Cloudflare plan retains sampled control-plane Workers Logs and traces for seven days.
+          Ghostbuild does not copy them to another log or trace store, and access is currently limited to the sole
+          operator-account administrator. Cloudflare may retain aggregate control-plane Worker metrics for up to three
+          months; those metrics are not a user-addressable event ledger.
+        </p>
+        <p>
+          Workspace Worker and Computer container logs, and generated-application Worker logs and traces, remain in your
+          connected Cloudflare account. Their access and retention follow that account’s permissions, plan, product
+          settings, and Cloudflare controls. Ghostbuild does not copy them into the operator’s log or trace store, and
+          removing a project does not immediately erase provider-retained observability.
         </p>
         <p>
           <a href="https://developers.cloudflare.com/d1/reference/time-travel/">Cloudflare D1 Time Travel</a> keeps

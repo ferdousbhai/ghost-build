@@ -63,10 +63,8 @@ export async function runtimeCredentialAction(args: { request: Request; env: Env
       accountId: connection.accountId,
       connectionGeneration: body.connectionGeneration,
     });
-  } catch (error) {
-    console.error('Unable to derive the user workspace runtime credential', {
-      error: error instanceof Error ? error.message : String(error),
-    });
+  } catch {
+    console.error('Unable to derive the user workspace runtime credential');
     return credentialResponse({ error: 'Cloudflare connection is unavailable.' }, 503);
   }
   if (!constantTimeEqual(bearer, expected)) {
@@ -78,10 +76,8 @@ export async function runtimeCredentialAction(args: { request: Request; env: Env
       forceRefresh: body.forceRefresh,
     });
     return credentialResponse({ accessToken }, 200);
-  } catch (error) {
-    console.error('Unable to resolve the user workspace runtime credential', {
-      error: error instanceof Error ? error.message : String(error),
-    });
+  } catch {
+    console.error('Unable to resolve the user workspace runtime credential');
     return credentialResponse({ error: 'Cloudflare connection is unavailable.' }, 503);
   }
 }

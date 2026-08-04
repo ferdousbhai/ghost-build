@@ -33,7 +33,7 @@ export function internalErrorResponse(error: unknown, fallback: string): Respons
   if (error instanceof Lz4PayloadError) {
     return Response.json({ error: error.message }, { status: error.kind === 'too-large' ? 413 : 400 });
   }
-  logger.error(error);
+  logger.error('Unhandled Cloudflare data request failure');
   return Response.json({ error: fallback }, { status: 500 });
 }
 

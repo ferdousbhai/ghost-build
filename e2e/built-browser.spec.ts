@@ -87,7 +87,7 @@ test('renders the public trust routes and persists the telemetry choice', async 
 
   const securityTxt = await page.request.get('/.well-known/security.txt');
   expect(securityTxt.status()).toBe(200);
-  expect(securityTxt.headers()['content-type']).toContain('text/plain');
+  expect(securityTxt.headers()['content-type']).toBe('text/plain; charset=utf-8');
   expect(await securityTxt.text()).toContain(
     'Contact: https://github.com/ferdousbhai/ghost-build/security/advisories/new',
   );

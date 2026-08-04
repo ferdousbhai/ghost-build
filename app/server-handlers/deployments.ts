@@ -273,6 +273,6 @@ function deploymentErrorResponse(error: unknown): Response {
   ) {
     return Response.json({ error: error.message }, { status: 409 });
   }
-  console.error('Deployment request failed', error);
+  console.error('Deployment request failed');
   return Response.json({ error: 'Unable to process the deployment.' }, { status: 500 });
 }

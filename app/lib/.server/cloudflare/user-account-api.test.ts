@@ -643,6 +643,7 @@ describe('UserCloudflareAccountApi', () => {
       compatibility_flags: string[];
       containers: Array<{ class_name: string }>;
       exports: Record<string, unknown>;
+      observability: unknown;
     };
     expect(metadata.compatibility_flags).toEqual(expect.arrayContaining(['nodejs_compat', 'experimental']));
     expect(metadata.containers).toEqual([{ class_name: 'ProjectWorkspace' }]);
@@ -667,6 +668,10 @@ describe('UserCloudflareAccountApi', () => {
       expect.arrayContaining([expect.objectContaining({ name: 'CLOUDFLARE_API_TOKEN' })]),
     );
     expect(metadata.exports).toHaveProperty('ProjectWorkspace');
+    expect(metadata.observability).toEqual({
+      enabled: true,
+      logs: { enabled: true, head_sampling_rate: 0.6 },
+    });
   });
 
   test('creates the Sandbox container application in the user account', async () => {

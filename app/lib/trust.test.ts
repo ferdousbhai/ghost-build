@@ -50,10 +50,28 @@ describe('public trust contract', () => {
 
   it('publishes the standard vulnerability-discovery file', () => {
     const securityTxt = readFileSync('public/.well-known/security.txt', 'utf8');
+    const staticHeaders = readFileSync('public/_headers', 'utf8');
     expect(securityTxt).toContain(`Contact: ${GHOSTBUILD_SECURITY_URL}`);
     expect(securityTxt).toContain('Canonical: https://ghostbuild.dev/.well-known/security.txt');
     expect(securityTxt).toContain('Policy: https://ghostbuild.dev/security');
     expect(securityTxt).toContain('Preferred-Languages: en');
+    expect(staticHeaders).toContain('/.well-known/security.txt');
+    expect(staticHeaders).toContain('Content-Type: text/plain; charset=utf-8');
+  });
+
+  it('keeps private vulnerability reporting as the only documented security-report path', () => {
+    const policy = readFileSync('SECURITY.md', 'utf8');
+    const issueConfig = parse(readFileSync('.github/ISSUE_TEMPLATE/config.yml', 'utf8')) as {
+      blank_issues_enabled?: boolean;
+      contact_links?: Array<{ name?: string; url?: string }>;
+    };
+
+    expect(policy).toContain(GHOSTBUILD_SECURITY_URL);
+    expect(policy).not.toContain('open a public issue containing no vulnerability details');
+    expect(issueConfig.blank_issues_enabled).toBe(false);
+    expect(issueConfig.contact_links?.find((link) => link.name === 'Report a security vulnerability')?.url).toBe(
+      GHOSTBUILD_SECURITY_URL,
+    );
   });
 });
 

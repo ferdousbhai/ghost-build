@@ -215,9 +215,7 @@ export async function provisionCloudflareWorkspaceRuntimeAction(args: {
     ) {
       return Response.json({ error: 'Invalid workspace runtime request.' }, { status: 400 });
     }
-    console.error('User-owned Cloudflare workspace runtime provisioning failed', {
-      error: error instanceof Error ? error.message : String(error),
-    });
+    console.error('User-owned Cloudflare workspace runtime provisioning failed');
     return Response.json(
       { error: error instanceof Error ? error.message : 'Cloudflare workspace runtime provisioning failed.' },
       { status: 502 },
@@ -631,6 +629,6 @@ function cloudflareIntegrationErrorResponse(error: unknown): Response {
   if (error instanceof z.ZodError) {
     return Response.json({ error: 'Invalid Cloudflare authorization response.' }, { status: 502 });
   }
-  console.error('Cloudflare authorization failed', error);
+  console.error('Cloudflare authorization failed');
   return Response.json({ error: 'Cloudflare authorization failed.' }, { status: 500 });
 }

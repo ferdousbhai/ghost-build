@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "reviewedAgainstCommit": "working-tree-2026-08-04",
   "policyStatus": "engineering inventory; the 2026-08-04 public-beta notice adopts enforced lifetimes and active-account/verified-request retention criteria, while complete account lifecycle tooling, jurisdiction-specific legal holds, and external-resource disposition remain explicit limitations",
   "systems": [
@@ -51,6 +51,32 @@
       "currentDeletion": "project-scoped teardown is not exposed as an account-wide operation"
     },
     {
+      "system": "Cloudflare Workers AI inference and AI Gateway request path",
+      "owner": "user Cloudflare account; Cloudflare processes inference as the infrastructure provider",
+      "categories": [
+        "prompts and conversation context needed for the request",
+        "relevant project files and tool definitions",
+        "model responses and usage metadata"
+      ],
+      "secrets": "Ghostbuild disables AI Gateway request logging at the gateway, model-request, and request-header layers; credentials and capability secrets must never be model inputs",
+      "currentRetention": "Workers AI transiently processes request content to perform inference under Cloudflare's service controls; Ghostbuild does not enable AI Gateway request logging and does not use AI Gateway to retain request payloads or request metadata; transcript and project copies remain in their separately inventoried stores",
+      "currentExport": "there is no AI Gateway log export because request logging is disabled; persisted transcript and project records are subject to the separate incomplete account-export process",
+      "currentDeletion": "there is no Ghostbuild AI Gateway request log to delete; persisted source records and provider handling remain subject to their separately described controls"
+    },
+    {
+      "system": "User-owned workspace runtime and Computer observability",
+      "owner": "user Cloudflare account",
+      "categories": [
+        "60%-sampled workspace Worker invocation and diagnostic logs",
+        "runtime, project, status, timing, binding, and exception metadata",
+        "enabled Computer container operational logs"
+      ],
+      "secrets": "prompts, source code, credentials, capability tokens, and raw tool output are not intended log fields and must be excluded from deliberate diagnostic events",
+      "currentRetention": "logs remain in the connected Cloudflare account under that account's plan, product settings, permissions, and Cloudflare retention controls; Ghostbuild does not copy them into the operator-account log store",
+      "currentExport": "not included in a Ghostbuild account export; the user controls access through the connected Cloudflare account and its available provider tools",
+      "currentDeletion": "project or runtime teardown does not immediately erase provider-retained logs; Cloudflare account controls and retention boundaries govern their removal"
+    },
+    {
       "system": "Browser storage",
       "owner": "user device",
       "categories": [
@@ -75,6 +101,33 @@
       "currentDeletion": "retained in the user Cloudflare account; deployment approval, Terms, and Privacy state that resources may continue to incur charges until the user removes them"
     },
     {
+      "system": "User-owned generated-application observability",
+      "owner": "user Cloudflare account",
+      "categories": [
+        "60%-sampled generated-application Worker invocation and diagnostic logs",
+        "5%-sampled generated-application Worker traces",
+        "request, response, timing, binding, and exception metadata produced by the generated application"
+      ],
+      "secrets": "the user controls generated-application behavior and must avoid logging credentials, personal data, or unnecessary request and application content",
+      "currentRetention": "logs, traces, and aggregate metrics remain in the connected Cloudflare account under that account's plan, product settings, permissions, and Cloudflare retention controls; Ghostbuild does not copy them into the operator-account log or trace store",
+      "currentExport": "not included in a Ghostbuild account export; the user controls access and any available export through the connected Cloudflare account",
+      "currentDeletion": "deployment removal does not immediately erase provider-retained observability; the user and Cloudflare account controls govern deletion, and Cloudflare automatically expires retained records at applicable boundaries"
+    },
+    {
+      "system": "GitHub support, abuse, and private security intake",
+      "owner": "Ghostbuild operator GitHub repository",
+      "categories": [
+        "GitHub account and issue or report metadata",
+        "public support and abuse issue content and attachments",
+        "private vulnerability report content and attachments",
+        "response and repository audit history"
+      ],
+      "secrets": "public support and abuse forms instruct requesters not to submit credentials, personal data, exploit details, or sensitive project content; vulnerability details belong only in GitHub private vulnerability reporting",
+      "currentRetention": "public issues and private vulnerability reports remain under GitHub policies and repository controls while needed for support, safety, security, fraud prevention, legal compliance, or claims",
+      "currentExport": "no Ghostbuild self-service export exists; public issues are publicly readable, private reports are limited by GitHub repository permissions, and manual requests remain subject to identity verification and provider controls",
+      "currentDeletion": "the operator may minimize or remove records through available GitHub controls when no longer needed, subject to provider behavior and lawful retention exceptions"
+    },
+    {
       "system": "Cloudflare Email Routing and HEY contact mailbox",
       "owner": "Ghostbuild operator",
       "categories": [
@@ -89,7 +142,7 @@
       "currentDeletion": "no case data is expected before activation; once activated, deletion is handled manually subject to identity verification, provider controls, and lawful retention exceptions"
     },
     {
-      "system": "Cloudflare Worker observability",
+      "system": "Ghostbuild control-plane Worker observability",
       "owner": "Ghostbuild operator Cloudflare account",
       "categories": [
         "sampled request method and path, Cloudflare request metadata, response status, timing, binding activity, and diagnostic metadata",
@@ -99,7 +152,7 @@
         "transient Cloudflare client IP used as the 60-second telemetry rate-limit key"
       ],
       "secrets": "telemetry requests omit browser credentials; prompts, code, credentials, tokens, URLs, user identifiers, raw tool output, and the client IP rate-limit key are rejected or omitted from the application event log",
-      "currentRetention": "the client IP keys the configured 60-second rate-limit window; the verified production plan retains sampled Workers Logs and traces for seven days, aggregate Worker metrics can remain up to three months, and Ghostbuild has no Logpush destination or tail consumer and does not copy logs or traces to another store",
+      "currentRetention": "the client IP keys the configured 60-second rate-limit window; the verified production plan retains 60%-sampled control-plane Workers Logs and 5%-sampled traces for seven days, aggregate Worker metrics can remain up to three months, and Ghostbuild has no Logpush destination or tail consumer and does not copy logs or traces to another store",
       "currentExport": "no self-service account export exists",
       "currentDeletion": "Cloudflare automatically deletes logs at the plan retention boundary; application telemetry payloads contain no account identifier; an August 4, 2026 readback showed access limited to the sole account administrator"
     }
