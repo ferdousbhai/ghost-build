@@ -3,4 +3,19 @@
   <url>
     <loc>https://ghostbuild.dev/</loc>
   </url>
+  <url>
+    <loc>https://ghostbuild.dev/privacy</loc>
+  </url>
+  <url>
+    <loc>https://ghostbuild.dev/terms</loc>
+  </url>
+  <url>
+    <loc>https://ghostbuild.dev/support</loc>
+  </url>
+  <url>
+    <loc>https://ghostbuild.dev/abuse</loc>
+  </url>
+  <url>
+    <loc>https://ghostbuild.dev/security</loc>
+  </url>
 </urlset>

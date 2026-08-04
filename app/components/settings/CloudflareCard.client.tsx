@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button } from '~/components/ui/primitives/Button';
-import { signInWithCloudflare } from '~/lib/auth-client';
+import { resolveCloudflareSetupContinuation, signInWithCloudflare } from '~/lib/auth-client';
 
 type ConnectionStatus = {
   connected: boolean;
@@ -177,6 +177,11 @@ function WorkspaceRuntimeSetup({
         <p className="mt-1 text-xs text-content-tertiary">
           Workspace files and execution stay in this connected Cloudflare account.
         </p>
+        <div className="mt-3">
+          <Button href={resolveCloudflareSetupContinuation()} size="xs" variant="primary">
+            Continue building
+          </Button>
+        </div>
       </div>
     );
   }

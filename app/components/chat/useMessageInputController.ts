@@ -6,7 +6,7 @@ import { WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
 import { showWorkersPaidRequiredToast } from '~/lib/workers-paid.client';
 import { captureException } from '~/lib/telemetry.client';
 import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
-import { signInWithCloudflare } from '~/lib/auth-client';
+import { createCloudflareSetupCallbackURL, signInWithCloudflare } from '~/lib/auth-client';
 import { messageInputStore } from '~/lib/stores/messageInput';
 import { getAuthToken } from '~/lib/stores/sessionId';
 import { debounce } from '~/utils/debounce';
@@ -61,7 +61,7 @@ export function useMessageInputController({
   const signIn = useCallback(async () => {
     preservePromptForAuthentication(input);
     try {
-      await signInWithCloudflare();
+      await signInWithCloudflare(createCloudflareSetupCallbackURL());
     } catch (error) {
       captureException('Failed to start Cloudflare authorization', error, { level: 'error' });
       toast.error(error instanceof Error ? error.message : 'Unable to connect Cloudflare. Please try again.');

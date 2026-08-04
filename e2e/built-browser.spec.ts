@@ -27,6 +27,7 @@ function collectBrowserDiagnostics(page: Page, testInfo: TestInfo, allowExpected
 
 test('hydrates the built landing page without replacing meaningful SSR content', async ({ page }, testInfo) => {
   const assertClean = collectBrowserDiagnostics(page, testInfo);
+  await page.setViewportSize({ width: 320, height: 800 });
 
   await page.goto('/');
 
@@ -34,6 +35,7 @@ test('hydrates the built landing page without replacing meaningful SSR content',
   await expect(page.getByRole('heading', { name: /If you can dream it/i })).toBeVisible();
   await expect(page.getByPlaceholder(/Describe the app, workflow, and data/i)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connect Cloudflare' }).first()).toBeVisible();
+  expect(await page.locator('header').evaluate((header) => header.scrollWidth <= header.clientWidth)).toBe(true);
   await assertClean();
 });
 

@@ -201,7 +201,7 @@ function verifyScripts(errors, pkg, label) {
     'typecheck',
     'validate',
     'validate:agent',
-    'validate:launch',
+    'validate:public-beta',
     'validate:root',
     'validate:template',
     'verify:production-config',
@@ -240,7 +240,7 @@ function verifyScripts(errors, pkg, label) {
       'pnpm install --frozen-lockfile',
       'scripts/check-workers-builds-environment.mjs',
       'validate',
-      'git diff --exit-code',
+      'scripts/deploy-production.mjs --check-workers-builds',
     ]),
   );
   errors.push(

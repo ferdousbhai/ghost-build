@@ -78,6 +78,37 @@ export async function signInWithCloudflare(callbackURL = window.location.href) {
   window.location.assign(payload.authorizationUrl);
 }
 
+export function createCloudflareSetupCallbackURL(
+  continueURL = window.location.href,
+  origin = window.location.origin,
+): string {
+  const expectedOrigin = new URL(origin).origin;
+  let continuation = '/';
+  try {
+    const requested = new URL(continueURL, expectedOrigin);
+    if (requested.origin === expectedOrigin) {
+      continuation =
+        requested.pathname === '/settings'
+          ? resolveCloudflareSetupContinuation(requested.search)
+          : `${requested.pathname}${requested.search}${requested.hash}`;
+    }
+  } catch {
+    // An invalid or external continuation falls back to the public builder.
+  }
+
+  const callback = new URL('/settings', expectedOrigin);
+  callback.searchParams.set('continue', continuation);
+  callback.hash = 'cloudflare';
+  return callback.toString();
+}
+
+export function resolveCloudflareSetupContinuation(search = window.location.search): string {
+  const continuation = new URLSearchParams(search).get('continue');
+  return continuation && continuation.length <= 2_048 && continuation.startsWith('/') && !continuation.startsWith('//')
+    ? continuation
+    : '/';
+}
+
 export async function signOutOfGhostbuild(callbackURL = window.location.origin) {
   const response = await fetch('/api/auth/sign-out', { method: 'POST', credentials: 'same-origin' });
   if (!response.ok) {

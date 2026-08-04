@@ -92,14 +92,16 @@ function HomepageLoadingFallback() {
       <div className="ghost-home-grid">
         <section className="ghost-home-copy min-w-0" aria-labelledby="loading-intro">
           <div>
+            <p className="ghost-home-beta">Public beta · Cloudflare Computer preview</p>
             <h1 id="loading-intro" className="ghost-home-title">
               If you can dream it,
               <br />
               <span>the ghost will build it. ✨</span>
             </h1>
-            <p className="ghost-home-lede">Turn a simple prompt into a real, shareable Cloudflare project.</p>
+            <p className="ghost-home-lede">Turn a simple prompt into a shareable Cloudflare project in your account.</p>
             <p className="ghost-home-ownership">
-              Your Cloudflare account owns the workspace, and every production deploy waits for your approval.
+              Your Cloudflare account owns the workspace, and every production deploy waits for your approval. Requires
+              Workers Paid and Containers.
             </p>
           </div>
           <div

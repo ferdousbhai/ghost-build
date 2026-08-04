@@ -83,6 +83,18 @@ describe('server Agent routing boundary', () => {
     expect(tanstackFetch).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ['HTTP', 'http://ghostbuild.dev/share?from=http', 'https://ghostbuild.dev/share?from=http'],
+    ['www', 'https://www.ghostbuild.dev/share?from=www', 'https://ghostbuild.dev/share?from=www'],
+  ])('redirects the production %s origin to canonical HTTPS before routing', async (_label, source, destination) => {
+    const response = await server.fetch(new Request(source), {} as Env);
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get('Location')).toBe(destination);
+    expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    expect(tanstackFetch).not.toHaveBeenCalled();
+  });
+
   it('prevents cached HTML from retaining stale hashed asset references', async () => {
     tanstackFetch.mockResolvedValueOnce(
       new Response('<html></html>', {

@@ -1,10 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
-import { createLaunchCandidateTrustPageHead } from '~/lib/trust';
+import { createPublicBetaTrustPageHead } from '~/lib/trust';
 
 export const Route = createFileRoute('/privacy')({
   head: () =>
-    createLaunchCandidateTrustPageHead({
+    createPublicBetaTrustPageHead({
       title: 'Privacy | Ghostbuild',
       description: 'How Ghostbuild handles account, workspace, deployment, and product data.',
       path: '/privacy',
@@ -87,12 +87,12 @@ function PrivacyPage() {
           your responsibility to download, remove, or clear.
         </p>
         <p>
-          Request handling, identity verification, response targets, escalation ownership, and any legally required
-          extension process remain subject to owner and qualified counsel approval before launch.
+          Public-beta requests are handled manually without a promised response time. Do not put sensitive information
+          in the public issue; a request may not be actionable until a private identity-verification path is arranged.
         </p>
         <p>
-          Legal-hold and final retention exceptions have not been approved. Any future exception must be documented here
-          before launch and limited to what applicable law requires.
+          Retention may be extended when applicable law requires it. Material changes to the current retention approach
+          will be documented here.
         </p>
       </TrustSection>
 

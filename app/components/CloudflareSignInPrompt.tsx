@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ArrowLeftIcon } from '@radix-ui/react-icons';
 import { BrandLink } from '~/components/BrandLink';
 import { Button } from '@ui/Button';
-import { signInWithCloudflare } from '~/lib/auth-client';
+import { createCloudflareSetupCallbackURL, signInWithCloudflare } from '~/lib/auth-client';
 import { TrustLinks } from '~/components/trust/TrustLinks';
 
 export function CloudflareSignInPrompt({
@@ -21,7 +21,7 @@ export function CloudflareSignInPrompt({
     setConnecting(true);
     setError(null);
     try {
-      await signInWithCloudflare(window.location.href);
+      await signInWithCloudflare(createCloudflareSetupCallbackURL());
     } catch (connectionError) {
       setError(connectionError instanceof Error ? connectionError.message : 'Unable to connect Cloudflare.');
       setConnecting(false);

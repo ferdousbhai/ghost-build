@@ -65,8 +65,7 @@ export const Route = createRootRoute({
       },
       { name: 'application-name', content: 'Ghostbuild' },
       { name: 'color-scheme', content: 'light dark' },
-      { name: 'theme-color', content: '#fff9fc', media: '(prefers-color-scheme: light)' },
-      { name: 'theme-color', content: '#18101e', media: '(prefers-color-scheme: dark)' },
+      { name: 'theme-color', content: '#18101e' },
     ],
     links: [
       {

@@ -1,10 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
-import { GHOSTBUILD_SECURITY_URL, TRUST_CHANNEL_STATUS, createLaunchCandidateTrustPageHead } from '~/lib/trust';
+import { GHOSTBUILD_SECURITY_URL, TRUST_CHANNEL_STATUS, createPublicBetaTrustPageHead } from '~/lib/trust';
 
 export const Route = createFileRoute('/security')({
   head: () =>
-    createLaunchCandidateTrustPageHead({
+    createPublicBetaTrustPageHead({
       title: 'Security | Ghostbuild',
       description: 'Privately report a Ghostbuild vulnerability.',
       path: '/security',
@@ -32,15 +32,12 @@ function SecurityPage() {
       </TrustSection>
       <TrustSection title="Response and disclosure">
         <p>
-          Proposed launch target, not a service-level agreement: acknowledge a private report within one business day,
-          provide an initial triage update within three business days, and coordinate disclosure after a fix is
-          available.
+          Ghostbuild does not promise a response time during public beta. If the owner responds, disclosure will be
+          coordinated after an appropriate fix is available.
         </p>
       </TrustSection>
-      <TrustSection title="Monitoring launch blocker">
-        <p>
-          <strong>Monitoring and escalation must be confirmed.</strong> {TRUST_CHANNEL_STATUS}
-        </p>
+      <TrustSection title="Public beta channel limits">
+        <p>{TRUST_CHANNEL_STATUS} Do not rely on this channel for an emergency response.</p>
       </TrustSection>
     </TrustPage>
   );

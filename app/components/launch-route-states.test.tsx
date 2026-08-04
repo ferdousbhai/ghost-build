@@ -32,12 +32,13 @@ describe('launch route states', () => {
     expect(html).toContain('Back to Ghostbuild');
   });
 
-  it('keeps mobile header controls at least 44px without changing desktop sizing', () => {
+  it('keeps the signed-out header focused on brand while the composer owns connection', () => {
     const html = renderToStaticMarkup(<Header />);
 
     expect(html).toContain('py-1.5');
     expect(html).toContain('sm:py-3');
-    expect(html).toContain('!min-h-11 sm:!min-h-7');
+    expect(html).not.toContain('Connect Cloudflare');
+    expect(html).not.toContain('Sponsor');
   });
 
   it('discloses the preview-only Cloudflare Computer dependency in settings', () => {

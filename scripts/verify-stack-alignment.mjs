@@ -298,12 +298,11 @@ export function verifyStackAlignment() {
       'verify:static-assets',
       'bundle:check',
     ]),
-    ...findMissingCommandSteps(rootPackage.scripts?.['validate:launch'], 'package.json scripts.validate:launch', [
-      'build',
-      'verify:built-ssr',
-      'verify:built-browser',
-      'test:e2e:critical',
-    ]),
+    ...findMissingCommandSteps(
+      rootPackage.scripts?.['validate:public-beta'],
+      'package.json scripts.validate:public-beta',
+      ['validate', 'verify:built-browser'],
+    ),
     ...findMissingCommandSteps(rootPackage.scripts?.['validate:template'], 'package.json scripts.validate:template', [
       'scripts/verify-template.mjs',
     ]),

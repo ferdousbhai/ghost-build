@@ -1,12 +1,12 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
-import { createLaunchCandidateTrustPageHead } from '~/lib/trust';
+import { createPublicBetaTrustPageHead } from '~/lib/trust';
 
 export const Route = createFileRoute('/terms')({
   head: () =>
-    createLaunchCandidateTrustPageHead({
+    createPublicBetaTrustPageHead({
       title: 'Terms | Ghostbuild',
-      description: 'Launch-candidate terms for using Ghostbuild and user-owned Cloudflare resources.',
+      description: 'Public-beta terms for using Ghostbuild and user-owned Cloudflare resources.',
       path: '/terms',
     }),
   component: TermsPage,
@@ -60,8 +60,8 @@ function TermsPage() {
           To the maximum extent permitted by law, Ghostbuild is provided without warranties, and the operator is not
           responsible for generated-code defects, lost data, Cloudflare charges, unavailable third-party services, or
           consequential losses. Mandatory consumer rights and liabilities that cannot lawfully be excluded remain
-          unaffected. Final governing-law, dispute, liability-cap, and operator-identification terms require owner and
-          qualified counsel approval before launch.
+          unaffected. Ghostbuild does not yet publish service-specific governing-law, dispute, or liability-cap terms;
+          this public-beta document has not been reviewed by qualified counsel.
         </p>
       </TrustSection>
       <TrustSection title="Changes and termination">

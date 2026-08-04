@@ -1,10 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
-import { GHOSTBUILD_SUPPORT_URL, TRUST_CHANNEL_STATUS, createLaunchCandidateTrustPageHead } from '~/lib/trust';
+import { GHOSTBUILD_SUPPORT_URL, TRUST_CHANNEL_STATUS, createPublicBetaTrustPageHead } from '~/lib/trust';
 
 export const Route = createFileRoute('/support')({
   head: () =>
-    createLaunchCandidateTrustPageHead({
+    createPublicBetaTrustPageHead({
       title: 'Support | Ghostbuild',
       description: 'Get product, account, and privacy help for Ghostbuild.',
       path: '/support',
@@ -26,22 +26,19 @@ function SupportPage() {
           </a>
         </p>
         <p>
-          Proposed launch target, not a service-level agreement: acknowledge support and account-help requests within
-          three business days. Public GitHub issues are visible to everyone; remove personal data, prompts, source code,
-          tokens, and Cloudflare account identifiers.
+          Public GitHub issues are visible to everyone. Remove personal data, prompts, source code, tokens, and
+          Cloudflare account identifiers. Ghostbuild does not promise a response time during public beta.
         </p>
       </TrustSection>
       <TrustSection title="Account and privacy help">
         <p>
           For access, correction, portability, deletion, or account recovery, choose the Account and privacy category in
-          the support form. Ghostbuild may need to verify control of the active Cloudflare identity before acting.
+          the support form without posting private details. Ghostbuild may need a private follow-up path to verify
+          control of the active Cloudflare identity before acting; that path is not currently guaranteed.
         </p>
       </TrustSection>
-      <TrustSection title="Launch blocker">
-        <p>
-          <strong>Monitored-channel confirmation is pending.</strong> {TRUST_CHANNEL_STATUS} Response targets and
-          escalation ownership must be approved before launch.
-        </p>
+      <TrustSection title="Public beta channel limits">
+        <p>{TRUST_CHANNEL_STATUS} Do not use a public issue for urgent or sensitive account requests.</p>
       </TrustSection>
     </TrustPage>
   );

@@ -24,7 +24,17 @@ export function TrustFooter({ className = '' }: { className?: string }) {
     <footer className={`border-t border-bolt-elements-borderColor p-4 sm:px-6 ${className}`}>
       <div className="mx-auto flex w-full max-w-[880px] flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-content-tertiary">
-          Ghostbuild is open source. Customer Cloudflare accounts own generated resources.
+          <a className="underline underline-offset-4" href="https://github.com/ferdousbhai/ghost-build">
+            Open source
+          </a>{' '}
+          ·{' '}
+          <a
+            className="underline underline-offset-4"
+            href="https://github.com/sponsors/ferdousbhai?metadata_campaign=ghostbuild-app"
+          >
+            Sponsor
+          </a>{' '}
+          · Your Cloudflare account owns generated resources.
         </p>
         <TrustLinks />
       </div>

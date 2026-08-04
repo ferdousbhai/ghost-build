@@ -11,6 +11,14 @@ dated, time-bounded beta-risk acceptance after every go/no check below passes.
 Any beta-risk acceptance expires no later than **2026-08-18** and must be
 renewed against the then-current upstream release and production evidence.
 
+## Active beta-risk acceptance
+
+The launch owner accepted the `@cloudflare/computer@0.1.1` preview risk for a
+public beta on **2026-08-04**. This acceptance expires on **2026-08-18**. It
+does not represent an upstream stability guarantee or approval for a broader
+production-readiness claim. Recheck the installed release and every go/no-go
+item before renewal.
+
 ## Mutable control
 
 The `launch_controls.cloudflare_computer` D1 row is checked before issuing a
@@ -40,10 +48,17 @@ Full beta access:
 
 ```sh
 pnpm exec wrangler d1 execute ghostbuild --remote --command \
-  "UPDATE launch_controls SET mode = 'all', cohort_basis_points = 10000, updated_at = unixepoch() * 1000 WHERE key = 'cloudflare_computer'"
+  "UPDATE launch_controls SET mode = 'all', cohort_basis_points = 10000, updated_at = unixepoch() * 1000 WHERE key = 'cloudflare_computer' AND mode = 'off' AND cohort_basis_points = 0 AND cohort_salt = 'ghostbuild-computer-launch-v1'; SELECT changes() AS changed_rows"
 ```
 
-Read the row back after every write. Never change `cohort_salt` during a live
+Require `changed_rows = 1`, then read the exact row back after every write:
+
+```sh
+pnpm exec wrangler d1 execute ghostbuild --remote --command \
+  "SELECT key, mode, cohort_basis_points, cohort_salt, updated_at FROM launch_controls WHERE key = 'cloudflare_computer'"
+```
+
+Never change `cohort_salt` during a live
 cohort experiment because that reshuffles every assignment.
 
 ## Go/no-go checks

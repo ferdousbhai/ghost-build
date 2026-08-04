@@ -80,6 +80,20 @@ html.dark {
   padding-top: clamp(24px, 7vh, 72px);
 }
 
+.ghost-home-beta {
+  display: inline-flex;
+  margin: 0 0 14px;
+  border: 1px solid color-mix(in srgb, var(--ghost-home-accent) 34%, var(--ghost-home-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ghost-home-accent) 8%, transparent);
+  color: var(--ghost-home-muted);
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .ghost-home-title {
   max-width: 780px;
   color: var(--ghost-home-ink);

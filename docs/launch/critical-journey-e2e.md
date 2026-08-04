@@ -1,13 +1,15 @@
 # Critical-journey browser gate
 
-`pnpm run verify:built-browser` complements `verify:built-ssr`: it starts the built Worker with Vite preview and drives
-Chromium through hydrated home, signed-out private routes, 404 handling, and desktop/mobile layout. That credential-free
+`pnpm run validate:public-beta` is the safe, credential-free release preflight. It runs the complete repository
+validation and then starts the built Worker with Vite preview to drive Chromium through hydrated home, signed-out
+private routes, 404 handling, and desktop/mobile layout. That credential-free
 gate retains failure screenshots, traces, video, and attached console/page/network diagnostics under `test-results/`
 and `playwright-report/`. The authenticated journey disables those raw browser artifacts because they can contain live
 cookies, prompts, generated code, preview URLs, and deployment identifiers; its release evidence is the redacted line
-report and operator checklist. Install the required browser once with `pnpm run test:e2e:install`. The deterministic
-built-browser gate and authenticated candidate journey are both required by `pnpm run validate:launch`; regular
-repository validation remains independent of isolated account credentials.
+report and operator checklist. Install the required browser once with `pnpm run test:e2e:install`.
+
+The authenticated journey is intentionally separate because it creates billable Cloudflare resources and has no safe
+automatic cleanup contract. Never hide it inside a general validation command.
 
 `pnpm run test:e2e:critical` is the authenticated launch journey. It intentionally fails rather than skips when these
 isolated-staging inputs are absent:
@@ -17,7 +19,13 @@ isolated-staging inputs are absent:
   ignored `playwright/.auth/`; never commit or upload it.
 - `E2E_STAGING_ACCOUNT`: the exact 32-character Cloudflare account ID. The suite reads the authenticated connection and
   refuses to continue unless it matches.
+- `E2E_CANDIDATE_SHA`: the exact lowercase 40-character release commit SHA. The suite reads `/api/version` and refuses
+  to continue against any other deployment.
 - Optional `E2E_BUILD_PROMPT`: a deterministic prompt maintained with the staging fixture.
+
+Before prompting, the journey also requires the connected workspace runtime to be current and ready and requires a
+successful runtime-session response. These cheap checks prevent an expensive journey from starting against a stale or
+incomplete Computer installation.
 
 The candidate journey has a one-hour whole-test budget because validation, preview, and deployment each cross isolated
 Cloudflare build/runtime boundaries. The deterministic built-browser smoke keeps the normal 60-second Playwright

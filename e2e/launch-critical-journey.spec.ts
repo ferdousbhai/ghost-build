@@ -16,16 +16,33 @@ test('authenticated build, edit, preview, approval, and production journey', asy
   const environment = requireCriticalJourneyEnvironment();
   const prompt = process.env.E2E_BUILD_PROMPT ?? 'Build a one-page launch checklist with durable task status.';
 
+  const versionResponse = await page.request.get('/api/version');
+  expect(versionResponse.ok()).toBe(true);
+  const version = (await versionResponse.json()) as { sha?: string };
+  if (version.sha !== environment.candidateSha) {
+    throw new Error('The authenticated journey origin does not serve the exact release candidate.');
+  }
+
   const connectionResponse = await page.request.get('/api/cloudflare/connection');
   expect(connectionResponse.ok()).toBe(true);
-  const connection = (await connectionResponse.json()) as { accountId?: string };
+  const connection = (await connectionResponse.json()) as {
+    accountId?: string;
+    workspaceRuntime?: { status?: string; current?: boolean };
+  };
   if (connection.accountId !== environment.stagingAccountId) {
     throw new Error('The authenticated Cloudflare connection does not match the isolated staging account.');
+  }
+  if (connection.workspaceRuntime?.status !== 'ready' || connection.workspaceRuntime.current !== true) {
+    throw new Error('The isolated Cloudflare Computer runtime is not ready for the current release candidate.');
+  }
+  const runtimeSessionResponse = await page.request.get('/api/cloudflare/runtime-session');
+  if (!runtimeSessionResponse.ok()) {
+    throw new Error('The isolated Cloudflare Computer runtime session preflight failed.');
   }
 
   await page.goto('/');
   await page.getByPlaceholder(/Describe the app, workflow, and data/i).fill(prompt);
-  await page.getByRole('button', { name: /Send prompt/i }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
 
   await expect(page).toHaveURL(/\/chat\//, { timeout: 30_000 });
   await expect(page.getByText('Project validation passed')).toBeVisible({ timeout: 10 * 60_000 });
@@ -70,6 +87,7 @@ function requireCriticalJourneyEnvironment() {
     ['E2E_BASE_URL', process.env.E2E_BASE_URL],
     ['E2E_AUTH_STORAGE_STATE', authStatePath],
     ['E2E_STAGING_ACCOUNT', process.env.E2E_STAGING_ACCOUNT],
+    ['E2E_CANDIDATE_SHA', process.env.E2E_CANDIDATE_SHA],
   ]
     .filter(([, value]) => !value)
     .map(([name]) => name);
@@ -93,7 +111,11 @@ function requireCriticalJourneyEnvironment() {
   if (!/^[a-f0-9]{32}$/i.test(stagingAccountId)) {
     throw new Error('E2E_STAGING_ACCOUNT must be the exact 32-character Cloudflare staging account ID.');
   }
-  return { stagingAccountId };
+  const candidateSha = process.env.E2E_CANDIDATE_SHA!;
+  if (!/^[a-f0-9]{40}$/.test(candidateSha)) {
+    throw new Error('E2E_CANDIDATE_SHA must be the exact lowercase 40-character release commit SHA.');
+  }
+  return { candidateSha, stagingAccountId };
 }
 
 function validatedAuthStatePath(value: string | undefined): string | undefined {

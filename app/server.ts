@@ -16,6 +16,7 @@ import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudfl
 
 const APPLICATION_CSP_BASELINE = "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
 const HSTS_MIN_AGE_SECONDS = '31536000';
+const PRODUCTION_HOSTNAME = 'ghostbuild.dev';
 
 function methodNotAllowed(allowedMethod: string) {
   return Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: allowedMethod } });
@@ -160,7 +161,16 @@ const exactRoutes: Record<string, ServerRoute> = {
 
 export default {
   async fetch(request: Request, env: Env) {
-    const pathname = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    if (
+      (url.hostname === PRODUCTION_HOSTNAME || url.hostname === `www.${PRODUCTION_HOSTNAME}`) &&
+      (url.protocol !== 'https:' || url.hostname !== PRODUCTION_HOSTNAME)
+    ) {
+      url.protocol = 'https:';
+      url.hostname = PRODUCTION_HOSTNAME;
+      return withApplicationSecurityHeaders(Response.redirect(url, 308), url.pathname);
+    }
+    const pathname = url.pathname;
     return withApplicationSecurityHeaders(await routeApplicationRequest(request, env), pathname);
   },
   scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {

@@ -76,7 +76,7 @@ export function findWorkersBuildsConfigErrors({
       'pnpm install --frozen-lockfile',
       'node scripts/check-workers-builds-environment.mjs',
       'pnpm run validate',
-      'git diff --exit-code',
+      'node scripts/deploy-production.mjs --check-workers-builds',
     ].join(' && '),
   );
   requireEqual(

@@ -1,10 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
-import { GHOSTBUILD_ABUSE_URL, TRUST_CHANNEL_STATUS, createLaunchCandidateTrustPageHead } from '~/lib/trust';
+import { GHOSTBUILD_ABUSE_URL, TRUST_CHANNEL_STATUS, createPublicBetaTrustPageHead } from '~/lib/trust';
 
 export const Route = createFileRoute('/abuse')({
   head: () =>
-    createLaunchCandidateTrustPageHead({
+    createPublicBetaTrustPageHead({
       title: 'Report abuse | Ghostbuild',
       description: 'Report harmful or prohibited use of Ghostbuild.',
       path: '/abuse',
@@ -26,9 +26,8 @@ function AbusePage() {
           </a>
         </p>
         <p>
-          Proposed launch target, not a service-level agreement: acknowledge urgent abuse reports within one business
-          day and other reports within three business days. The form is public. Do not post credentials, private
-          personal data, exploit details, or confidential project content.
+          The form is public. Do not post credentials, private personal data, exploit details, or confidential project
+          content. Ghostbuild does not promise a response time during public beta.
         </p>
       </TrustSection>
       <TrustSection title="Cloudflare-hosted resources">
@@ -38,11 +37,8 @@ function AbusePage() {
           resources. You may also need to use Cloudflare’s abuse reporting process.
         </p>
       </TrustSection>
-      <TrustSection title="Launch blocker">
-        <p>
-          <strong>Monitored-channel confirmation is pending.</strong> {TRUST_CHANNEL_STATUS} Abuse escalation ownership
-          must be approved before launch.
-        </p>
+      <TrustSection title="Public beta channel limits">
+        <p>{TRUST_CHANNEL_STATUS} Do not rely on this form for an emergency response.</p>
       </TrustSection>
     </TrustPage>
   );
