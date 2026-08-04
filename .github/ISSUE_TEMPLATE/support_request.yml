@@ -1,5 +1,5 @@
 name: Support request
-description: Get product, account, export, deletion, or privacy help
+description: Get product help or start an account or privacy request without sensitive details
 title: '[Support]: '
 labels:
   - support
@@ -8,17 +8,22 @@ body:
     attributes:
       value: >-
         This issue is public. Do not include prompts, source code, Cloudflare account IDs, credentials, tokens,
-        personal data, or vulnerability details. Use private vulnerability reporting for security issues.
+        personal data, or vulnerability details. For an account or privacy request, include only the request type and
+        your GitHub handle. If a private method can be arranged, a maintainer will identify it in the issue; until then,
+        do not provide sensitive information. Ghostbuild aims to review and acknowledge reports within two weekdays, but
+        this is not a guarantee or contractual service level. For immediate danger contact local emergency services. For
+        a compromised Cloudflare account use
+        https://developers.cloudflare.com/support/contacting-cloudflare-support/.
   - type: dropdown
     id: category
     attributes:
       label: Category
       options:
         - Product help
-        - Account and privacy
-        - Data export
-        - Account deletion
         - Cloudflare connection
+        - Cloudflare billing boundary
+        - Account or privacy request (request type only)
+        - Other non-sensitive question
     validations:
       required: true
   - type: textarea

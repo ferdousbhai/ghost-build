@@ -67,7 +67,7 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
         window.location.pathname = '/';
       }
     } catch (error) {
-      toast.error('Failed to delete conversation');
+      toast.error('Failed to remove project');
       logger.error(error);
     }
   };
@@ -186,19 +186,26 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
           {deleteTarget && (
             <ConfirmationDialog
               onClose={closeDialog}
-              confirmText="Delete"
+              confirmText="Remove"
               onConfirm={() => {
                 void deleteItem(deleteTarget);
                 closeDialog();
               }}
-              dialogTitle="Delete project"
+              dialogTitle="Remove project"
               dialogBody={
-                <p>
-                  You are about to delete{' '}
-                  <ProjectTitle className="font-medium text-content-primary">
-                    {deleteTarget.description || 'Untitled project'}
-                  </ProjectTitle>
-                </p>
+                <div className="space-y-2">
+                  <p>
+                    You are about to remove{' '}
+                    <ProjectTitle className="font-medium text-content-primary">
+                      {deleteTarget.description || 'Untitled project'}
+                    </ProjectTitle>
+                    .
+                  </p>
+                  <p className="text-content-secondary">
+                    This removes it from your project list and schedules workspace cleanup. It does not remove deployed
+                    Cloudflare resources or every retained record. See the <a href="/privacy">Privacy notice</a>.
+                  </p>
+                </div>
               }
             />
           )}

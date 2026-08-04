@@ -2,12 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('privacy-safe client telemetry', () => {
   const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
-  const storage = new Map<string, string>();
+  const sessionStorage = new Map<string, string>();
+  const localStorage = new Map<string, string>();
 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    storage.clear();
+    sessionStorage.clear();
+    localStorage.clear();
+    localStorage.set('ghostbuild:telemetry:preference', 'enabled');
     fetchMock.mockResolvedValue(new Response(null, { status: 202 }));
     vi.stubGlobal('navigator', { doNotTrack: '0', globalPrivacyControl: false });
     vi.stubGlobal('window', {
@@ -16,8 +19,12 @@ describe('privacy-safe client telemetry', () => {
         pathname: '/chat/private-project',
       },
       sessionStorage: {
-        getItem: (key: string) => storage.get(key) ?? null,
-        setItem: (key: string, value: string) => storage.set(key, value),
+        getItem: (key: string) => sessionStorage.get(key) ?? null,
+        setItem: (key: string, value: string) => sessionStorage.set(key, value),
+      },
+      localStorage: {
+        getItem: (key: string) => localStorage.get(key) ?? null,
+        setItem: (key: string, value: string) => localStorage.set(key, value),
       },
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -73,6 +80,16 @@ describe('privacy-safe client telemetry', () => {
     await captureProductEvent('landing_viewed');
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('requires an explicit product telemetry opt-in', async () => {
+    localStorage.delete('ghostbuild:telemetry:preference');
+    const { captureProductEvent } = await import('./telemetry.client');
+
+    await captureProductEvent('landing_viewed');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sessionStorage.size).toBe(0);
   });
 
   it('uses a credential-free keepalive request', async () => {

@@ -3,9 +3,9 @@ contact_links:
   - name: Report a security vulnerability
     url: https://github.com/ferdousbhai/ghost-build/security/advisories/new
     about: Send vulnerability details privately according to SECURITY.md.
-  - name: Product and account support
+  - name: Product support
     url: https://github.com/ferdousbhai/ghost-build/issues/new?template=support_request.yml
-    about: Ask for product, account, export, deletion, or privacy help without including private data.
+    about: Ask a non-sensitive product, Ghostbuild sign-in, or privacy question.
   - name: Report abuse
     url: https://github.com/ferdousbhai/ghost-build/issues/new?template=abuse_report.yml
     about: Report harmful or prohibited use. Do not include vulnerability details or secrets.

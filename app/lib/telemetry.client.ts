@@ -11,6 +11,7 @@ type TelemetryContext = {
 
 const TELEMETRY_ENDPOINT = '/api/client-telemetry';
 const JOURNEY_STORAGE_KEY = 'ghostbuild:telemetry:journey';
+const TELEMETRY_PREFERENCE_STORAGE_KEY = 'ghostbuild:telemetry:preference';
 const ONCE_PER_JOURNEY_EVENTS = new Set<ProductTelemetryEvent>([
   'landing_viewed',
   'cloudflare_connect_started',
@@ -37,6 +38,9 @@ export async function captureException(
 }
 
 export async function captureProductEvent(event: ProductTelemetryEvent, context?: TelemetryContext): Promise<void> {
+  if (!productTelemetryEnabled()) {
+    return;
+  }
   if (ONCE_PER_JOURNEY_EVENTS.has(event) && !claimOncePerJourney(event)) {
     return;
   }
@@ -47,7 +51,7 @@ async function emitTelemetry(
   event: ClientTelemetryEvent | ProductTelemetryEvent,
   context: TelemetryContext = {},
 ): Promise<void> {
-  if (!telemetryEnabled()) {
+  if (!productTelemetryEnabled()) {
     return;
   }
   const level = context.level ?? 'info';
@@ -88,12 +92,16 @@ function validMetric(value: number | undefined): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
-function telemetryEnabled(): boolean {
+export function productTelemetryEnabled(): boolean {
   const privacyNavigator = navigator as Navigator & { globalPrivacyControl?: boolean };
   if (privacyNavigator.globalPrivacyControl === true || privacyNavigator.doNotTrack === '1') {
     return false;
   }
-  return safeSessionStorageGet('ghostbuild:telemetry:disabled') !== 'true';
+  return safeLocalStorageGet(TELEMETRY_PREFERENCE_STORAGE_KEY) === 'enabled';
+}
+
+export function setProductTelemetryEnabled(enabled: boolean): void {
+  safeLocalStorageSet(TELEMETRY_PREFERENCE_STORAGE_KEY, enabled ? 'enabled' : 'disabled');
 }
 
 function journeyId(): string {
@@ -126,6 +134,22 @@ function safeSessionStorageGet(key: string): string | null {
 function safeSessionStorageSet(key: string, value: string): void {
   try {
     window.sessionStorage?.setItem(key, value);
+  } catch {
+    // Storage can be unavailable in privacy-restricted browser contexts.
+  }
+}
+
+function safeLocalStorageGet(key: string): string | null {
+  try {
+    return window.localStorage?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function safeLocalStorageSet(key: string, value: string): void {
+  try {
+    window.localStorage?.setItem(key, value);
   } catch {
     // Storage can be unavailable in privacy-restricted browser contexts.
   }

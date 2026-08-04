@@ -45,12 +45,16 @@ const LazyExistingChat = lazy(() =>
 const LazySettingsContent = lazy(() =>
   import('~/components/SettingsContent.client').then((mod) => ({ default: mod.SettingsContent })),
 );
+const LazyTelemetryPreference = lazy(() =>
+  import('~/components/trust/TelemetryPreference.client').then((mod) => ({ default: mod.TelemetryPreference })),
+);
 
 const getClientAppProviders = createClientOnlyFn(() => LazyAppProviders);
 const getClientHeader = createClientOnlyFn(() => LazyHeader);
 const getClientHomepage = createClientOnlyFn(() => LazyHomepage);
 const getClientExistingChat = createClientOnlyFn(() => LazyExistingChat);
 const getClientSettingsContent = createClientOnlyFn(() => LazySettingsContent);
+const getClientTelemetryPreference = createClientOnlyFn(() => LazyTelemetryPreference);
 
 export const ClientAppProviders = createClientComponent<{ children: ReactNode }>(
   getClientAppProviders,
@@ -70,6 +74,7 @@ export const ClientExistingChat = createClientComponent<{ chatId: string }>(getC
 export const ClientSettingsContent = createClientComponent<EmptyProps>(getClientSettingsContent, () => (
   <Loading message="Loading settings…" />
 ));
+export const ClientTelemetryPreference = createClientComponent<EmptyProps>(getClientTelemetryPreference);
 
 function HeaderLoadingFallback() {
   return (

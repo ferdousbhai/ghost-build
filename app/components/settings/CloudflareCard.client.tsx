@@ -142,9 +142,10 @@ export function CloudflareCard() {
       <p className="mt-3 text-xs text-content-tertiary">
         Computer workspaces, Sandboxes, previews, validation, builds, and generated apps run in your Cloudflare account.
         Ghostbuild&apos;s control plane retains account and session records, encrypted Cloudflare authorization and
-        connection metadata, runtime locators, and privacy-filtered operational events. Workers Paid is never enabled
-        automatically; your account must already support Containers. Ghostbuild currently uses Cloudflare Computer
-        0.1.1, which Cloudflare publishes as a preview with an unstable API and does not designate for production use.
+        connection metadata and runtime locators, plus optional browser product telemetry if you opt in. Workers Paid is
+        never enabled automatically; your account must already support Containers. Ghostbuild currently uses Cloudflare
+        Computer 0.1.1, which Cloudflare publishes as a preview with an unstable API and does not designate for
+        production use.
       </p>
       <p className="mt-2 text-xs text-content-tertiary">
         See{' '}

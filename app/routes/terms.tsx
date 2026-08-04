@@ -6,7 +6,7 @@ export const Route = createFileRoute('/terms')({
   head: () =>
     createPublicBetaTrustPageHead({
       title: 'Terms | Ghostbuild',
-      description: 'Public-beta terms for using Ghostbuild and user-owned Cloudflare resources.',
+      description: 'Public-beta terms for using Ghostbuild and customer-controlled Cloudflare resources.',
       path: '/terms',
     }),
   component: TermsPage,
@@ -16,27 +16,51 @@ function TermsPage() {
   return (
     <TrustPage
       eyebrow="Terms"
-      title="You approve the build. You own the cloud bill."
-      summary="Ghostbuild generates and operates project code inside the Cloudflare account you authorize. Production deployment always requires your explicit approval."
+      title="You approve the build. You control the cloud account."
+      summary="These terms govern the Ghostbuild public beta. The service can generate and operate project code inside the Cloudflare account you authorize, and production deployment requires your explicit approval."
     >
-      <TrustSection title="Service and account">
+      <TrustSection title="Operator, acceptance, and eligibility">
         <p>
-          You must be able to form a binding agreement and must keep your Cloudflare account secure. You authorize
-          Ghostbuild only for the scopes shown during connection. You remain responsible for activity, configuration,
-          and charges in your Cloudflare account.
+          Ghostbuild is operated by the owner of the{' '}
+          <a href="https://github.com/ferdousbhai">ferdousbhai GitHub account</a>, which maintains the{' '}
+          <a href="https://github.com/ferdousbhai/ghost-build">Ghostbuild repository</a>. These Terms form an agreement
+          between you and the operator. By connecting Cloudflare or using the signed-in service, you agree to these
+          Terms. You must be at least 18, able to form a binding agreement, and authorized to act for any organization
+          or Cloudflare account you use.
         </p>
       </TrustSection>
-      <TrustSection title="Generated code and Cloudflare resources">
+      <TrustSection title="Public-beta service and account access">
         <p>
-          Generated code may contain mistakes, security issues, or unsuitable dependencies. Review, test, and monitor it
-          before relying on it. You own or control the generated project and all Workers, D1 databases, R2 buckets,
-          Containers, Durable Objects, Agents, and related resources deployed into your Cloudflare account, subject to
-          Cloudflare’s terms and third-party licenses.
+          Ghostbuild is currently a free public beta. It uses AI and preview Cloudflare technology to generate,
+          validate, preview, and deploy applications. You authorize only the Cloudflare scopes shown during connection
+          and must keep your Ghostbuild and Cloudflare access secure. Cloudflare may separately charge your account for
+          inference, storage, builds, network use, and deployed infrastructure. Ghostbuild does not automatically enable
+          Workers Paid.
+        </p>
+      </TrustSection>
+      <TrustSection title="Your inputs and generated output">
+        <p>
+          You keep your rights in prompts, files, and other material you provide. You give Ghostbuild a limited license
+          to host, copy, transmit, and transform that material only as needed to provide, secure, troubleshoot, and
+          maintain the service. You must have the rights and permissions needed to provide it.
         </p>
         <p>
-          Ghostbuild does not automatically enable Workers Paid. Cloudflare may charge your account for inference,
-          storage, builds, network use, and deployed infrastructure. Deleting Ghostbuild-held account data does not
-          delete resources in your Cloudflare account.
+          As between you and Ghostbuild, Ghostbuild claims no ownership in generated project output. AI output may not
+          be unique or legally protectable and may be affected by third-party rights, open-source licenses, and service
+          terms. Similar output may be generated for others.
+        </p>
+      </TrustSection>
+      <TrustSection title="Generated applications and Cloudflare resources">
+        <p>
+          Generated code may contain mistakes, security issues, or unsuitable dependencies. Review, test, and monitor it
+          before relying on it. Workers, D1 databases, R2 buckets, Containers, Durable Objects, Agents, and related
+          resources are created in, controlled through, and billed to your Cloudflare account, subject to Cloudflare’s
+          terms and third-party licenses.
+        </p>
+        <p>
+          You are responsible for the applications you publish, including their content, users, security, monitoring,
+          legal notices, data handling, and compliance. Removing a project or Ghostbuild-held account data does not
+          remove resources from your Cloudflare account.
         </p>
       </TrustSection>
       <TrustSection title="Acceptable use">
@@ -49,27 +73,58 @@ function TermsPage() {
       </TrustSection>
       <TrustSection title="Beta and availability">
         <p>
-          Ghostbuild is pre-release software provided on an as-available basis. The builder depends on Cloudflare
-          services, including Cloudflare Computer 0.1.1, which Cloudflare publishes as a preview with an unstable API
-          and does not designate for production use. Features may fail, change incompatibly, or become unavailable. No
-          uptime or support service level is promised.
+          Ghostbuild is pre-release software provided on an as-available basis. It depends on Cloudflare and other
+          third-party services, including preview technology with changing interfaces. Features may fail, change
+          incompatibly, lose data, or become unavailable. No uptime, support, or emergency-response service level is
+          promised.
         </p>
       </TrustSection>
-      <TrustSection title="Warranty and responsibility">
+      <TrustSection title="Suspension, termination, and data">
         <p>
-          To the maximum extent permitted by law, Ghostbuild is provided without warranties, and the operator is not
-          responsible for generated-code defects, lost data, Cloudflare charges, unavailable third-party services, or
-          consequential losses. Mandatory consumer rights and liabilities that cannot lawfully be excluded remain
-          unaffected. Ghostbuild does not yet publish service-specific governing-law, dispute, or liability-cap terms;
-          this public-beta document has not been reviewed by qualified counsel.
+          You may stop using Ghostbuild at any time and revoke its Cloudflare access. Ghostbuild may limit or suspend
+          access when reasonably necessary for security, abuse prevention, legal compliance, service integrity, or a
+          material breach of these Terms. Notice will be provided when reasonably practical. Removal from Ghostbuild
+          does not remove customer-controlled Cloudflare resources, and the retention boundaries in the{' '}
+          <a href="/privacy">Privacy notice</a> continue to apply.
         </p>
       </TrustSection>
-      <TrustSection title="Changes and termination">
+      <TrustSection title="Warranty and liability">
         <p>
-          Material changes will be published with a new version and proposed effective date. You may stop using the
-          service, revoke Cloudflare access, download individual project source, or contact{' '}
-          <a href="/support">Support</a> about account data. Ghostbuild may suspend access for security, abuse, legal,
-          or platform-integrity reasons.
+          To the maximum extent permitted by law, Ghostbuild is provided “as is” and “as available,” without implied
+          warranties of merchantability, fitness for a particular purpose, non-infringement, or uninterrupted operation.
+          You are responsible for reviewing generated code, maintaining backups, and controlling spending in your
+          Cloudflare account.
+        </p>
+        <p>
+          If you use Ghostbuild mainly for a trade, business, craft, or profession, then to the maximum extent permitted
+          by law the operator will not be liable for indirect, incidental, special, consequential, exemplary, or
+          punitive damages, or for lost profits, revenue, data, goodwill, or business interruption. For those business
+          users, the operator’s aggregate liability arising from the service will not exceed the greater of US$100 and
+          the amount paid directly to Ghostbuild during the 12 months before the event giving rise to the claim.
+        </p>
+        <p>
+          If you use Ghostbuild as a consumer, your remedies and the operator’s liability are governed by the mandatory
+          law that applies to you. The business-user exclusions and cap above do not replace those rights. Nothing in
+          these Terms excludes liability for fraud, wilful misconduct, or any other liability that cannot lawfully be
+          excluded or limited.
+        </p>
+      </TrustSection>
+      <TrustSection title="Applicable law and disputes">
+        <p>
+          These Terms do not take away mandatory rights available where you live. Applicable law and courts are
+          determined by the conflict-of-law and jurisdiction rules that govern you and the operator. You may use{' '}
+          <a href="/support">Support</a> to try to resolve a concern before filing a claim, but doing so is not a
+          condition on any remedy or urgent relief available under applicable law.
+        </p>
+      </TrustSection>
+      <TrustSection title="Changes, notices, and general terms">
+        <p>
+          Changes apply prospectively. Material changes will be published with an updated version and effective date,
+          and Ghostbuild will provide reasonable advance notice through the service when the change may adversely affect
+          users. You may stop using Ghostbuild and revoke its Cloudflare authorization before the new terms take effect.
+          Continued signed-in use after the effective date accepts the updated Terms where applicable law permits. If
+          any provision is unenforceable, the rest remains effective, and a failure to enforce a provision is not a
+          waiver. Use <a href="/support">Support</a> for notices or questions.
         </p>
       </TrustSection>
     </TrustPage>

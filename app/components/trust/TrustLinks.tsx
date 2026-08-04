@@ -34,7 +34,7 @@ export function TrustFooter({ className = '' }: { className?: string }) {
           >
             Sponsor
           </a>{' '}
-          · Your Cloudflare account owns generated resources.
+          · Your Cloudflare account controls generated resources.
         </p>
         <TrustLinks />
       </div>

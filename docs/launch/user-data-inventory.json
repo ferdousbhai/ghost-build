@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "reviewedAgainstCommit": "working-tree-2026-08-04",
-  "policyStatus": "engineering inventory only; retention, legal-hold, and external-resource disposition require owner and counsel approval before launch",
+  "policyStatus": "engineering inventory; the 2026-08-04 public-beta notice draft discloses current retention gaps, but definitive retention, legal-hold, and external-resource disposition still require explicit owner approval",
   "systems": [
     {
       "system": "Ghostbuild control-plane D1",
@@ -16,7 +16,7 @@
       "secrets": "OAuth tokens are encrypted; ciphertext, IVs, session token hashes, and credential handles must never be exported",
       "currentRetention": "Expired authentication and OAuth metadata is pruned by scheduled maintenance; no approved retention or legal-hold schedule exists for other records",
       "currentExport": "no self-service account export exists; users can download individual project source and contact Support about a privacy or account-data request",
-      "currentDeletion": "no self-service account deletion exists; users can delete individual projects, revoke Cloudflare authorization, and contact Support about deletion of reachable Ghostbuild-held control-plane data"
+      "currentDeletion": "no self-service account deletion exists; users can remove individual projects, revoke Cloudflare authorization, and start a sanitized public Support request about deletion of reachable Ghostbuild-held control-plane data; no dedicated confidential privacy inbox exists"
     },
     {
       "system": "User-owned workspace runtime D1",
@@ -57,7 +57,8 @@
         "OPFS account-local chat/transcript replicas",
         "theme preference",
         "pending prompt in tab-scoped session storage",
-        "asset-recovery and telemetry journey session state"
+        "asset-recovery and telemetry journey session state",
+        "optional product-telemetry preference"
       ],
       "secrets": "the pending prompt can contain user content; it remains in tab-scoped session storage and the retired prompt cookie is expired when the message input loads",
       "currentRetention": "browser-controlled; pending-prompt and recovery session state lasts until the tab session ends, while OPFS and local storage persist until cleared or replaced",

@@ -16,8 +16,8 @@ function SupportPage() {
   return (
     <TrustPage
       eyebrow="Support"
-      title="Get help in the open."
-      summary="Use the structured GitHub support form for product, billing-boundary, account, export, or deletion questions. Never include credentials or private project data."
+      title="Get help through the right channel."
+      summary="Use the public GitHub form for non-sensitive product, Ghostbuild sign-in, or privacy questions. Never include credentials, account details, or private project data."
     >
       <TrustSection title="Open a support request">
         <p>
@@ -27,18 +27,28 @@ function SupportPage() {
         </p>
         <p>
           Public GitHub issues are visible to everyone. Remove personal data, prompts, source code, tokens, and
-          Cloudflare account identifiers. Ghostbuild does not promise a response time during public beta.
+          Cloudflare account identifiers. Ghostbuild aims to review and acknowledge a support request within two
+          weekdays. This is a public-beta target, not a guarantee, contractual service level, or resolution deadline.
         </p>
       </TrustSection>
-      <TrustSection title="Account and privacy help">
+      <TrustSection title="Account and privacy requests">
         <p>
-          For access, correction, portability, deletion, or account recovery, choose the Account and privacy category in
-          the support form without posting private details. Ghostbuild may need a private follow-up path to verify
-          control of the active Cloudflare identity before acting; that path is not currently guaranteed.
+          Start with the public support form and include only the request type and your GitHub handle. If a private
+          method can be arranged, a maintainer will identify it in the issue; until then, do not provide sensitive
+          information. Ghostbuild does not yet provide a dedicated confidential support or privacy inbox, so never place
+          identity documents, account details, or other private information in the issue. Applicable statutory deadlines
+          govern privacy-rights requests regardless of the public-beta target above.
         </p>
       </TrustSection>
-      <TrustSection title="Public beta channel limits">
-        <p>{TRUST_CHANNEL_STATUS} Do not use a public issue for urgent or sensitive account requests.</p>
+      <TrustSection title="Availability and urgent situations">
+        <p>{TRUST_CHANNEL_STATUS}</p>
+        <p>
+          Ghostbuild support is not an emergency service. For immediate danger, contact local emergency services. For a
+          compromised Cloudflare account or an active Cloudflare platform incident, use{' '}
+          <a href="https://developers.cloudflare.com/support/contacting-cloudflare-support/">Cloudflare support</a>. Use{' '}
+          <a href="/abuse">Report abuse</a> for harmful content and <a href="/security">Security</a> for a
+          vulnerability.
+        </p>
       </TrustSection>
     </TrustPage>
   );

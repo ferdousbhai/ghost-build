@@ -87,7 +87,7 @@ export function HistoryItem({ item, handleDeleteClick }: HistoryItemProps) {
               }}
             />
             <ChatActionButton
-              toolTipContent="Delete"
+              toolTipContent="Remove"
               icon={<TrashIcon />}
               onClick={() => {
                 handleDeleteClick(item);

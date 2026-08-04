@@ -8,7 +8,10 @@ body:
     attributes:
       value: >-
         This issue is public. Do not include credentials, private personal data, exploit details, or confidential
-        project content. Report security vulnerabilities through GitHub private vulnerability reporting.
+        project content. Do not download, copy, or attach suspected illegal imagery. Use https://abuse.cloudflare.com/
+        for sensitive evidence or live Cloudflare-hosted abuse, and report security vulnerabilities privately. Ghostbuild
+        aims to review and acknowledge reports within two weekdays, but this is not a guarantee, contractual service
+        level, or emergency-response service. For immediate danger contact local emergency services.
   - type: dropdown
     id: category
     attributes:

@@ -64,3 +64,34 @@ test('keeps the built 404 and mobile shell usable', async ({ page }, testInfo) =
   );
   await assertClean();
 });
+
+test('renders the public trust routes and persists the telemetry choice', async ({ page }, testInfo) => {
+  const assertClean = collectBrowserDiagnostics(page, testInfo);
+  const routes = [
+    ['/terms', 'You approve the build. You control the cloud account.'],
+    ['/support', 'Get help through the right channel.'],
+    ['/abuse', 'Report harmful use through the right channel.'],
+    ['/security', 'Keep vulnerability details private.'],
+  ] as const;
+
+  for (const [path, heading] of routes) {
+    await page.goto(path);
+    await expect(page.getByRole('heading', { name: heading })).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+    ).toBe(true);
+  }
+
+  await page.goto('/privacy');
+  await expect(page.getByRole('heading', { name: 'How Ghostbuild handles your data.' })).toBeVisible();
+  await expect(page.getByText('Product telemetry is disabled on this browser.')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Allow telemetry' }).click();
+  await expect(page.getByText('Product telemetry is enabled on this browser.')).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('Product telemetry is enabled on this browser.')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Disable telemetry' }).click();
+  await expect(page.getByText('Product telemetry is disabled on this browser.')).toBeVisible();
+  await assertClean();
+});

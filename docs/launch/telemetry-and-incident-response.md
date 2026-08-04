@@ -9,10 +9,11 @@ Browsers send `POST /api/client-telemetry` using a credential-free keepalive fet
 prompt cookies are not attached. The Worker accepts only the checked-in event enum, page class, opaque UUID
 journey/error-event IDs, status fields, and bounded non-negative metrics. The strict schema rejects extra properties.
 Prompts, generated code, URLs, user/account/project identifiers, credentials, tokens, exception messages, and raw tool
-output have no accepted field. Global Privacy Control, Do Not Track, and the browser session opt-out key
-`ghostbuild:telemetry:disabled=true` disable emission. The endpoint requires an exact same-origin browser `Origin`
-header, uses the Cloudflare-supplied client IP only as the 60-second rate-limit key, allows up to 120 requests per IP
-per minute before parsing, and caps each body at 8 KiB. The IP is not included in the application event log.
+output have no accepted field. Browser telemetry is off by default and is emitted only after the user sets
+`localStorage['ghostbuild:telemetry:preference']` to `enabled` through the Privacy-page control. Global Privacy Control
+and Do Not Track override that opt-in and disable emission. The endpoint requires an exact same-origin browser `Origin`
+header, uses the Cloudflare-supplied client IP only as the 60-second rate-limit key, allows up to 120 requests per IP per
+minute before parsing, and caps each body at 8 KiB. The IP is not included in the application event log.
 These are abuse and cost controls, not proof that an analytics event is truthful; funnel and SLO data remains
 operationally indicative rather than an authenticated ledger.
 
@@ -20,10 +21,10 @@ The launch funnel is:
 
 `landing_viewed → cloudflare_connect_started → prompt_submitted → first_tool_completed → validation_succeeded → preview_ready → deployment_approval_presented → deployment_approved → deployment_succeeded`
 
-Operational failures use the existing typed event names, an error level, a generic failure reason where available, and
-an opaque per-event ID. The journey ID groups events from one browser-session journey; neither identifier is an incident
-record. Cloudflare Worker logs are the current ingestion store. `app/lib/client-telemetry-events.test.ts` fails if a
-declared event loses every production call site.
+When browser telemetry is enabled, operational failures use the existing typed event names, an error level, a generic
+failure reason where available, and an opaque per-event ID. The journey ID groups events from one browser-session
+journey; neither identifier is an incident record. Cloudflare Worker logs are the current ingestion store.
+`app/lib/client-telemetry-events.test.ts` fails if a declared event loses every production call site.
 
 Before launch, the operator must configure a dashboard with conversion and latency by funnel stage and these initial
 engineering objectives:
@@ -54,9 +55,9 @@ groups, and deletion policy must likewise be approved and recorded; see `user-da
 4. Contain deployment incidents by stopping approvals/releases and revoking affected credentials through the normal
    Cloudflare connection controls. Never delete customer-owned Workers, D1, R2, Containers, or Agents as an inferred
    cleanup action.
-5. Communicate initial impact, affected surface, safe workaround, and next update time through the launch status and
-   support channels. Those channels and response-time commitments are blocked on issue #93 and must be filled in before
-   launch.
+5. Communicate initial impact, affected surface, safe workaround, and next update time through the published support and
+   security channels. Their business-day acknowledgement goals are operational targets, not 24/7 incident-response or
+   contractual service-level guarantees.
 6. Verify recovery using the built-browser smoke gate and the staging critical journey. Monitor one full error-budget
    window before resolving.
 7. Within two working days, write a blameless review covering timeline, detection gap, containment, customer impact,
