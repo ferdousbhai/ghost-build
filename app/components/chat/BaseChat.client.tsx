@@ -16,7 +16,6 @@ import { useStore } from '@nanostores/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { SubchatBar } from './SubchatBar';
-import { SubchatLimitNudge } from './SubchatLimitNudge';
 import { subchatQueryKey, useMutation } from '~/lib/cloudflare/data-hooks';
 import { api } from '~/lib/cloudflare/data-api';
 import { loadAllSubchats } from '~/lib/cloudflare/data-page-loader';
@@ -24,7 +23,6 @@ import { subchatIndexStore, useIsSubchatLoaded } from '~/lib/stores/subchats';
 import type { BuildProgress } from './build-progress';
 import type { SubchatSummary } from './subchat-model';
 
-const MIN_MESSAGES_FOR_SUBCHAT_NUDGE = 12;
 const Workbench = lazy(() =>
   import('~/components/workbench/Workbench.client').then((module) => ({ default: module.Workbench })),
 );
@@ -82,7 +80,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
   ) => {
     const isStreaming = isRecovering || isStreamStatusActive(streamStatus);
     const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
-    const shouldShowNudge = messages.length > MIN_MESSAGES_FOR_SUBCHAT_NUDGE;
     const createSubchat = useMutation(api.subchats.create);
     const setSubchatDescription = useMutation(api.subchats.setDescription);
     const queryClient = useQueryClient();
@@ -261,15 +258,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                     )}
                     {(!subchats || (currentSubchatIndex >= subchats.length - 1 && isSubchatLoaded)) && (
                       <>
-                        {shouldShowNudge && sessionId && (
-                          <div className="mb-4">
-                            <SubchatLimitNudge
-                              messageCount={messages.length}
-                              handleCreateSubchat={handleCreateSubchat}
-                            />
-                          </div>
-                        )}
-
                         {!disabledReason && (
                           <StreamingIndicator
                             streamStatus={streamStatus}
