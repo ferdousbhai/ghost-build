@@ -30,6 +30,38 @@ describe('WorkspaceOperationLane', () => {
     expect(recovered.recoveredOwner).toBe('owner-exec-tool-a');
   });
 
+  it('uses runtime liveness to recover an interrupted owner before its deadline', () => {
+    let active = true;
+    const storage = new TestStorage();
+    const lane = new WorkspaceOperationLane(
+      storage as never,
+      () => active,
+      (kind) => kind === 'validate',
+    );
+    lane.initialize();
+    lane.acquire(operation('validate', 'validation-a', 100, 30 * 60_000));
+
+    active = false;
+    expect(() => lane.acquire(operation('validate', 'validation-a', 200))).toThrow(
+      WorkspaceOperationIndeterminateError,
+    );
+    expect(lane.acquire(operation('validate', 'validation-b', 201))).toMatchObject({
+      recoveredOwner: 'owner-validate-validation-a',
+    });
+  });
+
+  it('keeps interrupted mutating operations leased until their deadline', () => {
+    const lane = new WorkspaceOperationLane(
+      new TestStorage() as never,
+      () => false,
+      (kind) => kind === 'validate',
+    );
+    lane.initialize();
+    lane.acquire(operation('exec', 'exec-a', 100, 30 * 60_000));
+
+    expect(() => lane.acquire(operation('write', 'write-b', 200))).toThrow(WorkspaceOperationConflictError);
+  });
+
   it('never treats a still-executing owner as stale solely because its deadline passed', () => {
     let activeOwner: string | null = 'owner-deployment-deploy-a';
     const storage = new TestStorage();

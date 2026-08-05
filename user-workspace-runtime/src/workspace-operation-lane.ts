@@ -53,6 +53,7 @@ export class WorkspaceOperationLane {
   constructor(
     private readonly storage: OperationLaneStorage,
     private readonly isOwnerActive: (owner: string) => boolean = () => false,
+    private readonly canRecoverInterruptedOwner: (kind: string) => boolean = () => false,
   ) {}
 
   initialize(): void {
@@ -84,7 +85,14 @@ export class WorkspaceOperationLane {
       const current = this.read();
       let recoveredOwner: string | null = null;
 
-      if (current.owner && current.deadline !== null && (current.deadline > now || this.isOwnerActive(current.owner))) {
+      const ownerIsActive = current.owner ? this.isOwnerActive(current.owner) : false;
+      const canRecoverBeforeDeadline =
+        !ownerIsActive && current.kind !== null && this.canRecoverInterruptedOwner(current.kind);
+      if (
+        current.owner &&
+        current.deadline !== null &&
+        (ownerIsActive || (current.deadline > now && !canRecoverBeforeDeadline))
+      ) {
         return {
           error: new WorkspaceOperationConflictError(
             current.kind ?? 'stateful operation',

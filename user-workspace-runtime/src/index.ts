@@ -324,7 +324,11 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     if (this.#toolOperations.pending().length > 0 || this.#syncRetries.state('container-shell')?.exhausted === true) {
       this.ctx.waitUntil(this.reconcilePendingCommands());
     }
-    this.#operationLane = new WorkspaceOperationLane(ctx.storage, (owner) => this.#activeOperationOwners.has(owner));
+    this.#operationLane = new WorkspaceOperationLane(
+      ctx.storage,
+      (owner) => this.#activeOperationOwners.has(owner),
+      (kind) => kind === 'validate',
+    );
     this.#operationLane.initialize();
     this.ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS ghostbuild_workspace_state (
