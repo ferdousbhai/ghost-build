@@ -822,7 +822,11 @@ describe('UserCloudflareAccountApi', () => {
     expect(metadata.bindings).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: 'CLOUDFLARE_API_TOKEN' })]),
     );
-    expect(metadata.exports).toHaveProperty('ProjectWorkspace');
+    expect(metadata.exports).toMatchObject({
+      ProjectWorkspace: { type: 'durable-object', storage: 'sqlite' },
+      BuilderAgent: { type: 'durable-object', storage: 'sqlite' },
+    });
+    expect(metadata.exports.ProjectWorkspace).not.toHaveProperty('container');
     expect(metadata.observability).toEqual({
       enabled: true,
       logs: { enabled: true, head_sampling_rate: 0.6 },

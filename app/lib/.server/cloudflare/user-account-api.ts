@@ -579,7 +579,6 @@ export class UserCloudflareAccountApi {
         ProjectWorkspace: {
           type: 'durable-object',
           storage: 'sqlite',
-          container: 'ProjectWorkspace',
         },
         BuilderAgent: {
           type: 'durable-object',
