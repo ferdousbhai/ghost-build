@@ -1,16 +1,1 @@
-export type BuilderValidationStage =
-  | 'sandbox initialization'
-  | 'source extraction'
-  | 'workspace policy verification'
-  | 'dependency installation'
-  | 'worker type generation'
-  | 'route generation'
-  | 'type checking'
-  | 'stack verification'
-  | 'license verification'
-  | 'application build'
-  | 'built output verification'
-  | 'linting'
-  | 'security boundary verification'
-  | 'build packaging'
-  | 'build download';
+export type BuilderValidationStage = 'computer validation';

@@ -75,6 +75,11 @@ type D1QueryResult = {
   results?: unknown[];
 };
 
+type D1MigrationOptions = {
+  legacyReceiptAttestations?: Readonly<Record<string, string>>;
+  trustLegacyReceiptsWithoutDigest?: boolean;
+};
+
 export class UserCloudflareAccountApi {
   constructor(
     private readonly accountId: string,
@@ -162,30 +167,53 @@ export class UserCloudflareAccountApi {
     return result as D1QueryResult[];
   }
 
-  async applyD1Migrations(databaseId: string, migrations: readonly { name: string; sql: string }[]): Promise<void> {
+  async applyD1Migrations(
+    databaseId: string,
+    migrations: readonly { name: string; sql: string }[],
+    options: D1MigrationOptions = {},
+  ): Promise<void> {
     await this.executeD1(
       databaseId,
       `CREATE TABLE IF NOT EXISTS ghostbuild_runtime_migrations (
          name TEXT PRIMARY KEY NOT NULL,
-         applied_at INTEGER NOT NULL
+         applied_at INTEGER NOT NULL,
+         digest TEXT
        )`,
     );
+    await this.ensureD1MigrationDigestColumn(databaseId);
     for (const migration of migrations) {
       if (!/^\d{4}_.+\.sql$/.test(migration.name) || !migration.sql.trim()) {
         throw new CloudflareAccountApiError('Invalid user-runtime D1 migration.');
       }
-      const read = await this.executeD1(databaseId, 'SELECT name FROM ghostbuild_runtime_migrations WHERE name = ?', [
-        migration.name,
-      ]);
-      if (read.some((result) => (result.results?.length ?? 0) > 0)) {
+      const digest = await sha256Hex(migration.sql);
+      const read = await this.executeD1(
+        databaseId,
+        'SELECT name, digest FROM ghostbuild_runtime_migrations WHERE name = ?',
+        [migration.name],
+      );
+      const receipt = d1MigrationReceipt(read, migration.name);
+      if (receipt?.digest === digest) {
+        continue;
+      }
+      if (receipt?.digest) {
+        throw new CloudflareAccountApiError(`User-runtime D1 migration digest mismatch: ${migration.name}`);
+      }
+      if (receipt) {
+        await this.attestAndUpgradeLegacyD1MigrationReceipt(
+          databaseId,
+          migration.name,
+          digest,
+          options.legacyReceiptAttestations?.[migration.name],
+          options.trustLegacyReceiptsWithoutDigest === true,
+        );
         continue;
       }
       try {
         await this.executeD1Batch(databaseId, [
           { sql: migration.sql },
           {
-            sql: 'INSERT OR IGNORE INTO ghostbuild_runtime_migrations (name, applied_at) VALUES (?, ?)',
-            params: [migration.name, Date.now()],
+            sql: 'INSERT INTO ghostbuild_runtime_migrations (name, applied_at, digest) VALUES (?, ?, ?)',
+            params: [migration.name, Date.now(), digest],
           },
         ]);
       } catch (error) {
@@ -194,14 +222,69 @@ export class UserCloudflareAccountApi {
         // transactional marker before surfacing the original failure.
         const committed = await this.executeD1(
           databaseId,
-          'SELECT name FROM ghostbuild_runtime_migrations WHERE name = ?',
+          'SELECT name, digest FROM ghostbuild_runtime_migrations WHERE name = ?',
           [migration.name],
         ).catch(() => []);
-        if (committed.some((result) => (result.results?.length ?? 0) > 0)) {
+        const committedReceipt = d1MigrationReceipt(committed, migration.name);
+        if (committedReceipt?.digest === digest) {
           continue;
+        }
+        if (committedReceipt?.digest) {
+          throw new CloudflareAccountApiError(`User-runtime D1 migration digest mismatch: ${migration.name}`);
         }
         throw error;
       }
+    }
+  }
+
+  private async ensureD1MigrationDigestColumn(databaseId: string): Promise<void> {
+    const columns = await this.executeD1(databaseId, 'PRAGMA table_info(ghostbuild_runtime_migrations)');
+    if (d1ResultsContain(columns, (row) => row.name === 'digest')) {
+      return;
+    }
+    await this.executeD1(databaseId, 'ALTER TABLE ghostbuild_runtime_migrations ADD COLUMN digest TEXT');
+  }
+
+  private async attestAndUpgradeLegacyD1MigrationReceipt(
+    databaseId: string,
+    name: string,
+    digest: string,
+    attestationSql: string | undefined,
+    trustWithoutAttestation: boolean,
+  ): Promise<void> {
+    if (!attestationSql?.trim() && !trustWithoutAttestation) {
+      throw new CloudflareAccountApiError(`User-runtime D1 migration receipt lacks a digest: ${name}`);
+    }
+    if (attestationSql?.trim()) {
+      const attestation = await this.executeD1(databaseId, attestationSql);
+      if (!d1ResultsContain(attestation, (row) => row.attested === 1)) {
+        throw new CloudflareAccountApiError(`User-runtime D1 migration schema attestation failed: ${name}`);
+      }
+    }
+    try {
+      await this.executeD1(
+        databaseId,
+        'UPDATE ghostbuild_runtime_migrations SET digest = ? WHERE name = ? AND digest IS NULL',
+        [digest, name],
+      );
+    } catch (error) {
+      const committed = await this.executeD1(
+        databaseId,
+        'SELECT name, digest FROM ghostbuild_runtime_migrations WHERE name = ?',
+        [name],
+      ).catch(() => []);
+      if (d1MigrationReceipt(committed, name)?.digest === digest) {
+        return;
+      }
+      throw error;
+    }
+    const readback = await this.executeD1(
+      databaseId,
+      'SELECT name, digest FROM ghostbuild_runtime_migrations WHERE name = ?',
+      [name],
+    );
+    if (d1MigrationReceipt(readback, name)?.digest !== digest) {
+      throw new CloudflareAccountApiError(`User-runtime D1 migration receipt upgrade failed: ${name}`);
     }
   }
 
@@ -987,6 +1070,26 @@ function requireCloudflareResourceName(name: string): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function d1ResultsContain(results: D1QueryResult[], predicate: (row: Record<string, unknown>) => boolean): boolean {
+  return results.some((result) => result.results?.some((row) => isRecord(row) && predicate(row)) === true);
+}
+
+function d1MigrationReceipt(results: D1QueryResult[], name: string): { name: string; digest: string | null } | null {
+  for (const result of results) {
+    for (const row of result.results ?? []) {
+      if (isRecord(row) && row.name === name && (typeof row.digest === 'string' || row.digest === null)) {
+        return { name, digest: row.digest };
+      }
+    }
+  }
+  return null;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function cloudflareErrorMessage(value: unknown): string | undefined {

@@ -3,7 +3,7 @@ import { useDiscardEmptyChat, useExistingInitializeChat, useHomepageInitializeCh
 import { useInitialMessages } from './useInitialMessages';
 import { useChatCheckpointSync } from './history';
 import { useCallback, useEffect, useState } from 'react';
-import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
+import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { useAllSubchats } from '~/lib/cloudflare/data-hooks';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { subchatIndexStore } from '~/lib/stores/subchats';
@@ -20,11 +20,6 @@ export function useChatHomepage(chatId: string) {
   const discardEmptyChat = useDiscardEmptyChat(chatId);
   const storeMessageHistory = useStoreMessageHistory();
   const loaded = useInitialMessages(chatInitialized ? chatId : undefined);
-  useEffect(() => {
-    if (loaded?.urlId) {
-      void navigateToChat(loaded.urlId);
-    }
-  }, [loaded?.urlId, navigateToChat]);
   useChatCheckpointSync(
     chatId,
     loaded?.loadedSubchatIndex ?? (chatInitialized ? 0 : undefined),
@@ -59,10 +54,10 @@ export function useExistingChat(chatId: string) {
   const discardEmptyChat = useDiscardEmptyChat(chatId);
   const initialMessages = useInitialMessages(chatId);
   useEffect(() => {
-    if (initialMessages?.urlId) {
-      void navigateToChat(initialMessages.urlId);
+    if (initialMessages?.loadedChatId && initialMessages.loadedChatId !== chatId) {
+      void navigateToChat(initialMessages.loadedChatId);
     }
-  }, [initialMessages?.urlId, navigateToChat]);
+  }, [chatId, initialMessages?.loadedChatId, navigateToChat]);
   useChatCheckpointSync(
     chatId,
     initialMessages?.loadedSubchatIndex,
@@ -85,12 +80,12 @@ export function useExistingChat(chatId: string) {
 }
 
 function useSubchats(chatId: string, enabled = true) {
-  const sessionId = useSessionIdOrNullOrLoading();
+  const userId = useUserIdOrNullOrLoading();
   return useAllSubchats(
-    sessionId && enabled
+    userId && enabled
       ? {
           chatId,
-          sessionId,
+          sessionId: userId,
         }
       : 'skip',
   );

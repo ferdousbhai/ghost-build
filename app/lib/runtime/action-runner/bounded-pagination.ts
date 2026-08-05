@@ -1,7 +1,6 @@
 import type { ToolResultCoverage } from 'ghostbuild-agent/tool-result';
 
 export const TOOL_PAGE_SERIALIZED_CHARACTERS = 12_000;
-const TOOL_PAGE_RECORDS = 40;
 const CURSOR_HASH_CHARACTERS = 16;
 
 type Page = {
@@ -11,27 +10,7 @@ type Page = {
   complete: boolean;
 };
 
-type RecordPage<T> = Page & { items: T[] };
 type TextPage = Page & { content: string };
-
-export function recordPage<T>(records: T[], start: number): RecordPage<T> {
-  assertOffset(start, records.length);
-  const maximumEnd = Math.min(start + TOOL_PAGE_RECORDS, records.length);
-  let end = start;
-  let serializedSize = 2;
-  while (end < maximumEnd) {
-    const recordSize = (JSON.stringify(records[end]) ?? 'null').length + (end === start ? 0 : 1);
-    if (end === start && serializedSize + recordSize > TOOL_PAGE_SERIALIZED_CHARACTERS) {
-      throw new Error('A structured result record exceeds the per-page size limit. Narrow the request.');
-    }
-    if (end > start && serializedSize + recordSize > TOOL_PAGE_SERIALIZED_CHARACTERS) {
-      break;
-    }
-    serializedSize += recordSize;
-    end += 1;
-  }
-  return { items: records.slice(start, end), start, end, total: records.length, complete: end === records.length };
-}
 
 export function textPage(content: string, start: number): TextPage {
   assertOffset(start, content.length);

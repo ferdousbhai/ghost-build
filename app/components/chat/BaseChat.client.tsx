@@ -5,7 +5,7 @@ import { MessageInput } from './MessageInput';
 import { Messages } from './Messages.client';
 import { useChatId } from '~/lib/stores/chatId';
 import { messageInputStore } from '~/lib/stores/messageInput';
-import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
+import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { classNames } from '~/utils/classNames';
 import styles from './BaseChat.module.css';
 import { DisabledChatMessageSheet } from './DisabledChatMessageSheet';
@@ -85,12 +85,12 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
     const queryClient = useQueryClient();
     const isSubchatLoaded = useIsSubchatLoaded();
     const chatId = useChatId();
-    const sessionId = useSessionIdOrNullOrLoading();
-    const activeChatContextRef = React.useRef<{ chatId: string; sessionId: string | null | undefined } | null>(null);
+    const userId = useUserIdOrNullOrLoading();
+    const activeChatContextRef = React.useRef<{ chatId: string; userId: string | null | undefined } | null>(null);
     const createSubchatPendingRef = React.useRef<symbol | null>(null);
 
     React.useEffect(() => {
-      const context = { chatId, sessionId };
+      const context = { chatId, userId };
       activeChatContextRef.current = context;
       createSubchatPendingRef.current = null;
       return () => {
@@ -99,16 +99,11 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
         }
         createSubchatPendingRef.current = null;
       };
-    }, [chatId, sessionId]);
+    }, [chatId, userId]);
 
     const handleCreateSubchat = useCallback(async (): Promise<boolean> => {
       const context = activeChatContextRef.current;
-      if (
-        !sessionId ||
-        context?.chatId !== chatId ||
-        context.sessionId !== sessionId ||
-        createSubchatPendingRef.current
-      ) {
+      if (!userId || context?.chatId !== chatId || context.userId !== userId || createSubchatPendingRef.current) {
         return false;
       }
       const attempt = Symbol('create-subchat');
@@ -117,7 +112,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       try {
         let subchatIndex: number;
         try {
-          subchatIndex = await createSubchat({ chatId, sessionId });
+          subchatIndex = await createSubchat({ chatId, sessionId: userId });
         } catch (error) {
           if (isActiveChat()) {
             toast.error(error instanceof Error ? error.message : 'Unable to create a new chat.');
@@ -128,11 +123,11 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
           return true;
         }
         try {
-          const subchats = await loadAllSubchats(chatId, sessionId);
+          const subchats = await loadAllSubchats(chatId, userId);
           if (!isActiveChat()) {
             return true;
           }
-          queryClient.setQueryData(subchatQueryKey({ chatId, sessionId }), subchats);
+          queryClient.setQueryData(subchatQueryKey({ chatId, sessionId: userId }), subchats);
         } catch (error) {
           if (isActiveChat()) {
             toast.error(
@@ -151,21 +146,21 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
           createSubchatPendingRef.current = null;
         }
       }
-    }, [createSubchat, chatId, queryClient, sessionId]);
+    }, [createSubchat, chatId, queryClient, userId]);
     const handleRenameSubchat = useCallback(
       async (title: string): Promise<boolean> => {
-        if (!sessionId) {
+        if (!userId) {
           return false;
         }
         try {
           await setSubchatDescription({
             chatId,
-            sessionId,
+            sessionId: userId,
             subchatIndex: currentSubchatIndex,
             description: title,
           });
           await queryClient.invalidateQueries({
-            queryKey: subchatQueryKey({ chatId, sessionId }),
+            queryKey: subchatQueryKey({ chatId, sessionId: userId }),
           });
           return true;
         } catch (error) {
@@ -173,7 +168,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
           return false;
         }
       },
-      [chatId, currentSubchatIndex, queryClient, sessionId, setSubchatDescription],
+      [chatId, currentSubchatIndex, queryClient, userId, setSubchatDescription],
     );
 
     const lastUserMessage = messages.findLast((message) => message.role === 'user');
@@ -216,7 +211,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                       currentSubchatIndex={currentSubchatIndex}
                       isStreaming={isStreaming}
                       chatDisabled={disabledReason !== null || messages.length === 0}
-                      sessionId={sessionId ?? null}
+                      userId={userId ?? null}
                       onSubchatTitleChange={onSubchatTitleChange}
                       handleCreateSubchat={handleCreateSubchat}
                       handleRenameSubchat={handleRenameSubchat}

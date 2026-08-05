@@ -1,6 +1,6 @@
 {
   "schemaVersion": 6,
-  "reviewedAgainstCommit": "working-tree-2026-08-04",
+  "reviewedAgainstCommit": "working-tree-2026-08-05",
   "policyStatus": "engineering inventory; the 2026-08-04 public-beta notice adopts enforced lifetimes and active-account/verified-request retention criteria, while complete account lifecycle tooling, jurisdiction-specific legal holds, and external-resource disposition remain explicit limitations",
   "systems": [
     {

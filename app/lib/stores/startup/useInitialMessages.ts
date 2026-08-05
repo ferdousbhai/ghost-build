@@ -5,9 +5,9 @@ import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { TranscriptCheckpoint, TranscriptIdentity } from 'ghostbuild-agent/transcript';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { useCachedChatTranscript } from '~/lib/cloudflare/chat-transcript-db';
-import { setKnownInitialId, setKnownUrlId } from '~/lib/stores/chatId';
+import { setKnownInitialId } from '~/lib/stores/chatId';
 import { description } from '~/lib/stores/description';
-import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
+import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import type { SerializedMessage } from './messages';
 
@@ -15,7 +15,6 @@ const logger = createScopedLogger('InitialMessages');
 
 interface InitialMessages {
   loadedChatId: string;
-  urlId?: string;
   deserialized: GhostbuildMessage[];
   loadedSubchatIndex: number;
   transcript: TranscriptIdentity;
@@ -32,13 +31,13 @@ export function useInitialMessages(chatId: string | undefined):
   | InitialMessages
   | null // not found
   | undefined {
-  const sessionId = useSessionIdOrNullOrLoading();
+  const userId = useUserIdOrNullOrLoading();
   const subchatIndex = useStore(subchatIndexStore);
-  const scope = chatId && sessionId ? `${sessionId}:${chatId}` : undefined;
+  const scope = chatId && userId ? `${userId}:${chatId}` : undefined;
   const [selection, setSelection] = useState<TranscriptSelection>();
   const activeSelection = selection?.scope === scope ? selection : undefined;
   const cached = useCachedChatTranscript(
-    sessionId,
+    userId,
     chatId && activeSelection
       ? {
           chatId,
@@ -83,9 +82,6 @@ export function useInitialMessages(chatId: string | undefined):
       return;
     }
     setKnownInitialId(transcript.initialId);
-    if (transcript.urlId) {
-      setKnownUrlId(transcript.urlId);
-    }
     description.set(transcript.description);
   }, [cached.transcript]);
 
@@ -99,7 +95,7 @@ export function useInitialMessages(chatId: string | undefined):
 
   const initialMessages = useMemo<InitialMessages | null | undefined>(() => {
     const transcript = cached.transcript;
-    if (!chatId || !sessionId || !activeSelection || cached.isLoading || transcript === undefined) {
+    if (!chatId || !userId || !activeSelection || cached.isLoading || transcript === undefined) {
       return undefined;
     }
     if (transcript.status === 'missing') {
@@ -108,13 +104,12 @@ export function useInitialMessages(chatId: string | undefined):
     const deserialized = transcript.messages.map(deserializeMessageFromStorage);
     return {
       loadedChatId: transcript.loadedChatId,
-      ...(transcript.urlId ? { urlId: transcript.urlId } : {}),
       deserialized,
       loadedSubchatIndex: transcript.loadedSubchatIndex,
       transcript: transcript.transcript,
       checkpoint: transcript.checkpoint,
     };
-  }, [activeSelection, cached.isLoading, cached.transcript, chatId, sessionId]);
+  }, [activeSelection, cached.isLoading, cached.transcript, chatId, userId]);
 
   if (initialMessages && subchatIndex !== undefined && initialMessages.loadedSubchatIndex !== subchatIndex) {
     return undefined;

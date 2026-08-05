@@ -14,7 +14,7 @@ export interface LiveSubchatTitle {
 
 export function getSubchatLabel(subchatIndex: number, description?: string): string {
   const normalizedDescription = description?.trim();
-  return normalizedDescription || (subchatIndex === 0 ? 'Initial chat' : `Feature #${subchatIndex}`);
+  return normalizedDescription || (subchatIndex === 0 ? 'Initial chat' : `Chat ${subchatIndex + 1}`);
 }
 
 export function createSubchatOptions(subchats: SubchatSummary[] | undefined): SubchatOption[] {

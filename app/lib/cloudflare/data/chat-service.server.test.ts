@@ -28,7 +28,7 @@ describe('setGeneratedDescriptionIfMissing', () => {
     ).resolves.toBe(true);
 
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining("NULLIF(TRIM(description), '') IS NULL"));
-    expect(bind).toHaveBeenCalledWith('Cloudflare Verification App', 'user-1', 'chat-1', 'chat-1');
+    expect(bind).toHaveBeenCalledWith('Cloudflare Verification App', 'user-1', 'chat-1');
   });
 
   it('does not overwrite a title that already exists', async () => {
@@ -65,7 +65,7 @@ describe('setGeneratedSubchatDescription', () => {
 
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining('SET description = ?'));
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining('UPDATE chat_transcripts'));
-    expect(bind).toHaveBeenCalledWith('Pocket Poll', 'user-1', 'chat-1', 'chat-1', 2, 'polling app');
+    expect(bind).toHaveBeenCalledWith('Pocket Poll', 'user-1', 'chat-1', 2, 'polling app');
   });
 
   it('does not replace a manual title that raced the generated title', async () => {
@@ -101,7 +101,7 @@ describe('setSubchatDescription', () => {
       }),
     ).resolves.toBeNull();
 
-    expect(bind).toHaveBeenCalledWith('My custom title', 'user-1', 'chat-1', 'chat-1', 0);
+    expect(bind).toHaveBeenCalledWith('My custom title', 'user-1', 'chat-1', 0);
   });
 });
 
@@ -142,15 +142,15 @@ describe('empty chat lifecycle', () => {
     expect(Number(statements[0].values[0]) - Number(statements[0].values[1])).toBe(AGENT_GC_GRACE_PERIOD_MS);
     expect(statements[1].query).toContain('SET is_deleted = 1');
     expect(statements[1].query).not.toContain('TRIM(description)');
-    expect(statements[1].values).toEqual(['user-1', 'chat-1', 'chat-1']);
+    expect(statements[1].values).toEqual(['user-1', 'chat-1']);
   });
 
   it('discards a titled empty chat while preserving chats with durable content', async () => {
     const database = emptyChatDatabase();
     const insertChat = database.sqlite.prepare(
       `INSERT INTO chats (
-         id, creator_id, initial_id, url_id, description, is_deleted
-       ) VALUES (?, 'owner', ?, NULL, ?, 0)`,
+         id, creator_id, initial_id, description, is_deleted
+       ) VALUES (?, 'owner', ?, ?, 0)`,
     );
     insertChat.run('empty-row', 'empty', '**Generated title**');
     insertChat.run('message-row', 'message', 'Message project');
@@ -182,7 +182,6 @@ describe('bounded chat reads', () => {
     const historyRows = ['row-c', 'row-b', 'row-a'].map((rowId) => ({
       row_id: rowId,
       initial_id: `initial-${rowId}`,
-      url_id: null,
       description: null,
       timestamp,
     }));
@@ -224,7 +223,6 @@ describe('bounded chat reads', () => {
       id: 'chat-row',
       creator_id: 'user-1',
       initial_id: 'chat',
-      url_id: null,
       description: null,
       timestamp: '2026-01-01T00:00:00.000Z',
       last_subchat_index: 2,
@@ -234,7 +232,7 @@ describe('bounded chat reads', () => {
     const prepare = vi.fn((query: string) => ({
       bind: vi.fn((...values: unknown[]) => {
         binds.push(values);
-        return query.includes('SELECT * FROM chats') ? { first } : { all };
+        return query.includes('SELECT chats.id') ? { first } : { all };
       }),
     }));
 
@@ -248,7 +246,7 @@ describe('bounded chat reads', () => {
     expect(page.nextCursor).toEqual({ subchatIndex: 1 });
     expect(prepare).toHaveBeenLastCalledWith(expect.stringContaining('LIMIT ?'));
     expect(binds).toEqual([
-      ['user-1', 'chat', 'chat'],
+      ['user-1', 'chat'],
       ['chat-row', -1, 3],
     ]);
   });
@@ -262,9 +260,6 @@ describe('chat deletion', () => {
         bind: vi.fn((...values: unknown[]) => ({
           query,
           values,
-          first: vi
-            .fn()
-            .mockResolvedValue(query.includes('SELECT * FROM chats') ? { id: 'chat-row', creator_id: 'owner' } : null),
           run: vi.fn(),
         })),
       })),
@@ -291,7 +286,6 @@ describe('transcript generation transitions', () => {
       id: 'chat-row',
       creator_id: 'user-1',
       initial_id: 'chat',
-      url_id: null,
       description: null,
       timestamp: '2026-01-01T00:00:00.000Z',
       last_subchat_index: 10_000,
@@ -367,8 +361,9 @@ function emptyChatDatabase(): { sqlite: DatabaseSync; db: D1Database } {
       id TEXT PRIMARY KEY,
       creator_id TEXT NOT NULL,
       initial_id TEXT NOT NULL,
-      url_id TEXT,
       description TEXT,
+      timestamp TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z',
+      last_subchat_index INTEGER NOT NULL DEFAULT 0,
       is_deleted INTEGER NOT NULL
     );
     CREATE TABLE chat_transcripts (
@@ -392,6 +387,7 @@ function emptyChatDatabase(): { sqlite: DatabaseSync; db: D1Database } {
   const db = {
     prepare: (query: string) => ({
       bind: (...values: unknown[]) => ({
+        first: async () => sqlite.prepare(query).get(...(values as SQLInputValue[])) ?? null,
         run: async () => {
           const result = sqlite.prepare(query).run(...(values as SQLInputValue[]));
           return { success: true, meta: { changes: Number(result.changes) } } as D1Result;
@@ -429,7 +425,6 @@ class ChatServiceDatabase {
     id: 'chat-row',
     creator_id: 'user-1',
     initial_id: 'chat',
-    url_id: null,
     description: null,
     timestamp: '2026-01-01T00:00:00.000Z',
     last_subchat_index: 2,

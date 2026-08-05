@@ -17,7 +17,7 @@
         // manual build processes
         "buildSystemPrompts.ts",
       ],
-      "project": ["**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!"],
+      "project": ["**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!", "!.ghostbuild-runtime-security-*/**"],
       "ignore": ["template/**", "app/test/cloudflare-workers-shim.ts"],
     },
     "ghostbuild-agent": {

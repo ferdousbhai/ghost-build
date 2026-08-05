@@ -2,8 +2,8 @@ import { createClientOnlyFn } from '@tanstack/react-start';
 import { ClientOnly } from '@tanstack/react-router';
 import { lazy, Suspense, type ComponentType, type ReactNode } from 'react';
 import { BrandLink } from '~/components/BrandLink';
+import { HomeHeroCopy } from '~/components/HomeHeroCopy';
 import { Loading } from '~/components/Loading';
-import { HOME_AI_DISCLOSURE } from '~/lib/trust';
 
 type MaybeComponent<TProps> = ComponentType<TProps> | undefined;
 type EmptyProps = Record<string, never>;
@@ -97,19 +97,7 @@ function HomepageLoadingFallback() {
   return (
     <div className="ghost-home-shell grow p-4 sm:px-6 lg:px-8 lg:py-5">
       <section className="ghost-home-copy min-w-0" aria-labelledby="loading-intro">
-        <div>
-          <p className="ghost-home-beta">Public beta · Cloudflare Computer preview</p>
-          <h1 id="loading-intro" className="ghost-home-title">
-            If you can dream it,
-            <br />
-            <span>the ghost will build it. ✨</span>
-          </h1>
-          <p className="ghost-home-lede">{HOME_AI_DISCLOSURE}</p>
-          <p className="ghost-home-ownership">
-            Your Cloudflare account owns the workspace, and every production deploy waits for your approval. Requires
-            Workers Paid and Containers.
-          </p>
-        </div>
+        <HomeHeroCopy headingId="loading-intro" />
         <div
           className="ghost-message-input--home mt-7 flex min-h-16 items-center px-5 text-sm text-content-secondary"
           role="status"

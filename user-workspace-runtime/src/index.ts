@@ -70,6 +70,12 @@ import { stableWorkspaceRead } from './stable-workspace-read';
 import { requireDeploymentMigrationName, requireWorkspaceFileEncoding } from './workspace-input';
 import { withCors } from './http-cors';
 import {
+  runTrackedSandboxCommand,
+  sandboxCommandFailureMessage,
+  SandboxProcessTerminationUnconfirmedError,
+  terminateTrackedSandboxProcess,
+} from './tracked-command';
+import {
   createContainerDirectoryCommand,
   createIsolatedProjectCommand,
   ISOLATED_PROJECT_ROOT,
@@ -108,6 +114,8 @@ const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.
 const INSTALL_COMMAND =
   'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/';
 const COMPUTERD_PROCESS_ID = 'ghostbuild-computerd';
+const TRANSIENT_COMMAND_PROCESS_ID = 'ghostbuild-transient-command';
+const PREVIEW_BUILD_CLEANUP_DEADLINE_MS = 30 * 60_000;
 const OPERATION_LEASE_MS = {
   seed: 10 * 60_000,
   write: 10 * 60_000,
@@ -145,6 +153,10 @@ type ActivePreviewRow = {
   snapshot_root: string;
   snapshot_revision: string;
   workspace_revision: number;
+};
+
+type PendingPreviewRow = ActivePreviewRow & {
+  expires_at: number;
 };
 
 type PreviewResultRow = {
@@ -366,6 +378,17 @@ export class ProjectWorkspace extends ComputerSandboxBase {
          snapshot_revision TEXT NOT NULL,
          workspace_revision INTEGER NOT NULL,
          activated_at INTEGER NOT NULL
+       )`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ghostbuild_pending_previews (
+         preview_id TEXT PRIMARY KEY,
+         exec_id TEXT NOT NULL,
+         port INTEGER NOT NULL,
+         snapshot_root TEXT NOT NULL,
+         snapshot_revision TEXT NOT NULL,
+         workspace_revision INTEGER NOT NULL,
+         expires_at INTEGER NOT NULL
        )`,
     );
     this.ctx.storage.sql.exec(
@@ -1069,36 +1092,30 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         const startedAt = Date.now();
         const isolatedRoot = `${ISOLATED_PROJECT_ROOT}/validation-${crypto.randomUUID()}`;
         try {
+          let cleanupAllowed = true;
           try {
-            await this.withComputer(async (workspace) => {
-              requireCommandSuccess(
-                await runCommand(
-                  workspace,
-                  createIsolatedProjectCommand({ projectRoot: PROJECT_ROOT, isolatedRoot, quote: shellQuote }),
-                  { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 2 * 60_000 },
-                ),
-              );
-              if ((await this.checkpoint()).revision !== before.revision) {
-                throw new Error('The project changed while validation was being isolated. Validate the new revision.');
-              }
-              requireCommandSuccess(await runNativeCommand(workspace, isolatedRoot, INSTALL_COMMAND, 4 * 60_000));
-              for (const command of [
-                'pnpm run typecheck',
-                'pnpm run verify:stack',
-                'pnpm run build',
-                'pnpm run lint',
-              ]) {
-                requireCommandSuccess(await runNativeCommand(workspace, isolatedRoot, command, 5 * 60_000));
-              }
-            });
+            await this.pushDurableProjectToContainer();
+            await this.runTransientCommand(
+              PROJECT_ROOT,
+              createIsolatedProjectCommand({ projectRoot: PROJECT_ROOT, isolatedRoot, quote: shellQuote }),
+              2 * 60_000,
+            );
+            if ((await this.checkpoint()).revision !== before.revision) {
+              throw new Error('The project changed while validation was being isolated. Validate the new revision.');
+            }
+            await this.runTransientCommand(isolatedRoot, INSTALL_COMMAND, 4 * 60_000);
+            for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
+              await this.runTransientCommand(isolatedRoot, command, 5 * 60_000);
+            }
+          } catch (error) {
+            cleanupAllowed = !(error instanceof SandboxProcessTerminationUnconfirmedError);
+            throw error;
           } finally {
-            await this.withComputer((workspace) =>
-              runCommand(workspace, `rm -rf ${shellQuote(isolatedRoot)}`, {
-                cwd: PROJECT_ROOT,
-                backend: 'container-shell',
-                timeoutMs: 30_000,
-              }),
-            ).catch(() => undefined);
+            if (cleanupAllowed) {
+              await this.runTransientCommand(PROJECT_ROOT, `rm -rf ${shellQuote(isolatedRoot)}`, 30_000).catch(
+                () => undefined,
+              );
+            }
           }
           const after = await this.checkpoint();
           if (after.revision !== before.revision) {
@@ -1332,7 +1349,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       ) {
         throw new WorkspaceOperationIndeterminateError('preview');
       }
-      if (replay.expires_at > Date.now()) {
+      if (replay.expires_at > Date.now() && this.activePreviewRow()?.preview_id === previewId) {
         return previewSuccess(replay);
       }
       this.ctx.storage.sql.exec('DELETE FROM ghostbuild_preview_results WHERE preview_id = ?', previewId);
@@ -1343,11 +1360,12 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       async () => {
         await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, true);
         this.requirePreviewNotCancelled(previewId);
+        await this.cleanupPendingPreviews();
         const previous = this.activePreviewRow();
         const port = previewPort(previewId, previous?.port);
         const execId = `preview-${previewId}`;
         const snapshotRoot = `${PREVIEW_SNAPSHOT_ROOT}/${previewId}`;
-        const pending: ActivePreviewRow = {
+        const candidate: ActivePreviewRow = {
           preview_id: previewId,
           exec_id: execId,
           port,
@@ -1356,65 +1374,61 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           workspace_revision: expectedWorkspaceRevision,
         };
         let published = false;
+        let cleanupAllowed = true;
         try {
-          await this.withComputer(async (workspace) => {
-            await cleanupPreviewProcess(workspace, pending);
-            requireCommandSuccess(
-              await runCommand(
-                workspace,
-                createIsolatedProjectCommand({
-                  projectRoot: PROJECT_ROOT,
-                  isolatedRoot: snapshotRoot,
-                  quote: shellQuote,
-                }),
-                {
-                  cwd: PROJECT_ROOT,
-                  backend: 'container-shell',
-                  timeoutMs: 2 * 60_000,
-                },
-              ),
-            );
-            await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
-            requireCommandSuccess(await runNativeCommand(workspace, snapshotRoot, INSTALL_COMMAND, 4 * 60_000));
-            this.requirePreviewNotCancelled(previewId);
-            requireCommandSuccess(
-              await runNativeCommand(
-                workspace,
-                snapshotRoot,
-                'pnpm exec wrangler d1 migrations apply DB --local --config wrangler.preview.jsonc',
-                60_000,
-              ),
-            );
-            requireCommandSuccess(
-              await runNativeCommand(workspace, snapshotRoot, 'pnpm run build:isolated-preview', 5 * 60_000),
-            );
-            await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
-            const handle = await workspace.runtime.exec(
-              createContainerDirectoryCommand({
-                directory: snapshotRoot,
-                command: `pnpm exec vite preview --mode ghostbuild-isolated-preview --host 0.0.0.0 --port ${port} --strictPort`,
-                quote: shellQuote,
-              }),
-              {
-                cwd: PROJECT_ROOT,
-                backend: 'container-shell',
-                env: { __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: '.trycloudflare.com,container' },
-                id: execId,
-                timeoutMs: PREVIEW_TTL_MS,
-                encoding: 'utf8',
-              },
-            );
-            handle[Symbol.dispose]();
-          });
+          const cleanupDeadline = Date.now() + PREVIEW_BUILD_CLEANUP_DEADLINE_MS;
+          this.upsertPendingPreview(candidate, cleanupDeadline);
+          await this.schedule(new Date(cleanupDeadline), 'expirePreview', { previewId });
+          await this.cleanupPreviewProcess(candidate);
+          await this.pushDurableProjectToContainer();
+          await this.runTransientCommand(
+            PROJECT_ROOT,
+            createIsolatedProjectCommand({
+              projectRoot: PROJECT_ROOT,
+              isolatedRoot: snapshotRoot,
+              quote: shellQuote,
+            }),
+            2 * 60_000,
+          );
+          await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
+          await this.runTransientCommand(snapshotRoot, INSTALL_COMMAND, 4 * 60_000);
+          this.requirePreviewNotCancelled(previewId);
+          await this.runTransientCommand(
+            snapshotRoot,
+            'pnpm exec wrangler d1 migrations apply DB --local --config wrangler.preview.jsonc',
+            60_000,
+          );
+          await this.runTransientCommand(snapshotRoot, 'pnpm run build:isolated-preview', 5 * 60_000);
+          await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
+          const expiresAt = Date.now() + PREVIEW_TTL_MS;
+          await this.schedule(new Date(expiresAt), 'expirePreview', { previewId });
+          this.upsertPendingPreview(candidate, expiresAt);
+          await this.startProcess(
+            createContainerDirectoryCommand({
+              directory: snapshotRoot,
+              command: `timeout --signal=KILL ${Math.ceil(PREVIEW_TTL_MS / 1_000)}s pnpm exec vite preview --mode ghostbuild-isolated-preview --host 0.0.0.0 --port ${port} --strictPort`,
+              quote: shellQuote,
+            }),
+            {
+              processId: execId,
+              autoCleanup: false,
+              env: { __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: '.trycloudflare.com,container' },
+            },
+          );
           await waitForHttpPort(this.ctx.container!.getTcpPort(port));
           const tunnel = await openPreviewQuickTunnel(this.tunnels, port);
           await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
           this.requirePreviewNotCancelled(previewId);
           await this.setKeepAlive(true);
-          await this.schedule(PREVIEW_TTL_MS / 1_000, 'expirePreview', { previewId });
           this.requirePreviewNotCancelled(previewId);
           const now = Date.now();
+          const previousExpiresAt = previous
+            ? (this.previewResultRow(previous.preview_id)?.expires_at ?? now + PREVIEW_TTL_MS)
+            : null;
           this.ctx.storage.transactionSync(() => {
+            if (previous && previous.preview_id !== previewId) {
+              this.upsertPendingPreview(previous, previousExpiresAt!);
+            }
             this.ctx.storage.sql.exec(
               `INSERT INTO ghostbuild_active_preview (
                singleton, preview_id, exec_id, port, snapshot_root, snapshot_revision,
@@ -1445,17 +1459,31 @@ export class ProjectWorkspace extends ComputerSandboxBase {
               expectedSnapshotRevision,
               expectedWorkspaceRevision,
               now,
-              now + PREVIEW_TTL_MS,
+              expiresAt,
             );
+            this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?', previewId);
           });
           published = true;
           if (previous && previous.preview_id !== previewId) {
-            await this.cleanupPreviewResources(previous).catch((error) =>
-              console.warn('Unable to retire the superseded ProjectWorkspace preview', {
-                previewId: previous.preview_id,
-                error: error instanceof Error ? error.message : String(error),
-              }),
-            );
+            await this.cleanupPreviewResources(previous)
+              .then(() => {
+                this.ctx.storage.transactionSync(() => {
+                  this.ctx.storage.sql.exec(
+                    'DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?',
+                    previous.preview_id,
+                  );
+                  this.ctx.storage.sql.exec(
+                    'DELETE FROM ghostbuild_preview_results WHERE preview_id = ?',
+                    previous.preview_id,
+                  );
+                });
+              })
+              .catch((error) =>
+                console.warn('Unable to retire the superseded ProjectWorkspace preview', {
+                  previewId: previous.preview_id,
+                  error: error instanceof Error ? error.message : String(error),
+                }),
+              );
           }
           return {
             id: previewId,
@@ -1463,13 +1491,21 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             workspaceRevision: expectedWorkspaceRevision,
             snapshotRevision: expectedSnapshotRevision,
             readyAt: new Date(now).toISOString(),
-            expiresAt: new Date(now + PREVIEW_TTL_MS).toISOString(),
+            expiresAt: new Date(expiresAt).toISOString(),
           };
+        } catch (error) {
+          cleanupAllowed = !(error instanceof SandboxProcessTerminationUnconfirmedError);
+          throw error;
         } finally {
-          if (!published) {
-            await this.cleanupPreviewResources(pending).catch(() => undefined);
-            if (!previous) {
-              await this.setKeepAlive(false).catch(() => undefined);
+          if (!published && cleanupAllowed) {
+            try {
+              await this.cleanupPreviewResources(candidate);
+              this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?', previewId);
+              if (!previous) {
+                await this.setKeepAlive(false).catch(() => undefined);
+              }
+            } catch {
+              // Preserve pending state and its expiry schedule for a later cleanup attempt.
             }
           }
         }
@@ -1493,15 +1529,28 @@ export class ProjectWorkspace extends ComputerSandboxBase {
        )`,
     );
     await this.withStatefulOperation('preview', `preview:stop:${previewId}`, async () => {
+      const pending = this.pendingPreviewRow(previewId);
+      if (pending) {
+        await this.cleanupPreviewResources(pending);
+        this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?', previewId);
+      }
       const row = this.activePreviewRow();
       if (row?.preview_id === previewId) {
         await this.stopActivePreview();
+      } else if (pending && !this.activePreviewRow()) {
+        await this.setKeepAlive(false).catch(() => undefined);
       }
     });
   }
 
   async expirePreview(value: unknown) {
-    await this.stopPreview(record(value).previewId);
+    const previewId = requirePreviewId(record(value).previewId);
+    try {
+      await this.stopPreview(previewId);
+    } catch (error) {
+      await this.schedule(30, 'expirePreview', { previewId });
+      throw error;
+    }
   }
 
   async prepareDeploymentArtifact(value: unknown): Promise<PreparedDeploymentArtifact> {
@@ -1533,73 +1582,69 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       const wranglerConfigPath = `${isolatedRoot}/.ghostbuild-deploy.json`;
       const artifactRoot = `${isolatedRoot}/.ghostbuild-artifact`;
       let artifact: PreparedDeploymentArtifact;
+      let cleanupAllowed = true;
       try {
-        artifact = await this.withComputer(async (workspace) => {
-          requireCommandSuccess(
-            await runCommand(
-              workspace,
-              createIsolatedProjectCommand({ projectRoot: PROJECT_ROOT, isolatedRoot, quote: shellQuote }),
-              { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 2 * 60_000 },
+        await this.pushDurableProjectToContainer();
+        await this.runTransientCommand(
+          PROJECT_ROOT,
+          createIsolatedProjectCommand({ projectRoot: PROJECT_ROOT, isolatedRoot, quote: shellQuote }),
+          2 * 60_000,
+        );
+        await this.assertDeploymentSession({ sessionId });
+        await this.runTransientCommand(isolatedRoot, INSTALL_COMMAND, 4 * 60_000);
+        for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
+          await this.runTransientCommand(isolatedRoot, command, 5 * 60_000);
+        }
+        const configWrite = await this.writeFile(
+          wranglerConfigPath,
+          JSON.stringify(
+            rebaseDeploymentConfigPaths(
+              createTrustedDeploymentConfig({ ...input, accountId, workerName, projectType }),
+              { projectRoot: PROJECT_ROOT, isolatedRoot },
             ),
-          );
-          await this.assertDeploymentSession({ sessionId });
-          requireCommandSuccess(await runNativeCommand(workspace, isolatedRoot, INSTALL_COMMAND, 4 * 60_000));
-          for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
-            requireCommandSuccess(await runNativeCommand(workspace, isolatedRoot, command, 5 * 60_000));
-          }
-          const configWrite = await this.writeFile(
-            wranglerConfigPath,
-            JSON.stringify(
-              rebaseDeploymentConfigPaths(
-                createTrustedDeploymentConfig({ ...input, accountId, workerName, projectType }),
-                { projectRoot: PROJECT_ROOT, isolatedRoot },
-              ),
-            ),
-            { encoding: 'utf-8' },
-          );
-          if (!configWrite.success) {
-            throw new Error('The isolated deployment configuration could not be written.');
-          }
-          requireCommandSuccess(
-            await runNativeCommand(
-              workspace,
-              isolatedRoot,
-              `pnpm exec wrangler deploy --dry-run --outdir ${shellQuote(artifactRoot)} --config ${shellQuote(wranglerConfigPath)}`,
-              10 * 60_000,
-            ),
-          );
-          return {
-            revision,
-            mainModule: projectType === 'worker' ? 'server.js' : 'index.js',
-            modules: await collectSandboxFiles(this, artifactRoot, (path) => /\.(?:js|mjs|wasm)$/.test(path)),
-            assets:
-              projectType === 'web_app'
-                ? await collectSandboxFiles(
-                    this,
-                    `${isolatedRoot}/dist/client`,
-                    (path) => path !== '.assetsignore' && !path.endsWith('.map'),
-                  )
+          ),
+          { encoding: 'utf-8' },
+        );
+        if (!configWrite.success) {
+          throw new Error('The isolated deployment configuration could not be written.');
+        }
+        await this.runTransientCommand(
+          isolatedRoot,
+          `pnpm exec wrangler deploy --dry-run --outdir ${shellQuote(artifactRoot)} --config ${shellQuote(wranglerConfigPath)}`,
+          10 * 60_000,
+        );
+        artifact = {
+          revision,
+          mainModule: projectType === 'worker' ? 'server.js' : 'index.js',
+          modules: await collectSandboxFiles(this, artifactRoot, (path) => /\.(?:js|mjs|wasm)$/.test(path)),
+          assets:
+            projectType === 'web_app'
+              ? await collectSandboxFiles(
+                  this,
+                  `${isolatedRoot}/dist/client`,
+                  (path) => path !== '.assetsignore' && !path.endsWith('.map'),
+                )
+              : [],
+          migrations: {
+            DB:
+              typeof input.d1DatabaseId === 'string'
+                ? await collectSandboxMigrations(this, `${isolatedRoot}/migrations`)
                 : [],
-            migrations: {
-              DB:
-                typeof input.d1DatabaseId === 'string'
-                  ? await collectSandboxMigrations(this, `${isolatedRoot}/migrations`)
-                  : [],
-              AGENT_SECURITY_DB:
-                typeof input.agentSecurityD1DatabaseId === 'string'
-                  ? await collectSandboxMigrations(this, `${isolatedRoot}/agent-security-migrations`)
-                  : [],
-            },
-          };
-        });
+            AGENT_SECURITY_DB:
+              typeof input.agentSecurityD1DatabaseId === 'string'
+                ? await collectSandboxMigrations(this, `${isolatedRoot}/agent-security-migrations`)
+                : [],
+          },
+        };
+      } catch (error) {
+        cleanupAllowed = !(error instanceof SandboxProcessTerminationUnconfirmedError);
+        throw error;
       } finally {
-        await this.withComputer((workspace) =>
-          runCommand(workspace, `rm -rf ${shellQuote(isolatedRoot)}`, {
-            cwd: PROJECT_ROOT,
-            backend: 'container-shell',
-            timeoutMs: 30_000,
-          }),
-        ).catch(() => undefined);
+        if (cleanupAllowed) {
+          await this.runTransientCommand(PROJECT_ROOT, `rm -rf ${shellQuote(isolatedRoot)}`, 30_000).catch(
+            () => undefined,
+          );
+        }
       }
       if ((await this.checkpoint()).revision !== revision) {
         throw new Error('The project changed while its deployment artifact was prepared. Validate the new revision.');
@@ -1616,6 +1661,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
 
   async deleteProject() {
     await this.withStatefulOperation('delete', 'delete:project', async () => {
+      await this.cleanupPendingPreviews();
       await this.stopActivePreview();
       await this.withComputer((workspace) => workspace.fs.rm(PROJECT_ROOT, { recursive: true, force: true }));
       this.ctx.storage.sql.exec('DELETE FROM ghostbuild_validations');
@@ -1631,7 +1677,6 @@ export class ProjectWorkspace extends ComputerSandboxBase {
 
   private async stopActivePreview() {
     const row = this.activePreviewRow();
-    this.deleteSchedules('expirePreview');
     if (row) {
       await this.cleanupPreviewResources(row);
     }
@@ -1641,7 +1686,102 @@ export class ProjectWorkspace extends ComputerSandboxBase {
 
   private async cleanupPreviewResources(row: ActivePreviewRow): Promise<void> {
     await this.tunnels.destroy(row.port).catch(() => undefined);
-    await this.withComputer((workspace) => cleanupPreviewProcess(workspace, row));
+    await this.cleanupPreviewProcess(row);
+  }
+
+  private async pushDurableProjectToContainer(): Promise<void> {
+    // Computer owns durable project state; Sandbox commands below reuse its container for transient /tmp builds.
+    // One explicit push avoids a full Computer push/pull cycle around every validation, preview, and deploy command.
+    await this.#workspace.push('container-shell');
+  }
+
+  private async runTransientCommand(directory: string, command: string, timeout: number): Promise<void> {
+    const existing = await this.getProcess(TRANSIENT_COMMAND_PROCESS_ID);
+    if (existing) {
+      const status = await existing.getStatus();
+      if (status === 'starting' || status === 'running') {
+        await terminateTrackedSandboxProcess(existing);
+      }
+    }
+    await runTrackedSandboxCommand({
+      command: createContainerDirectoryCommand({
+        directory,
+        command: `timeout --signal=KILL ${Math.ceil(timeout / 1_000)}s sh -lc ${shellQuote(command)}`,
+        quote: shellQuote,
+      }),
+      timeout,
+      processId: TRANSIENT_COMMAND_PROCESS_ID,
+      startProcess: (trackedCommand, options) => this.startProcess(trackedCommand, options),
+    });
+  }
+
+  private async cleanupPreviewProcess(row: Pick<ActivePreviewRow, 'exec_id' | 'snapshot_root'>): Promise<void> {
+    const process = await this.getProcess(row.exec_id);
+    if (process) {
+      const status = await process.getStatus();
+      if (status === 'starting' || status === 'running') {
+        await terminateTrackedSandboxProcess(process);
+      }
+    }
+    await this.runTransientCommand(PROJECT_ROOT, `rm -rf ${shellQuote(row.snapshot_root)}`, 30_000);
+  }
+
+  private async cleanupPendingPreviews(): Promise<void> {
+    for (const row of this.pendingPreviewRows()) {
+      try {
+        await this.cleanupPreviewResources(row);
+        this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?', row.preview_id);
+      } catch (error) {
+        console.warn('Unable to clean up an interrupted ProjectWorkspace preview', {
+          previewId: row.preview_id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    }
+  }
+
+  private pendingPreviewRow(previewId: string): PendingPreviewRow | null {
+    return (
+      first(
+        this.ctx.storage.sql.exec<PendingPreviewRow>(
+          `SELECT preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision, expires_at
+           FROM ghostbuild_pending_previews WHERE preview_id = ?`,
+          previewId,
+        ),
+      ) ?? null
+    );
+  }
+
+  private upsertPendingPreview(row: ActivePreviewRow, expiresAt: number): void {
+    this.ctx.storage.sql.exec(
+      `INSERT INTO ghostbuild_pending_previews (
+         preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision, expires_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(preview_id) DO UPDATE SET
+         exec_id = excluded.exec_id,
+         port = excluded.port,
+         snapshot_root = excluded.snapshot_root,
+         snapshot_revision = excluded.snapshot_revision,
+         workspace_revision = excluded.workspace_revision,
+         expires_at = excluded.expires_at`,
+      row.preview_id,
+      row.exec_id,
+      row.port,
+      row.snapshot_root,
+      row.snapshot_revision,
+      row.workspace_revision,
+      expiresAt,
+    );
+  }
+
+  private pendingPreviewRows(): PendingPreviewRow[] {
+    return [
+      ...this.ctx.storage.sql.exec<PendingPreviewRow>(
+        `SELECT preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision, expires_at
+       FROM ghostbuild_pending_previews ORDER BY expires_at`,
+      ),
+    ];
   }
 
   private activePreviewRow(): ActivePreviewRow | null {
@@ -2496,36 +2636,12 @@ function assertDeploymentSessionIdentity(
 
 function requireSandboxExecSuccess(result: { success: boolean; stdout: string; stderr: string }): void {
   if (!result.success) {
-    throw new Error(`${result.stderr}\n${result.stdout}`.trim() || 'The Sandbox bootstrap command failed.');
+    throw new Error(sandboxCommandFailureMessage(result));
   }
 }
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-function runNativeCommand(workspace: WorkspaceClient, directory: string, command: string, timeoutMs: number) {
-  return runCommand(workspace, createContainerDirectoryCommand({ directory, command, quote: shellQuote }), {
-    cwd: PROJECT_ROOT,
-    backend: 'container-shell',
-    timeoutMs,
-  });
-}
-
-async function cleanupPreviewProcess(
-  workspace: WorkspaceClient,
-  row: Pick<ActivePreviewRow, 'exec_id' | 'snapshot_root'>,
-) {
-  await workspace.runtime
-    .killExec(row.exec_id, { backend: 'container-shell', signal: 'SIGKILL' })
-    .catch(() => undefined);
-  await workspace.runtime.disposeExec(row.exec_id, { backend: 'container-shell' }).catch(() => undefined);
-  const result = await runCommand(workspace, `rm -rf ${shellQuote(row.snapshot_root)}`, {
-    cwd: PROJECT_ROOT,
-    backend: 'container-shell',
-    timeoutMs: 30_000,
-  });
-  requireCommandSuccess(result);
 }
 
 async function sha256Bytes(value: Uint8Array): Promise<string> {

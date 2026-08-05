@@ -1,9 +1,9 @@
-.actions .shiki {
+.tool-details .shiki {
   background-color: var(--bolt-elements-actions-code-background) !important;
 }
 
 .shiki {
-  &:not(:has(.actions), .actions *) {
+  &:not(:has(.tool-details), .tool-details *) {
     background-color: var(--bolt-elements-messages-code-background) !important;
   }
 }

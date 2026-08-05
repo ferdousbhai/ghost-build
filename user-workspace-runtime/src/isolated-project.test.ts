@@ -99,8 +99,9 @@ describe('isolated project command', () => {
 
     for (const operation of [validation, preview, deployment]) {
       expect(operation).toContain('createIsolatedProjectCommand');
-      expect(operation).toContain('runNativeCommand');
-      expect(operation).toContain('cwd: PROJECT_ROOT');
+      expect(operation).toContain('pushDurableProjectToContainer');
+      expect(operation).toContain('runTransientCommand');
+      expect(operation).not.toContain('workspace.runtime.exec');
       expect(operation).not.toContain('removeDerivedFiles');
     }
     expect(deployment).toContain('rebaseDeploymentConfigPaths');
@@ -108,9 +109,18 @@ describe('isolated project command', () => {
     expect(deployment).toContain('collectSandboxMigrations(this, `${isolatedRoot}/migrations`)');
     expect(preview).toContain("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: '.trycloudflare.com,container'");
     expect(preview).toContain(
-      'requireCommandSuccess(await runNativeCommand(workspace, snapshotRoot, INSTALL_COMMAND, 4 * 60_000));\n' +
-        '            this.requirePreviewNotCancelled(previewId);',
+      'await this.runTransientCommand(snapshotRoot, INSTALL_COMMAND, 4 * 60_000);\n' +
+        '          this.requirePreviewNotCancelled(previewId);',
     );
+    expect(preview).toContain('await this.startProcess(');
+    expect(source).toContain("await this.#workspace.push('container-shell')");
+    expect(source).toContain("const TRANSIENT_COMMAND_PROCESS_ID = 'ghostbuild-transient-command'");
+    const transientCommand = source.slice(
+      source.indexOf('private async runTransientCommand('),
+      source.indexOf('private async cleanupPreviewProcess('),
+    );
+    expect(transientCommand).toContain('processId: TRANSIENT_COMMAND_PROCESS_ID');
+    expect(transientCommand).not.toContain('crypto.randomUUID()');
     expect(source).toContain("(kind) => kind === 'validate' || kind === 'preview'");
     expect(source).not.toContain("cwd: '/tmp'");
     expect(source).not.toContain('cwd: isolatedRoot');

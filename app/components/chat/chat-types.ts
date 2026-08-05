@@ -17,8 +17,6 @@ export interface ChatProps {
   initializeChat: () => Promise<{ created: boolean }>;
   discardEmptyChat: () => Promise<void>;
   onBuilderRequestStart: () => void;
-  isReload: boolean;
-  hadSuccessfulDeploy: boolean;
   subchats?: SubchatSummary[];
   initialPrompt?: string;
   transcript: TranscriptIdentity;

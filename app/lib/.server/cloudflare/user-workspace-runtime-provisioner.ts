@@ -19,6 +19,10 @@ const USER_WORKSPACE_SANDBOX_IMAGE =
   'docker.io/cloudflare/sandbox:0.12.4@sha256:e83bb4d6d9748b93a4b876ce0852b5e93d8e0893da10c59d425770aef0d73738';
 const PROVISIONING_LEASE_MS = 40 * 60_000;
 
+export const LEGACY_USER_WORKSPACE_MIGRATION_ATTESTATIONS = {
+  '0001_user_workspace.sql': userWorkspaceSchemaAttestation(),
+} as const;
+
 export class UserWorkspaceRuntimeProvisioningInProgressError extends Error {
   constructor() {
     super('The project workspace is already being prepared.');
@@ -73,7 +77,9 @@ export async function provisionUserWorkspaceRuntime(args: {
   }
   try {
     const database = await accountApi.ensureD1Database(databaseName);
-    await accountApi.applyD1Migrations(database.id, USER_WORKSPACE_DATA_MIGRATIONS);
+    await accountApi.applyD1Migrations(database.id, USER_WORKSPACE_DATA_MIGRATIONS, {
+      legacyReceiptAttestations: LEGACY_USER_WORKSPACE_MIGRATION_ATTESTATIONS,
+    });
     const deployed = await accountApi.deployWorkspaceRuntimeWorker({
       workerName,
       source: USER_WORKSPACE_RUNTIME_SOURCE,
@@ -118,6 +124,40 @@ export async function provisionUserWorkspaceRuntime(args: {
     }).catch(() => undefined);
     throw error;
   }
+}
+
+function userWorkspaceSchemaAttestation(): string {
+  const initialMigration = USER_WORKSPACE_DATA_MIGRATIONS.find(({ name }) => name === '0001_user_workspace.sql');
+  if (!initialMigration) {
+    throw new Error('The initial user workspace migration is missing.');
+  }
+  const objects = initialMigration.sql
+    .split(';')
+    .map((statement) => statement.trim())
+    .filter(Boolean)
+    .map((statement) => {
+      const match = /^CREATE\s+(?:UNIQUE\s+)?(TABLE|INDEX)\s+([a-z_][a-z0-9_]*)\b/i.exec(statement);
+      if (!match) {
+        throw new Error('The initial user workspace migration contains an unsupported statement.');
+      }
+      return {
+        type: match[1]!.toLowerCase(),
+        name: match[2]!,
+        sql: statement.toLowerCase().replaceAll(/\s/g, ''),
+      };
+    });
+  const normalizeSql = `lower(replace(replace(replace(replace(sql,char(9),''),char(10),''),char(13),''),' ',''))`;
+  const objectChecks = objects.map(
+    ({ type, name, sql }) =>
+      `EXISTS (SELECT 1 FROM sqlite_schema WHERE type=${sqlLiteral(type)} AND name=${sqlLiteral(name)} AND ${normalizeSql}=${sqlLiteral(sql)})`,
+  );
+  return `SELECT CASE WHEN ${objectChecks.join('\n    AND ')}
+    AND NOT EXISTS (SELECT 1 FROM pragma_foreign_key_check)
+    THEN 1 ELSE 0 END AS attested`;
+}
+
+function sqlLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
 }
 
 function requireRuntimeCapabilities(connection: CloudflareConnection): void {

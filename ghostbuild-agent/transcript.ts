@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 export const TRANSCRIPT_HISTORY_FORMAT_VERSION = 2 as const;
 export const TRANSCRIPT_BASE_METADATA_KEY = 'ghostbuildTranscriptBase' as const;
+/** New transcripts remain generation zero; nonzero values identify deployed rewind-era objects. */
+export const CURRENT_TRANSCRIPT_GENERATION = 0 as const;
 
 export const transcriptIdentitySchema = z.object({
   agentName: z.string().min(1).max(512),
@@ -43,7 +45,7 @@ export function transcriptCheckpointsEqual(
 }
 
 export function transcriptAgentName(initialId: string, subchatIndex: number, generation: number): string {
-  if (subchatIndex === 0 && generation === 0) {
+  if (subchatIndex === 0 && generation === CURRENT_TRANSCRIPT_GENERATION) {
     return initialId;
   }
   return `${initialId}--transcript-${subchatIndex}-${generation}`;

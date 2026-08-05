@@ -25,7 +25,6 @@ import {
 import { USER_WORKSPACE_RUNTIME_SHA256 } from '~/generated/user-workspace-runtime.generated';
 import { deriveUserWorkspaceRuntimeSecret } from '~/lib/.server/cloudflare/user-workspace-runtime-secret';
 import { mintRuntimeCapability } from '~/lib/cloudflare/runtime-capability';
-import { computerRolloutUnavailableResponse, resolveComputerRollout } from '~/lib/.server/cloudflare/computer-rollout';
 import {
   CLOUDFLARE_AUTHORIZATION_ERROR_PARAM,
   CLOUDFLARE_AUTHORIZATION_ERROR_VALUE,
@@ -120,9 +119,6 @@ export async function cloudflareRuntimeSessionAction({
   const session = await getAuthSession(env, request);
   if (!session) {
     return Response.json({ error: 'Cloudflare authentication required.' }, { status: 401 });
-  }
-  if (!(await resolveComputerRollout(env.DB, session.user.id)).enabled) {
-    return computerRolloutUnavailableResponse();
   }
   const connection = await findCloudflareConnectionForUser(env.DB, session.user.id);
   if (!connection || connection.status !== 'active') {

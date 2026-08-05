@@ -7,7 +7,7 @@ import {
   ClientHomepage,
   ClientSettingsContent,
 } from './ClientRouteComponents';
-import { HOME_AI_DISCLOSURE } from '~/lib/trust';
+import { HOME_HERO_LEDE } from '~/lib/trust';
 
 describe('client route loading fallbacks', () => {
   it('renders useful homepage content before client-only chunks hydrate', () => {
@@ -20,7 +20,7 @@ describe('client route loading fallbacks', () => {
 
     expect(html).toContain('Ghostbuild');
     expect(html).toContain('If you can dream it');
-    expect(html).toContain(HOME_AI_DISCLOSURE);
+    expect(html).toContain(HOME_HERO_LEDE);
     expect(html).toContain('Loading the prompt editor');
   });
 

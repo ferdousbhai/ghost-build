@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, test } from 'vitest';
 
@@ -43,11 +43,49 @@ describe('user-owned workspace D1 schema', () => {
     });
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
   });
+
+  test('uses only the immutable initial ID for chat identity', () => {
+    const db = database();
+    const columns = db
+      .prepare('PRAGMA table_info(chats)')
+      .all()
+      .map((row) => String(row.name));
+    const indexes = db
+      .prepare("PRAGMA index_list('chats')")
+      .all()
+      .map((row) => String(row.name));
+
+    expect(columns).not.toContain('url_id');
+    expect(indexes).not.toContain('idx_chats_active_url');
+  });
+
+  test('removes the alternate URL identity without changing chat rows', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    db.exec(readFileSync('user-workspace-migrations/0001_user_workspace.sql', 'utf8'));
+    db.prepare(
+      `INSERT INTO chats (id, creator_id, initial_id, url_id, timestamp)
+       VALUES ('chat-row', 'user-1', 'initial-1', 'old-route', '2026-08-01T00:00:00.000Z')`,
+    ).run();
+
+    db.exec(readFileSync('user-workspace-migrations/0002_remove_chat_url_id.sql', 'utf8'));
+
+    expect(db.prepare('SELECT id, creator_id, initial_id FROM chats').get()).toEqual({
+      id: 'chat-row',
+      creator_id: 'user-1',
+      initial_id: 'initial-1',
+    });
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
 });
 
 function database(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON');
-  db.exec(readFileSync('user-workspace-migrations/0001_user_workspace.sql', 'utf8'));
+  for (const name of readdirSync('user-workspace-migrations')
+    .filter((name) => name.endsWith('.sql'))
+    .sort()) {
+    db.exec(readFileSync(`user-workspace-migrations/${name}`, 'utf8'));
+  }
   return db;
 }

@@ -13,6 +13,7 @@ import {
   requireDeploymentForUser,
   type Deployment,
 } from '~/lib/.server/cloudflare/deployment-repository';
+import { findChat } from '~/lib/cloudflare/data/chat-repository.server';
 import { InvalidJsonBodyError, PayloadTooLargeError, readJsonBodyWithLimit } from '~/lib/bounded-body';
 import { executeUserOwnedDeployment } from '~/lib/.server/cloudflare/user-workspace-deployment-executor';
 
@@ -85,13 +86,7 @@ async function createFreshWorkspaceDeploymentPlanForUser(args: {
   project: DeploymentProjectProfile;
 }) {
   const connection = runtimeCloudflareIdentity(args.env, args.userId);
-  const chat = await args.env.DB.prepare(
-    `SELECT id FROM chats
-     WHERE creator_id = ? AND (initial_id = ? OR url_id = ?) AND is_deleted = 0
-     LIMIT 1`,
-  )
-    .bind(args.userId, args.chatId, args.chatId)
-    .first<{ id: string }>();
+  const chat = await findChat(args.env.DB, { id: args.chatId, sessionId: args.userId });
   if (!chat) {
     throw new DeploymentChatNotFoundError();
   }

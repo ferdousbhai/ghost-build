@@ -20,7 +20,7 @@ export const AssistantMessage = memo(function AssistantMessage({ message, isStre
   if (!message.parts) {
     return (
       <div className="w-full overflow-hidden">
-        <Markdown html>{messageText(message)}</Markdown>
+        <Markdown>{messageText(message)}</Markdown>
       </div>
     );
   }
@@ -56,7 +56,7 @@ function AssistantMessagePart({
   }
 
   if (part.type === 'text') {
-    return <Markdown html>{part.text}</Markdown>;
+    return <Markdown>{part.text}</Markdown>;
   }
 
   if (part.type === 'data-deployment-approval') {

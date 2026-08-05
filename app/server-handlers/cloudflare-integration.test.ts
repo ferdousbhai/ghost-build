@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   createAuthSession: vi.fn(),
   upsertCloudflareUser: vi.fn(),
   findConnection: vi.fn(),
-  resolveComputerRollout: vi.fn(),
   activateConnection: vi.fn(),
   vault: {
     storeOAuthCredential: vi.fn(),
@@ -39,12 +38,6 @@ vi.mock('~/lib/.server/cloudflare/cloudflare-credential-vault', () => ({
     }
   },
 }));
-vi.mock('~/lib/.server/cloudflare/computer-rollout', () => ({
-  resolveComputerRollout: mocks.resolveComputerRollout,
-  computerRolloutUnavailableResponse: () =>
-    Response.json({ code: 'computer_preview_unavailable' }, { status: 503, headers: { 'Cache-Control': 'no-store' } }),
-}));
-
 import {
   CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
   cloudflareConnectionStatusAction,
@@ -72,7 +65,6 @@ describe('Cloudflare-only authentication', () => {
       image: null,
     });
     mocks.findConnection.mockResolvedValue(null);
-    mocks.resolveComputerRollout.mockResolvedValue({ enabled: true, mode: 'all' });
     mocks.vault.storeOAuthCredential.mockResolvedValue('credential-1');
     mocks.vault.deleteIfUnreferenced.mockResolvedValue(true);
     mocks.activateConnection.mockResolvedValue({
@@ -101,23 +93,6 @@ describe('Cloudflare-only authentication', () => {
       env: { DB: {} } as Env,
     });
     expect(response.status).toBe(401);
-  });
-
-  it('applies the mutable Computer rollout gate before preparing a runtime session', async () => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.resolveComputerRollout.mockResolvedValueOnce({ enabled: false, mode: 'off' });
-    const response = await cloudflareRuntimeSessionAction({
-      request: new Request('https://ghostbuild.dev/api/cloudflare/runtime', {
-        method: 'POST',
-        headers: { Origin: 'https://ghostbuild.dev' },
-      }),
-      env: { DB: {} } as Env,
-    });
-
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toMatchObject({ code: 'computer_preview_unavailable' });
-    expect(mocks.resolveComputerRollout).toHaveBeenCalledWith(expect.anything(), 'user-1');
-    expect(mocks.findConnection).not.toHaveBeenCalled();
   });
 
   it('rejects runtime preparation without a same-origin browser request', async () => {

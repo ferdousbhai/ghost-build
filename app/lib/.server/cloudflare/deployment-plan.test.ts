@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildDeploymentPlanFromSource, deploymentPlanResourceName } from './deployment-plan';
+import {
+  buildDeploymentPlanFromSource,
+  deploymentPlanResourceName,
+  isCurrentDeploymentPlan,
+  parseDeploymentPlanJson,
+} from './deployment-plan';
 import { DEPLOYMENT_SECURITY_BASELINE_VERSION } from './deployment-security-baseline';
 
 const SOURCE_ONE = '1'.repeat(64);
@@ -63,6 +68,7 @@ describe('buildDeploymentPlanFromSource', () => {
     const { plan } = await buildDeploymentPlanFromSource({
       deploymentId: 'deployment-2',
       sourceSha256: SOURCE_ONE,
+      project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, appAgent: true } },
     });
     expect(deploymentPlanResourceName(plan, 'worker', 'app')).toBe('ghostbuild-deployment-2');
     expect(deploymentPlanResourceName(plan, 'd1', 'AGENT_SECURITY_DB')).toBe('ghostbuild-deployment-2-agent-security');
@@ -79,7 +85,28 @@ describe('buildDeploymentPlanFromSource', () => {
 
   it('rejects a source reference that is not an exact SHA-256 revision', async () => {
     await expect(
-      buildDeploymentPlanFromSource({ deploymentId: 'deployment-1', sourceSha256: 'latest' }),
+      buildDeploymentPlanFromSource({
+        deploymentId: 'deployment-1',
+        sourceSha256: 'latest',
+        project: { type: 'worker', bindings: { ai: false, d1: false, r2: false, appAgent: false } },
+      }),
     ).rejects.toThrow('Deployment source digest is invalid.');
+  });
+
+  it('rejects persisted plans without a complete project profile', async () => {
+    const { plan } = await buildDeploymentPlanFromSource({
+      deploymentId: 'deployment-1',
+      sourceSha256: SOURCE_ONE,
+      project: { type: 'worker', bindings: { ai: false, d1: false, r2: false, appAgent: false } },
+    });
+    const { project: _project, ...missingProject } = plan;
+
+    expect(parseDeploymentPlanJson(JSON.stringify(plan))).toEqual(plan);
+    expect(isCurrentDeploymentPlan(plan)).toBe(true);
+    expect(isCurrentDeploymentPlan(missingProject)).toBe(false);
+    expect(() => parseDeploymentPlanJson(JSON.stringify(missingProject))).toThrow();
+    expect(() =>
+      parseDeploymentPlanJson(JSON.stringify({ ...plan, project: { type: 'worker', bindings: { ai: false } } })),
+    ).toThrow();
   });
 });

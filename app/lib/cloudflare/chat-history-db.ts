@@ -15,7 +15,6 @@ import {
 const chatHistorySummarySchema = z.object({
   id: z.string().min(1),
   initialId: z.string().min(1),
-  urlId: z.string().min(1).optional(),
   description: z.string().optional(),
   timestamp: z.iso.datetime(),
 }) satisfies z.ZodType<ChatHistorySummary>;

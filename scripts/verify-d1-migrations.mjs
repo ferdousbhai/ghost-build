@@ -19,11 +19,14 @@ const migrationPolicies = [
       '0003_launch_controls.sql': 'a9aaab709aabf2db221379e2449c78602aa1d44730f0d9984f185fa2dbad4bd3',
       '0004_remove_legacy_workspace_runtime.sql': 'fd0a0a6a4297ccc046216ff11216bb217afaaeb399548501a2581f7e4450ae5f',
       '0005_runtime_provisioning_leases.sql': '2e485f09167d3a71bf12d20729933be5da35fd25ce91f613a0d6964b2be62c07',
+      '0006_remove_launch_controls.sql': '48cb5986ca4291a46609b4714747878adb197dea2024d6c0a8bdd817327bb99f',
     },
     contractAllowlist: {
       // Explicit pre-launch clean break: the Computer locator replaced this
       // unused table, and keeping it would preserve a false compatibility path.
       '0004_remove_legacy_workspace_runtime.sql': 'fd0a0a6a4297ccc046216ff11216bb217afaaeb399548501a2581f7e4450ae5f',
+      // Full launch removes the default-off gate that blocked automatic provisioning.
+      '0006_remove_launch_controls.sql': '48cb5986ca4291a46609b4714747878adb197dea2024d6c0a8bdd817327bb99f',
     },
   },
   {
@@ -31,8 +34,12 @@ const migrationPolicies = [
     legacyCutoff: 1,
     checksums: {
       '0001_user_workspace.sql': '6647c65caa6992a4f418813a5682b86e1fb65bc91fe62d1af4d81fc7482f2ed5',
+      '0002_remove_chat_url_id.sql': '0f09b6846af83b969db428ee1177d5b17fbf0210cc1c53368167d65dfb4004f1',
     },
-    contractAllowlist: {},
+    contractAllowlist: {
+      // Chat identity has one immutable key; remove the unused alternate URL column and index.
+      '0002_remove_chat_url_id.sql': '0f09b6846af83b969db428ee1177d5b17fbf0210cc1c53368167d65dfb4004f1',
+    },
   },
   {
     directory: 'template/migrations',

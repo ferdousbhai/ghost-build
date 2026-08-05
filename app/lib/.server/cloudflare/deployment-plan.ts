@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { DeploymentProjectProfile } from './deployment-project-profile';
 import {
   DEPLOYMENT_SECURITY_BASELINE_VERSION,
@@ -6,42 +7,53 @@ import {
   TEMPLATE_SOURCE_SHA256,
 } from './deployment-security-baseline';
 
-export const DEPLOYMENT_PLAN_VERSION = 2 as const;
+const DEPLOYMENT_PLAN_VERSION = 2 as const;
 
 export type DeploymentResourceType = 'worker' | 'd1' | 'r2' | 'durable_object' | 'workers_ai';
 
-export type DeploymentPlanResource = {
-  type: DeploymentResourceType;
-  logicalName: string;
-  proposedName: string;
-};
+const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+const deploymentProjectProfileSchema: z.ZodType<DeploymentProjectProfile> = z.strictObject({
+  type: z.enum(['web_app', 'worker']),
+  bindings: z.strictObject({
+    ai: z.boolean(),
+    d1: z.boolean(),
+    r2: z.boolean(),
+    appAgent: z.boolean(),
+  }),
+});
+const deploymentPlanResourceSchema = z.strictObject({
+  type: z.enum(['worker', 'd1', 'r2', 'durable_object', 'workers_ai']),
+  logicalName: z.string().min(1),
+  proposedName: z.string().min(1),
+});
+const deploymentPlanSchema = z.strictObject({
+  version: z.number().int().nonnegative(),
+  deploymentId: z.string().min(1),
+  sourceSha256: sha256Schema,
+  templateSourceSha256: sha256Schema,
+  securityBaselineVersion: z.number().int().nonnegative(),
+  securityBoundarySha256: sha256Schema,
+  project: deploymentProjectProfileSchema,
+  billing: z.strictObject({
+    infrastructure: z.literal('user_cloudflare_account'),
+    workersAi: z.literal('user_cloudflare_account'),
+    workersPaidUpgrade: z.literal('explicit_user_authorization_required'),
+  }),
+  resources: z.array(deploymentPlanResourceSchema),
+});
 
-export type DeploymentPlan = {
-  version: typeof DEPLOYMENT_PLAN_VERSION;
-  deploymentId: string;
-  sourceSha256: string;
-  templateSourceSha256: string;
-  securityBaselineVersion: typeof DEPLOYMENT_SECURITY_BASELINE_VERSION;
-  securityBoundarySha256: string;
-  project?: DeploymentProjectProfile;
-  billing: {
-    infrastructure: 'user_cloudflare_account';
-    workersAi: 'user_cloudflare_account';
-    workersPaidUpgrade: 'explicit_user_authorization_required';
-  };
-  resources: DeploymentPlanResource[];
-};
+export type DeploymentPlan = z.infer<typeof deploymentPlanSchema>;
 
 export async function buildDeploymentPlanFromSource(args: {
   deploymentId: string;
   sourceSha256: string;
-  project?: DeploymentProjectProfile;
+  project: DeploymentProjectProfile;
 }): Promise<{ plan: DeploymentPlan; digest: string }> {
   if (!/^[a-f0-9]{64}$/.test(args.sourceSha256)) {
     throw new Error('Deployment source digest is invalid.');
   }
   const baseName = `ghostbuild-${args.deploymentId}`;
-  const project = args.project ?? defaultWebProjectProfile();
+  const project = deploymentProjectProfileSchema.parse(args.project);
   const plan: DeploymentPlan = {
     version: DEPLOYMENT_PLAN_VERSION,
     deploymentId: args.deploymentId,
@@ -80,21 +92,27 @@ export async function buildDeploymentPlanFromSource(args: {
   return { plan, digest };
 }
 
-export function isCurrentDeploymentPlan(plan: Partial<DeploymentPlan>): plan is DeploymentPlan {
-  if (!isCurrentDeploymentSecurityIdentity(plan) || !Array.isArray(plan.resources)) {
+export function parseDeploymentPlanJson(value: string): DeploymentPlan {
+  return deploymentPlanSchema.parse(JSON.parse(value));
+}
+
+export function isCurrentDeploymentPlan(plan: unknown): plan is DeploymentPlan {
+  const parsed = deploymentPlanSchema.safeParse(plan);
+  if (!parsed.success || !isCurrentDeploymentSecurityIdentity(parsed.data)) {
     return false;
   }
-  const requiresAgentSecurityDb = plan.project?.bindings.appAgent ?? true;
+  const current = parsed.data;
+  const requiresAgentSecurityDb = current.project.bindings.appAgent;
   if (!requiresAgentSecurityDb) {
     return true;
   }
-  const applicationDatabase = deploymentPlanResourceName(plan as DeploymentPlan, 'd1', 'DB');
-  const agentSecurityDatabase = deploymentPlanResourceName(plan as DeploymentPlan, 'd1', 'AGENT_SECURITY_DB');
+  const applicationDatabase = deploymentPlanResourceName(current, 'd1', 'DB');
+  const agentSecurityDatabase = deploymentPlanResourceName(current, 'd1', 'AGENT_SECURITY_DB');
   return Boolean(applicationDatabase && agentSecurityDatabase && applicationDatabase !== agentSecurityDatabase);
 }
 
 export function deploymentProjectProfile(plan: DeploymentPlan): DeploymentProjectProfile {
-  return plan.project ?? defaultWebProjectProfile();
+  return plan.project;
 }
 
 export function deploymentPlanResourceName(
@@ -115,8 +133,4 @@ async function sha256Hex(value: ArrayBuffer | Uint8Array): Promise<string> {
   const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
   const digest = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-function defaultWebProjectProfile(): DeploymentProjectProfile {
-  return { type: 'web_app', bindings: { ai: true, d1: true, r2: true, appAgent: true } };
 }

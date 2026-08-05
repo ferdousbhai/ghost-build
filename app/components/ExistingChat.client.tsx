@@ -2,12 +2,11 @@ import { useExistingChat } from '~/lib/stores/startup';
 import { Chat } from './chat/Chat';
 import { GhostbuildAuthProvider } from './chat/GhostbuildAuthWrapper';
 import { setPageLoadChatId } from '~/lib/stores/chatId';
-import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
+import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { Loading } from './Loading';
 import { useReloadMessages } from '~/lib/stores/startup/reloadMessages';
 import { UserProvider } from '~/components/UserProvider';
 import { Toaster } from '~/components/ui/Toaster';
-import { getToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { CloudflareSignInPrompt } from '~/components/CloudflareSignInPrompt';
 import { Button } from '@ui/Button';
 
@@ -30,21 +29,15 @@ export function ExistingChat({ chatId }: { chatId: string }) {
 }
 
 function ExistingChatWrapper({ chatId }: { chatId: string }) {
-  const sessionId = useSessionIdOrNullOrLoading();
-  return <ExistingChatSessionView chatId={chatId} sessionId={sessionId} />;
+  const userId = useUserIdOrNullOrLoading();
+  return <ExistingChatSessionView chatId={chatId} userId={userId} />;
 }
 
-export function ExistingChatSessionView({
-  chatId,
-  sessionId,
-}: {
-  chatId: string;
-  sessionId: string | null | undefined;
-}) {
-  if (sessionId === undefined) {
+export function ExistingChatSessionView({ chatId, userId }: { chatId: string; userId: string | null | undefined }) {
+  if (userId === undefined) {
     return <Loading message="Checking your Cloudflare session…" />;
   }
-  if (sessionId === null) {
+  if (userId === null) {
     return (
       <CloudflareSignInPrompt
         title="Connect Cloudflare to open this project."
@@ -85,11 +78,6 @@ function AuthenticatedExistingChat({ chatId }: { chatId: string }) {
   if (reloadState === undefined) {
     return <Loading message="Loading project…" />;
   }
-  const hadSuccessfulDeploy = initialMessages.some(
-    (message) =>
-      message.role === 'assistant' && message.parts?.some((part) => getToolInvocation(part)?.toolName === 'deploy'),
-  );
-
   return (
     <Chat
       initialMessages={initialMessages}
@@ -98,8 +86,6 @@ function AuthenticatedExistingChat({ chatId }: { chatId: string }) {
       initializeChat={initializeChat}
       discardEmptyChat={discardEmptyChat}
       onBuilderRequestStart={onBuilderRequestStart}
-      isReload={true}
-      hadSuccessfulDeploy={hadSuccessfulDeploy}
       subchats={subchats}
       transcript={transcript}
     />

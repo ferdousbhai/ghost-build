@@ -29,7 +29,7 @@ export function prepareMessageHistory(args: {
   persistedTranscriptCheckpoint: TranscriptCheckpoint | null;
   subchatIndex: number;
 }): {
-  url: URL;
+  searchParams: URLSearchParams;
   update: {
     messageIndex: number;
     partIndex: number;
@@ -38,33 +38,33 @@ export function prepareMessageHistory(args: {
 } {
   const { chatId, sessionId, completeMessageInfo, persistedMessageInfo } = args;
   const { messageIndex, partIndex, allMessages } = completeMessageInfo;
-  const url = new URL('/api/chats/store', window.location.origin);
+  const searchParams = new URLSearchParams();
 
-  url.searchParams.set('chatId', chatId);
-  url.searchParams.set('sessionId', sessionId);
-  url.searchParams.set('lastMessageRank', messageIndex.toString());
-  url.searchParams.set('partIndex', partIndex.toString());
-  url.searchParams.set('lastSubchatIndex', args.subchatIndex.toString());
+  searchParams.set('chatId', chatId);
+  searchParams.set('sessionId', sessionId);
+  searchParams.set('lastMessageRank', messageIndex.toString());
+  searchParams.set('partIndex', partIndex.toString());
+  searchParams.set('lastSubchatIndex', args.subchatIndex.toString());
   const firstMessage = allMessages.length > 0 ? messageText(allMessages[0]) : undefined;
   if (!completeMessageInfo.transcriptCheckpoint) {
-    return { url, update: null };
+    return { searchParams, update: null };
   }
   const checkpoint = completeMessageInfo.transcriptCheckpoint;
-  url.searchParams.set('transcriptAgentName', checkpoint.agentName);
-  url.searchParams.set('transcriptGeneration', checkpoint.generation.toString());
-  url.searchParams.set('transcriptRevision', checkpoint.revision.toString());
-  url.searchParams.set('transcriptDigest', checkpoint.digest);
-  url.searchParams.set('transcriptMessageCount', checkpoint.messageCount.toString());
+  searchParams.set('transcriptAgentName', checkpoint.agentName);
+  searchParams.set('transcriptGeneration', checkpoint.generation.toString());
+  searchParams.set('transcriptRevision', checkpoint.revision.toString());
+  searchParams.set('transcriptDigest', checkpoint.digest);
+  searchParams.set('transcriptMessageCount', checkpoint.messageCount.toString());
   if (
     messageIndex === persistedMessageInfo.messageIndex &&
     partIndex === persistedMessageInfo.partIndex &&
     transcriptCheckpointsEqual(checkpoint, args.persistedTranscriptCheckpoint)
   ) {
     // No changes
-    return { url, update: null };
+    return { searchParams, update: null };
   }
 
-  return { url, update: { messageIndex, partIndex, firstMessage } };
+  return { searchParams, update: { messageIndex, partIndex, firstMessage } };
 }
 
 export function waitForNewMessages(

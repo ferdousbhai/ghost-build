@@ -89,10 +89,7 @@ export function CloudflareCard({ initialError = null }: { initialError?: string 
           {error}
         </p>
       ) : null}
-      <p className="mt-3 text-xs text-content-tertiary">
-        Requires Workers Paid and Containers. Cloudflare Computer 0.1.1 is preview software not designated for
-        production.
-      </p>
+      <p className="mt-3 text-xs text-content-tertiary">Requires Cloudflare Workers Paid and Containers.</p>
     </section>
   );
 }

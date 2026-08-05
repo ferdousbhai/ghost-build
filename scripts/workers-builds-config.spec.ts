@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { findWorkersBuildsConfigErrors } from './workers-builds-config.mjs';
 
-const containerSourceSha256 = 'b'.repeat(64);
 const validConfig = {
   worker: 'ghostbuild',
   repository: 'ferdousbhai/ghost-build',
@@ -44,7 +43,6 @@ describe('Workers Builds production configuration', () => {
         githubWorkflowPaths: ['.github/workflows/runtime-artifacts.yml'],
         githubCompositeActionExists: false,
         workerConfig: {},
-        containerSourceSha256,
       }),
     ).toEqual([]);
   });
@@ -69,7 +67,6 @@ describe('Workers Builds production configuration', () => {
         ],
         githubCompositeActionExists: true,
         workerConfig: { containers: [{ class_name: 'DeploymentSandbox', image: './Dockerfile.sandbox' }] },
-        containerSourceSha256,
       }),
     ).toEqual(
       expect.arrayContaining([

@@ -1,4 +1,4 @@
-import type { DeploymentPlan } from './deployment-plan';
+import { parseDeploymentPlanJson, type DeploymentPlan } from './deployment-plan';
 
 export type DeploymentStatus = 'awaiting_approval' | 'approved' | 'provisioning' | 'deploying' | 'succeeded' | 'failed';
 
@@ -504,7 +504,7 @@ function deploymentFromRow(row: DeploymentRow): Deployment {
     executionGeneration: row.execution_generation,
     workspaceReference: row.workspace_reference,
     status: row.status,
-    plan: JSON.parse(row.plan_json) as DeploymentPlan,
+    plan: parseDeploymentPlanJson(row.plan_json),
     planDigest: row.plan_digest,
     approvedDigest: row.approved_digest,
     approvedAt: row.approved_at,

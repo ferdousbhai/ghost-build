@@ -5,7 +5,7 @@ import { useStore } from '@nanostores/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BuilderAgent, BuilderAgentState } from '~/agents/builder-agent';
 import { workbenchStore } from '~/lib/stores/workbench.client';
-import { getAuthToken, sessionIdStore, useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
+import { isAuthenticated, userIdStore, useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { captureMessage } from '~/lib/telemetry.client';
 import { ChatContextManager } from 'ghostbuild-agent/ChatContextManager';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
@@ -58,8 +58,8 @@ export function useBuilderAgentChat(args: {
     [args.transcript.agentName, args.transcript.generation, args.transcript.subchatIndex],
   );
   const currentSubchatIndex = useStore(subchatIndexStore);
-  const sessionId = useSessionIdOrNullOrLoading();
-  const workspaceReplica = useAccountLocalReplica(sessionId);
+  const userId = useUserIdOrNullOrLoading();
+  const workspaceReplica = useAccountLocalReplica(userId);
   const [workspacePresentationState, setWorkspacePresentationState] = useState<
     'connecting' | 'ready' | 'presentation-error'
   >('connecting');
@@ -79,7 +79,7 @@ export function useBuilderAgentChat(args: {
     host: runtimeEndpoint.host,
     protocol: runtimeEndpoint.protocol === 'https:' ? 'wss' : 'ws',
     query: async () => ({ capability: (await getUserRuntimeSession()).token }),
-    queryDeps: [sessionId, runtimeEndpoint.origin],
+    queryDeps: [userId, runtimeEndpoint.origin],
     cacheTtl: 4 * 60_000,
     onStateUpdate: (state) => {
       if (state.preview) {
@@ -91,11 +91,11 @@ export function useBuilderAgentChat(args: {
       }
       generatedSubchatTitleUpdatedAtRef.current = generatedTitle.updatedAt;
       args.onSubchatTitle(generatedTitle.subchatIndex, generatedTitle.title);
-      const sessionId = sessionIdStore.get();
+      const activeUserId = userIdStore.get();
       const chatId = chatIdStore.get();
-      if (typeof sessionId === 'string' && chatId) {
+      if (typeof activeUserId === 'string' && chatId) {
         void queryClient.invalidateQueries({
-          queryKey: subchatQueryKey({ chatId, sessionId }),
+          queryKey: subchatQueryKey({ chatId, sessionId: activeUserId }),
         });
       }
     },
@@ -110,8 +110,8 @@ export function useBuilderAgentChat(args: {
     syncMessagesToServer: false,
     experimental_throttle: 100,
     prepareSendMessagesRequest: ({ body }) => {
-      if (!getAuthToken()) {
-        throw new Error('No token');
+      if (!isAuthenticated()) {
+        throw new Error('Not authenticated');
       }
       return {
         body: {
@@ -427,15 +427,15 @@ function createAsyncGate(key: string | null): AsyncGate {
 }
 
 async function refreshProjectMetadata(attempt = 0): Promise<void> {
-  const sessionId = sessionIdStore.get();
+  const userId = userIdStore.get();
   const chatId = chatIdStore.get();
-  if (typeof sessionId !== 'string' || !chatId) {
+  if (typeof userId !== 'string' || !chatId) {
     return;
   }
   try {
     const [, chat] = await Promise.all([
-      refreshChatHistory(sessionId),
-      executeDataOperation(api.messages.get, { id: chatId, sessionId }),
+      refreshChatHistory(userId),
+      executeDataOperation(api.messages.get, { id: chatId, sessionId: userId }),
     ]);
     if (chat?.description) {
       descriptionStore.set(chat.description);

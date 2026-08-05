@@ -101,8 +101,18 @@ describe('deployment credential boundary', () => {
     expect(methodEnd).toBeGreaterThan(methodStart);
     const preparation = runtimeSource.slice(methodStart, methodEnd);
     expect(preparation).toContain('wrangler deploy --dry-run');
-    expect(preparation).toContain("backend: 'container-shell'");
+    expect(preparation).toContain('await this.pushDurableProjectToContainer()');
+    expect(preparation).toContain('await this.runTransientCommand(');
     expect(preparation).not.toMatch(/apiToken|CLOUDFLARE_API_TOKEN|authorization|env\s*:/i);
+
+    const transientCommandStart = runtimeSource.indexOf('private async runTransientCommand(');
+    const transientCommandEnd = runtimeSource.indexOf('private async cleanupPreviewProcess(', transientCommandStart);
+    expect(transientCommandStart).toBeGreaterThan(0);
+    expect(transientCommandEnd).toBeGreaterThan(transientCommandStart);
+    const transientCommand = runtimeSource.slice(transientCommandStart, transientCommandEnd);
+    expect(transientCommand).toContain('runTrackedSandboxCommand');
+    expect(transientCommand).toContain('this.startProcess(trackedCommand, options)');
+    expect(transientCommand).not.toMatch(/apiToken|CLOUDFLARE_API_TOKEN|authorization|env\s*:/i);
     expect(runtimeSource).not.toContain("route.operation === 'deploy'");
   });
 });

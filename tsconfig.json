@@ -13,10 +13,8 @@
     "strict": true,
     "allowJs": true,
     "skipLibCheck": true,
-    "ignoreDeprecations": "6.0",
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
     "paths": {
       "~/*": ["./app/*"],
       "@ui/*": ["./app/components/ui/primitives/*"]

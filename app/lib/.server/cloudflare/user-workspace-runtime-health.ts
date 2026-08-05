@@ -48,26 +48,6 @@ export async function readUserWorkspaceRuntimeHealth(env: RuntimeHealthEnv): Pro
   };
 }
 
-export function requireExpectedUserWorkspaceRuntimeHealth(payload: unknown, runtimeVersion: string): void {
-  const health = parseUserWorkspaceRuntimeHealth(payload);
-  if (health.runtimeVersion !== runtimeVersion) {
-    throw new Error('The user-owned workspace runtime did not pass its health check.');
-  }
-}
-
-function parseUserWorkspaceRuntimeHealth(payload: unknown): UserWorkspaceRuntimeHealth {
-  if (
-    !isRecord(payload) ||
-    payload.ok !== true ||
-    payload.service !== USER_WORKSPACE_RUNTIME_SERVICE ||
-    typeof payload.runtimeVersion !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(payload.runtimeVersion)
-  ) {
-    throw new Error('The user-owned workspace runtime did not pass its health check.');
-  }
-  return payload as UserWorkspaceRuntimeHealth;
-}
-
 export function parseUserWorkspaceRuntimeReadiness(payload: unknown): UserWorkspaceRuntimeReadiness {
   if (
     !isRecord(payload) ||

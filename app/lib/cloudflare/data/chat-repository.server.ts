@@ -3,6 +3,9 @@ import type { ChatRow } from './types';
 import { DataNotFoundError } from './errors';
 import { checkpointMatchesIdentity, requireChatTranscript } from './transcript-repository.server';
 
+const CHAT_COLUMNS =
+  'chats.id, chats.creator_id, chats.initial_id, chats.description, chats.timestamp, chats.last_subchat_index, chats.is_deleted';
+
 type ChatInsertArgs = {
   id: string;
   creatorId: string;
@@ -45,8 +48,8 @@ export async function ensureInitialChat(
 
   const chat = await db
     .prepare(
-      `SELECT * FROM chats
-       WHERE creator_id = ? AND initial_id = ? AND is_deleted = 0
+      `SELECT ${CHAT_COLUMNS} FROM chats
+       WHERE chats.creator_id = ? AND chats.initial_id = ? AND chats.is_deleted = 0
        LIMIT 1`,
     )
     .bind(args.creatorId, args.initialId)
@@ -60,11 +63,11 @@ export async function ensureInitialChat(
 export function findChat(db: D1Database, args: { id: string; sessionId: string }): Promise<ChatRow | null> {
   return db
     .prepare(
-      `SELECT * FROM chats
-       WHERE creator_id = ? AND (initial_id = ? OR url_id = ?) AND is_deleted = 0
+      `SELECT ${CHAT_COLUMNS} FROM chats
+       WHERE chats.creator_id = ? AND chats.initial_id = ? AND chats.is_deleted = 0
        LIMIT 1`,
     )
-    .bind(args.sessionId, args.id, args.id)
+    .bind(args.sessionId, args.id)
     .first<ChatRow>();
 }
 
@@ -171,9 +174,9 @@ function prepareInsertChat(db: D1Database, args: ChatInsertArgs, ignoreInitialCo
   return db
     .prepare(
       `INSERT INTO chats (
-        id, creator_id, initial_id, url_id, description, timestamp, last_subchat_index, is_deleted
+        id, creator_id, initial_id, description, timestamp, last_subchat_index, is_deleted
       )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?
+      SELECT ?, ?, ?, ?, ?, ?, ?
       WHERE NOT EXISTS (SELECT 1 FROM chats WHERE initial_id = ?)
       ${ignoreInitialConflict ? 'ON CONFLICT DO NOTHING' : ''}`,
     )
@@ -181,7 +184,6 @@ function prepareInsertChat(db: D1Database, args: ChatInsertArgs, ignoreInitialCo
       args.id,
       args.creatorId,
       args.initialId,
-      null,
       args.description ?? null,
       new Date().toISOString(),
       args.lastSubchatIndex ?? 0,

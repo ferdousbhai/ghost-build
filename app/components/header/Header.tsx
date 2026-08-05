@@ -2,7 +2,7 @@ import { useStore } from '@nanostores/react';
 import { lazy, Suspense, useState } from 'react';
 import { chatStore } from '~/lib/stores/chatId';
 import { ChatDescription } from '~/components/header/ChatDescription.client';
-import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
+import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { HamburgerMenuIcon, PersonIcon, GearIcon, ExitIcon } from '@radix-ui/react-icons';
 import { profileStore, setProfile } from '~/lib/stores/profile';
 import { Menu as MenuComponent, MenuItem as MenuItemComponent } from '@ui/Menu';
@@ -22,9 +22,9 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
   const chat = useStore(chatStore);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  const sessionId = useSessionIdOrNullOrLoading();
-  const isAccountSession = typeof sessionId === 'string';
-  const showSidebarIcon = !hideSidebarIcon && isAccountSession;
+  const userId = useUserIdOrNullOrLoading();
+  const isAuthenticated = typeof userId === 'string';
+  const showSidebarIcon = !hideSidebarIcon && isAuthenticated;
 
   const profile = useStore(profileStore);
 

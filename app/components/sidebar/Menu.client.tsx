@@ -9,7 +9,7 @@ import { HistoryItem } from './HistoryItem';
 import { binDates } from './date-binning';
 import { useSearchFilter } from '~/lib/hooks/useSearchFilter';
 import { classNames } from '~/utils/classNames';
-import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
+import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { getKnownInitialId } from '~/lib/stores/chatId';
 import { Button } from '@ui/Button';
 import { TextInput } from '@ui/TextInput';
@@ -45,9 +45,9 @@ interface MenuProps {
 
 export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
   const menuRef = useRef<HTMLDivElement>(null);
-  const sessionId = useSessionIdOrNullOrLoading();
-  const accountSessionId = typeof sessionId === 'string' ? sessionId : null;
-  const list = useChatHistory(accountSessionId);
+  const userId = useUserIdOrNullOrLoading();
+  const accountUserId = typeof userId === 'string' ? userId : null;
+  const list = useChatHistory(accountUserId);
   const [deleteTarget, setDeleteTarget] = useState<ChatHistorySummary | null>(null);
 
   const { filteredItems: filteredList, handleSearchChange } = useSearchFilter({
@@ -56,12 +56,12 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
   });
 
   const deleteItem = async (item: ChatHistorySummary) => {
-    if (!accountSessionId) {
+    if (!accountUserId) {
       return;
     }
 
     try {
-      await removeChatHistoryItem(accountSessionId, item.initialId);
+      await removeChatHistoryItem(accountUserId, item.initialId);
       if (getKnownInitialId() === item.initialId) {
         // hard page navigation to clear the stores
         window.location.pathname = '/';
@@ -115,7 +115,7 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
   };
 
   // Don't show the menu at all when logged out
-  if (!accountSessionId) {
+  if (!accountUserId) {
     return null;
   }
 

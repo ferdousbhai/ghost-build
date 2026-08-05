@@ -1,7 +1,7 @@
 import { memo, useMemo } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { rehypePlugins, remarkPlugins } from '~/utils/markdown';
+import { markdownRehypePlugins, markdownRemarkPlugins } from '~/utils/markdown';
 import { allowedHTMLElements } from 'ghostbuild-agent/prompts/formattingInstructions';
 import { CodeBlock } from './CodeBlock';
 
@@ -11,11 +11,9 @@ const logger = createScopedLogger('MarkdownComponent');
 
 interface MarkdownProps {
   children: string;
-  html?: boolean;
-  limitedMarkdown?: boolean;
 }
 
-export const Markdown = memo(function Markdown({ children, html = false, limitedMarkdown = false }: MarkdownProps) {
+export const Markdown = memo(function Markdown({ children }: MarkdownProps) {
   logger.trace('Render');
 
   const components: Components = useMemo(() => {
@@ -46,8 +44,8 @@ export const Markdown = memo(function Markdown({ children, html = false, limited
       allowedElements={allowedHTMLElements}
       className={styles.MarkdownContent}
       components={components}
-      remarkPlugins={remarkPlugins(limitedMarkdown)}
-      rehypePlugins={rehypePlugins(html)}
+      remarkPlugins={markdownRemarkPlugins}
+      rehypePlugins={markdownRehypePlugins}
     >
       {children}
     </ReactMarkdown>

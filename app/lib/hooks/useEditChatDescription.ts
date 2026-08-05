@@ -4,7 +4,7 @@ import { executeDataOperation } from '~/lib/cloudflare/client';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { description as descriptionStore } from '~/lib/stores/description';
-import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
+import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { chatIdStore } from '~/lib/stores/chatId';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 
@@ -48,7 +48,7 @@ export function useEditChatDescription({
   syncWithGlobalStore,
 }: EditChatDescriptionOptions): EditChatDescriptionHook {
   const chatIdFromStore = useStore(chatIdStore);
-  const sessionId = useSessionIdOrNullOrLoading();
+  const userId = useUserIdOrNullOrLoading();
   const [editing, setEditing] = useState(false);
   const [currentDescription, setCurrentDescription] = useState(initialDescription);
   const chatId = customChatId || chatIdFromStore;
@@ -63,18 +63,18 @@ export function useEditChatDescription({
   }, []);
 
   const fetchLatestDescription = useCallback(async () => {
-    if (!chatId || !sessionId) {
+    if (!chatId || !userId) {
       return initialDescription;
     }
 
     try {
-      const chat = await executeDataOperation(api.messages.get, { id: chatId, sessionId });
+      const chat = await executeDataOperation(api.messages.get, { id: chatId, sessionId: userId });
       return chat?.description || initialDescription;
     } catch (error) {
       logger.error('Failed to fetch latest description:', error);
       return initialDescription;
     }
-  }, [chatId, sessionId, initialDescription]);
+  }, [chatId, userId, initialDescription]);
 
   const handleBlur = useCallback(async () => {
     const latestDescription = await fetchLatestDescription();
@@ -101,14 +101,14 @@ export function useEditChatDescription({
       }
 
       try {
-        if (!chatId || !sessionId) {
+        if (!chatId || !userId) {
           toast.error('Chat Id is not available');
           return;
         }
 
         await executeDataOperation(api.messages.setDescription, {
           id: chatId,
-          sessionId,
+          sessionId: userId,
           description: currentDescription,
         });
 
@@ -123,7 +123,7 @@ export function useEditChatDescription({
 
       toggleEditMode();
     },
-    [currentDescription, chatId, initialDescription, toggleEditMode, syncWithGlobalStore, sessionId],
+    [currentDescription, chatId, initialDescription, toggleEditMode, syncWithGlobalStore, userId],
   );
 
   const handleKeyDown = useCallback(

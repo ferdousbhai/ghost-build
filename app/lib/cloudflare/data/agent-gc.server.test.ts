@@ -80,18 +80,18 @@ describe('BuilderAgent garbage collection receipts', () => {
     const bind = vi.fn(() => ({}) as D1PreparedStatement);
     const db = { prepare: vi.fn(() => ({ bind })) } as unknown as D1Database;
 
-    prepareChatAgentGcCandidatesStatement(db, { chatId: 'chat-row', ownerId: 'owner', now: 1_000 });
+    prepareChatAgentGcCandidatesStatement(db, { initialId: 'chat', ownerId: 'owner', now: 1_000 });
 
-    expect(bind).toHaveBeenCalledWith(1_000 + AGENT_GC_GRACE_PERIOD_MS, 1_000, 'chat-row', 'owner');
+    expect(bind).toHaveBeenCalledWith(1_000 + AGENT_GC_GRACE_PERIOD_MS, 1_000, 'chat', 'owner');
   });
 
   it('applies the full grace period to empty-chat discard candidates', () => {
     const bind = vi.fn(() => ({}) as D1PreparedStatement);
     const db = { prepare: vi.fn(() => ({ bind })) } as unknown as D1Database;
 
-    prepareEmptyChatAgentGcCandidatesStatement(db, { ownerId: 'owner', id: 'chat', now: 2_000 });
+    prepareEmptyChatAgentGcCandidatesStatement(db, { ownerId: 'owner', initialId: 'chat', now: 2_000 });
 
-    expect(bind).toHaveBeenCalledWith(2_000 + AGENT_GC_GRACE_PERIOD_MS, 2_000, 'owner', 'chat', 'chat');
+    expect(bind).toHaveBeenCalledWith(2_000 + AGENT_GC_GRACE_PERIOD_MS, 2_000, 'owner', 'chat');
   });
 });
 

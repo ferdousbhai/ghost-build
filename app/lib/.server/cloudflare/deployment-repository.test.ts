@@ -61,6 +61,16 @@ describe('deployment repository', () => {
     ).not.toEqual(expect.arrayContaining(['snapshot_key', 'build_artifact_key', 'build_artifact_generation']));
   });
 
+  it('rejects malformed persisted deployment plans at the repository boundary', async () => {
+    await create(1);
+    const { project: _project, ...missingProject } = plan;
+    sqlite
+      .prepare(`UPDATE deployments SET plan_json = ? WHERE id = 'deployment-1'`)
+      .run(JSON.stringify(missingProject));
+
+    await expect(requireDeploymentForUser(db, 'deployment-1', 'user-1')).rejects.toThrow();
+  });
+
   it('approves, claims, and completes the exact connection-bound execution', async () => {
     await create(1);
     const approved = await approveDeployment({

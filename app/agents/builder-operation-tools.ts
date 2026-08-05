@@ -56,7 +56,7 @@ async function runDependencyInstall(
 async function runValidation(args: Parameters<typeof executeBuilderOperationTool>[0]): Promise<GhostbuildToolResult> {
   validateProjectParameters.parse(args.input);
   args.abortSignal?.throwIfAborted();
-  args.context.onValidationStage?.(args.toolCallId, 'sandbox initialization');
+  args.context.onValidationStage?.(args.toolCallId, 'computer validation');
   try {
     return await args.workspace.validate({ toolCallId: args.toolCallId, input: args.input });
   } finally {

@@ -1,10 +1,4 @@
-/* All chats eventually have two IDs:
- * - The initialId is the ID of the chat when it is first created (a UUID)
- * - The urlId is the ID of the chat that is displayed in the URL. This is a human-friendly ID that is
- *   displayed in the URL.
- *
- * Server-side functions accept either, so we call their union a `chatId`.
- */
+/* A chat's immutable initial ID is its route, persistence, and agent identity. */
 import { useStore } from '@nanostores/react';
 import { useNavigate, useParams } from '@tanstack/react-router';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
@@ -13,10 +7,7 @@ import { atom, computed, map } from 'nanostores';
 
 const logger = createScopedLogger('ChatId');
 
-/*
- * When loading the homepage, we set `pageLoadMixedId` to a randomly generated initialId.
- * When loading `/chat`, the user may provide either an initialId or a urlId.
- */
+/* The homepage creates an ID; an existing route supplies it. */
 const pageLoadChatId = atom<string | undefined>(undefined);
 
 export function getPageLoadChatId() {
@@ -35,10 +26,7 @@ export function setPageLoadChatId(chatId: string) {
   }
 }
 
-/*
- * If the user loads `/chat` with a urlId, we only know the `initialId` after we're done
- * loading the chat.
- */
+/* Confirm the server-owned identity after chat metadata loads. */
 const knownInitialId = atom<string | undefined>(undefined);
 
 export function getKnownInitialId() {
@@ -49,44 +37,15 @@ export function setKnownInitialId(initialId: string) {
   knownInitialId.set(initialId);
 }
 
-// This is useful in places where we want a unique ID (e.g. logs) instead of the
-// more human-friendly `urlId`, which is only unique within the current session.
-export const initialIdStore = computed([pageLoadChatId, knownInitialId], (pageLoadChatId, knownInitialId) => {
+export const chatIdStore = computed([pageLoadChatId, knownInitialId], (pageLoadChatId, knownInitialId) => {
   if (knownInitialId !== undefined) {
     return knownInitialId;
   }
   if (pageLoadChatId === undefined) {
-    throw new Error('initialIdStore used before pageLoadChatId was set');
+    throw new Error('chatIdStore used before pageLoadChatId was set');
   }
   return pageLoadChatId;
 });
-
-/*
- * Existing chats can have a human-friendly `urlId`, which is learned while loading.
- */
-const knownUrlId = atom<string | undefined>(undefined);
-
-export function setKnownUrlId(urlId: string) {
-  if (!knownUrlId.get()) {
-    knownUrlId.set(urlId);
-  }
-}
-
-export const chatIdStore = computed(
-  [pageLoadChatId, knownInitialId, knownUrlId],
-  (pageLoadChatId, knownInitialId, knownUrlId) => {
-    if (knownUrlId !== undefined) {
-      return knownUrlId;
-    }
-    if (knownInitialId !== undefined) {
-      return knownInitialId;
-    }
-    if (pageLoadChatId === undefined) {
-      throw new Error('chatIdStore used before pageLoadChatId was set');
-    }
-    return pageLoadChatId;
-  },
-);
 
 export function useChatId() {
   return useStore(chatIdStore);

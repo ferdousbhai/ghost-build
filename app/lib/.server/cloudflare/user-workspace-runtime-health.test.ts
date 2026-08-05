@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  readUserWorkspaceRuntimeHealth,
-  requireExpectedUserWorkspaceRuntimeHealth,
-} from './user-workspace-runtime-health';
+import { readUserWorkspaceRuntimeHealth } from './user-workspace-runtime-health';
 
 const runtimeVersion = 'a'.repeat(64);
 
@@ -29,21 +26,5 @@ describe('user workspace runtime health', () => {
     await expect(
       readUserWorkspaceRuntimeHealth({ DB: { prepare } as never, GHOSTBUILD_RUNTIME_VERSION: runtimeVersion }),
     ).rejects.toThrow('database is unavailable');
-  });
-
-  it('rejects a healthy response from any runtime version other than the one just deployed', () => {
-    expect(() =>
-      requireExpectedUserWorkspaceRuntimeHealth(
-        { ok: true, service: 'ghostbuild-user-workspace-runtime', runtimeVersion: 'b'.repeat(64) },
-        runtimeVersion,
-      ),
-    ).toThrow('did not pass its health check');
-
-    expect(() =>
-      requireExpectedUserWorkspaceRuntimeHealth(
-        { ok: true, service: 'ghostbuild-user-workspace-runtime', runtimeVersion },
-        runtimeVersion,
-      ),
-    ).not.toThrow();
   });
 });

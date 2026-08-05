@@ -16,6 +16,7 @@ const plan: DeploymentPlan = {
   templateSourceSha256: TEMPLATE_SOURCE_SHA256,
   securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
   securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
+  project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, appAgent: true } },
   billing: {
     infrastructure: 'user_cloudflare_account',
     workersAi: 'user_cloudflare_account',
@@ -41,6 +42,12 @@ async function artifactFile(path: string, contents: string): Promise<DeploymentA
     size: bytes.byteLength,
     sha256: [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join(''),
   };
+}
+
+async function textDigest(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 describe('UserCloudflareAccountApi', () => {
@@ -287,6 +294,9 @@ describe('UserCloudflareAccountApi', () => {
     const request = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ success: true, results: [{ name: 'digest' }] }] }),
+      )
       .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
       .mockResolvedValueOnce(
         Response.json({
@@ -303,29 +313,185 @@ describe('UserCloudflareAccountApi', () => {
       { name: '0001_users.sql', sql: 'CREATE TABLE users (id TEXT PRIMARY KEY)' },
     ]);
 
-    const batch = JSON.parse(String(request.mock.calls[2]?.[1]?.body)) as { batch: Array<{ sql: string }> };
+    const batch = JSON.parse(String(request.mock.calls[3]?.[1]?.body)) as { batch: Array<{ sql: string }> };
     expect(batch.batch).toHaveLength(2);
     expect(batch.batch[0]?.sql).toBe('CREATE TABLE users (id TEXT PRIMARY KEY)');
     expect(batch.batch[1]?.sql).toContain('ghostbuild_runtime_migrations');
+    expect(batch.batch[1]?.sql).toContain('digest');
+    expect(batch.batch[1]?.sql).not.toContain('OR IGNORE');
   });
 
   test('resolves an ambiguous D1 batch acknowledgement by reading the transactional marker', async () => {
+    const sql = 'ALTER TABLE users ADD COLUMN display_name TEXT';
+    const digest = await textDigest(sql);
     const request = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ success: true, results: [{ name: 'digest' }] }] }),
+      )
       .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
       .mockRejectedValueOnce(new Error('network acknowledgement lost'))
       .mockResolvedValueOnce(
-        Response.json({ success: true, result: [{ success: true, results: [{ name: '0001_users.sql' }] }] }),
+        Response.json({
+          success: true,
+          result: [{ success: true, results: [{ name: '0001_users.sql', digest }] }],
+        }),
       );
     const api = new UserCloudflareAccountApi('account-1', 'token', request);
 
     await expect(
-      api.applyD1Migrations('0123456789abcdef0123456789abcdef', [
-        { name: '0001_users.sql', sql: 'ALTER TABLE users ADD COLUMN display_name TEXT' },
-      ]),
+      api.applyD1Migrations('0123456789abcdef0123456789abcdef', [{ name: '0001_users.sql', sql }]),
     ).resolves.toBeUndefined();
-    expect(request).toHaveBeenCalledTimes(4);
+    expect(request).toHaveBeenCalledTimes(5);
+  });
+
+  test('rejects a concurrent migration that records a different digest', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ success: true, results: [{ name: 'digest' }] }] }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
+      .mockRejectedValueOnce(new Error('UNIQUE constraint failed: ghostbuild_runtime_migrations.name'))
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ success: true, results: [{ name: '0001_users.sql', digest: 'b'.repeat(64) }] }],
+        }),
+      );
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).applyD1Migrations(
+        '0123456789abcdef0123456789abcdef',
+        [{ name: '0001_users.sql', sql: 'CREATE TABLE users (id TEXT PRIMARY KEY)' }],
+      ),
+    ).rejects.toThrow('migration digest mismatch');
+  });
+
+  test('rejects an applied migration whose recorded digest differs', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ success: true, results: [{ name: 'digest' }] }] }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ success: true, results: [{ name: '0001_users.sql', digest: 'b'.repeat(64) }] }],
+        }),
+      );
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).applyD1Migrations(
+        '0123456789abcdef0123456789abcdef',
+        [{ name: '0001_users.sql', sql: 'CREATE TABLE users (id TEXT PRIMARY KEY)' }],
+      ),
+    ).rejects.toThrow('migration digest mismatch');
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  test('upgrades a pre-digest receipt only after its legacy schema attestation succeeds', async () => {
+    const sql = 'CREATE TABLE chats (id TEXT PRIMARY KEY)';
+    const digest = await textDigest(sql);
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ success: true, results: [{ name: 'digest' }] }] }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ success: true, results: [{ name: '0001_user_workspace.sql', digest: null }] }],
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [{ attested: 1 }] }] }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ success: true, results: [{ name: '0001_user_workspace.sql', digest }] }],
+        }),
+      );
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).applyD1Migrations(
+        '0123456789abcdef0123456789abcdef',
+        [{ name: '0001_user_workspace.sql', sql }],
+        { legacyReceiptAttestations: { '0001_user_workspace.sql': 'SELECT 1 AS attested' } },
+      ),
+    ).resolves.toBeUndefined();
+    expect(request).toHaveBeenCalledTimes(6);
+  });
+
+  test.each([
+    ['missing', undefined],
+    ['failed', 'SELECT 0 AS attested'],
+  ])('rejects a pre-digest receipt with %s schema attestation', async (_label, attestationSql) => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ success: true, results: [{ name: 'digest' }] }] }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ success: true, results: [{ name: '0001_user_workspace.sql', digest: null }] }],
+        }),
+      );
+    if (attestationSql) {
+      request.mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ success: true, results: [{ attested: 0 }] }] }),
+      );
+    }
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).applyD1Migrations(
+        '0123456789abcdef0123456789abcdef',
+        [{ name: '0001_user_workspace.sql', sql: 'CREATE TABLE chats (id TEXT PRIMARY KEY)' }],
+        attestationSql ? { legacyReceiptAttestations: { '0001_user_workspace.sql': attestationSql } } : {},
+      ),
+    ).rejects.toThrow(attestationSql ? 'schema attestation failed' : 'receipt lacks a digest');
+    expect(request.mock.calls.map((call) => String(call[1]?.body)).join('\n')).not.toContain(
+      'UPDATE ghostbuild_runtime_migrations',
+    );
+  });
+
+  test('trusts a user-authored pre-digest receipt once, then records its digest', async () => {
+    const sql = 'ALTER TABLE notes ADD COLUMN archived INTEGER';
+    const digest = await textDigest(sql);
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ success: true, results: [{ name: 'digest' }] }] }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ success: true, results: [{ name: '0002_archive.sql', digest: null }] }],
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ success: true, results: [{ name: '0002_archive.sql', digest }] }],
+        }),
+      );
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).applyD1Migrations(
+        '0123456789abcdef0123456789abcdef',
+        [{ name: '0002_archive.sql', sql }],
+        { trustLegacyReceiptsWithoutDigest: true },
+      ),
+    ).resolves.toBeUndefined();
+    expect(request).toHaveBeenCalledTimes(5);
   });
 
   test('replaces runtime schedules with exactly one deterministic GC trigger', async () => {

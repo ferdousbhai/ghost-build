@@ -28,11 +28,11 @@ describe('launch route states', () => {
   });
 
   it('distinguishes session loading from a signed-out direct project link', () => {
-    expect(renderToStaticMarkup(<ExistingChatSessionView chatId="project-1" sessionId={undefined} />)).toContain(
+    expect(renderToStaticMarkup(<ExistingChatSessionView chatId="project-1" userId={undefined} />)).toContain(
       'Checking your Cloudflare session',
     );
 
-    const signedOut = renderToStaticMarkup(<ExistingChatSessionView chatId="project-1" sessionId={null} />);
+    const signedOut = renderToStaticMarkup(<ExistingChatSessionView chatId="project-1" userId={null} />);
     expect(signedOut).toContain('Connect Cloudflare to open this project');
     expect(signedOut).toContain('Back to Ghostbuild');
   });
@@ -54,10 +54,10 @@ describe('launch route states', () => {
     expect(html).not.toContain('Sponsor');
   });
 
-  it('discloses the preview-only Cloudflare Computer dependency in settings', () => {
+  it('states the Cloudflare plan requirements without an internal runtime warning', () => {
     const html = renderToStaticMarkup(<CloudflareCard />);
 
-    expect(html).toContain('Cloudflare Computer 0.1.1');
-    expect(html).toContain('preview software not designated for production');
+    expect(html).toContain('Requires Cloudflare Workers Paid and Containers.');
+    expect(html).not.toContain('Cloudflare Computer');
   });
 });

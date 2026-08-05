@@ -1,0 +1,20 @@
+{
+  "ignoreExportsUsedInFile": {
+    "interface": true,
+  },
+  "workspaces": {
+    ".": {
+      "entry": ["app/router.tsx", "user-workspace-runtime/src/index.ts", "buildSystemPrompts.ts"],
+      "project": [
+        "**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!",
+        "!**/*.test.{ts,tsx}",
+        "!**/*.spec.{ts,tsx}",
+        "!tests/**",
+        "!e2e/**",
+        "!.ghostbuild-runtime-security-*/**",
+      ],
+      "ignore": ["template/**", "app/test/cloudflare-workers-shim.ts"],
+    },
+  },
+  "ignoreDependencies": ["@babel/core", "@babel/plugin-proposal-decorators", "cloudflare"],
+}

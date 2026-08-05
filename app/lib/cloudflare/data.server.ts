@@ -1,5 +1,6 @@
 import { deriveProvisionalTitle } from '@summonghost/title-generation';
 import {
+  TRANSCRIPT_HISTORY_FORMAT_VERSION,
   transcriptCheckpointsEqual,
   transcriptIdentitiesEqual,
   type TranscriptCheckpoint,
@@ -166,7 +167,7 @@ export async function userRuntimeInitialMessagesAction(args: {
       return transcriptConflictResponse(durable.checkpoint);
     }
     return Response.json(
-      { version: 2, transcript: durable.checkpoint, messages: durable.messages },
+      { version: TRANSCRIPT_HISTORY_FORMAT_VERSION, transcript: durable.checkpoint, messages: durable.messages },
       { headers: transcriptResponseHeaders(transcript) },
     );
   } catch (error) {

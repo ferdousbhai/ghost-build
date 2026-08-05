@@ -28,12 +28,13 @@ describe('chat URL lifecycle', () => {
     });
   });
 
-  it('uses the real URL ID once it has been assigned', async () => {
-    const { chatIdStore, setKnownInitialId, setKnownUrlId } = await import('./chatId');
+  it('uses the server-confirmed immutable chat ID', async () => {
+    const { chatIdStore, setKnownInitialId, setPageLoadChatId } = await import('./chatId');
+
+    setPageLoadChatId('initial-chat-id');
+    expect(chatIdStore.get()).toBe('initial-chat-id');
 
     setKnownInitialId('initial-chat-id');
-    setKnownUrlId('todo-app');
-
-    expect(chatIdStore.get()).toBe('todo-app');
+    expect(chatIdStore.get()).toBe('initial-chat-id');
   });
 });

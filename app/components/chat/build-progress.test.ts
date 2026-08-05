@@ -113,27 +113,27 @@ describe('getBuildProgress', () => {
     ).toMatchObject({ delayed: true, stalled: true });
   });
 
-  it('shows the current isolated validation stage', () => {
+  it('shows the current Computer validation operation', () => {
     expect(
       getBuildProgress({
         streamStatus: 'streaming',
         isRecovering: false,
         activeToolNames: ['validateProject'],
-        validationStage: 'dependency installation',
+        validationStage: 'computer validation',
         inactiveForMs: 0,
       }),
-    ).toMatchObject({ phase: 'validating', message: 'Installing validation dependencies…' });
+    ).toMatchObject({ phase: 'validating', message: 'Validating your project with Cloudflare Computer…' });
     expect(
       getBuildProgress({
         streamStatus: 'streaming',
         isRecovering: false,
         activeToolNames: ['validateProject'],
-        validationStage: 'application build',
+        validationStage: 'computer validation',
         inactiveForMs: VALIDATION_PROGRESS_DELAY_MS,
       }),
     ).toMatchObject({
       delayed: true,
-      message: 'Taking longer than usual — still building your project for production',
+      message: 'Taking longer than usual — still validating your project with cloudflare computer',
     });
   });
 

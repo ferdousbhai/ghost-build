@@ -4,7 +4,7 @@ import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { api } from '~/lib/cloudflare/data-api';
 import { useQuery } from '~/lib/cloudflare/data-hooks';
-import { useSessionIdOrNullOrLoading, waitForSessionId } from '~/lib/stores/sessionId';
+import { useUserIdOrNullOrLoading, waitForUserId } from '~/lib/stores/userId';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { chatSyncWorker, hasPendingCheckpointWork, initializeCheckpointPosition } from './chat-checkpoint-sync-worker';
@@ -21,8 +21,8 @@ export function useChatCheckpointSync(
   checkpoint?: TranscriptCheckpoint | null,
 ): void {
   const subchatIndex = useStore(subchatIndexStore);
-  const sessionId = useSessionIdOrNullOrLoading();
-  const chatInfo = useQuery(api.messages.get, sessionId ? { id: chatId, sessionId } : 'skip');
+  const userId = useUserIdOrNullOrLoading();
+  const chatInfo = useQuery(api.messages.get, userId ? { id: chatId, sessionId: userId } : 'skip');
 
   useEffect(() => {
     if (loadedSubchatIndex !== undefined && subchatIndexStore.get() !== loadedSubchatIndex) {
@@ -49,14 +49,14 @@ export function useChatCheckpointSync(
   useEffect(() => {
     const controller = new AbortController();
     const startWorker = async () => {
-      const activeSessionId = await waitForSessionId('useChatCheckpointSync');
+      const activeUserId = await waitForUserId('useChatCheckpointSync');
       controller.signal.throwIfAborted();
       if (chatInfo && chatInfo.subchatIndex > 0) {
         workbenchStore.showWorkbench.set(true);
       }
       await chatSyncWorker({
         chatId,
-        sessionId: activeSessionId,
+        sessionId: activeUserId,
         currentSubchatIndex: subchatIndex,
         latestSubchatIndex: chatInfo?.subchatIndex ?? loadedSubchatIndex,
         abortSignal: controller.signal,

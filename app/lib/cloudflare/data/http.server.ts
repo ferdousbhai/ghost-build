@@ -1,10 +1,9 @@
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { z } from 'zod';
 import { UnauthorizedError } from './auth.server';
-import { ChatStorageRetentionError, DataNotFoundError, SubchatLimitError } from './errors';
+import { DataNotFoundError, SubchatLimitError } from './errors';
 import { InvalidJsonBodyError, PayloadTooLargeError } from '~/lib/bounded-body';
 import { InvalidMultipartBodyError } from '~/lib/bounded-multipart';
-import { Lz4PayloadError } from '~/lib/compression-limits';
 
 const logger = createScopedLogger('CloudflareData');
 
@@ -18,9 +17,6 @@ export function internalErrorResponse(error: unknown, fallback: string): Respons
   if (error instanceof DataNotFoundError) {
     return Response.json({ error: error.message }, { status: 404 });
   }
-  if (error instanceof ChatStorageRetentionError) {
-    return Response.json({ error: error.message }, { status: 409 });
-  }
   if (error instanceof SubchatLimitError) {
     return Response.json({ error: error.message }, { status: 409 });
   }
@@ -29,9 +25,6 @@ export function internalErrorResponse(error: unknown, fallback: string): Respons
   }
   if (error instanceof InvalidJsonBodyError || error instanceof InvalidMultipartBodyError) {
     return Response.json({ error: error.message }, { status: 400 });
-  }
-  if (error instanceof Lz4PayloadError) {
-    return Response.json({ error: error.message }, { status: error.kind === 'too-large' ? 413 : 400 });
   }
   logger.error('Unhandled Cloudflare data request failure');
   return Response.json({ error: fallback }, { status: 500 });

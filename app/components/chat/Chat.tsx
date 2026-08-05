@@ -5,8 +5,8 @@ import { chatStore } from '~/lib/stores/chatId';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { BaseChat } from './BaseChat.client';
-import { initialIdStore } from '~/lib/stores/chatId';
-import { useSessionIdOrNullOrLoading } from '~/lib/stores/sessionId';
+import { chatIdStore } from '~/lib/stores/chatId';
+import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import type { ChatProps } from './chat-types';
 import { UnauthenticatedChat } from './UnauthenticatedChat';
 import { useBuilderAgentChat } from './useBuilderAgentChat';
@@ -37,12 +37,12 @@ export const Chat = memo(
   }: ChatProps) => {
     const [pendingInitialMessage, setPendingInitialMessage] = useState<string | null>(initialPrompt ?? null);
     const clearPendingInitialMessage = useCallback(() => setPendingInitialMessage(null), []);
-    const sessionId = useSessionIdOrNullOrLoading();
+    const userId = useUserIdOrNullOrLoading();
     const runtimeEndpoint = useStore(userRuntimeEndpointStore);
     const [runtimeConnectionError, setRuntimeConnectionError] = useState<string | null>(null);
     const [runtimeConnectionAttempt, setRuntimeConnectionAttempt] = useState(0);
     useEffect(() => {
-      if (typeof sessionId !== 'string' || runtimeEndpoint) {
+      if (typeof userId !== 'string' || runtimeEndpoint) {
         return undefined;
       }
       let canceled = false;
@@ -58,14 +58,10 @@ export const Chat = memo(
       return () => {
         canceled = true;
       };
-    }, [runtimeConnectionAttempt, runtimeEndpoint, sessionId]);
-    if (typeof sessionId !== 'string') {
+    }, [runtimeConnectionAttempt, runtimeEndpoint, userId]);
+    if (typeof userId !== 'string') {
       return (
-        <UnauthenticatedChat
-          initialMessages={initialMessages}
-          subchats={subchats}
-          authLoading={sessionId === undefined}
-        />
+        <UnauthenticatedChat initialMessages={initialMessages} subchats={subchats} authLoading={userId === undefined} />
       );
     }
     if (!runtimeEndpoint) {
@@ -130,11 +126,11 @@ const AuthenticatedChat = memo(
     pendingInitialMessage,
     clearPendingInitialMessage,
     transcript,
-  }: Omit<ChatProps, 'isReload' | 'hadSuccessfulDeploy'> & {
+  }: ChatProps & {
     pendingInitialMessage: string | null;
     clearPendingInitialMessage: () => void;
   }) => {
-    const chatInitialId = useStore(initialIdStore);
+    const chatInitialId = useStore(chatIdStore);
     const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
     const hasMultipleSubchats = (subchats?.length ?? 0) > 1;
     const [liveSubchatTitle, setLiveSubchatTitle] = useState<LiveSubchatTitle | null>(null);

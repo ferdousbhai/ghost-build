@@ -97,7 +97,6 @@ function chat(): ChatRow {
     id: 'chat-row',
     creator_id: 'session',
     initial_id: 'chat',
-    url_id: null,
     description: null,
     timestamp: '2026-08-01T00:00:00.000Z',
     last_subchat_index: 0,
@@ -153,7 +152,7 @@ class PreparedStatement {
   }
 
   async first<T>(): Promise<T | null> {
-    if (this.query.includes('SELECT * FROM chats')) {
+    if (this.query.includes('FROM chats')) {
       return chat() as T;
     }
     return null;

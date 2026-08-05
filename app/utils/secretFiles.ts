@@ -12,36 +12,6 @@ const LOCAL_CREDENTIAL_FILE_NAMES = [
 const PROJECT_DEPENDENCY_HOOK_FILE_NAMES = ['.pnpmfile.cjs', '.pnpmfile.js'] as const;
 const FORBIDDEN_LOCAL_FILE_NAMES = [...LOCAL_CREDENTIAL_FILE_NAMES, ...PROJECT_DEPENDENCY_HOOK_FILE_NAMES] as const;
 
-export const LOCAL_SECRET_FILE_IGNORE_PATHS = [
-  '.git',
-  ...FORBIDDEN_LOCAL_FILE_NAMES,
-  '.env',
-  '.env.',
-  '.env.local',
-  '.envrc',
-  '.dev.vars',
-  '.dev.vars.',
-] as const;
-
-/** Export globs used by downloaded project archives. */
-export const LOCAL_SECRET_FILE_EXPORT_EXCLUDES = [
-  '.git',
-  '.git/**',
-  '**/.git',
-  '**/.git/**',
-  ...FORBIDDEN_LOCAL_FILE_NAMES.flatMap((name) => [name, `**/${name}`]),
-  '.env',
-  '.env.*',
-  '**/.env',
-  '**/.env.*',
-  '.envrc',
-  '**/.envrc',
-  '.dev.vars',
-  '.dev.vars.*',
-  '**/.dev.vars',
-  '**/.dev.vars.*',
-] as const;
-
 const LOCAL_SECRET_FILE_NAMES = new Set([...FORBIDDEN_LOCAL_FILE_NAMES, '.git', '.env', '.envrc', '.dev.vars']);
 const PROJECT_DEPENDENCY_HOOK_FILE_NAME_SET = new Set<string>(PROJECT_DEPENDENCY_HOOK_FILE_NAMES);
 

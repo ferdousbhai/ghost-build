@@ -49,7 +49,7 @@ export class ContextCompactionUnavailableError extends Error {
   }
 }
 
-/** Build the actual provider input, compacting once above 100K without dropping transcript history. */
+/** Build provider input, replacing older prompt messages with a summary as the configured limits approach. */
 export async function prepareModelInput(args: {
   messages: GhostbuildMessage[];
   turnContext?: ChatTurnContext;

@@ -99,7 +99,7 @@ export async function attestManagedDeploymentSecurity(args: {
   attempts?: number;
   retryDelay?: (milliseconds: number) => Promise<void>;
 }): Promise<DeploymentSecurityAttestation> {
-  const requiresAgentSecurityDb = args.deployment.plan.project?.bindings.appAgent ?? true;
+  const requiresAgentSecurityDb = args.deployment.plan.project.bindings.appAgent;
   const profile = deploymentProjectProfile(args.deployment.plan);
   if (requiresAgentSecurityDb && !args.expectedAgentSecurityD1DatabaseId) {
     throw new DeploymentSecurityAttestationError(

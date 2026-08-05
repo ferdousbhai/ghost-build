@@ -7,10 +7,8 @@
     "worker-configuration.d.ts"
   ],
   "compilerOptions": {
-    "baseUrl": ".",
     "target": "ES2022",
     "module": "ESNext",
-    "ignoreDeprecations": "6.0",
     "types": ["./worker-configuration.d.ts", "node", "vite/client"],
     "paths": {
       "#/*": ["./src/*"],

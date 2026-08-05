@@ -44,6 +44,17 @@ describe('user workspace runtime control-plane readiness route', () => {
     expect(response?.headers.get('cache-control')).toBe('no-store');
     expect(get).not.toHaveBeenCalled();
   });
+
+  it('does not expose the retired health compatibility route', async () => {
+    const response = await routeUserWorkspaceRuntimeControlPlaneRequest(
+      new Request('https://workspace-runtime.example/v1/health', {
+        headers: { authorization: `Bearer ${controlPlaneSecret}` },
+      }),
+      runtimeEnv({ idFromName: vi.fn(() => 'readiness-id'), get: vi.fn() }) as never,
+    );
+
+    expect(response).toBeNull();
+  });
 });
 
 function runtimeEnv(projectWorkspace: { idFromName: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> }) {

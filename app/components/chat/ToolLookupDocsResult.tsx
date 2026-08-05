@@ -20,7 +20,7 @@ export function ToolLookupDocsResult({ invocation }: { invocation: GhostbuildToo
     </ToolResultFrame>
   ) : (
     <ToolResultFrame>
-      <Markdown html>{resultText}</Markdown>
+      <Markdown>{resultText}</Markdown>
     </ToolResultFrame>
   );
 }

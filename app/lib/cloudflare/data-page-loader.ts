@@ -142,7 +142,6 @@ function isChatHistorySummary(value: unknown): value is ChatHistorySummary {
     isNonEmptyString(value.id) &&
     isNonEmptyString(value.initialId) &&
     isStoredChatTimestamp(value.timestamp) &&
-    (value.urlId === undefined || isNonEmptyString(value.urlId)) &&
     (value.description === undefined || typeof value.description === 'string')
   );
 }

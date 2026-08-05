@@ -14,7 +14,7 @@ export const UserMessage = memo(function UserMessage({ content }: UserMessagePro
 
     body = (
       <div className="flex flex-col gap-4">
-        {textContent && <Markdown html>{textContent}</Markdown>}
+        {textContent && <Markdown>{textContent}</Markdown>}
         {images.map((item, index) => (
           <img
             key={index}
@@ -27,7 +27,7 @@ export const UserMessage = memo(function UserMessage({ content }: UserMessagePro
       </div>
     );
   } else {
-    body = <Markdown html>{content}</Markdown>;
+    body = <Markdown>{content}</Markdown>;
   }
 
   return <div className="overflow-hidden text-sm">{body}</div>;

@@ -8,7 +8,7 @@ import { captureException } from '~/lib/telemetry.client';
 import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
 import { createCloudflareReturnURL, signInWithCloudflare } from '~/lib/auth-client';
 import { messageInputStore } from '~/lib/stores/messageInput';
-import { getAuthToken } from '~/lib/stores/sessionId';
+import { isAuthenticated } from '~/lib/stores/userId';
 import { debounce } from '~/utils/debounce';
 import { PENDING_PROMPT_STORAGE_KEY } from '~/utils/constants';
 import { useGhostbuildAuth } from './GhostbuildAuthWrapper';
@@ -110,8 +110,8 @@ export function useMessageInputController({
     enhanceRequestRef.current = controller;
     try {
       setIsEnhancing(true);
-      if (!getAuthToken()) {
-        throw new Error('No auth token');
+      if (!isAuthenticated()) {
+        throw new Error('Not authenticated');
       }
       const response = await fetchUserRuntime('/v1/enhance-prompt', {
         method: 'POST',

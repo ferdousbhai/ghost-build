@@ -26,8 +26,6 @@ export function HomepageChat({ initialId, initialPrompt }: { initialId: string; 
       initializeChat={initializeChat}
       discardEmptyChat={discardEmptyChat}
       onBuilderRequestStart={onBuilderRequestStart}
-      isReload={false}
-      hadSuccessfulDeploy={false}
       subchats={subchats}
       initialPrompt={initialPrompt}
       transcript={transcript}

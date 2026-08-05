@@ -33,7 +33,9 @@ test('hydrates the built landing page without replacing meaningful SSR content',
 
   await expect(page).toHaveTitle(/Ghostbuild/);
   await expect(page.getByRole('heading', { name: /If you can dream it/i })).toBeVisible();
-  await expect(page.getByText(/You are interacting with Ghostbuild, an AI coding agent/i)).toBeVisible();
+  await expect(
+    page.getByText(/Ghostbuild writes, runs, and deploys your app inside your own Cloudflare account/i),
+  ).toBeVisible();
   await expect(page.getByPlaceholder(/Describe the app, workflow, and data/i)).toBeVisible();
   const modelSelector = page.getByRole('combobox', { name: /Builder model/i });
   await expect(modelSelector).toBeVisible();

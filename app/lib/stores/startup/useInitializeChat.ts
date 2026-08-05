@@ -1,15 +1,15 @@
 import { executeDataOperation } from '~/lib/cloudflare/client';
-import { waitForSessionId } from '~/lib/stores/sessionId';
+import { waitForUserId } from '~/lib/stores/userId';
 import { useCallback } from 'react';
 import { api } from '~/lib/cloudflare/data-api';
 
 export function useHomepageInitializeChat(chatId: string, setChatInitialized: (chatInitialized: boolean) => void) {
   return useCallback(async () => {
-    const sessionId = await waitForSessionId('useInitializeChat');
+    const userId = await waitForUserId('useInitializeChat');
 
     const result = await executeDataOperation(api.messages.initializeChat, {
       id: chatId,
-      sessionId,
+      sessionId: userId,
     });
     setChatInitialized(true);
     return result;
@@ -18,20 +18,20 @@ export function useHomepageInitializeChat(chatId: string, setChatInitialized: (c
 
 export function useExistingInitializeChat(chatId: string) {
   return useCallback(async () => {
-    const sessionId = await waitForSessionId('useInitializeChat');
+    const userId = await waitForUserId('useInitializeChat');
     return executeDataOperation(api.messages.initializeChat, {
       id: chatId,
-      sessionId,
+      sessionId: userId,
     });
   }, [chatId]);
 }
 
 export function useDiscardEmptyChat(chatId: string) {
   return useCallback(async () => {
-    const sessionId = await waitForSessionId('useDiscardEmptyChat');
+    const userId = await waitForUserId('useDiscardEmptyChat');
     await executeDataOperation(api.messages.discardEmptyChat, {
       id: chatId,
-      sessionId,
+      sessionId: userId,
     });
   }, [chatId]);
 }

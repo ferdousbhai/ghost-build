@@ -9,7 +9,7 @@ describe('subchat model', () => {
         { subchatIndex: 1, updatedAt: 2, description: 'Billing', transcript: transcript(1) },
       ]).map(({ label }) => label),
     ).toEqual(['Initial chat', 'Billing']);
-    expect(getSubchatLabel(3, '   ')).toBe('Feature #3');
+    expect(getSubchatLabel(3, '   ')).toBe('Chat 4');
   });
 
   it('derives navigation and creation permissions', () => {

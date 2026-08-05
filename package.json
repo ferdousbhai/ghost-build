@@ -56,7 +56,7 @@
     "validate:template": "node scripts/verify-template.mjs",
     "validate:public-beta": "pnpm run validate && pnpm run verify:built-browser",
     "validate": "pnpm run validate:root && pnpm run validate:agent && pnpm run validate:template",
-    "knip": "knip --treat-config-hints-as-errors"
+    "knip": "knip --treat-config-hints-as-errors && knip --config knip.production.jsonc --treat-config-hints-as-errors"
   },
   "engines": {
     "node": ">=26.0.0"

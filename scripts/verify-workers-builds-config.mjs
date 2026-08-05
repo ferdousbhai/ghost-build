@@ -1,9 +1,8 @@
-import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, printParseErrorCode } from 'jsonc-parser';
-import { findWorkersBuildsConfigErrors, WORKERS_BUILDS_CONTAINER_SOURCE_FILES } from './workers-builds-config.mjs';
+import { findWorkersBuildsConfigErrors } from './workers-builds-config.mjs';
 import { runVerifierIfMain } from './run-verifier.mjs';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,31 +25,12 @@ function readJsonc(path, errors) {
   return config;
 }
 
-export function hashContainerSources(paths) {
-  const hash = createHash('sha256');
-  for (const path of paths) {
-    hash.update(path);
-    hash.update('\0');
-    hash.update(readFileSync(resolve(rootDir, path)));
-    hash.update('\0');
-  }
-  return hash.digest('hex');
-}
-
 export function verifyWorkersBuildsConfig() {
   const errors = [];
   const config = readJson('workers-builds.production.json', errors);
   const packageJson = readJson('package.json', errors);
   const workerConfig = readJsonc('wrangler.jsonc', errors);
   const nvmrc = readFileSync(resolve(rootDir, '.nvmrc'), 'utf8');
-  let containerSourceSha256;
-  try {
-    containerSourceSha256 = hashContainerSources(WORKERS_BUILDS_CONTAINER_SOURCE_FILES);
-  } catch (error) {
-    errors.push(
-      `Workers Builds Container sources must be readable: ${error instanceof Error ? error.message : String(error)}.`,
-    );
-  }
   const workflowsDirectory = resolve(rootDir, '.github/workflows');
   const githubWorkflowPaths = existsSync(workflowsDirectory)
     ? readdirSync(workflowsDirectory)
@@ -66,7 +46,6 @@ export function verifyWorkersBuildsConfig() {
       githubWorkflowPaths,
       githubCompositeActionExists: existsSync(resolve(rootDir, '.github/actions/setup-and-build/action.yaml')),
       workerConfig,
-      containerSourceSha256,
     }),
   );
   return errors;

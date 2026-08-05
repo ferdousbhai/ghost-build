@@ -183,7 +183,7 @@ async function syncCheckpoint(
   completeMessageInfo: CompleteMessageInfo,
   signal: AbortSignal,
 ): Promise<void> {
-  const { url, update } = prepareMessageHistory({
+  const { searchParams, update } = prepareMessageHistory({
     chatId,
     sessionId,
     completeMessageInfo,
@@ -208,7 +208,7 @@ async function syncCheckpoint(
   let response: Response | undefined;
   let requestError: Error | null = null;
   try {
-    response = await fetchUserRuntime(`/v1/chats/store${url.search}`, { method: 'POST', body: formData, signal });
+    response = await fetchUserRuntime(`/v1/chats/store?${searchParams}`, { method: 'POST', body: formData, signal });
   } catch (error) {
     if (signal.aborted) {
       throw error;

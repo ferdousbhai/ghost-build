@@ -87,9 +87,8 @@ describe('BuilderAgent request policy', () => {
     ).toThrow(expect.objectContaining({ status: 409 }));
   });
 
-  it('keeps the configured persisted transcript window finite', () => {
-    expect(MAX_BUILDER_AGENT_MESSAGES).toBeGreaterThan(0);
-    expect(MAX_BUILDER_AGENT_MESSAGES).toBeLessThanOrEqual(500);
+  it('keeps the persisted transcript window finite', () => {
+    expect(MAX_BUILDER_AGENT_MESSAGES).toBe(500);
   });
 
   it('bounds direct-client user text without altering assistant tool parts', () => {

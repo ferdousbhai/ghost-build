@@ -7,7 +7,6 @@ const controlPlaneTables = [
   'cloudflare_connections',
   'cloudflare_credentials',
   'cloudflare_oauth_states',
-  'launch_controls',
   'user',
   'user_computer_runtimes',
 ];
@@ -28,9 +27,6 @@ describe('Ghostbuild control-plane D1 schema', () => {
 
     expect(tableNames(db)).toEqual(controlPlaneTables);
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-    expect(
-      db.prepare("SELECT mode, cohort_basis_points FROM launch_controls WHERE key = 'cloudflare_computer'").get(),
-    ).toEqual({ mode: 'off', cohort_basis_points: 0 });
   });
 
   test('enforces one current Cloudflare connection and runtime per user', () => {

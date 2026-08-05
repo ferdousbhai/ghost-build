@@ -2,7 +2,6 @@ export type ChatRow = {
   id: string;
   creator_id: string;
   initial_id: string;
-  url_id: string | null;
   description: string | null;
   timestamp: string;
   last_subchat_index: number;

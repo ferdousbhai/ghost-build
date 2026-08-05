@@ -21,15 +21,15 @@ export async function initializeChat(
 
 export async function discardEmptyChat(db: D1Database, args: { sessionId: string; id: string }): Promise<null> {
   await db.batch([
-    prepareEmptyChatAgentGcCandidatesStatement(db, { ownerId: args.sessionId, id: args.id }),
+    prepareEmptyChatAgentGcCandidatesStatement(db, { ownerId: args.sessionId, initialId: args.id }),
     db
       .prepare(
         `UPDATE chats
          SET is_deleted = 1
-         WHERE creator_id = ? AND (initial_id = ? OR url_id = ?)
+         WHERE creator_id = ? AND initial_id = ?
            AND ${EMPTY_CHAT_DISCARD_PREDICATE}`,
       )
-      .bind(args.sessionId, args.id, args.id),
+      .bind(args.sessionId, args.id),
   ]);
   return null;
 }
@@ -43,7 +43,6 @@ export async function getChat(db: D1Database, args: { id: string; sessionId: str
   const transcript = await requireChatTranscript(db, { chatId: chat.id, subchatIndex: selectedSubchatIndex });
   return {
     initialId: chat.initial_id,
-    urlId: chat.url_id ?? undefined,
     description: chat.description ?? undefined,
     timestamp: chat.timestamp,
     subchatIndex: chat.last_subchat_index,
@@ -62,7 +61,6 @@ export async function getAllChats(
       `SELECT
          chats.id AS row_id,
          chats.initial_id,
-         chats.url_id,
          COALESCE(
            NULLIF(TRIM(chats.description), ''),
            (
@@ -90,7 +88,6 @@ export async function getAllChats(
     .all<{
       row_id: string;
       initial_id: string;
-      url_id: string | null;
       description: string | null;
       timestamp: string;
     }>();
@@ -98,9 +95,8 @@ export async function getAllChats(
   const lastRow = pageRows.at(-1);
   return {
     items: pageRows.map((row) => ({
-      id: row.url_id ?? row.initial_id,
+      id: row.initial_id,
       initialId: row.initial_id,
-      urlId: row.url_id ?? undefined,
       description: row.description ?? undefined,
       timestamp: row.timestamp,
     })),
@@ -131,10 +127,10 @@ export async function setGeneratedDescriptionIfMissing(
     .prepare(
       `UPDATE chats
        SET description = ?
-       WHERE creator_id = ? AND (initial_id = ? OR url_id = ?) AND is_deleted = 0
+       WHERE creator_id = ? AND initial_id = ? AND is_deleted = 0
          AND NULLIF(TRIM(description), '') IS NULL`,
     )
-    .bind(args.description, args.sessionId, args.id, args.id)
+    .bind(args.description, args.sessionId, args.id)
     .run();
   return result.meta.changes > 0;
 }
@@ -155,7 +151,7 @@ export async function setGeneratedSubchatDescription(
        SET description = ?
        WHERE chat_id = (
          SELECT id FROM chats
-         WHERE creator_id = ? AND (initial_id = ? OR url_id = ?) AND is_deleted = 0
+         WHERE creator_id = ? AND initial_id = ? AND is_deleted = 0
        )
          AND subchat_index = ?
          AND (
@@ -163,7 +159,7 @@ export async function setGeneratedSubchatDescription(
            OR description = ?
          )`,
     )
-    .bind(args.description, args.sessionId, args.id, args.id, args.subchatIndex, args.provisionalDescription)
+    .bind(args.description, args.sessionId, args.id, args.subchatIndex, args.provisionalDescription)
     .run();
   return result.meta.changes > 0;
 }
@@ -178,11 +174,11 @@ export async function setSubchatDescription(
        SET description = ?
        WHERE chat_id = (
          SELECT id FROM chats
-         WHERE creator_id = ? AND (initial_id = ? OR url_id = ?) AND is_deleted = 0
+         WHERE creator_id = ? AND initial_id = ? AND is_deleted = 0
        )
          AND subchat_index = ?`,
     )
-    .bind(args.description, args.sessionId, args.chatId, args.chatId, args.subchatIndex)
+    .bind(args.description, args.sessionId, args.chatId, args.subchatIndex)
     .run();
   if (result.meta.changes === 0) {
     throw new Error('Chat not found');
@@ -191,19 +187,16 @@ export async function setSubchatDescription(
 }
 
 export async function removeChat(db: D1Database, args: { sessionId: string; id: string }) {
-  const chat = await findChat(db, { id: args.id, sessionId: args.sessionId });
-  if (chat) {
-    await db.batch([
-      prepareChatAgentGcCandidatesStatement(db, { chatId: chat.id, ownerId: args.sessionId }),
-      db
-        .prepare(
-          `UPDATE chats
-           SET is_deleted = 1
-           WHERE id = ? AND creator_id = ? AND is_deleted = 0`,
-        )
-        .bind(chat.id, args.sessionId),
-    ]);
-  }
+  await db.batch([
+    prepareChatAgentGcCandidatesStatement(db, { initialId: args.id, ownerId: args.sessionId }),
+    db
+      .prepare(
+        `UPDATE chats
+         SET is_deleted = 1
+         WHERE initial_id = ? AND creator_id = ? AND is_deleted = 0`,
+      )
+      .bind(args.id, args.sessionId),
+  ]);
   return { kind: 'success' } as const;
 }
 

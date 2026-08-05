@@ -1,4 +1,5 @@
 import {
+  CURRENT_TRANSCRIPT_GENERATION,
   transcriptAgentName,
   transcriptIdentitiesEqual,
   type TranscriptCheckpoint,
@@ -34,7 +35,6 @@ export function prepareInsertChatTranscript(
     chatId: string;
     initialId: string;
     subchatIndex: number;
-    generation?: number;
     headRevision?: number;
     headDigest?: string | null;
     parent?: { subchatIndex: number; generation: number; revision: number } | null;
@@ -43,7 +43,7 @@ export function prepareInsertChatTranscript(
     now?: number;
   },
 ): D1PreparedStatement {
-  const generation = args.generation ?? 0;
+  const generation = CURRENT_TRANSCRIPT_GENERATION;
   const now = args.now ?? Date.now();
   const values = [
     args.chatId,

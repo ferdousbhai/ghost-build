@@ -10,12 +10,12 @@ import type {
 } from '~/components/editor/codemirror/CodeMirrorEditor';
 import useViewport from '~/lib/hooks/useViewport';
 import { workbenchStore, type WorkbenchViewType } from '~/lib/stores/workbench.client';
-import { initialIdStore } from '~/lib/stores/chatId';
+import { chatIdStore } from '~/lib/stores/chatId';
 
 const logger = createScopedLogger('WorkbenchController');
 
 export function useWorkbenchController(isStreaming?: boolean) {
-  const projectId = useStore(initialIdStore);
+  const projectId = useStore(chatIdStore);
   const hasPreview = useStore(workbenchStore.hasPreview);
   const showWorkbench = useStore(workbenchStore.showWorkbench);
   const selectedFile = useStore(workbenchStore.selectedFile);

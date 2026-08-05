@@ -42,7 +42,7 @@ describe('server Builder operation tools', () => {
     });
     expect(workspace.validate).toHaveBeenCalledWith({ toolCallId: 'validation-call', input: {} });
     expect(onValidationStage.mock.calls).toEqual([
-      ['validation-call', 'sandbox initialization'],
+      ['validation-call', 'computer validation'],
       ['validation-call', null],
     ]);
   });

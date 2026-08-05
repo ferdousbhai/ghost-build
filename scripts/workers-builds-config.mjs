@@ -11,7 +11,6 @@ const EXPECTED_BUILD_VARIABLES = {
   SKIP_DEPENDENCY_INSTALL: '1',
 };
 const EXPECTED_REQUIRED_BUILD_VARIABLES = ['CLOUDFLARE_OAUTH_CLIENT_ID'];
-export const WORKERS_BUILDS_CONTAINER_SOURCE_FILES = [];
 const ALLOWED_GITHUB_WORKFLOW_PATHS = ['.github/workflows/runtime-artifacts.yml'];
 
 export function findUnexpectedGithubWorkflowPaths(paths) {
@@ -25,7 +24,6 @@ export function findWorkersBuildsConfigErrors({
   githubWorkflowPaths,
   githubCompositeActionExists,
   workerConfig,
-  containerSourceSha256,
 }) {
   const errors = [];
   requireEqual(errors, 'workers-builds.production.json worker', config?.worker, EXPECTED_WORKER);

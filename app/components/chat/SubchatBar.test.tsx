@@ -104,7 +104,7 @@ describe('SubchatBar', () => {
           currentSubchatIndex={0}
           isStreaming={false}
           chatDisabled={false}
-          sessionId="session"
+          userId="user"
           handleCreateSubchat={handleCreateSubchat}
           handleRenameSubchat={() => Promise.resolve(true)}
           isSubchatLoaded
@@ -149,7 +149,7 @@ describe('SubchatBar', () => {
           currentSubchatIndex={0}
           isStreaming={false}
           chatDisabled={false}
-          sessionId="session"
+          userId="user"
           handleCreateSubchat={() => Promise.resolve(true)}
           handleRenameSubchat={handleRenameSubchat}
           onSubchatTitleChange={onSubchatTitleChange}
@@ -193,7 +193,7 @@ function renderSubchatBar({
       currentSubchatIndex={currentSubchatIndex}
       isStreaming={false}
       chatDisabled={false}
-      sessionId="session"
+      userId="user"
       handleCreateSubchat={() => Promise.resolve(true)}
       handleRenameSubchat={() => Promise.resolve(true)}
       isSubchatLoaded

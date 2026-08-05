@@ -64,4 +64,70 @@ describe('ProjectWorkspace preview lifecycle', () => {
       create.indexOf('pnpm run build:isolated-preview'),
     );
   });
+
+  it('durably tracks and bounds the process before launching Preview', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const create = source.slice(source.indexOf('async createPreview('), source.indexOf('async stopPreview('));
+    const schedule = create.indexOf("await this.schedule(new Date(cleanupDeadline), 'expirePreview'");
+    const persist = create.indexOf('this.upsertPendingPreview(candidate, cleanupDeadline)');
+    const isolate = create.indexOf('createIsolatedProjectCommand');
+    const launch = create.indexOf('await this.startProcess(');
+
+    expect(schedule).toBeGreaterThan(0);
+    expect(persist).toBeGreaterThan(0);
+    expect(persist).toBeLessThan(schedule);
+    expect(schedule).toBeLessThan(isolate);
+    expect(persist).toBeLessThan(launch);
+    expect(create).toContain('timeout --signal=KILL ${Math.ceil(PREVIEW_TTL_MS / 1_000)}s');
+    expect(create).toContain('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?');
+  });
+
+  it('recovers pending Preview processes through stop and expiry paths', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const stop = source.slice(source.indexOf('async stopPreview('), source.indexOf('async expirePreview('));
+    const expire = source.slice(
+      source.indexOf('async expirePreview('),
+      source.indexOf('async prepareDeploymentArtifact('),
+    );
+    const cleanup = source.slice(
+      source.indexOf('private async cleanupPendingPreviews('),
+      source.indexOf('private pendingPreviewRow('),
+    );
+
+    expect(stop).toContain('pendingPreviewRow(previewId)');
+    expect(stop).toContain('cleanupPreviewResources(pending)');
+    expect(stop).toContain('pending && !this.activePreviewRow()');
+    expect(expire).toContain("await this.schedule(30, 'expirePreview', { previewId })");
+    expect(cleanup.indexOf('await this.cleanupPreviewResources(row)')).toBeLessThan(
+      cleanup.indexOf('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?'),
+    );
+    expect(cleanup.indexOf('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?')).toBeLessThan(
+      cleanup.indexOf('} catch (error)'),
+    );
+    expect(source).toContain('CREATE TABLE IF NOT EXISTS ghostbuild_pending_previews');
+    expect(source).not.toContain("this.deleteSchedules('expirePreview')");
+  });
+
+  it('preserves the prior Preview as pending until replacement cleanup succeeds', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const create = source.slice(source.indexOf('async createPreview('), source.indexOf('async stopPreview('));
+    const preservePrevious = create.indexOf('this.upsertPendingPreview(previous');
+    const publishReplacement = create.indexOf('INSERT INTO ghostbuild_active_preview');
+    const deleteRecoveredPrevious = create.lastIndexOf('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?');
+
+    expect(preservePrevious).toBeGreaterThan(0);
+    expect(preservePrevious).toBeLessThan(publishReplacement);
+    expect(deleteRecoveredPrevious).toBeGreaterThan(publishReplacement);
+    expect(create.lastIndexOf('DELETE FROM ghostbuild_preview_results WHERE preview_id = ?')).toBeGreaterThan(
+      publishReplacement,
+    );
+  });
+
+  it('replays only the currently active Preview result', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const create = source.slice(source.indexOf('async createPreview('), source.indexOf('async stopPreview('));
+    const replay = create.slice(create.indexOf('const replay ='), create.indexOf('return this.withStatefulOperation('));
+
+    expect(replay).toContain('this.activePreviewRow()?.preview_id === previewId');
+  });
 });

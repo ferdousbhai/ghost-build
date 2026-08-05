@@ -3,6 +3,7 @@ import { parseLoadSubsetOptions, queryCollectionOptions } from '@tanstack/query-
 import { useLiveQuery } from '@tanstack/react-db';
 import { z } from 'zod';
 import {
+  TRANSCRIPT_HISTORY_FORMAT_VERSION,
   transcriptCheckpointSchema,
   transcriptIdentitiesEqual,
   transcriptIdentitySchema,
@@ -38,6 +39,14 @@ const serializedMessageSchema = z.custom<SerializedMessage>(
   'Invalid serialized message.',
 );
 
+const transcriptHistorySchema = z
+  .object({
+    version: z.literal(TRANSCRIPT_HISTORY_FORMAT_VERSION),
+    transcript: transcriptCheckpointSchema,
+    messages: z.array(serializedMessageSchema),
+  })
+  .strict();
+
 const missingChatTranscriptSchema = z.object({
   requestKey: z.string().min(1),
   status: z.literal('missing'),
@@ -48,7 +57,6 @@ const readyChatTranscriptSchema = z.object({
   status: z.literal('ready'),
   loadedChatId: z.string().min(1),
   initialId: z.string().min(1),
-  urlId: z.string().min(1).optional(),
   description: z.string().optional(),
   loadedSubchatIndex: z.number().int().nonnegative(),
   transcript: transcriptIdentitySchema,
@@ -209,7 +217,6 @@ export function cachePersistedTranscript(args: {
     status: 'ready',
     loadedChatId: existing.loadedChatId,
     initialId: existing.initialId,
-    ...(existing.urlId === undefined ? {} : { urlId: existing.urlId }),
     ...(existing.description === undefined ? {} : { description: existing.description }),
     loadedSubchatIndex: args.subchatIndex,
     transcript: transcriptIdentity(args.checkpoint),
@@ -262,9 +269,8 @@ async function loadChatTranscript(
   return {
     requestKey,
     status: 'ready',
-    loadedChatId: chatInfo.urlId ?? chatInfo.initialId,
+    loadedChatId: chatInfo.initialId,
     initialId: chatInfo.initialId,
-    urlId: chatInfo.urlId,
     description: chatInfo.description,
     loadedSubchatIndex,
     transcript: responseTranscript,
@@ -306,22 +312,13 @@ function parseTranscriptHeaderInteger(value: string | null): number {
   return Number.isSafeInteger(parsed) ? parsed : Number.NaN;
 }
 
-function parseMessageHistory(deserialized: unknown): {
+export function parseMessageHistory(deserialized: unknown): {
   messages: SerializedMessage[];
   checkpoint: TranscriptCheckpoint | null;
 } {
-  if (!Array.isArray(deserialized)) {
-    const history = deserialized as Record<string, unknown> | null;
-    if (history !== null && history.version === 2 && Array.isArray(history.messages)) {
-      return {
-        messages: z.array(serializedMessageSchema).parse(history.messages),
-        checkpoint: transcriptCheckpointSchema.parse(history.transcript),
-      };
-    }
-    throw new Error('Unexpected state -- response is not a message history');
-  }
+  const history = transcriptHistorySchema.parse(deserialized);
   return {
-    messages: z.array(serializedMessageSchema).parse(deserialized),
-    checkpoint: null,
+    messages: history.messages,
+    checkpoint: history.transcript,
   };
 }

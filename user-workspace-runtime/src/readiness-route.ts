@@ -30,21 +30,11 @@ export async function routeUserWorkspaceRuntimeControlPlaneRequest(
   env: RuntimeReadinessEnv,
 ): Promise<Response | null> {
   const path = new URL(request.url).pathname;
-  if (request.method !== 'GET' || (path !== '/v1/health' && path !== '/v1/readiness')) {
+  if (request.method !== 'GET' || path !== '/v1/readiness') {
     return null;
   }
   if (!authorized(request, env.CONTROL_PLANE_SECRET)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401, headers: noStoreHeaders() });
-  }
-  if (path === '/v1/health') {
-    try {
-      return Response.json(await readUserWorkspaceRuntimeHealth(env), { headers: noStoreHeaders() });
-    } catch {
-      return Response.json(
-        { ok: false, service: USER_WORKSPACE_RUNTIME_SERVICE },
-        { status: 503, headers: noStoreHeaders() },
-      );
-    }
   }
   return readUserWorkspaceRuntimeReadiness(env);
 }

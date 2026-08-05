@@ -1,17 +1,14 @@
 import { memo, useEffect, useRef, type ChangeEventHandler, type KeyboardEventHandler } from 'react';
-import { ArrowRightIcon, ExclamationTriangleIcon, StopIcon } from '@radix-ui/react-icons';
+import { ArrowRightIcon, StopIcon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
 import { KeyboardShortcut } from '@ui/KeyboardShortcut';
 import { Spinner } from '@ui/Spinner';
-import { Tooltip } from '@ui/Tooltip';
 import { CloudflareConnectLegalNotice } from '~/components/CloudflareConnectLegalNotice';
 import { classNames } from '~/utils/classNames';
 import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import { EnhancePromptButton } from './EnhancePromptButton.client';
 import { getMessageInputPrimaryActionLabel, useMessageInputController } from './useMessageInputController';
 import { BuilderModelSelector } from './BuilderModelSelector.client';
-
-const PROMPT_LENGTH_WARNING_THRESHOLD = 2000;
 
 interface MessageInputProps {
   chatStarted: boolean;
@@ -42,14 +39,9 @@ export const MessageInput = memo(function MessageInput({
   const placeholder = chatStarted
     ? numMessages !== undefined && numMessages > 0
       ? 'Request changes by sending another message…'
-      : 'Send a prompt for a new feature…'
+      : 'Start this chat with a prompt…'
     : 'Describe the app, workflow, and data you want to build…';
-  const inputStatus =
-    input.length > PROMPT_LENGTH_WARNING_THRESHOLD ? (
-      <CharacterWarning />
-    ) : input.length > 3 ? (
-      <NewLineShortcut />
-    ) : null;
+  const inputStatus = input.length > 3 ? <NewLineShortcut /> : null;
   const actions = (
     <>
       {chatStarted && authState.kind === 'unauthenticated' && (
@@ -199,16 +191,5 @@ function NewLineShortcut() {
     <div className="text-xs text-content-tertiary">
       <KeyboardShortcut value={['Shift', 'Return']} className="mr-0.5 font-semibold" /> for new line
     </div>
-  );
-}
-
-function CharacterWarning() {
-  return (
-    <Tooltip tip="Ghostbuild performs better with shorter prompts. Consider making your prompt more concise or breaking it into smaller chunks.">
-      <div className="flex cursor-help items-center text-xs text-content-warning">
-        <ExclamationTriangleIcon className="mr-1 size-4" />
-        Prompt exceeds {PROMPT_LENGTH_WARNING_THRESHOLD.toLocaleString()} characters
-      </div>
-    </Tooltip>
   );
 }

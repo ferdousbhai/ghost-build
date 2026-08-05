@@ -5,7 +5,6 @@ import type { ChatHistoryCursor, DataPage, SubchatCursor } from './data-paginati
 
 type ChatSummary = {
   initialId: string;
-  urlId?: string;
   description?: string;
   timestamp: string;
   subchatIndex: number;
@@ -13,13 +12,8 @@ type ChatSummary = {
 };
 
 export type ChatHistorySummary = {
-  /*
-   * ID should be the urlId (if it's set) or the initialId, and callers should be able
-   * to handle either.
-   */
   id: string;
   initialId: string;
-  urlId?: string;
   description?: string;
   timestamp: string;
 };

@@ -72,11 +72,8 @@ daily-monitoring and 24-hour response obligation applies as documented there; it
 
 ## Containment limits
 
-The mutable `launch_controls.cloudflare_computer` D1 gate denies new runtime capabilities and provisioning without a
-Worker deployment; the exact commands and recovery procedure live in `cloudflare-computer-rollout.md`. It is not a hard
-process kill switch: an established WebSocket or in-flight bounded turn can continue until it settles, times out, or the
-operator revokes that user runtime. There is also no independent global gate for an already-authorized user-owned
-deployment execution. Until both limits are rehearsed and explicitly risk-accepted, halt launch/release activity, set
-the Computer gate to `off`, and use Cloudflare operator controls only for the exact affected Worker after confirming
-ownership and scope. A staging drill must inject client, Agent, sync, preview, validation, and deployment failures and
-verify redaction, correlation, containment, dashboard alerts, rollback, and customer communication before Product Hunt.
+There is no global process kill switch for user-owned runtimes. An established WebSocket or in-flight bounded turn can
+continue until it settles, times out, or the operator revokes that runtime. During an incident, halt releases and use
+Cloudflare operator controls only for the exact affected Worker after confirming ownership and scope. A staging drill
+must inject client, Agent, sync, preview, validation, and deployment failures and verify redaction, correlation,
+containment, dashboard alerts, rollback, and customer communication before launch.

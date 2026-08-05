@@ -94,7 +94,6 @@ const requiredMigrationTables = [
   'cloudflare_credentials',
   'cloudflare_connections',
   'user_computer_runtimes',
-  'launch_controls',
 ];
 const forbiddenCentralWorkloadTables = [
   'chats',

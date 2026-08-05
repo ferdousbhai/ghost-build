@@ -12,6 +12,23 @@ import { validatePreparedDeploymentArtifact } from './deployment-artifact';
 import { UserCloudflareAccountApi } from './user-account-api';
 import { GHOSTBUILD_CONTROL_PLANE_ENDPOINT } from './user-workspace-runtime-policy';
 
+export const LEGACY_AGENT_SECURITY_MIGRATION_ATTESTATIONS = {
+  '0001_agent_security.sql': `SELECT CASE WHEN
+    EXISTS (SELECT 1 FROM sqlite_schema WHERE type='table' AND name='app_agent_sessions'
+      AND lower(replace(replace(replace(replace(sql,char(9),''),char(10),''),char(13),''),' ','')) =
+        'createtableapp_agent_sessions(token_hashtextprimarykeynotnullcheck(length(token_hash)=64),agent_nametextnotnulluniquecheck(length(agent_name)between16and80),expires_atintegernotnull,created_atintegernotnull)')
+    AND EXISTS (SELECT 1 FROM sqlite_schema WHERE type='table' AND name='app_agent_rate_limits'
+      AND lower(replace(replace(replace(replace(sql,char(9),''),char(10),''),char(13),''),' ','')) =
+        'createtableapp_agent_rate_limits(buckettextnotnull,window_startintegernotnull,countintegernotnullcheck(count>0),primarykey(bucket,window_start))')
+    AND EXISTS (SELECT 1 FROM sqlite_schema WHERE type='index' AND name='app_agent_sessions_expires_at_idx'
+      AND lower(replace(replace(replace(replace(sql,char(9),''),char(10),''),char(13),''),' ','')) =
+        'createindexapp_agent_sessions_expires_at_idxonapp_agent_sessions(expires_at)')
+    AND EXISTS (SELECT 1 FROM sqlite_schema WHERE type='index' AND name='app_agent_rate_limits_window_start_idx'
+      AND lower(replace(replace(replace(replace(sql,char(9),''),char(10),''),char(13),''),' ','')) =
+        'createindexapp_agent_rate_limits_window_start_idxonapp_agent_rate_limits(window_start)')
+    THEN 1 ELSE 0 END AS attested`,
+} as const;
+
 type UserOwnedDeploymentArgs = {
   env: Env;
   deploymentId: string;
@@ -133,10 +150,14 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
     const publishApi = await createUserAccountApi(runtimeEnv, request, true);
     await workspace.assertDeploymentSession({ sessionId });
     if (d1) {
-      await publishApi.applyD1Migrations(d1.id, artifact.migrations.DB);
+      await publishApi.applyD1Migrations(d1.id, artifact.migrations.DB, {
+        trustLegacyReceiptsWithoutDigest: true,
+      });
     }
     if (agentD1) {
-      await publishApi.applyD1Migrations(agentD1.id, artifact.migrations.AGENT_SECURITY_DB);
+      await publishApi.applyD1Migrations(agentD1.id, artifact.migrations.AGENT_SECURITY_DB, {
+        legacyReceiptAttestations: LEGACY_AGENT_SECURITY_MIGRATION_ATTESTATIONS,
+      });
     }
     providerChangesPossible = true;
     const result = await publishApi.deployManagedWorker({

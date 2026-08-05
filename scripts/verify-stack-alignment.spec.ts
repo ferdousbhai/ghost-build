@@ -203,7 +203,6 @@ describe('stack alignment verification helpers', () => {
       'cloudflare_credentials',
       'cloudflare_connections',
       'user_computer_runtimes',
-      'launch_controls',
     ]
       .map((table) => `CREATE TABLE IF NOT EXISTS ${table} (id TEXT);`)
       .join('\n');

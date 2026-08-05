@@ -6,7 +6,6 @@ function project(timestamp: string, initialId: string): ChatHistorySummary {
   return {
     id: initialId,
     initialId,
-    urlId: initialId,
     description: `Project ${initialId}`,
     timestamp,
   };

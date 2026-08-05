@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   advanceTranscriptCheckpoint,
+  CURRENT_TRANSCRIPT_GENERATION,
   digestTranscriptMessages,
   stripTranscriptBaseMetadata,
   transcriptAgentName,
@@ -11,8 +12,8 @@ import {
 
 describe('transcript identity', () => {
   it('preserves the legacy initial agent name only for the original transcript', () => {
-    expect(transcriptAgentName('chat', 0, 0)).toBe('chat');
-    expect(transcriptAgentName('chat', 1, 0)).toBe('chat--transcript-1-0');
+    expect(transcriptAgentName('chat', 0, CURRENT_TRANSCRIPT_GENERATION)).toBe('chat');
+    expect(transcriptAgentName('chat', 1, CURRENT_TRANSCRIPT_GENERATION)).toBe('chat--transcript-1-0');
     expect(transcriptAgentName('chat', 0, 2)).toBe('chat--transcript-0-2');
   });
 

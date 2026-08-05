@@ -1,15 +1,10 @@
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
-import type { PluggableList, Plugin } from 'unified';
+import type { PluggableList } from 'unified';
 import rehypeSanitize, { defaultSchema, type Options as RehypeSanitizeOptions } from 'rehype-sanitize';
-import { SKIP, visit } from 'unist-util-visit';
-import type { Node as UnistNode, Parent as UnistParent } from 'unist';
+import { visit } from 'unist-util-visit';
+import type { Node as UnistNode } from 'unist';
 import { allowedHTMLElements } from 'ghostbuild-agent/prompts/formattingInstructions';
-
-type TextReplacementNode = UnistNode & {
-  type: 'text';
-  value: string;
-};
 
 type HtmlNode = UnistNode & {
   type: 'html';
@@ -49,54 +44,7 @@ const rehypeSanitizeOptions: RehypeSanitizeOptions = {
   strip: [],
 };
 
-export function remarkPlugins(limitedMarkdown: boolean) {
-  const plugins: PluggableList = [remarkGfm];
+export const markdownRemarkPlugins: PluggableList = [remarkThinkRawContent, remarkGfm];
 
-  if (limitedMarkdown) {
-    plugins.unshift(limitedMarkdownPlugin);
-  }
-
-  plugins.unshift(remarkThinkRawContent);
-
-  return plugins;
-}
-
-export function rehypePlugins(html: boolean) {
-  const plugins: PluggableList = [];
-
-  if (html) {
-    plugins.push(rehypeRaw, [rehypeSanitize, rehypeSanitizeOptions]);
-  }
-
-  return plugins;
-}
-
-const limitedMarkdownPlugin: Plugin = () => {
-  return (tree, file) => {
-    const contents = file.toString();
-
-    visit(tree, (node: UnistNode, index, parent: UnistParent) => {
-      if (
-        index == null ||
-        ['paragraph', 'text', 'inlineCode', 'code', 'strong', 'emphasis'].includes(node.type) ||
-        !node.position
-      ) {
-        return true;
-      }
-
-      let value = contents.slice(node.position.start.offset, node.position.end.offset);
-
-      if (node.type === 'heading') {
-        value = `\n${value}`;
-      }
-
-      const replacement: TextReplacementNode = {
-        type: 'text',
-        value,
-      };
-      parent.children[index] = replacement;
-
-      return [SKIP, index] as const;
-    });
-  };
-};
+// rehypeRaw parses untrusted model/user HTML, so sanitization must remain the final rehype transform.
+export const markdownRehypePlugins: PluggableList = [rehypeRaw, [rehypeSanitize, rehypeSanitizeOptions]];

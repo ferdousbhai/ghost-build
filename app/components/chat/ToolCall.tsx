@@ -2,7 +2,6 @@ import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
 import { memo, useMemo, useState } from 'react';
 import type { GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
-import { workbenchStore } from '~/lib/stores/workbench.client';
 import type { PartId } from 'ghostbuild-agent/partId';
 import { ToolUseContents } from './ToolUseContents';
 import { normalizeToolInvocation, statusIcon, toolTitle } from './tool-call-presentation';
@@ -38,14 +37,13 @@ export const ToolCall = memo(function ToolCall({
           {statusIcon(status, invocation)}
         </div>
       }
-      onOpen={() => workbenchStore.showWorkbench.set(!workbenchStore.showWorkbench.get())}
       onToggle={toggleAction}
       toggleDisabled={invocation.state === 'input-streaming'}
       body={
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-          <ul className="list-none space-y-2.5">
+          <div className="space-y-2.5">
             <ToolUseContents invocation={invocation} />
-          </ul>
+          </div>
         </motion.div>
       }
     />

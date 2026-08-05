@@ -14,8 +14,8 @@ interface HistoryItemProps {
 }
 
 export function HistoryItem({ item, handleDeleteClick }: HistoryItemProps) {
-  const { id: urlId } = useParams({ strict: false }) as { id?: string };
-  const isActiveChat = urlId === item.id;
+  const { id: routeChatId } = useParams({ strict: false }) as { id?: string };
+  const isActiveChat = routeChatId === item.id;
 
   const { editing, handleChange, handleBlur, handleSubmit, handleKeyDown, currentDescription, toggleEditMode } =
     useEditChatDescription({
@@ -63,7 +63,7 @@ export function HistoryItem({ item, handleDeleteClick }: HistoryItemProps) {
       ) : (
         <>
           <a
-            href={`/chat/${item.urlId ?? item.initialId}`}
+            href={`/chat/${item.initialId}`}
             className="flex min-w-0 flex-1 items-start gap-2.5 rounded-lg p-2 text-content-primary no-underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500"
           >
             <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--gb-background-secondary)] text-content-accent shadow-sm">

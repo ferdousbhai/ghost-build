@@ -21,7 +21,7 @@ interface SubchatBarProps {
   currentSubchatIndex: number;
   isStreaming: boolean;
   chatDisabled: boolean;
-  sessionId: string | null;
+  userId: string | null;
   handleCreateSubchat: () => Promise<boolean>;
   handleRenameSubchat: (title: string) => Promise<boolean>;
   onSubchatTitleChange?: (subchatIndex: number, title: string) => void;
@@ -33,7 +33,7 @@ export function SubchatBar({
   currentSubchatIndex,
   isStreaming,
   chatDisabled,
-  sessionId,
+  userId,
   handleCreateSubchat,
   handleRenameSubchat,
   onSubchatTitleChange,
@@ -50,7 +50,7 @@ export function SubchatBar({
   const { hasMultipleSubchats, canNavigatePrev, canNavigateNext, canCreateSubchat } = getSubchatNavigation(
     subchatCount,
     currentSubchatIndex,
-    sessionId !== null,
+    userId !== null,
   );
 
   const busyTip = isCreatingSubchat
@@ -90,7 +90,7 @@ export function SubchatBar({
     setRenameValue(currentSubchatLabel);
     setIsRenameModalOpen(true);
   };
-  const chatTitle = sessionId ? (
+  const chatTitle = userId ? (
     <button
       type="button"
       className="group flex min-w-0 grow items-center gap-1.5 rounded-md bg-transparent text-left text-sm font-medium text-content-primary outline-none focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:opacity-50"
@@ -147,7 +147,7 @@ export function SubchatBar({
         }}
         confirmRename={async () => {
           const title = renameValue.trim();
-          if (!sessionId || !title || isRenaming) {
+          if (!userId || !title || isRenaming) {
             return;
           }
           setIsRenaming(true);
@@ -216,10 +216,10 @@ export function SubchatBar({
                   sideOffset={8}
                   collisionPadding={12}
                   className="z-50 max-h-[min(24rem,var(--radix-dropdown-menu-content-available-height))] w-[var(--radix-dropdown-menu-trigger-width)] min-w-72 overflow-y-auto rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-1.5 text-content-primary shadow-[0_18px_50px_rgba(0,0,0,0.28)] outline-none"
-                  aria-label="Build history"
+                  aria-label="Chat history"
                 >
                   <DropdownMenu.Label className="px-3 pb-2 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-content-secondary">
-                    Build history
+                    Chat history
                   </DropdownMenu.Label>
                   <DropdownMenu.RadioGroup
                     value={String(currentSubchatIndex)}

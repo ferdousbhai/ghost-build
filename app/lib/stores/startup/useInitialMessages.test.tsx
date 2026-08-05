@@ -3,7 +3,7 @@
 import { act, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { sessionIdStore } from '~/lib/stores/sessionId';
+import { userIdStore } from '~/lib/stores/userId';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { useInitialMessages } from './useInitialMessages';
 import { description } from '~/lib/stores/description';
@@ -25,7 +25,7 @@ describe('useInitialMessages', () => {
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     subchatIndexStore.set(0);
-    sessionIdStore.set(undefined);
+    userIdStore.set(undefined);
     executeDataOperationMock.mockReset();
     vi.stubGlobal(
       'fetch',
@@ -45,7 +45,7 @@ describe('useInitialMessages', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    sessionIdStore.set(undefined);
+    userIdStore.set(undefined);
     subchatIndexStore.set(undefined);
     description.set(undefined);
     document.body.replaceChildren();
@@ -58,7 +58,6 @@ describe('useInitialMessages', () => {
       }
       return {
         initialId: 'project-id',
-        urlId: undefined,
         description: 'Project',
         subchatIndex: 0,
         transcript: { agentName: 'project-id', generation: 0, subchatIndex: 0 },
@@ -81,14 +80,14 @@ describe('useInitialMessages', () => {
 
     await act(async () => {
       root.render(<Harness />);
-      sessionIdStore.set('stale-session');
+      userIdStore.set('stale-session');
     });
     await act(async () => {
       await vi.waitFor(() => expect(container.textContent).toBe('missing'));
     });
 
     await act(async () => {
-      sessionIdStore.set('signed-in-user');
+      userIdStore.set('signed-in-user');
     });
     await act(async () => {
       await vi.waitFor(() => expect(container.textContent).toBe('ready'));
@@ -112,7 +111,6 @@ describe('useInitialMessages', () => {
       }
       return {
         initialId: 'project-id',
-        urlId: undefined,
         description: 'Project',
         subchatIndex: args.subchatIndex ?? 0,
         transcript: {
@@ -140,7 +138,7 @@ describe('useInitialMessages', () => {
 
     await act(async () => {
       root.render(<Harness />);
-      sessionIdStore.set('signed-in-subchat-user');
+      userIdStore.set('signed-in-subchat-user');
     });
     await act(async () => {
       await vi.waitFor(() => expect(container.textContent).toBe('ready-0'));
@@ -166,7 +164,6 @@ describe('useInitialMessages', () => {
     let latestSubchatIndex = 0;
     executeDataOperationMock.mockImplementation(async () => ({
       initialId: 'project-id',
-      urlId: undefined,
       description: 'Project',
       subchatIndex: latestSubchatIndex,
       transcript: {
@@ -187,7 +184,7 @@ describe('useInitialMessages', () => {
 
     await act(async () => {
       root.render(<Harness />);
-      sessionIdStore.set('signed-in-revalidation-user');
+      userIdStore.set('signed-in-revalidation-user');
     });
     await act(async () => {
       await vi.waitFor(() => expect(container.textContent).toBe('ready-0'));
