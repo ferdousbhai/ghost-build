@@ -159,11 +159,7 @@ export function findSandboxRuntimePinErrors(packageSpec, installedVersion, provi
   if (image[1] !== installedVersion) {
     errors.push(`Cloudflare Sandbox package ${installedVersion} must match container image tag ${image[1]}.`);
   }
-  if (/^0\.0\.0-pr-\d+-[a-f0-9]{8}$/.test(installedVersion)) {
-    if (!/^github:ferdousbhai\/cloudflare-sandbox-pr799-mirror#[a-f0-9]{40}$/.test(packageSpec ?? '')) {
-      errors.push(`Cloudflare Sandbox preview ${installedVersion} must use its immutable Git commit mirror.`);
-    }
-  } else if (packageSpec !== installedVersion) {
+  if (packageSpec !== installedVersion) {
     errors.push(`package.json must pin the installed Cloudflare Sandbox version ${installedVersion} exactly.`);
   }
   return errors;
