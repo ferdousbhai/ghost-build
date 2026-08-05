@@ -45,6 +45,13 @@ type ContainerApplicationReadback = {
   durable_objects?: { namespace_id?: string };
 };
 
+type ContainerApplicationRolloutReadback = {
+  id?: string;
+  created_at?: string;
+  status?: string;
+  target_configuration?: unknown;
+};
+
 export type ActiveWorkerDeploymentReadback = {
   providerDeploymentId: string;
   workerVersionId: string;
@@ -671,6 +678,35 @@ export class UserCloudflareAccountApi {
     if (!result.id || result.name !== args.applicationName) {
       throw new CloudflareAccountApiError('Cloudflare returned an invalid workspace container application.');
     }
+    if (existing) {
+      const rollouts = await this.callContainer<unknown>(`/applications/${encodeURIComponent(existing.id)}/rollouts`, {
+        method: 'GET',
+      });
+      const latestRollout = latestContainerApplicationRollout(rollouts);
+      const converged =
+        latestRollout &&
+        ['pending', 'progressing', 'completed'].includes(latestRollout.status) &&
+        matchesWorkspaceContainerConfiguration(latestRollout.target_configuration, args.image);
+      if (converged) {
+        return { id: result.id, name: result.name };
+      }
+      const rollout = await this.callContainer<{ id?: string }>(
+        `/applications/${encodeURIComponent(existing.id)}/rollouts`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            description: 'Ghostbuild workspace runtime update',
+            strategy: 'rolling',
+            target_configuration: configuration.configuration,
+            step_percentage: 100,
+            kind: 'full_auto',
+          }),
+        },
+      );
+      if (!rollout.id) {
+        throw new CloudflareAccountApiError('Cloudflare returned an invalid workspace container rollout.');
+      }
+    }
     return { id: result.id, name: result.name };
   }
 
@@ -1118,6 +1154,39 @@ function existingContainerApplication(
     name: applicationName,
     durable_objects: { namespace_id: existing.durable_objects.namespace_id },
   };
+}
+
+function latestContainerApplicationRollout(value: unknown): Required<ContainerApplicationRolloutReadback> | null {
+  if (!Array.isArray(value)) {
+    throw new CloudflareAccountApiError('Cloudflare returned invalid workspace container rollouts.');
+  }
+  const rollouts = value.map((rollout) => {
+    if (
+      !isRecord(rollout) ||
+      typeof rollout.id !== 'string' ||
+      typeof rollout.created_at !== 'string' ||
+      typeof rollout.status !== 'string' ||
+      !isRecord(rollout.target_configuration)
+    ) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid workspace container rollouts.');
+    }
+    return rollout as Required<ContainerApplicationRolloutReadback>;
+  });
+  return rollouts.sort((left, right) => right.created_at.localeCompare(left.created_at))[0] ?? null;
+}
+
+function matchesWorkspaceContainerConfiguration(value: unknown, image: string): boolean {
+  if (!isRecord(value) || value.image !== image) {
+    return false;
+  }
+  const ssh = isRecord(value.wrangler_ssh) ? value.wrangler_ssh : null;
+  const observability = isRecord(value.observability) ? value.observability : null;
+  const logs = observability && isRecord(observability.logs) ? observability.logs : null;
+  const disk = isRecord(value.disk) ? value.disk : null;
+  const basicInstance =
+    value.instance_type === PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE ||
+    (value.vcpu === 0.25 && value.memory_mib === 1_024 && disk?.size_mb === 4_000);
+  return ssh?.enabled === false && logs?.enabled === true && basicInstance;
 }
 
 function workerModuleContentType(path: string): string {
