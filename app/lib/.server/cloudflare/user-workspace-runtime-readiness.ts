@@ -1,5 +1,9 @@
 import { readJsonBodyWithLimit } from '~/lib/bounded-body';
-import { parseUserWorkspaceRuntimeReadiness } from './user-workspace-runtime-health';
+import {
+  parseUserWorkspaceRuntimeReadiness,
+  USER_WORKSPACE_READINESS_COMPONENTS,
+  type UserWorkspaceReadinessComponent,
+} from './user-workspace-runtime-health';
 
 const READINESS_DEADLINE_MS = 10 * 60_000;
 const READINESS_REQUEST_TIMEOUT_MS = 8 * 60_000;
@@ -7,6 +11,19 @@ const READINESS_MAX_ATTEMPTS = 30;
 const READINESS_INITIAL_BACKOFF_MS = 500;
 const READINESS_MAX_BACKOFF_MS = 5_000;
 const MAX_HEALTH_RESPONSE_BYTES = 4 * 1024;
+const ACTIONABLE_FAILURE_CODES = new Set([
+  'cleanup_failed',
+  'invalid_version',
+  'query_failed',
+  'rpc_failed',
+  'unavailable',
+  'workspace_sync_pending',
+]);
+
+type ReadinessFailure = {
+  component: UserWorkspaceReadinessComponent;
+  code: string;
+};
 
 type ReadinessDependencies = {
   request?: typeof fetch;
@@ -38,6 +55,7 @@ export async function waitForUserWorkspaceRuntimeReadiness(
     'readiness request timeout',
   );
   const deadline = now() + deadlineMs;
+  let lastReadinessFailures: ReadinessFailure[] = [];
 
   for (let attempt = 1; attempt <= READINESS_MAX_ATTEMPTS; attempt += 1) {
     const remainingBeforeRequest = deadline - now();
@@ -52,11 +70,15 @@ export async function waitForUserWorkspaceRuntimeReadiness(
       });
       if (!response.ok) {
         retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'), now());
-        await response.body?.cancel().catch(() => undefined);
         if (!isTransientReadinessStatus(response.status)) {
+          await response.body?.cancel().catch(() => undefined);
           throw new UserWorkspaceRuntimeReadinessError(
             `The user-owned workspace runtime rejected its health check (HTTP ${response.status}).`,
           );
+        }
+        const health = await readTransientReadiness(response);
+        if (health?.runtimeVersion === args.runtimeVersion) {
+          lastReadinessFailures = actionableReadinessFailures(health);
         }
       } else {
         const payload = await readJsonBodyWithLimit(response, MAX_HEALTH_RESPONSE_BYTES, 'Workspace runtime health');
@@ -91,7 +113,7 @@ export async function waitForUserWorkspaceRuntimeReadiness(
   }
 
   throw new UserWorkspaceRuntimeReadinessError(
-    'The user-owned workspace runtime was not ready before the health-check deadline.',
+    `The user-owned workspace runtime was not ready before the health-check deadline.${formatReadinessFailures(lastReadinessFailures)}`,
   );
 }
 
@@ -124,6 +146,34 @@ function isTransientFetchFailure(error: unknown): boolean {
     error instanceof TypeError ||
     (error instanceof DOMException && ['AbortError', 'NetworkError', 'TimeoutError'].includes(error.name))
   );
+}
+
+async function readTransientReadiness(response: Response) {
+  try {
+    const payload = await readJsonBodyWithLimit(response, MAX_HEALTH_RESPONSE_BYTES, 'Workspace runtime health');
+    return parseUserWorkspaceRuntimeReadiness(payload);
+  } catch {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+}
+
+function actionableReadinessFailures(
+  health: ReturnType<typeof parseUserWorkspaceRuntimeReadiness>,
+): ReadinessFailure[] {
+  return USER_WORKSPACE_READINESS_COMPONENTS.flatMap((component) => {
+    const result = health.components[component];
+    return !result.ok && ACTIONABLE_FAILURE_CODES.has(result.code) ? [{ component, code: result.code }] : [];
+  });
+}
+
+function formatReadinessFailures(failures: ReadinessFailure[]): string {
+  if (failures.length === 0) {
+    return '';
+  }
+  return ` Readiness checks still failing: ${failures
+    .map(({ component, code }) => `${component} (${code})`)
+    .join(', ')}.`;
 }
 
 function exponentialBackoffWithJitter(attempt: number, random: () => number): number {

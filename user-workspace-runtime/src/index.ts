@@ -109,7 +109,9 @@ const DERIVED_PATHS = ['dist', '.output', '.tanstack', '.wrangler'].map((name) =
 const COMPUTERD_PROCESS_ID = 'ghostbuild-computerd';
 const COMPUTERD_ROOT = '/tmp/ghostbuild-computer';
 const COMPUTERD_BINARY = `${COMPUTERD_ROOT}/usr/local/bin/computerd`;
-const COMPUTERD_LAYER_DIGEST = 'sha256:4034b86577bc36e9f089df87960e9249e1f05c77edaa52783da7d6142d07bb81';
+// Immutable linux/amd64 layer published by
+// ghcr.io/cloudflare/computer-computerd-linux-x64:0.1.1.
+const COMPUTERD_LAYER_DIGEST = 'sha256:7d54afd24f340c562357091403ee2dca004c0ce99d3970f32a03300602e19c47';
 const OPERATION_LEASE_MS = {
   seed: 10 * 60_000,
   write: 10 * 60_000,

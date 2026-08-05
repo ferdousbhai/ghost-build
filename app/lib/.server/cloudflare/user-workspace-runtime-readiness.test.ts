@@ -137,6 +137,51 @@ describe('user workspace runtime readiness', () => {
     expect(clock.now()).toBe(1_000);
   });
 
+  test('reports actionable component codes from the last authenticated transient response', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(unhealthy(runtimeVersion, 'container', 'unavailable'), { status: 503 }))
+      .mockRejectedValueOnce(new TypeError('fetch failed'));
+    const clock = fakeClock();
+
+    await expect(
+      waitForUserWorkspaceRuntimeReadiness({
+        endpoint,
+        controlPlaneSecret,
+        runtimeVersion,
+        request,
+        now: clock.now,
+        sleep: clock.sleep,
+        random: () => 0,
+        deadlineMs: 1_000,
+      }),
+    ).rejects.toThrow('health-check deadline. Readiness checks still failing: container (unavailable)');
+
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  test('does not expose unrecognized component codes from a transient response', async () => {
+    const sensitiveCode = 'secret_account_token_123';
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(unhealthy(runtimeVersion, 'container', sensitiveCode), { status: 503 }));
+    const clock = fakeClock();
+
+    const result = waitForUserWorkspaceRuntimeReadiness({
+      endpoint,
+      controlPlaneSecret,
+      runtimeVersion,
+      request,
+      now: clock.now,
+      sleep: clock.sleep,
+      random: () => 0,
+      deadlineMs: 1,
+    });
+
+    await expect(result).rejects.toThrow('health-check deadline.');
+    await expect(result).rejects.not.toThrow(sensitiveCode);
+  });
+
   test('does not retry unexpected request failures', async () => {
     const request = vi.fn<typeof fetch>().mockRejectedValue(new Error('programming error'));
     const sleep = vi.fn(async () => undefined);
@@ -169,6 +214,18 @@ function healthy(version: string) {
       cleanup: check,
     },
   } as const;
+}
+
+function unhealthy(version: string, component: keyof ReturnType<typeof healthy>['components'], code: string) {
+  const payload = healthy(version);
+  return {
+    ...payload,
+    ok: false,
+    components: {
+      ...payload.components,
+      [component]: { ok: false, code, durationMs: 1 },
+    },
+  };
 }
 
 function fakeClock() {
