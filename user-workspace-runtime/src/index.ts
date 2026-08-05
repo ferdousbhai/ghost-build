@@ -47,6 +47,7 @@ import { toolFailure, toolSuccess, type GhostbuildToolResult } from '../../ghost
 import { computerSyncUnconfirmedToolResult } from '../../ghostbuild-agent/cloudflare-computer';
 import { openPreviewQuickTunnel } from './preview-tunnel';
 import { applyAtomicWorkspaceChanges } from './atomic-workspace-changes';
+import { isComputerContainerCallback } from './container-fetch-routing';
 import { routeUserWorkspaceRuntimeControlPlaneRequest } from './readiness-route';
 import { scheduleUserWorkspaceRuntimeMaintenance } from './scheduled-maintenance';
 import { ToolOperationJournal, type ToolOperationStartResult } from './tool-operation-journal';
@@ -397,7 +398,10 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   }
 
   override fetch(request: Request): Promise<Response> {
-    return this.containerBackend.handleFetch(request);
+    if (isComputerContainerCallback(request)) {
+      return this.containerBackend.handleFetch(request);
+    }
+    return super.fetch(request);
   }
 
   async __getWorkspaceStub() {
