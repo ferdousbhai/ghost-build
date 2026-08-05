@@ -15,6 +15,7 @@ import {
   findMissingCommandSteps,
   findPackageVersionAlignmentErrors,
   findRuntimePinErrors,
+  findSandboxRuntimePinErrors,
   findRootMigrationErrors,
   findBuilderTemplateModuleErrors,
   packageDependencyVersion,
@@ -100,6 +101,20 @@ describe('stack alignment verification helpers', () => {
       'package.json must pin the tested AI SDK 7 family @ai-sdk/react@4.0.51 for agents, @cloudflare/ai-chat, workers-ai-provider; found 4.0.7.',
       'package.json must pin the tested AI SDK 7 family @ai-sdk/provider@4.0.4 for agents, @cloudflare/ai-chat, workers-ai-provider; found 4.0.0.',
       'package.json must pin the tested AI SDK 7 family workers-ai-provider@4.0.0 for agents, @cloudflare/ai-chat, workers-ai-provider; found ^3.3.0.',
+    ]);
+  });
+
+  it('keeps the Sandbox package, immutable mirror, and container image aligned', () => {
+    const version = '0.0.0-pr-799-66773f6b';
+    const mirror = `github:ferdousbhai/cloudflare-sandbox-pr799-mirror#${'b'.repeat(40)}`;
+    const image = `docker.io/cloudflare/sandbox:${version}@sha256:${'a'.repeat(64)}`;
+
+    expect(findSandboxRuntimePinErrors(mirror, version, image)).toEqual([]);
+    expect(findSandboxRuntimePinErrors('https://pkg.pr.new/sandbox', version, image)).toEqual([
+      'Cloudflare Sandbox preview 0.0.0-pr-799-66773f6b must use its immutable Git commit mirror.',
+    ]);
+    expect(findSandboxRuntimePinErrors(mirror, version, image.replace(version, '0.12.4'))).toEqual([
+      'Cloudflare Sandbox package 0.0.0-pr-799-66773f6b must match container image tag 0.12.4.',
     ]);
   });
 

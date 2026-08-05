@@ -150,6 +150,25 @@ export function findForbiddenRootBrowserRuntimeDependencies(pkg) {
     .map((name) => `package.json must not depend on the removed browser execution runtime ${name}.`);
 }
 
+export function findSandboxRuntimePinErrors(packageSpec, installedVersion, provisionerSource) {
+  const errors = [];
+  const image = /docker\.io\/cloudflare\/sandbox:([^@'\s]+)@sha256:([a-f0-9]{64})/.exec(provisionerSource);
+  if (!image) {
+    return ['user workspace runtime must pin a Cloudflare Sandbox image tag and SHA-256 digest.'];
+  }
+  if (image[1] !== installedVersion) {
+    errors.push(`Cloudflare Sandbox package ${installedVersion} must match container image tag ${image[1]}.`);
+  }
+  if (/^0\.0\.0-pr-\d+-[a-f0-9]{8}$/.test(installedVersion)) {
+    if (!/^github:ferdousbhai\/cloudflare-sandbox-pr799-mirror#[a-f0-9]{40}$/.test(packageSpec ?? '')) {
+      errors.push(`Cloudflare Sandbox preview ${installedVersion} must use its immutable Git commit mirror.`);
+    }
+  } else if (packageSpec !== installedVersion) {
+    errors.push(`package.json must pin the installed Cloudflare Sandbox version ${installedVersion} exactly.`);
+  }
+  return errors;
+}
+
 export function findBuilderTemplateModuleErrors(content, sourceSha256) {
   return content.includes(`export const BUILDER_TEMPLATE_SOURCE_SHA256 = '${sourceSha256}';`)
     ? []
@@ -249,6 +268,7 @@ export function verifyStackAlignment() {
   const rootPackage = readJson('package.json');
   const agentPackage = readJson('ghostbuild-agent/package.json');
   const templatePackage = readJson('template/package.json');
+  const sandboxPackage = readJson('node_modules/@cloudflare/sandbox/package.json');
 
   verifyPackage(errors, rootPackage, 'package.json', APP_REQUIRED_PACKAGES, true);
   verifyPackage(errors, agentPackage, 'ghostbuild-agent/package.json', agentRequiredPackages);
@@ -269,6 +289,11 @@ export function verifyStackAlignment() {
     ...findForbiddenDependencyUpdateConfigs(forbiddenDependencyUpdateConfigs),
     ...findForbiddenLegacyPaths(forbiddenLegacyPaths),
     ...findMissingPaths(rootDir, requiredPaths),
+    ...findSandboxRuntimePinErrors(
+      rootPackage.dependencies?.['@cloudflare/sandbox'],
+      sandboxPackage.version,
+      readFileSync(resolve(rootDir, 'app/lib/.server/cloudflare/user-workspace-runtime-provisioner.ts'), 'utf8'),
+    ),
   );
 
   if (rootPackage.license !== 'Apache-2.0') {

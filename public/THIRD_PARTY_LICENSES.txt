@@ -8,7 +8,7 @@ This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-08-04
 Production packages: 620
-Inventory SHA-256: f21c052433e03ed461b216090bc9ea64afdde23e0001c3e6c2c096e99cfe4256
+Inventory SHA-256: 3fc6be194e7bd498fca6cfc5abccd4a84da4025257d0396123af34e98fa8ed4f
 
 PACKAGE INVENTORY
 =================
@@ -505,7 +505,7 @@ Homepage: <not published>
 Package-level license evidence: <not published>
 Published license/notice files: <not published>
 
-@cloudflare/sandbox@0.12.4
+@cloudflare/sandbox@0.0.0-pr-799-66773f6b
 Declared license: Apache-2.0
 Author: <not published>
 Repository: {"type":"git","url":"https://github.com/cloudflare/sandbox-sdk"}
@@ -13057,7 +13057,7 @@ THE SOFTWARE.
 
 SHA-256 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a
 Used by:
-- @cloudflare/sandbox@0.12.4:LICENSE
+- @cloudflare/sandbox@0.0.0-pr-799-66773f6b:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
                               Apache License
                         Version 2.0, January 2004

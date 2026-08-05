@@ -106,7 +106,6 @@ const DERIVED_PATHS = ['dist', '.output', '.tanstack', '.wrangler'].map((name) =
 const COMPUTERD_PROCESS_ID = 'ghostbuild-computerd';
 const COMPUTERD_ROOT = '/tmp/ghostbuild-computer';
 const COMPUTERD_BINARY = `${COMPUTERD_ROOT}/usr/local/bin/computerd`;
-const SANDBOX_CONTROL_PORT = 3_000;
 // Immutable linux/amd64 layer published by
 // ghcr.io/cloudflare/computer-computerd-linux-x64:0.1.1.
 const COMPUTERD_LAYER_DIGEST = 'sha256:7d54afd24f340c562357091403ee2dca004c0ce99d3970f32a03300602e19c47';
@@ -180,18 +179,7 @@ class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
 
   readonly #computerHost = new SandboxComputerHost(this);
 
-  async getWorkspaceContainer(): Promise<IWorkspaceContainerAPI> {
-    // Sandbox 0.12.4's RPC upgrade bypasses its normal cold-start path. The
-    // Computer backend asks for lifecycle state before calling start(), so the
-    // container must already be listening when we expose the host adapter.
-    await this.startAndWaitForPorts({
-      ports: SANDBOX_CONTROL_PORT,
-      cancellationOptions: {
-        instanceGetTimeoutMS: 8_000,
-        portReadyTimeoutMS: 90_000,
-        waitInterval: 300,
-      },
-    });
+  getWorkspaceContainer(): IWorkspaceContainerAPI {
     return this.#computerHost;
   }
 

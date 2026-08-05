@@ -16,7 +16,7 @@ import { UserCloudflareAccountApi } from './user-account-api';
 import { waitForUserWorkspaceRuntimeReadiness } from './user-workspace-runtime-readiness';
 
 const USER_WORKSPACE_SANDBOX_IMAGE =
-  'docker.io/cloudflare/sandbox:0.12.4@sha256:e83bb4d6d9748b93a4b876ce0852b5e93d8e0893da10c59d425770aef0d73738';
+  'docker.io/cloudflare/sandbox:0.0.0-pr-799-66773f6b@sha256:b1436a9618d01ea166672e5f58265309a2f4f591c24d4afa3a1fa58ec7f8d9de';
 const PROVISIONING_LEASE_MS = 15 * 60_000;
 
 export class UserWorkspaceRuntimeProvisioningInProgressError extends Error {

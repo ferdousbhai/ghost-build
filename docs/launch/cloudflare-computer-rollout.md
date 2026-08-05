@@ -19,6 +19,9 @@ does not represent an upstream stability guarantee or approval for a broader
 production-readiness claim. Recheck the installed release and every go/no-go
 item before renewal.
 
+The user runtime uses a commit-pinned [mirror](https://github.com/ferdousbhai/cloudflare-sandbox-pr799-mirror)
+of Cloudflare Sandbox PR #799 at upstream commit `66773f6b8b334d96d0744b8d62d25283c1f46c3b` and a digest-pinned matching image. Replace both with the first stable release containing that RPC fix before renewal.
+
 ## Mutable control
 
 The `launch_controls.cloudflare_computer` D1 row is checked before issuing a
