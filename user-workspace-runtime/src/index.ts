@@ -7,14 +7,12 @@ import {
   type WorkspaceRuntimeResult,
   Workspace,
   WorkspaceProxy,
-  WorkspaceServiceProxy,
 } from '@cloudflare/computer';
 import {
   CloudflareContainerBackend,
   type IWorkspaceContainerAPI,
   type WorkspaceRef,
 } from '@cloudflare/computer/backends/container';
-import { WorkerShellBackend } from '@cloudflare/computer/backends/worker-shell';
 import { Sandbox } from '@cloudflare/sandbox';
 import { parse } from 'jsonc-parser';
 import { BuilderAgent } from '../../app/agents/builder-agent';
@@ -76,14 +74,13 @@ import {
 import { stableWorkspaceRead } from './stable-workspace-read';
 import { requireDeploymentMigrationName, requireWorkspaceFileEncoding } from './workspace-input';
 
-export { WorkspaceProxy, WorkspaceServiceProxy };
+export { WorkspaceProxy };
 
 interface RuntimeEnv {
   PROJECT_WORKSPACE: DurableObjectNamespace<ProjectWorkspace>;
   BuilderAgent: DurableObjectNamespace<BuilderAgent>;
   DB: D1Database;
   AI: Ai;
-  LOADER: unknown;
   CONTROL_PLANE_SECRET: string;
   CLOUDFLARE_ACCOUNT_ID: string;
   GHOSTBUILD_USER_ID: string;
@@ -178,13 +175,6 @@ class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
     containerEnv: { MOUNT_POINT: '/home', FUSE_MOUNT: 'auto' },
     connectTimeoutMs: 2 * 60_000,
     id: 'container-shell',
-  });
-
-  readonly workerShellBackend = new WorkerShellBackend({
-    loader: this.env.LOADER as never,
-    workspace: { binding: 'PROJECT_WORKSPACE', id: this.ctx.id.toString() },
-    ctx: this.ctx,
-    id: 'worker-shell',
   });
 
   readonly #computerHost = new SandboxComputerHost(this);
@@ -291,7 +281,7 @@ function computerWorkspaceOptions(
   const { ctx } = self as unknown as { ctx: DurableObjectState };
   return {
     storage: ctx.storage as unknown as DurableObjectStorageLike,
-    backends: [self.workerShellBackend, self.containerBackend],
+    backends: [self.containerBackend],
     waitUntil: (promise) => ctx.waitUntil(promise),
     retryScheduler,
     retry: { initialDelayMs: 1_000, maxDelayMs: 60_000, maxAttempts: 5 },
@@ -623,20 +613,6 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         }),
       'read_write_ready',
     );
-    await check(
-      'workerShell',
-      () =>
-        this.withComputer(async (workspace) => {
-          requireCommandSuccess(
-            await runCommand(workspace, `test "$(cat ${shellQuote(path)})" = ${shellQuote(nonce)}`, {
-              cwd: '/home',
-              backend: 'worker-shell',
-              timeoutMs: 30_000,
-            }),
-          );
-        }),
-      'loader_ready',
-    );
     const containerNonce = `${nonce}-container`;
     await check(
       'container',
@@ -682,7 +658,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       }
     }
     return {
-      ok: ['durableVfs', 'workerShell', 'container', 'fuse', 'sync', 'cleanup'].every(
+      ok: ['durableVfs', 'container', 'fuse', 'sync', 'cleanup'].every(
         (name) => components[name as UserWorkspaceReadinessComponent]?.ok === true,
       ),
       components,
@@ -2071,7 +2047,7 @@ async function runCommand(
   command: string,
   options: {
     cwd: string;
-    backend: 'worker-shell' | 'container-shell';
+    backend: 'container-shell';
     timeoutMs: number;
     env?: Record<string, string>;
     onSyncPending?: (result: WorkspaceRuntimeResult<'utf8'>) => void;
@@ -2232,12 +2208,9 @@ function requireAbsolutePath(value: unknown): string {
   return path.length > 1 ? path.replace(/\/$/, '') : path;
 }
 
-function requireBackend(value: unknown): 'worker-shell' | 'container-shell' {
-  if (value === undefined || value === 'worker-shell') {
-    return 'worker-shell';
-  }
-  if (value === 'container-shell') {
-    return value;
+function requireBackend(value: unknown): 'container-shell' {
+  if (value === undefined || value === 'container-shell') {
+    return 'container-shell';
   }
   throw new SyntaxError('Invalid Computer execution backend.');
 }

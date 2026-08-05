@@ -66,11 +66,15 @@ export function requireWorkspaceSyncBarrier(
       retry?.lastError ?? null,
     );
   }
-  for (const backend of ['worker-shell', 'container-shell'] as const) {
-    const retry = state(backend);
-    if (retry) {
-      throw new WorkspaceSyncPendingError(backend, retry.attempt, retry.notBefore, retry.exhausted, retry.lastError);
-    }
+  const retry = state('container-shell');
+  if (retry) {
+    throw new WorkspaceSyncPendingError(
+      'container-shell',
+      retry.attempt,
+      retry.notBefore,
+      retry.exhausted,
+      retry.lastError,
+    );
   }
 }
 

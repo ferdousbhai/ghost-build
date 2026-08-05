@@ -6,7 +6,6 @@ import { z, type ZodType } from 'zod';
 import {
   CLOUDFLARE_COMPUTER_VERSION,
   COMPUTER_AI_TOOL_OPTIONS,
-  COMPUTER_CONTAINER_SHELL_BACKEND,
   COMPUTER_DEFAULT_SHELL_BACKEND,
   COMPUTER_SHELL_BACKEND_IDS,
   COMPUTER_SHELL_TOOL_OPTIONS,
@@ -91,13 +90,10 @@ describe('Cloudflare Computer preview contract', () => {
       shell: { maxBytes: COMPUTER_TOOL_LIMITS.execMaxBytesPerStream },
     });
     expect(COMPUTER_SHELL_TOOL_OPTIONS.defaultBackend).toBe(COMPUTER_DEFAULT_SHELL_BACKEND);
-    expect(COMPUTER_CONTAINER_SHELL_BACKEND).not.toBe(COMPUTER_DEFAULT_SHELL_BACKEND);
     expect(Object.keys(COMPUTER_SHELL_TOOL_OPTIONS.backends)).toEqual(COMPUTER_SHELL_BACKEND_IDS);
     expect(
       Object.values(COMPUTER_SHELL_TOOL_OPTIONS.backends).every(({ description }) => description.length >= 80),
     ).toBe(true);
-    expect(COMPUTER_SHELL_TOOL_OPTIONS.backends['worker-shell'].description).toContain('no public network');
-    expect(COMPUTER_SHELL_TOOL_OPTIONS.backends['worker-shell'].description).toContain('cannot run Node.js');
     expect(COMPUTER_SHELL_TOOL_OPTIONS.backends['container-shell'].description).toContain('public network access');
     expect(COMPUTER_SHELL_TOOL_OPTIONS.backends['container-shell'].description).toContain('pnpm');
 

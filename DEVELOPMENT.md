@@ -85,19 +85,18 @@ checks both sides of that policy.
 
 `pnpm run generate:user-workspace-runtime` bundles the source in `user-workspace-runtime/` together with its migrations.
 The control plane deploys that bundle into each connected user's Cloudflare account and provisions its D1 database,
-`BuilderAgent` Durable Objects, `ProjectWorkspace` Durable Objects, Worker Loader binding, and Container application
-there. The R2 permission is retained for generated applications that request an R2 binding; project workspace bytes do
-not use an R2 backup bucket.
+`BuilderAgent` Durable Objects, `ProjectWorkspace` Durable Objects, and Container application there. The R2 permission
+is retained for generated applications that request an R2 binding; project workspace bytes do not use an R2 backup
+bucket.
 
 There is intentionally no migration path from retired Ghostbuild-owned project or chat storage. A new deployment of
 the control plane bootstraps its current D1 schema; each newly provisioned user runtime bootstraps the current
 `user-workspace-migrations/` schema. Existing user runtimes are replaced when their recorded bundle digest differs from
 the current digest.
 
-Cloudflare Computer's SQLite VFS in `ProjectWorkspace` owns the current project. Lightweight shell commands operate on
-that VFS through the worker-shell backend; dependency installation, validation, preview, and generated-app deployment
-use the container backend and its FUSE projection of the same files. No ZIP, `DirectoryBackup`, or project copy passes
-through Ghostbuild.
+Cloudflare Computer's SQLite VFS in `ProjectWorkspace` owns the current project. Its container backend projects the
+same files through FUSE for shell commands, dependency installation, validation, preview, and generated-app deployment.
+No ZIP, `DirectoryBackup`, or project copy passes through Ghostbuild.
 
 ## Deployment
 

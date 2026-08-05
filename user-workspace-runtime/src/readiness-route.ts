@@ -7,7 +7,7 @@ import {
 } from '../../app/lib/.server/cloudflare/user-workspace-runtime-health';
 
 const READINESS_WORKSPACE_NAME = 'ghostbuild-runtime-readiness';
-const WORKSPACE_COMPONENTS = ['durableVfs', 'workerShell', 'container', 'fuse', 'sync', 'cleanup'] as const;
+const WORKSPACE_COMPONENTS = ['durableVfs', 'container', 'fuse', 'sync', 'cleanup'] as const;
 
 type WorkspaceReadinessProbe = {
   ok: boolean;

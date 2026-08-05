@@ -170,12 +170,12 @@ describe('ToolOperationJournal', () => {
 
     afterRestart.begin({ toolCallId: 'pending-exhausted', toolName: 'exec', argsSha256: 'exhausted' });
     afterRestart.registerPending({
-      backend: 'worker-shell',
+      backend: 'container-shell',
       toolCallId: 'pending-exhausted',
       result: { command: 'touch other', exitCode: 0 },
     });
     const exhausted = { kind: 'workspace-sync-unconfirmed', status: 'exhausted' };
-    expect(afterRestart.completePending('worker-shell', exhausted)).toBe(true);
+    expect(afterRestart.completePending('container-shell', exhausted)).toBe(true);
     expect(afterRestart.begin({ toolCallId: 'pending-exhausted', toolName: 'exec', argsSha256: 'exhausted' })).toEqual({
       status: 'completed',
       result: exhausted,

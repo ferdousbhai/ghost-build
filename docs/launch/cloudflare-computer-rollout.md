@@ -66,9 +66,9 @@ cohort experiment because that reshuffles every assignment.
 Before increasing access, require all of the following:
 
 1. Exact dependency and tool-schema canaries pass for `read`, `ls`, `write`,
-   `edit`, and both `exec` backends.
+   `edit`, and the container `exec` backend.
 2. User-runtime readiness is green for D1, Durable Object RPC, Computer VFS,
-   worker-shell, container-shell, FUSE, and a completed sync.
+   container-shell, FUSE, and a completed sync.
 3. The build validates from a clean checkout, generated runtime source matches,
    and production configuration checks pass.
 4. A sentinel workspace can write, read, execute, read back, and delete a
@@ -103,4 +103,4 @@ Primary references:
 
 - [Cloudflare Computer README](https://github.com/cloudflare/computer/blob/main/packages/computer/README.md)
 - [Computer tool interface](https://github.com/cloudflare/computer/blob/main/docs/09_tool_interface.md)
-- [Computer Worker backend](https://github.com/cloudflare/computer/blob/main/docs/12_worker_backend.md)
+- [Computer container example](https://github.com/cloudflare/computer/tree/main/examples/container)

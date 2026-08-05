@@ -16,7 +16,6 @@ export const USER_WORKSPACE_READINESS_COMPONENTS = [
   'database',
   'projectWorkspaceRpc',
   'durableVfs',
-  'workerShell',
   'container',
   'fuse',
   'sync',

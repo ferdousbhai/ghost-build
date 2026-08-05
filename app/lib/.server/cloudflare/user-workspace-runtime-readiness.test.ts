@@ -207,7 +207,6 @@ function healthy(version: string) {
       database: check,
       projectWorkspaceRpc: check,
       durableVfs: check,
-      workerShell: check,
       container: check,
       fuse: check,
       sync: check,

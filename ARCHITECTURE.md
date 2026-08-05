@@ -75,10 +75,9 @@ or reconciling the retired R2/WebContainer formats is explicitly not a compatibi
 ## Project Lifecycle
 
 `BuilderAgent` owns conversation execution and delegates project operations to `ProjectWorkspace`. Cloudflare Computer
-stores files directly in the Durable Object's SQLite VFS. Its worker-shell backend operates against that authoritative
-store over Workers RPC; its container backend projects the same files into the Container through FUSE and reconciles
-changes back to the VFS. There is no application-level ZIP archive, R2 backup, or duplicate project blob in the control
-plane.
+stores files directly in the Durable Object's SQLite VFS. Its container backend projects the same files into the
+Container through FUSE and reconciles changes back to the VFS. There is no application-level ZIP archive, R2 backup, or
+duplicate project blob in the control plane.
 
 The model's `read`, `write`, `edit`, `ls`, and `exec` tools come from `@cloudflare/computer/tools`; Ghostbuild adds only
 durable replay, mutation ordering, and product-specific operations around them. Model tools and editor reads use the
@@ -139,7 +138,7 @@ verification consume that same data rather than maintaining separate security ov
 Ghostbuild intentionally pins `@cloudflare/computer` to `0.1.1`. Cloudflare labels this release preview-only, describes
 its API as unstable, and says it is not suitable for production use. The repository therefore treats every upgrade as
 an architecture review: tests pin the installed version, tool names, complete AI SDK input schemas, result fields used by
-the build lifecycle, read-only behavior, backend selectors, and backend capability descriptions. Tool configuration
+the build lifecycle, read-only behavior, backend selector, and backend capability description. Tool configuration
 explicitly disables Computer's optional `publish` capability and pins the reviewed default limits: 2,000 lines or 256
 KiB per read, 2 MiB per write/edit, and 64 KiB for each exec output stream. These gates detect drift; they cannot turn a
 preview dependency into a stable production contract. AI SDK cancellation is checked before a queued tool starts, but
@@ -150,8 +149,8 @@ already in flight therefore relies on the workspace runtime's bounded timeout in
 
 The browser sends open, recently used, and locally modified file context as a bounded turn attachment. The server adds
 that attachment only to the current model view; it never persists the generated context as a transcript message. After
-compaction, the model reacquires authoritative facts on demand through Computer's paged `read` tool and bounded
-worker-shell `exec` searches. Retrieved source remains untrusted project data.
+compaction, the model reacquires authoritative facts on demand through Computer's paged `read` tool and bounded `exec`
+searches. Retrieved source remains untrusted project data.
 
 Workers AI prefix caching is automatic for supported models. Ghostbuild sends an opaque, stable session-affinity value
 per transcript generation, keeps system instructions at the front of the prompt, and leaves dynamic project context in

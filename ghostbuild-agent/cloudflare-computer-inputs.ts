@@ -16,6 +16,9 @@ export const COMPUTER_TOOL_INPUT_SCHEMAS = {
   exec: z.object({
     command: z.string(),
     cwd: z.string().optional(),
-    backend: z.enum(COMPUTER_SHELL_BACKEND_IDS).optional(),
+    backend: z
+      .enum(COMPUTER_SHELL_BACKEND_IDS)
+      .optional()
+      .describe('Omit to use container-shell, the only available execution backend.'),
   }),
 } as const satisfies Record<ComputerToolName, ZodType>;

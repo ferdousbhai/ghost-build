@@ -552,14 +552,13 @@ export class UserCloudflareAccountApi {
     const metadata = {
       main_module: 'workspace-runtime.mjs',
       compatibility_date: '2026-07-27',
-      compatibility_flags: ['nodejs_compat', 'experimental'],
+      compatibility_flags: ['nodejs_compat'],
       containers: [{ class_name: 'ProjectWorkspace' }],
       bindings: [
         { type: 'durable_object_namespace', name: 'PROJECT_WORKSPACE', class_name: 'ProjectWorkspace' },
         { type: 'durable_object_namespace', name: 'BuilderAgent', class_name: 'BuilderAgent' },
         { type: 'd1', name: 'DB', id: args.databaseId },
         { type: 'ai', name: 'AI' },
-        { type: 'worker_loader', name: 'LOADER' },
         { type: 'secret_text', name: 'CONTROL_PLANE_SECRET', text: args.controlPlaneSecret },
         { type: 'plain_text', name: 'CLOUDFLARE_ACCOUNT_ID', text: this.accountId },
         { type: 'plain_text', name: 'GHOSTBUILD_USER_ID', text: args.userId },

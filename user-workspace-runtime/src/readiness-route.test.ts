@@ -63,7 +63,6 @@ function workspaceProbe() {
     ok: true,
     components: {
       durableVfs: ready,
-      workerShell: ready,
       container: ready,
       fuse: ready,
       sync: ready,

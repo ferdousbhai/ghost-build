@@ -10,6 +10,7 @@ import {
   computerSyncUnconfirmedToolResult,
   type ComputerToolName,
 } from 'ghostbuild-agent/cloudflare-computer';
+import { COMPUTER_TOOL_INPUT_SCHEMAS } from 'ghostbuild-agent/cloudflare-computer-inputs';
 import { createAITools } from '@cloudflare/computer/tools';
 import type { GhostbuildToolName, GhostbuildToolSet } from 'ghostbuild-agent/types';
 import { z, type ZodType } from 'zod';
@@ -146,9 +147,10 @@ function computerWorkspaceTool(
   }
   return {
     ...definition,
+    ...(toolName === 'exec' ? { inputSchema: COMPUTER_TOOL_INPUT_SCHEMAS.exec } : {}),
     description:
       toolName === 'exec'
-        ? `${definition.description ?? 'Run a shell command in the workspace.'}\n\n${COMPUTER_EXEC_APPLICATION_POLICY}`
+        ? `Run a shell command in the project workspace using its Cloudflare Container.\n\n${COMPUTER_EXEC_APPLICATION_POLICY}`
         : definition.description,
     execute: async (input, options) => {
       options.abortSignal?.throwIfAborted();

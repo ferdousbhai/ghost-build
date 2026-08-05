@@ -746,7 +746,7 @@ describe('UserCloudflareAccountApi', () => {
               script: { etag: 'runtime-etag' },
               script_runtime: {
                 compatibility_date: '2026-07-27',
-                compatibility_flags: ['nodejs_compat', 'experimental'],
+                compatibility_flags: ['nodejs_compat'],
               },
             },
           },
@@ -800,7 +800,7 @@ describe('UserCloudflareAccountApi', () => {
       exports: Record<string, unknown>;
       observability: unknown;
     };
-    expect(metadata.compatibility_flags).toEqual(['nodejs_compat', 'experimental']);
+    expect(metadata.compatibility_flags).toEqual(['nodejs_compat']);
     expect(metadata.containers).toEqual([{ class_name: 'ProjectWorkspace' }]);
     expect(metadata.bindings).toEqual(
       expect.arrayContaining([
@@ -809,7 +809,6 @@ describe('UserCloudflareAccountApi', () => {
           name: 'PROJECT_WORKSPACE',
           class_name: 'ProjectWorkspace',
         }),
-        expect.objectContaining({ type: 'worker_loader', name: 'LOADER' }),
         expect.objectContaining({ type: 'plain_text', name: 'SANDBOX_TRANSPORT', text: 'rpc' }),
         expect.objectContaining({
           type: 'plain_text',
@@ -818,6 +817,7 @@ describe('UserCloudflareAccountApi', () => {
         }),
       ]),
     );
+    expect(metadata.bindings).not.toEqual(expect.arrayContaining([expect.objectContaining({ type: 'worker_loader' })]));
     expect(metadata.bindings).not.toEqual(expect.arrayContaining([expect.objectContaining({ type: 'r2_bucket' })]));
     expect(metadata.bindings).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: 'CLOUDFLARE_API_TOKEN' })]),

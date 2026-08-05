@@ -56,6 +56,7 @@ describe('Workers AI tool lifecycle', () => {
     };
 
     expect(tools.exec.description).toContain(COMPUTER_EXEC_APPLICATION_POLICY);
+    expect(tools.exec.description).not.toContain('multiple backends');
 
     await expect(executeTool(tools.exec, input)).resolves.toEqual({
       ...input,
@@ -72,7 +73,7 @@ describe('Workers AI tool lifecycle', () => {
     expect(workspace.refresh).toHaveBeenCalledOnce();
   });
 
-  it('defaults Computer exec to worker-shell without changing its result shape', async () => {
+  it('defaults Computer exec to the production container backend without changing its result shape', async () => {
     const runtimeExec = vi.fn(async () => ({
       result: async () => ({ exitCode: 0, stdout: 'src\n', stderr: '' }),
     }));
@@ -81,7 +82,7 @@ describe('Workers AI tool lifecycle', () => {
     await expect(executeTool(tools.exec, { command: 'ls /home/project' })).resolves.toEqual({
       command: 'ls /home/project',
       cwd: null,
-      backend: 'worker-shell',
+      backend: 'container-shell',
       exitCode: 0,
       stdout: 'src\n',
       stderr: '',
@@ -89,7 +90,7 @@ describe('Workers AI tool lifecycle', () => {
     expect(runtimeExec).toHaveBeenCalledWith('ls /home/project', {
       cwd: undefined,
       encoding: 'utf8',
-      backend: 'worker-shell',
+      backend: 'container-shell',
     });
   });
 
