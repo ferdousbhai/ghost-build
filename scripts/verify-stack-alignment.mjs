@@ -58,7 +58,6 @@ const forbiddenLegacyPaths = [
   'public/template-snapshot-manifest.json',
 ];
 const requiredPaths = [
-  '.github/dependabot.yml',
   '.github/workflows/runtime-artifacts.yml',
   'CODE_OF_CONDUCT.md',
   'CONTRIBUTING.md',

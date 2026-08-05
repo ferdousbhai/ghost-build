@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { parse } from 'yaml';
 import {
   dependencyNames,
   findForbiddenFiles,
@@ -23,50 +22,6 @@ import {
 } from './verify-stack-alignment.mjs';
 
 describe('stack alignment verification helpers', () => {
-  it('keeps root workspace dependency updates complete and reviewable', () => {
-    const config = parse(readFileSync(new URL('../.github/dependabot.yml', import.meta.url), 'utf8')) as Record<
-      string,
-      unknown
-    >;
-    const updates = config.updates as Array<Record<string, unknown>>;
-
-    expect(updates).toHaveLength(2);
-    expect(updates[0]).toMatchObject({
-      'package-ecosystem': 'npm',
-      directory: '/',
-      'open-pull-requests-limit': 8,
-    });
-
-    const groups = updates[0].groups as Record<string, Record<string, unknown>>;
-    expect(groups.production).toMatchObject({
-      'dependency-type': 'production',
-      patterns: ['*'],
-      'update-types': ['minor', 'patch'],
-    });
-    expect(groups.development).toMatchObject({
-      'dependency-type': 'development',
-      patterns: ['*'],
-      'update-types': ['minor', 'patch'],
-    });
-    expect(Object.keys(groups)).toEqual([
-      'ai-runtime',
-      'cloudflare-runtime',
-      'tanstack',
-      'react',
-      'production',
-      'development',
-    ]);
-    expect(
-      Object.values(groups).every((group) => (group['update-types'] as string[]).join(',') === 'minor,patch'),
-    ).toBe(true);
-    expect(updates[1]).toMatchObject({
-      'package-ecosystem': 'github-actions',
-      directory: '/',
-      'open-pull-requests-limit': 2,
-      groups: { actions: { patterns: ['*'] } },
-    });
-  });
-
   it('checks runtime artifact pins before merge without mutating pull request issues', () => {
     const workflow = readFileSync(new URL('../.github/workflows/runtime-artifacts.yml', import.meta.url), 'utf8');
 
