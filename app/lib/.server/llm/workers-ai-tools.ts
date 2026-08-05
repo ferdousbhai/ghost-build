@@ -10,7 +10,6 @@ import {
   computerSyncUnconfirmedToolResult,
   type ComputerToolName,
 } from 'ghostbuild-agent/cloudflare-computer';
-import { COMPUTER_TOOL_INPUT_SCHEMAS } from 'ghostbuild-agent/cloudflare-computer-inputs';
 import { createAITools } from '@cloudflare/computer/tools';
 import type { GhostbuildToolName, GhostbuildToolSet } from 'ghostbuild-agent/types';
 import { z, type ZodType } from 'zod';
@@ -147,7 +146,6 @@ function computerWorkspaceTool(
   }
   return {
     ...definition,
-    ...(toolName === 'exec' ? { inputSchema: COMPUTER_TOOL_INPUT_SCHEMAS.exec } : {}),
     description:
       toolName === 'exec'
         ? `Run a shell command in the project workspace using its Cloudflare Container.\n\n${COMPUTER_EXEC_APPLICATION_POLICY}`
@@ -423,14 +421,24 @@ function isImplementationMutationResult(result: { toolName: string; result?: unk
   if (result.toolName !== 'write' && result.toolName !== 'edit') {
     return false;
   }
-  return (
-    isRecord(result.result) &&
+  if (!isRecord(result.result)) {
+    return false;
+  }
+  if (
     result.result.kind === 'workspace-mutation-receipt' &&
     result.result.version === 1 &&
     result.result.committed === true &&
     result.result.acknowledgement === 'complete' &&
     result.result.tool === result.toolName
-  );
+  ) {
+    return true;
+  }
+  if (typeof result.result.path !== 'string' || typeof result.result.error === 'string') {
+    return false;
+  }
+  return result.toolName === 'write'
+    ? Number.isSafeInteger(result.result.bytesWritten) && Number(result.result.bytesWritten) >= 0
+    : Number.isSafeInteger(result.result.editsApplied) && Number(result.result.editsApplied) > 0;
 }
 
 function isDependencyMutationResult(result: { toolName: string; result?: unknown }): boolean {

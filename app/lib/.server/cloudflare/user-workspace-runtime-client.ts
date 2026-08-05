@@ -249,7 +249,8 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
         throw syncError;
       }
       try {
-        return (await stub.completeToolOperation({ toolCallId, result })) as T;
+        const completed = await stub.completeToolOperation({ toolCallId, result });
+        return (isComputerToolError(result) && isCompletedMutationReceipt(completed) ? completed : result) as T;
       } catch (error) {
         if (toolName !== 'write' && toolName !== 'edit') {
           throw error;
@@ -258,11 +259,10 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
         if (replay.status !== 'completed') {
           throw error;
         }
-        return (
-          isPendingMutationReceipt(replay.result)
-            ? await stub.completeToolOperation({ toolCallId, result: replay.result })
-            : replay.result
-        ) as T;
+        const completed = isPendingMutationReceipt(replay.result)
+          ? await stub.completeToolOperation({ toolCallId, result })
+          : replay.result;
+        return (isComputerToolError(result) && isCompletedMutationReceipt(completed) ? completed : result) as T;
       }
     } catch (error) {
       if (!isComputerSyncUnconfirmedError(error)) {
@@ -319,6 +319,20 @@ function isPendingMutationReceipt(value: unknown): boolean {
     (value as { committed?: unknown }).committed === true &&
     (value as { acknowledgement?: unknown }).acknowledgement === 'pending'
   );
+}
+
+function isCompletedMutationReceipt(value: unknown): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === 'workspace-mutation-receipt' &&
+    (value as { committed?: unknown }).committed === true &&
+    (value as { acknowledgement?: unknown }).acknowledgement === 'complete'
+  );
+}
+
+function isComputerToolError(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && typeof (value as { error?: unknown }).error === 'string';
 }
 
 function requireToolCallId(value: unknown): string {

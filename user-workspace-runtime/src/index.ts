@@ -75,6 +75,7 @@ import {
 } from './workspace-sync-retry';
 import { stableWorkspaceRead } from './stable-workspace-read';
 import { requireDeploymentMigrationName, requireWorkspaceFileEncoding } from './workspace-input';
+import { withCors } from './http-cors';
 
 export { WorkspaceProxy };
 
@@ -2283,18 +2284,6 @@ function decodeBase64(value: string): Uint8Array {
 function bearerToken(request: Request): string | null {
   const authorization = request.headers.get('authorization');
   return authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
-}
-
-function withCors(response: Response, origin: string | null): Response {
-  if (!origin || (response as Response & { webSocket?: WebSocket }).webSocket) {
-    return response;
-  }
-  const headers = new Headers(response.headers);
-  headers.set('Access-Control-Allow-Origin', origin);
-  headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-  headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  headers.append('Vary', 'Origin');
-  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 function record(value: unknown): Record<string, unknown> {

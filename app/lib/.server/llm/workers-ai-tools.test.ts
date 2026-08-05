@@ -197,24 +197,40 @@ describe('Workers AI tool lifecycle', () => {
     });
   });
 
-  it('requires concrete implementation or validation work after a successful current-turn mutation', () => {
-    expect(
-      getWorkersAiToolSettings([
-        user('Build a habit tracker'),
-        toolResult('write', { path: '/home/project/src/router.tsx' }, writeResult()),
-      ]),
-    ).toEqual({
-      activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'required',
-    });
+  it('requires concrete implementation or validation work after native and recovered mutations', () => {
+    for (const [toolName, result] of [
+      ['write', writeResult()],
+      [
+        'edit',
+        {
+          path: '/home/project/src/router.tsx',
+          editsApplied: 1,
+          diff: '',
+          patch: '',
+          firstChangedLine: 1,
+        },
+      ],
+      ['write', writeReceipt()],
+    ] as const) {
+      expect(
+        getWorkersAiToolSettings([
+          user('Build a habit tracker'),
+          toolResult(toolName, { path: '/home/project/src/router.tsx' }, result),
+        ]),
+      ).toEqual({
+        activeTools: AUTOMATIC_TOOLS,
+        toolChoice: 'required',
+      });
+    }
   });
 
-  it('does not treat legacy, pending, or failed write output as a committed implementation mutation', () => {
+  it('does not treat malformed, pending, or failed write output as a committed implementation mutation', () => {
     const base = [user('Build a habit tracker')];
     for (const result of [
-      { path: '/home/project/a.ts', bytesWritten: 42 },
-      { ...writeResult(), acknowledgement: 'pending' },
-      { ...writeResult(), committed: false },
+      { path: '/home/project/a.ts' },
+      { path: '/home/project/a.ts', bytesWritten: -1 },
+      { ...writeReceipt(), acknowledgement: 'pending' },
+      { ...writeReceipt(), committed: false },
       { error: 'write failed' },
     ]) {
       expect(getWorkersAiToolSettings([...base, toolResult('write', {}, result)])).toEqual({
@@ -449,6 +465,13 @@ function validationResult(nextAction: 'sign-in-required' | 'prepare-deployment',
 }
 
 function writeResult() {
+  return {
+    path: '/home/project/src/routes/index.tsx',
+    bytesWritten: 42,
+  };
+}
+
+function writeReceipt() {
   return {
     kind: 'workspace-mutation-receipt',
     version: 1,

@@ -44,6 +44,52 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     expect(stub.completeToolOperation).toHaveBeenCalledWith({ toolCallId: 'call-1', result: pending });
   });
 
+  it('returns the native Computer write result after durably acknowledging its mutation', async () => {
+    const result = { path: '/project/a.ts', bytesWritten: 12 };
+    const execute = vi.fn(async () => result);
+    const { client, stub } = harness((operation) => {
+      if (operation === 'beginToolOperation') {
+        return { status: 'execute' };
+      }
+      if (operation === 'completeToolOperation') {
+        return {
+          kind: 'workspace-mutation-receipt',
+          version: 1,
+          committed: true,
+          acknowledgement: 'complete',
+          tool: 'write',
+          files: [{ path: result.path }],
+        };
+      }
+      return undefined;
+    });
+
+    await expect(client.executeToolOnce('call-1', 'write', { path: result.path }, execute)).resolves.toEqual(result);
+    expect(stub.completeToolOperation).toHaveBeenCalledWith({ toolCallId: 'call-1', result });
+  });
+
+  it('surfaces a committed mutation when the native tool reports a post-commit failure', async () => {
+    const result = { error: 'The workspace refresh failed after the write committed.' };
+    const receipt = {
+      kind: 'workspace-mutation-receipt',
+      version: 1,
+      committed: true,
+      acknowledgement: 'complete',
+      tool: 'write',
+      files: [{ path: '/project/a.ts' }],
+    };
+    const { client } = harness((operation) => {
+      if (operation === 'beginToolOperation') {
+        return { status: 'execute' };
+      }
+      return operation === 'completeToolOperation' ? receipt : undefined;
+    });
+
+    await expect(
+      client.executeToolOnce('call-1', 'write', { path: '/project/a.ts' }, async () => result),
+    ).resolves.toEqual(receipt);
+  });
+
   it('recovers a lost acknowledgement response after one write without executing it twice', async () => {
     const pending = {
       kind: 'workspace-mutation-receipt',
@@ -56,8 +102,9 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     const completed = { ...pending, acknowledgement: 'complete' };
     let begins = 0;
     let completions = 0;
-    const execute = vi.fn(async () => ({ path: '/project/a.ts', bytesWritten: 12 }));
-    const { client } = harness((operation) => {
+    const result = { path: '/project/a.ts', bytesWritten: 12 };
+    const execute = vi.fn(async () => result);
+    const { client, stub } = harness((operation) => {
       if (operation === 'beginToolOperation') {
         begins += 1;
         return begins === 1 ? { status: 'execute' } : { status: 'completed', result: pending };
@@ -73,11 +120,12 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     });
 
     await expect(client.executeToolOnce('call-1', 'write', { path: '/project/a.ts' }, execute)).resolves.toEqual(
-      completed,
+      result,
     );
     expect(execute).toHaveBeenCalledOnce();
     expect(begins).toBe(2);
     expect(completions).toBe(2);
+    expect(stub.completeToolOperation).toHaveBeenLastCalledWith({ toolCallId: 'call-1', result });
   });
 
   it('fails closed when the durable journal reports an indeterminate operation', async () => {
