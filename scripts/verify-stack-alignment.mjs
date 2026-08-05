@@ -38,7 +38,6 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeEnvAccessAllowlist = [{ pathSuffix: 'app/components/ErrorComponent.tsx', snippet: 'import.meta.env.DEV' }];
 const agentRequiredPackages = ['ai', 'zod'];
 const forbiddenLockfiles = ['package-lock.json'];
-const forbiddenDependencyUpdateConfigs = ['.github/dependabot.yml', '.github/dependabot.yaml'];
 const forbiddenLegacyPaths = [
   '.cursor/rules/convex_rules.mdc',
   'app/components/convex',
@@ -59,6 +58,7 @@ const forbiddenLegacyPaths = [
   'public/template-snapshot-manifest.json',
 ];
 const requiredPaths = [
+  '.github/dependabot.yml',
   'CODE_OF_CONDUCT.md',
   'CONTRIBUTING.md',
   'LICENSE',
@@ -124,14 +124,6 @@ function readJson(path) {
 
 export function findForbiddenFiles(paths) {
   return findForbiddenPaths(rootDir, paths, 'Ghostbuild uses pnpm lockfiles only');
-}
-
-export function findForbiddenDependencyUpdateConfigs(paths) {
-  return findForbiddenPaths(
-    rootDir,
-    paths,
-    'Ghostbuild uses private vulnerability alerts without automated dependency update pull requests',
-  );
 }
 
 export function findForbiddenLegacyPaths(paths) {
@@ -282,7 +274,6 @@ export function verifyStackAlignment() {
     ),
     ...findPackageVersionAlignmentErrors(rootPackage, templatePackage, 'template/package.json', APP_REQUIRED_PACKAGES),
     ...findForbiddenFiles(forbiddenLockfiles),
-    ...findForbiddenDependencyUpdateConfigs(forbiddenDependencyUpdateConfigs),
     ...findForbiddenLegacyPaths(forbiddenLegacyPaths),
     ...findMissingPaths(rootDir, requiredPaths),
     ...findSandboxRuntimePinErrors(
