@@ -293,6 +293,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   readonly #syncRetries: DurableWorkspaceSyncRetryScheduler;
   readonly #activeOperationOwners = new Set<string>();
   readonly #activeSyncRecoveries = new Map<string, Promise<boolean>>();
+  #containerKeepAliveOperations = 0;
 
   constructor(ctx: DurableObjectState<{}>, env: RuntimeEnv) {
     super(ctx, env);
@@ -1501,7 +1502,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       throw new Error('The deployment artifact revision does not match its active deployment session.');
     }
     this.#activeOperationOwners.add(session.owner);
-    return (async () => {
+    const operation = async () => {
       await this.assertDeploymentSession({ sessionId });
       if (!/^[a-f0-9]{64}$/.test(revision) || !this.hasSuccessfulValidation(revision)) {
         throw new Error('Deployment requires successful validation of this exact revision.');
@@ -1593,7 +1594,12 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       }
       await this.assertDeploymentSession({ sessionId });
       return validatePreparedDeploymentArtifact(artifact, { revision, projectType });
-    })().finally(() => this.#activeOperationOwners.delete(session.owner));
+    };
+    try {
+      return await this.withContainerKeepAlive(operation);
+    } finally {
+      this.#activeOperationOwners.delete(session.owner);
+    }
   }
 
   async deleteProject() {
@@ -1835,10 +1841,23 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       });
     }
     try {
-      return await operation();
+      return await this.withContainerKeepAlive(operation);
     } finally {
       this.#operationLane.release(lease);
       this.#activeOperationOwners.delete(owner);
+    }
+  }
+
+  private async withContainerKeepAlive<T>(operation: () => Promise<T>): Promise<T> {
+    this.#containerKeepAliveOperations += 1;
+    try {
+      await this.setKeepAlive(true);
+      return await operation();
+    } finally {
+      this.#containerKeepAliveOperations -= 1;
+      if (this.#containerKeepAliveOperations === 0 && !this.activePreviewRow()) {
+        await this.setKeepAlive(false).catch(() => undefined);
+      }
     }
   }
 

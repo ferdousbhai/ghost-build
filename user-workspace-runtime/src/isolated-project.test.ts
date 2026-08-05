@@ -110,4 +110,28 @@ describe('isolated project command', () => {
     expect(source).not.toContain('cwd: isolatedRoot');
     expect(source).not.toContain('cwd: snapshotRoot');
   });
+
+  it('keeps the Computer container alive for stateful and deployment operations', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const deployment = source.slice(
+      source.indexOf('async prepareDeploymentArtifact('),
+      source.indexOf('async deleteProject('),
+    );
+    const statefulOperation = source.slice(
+      source.indexOf('private async withStatefulOperation'),
+      source.indexOf('private requireCompletedComputerSync'),
+    );
+    const keepAlive = source.slice(
+      source.indexOf('private async withContainerKeepAlive'),
+      source.indexOf('private requireCompletedComputerSync'),
+    );
+
+    expect(deployment).toContain('return await this.withContainerKeepAlive(operation)');
+    expect(statefulOperation).toContain('return await this.withContainerKeepAlive(operation)');
+    expect(keepAlive).toContain('this.#containerKeepAliveOperations += 1');
+    expect(keepAlive).toContain('await this.setKeepAlive(true)');
+    expect(keepAlive).toContain('this.#containerKeepAliveOperations -= 1');
+    expect(keepAlive).toContain('this.#containerKeepAliveOperations === 0 && !this.activePreviewRow()');
+    expect(keepAlive).toContain('await this.setKeepAlive(false)');
+  });
 });
