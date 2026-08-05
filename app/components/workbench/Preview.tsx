@@ -14,10 +14,10 @@ export function Preview() {
   const [requesting, setRequesting] = useState(false);
   const [, setExpirationTick] = useState(0);
   const candidate = state.active ?? state.lastSuccessful;
-  const preview = candidate && Date.parse(candidate.expiresAt) > Date.now() ? candidate : null;
+  const now = Date.now();
+  const preview = candidate && Date.parse(candidate.expiresAt) > now ? candidate : null;
   const previewUrl = preview?.url ?? null;
-  const status =
-    candidate && !preview && state.status !== 'queued' && state.status !== 'building' ? 'expired' : state.status;
+  const status = previewDisplayStatus(state.status, candidate, now);
   const canRetry = state.status === 'failed' || (state.stale && status !== 'queued' && status !== 'building');
 
   useEffect(() => {
@@ -99,6 +99,14 @@ export function Preview() {
       </div>
     </div>
   );
+}
+
+export function previewDisplayStatus(
+  status: string,
+  candidate: { expiresAt: string } | null,
+  now = Date.now(),
+): string {
+  return status === 'ready' && candidate && Date.parse(candidate.expiresAt) <= now ? 'expired' : status;
 }
 
 function PreviewBadge({ status, stale }: { status: string; stale: boolean }) {
