@@ -12,6 +12,11 @@ const EXPECTED_BUILD_VARIABLES = {
 };
 const EXPECTED_REQUIRED_BUILD_VARIABLES = ['CLOUDFLARE_OAUTH_CLIENT_ID'];
 export const WORKERS_BUILDS_CONTAINER_SOURCE_FILES = [];
+const ALLOWED_GITHUB_WORKFLOW_PATHS = ['.github/workflows/runtime-artifacts.yml'];
+
+export function findUnexpectedGithubWorkflowPaths(paths) {
+  return Array.isArray(paths) ? paths.filter((path) => !ALLOWED_GITHUB_WORKFLOW_PATHS.includes(path)) : [];
+}
 
 export function findWorkersBuildsConfigErrors({
   config,
@@ -102,9 +107,10 @@ export function findWorkersBuildsConfigErrors({
   requireEqual(errors, 'package.json packageManager', packageJson?.packageManager, 'pnpm@11.14.0');
   requireEqual(errors, '.nvmrc', nvmrc?.trim(), '26.3.0');
 
-  if (Array.isArray(githubWorkflowPaths) && githubWorkflowPaths.length > 0) {
+  const unexpectedGithubWorkflowPaths = findUnexpectedGithubWorkflowPaths(githubWorkflowPaths);
+  if (unexpectedGithubWorkflowPaths.length > 0) {
     errors.push(
-      `GitHub Actions workflows must not exist; Cloudflare Workers Builds is the only CI/CD provider. Found: ${githubWorkflowPaths.join(', ')}.`,
+      `GitHub deployment workflows must not exist; Cloudflare Workers Builds is the only CI/CD provider. Found: ${unexpectedGithubWorkflowPaths.join(', ')}.`,
     );
   }
   if (githubCompositeActionExists) {

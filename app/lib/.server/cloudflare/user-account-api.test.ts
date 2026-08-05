@@ -885,7 +885,20 @@ describe('UserCloudflareAccountApi', () => {
       )
       .mockResolvedValueOnce(Response.json({ id: 'container-application-1', name: 'ghostbuild-workspace-user' }))
       .mockResolvedValueOnce(Response.json([]))
-      .mockResolvedValueOnce(Response.json({ id: 'rollout-1' }));
+      .mockResolvedValueOnce(Response.json({ id: 'rollout-1' }))
+      .mockResolvedValueOnce(
+        Response.json({
+          id: 'rollout-1',
+          created_at: '2026-08-05T00:00:00Z',
+          status: 'completed',
+          target_configuration: {
+            image,
+            instance_type: 'basic',
+            observability: { logs: { enabled: true } },
+            wrangler_ssh: { enabled: false },
+          },
+        }),
+      );
 
     await new UserCloudflareAccountApi('user-account', 'user-token', request).ensureWorkspaceRuntimeContainer({
       applicationName: 'ghostbuild-workspace-user',
@@ -935,6 +948,19 @@ describe('UserCloudflareAccountApi', () => {
             },
           },
         ]),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          id: 'rollout-1',
+          created_at: '2026-08-05T00:00:00Z',
+          status: 'completed',
+          target_configuration: {
+            image,
+            instance_type: 'basic',
+            observability: { logs: { enabled: true } },
+            wrangler_ssh: { enabled: false },
+          },
+        }),
       );
 
     await new UserCloudflareAccountApi('user-account', 'user-token', request).ensureWorkspaceRuntimeContainer({
@@ -943,7 +969,70 @@ describe('UserCloudflareAccountApi', () => {
       image,
     });
 
-    expect(request).toHaveBeenCalledTimes(3);
+    expect(request).toHaveBeenCalledTimes(4);
+    expect(request).toHaveBeenLastCalledWith(
+      'https://api.cloudflare.com/client/v4/accounts/user-account/containers/applications/container-application-1/rollouts/rollout-1',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  test('waits for a matching Sandbox rollout to complete', async () => {
+    const image = `docker.io/cloudflare/sandbox:0.12.5@sha256:${'b'.repeat(64)}`;
+    const targetConfiguration = {
+      image,
+      instance_type: 'basic',
+      observability: { logs: { enabled: true } },
+      wrangler_ssh: { enabled: false },
+    };
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json([
+          {
+            id: 'container-application-1',
+            name: 'ghostbuild-workspace-user',
+            durable_objects: { namespace_id: '0123456789abcdef0123456789abcdef' },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(Response.json({ id: 'container-application-1', name: 'ghostbuild-workspace-user' }))
+      .mockResolvedValueOnce(
+        Response.json([
+          {
+            id: 'rollout-1',
+            created_at: '2026-08-05T00:00:00Z',
+            status: 'progressing',
+            target_configuration: targetConfiguration,
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          id: 'rollout-1',
+          created_at: '2026-08-05T00:00:00Z',
+          status: 'progressing',
+          target_configuration: targetConfiguration,
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          id: 'rollout-1',
+          created_at: '2026-08-05T00:00:00Z',
+          status: 'completed',
+          target_configuration: targetConfiguration,
+        }),
+      );
+    const sleep = vi.fn(async () => undefined);
+
+    await new UserCloudflareAccountApi('user-account', 'user-token', request).ensureWorkspaceRuntimeContainer({
+      applicationName: 'ghostbuild-workspace-user',
+      namespaceId: '0123456789abcdef0123456789abcdef',
+      image,
+      sleep,
+    });
+
+    expect(sleep).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledTimes(5);
   });
 
   test('preserves Cloudflare Containers error details', async () => {

@@ -41,7 +41,7 @@ describe('Workers Builds production configuration', () => {
         config: validConfig,
         packageJson,
         nvmrc: '26.3.0\n',
-        githubWorkflowPaths: [],
+        githubWorkflowPaths: ['.github/workflows/runtime-artifacts.yml'],
         githubCompositeActionExists: false,
         workerConfig: {},
         containerSourceSha256,
@@ -49,7 +49,7 @@ describe('Workers Builds production configuration', () => {
     ).toEqual([]);
   });
 
-  it('rejects disabled previews, mutable toolchains, unreviewed variables, and GitHub Actions', () => {
+  it('rejects disabled previews, mutable toolchains, unreviewed variables, and GitHub deployment workflows', () => {
     expect(
       findWorkersBuildsConfigErrors({
         config: {
@@ -62,7 +62,11 @@ describe('Workers Builds production configuration', () => {
         },
         packageJson: { ...packageJson, packageManager: 'pnpm@latest' },
         nvmrc: 'node\n',
-        githubWorkflowPaths: ['.github/workflows/ci.yml', '.github/workflows/deploy.yml'],
+        githubWorkflowPaths: [
+          '.github/workflows/runtime-artifacts.yml',
+          '.github/workflows/ci.yml',
+          '.github/workflows/deploy.yml',
+        ],
         githubCompositeActionExists: true,
         workerConfig: { containers: [{ class_name: 'DeploymentSandbox', image: './Dockerfile.sandbox' }] },
         containerSourceSha256,
@@ -77,7 +81,7 @@ describe('Workers Builds production configuration', () => {
         'wrangler.jsonc must not bind Ghostbuild-owned Containers.',
         'package.json packageManager must be "pnpm@11.14.0"; found "pnpm@latest".',
         '.nvmrc must be "26.3.0"; found "node".',
-        'GitHub Actions workflows must not exist; Cloudflare Workers Builds is the only CI/CD provider. Found: .github/workflows/ci.yml, .github/workflows/deploy.yml.',
+        'GitHub deployment workflows must not exist; Cloudflare Workers Builds is the only CI/CD provider. Found: .github/workflows/ci.yml, .github/workflows/deploy.yml.',
         '.github/actions/setup-and-build/action.yaml must not exist; the Cloudflare build command owns toolchain setup.',
       ]),
     );

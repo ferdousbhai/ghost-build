@@ -55,4 +55,13 @@ describe('ProjectWorkspace preview lifecycle', () => {
       create.indexOf('INSERT INTO ghostbuild_active_preview'),
     );
   });
+
+  it('applies the isolated local D1 schema before building Preview', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const create = source.slice(source.indexOf('async createPreview('), source.indexOf('async stopPreview('));
+    expect(create).toContain('pnpm exec wrangler d1 migrations apply DB --local --config wrangler.preview.jsonc');
+    expect(create.indexOf('d1 migrations apply DB --local')).toBeLessThan(
+      create.indexOf('pnpm run build:isolated-preview'),
+    );
+  });
 });

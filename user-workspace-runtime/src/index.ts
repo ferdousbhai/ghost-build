@@ -1378,6 +1378,14 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             requireCommandSuccess(await runNativeCommand(workspace, snapshotRoot, INSTALL_COMMAND, 4 * 60_000));
             this.requirePreviewNotCancelled(previewId);
             requireCommandSuccess(
+              await runNativeCommand(
+                workspace,
+                snapshotRoot,
+                'pnpm exec wrangler d1 migrations apply DB --local --config wrangler.preview.jsonc',
+                60_000,
+              ),
+            );
+            requireCommandSuccess(
               await runNativeCommand(workspace, snapshotRoot, 'pnpm run build:isolated-preview', 5 * 60_000),
             );
             await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);

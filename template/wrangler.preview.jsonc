@@ -3,22 +3,13 @@
   "name": "ghostbuild-cloudflare-app-preview",
   "compatibility_date": "2026-07-21",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "src/server.ts",
-  "vars": {
-    "GHOSTBUILD_ISOLATED_PREVIEW": "1",
-  },
+  "main": "src/preview-server.ts",
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "ghostbuild-cloudflare-app-preview",
       "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "migrations",
-    },
-    {
-      "binding": "AGENT_SECURITY_DB",
-      "database_name": "ghostbuild-cloudflare-app-agent-security-preview",
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "agent-security-migrations",
     },
   ],
   "r2_buckets": [
@@ -27,18 +18,4 @@
       "bucket_name": "ghostbuild-cloudflare-app-storage-preview",
     },
   ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "AppAgent",
-        "class_name": "AppAgent",
-      },
-    ],
-  },
-  "exports": {
-    "AppAgent": {
-      "type": "durable-object",
-      "storage": "sqlite",
-    },
-  },
 }

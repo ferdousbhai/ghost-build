@@ -15,6 +15,7 @@ import {
   workflowPathsFromDirectoryEntries,
 } from '../template/scripts/lib/project-policy.mjs';
 import { runVerifierIfMain } from './run-verifier.mjs';
+import { findUnexpectedGithubWorkflowPaths } from './workers-builds-config.mjs';
 
 export {
   findBuildApprovalErrors,
@@ -280,7 +281,7 @@ function verifyWorkflows(errors) {
   const workflowPaths = existsSync(workflowsDirectory)
     ? workflowPathsFromDirectoryEntries(readdirSync(workflowsDirectory))
     : [];
-  for (const path of workflowPaths) {
+  for (const path of findUnexpectedGithubWorkflowPaths(workflowPaths)) {
     errors.push(`${path} must not exist; Cloudflare Workers Builds is the only CI/CD provider.`);
   }
 

@@ -24,6 +24,8 @@ const MAX_ASSET_UPLOAD_JWT_BYTES = 16 * 1024;
 const ASSET_HASH_PATTERN = /^[a-f0-9]{32}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const R2_BUCKET_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
+const CONTAINER_ROLLOUT_DEADLINE_MS = 20 * 60_000;
+const CONTAINER_ROLLOUT_POLL_INTERVAL_MS = 5_000;
 
 type WorkerBinding = {
   name?: string;
@@ -632,6 +634,7 @@ export class UserCloudflareAccountApi {
     namespaceId: string;
     image: string;
     maxInstances?: number;
+    sleep?: (milliseconds: number) => Promise<void>;
   }): Promise<{ id: string; name: string }> {
     requireWorkerName(args.applicationName);
     if (!/^[0-9a-f-]{32,64}$/i.test(args.namespaceId)) {
@@ -683,31 +686,89 @@ export class UserCloudflareAccountApi {
         method: 'GET',
       });
       const latestRollout = latestContainerApplicationRollout(rollouts);
-      const converged =
-        latestRollout &&
-        ['pending', 'progressing', 'completed'].includes(latestRollout.status) &&
-        matchesWorkspaceContainerConfiguration(latestRollout.target_configuration, args.image);
-      if (converged) {
+      const matchingRollout =
+        latestRollout && matchesWorkspaceContainerConfiguration(latestRollout.target_configuration, args.image)
+          ? latestRollout
+          : null;
+      if (matchingRollout?.status === 'completed') {
         return { id: result.id, name: result.name };
       }
-      const rollout = await this.callContainer<{ id?: string }>(
-        `/applications/${encodeURIComponent(existing.id)}/rollouts`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            description: 'Ghostbuild workspace runtime update',
-            strategy: 'rolling',
-            target_configuration: configuration.configuration,
-            step_percentage: 100,
-            kind: 'full_auto',
-          }),
-        },
-      );
-      if (!rollout.id) {
-        throw new CloudflareAccountApiError('Cloudflare returned an invalid workspace container rollout.');
-      }
+      const rolloutId =
+        matchingRollout && ['pending', 'progressing'].includes(matchingRollout.status)
+          ? matchingRollout.id
+          : await this.createWorkspaceRuntimeContainerRollout(
+              existing.id,
+              args.applicationName,
+              configuration.configuration,
+            );
+      await this.waitForWorkspaceRuntimeContainerRollout({
+        applicationId: existing.id,
+        applicationName: args.applicationName,
+        rolloutId,
+        image: args.image,
+        sleep: args.sleep,
+      });
     }
     return { id: result.id, name: result.name };
+  }
+
+  private async createWorkspaceRuntimeContainerRollout(
+    applicationId: string,
+    applicationName: string,
+    targetConfiguration: object,
+  ): Promise<string> {
+    const rollout = await this.callContainer<{ id?: string }>(
+      `/applications/${encodeURIComponent(applicationId)}/rollouts`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          description: `Ghostbuild workspace runtime update for ${applicationName}`,
+          strategy: 'rolling',
+          target_configuration: targetConfiguration,
+          step_percentage: 100,
+          kind: 'full_auto',
+        }),
+      },
+    );
+    if (!rollout.id) {
+      throw new CloudflareAccountApiError('Cloudflare returned an invalid workspace container rollout.');
+    }
+    return rollout.id;
+  }
+
+  private async waitForWorkspaceRuntimeContainerRollout(args: {
+    applicationId: string;
+    applicationName: string;
+    rolloutId: string;
+    image: string;
+    sleep?: (milliseconds: number) => Promise<void>;
+  }): Promise<void> {
+    const sleep = args.sleep ?? ((milliseconds: number) => scheduler.wait(milliseconds));
+    const deadline = Date.now() + CONTAINER_ROLLOUT_DEADLINE_MS;
+    while (Date.now() < deadline) {
+      const rollout = requireContainerApplicationRollout(
+        await this.callContainer<unknown>(
+          `/applications/${encodeURIComponent(args.applicationId)}/rollouts/${encodeURIComponent(args.rolloutId)}`,
+          { method: 'GET' },
+        ),
+        args.rolloutId,
+      );
+      if (!matchesWorkspaceContainerConfiguration(rollout.target_configuration, args.image)) {
+        throw new CloudflareAccountApiError('Cloudflare changed the workspace container rollout configuration.');
+      }
+      if (rollout.status === 'completed') {
+        return;
+      }
+      if (!['pending', 'progressing'].includes(rollout.status)) {
+        throw new CloudflareAccountApiError(
+          `Cloudflare did not complete the workspace container rollout for ${args.applicationName}.`,
+        );
+      }
+      await sleep(Math.min(CONTAINER_ROLLOUT_POLL_INTERVAL_MS, Math.max(1, deadline - Date.now())));
+    }
+    throw new CloudflareAccountApiError(
+      `Cloudflare did not complete the workspace container rollout for ${args.applicationName} before the deadline.`,
+    );
   }
 
   async enableWorkerSubdomain(workerName: string): Promise<void> {
@@ -1173,6 +1234,22 @@ function latestContainerApplicationRollout(value: unknown): Required<ContainerAp
     return rollout as Required<ContainerApplicationRolloutReadback>;
   });
   return rollouts.sort((left, right) => right.created_at.localeCompare(left.created_at))[0] ?? null;
+}
+
+function requireContainerApplicationRollout(
+  value: unknown,
+  rolloutId: string,
+): Required<ContainerApplicationRolloutReadback> {
+  if (
+    !isRecord(value) ||
+    value.id !== rolloutId ||
+    typeof value.created_at !== 'string' ||
+    typeof value.status !== 'string' ||
+    !isRecord(value.target_configuration)
+  ) {
+    throw new CloudflareAccountApiError('Cloudflare returned an invalid workspace container rollout.');
+  }
+  return value as Required<ContainerApplicationRolloutReadback>;
 }
 
 function matchesWorkspaceContainerConfiguration(value: unknown, image: string): boolean {

@@ -59,6 +59,7 @@ const forbiddenLegacyPaths = [
 ];
 const requiredPaths = [
   '.github/dependabot.yml',
+  '.github/workflows/runtime-artifacts.yml',
   'CODE_OF_CONDUCT.md',
   'CONTRIBUTING.md',
   'LICENSE',
@@ -75,13 +76,16 @@ const requiredPaths = [
   'app/lib/workers-ai-model.ts',
   'ghostbuild-agent/package.json',
   'ghostbuild-agent/tsconfig.json',
+  'scripts/check-runtime-artifacts.mjs',
   'template/package.json',
   'template/pnpm-lock.yaml',
+  'template/src/preview-server.ts',
   'template/src/server.ts',
   'template/src/agents/app-agent.ts',
   'template/src/agents/anonymous-retention.ts',
   'template/vite.config.ts',
   'template/wrangler.jsonc',
+  'template/wrangler.preview.jsonc',
 ];
 const requiredMigrationTables = [
   'user',

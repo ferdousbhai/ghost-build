@@ -17,7 +17,7 @@ import { waitForUserWorkspaceRuntimeReadiness } from './user-workspace-runtime-r
 
 const USER_WORKSPACE_SANDBOX_IMAGE =
   'docker.io/cloudflare/sandbox:0.12.4@sha256:e83bb4d6d9748b93a4b876ce0852b5e93d8e0893da10c59d425770aef0d73738';
-const PROVISIONING_LEASE_MS = 15 * 60_000;
+const PROVISIONING_LEASE_MS = 40 * 60_000;
 
 export class UserWorkspaceRuntimeProvisioningInProgressError extends Error {
   constructor() {
@@ -85,12 +85,12 @@ export async function provisionUserWorkspaceRuntime(args: {
       connectionGeneration: connection.generation,
       endpoint,
     });
-    await accountApi.configureWorkspaceRuntimeGcSchedule(workerName);
     await accountApi.ensureWorkspaceRuntimeContainer({
       applicationName: workerName,
       namespaceId: deployed.namespaceId,
       image: USER_WORKSPACE_SANDBOX_IMAGE,
     });
+    await accountApi.configureWorkspaceRuntimeGcSchedule(workerName);
     await accountApi.enableWorkerSubdomain(workerName);
     await waitForUserWorkspaceRuntimeReadiness({
       endpoint,

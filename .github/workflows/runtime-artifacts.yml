@@ -1,0 +1,90 @@
+name: Runtime artifacts
+
+on:
+  pull_request:
+    paths:
+      - package.json
+      - pnpm-lock.yaml
+      - app/lib/.server/cloudflare/user-workspace-runtime-provisioner.ts
+      - user-workspace-runtime/src/container-toolchain.ts
+      - scripts/check-runtime-artifacts.mjs
+      - .github/workflows/runtime-artifacts.yml
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: runtime-artifacts
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26
+
+      - name: Check official registries
+        id: check
+        continue-on-error: true
+        run: |
+          set +e
+          node scripts/check-runtime-artifacts.mjs --json > "$RUNNER_TEMP/runtime-artifacts.json"
+          status=$?
+          set -e
+          if ! jq -e '.status and .markdown' "$RUNNER_TEMP/runtime-artifacts.json" >/dev/null 2>&1; then
+            jq -n '{status:"error",results:[],markdown:"<!-- ghostbuild-runtime-artifact-watch -->\n## Runtime artifact check failed\n\nThe checker exited before producing a valid report. Inspect this workflow run.\n"}' \
+              > "$RUNNER_TEMP/runtime-artifacts.json"
+            status=2
+          fi
+          jq -r .markdown "$RUNNER_TEMP/runtime-artifacts.json" > "$RUNNER_TEMP/runtime-artifacts.md"
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Publish summary
+        if: always()
+        run: cat "$RUNNER_TEMP/runtime-artifacts.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sync tracking issue
+        if: always() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          marker='<!-- ghostbuild-runtime-artifact-watch -->'
+          issue_number=$(gh issue list --state open --limit 100 --json number,body,author --jq \
+            "map(select((.author.login == \"github-actions[bot]\" or .author.login == \"$REPOSITORY_OWNER\") and ((.body // \"\") | contains(\"$marker\"))))[0].number // empty")
+          status=$(jq -r .status "$RUNNER_TEMP/runtime-artifacts.json")
+
+          if [ "$status" = current ]; then
+            if [ -n "$issue_number" ]; then
+              gh issue close "$issue_number" --comment 'The pinned runtime artifacts match their official registry tags again.'
+            fi
+            exit 0
+          fi
+
+          if [ "$status" = drift ]; then
+            title='Update immutable Cloudflare runtime artifact pins'
+          else
+            title='Runtime artifact registry check is failing'
+          fi
+
+          if [ -n "$issue_number" ]; then
+            gh issue edit "$issue_number" --title "$title" --body-file "$RUNNER_TEMP/runtime-artifacts.md"
+          else
+            gh issue create --title "$title" --body-file "$RUNNER_TEMP/runtime-artifacts.md"
+          fi
+
+      - name: Fail on drift or monitoring errors
+        if: always() && steps.check.outputs.exit_code != '0'
+        env:
+          EXIT_CODE: ${{ steps.check.outputs.exit_code }}
+        run: exit "$EXIT_CODE"

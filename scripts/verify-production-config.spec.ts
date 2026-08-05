@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   findBuildApprovalErrors,
@@ -295,8 +295,8 @@ overrides:
     );
   });
 
-  it('keeps paid GitHub Actions disabled', () => {
-    expect(existsSync('.github/workflows')).toBe(false);
+  it('keeps GitHub deployment Actions disabled', () => {
+    expect(readdirSync('.github/workflows')).toEqual(['runtime-artifacts.yml']);
     expect(existsSync('.github/actions/setup-and-build/action.yaml')).toBe(false);
   });
 

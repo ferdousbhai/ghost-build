@@ -27,15 +27,28 @@ describe('standalone template verification source', () => {
     }
   });
 
-  test('uses only the canonical Cloudflare Vite plugin configuration for dev, build, and preview', () => {
+  test('uses the canonical Cloudflare Vite plugin with a minimal isolated Preview entrypoint', () => {
     const viteConfig = readFileSync('template/vite.config.ts', 'utf8');
     const server = readFileSync('template/src/server.ts', 'utf8');
+    const previewServer = readFileSync('template/src/preview-server.ts', 'utf8');
+    const previewConfig = readFileSync('template/wrangler.preview.jsonc', 'utf8');
     const pkg = JSON.parse(readFileSync('template/package.json', 'utf8')) as { scripts: Record<string, string> };
 
     expect(server).toContain('handler.fetch(request)');
     expect(server).toContain('routeAppAgentRequest');
+    expect(server).not.toContain('GHOSTBUILD_ISOLATED_PREVIEW');
+    expect(server).not.toContain('isAgentRoute');
     expect(viteConfig).toContain('cloudflare({');
     expect(viteConfig).toContain('tanstackStart()');
+    expect(previewServer).toContain('handler.fetch(request)');
+    expect(previewServer).toContain('isolatedPreview: true');
+    expect(previewConfig).toContain('"main": "src/preview-server.ts"');
+    expect(previewConfig).toContain('"d1_databases"');
+    expect(previewConfig).toContain('"r2_buckets"');
+    expect(previewConfig).not.toContain('"durable_objects"');
+    expect(previewConfig).not.toContain('"ai"');
+    expect(previewConfig).not.toContain('"vars"');
+    expect(previewConfig).not.toContain('"exports"');
     expect(pkg.scripts.dev).toBe('vite dev --host 0.0.0.0');
     expect(pkg.scripts.preview).toBe('vite preview --host 0.0.0.0');
     expect(existsSync('template/vite.preview.config.mjs')).toBe(false);
