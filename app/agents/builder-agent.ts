@@ -322,6 +322,9 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         }),
       });
     }
+    if (!options?.continuation) {
+      await this.cancelPreview();
+    }
     await this.advanceTranscriptCheckpoint(transcript);
     this.contextCompaction.migrateLegacySubchat(subchatIndex);
     const turnContext = parseTurnContext(body.turnContext);
@@ -468,7 +471,9 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       error: result.error,
     });
     if (status === 'completed') {
-      await this.requestPreviewInternal().catch(() => logger.warn('Unable to queue the automatic remote preview'));
+      await this.requestPreviewInternal({ requireValidation: true }).catch(() =>
+        logger.warn('Unable to queue the automatic remote preview'),
+      );
     }
   }
 
@@ -836,13 +841,16 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     return seedBuilderWorkspace(this.workspace, seedId, entries);
   }
 
-  private async requestPreviewInternal(): Promise<BuilderPreviewState> {
+  private async requestPreviewInternal(options: { requireValidation?: boolean } = {}): Promise<BuilderPreviewState> {
     if (!this.ownerId || !this.userId || !this.transcriptBinding) {
       throw new Response('Agent authentication is required.', { status: 401 });
     }
     const workspace = await this.initializeWorkspace(this.transcriptBinding);
     const current = this.currentPreviewState();
     const snapshot = await this.workspace.checkpoint();
+    if (options.requireValidation && !(await this.workspace.hasSuccessfulValidation(snapshot.revision))) {
+      return current;
+    }
     if (
       current.workspaceRevision === workspace.revision &&
       (current.status === 'queued' || current.status === 'building')

@@ -50,6 +50,21 @@ describe('WorkspaceOperationLane', () => {
     });
   });
 
+  it('recovers an interrupted preview before it can block foreground work', () => {
+    const storage = new TestStorage();
+    const lane = new WorkspaceOperationLane(
+      storage as never,
+      () => false,
+      (kind) => kind === 'validate' || kind === 'preview',
+    );
+    lane.initialize();
+    lane.acquire(operation('preview', 'preview-a', 100, 15 * 60_000));
+
+    expect(lane.acquire(operation('validate', 'validation-b', 200))).toMatchObject({
+      recoveredOwner: 'owner-preview-preview-a',
+    });
+  });
+
   it('keeps interrupted mutating operations leased until their deadline', () => {
     const lane = new WorkspaceOperationLane(
       new TestStorage() as never,

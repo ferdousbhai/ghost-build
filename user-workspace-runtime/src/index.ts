@@ -114,7 +114,7 @@ const OPERATION_LEASE_MS = {
   exec: 10 * 60_000,
   install: 15 * 60_000,
   validate: 30 * 60_000,
-  preview: 30 * 60_000,
+  preview: 15 * 60_000,
   deployment: 45 * 60_000,
   delete: 15 * 60_000,
 } as const;
@@ -326,7 +326,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     this.#operationLane = new WorkspaceOperationLane(
       ctx.storage,
       (owner) => this.#activeOperationOwners.has(owner),
-      (kind) => kind === 'validate',
+      (kind) => kind === 'validate' || kind === 'preview',
     );
     this.#operationLane.initialize();
     this.ctx.storage.sql.exec(
@@ -1376,6 +1376,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             );
             await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
             requireCommandSuccess(await runNativeCommand(workspace, snapshotRoot, INSTALL_COMMAND, 4 * 60_000));
+            this.requirePreviewNotCancelled(previewId);
             requireCommandSuccess(
               await runNativeCommand(workspace, snapshotRoot, 'pnpm run build:isolated-preview', 5 * 60_000),
             );

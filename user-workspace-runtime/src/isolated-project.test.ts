@@ -107,6 +107,11 @@ describe('isolated project command', () => {
     expect(deployment).toContain('collectSandboxFiles(this, artifactRoot');
     expect(deployment).toContain('collectSandboxMigrations(this, `${isolatedRoot}/migrations`)');
     expect(preview).toContain("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: '.trycloudflare.com,container'");
+    expect(preview).toContain(
+      'requireCommandSuccess(await runNativeCommand(workspace, snapshotRoot, INSTALL_COMMAND, 4 * 60_000));\n' +
+        '            this.requirePreviewNotCancelled(previewId);',
+    );
+    expect(source).toContain("(kind) => kind === 'validate' || kind === 'preview'");
     expect(source).not.toContain("cwd: '/tmp'");
     expect(source).not.toContain('cwd: isolatedRoot');
     expect(source).not.toContain('cwd: snapshotRoot');
