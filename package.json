@@ -149,7 +149,7 @@
     "knip": "^5.88.1",
     "postcss": "^8.5.25",
     "postcss-mixins": "^11.0.3",
-    "postcss-nesting": "^13.0.2",
+    "postcss-nesting": "^14.0.1",
     "prettier": "^3.9.6",
     "tailwind-scrollbar": "3.1.0",
     "tailwindcss": "^3.4.19",
