@@ -552,7 +552,7 @@ export class UserCloudflareAccountApi {
     const metadata = {
       main_module: 'workspace-runtime.mjs',
       compatibility_date: '2026-07-27',
-      compatibility_flags: ['nodejs_compat'],
+      compatibility_flags: ['nodejs_compat', 'experimental'],
       containers: [{ class_name: 'ProjectWorkspace' }],
       bindings: [
         { type: 'durable_object_namespace', name: 'PROJECT_WORKSPACE', class_name: 'ProjectWorkspace' },

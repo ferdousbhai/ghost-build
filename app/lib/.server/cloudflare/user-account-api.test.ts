@@ -746,7 +746,7 @@ describe('UserCloudflareAccountApi', () => {
               script: { etag: 'runtime-etag' },
               script_runtime: {
                 compatibility_date: '2026-07-27',
-                compatibility_flags: ['nodejs_compat'],
+                compatibility_flags: ['nodejs_compat', 'experimental'],
               },
             },
           },
@@ -800,7 +800,7 @@ describe('UserCloudflareAccountApi', () => {
       exports: Record<string, unknown>;
       observability: unknown;
     };
-    expect(metadata.compatibility_flags).toEqual(['nodejs_compat']);
+    expect(metadata.compatibility_flags).toEqual(['nodejs_compat', 'experimental']);
     expect(metadata.containers).toEqual([{ class_name: 'ProjectWorkspace' }]);
     expect(metadata.bindings).toEqual(
       expect.arrayContaining([
