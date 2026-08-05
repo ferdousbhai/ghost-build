@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { z, type ZodType } from 'zod';
 import {
   CLOUDFLARE_COMPUTER_VERSION,
+  GENERATED_PROJECT_PNPM_VERSION,
   COMPUTER_AI_TOOL_OPTIONS,
   COMPUTER_DEFAULT_SHELL_BACKEND,
   COMPUTER_SHELL_BACKEND_IDS,
@@ -37,12 +38,13 @@ describe('Cloudflare Computer preview contract', () => {
     expect(computerSyncUnconfirmedToolResult({ error: 'ordinary failure' })).toBeNull();
   });
   it('pins the reviewed preview package in dependency and release-age configuration', () => {
-    const rootPackage = jsonFile<{ dependencies?: Record<string, string> }>('../package.json');
+    const rootPackage = jsonFile<{ dependencies?: Record<string, string>; packageManager?: string }>('../package.json');
     const installedPackage = jsonFile<{ version?: string }>('../node_modules/@cloudflare/computer/package.json');
     const workspaceConfig = textFile('../pnpm-workspace.yaml');
     const installedReadme = textFile('../node_modules/@cloudflare/computer/README.md');
 
     expect(rootPackage.dependencies?.['@cloudflare/computer']).toBe(CLOUDFLARE_COMPUTER_VERSION);
+    expect(rootPackage.packageManager).toBe(`pnpm@${GENERATED_PROJECT_PNPM_VERSION}`);
     expect(installedPackage.version).toBe(CLOUDFLARE_COMPUTER_VERSION);
     expect(workspaceConfig).toContain(`'@cloudflare/computer@${CLOUDFLARE_COMPUTER_VERSION}'`);
     expect(installedReadme).toContain('**PREVIEW ONLY.**');

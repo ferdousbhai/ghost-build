@@ -3,6 +3,7 @@ import type { CreateAIToolsOptions } from '@cloudflare/computer/tools';
 // Computer 0.1.1 declares itself preview-only. Keep the package, schemas, and
 // backend contract pinned together until a reviewed upgrade changes all three.
 export const CLOUDFLARE_COMPUTER_VERSION = '0.1.1';
+export const GENERATED_PROJECT_PNPM_VERSION = '11.14.0';
 
 export const COMPUTER_TOOL_NAMES = ['read', 'ls', 'write', 'edit', 'exec'] as const;
 export type ComputerToolName = (typeof COMPUTER_TOOL_NAMES)[number];

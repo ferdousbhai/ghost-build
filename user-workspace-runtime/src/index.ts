@@ -48,6 +48,7 @@ import { computerSyncUnconfirmedToolResult } from '../../ghostbuild-agent/cloudf
 import { openPreviewQuickTunnel } from './preview-tunnel';
 import { applyAtomicWorkspaceChanges } from './atomic-workspace-changes';
 import { isComputerContainerCallback } from './container-fetch-routing';
+import { containerToolchainBootstrapCommand } from './container-toolchain';
 import { routeUserWorkspaceRuntimeControlPlaneRequest } from './readiness-route';
 import { scheduleUserWorkspaceRuntimeMaintenance } from './scheduled-maintenance';
 import { ToolOperationJournal, type ToolOperationStartResult } from './tool-operation-journal';
@@ -185,6 +186,7 @@ class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
   }
 
   async startComputerd(env: Record<string, string>): Promise<void> {
+    requireSandboxExecSuccess(await this.exec(containerToolchainBootstrapCommand(), { timeout: 2 * 60_000 }));
     const existing = await this.getProcess(COMPUTERD_PROCESS_ID).catch(() => null);
     if (existing && (existing.status === 'starting' || existing.status === 'running')) {
       return;
