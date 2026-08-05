@@ -288,13 +288,48 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     if (this.#stubPromise) {
       return this.#stubPromise;
     }
-    this.#stubPromise = this.#resolveStub();
+    const promise = this.#resolveStub().then((stub) =>
+      this.#guardStub(stub, () => {
+        if (this.#stubPromise === promise) {
+          this.#stubPromise = null;
+        }
+      }),
+    );
+    this.#stubPromise = promise;
     try {
-      return await this.#stubPromise;
+      return await promise;
     } catch (error) {
-      this.#stubPromise = null;
+      if (this.#stubPromise === promise) {
+        this.#stubPromise = null;
+      }
       throw error;
     }
+  }
+
+  #guardStub(stub: ProjectWorkspaceStub, invalidate: () => void): ProjectWorkspaceStub {
+    return new Proxy(stub, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property, target);
+        if (typeof value !== 'function') {
+          return value;
+        }
+        return (...args: unknown[]) => {
+          try {
+            return Promise.resolve(Reflect.apply(value, target, args)).catch((error: unknown) => {
+              if (isDurableObjectCodeReset(error)) {
+                invalidate();
+              }
+              throw error;
+            });
+          } catch (error) {
+            if (isDurableObjectCodeReset(error)) {
+              invalidate();
+            }
+            throw error;
+          }
+        };
+      },
+    });
   }
 
   async #resolveStub(): Promise<ProjectWorkspaceStub> {
@@ -340,6 +375,16 @@ function requireToolCallId(value: unknown): string {
     throw new Error('Invalid workspace tool-call identifier.');
   }
   return value;
+}
+
+function isDurableObjectCodeReset(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof error.message === 'string' &&
+    error.message.includes('Durable Object reset because its code was updated')
+  );
 }
 
 function stableValue(value: unknown): unknown {
