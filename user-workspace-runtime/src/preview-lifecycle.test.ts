@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs';
 import {
   assertPreviewPublicationAllowed,
   assertPreviewSourceCheckpoint,
-  createPreviewSnapshotCommand,
   PREVIEW_PORT_COUNT,
   PREVIEW_PORT_MIN,
   previewPort,
@@ -40,18 +39,6 @@ describe('ProjectWorkspace preview lifecycle', () => {
     expect(first).toBeGreaterThanOrEqual(PREVIEW_PORT_MIN);
     expect(first).toBeLessThan(PREVIEW_PORT_MIN + PREVIEW_PORT_COUNT);
     expect(replacement).not.toBe(first);
-  });
-
-  it('copies a built immutable snapshot without copying dependencies or local Wrangler state', () => {
-    const command = createPreviewSnapshotCommand({
-      projectRoot: '/home/project',
-      snapshotRoot: '/tmp/ghostbuild-previews/preview-a',
-      quote: (value) => `'${value}'`,
-    });
-    expect(command).toContain("--exclude='./node_modules'");
-    expect(command).toContain("--exclude='./.wrangler/state'");
-    expect(command).toContain("ln -s '/home/project/node_modules'");
-    expect(command).toContain("'/tmp/ghostbuild-previews/preview-a'");
   });
 
   it('persists cancellation outside the serialized build lane and checks it before publication', () => {

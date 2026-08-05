@@ -120,6 +120,35 @@ describe('DurableWorkspaceSyncRetryScheduler', () => {
     expect(scheduler).toContain('{ idempotent: true }');
   });
 
+  it('proves exhausted recovery through a fresh pull before preserving the result and clearing the barrier', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const start = source.indexOf('private async recoverExhaustedComputerSync(');
+    const recovery = source.slice(start, source.indexOf('\n  private ', start + 1));
+
+    expect(recovery.indexOf('await this.#workspace.close()')).toBeGreaterThanOrEqual(0);
+    expect(recovery.indexOf('await this.#workspace.pull(backend)')).toBeGreaterThan(
+      recovery.indexOf('await this.#workspace.close()'),
+    );
+    expect(recovery.indexOf('this.finishPendingCommand(backend)')).toBeGreaterThan(
+      recovery.indexOf('await this.#workspace.pull(backend)'),
+    );
+    expect(recovery.indexOf('await this.#syncRetries.clear(backend)')).toBeGreaterThan(
+      recovery.indexOf('this.finishPendingCommand(backend)'),
+    );
+    expect(recovery).toContain('return false');
+  });
+
+  it('keeps exhausted sync recovery armed even when no tool continuation remains', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const constructor = source.slice(source.indexOf('constructor(ctx:'), source.indexOf('override fetch('));
+    const reconcileStart = source.indexOf('async reconcilePendingCommands()');
+    const reconcile = source.slice(reconcileStart, source.indexOf('\n  async beginToolOperation(', reconcileStart));
+
+    expect(constructor).toContain("this.#syncRetries.state('container-shell')?.exhausted === true");
+    expect(reconcile).toContain("backends.add('container-shell')");
+    expect(reconcile).toContain('await this.schedulePendingCommandRecovery');
+  });
+
   it('rejects tools on a pre-existing pending backend before allocating journal rows', () => {
     const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
     for (const [start, end] of [

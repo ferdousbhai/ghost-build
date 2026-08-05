@@ -558,12 +558,11 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   @callable()
-  async getTranscriptSnapshot(identityValue?: unknown): Promise<{
+  async getTranscriptSnapshot(identityValue: unknown): Promise<{
     checkpoint: TranscriptCheckpoint | null;
     messages: NonNullable<ChatRequestBody['messages']>;
   }> {
-    const checkpoint =
-      identityValue === undefined ? (this.state.transcript ?? null) : await this.getTranscriptCheckpoint(identityValue);
+    const checkpoint = await this.getTranscriptCheckpoint(identityValue);
     return {
       checkpoint,
       messages: this.messages as NonNullable<ChatRequestBody['messages']>,

@@ -37,6 +37,7 @@ export class WorkspaceSyncPendingError extends Error {
     readonly notBefore: number,
     exhausted: boolean,
     readonly causeCode: string | null,
+    readonly commandResult?: WorkspaceRuntimeResult<'utf8'>,
   ) {
     const code = exhausted ? COMPUTER_SYNC_EXHAUSTED_ERROR_CODE : COMPUTER_SYNC_PENDING_ERROR_CODE;
     super(
@@ -79,13 +80,13 @@ export function requireWorkspaceSyncBarrier(
 }
 
 /** A successful command is not a durable mutation until its post-command pull completed. */
-export function requireDurableCommandResult<E extends 'utf8' | undefined>(
-  result: WorkspaceRuntimeResult<E>,
+export function requireDurableCommandResult(
+  result: WorkspaceRuntimeResult<'utf8'>,
   backend: string,
   now = Date.now(),
-): WorkspaceRuntimeResult<E> {
+): WorkspaceRuntimeResult<'utf8'> {
   if (result.sync.status === 'pending') {
-    throw new WorkspaceSyncPendingError(backend, 1, now + 1_000, false, result.sync.error);
+    throw new WorkspaceSyncPendingError(backend, 1, now + 1_000, false, result.sync.error, result);
   }
   return result;
 }

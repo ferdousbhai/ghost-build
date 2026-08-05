@@ -22,11 +22,7 @@ import {
   type UserWorkspaceReadinessCheck,
   type UserWorkspaceReadinessComponent,
 } from '../../app/lib/.server/cloudflare/user-workspace-runtime-health';
-import {
-  DEPLOYMENT_ARTIFACT_ROOT,
-  DEPLOYMENT_PROJECT_ROOT,
-  DEPLOYMENT_WRANGLER_CONFIG_PATH,
-} from '../../app/lib/.server/cloudflare/deployment-runtime-policy';
+import { DEPLOYMENT_PROJECT_ROOT } from '../../app/lib/.server/cloudflare/deployment-runtime-policy';
 import {
   MAX_DEPLOYMENT_ARTIFACT_BYTES,
   MAX_DEPLOYMENT_ARTIFACT_FILES,
@@ -44,7 +40,6 @@ import { verifyRuntimeCapability } from '../../app/lib/cloudflare/runtime-capabi
 import { userRuntimeDeploymentAction } from '../../app/server-handlers/deployments';
 import { userRuntimeEnhancePromptAction } from '../../app/server-handlers/enhance-prompt';
 import { toolFailure, toolSuccess, type GhostbuildToolResult } from '../../ghostbuild-agent/tool-result';
-import { computerSyncUnconfirmedToolResult } from '../../ghostbuild-agent/cloudflare-computer';
 import { openPreviewQuickTunnel } from './preview-tunnel';
 import { applyAtomicWorkspaceChanges } from './atomic-workspace-changes';
 import { isComputerContainerCallback } from './container-fetch-routing';
@@ -56,7 +51,6 @@ import { createCommittedMutationReceipt } from './mutation-receipt';
 import {
   assertPreviewSourceCheckpoint,
   assertPreviewPublicationAllowed,
-  createPreviewSnapshotCommand,
   PREVIEW_SNAPSHOT_ROOT,
   PREVIEW_TTL_MS,
   previewPort,
@@ -76,6 +70,12 @@ import {
 import { stableWorkspaceRead } from './stable-workspace-read';
 import { requireDeploymentMigrationName, requireWorkspaceFileEncoding } from './workspace-input';
 import { withCors } from './http-cors';
+import {
+  createIsolatedProjectCommand,
+  ISOLATED_PROJECT_ROOT,
+  rebaseDeploymentConfigPaths,
+  relativeIsolatedPath,
+} from './isolated-project';
 
 export { WorkspaceProxy };
 
@@ -105,7 +105,8 @@ const MAX_FILES = 10_000;
 const SYNC_BATCH_BYTES = 4 * 1024 * 1024;
 const SYNC_BATCH_FILES = 100;
 const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.tanstack', '.wrangler']);
-const DERIVED_PATHS = ['dist', '.output', '.tanstack', '.wrangler'].map((name) => `${PROJECT_ROOT}/${name}`);
+const INSTALL_COMMAND =
+  'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/';
 const COMPUTERD_PROCESS_ID = 'ghostbuild-computerd';
 const OPERATION_LEASE_MS = {
   seed: 10 * 60_000,
@@ -290,6 +291,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   readonly #operationLane: WorkspaceOperationLane;
   readonly #syncRetries: DurableWorkspaceSyncRetryScheduler;
   readonly #activeOperationOwners = new Set<string>();
+  readonly #activeSyncRecoveries = new Map<string, Promise<boolean>>();
 
   constructor(ctx: DurableObjectState<{}>, env: RuntimeEnv) {
     super(ctx, env);
@@ -304,7 +306,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         this,
         Math.max(0, Math.ceil((intent.notBefore - Date.now()) / 1_000)),
         'retryPendingComputerSync',
-        { backend: intent.backend },
+        { backend: intent.backend, attempt: intent.attempt, notBefore: intent.notBefore },
         { idempotent: true },
       );
     });
@@ -317,7 +319,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     this.#workspace = new Workspace(computerWorkspaceOptions(this, this.#syncRetries));
     this.#toolOperations = new ToolOperationJournal(ctx.storage);
     this.#toolOperations.initialize();
-    if (this.#toolOperations.pending().length > 0) {
+    if (this.#toolOperations.pending().length > 0 || this.#syncRetries.state('container-shell')?.exhausted === true) {
       this.ctx.waitUntil(this.reconcilePendingCommands());
     }
     this.#operationLane = new WorkspaceOperationLane(ctx.storage, (owner) => this.#activeOperationOwners.has(owner));
@@ -439,16 +441,16 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       return;
     }
     if (state.exhausted) {
-      this.finishPendingCommand(backend, {
-        exhausted: true,
-        attempt: state.attempt,
-        error: state.lastError,
-      });
+      const recovered = await this.recoverExhaustedComputerSync(backend);
+      if (!recovered) {
+        await this.schedulePendingCommandRecovery(60_000);
+      }
       console.info('ProjectWorkspace Computer sync retry is exhausted', {
         backend,
         attempt: state.attempt,
         ageMs: Math.max(0, Date.now() - state.createdAt),
         exhaustion: true,
+        recovery: recovered ? 'complete' : 'pending',
       });
       return;
     }
@@ -473,11 +475,10 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       this.finishPendingCommand(backend);
       await this.cleanupReadinessRoot().catch(() => undefined);
     } else if (result.status === 'exhausted') {
-      this.finishPendingCommand(backend, {
-        exhausted: true,
-        attempt: result.attempt,
-        error: result.error,
-      });
+      const recovered = await this.recoverExhaustedComputerSync(backend);
+      if (!recovered) {
+        await this.schedulePendingCommandRecovery(60_000);
+      }
     }
     console.info('ProjectWorkspace Computer sync retry', event);
   }
@@ -490,37 +491,44 @@ export class ProjectWorkspace extends ComputerSandboxBase {
    */
   async reconcilePendingCommands(): Promise<void> {
     let retryAt = Number.POSITIVE_INFINITY;
-    for (const continuation of this.#toolOperations.pending()) {
-      const state = this.#syncRetries.state(continuation.backend);
+    const pending = this.#toolOperations.pending();
+    const backends = new Set(pending.map((continuation) => continuation.backend));
+    if (this.#syncRetries.state('container-shell')?.exhausted) {
+      backends.add('container-shell');
+    }
+    for (const backend of backends) {
+      const state = this.#syncRetries.state(backend);
       try {
         if (state) {
           if (state.exhausted) {
-            this.finishPendingCommand(continuation.backend, {
-              exhausted: true,
-              attempt: state.attempt,
-              error: state.lastError,
-            });
+            if (!(await this.recoverExhaustedComputerSync(backend))) {
+              retryAt = Math.min(retryAt, Date.now() + 60_000);
+            }
             continue;
           }
           if (state.notBefore > Date.now()) {
             retryAt = Math.min(retryAt, state.notBefore);
             continue;
           }
-          await this.retryPendingComputerSync({ backend: continuation.backend });
+          await this.retryPendingComputerSync({ backend });
+          const retry = this.#syncRetries.state(backend);
+          if (retry) {
+            retryAt = Math.min(retryAt, retry.exhausted ? Date.now() + 60_000 : retry.notBefore);
+          }
         } else {
           // Absence of Computer's retry row is not proof of success: the
           // package intentionally swallows host scheduling failures after a
           // command. An ordinary pull is idempotent and proves remote changes
           // reached the durable VFS before the tool result is exposed.
-          await this.#workspace.pull(continuation.backend);
-          this.finishPendingCommand(continuation.backend);
+          await this.#workspace.pull(backend);
+          this.finishPendingCommand(backend);
           await this.cleanupReadinessRoot().catch(() => undefined);
         }
       } catch {
         retryAt = Math.min(retryAt, Date.now() + 1_000);
       }
     }
-    if (this.#toolOperations.pending().length > 0) {
+    if (this.#toolOperations.pending().length > 0 || this.#syncRetries.state('container-shell')?.exhausted === true) {
       await this.schedulePendingCommandRecovery(Number.isFinite(retryAt) ? Math.max(0, retryAt - Date.now()) : 1_000);
     }
   }
@@ -1055,26 +1063,51 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       this.withStatefulOperation('validate', `tool:${toolCallId}`, async () => {
         const before = await this.checkpoint();
         const startedAt = Date.now();
+        const isolatedRoot = `${ISOLATED_PROJECT_ROOT}/validation-${crypto.randomUUID()}`;
         try {
-          await this.withComputer(async (workspace) => {
-            requireCommandSuccess(
-              await runCommand(
-                workspace,
-                'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
-                { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 4 * 60_000 },
-              ),
-            );
-            for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
+          try {
+            await this.withComputer(async (workspace) => {
               requireCommandSuccess(
-                await runCommand(workspace, command, {
-                  cwd: PROJECT_ROOT,
+                await runCommand(
+                  workspace,
+                  createIsolatedProjectCommand({ projectRoot: PROJECT_ROOT, isolatedRoot, quote: shellQuote }),
+                  { cwd: '/tmp', backend: 'container-shell', timeoutMs: 2 * 60_000 },
+                ),
+              );
+              if ((await this.checkpoint()).revision !== before.revision) {
+                throw new Error('The project changed while validation was being isolated. Validate the new revision.');
+              }
+              requireCommandSuccess(
+                await runCommand(workspace, INSTALL_COMMAND, {
+                  cwd: isolatedRoot,
                   backend: 'container-shell',
-                  timeoutMs: 5 * 60_000,
+                  timeoutMs: 4 * 60_000,
                 }),
               );
-            }
-            await removeDerivedFiles(workspace);
-          });
+              for (const command of [
+                'pnpm run typecheck',
+                'pnpm run verify:stack',
+                'pnpm run build',
+                'pnpm run lint',
+              ]) {
+                requireCommandSuccess(
+                  await runCommand(workspace, command, {
+                    cwd: isolatedRoot,
+                    backend: 'container-shell',
+                    timeoutMs: 5 * 60_000,
+                  }),
+                );
+              }
+            });
+          } finally {
+            await this.withComputer((workspace) =>
+              runCommand(workspace, `rm -rf ${shellQuote(isolatedRoot)}`, {
+                cwd: '/tmp',
+                backend: 'container-shell',
+                timeoutMs: 30_000,
+              }),
+            ).catch(() => undefined);
+          }
           const after = await this.checkpoint();
           if (after.revision !== before.revision) {
             throw new Error('The project changed while validation was running. Validate the new revision.');
@@ -1333,27 +1366,37 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         let published = false;
         try {
           await this.withComputer(async (workspace) => {
-            requireCommandSuccess(
-              await runCommand(workspace, 'pnpm run build:isolated-preview', {
-                cwd: PROJECT_ROOT,
-                backend: 'container-shell',
-                timeoutMs: 5 * 60_000,
-              }),
-            );
-            await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
             await cleanupPreviewProcess(workspace, pending);
             requireCommandSuccess(
               await runCommand(
                 workspace,
-                createPreviewSnapshotCommand({ projectRoot: PROJECT_ROOT, snapshotRoot, quote: shellQuote }),
+                createIsolatedProjectCommand({
+                  projectRoot: PROJECT_ROOT,
+                  isolatedRoot: snapshotRoot,
+                  quote: shellQuote,
+                }),
                 {
-                  cwd: PROJECT_ROOT,
+                  cwd: '/tmp',
                   backend: 'container-shell',
                   timeoutMs: 2 * 60_000,
                 },
               ),
             );
-            await removeDerivedFiles(workspace);
+            await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
+            requireCommandSuccess(
+              await runCommand(workspace, INSTALL_COMMAND, {
+                cwd: snapshotRoot,
+                backend: 'container-shell',
+                timeoutMs: 4 * 60_000,
+              }),
+            );
+            requireCommandSuccess(
+              await runCommand(workspace, 'pnpm run build:isolated-preview', {
+                cwd: snapshotRoot,
+                backend: 'container-shell',
+                timeoutMs: 5 * 60_000,
+              }),
+            );
             await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
             const handle = await workspace.runtime.exec(
               `pnpm exec vite preview --mode ghostbuild-isolated-preview --host 0.0.0.0 --port ${port} --strictPort`,
@@ -1490,66 +1533,88 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       if (!projectType) {
         throw new SyntaxError('Invalid deployment project type.');
       }
+      const isolatedRoot = `${ISOLATED_PROJECT_ROOT}/deployment-${crypto.randomUUID()}`;
+      const wranglerConfigPath = `${isolatedRoot}/.ghostbuild-deploy.json`;
+      const artifactRoot = `${isolatedRoot}/.ghostbuild-artifact`;
       let artifact: PreparedDeploymentArtifact;
       try {
         artifact = await this.withComputer(async (workspace) => {
+          requireCommandSuccess(
+            await runCommand(
+              workspace,
+              createIsolatedProjectCommand({ projectRoot: PROJECT_ROOT, isolatedRoot, quote: shellQuote }),
+              { cwd: '/tmp', backend: 'container-shell', timeoutMs: 2 * 60_000 },
+            ),
+          );
+          await this.assertDeploymentSession({ sessionId });
+          requireCommandSuccess(
+            await runCommand(workspace, INSTALL_COMMAND, {
+              cwd: isolatedRoot,
+              backend: 'container-shell',
+              timeoutMs: 4 * 60_000,
+            }),
+          );
           for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
             requireCommandSuccess(
               await runCommand(workspace, command, {
-                cwd: PROJECT_ROOT,
+                cwd: isolatedRoot,
                 backend: 'container-shell',
                 timeoutMs: 5 * 60_000,
               }),
             );
           }
-          await writeWorkspaceFile(
-            workspace,
-            DEPLOYMENT_WRANGLER_CONFIG_PATH,
-            new TextEncoder().encode(
-              JSON.stringify(createTrustedDeploymentConfig({ ...input, accountId, workerName, projectType })),
+          const configWrite = await this.writeFile(
+            wranglerConfigPath,
+            JSON.stringify(
+              rebaseDeploymentConfigPaths(
+                createTrustedDeploymentConfig({ ...input, accountId, workerName, projectType }),
+                { projectRoot: PROJECT_ROOT, isolatedRoot },
+              ),
             ),
-            false,
+            { encoding: 'utf-8' },
           );
-          await workspace.fs.rm(DEPLOYMENT_ARTIFACT_ROOT, { recursive: true, force: true });
+          if (!configWrite.success) {
+            throw new Error('The isolated deployment configuration could not be written.');
+          }
           requireCommandSuccess(
             await runCommand(
               workspace,
-              `pnpm exec wrangler deploy --dry-run --outdir ${DEPLOYMENT_ARTIFACT_ROOT} --config ${DEPLOYMENT_WRANGLER_CONFIG_PATH}`,
-              { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 10 * 60_000 },
+              `pnpm exec wrangler deploy --dry-run --outdir ${shellQuote(artifactRoot)} --config ${shellQuote(wranglerConfigPath)}`,
+              { cwd: isolatedRoot, backend: 'container-shell', timeoutMs: 10 * 60_000 },
             ),
           );
           return {
             revision,
             mainModule: projectType === 'worker' ? 'server.js' : 'index.js',
-            modules: await collectDeploymentArtifactFiles(workspace, DEPLOYMENT_ARTIFACT_ROOT, (path) =>
-              /\.(?:js|mjs|wasm)$/.test(path),
-            ),
+            modules: await collectSandboxFiles(this, artifactRoot, (path) => /\.(?:js|mjs|wasm)$/.test(path)),
             assets:
               projectType === 'web_app'
-                ? await collectDeploymentArtifactFiles(
-                    workspace,
-                    `${PROJECT_ROOT}/dist/client`,
+                ? await collectSandboxFiles(
+                    this,
+                    `${isolatedRoot}/dist/client`,
                     (path) => path !== '.assetsignore' && !path.endsWith('.map'),
                   )
                 : [],
             migrations: {
               DB:
                 typeof input.d1DatabaseId === 'string'
-                  ? await collectDeploymentMigrations(workspace, `${PROJECT_ROOT}/migrations`)
+                  ? await collectSandboxMigrations(this, `${isolatedRoot}/migrations`)
                   : [],
               AGENT_SECURITY_DB:
                 typeof input.agentSecurityD1DatabaseId === 'string'
-                  ? await collectDeploymentMigrations(workspace, `${PROJECT_ROOT}/agent-security-migrations`)
+                  ? await collectSandboxMigrations(this, `${isolatedRoot}/agent-security-migrations`)
                   : [],
             },
           };
         });
       } finally {
-        await this.withComputer(async (workspace) => {
-          await workspace.fs.rm(DEPLOYMENT_WRANGLER_CONFIG_PATH, { force: true }).catch(() => undefined);
-          await workspace.fs.rm(DEPLOYMENT_ARTIFACT_ROOT, { recursive: true, force: true }).catch(() => undefined);
-          await removeDerivedFiles(workspace);
-        }).catch(() => undefined);
+        await this.withComputer((workspace) =>
+          runCommand(workspace, `rm -rf ${shellQuote(isolatedRoot)}`, {
+            cwd: '/tmp',
+            backend: 'container-shell',
+            timeoutMs: 30_000,
+          }),
+        ).catch(() => undefined);
       }
       if ((await this.checkpoint()).revision !== revision) {
         throw new Error('The project changed while its deployment artifact was prepared. Validate the new revision.');
@@ -1731,7 +1796,14 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     args: unknown,
     operation: () => Promise<T>,
   ): Promise<T> {
-    this.requireCompletedComputerSync();
+    try {
+      this.requireCompletedComputerSync();
+    } catch (error) {
+      if (error instanceof WorkspaceSyncPendingError) {
+        return pendingComputerSyncToolResult(error) as T;
+      }
+      throw error;
+    }
     const argsJson = JSON.stringify(stableValue(args)) ?? 'null';
     const started = this.#toolOperations.begin({
       toolCallId,
@@ -1750,17 +1822,14 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     } catch (error) {
       if (error instanceof WorkspaceSyncPendingError) {
         const result =
-          toolName === 'npmInstall'
-            ? toolSuccess('Dependency installation completed after the project filesystem was durably synchronized.', {
+          error.commandResult && error.commandResult.exitCode !== 0
+            ? toolFailure(commandFailureMessage(error.commandResult), {
                 buildEnvironment: 'cloudflare-computer-container',
-                nextAction: 'validate-project',
+                nextAction: toolName === 'npmInstall' ? 'install-dependencies' : 'validate-project',
               })
-            : toolFailure(
-                'Validation stopped while the project filesystem was being synchronized. Run full validation again.',
-                { buildEnvironment: 'cloudflare-computer-container', nextAction: 'validate-project' },
-              );
+            : pendingComputerSyncToolResult(error);
         this.registerPendingCommand({ backend: error.backend, toolCallId, result });
-        throw error;
+        return result as T;
       }
       try {
         this.#toolOperations.fail({
@@ -1805,20 +1874,46 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     requireWorkspaceSyncBarrier(this.#toolOperations.pending(), (backend) => this.#syncRetries.state(backend));
   }
 
-  private finishPendingCommand(
-    backend: string,
-    exhausted?: { exhausted: true; attempt: number; error: string | null },
-  ): void {
+  private finishPendingCommand(backend: string): void {
     const continuation = this.#toolOperations.pending().find((operation) => operation.backend === backend);
     if (!continuation) {
       return;
     }
-    const result = exhausted
-      ? computerSyncUnconfirmedToolResult(
-          new WorkspaceSyncPendingError(backend, exhausted.attempt, Date.now(), true, exhausted.error),
-        )
-      : continuation.result;
-    this.#toolOperations.completePending(backend, result);
+    this.#toolOperations.completePending(backend, continuation.result);
+  }
+
+  private async recoverExhaustedComputerSync(backend: string): Promise<boolean> {
+    const active = this.#activeSyncRecoveries.get(backend);
+    if (active) {
+      return active;
+    }
+    const recovery = (async () => {
+      try {
+        // Exhaustion may be tied to a stale Computer connection. A closed
+        // Workspace reconnects lazily, so the following pull is proof from a
+        // fresh backend handle rather than another attempt on the failed one.
+        await this.#workspace.close();
+        await this.#workspace.pull(backend);
+        this.finishPendingCommand(backend);
+        await this.#syncRetries.clear(backend);
+        await this.cleanupReadinessRoot().catch(() => undefined);
+        return true;
+      } catch (error) {
+        console.warn('ProjectWorkspace exhausted Computer sync recovery remains pending', {
+          backend,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      }
+    })();
+    this.#activeSyncRecoveries.set(backend, recovery);
+    try {
+      return await recovery;
+    } finally {
+      if (this.#activeSyncRecoveries.get(backend) === recovery) {
+        this.#activeSyncRecoveries.delete(backend);
+      }
+    }
   }
 
   private registerPendingCommand(args: { backend: string; toolCallId: string; result: unknown }): void {
@@ -1833,11 +1928,12 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       payload: unknown,
       options: { idempotent: true },
     ) => Promise<unknown>;
+    const delaySeconds = Math.max(1, Math.ceil(delayMs / 1_000));
     await schedule.call(
       this,
-      Math.max(0, Math.ceil(delayMs / 1_000)),
+      delaySeconds,
       'reconcilePendingCommands',
-      {},
+      { notBefore: Date.now() + delaySeconds * 1_000 },
       { idempotent: true },
     );
   }
@@ -1968,49 +2064,61 @@ async function readWorkspaceFile(workspace: WorkspaceClient, path: string): Prom
   return { path, bytes, size: bytes.byteLength, mode: stat.mode, sha256: await sha256Bytes(bytes) };
 }
 
-async function collectDeploymentArtifactFiles(
-  workspace: WorkspaceClient,
+type SandboxFileAccess = Pick<ProjectWorkspace, 'exists' | 'listFiles' | 'readFile'>;
+
+async function collectSandboxFiles(
+  sandbox: SandboxFileAccess,
   root: string,
   include: (relativePath: string) => boolean,
 ): Promise<DeploymentArtifactFile[]> {
-  const entries = (await workspace.fs.find(root)).filter((entry) => entry.type === 'file');
+  const listing = await sandbox.listFiles(root, { recursive: true, includeHidden: true });
+  if (!listing.success) {
+    throw new Error('The prepared deployment artifact could not be listed.');
+  }
+  const entries = listing.files.filter((entry) => entry.type === 'file');
   if (entries.length > MAX_DEPLOYMENT_ARTIFACT_FILES) {
     throw new Error('The prepared deployment artifact has too many files.');
   }
   const files: DeploymentArtifactFile[] = [];
   let totalBytes = 0;
   for (const entry of entries) {
-    const relativePath = entry.path.slice(root.length).replace(/^\/+/, '');
+    const relativePath = relativeIsolatedPath(root, entry.absolutePath);
     if (!relativePath || !include(relativePath)) {
       continue;
     }
-    const file = await readWorkspaceFile(workspace, entry.path);
-    totalBytes += file.size;
+    if (entry.size > MAX_FILE_BYTES) {
+      throw new Error(`Deployment artifact file is too large: ${relativePath}`);
+    }
+    const file = await sandbox.readFile(entry.absolutePath, { encoding: 'none' });
+    const bytes = await readStream(file.content, file.size);
+    totalBytes += bytes.byteLength;
     if (totalBytes > MAX_DEPLOYMENT_ARTIFACT_BYTES) {
       throw new Error('The prepared deployment artifact exceeds its aggregate size limit.');
     }
-    files.push({ path: relativePath, bytes: file.bytes, size: file.size, sha256: file.sha256 });
+    files.push({ path: relativePath, bytes, size: bytes.byteLength, sha256: await sha256Bytes(bytes) });
   }
   return files.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-async function collectDeploymentMigrations(
-  workspace: WorkspaceClient,
+async function collectSandboxMigrations(
+  sandbox: SandboxFileAccess,
   root: string,
 ): Promise<Array<{ name: string; sql: string }>> {
-  let entries;
-  try {
-    entries = (await workspace.fs.find(root)).filter((entry) => entry.type === 'file');
-  } catch (error) {
-    if (isMissingPath(error)) {
-      return [];
-    }
-    throw error;
+  if (!(await sandbox.exists(root)).exists) {
+    return [];
+  }
+  const listing = await sandbox.listFiles(root, { recursive: true, includeHidden: true });
+  if (!listing.success) {
+    throw new Error('Deployment migrations could not be listed.');
   }
   const migrations: Array<{ name: string; sql: string }> = [];
-  for (const entry of entries) {
-    const name = requireDeploymentMigrationName(entry.path.slice(root.length).replace(/^\/+/, ''));
-    const sql = decodeUtf8((await readWorkspaceFile(workspace, entry.path)).bytes);
+  for (const entry of listing.files.filter((candidate) => candidate.type === 'file')) {
+    const name = requireDeploymentMigrationName(relativeIsolatedPath(root, entry.absolutePath));
+    if (entry.size > MAX_FILE_BYTES) {
+      throw new Error(`Deployment migration is too large: ${name}`);
+    }
+    const file = await sandbox.readFile(entry.absolutePath, { encoding: 'none' });
+    const sql = decodeUtf8(await readStream(file.content, file.size));
     if (!sql.trim()) {
       throw new Error(`Deployment migration is empty: ${name}`);
     }
@@ -2033,12 +2141,6 @@ async function writeWorkspaceFile(
   const slash = path.lastIndexOf('/');
   await workspace.fs.mkdir(path.slice(0, slash) || '/', { recursive: true });
   await workspace.fs.writeFile(path, bytes, mode === undefined ? undefined : { mode });
-}
-
-async function removeDerivedFiles(workspace: WorkspaceClient): Promise<void> {
-  for (const path of DERIVED_PATHS) {
-    await workspace.fs.rm(path, { recursive: true, force: true });
-  }
 }
 
 async function runCommand(
@@ -2074,8 +2176,28 @@ async function runCommand(
 
 function requireCommandSuccess(result: WorkspaceRuntimeResult<'utf8'>): void {
   if (result.exitCode !== 0) {
-    throw new Error(`${result.stderr}\n${result.stdout}`.trim().slice(-4_000) || 'The Computer command failed.');
+    throw new Error(commandFailureMessage(result));
   }
+}
+
+function commandFailureMessage(result: Pick<WorkspaceRuntimeResult<'utf8'>, 'stderr' | 'stdout'>): string {
+  return `${result.stderr}\n${result.stdout}`.trim().slice(-4_000) || 'The Computer command failed.';
+}
+
+function pendingComputerSyncToolResult(error: WorkspaceSyncPendingError): GhostbuildToolResult {
+  return toolFailure(
+    error.code === 'workspace_sync_exhausted'
+      ? 'Cloudflare Computer could not confirm the durable project filesystem. The execution backend is being recovered; retry this operation.'
+      : 'Cloudflare Computer is still saving the project filesystem. Retry this operation after synchronization completes.',
+    {
+      state: error.code,
+      backend: error.backend,
+      attempt: error.attempt,
+      retryAfterMs: Math.max(0, error.notBefore - Date.now()),
+      buildEnvironment: 'cloudflare-computer-container',
+      nextAction: 'retry-operation',
+    },
+  );
 }
 
 async function waitForHttpPort(port: Fetcher): Promise<void> {

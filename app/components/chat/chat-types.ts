@@ -12,7 +12,6 @@ export type StoreMessageHistory = (
 
 export interface ChatProps {
   initialMessages: GhostbuildMessage[];
-  loadedCheckpoint: TranscriptCheckpoint | null;
   partCache: PartCache;
   storeMessageHistory: StoreMessageHistory;
   initializeChat: () => Promise<{ created: boolean }>;

@@ -1,24 +1,61 @@
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import {
+  transcriptCheckpointSchema,
   transcriptCheckpointMatchesMessages,
-  transcriptCheckpointsEqual,
   type TranscriptCheckpoint,
+  type TranscriptIdentity,
+  transcriptIdentitiesEqual,
 } from 'ghostbuild-agent/transcript';
+import { z } from 'zod';
+
+const transcriptMessageSchema = z
+  .object({
+    id: z.string().min(1),
+    role: z.enum(['system', 'user', 'assistant']),
+    parts: z.array(z.object({ type: z.string().min(1) }).loose()),
+  })
+  .loose();
+
+const transcriptSnapshotSchema = z.object({
+  checkpoint: transcriptCheckpointSchema.nullable(),
+  messages: z.array(transcriptMessageSchema),
+});
+
+type AuthoritativeTranscriptSnapshot = {
+  checkpoint: TranscriptCheckpoint | null;
+  messages: GhostbuildMessage[];
+};
+
+export async function loadAuthoritativeTranscriptSnapshot(args: {
+  read: () => Promise<unknown>;
+  expectedIdentity: TranscriptIdentity;
+  attempts?: number;
+}): Promise<AuthoritativeTranscriptSnapshot> {
+  const attempts = args.attempts ?? 2;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const parsed = transcriptSnapshotSchema.safeParse(await args.read());
+    if (!parsed.success) {
+      continue;
+    }
+    const snapshot = parsed.data as AuthoritativeTranscriptSnapshot;
+    if (
+      (snapshot.checkpoint === null
+        ? snapshot.messages.length === 0
+        : transcriptIdentitiesEqual(snapshot.checkpoint, args.expectedIdentity)) &&
+      (await transcriptCheckpointMatchesMessages(snapshot.checkpoint, snapshot.messages))
+    ) {
+      return snapshot;
+    }
+  }
+  throw new Error('The agent returned an inconsistent transcript snapshot. Reload and try again.');
+}
 
 export async function reconcileMessagesForSend(args: {
-  durableCheckpoint: TranscriptCheckpoint | null;
+  snapshot: AuthoritativeTranscriptSnapshot;
   localMessages: GhostbuildMessage[];
-  loadedCheckpoint: TranscriptCheckpoint | null;
-  loadedMessages: GhostbuildMessage[];
-}): Promise<GhostbuildMessage[] | null> {
-  if (await transcriptCheckpointMatchesMessages(args.durableCheckpoint, args.localMessages)) {
+}): Promise<GhostbuildMessage[]> {
+  if (await transcriptCheckpointMatchesMessages(args.snapshot.checkpoint, args.localMessages)) {
     return args.localMessages;
   }
-  if (
-    transcriptCheckpointsEqual(args.durableCheckpoint, args.loadedCheckpoint) &&
-    (await transcriptCheckpointMatchesMessages(args.durableCheckpoint, args.loadedMessages))
-  ) {
-    return args.loadedMessages;
-  }
-  return null;
+  return args.snapshot.messages;
 }

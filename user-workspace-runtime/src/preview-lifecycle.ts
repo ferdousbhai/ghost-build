@@ -40,19 +40,3 @@ export function previewPort(previewId: string, unavailablePort?: number): number
   }
   return port;
 }
-
-export function createPreviewSnapshotCommand(args: {
-  projectRoot: string;
-  snapshotRoot: string;
-  quote: (value: string) => string;
-}): string {
-  const projectRoot = args.quote(args.projectRoot);
-  const destination = args.quote(args.snapshotRoot);
-  return [
-    'set -eu',
-    `rm -rf ${destination}`,
-    `mkdir -p ${destination}`,
-    `tar -C ${projectRoot} --exclude='./node_modules' --exclude='./.wrangler/state' -cf - . | tar -C ${destination} -xf -`,
-    `ln -s ${args.quote(`${args.projectRoot}/node_modules`)} ${args.quote(`${args.snapshotRoot}/node_modules`)}`,
-  ].join('\n');
-}

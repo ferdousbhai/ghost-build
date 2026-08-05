@@ -26,7 +26,6 @@ const logger = createScopedLogger('Chat');
 export const Chat = memo(
   ({
     initialMessages,
-    loadedCheckpoint,
     partCache,
     storeMessageHistory,
     initializeChat,
@@ -83,7 +82,6 @@ export const Chat = memo(
     return (
       <AuthenticatedChat
         initialMessages={initialMessages}
-        loadedCheckpoint={loadedCheckpoint}
         partCache={partCache}
         storeMessageHistory={storeMessageHistory}
         initializeChat={initializeChat}
@@ -123,7 +121,6 @@ function WorkspaceRuntimeConnectionError({ message, onRetry }: { message: string
 const AuthenticatedChat = memo(
   ({
     initialMessages,
-    loadedCheckpoint,
     partCache,
     storeMessageHistory,
     initializeChat,
@@ -166,7 +163,6 @@ const AuthenticatedChat = memo(
     } = useBuilderAgentChat({
       chatInitialId,
       initialMessages,
-      loadedCheckpoint,
       onSubchatTitle: handleSubchatTitleChange,
       transcript,
     });

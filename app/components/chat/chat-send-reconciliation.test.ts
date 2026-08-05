@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { advanceTranscriptCheckpoint } from 'ghostbuild-agent/transcript';
-import { reconcileMessagesForSend } from './chat-send-reconciliation';
+import { loadAuthoritativeTranscriptSnapshot, reconcileMessagesForSend } from './chat-send-reconciliation';
 
 describe('reconcileMessagesForSend', () => {
   it('keeps local messages that match the durable checkpoint', async () => {
@@ -10,56 +10,63 @@ describe('reconcileMessagesForSend', () => {
 
     expect(
       await reconcileMessagesForSend({
-        durableCheckpoint: checkpoint,
+        snapshot: { checkpoint, messages: localMessages },
         localMessages,
-        loadedCheckpoint: null,
-        loadedMessages: [],
       }),
     ).toBe(localMessages);
   });
 
-  it('adopts authoritative refreshed messages when local hydration is stale', async () => {
-    const loadedMessages = [message('durable')];
-    const checkpoint = await advanceTranscriptCheckpoint(null, identity, loadedMessages);
+  it('adopts the authoritative snapshot when local hydration is stale', async () => {
+    const authoritativeMessages = [message('durable')];
+    const checkpoint = await advanceTranscriptCheckpoint(null, identity, authoritativeMessages);
 
     expect(
       await reconcileMessagesForSend({
-        durableCheckpoint: checkpoint,
+        snapshot: { checkpoint, messages: authoritativeMessages },
         localMessages: [],
-        loadedCheckpoint: checkpoint,
-        loadedMessages,
       }),
-    ).toBe(loadedMessages);
+    ).toBe(authoritativeMessages);
   });
 
-  it('rejects when neither local nor refreshed messages match durable state', async () => {
+  it('validates the snapshot digest and retries one inconsistent read', async () => {
     const durableMessages = [message('durable')];
     const checkpoint = await advanceTranscriptCheckpoint(null, identity, durableMessages);
+    let reads = 0;
 
-    expect(
-      await reconcileMessagesForSend({
-        durableCheckpoint: checkpoint,
-        localMessages: [],
-        loadedCheckpoint: checkpoint,
-        loadedMessages: [message('stale')],
+    await expect(
+      loadAuthoritativeTranscriptSnapshot({
+        expectedIdentity: identity,
+        read: async () => {
+          reads += 1;
+          return { checkpoint, messages: reads === 1 ? [message('stale')] : durableMessages };
+        },
       }),
-    ).toBeNull();
+    ).resolves.toEqual({ checkpoint, messages: durableMessages });
+    expect(reads).toBe(2);
   });
 
-  it('rejects refreshed messages whose checkpoint is older than durable state', async () => {
-    const firstMessages = [message('first')];
-    const firstCheckpoint = await advanceTranscriptCheckpoint(null, identity, firstMessages);
-    const durableMessages = [...firstMessages, message('second')];
-    const durableCheckpoint = await advanceTranscriptCheckpoint(firstCheckpoint, identity, durableMessages);
+  it('rejects malformed, wrong-identity, and persistently inconsistent snapshots', async () => {
+    const messages = [message('durable')];
+    const checkpoint = await advanceTranscriptCheckpoint(null, identity, messages);
 
-    expect(
-      await reconcileMessagesForSend({
-        durableCheckpoint,
-        localMessages: [],
-        loadedCheckpoint: firstCheckpoint,
-        loadedMessages: firstMessages,
+    await expect(
+      loadAuthoritativeTranscriptSnapshot({
+        expectedIdentity: identity,
+        read: async () => ({ checkpoint: { ...checkpoint, agentName: 'other' }, messages }),
       }),
-    ).toBeNull();
+    ).rejects.toThrow(/inconsistent transcript snapshot/i);
+    await expect(
+      loadAuthoritativeTranscriptSnapshot({
+        expectedIdentity: identity,
+        read: async () => ({ checkpoint: null, messages }),
+      }),
+    ).rejects.toThrow(/inconsistent transcript snapshot/i);
+    await expect(
+      loadAuthoritativeTranscriptSnapshot({
+        expectedIdentity: identity,
+        read: async () => ({ checkpoint, messages: [{ role: 'assistant', parts: [] }] }),
+      }),
+    ).rejects.toThrow(/inconsistent transcript snapshot/i);
   });
 });
 
