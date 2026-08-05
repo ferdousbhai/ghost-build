@@ -131,6 +131,40 @@ describe('chatSyncWorker', () => {
     controller.abort();
     await expect(worker).resolves.toBeUndefined();
   });
+
+  it('waits when an unfinished next part follows the persisted checkpoint', async () => {
+    const messages = [message('a-1', 'first')];
+    chatCheckpointSyncState.set({
+      chatId: 'chat-a',
+      lastSync: 0,
+      numFailures: 0,
+      started: false,
+      persistedMessageInfo: { messageIndex: 0, partIndex: 0 },
+      persistedTranscriptCheckpoint: null,
+      subchatIndex: 0,
+    });
+    lastCompleteMessageInfoStore.set({
+      messageIndex: 0,
+      partIndex: 0,
+      allMessages: messages,
+      hasNextPart: true,
+      transcriptCheckpoint: null,
+    });
+    const controller = new AbortController();
+    const worker = chatSyncWorker({
+      chatId: 'chat-a',
+      sessionId: 'session-a',
+      currentSubchatIndex: 0,
+      latestSubchatIndex: 0,
+      abortSignal: controller.signal,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(chatCheckpointSyncState.get().started).toBe(true);
+
+    controller.abort();
+    await expect(worker).resolves.toBeUndefined();
+  });
 });
 
 describe('adoptAdvancedTranscriptCheckpoint', () => {

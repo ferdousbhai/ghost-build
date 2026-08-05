@@ -172,7 +172,6 @@ function hasPendingMessageCheckpoint(
     completeMessageInfo !== null &&
     (currentState.persistedMessageInfo.messageIndex !== completeMessageInfo.messageIndex ||
       currentState.persistedMessageInfo.partIndex !== completeMessageInfo.partIndex ||
-      completeMessageInfo.hasNextPart ||
       !transcriptCheckpointsEqual(currentState.persistedTranscriptCheckpoint, completeMessageInfo.transcriptCheckpoint))
   );
 }
