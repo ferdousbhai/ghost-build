@@ -4,12 +4,14 @@ import { advanceTranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 import { isCompleteMessageInfoAtLeast } from './chat-checkpoint-sync-policy';
 import {
   adoptAdvancedTranscriptCheckpoint,
+  chatSyncWorker,
   checkpointRetryDelay,
   initializeCheckpointPosition,
   isTranscriptAdvanceConflict,
 } from './chat-checkpoint-sync-worker';
 import { chatCheckpointSyncState } from './chatCheckpointSyncState';
 import { lastCompleteMessageInfoStore } from './messages';
+import { subchatIndexStore } from '~/lib/stores/subchats';
 
 function message(id: string, text: string): GhostbuildMessage {
   return { id, role: 'user', parts: [{ type: 'text', text }] };
@@ -26,6 +28,7 @@ beforeEach(() => {
     subchatIndex: 0,
   });
   lastCompleteMessageInfoStore.set(null);
+  subchatIndexStore.set(0);
 });
 
 describe('isCompleteMessageInfoAtLeast', () => {
@@ -83,6 +86,50 @@ describe('initializeCheckpointPosition', () => {
       chatId: 'chat-a',
       persistedMessageInfo: { messageIndex: 3, partIndex: 2 },
     });
+  });
+
+  it('restores missing complete message state when the same chat reinitializes', () => {
+    const initialMessages = [message('a-1', 'first')];
+    initializeCheckpointPosition('chat-a', initialMessages, 0);
+    lastCompleteMessageInfoStore.set(null);
+
+    initializeCheckpointPosition('chat-a', initialMessages, 0);
+
+    expect(lastCompleteMessageInfoStore.get()).toEqual({
+      messageIndex: 0,
+      partIndex: 0,
+      allMessages: initialMessages,
+      hasNextPart: false,
+      transcriptCheckpoint: null,
+    });
+  });
+});
+
+describe('chatSyncWorker', () => {
+  it('yields until complete message state is initialized', async () => {
+    chatCheckpointSyncState.set({
+      chatId: 'chat-a',
+      lastSync: 0,
+      numFailures: 0,
+      started: false,
+      persistedMessageInfo: { messageIndex: 0, partIndex: 0 },
+      persistedTranscriptCheckpoint: null,
+      subchatIndex: 0,
+    });
+    const controller = new AbortController();
+    const worker = chatSyncWorker({
+      chatId: 'chat-a',
+      sessionId: 'session-a',
+      currentSubchatIndex: 0,
+      latestSubchatIndex: 0,
+      abortSignal: controller.signal,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(chatCheckpointSyncState.get().started).toBe(true);
+
+    controller.abort();
+    await expect(worker).resolves.toBeUndefined();
   });
 });
 

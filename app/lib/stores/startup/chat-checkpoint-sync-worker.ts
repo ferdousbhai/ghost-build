@@ -54,7 +54,20 @@ export function initializeCheckpointPosition(
   };
   const currentState = chatCheckpointSyncState.get();
   const chatChanged = currentState.chatId !== chatId;
+  const currentCompleteInfo = lastCompleteMessageInfoStore.get();
   if (!chatChanged && currentState.persistedMessageInfo !== null && loadedSubchatIndex === currentState.subchatIndex) {
+    if (
+      currentCompleteInfo === null &&
+      currentState.persistedMessageInfo.messageIndex === initialMessageInfo.messageIndex &&
+      currentState.persistedMessageInfo.partIndex === initialMessageInfo.partIndex
+    ) {
+      lastCompleteMessageInfoStore.set({
+        ...initialMessageInfo,
+        allMessages: initialMessages,
+        hasNextPart: false,
+        transcriptCheckpoint: checkpoint,
+      });
+    }
     return;
   }
   chatCheckpointSyncState.set({
@@ -72,7 +85,6 @@ export function initializeCheckpointPosition(
     persistedTranscriptCheckpoint: checkpoint,
     subchatIndex: loadedSubchatIndex,
   });
-  const currentCompleteInfo = lastCompleteMessageInfoStore.get();
   if (chatChanged || !isCompleteMessageInfoAtLeast(currentCompleteInfo, initialMessageInfo)) {
     lastCompleteMessageInfoStore.set({
       ...initialMessageInfo,
@@ -114,7 +126,7 @@ export async function chatSyncWorker(options: ChatSyncWorkerOptions): Promise<vo
       const state = await waitForInitialized(options.chatId, signal);
       const completeMessageInfo = lastCompleteMessageInfoStore.get();
       if (completeMessageInfo === null) {
-        logger.error('Complete message info not initialized');
+        await waitForStoreValue(lastCompleteMessageInfoStore, (messageInfo) => messageInfo, { signal });
         continue;
       }
       if (completeMessageInfo.messageIndex < 0 || completeMessageInfo.partIndex < 0) {
