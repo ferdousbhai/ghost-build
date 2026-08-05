@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getToolInvocation, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { StreamStatus } from '~/lib/common/types';
 import { getBuildProgress } from './build-progress';
@@ -15,10 +15,12 @@ export function useBuildProgress(args: {
   toolActivityRevision: number;
   messages: GhostbuildMessage[];
 }) {
+  const activeToolActivity = args.activeToolNames.toSorted().join(',');
   const activityKey = useMemo(
     () =>
-      `${messageActivityKey(args.messages)}:${args.toolActivityRevision}:${args.streamStatus}:${args.isRecovering}:${args.isProjectUpdate}:${args.validationStage ?? ''}`,
+      `${messageActivityKey(args.messages)}:${args.toolActivityRevision}:${activeToolActivity}:${args.streamStatus}:${args.isRecovering}:${args.isProjectUpdate}:${args.validationStage ?? ''}`,
     [
+      activeToolActivity,
       args.isProjectUpdate,
       args.isRecovering,
       args.messages,
@@ -27,12 +29,14 @@ export function useBuildProgress(args: {
       args.validationStage,
     ],
   );
-  const lastActivityAt = useRef(Date.now());
-  const [now, setNow] = useState(() => Date.now());
+  const [clock, setClock] = useState(() => {
+    const timestamp = Date.now();
+    return { activityKey, lastActivityAt: timestamp, now: timestamp };
+  });
 
   useEffect(() => {
-    lastActivityAt.current = Date.now();
-    setNow(lastActivityAt.current);
+    const timestamp = Date.now();
+    setClock({ activityKey, lastActivityAt: timestamp, now: timestamp });
   }, [activityKey]);
 
   const active = args.isRecovering || args.streamStatus === 'submitted' || args.streamStatus === 'streaming';
@@ -40,9 +44,12 @@ export function useBuildProgress(args: {
     if (!active) {
       return () => undefined;
     }
-    const interval = window.setInterval(() => setNow(Date.now()), CLOCK_INTERVAL_MS);
+    const interval = window.setInterval(
+      () => setClock((current) => (current.activityKey === activityKey ? { ...current, now: Date.now() } : current)),
+      CLOCK_INTERVAL_MS,
+    );
     return () => window.clearInterval(interval);
-  }, [active]);
+  }, [active, activityKey]);
 
   return getBuildProgress({
     streamStatus: args.streamStatus,
@@ -50,7 +57,7 @@ export function useBuildProgress(args: {
     isProjectUpdate: args.isProjectUpdate,
     activeToolNames: args.activeToolNames,
     validationStage: args.validationStage,
-    inactiveForMs: Math.max(0, now - lastActivityAt.current),
+    inactiveForMs: clock.activityKey === activityKey ? Math.max(0, clock.now - clock.lastActivityAt) : 0,
   });
 }
 
