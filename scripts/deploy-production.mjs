@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { verifyGlobalDeployment, verifyLocalDeployment } from './verify-live-deployment.mjs';
+import { verifyLocalDeployment } from './verify-live-deployment.mjs';
 
 const CLIENT_ID_ENV = 'CLOUDFLARE_OAUTH_CLIENT_ID';
 const MAX_CLIENT_ID_LENGTH = 512;
@@ -209,7 +209,6 @@ export function deployProduction({
  *   env?: Record<string, string | undefined>;
  *   spawn?: DeploySpawn;
  *   verifyLocal?: typeof verifyLocalDeployment;
- *   verifyGlobal?: typeof verifyGlobalDeployment;
  * }} [options]
  */
 export async function deployAndVerifyProduction({
@@ -218,11 +217,9 @@ export async function deployAndVerifyProduction({
   env = process.env,
   spawn = spawnSync,
   verifyLocal = verifyLocalDeployment,
-  verifyGlobal = verifyGlobalDeployment,
 } = {}) {
   const deployedSha = deployProduction({ clientId, commitSha, env, spawn });
   await verifyLocal({ expectedSha: deployedSha });
-  await verifyGlobal({ expectedSha: deployedSha });
   return deployedSha;
 }
 

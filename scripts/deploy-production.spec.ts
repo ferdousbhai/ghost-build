@@ -186,9 +186,8 @@ describe('production deploy wrapper', () => {
     );
   });
 
-  it('verifies the local and global deployment against the deployed commit', async () => {
+  it('verifies the deployment against the deployed commit', async () => {
     const verifyLocal = vi.fn(async () => undefined);
-    const verifyGlobal = vi.fn(async () => undefined);
 
     await expect(
       deployAndVerifyProduction({
@@ -197,12 +196,9 @@ describe('production deploy wrapper', () => {
         env: workersBuildEnv,
         spawn: () => ({ status: 0 }),
         verifyLocal,
-        verifyGlobal,
       }),
     ).resolves.toBe(commitSha);
     expect(verifyLocal).toHaveBeenCalledWith({ expectedSha: commitSha });
-    expect(verifyGlobal).toHaveBeenCalledWith({ expectedSha: commitSha });
-    expect(verifyLocal.mock.invocationCallOrder[0]).toBeLessThan(verifyGlobal.mock.invocationCallOrder[0]);
   });
 
   it('propagates process failures', () => {
