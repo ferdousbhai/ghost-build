@@ -22,6 +22,14 @@ export function createIsolatedProjectCommand(args: {
   ].join('\n');
 }
 
+export function createContainerDirectoryCommand(args: {
+  directory: string;
+  command: string;
+  quote: (value: string) => string;
+}): string {
+  return `cd ${args.quote(args.directory)} &&\n${args.command}`;
+}
+
 export function rebaseDeploymentConfigPaths<T extends DeploymentConfigPaths>(
   config: T,
   args: { projectRoot: string; isolatedRoot: string },

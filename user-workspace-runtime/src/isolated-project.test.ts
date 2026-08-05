@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { createIsolatedProjectCommand, rebaseDeploymentConfigPaths, relativeIsolatedPath } from './isolated-project';
+import {
+  createContainerDirectoryCommand,
+  createIsolatedProjectCommand,
+  rebaseDeploymentConfigPaths,
+  relativeIsolatedPath,
+} from './isolated-project';
 
 describe('isolated project command', () => {
   it('copies source without durable dependencies or build output', () => {
@@ -16,6 +21,7 @@ describe('isolated project command', () => {
     expect(command).toContain("--exclude='./.wrangler'");
     expect(command).not.toContain('ln -s');
     expect(command).toContain("'/tmp/ghostbuild-projects/validation-id'");
+    expect(command).toContain("mkdir -p '/tmp/ghostbuild-projects/validation-id'");
     expect(command).toContain('Project source cannot contain non-regular files.');
   });
 
@@ -43,6 +49,16 @@ describe('isolated project command', () => {
         },
       ],
     });
+  });
+
+  it('enters a quoted native directory from a valid workspace cwd', () => {
+    expect(
+      createContainerDirectoryCommand({
+        directory: '/tmp/ghostbuild projects/validation-id',
+        command: 'pnpm run build',
+        quote: (value) => `'${value}'`,
+      }),
+    ).toBe("cd '/tmp/ghostbuild projects/validation-id' &&\npnpm run build");
   });
 
   it('rejects trusted deployment paths outside the durable project root', () => {
@@ -83,14 +99,15 @@ describe('isolated project command', () => {
 
     for (const operation of [validation, preview, deployment]) {
       expect(operation).toContain('createIsolatedProjectCommand');
-      expect(operation).not.toContain('cwd: PROJECT_ROOT');
+      expect(operation).toContain('runNativeCommand');
+      expect(operation).toContain('cwd: PROJECT_ROOT');
       expect(operation).not.toContain('removeDerivedFiles');
     }
-    expect(validation).toContain('cwd: isolatedRoot');
-    expect(preview).toContain('cwd: snapshotRoot');
-    expect(deployment).toContain('cwd: isolatedRoot');
     expect(deployment).toContain('rebaseDeploymentConfigPaths');
     expect(deployment).toContain('collectSandboxFiles(this, artifactRoot');
     expect(deployment).toContain('collectSandboxMigrations(this, `${isolatedRoot}/migrations`)');
+    expect(source).not.toContain("cwd: '/tmp'");
+    expect(source).not.toContain('cwd: isolatedRoot');
+    expect(source).not.toContain('cwd: snapshotRoot');
   });
 });

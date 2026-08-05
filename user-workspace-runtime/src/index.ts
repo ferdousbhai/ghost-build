@@ -71,6 +71,7 @@ import { stableWorkspaceRead } from './stable-workspace-read';
 import { requireDeploymentMigrationName, requireWorkspaceFileEncoding } from './workspace-input';
 import { withCors } from './http-cors';
 import {
+  createContainerDirectoryCommand,
   createIsolatedProjectCommand,
   ISOLATED_PROJECT_ROOT,
   rebaseDeploymentConfigPaths,
@@ -1071,38 +1072,26 @@ export class ProjectWorkspace extends ComputerSandboxBase {
                 await runCommand(
                   workspace,
                   createIsolatedProjectCommand({ projectRoot: PROJECT_ROOT, isolatedRoot, quote: shellQuote }),
-                  { cwd: '/tmp', backend: 'container-shell', timeoutMs: 2 * 60_000 },
+                  { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 2 * 60_000 },
                 ),
               );
               if ((await this.checkpoint()).revision !== before.revision) {
                 throw new Error('The project changed while validation was being isolated. Validate the new revision.');
               }
-              requireCommandSuccess(
-                await runCommand(workspace, INSTALL_COMMAND, {
-                  cwd: isolatedRoot,
-                  backend: 'container-shell',
-                  timeoutMs: 4 * 60_000,
-                }),
-              );
+              requireCommandSuccess(await runNativeCommand(workspace, isolatedRoot, INSTALL_COMMAND, 4 * 60_000));
               for (const command of [
                 'pnpm run typecheck',
                 'pnpm run verify:stack',
                 'pnpm run build',
                 'pnpm run lint',
               ]) {
-                requireCommandSuccess(
-                  await runCommand(workspace, command, {
-                    cwd: isolatedRoot,
-                    backend: 'container-shell',
-                    timeoutMs: 5 * 60_000,
-                  }),
-                );
+                requireCommandSuccess(await runNativeCommand(workspace, isolatedRoot, command, 5 * 60_000));
               }
             });
           } finally {
             await this.withComputer((workspace) =>
               runCommand(workspace, `rm -rf ${shellQuote(isolatedRoot)}`, {
-                cwd: '/tmp',
+                cwd: PROJECT_ROOT,
                 backend: 'container-shell',
                 timeoutMs: 30_000,
               }),
@@ -1376,32 +1365,26 @@ export class ProjectWorkspace extends ComputerSandboxBase {
                   quote: shellQuote,
                 }),
                 {
-                  cwd: '/tmp',
+                  cwd: PROJECT_ROOT,
                   backend: 'container-shell',
                   timeoutMs: 2 * 60_000,
                 },
               ),
             );
             await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
+            requireCommandSuccess(await runNativeCommand(workspace, snapshotRoot, INSTALL_COMMAND, 4 * 60_000));
             requireCommandSuccess(
-              await runCommand(workspace, INSTALL_COMMAND, {
-                cwd: snapshotRoot,
-                backend: 'container-shell',
-                timeoutMs: 4 * 60_000,
-              }),
-            );
-            requireCommandSuccess(
-              await runCommand(workspace, 'pnpm run build:isolated-preview', {
-                cwd: snapshotRoot,
-                backend: 'container-shell',
-                timeoutMs: 5 * 60_000,
-              }),
+              await runNativeCommand(workspace, snapshotRoot, 'pnpm run build:isolated-preview', 5 * 60_000),
             );
             await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
             const handle = await workspace.runtime.exec(
-              `pnpm exec vite preview --mode ghostbuild-isolated-preview --host 0.0.0.0 --port ${port} --strictPort`,
+              createContainerDirectoryCommand({
+                directory: snapshotRoot,
+                command: `pnpm exec vite preview --mode ghostbuild-isolated-preview --host 0.0.0.0 --port ${port} --strictPort`,
+                quote: shellQuote,
+              }),
               {
-                cwd: snapshotRoot,
+                cwd: PROJECT_ROOT,
                 backend: 'container-shell',
                 id: execId,
                 timeoutMs: PREVIEW_TTL_MS,
@@ -1543,25 +1526,13 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             await runCommand(
               workspace,
               createIsolatedProjectCommand({ projectRoot: PROJECT_ROOT, isolatedRoot, quote: shellQuote }),
-              { cwd: '/tmp', backend: 'container-shell', timeoutMs: 2 * 60_000 },
+              { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 2 * 60_000 },
             ),
           );
           await this.assertDeploymentSession({ sessionId });
-          requireCommandSuccess(
-            await runCommand(workspace, INSTALL_COMMAND, {
-              cwd: isolatedRoot,
-              backend: 'container-shell',
-              timeoutMs: 4 * 60_000,
-            }),
-          );
+          requireCommandSuccess(await runNativeCommand(workspace, isolatedRoot, INSTALL_COMMAND, 4 * 60_000));
           for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
-            requireCommandSuccess(
-              await runCommand(workspace, command, {
-                cwd: isolatedRoot,
-                backend: 'container-shell',
-                timeoutMs: 5 * 60_000,
-              }),
-            );
+            requireCommandSuccess(await runNativeCommand(workspace, isolatedRoot, command, 5 * 60_000));
           }
           const configWrite = await this.writeFile(
             wranglerConfigPath,
@@ -1577,10 +1548,11 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             throw new Error('The isolated deployment configuration could not be written.');
           }
           requireCommandSuccess(
-            await runCommand(
+            await runNativeCommand(
               workspace,
+              isolatedRoot,
               `pnpm exec wrangler deploy --dry-run --outdir ${shellQuote(artifactRoot)} --config ${shellQuote(wranglerConfigPath)}`,
-              { cwd: isolatedRoot, backend: 'container-shell', timeoutMs: 10 * 60_000 },
+              10 * 60_000,
             ),
           );
           return {
@@ -1610,7 +1582,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       } finally {
         await this.withComputer((workspace) =>
           runCommand(workspace, `rm -rf ${shellQuote(isolatedRoot)}`, {
-            cwd: '/tmp',
+            cwd: PROJECT_ROOT,
             backend: 'container-shell',
             timeoutMs: 30_000,
           }),
@@ -2501,6 +2473,14 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+function runNativeCommand(workspace: WorkspaceClient, directory: string, command: string, timeoutMs: number) {
+  return runCommand(workspace, createContainerDirectoryCommand({ directory, command, quote: shellQuote }), {
+    cwd: PROJECT_ROOT,
+    backend: 'container-shell',
+    timeoutMs,
+  });
+}
+
 async function cleanupPreviewProcess(
   workspace: WorkspaceClient,
   row: Pick<ActivePreviewRow, 'exec_id' | 'snapshot_root'>,
@@ -2510,7 +2490,7 @@ async function cleanupPreviewProcess(
     .catch(() => undefined);
   await workspace.runtime.disposeExec(row.exec_id, { backend: 'container-shell' }).catch(() => undefined);
   const result = await runCommand(workspace, `rm -rf ${shellQuote(row.snapshot_root)}`, {
-    cwd: '/tmp',
+    cwd: PROJECT_ROOT,
     backend: 'container-shell',
     timeoutMs: 30_000,
   });
