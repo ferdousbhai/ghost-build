@@ -36,7 +36,7 @@
     "lucide-react": "1.28.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "three": "^0.179.1",
+    "three": "^0.185.1",
     "workers-ai-provider": "4.0.0",
     "zod": "^4.4.3"
   },
