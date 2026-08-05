@@ -148,7 +148,7 @@
     "jsonc-parser": "^3.3.1",
     "knip": "^5.88.1",
     "postcss": "^8.5.25",
-    "postcss-mixins": "^11.0.3",
+    "postcss-mixins": "^12.1.2",
     "postcss-nesting": "^13.0.2",
     "prettier": "^3.9.6",
     "tailwind-scrollbar": "3.1.0",
