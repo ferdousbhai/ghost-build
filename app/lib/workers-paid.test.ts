@@ -30,10 +30,17 @@ describe('Workers Paid consent boundary', () => {
     expect(isCloudflareAiFundingError(error)).toBe(true);
     expect(isWorkersAiFreeAllocationError(error)).toBe(false);
     expect(cloudflareAiFundingRequiredMessage()).toContain(CLOUDFLARE_AI_FUNDING_REQUIRED_MARKER);
+    expect(cloudflareAiFundingRequiredMessage()).toContain('prepaid AI Gateway credits');
     expect(cloudflareAiFundingRequiredMessage()).toContain('Ghostbuild did not make a purchase');
+  });
+
+  test('recognizes the misleading Workers AI binding wrapper for an unfunded partner model', () => {
+    expect(isCloudflareAiFundingError(new Error('2021: Invalid User Credentials'))).toBe(true);
+    expect(isCloudflareAiFundingError(new Error('Invalid User Credentials (2021)'))).toBe(true);
   });
 
   test('does not treat unrelated provider failures as AI Gateway funding failures', () => {
     expect(isCloudflareAiFundingError(new Error('Provider timed out'))).toBe(false);
+    expect(isCloudflareAiFundingError(new Error('Invalid User Credentials'))).toBe(false);
   });
 });

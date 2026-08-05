@@ -17,7 +17,7 @@ export function showWorkersPaidRequiredToast(): void {
 
 export function showCloudflareAiFundingRequiredToast(): void {
   toast.warning(
-    'This partner model requires Cloudflare AI Gateway balance or BYOK. Ghostbuild did not make a purchase.',
+    'This partner model requires prepaid Cloudflare AI Gateway credits. Ghostbuild did not make a purchase.',
     {
       action: {
         label: 'Review AI Gateway',

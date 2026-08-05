@@ -65,6 +65,7 @@ function AuthenticatedExistingChat({ chatId }: { chatId: string }) {
     onBuilderRequestStart,
     subchats,
     transcript,
+    loadedCheckpoint,
   } = useExistingChat(chatId);
 
   const reloadState = useReloadMessages(initialMessages ?? undefined);
@@ -93,6 +94,7 @@ function AuthenticatedExistingChat({ chatId }: { chatId: string }) {
   return (
     <Chat
       initialMessages={initialMessages}
+      loadedCheckpoint={loadedCheckpoint}
       partCache={reloadState.partCache}
       storeMessageHistory={storeMessageHistory}
       initializeChat={initializeChat}

@@ -12,11 +12,15 @@ export function isWorkersAiFreeAllocationError(error: unknown): boolean {
 }
 
 export function cloudflareAiFundingRequiredMessage(): string {
-  return `${CLOUDFLARE_AI_FUNDING_REQUIRED_MARKER} This Cloudflare partner model requires AI Gateway balance or BYOK. Review billing in Cloudflare to continue; Ghostbuild did not make a purchase.`;
+  return `${CLOUDFLARE_AI_FUNDING_REQUIRED_MARKER} This Cloudflare partner model requires prepaid AI Gateway credits. Add credits in Cloudflare to continue; Ghostbuild did not make a purchase.`;
 }
 
 export function isCloudflareAiFundingError(error: unknown): boolean {
-  return /insufficient\s+balance|add\s+money\s+to\s+your\s+gateway|use\s+BYOK/i.test(providerErrorDetails(error));
+  const details = providerErrorDetails(error);
+  return (
+    /insufficient\s+balance|add\s+money\s+to\s+your\s+gateway|use\s+BYOK/i.test(details) ||
+    (/\b2021\b/.test(details) && /invalid\s+user\s+credentials/i.test(details))
+  );
 }
 
 function providerErrorDetails(error: unknown): string {

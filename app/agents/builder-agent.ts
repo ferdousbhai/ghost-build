@@ -1,6 +1,7 @@
 import {
   AIChatAgent,
   type ChatRecoveryContext,
+  type ChatRecoveryExhaustedContext,
   type ChatRecoveryOptions,
   type ChatResponseResult,
 } from '@cloudflare/ai-chat';
@@ -13,6 +14,7 @@ import {
   completeBuilderTurn,
   createBuilderTurn,
   createRecoveryTurn,
+  exhaustedBuilderTurnResult,
   type BuilderTurnState,
   type BuilderTurnStatus,
 } from './builder-turn-store';
@@ -75,9 +77,9 @@ import {
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 const logger = createScopedLogger('BuilderAgent');
-const STALE_CHAT_RECOVERY_MS = 30 * 60 * 1000;
+const STALE_CHAT_RECOVERY_MS = 15 * 60 * 1000;
 const MAX_CHAT_RECOVERY_ATTEMPTS = 2;
-const CHAT_NO_PROGRESS_TIMEOUT_MS = 25 * 60 * 1000;
+const CHAT_NO_PROGRESS_TIMEOUT_MS = 14 * 60 * 1000;
 const CONTEXT_COMPACTION_FIBER = 'background:context_compaction';
 const PREVIEW_BUILD_FIBER = 'background:builder_preview';
 const CHAT_CANCELLATION_SETTLE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -138,6 +140,17 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     maxAttempts: MAX_CHAT_RECOVERY_ATTEMPTS,
     noProgressTimeoutMs: CHAT_NO_PROGRESS_TIMEOUT_MS,
     terminalMessage: 'The builder was interrupted. Please send your message again.',
+    shouldKeepRecovering: ({ ageMs }: { ageMs: number }) => ageMs <= STALE_CHAT_RECOVERY_MS,
+    onExhausted: (context: ChatRecoveryExhaustedContext) => {
+      const activeTurn = this.state.activeTurn;
+      if (!activeTurn) {
+        return;
+      }
+      const result = exhaustedBuilderTurnResult(activeTurn, context);
+      if (result) {
+        this.finishTurn(activeTurn, result);
+      }
+    },
   };
 
   override chatStreamStallTimeoutMs = CHAT_NO_PROGRESS_TIMEOUT_MS;

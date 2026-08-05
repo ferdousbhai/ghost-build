@@ -14,7 +14,14 @@ function isPartMaybeEqual(a: Part, b: Part): boolean {
   const aInvocation = getToolInvocation(a);
   const bInvocation = getToolInvocation(b);
   if (aInvocation && bInvocation) {
-    if (aInvocation.state.startsWith('output-') && bInvocation.state.startsWith('output-')) {
+    const aState = (aInvocation as { state?: unknown }).state;
+    const bState = (bInvocation as { state?: unknown }).state;
+    if (
+      typeof aState === 'string' &&
+      typeof bState === 'string' &&
+      aState.startsWith('output-') &&
+      bState.startsWith('output-')
+    ) {
       return aInvocation.toolCallId === bInvocation.toolCallId && aInvocation.state === bInvocation.state;
     }
   }

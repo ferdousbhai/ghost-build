@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
-import { BuilderTurnStore, completeBuilderTurn, createBuilderTurn } from './builder-turn-store';
+import type { ChatRecoveryExhaustedContext } from '@cloudflare/ai-chat';
+import {
+  BuilderTurnStore,
+  completeBuilderTurn,
+  createBuilderTurn,
+  exhaustedBuilderTurnResult,
+} from './builder-turn-store';
 
 describe('BuilderTurnStore', () => {
   it('bounds identifiers, prompt previews, and terminal errors', () => {
@@ -46,7 +52,56 @@ describe('BuilderTurnStore', () => {
     expect(statements[1]?.text).toContain('LIMIT -1 OFFSET');
     expect(statements[1]?.values).toEqual([100]);
   });
+
+  it('terminalizes only the active turn that belongs to the exhausted recovery', () => {
+    const turn = createBuilderTurn({
+      requestId: 'root-request',
+      chatInitialId: 'chat',
+      continuation: false,
+      firstUserMessage: true,
+      messages: [message('m', 'hello')],
+    });
+    const context = recoveryExhaustedContext();
+
+    expect(exhaustedBuilderTurnResult(turn, context)).toEqual({
+      requestId: 'recovery-request',
+      status: 'error',
+      error: 'The builder was interrupted.',
+    });
+    expect(exhaustedBuilderTurnResult({ ...turn, requestId: 'newer-request' }, context)).toBeNull();
+    expect(
+      exhaustedBuilderTurnResult(
+        {
+          ...turn,
+          requestId: 'newer-request',
+          recovery: { incidentId: 'incident', attempt: 1, recoveryKind: 'continue', partialTextLength: 1 },
+        },
+        context,
+      ),
+    ).toEqual({
+      requestId: 'recovery-request',
+      status: 'error',
+      error: 'The builder was interrupted.',
+    });
+  });
 });
+
+function recoveryExhaustedContext(): ChatRecoveryExhaustedContext {
+  return {
+    incidentId: 'incident',
+    requestId: 'recovery-request',
+    recoveryRootRequestId: 'root-request',
+    attempt: 2,
+    maxAttempts: 2,
+    recoveryKind: 'continue',
+    streamId: 'stream',
+    createdAt: Date.now(),
+    partialText: '',
+    partialParts: [],
+    reason: 'recovery_aborted',
+    terminalMessage: 'The builder was interrupted.',
+  };
+}
 
 function message(id: string, text: string): GhostbuildMessage {
   return { id, role: 'user', parts: [{ type: 'text', text }] };

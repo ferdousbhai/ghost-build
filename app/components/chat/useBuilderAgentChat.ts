@@ -22,11 +22,12 @@ import { executeDataOperation } from '~/lib/cloudflare/client';
 import { api } from '~/lib/cloudflare/data-api';
 import { description as descriptionStore } from '~/lib/stores/description';
 import {
-  transcriptCheckpointMatchesMessages,
+  transcriptCheckpointsEqual,
   transcriptCheckpointSchema,
   transcriptIdentitiesEqual,
   stripTranscriptBaseMetadata,
   TRANSCRIPT_BASE_METADATA_KEY,
+  type TranscriptCheckpoint,
   type TranscriptIdentity,
 } from 'ghostbuild-agent/transcript';
 import { BuilderWorkspaceSyncController } from '~/lib/stores/builder-workspace-sync.client';
@@ -38,6 +39,7 @@ import { useAccountLocalReplica } from '~/lib/cloudflare/account-local-replica';
 import { getUserRuntimeSession, requireUserRuntimeEndpoint } from '~/lib/cloudflare/runtime-session';
 import { builderModelStore } from '~/lib/stores/builder-model.client';
 import { isWorkersAiModelId } from '~/lib/workers-ai-model';
+import { reconcileMessagesForSend } from './chat-send-reconciliation';
 
 const logger = createScopedLogger('BuilderAgentChat');
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
@@ -46,6 +48,7 @@ const AGENT_CANCEL_SETTLE_TIMEOUT_MS = 5 * 60 * 1000;
 export function useBuilderAgentChat(args: {
   chatInitialId: string;
   initialMessages: GhostbuildMessage[];
+  loadedCheckpoint: TranscriptCheckpoint | null;
   onSubchatTitle: (subchatIndex: number, title: string) => void;
   transcript: TranscriptIdentity;
 }) {
@@ -266,8 +269,17 @@ export function useBuilderAgentChat(args: {
         }
         const checkpoint = checkpointResult.data;
         const localMessages = chat.messages as GhostbuildMessage[];
-        if (!(await transcriptCheckpointMatchesMessages(checkpoint, localMessages))) {
+        const reconciledMessages = await reconcileMessagesForSend({
+          durableCheckpoint: checkpoint,
+          localMessages,
+          loadedCheckpoint: args.loadedCheckpoint,
+          loadedMessages: args.initialMessages,
+        });
+        if (reconciledMessages === null) {
           throw new Error('This chat changed in another session. Reload the latest messages before sending.');
+        }
+        if (reconciledMessages !== localMessages) {
+          setMessagesRef.current(reconciledMessages as UIMessage[]);
         }
         const metadata =
           'metadata' in message &&
@@ -294,7 +306,7 @@ export function useBuilderAgentChat(args: {
       onRequestStart?.();
       return request;
     },
-    [args.transcript, builderAgent, chat, workspaceGateRef],
+    [args.initialMessages, args.loadedCheckpoint, args.transcript, builderAgent, chat, workspaceGateRef],
   );
 
   const stop = useCallback(() => {
@@ -317,9 +329,44 @@ export function useBuilderAgentChat(args: {
   }, [builderAgent, chat]);
 
   useEffect(() => {
+    toolActivityStore.abortActive();
     setMessagesRef.current(initialMessagesRef.current as UIMessage[]);
     contextManager.current.reset();
   }, [currentSubchatIndex]);
+
+  useEffect(() => {
+    const durableCheckpoint = builderAgent.state?.transcript;
+    if (
+      durableCheckpoint === undefined ||
+      !transcriptCheckpointsEqual(durableCheckpoint, args.loadedCheckpoint) ||
+      (chat.status !== 'ready' && chat.status !== 'error') ||
+      chat.isRecovering
+    ) {
+      return undefined;
+    }
+    let disposed = false;
+    const localMessages = chat.messages as GhostbuildMessage[];
+    void reconcileMessagesForSend({
+      durableCheckpoint,
+      localMessages,
+      loadedCheckpoint: args.loadedCheckpoint,
+      loadedMessages: args.initialMessages,
+    }).then((reconciledMessages) => {
+      if (!disposed && reconciledMessages !== null && reconciledMessages !== localMessages) {
+        setMessagesRef.current(reconciledMessages as UIMessage[]);
+      }
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [
+    args.initialMessages,
+    args.loadedCheckpoint,
+    builderAgent.state?.transcript,
+    chat.isRecovering,
+    chat.messages,
+    chat.status,
+  ]);
 
   return {
     ...chat,

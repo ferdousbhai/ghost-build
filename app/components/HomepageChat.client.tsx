@@ -16,11 +16,13 @@ export function HomepageChat({ initialId, initialPrompt }: { initialId: string; 
     initialMessages,
     subchats,
     transcript,
+    loadedCheckpoint,
   } = useChatHomepage(initialId);
 
   return (
     <Chat
       initialMessages={initialMessages ?? EMPTY_MESSAGES}
+      loadedCheckpoint={loadedCheckpoint}
       partCache={partCache.current}
       storeMessageHistory={storeMessageHistory}
       initializeChat={initializeChat}

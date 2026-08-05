@@ -1,0 +1,41 @@
+import { describe, expect, it } from 'vitest';
+import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import { makePartId } from 'ghostbuild-agent/partId';
+import { currentToolStatus } from './useCurrentToolStatus';
+
+describe('currentToolStatus', () => {
+  it('ignores active tool state from another transcript', () => {
+    const previous = message('previous');
+    const activities = {
+      [makePartId(previous.id, 0)]: {
+        invocation: {
+          type: 'dynamic-tool',
+          state: 'input-available',
+          toolCallId: 'validate-1',
+          toolName: 'validateProject',
+          input: {},
+        },
+        status: 'running' as const,
+      },
+    } satisfies Parameters<typeof currentToolStatus>[1];
+
+    expect(currentToolStatus([], activities)).toEqual({ toolStatus: {}, activeToolNames: [], activityRevision: 0 });
+    expect(currentToolStatus([previous], activities).activeToolNames).toEqual(['validateProject']);
+  });
+});
+
+function message(id: string): GhostbuildMessage {
+  return {
+    id,
+    role: 'assistant',
+    parts: [
+      {
+        type: 'dynamic-tool',
+        state: 'input-available',
+        toolCallId: 'validate-1',
+        toolName: 'validateProject',
+        input: {},
+      },
+    ],
+  };
+}

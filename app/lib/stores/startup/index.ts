@@ -48,6 +48,7 @@ export function useChatHomepage(chatId: string) {
     onBuilderRequestStart,
     storeMessageHistory,
     initialMessages: loaded?.deserialized ?? EMPTY_INITIAL_MESSAGES,
+    loadedCheckpoint: loaded?.checkpoint ?? null,
     subchats,
     transcript,
   };
@@ -75,6 +76,7 @@ export function useExistingChat(chatId: string) {
 
   return {
     initialMessages: initialMessages ? initialMessages.deserialized : initialMessages,
+    loadedCheckpoint: initialMessages?.checkpoint ?? null,
     initializeChat,
     discardEmptyChat,
     onBuilderRequestStart,

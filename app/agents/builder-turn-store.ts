@@ -1,4 +1,4 @@
-import type { ChatRecoveryContext } from '@cloudflare/ai-chat';
+import type { ChatRecoveryContext, ChatRecoveryExhaustedContext } from '@cloudflare/ai-chat';
 import type { SqlProvider } from 'agents/experimental/memory/session';
 import { messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 
@@ -150,6 +150,22 @@ export function completeBuilderTurn(
     status: result.status,
     updatedAt: new Date().toISOString(),
     error: result.error === undefined ? undefined : truncate(result.error, MAX_TURN_ERROR_LENGTH),
+  };
+}
+
+export function exhaustedBuilderTurnResult(
+  turn: BuilderTurnState,
+  context: ChatRecoveryExhaustedContext,
+): { requestId: string; status: 'error'; error: string } | null {
+  const matchesIncident = turn.recovery?.incidentId === context.incidentId;
+  const matchesRequest = turn.requestId === context.requestId || turn.requestId === context.recoveryRootRequestId;
+  if (!matchesIncident && !matchesRequest) {
+    return null;
+  }
+  return {
+    requestId: context.requestId,
+    status: 'error',
+    error: context.terminalMessage,
   };
 }
 
