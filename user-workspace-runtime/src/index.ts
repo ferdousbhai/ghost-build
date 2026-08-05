@@ -1387,6 +1387,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
               {
                 cwd: PROJECT_ROOT,
                 backend: 'container-shell',
+                env: { __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: '.trycloudflare.com,container' },
                 id: execId,
                 timeoutMs: PREVIEW_TTL_MS,
                 encoding: 'utf8',
