@@ -1,25 +1,44 @@
 const APPLICATION_CSP_BASELINE =
   "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
+const ISOLATED_PREVIEW_CSP_BASELINE =
+  "base-uri 'self'; frame-ancestors https://ghostbuild.dev; object-src 'none'; form-action 'self'";
 const HSTS_MIN_AGE_SECONDS = "31536000";
+
+type ApplicationSecurityOptions = {
+  isolatedPreview?: boolean;
+};
 
 export async function finalizeApplicationResponse(
   _request: Request,
   agentResponse: Response | null,
   fetchApplication: () => Response | Promise<Response>,
+  options: ApplicationSecurityOptions = {},
 ): Promise<Response> {
   if (agentResponse) {
     return agentResponse;
   }
-  return withApplicationSecurityHeaders(await fetchApplication());
+  return withApplicationSecurityHeaders(await fetchApplication(), options);
 }
 
-export function withApplicationSecurityHeaders(response: Response): Response {
+export function withApplicationSecurityHeaders(
+  response: Response,
+  options: ApplicationSecurityOptions = {},
+): Response {
   const headers = new Headers(response.headers);
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   headers.set("X-Content-Type-Options", "nosniff");
-  applyContentSecurityPolicyBaseline(headers);
+  applyContentSecurityPolicyBaseline(
+    headers,
+    options.isolatedPreview
+      ? ISOLATED_PREVIEW_CSP_BASELINE
+      : APPLICATION_CSP_BASELINE,
+  );
   applyHstsFloor(headers);
-  headers.set("X-Frame-Options", "DENY");
+  if (options.isolatedPreview) {
+    headers.delete("X-Frame-Options");
+  } else {
+    headers.set("X-Frame-Options", "DENY");
+  }
 
   return new Response(response.body, {
     status: response.status,
@@ -28,18 +47,17 @@ export function withApplicationSecurityHeaders(response: Response): Response {
   });
 }
 
-function applyContentSecurityPolicyBaseline(headers: Headers): void {
+function applyContentSecurityPolicyBaseline(
+  headers: Headers,
+  baseline: string,
+): void {
   const current = headers.get("Content-Security-Policy");
   if (!current) {
-    headers.set("Content-Security-Policy", APPLICATION_CSP_BASELINE);
-  } else if (
-    !current
-      .split(",")
-      .some((policy) => policy.trim() === APPLICATION_CSP_BASELINE)
-  ) {
+    headers.set("Content-Security-Policy", baseline);
+  } else if (!current.split(",").some((policy) => policy.trim() === baseline)) {
     // A CSP list enforces every policy independently. Appending keeps a
     // response's stricter resource policy while making this baseline mandatory.
-    headers.append("Content-Security-Policy", APPLICATION_CSP_BASELINE);
+    headers.append("Content-Security-Policy", baseline);
   }
 }
 

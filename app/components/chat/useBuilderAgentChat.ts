@@ -179,7 +179,7 @@ export function useBuilderAgentChat(args: {
 
   useEffect(() => {
     let disposed = false;
-    const callPreview = async (method: 'getPreviewState' | 'requestPreview' | 'cancelPreview') => {
+    const callPreview = async (method: 'getPreviewState' | 'requestPreview') => {
       const state = (await builderAgent.call(method, [], {
         timeout: method === 'getPreviewState' ? 10_000 : 30_000,
       })) as NonNullable<BuilderAgentState['preview']>;
@@ -189,9 +189,7 @@ export function useBuilderAgentChat(args: {
       return state;
     };
     const disconnect = workbenchStore.connectPreview({
-      refresh: () => callPreview('getPreviewState'),
       request: () => callPreview('requestPreview'),
-      cancel: () => callPreview('cancelPreview'),
     });
     void callPreview('getPreviewState').catch((error) => logger.warn('Unable to load remote preview state', error));
     return () => {

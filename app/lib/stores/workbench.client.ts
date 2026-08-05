@@ -46,8 +46,8 @@ export class WorkbenchStore {
     return this.#previewsStore.state;
   }
 
-  get previews() {
-    return this.#previewsStore.previews;
+  get hasPreview() {
+    return this.#previewsStore.hasPreview;
   }
 
   connectPreview(...args: Parameters<PreviewsStore['connect']>) {
@@ -58,16 +58,8 @@ export class WorkbenchStore {
     return this.#previewsStore.update(...args);
   }
 
-  refreshPreview() {
-    return this.#previewsStore.refresh();
-  }
-
   requestPreview() {
     return this.#previewsStore.request();
-  }
-
-  cancelPreview() {
-    return this.#previewsStore.cancel();
   }
 
   get files() {

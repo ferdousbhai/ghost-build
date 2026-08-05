@@ -8,11 +8,10 @@ export { AppAgent } from "./agents/app-agent";
 
 export default {
   async fetch(request: Request, env: Env) {
-    if (
+    const isolatedPreview =
       (env as Env & { GHOSTBUILD_ISOLATED_PREVIEW?: string })
-        .GHOSTBUILD_ISOLATED_PREVIEW === "1" &&
-      isAgentRoute(new URL(request.url).pathname)
-    ) {
+        .GHOSTBUILD_ISOLATED_PREVIEW === "1";
+    if (isolatedPreview && isAgentRoute(new URL(request.url).pathname)) {
       return Response.json(
         {
           code: "workers_ai_unavailable_in_isolated_preview",
@@ -27,8 +26,11 @@ export default {
       env,
       getAgentByName as unknown as AppAgentResolver,
     );
-    return finalizeApplicationResponse(request, agentResponse, () =>
-      handler.fetch(request),
+    return finalizeApplicationResponse(
+      request,
+      agentResponse,
+      () => handler.fetch(request),
+      { isolatedPreview },
     );
   },
   async scheduled(controller: ScheduledController, env: Env) {

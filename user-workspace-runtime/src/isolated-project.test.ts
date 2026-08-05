@@ -135,4 +135,15 @@ describe('isolated project command', () => {
     expect(keepAlive).toContain('this.#containerKeepAliveOperations === 0 && !this.activePreviewRow()');
     expect(keepAlive).toContain('await this.setKeepAlive(false)');
   });
+
+  it('uses the public Computer filesystem for durable workspace changes', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const applyChanges = source.slice(source.indexOf('async applyChanges('), source.indexOf('async getSyncPage('));
+
+    expect(applyChanges).toContain('await this.withComputer');
+    expect(applyChanges).toContain('workspace.fs.rm');
+    expect(applyChanges).toContain('writeWorkspaceFile(workspace');
+    expect(applyChanges).not.toContain('transactionSync');
+    expect(applyChanges).not.toContain('.provider()');
+  });
 });

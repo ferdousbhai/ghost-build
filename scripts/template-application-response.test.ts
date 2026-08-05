@@ -31,6 +31,15 @@ describe('generated application response boundary', () => {
     expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=63072000; includeSubDomains; preload');
   });
 
+  test('allows only Ghostbuild to frame an isolated preview', () => {
+    const response = withApplicationSecurityHeaders(new Response('preview'), { isolatedPreview: true });
+
+    expect(response.headers.get('Content-Security-Policy')).toBe(
+      "base-uri 'self'; frame-ancestors https://ghostbuild.dev; object-src 'none'; form-action 'self'",
+    );
+    expect(response.headers.get('X-Frame-Options')).toBeNull();
+  });
+
   test('raises a weaker HSTS response to the production minimum without dropping its flags', () => {
     const response = withApplicationSecurityHeaders(
       new Response('app', {

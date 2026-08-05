@@ -41,7 +41,6 @@ import { userRuntimeDeploymentAction } from '../../app/server-handlers/deploymen
 import { userRuntimeEnhancePromptAction } from '../../app/server-handlers/enhance-prompt';
 import { toolFailure, toolSuccess, type GhostbuildToolResult } from '../../ghostbuild-agent/tool-result';
 import { openPreviewQuickTunnel } from './preview-tunnel';
-import { applyAtomicWorkspaceChanges } from './atomic-workspace-changes';
 import { isComputerContainerCallback } from './container-fetch-routing';
 import { COMPUTERD_BINARY, computerdBootstrapCommand, containerToolchainBootstrapCommand } from './container-toolchain';
 import { routeUserWorkspaceRuntimeControlPlaneRequest } from './readiness-route';
@@ -810,18 +809,17 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       ) {
         throw new Error('The project workspace exceeds its size limit.');
       }
-      const changedPaths = applyAtomicWorkspaceChanges(
-        this.#workspace,
-        changes.map((change) =>
-          change.kind === 'delete'
-            ? change
-            : {
-                kind: 'write' as const,
-                path: change.path,
-                ...decodedWrites.get(change.path)!,
-              },
-        ),
-      );
+      const changedPaths = await this.withComputer(async (workspace) => {
+        for (const change of changes) {
+          if (change.kind === 'delete') {
+            await workspace.fs.rm(change.path, { recursive: true, force: true });
+            continue;
+          }
+          const write = decodedWrites.get(change.path)!;
+          await writeWorkspaceFile(workspace, change.path, write.bytes, true, write.mode);
+        }
+        return changes.map((change) => change.path);
+      });
       const committedRevision = this.currentRevision();
       if (typeof input.toolCallId === 'string') {
         const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);

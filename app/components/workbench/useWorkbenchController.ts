@@ -16,7 +16,7 @@ const logger = createScopedLogger('WorkbenchController');
 
 export function useWorkbenchController(isStreaming?: boolean) {
   const projectId = useStore(initialIdStore);
-  const previews = useStore(workbenchStore.previews);
+  const hasPreview = useStore(workbenchStore.hasPreview);
   const showWorkbench = useStore(workbenchStore.showWorkbench);
   const selectedFile = useStore(workbenchStore.selectedFile);
   const currentDocument = useStore(workbenchStore.currentDocument);
@@ -28,10 +28,10 @@ export function useWorkbenchController(isStreaming?: boolean) {
   const [hasLoadedPreview, setHasLoadedPreview] = useState(false);
 
   useEffect(() => {
-    if (previews.length) {
+    if (hasPreview) {
       workbenchStore.currentView.set('preview');
     }
-  }, [previews.length]);
+  }, [hasPreview]);
 
   useEffect(() => {
     if (selectedView === 'preview') {
@@ -67,10 +67,21 @@ export function useWorkbenchController(isStreaming?: boolean) {
   }, []);
   const onFileSave = useCallback(() => {
     workbenchStore.flushPendingEditorChange();
-    void workbenchStore.saveCurrentDocument().catch((error) => {
-      logger.error('Failed to update file content', error);
-      toast.error('Failed to update file content');
-    });
+    void (async () => {
+      try {
+        await workbenchStore.saveCurrentDocument();
+      } catch (error) {
+        logger.error('Failed to save the file', error);
+        toast.error('Save failed');
+        return;
+      }
+      try {
+        workbenchStore.updatePreview(await workbenchStore.requestPreview());
+      } catch (error) {
+        logger.warn('Failed to update the preview after a file save', error);
+        toast.error('Preview update failed');
+      }
+    })();
   }, []);
 
   return {

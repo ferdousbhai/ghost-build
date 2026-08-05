@@ -16,9 +16,9 @@ export function Preview() {
   const candidate = state.active ?? state.lastSuccessful;
   const preview = candidate && Date.parse(candidate.expiresAt) > Date.now() ? candidate : null;
   const previewUrl = preview?.url ?? null;
-  const expiresAt = preview ? new Date(preview.expiresAt) : null;
   const status =
     candidate && !preview && state.status !== 'queued' && state.status !== 'building' ? 'expired' : state.status;
+  const canRetry = state.status === 'failed' || (state.stale && status !== 'queued' && status !== 'building');
 
   useEffect(() => {
     if (!candidate) {
@@ -57,9 +57,7 @@ export function Preview() {
       <div className="flex min-h-12 items-center gap-2 border-b border-border-transparent px-3 py-2">
         <PreviewBadge status={status} stale={state.stale} />
         <div className="min-w-0 flex-1 truncate text-xs text-content-secondary" aria-live="polite">
-          {preview
-            ? `Revision ${preview.workspaceRevision}${expiresAt ? ` · expires ${expiresAt.toLocaleTimeString()}` : ''}`
-            : `Revision ${state.currentWorkspaceRevision}`}
+          Revision {preview?.workspaceRevision ?? state.workspaceRevision ?? state.currentWorkspaceRevision}
         </div>
         <IconButton
           icon={<ReloadIcon />}
@@ -67,29 +65,16 @@ export function Preview() {
           disabled={!previewUrl}
           onClick={() => setReloadKey((value) => value + 1)}
         />
-        <Button
-          size="xs"
-          variant="neutral"
-          disabled={requesting || state.status === 'building'}
-          onClick={requestPreview}
-        >
-          {requesting || state.status === 'queued' ? 'Queued…' : state.stale ? 'Rebuild' : 'Refresh'}
-        </Button>
+        {preview && canRetry && (
+          <Button size="xs" variant="neutral" disabled={requesting} onClick={requestPreview}>
+            Retry
+          </Button>
+        )}
       </div>
 
-      {(state.stale || status === 'failed' || status === 'expired') && (
-        <div
-          className={classNames('border-b px-4 py-2 text-xs', {
-            'border-amber-500/20 bg-amber-500/10 text-content-warning': state.stale || state.status === 'expired',
-            'border-red-500/20 bg-red-500/10 text-content-error': status === 'failed',
-          })}
-          role="status"
-        >
-          {status === 'failed'
-            ? `${state.error ?? 'The latest remote build failed.'}${preview ? ' The last successful preview is still available.' : ''}`
-            : status === 'expired'
-              ? 'This preview expired. Build a fresh preview from the current durable revision.'
-              : `This preview is stale. The project is now at durable revision ${state.currentWorkspaceRevision}.`}
+      {preview && status === 'failed' && (
+        <div className="border-b border-red-500/20 bg-red-500/10 px-4 py-2 text-xs text-content-error" role="status">
+          {state.error ?? 'The latest preview failed.'}
         </div>
       )}
 
@@ -105,20 +90,11 @@ export function Preview() {
           />
         ) : (
           <PreviewEmpty
-            status={state.status}
+            status={status}
             error={state.error}
             onRequest={() => void requestPreview()}
             disabled={requesting}
           />
-        )}
-        {(state.status === 'queued' || state.status === 'building') && (
-          <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center p-3">
-            <div className="rounded-full border border-border-transparent bg-bolt-elements-background-depth-2/95 px-3 py-1.5 text-xs text-content-secondary shadow-lg backdrop-blur">
-              {state.status === 'queued'
-                ? 'Preview queued…'
-                : `Building revision ${state.workspaceRevision ?? state.currentWorkspaceRevision}…`}
-            </div>
-          </div>
         )}
       </div>
     </div>
@@ -126,20 +102,32 @@ export function Preview() {
 }
 
 function PreviewBadge({ status, stale }: { status: string; stale: boolean }) {
-  const label = stale && status === 'ready' ? 'stale' : status;
+  const label = stale && status === 'ready' ? 'updating' : previewStatusLabel(status);
   return (
     <span
       className={classNames('rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide', {
-        'border-emerald-500/30 bg-emerald-500/10 text-emerald-600': label === 'ready',
-        'border-amber-500/30 bg-amber-500/10 text-amber-600':
-          label === 'queued' || label === 'building' || label === 'stale',
+        'border-emerald-500/30 bg-emerald-500/10 text-emerald-600': label === 'live',
+        'border-amber-500/30 bg-amber-500/10 text-amber-600': label === 'updating',
         'border-red-500/30 bg-red-500/10 text-red-600': label === 'failed' || label === 'expired',
-        'border-border-transparent text-content-tertiary': label === 'idle' || label === 'cancelled',
+        'border-border-transparent text-content-tertiary': label === 'preview',
       })}
     >
       {label}
     </span>
   );
+}
+
+function previewStatusLabel(status: string): string {
+  if (status === 'ready') {
+    return 'live';
+  }
+  if (status === 'queued' || status === 'building') {
+    return 'updating';
+  }
+  if (status === 'failed' || status === 'expired') {
+    return status;
+  }
+  return 'preview';
 }
 
 function PreviewEmpty({
@@ -153,16 +141,33 @@ function PreviewEmpty({
   onRequest: () => void;
   disabled: boolean;
 }) {
+  const updating = status === 'queued' || status === 'building';
+  const title =
+    status === 'failed'
+      ? 'Preview failed'
+      : status === 'expired'
+        ? 'Preview expired'
+        : updating
+          ? 'Updating preview…'
+          : 'No preview yet';
+  const message =
+    status === 'failed'
+      ? error
+      : status === 'expired'
+        ? 'Build the latest revision.'
+        : updating
+          ? null
+          : 'Build the current revision.';
   return (
     <div className="flex size-full items-center justify-center p-6 text-center">
       <div className="max-w-sm">
-        <p className="font-medium text-content-primary">
-          {status === 'failed' ? 'Preview build failed' : 'Build preview'}
-        </p>
-        <p className="mt-2 text-sm text-content-secondary">{error ?? 'Build the current project revision.'}</p>
-        <Button className="mt-4" size="sm" disabled={disabled} onClick={onRequest}>
-          Build preview
-        </Button>
+        <p className="font-medium text-content-primary">{title}</p>
+        {message && <p className="mt-2 text-sm text-content-secondary">{message}</p>}
+        {!updating && (
+          <Button className="mt-4" size="sm" disabled={disabled} onClick={onRequest}>
+            {status === 'failed' ? 'Retry' : 'Build preview'}
+          </Button>
+        )}
       </div>
     </div>
   );

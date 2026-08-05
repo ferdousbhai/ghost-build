@@ -1,6 +1,6 @@
 import { BUILDER_TEMPLATE_SOURCE_SHA256 } from '~/agents/builder-template.generated';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 25 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 26 as const;
 export {
   DEPLOYMENT_SECURITY_BASELINE_BINDING,
   DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
@@ -46,8 +46,8 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'src/agents/app-agent.ts': '38db7b77ad8420ec8d39cc2144f2510d5c5493a9e7c047bbee354a122ef0b2d3',
   'src/agents/chat-policy.ts': '16a806aa0e26b5c7057e70fecb59cbbfd08921e36e8d2b967102eab6b7e6dec2',
   'src/app-bindings.ts': '6f5fd82619b6bd55d20ee66428ad264aaf8dfee7b179efeb7cf3eb09906a7998',
-  'src/application-response.ts': 'd5a200ad672d89f6fc68535d825e73128bc3ab0da57adc227e0b540f89f0f07c',
-  'src/server.ts': '0c41c0f40d24938453842f877f7e09f7af7753762422c22418b2bc2938931d69',
+  'src/application-response.ts': '70f3c2a456f3bd7ae96385d78ec06c4555e5b7d0bf2845594e5f5ba9949d5fec',
+  'src/server.ts': '9bf81d5e9a542ebf2b6c93bafbaabdbb5fd963e444c9791c5826af0f679558ab',
   'src/workers-ai.shared.ts': '04a50a0d46bcb5a24dfe0a0d1d597112eed890e38ff11f384ebbdfba7ab26f0e',
   'tailwind.config.js': 'c43ce7f83ee3ef0259121fa47ebc98dcb67a25a106aea5318fb0559ce72bc558',
   'tsconfig.json': 'a005fcf59f0217cc7486892312d032adad3e400f86c396d4150390247c989b6a',
@@ -55,7 +55,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'wrangler.preview.jsonc': '8a0b4043577c3f273d135a4594bb93782a1c482704020b6c387d82a97dc7e5c4',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'a7ced41b34c0c79626bb03a6f76b021bb461334c7b205a9be822ace60fa7c5cd';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'ec4099b920a343e3fd95162350d1b51b4a52aaccbc80a6f072cebbd361ea1f8c';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
   '88e1f53fc10bb267f5feee133f7e6581e67f4793617155ba4a756447371e38f0';
