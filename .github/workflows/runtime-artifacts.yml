@@ -5,6 +5,8 @@ on:
     paths:
       - package.json
       - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - patches/**
       - app/lib/.server/cloudflare/user-workspace-runtime-provisioner.ts
       - user-workspace-runtime/src/container-toolchain.ts
       - scripts/check-runtime-artifacts.mjs

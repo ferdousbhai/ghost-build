@@ -1,0 +1,13 @@
+diff --git a/dist/index.js b/dist/index.js
+index d85160c7f7c68a37d9fdace811482657921fd8c6..0af111971715d88f856ee4521500d4b383da4565 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -2806,7 +2806,7 @@ function toHex(bytes) {
+ 	for (const b of bytes) out += b.toString(16).padStart(2, "0");
+ 	return out;
+ }
+-const PROBE_BATCH = 256;
++const PROBE_BATCH = 64;
+ function hasObjects(db, hashes) {
+ 	if (hashes.length === 0) return [];
+ 	const present = /* @__PURE__ */ new Set();

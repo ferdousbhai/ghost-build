@@ -44,3 +44,7 @@ peerDependencyRules:
     '@cloudflare/workers-types': '5'
     # @blitz/eslint-plugin is exercised by the repository's ESLint 9 validation.
     eslint: '9'
+# Computer 0.1.1 probes 256 blob hashes in one statement; Durable Object
+# SQLite accepts fewer bind variables. Remove this when upstream lowers it.
+patchedDependencies:
+  '@cloudflare/computer@0.1.1': patches/@cloudflare__computer@0.1.1.patch

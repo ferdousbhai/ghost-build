@@ -26,10 +26,12 @@ describe('assertSafeGeneratedPnpmWorkspace', () => {
     });
     expect(browserPolicy.profiles.repository.minimumReleaseAgeExclusionReason).toContain('preview dependency');
 
-    const rootWorkspace = readFileSync('pnpm-workspace.yaml', 'utf8').replace(
-      /^  (?:'@journeyapps\/wa-sqlite'|'@mongodb-js\/zstd'|node-liblzma): false$/gm,
-      '',
-    );
+    const rootWorkspace = readFileSync('pnpm-workspace.yaml', 'utf8')
+      .replace(/^  (?:'@journeyapps\/wa-sqlite'|'@mongodb-js\/zstd'|node-liblzma): false$/gm, '')
+      .replace(
+        /^patchedDependencies:\n  '@cloudflare\/computer@0\.1\.1': patches\/@cloudflare__computer@0\.1\.1\.patch$/m,
+        '',
+      );
     expect(findBuildApprovalErrors(rootWorkspace, 'pnpm-workspace.yaml')).toEqual([]);
     expect(findBuildApprovalErrors(readFileSync('template/pnpm-workspace.yaml', 'utf8'), 'template policy')).toEqual(
       [],

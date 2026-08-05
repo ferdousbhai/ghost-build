@@ -64,6 +64,7 @@ const requiredPaths = [
   'CONTRIBUTING.md',
   'LICENSE',
   'NOTICE',
+  'patches/@cloudflare__computer@0.1.1.patch',
   'README.md',
   'SECURITY.md',
   'THIRD_PARTY_NOTICES',
@@ -214,7 +215,18 @@ function verifyWorkspace(errors) {
   if (blockedComputerBuildEntries.length !== 2) {
     errors.push('pnpm-workspace.yaml must explicitly block both optional Computer native compression builds.');
   }
-  errors.push(...findBuildApprovalErrors(workspace.replace(blockedOptionalBuilds, ''), 'pnpm-workspace.yaml'));
+  const computerSqlPatch =
+    /^patchedDependencies:\n  '@cloudflare\/computer@0\.1\.1': patches\/@cloudflare__computer@0\.1\.1\.patch$/gm;
+  const computerSqlPatchEntries = workspace.match(computerSqlPatch) ?? [];
+  if (computerSqlPatchEntries.length !== 1) {
+    errors.push('pnpm-workspace.yaml must apply the reviewed Computer 0.1.1 SQL probe patch exactly once.');
+  }
+  errors.push(
+    ...findBuildApprovalErrors(
+      workspace.replace(blockedOptionalBuilds, '').replace(computerSqlPatch, ''),
+      'pnpm-workspace.yaml',
+    ),
+  );
   if (/set this to true or false/i.test(workspace)) {
     errors.push('pnpm-workspace.yaml must not contain unresolved build-approval placeholders.');
   }

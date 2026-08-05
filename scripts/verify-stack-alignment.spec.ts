@@ -77,6 +77,20 @@ describe('stack alignment verification helpers', () => {
     expect(workflow).toContain('.author.login == \\"$REPOSITORY_OWNER\\"');
   });
 
+  it('keeps Computer object probes below the Durable Object SQL variable limit', () => {
+    const workspace = readFileSync(new URL('../pnpm-workspace.yaml', import.meta.url), 'utf8');
+    const patch = readFileSync(new URL('../patches/@cloudflare__computer@0.1.1.patch', import.meta.url), 'utf8');
+    const installed = readFileSync(
+      new URL('../node_modules/@cloudflare/computer/dist/index.js', import.meta.url),
+      'utf8',
+    );
+
+    expect(workspace).toContain("'@cloudflare/computer@0.1.1': patches/@cloudflare__computer@0.1.1.patch");
+    expect(patch).toContain('-const PROBE_BATCH = 256;');
+    expect(patch).toContain('+const PROBE_BATCH = 64;');
+    expect(installed).toContain('const PROBE_BATCH = 64;');
+  });
+
   it('collects dependency names across package sections', () => {
     expect(
       dependencyNames({

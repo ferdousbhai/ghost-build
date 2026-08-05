@@ -66,17 +66,11 @@ export async function verifyTemplate() {
     run(tempDir, ['run', 'verify:licenses:built']);
     await verifyResolvedProductionModulePolicy(tempDir);
     run(tempDir, ['exec', 'wrangler', 'deploy', '--dry-run']);
-    run(tempDir, [
-      'exec',
-      'wrangler',
-      'd1',
-      'migrations',
-      'apply',
-      'DB',
-      '--local',
-      '--config',
-      'wrangler.preview.jsonc',
-    ]);
+    run(
+      tempDir,
+      ['exec', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--local', '--config', 'wrangler.preview.jsonc'],
+      { ...process.env, CI: 'true' },
+    );
     await installIsolatedPreviewBindingProbe(tempDir);
     run(tempDir, ['run', 'build:isolated-preview']);
     await verifyIsolatedPreview(tempDir);
@@ -192,24 +186,29 @@ async function terminateProcessGroup(child, exited) {
   if (child.exitCode !== null) {
     return;
   }
-  try {
-    if (process.platform === 'win32') {
-      child.kill('SIGTERM');
-    } else {
-      process.kill(-child.pid, 'SIGTERM');
+  const signal = (signalName) => {
+    if (process.platform !== 'win32') {
+      try {
+        process.kill(-child.pid, signalName);
+        return;
+      } catch (error) {
+        if (error?.code !== 'EPERM' && error?.code !== 'ESRCH') {
+          throw error;
+        }
+      }
     }
-  } catch (error) {
-    if (error?.code !== 'ESRCH') {
-      throw error;
+    try {
+      child.kill(signalName);
+    } catch (error) {
+      if (error?.code !== 'ESRCH') {
+        throw error;
+      }
     }
-  }
+  };
+  signal('SIGTERM');
   await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000))]);
   if (child.exitCode === null) {
-    if (process.platform === 'win32') {
-      child.kill('SIGKILL');
-    } else {
-      process.kill(-child.pid, 'SIGKILL');
-    }
+    signal('SIGKILL');
     await exited;
   }
 }
