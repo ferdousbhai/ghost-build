@@ -48,7 +48,7 @@ import { computerSyncUnconfirmedToolResult } from '../../ghostbuild-agent/cloudf
 import { openPreviewQuickTunnel } from './preview-tunnel';
 import { applyAtomicWorkspaceChanges } from './atomic-workspace-changes';
 import { isComputerContainerCallback } from './container-fetch-routing';
-import { containerToolchainBootstrapCommand } from './container-toolchain';
+import { COMPUTERD_BINARY, computerdBootstrapCommand, containerToolchainBootstrapCommand } from './container-toolchain';
 import { routeUserWorkspaceRuntimeControlPlaneRequest } from './readiness-route';
 import { scheduleUserWorkspaceRuntimeMaintenance } from './scheduled-maintenance';
 import { ToolOperationJournal, type ToolOperationStartResult } from './tool-operation-journal';
@@ -106,11 +106,6 @@ const SYNC_BATCH_FILES = 100;
 const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.tanstack', '.wrangler']);
 const DERIVED_PATHS = ['dist', '.output', '.tanstack', '.wrangler'].map((name) => `${PROJECT_ROOT}/${name}`);
 const COMPUTERD_PROCESS_ID = 'ghostbuild-computerd';
-const COMPUTERD_ROOT = '/tmp/ghostbuild-computer';
-const COMPUTERD_BINARY = `${COMPUTERD_ROOT}/usr/local/bin/computerd`;
-// Immutable linux/amd64 layer published by
-// ghcr.io/cloudflare/computer-computerd-linux-x64:0.1.1.
-const COMPUTERD_LAYER_DIGEST = 'sha256:7d54afd24f340c562357091403ee2dca004c0ce99d3970f32a03300602e19c47';
 const OPERATION_LEASE_MS = {
   seed: 10 * 60_000,
   write: 10 * 60_000,
@@ -192,10 +187,7 @@ class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
       return;
     }
     await this.cleanupCompletedProcesses().catch(() => undefined);
-    const ready = await this.exec(`test -x ${shellQuote(COMPUTERD_BINARY)}`, { timeout: 30_000 });
-    if (!ready.success) {
-      requireSandboxExecSuccess(await this.exec(computerdBootstrapCommand(), { timeout: 5 * 60_000 }));
-    }
+    requireSandboxExecSuccess(await this.exec(computerdBootstrapCommand(), { timeout: 5 * 60_000 }));
     await this.startProcess(shellQuote(COMPUTERD_BINARY), {
       processId: COMPUTERD_PROCESS_ID,
       autoCleanup: false,
@@ -2083,21 +2075,6 @@ function requireCommandSuccess(result: WorkspaceRuntimeResult<'utf8'>): void {
   if (result.exitCode !== 0) {
     throw new Error(`${result.stderr}\n${result.stdout}`.trim().slice(-4_000) || 'The Computer command failed.');
   }
-}
-
-function computerdBootstrapCommand(): string {
-  const tokenUrl =
-    'https://ghcr.io/token?service=ghcr.io&scope=repository:cloudflare/computer-computerd-linux-x64:pull';
-  const blobUrl = `https://ghcr.io/v2/cloudflare/computer-computerd-linux-x64/blobs/${COMPUTERD_LAYER_DIGEST}`;
-  return [
-    'set -eu',
-    `mkdir -p ${shellQuote(COMPUTERD_ROOT)}`,
-    `token="$(curl -fsSL ${shellQuote(tokenUrl)} | jq -er .token)"`,
-    `curl -fsSL -H "Authorization: Bearer $token" -o ${shellQuote(`${COMPUTERD_ROOT}/layer.tgz`)} ${shellQuote(blobUrl)}`,
-    `echo ${shellQuote(`${COMPUTERD_LAYER_DIGEST.slice('sha256:'.length)}  ${COMPUTERD_ROOT}/layer.tgz`)} | sha256sum -c -`,
-    `tar -xzf ${shellQuote(`${COMPUTERD_ROOT}/layer.tgz`)} -C ${shellQuote(COMPUTERD_ROOT)}`,
-    `chmod 0755 ${shellQuote(COMPUTERD_BINARY)}`,
-  ].join('\n');
 }
 
 async function waitForHttpPort(port: Fetcher): Promise<void> {
