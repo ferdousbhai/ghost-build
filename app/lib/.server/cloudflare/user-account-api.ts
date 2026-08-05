@@ -648,7 +648,7 @@ export class UserCloudflareAccountApi {
         image: args.image,
         instance_type: PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE,
         observability: { logs: { enabled: true } },
-        wrangler_ssh: false,
+        wrangler_ssh: { enabled: false },
       },
       max_instances: args.maxInstances ?? PROJECT_WORKSPACE_CONTAINER_MAX_INSTANCES,
       constraints: { tiers: [1, 2] },
@@ -839,19 +839,14 @@ export class UserCloudflareAccountApi {
     });
     const payload = await readBoundedJson<CloudflareEnvelope<T> | T | { error?: string; message?: string }>(response);
     if (!response.ok || payload === null) {
-      const message =
-        payload && typeof payload === 'object' && !Array.isArray(payload)
-          ? (('message' in payload && typeof payload.message === 'string' ? payload.message : undefined) ??
-            ('error' in payload && typeof payload.error === 'string' ? payload.error : undefined))
-          : undefined;
-      throw new CloudflareAccountApiError(message || `Cloudflare Containers request failed (${response.status}).`);
+      throw new CloudflareAccountApiError(
+        cloudflareErrorMessage(payload) || `Cloudflare Containers request failed (${response.status}).`,
+      );
     }
     if (typeof payload === 'object' && !Array.isArray(payload) && 'success' in payload) {
       const envelope = payload as CloudflareEnvelope<T>;
       if (envelope.success !== true || envelope.result === undefined) {
-        throw new CloudflareAccountApiError(
-          envelope.errors?.find((error) => error.message)?.message || 'Cloudflare Containers request failed.',
-        );
+        throw new CloudflareAccountApiError(cloudflareErrorMessage(payload) || 'Cloudflare Containers request failed.');
       }
       return envelope.result;
     }
@@ -896,6 +891,25 @@ function requireCloudflareResourceName(name: string): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function cloudflareErrorMessage(value: unknown): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  for (const key of ['message', 'error'] as const) {
+    if (typeof value[key] === 'string' && value[key].length > 0) {
+      return value[key];
+    }
+  }
+  if (Array.isArray(value.errors)) {
+    for (const error of value.errors) {
+      if (isRecord(error) && typeof error.message === 'string' && error.message.length > 0) {
+        return error.message;
+      }
+    }
+  }
+  return undefined;
 }
 
 async function parseCloudflareEnvelope<T>(response: Response): Promise<T> {

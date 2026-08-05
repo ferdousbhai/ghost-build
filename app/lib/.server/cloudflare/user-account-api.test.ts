@@ -861,12 +861,33 @@ describe('UserCloudflareAccountApi', () => {
       expect.objectContaining({ method: 'GET' }),
     );
     const [, createInit] = request.mock.calls[1];
-    expect(JSON.parse(String(createInit?.body))).toMatchObject({
+    const createPayload = JSON.parse(String(createInit?.body));
+    expect(createPayload).toMatchObject({
       name: 'ghostbuild-workspace-user',
-      configuration: { image, instance_type: 'basic' },
+      configuration: { image, instance_type: 'basic', wrangler_ssh: { enabled: false } },
       max_instances: 10,
       durable_objects: { namespace_id: '0123456789abcdef0123456789abcdef' },
     });
+  });
+
+  test('preserves Cloudflare Containers error details', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json([]))
+      .mockResolvedValueOnce(
+        Response.json(
+          { success: false, errors: [{ code: 1000, message: 'wrangler_ssh must be an object' }] },
+          { status: 400 },
+        ),
+      );
+
+    await expect(
+      new UserCloudflareAccountApi('user-account', 'user-token', request).ensureWorkspaceRuntimeContainer({
+        applicationName: 'ghostbuild-workspace-user',
+        namespaceId: '0123456789abcdef0123456789abcdef',
+        image: `docker.io/cloudflare/sandbox:0.12.4@sha256:${'b'.repeat(64)}`,
+      }),
+    ).rejects.toThrow('wrangler_ssh must be an object');
   });
 
   test('rejects a matching container application without provider identity', async () => {
