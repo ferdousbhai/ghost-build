@@ -36,32 +36,46 @@ describe('BuilderModelSelector', () => {
 
     await act(async () => root?.render(<BuilderModelSelector />));
 
-    const select = document.querySelector('select') as unknown as HTMLSelectElement | null;
-    expect(select?.getAttribute('aria-label')).toContain('GLM 5.2');
-    expect([...document.querySelectorAll('optgroup')].map(({ label }) => label)).toEqual([
-      'Cloudflare-hosted',
-      'Partner via Cloudflare',
-    ]);
+    const trigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Builder model"]');
+    expect(trigger?.getAttribute('aria-label')).toContain('GLM 5.2');
+    expect(trigger?.getAttribute('aria-haspopup')).toBe('menu');
 
-    act(() => {
-      if (select) {
-        select.value = 'deepseek/deepseek-v4-pro';
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-      }
+    await act(async () => {
+      trigger?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
     });
+
+    const menu = document.querySelector('[role="menu"]');
+    expect(menu?.textContent).toContain('Cloudflare hosted');
+    expect(menu?.textContent).toContain('Partner via Cloudflare');
+    expect(document.querySelectorAll('[role="menuitemradio"]')).toHaveLength(6);
+    const deepSeek = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
+      item.textContent?.includes('DeepSeek V4 Pro'),
+    );
+
+    await act(async () => deepSeek?.click());
 
     expect(builderModelStore.get()).toBe('deepseek/deepseek-v4-pro');
     expect(localStorage.getItem('ghostbuild_builder_model')).toBe('deepseek/deepseek-v4-pro');
   });
 
-  it('prevents changes while a turn is active', async () => {
+  it('closes the menu and prevents changes when a turn becomes active', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
 
+    await act(async () => root?.render(<BuilderModelSelector />));
+
+    const enabledTrigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Builder model"]');
+    await act(async () => {
+      enabledTrigger?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    });
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+
     await act(async () => root?.render(<BuilderModelSelector disabled />));
 
-    const select = document.querySelector('select') as unknown as HTMLSelectElement | null;
-    expect(select?.disabled).toBe(true);
+    const trigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Builder model"]');
+    expect(trigger?.disabled).toBe(true);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
   });
 });
