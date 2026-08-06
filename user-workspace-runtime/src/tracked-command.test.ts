@@ -6,6 +6,32 @@ import {
 } from './tracked-command';
 
 describe('tracked Sandbox commands', () => {
+  it('exposes the exact started process before waiting for it', async () => {
+    const events: string[] = [];
+    const process = {
+      waitForExit: vi.fn(async () => {
+        events.push('wait');
+        return { exitCode: 0 };
+      }),
+      kill: vi.fn(async () => undefined),
+      getStatus: vi.fn(async () => 'completed' as const),
+      getLogs: vi.fn(async () => ({ stdout: '', stderr: '' })),
+    };
+
+    await runTrackedSandboxCommand({
+      command: 'pnpm run build',
+      timeout: 30_000,
+      processId: 'transient-1',
+      startProcess: async () => process,
+      onProcess: (startedProcess) => {
+        expect(startedProcess).toBe(process);
+        events.push('attach');
+      },
+    });
+
+    expect(events).toEqual(['attach', 'wait']);
+  });
+
   it('kills a timed-out process before cleanup returns to the caller', async () => {
     const events: string[] = [];
     const process = {

@@ -26,6 +26,7 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
   #files: BuilderWorkspaceFileMetadata[] = [];
   #stubPromise: Promise<ProjectWorkspaceStub> | null = null;
   #activeTool: { toolCallId: string; toolName: string } | null = null;
+  #activeValidationToolCallId: string | null = null;
 
   readonly computer: BuilderWorkspaceApi['computer'] = {
     fs: {
@@ -194,8 +195,51 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       });
   }
 
-  validate(args: { toolCallId: string; input: unknown }): Promise<GhostbuildToolResult> {
-    return this.#stub().then((stub) => stub.validateTool(args));
+  async validate(args: {
+    toolCallId: string;
+    input: unknown;
+    abortSignal?: AbortSignal;
+  }): Promise<GhostbuildToolResult> {
+    args.abortSignal?.throwIfAborted();
+    if (this.#activeValidationToolCallId && this.#activeValidationToolCallId !== args.toolCallId) {
+      throw new Error('ProjectWorkspace validation is already running.');
+    }
+    this.#activeValidationToolCallId = args.toolCallId;
+    let cancellation: Promise<void> | undefined;
+    const cancel = () => {
+      cancellation ??= this.#cancelValidation(args.toolCallId);
+      void cancellation.catch(() => undefined);
+    };
+    args.abortSignal?.addEventListener('abort', cancel, { once: true });
+    try {
+      const result = await (await this.#stub()).validateTool({ toolCallId: args.toolCallId, input: args.input });
+      args.abortSignal?.throwIfAborted();
+      return result;
+    } finally {
+      args.abortSignal?.removeEventListener('abort', cancel);
+      try {
+        if (args.abortSignal?.aborted) {
+          cancel();
+          await cancellation;
+        }
+      } finally {
+        if (this.#activeValidationToolCallId === args.toolCallId) {
+          this.#activeValidationToolCallId = null;
+        }
+      }
+    }
+  }
+
+  async cancelActiveValidation(): Promise<void> {
+    const toolCallId = this.#activeValidationToolCallId;
+    if (!toolCallId) {
+      return;
+    }
+    await this.#cancelValidation(toolCallId);
+  }
+
+  async #cancelValidation(toolCallId: string): Promise<void> {
+    await (await this.#stub()).cancelValidation({ toolCallId });
   }
 
   hasSuccessfulValidation(revision: string): Promise<boolean> {

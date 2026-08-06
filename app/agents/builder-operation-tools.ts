@@ -58,7 +58,11 @@ async function runValidation(args: Parameters<typeof executeBuilderOperationTool
   args.abortSignal?.throwIfAborted();
   args.context.onValidationStage?.(args.toolCallId, 'computer validation');
   try {
-    return await args.workspace.validate({ toolCallId: args.toolCallId, input: args.input });
+    return await args.workspace.validate({
+      toolCallId: args.toolCallId,
+      input: args.input,
+      abortSignal: args.abortSignal,
+    });
   } finally {
     args.context.onValidationStage?.(args.toolCallId, null);
   }

@@ -28,4 +28,19 @@ describe('BuilderAgent preview lifecycle', () => {
       'options.requireValidation && !(await this.workspace.hasSuccessfulValidation(snapshot.revision))',
     );
   });
+
+  it('cancels active validation before waiting for a stopped turn to settle', () => {
+    const cancellation = source.slice(
+      source.indexOf('async cancelActiveTurn()'),
+      source.indexOf('@callable()\n  getWorkspaceState'),
+    );
+    const boundedCancellation = 'await waitForCancellationBeforeDeadline(validationCancellation, deadline)';
+
+    expect(cancellation).toContain('const validationCancellation = this.workspace.cancelActiveValidation()');
+    expect(cancellation.indexOf('this.abortAllRequests(')).toBeLessThan(cancellation.indexOf(boundedCancellation));
+    expect(cancellation.indexOf(boundedCancellation)).toBeLessThan(cancellation.indexOf('await this.waitUntilStable('));
+    expect(cancellation).toContain('const deadline = Date.now() + CHAT_CANCELLATION_SETTLE_TIMEOUT_MS');
+    expect(cancellation).toContain('const remainingSettleTime = Math.max(0, deadline - Date.now())');
+    expect(cancellation).toContain('timeout: remainingSettleTime');
+  });
 });

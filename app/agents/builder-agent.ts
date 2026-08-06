@@ -75,6 +75,7 @@ import {
   type BuilderPreviewState,
 } from './builder-preview-types';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
+import { waitForCancellationBeforeDeadline } from './builder-cancellation';
 
 const logger = createScopedLogger('BuilderAgent');
 const STALE_CHAT_RECOVERY_MS = 15 * 60 * 1000;
@@ -82,7 +83,7 @@ const MAX_CHAT_RECOVERY_ATTEMPTS = 2;
 const CHAT_NO_PROGRESS_TIMEOUT_MS = 14 * 60 * 1000;
 const CONTEXT_COMPACTION_FIBER = 'background:context_compaction';
 const PREVIEW_BUILD_FIBER = 'background:builder_preview';
-const CHAT_CANCELLATION_SETTLE_TIMEOUT_MS = 5 * 60 * 1000;
+const CHAT_CANCELLATION_SETTLE_TIMEOUT_MS = 4.5 * 60 * 1000;
 
 type PreviewBuildJob = {
   previewId: string;
@@ -484,7 +485,9 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
 
   @callable()
   async cancelActiveTurn(): Promise<unknown> {
+    const deadline = Date.now() + CHAT_CANCELLATION_SETTLE_TIMEOUT_MS;
     const activeTurn = this.state.activeTurn;
+    const validationCancellation = this.workspace.cancelActiveValidation();
     this.abortAllRequests(new DOMException('Cancelled by the project owner', 'AbortError'));
     if (activeTurn) {
       this.finishTurn(activeTurn, {
@@ -492,8 +495,10 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         error: 'Cancelled by the project owner',
       });
     }
+    await waitForCancellationBeforeDeadline(validationCancellation, deadline);
+    const remainingSettleTime = Math.max(0, deadline - Date.now());
     const settled = await this.waitUntilStable({
-      timeout: CHAT_CANCELLATION_SETTLE_TIMEOUT_MS,
+      timeout: remainingSettleTime,
       pendingInteraction: () => false,
     });
     if (!settled) {

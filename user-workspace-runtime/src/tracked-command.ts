@@ -1,6 +1,6 @@
 const MAX_SANDBOX_FAILURE_MESSAGE_LENGTH = 4_000;
 
-type TrackedSandboxProcess = {
+export type TrackedSandboxProcess = {
   waitForExit(timeout?: number): Promise<{ exitCode: number }>;
   kill(signal?: string): Promise<void>;
   getStatus(): Promise<'starting' | 'running' | 'completed' | 'failed' | 'killed' | 'error'>;
@@ -26,6 +26,7 @@ type RunTrackedSandboxCommandOptions = {
       onOutput: (stream: 'stdout' | 'stderr', data: string) => void;
     },
   ) => Promise<TrackedSandboxProcess>;
+  onProcess?: (process: TrackedSandboxProcess) => void | Promise<void>;
 };
 
 export async function runTrackedSandboxCommand(options: RunTrackedSandboxCommandOptions): Promise<void> {
@@ -37,6 +38,7 @@ export async function runTrackedSandboxCommand(options: RunTrackedSandboxCommand
       logs[stream] = `${logs[stream]}${data}`.slice(-MAX_SANDBOX_FAILURE_MESSAGE_LENGTH);
     },
   });
+  await options.onProcess?.(process);
   let exitCode: number;
   try {
     exitCode = (await process.waitForExit(options.timeout)).exitCode;

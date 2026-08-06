@@ -82,6 +82,7 @@ import {
   SandboxProcessTerminationUnconfirmedError,
   terminateTrackedSandboxProcess,
 } from './tracked-command';
+import { ValidationCancellation } from './validation-cancellation';
 import {
   createContainerDirectoryCommand,
   createIsolatedProjectCommand,
@@ -122,6 +123,7 @@ const INSTALL_COMMAND =
   'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/';
 const COMPUTERD_PROCESS_ID = 'ghostbuild-computerd';
 const TRANSIENT_COMMAND_PROCESS_ID = 'ghostbuild-transient-command';
+const VALIDATION_CANCELLATION_SETTLE_MS = 45_000;
 const PREVIEW_BUILD_CLEANUP_DEADLINE_MS = 30 * 60_000;
 const OPERATION_LEASE_MS = {
   seed: 10 * 60_000,
@@ -135,6 +137,13 @@ const OPERATION_LEASE_MS = {
 } as const;
 
 type StatefulOperationKind = keyof typeof OPERATION_LEASE_MS;
+
+type ActiveValidation = {
+  toolCallId: string;
+  inputJson: string;
+  cancellation: ValidationCancellation;
+  promise: Promise<GhostbuildToolResult>;
+};
 
 type WorkspaceFile = {
   path: string;
@@ -310,6 +319,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   readonly #operationLane: WorkspaceOperationLane;
   readonly #syncRetries: DurableWorkspaceSyncRetryScheduler;
   readonly #activeOperationOwners = new Set<string>();
+  #activeValidation: ActiveValidation | null = null;
   readonly #activeSyncRecoveries = new Map<string, Promise<boolean>>();
   #containerKeepAliveOperations = 0;
 
@@ -1093,26 +1103,76 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   async validateTool(value: unknown): Promise<GhostbuildToolResult> {
     const input = record(value);
     const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
-    return this.runToolOperation(toolCallId, 'validateProject', input.input, () =>
+    const inputJson = JSON.stringify(stableValue(input.input)) ?? 'null';
+    if (this.#activeValidation) {
+      if (this.#activeValidation.toolCallId === toolCallId) {
+        if (this.#activeValidation.inputJson !== inputJson) {
+          throw new Error('A workspace tool-call identifier was reused with different arguments.');
+        }
+        return this.#activeValidation.promise;
+      }
+      throw new Error('ProjectWorkspace validation is already running.');
+    }
+    const cancellation = new ValidationCancellation();
+    const validation = this.runValidationTool(toolCallId, input.input, cancellation);
+    const activeRecord = { toolCallId, inputJson, cancellation, promise: validation };
+    this.#activeValidation = activeRecord;
+    try {
+      return await validation;
+    } finally {
+      if (this.#activeValidation === activeRecord) {
+        this.#activeValidation = null;
+      }
+    }
+  }
+
+  async cancelValidation(value: unknown): Promise<void> {
+    const toolCallId = requireString(record(value).toolCallId, 'toolCallId', 512);
+    const active = this.#activeValidation;
+    if (!active || active.toolCallId !== toolCallId) {
+      return;
+    }
+    await Promise.race([
+      Promise.all([active.cancellation.cancel(), active.promise.catch(() => undefined)]).then(() => undefined),
+      scheduler.wait(VALIDATION_CANCELLATION_SETTLE_MS).then(() => {
+        throw new Error('Project validation did not settle after cancellation.');
+      }),
+    ]);
+  }
+
+  private runValidationTool(
+    toolCallId: string,
+    input: unknown,
+    cancellation: ValidationCancellation,
+  ): Promise<GhostbuildToolResult> {
+    return this.runToolOperation(toolCallId, 'validateProject', input, () =>
       this.withStatefulOperation('validate', `tool:${toolCallId}`, async () => {
+        cancellation.requireActive();
         const before = await this.checkpoint();
+        cancellation.requireActive();
         const startedAt = Date.now();
         const isolatedRoot = `${ISOLATED_PROJECT_ROOT}/validation-${crypto.randomUUID()}`;
         try {
           let cleanupAllowed = true;
           try {
             await this.pushDurableProjectToContainer();
-            await this.runTransientCommand(
+            cancellation.requireActive();
+            await this.runValidationCommand(
+              cancellation,
               PROJECT_ROOT,
               createIsolatedProjectCommand({ projectRoot: PROJECT_ROOT, isolatedRoot, quote: shellQuote }),
               2 * 60_000,
             );
+            cancellation.requireActive();
             if ((await this.checkpoint()).revision !== before.revision) {
               throw new Error('The project changed while validation was being isolated. Validate the new revision.');
             }
-            await this.runTransientCommand(isolatedRoot, INSTALL_COMMAND, 4 * 60_000);
+            cancellation.requireActive();
+            await this.runValidationCommand(cancellation, isolatedRoot, INSTALL_COMMAND, 4 * 60_000);
+            cancellation.requireActive();
             for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
-              await this.runTransientCommand(isolatedRoot, command, 5 * 60_000);
+              await this.runValidationCommand(cancellation, isolatedRoot, command, 5 * 60_000);
+              cancellation.requireActive();
             }
           } catch (error) {
             cleanupAllowed = !(error instanceof SandboxProcessTerminationUnconfirmedError);
@@ -1124,7 +1184,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
               );
             }
           }
+          cancellation.requireActive();
           const after = await this.checkpoint();
+          cancellation.requireActive();
           if (after.revision !== before.revision) {
             throw new Error('The project changed while validation was running. Validate the new revision.');
           }
@@ -1703,13 +1765,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   }
 
   private async runTransientCommand(directory: string, command: string, timeout: number): Promise<void> {
-    const existing = await this.getProcess(TRANSIENT_COMMAND_PROCESS_ID);
-    if (existing) {
-      const status = await existing.getStatus();
-      if (status === 'starting' || status === 'running') {
-        await terminateTrackedSandboxProcess(existing);
-      }
-    }
+    await this.terminateTransientCommand();
     await runTrackedSandboxCommand({
       command: createContainerDirectoryCommand({
         directory,
@@ -1720,6 +1776,47 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       processId: TRANSIENT_COMMAND_PROCESS_ID,
       startProcess: (trackedCommand, options) => this.startProcess(trackedCommand, options),
     });
+  }
+
+  private async runValidationCommand(
+    cancellation: ValidationCancellation,
+    directory: string,
+    command: string,
+    timeout: number,
+  ): Promise<void> {
+    await this.terminateTransientCommand();
+    cancellation.requireActive();
+    let process: Parameters<ValidationCancellation['attachProcess']>[0] | undefined;
+    try {
+      await runTrackedSandboxCommand({
+        command: createContainerDirectoryCommand({
+          directory,
+          command: `timeout --signal=KILL ${Math.ceil(timeout / 1_000)}s sh -lc ${shellQuote(command)}`,
+          quote: shellQuote,
+        }),
+        timeout,
+        processId: TRANSIENT_COMMAND_PROCESS_ID,
+        startProcess: (trackedCommand, options) => this.startProcess(trackedCommand, options),
+        onProcess: async (startedProcess) => {
+          process = startedProcess;
+          await cancellation.attachProcess(startedProcess);
+        },
+      });
+    } finally {
+      if (process) {
+        cancellation.detachProcess(process);
+      }
+    }
+  }
+
+  private async terminateTransientCommand(): Promise<void> {
+    const existing = await this.getProcess(TRANSIENT_COMMAND_PROCESS_ID);
+    if (existing) {
+      const status = await existing.getStatus();
+      if (status === 'starting' || status === 'running') {
+        await terminateTrackedSandboxProcess(existing);
+      }
+    }
   }
 
   private async cleanupPreviewProcess(row: Pick<ActivePreviewRow, 'exec_id' | 'snapshot_root'>): Promise<void> {

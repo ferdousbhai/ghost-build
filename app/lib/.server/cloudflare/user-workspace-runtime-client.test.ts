@@ -190,6 +190,80 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     await expect(first).resolves.toEqual({ ok: true });
   });
 
+  it('cancels the exact active validation and forgets it after the RPC settles', async () => {
+    let finishValidation!: (value: { content: string }) => void;
+    const validationResult = new Promise<{ content: string }>((resolve) => {
+      finishValidation = resolve;
+    });
+    const { client, stub } = harness((operation) => {
+      if (operation === 'validateTool') {
+        return validationResult;
+      }
+      return undefined;
+    });
+
+    const validation = client.validate({ toolCallId: 'validation-1', input: {} });
+    await vi.waitFor(() => expect(stub.validateTool).toHaveBeenCalledOnce());
+
+    await client.cancelActiveValidation();
+    expect(stub.cancelValidation).toHaveBeenCalledWith({ toolCallId: 'validation-1' });
+
+    finishValidation({ content: 'cancelled' });
+    await expect(validation).resolves.toEqual({ content: 'cancelled' });
+    await client.cancelActiveValidation();
+    expect(stub.cancelValidation).toHaveBeenCalledOnce();
+  });
+
+  it('cancels the exact validation when the AI SDK abort signal fires', async () => {
+    let finishValidation!: (value: { content: string }) => void;
+    const validationResult = new Promise<{ content: string }>((resolve) => {
+      finishValidation = resolve;
+    });
+    const { client, stub } = harness((operation) => {
+      if (operation === 'validateTool') {
+        return validationResult;
+      }
+      if (operation === 'cancelValidation') {
+        finishValidation({ content: 'cancelled' });
+      }
+      return undefined;
+    });
+    const controller = new AbortController();
+
+    const validation = client.validate({ toolCallId: 'validation-1', input: {}, abortSignal: controller.signal });
+    await vi.waitFor(() => expect(stub.validateTool).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(validation).rejects.toMatchObject({ name: 'AbortError' });
+    expect(stub.cancelValidation).toHaveBeenCalledWith({ toolCallId: 'validation-1' });
+  });
+
+  it('forgets an aborted validation even when its cancellation RPC fails', async () => {
+    let rejectValidation!: (error: Error) => void;
+    const firstValidation = new Promise<never>((_resolve, reject) => {
+      rejectValidation = reject;
+    });
+    const cancellationFailure = new Error('cancellation RPC failed');
+    const { client, stub } = harness((operation, value) => {
+      if (operation === 'validateTool') {
+        return record(value).toolCallId === 'validation-1' ? firstValidation : { content: 'validated' };
+      }
+      if (operation === 'cancelValidation') {
+        rejectValidation(new Error('validation cancelled'));
+        throw cancellationFailure;
+      }
+      return undefined;
+    });
+    const controller = new AbortController();
+
+    const aborted = client.validate({ toolCallId: 'validation-1', input: {}, abortSignal: controller.signal });
+    await vi.waitFor(() => expect(stub.validateTool).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(aborted).rejects.toBe(cancellationFailure);
+    await expect(client.validate({ toolCallId: 'validation-2', input: {} })).resolves.toEqual({ content: 'validated' });
+  });
+
   it('propagates typed stub failures and preserves the original tool error', async () => {
     const failure = new Error('command failed');
     const { client, stub } = harness((operation) =>
@@ -340,6 +414,8 @@ function harness(respond: (operation: string, value: unknown) => unknown, userId
     beginToolOperation: method('beginToolOperation'),
     completeToolOperation: method('completeToolOperation'),
     failToolOperation: method('failToolOperation'),
+    validateTool: method('validateTool'),
+    cancelValidation: method('cancelValidation'),
     readWorkspaceFile: method('readWorkspaceFile'),
     streamWorkspaceFile: method('streamWorkspaceFile'),
   };

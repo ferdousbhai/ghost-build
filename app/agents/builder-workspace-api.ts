@@ -53,6 +53,7 @@ export interface ProjectWorkspaceRpc extends Rpc.DurableObjectBranded {
   checkpoint(): Promise<BuilderWorkspaceCheckpoint>;
   installDependenciesTool(value: unknown): Promise<GhostbuildToolResult>;
   validateTool(value: unknown): Promise<GhostbuildToolResult>;
+  cancelValidation(value: unknown): Promise<void>;
   validationStatus(revision: unknown): { valid: boolean } | Promise<{ valid: boolean }>;
   deploymentPlan(revision: unknown): ReturnType<BuilderWorkspaceApi['prepareDeployment']>;
   beginDeploymentSession(value: {
@@ -115,7 +116,8 @@ export interface BuilderWorkspaceApi {
     mode: 'add' | 'sync-lockfile';
     packages: string[];
   }): Promise<GhostbuildToolResult>;
-  validate(args: { toolCallId: string; input: unknown }): Promise<GhostbuildToolResult>;
+  validate(args: { toolCallId: string; input: unknown; abortSignal?: AbortSignal }): Promise<GhostbuildToolResult>;
+  cancelActiveValidation(): Promise<void>;
   hasSuccessfulValidation(revision: string): Promise<boolean>;
   prepareDeployment(revision: string): Promise<{
     workspaceRevision: number;

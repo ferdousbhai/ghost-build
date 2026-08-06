@@ -40,7 +40,11 @@ describe('server Builder operation tools', () => {
         buildEnvironment: 'user-cloudflare-sandbox',
       },
     });
-    expect(workspace.validate).toHaveBeenCalledWith({ toolCallId: 'validation-call', input: {} });
+    expect(workspace.validate).toHaveBeenCalledWith({
+      toolCallId: 'validation-call',
+      input: {},
+      abortSignal: undefined,
+    });
     expect(onValidationStage.mock.calls).toEqual([
       ['validation-call', 'computer validation'],
       ['validation-call', null],

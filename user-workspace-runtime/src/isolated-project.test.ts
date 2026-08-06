@@ -115,6 +115,14 @@ describe('isolated project command', () => {
     expect(preview).toContain('await this.startProcess(');
     expect(source).toContain("await this.#workspace.push('container-shell')");
     expect(source).toContain("const TRANSIENT_COMMAND_PROCESS_ID = 'ghostbuild-transient-command'");
+    expect(validation).toContain('async cancelValidation(');
+    expect(validation).toContain('active.cancellation.cancel()');
+    expect(validation).toContain('this.#activeValidation.inputJson !== inputJson');
+    expect(validation).toContain('cancellation.requireActive()');
+    expect(validation).toContain('this.runValidationCommand(');
+    const initialCheckpoint = validation.indexOf('const before = await this.checkpoint()');
+    const durablePush = validation.indexOf('await this.pushDurableProjectToContainer()');
+    expect(validation.indexOf('cancellation.requireActive()', initialCheckpoint)).toBeLessThan(durablePush);
     const transientCommand = source.slice(
       source.indexOf('private async runTransientCommand('),
       source.indexOf('private async cleanupPreviewProcess('),
