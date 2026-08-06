@@ -10,7 +10,7 @@ import type {
 } from '~/components/editor/codemirror/CodeMirrorEditor';
 import useViewport from '~/lib/hooks/useViewport';
 import { workbenchStore, type WorkbenchViewType } from '~/lib/stores/workbench.client';
-import { useChatId } from '~/lib/stores/chatId';
+import { chatStore, useChatId } from '~/lib/stores/chatId';
 
 const logger = createScopedLogger('WorkbenchController');
 
@@ -98,7 +98,10 @@ export function useWorkbenchController(isStreaming?: boolean) {
   }, []);
 
   return {
-    close: () => workbenchStore.showWorkbench.set(false),
+    close: () => {
+      chatStore.setKey('showChat', true);
+      workbenchStore.showWorkbench.set(false);
+    },
     currentDocument,
     files,
     following,

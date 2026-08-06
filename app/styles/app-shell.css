@@ -293,10 +293,6 @@ button,
     padding-left: 12px;
   }
 
-  .ghostbuild-header[data-chat-started='true'] .ghostbuild-brand-name {
-    display: none;
-  }
-
   .app-page-container {
     width: min(100% - 28px, 960px);
     padding-top: 18px;
@@ -308,6 +304,12 @@ button,
 
   .app-page-lede {
     font-size: 16px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .ghostbuild-header[data-chat-started='true'] .ghostbuild-brand-name {
+    display: none;
   }
 }
 

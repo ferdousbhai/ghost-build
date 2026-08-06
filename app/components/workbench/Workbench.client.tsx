@@ -216,23 +216,44 @@ function WorkbenchFrame({
       inert={!visible}
     >
       <div
-        className={classNames(
-          'fixed top-[calc(var(--header-height)+1rem)] bottom-four w-[var(--workbench-inner-width)] z-0 transition-[left,width] duration-200 bolt-ease-cubic-bezier',
-          {
-            invisible: !visible,
-            'w-full': isSmallViewport,
-            'left-0': isSmallViewport,
-            'left-[var(--workbench-left)]': !isSmallViewport,
-          },
-        )}
+        className={classNames('fixed z-0 transition-[left,width] duration-200 bolt-ease-cubic-bezier', {
+          invisible: !visible,
+          'inset-x-0 top-[var(--header-height)] bottom-0 w-full': isSmallViewport,
+          'left-[var(--workbench-left)] top-[calc(var(--header-height)+1rem)] bottom-four w-[var(--workbench-inner-width)]':
+            !isSmallViewport,
+        })}
       >
-        <div className="absolute inset-0 px-2 lg:px-6">
-          <div className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-border-transparent bg-bolt-elements-background-depth-2 shadow-[0_20px_60px_color-mix(in_srgb,var(--ghost-home-accent-2)_10%,transparent)]">
-            <div className="flex items-center border-b border-border-transparent px-3 py-2.5">
-              <Slider selected={selectedView} options={sliderOptions} setSelected={setSelectedView} />
-              <div className="ml-auto" />
-              <div inert={Boolean(lockedMessage)}>{headerActions}</div>
-              <IconButton icon={<Cross2Icon />} className="-mr-1" size="xl" title="Close workbench" onClick={onClose} />
+        <div className={classNames('absolute inset-0', { 'px-2 lg:px-6': !isSmallViewport })}>
+          <div
+            className={classNames('relative flex h-full flex-col overflow-hidden bg-bolt-elements-background-depth-2', {
+              'rounded-2xl border border-border-transparent shadow-[0_20px_60px_color-mix(in_srgb,var(--ghost-home-accent-2)_10%,transparent)]':
+                !isSmallViewport,
+            })}
+          >
+            <div
+              className={classNames('flex items-center border-b border-border-transparent', {
+                'min-h-11 justify-end px-2 py-1': isSmallViewport,
+                'px-3 py-2.5': !isSmallViewport,
+              })}
+            >
+              {!isSmallViewport && (
+                <>
+                  <Slider selected={selectedView} options={sliderOptions} setSelected={setSelectedView} />
+                  <div className="ml-auto" />
+                </>
+              )}
+              <div className={classNames({ 'ml-auto': isSmallViewport })} inert={Boolean(lockedMessage)}>
+                {headerActions}
+              </div>
+              {!isSmallViewport && (
+                <IconButton
+                  icon={<Cross2Icon />}
+                  className="-mr-1"
+                  size="xl"
+                  title="Close workbench"
+                  onClick={onClose}
+                />
+              )}
             </div>
             <div className="relative flex-1 overflow-hidden">
               <div className="size-full" inert={Boolean(lockedMessage)}>

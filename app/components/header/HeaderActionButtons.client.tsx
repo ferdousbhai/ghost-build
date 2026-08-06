@@ -1,9 +1,11 @@
 import { useStore } from '@nanostores/react';
-import { ChatBubbleIcon, CodeIcon } from '@radix-ui/react-icons';
+import { ChatBubbleIcon, CodeIcon, EyeOpenIcon } from '@radix-ui/react-icons';
+import { useEffect, type ReactNode } from 'react';
 import { Button } from '@ui/Button';
 import useViewport from '~/lib/hooks/useViewport';
 import { chatStore } from '~/lib/stores/chatId';
-import { workbenchStore } from '~/lib/stores/workbench.client';
+import { workbenchStore, type WorkbenchViewType } from '~/lib/stores/workbench.client';
+import { classNames } from '~/utils/classNames';
 
 export function HeaderActionButtons() {
   const showWorkbench = useStore(workbenchStore.showWorkbench);
@@ -11,11 +13,15 @@ export function HeaderActionButtons() {
   const isSmallViewport = useViewport(1024);
   const canHideChat = showWorkbench || !showChat;
 
+  if (isSmallViewport) {
+    return <SmallScreenSurfaceSwitcher showChat={showChat} showWorkbench={showWorkbench} />;
+  }
+
   return (
     <div className="flex">
       <div className="flex overflow-hidden">
         <Button
-          disabled={!canHideChat || isSmallViewport} // expand button is disabled on mobile as it's not needed
+          disabled={!canHideChat}
           tip={!canHideChat ? 'Cannot hide chat while code is closed' : showChat ? 'Hide chat' : 'Show chat'}
           onClick={() => {
             if (canHideChat) {
@@ -43,5 +49,81 @@ export function HeaderActionButtons() {
         />
       </div>
     </div>
+  );
+}
+
+function SmallScreenSurfaceSwitcher({ showChat, showWorkbench }: { showChat: boolean; showWorkbench: boolean }) {
+  const selectedView = useStore(workbenchStore.currentView);
+
+  useEffect(() => {
+    if (!showChat && !showWorkbench) {
+      chatStore.setKey('showChat', true);
+    }
+  }, [showChat, showWorkbench]);
+
+  const selectWorkbench = (view: WorkbenchViewType) => {
+    chatStore.setKey('showChat', true);
+    workbenchStore.currentView.set(view);
+    workbenchStore.showWorkbench.set(true);
+  };
+
+  return (
+    <div
+      className="flex overflow-hidden rounded-full border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2"
+      role="group"
+      aria-label="Workspace view"
+    >
+      <SurfaceButton
+        label="Chat"
+        selected={showChat && !showWorkbench}
+        icon={<ChatBubbleIcon />}
+        onClick={() => {
+          chatStore.setKey('showChat', true);
+          workbenchStore.showWorkbench.set(false);
+        }}
+      />
+      <SurfaceButton
+        label="Code"
+        selected={showWorkbench && selectedView === 'code'}
+        icon={<CodeIcon />}
+        onClick={() => selectWorkbench('code')}
+      />
+      <SurfaceButton
+        label="Preview"
+        selected={showWorkbench && selectedView === 'preview'}
+        icon={<EyeOpenIcon />}
+        onClick={() => selectWorkbench('preview')}
+      />
+    </div>
+  );
+}
+
+function SurfaceButton({
+  label,
+  selected,
+  icon,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  icon: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={classNames(
+        'grid size-11 shrink-0 place-items-center border-r border-bolt-elements-borderColor text-content-secondary transition-colors last:border-r-0 hover:bg-bolt-elements-background-depth-3 hover:text-content-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500',
+        {
+          'bg-bolt-elements-item-backgroundAccent text-bolt-elements-item-contentAccent': selected,
+        },
+      )}
+      aria-label={label}
+      aria-pressed={selected}
+      title={label}
+      onClick={onClick}
+    >
+      {icon}
+    </button>
   );
 }

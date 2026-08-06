@@ -13,8 +13,12 @@ import { ThemeSwitch } from '~/components/ui/ThemeSwitch';
 import { toast } from 'sonner';
 import { LinkButton } from '~/components/ui/LinkButton';
 import { useNavigate } from '@tanstack/react-router';
+import { classNames } from '~/utils/classNames';
 
 const DownloadButton = lazy(() => import('./DownloadButton').then((module) => ({ default: module.DownloadButton })));
+const MobileProjectMenuItems = lazy(() =>
+  import('./DownloadButton').then((module) => ({ default: module.MobileProjectMenuItems })),
+);
 const SidebarMenu = lazy(() => import('~/components/sidebar/Menu.client').then((module) => ({ default: module.Menu })));
 const HeaderActionButtons = lazy(() =>
   import('./HeaderActionButtons.client').then((module) => ({ default: module.HeaderActionButtons })),
@@ -45,7 +49,10 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
   return (
     <>
       <header
-        className="ghostbuild-header flex h-[var(--header-height)] items-center overflow-x-auto overflow-y-hidden border-b px-3 py-1.5 sm:px-5 sm:py-3"
+        className={classNames(
+          'ghostbuild-header flex h-[var(--header-height)] items-center overflow-x-auto overflow-y-hidden border-b px-3 sm:px-5',
+          { 'py-1 lg:py-3': chat.started, 'py-1.5 sm:py-3': !chat.started },
+        )}
         data-chat-started={chat.started}
       >
         <div className="z-40 flex items-center gap-3 text-content-primary">
@@ -67,7 +74,10 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
           )}
           <BrandLink
             variant="header"
-            className="flex items-center gap-2 rounded-md text-content-primary no-underline hover:text-content-primary hover:no-underline"
+            className={classNames(
+              'flex items-center gap-2 rounded-md text-content-primary no-underline hover:text-content-primary hover:no-underline',
+              { 'max-[479px]:hidden': showSidebarIcon && chat.started },
+            )}
             nameClassName="ghostbuild-brand-name font-display text-lg font-black leading-none text-content-primary"
           />
         </div>
@@ -80,7 +90,9 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
           {chat.started && (
             <>
               <Suspense fallback={null}>
-                <DownloadButton />
+                <div className="hidden lg:block">
+                  <DownloadButton />
+                </div>
               </Suspense>
               <Suspense fallback={null}>
                 <div className="mr-1">
@@ -89,7 +101,9 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
               </Suspense>
             </>
           )}
-          <ThemeSwitch className="!size-11 !min-h-11 sm:!size-auto sm:!min-h-9" />
+          <ThemeSwitch
+            className={chat.started ? 'hidden lg:inline-flex' : '!size-11 !min-h-11 sm:!size-auto sm:!min-h-9'}
+          />
           {profile && (
             <>
               <div className="hidden items-center gap-1 lg:flex">
@@ -110,6 +124,11 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
                     icon: <ProfileAvatar avatar={profile.avatar} username={profile.username} />,
                   }}
                 >
+                  {chat.started && (
+                    <Suspense fallback={null}>
+                      <MobileProjectMenuItems />
+                    </Suspense>
+                  )}
                   <MenuItemComponent action={handleSettingsClick}>
                     <GearIcon className="text-content-secondary" />
                     Settings
