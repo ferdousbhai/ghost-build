@@ -134,6 +134,13 @@ describe('isolated project command', () => {
     expect(source).not.toContain('cwd: isolatedRoot');
     expect(source).not.toContain('cwd: snapshotRoot');
 
+    const previewCleanup = source.slice(
+      source.indexOf('private async cleanupPreviewProcess('),
+      source.indexOf('private async cleanupPendingPreviews('),
+    );
+    expect(previewCleanup).toContain("await this.runTransientCommand('/', `rm -rf");
+    expect(previewCleanup).not.toContain('this.runTransientCommand(PROJECT_ROOT');
+
     const materialization = source.slice(
       source.indexOf('private async pushDurableProjectToContainer('),
       source.indexOf('private async runTransientCommand('),

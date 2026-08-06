@@ -1856,7 +1856,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         await terminateTrackedSandboxProcess(process);
       }
     }
-    await this.runTransientCommand(PROJECT_ROOT, `rm -rf ${shellQuote(row.snapshot_root)}`, 30_000);
+    await this.runTransientCommand('/', `rm -rf ${shellQuote(row.snapshot_root)}`, 30_000);
   }
 
   private async cleanupPendingPreviews(): Promise<void> {
