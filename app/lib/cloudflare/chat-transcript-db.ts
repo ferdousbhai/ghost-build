@@ -12,7 +12,7 @@ import {
   type TranscriptIdentity,
 } from 'ghostbuild-agent/transcript';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
-import { executeDataOperation } from './client';
+import { executeDataOperation, UserRuntimeRequestError } from './client';
 import { api } from './data-api';
 import { queryClient } from '~/lib/stores/reactQueryClient';
 import type { SerializedMessage } from '~/lib/stores/startup/messages';
@@ -280,9 +280,7 @@ async function loadChatTranscript(
     signal: AbortSignal.any([signal, AbortSignal.timeout(TRANSCRIPT_FETCH_TIMEOUT_MS)]),
   });
   if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
-    const detail = typeof payload?.error === 'string' ? `: ${payload.error}` : '';
-    throw new Error(`Failed to fetch project messages (${response.status})${detail}`);
+    throw await projectMessagesRequestError(response);
   }
   const responseTranscript = transcriptIdentityFromHeaders(response.headers);
   const history =
@@ -302,6 +300,16 @@ async function loadChatTranscript(
         : null,
     messages: history.messages,
   };
+}
+
+export async function projectMessagesRequestError(response: Response): Promise<UserRuntimeRequestError> {
+  const payload = (await response.json().catch(() => null)) as { error?: unknown; retryable?: unknown } | null;
+  const detail = typeof payload?.error === 'string' ? `: ${payload.error}` : '';
+  return new UserRuntimeRequestError(
+    `Failed to fetch project messages (${response.status})${detail}`,
+    response.status,
+    payload?.retryable,
+  );
 }
 
 function transcriptIdentity(checkpoint: TranscriptCheckpoint): TranscriptIdentity {

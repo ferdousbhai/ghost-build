@@ -76,5 +76,19 @@ describe('executeDataOperation', () => {
     await expect(
       executeDataOperation(api.messages.initializeChat, { id: 'chat-1', sessionId: 'session-1' }),
     ).rejects.toMatchObject({ name: 'DataOperationError', status: 503, retryable: true });
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({ error: 'Overloaded', retryable: false }, { status: 503 }),
+    );
+    await expect(
+      executeDataOperation(api.messages.initializeChat, { id: 'chat-1', sessionId: 'session-1' }),
+    ).rejects.toMatchObject({ name: 'DataOperationError', status: 503, retryable: false });
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({ error: 'Malformed marker', retryable: 'false' }, { status: 500 }),
+    );
+    await expect(
+      executeDataOperation(api.messages.initializeChat, { id: 'chat-1', sessionId: 'session-1' }),
+    ).rejects.toMatchObject({ name: 'DataOperationError', status: 500, retryable: true });
   });
 });

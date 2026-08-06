@@ -29,6 +29,7 @@ import {
 import { sweepAgentGcCandidatesBestEffort } from './data/agent-gc.server';
 import { ensureDataBindings, internalErrorResponse, parseRequestQuery } from './data/http.server';
 import { requireChatTranscript, transcriptIdentity } from './data/transcript-repository.server';
+import { retryDurableObjectRpc } from './durable-object-rpc.server';
 import type { ChatTranscriptRow } from './data/types';
 
 const dataOperationPathSchema = z.enum(
@@ -190,11 +191,13 @@ function getBuilderTranscriptSnapshot(
   identity: TranscriptIdentity,
   ownerId: string,
 ): ReturnType<BuilderAgent['getTranscriptSnapshot']> {
-  const stub = env.BuilderAgent.getByName(identity.agentName) as unknown as Pick<
-    BuilderAgent,
-    'getTranscriptSnapshotForOwner'
-  >;
-  return stub.getTranscriptSnapshotForOwner(identity, ownerId);
+  return retryDurableObjectRpc(() => {
+    const stub = env.BuilderAgent.getByName(identity.agentName) as unknown as Pick<
+      BuilderAgent,
+      'getTranscriptSnapshotForOwner'
+    >;
+    return stub.getTranscriptSnapshotForOwner(identity, ownerId);
+  });
 }
 
 function transcriptResponseHeaders(transcript: ChatTranscriptRow): Headers {

@@ -12,8 +12,8 @@ import { queryClient as collectionQueryClient } from '~/lib/stores/reactQueryCli
 
 const executeDataOperation = vi.hoisted(() => vi.fn());
 
-vi.mock('./client', () => ({
-  DataOperationError: class DataOperationError extends Error {
+vi.mock('./client', () => {
+  class UserRuntimeRequestError extends Error {
     constructor(
       message: string,
       readonly status: number | undefined,
@@ -21,9 +21,14 @@ vi.mock('./client', () => ({
     ) {
       super(message);
     }
-  },
-  executeDataOperation,
-}));
+  }
+
+  return {
+    UserRuntimeRequestError,
+    DataOperationError: class DataOperationError extends UserRuntimeRequestError {},
+    executeDataOperation,
+  };
+});
 
 vi.mock('./account-local-replica', () => ({
   ACCOUNT_LOCAL_REPLICA_GC_TIME: 30 * 24 * 60 * 60 * 1_000,

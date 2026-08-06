@@ -21,4 +21,18 @@ describe('internalErrorResponse', () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: 'This project has reached the maximum number of subchats.' });
   });
+
+  it('marks Durable Object overloads as non-retryable without exposing provider details', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const overloaded = Object.assign(new Error('SECRET_PROVIDER_MARKER: queue full'), {
+      overloaded: true,
+      retryable: true,
+    });
+
+    const response = internalErrorResponse(overloaded, 'Unknown data error');
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'Unknown data error', retryable: false });
+    consoleError.mockRestore();
+  });
 });

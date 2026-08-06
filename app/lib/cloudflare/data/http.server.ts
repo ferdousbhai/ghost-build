@@ -4,6 +4,7 @@ import { UnauthorizedError } from './auth.server';
 import { DataNotFoundError, SubchatLimitError } from './errors';
 import { InvalidJsonBodyError, PayloadTooLargeError } from '~/lib/bounded-body';
 import { InvalidMultipartBodyError } from '~/lib/bounded-multipart';
+import { isDurableObjectOverloadedError } from '~/lib/cloudflare/durable-object-rpc.server';
 
 const logger = createScopedLogger('CloudflareData');
 
@@ -25,6 +26,10 @@ export function internalErrorResponse(error: unknown, fallback: string): Respons
   }
   if (error instanceof InvalidJsonBodyError || error instanceof InvalidMultipartBodyError) {
     return Response.json({ error: error.message }, { status: 400 });
+  }
+  if (isDurableObjectOverloadedError(error)) {
+    logger.error('Cloudflare data request rejected by an overloaded Durable Object');
+    return Response.json({ error: fallback, retryable: false }, { status: 503 });
   }
   logger.error('Unhandled Cloudflare data request failure');
   return Response.json({ error: fallback }, { status: 500 });

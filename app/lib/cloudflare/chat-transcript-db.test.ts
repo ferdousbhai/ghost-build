@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TRANSCRIPT_HISTORY_FORMAT_VERSION } from 'ghostbuild-agent/transcript';
-import { parseMessageHistory, transcriptIdentityFromHeaders } from './chat-transcript-db';
+import { parseMessageHistory, projectMessagesRequestError, transcriptIdentityFromHeaders } from './chat-transcript-db';
 
 const checkpoint = {
   agentName: 'agent-1',
@@ -70,5 +70,28 @@ describe('transcriptIdentityFromHeaders', () => {
         }),
       ),
     ).toThrow('invalid transcript identity headers');
+  });
+});
+
+describe('projectMessagesRequestError', () => {
+  it('preserves an explicit non-retryable overload marker', async () => {
+    const error = await projectMessagesRequestError(
+      Response.json({ error: 'Project storage is busy', retryable: false }, { status: 503 }),
+    );
+
+    expect(error).toMatchObject({
+      name: 'UserRuntimeRequestError',
+      message: 'Failed to fetch project messages (503): Project storage is busy',
+      status: 503,
+      retryable: false,
+    });
+  });
+
+  it('ignores malformed retryability metadata and falls back to HTTP status', async () => {
+    const error = await projectMessagesRequestError(
+      Response.json({ error: 'Unknown failure', retryable: 'false' }, { status: 500 }),
+    );
+
+    expect(error.retryable).toBe(true);
   });
 });

@@ -3,13 +3,26 @@ import { fetchUserRuntime } from './runtime-session';
 
 const DATA_OPERATION_TIMEOUT_MS = 15_000;
 
-export class DataOperationError extends Error {
+export class UserRuntimeRequestError extends Error {
+  readonly retryable: boolean;
+
   constructor(
     message: string,
     readonly status: number | undefined,
-    readonly retryable: boolean,
+    retryable?: unknown,
   ) {
     super(message);
+    this.name = 'UserRuntimeRequestError';
+    this.retryable =
+      typeof retryable === 'boolean'
+        ? retryable
+        : status === undefined || status === 408 || status === 429 || status >= 500;
+  }
+}
+
+export class DataOperationError extends UserRuntimeRequestError {
+  constructor(message: string, status: number | undefined, retryable?: unknown) {
+    super(message, status, retryable);
     this.name = 'DataOperationError';
   }
 }
@@ -49,17 +62,14 @@ export async function executeDataOperation<Path extends DataOperationPath>(
     const body = (await response.json().catch(() => null)) as {
       result?: DataOperationResult<Path>;
       error?: string;
+      retryable?: unknown;
     } | null;
     if (timedOut) {
       throw dataOperationTimeoutError(path);
     }
     options.signal?.throwIfAborted();
     if (!response.ok) {
-      throw new DataOperationError(
-        body?.error ?? `Data operation failed: ${path}`,
-        response.status,
-        response.status === 408 || response.status === 429 || response.status >= 500,
-      );
+      throw new DataOperationError(body?.error ?? `Data operation failed: ${path}`, response.status, body?.retryable);
     }
     if (!body || !Object.hasOwn(body, 'result')) {
       throw new DataOperationError(`Data operation returned a malformed response: ${path}`, response.status, false);
