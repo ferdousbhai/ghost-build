@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "cloudflare-skills",
+      "repository": "cloudflare/skills",
+      "defaultBranch": "main",
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://github.com/cloudflare/skills/blob/main/LICENSE"
+      },
+      "trackedPaths": [
+        "skills/cloudflare",
+        "skills/agents-sdk",
+        "skills/durable-objects",
+        "skills/workers-best-practices",
+        "skills/wrangler",
+        "skills/cloudflare-email-service",
+        "skills/sandbox-sdk",
+        "skills/turnstile-spin",
+        "skills/web-perf"
+      ],
+      "localReferences": ["ghostbuild-agent/references/cloudflare.ts"],
+      "lastReviewedRelease": null,
+      "lastReviewedRevision": "70215303d44a81a0db3219428f4825b604fc6061",
+      "lastReviewedAt": "2026-07-20",
+      "lastReviewOutcome": "Initial Ghostbuild reference set introduced; scheduled upstream review not yet run."
+    }
+  ]
+}
