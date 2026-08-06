@@ -8,6 +8,8 @@ import { workbenchStore } from '~/lib/stores/workbench.client';
 import { classNames } from '~/utils/classNames';
 import { captureProductEvent } from '~/lib/telemetry.client';
 
+export const PREVIEW_SANDBOX = 'allow-forms allow-modals allow-popups allow-same-origin allow-scripts';
+
 export function Preview() {
   const state = useStore(workbenchStore.previewState);
   const [reloadKey, setReloadKey] = useState(0);
@@ -16,8 +18,9 @@ export function Preview() {
   const candidate = state.active ?? state.lastSuccessful;
   const now = Date.now();
   const preview = candidate && Date.parse(candidate.expiresAt) > now ? candidate : null;
-  const previewUrl = preview?.url ?? null;
-  const status = previewDisplayStatus(state.status, candidate, now);
+  const candidateUrl = candidate ? previewFrameUrl(candidate.url) : null;
+  const previewUrl = preview ? candidateUrl : null;
+  const status = previewDisplayStatus(state.status, candidate, now, candidateUrl !== null);
   const canRetry = state.status === 'failed' || (state.stale && status !== 'queued' && status !== 'building');
 
   useEffect(() => {
@@ -85,7 +88,7 @@ export function Preview() {
             className="size-full border-0 bg-white"
             src={previewUrl}
             title={`Remote preview for durable revision ${preview.workspaceRevision}`}
-            sandbox="allow-forms allow-modals allow-popups allow-scripts"
+            sandbox={PREVIEW_SANDBOX}
             referrerPolicy="no-referrer"
           />
         ) : (
@@ -105,8 +108,26 @@ export function previewDisplayStatus(
   status: string,
   candidate: { expiresAt: string } | null,
   now = Date.now(),
+  hasValidPreviewUrl = true,
 ): string {
-  return status === 'ready' && candidate && Date.parse(candidate.expiresAt) <= now ? 'expired' : status;
+  const expired = candidate && Date.parse(candidate.expiresAt) <= now;
+  if (expired && status !== 'failed' && status !== 'queued' && status !== 'building') {
+    return 'expired';
+  }
+  if (candidate && !hasValidPreviewUrl && status !== 'queued' && status !== 'building') {
+    return 'failed';
+  }
+  return status;
+}
+
+export function previewFrameUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    const quickTunnel = url.hostname !== 'trycloudflare.com' && url.hostname.endsWith('.trycloudflare.com');
+    return url.protocol === 'https:' && !url.username && !url.password && !url.port && quickTunnel ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function PreviewBadge({ status, stale }: { status: string; stale: boolean }) {
