@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { makePartId } from 'ghostbuild-agent/partId';
 import { toolSuccess } from 'ghostbuild-agent/tool-result';
+import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { ToolCall } from './ToolCall';
 
 describe('ToolCall', () => {
@@ -14,9 +15,35 @@ describe('ToolCall', () => {
 
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    window.scrollTo = () => undefined;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+    toolActivityStore.activities.set({});
+    toolActivityStore.startTurn();
+  });
+
+  it.each([
+    ['validateProject', 'Project validation stopped', 'Validating the project'],
+    ['npmInstall', 'Dependency install stopped', 'Installing dependencies'],
+    ['deploy', 'Deployment stopped', 'Checking the project'],
+    ['write', 'File write stopped', 'Writing a file'],
+  ])('presents an incomplete %s tool from an inactive turn as stopped', async (toolName, stopped, active) => {
+    const partId = makePartId('message-1', 0);
+    const invocation: GhostbuildToolInvocation = {
+      type: 'dynamic-tool',
+      state: 'input-available',
+      toolCallId: 'validate-1',
+      toolName,
+      input: {},
+    };
+    toolActivityStore.abortActive();
+    toolActivityStore.record(partId, invocation);
+
+    await act(async () => root.render(<ToolCall partId={partId} invocation={invocation} />));
+
+    expect(container.textContent).toContain(stopped);
+    expect(container.textContent).not.toContain(active);
   });
 
   afterEach(async () => {

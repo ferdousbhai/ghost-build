@@ -55,6 +55,18 @@ const TOOL_INPUT_SCHEMAS: Record<GhostbuildToolName, ZodType> = {
 
 const MAX_TOOL_TITLE_VALUE_CHARACTERS = 160;
 
+const STOPPED_TOOL_TITLES: Record<GhostbuildToolName, string> = {
+  deploy: 'Deployment stopped',
+  edit: 'File edit stopped',
+  exec: 'Command stopped',
+  lookupDocs: 'Documentation lookup stopped',
+  ls: 'File listing stopped',
+  npmInstall: 'Dependency install stopped',
+  read: 'File read stopped',
+  validateProject: 'Project validation stopped',
+  write: 'File write stopped',
+};
+
 export function normalizeToolInvocation(invocation: GhostbuildToolInvocation | undefined): GhostbuildToolInvocation {
   if (!invocation) {
     return emptyInvocation;
@@ -87,7 +99,11 @@ export function statusIcon(status: ToolActivityStatus, invocation: GhostbuildToo
   }
 }
 
-export function toolTitle(invocation: GhostbuildToolInvocation): ReactNode {
+export function toolTitle(invocation: GhostbuildToolInvocation, status: ToolActivityStatus): ReactNode {
+  if (status === 'aborted') {
+    const title = STOPPED_TOOL_TITLES[invocation.toolName as GhostbuildToolName] ?? 'Tool stopped';
+    return titleRow(title, invocation.toolName === 'validateProject' ? validationIcon : undefined);
+  }
   const resultText = toolInvocationResultSummary(invocation);
   switch (invocation.toolName) {
     case 'read':

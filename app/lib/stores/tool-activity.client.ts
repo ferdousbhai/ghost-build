@@ -11,14 +11,44 @@ type ToolActivity = {
 export class ToolActivityStore {
   readonly activities = map<Record<PartId, ToolActivity>>({});
   readonly revision = atom(0);
+  #scope: string | null = null;
   #turnActive = true;
 
-  record(partId: PartId, invocation: GhostbuildToolInvocation): void {
-    if (!this.#turnActive) {
+  activateScope(scope: string): void {
+    if (this.#scope === scope) {
       return;
     }
+    this.#scope = scope;
+    this.#turnActive = false;
+    if (Object.keys(this.activities.get()).length > 0) {
+      this.activities.set({});
+      this.#bumpRevision();
+    }
+  }
+
+  record(partId: PartId, invocation: GhostbuildToolInvocation): void {
+    const activities = this.activities.get();
+    const current = activities[partId];
     const status = invocationStatus(invocation);
-    const current = this.activities.get()[partId];
+    const terminal = Object.values(activities).find(
+      (activity) =>
+        activity.invocation.toolCallId === invocation.toolCallId &&
+        (activity.status === 'aborted' || (activity.status === 'complete' && isToolActivityStatusActive(status))),
+    );
+    if (terminal) {
+      if (current !== terminal) {
+        this.activities.setKey(partId, terminal);
+        this.#bumpRevision();
+      }
+      return;
+    }
+    if (!this.#turnActive) {
+      if (isToolActivityStatusActive(status)) {
+        this.activities.setKey(partId, { invocation, status: 'aborted' });
+        this.#bumpRevision();
+      }
+      return;
+    }
     if (current?.invocation === invocation && current.status === status) {
       return;
     }

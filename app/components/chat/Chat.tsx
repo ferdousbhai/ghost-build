@@ -139,6 +139,7 @@ const AuthenticatedChat = memo(
     const presentationId = workspacePresentationId(accountId, transcript.agentName);
     useLayoutEffect(() => {
       workbenchStore.activateWorkspace(presentationId);
+      toolActivityStore.activateScope(presentationId);
     }, [presentationId]);
     const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
     const hasMultipleSubchats = (subchats?.length ?? 0) > 1;
