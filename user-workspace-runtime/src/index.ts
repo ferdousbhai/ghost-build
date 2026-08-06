@@ -47,7 +47,6 @@ import { verifyRuntimeCapability } from '../../app/lib/cloudflare/runtime-capabi
 import { userRuntimeDeploymentAction } from '../../app/server-handlers/deployments';
 import { userRuntimeEnhancePromptAction } from '../../app/server-handlers/enhance-prompt';
 import { toolFailure, toolSuccess, type GhostbuildToolResult } from '../../ghostbuild-agent/tool-result';
-import { openReadyPreviewQuickTunnel } from './preview-tunnel';
 import { isComputerContainerCallback } from './container-fetch-routing';
 import { COMPUTERD_BINARY, computerdBootstrapCommand, containerToolchainBootstrapCommand } from './container-toolchain';
 import { routeUserWorkspaceRuntimeControlPlaneRequest } from './readiness-route';
@@ -1487,7 +1486,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             },
           );
           await waitForHttpPort(this.ctx.container!.getTcpPort(port));
-          const tunnel = await openReadyPreviewQuickTunnel(this.tunnels, port);
+          const tunnel = await this.tunnels.get(port);
           await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
           this.requirePreviewNotCancelled(previewId);
           await this.setKeepAlive(true);
