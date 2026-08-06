@@ -61,8 +61,10 @@ export const EditorPanel = memo(function EditorPanel({
 
   return (
     <div className="grid h-full min-h-0 grid-cols-[minmax(10rem,22%)_1fr] max-sm:grid-cols-1 max-sm:grid-rows-[minmax(8rem,30%)_1fr]">
-      <aside className="flex min-h-0 flex-col border-r border-border-transparent max-sm:border-r-0 max-sm:border-b">
-        <PanelHeader>Durable files</PanelHeader>
+      <aside
+        aria-label="Project files"
+        className="flex min-h-0 flex-col border-r border-border-transparent max-sm:border-r-0 max-sm:border-b"
+      >
         <FileTree
           className="h-full min-h-0"
           files={files}
