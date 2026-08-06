@@ -57,6 +57,7 @@ import { createCommittedMutationReceipt } from './mutation-receipt';
 import {
   assertPreviewSourceCheckpoint,
   assertPreviewPublicationAllowed,
+  previewExpirationAction,
   PREVIEW_SNAPSHOT_ROOT,
   PREVIEW_TTL_MS,
   previewPort,
@@ -1614,6 +1615,19 @@ export class ProjectWorkspace extends ComputerSandboxBase {
 
   async expirePreview(value: unknown) {
     const previewId = requirePreviewId(record(value).previewId);
+    const pendingExpiresAt = this.pendingPreviewRow(previewId)?.expires_at ?? null;
+    const resultExpiresAt = this.previewResultRow(previewId)?.expires_at ?? null;
+    const expiresAt =
+      pendingExpiresAt === null
+        ? resultExpiresAt
+        : resultExpiresAt === null
+          ? pendingExpiresAt
+          : Math.max(pendingExpiresAt, resultExpiresAt);
+    const expiration = previewExpirationAction(expiresAt);
+    if (expiration.action === 'reschedule') {
+      await this.schedule(new Date(expiration.at), 'expirePreview', { previewId });
+      return;
+    }
     try {
       await this.stopPreview(previewId);
     } catch (error) {

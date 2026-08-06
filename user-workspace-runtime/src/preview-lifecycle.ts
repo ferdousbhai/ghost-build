@@ -1,7 +1,15 @@
 export const PREVIEW_PORT_MIN = 4173;
 export const PREVIEW_PORT_COUNT = 100;
-export const PREVIEW_TTL_MS = 15 * 60_000;
+export const PREVIEW_TTL_MS = 60 * 60_000;
 export const PREVIEW_SNAPSHOT_ROOT = '/tmp/ghostbuild-previews';
+
+type PreviewExpirationAction = { action: 'expire' } | { action: 'reschedule'; at: number };
+
+export function previewExpirationAction(expiresAt: number | null, now = Date.now()): PreviewExpirationAction {
+  return expiresAt !== null && expiresAt > now
+    ? { action: 'reschedule', at: Math.ceil(expiresAt / 1_000) * 1_000 }
+    : { action: 'expire' };
+}
 
 type PreviewCheckpoint = {
   workspaceRevision: number;

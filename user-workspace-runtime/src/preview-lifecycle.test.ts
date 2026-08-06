@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   assertPreviewPublicationAllowed,
   assertPreviewSourceCheckpoint,
+  previewExpirationAction,
   PREVIEW_PORT_COUNT,
   PREVIEW_PORT_MIN,
   previewPort,
@@ -39,6 +40,14 @@ describe('ProjectWorkspace preview lifecycle', () => {
     expect(first).toBeGreaterThanOrEqual(PREVIEW_PORT_MIN);
     expect(first).toBeLessThan(PREVIEW_PORT_MIN + PREVIEW_PORT_COUNT);
     expect(replacement).not.toBe(first);
+  });
+
+  it('does not let an earlier cleanup alarm expire a preview with a later durable deadline', () => {
+    const now = 1_000;
+    expect(previewExpirationAction(now + 60_000, now)).toEqual({ action: 'reschedule', at: now + 60_000 });
+    expect(previewExpirationAction(61_999, 61_100)).toEqual({ action: 'reschedule', at: 62_000 });
+    expect(previewExpirationAction(now, now)).toEqual({ action: 'expire' });
+    expect(previewExpirationAction(null, now)).toEqual({ action: 'expire' });
   });
 
   it('persists cancellation outside the serialized build lane and checks it before publication', () => {
