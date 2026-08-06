@@ -1,19 +1,17 @@
 import { motion } from 'framer-motion';
-import { type StreamStatus, type ToolStatus } from '~/lib/common/types';
+import type { StreamStatus } from '~/lib/common/types';
 import { useStore } from '@nanostores/react';
 import { chatStore } from '~/lib/stores/chatId';
 import { Spinner } from '@ui/Spinner';
 import { ExclamationTriangleIcon, ResetIcon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { isToolActivityStatusActive } from '~/lib/common/types';
 import type { BuildProgress } from './build-progress';
 
 const logger = createScopedLogger('StreamingIndicator');
 
 interface StreamingIndicatorProps {
   streamStatus: StreamStatus;
-  toolStatus?: ToolStatus;
   isRecovering?: boolean;
   currentError?: Error;
   buildProgress: BuildProgress | null;
@@ -58,9 +56,7 @@ export default function StreamingIndicator(props: StreamingIndicatorProps) {
   const { aborted } = useStore(chatStore);
 
   let streamStatus = props.streamStatus;
-  const anyToolRunning =
-    props.toolStatus && Object.values(props.toolStatus).some((status) => isToolActivityStatusActive(status));
-  if (props.isRecovering || anyToolRunning) {
+  if (props.isRecovering) {
     streamStatus = 'streaming';
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PartId } from 'ghostbuild-agent/partId';
+import { makePartId, type PartId } from 'ghostbuild-agent/partId';
 import { ToolActivityStore } from './tool-activity.client';
 
 describe('ToolActivityStore', () => {
@@ -112,6 +112,44 @@ describe('ToolActivityStore', () => {
 
     expect(store.activities.get()[partId]?.status).toBe('complete');
     expect(store.activities.get()[partId]?.invocation.state).toBe('output-available');
+  });
+
+  it('records a final tool result before stopping provider-ended incomplete calls', () => {
+    const store = new ToolActivityStore();
+    const completedPart = makePartId('message', 0);
+    const incompletePart = makePartId('message', 1);
+    store.record(completedPart, {
+      type: 'dynamic-tool',
+      state: 'input-available',
+      toolCallId: 'tool-1',
+      toolName: 'validateProject',
+      input: {},
+    });
+    store.record(incompletePart, {
+      type: 'dynamic-tool',
+      state: 'input-available',
+      toolCallId: 'tool-2',
+      toolName: 'read',
+      input: { path: '/home/project/src/index.tsx' },
+    });
+
+    store.finishTurn({
+      id: 'message',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          state: 'output-available',
+          toolCallId: 'tool-1',
+          toolName: 'validateProject',
+          input: {},
+          output: { ok: true },
+        },
+      ],
+    });
+
+    expect(store.activities.get()[completedPart]?.status).toBe('complete');
+    expect(store.activities.get()[incompletePart]?.status).toBe('aborted');
   });
 
   it('does not carry terminal tool-call IDs into another presentation', () => {

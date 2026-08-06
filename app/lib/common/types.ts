@@ -1,7 +1,5 @@
 export type ToolActivityStatus = 'pending' | 'running' | 'complete' | 'aborted';
 
-export type ToolStatus = Record<string, ToolActivityStatus>;
-
 export type StreamStatus = 'streaming' | 'submitted' | 'ready' | 'error';
 
 export function isStreamStatusActive(status: StreamStatus): boolean {

@@ -1,6 +1,6 @@
 import { atom, map } from 'nanostores';
-import type { GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
-import type { PartId } from 'ghostbuild-agent/partId';
+import { getToolInvocation, type GhostbuildMessage, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
+import { makePartId, type PartId } from 'ghostbuild-agent/partId';
 import { isToolActivityStatusActive, type ToolActivityStatus } from '~/lib/common/types';
 
 type ToolActivity = {
@@ -58,6 +58,16 @@ export class ToolActivityStore {
 
   startTurn(): void {
     this.#turnActive = true;
+  }
+
+  finishTurn(message: GhostbuildMessage): void {
+    message.parts?.forEach((part, index) => {
+      const invocation = getToolInvocation(part);
+      if (invocation) {
+        this.record(makePartId(message.id, index), invocation);
+      }
+    });
+    this.abortActive();
   }
 
   abortActive(): void {

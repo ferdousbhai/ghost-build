@@ -19,7 +19,7 @@ describe('currentToolStatus', () => {
       },
     } satisfies Parameters<typeof currentToolStatus>[1];
 
-    expect(currentToolStatus([], activities)).toEqual({ toolStatus: {}, activeToolNames: [], activityRevision: 0 });
+    expect(currentToolStatus([], activities)).toEqual({ activeToolNames: [], activityRevision: 0 });
     expect(currentToolStatus([previous], activities).activeToolNames).toEqual(['validateProject']);
   });
 });

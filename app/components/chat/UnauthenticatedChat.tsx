@@ -24,7 +24,6 @@ export function UnauthenticatedChat({
       buildProgress={null}
       isRecovering={false}
       currentError={undefined}
-      toolStatus={{}}
       messages={initialMessages}
       disabledReason={authLoading ? 'Loading account...' : null}
       runtimeNotice="Connect Cloudflare to build and preview."

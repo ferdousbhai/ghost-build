@@ -196,7 +196,7 @@ const AuthenticatedChat = memo(
       toolActivityStore.abortActive();
     };
 
-    const { toolStatus, activeToolNames, activityRevision } = useCurrentToolStatus(messages);
+    const { activeToolNames, activityRevision } = useCurrentToolStatus(messages);
     const buildProgress = useBuildProgress({
       streamStatus,
       isRecovering,
@@ -257,7 +257,6 @@ const AuthenticatedChat = memo(
         streamStatus={streamStatus}
         isRecovering={isRecovering}
         currentError={error}
-        toolStatus={toolStatus}
         buildProgress={buildProgress}
         messages={visibleMessages /* Note that parsedMessages are throttled. */}
         disabledReason={disabledReason}

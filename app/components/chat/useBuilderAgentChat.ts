@@ -159,7 +159,12 @@ export function useBuilderAgentChat(args: {
         () => activePresentationRef.current === args.presentationId,
       );
     },
-    onFinish: ({ finishReason }) => {
+    onFinish: ({ finishReason, message }) => {
+      if (activePresentationRef.current === args.presentationId) {
+        // Record final tool outputs before stopping any provider-ended incomplete
+        // calls; sampled message processing may not have observed the last chunk yet.
+        toolActivityStore.finishTurn(message as GhostbuildMessage);
+      }
       if (finishReason === 'stop') {
         resetChatRetryState();
       }

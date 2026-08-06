@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, type ReactNode, type RefCallback, useCallback } from 'react';
 import { messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
-import { isStreamStatusActive, type StreamStatus, type ToolStatus } from '~/lib/common/types';
+import { isStreamStatusActive, type StreamStatus } from '~/lib/common/types';
 import { MessageInput } from './MessageInput';
 import { Messages } from './Messages.client';
 import { useChatId } from '~/lib/stores/chatId';
@@ -44,7 +44,6 @@ interface BaseChatProps {
   streamStatus: StreamStatus;
   isRecovering: boolean;
   currentError: Error | undefined;
-  toolStatus: ToolStatus;
   buildProgress: BuildProgress | null;
   messages: GhostbuildMessage[];
   disabledReason: ReactNode | null;
@@ -69,7 +68,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       sendMessageInProgress,
       messages,
       isRecovering,
-      toolStatus,
       buildProgress,
       disabledReason,
       runtimeNotice,
@@ -261,7 +259,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                         {!disabledReason && (
                           <StreamingIndicator
                             streamStatus={streamStatus}
-                            toolStatus={toolStatus}
                             isRecovering={isRecovering}
                             currentError={currentError}
                             buildProgress={buildProgress}

@@ -1,12 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   assertPreviewPublicationAllowed,
   assertPreviewSourceCheckpoint,
+  createReachablePreviewTunnel,
   previewExpirationAction,
   PREVIEW_PORT_COUNT,
   PREVIEW_PORT_MIN,
   previewPort,
+  waitForPreviewPublication,
 } from './preview-lifecycle';
 
 describe('ProjectWorkspace preview lifecycle', () => {
@@ -40,6 +42,48 @@ describe('ProjectWorkspace preview lifecycle', () => {
     expect(first).toBeGreaterThanOrEqual(PREVIEW_PORT_MIN);
     expect(first).toBeLessThan(PREVIEW_PORT_MIN + PREVIEW_PORT_COUNT);
     expect(replacement).not.toBe(first);
+  });
+
+  it('waits for the public tunnel URL instead of treating DNS warm-up as ready', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('NXDOMAIN'))
+      .mockResolvedValueOnce(new Response('warming up', { status: 502 }))
+      .mockResolvedValueOnce(new Response('ready'));
+    const wait = vi.fn(() => Promise.resolve());
+
+    await waitForPreviewPublication('https://preview.trycloudflare.com', {
+      attempts: 3,
+      fetcher,
+      wait,
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(wait).toHaveBeenCalledTimes(2);
+  });
+
+  it('replaces a quick tunnel once when its hostname never becomes reachable', async () => {
+    const tunnels = {
+      get: vi
+        .fn<(port: number) => Promise<{ url: string }>>()
+        .mockResolvedValueOnce({ url: 'https://first.trycloudflare.com' })
+        .mockResolvedValueOnce({ url: 'https://second.trycloudflare.com' }),
+      destroy: vi.fn<(port: number) => Promise<void>>(() => Promise.resolve()),
+    };
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('NXDOMAIN'))
+      .mockResolvedValueOnce(new Response('ready'));
+
+    await expect(
+      createReachablePreviewTunnel(tunnels, 4_173, {
+        attempts: 1,
+        fetcher,
+        wait: () => Promise.resolve(),
+      }),
+    ).resolves.toEqual({ url: 'https://second.trycloudflare.com' });
+    expect(tunnels.get).toHaveBeenCalledTimes(2);
+    expect(tunnels.destroy).toHaveBeenCalledWith(4_173);
   });
 
   it('does not let an earlier cleanup alarm expire a preview with a later durable deadline', () => {

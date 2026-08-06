@@ -56,6 +56,7 @@ import { createCommittedMutationReceipt } from './mutation-receipt';
 import {
   assertPreviewSourceCheckpoint,
   assertPreviewPublicationAllowed,
+  createReachablePreviewTunnel,
   previewExpirationAction,
   PREVIEW_SNAPSHOT_ROOT,
   PREVIEW_TTL_MS,
@@ -1486,7 +1487,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             },
           );
           await waitForHttpPort(this.ctx.container!.getTcpPort(port));
-          const tunnel = await this.tunnels.get(port);
+          const tunnel = await createReachablePreviewTunnel(this.tunnels, port);
           await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
           this.requirePreviewNotCancelled(previewId);
           await this.setKeepAlive(true);

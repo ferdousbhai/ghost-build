@@ -113,7 +113,7 @@ describe('isolated project command', () => {
         '          this.requirePreviewNotCancelled(previewId);',
     );
     expect(preview).toContain('await this.startProcess(');
-    expect(preview).toContain('await this.tunnels.get(port)');
+    expect(preview).toContain('await createReachablePreviewTunnel(this.tunnels, port)');
     expect(source).toContain("await this.#workspace.push('container-shell')");
     expect(source).toContain("const TRANSIENT_COMMAND_PROCESS_ID = 'ghostbuild-transient-command'");
     expect(validation).toContain('async cancelValidation(');
