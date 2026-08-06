@@ -1487,7 +1487,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             },
           );
           await waitForHttpPort(this.ctx.container!.getTcpPort(port));
-          const tunnel = await createReachablePreviewTunnel(this.tunnels, port);
+          const tunnel = await createReachablePreviewTunnel(this.tunnels, port, {
+            assertActive: () => this.requirePreviewNotCancelled(previewId),
+          });
           await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
           this.requirePreviewNotCancelled(previewId);
           await this.setKeepAlive(true);

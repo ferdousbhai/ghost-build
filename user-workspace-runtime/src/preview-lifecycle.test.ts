@@ -62,6 +62,40 @@ describe('ProjectWorkspace preview lifecycle', () => {
     expect(wait).toHaveBeenCalledTimes(2);
   });
 
+  it('allows quick-tunnel routing to warm beyond the former ten-second window', async () => {
+    let attempts = 0;
+    const fetcher = vi.fn<typeof fetch>(() =>
+      Promise.resolve(++attempts < 30 ? new Response('origin unresolved', { status: 530 }) : new Response('ready')),
+    );
+    const wait = vi.fn(() => Promise.resolve());
+
+    await waitForPreviewPublication('https://preview.trycloudflare.com', { fetcher, wait });
+
+    expect(fetcher).toHaveBeenCalledTimes(30);
+    expect(wait).toHaveBeenCalledTimes(29);
+  });
+
+  it('checks cancellation between public tunnel probes', async () => {
+    let active = true;
+    const fetcher = vi.fn<typeof fetch>(() => {
+      active = false;
+      return Promise.resolve(new Response('origin unresolved', { status: 530 }));
+    });
+
+    await expect(
+      waitForPreviewPublication('https://preview.trycloudflare.com', {
+        assertActive: () => {
+          if (!active) {
+            throw new Error('cancelled');
+          }
+        },
+        fetcher,
+        wait: () => Promise.resolve(),
+      }),
+    ).rejects.toThrow('cancelled');
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
   it('replaces a quick tunnel once when its hostname never becomes reachable', async () => {
     const tunnels = {
       get: vi

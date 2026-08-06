@@ -2,7 +2,10 @@ export const PREVIEW_PORT_MIN = 4173;
 export const PREVIEW_PORT_COUNT = 100;
 export const PREVIEW_TTL_MS = 60 * 60_000;
 export const PREVIEW_SNAPSHOT_ROOT = '/tmp/ghostbuild-previews';
-const PREVIEW_PUBLICATION_ATTEMPTS = 10;
+// Quick-tunnel creation can return before the public hostname routes to its
+// cloudflared connection. Production has observed HTTP 530 beyond ten seconds,
+// so keep probing the assigned URL before replacing an otherwise healthy tunnel.
+const PREVIEW_PUBLICATION_ATTEMPTS = 30;
 const PREVIEW_PUBLICATION_RETRY_DELAY_MS = 1_000;
 const PREVIEW_PUBLICATION_REQUEST_TIMEOUT_MS = 3_000;
 
@@ -14,6 +17,7 @@ type PreviewTunnels<Tunnel extends PreviewTunnel> = {
 };
 
 type PreviewPublicationOptions = {
+  assertActive?: () => void;
   attempts?: number;
   fetcher?: typeof fetch;
   requestTimeoutMs?: number;
@@ -74,6 +78,7 @@ export async function createReachablePreviewTunnel<Tunnel extends PreviewTunnel>
 ): Promise<Tunnel> {
   let lastError: unknown;
   for (let tunnelAttempt = 0; tunnelAttempt < 2; tunnelAttempt += 1) {
+    options.assertActive?.();
     if (tunnelAttempt > 0) {
       await tunnels.destroy(port);
     }
@@ -97,6 +102,7 @@ export async function waitForPreviewPublication(url: string, options: PreviewPub
   let lastFailure = 'not reachable';
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    options.assertActive?.();
     try {
       const response = await fetcher(url, {
         method: 'GET',
