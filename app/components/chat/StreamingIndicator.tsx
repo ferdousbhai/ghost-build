@@ -3,7 +3,7 @@ import { type StreamStatus, type ToolStatus } from '~/lib/common/types';
 import { useStore } from '@nanostores/react';
 import { chatStore } from '~/lib/stores/chatId';
 import { Spinner } from '@ui/Spinner';
-import { ExclamationTriangleIcon, CheckCircledIcon, ResetIcon } from '@radix-ui/react-icons';
+import { ExclamationTriangleIcon, ResetIcon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { isToolActivityStatusActive } from '~/lib/common/types';
@@ -13,8 +13,6 @@ const logger = createScopedLogger('StreamingIndicator');
 
 interface StreamingIndicatorProps {
   streamStatus: StreamStatus;
-  numMessages: number;
-  numSubchats: number;
   toolStatus?: ToolStatus;
   isRecovering?: boolean;
   currentError?: Error;
@@ -28,7 +26,6 @@ interface StreamingIndicatorProps {
 // Icon components
 const WarningIcon = () => <ExclamationTriangleIcon className="text-[var(--gb-content-warning)]" />;
 const LoadingIcon = () => <Spinner />;
-const CheckIcon = () => <CheckCircledIcon />;
 
 // Status messages
 export const STATUS_MESSAGES = {
@@ -36,7 +33,6 @@ export const STATUS_MESSAGES = {
   recovering: 'Recovering interrupted response...',
   stopped: 'Generation stopped',
   error: 'The model hit an error. Try sending your message again.',
-  generated: 'Ready for your next change',
 } as const;
 
 function streamErrorMessage(currentError: Error | undefined): React.ReactNode {
@@ -68,7 +64,7 @@ export default function StreamingIndicator(props: StreamingIndicatorProps) {
     streamStatus = 'streaming';
   }
 
-  if (streamStatus === 'ready' && props.numMessages === 0 && props.numSubchats === 1 && !props.submissionPending) {
+  if (streamStatus === 'ready' && !props.submissionPending && !aborted) {
     return null;
   }
 
@@ -94,10 +90,6 @@ export default function StreamingIndicator(props: StreamingIndicatorProps) {
         message = streamErrorMessage(props.currentError);
         break;
       case 'ready':
-        if (props.numMessages > 0) {
-          icon = <CheckIcon />;
-          message = STATUS_MESSAGES.generated;
-        }
         break;
     }
   }

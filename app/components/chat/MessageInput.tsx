@@ -38,7 +38,7 @@ export const MessageInput = memo(function MessageInput({
   );
   const placeholder = chatStarted
     ? numMessages !== undefined && numMessages > 0
-      ? 'Request changes by sending another message…'
+      ? 'What would you like to do next?'
       : 'Start this chat with a prompt…'
     : 'Describe the app, workflow, and data you want to build…';
   const inputStatus = input.length > 3 ? <NewLineShortcut /> : null;

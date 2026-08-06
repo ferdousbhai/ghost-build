@@ -250,8 +250,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                         {!disabledReason && (
                           <StreamingIndicator
                             streamStatus={streamStatus}
-                            numMessages={messages.length}
-                            numSubchats={subchats?.length ?? 1}
                             toolStatus={toolStatus}
                             isRecovering={isRecovering}
                             currentError={currentError}
