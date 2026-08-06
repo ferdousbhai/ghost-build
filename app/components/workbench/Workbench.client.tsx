@@ -1,4 +1,4 @@
-import { motion, type HTMLMotionProps, type Variants } from 'framer-motion';
+import { motion, MotionConfig, type HTMLMotionProps, type Variants } from 'framer-motion';
 import {
   lazy,
   memo,
@@ -22,13 +22,14 @@ import { useWorkbenchController } from './useWorkbenchController';
 import { useStore } from '@nanostores/react';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { previewPresentation } from '~/lib/common/preview-presentation';
+import { useWorkspaceSwipe } from '~/lib/hooks/useWorkspaceSwipe';
 
 interface WorkbenchProps {
   chatStarted?: boolean;
   isStreaming?: boolean;
 }
 
-const viewTransition = { ease: cubicEasingFn };
+const viewTransition = { duration: 0.3, ease: cubicEasingFn };
 const Preview = lazy(() => import('./Preview').then((module) => ({ default: module.Preview })));
 const sliderOptions: SliderOptions<WorkbenchViewType> = {
   options: [
@@ -75,7 +76,11 @@ export const Workbench = memo(function Workbench({ chatStarted, isStreaming }: W
     return null;
   }
 
-  return <ReadyWorkbench isStreaming={isStreaming} />;
+  return (
+    <MotionConfig reducedMotion="user">
+      <ReadyWorkbench isStreaming={isStreaming} />
+    </MotionConfig>
+  );
 });
 
 function ReadyWorkbench({ isStreaming }: Pick<WorkbenchProps, 'isStreaming'>) {
@@ -203,6 +208,7 @@ function WorkbenchFrame({
   headerActions?: ReactNode;
   children: ReactNode;
 }) {
+  const workspaceSwipe = useWorkspaceSwipe(isSmallViewport);
   return (
     <motion.div
       initial="closed"
@@ -215,9 +221,12 @@ function WorkbenchFrame({
       aria-hidden={!visible}
       inert={!visible}
     >
-      <div
+      <motion.div
+        initial={isSmallViewport ? { x: '100%' } : false}
+        animate={{ x: isSmallViewport && !visible ? '100%' : '0%' }}
+        transition={viewTransition}
         className={classNames('fixed z-0 transition-[left,width] duration-200 bolt-ease-cubic-bezier', {
-          invisible: !visible,
+          invisible: !visible && !isSmallViewport,
           'inset-x-0 top-[var(--header-height)] bottom-0 w-full': isSmallViewport,
           'left-[var(--workbench-left)] top-[calc(var(--header-height)+1rem)] bottom-four w-[var(--workbench-inner-width)]':
             !isSmallViewport,
@@ -232,10 +241,17 @@ function WorkbenchFrame({
           >
             <div
               className={classNames('flex items-center border-b border-border-transparent', {
-                'min-h-11 justify-end px-2 py-1': isSmallViewport,
+                'relative min-h-11 justify-end px-2 py-1 touch-pan-y touch-pinch-zoom': isSmallViewport,
                 'px-3 py-2.5': !isSmallViewport,
               })}
+              {...(isSmallViewport ? workspaceSwipe : {})}
             >
+              {isSmallViewport && (
+                <div
+                  className="pointer-events-none absolute top-1.5 left-1/2 h-1 w-8 -translate-x-1/2 rounded-full bg-bolt-elements-borderColor"
+                  aria-hidden
+                />
+              )}
               {!isSmallViewport && (
                 <>
                   <Slider selected={selectedView} options={sliderOptions} setSelected={setSelectedView} />
@@ -267,7 +283,7 @@ function WorkbenchFrame({
             </div>
           </div>
         </div>
-      </div>
+      </motion.div>
     </motion.div>
   );
 }

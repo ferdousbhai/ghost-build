@@ -4,7 +4,8 @@ import { useEffect, type ReactNode } from 'react';
 import { Button } from '@ui/Button';
 import useViewport from '~/lib/hooks/useViewport';
 import { chatStore } from '~/lib/stores/chatId';
-import { workbenchStore, type WorkbenchViewType } from '~/lib/stores/workbench.client';
+import { workbenchStore } from '~/lib/stores/workbench.client';
+import { selectWorkspaceSurface } from '~/lib/stores/workspace-surface.client';
 import { classNames } from '~/utils/classNames';
 
 export function HeaderActionButtons() {
@@ -61,12 +62,6 @@ function SmallScreenSurfaceSwitcher({ showChat, showWorkbench }: { showChat: boo
     }
   }, [showChat, showWorkbench]);
 
-  const selectWorkbench = (view: WorkbenchViewType) => {
-    chatStore.setKey('showChat', true);
-    workbenchStore.currentView.set(view);
-    workbenchStore.showWorkbench.set(true);
-  };
-
   return (
     <div
       className="flex overflow-hidden rounded-full border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2"
@@ -78,21 +73,20 @@ function SmallScreenSurfaceSwitcher({ showChat, showWorkbench }: { showChat: boo
         selected={showChat && !showWorkbench}
         icon={<ChatBubbleIcon />}
         onClick={() => {
-          chatStore.setKey('showChat', true);
-          workbenchStore.showWorkbench.set(false);
+          selectWorkspaceSurface('chat');
         }}
       />
       <SurfaceButton
         label="Code"
         selected={showWorkbench && selectedView === 'code'}
         icon={<CodeIcon />}
-        onClick={() => selectWorkbench('code')}
+        onClick={() => selectWorkspaceSurface('code')}
       />
       <SurfaceButton
         label="Preview"
         selected={showWorkbench && selectedView === 'preview'}
         icon={<EyeOpenIcon />}
-        onClick={() => selectWorkbench('preview')}
+        onClick={() => selectWorkspaceSurface('preview')}
       />
     </div>
   );

@@ -8,6 +8,8 @@ import { messageInputStore } from '~/lib/stores/messageInput';
 import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { classNames } from '~/utils/classNames';
 import styles from './BaseChat.module.css';
+import { useWorkspaceSwipe } from '~/lib/hooks/useWorkspaceSwipe';
+import useViewport from '~/lib/hooks/useViewport';
 import { DisabledChatMessageSheet } from './DisabledChatMessageSheet';
 import { HomeIntro } from './HomeIntro.client';
 import StreamingIndicator from './StreamingIndicator';
@@ -171,13 +173,22 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
         await onSend(messageText(lastUserMessage));
       }
     }, [lastUserMessage, onSend]);
+    const isSmallViewport = useViewport(1024);
+    const swipeEnabled = isSmallViewport && chatStarted;
+    const workspaceSwipe = useWorkspaceSwipe(swipeEnabled);
     const content = (
       <div
         ref={ref}
         className={classNames(styles.BaseChat, 'relative flex h-full w-full overflow-hidden')}
         data-chat-visible={showChat}
       >
-        <div ref={scrollRef} className={classNames(styles.ChatScroller, 'flex size-full flex-col overflow-y-auto')}>
+        <div
+          ref={scrollRef}
+          className={classNames(styles.ChatScroller, 'flex size-full flex-col overflow-y-auto', {
+            'touch-pan-y touch-pinch-zoom': swipeEnabled,
+          })}
+          {...workspaceSwipe}
+        >
           <div className="flex w-full grow flex-col lg:flex-row">
             <div
               className={classNames(styles.Chat, 'flex flex-col flex-grow lg:min-w-[var(--chat-min-width)] h-full', {
