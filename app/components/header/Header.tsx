@@ -11,6 +11,8 @@ import { BrandLink } from '~/components/BrandLink';
 import { Button } from '@ui/Button';
 import { ThemeSwitch } from '~/components/ui/ThemeSwitch';
 import { toast } from 'sonner';
+import { LinkButton } from '~/components/ui/LinkButton';
+import { useNavigate } from '@tanstack/react-router';
 
 const DownloadButton = lazy(() => import('./DownloadButton').then((module) => ({ default: module.DownloadButton })));
 const SidebarMenu = lazy(() => import('~/components/sidebar/Menu.client').then((module) => ({ default: module.Menu })));
@@ -21,6 +23,7 @@ const HeaderActionButtons = lazy(() =>
 export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean }) {
   const chat = useStore(chatStore);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const navigate = useNavigate();
 
   const userId = useUserIdOrNullOrLoading();
   const isAuthenticated = typeof userId === 'string';
@@ -37,9 +40,7 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
     }
   };
 
-  const handleSettingsClick = () => {
-    window.location.pathname = '/settings';
-  };
+  const handleSettingsClick = () => void navigate({ to: '/settings' });
 
   return (
     <>
@@ -92,9 +93,9 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
           {profile && (
             <>
               <div className="hidden items-center gap-1 lg:flex">
-                <Button variant="ghost" size="xs" onClick={handleSettingsClick} icon={<GearIcon />}>
+                <LinkButton variant="ghost" size="xs" to="/settings" icon={<GearIcon />}>
                   Settings
-                </Button>
+                </LinkButton>
                 <Button variant="ghost" size="xs" onClick={() => void handleLogout()} icon={<ExitIcon />}>
                   Log out
                 </Button>

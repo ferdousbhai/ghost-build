@@ -1,10 +1,10 @@
 import { useStoreMessageHistory } from './useStoreMessageHistory';
 import { useDiscardEmptyChat, useExistingInitializeChat, useHomepageInitializeChat } from './useInitializeChat';
-import { useInitialMessages } from './useInitialMessages';
+import { useInitialMessages, useInitialMessagesState } from './useInitialMessages';
 import { useChatCheckpointSync } from './history';
 import { useCallback, useEffect, useState } from 'react';
 import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
-import { useAllSubchats } from '~/lib/cloudflare/data-hooks';
+import { useAllSubchatsState } from '~/lib/cloudflare/data-hooks';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { useStore } from '@nanostores/react';
@@ -26,7 +26,8 @@ export function useChatHomepage(chatId: string) {
     loaded?.deserialized ?? (chatInitialized ? EMPTY_INITIAL_MESSAGES : undefined),
     loaded?.checkpoint,
   );
-  const subchats = useSubchats(chatId, chatInitialized);
+  const subchatState = useSubchats(chatId, chatInitialized);
+  const subchats = subchatState.subchats;
   const subchatIndex = useStore(subchatIndexStore) ?? 0;
   const loadedTranscript = loaded?.loadedSubchatIndex === subchatIndex ? loaded.transcript : undefined;
   const transcript =
@@ -52,7 +53,8 @@ export function useExistingChat(chatId: string) {
   const navigateToChat = useNavigateToChat();
   const initializeChat = useExistingInitializeChat(chatId);
   const discardEmptyChat = useDiscardEmptyChat(chatId);
-  const initialMessages = useInitialMessages(chatId);
+  const initialMessageState = useInitialMessagesState(chatId);
+  const initialMessages = initialMessageState.initialMessages;
   useEffect(() => {
     if (initialMessages?.loadedChatId && initialMessages.loadedChatId !== chatId) {
       void navigateToChat(initialMessages.loadedChatId);
@@ -65,7 +67,8 @@ export function useExistingChat(chatId: string) {
     initialMessages?.checkpoint,
   );
   const storeMessageHistory = useStoreMessageHistory();
-  const subchats = useSubchats(chatId);
+  const subchatState = useSubchats(chatId);
+  const subchats = subchatState.subchats;
   const onBuilderRequestStart = useCallback(() => undefined, []);
 
   return {
@@ -76,12 +79,16 @@ export function useExistingChat(chatId: string) {
     storeMessageHistory,
     subchats,
     transcript: initialMessages?.transcript,
+    loadError: initialMessageState.error,
+    retryLoad: initialMessageState.retry,
+    subchatLoadError: subchatState.error,
+    retrySubchats: subchatState.retry,
   };
 }
 
 function useSubchats(chatId: string, enabled = true) {
   const userId = useUserIdOrNullOrLoading();
-  return useAllSubchats(
+  return useAllSubchatsState(
     userId && enabled
       ? {
           chatId,

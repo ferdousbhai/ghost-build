@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
 import { GHOSTBUILD_SUPPORT_URL, TRUST_CHANNEL_STATUS, createPublicBetaTrustPageHead } from '~/lib/trust';
 
@@ -46,7 +46,7 @@ function SupportPage() {
           Ghostbuild support is not an emergency service. For immediate danger, contact local emergency services. For a
           compromised Cloudflare account or an active Cloudflare platform incident, use{' '}
           <a href="https://developers.cloudflare.com/support/contacting-cloudflare-support/">Cloudflare support</a>. Use{' '}
-          <a href="/abuse">Report abuse</a> for harmful content and <a href="/security">Security</a> for a
+          <Link to="/abuse">Report abuse</Link> for harmful content and <Link to="/security">Security</Link> for a
           vulnerability.
         </p>
       </TrustSection>

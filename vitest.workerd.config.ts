@@ -1,4 +1,5 @@
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
+import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Plugin } from 'vite';
@@ -17,7 +18,6 @@ for (const [name, value] of Object.entries(testSecrets)) {
 }
 
 const serverDependencyStubs = new Set([
-  '@tanstack/react-start/server-entry',
   './lib/cloudflare/data/cloudflare-auth-retention.server',
   './server-handlers/auth',
   './server-handlers/cloudflare-integration',
@@ -29,7 +29,11 @@ function isolateRootWorkerRoutes(): Plugin {
     name: 'ghostbuild-workerd-route-boundaries',
     enforce: 'pre',
     resolveId(source, importer) {
-      if (importer?.endsWith('/app/server.ts') && serverDependencyStubs.has(source)) {
+      if (source === '@tanstack/react-start/server-entry') {
+        return stub;
+      }
+      const importerPath = importer?.replace(/\?.*$/, '');
+      if (importerPath?.endsWith('/app/server.ts') && serverDependencyStubs.has(source)) {
         return stub;
       }
     },
@@ -39,6 +43,15 @@ function isolateRootWorkerRoutes(): Plugin {
 export default defineConfig({
   plugins: [
     isolateRootWorkerRoutes(),
+    tanstackStart({
+      srcDirectory: 'app',
+      router: {
+        routesDirectory: 'routes',
+        generatedRouteTree: 'routeTree.gen.ts',
+        quoteStyle: 'single',
+        semicolons: true,
+      },
+    }),
     cloudflareTest(async () => ({
       wrangler: { configPath: './wrangler.jsonc' },
       miniflare: {

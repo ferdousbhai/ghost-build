@@ -1,4 +1,5 @@
 import { classNames } from '~/utils/classNames';
+import { Link } from '@tanstack/react-router';
 
 export function BrandLink({
   className,
@@ -10,8 +11,9 @@ export function BrandLink({
   variant?: 'page' | 'header';
 }) {
   return (
-    <a
-      href="/"
+    <Link
+      to="/"
+      reloadDocument={variant === 'header'}
       className={classNames({ 'app-brand-lockup': variant === 'page' }, className)}
       aria-label="Ghostbuild home"
     >
@@ -19,6 +21,6 @@ export function BrandLink({
         <span className="ghostbuild-brand-mark__glyph">👻</span>
       </span>
       <span className={nameClassName}>Ghostbuild</span>
-    </a>
+    </Link>
   );
 }

@@ -31,6 +31,7 @@ export class BuilderWorkspaceSyncController {
 
   private constructor(
     private readonly agent: BuilderWorkspaceAgent,
+    private readonly workspaceId: string,
     private readonly collection: BuilderWorkspaceCollection,
     private readonly source: ReturnType<typeof createBuilderWorkspaceCollection>['source'],
   ) {}
@@ -39,16 +40,21 @@ export class BuilderWorkspaceSyncController {
     agent: BuilderWorkspaceAgent,
     options: { workspaceId?: string; replica?: AccountLocalReplica | null } = {},
   ): Promise<BuilderWorkspaceSyncController> {
+    const workspaceId = options.workspaceId ?? 'active';
+    workbenchStore.activateWorkspace(workspaceId);
     const state = await callAgent<BuilderWorkspaceState>(agent, 'getWorkspaceState', []);
+    if (!workbenchStore.isWorkspaceActive(workspaceId)) {
+      throw new Error('The durable workspace connection was superseded.');
+    }
     if (!state.initialized) {
       throw new Error('The durable project workspace is not initialized.');
     }
     const { collection, source } = createBuilderWorkspaceCollection({
       agent,
-      workspaceId: options.workspaceId ?? 'active',
+      workspaceId,
       replica: options.replica ?? null,
     });
-    const controller = new BuilderWorkspaceSyncController(agent, collection, source);
+    const controller = new BuilderWorkspaceSyncController(agent, workspaceId, collection, source);
     workbenchStore.setWorkspaceChangeListener(controller.#changeListener);
     const initialPullOutcome = source.initialPull.then(
       (pull) => ({ ok: true as const, pull }),
@@ -134,6 +140,9 @@ export class BuilderWorkspaceSyncController {
   }
 
   #presentPull(pull: BuilderWorkspacePullResult): void {
+    if (!workbenchStore.isWorkspaceActive(this.workspaceId)) {
+      return;
+    }
     if (pull.mode === 'snapshot') {
       this.#replacePresentationFromCollection();
     } else if (pull.entries.length > 0) {
@@ -142,7 +151,9 @@ export class BuilderWorkspaceSyncController {
   }
 
   #replacePresentationFromCollection(): void {
-    workbenchStore.replaceWorkspaceSnapshot(workspaceCollectionSnapshot(this.collection));
+    if (workbenchStore.isWorkspaceActive(this.workspaceId)) {
+      workbenchStore.replaceWorkspaceSnapshot(workspaceCollectionSnapshot(this.collection));
+    }
   }
 
   async #call<T>(method: string, args: unknown[]): Promise<T> {

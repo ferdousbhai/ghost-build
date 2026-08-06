@@ -1,6 +1,7 @@
 import { createCollection, eq, type LoadSubsetOptions } from '@tanstack/db';
 import { parseLoadSubsetOptions, queryCollectionOptions } from '@tanstack/query-db-collection';
 import { useLiveQuery } from '@tanstack/react-db';
+import { useCallback } from 'react';
 import { z } from 'zod';
 import {
   TRANSCRIPT_HISTORY_FORMAT_VERSION,
@@ -18,12 +19,16 @@ import type { SerializedMessage } from '~/lib/stores/startup/messages';
 import { serializeCompleteMessages } from '~/lib/stores/startup/messages';
 import {
   ACCOUNT_LOCAL_REPLICA_SCHEMA_VERSION,
+  ACCOUNT_LOCAL_REPLICA_GC_TIME,
+  registerAccountCollectionDisposer,
   type AccountLocalReplica,
   useAccountLocalReplica,
 } from './account-local-replica';
 import { fetchUserRuntime } from './runtime-session';
+import { useQueryCacheError } from './use-query-cache-error';
 
 const TRANSCRIPT_QUERY_KEY_PREFIX = ['ghostbuild-local', 'transcripts'] as const;
+const TRANSCRIPT_FETCH_TIMEOUT_MS = 30_000;
 
 const serializedMessageShape = z
   .object({
@@ -130,7 +135,7 @@ function createTranscriptCollection(sessionId: string, replica: AccountLocalRepl
     },
     queryClient,
     getKey: (item) => item.requestKey,
-    persistedGcTime: Number.POSITIVE_INFINITY,
+    persistedGcTime: ACCOUNT_LOCAL_REPLICA_GC_TIME,
     refetchOnMount: 'always',
     refetchOnReconnect: true,
   });
@@ -152,6 +157,13 @@ type TranscriptCollection = ReturnType<typeof createTranscriptCollection>;
 const transcriptCollections = new Map<string, TranscriptCollection>();
 const activeTranscriptCollections = new Map<string, TranscriptCollection>();
 
+registerAccountCollectionDisposer(async () => {
+  const collections = new Set(transcriptCollections.values());
+  transcriptCollections.clear();
+  activeTranscriptCollections.clear();
+  await Promise.allSettled([...collections].map((collection) => collection.cleanup()));
+});
+
 function getTranscriptCollection(sessionId: string, replica: AccountLocalReplica | null) {
   const cacheKey = `${sessionId}:${replica ? 'persisted' : 'memory'}`;
   const existing = transcriptCollections.get(cacheKey);
@@ -172,6 +184,7 @@ export function useCachedChatTranscript(
   transcript: CachedChatTranscript | undefined;
   isLoading: boolean;
   error: unknown;
+  retry: () => void;
 } {
   const replica = useAccountLocalReplica(sessionId);
   const collection = sessionId && replica !== undefined ? getTranscriptCollection(sessionId, replica) : undefined;
@@ -183,10 +196,17 @@ export function useCachedChatTranscript(
         : undefined,
     [collection, requestKey],
   );
+  const error = useQueryCacheError(
+    sessionId && requestKey ? [...TRANSCRIPT_QUERY_KEY_PREFIX, sessionId, requestKey] : undefined,
+  );
+  const retry = useCallback(() => {
+    void collection?.utils.clearError().catch(() => undefined);
+  }, [collection]);
   return {
     transcript: query.data?.[0],
     isLoading: replica === undefined || query.isLoading,
-    error: collection?.utils.lastError,
+    error,
+    retry,
   };
 }
 
@@ -257,10 +277,12 @@ async function loadChatTranscript(
       sessionId,
       subchatIndex: loadedSubchatIndex,
     }),
-    signal,
+    signal: AbortSignal.any([signal, AbortSignal.timeout(TRANSCRIPT_FETCH_TIMEOUT_MS)]),
   });
   if (!response.ok) {
-    throw new Error('Failed to fetch initial messages');
+    const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+    const detail = typeof payload?.error === 'string' ? `: ${payload.error}` : '';
+    throw new Error(`Failed to fetch project messages (${response.status})${detail}`);
   }
   const responseTranscript = transcriptIdentityFromHeaders(response.headers);
   const history =

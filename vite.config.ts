@@ -76,10 +76,6 @@ export default defineConfig((config) => {
       !isTest &&
         tanstackStart({
           srcDirectory: 'app',
-          importProtection: {
-            behavior: 'mock',
-            mockAccess: 'warn',
-          },
           router: {
             routesDirectory: 'routes',
             generatedRouteTree: 'routeTree.gen.ts',

@@ -10,6 +10,7 @@ import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 const logger = createScopedLogger('AccountLocalReplica');
 
 export const ACCOUNT_LOCAL_REPLICA_SCHEMA_VERSION = 1;
+export const ACCOUNT_LOCAL_REPLICA_GC_TIME = 30 * 24 * 60 * 60 * 1000;
 
 export type AccountLocalReplica = {
   persistence: PersistedCollectionPersistence;
@@ -23,17 +24,24 @@ type OpenAccountLocalReplica = AccountLocalReplica & {
 
 const pendingReplicas = new Map<string, Promise<OpenAccountLocalReplica | null>>();
 const resolvedReplicas = new Map<string, OpenAccountLocalReplica | null>();
+const collectionDisposers = new Set<() => void | Promise<void>>();
 let replicaGeneration = 0;
 
 export function useAccountLocalReplica(sessionId: string | null | undefined): AccountLocalReplica | null | undefined {
-  const [replica, setReplica] = useState<OpenAccountLocalReplica | null | undefined>(() =>
-    sessionId ? resolvedReplicas.get(sessionId) : undefined,
-  );
+  const [state, setState] = useState<{
+    sessionId: string;
+    replica: OpenAccountLocalReplica | null;
+  } | null>(() => {
+    if (!sessionId || !resolvedReplicas.has(sessionId)) {
+      return null;
+    }
+    return { sessionId, replica: resolvedReplicas.get(sessionId) ?? null };
+  });
 
   useEffect(() => {
     let active = true;
     if (!sessionId) {
-      setReplica(undefined);
+      setState(null);
       return () => {
         active = false;
       };
@@ -41,16 +49,16 @@ export function useAccountLocalReplica(sessionId: string | null | undefined): Ac
 
     const resolved = resolvedReplicas.get(sessionId);
     if (resolved !== undefined || resolvedReplicas.has(sessionId)) {
-      setReplica(resolved ?? null);
+      setState({ sessionId, replica: resolved ?? null });
       return () => {
         active = false;
       };
     }
 
-    setReplica(undefined);
+    setState(null);
     void openAccountLocalReplica(sessionId).then((value) => {
       if (active) {
-        setReplica(value);
+        setState({ sessionId, replica: value });
       }
     });
     return () => {
@@ -58,7 +66,10 @@ export function useAccountLocalReplica(sessionId: string | null | undefined): Ac
     };
   }, [sessionId]);
 
-  return replica;
+  if (!state || state.sessionId !== sessionId) {
+    return undefined;
+  }
+  return state.replica;
 }
 
 async function openAccountLocalReplica(sessionId: string): Promise<OpenAccountLocalReplica | null> {
@@ -73,10 +84,10 @@ async function openAccountLocalReplica(sessionId: string): Promise<OpenAccountLo
       logger.warn('Local project persistence is unavailable; continuing with server-backed collections.', error);
       return null;
     })
-    .then((replica) => {
+    .then(async (replica) => {
       if (generation !== replicaGeneration) {
         if (replica) {
-          disposeReplica(replica);
+          await disposeReplica(replica);
         }
         return null;
       }
@@ -135,24 +146,30 @@ async function createAccountLocalReplica(sessionId: string): Promise<OpenAccount
   }
 }
 
-export function disposeAccountLocalReplicas(): void {
+export function registerAccountCollectionDisposer(dispose: () => void | Promise<void>): () => void {
+  collectionDisposers.add(dispose);
+  return () => collectionDisposers.delete(dispose);
+}
+
+export async function disposeAccountLocalReplicas(): Promise<void> {
   replicaGeneration += 1;
   pendingReplicas.clear();
+  await Promise.allSettled([...collectionDisposers].map((dispose) => dispose()));
   for (const replica of resolvedReplicas.values()) {
     if (replica) {
-      disposeReplica(replica);
+      await disposeReplica(replica);
     }
   }
   resolvedReplicas.clear();
 }
 
-function disposeReplica(replica: OpenAccountLocalReplica): void {
+async function disposeReplica(replica: OpenAccountLocalReplica): Promise<void> {
   try {
     replica.coordinator.dispose();
   } catch (error) {
     logger.warn('Unable to dispose the local project coordinator cleanly.', error);
   }
-  void Promise.resolve(replica.database.close?.()).catch((error: unknown) => {
+  await Promise.resolve(replica.database.close?.()).catch((error: unknown) => {
     logger.warn('Unable to close the local project database cleanly.', error);
   });
 }

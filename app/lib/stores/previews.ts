@@ -23,6 +23,11 @@ export class PreviewsStore {
     this.state.set(state);
   }
 
+  reset(): void {
+    this.#actions = null;
+    this.state.set(idleBuilderPreviewState(0));
+  }
+
   request(): Promise<BuilderPreviewState> {
     return this.#requireActions().request();
   }

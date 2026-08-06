@@ -14,12 +14,13 @@ export const userRuntimeEndpointStore = atom<string | null>(null);
 let current: UserRuntimeSession | null = null;
 let generation = 0;
 
-export async function getUserRuntimeSession(): Promise<UserRuntimeSession> {
+export async function getUserRuntimeSession(signal?: AbortSignal): Promise<UserRuntimeSession> {
+  signal?.throwIfAborted();
   if (current && current.expiresAt - Date.now() > REFRESH_SKEW_MS) {
     return current;
   }
   if (pending) {
-    return pending;
+    return waitForRuntimeSession(pending, signal);
   }
   const requestGeneration = generation;
   const request = requestUserRuntimeSession(() => generation === requestGeneration)
@@ -37,7 +38,38 @@ export async function getUserRuntimeSession(): Promise<UserRuntimeSession> {
       }
     });
   pending = request;
-  return request;
+  return waitForRuntimeSession(request, signal);
+}
+
+function waitForRuntimeSession(
+  request: Promise<UserRuntimeSession>,
+  signal: AbortSignal | undefined,
+): Promise<UserRuntimeSession> {
+  if (!signal) {
+    return request;
+  }
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener('abort', onAbort);
+    const onAbort = () => {
+      cleanup();
+      reject(signal.reason ?? new DOMException('The runtime session wait was canceled.', 'AbortError'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+    }
+    request.then(
+      (session) => {
+        cleanup();
+        resolve(session);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }
 
 async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<UserRuntimeSession> {
@@ -95,7 +127,9 @@ export function requireUserRuntimeEndpoint(): string {
 }
 
 export async function fetchUserRuntime(path: string, init: RequestInit = {}): Promise<Response> {
-  const session = await getUserRuntimeSession();
+  const signal = init.signal ?? undefined;
+  const session = await getUserRuntimeSession(signal);
+  signal?.throwIfAborted();
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${session.token}`);
   return fetch(`${session.endpoint}${path.startsWith('/') ? path : `/${path}`}`, { ...init, headers });

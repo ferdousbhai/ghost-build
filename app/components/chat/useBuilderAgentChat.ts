@@ -5,7 +5,7 @@ import { useStore } from '@nanostores/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BuilderAgent, BuilderAgentState } from '~/agents/builder-agent';
 import { workbenchStore } from '~/lib/stores/workbench.client';
-import { isAuthenticated, userIdStore, useUserIdOrNullOrLoading } from '~/lib/stores/userId';
+import { isAuthenticated } from '~/lib/stores/userId';
 import { captureMessage } from '~/lib/telemetry.client';
 import { ChatContextManager } from 'ghostbuild-agent/ChatContextManager';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
@@ -17,7 +17,6 @@ import { waitForAgentSocketOpen } from './agent-connection';
 import { CLOUDFLARE_AI_FUNDING_REQUIRED_MARKER, WORKERS_PAID_REQUIRED_MARKER } from '~/lib/workers-paid';
 import { showCloudflareAiFundingRequiredToast, showWorkersPaidRequiredToast } from '~/lib/workers-paid.client';
 import { refreshChatHistory } from '~/lib/cloudflare/chat-history-db';
-import { chatIdStore } from '~/lib/stores/chatId';
 import { executeDataOperation } from '~/lib/cloudflare/client';
 import { api } from '~/lib/cloudflare/data-api';
 import { description as descriptionStore } from '~/lib/stores/description';
@@ -43,12 +42,28 @@ const logger = createScopedLogger('BuilderAgentChat');
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
 const AGENT_CANCEL_SETTLE_TIMEOUT_MS = 5 * 60 * 1000;
 
+export function workspacePresentationId(accountId: string, agentName: string): string {
+  return `${accountId}:${agentName}`;
+}
+
 export function useBuilderAgentChat(args: {
+  accountId: string;
   chatInitialId: string;
   initialMessages: GhostbuildMessage[];
   onSubchatTitle: (subchatIndex: number, title: string) => void;
+  presentationId: string;
   transcript: TranscriptIdentity;
 }) {
+  const activePresentationRef = useRef<string | null>(args.presentationId);
+  activePresentationRef.current = args.presentationId;
+  useEffect(
+    () => () => {
+      if (activePresentationRef.current === args.presentationId) {
+        activePresentationRef.current = null;
+      }
+    },
+    [args.presentationId],
+  );
   const transcript = useMemo<TranscriptIdentity>(
     () => ({
       agentName: args.transcript.agentName,
@@ -58,8 +73,7 @@ export function useBuilderAgentChat(args: {
     [args.transcript.agentName, args.transcript.generation, args.transcript.subchatIndex],
   );
   const currentSubchatIndex = useStore(subchatIndexStore);
-  const userId = useUserIdOrNullOrLoading();
-  const workspaceReplica = useAccountLocalReplica(userId);
+  const workspaceReplica = useAccountLocalReplica(args.accountId);
   const [workspacePresentationState, setWorkspacePresentationState] = useState<
     'connecting' | 'ready' | 'presentation-error'
   >('connecting');
@@ -79,9 +93,12 @@ export function useBuilderAgentChat(args: {
     host: runtimeEndpoint.host,
     protocol: runtimeEndpoint.protocol === 'https:' ? 'wss' : 'ws',
     query: async () => ({ capability: (await getUserRuntimeSession()).token }),
-    queryDeps: [userId, runtimeEndpoint.origin],
+    queryDeps: [args.accountId, runtimeEndpoint.origin],
     cacheTtl: 4 * 60_000,
     onStateUpdate: (state) => {
+      if (activePresentationRef.current !== args.presentationId) {
+        return;
+      }
       if (state.preview) {
         workbenchStore.updatePreview(state.preview);
       }
@@ -91,18 +108,16 @@ export function useBuilderAgentChat(args: {
       }
       generatedSubchatTitleUpdatedAtRef.current = generatedTitle.updatedAt;
       args.onSubchatTitle(generatedTitle.subchatIndex, generatedTitle.title);
-      const activeUserId = userIdStore.get();
-      const chatId = chatIdStore.get();
-      if (typeof activeUserId === 'string' && chatId) {
+      const chatId = args.chatInitialId;
+      if (chatId) {
         void queryClient.invalidateQueries({
-          queryKey: subchatQueryKey({ chatId, sessionId: activeUserId }),
+          queryKey: subchatQueryKey({ chatId, sessionId: args.accountId }),
         });
       }
     },
   });
   const workspaceControllerRef = useRef<BuilderWorkspaceSyncController | null>(null);
-  const workspaceKey = transcript.agentName;
-  const workspaceGateRef = useAsyncGate(workspaceKey);
+  const workspaceGateRef = useAsyncGate(args.presentationId);
   const chat = useAgentChat<BuilderAgentState, UIMessage>({
     agent: builderAgent,
     getInitialMessages: null,
@@ -134,7 +149,11 @@ export function useBuilderAgentChat(args: {
       } else if (error.message.includes(CLOUDFLARE_AI_FUNDING_REQUIRED_MARKER)) {
         showCloudflareAiFundingRequiredToast();
       }
-      void refreshProjectMetadata();
+      void refreshProjectMetadata(
+        args.chatInitialId,
+        args.accountId,
+        () => activePresentationRef.current === args.presentationId,
+      );
     },
     onFinish: ({ finishReason }) => {
       if (finishReason === 'stop') {
@@ -144,7 +163,11 @@ export function useBuilderAgentChat(args: {
       void workspaceControllerRef.current?.pull().catch((workspaceError) => {
         logger.error('Failed to refresh the durable workspace presentation after a builder response', workspaceError);
       });
-      void refreshProjectMetadata();
+      void refreshProjectMetadata(
+        args.chatInitialId,
+        args.accountId,
+        () => activePresentationRef.current === args.presentationId,
+      );
     },
   });
   const setMessagesRef = useRef(chat.setMessages);
@@ -203,7 +226,7 @@ export function useBuilderAgentChat(args: {
       return () => undefined;
     }
     const gate = workspaceGateRef.current;
-    if (gate.key !== workspaceKey || gate.started) {
+    if (gate.key !== args.presentationId || gate.started) {
       return () => undefined;
     }
     gate.started = true;
@@ -223,7 +246,7 @@ export function useBuilderAgentChat(args: {
           gate.resolve();
         }
         const controller = await BuilderWorkspaceSyncController.initialize(builderAgent as never, {
-          workspaceId: workspaceKey,
+          workspaceId: args.presentationId,
           replica: workspaceReplica,
         });
         if (disposed || workspaceGateRef.current !== gate) {
@@ -263,7 +286,7 @@ export function useBuilderAgentChat(args: {
         workspaceControllerRef.current = null;
       }
     };
-  }, [builderAgent, workspaceGateRef, workspaceKey, workspaceReplica]);
+  }, [args.presentationId, builderAgent, workspaceGateRef, workspaceReplica]);
 
   const sendMessage = useCallback(
     async (
@@ -426,21 +449,30 @@ function createAsyncGate(key: string | null): AsyncGate {
   return { key, promise, resolve, error: null, started: false };
 }
 
-async function refreshProjectMetadata(attempt = 0): Promise<void> {
-  const userId = userIdStore.get();
-  const chatId = chatIdStore.get();
-  if (typeof userId !== 'string' || !chatId) {
+async function refreshProjectMetadata(
+  chatId: string,
+  accountId: string,
+  isActive: () => boolean,
+  attempt = 0,
+): Promise<void> {
+  if (!chatId || !isActive()) {
     return;
   }
   try {
     const [, chat] = await Promise.all([
-      refreshChatHistory(userId),
-      executeDataOperation(api.messages.get, { id: chatId, sessionId: userId }),
+      refreshChatHistory(accountId),
+      executeDataOperation(api.messages.get, { id: chatId, sessionId: accountId }),
     ]);
+    if (!isActive()) {
+      return;
+    }
     if (chat?.description) {
       descriptionStore.set(chat.description);
     } else if (attempt < 2) {
-      window.setTimeout(() => void refreshProjectMetadata(attempt + 1), (attempt + 1) * 1_000);
+      window.setTimeout(
+        () => void refreshProjectMetadata(chatId, accountId, isActive, attempt + 1),
+        (attempt + 1) * 1_000,
+      );
     }
   } catch (error) {
     logger.debug('Unable to refresh generated project title', error);

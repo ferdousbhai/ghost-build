@@ -3,6 +3,17 @@ import { fetchUserRuntime } from './runtime-session';
 
 const DATA_OPERATION_TIMEOUT_MS = 15_000;
 
+export class DataOperationError extends Error {
+  constructor(
+    message: string,
+    readonly status: number | undefined,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = 'DataOperationError';
+  }
+}
+
 export async function executeDataOperation<Path extends DataOperationPath>(
   path: Path,
   args: DataOperationArgs<Path>,
@@ -44,10 +55,14 @@ export async function executeDataOperation<Path extends DataOperationPath>(
     }
     options.signal?.throwIfAborted();
     if (!response.ok) {
-      throw new Error(body?.error ?? `Data operation failed: ${path}`);
+      throw new DataOperationError(
+        body?.error ?? `Data operation failed: ${path}`,
+        response.status,
+        response.status === 408 || response.status === 429 || response.status >= 500,
+      );
     }
     if (!body || !Object.hasOwn(body, 'result')) {
-      throw new Error(`Data operation returned a malformed response: ${path}`);
+      throw new DataOperationError(`Data operation returned a malformed response: ${path}`, response.status, false);
     }
     return body.result as DataOperationResult<Path>;
   } catch (error) {
@@ -63,5 +78,5 @@ export async function executeDataOperation<Path extends DataOperationPath>(
 }
 
 function dataOperationTimeoutError(path: DataOperationPath): Error {
-  return new Error(`Ghostbuild timed out while running ${path}. Please try again.`);
+  return new DataOperationError(`Ghostbuild timed out while running ${path}. Please try again.`, undefined, true);
 }

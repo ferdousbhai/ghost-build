@@ -1,4 +1,4 @@
-import { useParams } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import { classNames } from '~/utils/classNames';
 import type { ChatHistorySummary } from '~/lib/cloudflare/data-api';
 import { useEditChatDescription } from '~/lib/hooks/useEditChatDescription';
@@ -7,15 +7,17 @@ import { Button } from '@ui/Button';
 import { TextInput } from '@ui/TextInput';
 import { format } from 'date-fns';
 import { ProjectTitle } from '~/components/ProjectTitle';
+import { useChatId } from '~/lib/stores/chatId';
 
 interface HistoryItemProps {
   item: ChatHistorySummary;
   handleDeleteClick: (item: ChatHistorySummary) => void;
+  onNavigate: () => void;
 }
 
-export function HistoryItem({ item, handleDeleteClick }: HistoryItemProps) {
-  const { id: routeChatId } = useParams({ strict: false }) as { id?: string };
-  const isActiveChat = routeChatId === item.id;
+export function HistoryItem({ item, handleDeleteClick, onNavigate }: HistoryItemProps) {
+  const activeChatId = useChatId();
+  const isActiveChat = activeChatId === item.initialId;
 
   const { editing, handleChange, handleBlur, handleSubmit, handleKeyDown, currentDescription, toggleEditMode } =
     useEditChatDescription({
@@ -62,8 +64,10 @@ export function HistoryItem({ item, handleDeleteClick }: HistoryItemProps) {
         </form>
       ) : (
         <>
-          <a
-            href={`/chat/${item.initialId}`}
+          <Link
+            to="/chat/$id"
+            params={{ id: item.initialId }}
+            onClick={onNavigate}
             className="flex min-w-0 flex-1 items-start gap-2.5 rounded-lg p-2 text-content-primary no-underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500"
           >
             <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--gb-background-secondary)] text-content-accent shadow-sm">
@@ -77,7 +81,7 @@ export function HistoryItem({ item, handleDeleteClick }: HistoryItemProps) {
                 Created {projectTime}
               </span>
             </span>
-          </a>
+          </Link>
           <div className="flex shrink-0 items-center gap-0.5 text-content-tertiary opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
             <ChatActionButton
               toolTipContent="Rename"

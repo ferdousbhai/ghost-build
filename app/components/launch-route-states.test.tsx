@@ -1,6 +1,19 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
-import { ExistingChatSessionView } from './ExistingChat.client';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@tanstack/react-router', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    Link: ({ children, to, hash, ...props }: { children: React.ReactNode; to: string; hash?: string }) => (
+      <a {...props} href={`${to}${hash ? `#${hash}` : ''}`}>
+        {children}
+      </a>
+    ),
+    useNavigate: () => vi.fn(),
+  };
+});
+import { ExistingChatSessionView, ProjectLoadError } from './ExistingChat.client';
 import { Header } from './header/Header';
 import { RootNotFoundComponent } from '~/routes/__root';
 import { SettingsRouteView } from '~/routes/settings';
@@ -35,6 +48,15 @@ describe('launch route states', () => {
     const signedOut = renderToStaticMarkup(<ExistingChatSessionView chatId="project-1" userId={null} />);
     expect(signedOut).toContain('Connect Cloudflare to open this project');
     expect(signedOut).toContain('Back to Ghostbuild');
+  });
+
+  it('replaces a failed cold project load with a retryable error instead of an endless spinner', () => {
+    const html = renderToStaticMarkup(<ProjectLoadError error={new Error('Runtime unavailable')} onRetry={vi.fn()} />);
+
+    expect(html).toContain('Ghostbuild could not load this project');
+    expect(html).toContain('Runtime unavailable');
+    expect(html).toContain('Try again');
+    expect(html).not.toContain('Loading project');
   });
 
   it('renders a branded, semantic root not-found state', () => {

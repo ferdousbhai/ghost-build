@@ -23,6 +23,7 @@ export class WorkbenchStore {
   #filesStore = new FilesStore();
   #editorStore = new EditorStore();
   #flushPendingEditorChange: (() => void) | null = null;
+  #workspaceId: string | null = null;
   showWorkbench: WritableAtom<boolean> = import.meta.hot?.data.showWorkbench ?? atom(false);
   currentView = workbenchCurrentView;
   unsavedFiles: WritableAtom<Set<AbsolutePath>> = import.meta.hot?.data.unsavedFiles ?? atom(new Set<AbsolutePath>());
@@ -89,6 +90,27 @@ export class WorkbenchStore {
 
   flushPendingEditorChange(): void {
     this.#flushPendingEditorChange?.();
+  }
+
+  activateWorkspace(workspaceId: string): void {
+    if (this.#workspaceId === workspaceId) {
+      return;
+    }
+    this.#workspaceId = workspaceId;
+    this.#flushPendingEditorChange = null;
+    this.#filesStore.setWorkspaceChangeListener(null);
+    this.unsavedFiles.set(new Set());
+    this.#filesStore.replaceWorkspaceSnapshot([]);
+    this.#editorStore.setDocuments({});
+    this.#editorStore.setSelectedFile(undefined);
+    this.#editorStore.followingStreamedCode.set(true);
+    this.#previewsStore.reset();
+    this.currentView.set('code');
+    this.showWorkbench.set(false);
+  }
+
+  isWorkspaceActive(workspaceId: string): boolean {
+    return this.#workspaceId === workspaceId;
   }
 
   applyWorkspaceSyncEntries(entries: BuilderWorkspaceSyncEntry[]): void {

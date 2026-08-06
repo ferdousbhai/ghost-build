@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
 import {
   CLOUDFLARE_ABUSE_URL,
@@ -39,7 +39,7 @@ function AbusePage() {
         <p>
           Ghostbuild does not yet provide a verified confidential abuse inbox. If a concern cannot be described safely
           in public, do not put the evidence in a GitHub issue. For a security vulnerability, use the{' '}
-          <a href="/security">private security channel</a>. For live Cloudflare-hosted abuse, use{' '}
+          <Link to="/security">private security channel</Link>. For live Cloudflare-hosted abuse, use{' '}
           <a href={CLOUDFLARE_ABUSE_URL}>Cloudflare’s abuse form</a>, which accepts non-public report details.
         </p>
         <p>

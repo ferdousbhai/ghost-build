@@ -1,5 +1,6 @@
 import { ExclamationTriangleIcon, ReloadIcon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
+import { LinkButton } from '~/components/ui/LinkButton';
 import { BrandLink } from '~/components/BrandLink';
 
 interface ErrorDisplayProps {
@@ -27,9 +28,9 @@ export function ErrorDisplay({ error, resetErrorBoundary }: ErrorDisplayProps) {
           <Button onClick={retry} icon={<ReloadIcon aria-hidden />}>
             Try again
           </Button>
-          <Button href="/" variant="neutral">
+          <LinkButton to="/" variant="neutral">
             Back to Ghostbuild
-          </Button>
+          </LinkButton>
         </div>
 
         {import.meta.env.DEV && isError && error.stack && (

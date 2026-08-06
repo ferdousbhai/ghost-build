@@ -35,9 +35,6 @@ export function createClientComponent<TProps extends object>(
   };
 }
 
-const LazyAppProviders = lazy(() =>
-  import('~/components/AppProviders.client').then((mod) => ({ default: mod.AppProviders })),
-);
 const LazyHeader = lazy(() => import('~/components/header/Header.client').then((mod) => ({ default: mod.Header })));
 const LazyHomepage = lazy(() => import('~/components/Homepage.client').then((mod) => ({ default: mod.Homepage })));
 const LazyExistingChat = lazy(() =>
@@ -50,23 +47,19 @@ const LazyTelemetryPreference = lazy(() =>
   import('~/components/trust/TelemetryPreference.client').then((mod) => ({ default: mod.TelemetryPreference })),
 );
 
-const getClientAppProviders = createClientOnlyFn(() => LazyAppProviders);
 const getClientHeader = createClientOnlyFn(() => LazyHeader);
 const getClientHomepage = createClientOnlyFn(() => LazyHomepage);
 const getClientExistingChat = createClientOnlyFn(() => LazyExistingChat);
 const getClientSettingsContent = createClientOnlyFn(() => LazySettingsContent);
 const getClientTelemetryPreference = createClientOnlyFn(() => LazyTelemetryPreference);
 
-export const ClientAppProviders = createClientComponent<{ children: ReactNode }>(
-  getClientAppProviders,
-  ({ children }) => children,
-);
-
 export const ClientHeader = createClientComponent<{ hideSidebarIcon?: boolean }>(getClientHeader, () => (
   <HeaderLoadingFallback />
 ));
 
-export const ClientHomepage = createClientComponent<EmptyProps>(getClientHomepage, () => <HomepageLoadingFallback />);
+export const ClientHomepage = createClientComponent<{ initialId: string }>(getClientHomepage, () => (
+  <HomepageLoadingFallback />
+));
 
 export const ClientExistingChat = createClientComponent<{ chatId: string }>(getClientExistingChat, () => (
   <Loading message="Loading project…" />

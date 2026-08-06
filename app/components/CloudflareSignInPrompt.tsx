@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ArrowLeftIcon } from '@radix-ui/react-icons';
 import { BrandLink } from '~/components/BrandLink';
 import { Button } from '@ui/Button';
+import { LinkButton } from '~/components/ui/LinkButton';
 import { createCloudflareReturnURL, signInWithCloudflare } from '~/lib/auth-client';
 import { CloudflareConnectLegalNotice } from '~/components/CloudflareConnectLegalNotice';
 
@@ -45,9 +46,9 @@ export function CloudflareSignInPrompt({
           <Button loading={connecting} onClick={() => void connect()}>
             Connect Cloudflare
           </Button>
-          <Button href="/" variant="neutral" icon={<ArrowLeftIcon aria-hidden />}>
+          <LinkButton to="/" variant="neutral" icon={<ArrowLeftIcon aria-hidden />}>
             Back to Ghostbuild
-          </Button>
+          </LinkButton>
         </div>
         <CloudflareConnectLegalNotice className="mt-6 text-xs leading-relaxed text-content-tertiary" />
       </section>

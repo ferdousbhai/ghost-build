@@ -71,9 +71,10 @@ describe('server Agent routing boundary', () => {
     expect(await response.text()).toBe('application');
     expect(response.headers.has('Cross-Origin-Opener-Policy')).toBe(false);
     expect(response.headers.has('Cross-Origin-Embedder-Policy')).toBe(false);
-    expect(response.headers.get('Content-Security-Policy')).toBe(
-      "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'",
-    );
+    const forwardedRequest = tanstackFetch.mock.calls[0]?.[0] as Request;
+    const nonce = forwardedRequest.headers.get('X-Ghostbuild-CSP-Nonce');
+    expect(nonce).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(response.headers.get('Content-Security-Policy')).toContain(`script-src 'self' 'nonce-${nonce}'`);
     expect(response.headers.get('Referrer-Policy')).toBe('strict-origin-when-cross-origin');
     expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000');
     expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
@@ -105,6 +106,26 @@ describe('server Agent routing boundary', () => {
     const response = await server.fetch(new Request('https://ghostbuild.dev/chat/project'), {} as Env);
 
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  it('preserves the streamed HTML body while applying the matching nonce policy', async () => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('<html>'));
+        controller.close();
+      },
+    });
+    tanstackFetch.mockResolvedValueOnce(
+      new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }),
+    );
+
+    const response = await server.fetch(new Request('https://ghostbuild.dev/stream'), {} as Env);
+    const forwardedRequest = tanstackFetch.mock.calls[0]?.[0] as Request;
+    const nonce = forwardedRequest.headers.get('X-Ghostbuild-CSP-Nonce');
+
+    expect(response.body).toBe(body);
+    expect(response.headers.get('Content-Security-Policy')).toContain(`'nonce-${nonce}'`);
+    expect(await response.text()).toBe('<html>');
   });
 
   it('preserves immutable caching for content-addressed static assets', async () => {

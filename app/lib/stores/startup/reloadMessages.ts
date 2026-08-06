@@ -9,7 +9,9 @@ import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 const logger = createScopedLogger('ReloadMessages');
 
 type ReloadedMessages = {
+  initialMessages: GhostbuildMessage[];
   partCache: PartCache;
+  subchatIndex: number | undefined;
 };
 
 export function useReloadMessages(initialMessages: GhostbuildMessage[] | undefined): ReloadedMessages | undefined {
@@ -27,11 +29,13 @@ export function useReloadMessages(initialMessages: GhostbuildMessage[] | undefin
         }
         processMessage(message, partCache);
       }
-      setReloadState({ partCache });
+      setReloadState({ initialMessages, partCache, subchatIndex });
     } catch (error) {
       toast.error('Failed to load previous chat messages from storage.');
       logger.error('Error reloading messages:', error);
     }
   }, [initialMessages, subchatIndex]);
-  return reloadState;
+  return reloadState?.initialMessages === initialMessages && reloadState?.subchatIndex === subchatIndex
+    ? reloadState
+    : undefined;
 }

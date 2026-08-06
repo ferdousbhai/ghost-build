@@ -13,12 +13,10 @@ import { HomeIntro } from './HomeIntro.client';
 import StreamingIndicator from './StreamingIndicator';
 import { AnimatePresence, motion, MotionConfig } from 'framer-motion';
 import { useStore } from '@nanostores/react';
-import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { SubchatBar } from './SubchatBar';
-import { subchatQueryKey, useMutation } from '~/lib/cloudflare/data-hooks';
+import { refreshSubchats, useMutation } from '~/lib/cloudflare/data-hooks';
 import { api } from '~/lib/cloudflare/data-api';
-import { loadAllSubchats } from '~/lib/cloudflare/data-page-loader';
 import { subchatIndexStore, useIsSubchatLoaded } from '~/lib/stores/subchats';
 import type { BuildProgress } from './build-progress';
 import type { SubchatSummary } from './subchat-model';
@@ -82,7 +80,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
     const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
     const createSubchat = useMutation(api.subchats.create);
     const setSubchatDescription = useMutation(api.subchats.setDescription);
-    const queryClient = useQueryClient();
     const isSubchatLoaded = useIsSubchatLoaded();
     const chatId = useChatId();
     const userId = useUserIdOrNullOrLoading();
@@ -123,11 +120,10 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
           return true;
         }
         try {
-          const subchats = await loadAllSubchats(chatId, userId);
+          await refreshSubchats({ chatId, sessionId: userId });
           if (!isActiveChat()) {
             return true;
           }
-          queryClient.setQueryData(subchatQueryKey({ chatId, sessionId: userId }), subchats);
         } catch (error) {
           if (isActiveChat()) {
             toast.error(
@@ -146,7 +142,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
           createSubchatPendingRef.current = null;
         }
       }
-    }, [createSubchat, chatId, queryClient, userId]);
+    }, [createSubchat, chatId, userId]);
     const handleRenameSubchat = useCallback(
       async (title: string): Promise<boolean> => {
         if (!userId) {
@@ -159,16 +155,14 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
             subchatIndex: currentSubchatIndex,
             description: title,
           });
-          await queryClient.invalidateQueries({
-            queryKey: subchatQueryKey({ chatId, sessionId: userId }),
-          });
+          await refreshSubchats({ chatId, sessionId: userId });
           return true;
         } catch (error) {
           toast.error(error instanceof Error ? error.message : 'Unable to rename this chat.');
           return false;
         }
       },
-      [chatId, currentSubchatIndex, queryClient, userId, setSubchatDescription],
+      [chatId, currentSubchatIndex, userId, setSubchatDescription],
     );
 
     const lastUserMessage = messages.findLast((message) => message.role === 'user');

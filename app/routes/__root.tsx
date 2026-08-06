@@ -1,13 +1,17 @@
 import { useStore } from '@nanostores/react';
 import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
 import { useEffect, type ReactNode } from 'react';
-import { ClientAppProviders } from '~/components/ClientRouteComponents';
+import { AppProviders } from '~/components/AppProviders';
 import { ErrorDisplay } from '~/components/ErrorComponent';
 import { BrandLink } from '~/components/BrandLink';
-import { Button } from '@ui/Button';
+import { LinkButton } from '~/components/ui/LinkButton';
 import { themeStore } from '~/lib/stores/theme';
 import { stripIndents } from 'ghostbuild-agent/utils/stripIndent';
 import globalStyles from '~/styles/index.css?url';
+
+type RootSearch = {
+  prefill?: string;
+};
 
 const inlineBootstrapCode = stripIndents`
   setGhostbuildTheme();
@@ -54,6 +58,8 @@ const inlineBootstrapCode = stripIndents`
 const dynamicImportRecoveryKey = 'ghostbuild:dynamic-import-recovery';
 
 export const Route = createRootRoute({
+  validateSearch: (search: Record<string, unknown>): RootSearch =>
+    typeof search.prefill === 'string' ? { prefill: search.prefill } : {},
   head: () => ({
     meta: [
       { charSet: 'utf-8' },
@@ -122,11 +128,11 @@ function Layout({ children }: { children: ReactNode }) {
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
-      <ClientAppProviders>
+      <AppProviders>
         <main id="main-content" className="size-full">
           {children}
         </main>
-      </ClientAppProviders>
+      </AppProviders>
     </>
   );
 }
@@ -143,14 +149,14 @@ export function RootNotFoundComponent() {
           This page does not exist.
         </h1>
         <div className="mt-7">
-          <Button href="/">Back to Ghostbuild</Button>
+          <LinkButton to="/">Back to Ghostbuild</LinkButton>
         </div>
       </section>
     </div>
   );
 }
 
-function RootErrorComponent({ error }: { error: unknown }) {
+function RootErrorComponent({ error, reset }: { error: unknown; reset: () => void }) {
   useEffect(() => {
     recoverFromDynamicImportError(error);
   }, [error]);
@@ -161,7 +167,7 @@ function RootErrorComponent({ error }: { error: unknown }) {
     );
   }
 
-  return <ErrorDisplay error={error} />;
+  return <ErrorDisplay error={error} resetErrorBoundary={reset} />;
 }
 
 function useDynamicImportRecovery() {

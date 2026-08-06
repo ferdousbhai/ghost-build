@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import type { SyncConfig } from '@tanstack/db';
 import type { BuilderWorkspaceClientChange, BuilderWorkspaceSyncEntry } from '~/agents/builder-workspace-types';
 import type { AccountLocalReplica } from '~/lib/cloudflare/account-local-replica';
 import type { BuilderWorkspaceFileRecord } from './builder-workspace-collection.client';
 
 const workbench = vi.hoisted(() => ({
+  activateWorkspace: vi.fn(),
+  isWorkspaceActive: vi.fn((_workspaceId: string) => true),
   setWorkspaceChangeListener: vi.fn(),
   clearWorkspaceChangeListener: vi.fn(),
   applyWorkspaceSyncEntries: vi.fn(async (_entries: BuilderWorkspaceSyncEntry[]) => undefined),
@@ -36,6 +39,58 @@ describe('BuilderWorkspaceSyncController', () => {
       'durable project workspace is not initialized',
     );
     expect(workbench.replaceWorkspaceSnapshot).not.toHaveBeenCalled();
+  });
+
+  test('rejects late workspace initialization after an account-scoped workspace supersedes it', async () => {
+    let activeWorkspace = '';
+    workbench.activateWorkspace.mockImplementation((workspaceId: string) => {
+      activeWorkspace = workspaceId;
+    });
+    workbench.isWorkspaceActive.mockImplementation((workspaceId: string) => activeWorkspace === workspaceId);
+    let releaseFirstAccount: () => void = () => undefined;
+    const firstAccountBlocked = new Promise<void>((resolve) => {
+      releaseFirstAccount = resolve;
+    });
+    const firstAgent = {
+      call: vi.fn(async (method: string) => {
+        if (method === 'getWorkspaceState') {
+          await firstAccountBlocked;
+          return workspaceState(1);
+        }
+        throw new Error(`Unexpected RPC: ${method}`);
+      }),
+    };
+    const secondAgent = {
+      call: vi.fn(async (method: string, args: unknown[]) => {
+        if (method === 'getWorkspaceState') {
+          return workspaceState(1);
+        }
+        if (method === 'getWorkspaceSyncPage') {
+          const request = args[0] as { fromRevision: number };
+          return syncPage(request.fromRevision, 1, 'snapshot', []);
+        }
+        throw new Error(`Unexpected RPC: ${method}`);
+      }),
+    };
+
+    const firstInitialization = BuilderWorkspaceSyncController.initialize(firstAgent, {
+      workspaceId: 'account-a:shared-agent',
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await vi.waitFor(() => expect(firstAgent.call).toHaveBeenCalledWith('getWorkspaceState', [], expect.anything()));
+    const secondController = await BuilderWorkspaceSyncController.initialize(secondAgent, {
+      workspaceId: 'account-b:shared-agent',
+    });
+    releaseFirstAccount();
+
+    await expect(firstInitialization).resolves.toEqual(
+      expect.objectContaining({ message: 'The durable workspace connection was superseded.' }),
+    );
+    expect(activeWorkspace).toBe('account-b:shared-agent');
+    expect(firstAgent.call).toHaveBeenCalledTimes(1);
+    secondController.dispose();
   });
 
   test('hydrates persisted rows and resumes server sync from the SQLite revision', async () => {
@@ -182,16 +237,16 @@ describe('BuilderWorkspaceSyncController', () => {
             }
             if (request.fromRevision === 1) {
               restarting = true;
-              return { ...syncPage(1, 2, 'current', []), restart: true };
+              return { ...syncPage(1, 2, 'snapshot', []), restart: true };
             }
             if (!request.cursor) {
               return {
-                ...syncPage(0, 2, 'snapshot', [write('/home/project/src/one.ts', 'one', 2)]),
-                nextCursor: '1',
+                ...syncPage(0, 2, 'snapshot', [write('/home/project/src/one.ts', 'one', 2)], workspaceState(2, 2, 6)),
+                nextCursor: syncCursor(2, 1),
               };
             }
-            expect(request).toEqual({ fromRevision: 0, targetRevision: 2, cursor: '1' });
-            return syncPage(0, 2, 'snapshot', [write('/home/project/src/two.ts', 'two', 2)]);
+            expect(request).toEqual({ fromRevision: 0, targetRevision: 2, cursor: syncCursor(2, 1) });
+            return syncPage(0, 2, 'snapshot', [write('/home/project/src/two.ts', 'two', 2)], workspaceState(2, 2, 6));
           }
           default:
             throw new Error(`Unexpected RPC: ${method}`);
@@ -223,7 +278,7 @@ describe('BuilderWorkspaceSyncController', () => {
             const request = args[0] as { fromRevision: number };
             return request.fromRevision === 0
               ? syncPage(0, 1, 'snapshot', [])
-              : syncPage(request.fromRevision, 2, 'current', []);
+              : syncPage(request.fromRevision, 2, 'snapshot', []);
           }
           case 'applyWorkspaceClientChanges':
             applyCount += 1;
@@ -269,7 +324,9 @@ describe('BuilderWorkspaceSyncController', () => {
             const request = args[0] as { fromRevision: number };
             return request.fromRevision === 0
               ? syncPage(0, 1, 'snapshot', [])
-              : syncPage(request.fromRevision, revision, 'current', []);
+              : request.fromRevision === revision
+                ? syncPage(request.fromRevision, revision, 'current', [])
+                : syncPage(request.fromRevision, revision, 'snapshot', []);
           }
           case 'applyWorkspaceClientChanges': {
             activeApplyCalls += 1;
@@ -307,15 +364,215 @@ describe('BuilderWorkspaceSyncController', () => {
     expect(maximumActiveApplyCalls).toBe(1);
     expect(agent.call.mock.calls.filter(([method]) => method === 'applyWorkspaceClientChanges')).toHaveLength(2);
   });
+
+  test('discards corrupt persisted rows and requests an authoritative snapshot', async () => {
+    const cached = { ...fileRecord('/home/project/src/cached.ts', 'cached', 7), content: 'tamper' };
+    const serverFile = write('/home/project/src/server.ts', 'server', 8);
+    const agent = {
+      call: vi.fn(async (method: string, args: unknown[]) => {
+        switch (method) {
+          case 'getWorkspaceState':
+            return workspaceState(8);
+          case 'getWorkspaceSyncPage': {
+            const request = args[0] as { fromRevision: number };
+            return syncPage(request.fromRevision, 8, 'snapshot', [serverFile]);
+          }
+          default:
+            throw new Error(`Unexpected RPC: ${method}`);
+        }
+      }),
+    };
+
+    const controller = await BuilderWorkspaceSyncController.initialize(agent, {
+      workspaceId: 'workspace-corrupt',
+      replica: replicaWithCachedRecord(cached, 7),
+    });
+
+    expect(agent.call).toHaveBeenCalledWith(
+      'getWorkspaceSyncPage',
+      [{ fromRevision: 0 }],
+      expect.objectContaining({ timeout: 30_000 }),
+    );
+    expect(workbench.replaceWorkspaceSnapshot).toHaveBeenLastCalledWith([
+      expect.objectContaining({ path: '/home/project/src/server.ts', content: 'server' }),
+    ]);
+    expect(
+      workbench.replaceWorkspaceSnapshot.mock.calls
+        .flatMap(([entries]) => entries)
+        .some((entry) => entry.path === cached.path),
+    ).toBe(false);
+    controller.dispose();
+  });
+
+  test('rejects persisted rows from an older revision than the collection metadata', async () => {
+    const cached = fileRecord('/home/project/src/stale.ts', 'stale', 6);
+    const serverFile = write('/home/project/src/current.ts', 'current', 7);
+    const agent = {
+      call: vi.fn(async (method: string, args: unknown[]) => {
+        if (method === 'getWorkspaceState') {
+          return workspaceState(7);
+        }
+        if (method === 'getWorkspaceSyncPage') {
+          const request = args[0] as { fromRevision: number };
+          return syncPage(request.fromRevision, 7, 'snapshot', [serverFile]);
+        }
+        throw new Error(`Unexpected RPC: ${method}`);
+      }),
+    };
+
+    const controller = await BuilderWorkspaceSyncController.initialize(agent, {
+      workspaceId: 'workspace-stale-revision',
+      replica: replicaWithCachedRecord(cached, 7),
+    });
+
+    expect(agent.call).toHaveBeenCalledWith(
+      'getWorkspaceSyncPage',
+      [{ fromRevision: 0 }],
+      expect.objectContaining({ timeout: 30_000 }),
+    );
+    expect(workbench.replaceWorkspaceSnapshot).toHaveBeenLastCalledWith([
+      expect.objectContaining({ path: serverFile.path }),
+    ]);
+    controller.dispose();
+  });
+
+  test('replaces an incomplete persisted snapshot after a server current response', async () => {
+    const cached = fileRecord('/home/project/src/cached.ts', 'cached', 7);
+    const missing = write('/home/project/src/missing.ts', 'new', 7);
+    const agent = {
+      call: vi.fn(async (method: string, args: unknown[]) => {
+        if (method === 'getWorkspaceState') {
+          return workspaceState(7, 2, 9);
+        }
+        if (method === 'getWorkspaceSyncPage') {
+          const request = args[0] as { fromRevision: number };
+          return request.fromRevision === 7
+            ? syncPage(7, 7, 'current', [], workspaceState(7, 2, 9))
+            : syncPage(0, 7, 'snapshot', [write(cached.path, cached.content, cached.revision), missing]);
+        }
+        throw new Error(`Unexpected RPC: ${method}`);
+      }),
+    };
+
+    const controller = await BuilderWorkspaceSyncController.initialize(agent, {
+      workspaceId: 'workspace-incomplete',
+      replica: replicaWithCachedRecord(cached, 7),
+    });
+
+    expect(agent.call.mock.calls.filter(([method]) => method === 'getWorkspaceSyncPage')).toEqual([
+      ['getWorkspaceSyncPage', [{ fromRevision: 7 }], { timeout: 30_000 }],
+      ['getWorkspaceSyncPage', [{ fromRevision: 0 }], { timeout: 30_000 }],
+    ]);
+    expect(workbench.replaceWorkspaceSnapshot).toHaveBeenLastCalledWith([
+      expect.objectContaining({ path: cached.path }),
+      expect.objectContaining({ path: missing.path }),
+    ]);
+    controller.dispose();
+  });
+
+  test('rejects a sync cursor that does not advance to the next entry', async () => {
+    const agent = {
+      call: vi.fn(async (method: string) => {
+        if (method === 'getWorkspaceState') {
+          return workspaceState(1);
+        }
+        if (method === 'getWorkspaceSyncPage') {
+          return {
+            ...syncPage(0, 1, 'snapshot', [write('/home/project/src/one.ts', 'one', 1)]),
+            nextCursor: syncCursor(1, 0),
+          };
+        }
+        throw new Error(`Unexpected RPC: ${method}`);
+      }),
+    };
+
+    await expect(BuilderWorkspaceSyncController.initialize(agent)).rejects.toThrow(
+      'sync cursor did not advance to the next entry',
+    );
+    expect(workbench.applyWorkspaceSyncEntries).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['path', { ...write('/home/project/src/file.ts', 'one', 1), path: '/tmp/file.ts' }],
+    ['encoding', { ...write('/home/project/src/file.ts', 'one', 1), encoding: 'hex' }],
+    ['hash', { ...write('/home/project/src/file.ts', 'one', 1), sha256: '1' }],
+  ])('rejects a sync entry with an invalid %s before committing it', async (_field, invalidEntry) => {
+    const agent = {
+      call: vi.fn(async (method: string) => {
+        if (method === 'getWorkspaceState') {
+          return workspaceState(1);
+        }
+        if (method === 'getWorkspaceSyncPage') {
+          return {
+            ...syncPage(0, 1, 'snapshot', [write('/home/project/src/file.ts', 'one', 1)]),
+            entries: [invalidEntry],
+          };
+        }
+        throw new Error(`Unexpected RPC: ${method}`);
+      }),
+    };
+
+    await expect(BuilderWorkspaceSyncController.initialize(agent)).rejects.toThrow(
+      'Invalid durable workspace sync response',
+    );
+    expect(workbench.applyWorkspaceSyncEntries).not.toHaveBeenCalled();
+  });
+
+  test('rejects sync content that does not match its declared hash', async () => {
+    const entry = { ...write('/home/project/src/file.ts', 'one', 1), content: 'two' };
+    const agent = {
+      call: vi.fn(async (method: string) => {
+        if (method === 'getWorkspaceState') {
+          return workspaceState(1);
+        }
+        if (method === 'getWorkspaceSyncPage') {
+          return syncPage(0, 1, 'snapshot', [entry]);
+        }
+        throw new Error(`Unexpected RPC: ${method}`);
+      }),
+    };
+
+    await expect(BuilderWorkspaceSyncController.initialize(agent)).rejects.toThrow(
+      'content hash does not match for /home/project/src/file.ts',
+    );
+    expect(workbench.replaceWorkspaceSnapshot).toHaveBeenCalledWith([]);
+    expect(workbench.applyWorkspaceSyncEntries).not.toHaveBeenCalled();
+  });
+
+  test('rejects a target revision change between pages before committing entries', async () => {
+    let page = 0;
+    const agent = {
+      call: vi.fn(async (method: string) => {
+        if (method === 'getWorkspaceState') {
+          return workspaceState(2);
+        }
+        if (method === 'getWorkspaceSyncPage') {
+          page += 1;
+          return page === 1
+            ? {
+                ...syncPage(0, 2, 'snapshot', [write('/home/project/src/one.ts', 'one', 2)], workspaceState(2, 2, 6)),
+                nextCursor: syncCursor(2, 1),
+              }
+            : syncPage(0, 3, 'snapshot', [write('/home/project/src/two.ts', 'two', 3)], workspaceState(3, 2, 6));
+        }
+        throw new Error(`Unexpected RPC: ${method}`);
+      }),
+    };
+
+    await expect(BuilderWorkspaceSyncController.initialize(agent)).rejects.toThrow(
+      'target revision changed between pages',
+    );
+    expect(workbench.applyWorkspaceSyncEntries).not.toHaveBeenCalled();
+  });
 });
 
-function workspaceState(revision: number) {
+function workspaceState(revision: number, fileCount = 1, totalBytes = 1) {
   return {
     initialized: true,
     revision,
     resetRevision: 1,
-    fileCount: 1,
-    totalBytes: 1,
+    fileCount,
+    totalBytes,
     seeding: false,
   };
 }
@@ -325,9 +582,16 @@ function syncPage(
   targetRevision: number,
   mode: 'current' | 'snapshot' | 'delta',
   entries: BuilderWorkspaceSyncEntry[],
+  state = mode === 'snapshot'
+    ? workspaceState(
+        targetRevision,
+        entries.filter((entry) => entry.kind === 'write').length,
+        entries.reduce((total, entry) => total + (entry.kind === 'write' ? entry.size : 0), 0),
+      )
+    : workspaceState(targetRevision),
 ) {
   return {
-    state: workspaceState(targetRevision),
+    state,
     fromRevision,
     targetRevision,
     mode,
@@ -342,9 +606,13 @@ function write(path: string, content: string, revision: number): BuilderWorkspac
     content,
     encoding: 'utf8',
     size: content.length,
-    sha256: `${revision}`,
+    sha256: sha256(content),
     revision,
   };
+}
+
+function syncCursor(revision: number, index: number): string {
+  return btoa(JSON.stringify({ revision, index }));
 }
 
 type WorkspaceSyncParams = Parameters<SyncConfig<BuilderWorkspaceFileRecord, string>['sync']>[0];
@@ -361,7 +629,41 @@ function fileRecord(path: string, content: string, revision: number): BuilderWor
     content,
     encoding: 'utf8',
     size: content.length,
-    sha256: `${revision}`,
+    sha256: sha256(content),
     revision,
   };
+}
+
+function sha256(content: string): string {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+function replicaWithCachedRecord(cached: BuilderWorkspaceFileRecord, revision: number): AccountLocalReplica {
+  return {
+    persistence: {},
+    persistedCollectionOptions: (options: WorkspaceCollectionOptions) => ({
+      ...options,
+      sync: {
+        ...options.sync,
+        sync: (params: WorkspaceSyncParams) => {
+          params.begin({ immediate: true });
+          params.write({ type: 'update', value: cached });
+          params.commit();
+          if (!params.metadata) {
+            throw new Error('Expected collection metadata support.');
+          }
+          return options.sync.sync({
+            ...params,
+            metadata: {
+              ...params.metadata,
+              collection: {
+                ...params.metadata.collection,
+                get: () => revision,
+              },
+            },
+          });
+        },
+      },
+    }),
+  } as unknown as AccountLocalReplica;
 }

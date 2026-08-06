@@ -12,6 +12,7 @@ const fileB = '/home/project/b.ts' as AbsolutePath;
 
 function createStore() {
   const store = new WorkbenchStore();
+  store.activateWorkspace('workspace-a');
   store.files.set({
     [fileA]: { type: 'file', content: 'a0', isBinary: false },
     [fileB]: { type: 'file', content: 'b0', isBinary: false },
@@ -131,5 +132,23 @@ describe('WorkbenchStore editor flush boundaries', () => {
 
     expect(store.currentDocument.get()).toMatchObject({ filePath: fileA, value: 'same content' });
     expect(store.unsavedFiles.get()).not.toContain(fileA);
+  });
+
+  it('drops every project-scoped presentation value before activating another workspace', () => {
+    const store = createStore();
+    store.setDocumentContent(fileA, 'private workspace-a edit');
+    store.showWorkbench.set(true);
+    store.currentView.set('preview');
+
+    store.activateWorkspace('workspace-b');
+    store.replaceWorkspaceSnapshot([syncWrite(fileB, 'workspace-b content')]);
+
+    expect(store.files.get()[fileA]).toBeUndefined();
+    expect(store.files.get()[fileB]).toMatchObject({ content: 'workspace-b content' });
+    expect(store.unsavedFiles.get()).toEqual(new Set());
+    expect(store.selectedFile.get()).toBe(fileB);
+    expect(store.currentView.get()).toBe('code');
+    expect(store.showWorkbench.get()).toBe(false);
+    expect(store.hasPreview.get()).toBe(false);
   });
 });

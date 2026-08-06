@@ -2,7 +2,7 @@ import { ArrowLeftIcon } from '@radix-ui/react-icons';
 import { ProfileCard } from '~/components/settings/ProfileCard';
 import { Toaster } from '~/components/ui/Toaster';
 import { UserProvider } from '~/components/UserProvider';
-import { Button } from '@ui/Button';
+import { LinkButton } from '~/components/ui/LinkButton';
 import { BrandLink } from '~/components/BrandLink';
 import { CloudflareCard } from '~/components/settings/CloudflareCard.client';
 import { TrustFooter } from '~/components/trust/TrustLinks';
@@ -14,9 +14,9 @@ export function SettingsContent({ authorizationError }: { authorizationError?: s
         <div className="app-page-container">
           <nav className="app-page-nav !mb-8" aria-label="Settings navigation">
             <BrandLink />
-            <Button href="/" variant="neutral" size="sm" icon={<ArrowLeftIcon aria-hidden />}>
+            <LinkButton to="/" variant="neutral" size="sm" icon={<ArrowLeftIcon aria-hidden />}>
               <span>Back to builder</span>
-            </Button>
+            </LinkButton>
           </nav>
 
           <h1 className="sr-only">Settings</h1>

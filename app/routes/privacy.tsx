@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { ClientTelemetryPreference } from '~/components/ClientRouteComponents';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
 import { GHOSTBUILD_OPERATOR, createPublicBetaTrustPageHead } from '~/lib/trust';
@@ -202,10 +202,10 @@ function PrivacyPage() {
         <p>
           Depending on applicable law, you may request access, correction, portability, restriction, objection, or
           erasure and may complain to the data-protection authority responsible where you live or where an alleged
-          infringement occurred. Start with the public <a href="/support">Support</a> form and include only the request
-          type and your GitHub handle. If a private method can be arranged, a maintainer will identify it in the issue;
-          until then, do not provide sensitive information. Ghostbuild does not yet provide a verified confidential
-          privacy inbox.
+          infringement occurred. Start with the public <Link to="/support">Support</Link> form and include only the
+          request type and your GitHub handle. If a private method can be arranged, a maintainer will identify it in the
+          issue; until then, do not provide sensitive information. Ghostbuild does not yet provide a verified
+          confidential privacy inbox.
         </p>
         <p>
           Ghostbuild may request proportionate information to verify control of the relevant Cloudflare identity before
@@ -228,8 +228,8 @@ function PrivacyPage() {
       <TrustSection title="Changes and contact">
         <p>
           Material changes will be published with an updated version and effective date and, when practical, additional
-          notice in the service. Use <a href="/support">Support</a> for privacy questions, sharing only the request type
-          and your GitHub handle in the public form.
+          notice in the service. Use <Link to="/support">Support</Link> for privacy questions, sharing only the request
+          type and your GitHub handle in the public form.
         </p>
       </TrustSection>
     </TrustPage>

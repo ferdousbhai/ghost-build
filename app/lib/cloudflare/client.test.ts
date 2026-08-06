@@ -64,4 +64,17 @@ describe('executeDataOperation', () => {
       executeDataOperation(api.messages.initializeChat, { id: 'chat-1', sessionId: 'session-1' }),
     ).rejects.toThrow('Data operation returned a malformed response: messages.initializeChat');
   });
+
+  it('preserves HTTP status and retryability for query policy decisions', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json({ error: 'Invalid request' }, { status: 400 }));
+
+    await expect(
+      executeDataOperation(api.messages.initializeChat, { id: 'chat-1', sessionId: 'session-1' }),
+    ).rejects.toMatchObject({ name: 'DataOperationError', status: 400, retryable: false });
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json({ error: 'Try later' }, { status: 503 }));
+    await expect(
+      executeDataOperation(api.messages.initializeChat, { id: 'chat-1', sessionId: 'session-1' }),
+    ).rejects.toMatchObject({ name: 'DataOperationError', status: 503, retryable: true });
+  });
 });

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getUserRuntimeSession, resetUserRuntimeSession, userRuntimeEndpointStore } from './runtime-session';
+import {
+  fetchUserRuntime,
+  getUserRuntimeSession,
+  resetUserRuntimeSession,
+  userRuntimeEndpointStore,
+} from './runtime-session';
 
 afterEach(() => {
   resetUserRuntimeSession();
@@ -66,6 +71,36 @@ describe('user runtime session', () => {
 
     await expect(session).resolves.toMatchObject({ endpoint: 'https://workspace.example' });
     expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets a caller cancel its wait without cancelling shared provisioning', async () => {
+    let finishProvisioning: ((response: Response) => void) | undefined;
+    const request = vi.fn().mockReturnValue(
+      new Promise<Response>((resolve) => {
+        finishProvisioning = resolve;
+      }),
+    );
+    vi.stubGlobal('fetch', request);
+    const caller = new AbortController();
+
+    const canceledWait = fetchUserRuntime('/v1/data', { signal: caller.signal });
+    const sharedWait = getUserRuntimeSession();
+    const canceled = expect(canceledWait).rejects.toMatchObject({ name: 'AbortError', message: 'Query cancelled' });
+    caller.abort(new DOMException('Query cancelled', 'AbortError'));
+
+    await canceled;
+    expect(request).toHaveBeenCalledOnce();
+
+    finishProvisioning?.(
+      Response.json({
+        endpoint: 'https://workspace.example',
+        token: 'capability-token',
+        expiresAt: Date.now() + 60_000,
+      }),
+    );
+    await expect(sharedWait).resolves.toMatchObject({ endpoint: 'https://workspace.example' });
+    expect(userRuntimeEndpointStore.get()).toBe('https://workspace.example');
+    expect(request).toHaveBeenCalledOnce();
   });
 
   it('stops lease polling when the account session resets', async () => {

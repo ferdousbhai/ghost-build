@@ -19,6 +19,8 @@ vi.mock('~/lib/cloudflare/runtime-session', () => ({
 }));
 vi.mock('~/lib/cloudflare/account-local-replica', () => ({
   ACCOUNT_LOCAL_REPLICA_SCHEMA_VERSION: 1,
+  ACCOUNT_LOCAL_REPLICA_GC_TIME: 30 * 24 * 60 * 60 * 1000,
+  registerAccountCollectionDisposer: () => () => undefined,
   useAccountLocalReplica: () => null,
 }));
 describe('useInitialMessages', () => {

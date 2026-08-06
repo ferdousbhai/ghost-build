@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
 import { GHOSTBUILD_OPERATOR, createPublicBetaTrustPageHead } from '~/lib/trust';
 
@@ -87,7 +87,7 @@ function TermsPage() {
           access when reasonably necessary for security, abuse prevention, legal compliance, service integrity, or a
           material breach of these Terms. Notice will be provided when reasonably practical. Removal from Ghostbuild
           does not remove customer-controlled Cloudflare resources, and the retention boundaries in the{' '}
-          <a href="/privacy">Privacy notice</a> continue to apply.
+          <Link to="/privacy">Privacy notice</Link> continue to apply.
         </p>
       </TrustSection>
       <TrustSection title="Warranty and liability">
@@ -115,7 +115,7 @@ function TermsPage() {
         <p>
           These Terms do not take away mandatory rights available where you live. Applicable law and courts are
           determined by the conflict-of-law and jurisdiction rules that govern you and the operator. You may use{' '}
-          <a href="/support">Support</a> to try to resolve a concern before filing a claim, but doing so is not a
+          <Link to="/support">Support</Link> to try to resolve a concern before filing a claim, but doing so is not a
           condition on any remedy or urgent relief available under applicable law.
         </p>
       </TrustSection>
@@ -127,7 +127,7 @@ function TermsPage() {
           using Ghostbuild and revoke its Cloudflare authorization before a later effective date. Continued signed-in
           use after that date accepts the updated Terms where applicable law permits. If any provision is unenforceable,
           the rest remains effective, and a failure to enforce a provision is not a waiver. Use{' '}
-          <a href="/support">Support</a> for notices or questions.
+          <Link to="/support">Support</Link> for notices or questions.
         </p>
       </TrustSection>
     </TrustPage>

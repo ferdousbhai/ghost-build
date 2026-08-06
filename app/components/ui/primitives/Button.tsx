@@ -1,4 +1,4 @@
-import { forwardRef, type AnchorHTMLAttributes, type ButtonHTMLAttributes, type ReactNode, type Ref } from 'react';
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { classNames } from '~/utils/classNames';
 
 export type ButtonVariant = 'primary' | 'neutral' | 'danger' | 'ghost';
@@ -18,17 +18,9 @@ export type ButtonVisualProps = {
   type?: ButtonHTMLAttributes<HTMLButtonElement>['type'];
 };
 
-type AnchorButtonProps = ButtonVisualProps &
-  Omit<AnchorHTMLAttributes<HTMLAnchorElement>, keyof ButtonVisualProps | 'href'> & {
-    href: string;
-  };
+type NativeButtonProps = ButtonVisualProps & Omit<ButtonHTMLAttributes<HTMLButtonElement>, keyof ButtonVisualProps>;
 
-type NativeButtonProps = ButtonVisualProps &
-  Omit<ButtonHTMLAttributes<HTMLButtonElement>, keyof ButtonVisualProps | 'href'> & {
-    href?: undefined;
-  };
-
-type ButtonProps = AnchorButtonProps | NativeButtonProps;
+type ButtonProps = NativeButtonProps;
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary: 'bg-accent-500 text-white hover:bg-accent-600',
@@ -63,7 +55,7 @@ export function buttonClassNames({
   );
 }
 
-export const Button = forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonProps>(function Button(
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   {
     children,
     className,
@@ -73,7 +65,6 @@ export const Button = forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonPr
     size = 'md',
     inline,
     focused,
-    href,
     loading,
     disabled,
     type = 'button',
@@ -96,29 +87,13 @@ export const Button = forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonPr
     </>
   );
 
-  if (href) {
-    const anchorProps = props as AnchorHTMLAttributes<HTMLAnchorElement>;
-    return (
-      <a
-        {...anchorProps}
-        ref={ref as Ref<HTMLAnchorElement>}
-        href={href}
-        className={classes}
-        title={tip ?? anchorProps.title}
-      >
-        {content}
-      </a>
-    );
-  }
-
-  const buttonProps = props as ButtonHTMLAttributes<HTMLButtonElement>;
   return (
     <button
-      {...buttonProps}
-      ref={ref as Ref<HTMLButtonElement>}
+      {...props}
+      ref={ref}
       type={type}
       className={classes}
-      title={tip ?? buttonProps.title}
+      title={tip ?? props.title}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
     >

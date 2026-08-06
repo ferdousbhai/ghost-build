@@ -1,15 +1,15 @@
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useSnapScroll } from '~/lib/hooks/useSnapScroll';
 import { chatStore } from '~/lib/stores/chatId';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { BaseChat } from './BaseChat.client';
-import { chatIdStore } from '~/lib/stores/chatId';
+import { useChatId } from '~/lib/stores/chatId';
 import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import type { ChatProps } from './chat-types';
 import { UnauthenticatedChat } from './UnauthenticatedChat';
-import { useBuilderAgentChat } from './useBuilderAgentChat';
+import { workspacePresentationId, useBuilderAgentChat } from './useBuilderAgentChat';
 import { useChatHistoryProcessing } from './useChatHistoryProcessing';
 import { useCurrentToolStatus } from './useCurrentToolStatus';
 import { useBuildProgress } from './useBuildProgress';
@@ -20,6 +20,8 @@ import { applyLiveSubchatTitle, type LiveSubchatTitle } from './subchat-model';
 import { getUserRuntimeSession, userRuntimeEndpointStore } from '~/lib/cloudflare/runtime-session';
 import { Loading } from '~/components/Loading';
 import { Button } from '@ui/Button';
+import { LinkButton } from '~/components/ui/LinkButton';
+import { workbenchStore } from '~/lib/stores/workbench.client';
 
 const logger = createScopedLogger('Chat');
 
@@ -77,6 +79,7 @@ export const Chat = memo(
 
     return (
       <AuthenticatedChat
+        accountId={userId}
         initialMessages={initialMessages}
         partCache={partCache}
         storeMessageHistory={storeMessageHistory}
@@ -105,9 +108,9 @@ function WorkspaceRuntimeConnectionError({ message, onRetry }: { message: string
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           <Button onClick={onRetry}>Try again</Button>
-          <Button href="/settings#cloudflare" variant="neutral">
+          <LinkButton to="/settings" hash="cloudflare" variant="neutral">
             Cloudflare account
-          </Button>
+          </LinkButton>
         </div>
       </section>
     </div>
@@ -116,6 +119,7 @@ function WorkspaceRuntimeConnectionError({ message, onRetry }: { message: string
 
 const AuthenticatedChat = memo(
   ({
+    accountId,
     initialMessages,
     partCache,
     storeMessageHistory,
@@ -127,10 +131,15 @@ const AuthenticatedChat = memo(
     clearPendingInitialMessage,
     transcript,
   }: ChatProps & {
+    accountId: string;
     pendingInitialMessage: string | null;
     clearPendingInitialMessage: () => void;
   }) => {
-    const chatInitialId = useStore(chatIdStore);
+    const chatInitialId = useChatId();
+    const presentationId = workspacePresentationId(accountId, transcript.agentName);
+    useLayoutEffect(() => {
+      workbenchStore.activateWorkspace(presentationId);
+    }, [presentationId]);
     const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
     const hasMultipleSubchats = (subchats?.length ?? 0) > 1;
     const [liveSubchatTitle, setLiveSubchatTitle] = useState<LiveSubchatTitle | null>(null);
@@ -157,9 +166,11 @@ const AuthenticatedChat = memo(
       validationStage,
       workspacePresentationState,
     } = useBuilderAgentChat({
+      accountId,
       chatInitialId,
       initialMessages,
       onSubchatTitle: handleSubchatTitleChange,
+      presentationId,
       transcript,
     });
     const parsedMessages = useChatHistoryProcessing({
@@ -173,6 +184,9 @@ const AuthenticatedChat = memo(
 
     useEffect(() => {
       chatStore.setKey('started', chatStarted);
+      return () => {
+        chatStore.set({ started: false, aborted: false, showChat: true });
+      };
     }, [chatStarted]);
 
     const abort = () => {

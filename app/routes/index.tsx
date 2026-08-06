@@ -2,8 +2,11 @@ import { createFileRoute } from '@tanstack/react-router';
 import { ClientHeader, ClientHomepage } from '~/components/ClientRouteComponents';
 import { createSocialPageHead } from '~/lib/social-meta';
 import { TrustFooter } from '~/components/trust/TrustLinks';
+import { ChatIdProvider } from '~/lib/stores/chatId';
+import { useState } from 'react';
 
 export const Route = createFileRoute('/')({
+  loader: () => ({ initialId: crypto.randomUUID() }),
   head: () => ({
     ...createSocialPageHead({
       title: 'Ghostbuild | Build and ship Cloudflare apps',
@@ -22,14 +25,23 @@ export const Route = createFileRoute('/')({
 // URL as `/chat/$id`; reloading that URL uses the existing-chat route below.
 // This route is optimized for making the initial experience seamless.
 //
-// It's critical that going back to the homepage or to other chats use a `<a>`
-// tag so all in-memory state is rebuilt from scratch.
 function Index() {
+  const { initialId } = Route.useLoaderData();
+  return <IndexShell initialId={initialId} />;
+}
+
+export function IndexShell({ initialId }: { initialId: string }) {
+  // Publishing the masked resumable URL revalidates the active `/` loader.
+  // The mounted live build must keep the identity it started with.
+  const [chatId] = useState(initialId);
+
   return (
-    <div className="flex size-full flex-col bg-bolt-elements-background-depth-1">
-      <ClientHeader />
-      <ClientHomepage />
-      <TrustFooter />
-    </div>
+    <ChatIdProvider key={chatId} chatId={chatId}>
+      <div className="flex size-full flex-col bg-bolt-elements-background-depth-1">
+        <ClientHeader />
+        <ClientHomepage initialId={chatId} />
+        <TrustFooter />
+      </div>
+    </ChatIdProvider>
   );
 }

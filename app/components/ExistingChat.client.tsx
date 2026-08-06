@@ -1,7 +1,6 @@
 import { useExistingChat } from '~/lib/stores/startup';
 import { Chat } from './chat/Chat';
 import { GhostbuildAuthProvider } from './chat/GhostbuildAuthWrapper';
-import { setPageLoadChatId } from '~/lib/stores/chatId';
 import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { Loading } from './Loading';
 import { useReloadMessages } from '~/lib/stores/startup/reloadMessages';
@@ -9,13 +8,9 @@ import { UserProvider } from '~/components/UserProvider';
 import { Toaster } from '~/components/ui/Toaster';
 import { CloudflareSignInPrompt } from '~/components/CloudflareSignInPrompt';
 import { Button } from '@ui/Button';
+import { LinkButton } from '~/components/ui/LinkButton';
 
 export function ExistingChat({ chatId }: { chatId: string }) {
-  // Fill in the chatID store from props early in app initialization. If this
-  // chat ID ends up being invalid, we'll abandon the page and redirect to
-  // the homepage.
-  setPageLoadChatId(chatId);
-
   return (
     <>
       <GhostbuildAuthProvider>
@@ -58,12 +53,22 @@ function AuthenticatedExistingChat({ chatId }: { chatId: string }) {
     onBuilderRequestStart,
     subchats,
     transcript,
+    loadError,
+    retryLoad,
+    subchatLoadError,
+    retrySubchats,
   } = useExistingChat(chatId);
 
   const reloadState = useReloadMessages(initialMessages ?? undefined);
 
+  if (loadError && initialMessages == null) {
+    return <ProjectLoadError error={loadError} onRetry={retryLoad} />;
+  }
   if (initialMessages === null) {
     return <NotFound />;
+  }
+  if (subchatLoadError && subchats === undefined) {
+    return <ProjectLoadError error={subchatLoadError} onRetry={retrySubchats} />;
   }
 
   // Download the account-owned chat after the session gate above has passed.
@@ -92,6 +97,26 @@ function AuthenticatedExistingChat({ chatId }: { chatId: string }) {
   );
 }
 
+export function ProjectLoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const message = error instanceof Error ? error.message : 'The project data could not be loaded.';
+  return (
+    <div className="flex h-full items-center justify-center p-5">
+      <section className="app-card w-full max-w-xl p-6 text-center sm:p-8" aria-labelledby="project-load-heading">
+        <p className="app-page-eyebrow">Project unavailable</p>
+        <h1 id="project-load-heading" className="mt-2 font-display text-4xl font-black text-content-primary">
+          Ghostbuild could not load this project.
+        </h1>
+        <p className="mx-auto mt-4 max-w-md break-words text-content-secondary" role="alert">
+          {message}
+        </p>
+        <Button className="mt-6" onClick={onRetry}>
+          Try again
+        </Button>
+      </section>
+    </div>
+  );
+}
+
 function NotFound() {
   return (
     <div className="flex h-full items-center justify-center p-5">
@@ -106,9 +131,9 @@ function NotFound() {
         <p className="mx-auto mt-4 max-w-md text-balance text-content-secondary">
           It may have been deleted, or it may belong to a different Cloudflare account.
         </p>
-        <Button href="/" className="mt-6">
+        <LinkButton to="/" className="mt-6">
           Start a new project
-        </Button>
+        </LinkButton>
       </section>
     </div>
   );

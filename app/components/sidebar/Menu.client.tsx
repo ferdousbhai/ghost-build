@@ -10,12 +10,14 @@ import { binDates } from './date-binning';
 import { useSearchFilter } from '~/lib/hooks/useSearchFilter';
 import { classNames } from '~/utils/classNames';
 import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
-import { getKnownInitialId } from '~/lib/stores/chatId';
+import { useChatId } from '~/lib/stores/chatId';
 import { Button } from '@ui/Button';
+import { LinkButton } from '~/components/ui/LinkButton';
 import { TextInput } from '@ui/TextInput';
 import { PlusIcon } from '@radix-ui/react-icons';
 import { removeChatHistoryItem, useChatHistory } from '~/lib/cloudflare/chat-history-db';
 import { ProjectTitle } from '~/components/ProjectTitle';
+import { Link } from '@tanstack/react-router';
 
 const menuVariants = {
   closed: {
@@ -47,7 +49,9 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const userId = useUserIdOrNullOrLoading();
   const accountUserId = typeof userId === 'string' ? userId : null;
-  const list = useChatHistory(accountUserId);
+  const activeChatId = useChatId();
+  const history = useChatHistory(accountUserId);
+  const list = history.projects;
   const [deleteTarget, setDeleteTarget] = useState<ChatHistorySummary | null>(null);
 
   const { filteredItems: filteredList, handleSearchChange } = useSearchFilter({
@@ -62,9 +66,8 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
 
     try {
       await removeChatHistoryItem(accountUserId, item.initialId);
-      if (getKnownInitialId() === item.initialId) {
-        // hard page navigation to clear the stores
-        window.location.pathname = '/';
+      if (activeChatId === item.initialId) {
+        window.location.replace('/');
       }
     } catch (error) {
       toast.error('Failed to remove project');
@@ -140,13 +143,15 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
       <div aria-hidden className="h-[var(--header-height)] shrink-0 border-b" />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <div className="min-w-0 space-y-3 px-4 pb-5 pt-4">
-          <Button
+          <LinkButton
             className="min-h-11 w-full min-w-0 max-w-full overflow-hidden rounded-xl px-4 no-underline"
-            href="/"
+            to="/"
+            reloadDocument
+            onClick={onClose}
             icon={<PlusIcon className="size-4 shrink-0" />}
           >
             <span className="truncate">Start new project</span>
-          </Button>
+          </LinkButton>
           <div className="relative min-w-0">
             <TextInput
               id="search-projects"
@@ -165,9 +170,29 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
           </span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-5">
+          {history.error != null && (
+            <div
+              className="mb-3 rounded-xl border border-[var(--gb-content-warning)]/40 bg-[var(--gb-background-secondary)] p-3 text-xs text-content-secondary"
+              role="alert"
+            >
+              <p>Projects could not be refreshed.</p>
+              <Button className="mt-2" size="xs" variant="neutral" onClick={history.retry}>
+                Try again
+              </Button>
+            </div>
+          )}
+          {history.isLoading && list.length === 0 && (
+            <p className="px-4 text-sm text-content-tertiary" role="status">
+              Loading projects…
+            </p>
+          )}
           {filteredList.length === 0 && (
             <div className="px-4 text-sm text-gray-500 dark:text-gray-400">
-              {list.length === 0 ? 'No previous projects' : 'No matches found'}
+              {!history.isLoading && !history.error && list.length === 0
+                ? 'No previous projects'
+                : list.length > 0
+                  ? 'No matches found'
+                  : null}
             </div>
           )}
           {binDates(filteredList).map(({ category, items }) => (
@@ -178,7 +203,12 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
               </div>
               <div className="space-y-1.5">
                 {items.map((item) => (
-                  <HistoryItem key={item.initialId} item={item} handleDeleteClick={handleDeleteClick} />
+                  <HistoryItem
+                    key={item.initialId}
+                    item={item}
+                    handleDeleteClick={handleDeleteClick}
+                    onNavigate={onClose}
+                  />
                 ))}
               </div>
             </section>
@@ -203,7 +233,7 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
                   </p>
                   <p className="text-content-secondary">
                     This removes it from your project list and schedules workspace cleanup. It does not remove deployed
-                    Cloudflare resources or every retained record. See the <a href="/privacy">Privacy notice</a>.
+                    Cloudflare resources or every retained record. See the <Link to="/privacy">Privacy notice</Link>.
                   </p>
                 </div>
               }

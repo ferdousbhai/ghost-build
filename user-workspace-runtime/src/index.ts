@@ -16,6 +16,13 @@ import {
 import { Sandbox } from '@cloudflare/sandbox';
 import { parse } from 'jsonc-parser';
 import { BuilderAgent } from '../../app/agents/builder-agent';
+import {
+  BUILDER_WORKSPACE_MAX_FILE_BYTES,
+  BUILDER_WORKSPACE_MAX_FILES,
+  BUILDER_WORKSPACE_MAX_TOTAL_BYTES,
+  BUILDER_WORKSPACE_SYNC_BATCH_BYTES,
+  BUILDER_WORKSPACE_SYNC_BATCH_FILES,
+} from '../../app/agents/builder-workspace-types';
 import { routeUserRuntimeAgentRequest } from '../../app/lib/.server/agent-request-identity';
 import { createTrustedDeploymentConfig } from '../../app/lib/.server/cloudflare/deployment-config';
 import {
@@ -105,11 +112,11 @@ interface RuntimeEnv {
 const PROJECT_ROOT = DEPLOYMENT_PROJECT_ROOT;
 const READINESS_ROOT = '/home/.ghostbuild-readiness';
 const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
-const MAX_FILE_BYTES = 16 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
-const MAX_FILES = 10_000;
-const SYNC_BATCH_BYTES = 4 * 1024 * 1024;
-const SYNC_BATCH_FILES = 100;
+const MAX_FILE_BYTES = BUILDER_WORKSPACE_MAX_FILE_BYTES;
+const MAX_TOTAL_BYTES = BUILDER_WORKSPACE_MAX_TOTAL_BYTES;
+const MAX_FILES = BUILDER_WORKSPACE_MAX_FILES;
+const SYNC_BATCH_BYTES = BUILDER_WORKSPACE_SYNC_BATCH_BYTES;
+const SYNC_BATCH_FILES = BUILDER_WORKSPACE_SYNC_BATCH_FILES;
 const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.tanstack', '.wrangler']);
 const INSTALL_COMMAND =
   'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/';

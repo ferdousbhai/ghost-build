@@ -12,6 +12,7 @@ import { authSessionAction, signOutAction } from './server-handlers/auth';
 import { runtimeCredentialAction } from './server-handlers/runtime-credential';
 import { clientTelemetryAction } from './server-handlers/client-telemetry';
 import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudflare-auth-retention.server';
+import { CSP_NONCE_REQUEST_HEADER } from './lib/csp-nonce';
 
 const APPLICATION_CSP_BASELINE = "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
 const HSTS_MIN_AGE_SECONDS = '31536000';
@@ -70,16 +71,11 @@ function applyHstsFloor(headers: Headers) {
   headers.set('Strict-Transport-Security', [`max-age=${HSTS_MIN_AGE_SECONDS}`, ...retainedDirectives].join('; '));
 }
 
-async function withApplicationSecurityHeaders(response: Response, pathname: string) {
+function withApplicationSecurityHeaders(response: Response, pathname: string, nonce?: string) {
   const headers = new Headers(response.headers);
   const isHtml = headers.get('Content-Type')?.toLowerCase().includes('text/html') ?? false;
-  let body: BodyInit | null = response.body;
   if (isHtml) {
-    const html = await response.text();
-    const nonce = /<meta\s+property="csp-nonce"\s+content="([0-9a-f-]{36})"\s*\/?>/i.exec(html)?.[1];
     applyContentSecurityPolicyBaseline(headers, nonce);
-    headers.delete('Content-Length');
-    body = html;
   } else {
     applyContentSecurityPolicyBaseline(headers);
   }
@@ -99,7 +95,7 @@ async function withApplicationSecurityHeaders(response: Response, pathname: stri
     headers.set('Cache-Control', 'no-store');
   }
 
-  return new Response(body, {
+  return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
     headers,
@@ -166,7 +162,8 @@ export default {
       return withApplicationSecurityHeaders(Response.redirect(url, 308), url.pathname);
     }
     const pathname = url.pathname;
-    return withApplicationSecurityHeaders(await routeApplicationRequest(request, env), pathname);
+    const nonce = crypto.randomUUID();
+    return withApplicationSecurityHeaders(await routeApplicationRequest(request, env, nonce), pathname, nonce);
   },
   scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(runScheduledMaintenance(env));
@@ -177,7 +174,7 @@ async function runScheduledMaintenance(env: Env) {
   await pruneCloudflareAuthDataBestEffort(env.DB);
 }
 
-async function routeApplicationRequest(request: Request, env: Env): Promise<Response> {
+async function routeApplicationRequest(request: Request, env: Env, nonce: string): Promise<Response> {
   const url = new URL(request.url);
 
   const route = exactRoutes[url.pathname];
@@ -185,5 +182,7 @@ async function routeApplicationRequest(request: Request, env: Env): Promise<Resp
     return requireMethod(request, route.method, () => route.handler(request, env));
   }
 
-  return handler.fetch(request);
+  const headers = new Headers(request.headers);
+  headers.set(CSP_NONCE_REQUEST_HEADER, nonce);
+  return handler.fetch(new Request(request, { headers }));
 }

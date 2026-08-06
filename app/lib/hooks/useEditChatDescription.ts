@@ -1,11 +1,10 @@
 import { api } from '~/lib/cloudflare/data-api';
-import { useStore } from '@nanostores/react';
 import { executeDataOperation } from '~/lib/cloudflare/client';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { description as descriptionStore } from '~/lib/stores/description';
 import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
-import { chatIdStore } from '~/lib/stores/chatId';
+import { useChatId } from '~/lib/stores/chatId';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 
 const logger = createScopedLogger('useEditChatDescription');
@@ -47,11 +46,11 @@ export function useEditChatDescription({
   customChatId,
   syncWithGlobalStore,
 }: EditChatDescriptionOptions): EditChatDescriptionHook {
-  const chatIdFromStore = useStore(chatIdStore);
+  const chatIdFromRoute = useChatId();
   const userId = useUserIdOrNullOrLoading();
   const [editing, setEditing] = useState(false);
   const [currentDescription, setCurrentDescription] = useState(initialDescription);
-  const chatId = customChatId || chatIdFromStore;
+  const chatId = customChatId || chatIdFromRoute;
   useEffect(() => {
     setCurrentDescription(initialDescription);
   }, [initialDescription]);

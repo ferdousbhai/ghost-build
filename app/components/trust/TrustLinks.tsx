@@ -1,4 +1,5 @@
 import { TRUST_LINKS } from '~/lib/trust';
+import { Link } from '@tanstack/react-router';
 
 export function TrustLinks({ className = '' }: { className?: string }) {
   return (
@@ -7,13 +8,13 @@ export function TrustLinks({ className = '' }: { className?: string }) {
       aria-label="Trust and legal"
     >
       {TRUST_LINKS.map(({ href, label }) => (
-        <a
+        <Link
           key={href}
-          href={href}
+          to={href}
           className="rounded-sm underline decoration-transparent underline-offset-4 transition hover:decoration-current focus-visible:decoration-current"
         >
           {label}
-        </a>
+        </Link>
       ))}
     </nav>
   );

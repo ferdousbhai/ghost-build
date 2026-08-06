@@ -2,26 +2,12 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { GhostbuildAuthProvider } from './chat/GhostbuildAuthWrapper';
 import { HomeIntro } from './chat/HomeIntro.client';
 import { Toaster } from '~/components/ui/Toaster';
-import { getPageLoadChatId, setPageLoadChatId } from '~/lib/stores/chatId';
 import { UserProvider } from '~/components/UserProvider';
 import { captureProductEvent } from '~/lib/telemetry.client';
 
 const HomepageChat = lazy(() => import('./HomepageChat.client').then((module) => ({ default: module.HomepageChat })));
 
-function getOrCreateHomepageInitialId() {
-  const existingId = getPageLoadChatId();
-  if (existingId) {
-    return existingId;
-  }
-
-  const initialId = crypto.randomUUID();
-  setPageLoadChatId(initialId);
-
-  return initialId;
-}
-
-export function Homepage() {
-  const initialId = getOrCreateHomepageInitialId();
+export function Homepage({ initialId }: { initialId: string }) {
   const [initialPrompt, setInitialPrompt] = useState<string | null>(null);
   const initialPromptRef = useRef<string | null>(null);
   useEffect(() => {

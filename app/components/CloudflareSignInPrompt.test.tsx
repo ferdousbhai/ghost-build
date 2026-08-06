@@ -5,6 +5,18 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CloudflareSignInPrompt } from './CloudflareSignInPrompt';
 
+vi.mock('@tanstack/react-router', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    Link: ({ children, to, ...props }: { children: React.ReactNode; to: string }) => (
+      <a {...props} href={to}>
+        {children}
+      </a>
+    ),
+  };
+});
+
 const auth = vi.hoisted(() => ({
   createCloudflareReturnURL: vi.fn(() => 'http://localhost/'),
   signInWithCloudflare: vi.fn(),

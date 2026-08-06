@@ -4,6 +4,7 @@ import { Checkbox } from '~/components/ui/primitives/Checkbox';
 import type { PendingDeploymentApproval } from '~/lib/deployment-approval';
 import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
 import { captureProductEvent } from '~/lib/telemetry.client';
+import { Link } from '@tanstack/react-router';
 
 export function DeploymentApproval({ deployment }: { deployment: PendingDeploymentApproval }) {
   const [activeDeployment, setActiveDeployment] = useState(deployment);
@@ -143,17 +144,17 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
       <p className="text-xs leading-relaxed text-content-tertiary">
         Deployment creates customer-owned Cloudflare resources that remain in your account until you remove them. Review
         the{' '}
-        <a className="underline underline-offset-4" href="/terms">
+        <Link className="underline underline-offset-4" to="/terms">
           Terms
-        </a>
+        </Link>
         ,{' '}
-        <a className="underline underline-offset-4" href="/privacy">
+        <Link className="underline underline-offset-4" to="/privacy">
           Privacy notice
-        </a>
+        </Link>
         , and{' '}
-        <a className="underline underline-offset-4" href="/support">
+        <Link className="underline underline-offset-4" to="/support">
           Support
-        </a>{' '}
+        </Link>{' '}
         before approval.
       </p>
       <label className="text-content-primary flex items-start gap-2">

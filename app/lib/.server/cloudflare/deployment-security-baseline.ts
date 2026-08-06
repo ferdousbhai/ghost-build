@@ -1,6 +1,6 @@
 import { BUILDER_TEMPLATE_SOURCE_SHA256 } from '~/agents/builder-template.generated';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 28 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 29 as const;
 export {
   DEPLOYMENT_SECURITY_BASELINE_BINDING,
   DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
@@ -56,10 +56,10 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'wrangler.preview.jsonc': 'b7e17326710f92a9d1bf3b828612ddf7823af0b87a0c86bedfd0077f362587bb',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '81a0319184d9f4a4127e5b836514ce4e512b0abde1d95d00b1a7e4ddfbf1d8b2';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'fcdcd2a071b697d8ed16862988dce607fd58ec2ed7ab326ff5f0848145cddf61';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
-  '88e1f53fc10bb267f5feee133f7e6581e67f4793617155ba4a756447371e38f0';
+  '16462d8b164f2cb4bed01d6fa3ae297962407b620fed6e88d5dad6eeaf32b46b';
 
 export function isCurrentDeploymentSecurityIdentity(value: {
   version?: unknown;

@@ -1,21 +1,27 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
-import {
-  ClientAppProviders,
-  ClientExistingChat,
-  ClientHeader,
-  ClientHomepage,
-  ClientSettingsContent,
-} from './ClientRouteComponents';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@tanstack/react-router', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    Link: ({ children, to, ...props }: { children: React.ReactNode; to: string }) => (
+      <a {...props} href={to}>
+        {children}
+      </a>
+    ),
+  };
+});
+import { ClientExistingChat, ClientHeader, ClientHomepage, ClientSettingsContent } from './ClientRouteComponents';
 import { HOME_HERO_LEDE } from '~/lib/trust';
 
 describe('client route loading fallbacks', () => {
   it('renders useful homepage content before client-only chunks hydrate', () => {
     const html = renderToStaticMarkup(
-      <ClientAppProviders>
+      <>
         <ClientHeader />
-        <ClientHomepage />
-      </ClientAppProviders>,
+        <ClientHomepage initialId="project-1" />
+      </>,
     );
 
     expect(html).toContain('Ghostbuild');

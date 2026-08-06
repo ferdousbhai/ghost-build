@@ -30,7 +30,7 @@ export function useMessageInputController({
   const enhanceRequestRef = useRef<AbortController | null>(null);
   const authState = useGhostbuildAuth();
   const input = useStore(messageInputStore);
-  const search = useSearch({ strict: false }) as { prefill?: string };
+  const search = useSearch({ from: '__root__' });
 
   useEffect(() => {
     if (!prefillEnabled) {

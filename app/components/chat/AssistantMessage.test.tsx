@@ -5,6 +5,17 @@ import { describe, expect, it, vi } from 'vitest';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { AssistantMessage } from './AssistantMessage';
 
+vi.mock('@tanstack/react-router', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    Link: ({ children, to, ...props }: { children: React.ReactNode; to: string }) => (
+      <a {...props} href={to}>
+        {children}
+      </a>
+    ),
+  };
+});
 vi.mock('./ToolCall', () => ({ ToolCall: () => null }));
 vi.mock('./Markdown', () => ({ Markdown: ({ children }: { children: string }) => <span>{children}</span> }));
 

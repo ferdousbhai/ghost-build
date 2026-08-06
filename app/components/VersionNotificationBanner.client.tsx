@@ -5,14 +5,12 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { captureMessage } from '~/lib/telemetry.client';
 
-export default function useVersionNotificationBanner() {
+export function VersionNotificationEffect() {
   const loadedVersionSha = useRef<string | null | undefined>(undefined);
   const { data, error } = useQuery({
     queryKey: ['ghostbuild-version'],
     queryFn: ({ signal }) => versionFetcher('/api/version', signal),
-    // Refresh every hour.
     refetchInterval: 1000 * 60 * 60,
-    // Refresh on focus at most every 10 minutes.
     staleTime: 1000 * 60 * 10,
     refetchOnWindowFocus: true,
     retry: false,
@@ -52,6 +50,8 @@ export default function useVersionNotificationBanner() {
       },
     );
   }, [data, error]);
+
+  return null;
 }
 
 const versionFetcher = async (url: string, signal: AbortSignal): Promise<{ sha?: string | null }> => {

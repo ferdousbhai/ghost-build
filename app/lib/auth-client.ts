@@ -110,7 +110,7 @@ export async function signOutOfGhostbuild(callbackURL = window.location.origin) 
     throw new Error(payload?.error ?? 'Unable to sign out of Ghostbuild.');
   }
   setState({ data: null, isPending: false });
-  disposeAccountLocalReplicas();
+  await disposeAccountLocalReplicas();
   resetUserRuntimeSession();
   window.location.assign(callbackURL);
 }

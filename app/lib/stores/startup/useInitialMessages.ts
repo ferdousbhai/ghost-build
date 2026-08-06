@@ -5,7 +5,6 @@ import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { TranscriptCheckpoint, TranscriptIdentity } from 'ghostbuild-agent/transcript';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { useCachedChatTranscript } from '~/lib/cloudflare/chat-transcript-db';
-import { setKnownInitialId } from '~/lib/stores/chatId';
 import { description } from '~/lib/stores/description';
 import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { subchatIndexStore } from '~/lib/stores/subchats';
@@ -27,10 +26,17 @@ type TranscriptSelection = {
   loadedSubchatIndex?: number;
 };
 
-export function useInitialMessages(chatId: string | undefined):
-  | InitialMessages
-  | null // not found
-  | undefined {
+type InitialMessagesState = {
+  initialMessages: InitialMessages | null | undefined;
+  error: unknown;
+  retry: () => void;
+};
+
+export function useInitialMessages(chatId: string | undefined): InitialMessages | null | undefined {
+  return useInitialMessagesState(chatId).initialMessages;
+}
+
+export function useInitialMessagesState(chatId: string | undefined): InitialMessagesState {
   const userId = useUserIdOrNullOrLoading();
   const subchatIndex = useStore(subchatIndexStore);
   const scope = chatId && userId ? `${userId}:${chatId}` : undefined;
@@ -81,7 +87,6 @@ export function useInitialMessages(chatId: string | undefined):
     if (transcript?.status !== 'ready') {
       return;
     }
-    setKnownInitialId(transcript.initialId);
     description.set(transcript.description);
   }, [cached.transcript]);
 
@@ -112,9 +117,9 @@ export function useInitialMessages(chatId: string | undefined):
   }, [activeSelection, cached.isLoading, cached.transcript, chatId, userId]);
 
   if (initialMessages && subchatIndex !== undefined && initialMessages.loadedSubchatIndex !== subchatIndex) {
-    return undefined;
+    return { initialMessages: undefined, error: cached.error, retry: cached.retry };
   }
-  return initialMessages;
+  return { initialMessages, error: cached.error, retry: cached.retry };
 }
 
 function deserializeMessageFromStorage(message: SerializedMessage): GhostbuildMessage {
