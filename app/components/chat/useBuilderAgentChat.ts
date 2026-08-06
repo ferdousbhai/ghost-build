@@ -33,10 +33,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { subchatQueryKey } from '~/lib/cloudflare/data-hooks';
 import { settleBuilderStop } from './builder-stop';
 import { useAccountLocalReplica } from '~/lib/cloudflare/account-local-replica';
-import { getUserRuntimeSession, requireUserRuntimeEndpoint } from '~/lib/cloudflare/runtime-session';
+import { requireUserRuntimeEndpoint } from '~/lib/cloudflare/runtime-session';
 import { builderModelStore } from '~/lib/stores/builder-model.client';
 import { isWorkersAiModelId } from '~/lib/workers-ai-model';
 import { loadAuthoritativeTranscriptSnapshot, reconcileMessagesForSend } from './chat-send-reconciliation';
+import { BUILDER_AGENT_QUERY_CACHE_TTL_MS, loadBuilderAgentCapability } from './builder-agent-auth';
 
 const logger = createScopedLogger('BuilderAgentChat');
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
@@ -87,14 +88,17 @@ export function useBuilderAgentChat(args: {
     ),
   );
   const runtimeEndpoint = new URL(requireUserRuntimeEndpoint());
+  const runtimeOrigin = runtimeEndpoint.origin;
   const builderAgent = useAgent<BuilderAgent, BuilderAgentState>({
     agent: 'BuilderAgent',
     name: transcript.agentName,
     host: runtimeEndpoint.host,
     protocol: runtimeEndpoint.protocol === 'https:' ? 'wss' : 'ws',
-    query: async () => ({ capability: (await getUserRuntimeSession()).token }),
-    queryDeps: [args.accountId, runtimeEndpoint.origin],
-    cacheTtl: 4 * 60_000,
+    query: loadBuilderAgentCapability,
+    queryDeps: [args.accountId, runtimeOrigin],
+    // A finite query TTL replaces the live socket when it expires. Refresh the
+    // short-lived capability only when the SDK reconnects or this identity changes.
+    cacheTtl: BUILDER_AGENT_QUERY_CACHE_TTL_MS,
     onStateUpdate: (state) => {
       if (activePresentationRef.current !== args.presentationId) {
         return;
