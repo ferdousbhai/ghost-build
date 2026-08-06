@@ -36,6 +36,7 @@ export async function createChatResponseFromBody({
   userId,
   agentName,
   onValidationStage,
+  runWithKeepAlive,
 }: {
   abortSignal?: AbortSignal;
   body: Pick<ChatRequestBody, 'messages' | 'chatInitialId' | 'modelId'>;
@@ -55,6 +56,7 @@ export async function createChatResponseFromBody({
   userId: string;
   agentName: string;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
+  runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
 }) {
   const { messages, chatInitialId, modelId } = body;
   const transcriptMessages = messages ?? [];
@@ -77,6 +79,7 @@ export async function createChatResponseFromBody({
       userId,
       agentName,
       onValidationStage,
+      runWithKeepAlive,
     });
 
     return createUIMessageStreamResponse({ stream: dataStream });

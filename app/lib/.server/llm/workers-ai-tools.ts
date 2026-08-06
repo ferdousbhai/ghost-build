@@ -25,6 +25,7 @@ type BuilderOperationContext = {
   chatInitialId: string;
   agentName: string;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
+  runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
 };
 
 export type AgentToolChoice = 'auto' | 'none' | 'required';
@@ -53,7 +54,7 @@ export function createWorkersAiTools(
   workspace: BuilderWorkspaceApi,
   operationContext: BuilderOperationContext,
 ): GhostbuildToolSet {
-  const coordinateStatefulTool = createTurnStatefulToolCoordinator();
+  const coordinateStatefulTool = createTurnStatefulToolCoordinator(operationContext.runWithKeepAlive);
   const computerTools = requireComputerTools(
     createAITools({
       workspace: workspace.computer,
@@ -186,13 +187,15 @@ function computerWorkspaceTool(
   };
 }
 
-export function createTurnStatefulToolCoordinator(): TurnStatefulToolCoordinator {
+export function createTurnStatefulToolCoordinator(
+  runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>,
+): TurnStatefulToolCoordinator {
   let tail = Promise.resolve();
   return (toolName, operation) => {
     if (!isStatefulTool(toolName)) {
       return operation();
     }
-    const scheduled = tail.then(operation, operation);
+    const scheduled = tail.then(() => runWithKeepAlive(operation));
     tail = scheduled.then(
       () => undefined,
       () => undefined,

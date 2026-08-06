@@ -371,6 +371,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         userId: durableIdentity.userId,
         agentName: this.name,
         onValidationStage: (toolCallId, stage) => this.setValidationProgress(toolCallId, stage),
+        runWithKeepAlive: (operation) => this.keepAliveWhile(operation),
         compaction: {
           current: this.contextCompaction.getCompaction(),
           pending: compactionPending,

@@ -29,6 +29,15 @@ describe('BuilderAgent preview lifecycle', () => {
     );
   });
 
+  it('keeps the agent alive while stateful Computer tools run', () => {
+    const chatMessage = source.slice(
+      source.indexOf('override async onChatMessage('),
+      source.indexOf('private async runContextCompaction('),
+    );
+
+    expect(chatMessage).toContain('runWithKeepAlive: (operation) => this.keepAliveWhile(operation)');
+  });
+
   it('cancels active validation before waiting for a stopped turn to settle', () => {
     const cancellation = source.slice(
       source.indexOf('async cancelActiveTurn()'),

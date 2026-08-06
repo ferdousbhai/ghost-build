@@ -158,6 +158,7 @@ function createAgentStream(modelId: Parameters<typeof workersAiAgent>[0]['modelI
     workspace: {} as never,
     userId: 'user-1',
     agentName: 'agent-1',
+    runWithKeepAlive: (operation) => operation(),
   });
 }
 

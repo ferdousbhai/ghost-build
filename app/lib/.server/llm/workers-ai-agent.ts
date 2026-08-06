@@ -50,6 +50,7 @@ interface WorkersAiAgentOptions {
   userId: string;
   agentName: string;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
+  runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
 }
 
 export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<ReadableStream<UIMessageChunk>> {
@@ -68,6 +69,7 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     userId,
     agentName,
     onValidationStage,
+    runWithKeepAlive,
   } = options;
   logger.debug('Starting Workers AI agent');
   const startedAt = Date.now();
@@ -82,6 +84,7 @@ export async function workersAiAgent(options: WorkersAiAgentOptions): Promise<Re
     agentName,
     chatInitialId,
     onValidationStage,
+    runWithKeepAlive,
   });
   const validatedBuildCompletion = getValidatedBuildCompletion(messages);
   if (validatedBuildCompletion) {

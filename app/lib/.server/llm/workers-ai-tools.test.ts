@@ -147,7 +147,7 @@ describe('Workers AI tool lifecycle', () => {
   });
 
   it('serializes writes and validation in model tool-call order', async () => {
-    const coordinate = createTurnStatefulToolCoordinator();
+    const coordinate = createTurnStatefulToolCoordinator((operation) => operation());
     let finishWrite: (() => void) | undefined;
     const events: string[] = [];
     const write = coordinate('write', async () => {
@@ -169,7 +169,7 @@ describe('Workers AI tool lifecycle', () => {
   });
 
   it('does not let a failed stateful tool block the remaining turn', async () => {
-    const coordinate = createTurnStatefulToolCoordinator();
+    const coordinate = createTurnStatefulToolCoordinator((operation) => operation());
     const failedWrite = coordinate('write', async () => {
       throw new Error('write failed');
     });
@@ -177,6 +177,77 @@ describe('Workers AI tool lifecycle', () => {
 
     await expect(failedWrite).rejects.toThrow('write failed');
     await expect(validation).resolves.toBe('validated');
+  });
+
+  it('keeps the agent alive while a stateful tool runs', async () => {
+    const events: string[] = [];
+    let keepAliveCalls = 0;
+    const runWithKeepAlive = async <T>(operation: () => Promise<T>): Promise<T> => {
+      keepAliveCalls += 1;
+      events.push('keep-alive-start');
+      const result = await operation();
+      events.push('keep-alive-end');
+      return result;
+    };
+    const coordinate = createTurnStatefulToolCoordinator(runWithKeepAlive);
+
+    await expect(
+      coordinate('validateProject', async () => {
+        events.push('validation');
+        return 'validated';
+      }),
+    ).resolves.toBe('validated');
+
+    expect(events).toEqual(['keep-alive-start', 'validation', 'keep-alive-end']);
+    expect(keepAliveCalls).toBe(1);
+  });
+
+  it('releases keep-alive after a failure and keeps the stateful queue usable', async () => {
+    const events: string[] = [];
+    const runWithKeepAlive = async <T>(operation: () => Promise<T>): Promise<T> => {
+      events.push('keep-alive-start');
+      try {
+        return await operation();
+      } finally {
+        events.push('keep-alive-end');
+      }
+    };
+    const coordinate = createTurnStatefulToolCoordinator(runWithKeepAlive);
+
+    const failedWrite = coordinate('write', async () => {
+      events.push('write');
+      throw new Error('write failed');
+    });
+    const validation = coordinate('validateProject', async () => {
+      events.push('validation');
+      return 'validated';
+    });
+
+    await expect(failedWrite).rejects.toThrow('write failed');
+    await expect(validation).resolves.toBe('validated');
+    expect(events).toEqual([
+      'keep-alive-start',
+      'write',
+      'keep-alive-end',
+      'keep-alive-start',
+      'validation',
+      'keep-alive-end',
+    ]);
+  });
+
+  it('does not keep the agent alive for read-only tools', async () => {
+    let keepAliveCalls = 0;
+    const runWithKeepAlive = <T>(operation: () => Promise<T>): Promise<T> => {
+      keepAliveCalls += 1;
+      return operation();
+    };
+    const coordinate = createTurnStatefulToolCoordinator(runWithKeepAlive);
+
+    await expect(coordinate('read', async () => 'contents')).resolves.toBe('contents');
+    await expect(coordinate('ls', async () => ['src'])).resolves.toEqual(['src']);
+    await expect(coordinate('lookupDocs', async () => 'guidance')).resolves.toBe('guidance');
+
+    expect(keepAliveCalls).toBe(0);
   });
 
   it('gives the model all non-deployment tools before a mutation', () => {
@@ -499,6 +570,7 @@ function operationContext() {
     userId: 'user',
     chatInitialId: 'chat',
     agentName: 'agent',
+    runWithKeepAlive: <T>(operation: () => Promise<T>) => operation(),
   };
 }
 

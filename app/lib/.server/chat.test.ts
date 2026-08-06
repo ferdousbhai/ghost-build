@@ -38,6 +38,7 @@ describe('chat provider error boundary', () => {
         workspace: {} as never,
         userId: 'user-id',
         agentName: 'agent',
+        runWithKeepAlive: (operation) => operation(),
       }),
     ).rejects.toMatchObject({ status: 500 });
 
@@ -64,6 +65,7 @@ describe('chat provider error boundary', () => {
       workspace: {} as never,
       userId: 'user-id',
       agentName: 'agent',
+      runWithKeepAlive: (operation) => operation(),
     });
 
     expect(workersAiAgent).toHaveBeenCalledWith(expect.objectContaining({ modelId: 'deepseek/deepseek-v4-pro' }));
