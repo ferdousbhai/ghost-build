@@ -17,10 +17,11 @@ import { classNames } from '~/utils/classNames';
 import { cubicEasingFn } from '~/utils/easings';
 import { renderLogger } from 'ghostbuild-agent/utils/logger';
 import { EditorPanel } from './EditorPanel';
-import { Cross2Icon } from '@radix-ui/react-icons';
+import { Cross2Icon, ReloadIcon } from '@radix-ui/react-icons';
 import { useWorkbenchController } from './useWorkbenchController';
 import { useStore } from '@nanostores/react';
 import { workbenchStore } from '~/lib/stores/workbench.client';
+import { previewPresentation } from '~/lib/common/preview-presentation';
 
 interface WorkbenchProps {
   chatStarted?: boolean;
@@ -79,6 +80,9 @@ export const Workbench = memo(function Workbench({ chatStarted, isStreaming }: W
 
 function ReadyWorkbench({ isStreaming }: Pick<WorkbenchProps, 'isStreaming'>) {
   const controller = useWorkbenchController(isStreaming);
+  const [previewReloadKey, setPreviewReloadKey] = useState(0);
+  const previewNow = usePreviewClock(controller.previewState.active ?? controller.previewState.lastSuccessful);
+  const presentation = previewPresentation(controller.previewState, previewNow);
 
   return (
     <WorkbenchFrame
@@ -95,7 +99,31 @@ function ReadyWorkbench({ isStreaming }: Pick<WorkbenchProps, 'isStreaming'>) {
           <PanelHeaderButton className="mr-1 text-sm" onClick={() => void controller.onFileSave()}>
             Save
           </PanelHeaderButton>
-        ) : null
+        ) : (
+          <>
+            {presentation.isUpdatingVisible && (
+              <span className="mr-2 text-xs text-content-secondary" aria-live="polite">
+                Updating…
+              </span>
+            )}
+            {presentation.canUpdate && (
+              <PanelHeaderButton
+                className="mr-1 text-sm"
+                disabled={controller.previewRequesting}
+                onClick={() => void controller.onPreviewRequest()}
+              >
+                Update
+              </PanelHeaderButton>
+            )}
+            <IconButton
+              icon={<ReloadIcon />}
+              size="xl"
+              title="Reload preview frame"
+              disabled={!presentation.canReload}
+              onClick={() => setPreviewReloadKey((value) => value + 1)}
+            />
+          </>
+        )
       }
     >
       <>
@@ -119,7 +147,13 @@ function ReadyWorkbench({ isStreaming }: Pick<WorkbenchProps, 'isStreaming'>) {
         <View {...slidingPosition({ view: 'preview', selectedView: controller.selectedView })}>
           {controller.hasLoadedPreview ? (
             <Suspense fallback={null}>
-              <Preview />
+              <Preview
+                presentation={presentation}
+                reloadKey={previewReloadKey}
+                requesting={controller.previewRequesting}
+                onRequest={() => void controller.onPreviewRequest()}
+                error={controller.previewState.error}
+              />
             </Suspense>
           ) : (
             <div />
@@ -128,6 +162,26 @@ function ReadyWorkbench({ isStreaming }: Pick<WorkbenchProps, 'isStreaming'>) {
       </>
     </WorkbenchFrame>
   );
+}
+
+function usePreviewClock(candidate: { expiresAt: string } | null): number {
+  const [now, setNow] = useState(Date.now);
+
+  useEffect(() => {
+    const current = Date.now();
+    setNow(current);
+    if (!candidate) {
+      return undefined;
+    }
+    const remaining = Date.parse(candidate.expiresAt) - current;
+    if (remaining <= 0) {
+      return undefined;
+    }
+    const timeout = setTimeout(() => setNow(Date.now()), Math.min(remaining + 10, 2_147_483_647));
+    return () => clearTimeout(timeout);
+  }, [candidate]);
+
+  return now;
 }
 
 function WorkbenchFrame({

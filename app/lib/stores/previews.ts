@@ -1,4 +1,4 @@
-import { atom, computed } from 'nanostores';
+import { atom } from 'nanostores';
 import { idleBuilderPreviewState, type BuilderPreviewState } from '~/agents/builder-preview-types';
 
 type PreviewActions = {
@@ -7,7 +7,6 @@ type PreviewActions = {
 
 export class PreviewsStore {
   state = atom<BuilderPreviewState>(idleBuilderPreviewState(0));
-  hasPreview = computed(this.state, (state) => Boolean(state.active ?? state.lastSuccessful));
   #actions: PreviewActions | null = null;
 
   connect(actions: PreviewActions): () => void {

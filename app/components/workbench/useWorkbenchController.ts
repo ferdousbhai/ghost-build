@@ -16,7 +16,7 @@ const logger = createScopedLogger('WorkbenchController');
 
 export function useWorkbenchController(isStreaming?: boolean) {
   const projectId = useChatId();
-  const hasPreview = useStore(workbenchStore.hasPreview);
+  const previewState = useStore(workbenchStore.previewState);
   const showWorkbench = useStore(workbenchStore.showWorkbench);
   const selectedFile = useStore(workbenchStore.selectedFile);
   const currentDocument = useStore(workbenchStore.currentDocument);
@@ -26,6 +26,8 @@ export function useWorkbenchController(isStreaming?: boolean) {
   const following = useStore(workbenchStore.followingStreamedCode);
   const isSmallViewport = useViewport(1024);
   const [hasLoadedPreview, setHasLoadedPreview] = useState(false);
+  const [previewRequesting, setPreviewRequesting] = useState(false);
+  const hasPreview = Boolean(previewState.active ?? previewState.lastSuccessful);
 
   useEffect(() => {
     if (hasPreview) {
@@ -84,6 +86,17 @@ export function useWorkbenchController(isStreaming?: boolean) {
     })();
   }, []);
 
+  const onPreviewRequest = useCallback(async () => {
+    setPreviewRequesting(true);
+    try {
+      workbenchStore.updatePreview(await workbenchStore.requestPreview());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to queue a remote preview.');
+    } finally {
+      setPreviewRequesting(false);
+    }
+  }, []);
+
   return {
     close: () => workbenchStore.showWorkbench.set(false),
     currentDocument,
@@ -97,6 +110,9 @@ export function useWorkbenchController(isStreaming?: boolean) {
     onFileReset: () => workbenchStore.resetCurrentDocument(),
     onFileSave,
     onFileSelect,
+    onPreviewRequest,
+    previewRequesting,
+    previewState,
     projectId,
     selectedFile,
     selectedView,

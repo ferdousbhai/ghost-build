@@ -47,10 +47,6 @@ export class WorkbenchStore {
     return this.#previewsStore.state;
   }
 
-  get hasPreview() {
-    return this.#previewsStore.hasPreview;
-  }
-
   connectPreview(...args: Parameters<PreviewsStore['connect']>) {
     return this.#previewsStore.connect(...args);
   }
