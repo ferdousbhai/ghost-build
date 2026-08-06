@@ -20,11 +20,18 @@ describe('builder turn budgets', () => {
   });
 
   it('keeps model, inactivity, tool, and total limits finite and ordered', () => {
-    expect(BUILDER_TURN_TIMEOUTS.chunkMs).toBeLessThan(BUILDER_TURN_TIMEOUTS.firstChunkMs);
+    const toolTimeouts = [BUILDER_TURN_TIMEOUTS.toolMs, ...Object.values(BUILDER_TURN_TIMEOUTS.tools)];
+    const longestToolTimeout = Math.max(...toolTimeouts);
+
     expect(BUILDER_TURN_TIMEOUTS.firstChunkMs).toBeLessThan(BUILDER_TURN_TIMEOUTS.stepMs);
+    expect(BUILDER_TURN_TIMEOUTS.chunkMs).toBeLessThan(BUILDER_TURN_TIMEOUTS.stepMs);
     expect(BUILDER_TURN_TIMEOUTS.stepMs).toBeLessThan(BUILDER_TURN_TIMEOUTS.totalMs);
-    expect(BUILDER_TURN_TIMEOUTS.tools.validateProjectMs).toBeLessThan(BUILDER_TURN_TIMEOUTS.stepMs);
-    expect(BUILDER_TURN_TIMEOUTS.tools.deployMs).toBeLessThan(BUILDER_TURN_TIMEOUTS.stepMs);
+    for (const toolTimeoutMs of toolTimeouts) {
+      expect(toolTimeoutMs).toBeLessThan(BUILDER_TURN_TIMEOUTS.chunkMs);
+    }
+    expect(BUILDER_TURN_TIMEOUTS.firstChunkMs + longestToolTimeout + 2 * 60_000).toBeLessThanOrEqual(
+      BUILDER_TURN_TIMEOUTS.stepMs,
+    );
   });
 
   it('distinguishes timeouts from user cancellation and exposes a typed retryable payload', () => {

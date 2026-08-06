@@ -3,14 +3,15 @@ export const BUILDER_TURN_MAX_MODEL_STEPS = 32;
 /**
  * One source of truth for every wall-clock limit applied to a builder loop.
  * The longest server-owned operation is the 10 minute deployment build, so a
- * step gets 15 minutes and the whole turn gets three such windows. Model
- * transport stalls are much shorter and do not share the user-cancel signal.
+ * step gets 20 minutes and the whole turn gets three such windows. AI SDK
+ * chunk inactivity includes time spent executing a tool, so that timeout must
+ * outlive every permitted tool instead of preempting one mid-operation.
  */
 export const BUILDER_TURN_TIMEOUTS = {
-  totalMs: 45 * 60_000,
-  stepMs: 15 * 60_000,
+  totalMs: 60 * 60_000,
+  stepMs: 20 * 60_000,
   firstChunkMs: 3 * 60_000,
-  chunkMs: 2 * 60_000,
+  chunkMs: 13 * 60_000,
   toolMs: 6 * 60_000,
   tools: {
     readMs: 2 * 60_000,
