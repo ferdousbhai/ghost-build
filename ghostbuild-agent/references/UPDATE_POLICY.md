@@ -11,8 +11,8 @@ maintained until both are documented in the manifest.
 
 ## Review cadence and triggers
 
-The Codex project automation `review-upstream-ghostbuild-skills` checks tracked sources weekly and reviews them when either
-of these events occurs:
+The Codex project automation `review-upstream-ghostbuild-skills` checks tracked sources every other Monday and reviews them
+when either of these events occurs:
 
 1. The repository publishes a new stable GitHub release.
 2. If the repository does not publish releases, its tracked paths change on the default branch after the recorded
