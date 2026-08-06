@@ -40,7 +40,7 @@ describe('privacy-safe client telemetry', () => {
   it('sends only allowlisted structured fields and never includes the current URL', async () => {
     const { captureMessage } = await import('./telemetry.client');
 
-    await captureMessage('Failed to fetch dashboard version information', {
+    await captureMessage('Unknown assistant message part', {
       level: 'warning',
       durationMs: 42,
     });
@@ -49,7 +49,7 @@ describe('privacy-safe client telemetry', () => {
     const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(payload).toMatchObject({
       schemaVersion: 1,
-      event: 'Failed to fetch dashboard version information',
+      event: 'Unknown assistant message part',
       level: 'warning',
       page: 'chat',
       context: { durationMs: 42 },

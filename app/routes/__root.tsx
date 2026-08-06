@@ -1,10 +1,11 @@
 import { useStore } from '@nanostores/react';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
 import { useEffect, type ReactNode } from 'react';
-import { AppProviders } from '~/components/AppProviders';
 import { ErrorDisplay } from '~/components/ErrorComponent';
 import { BrandLink } from '~/components/BrandLink';
 import { LinkButton } from '~/components/ui/LinkButton';
+import { queryClient } from '~/lib/stores/reactQueryClient';
 import { themeStore } from '~/lib/stores/theme';
 import { stripIndents } from 'ghostbuild-agent/utils/stripIndent';
 import globalStyles from '~/styles/index.css?url';
@@ -128,11 +129,11 @@ function Layout({ children }: { children: ReactNode }) {
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
-      <AppProviders>
+      <QueryClientProvider client={queryClient}>
         <main id="main-content" className="size-full">
           {children}
         </main>
-      </AppProviders>
+      </QueryClientProvider>
     </>
   );
 }
