@@ -133,6 +133,16 @@ describe('isolated project command', () => {
     expect(source).not.toContain("cwd: '/tmp'");
     expect(source).not.toContain('cwd: isolatedRoot');
     expect(source).not.toContain('cwd: snapshotRoot');
+
+    const materialization = source.slice(
+      source.indexOf('private async pushDurableProjectToContainer('),
+      source.indexOf('private async runTransientCommand('),
+    );
+    expect(materialization.match(/await this\.#workspace\.push\('container-shell'\)/g)).toHaveLength(2);
+    expect(materialization).toContain('if ((await this.exists(PROJECT_ROOT)).exists)');
+    expect(materialization).toContain('await this.#workspace.close()');
+    expect(materialization).toContain('await this.restartComputerd(COMPUTERD_ENV)');
+    expect(materialization).toContain('if (!(await this.exists(PROJECT_ROOT)).exists)');
   });
 
   it('keeps the Computer container alive for stateful and deployment operations', () => {

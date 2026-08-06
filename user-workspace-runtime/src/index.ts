@@ -123,6 +123,7 @@ const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.
 const INSTALL_COMMAND =
   'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/';
 const COMPUTERD_PROCESS_ID = 'ghostbuild-computerd';
+const COMPUTERD_ENV = { PORT: '8080', MOUNT_POINT: '/home', FUSE_MOUNT: 'auto' } as const;
 const TRANSIENT_COMMAND_PROCESS_ID = 'ghostbuild-transient-command';
 const VALIDATION_CANCELLATION_SETTLE_MS = 45_000;
 const PREVIEW_BUILD_CLEANUP_DEADLINE_MS = 30 * 60_000;
@@ -200,7 +201,7 @@ class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
   readonly containerBackend = new CloudflareContainerBackend({
     container: () => this,
     workspace: { binding: 'PROJECT_WORKSPACE', id: this.ctx.id.toString() },
-    containerEnv: { MOUNT_POINT: '/home', FUSE_MOUNT: 'auto' },
+    containerEnv: COMPUTERD_ENV,
     connectTimeoutMs: 2 * 60_000,
     id: 'container-shell',
   });
@@ -1776,6 +1777,20 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     // Computer owns durable project state; Sandbox commands below reuse its container for transient /tmp builds.
     // One explicit push avoids a full Computer push/pull cycle around every validation, preview, and deploy command.
     await this.#workspace.push('container-shell');
+    if ((await this.exists(PROJECT_ROOT)).exists) {
+      return;
+    }
+
+    // The container-side filesystem is in memory. After a container lifecycle transition, a stale Computer
+    // connection can retain its sync watermark even though the native Sandbox no longer sees the FUSE mount.
+    // Reconnect through a fresh computerd generation so Computer performs a full durable-to-container sync.
+    console.warn('ProjectWorkspace container project is missing after Computer sync; rematerializing it');
+    await this.#workspace.close();
+    await this.restartComputerd(COMPUTERD_ENV);
+    await this.#workspace.push('container-shell');
+    if (!(await this.exists(PROJECT_ROOT)).exists) {
+      throw new Error('Cloudflare Computer could not restore the project filesystem in its execution container.');
+    }
   }
 
   private async runTransientCommand(directory: string, command: string, timeout: number): Promise<void> {
