@@ -1,6 +1,6 @@
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { workersAiAgent } from '~/lib/.server/llm/workers-ai-agent';
-import { createUIMessageStreamResponse } from 'ai';
+import { createPiStreamResponse } from './llm/pi-stream';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { ContextCompactionUnavailableError, ModelInputBudgetExceededError } from './llm/model-input';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
@@ -82,7 +82,7 @@ export async function createChatResponseFromBody({
       runWithKeepAlive,
     });
 
-    return createUIMessageStreamResponse({ stream: dataStream });
+    return createPiStreamResponse(dataStream);
   } catch (error: unknown) {
     logProviderFailure(logger, 'Workers AI chat request failed', error);
 

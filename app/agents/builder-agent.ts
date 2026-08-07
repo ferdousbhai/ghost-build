@@ -313,7 +313,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         event: 'builder_deployment_plan_continuation_stopped',
       });
       return createUIMessageStreamResponse({
-        stream: createUIMessageStream<GhostbuildMessage>({
+        stream: createUIMessageStream<UIMessage>({
           execute: ({ writer }) => {
             writer.write({
               type: 'data-deployment-approval',

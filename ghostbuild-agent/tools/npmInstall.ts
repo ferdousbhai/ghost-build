@@ -1,4 +1,4 @@
-import type { Tool } from 'ai';
+import type { Tool } from 'ghostbuild-agent/pi-tool-compat';
 import { z } from 'zod';
 import {
   isForbiddenStackDependencyPackageName,

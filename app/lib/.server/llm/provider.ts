@@ -1,15 +1,32 @@
-import type { LanguageModel } from 'ai';
-import { createWorkersAI } from 'workers-ai-provider';
 import { CLOUDFLARE_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';
 import { MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
+import { getPiModel, type ModelHandle } from './pi-ai-models';
 
-type Provider = {
-  maxTokens: number;
-  model: LanguageModel;
-};
+// Canonical provider is now Pi's ModelHandle. Legacy ai/provider shim removed — Pi is sole path (workshop-backend pattern).
 
 export type WorkersAiAccountCredentials =
-  { accountId: string; apiKey: string; binding?: never } | { binding: Ai; accountId?: never; apiKey?: never };
+  | { accountId: string; apiKey: string; binding?: never }
+  | { binding: Ai; accountId?: never; apiKey?: never };
+
+export type PiProvider = {
+  handle: ModelHandle;
+  maxTokens: number;
+};
+
+export type Provider = PiProvider;
+
+export function getPiProvider(
+  accountCredentials: WorkersAiAccountCredentials,
+  modelId: string = CLOUDFLARE_WORKERS_AI_MODEL,
+  settings?: { sessionAffinity?: string },
+): PiProvider {
+  return {
+    handle: getPiModel(accountCredentials, modelId as never, {
+      sessionAffinity: settings?.sessionAffinity,
+    }),
+    maxTokens: MODEL_MAX_OUTPUT_TOKENS,
+  };
+}
 
 export function getProvider(
   _env: Env,
@@ -17,24 +34,5 @@ export function getProvider(
   modelId: string = CLOUDFLARE_WORKERS_AI_MODEL,
   settings?: { sessionAffinity?: string; feature?: string },
 ): Provider {
-  const cloudflare = createWorkersAI({
-    ...accountCredentials,
-    gateway: { id: 'default', collectLog: false },
-  });
-
-  return {
-    model: cloudflare(modelId, {
-      sessionAffinity: settings?.sessionAffinity,
-      metadata: {
-        ghostbuild_feature: settings?.feature ?? 'supporting-model-call',
-        ghostbuild_source: 'user-runtime',
-      },
-      collectLog: false,
-      extraHeaders: {
-        'cf-aig-collect-log': 'false',
-        'cf-aig-collect-log-payload': 'false',
-      },
-    }),
-    maxTokens: MODEL_MAX_OUTPUT_TOKENS,
-  };
+  return getPiProvider(accountCredentials, modelId, settings);
 }

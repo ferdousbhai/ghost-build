@@ -1,7 +1,7 @@
-import { generateText } from 'ai';
 import { z } from 'zod';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { getProvider } from '~/lib/.server/llm/provider';
+import { getPiProvider } from '~/lib/.server/llm/provider';
+import { completeText } from '~/lib/.server/llm/pi-ai-invoke';
 import { ENHANCE_PROMPT_SYSTEM_PROMPT } from './enhance-prompt-prompt';
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
@@ -27,14 +27,14 @@ async function enhancePromptForUser({ request, env, userId }: { request: Request
     }
     const { prompt } = parsedRequest.data;
     const accountCredentials = await getUserWorkersAiCredentials(env, userId);
-    const completion = await generateText({
-      model: getProvider(env, accountCredentials, undefined, { feature: 'prompt-enhancement' }).model,
-      instructions: ENHANCE_PROMPT_SYSTEM_PROMPT,
-      prompt,
-      temperature: 0.4,
-      maxOutputTokens: ENHANCE_PROMPT_MAX_OUTPUT_TOKENS,
-    });
-    const enhancedPrompt = completion.text.trim();
+    const handle = getPiProvider(accountCredentials).handle;
+    const enhancedPrompt = (
+      await completeText(handle, {
+        systemPrompt: ENHANCE_PROMPT_SYSTEM_PROMPT,
+        prompt,
+        maxTokens: ENHANCE_PROMPT_MAX_OUTPUT_TOKENS,
+      })
+    ).trim();
     if (!enhancedPrompt) {
       throw new Error('Workers AI returned an empty enhanced prompt.');
     }

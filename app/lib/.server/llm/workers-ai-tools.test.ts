@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { GhostbuildMessage, GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
-import type { Tool, ToolExecutionOptions } from 'ai';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
+
+type Tool = { description?: string; inputSchema?: unknown; execute?: unknown };
+type ToolExecutionOptions = { toolCallId: string; abortSignal?: AbortSignal };
 import type { ZodType } from 'zod';
 import { COMPUTER_EXEC_APPLICATION_POLICY, COMPUTER_TOOL_NAMES } from 'ghostbuild-agent/cloudflare-computer';
 import { UserWorkspaceRuntimeClient } from '~/lib/.server/cloudflare/user-workspace-runtime-client';

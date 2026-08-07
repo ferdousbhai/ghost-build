@@ -1,5 +1,6 @@
-import { generateText } from 'ai';
-import { getProvider, type WorkersAiAccountCredentials } from './provider';
+import { getPiModel } from './pi-ai-models';
+import type { WorkersAiAccountCredentials } from './provider';
+import { completeText } from './pi-ai-invoke';
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
 
 const CONTEXT_SUMMARY_MAX_TOKENS = 4_000;
@@ -14,19 +15,19 @@ type WorkersAiTextOptions = {
 };
 
 async function generateWorkersAiText(
-  env: Env,
+  _env: Env,
   options: WorkersAiTextOptions,
   accountCredentials: WorkersAiAccountCredentials,
 ): Promise<string> {
   const maxOutputTokens = options.maxTokens ?? CONTEXT_SUMMARY_MAX_TOKENS;
-  const result = await generateText({
-    model: getProvider(env, accountCredentials).model,
-    instructions: options.system,
-    prompt: options.user,
-    maxOutputTokens,
-    temperature: options.temperature,
-  });
-  const text = result.text.trim();
+  const handle = getPiModel(accountCredentials, '@cf/zai-org/glm-5.2' as never);
+  const text = (
+    await completeText(handle, {
+      systemPrompt: options.system,
+      prompt: options.user,
+      maxTokens: maxOutputTokens,
+    })
+  ).trim();
   if (!text) {
     throw new Error('Workers AI returned an empty context summary.');
   }

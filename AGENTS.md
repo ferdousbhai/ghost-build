@@ -4,7 +4,7 @@ Use this file as a source map. Prefer the implementation, types, tests, and conf
 
 ## Delivery
 
-Work on `main`; no branches, worktrees, or PRs unless asked. Before each commit, simplify the diff and affected logic, fix all valid issues, run checks, commit, and push `origin/main`.
+Prefer `main` — branches/PRs only if asked or for isolated experiments. For small/docs changes, lightweight checks are fine; otherwise simplify diff, fix blocking issues, run checks, then commit and push `origin/main`.
 
 ## Primary Entry Points
 

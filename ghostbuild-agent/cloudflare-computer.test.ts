@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createAITools, type CreateAIToolsOptions } from '@cloudflare/computer/tools';
-import type { Tool } from 'ai';
+import type { Tool } from 'ghostbuild-agent/pi-tool-compat';
 import { describe, expect, it } from 'vitest';
 import { z, type ZodType } from 'zod';
 import {

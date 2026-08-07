@@ -28,12 +28,9 @@ export const REQUIRED_PNPM_VERSION = "11.14.0";
 const REQUIRED_AI_SDK_VERSIONS = {
   ai: "7.0.48",
   "@ai-sdk/react": "4.0.51",
-  "@ai-sdk/provider": "4.0.4",
-  "workers-ai-provider": "4.0.0",
 };
 
 export const APP_REQUIRED_PACKAGES = [
-  "@ai-sdk/provider",
   "@ai-sdk/react",
   "@cloudflare/ai-chat",
   "@cloudflare/vite-plugin",
@@ -47,7 +44,6 @@ export const APP_REQUIRED_PACKAGES = [
   "react-dom",
   "typescript",
   "vite",
-  "workers-ai-provider",
   "wrangler",
   "zod",
 ];
@@ -116,9 +112,7 @@ export function findPackageVersionAlignmentErrors(
 }
 
 export function findCloudflareAiPeerCompatibilityErrors(pkg, label) {
-  const peers = ["agents", "@cloudflare/ai-chat", "workers-ai-provider"].filter(
-    (name) => packageDependencyVersion(pkg, name),
-  );
+  const peers = ["agents", "@cloudflare/ai-chat"].filter((name) => packageDependencyVersion(pkg, name));
   if (peers.length === 0) {
     return [];
   }

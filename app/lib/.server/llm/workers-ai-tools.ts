@@ -14,8 +14,10 @@ import { createAITools } from '@cloudflare/computer/tools';
 import type { GhostbuildToolName, GhostbuildToolSet } from 'ghostbuild-agent/types';
 import { z, type ZodType } from 'zod';
 import { isGhostbuildToolResult, toolFailure } from 'ghostbuild-agent/tool-result';
-import type { Tool, ToolSet } from 'ai';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
+
+type Tool = { description?: string; inputSchema?: unknown; execute?: unknown };
+type ToolSet = Record<string, Tool>;
 import type { ServerOperationToolName } from '~/agents/builder-workspace-types';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 

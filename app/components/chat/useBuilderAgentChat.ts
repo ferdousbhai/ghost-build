@@ -1,6 +1,5 @@
 import { useAgentChat } from '@cloudflare/ai-chat/react';
 import { useAgent } from 'agents/react';
-import type { UIMessage } from 'ai';
 import { useStore } from '@nanostores/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BuilderAgent, BuilderAgentState } from '~/agents/builder-agent';
@@ -9,6 +8,7 @@ import { isAuthenticated } from '~/lib/stores/userId';
 import { captureMessage } from '~/lib/telemetry.client';
 import { ChatContextManager } from 'ghostbuild-agent/ChatContextManager';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
+import type { UIMessage } from 'ai';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { STATUS_MESSAGES } from './StreamingIndicator';
 import { recordChatFailure, resetChatRetryState } from './chat-retry';

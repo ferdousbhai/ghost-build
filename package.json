@@ -62,7 +62,6 @@
     "node": ">=26.0.0"
   },
   "dependencies": {
-    "@ai-sdk/provider": "4.0.4",
     "@ai-sdk/react": "4.0.51",
     "@cloudflare/ai-chat": "^0.10.1",
     "@cloudflare/computer": "0.1.1",
@@ -83,6 +82,8 @@
     "@codemirror/search": "^6.7.1",
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.43.7",
+    "@earendil-works/pi-agent-core": "0.83.0",
+    "@earendil-works/pi-ai": "0.83.0",
     "@heroicons/react": "^2.2.0",
     "@journeyapps/wa-sqlite": "1.7.2",
     "@nanostores/react": "^0.8.4",
@@ -119,7 +120,6 @@
     "shiki": "^4.4.1",
     "sonner": "^2.0.7",
     "unist-util-visit": "^5.1.0",
-    "workers-ai-provider": "4.0.0",
     "yaml": "2.9.0",
     "zod": "^4.4.3"
   },

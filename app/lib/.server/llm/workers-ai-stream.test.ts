@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { UIMessageChunk } from 'ai';
+import type { PiStreamChunk } from './pi-stream';
 import { appendDeterministicCompletion } from './workers-ai-stream';
+
+type UIMessageChunk = PiStreamChunk;
 
 describe('appendDeterministicCompletion', () => {
   it('places server-owned completion copy before a terminal stop chunk', async () => {

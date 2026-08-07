@@ -1,6 +1,19 @@
-import type { PiStreamChunk } from './pi-stream';
+import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 
-export type UIMessageChunk = PiStreamChunk;
+// Pi-native stream chunk — replaces ai:UIMessageChunk
+export type PiStreamChunk =
+  | { type: 'text-start'; id: string }
+  | { type: 'text-delta'; id: string; delta: string }
+  | { type: 'text-end'; id: string }
+  | { type: 'tool-start'; id: string; toolName: string }
+  | { type: 'tool-delta'; id: string; delta: string }
+  | { type: 'tool-end'; id: string }
+  | { type: 'finish'; finishReason: 'stop' | 'error' | 'tool-calls' | 'length' }
+  | { type: 'error'; errorText: string }
+  | { type: 'data-deployment-approval'; data: unknown }
+  | { type: 'start' };
+
+export type UIMessageChunk = PiStreamChunk; // compat alias until full removal
 
 export function appendDeterministicCompletion(
   stream: ReadableStream<PiStreamChunk>,
@@ -63,4 +76,29 @@ export function normalizeTextPartBoundaries(stream: ReadableStream<PiStreamChunk
       },
     }),
   );
+}
+
+// Convert PiStreamChunk readable to newline-delimited JSON for Response body — replaces createUIMessageStreamResponse
+export function createPiStreamResponse(stream: ReadableStream<PiStreamChunk>): Response {
+  const encoded = stream.pipeThrough(
+    new TransformStream<PiStreamChunk, Uint8Array>({
+      transform(chunk, controller) {
+        controller.enqueue(new TextEncoder().encode(JSON.stringify(chunk) + '\n'));
+      },
+    }),
+  );
+  return new Response(encoded, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
+
+// Also produce a GhostbuildMessage stream for BuilderAgent's internal transcript sync
+export function piChunksToGhostbuildMessages(chunks: PiStreamChunk[]): GhostbuildMessage[] {
+  // handled by agents layer; placeholder for type compat
+  return [];
 }

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  generateText: vi.fn(),
-  getProvider: vi.fn(() => ({ model: { modelId: 'workers-ai-model' } })),
+  completeText: vi.fn(),
+  getPiModel: vi.fn(() => ({ model: { id: 'workers-ai-model' }, stream: vi.fn() })),
 }));
-vi.mock('ai', () => ({ generateText: mocks.generateText }));
-vi.mock('./provider', () => ({ getProvider: mocks.getProvider }));
+vi.mock('./pi-ai-invoke', () => ({ completeText: mocks.completeText }));
+vi.mock('./pi-ai-models', () => ({ getPiModel: mocks.getPiModel }));
 
 import { summarizeBuilderContext } from './workers-ai-text';
 
@@ -15,14 +15,14 @@ describe('summarizeBuilderContext', () => {
   beforeEach(() => vi.clearAllMocks());
 
   test('returns a trimmed readable summary using the connected account', async () => {
-    mocks.generateText.mockResolvedValue({ text: '  current state  ' });
+    mocks.completeText.mockResolvedValue('  current state  ');
     const env = {} as Env;
     await expect(summarizeBuilderContext(env, 'conversation', credentials)).resolves.toBe('current state');
-    expect(mocks.getProvider).toHaveBeenCalledWith(env, credentials);
+    expect(mocks.getPiModel).toHaveBeenCalled();
   });
 
   test('uses a fixed safe error when generation fails', async () => {
-    mocks.generateText.mockRejectedValue(new Error('provider detail'));
+    mocks.completeText.mockRejectedValue(new Error('provider detail'));
     await expect(summarizeBuilderContext({} as Env, 'conversation', credentials)).rejects.toThrow(
       'Context compaction generation failed.',
     );

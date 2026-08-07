@@ -1,5 +1,5 @@
-import { pruneMessages, type ModelMessage } from 'ai';
 import { decideConversationCompaction, type ConversationCompactionAction } from '@summonghost/compaction';
+import type { ModelMessage } from './message-conversion';
 import { estimateStringTokens } from 'agents/experimental/memory/utils';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { MAX_ESTIMATED_MODEL_INPUT_TOKENS } from 'ghostbuild-agent/context-limits';
@@ -138,13 +138,7 @@ async function assembleModelInput(
   uiMessages: GhostbuildMessage[],
   args: Pick<Parameters<typeof prepareModelInput>[0], 'activeTools' | 'systemPrompts' | 'tools' | 'toolChoice'>,
 ): Promise<{ messages: ModelMessage[]; estimatedTokens: number }> {
-  const history = pruneMessages({
-    messages: await cleanupAssistantMessages(uiMessages, args.tools),
-    reasoning: 'before-last-message',
-    toolCalls: 'before-last-2-messages',
-    emptyMessages: 'remove',
-  });
-  const messages: ModelMessage[] = history;
+  const messages = await cleanupAssistantMessages(uiMessages, args.tools);
   const estimatedTokens = estimateStringTokens(
     JSON.stringify({
       instructions: args.systemPrompts,
