@@ -1,5 +1,6 @@
 packages:
   - 'ghostbuild-agent'
+  - 'packages/@summonghost/*'
   - 'template'
 ignoreWorkspaceRootCheck: true
 minimumReleaseAge: 1440
@@ -30,6 +31,7 @@ overrides:
 allowBuilds:
   # The OPFS adapter uses wa-sqlite's published dist artifacts. Its postinstall
   # only downloads the unrelated optional PowerSync core.
+  '@google/genai': false
   '@journeyapps/wa-sqlite': false
   # Computer's shell emulation treats these native compression bindings as
   # optional. Keep their install scripts disabled in the Worker build.
@@ -37,6 +39,7 @@ allowBuilds:
   core-js-pure: true
   esbuild: true
   node-liblzma: false
+  protobufjs: false
   sharp: true
   workerd: true
 peerDependencyRules:
