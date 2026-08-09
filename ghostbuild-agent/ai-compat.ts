@@ -24,18 +24,77 @@ export type GhostbuildDataTypes = {
 // Pi-native ghost message — kept structurally compatible with UIMessage parts shapes used by chat UI.
 export type GhostbuildPart =
   | { type: 'text'; text: string }
-  | { type: 'tool-read'; toolCallId: string; toolName: string; state: string; input?: unknown; output?: unknown; errorText?: string }
-  | { type: 'tool-write'; toolCallId: string; toolName: string; state: string; input?: unknown; output?: unknown; errorText?: string }
-  | { type: 'tool-edit'; toolCallId: string; toolName: string; state: string; input?: unknown; output?: unknown; errorText?: string }
-  | { type: 'tool-exec'; toolCallId: string; toolName: string; state: string; input?: unknown; output?: unknown; errorText?: string }
-  | ({ type: 'dynamic-tool'; toolName: string; toolCallId: string; state: string; input?: unknown; output?: unknown; errorText?: string } & Record<string, unknown>)
-  | ({ type: string; text?: string; toolName?: string; toolCallId?: string; state?: string } & Record<string, unknown>);
+  | {
+      type: 'tool-read';
+      toolCallId: string;
+      toolName: string;
+      state: string;
+      input?: unknown;
+      output?: unknown;
+      errorText?: string;
+    }
+  | {
+      type: 'tool-write';
+      toolCallId: string;
+      toolName: string;
+      state: string;
+      input?: unknown;
+      output?: unknown;
+      errorText?: string;
+    }
+  | {
+      type: 'tool-edit';
+      toolCallId: string;
+      toolName: string;
+      state: string;
+      input?: unknown;
+      output?: unknown;
+      errorText?: string;
+    }
+  | {
+      type: 'tool-exec';
+      toolCallId: string;
+      toolName: string;
+      state: string;
+      input?: unknown;
+      output?: unknown;
+      errorText?: string;
+    }
+  | ({
+      type: 'dynamic-tool';
+      toolName: string;
+      toolCallId: string;
+      state: string;
+      input?: unknown;
+      output?: unknown;
+      errorText?: string;
+    } & Record<string, unknown>)
+  | ({
+      type: string;
+      text?: string;
+      toolName?: string;
+      toolCallId?: string;
+      state?: string;
+      input?: unknown;
+      output?: unknown;
+      errorText?: string;
+      approval?: unknown;
+      data?: unknown;
+      url?: unknown;
+      mediaType?: unknown;
+      title?: unknown;
+    } & Record<string, unknown>);
 
-export type GhostbuildToolInvocation = Extract<GhostbuildPart, { type: 'dynamic-tool' }> & {
+export type GhostbuildToolInvocation = {
+  type: 'dynamic-tool';
   toolName: string;
   toolCallId: string;
   state: string;
-};
+  input?: unknown;
+  output?: unknown;
+  errorText?: string;
+  approval?: { id?: string; approved?: boolean; reason?: string };
+} & Record<string, unknown>;
 
 export type GhostbuildMessage = {
   id: string;
@@ -49,13 +108,23 @@ export type GhostbuildMessage = {
 export type { PiMessage, PiAssistantMessage, PiTextContent, PiToolCall, PiUsage, PiAgentEvent };
 
 export function messageText(message: Pick<GhostbuildMessage, 'parts'>): string {
-  return message.parts.map((part) => (part.type === 'text' && typeof (part as { text?: string }).text === 'string' ? (part as { text: string }).text : '')).join('');
+  return message.parts
+    .map((part) =>
+      part.type === 'text' && typeof (part as { text?: string }).text === 'string'
+        ? (part as { text: string }).text
+        : '',
+    )
+    .join('');
 }
 
 export function createdAtMillis(message: Pick<GhostbuildMessage, 'createdAt'>): number | undefined {
   const { createdAt } = message;
-  if (createdAt instanceof Date) return createdAt.getTime();
-  if (typeof createdAt === 'number') return createdAt;
+  if (createdAt instanceof Date) {
+    return createdAt.getTime();
+  }
+  if (typeof createdAt === 'number') {
+    return createdAt;
+  }
   if (typeof createdAt === 'string') {
     const timestamp = Date.parse(createdAt);
     return Number.isNaN(timestamp) ? undefined : timestamp;
@@ -77,25 +146,41 @@ export function languageModelId(model: unknown, fallback: string): string {
 }
 
 function findNumericCacheRead(value: unknown, seen: WeakSet<object>): number | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  if (seen.has(value)) return undefined;
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  if (seen.has(value)) {
+    return undefined;
+  }
   seen.add(value);
   const record = value as Record<string, unknown>;
   let observedZero = false;
-  for (const key of ['cachedPromptTokens', 'cachedInputTokens', 'cacheReadInputTokens', 'cacheReadTokens', 'cacheRead']) {
+  for (const key of [
+    'cachedPromptTokens',
+    'cachedInputTokens',
+    'cacheReadInputTokens',
+    'cacheReadTokens',
+    'cacheRead',
+  ]) {
     const candidate = record[key];
-    if (isPositiveSafeInteger(candidate)) return candidate;
+    if (isPositiveSafeInteger(candidate)) {
+      return candidate;
+    }
     observedZero ||= candidate === 0;
   }
   const promptTokenDetails = record.prompt_tokens_details;
   if (promptTokenDetails && typeof promptTokenDetails === 'object') {
     const cachedTokens = (promptTokenDetails as Record<string, unknown>).cached_tokens;
-    if (isPositiveSafeInteger(cachedTokens)) return cachedTokens;
+    if (isPositiveSafeInteger(cachedTokens)) {
+      return cachedTokens;
+    }
     observedZero ||= cachedTokens === 0;
   }
   for (const candidate of Object.values(record)) {
     const nested = findNumericCacheRead(candidate, seen);
-    if (nested !== undefined && nested > 0) return nested;
+    if (nested !== undefined && nested > 0) {
+      return nested;
+    }
     observedZero ||= nested === 0;
   }
   return observedZero ? 0 : undefined;
@@ -111,14 +196,26 @@ export function isToolPart(part: GhostbuildPart): boolean {
 }
 
 export function getToolInvocation(part: GhostbuildPart): GhostbuildToolInvocation | null {
-  if (!isToolPart(part)) return null;
+  if (!isToolPart(part)) {
+    return null;
+  }
   const p = part as Record<string, unknown>;
-  if (part.type === 'dynamic-tool') return part as GhostbuildToolInvocation;
+  const approval = isRecord(p.approval)
+    ? {
+        ...(typeof p.approval.id === 'string' ? { id: p.approval.id } : {}),
+        ...(typeof p.approval.approved === 'boolean' ? { approved: p.approval.approved } : {}),
+        ...(typeof p.approval.reason === 'string' ? { reason: p.approval.reason } : {}),
+      }
+    : undefined;
   return {
     ...part,
     type: 'dynamic-tool',
-    toolName: (p.toolName as string) ?? (p.type as string).replace(/^tool-/, ''),
-  } as GhostbuildToolInvocation;
+    toolName: typeof p.toolName === 'string' ? p.toolName : part.type.replace(/^tool-/, ''),
+    toolCallId: typeof p.toolCallId === 'string' ? p.toolCallId : '',
+    state: typeof p.state === 'string' ? p.state : 'input-streaming',
+    ...(typeof p.errorText === 'string' ? { errorText: p.errorText } : {}),
+    approval,
+  };
 }
 
 export function isToolResult(part: GhostbuildPart): boolean {
@@ -142,13 +239,21 @@ export function fromUIMessage(message: unknown): GhostbuildMessage {
 
 // Pi Message -> GhostbuildMessage text helper
 export function piMessageText(piMessage: PiMessage): string {
-  if (piMessage.role === 'user' && typeof piMessage.content === 'string') return piMessage.content;
+  if (piMessage.role === 'user' && typeof piMessage.content === 'string') {
+    return piMessage.content;
+  }
   if ('content' in piMessage && Array.isArray((piMessage as PiAssistantMessage).content)) {
     return ((piMessage as PiAssistantMessage).content as Array<PiTextContent | PiToolCall>)
       .filter((b) => (b as { type: string }).type === 'text')
       .map((b) => (b as PiTextContent).text)
       .join('');
   }
-  if (typeof (piMessage as { content?: unknown }).content === 'string') return (piMessage as { content: string }).content;
+  if (typeof (piMessage as { content?: unknown }).content === 'string') {
+    return (piMessage as { content: string }).content;
+  }
   return '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

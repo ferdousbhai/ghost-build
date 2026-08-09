@@ -6,14 +6,14 @@ export type { PendingDeploymentApproval } from 'ghostbuild-agent/ai-compat';
 export function parsePendingDeploymentApproval(result: unknown): PendingDeploymentApproval | null {
   if (isGhostbuildToolResult(result) && result.ok && isRecord(result.data)) {
     if (result.data.state === 'awaiting-approval') {
-      return parseDeployment(result.data.deployment);
+      return parsePendingDeploymentApprovalData(result.data.deployment);
     }
     return null;
   }
   return null;
 }
 
-function parseDeployment(value: unknown): PendingDeploymentApproval | null {
+export function parsePendingDeploymentApprovalData(value: unknown): PendingDeploymentApproval | null {
   if (!isRecord(value) || typeof value.id !== 'string' || !/^[a-f0-9]{64}$/.test(String(value.planDigest))) {
     return null;
   }

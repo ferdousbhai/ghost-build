@@ -3,7 +3,11 @@ import type { GhostbuildMessage, GhostbuildToolInvocation } from 'ghostbuild-age
 import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 
-type Tool = { description?: string; inputSchema?: unknown; execute?: unknown };
+type Tool = {
+  description?: string;
+  inputSchema?: unknown;
+  execute?: (input: unknown, options: ToolExecutionOptions) => Promise<unknown>;
+};
 type ToolExecutionOptions = { toolCallId: string; abortSignal?: AbortSignal };
 import type { ZodType } from 'zod';
 import { COMPUTER_EXEC_APPLICATION_POLICY, COMPUTER_TOOL_NAMES } from 'ghostbuild-agent/cloudflare-computer';
@@ -614,13 +618,11 @@ async function executeTool(definition: Tool, input: unknown, abortSignal?: Abort
   if (!definition.execute) {
     throw new Error('Expected an executable tool.');
   }
-  const options: ToolExecutionOptions<unknown> = {
+  const options: ToolExecutionOptions = {
     toolCallId: 'tool-call',
-    messages: [],
     abortSignal,
-    context: undefined,
   };
-  return definition.execute(input as never, options);
+  return definition.execute(input, options);
 }
 
 function toolInputSchema(definition: Tool): ZodType {

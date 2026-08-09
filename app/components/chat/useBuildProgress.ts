@@ -70,7 +70,7 @@ function messageActivityKey(messages: GhostbuildMessage[]): string {
     lastMessage.parts
       ?.map((part) => {
         if (part.type === 'text') {
-          return `text:${part.text.length}`;
+          return `text:${typeof part.text === 'string' ? part.text.length : 0}`;
         }
         const invocation = getToolInvocation(part);
         return invocation ? `tool:${invocation.toolCallId}:${invocation.toolName}:${invocation.state}` : part.type;

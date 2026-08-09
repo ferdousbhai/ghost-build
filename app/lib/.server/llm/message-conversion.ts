@@ -1,23 +1,24 @@
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 
 export type ModelMessage = { role: string; content: unknown };
-export type ToolSet = Record<string, unknown>;
-export type UIMessage = GhostbuildMessage;
 
-export function asAiSdkTools(tools: object): ToolSet {
-  return tools as ToolSet;
+export function asOriginalMessages(messages: GhostbuildMessage[]): GhostbuildMessage[] {
+  return messages;
 }
 
-export function asOriginalMessages(messages: GhostbuildMessage[]): UIMessage[] {
-  return messages as UIMessage[];
-}
-
-export async function cleanupAssistantMessages(messages: GhostbuildMessage[], _tools?: object): Promise<ModelMessage[]> {
+export async function cleanupAssistantMessages(
+  messages: GhostbuildMessage[],
+  _tools?: object,
+): Promise<ModelMessage[]> {
   const result: ModelMessage[] = [];
   for (const msg of messages) {
     if (msg.role !== 'assistant') {
       // For non-assistant, produce simple user/assistant message with cleaned text
-      const cleanedParts = msg.parts.map((p) => (p.type === 'text' && typeof (p as { text: string }).text === 'string' ? { ...p, text: cleanMessage((p as { text: string }).text) } : p));
+      const cleanedParts = msg.parts.map((p) =>
+        p.type === 'text' && typeof (p as { text: string }).text === 'string'
+          ? { ...p, text: cleanMessage((p as { text: string }).text) }
+          : p,
+      );
       const text = cleanedParts
         .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
         .map((p) => p.text)
@@ -63,9 +64,13 @@ export async function cleanupAssistantMessages(messages: GhostbuildMessage[], _t
       const toolCallId = (p.toolCallId as string) ?? (p.id as string) ?? `call_${Math.random().toString(36).slice(2)}`;
       // Derive toolName from part.type or toolName field
       let toolName: string;
-      if (typeof p.toolName === 'string' && p.toolName) toolName = p.toolName;
-      else if (typeof p.type === 'string' && p.type.startsWith('tool-')) toolName = (p.type as string).slice(5);
-      else toolName = 'unknown';
+      if (typeof p.toolName === 'string' && p.toolName) {
+        toolName = p.toolName;
+      } else if (typeof p.type === 'string' && p.type.startsWith('tool-')) {
+        toolName = (p.type as string).slice(5);
+      } else {
+        toolName = 'unknown';
+      }
       const state = p.state as string | undefined;
       const input = (p.input as unknown) ?? {};
       const output = p.output as unknown;
@@ -87,14 +92,26 @@ export async function cleanupAssistantMessages(messages: GhostbuildMessage[], _t
       } else if (state === 'output-error') {
         result.push({
           role: 'tool',
-          content: [{ type: 'tool-result', toolCallId, toolName, output: { type: 'error-text', value: errorText ?? 'Error' } }],
+          content: [
+            { type: 'tool-result', toolCallId, toolName, output: { type: 'error-text', value: errorText ?? 'Error' } },
+          ],
         } as ModelMessage);
       } else if (state === 'output-denied') {
         const blocks: unknown[] = [];
         if (approval) {
-          blocks.push({ type: 'tool-approval-response', approvalId: approval.id, approved: false, reason: approval.reason ?? errorText });
+          blocks.push({
+            type: 'tool-approval-response',
+            approvalId: approval.id,
+            approved: false,
+            reason: approval.reason ?? errorText,
+          });
         }
-        blocks.push({ type: 'tool-result', toolCallId, toolName, output: { type: 'error-text', value: errorText ?? approval?.reason ?? 'Denied' } });
+        blocks.push({
+          type: 'tool-result',
+          toolCallId,
+          toolName,
+          output: { type: 'error-text', value: errorText ?? approval?.reason ?? 'Denied' },
+        });
         result.push({ role: 'tool', content: blocks } as ModelMessage);
       } else if (state === 'input-available' || state === 'input-streaming' || !state) {
         // No tool result yet — only assistant tool-call (for in-progress). Tests don't cover this alone.
@@ -107,7 +124,9 @@ export async function cleanupAssistantMessages(messages: GhostbuildMessage[], _t
 
   return result.filter((m) => {
     const c = (m as { content?: unknown }).content;
-    if (c === undefined || c === null) return false;
+    if (c === undefined || c === null) {
+      return false;
+    }
     try {
       return JSON.stringify(c).length > 0;
     } catch {
@@ -119,8 +138,11 @@ export async function cleanupAssistantMessages(messages: GhostbuildMessage[], _t
 function ghostbuildPartToModelMessages(p: Record<string, unknown>): ModelMessage[] {
   // Fallback for unexpected tool parts in non-assistant messages — emit as assistant tool-call + tool result if possible
   const toolCallId = (p.toolCallId as string) ?? `call_${Math.random().toString(36).slice(2)}`;
-  const toolName = (p.toolName as string) ?? (typeof p.type === 'string' ? (p.type as string).replace(/^tool-/, '') : 'unknown');
-  return [{ role: 'assistant', content: [{ type: 'tool-call', toolCallId, toolName, input: p.input ?? {} }] } as ModelMessage];
+  const toolName =
+    (p.toolName as string) ?? (typeof p.type === 'string' ? (p.type as string).replace(/^tool-/, '') : 'unknown');
+  return [
+    { role: 'assistant', content: [{ type: 'tool-call', toolCallId, toolName, input: p.input ?? {} }] } as ModelMessage,
+  ];
 }
 
 function cleanMessage(message: string) {

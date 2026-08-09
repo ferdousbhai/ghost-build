@@ -14,6 +14,7 @@ import {
   findMissingDependencies,
   findMissingCommandSteps,
   findPackageVersionAlignmentErrors,
+  findRootWorkspacePolicyErrors,
   findRuntimePinErrors,
   findSandboxRuntimePinErrors,
   findRootMigrationErrors,
@@ -22,6 +23,15 @@ import {
 } from './verify-stack-alignment.mjs';
 
 describe('stack alignment verification helpers', () => {
+  it('accepts the reviewed root-only blocked dependency scripts', () => {
+    const workspace = readFileSync(new URL('../pnpm-workspace.yaml', import.meta.url), 'utf8');
+
+    expect(findRootWorkspacePolicyErrors(workspace)).toEqual([]);
+    expect(findRootWorkspacePolicyErrors(workspace.replace('  protobufjs: false\n', ''))).toContain(
+      'pnpm-workspace.yaml must explicitly block protobufjs exactly once.',
+    );
+  });
+
   it('checks runtime artifact pins before merge without mutating pull request issues', () => {
     const workflow = readFileSync(new URL('../.github/workflows/runtime-artifacts.yml', import.meta.url), 'utf8');
 
@@ -121,10 +131,8 @@ describe('stack alignment verification helpers', () => {
         'package.json',
       ),
     ).toEqual([
-      'package.json must pin the tested AI SDK 7 family ai@7.0.48 for agents, @cloudflare/ai-chat, workers-ai-provider; found 7.0.6.',
-      'package.json must pin the tested AI SDK 7 family @ai-sdk/react@4.0.51 for agents, @cloudflare/ai-chat, workers-ai-provider; found 4.0.7.',
-      'package.json must pin the tested AI SDK 7 family @ai-sdk/provider@4.0.4 for agents, @cloudflare/ai-chat, workers-ai-provider; found 4.0.0.',
-      'package.json must pin the tested AI SDK 7 family workers-ai-provider@4.0.0 for agents, @cloudflare/ai-chat, workers-ai-provider; found ^3.3.0.',
+      'package.json must pin the tested AI SDK 7 family ai@7.0.48 for agents, @cloudflare/ai-chat; found 7.0.6.',
+      'package.json must pin the tested AI SDK 7 family @ai-sdk/react@4.0.51 for agents, @cloudflare/ai-chat; found 4.0.7.',
     ]);
   });
 

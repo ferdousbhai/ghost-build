@@ -13,6 +13,7 @@ const validDocsDescription = docKeys.map((key) => `\`${key}\`: ${docDescriptions
 
 export const deployPiTool = defineTool({
   name: 'deploy',
+  label: 'Deploy project',
   description: `
 After validateProject succeeds for the current workspace revision, capture and upload an immutable source snapshot and prepare an exact production
 resource plan for explicit user approval. After approval, Ghostbuild's isolated server-side deployment
@@ -45,7 +46,9 @@ Workers Paid was enabled unless the result explicitly confirms the user separate
 
 export const lookupDocsPiTool = defineTool({
   name: 'lookupDocs',
-  description: `Lookup bounded documentation sections and skill references for supported stack features. Select a heading or query when possible and reuse nextCursor to continue the same immutable documentation result.\n${validDocsDescription}`.trim(),
+  label: 'Look up documentation',
+  description:
+    `Lookup bounded documentation sections and skill references for supported stack features. Select a heading or query when possible and reuse nextCursor to continue the same immutable documentation result.\n${validDocsDescription}`.trim(),
   parameters: Type.Object({
     docs: Type.Array(Type.Union(docKeys.map((k) => Type.Literal(k)) as never[]), {
       description: `List of docs or skill references to look up.\n${validDocsDescription}`,
@@ -56,9 +59,15 @@ export const lookupDocsPiTool = defineTool({
       Type.String({ description: 'Optional Markdown heading to select exactly.', minLength: 1, maxLength: 300 }),
     ),
     query: Type.Optional(
-      Type.String({ description: 'Optional text query used to select matching sections.', minLength: 2, maxLength: 300 }),
+      Type.String({
+        description: 'Optional text query used to select matching sections.',
+        minLength: 2,
+        maxLength: 300,
+      }),
     ),
-    cursor: Type.Optional(Type.String({ description: 'Exact nextCursor from preceding lookupDocs page.', maxLength: 64 })),
+    cursor: Type.Optional(
+      Type.String({ description: 'Exact nextCursor from preceding lookupDocs page.', maxLength: 64 }),
+    ),
   }),
   execute: async () => {
     throw new Error('lookupDocs tool execute is wired in pi-agent.ts');
@@ -67,6 +76,7 @@ export const lookupDocsPiTool = defineTool({
 
 export const npmInstallPiTool = defineTool({
   name: 'npmInstall',
+  label: 'Install dependencies',
   description: 'Install npm dependencies for the generated project. Use spec array for registry selectors.',
   parameters: Type.Object({
     specs: Type.Optional(Type.Array(Type.String({ description: 'npm registry selectors' }))),
@@ -78,6 +88,7 @@ export const npmInstallPiTool = defineTool({
 
 export const validateProjectPiTool = defineTool({
   name: 'validateProject',
+  label: 'Validate project',
   description: 'Run full project validation (typecheck, build, lint) against the current workspace revision.',
   parameters: Type.Object({}),
   execute: async () => {

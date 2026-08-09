@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PiStreamChunk } from './pi-stream';
-import { appendDeterministicCompletion } from './workers-ai-stream';
+import { appendDeterministicCompletion, normalizeTextPartBoundaries } from './workers-ai-stream';
 
 type UIMessageChunk = PiStreamChunk;
 
@@ -32,6 +32,28 @@ describe('appendDeterministicCompletion', () => {
     const input = [{ type: 'start' }, { type: 'finish', finishReason: 'stop' }] as UIMessageChunk[];
 
     await expect(readChunks(appendDeterministicCompletion(chunks(input), () => undefined))).resolves.toEqual(input);
+  });
+});
+
+describe('normalizeTextPartBoundaries', () => {
+  it('closes a synthesized text part before the terminal chunk', async () => {
+    const result = await readChunks(
+      normalizeTextPartBoundaries(
+        chunks([
+          { type: 'start' },
+          { type: 'text-delta', id: 'assistant-1', delta: 'Hello' },
+          { type: 'finish', finishReason: 'stop' },
+        ]),
+      ),
+    );
+
+    expect(result).toEqual([
+      { type: 'start' },
+      { type: 'text-start', id: 'assistant-1' },
+      { type: 'text-delta', id: 'assistant-1', delta: 'Hello' },
+      { type: 'text-end', id: 'assistant-1' },
+      { type: 'finish', finishReason: 'stop' },
+    ]);
   });
 });
 

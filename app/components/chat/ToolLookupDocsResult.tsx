@@ -11,7 +11,7 @@ export function ToolLookupDocsResult({ invocation }: { invocation: GhostbuildToo
     return <ToolResultFrame>{invocation.errorText}</ToolResultFrame>;
   }
   if (invocation.state === 'output-denied') {
-    return <ToolResultFrame>{invocation.approval.reason ?? 'Documentation lookup was denied.'}</ToolResultFrame>;
+    return <ToolResultFrame>{invocation.approval?.reason ?? 'Documentation lookup was denied.'}</ToolResultFrame>;
   }
   const resultText = toolResultContent(invocation.output) ?? toolResultSummary(invocation.output);
   return !toolResultSucceeded(invocation.output) ? (

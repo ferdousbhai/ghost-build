@@ -6,6 +6,7 @@ import type {
   ModelCost,
   OpenAICompletionsCompat,
   AnthropicMessagesCompat,
+  FetchFunction,
   ProviderHeaders,
   SimpleStreamOptions,
   StreamFunction,
@@ -19,15 +20,15 @@ import { CLOUDFLARE_WORKERS_AI_MODELS } from '@earendil-works/pi-ai/providers/cl
 import { GOOGLE_MODELS } from '@earendil-works/pi-ai/providers/google.models';
 import { OPENAI_MODELS } from '@earendil-works/pi-ai/providers/openai.models';
 import { MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
-import { getWorkersAiModel, type WorkersAiModelId } from '~/lib/workers-ai-model';
+import { getWorkersAiModel, isWorkersAiModelId, type WorkersAiRuntimeModelId } from '~/lib/workers-ai-model';
 
 // Mirrors cloudflare-os/packages/workshop-backend/src/ai-models.ts — adapted for ghost-build's
 // Workers-AI-only catalog. Multi-provider catalogs are kept for pi's type parity, but ghost-build
 // only routes Workers AI via its gateway account binding at runtime.
 
-export type GhostbuildModelConfig = {
+type GhostbuildModelConfig = {
   provider: 'cloudflare';
-  model: WorkersAiModelId;
+  model: WorkersAiRuntimeModelId;
   apiToken?: string;
   apiUrl?: string;
 };
@@ -67,9 +68,9 @@ function catalogModel(provider: string, modelId: string): Model<Api> | undefined
 }
 
 function modelTokenWindow(config: GhostbuildModelConfig, catalog: Model<Api> | undefined) {
-  const model = getWorkersAiModel(config.model);
+  const model = isWorkersAiModelId(config.model) ? getWorkersAiModel(config.model) : undefined;
   return {
-    contextWindow: model.contextTokens ?? catalog?.contextWindow ?? 128_000,
+    contextWindow: model?.contextTokens ?? catalog?.contextWindow ?? 128_000,
     maxTokens: MODEL_MAX_OUTPUT_TOKENS,
   };
 }
@@ -85,10 +86,14 @@ function workersAiCompat(catalog: Model<Api> | undefined): OpenAICompletionsComp
 }
 
 function getHeader(headers: Record<string, string>, name: string): string | undefined {
-  if (headers[name] !== undefined) return headers[name];
+  if (headers[name] !== undefined) {
+    return headers[name];
+  }
   const lower = name.toLowerCase();
   for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === lower) return value;
+    if (key.toLowerCase() === lower) {
+      return value;
+    }
   }
   return undefined;
 }
@@ -96,13 +101,16 @@ function getHeader(headers: Record<string, string>, name: string): string | unde
 type HandleArgs = {
   model: Model<Api>;
   apiKey?: string;
+  fetch?: FetchFunction;
   headers?: ProviderHeaders;
   sessionAffinity?: string;
 };
 
 function makeHandle(args: HandleArgs): ModelHandle {
   const streamFn = API_STREAMS[args.model.api];
-  if (!streamFn) throw new Error(`Unsupported model API "${args.model.api}".`);
+  if (!streamFn) {
+    throw new Error(`Unsupported model API "${args.model.api}".`);
+  }
 
   const anthropicCompat = args.model.compat as AnthropicMessagesCompat | undefined;
   const apiExtras: Record<string, unknown> =
@@ -120,13 +128,10 @@ function makeHandle(args: HandleArgs): ModelHandle {
       handle.lastResponse = undefined;
       const headers: ProviderHeaders = { ...args.headers, ...options.headers };
       const merged: SimpleStreamOptions = {
-        ...(thinking
-          ? apiExtras
-          : args.model.api === 'anthropic-messages'
-            ? { thinkingEnabled: false }
-            : {}),
+        ...(thinking ? apiExtras : args.model.api === 'anthropic-messages' ? { thinkingEnabled: false } : {}),
         ...options,
         ...(args.apiKey !== undefined ? { apiKey: args.apiKey } : {}),
+        ...(args.fetch !== undefined ? { fetch: args.fetch } : {}),
         ...(Object.keys(headers).length > 0 ? { headers } : {}),
         sessionId: options.sessionId ?? args.sessionAffinity,
         onResponse: async (response, responseModel) => {
@@ -145,7 +150,7 @@ function makeHandle(args: HandleArgs): ModelHandle {
 
 export function getPiModel(
   accountCredentials: { accountId: string; apiKey: string } | { binding: Ai },
-  modelId: WorkersAiModelId,
+  modelId: WorkersAiRuntimeModelId,
   settings?: { sessionAffinity?: string },
 ): ModelHandle {
   const config: GhostbuildModelConfig = { provider: 'cloudflare', model: modelId };
@@ -156,21 +161,26 @@ export function getPiModel(
   // For pi, speak Workers AI's OpenAI-compat endpoint; auth is via account credentials / binding.
   // Direct REST shape mirrors cloudflare-os getModelDirect for cloudflare provider.
   if ('binding' in accountCredentials) {
-    // Binding path — pi will use fetch override if needed; for now model descriptor points at
-    // Workers AI compat endpoint and caller supplies fetch that hits the binding.
     const model: Model<Api> = {
       id: config.model,
       name: catalog?.name ?? config.model,
       api: 'openai-completions',
       provider: 'cloudflare-workers-ai',
-      baseUrl: 'https://api.cloudflare.com/client/v4/accounts/binding/ai/v1',
+      baseUrl: 'https://workers-ai-binding.invalid/v1',
       reasoning: catalog?.reasoning ?? false,
       input: catalog?.input ?? ['text'],
       cost: catalog?.cost ?? ZERO_COST,
       ...win,
       compat: workersAiCompat(catalog),
     };
-    return makeHandle({ model, sessionAffinity: settings?.sessionAffinity });
+    return makeHandle({
+      model,
+      // pi's OpenAI-compatible serializer requires a non-empty key before calling custom fetch.
+      // The binding fetch below never forwards this local sentinel or any request headers.
+      apiKey: 'workers-ai-binding',
+      fetch: createWorkersAiBindingFetch(accountCredentials.binding, config.model),
+      sessionAffinity: settings?.sessionAffinity,
+    });
   }
 
   const model: Model<Api> = {
@@ -192,12 +202,23 @@ export function getPiModel(
   });
 }
 
-// Keep getProvider shim for incremental strangle — delegates to pi handle's model descriptor
-// where needed, but preserves LanguageModel shape until Phase 5 cuts over.
-export function getPiModelHandleForCompat(
-  accountCredentials: { accountId: string; apiKey: string } | { binding: Ai },
-  modelId: WorkersAiModelId,
-  sessionAffinity?: string,
-) {
-  return getPiModel(accountCredentials, modelId, { sessionAffinity });
+function createWorkersAiBindingFetch(binding: Ai, modelId: WorkersAiRuntimeModelId): FetchFunction {
+  return async (input, init) => {
+    const request = new Request(input, init);
+    request.signal.throwIfAborted();
+    const payload = (await request.json()) as Record<string, unknown>;
+    // The model is the first binding argument; keeping it out of inputs matches env.AI.run().
+    delete payload.model;
+    const rawBinding = binding as unknown as {
+      run: (
+        model: string,
+        inputs: Record<string, unknown>,
+        options: { returnRawResponse: true; signal: AbortSignal },
+      ) => Promise<Response>;
+    };
+    return rawBinding.run(modelId, payload, {
+      returnRawResponse: true,
+      signal: request.signal,
+    });
+  };
 }

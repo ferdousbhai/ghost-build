@@ -15,12 +15,20 @@ describe('Workers AI provider (Pi)', () => {
       feature: 'builder-chat',
     });
 
-    expect(getPiModel).toHaveBeenCalledWith(credentials, '@cf/zai-org/glm-5.2', expect.objectContaining({ sessionAffinity: 'gb-opaque' }));
+    expect(getPiModel).toHaveBeenCalledWith(
+      credentials,
+      '@cf/zai-org/glm-5.2',
+      expect.objectContaining({ sessionAffinity: 'gb-opaque' }),
+    );
   });
 
   test('passes a Cloudflare catalog partner slug through Pi provider', () => {
     const creds = { accountId: 'account-1', apiKey: 'oauth-token' };
     getPiProvider(creds, 'deepseek/deepseek-v4-pro', { sessionAffinity: 'gb-opaque' });
-    expect(getPiModel).toHaveBeenCalledWith(creds, 'deepseek/deepseek-v4-pro', expect.objectContaining({ sessionAffinity: 'gb-opaque' }));
+    expect(getPiModel).toHaveBeenCalledWith(
+      creds,
+      'deepseek/deepseek-v4-pro',
+      expect.objectContaining({ sessionAffinity: 'gb-opaque' }),
+    );
   });
 });

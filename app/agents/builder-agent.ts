@@ -30,7 +30,7 @@ import {
   setGeneratedDescriptionIfMissing,
   setGeneratedSubchatDescription,
 } from '~/lib/cloudflare/data/chat-service.server';
-import { messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import { messageText } from 'ghostbuild-agent/ai-compat';
 import {
   transcriptCheckpointSchema,
   transcriptCheckpointsEqual,

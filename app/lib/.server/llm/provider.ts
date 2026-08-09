@@ -5,15 +5,12 @@ import { getPiModel, type ModelHandle } from './pi-ai-models';
 // Canonical provider is now Pi's ModelHandle. Legacy ai/provider shim removed — Pi is sole path (workshop-backend pattern).
 
 export type WorkersAiAccountCredentials =
-  | { accountId: string; apiKey: string; binding?: never }
-  | { binding: Ai; accountId?: never; apiKey?: never };
+  { accountId: string; apiKey: string; binding?: never } | { binding: Ai; accountId?: never; apiKey?: never };
 
-export type PiProvider = {
+type PiProvider = {
   handle: ModelHandle;
   maxTokens: number;
 };
-
-export type Provider = PiProvider;
 
 export function getPiProvider(
   accountCredentials: WorkersAiAccountCredentials,
@@ -33,6 +30,6 @@ export function getProvider(
   accountCredentials: WorkersAiAccountCredentials,
   modelId: string = CLOUDFLARE_WORKERS_AI_MODEL,
   settings?: { sessionAffinity?: string; feature?: string },
-): Provider {
+): PiProvider {
   return getPiProvider(accountCredentials, modelId, settings);
 }

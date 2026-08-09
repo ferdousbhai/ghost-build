@@ -1,5 +1,5 @@
 import type { AbsolutePath } from './utils/workDir.js';
-import type { Tool } from './pi-tool-compat';
+import type { Tool } from './pi-tool-compat.js';
 import type { ComputerToolName } from './cloudflare-computer.js';
 
 export interface EditorDocument {

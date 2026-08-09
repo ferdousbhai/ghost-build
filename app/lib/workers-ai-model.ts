@@ -48,6 +48,7 @@ export type WorkersAiModelId = WorkersAiModel['id'];
 
 export const CLOUDFLARE_WORKERS_AI_MODEL = WORKERS_AI_MODELS[0].id;
 export const CLOUDFLARE_PROJECT_TITLE_MODEL = '@cf/meta/llama-3.2-1b-instruct';
+export type WorkersAiRuntimeModelId = WorkersAiModelId | typeof CLOUDFLARE_PROJECT_TITLE_MODEL;
 
 const WORKERS_AI_MODEL_IDS = new Set<string>(WORKERS_AI_MODELS.map(({ id }) => id));
 

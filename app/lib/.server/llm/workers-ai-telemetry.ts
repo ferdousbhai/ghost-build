@@ -3,11 +3,14 @@ import type { PromptCharacterCounts } from 'ghostbuild-agent/context-message-met
 import type { Usage } from '@earendil-works/pi-ai';
 import type { WorkersAiPromptCacheStatus } from './workers-ai-prompt-cache';
 
-type ToolSet = Record<string, unknown>;
-type GenerateTextEndEvent<T> = { usage: Usage & { inputTokens?: number; outputTokens?: number; totalTokens?: number }; finishReason: string; finalStep: { providerMetadata: unknown } };
+type GenerateTextEndEvent = {
+  usage: Usage & { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+  finishReason: string;
+  finalStep: { providerMetadata: unknown };
+};
 
 interface FinishTelemetryOptions {
-  result: GenerateTextEndEvent<ToolSet>;
+  result: GenerateTextEndEvent;
   firstUserMessage: boolean;
   contextReduced: boolean;
   estimatedContextTokens?: number;

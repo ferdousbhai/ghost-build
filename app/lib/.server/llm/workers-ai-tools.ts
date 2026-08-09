@@ -15,8 +15,8 @@ import type { GhostbuildToolName, GhostbuildToolSet } from 'ghostbuild-agent/typ
 import { z, type ZodType } from 'zod';
 import { isGhostbuildToolResult, toolFailure } from 'ghostbuild-agent/tool-result';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
+import type { Tool } from 'ghostbuild-agent/pi-tool-compat';
 
-type Tool = { description?: string; inputSchema?: unknown; execute?: unknown };
 type ToolSet = Record<string, Tool>;
 import type { ServerOperationToolName } from '~/agents/builder-workspace-types';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
@@ -61,14 +61,14 @@ export function createWorkersAiTools(
     createAITools({
       workspace: workspace.computer,
       ...COMPUTER_AI_TOOL_OPTIONS,
-    }),
+    }) as unknown as ToolSet,
   );
   const tools: GhostbuildToolSet = {
     ...computerTools,
-    deploy: deployTool,
-    lookupDocs: lookupDocsTool(),
-    npmInstall: npmInstallTool,
-    validateProject: validateProjectTool,
+    deploy: deployTool as unknown as Tool,
+    lookupDocs: lookupDocsTool() as unknown as Tool,
+    npmInstall: npmInstallTool as unknown as Tool,
+    validateProject: validateProjectTool as unknown as Tool,
   };
   for (const toolName of COMPUTER_TOOL_NAMES) {
     tools[toolName] = computerWorkspaceTool(toolName, tools[toolName], workspace, coordinateStatefulTool);

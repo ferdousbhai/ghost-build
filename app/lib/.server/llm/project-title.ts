@@ -11,12 +11,12 @@ export async function generateProjectTitle(
 ): Promise<string | null> {
   const handle = getPiModel(accountCredentials, CLOUDFLARE_PROJECT_TITLE_MODEL);
   const generated = await generateTitle({
-    execute: async (request) =>
-      completeText(handle, {
-        systemPrompt: request.system,
+    execute: async (request) => ({
+      text: await completeText(handle, {
         prompt: request.prompt,
-        maxTokens: request.maxTokens,
+        maxTokens: request.maxOutputTokens,
       }),
+    }),
     firstPrompt: prompt,
     subject: 'project',
   });

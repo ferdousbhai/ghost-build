@@ -27,7 +27,7 @@ describe('RelevantFilesContext', () => {
     expect(message.parts).toHaveLength(1);
     const part = message.parts[0];
     expect(part.type).toBe('text');
-    if (part.type === 'text') {
+    if (part.type === 'text' && typeof part.text === 'string') {
       expect(part.text.length).toBeLessThanOrEqual(500);
       expect(part.text).toMatch(/^Relevant workspace context:/);
       expect(part.text).toContain('more paths');
@@ -45,7 +45,7 @@ describe('RelevantFilesContext', () => {
     const message = context.build([], 'context', 1_000);
     const part = message.parts[0];
     expect(part.type).toBe('text');
-    if (part.type === 'text') {
+    if (part.type === 'text' && typeof part.text === 'string') {
       expect(part.text).toContain('File "/home/project/src/a\\"&b.ts":');
       expect(part.text).not.toContain('boltArtifact');
     }
@@ -65,6 +65,10 @@ describe('RelevantFilesContext', () => {
     );
 
     const message = context.build([], 'context', 1_000);
-    expect(message.parts.every((part) => part.type !== 'text' || !part.text.includes(binaryMarker))).toBe(true);
+    expect(
+      message.parts.every(
+        (part) => part.type !== 'text' || typeof part.text !== 'string' || !part.text.includes(binaryMarker),
+      ),
+    ).toBe(true);
   });
 });

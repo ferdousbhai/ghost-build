@@ -12,21 +12,21 @@ export {
   type XaiCompactionUsage,
   type XaiNativeUsage,
   type XaiResponsesInputItem,
-} from "./xai.js";
+} from './xai.js';
 
-export type ConversationCompactionAction = "none" | "background" | "blocking";
+export type ConversationCompactionAction = 'none' | 'background' | 'blocking';
 
 export class ConversationCompactionSupersededError extends Error {
-  override name = "ConversationCompactionSuperseded";
+  override name = 'ConversationCompactionSuperseded';
 
   constructor() {
-    super("Conversation compaction was superseded by newer history");
+    super('Conversation compaction was superseded by newer history');
   }
 }
 
 export class ConversationCompactionLimitError extends Error {
-  readonly code = "conversation_compaction_limit" as const;
-  override name = "ConversationCompactionLimitError";
+  readonly code = 'conversation_compaction_limit' as const;
+  override name = 'ConversationCompactionLimitError';
 
   constructor(
     readonly replacementTokens: number,
@@ -62,28 +62,18 @@ export type ScheduledConversationCompaction<Snapshot> = Readonly<{
   sequence: number;
 }>;
 
-export type ConversationCompactionControllerOptions<
-  Message,
-  Snapshot,
-  Context = undefined,
-> = Readonly<{
+export type ConversationCompactionControllerOptions<Message, Snapshot, Context = undefined> = Readonly<{
   applySnapshot: (
     input: Readonly<{
       sequence: number;
       snapshot: Snapshot;
     }>,
   ) => readonly Message[];
-  countInputTokens: (
-    input: ConversationCompactionCountRequest<Message, Context>,
-  ) => Promise<number>;
-  createSnapshot: (
-    input: ConversationCompactionSnapshotRequest<Message, Context>,
-  ) => Promise<Snapshot>;
+  countInputTokens: (input: ConversationCompactionCountRequest<Message, Context>) => Promise<number>;
+  createSnapshot: (input: ConversationCompactionSnapshotRequest<Message, Context>) => Promise<Snapshot>;
   messagesEqual?: (left: Message, right: Message) => boolean;
   policy: ConversationCompactionPolicy;
-  scheduleCompaction?: (
-    input: ScheduledConversationCompaction<Snapshot>,
-  ) => Promise<void>;
+  scheduleCompaction?: (input: ScheduledConversationCompaction<Snapshot>) => Promise<void>;
 }>;
 
 export function decideConversationCompaction(
@@ -94,23 +84,16 @@ export function decideConversationCompaction(
   }>,
 ): ConversationCompactionAction {
   assertPolicy(input.policy);
-  const estimated = nonNegativeInteger(
-    input.estimatedTokens,
-    "estimatedTokens",
-  );
+  const estimated = nonNegativeInteger(input.estimatedTokens, 'estimatedTokens');
   const projected = saturatingAdd(estimated, input.policy.headroomTokens ?? 0);
-  if (projected >= input.policy.hardLimitTokens) return "blocking";
+  if (projected >= input.policy.hardLimitTokens) return 'blocking';
   if (projected >= input.policy.proactiveTokens && !input.pending) {
-    return "background";
+    return 'background';
   }
-  return "none";
+  return 'none';
 }
 
-export function createConversationCompactionController<
-  Message,
-  Snapshot,
-  Context = undefined,
->(
+export function createConversationCompactionController<Message, Snapshot, Context = undefined>(
   options: ConversationCompactionControllerOptions<Message, Snapshot, Context>,
 ) {
   assertPolicy(options.policy);
@@ -123,10 +106,7 @@ export function createConversationCompactionController<
   let branchRevision = 0;
   let preparationTail: Promise<void> = Promise.resolve();
 
-  const prepareMessagesOnce = async (
-    fullMessages: readonly Message[],
-    context?: Context,
-  ): Promise<Message[]> => {
+  const prepareMessagesOnce = async (fullMessages: readonly Message[], context?: Context): Promise<Message[]> => {
     if (
       observedMessages === null ||
       effectiveMessages === null ||
@@ -147,15 +127,15 @@ export function createConversationCompactionController<
         context,
         messages: effectiveMessages,
       }),
-      "inputTokens",
+      'inputTokens',
     );
     const action = decideConversationCompaction({
       estimatedTokens: inputTokens,
       pending: pendingSequence !== null,
       policy: options.policy,
     });
-    if (action === "none") return [...effectiveMessages];
-    if (action === "background" && !options.scheduleCompaction) {
+    if (action === 'none') return [...effectiveMessages];
+    if (action === 'background' && !options.scheduleCompaction) {
       return [...effectiveMessages];
     }
 
@@ -164,10 +144,7 @@ export function createConversationCompactionController<
     const sourceMessages = [...effectiveMessages];
     const sourceBranchRevision = branchRevision;
     const createSnapshot = async (): Promise<Snapshot> => {
-      if (
-        sourceBranchRevision !== branchRevision ||
-        sequence !== nextSequence
-      ) {
+      if (sourceBranchRevision !== branchRevision || sequence !== nextSequence) {
         throw new ConversationCompactionSupersededError();
       }
       const snapshot = await options.createSnapshot({
@@ -176,22 +153,16 @@ export function createConversationCompactionController<
         messages: sourceMessages,
         sequence,
       });
-      if (
-        sourceBranchRevision !== branchRevision ||
-        sequence !== nextSequence
-      ) {
+      if (sourceBranchRevision !== branchRevision || sequence !== nextSequence) {
         throw new ConversationCompactionSupersededError();
       }
       return snapshot;
     };
 
-    if (action === "background" && options.scheduleCompaction) {
+    if (action === 'background' && options.scheduleCompaction) {
       pendingSequence = sequence;
       const run = async (): Promise<Snapshot> => {
-        if (
-          sourceBranchRevision !== branchRevision ||
-          sequence !== nextSequence
-        ) {
+        if (sourceBranchRevision !== branchRevision || sequence !== nextSequence) {
           throw new ConversationCompactionSupersededError();
         }
         pendingSequence = sequence;
@@ -219,32 +190,20 @@ export function createConversationCompactionController<
         context,
         messages: replacementMessages,
       }),
-      "replacementTokens",
+      'replacementTokens',
     );
     const headroomTokens = options.policy.headroomTokens ?? 0;
-    if (
-      saturatingAdd(replacementTokens, headroomTokens) >=
-      options.policy.hardLimitTokens
-    ) {
-      throw new ConversationCompactionLimitError(
-        replacementTokens,
-        options.policy.hardLimitTokens,
-        headroomTokens,
-      );
+    if (saturatingAdd(replacementTokens, headroomTokens) >= options.policy.hardLimitTokens) {
+      throw new ConversationCompactionLimitError(replacementTokens, options.policy.hardLimitTokens, headroomTokens);
     }
     latestSnapshot = snapshot;
     effectiveMessages = replacementMessages;
     return [...effectiveMessages];
   };
 
-  const prepareMessages = (
-    fullMessages: readonly Message[],
-    context?: Context,
-  ): Promise<Message[]> => {
+  const prepareMessages = (fullMessages: readonly Message[], context?: Context): Promise<Message[]> => {
     const messages = [...fullMessages];
-    const prepared = preparationTail.then(() =>
-      prepareMessagesOnce(messages, context),
-    );
+    const prepared = preparationTail.then(() => prepareMessagesOnce(messages, context));
     preparationTail = prepared.then(
       () => undefined,
       () => undefined,
@@ -270,12 +229,9 @@ export function conversationCompactionKey(
     revision?: number | string;
   }>,
 ): string {
-  const scope = requiredKeyPart(input.scope, "scope");
-  const throughId = requiredKeyPart(input.throughId, "throughId");
-  const revision =
-    input.revision === undefined
-      ? "0"
-      : requiredKeyPart(String(input.revision), "revision");
+  const scope = requiredKeyPart(input.scope, 'scope');
+  const throughId = requiredKeyPart(input.throughId, 'throughId');
+  const revision = input.revision === undefined ? '0' : requiredKeyPart(String(input.revision), 'revision');
   return `conversation-compaction:${encodeURIComponent(scope)}:${encodeURIComponent(throughId)}:${encodeURIComponent(revision)}`;
 }
 
@@ -303,23 +259,16 @@ function isMessagePrefix<Message>(
   if (previous.length > current.length) return false;
   return previous.every((message, index) => {
     const currentMessage = current[index];
-    return (
-      currentMessage !== undefined && messagesEqual(message, currentMessage)
-    );
+    return currentMessage !== undefined && messagesEqual(message, currentMessage);
   });
 }
 
 function assertPolicy(policy: ConversationCompactionPolicy): void {
-  const proactive = nonNegativeInteger(
-    policy.proactiveTokens,
-    "proactiveTokens",
-  );
-  const hard = nonNegativeInteger(policy.hardLimitTokens, "hardLimitTokens");
-  nonNegativeInteger(policy.headroomTokens ?? 0, "headroomTokens");
+  const proactive = nonNegativeInteger(policy.proactiveTokens, 'proactiveTokens');
+  const hard = nonNegativeInteger(policy.hardLimitTokens, 'hardLimitTokens');
+  nonNegativeInteger(policy.headroomTokens ?? 0, 'headroomTokens');
   if (proactive < 1 || hard <= proactive) {
-    throw new Error(
-      "Compaction policy requires 0 < proactiveTokens < hardLimitTokens",
-    );
+    throw new Error('Compaction policy requires 0 < proactiveTokens < hardLimitTokens');
   }
 }
 
@@ -331,9 +280,7 @@ function nonNegativeInteger(value: number, name: string): number {
 }
 
 function saturatingAdd(left: number, right: number): number {
-  return left > Number.MAX_SAFE_INTEGER - right
-    ? Number.MAX_SAFE_INTEGER
-    : left + right;
+  return left > Number.MAX_SAFE_INTEGER - right ? Number.MAX_SAFE_INTEGER : left + right;
 }
 
 function requiredKeyPart(value: string, name: string): string {

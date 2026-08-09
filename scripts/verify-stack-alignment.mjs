@@ -38,6 +38,13 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeEnvAccessAllowlist = [{ pathSuffix: 'app/components/ErrorComponent.tsx', snippet: 'import.meta.env.DEV' }];
 const agentRequiredPackages = ['ai', 'zod'];
 const forbiddenLockfiles = ['package-lock.json'];
+const blockedRootBuildEntries = new Map([
+  ['@google/genai', "  '@google/genai': false"],
+  ['@journeyapps/wa-sqlite', "  '@journeyapps/wa-sqlite': false"],
+  ['@mongodb-js/zstd', "  '@mongodb-js/zstd': false"],
+  ['node-liblzma', '  node-liblzma: false'],
+  ['protobufjs', '  protobufjs: false'],
+]);
 const forbiddenLegacyPaths = [
   '.cursor/rules/convex_rules.mdc',
   'app/components/convex',
@@ -197,21 +204,21 @@ export function findInternalPackageMetadataErrors(pkg, label) {
   return pkg?.private === true ? [] : [`${label} must set private to true so it cannot be published accidentally.`];
 }
 
-function verifyWorkspace(errors) {
-  const workspace = readFileSync(resolve(rootDir, 'pnpm-workspace.yaml'), 'utf8');
+export function findRootWorkspacePolicyErrors(workspace) {
+  const errors = [];
   for (const packagePath of ['ghostbuild-agent', 'template']) {
     if (!new RegExp(`- ['"]?${packagePath}['"]?`).test(workspace)) {
       errors.push(`pnpm-workspace.yaml must include ${packagePath}.`);
     }
   }
-  const blockedOptionalBuilds = /^  (?:'@journeyapps\/wa-sqlite'|'@mongodb-js\/zstd'|node-liblzma): false$/gm;
-  const blockedWASQLiteEntries = workspace.match(/^  '@journeyapps\/wa-sqlite': false$/gm) ?? [];
-  if (blockedWASQLiteEntries.length !== 1) {
-    errors.push("pnpm-workspace.yaml must explicitly block '@journeyapps/wa-sqlite' exactly once.");
-  }
-  const blockedComputerBuildEntries = workspace.match(/^  (?:'@mongodb-js\/zstd'|node-liblzma): false$/gm) ?? [];
-  if (blockedComputerBuildEntries.length !== 2) {
-    errors.push('pnpm-workspace.yaml must explicitly block both optional Computer native compression builds.');
+  let generatedProjectPolicy = workspace;
+  for (const [dependency, entry] of blockedRootBuildEntries) {
+    const pattern = new RegExp(`^${escapeRegExp(entry)}$`, 'gm');
+    const matches = workspace.match(pattern) ?? [];
+    if (matches.length !== 1) {
+      errors.push(`pnpm-workspace.yaml must explicitly block ${dependency} exactly once.`);
+    }
+    generatedProjectPolicy = generatedProjectPolicy.replace(pattern, '');
   }
   const computerSqlPatch =
     /^patchedDependencies:\n  '@cloudflare\/computer@0\.1\.1': patches\/@cloudflare__computer@0\.1\.1\.patch$/gm;
@@ -219,15 +226,20 @@ function verifyWorkspace(errors) {
   if (computerSqlPatchEntries.length !== 1) {
     errors.push('pnpm-workspace.yaml must apply the reviewed Computer 0.1.1 SQL probe patch exactly once.');
   }
-  errors.push(
-    ...findBuildApprovalErrors(
-      workspace.replace(blockedOptionalBuilds, '').replace(computerSqlPatch, ''),
-      'pnpm-workspace.yaml',
-    ),
-  );
+  errors.push(...findBuildApprovalErrors(generatedProjectPolicy.replace(computerSqlPatch, ''), 'pnpm-workspace.yaml'));
   if (/set this to true or false/i.test(workspace)) {
     errors.push('pnpm-workspace.yaml must not contain unresolved build-approval placeholders.');
   }
+  return errors;
+}
+
+function verifyWorkspace(errors) {
+  const workspace = readFileSync(resolve(rootDir, 'pnpm-workspace.yaml'), 'utf8');
+  errors.push(...findRootWorkspacePolicyErrors(workspace));
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function verifyToolchainConfig(errors, rootPackage) {

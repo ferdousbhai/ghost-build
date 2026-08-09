@@ -1,7 +1,7 @@
 import type { PiStreamChunk } from './pi-stream';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 
-export type UIMessageChunk = PiStreamChunk;
+type UIMessageChunk = PiStreamChunk;
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import type { WorkersAiModelId } from '~/lib/workers-ai-model';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';

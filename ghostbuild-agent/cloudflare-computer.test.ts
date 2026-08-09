@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
 import { createAITools, type CreateAIToolsOptions } from '@cloudflare/computer/tools';
-import type { Tool } from 'ghostbuild-agent/pi-tool-compat';
 import { describe, expect, it } from 'vitest';
 import { z, type ZodType } from 'zod';
 import {
@@ -23,6 +22,8 @@ const EXPECTED_TOOL_SCHEMA = {
   read: { properties: ['limit', 'offset', 'path'], required: ['path'] },
   write: { properties: ['content', 'path'], required: ['path', 'content'] },
 } as const;
+
+type SchemaTool = { inputSchema?: unknown };
 
 describe('Cloudflare Computer preview contract', () => {
   it('recognizes both thrown and official wrapped pending-sync failures', () => {
@@ -108,14 +109,14 @@ function workspaceStub(): CreateAIToolsOptions['workspace'] {
   return {} as CreateAIToolsOptions['workspace'];
 }
 
-function requireTool(tool: Tool | undefined, name: string): Tool {
+function requireTool<T extends SchemaTool>(tool: T | undefined, name: string): T {
   if (!tool) {
     throw new Error(`Cloudflare Computer did not expose ${name}.`);
   }
   return tool;
 }
 
-function jsonSchema(tool: Tool): {
+function jsonSchema(tool: SchemaTool): {
   properties?: Record<string, { enum?: string[] }>;
   required?: string[];
 } {

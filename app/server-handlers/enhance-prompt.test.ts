@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  generateText: vi.fn(),
+  completeText: vi.fn(),
   getCredentials: vi.fn(),
-  getProvider: vi.fn(() => ({ model: { modelId: 'test' } })),
+  getPiProvider: vi.fn(() => ({ handle: { model: { id: 'test' } } })),
 }));
 
-vi.mock('ai', () => ({ generateText: mocks.generateText }));
 vi.mock('~/lib/.server/cloudflare/workers-ai-billing-context', () => ({
   getUserWorkersAiCredentials: mocks.getCredentials,
 }));
-vi.mock('~/lib/.server/llm/provider', () => ({ getProvider: mocks.getProvider }));
+vi.mock('~/lib/.server/llm/provider', () => ({ getPiProvider: mocks.getPiProvider }));
+vi.mock('~/lib/.server/llm/pi-ai-invoke', () => ({ completeText: mocks.completeText }));
 
 import { userRuntimeEnhancePromptAction } from './enhance-prompt';
 
@@ -26,11 +26,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getCredentials.mockResolvedValue({ accountId: 'account-1', apiKey: 'token' });
-    mocks.generateText.mockResolvedValue({
-      text: 'Build a detailed calendar',
-      usage: { inputTokens: 20, outputTokens: 10 },
-      finalStep: { providerMetadata: {} },
-    });
+    mocks.completeText.mockResolvedValue('Build a detailed calendar');
   });
 
   it('rejects an oversized prompt body before calling the provider', async () => {
@@ -44,7 +40,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
     });
 
     expect(response.status).toBe(413);
-    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.completeText).not.toHaveBeenCalled();
   });
 
   it('uses only connected-user credentials', async () => {
@@ -52,14 +48,12 @@ describe('userRuntimeEnhancePromptAction billing', () => {
     mocks.getCredentials.mockResolvedValue(credentials);
     const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
     expect(response.status).toBe(200);
-    expect(mocks.getProvider).toHaveBeenCalledWith({ DB: {} }, credentials, undefined, {
-      feature: 'prompt-enhancement',
-    });
+    expect(mocks.getPiProvider).toHaveBeenCalledWith(credentials);
   });
 
   it('asks for explicit Workers Paid authorization when the connected free allocation is exhausted', async () => {
     mocks.getCredentials.mockResolvedValue({ accountId: 'account-1', apiKey: 'token' });
-    mocks.generateText.mockRejectedValue(new Error('Workers Paid plan required after free AI allocation'));
+    mocks.completeText.mockRejectedValue(new Error('Workers Paid plan required after free AI allocation'));
     const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
     expect(response.status).toBe(402);
     await expect(response.json()).resolves.toMatchObject({
@@ -73,7 +67,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
     const providerError = Object.assign(new Error('provider failure'), {
       requestBodyValues: { prompt: 'SECRET_PROMPT_MARKER' },
     });
-    mocks.generateText.mockRejectedValue(providerError);
+    mocks.completeText.mockRejectedValue(providerError);
 
     const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
 
@@ -84,7 +78,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
   });
 
   it('rejects an empty provider result instead of returning the original prompt as a successful enhancement', async () => {
-    mocks.generateText.mockResolvedValue({ text: '   ' });
+    mocks.completeText.mockResolvedValue('   ');
 
     const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
 

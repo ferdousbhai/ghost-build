@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedAt": "2026-08-04",
+  "reviewedAt": "2026-08-09",
   "allowedLicenseExpressions": [
     "(AFL-2.1 OR BSD-3-Clause)",
     "(Apache-2.0 AND BSD-3-Clause)",
@@ -32,11 +32,16 @@
   },
   "metadataOnlyPackageAllowlist": [
     "@ai-sdk/provider-utils@5.0.18",
+    "@aws-sdk/credential-provider-http@3.972.69",
+    "@aws-sdk/credential-provider-login@3.972.74",
+    "@aws-sdk/nested-clients@3.997.41",
     "@bufbuild/protobuf@2.12.1",
     "@cfworker/json-schema@4.1.1",
     "@cloudflare/computer@0.1.1",
     "@cloudflare/containers@0.3.7",
     "@cloudflare/workers-types@5.20260801.1",
+    "@earendil-works/pi-agent-core@0.83.0",
+    "@earendil-works/pi-ai@0.83.0",
     "@napi-rs/wasm-runtime@1.2.2",
     "@nodable/entities@3.0.0",
     "@rolldown/binding-wasm32-wasi@1.2.1",

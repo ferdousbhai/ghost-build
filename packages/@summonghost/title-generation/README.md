@@ -6,15 +6,12 @@ Provider-neutral helpers for a two-stage title lifecycle:
 2. build a small-model prompt and validate its replacement.
 
 ```ts
-import {
-  deriveProvisionalTitle,
-  generateTitle,
-} from "@summonghost/title-generation";
+import { deriveProvisionalTitle, generateTitle } from '@summonghost/title-generation';
 
 const provisional = deriveProvisionalTitle(firstPrompt);
 const generated = await generateTitle({
   firstPrompt,
-  subject: "project",
+  subject: 'project',
   execute: (request) =>
     generateText({
       model: configuredSmallModel,

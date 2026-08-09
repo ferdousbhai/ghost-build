@@ -1,6 +1,6 @@
 import { BUILDER_TEMPLATE_SOURCE_SHA256 } from '~/agents/builder-template.generated';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 30 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 31 as const;
 export {
   DEPLOYMENT_SECURITY_BASELINE_BINDING,
   DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
@@ -29,9 +29,9 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/lib/runtime-module-security.ts': 'b3bfa3863b861a3d2a6fc068e29c8bbde7c240634058bd3537a124c876dbf8f9',
   'scripts/lib/project-policy.mjs': '5a2e78715a0daf68a7b3781211b0b0deaec04e61bf3e36b98597b9f0b885b32b',
   'scripts/lib/project-policy/dependency-policy.mjs':
-    'd236505967fc5d1bba39d9ac1bc436fa251c5d49e5d420c5ce04b6b1ecfbce03',
+    '9335f533a868ffa2e72e3e552d9f3d4e86d69c099d242aed12c3f2f65a3691a5',
   'scripts/lib/project-policy/generated-project-dependency-policy.json':
-    '0aa02da119e46a4460a5bfbe4ed0116734e7c16d28e3c68622e53c37e86e0e85',
+    'ed52dc2a5235d78baa3cab520e0a48b13ab2bfb47ee5f035989e65f56c98bf8e',
   'scripts/lib/project-policy/source-policy.mjs': 'deed7d40e7c9c1bca8cfb3dbf46503f9dc89a4004988f8ef55871b7ed0c24f86',
   'scripts/lib/project-policy/worker-policy.mjs': '9f908807030d1a91c99b442b41488048d2e49b996783a18900b413e046f3edbc',
   'scripts/lib/project-policy/workflow-policy.mjs': 'e4c172b80ffe2f551a4ca25d4f8a4d0ea19195a7cef0ee056536e331d3993fab',
@@ -56,10 +56,10 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'wrangler.preview.jsonc': 'b7e17326710f92a9d1bf3b828612ddf7823af0b87a0c86bedfd0077f362587bb',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'bb0ccfe596d7a9a4a1ae0ad35359d81e052e154199d80b8e868c4f6c8fab97a1';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '491899e8ebb1f74cc70cb7934c74b359cdef24cf7aa491ec83167a4f9c21a82f';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
-  '37125a780dce177fa894569e48a1c4f7ed0c4b74aabd0c85378a7e74fb798a72';
+  '0b9d16c0b631ec77600d4ac8b751e7d320e4dd54e7c85c52dc2713289e8baaf9';
 
 export function isCurrentDeploymentSecurityIdentity(value: {
   version?: unknown;

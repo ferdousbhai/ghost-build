@@ -1,20 +1,9 @@
-import type { Message, Usage } from '@earendil-works/pi-ai';
+import type { Message } from '@earendil-works/pi-ai';
 import type { ModelHandle } from './pi-ai-models';
 
 // Verbatim port of cloudflare-os/packages/workshop-backend/src/ai-invoke.ts
 
-export function zeroUsage(): Usage {
-  return {
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: 0,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-  };
-}
-
-export class AgentTurnError extends Error {
+class AgentTurnError extends Error {
   readonly statusCode?: number;
   constructor(message: string, statusCode?: number) {
     super(message);
@@ -22,9 +11,11 @@ export class AgentTurnError extends Error {
   }
 }
 
-export function httpStatusFromError(errorMessage: string, handle: ModelHandle): number | undefined {
+function httpStatusFromError(errorMessage: string, handle: ModelHandle): number | undefined {
   const match = /^(\d{3})\b/.exec(errorMessage.trim());
-  if (match) return Number(match[1]);
+  if (match) {
+    return Number(match[1]);
+  }
   return handle.lastResponse?.status;
 }
 
@@ -38,9 +29,7 @@ export async function completeText(
     signal?: AbortSignal;
   },
 ): Promise<string> {
-  const messages: Message[] = args.messages ?? [
-    { role: 'user', content: args.prompt ?? '', timestamp: Date.now() },
-  ];
+  const messages: Message[] = args.messages ?? [{ role: 'user', content: args.prompt ?? '', timestamp: Date.now() }];
   const stream = await handle.stream(
     handle.model,
     { systemPrompt: args.systemPrompt, messages },

@@ -32,7 +32,10 @@ export function calculatePromptCharacterCounts(
 }
 
 function messageCharacterCount(message: GhostbuildMessage): number {
-  const textSize = message.parts.reduce((total, part) => total + (part.type === 'text' ? part.text.length : 0), 0);
+  const textSize = message.parts.reduce(
+    (total, part) => total + (part.type === 'text' && typeof part.text === 'string' ? part.text.length : 0),
+    0,
+  );
   const nonTextSize = message.parts.reduce(
     (total, part) => total + (part.type === 'text' ? 0 : partCharacterCount(part)),
     0,
@@ -44,13 +47,13 @@ function partCharacterCount(part: GhostbuildPart): number {
   switch (part.type) {
     case 'text':
     case 'reasoning':
-      return part.text.length;
+      return stringLength(part.text);
     case 'file':
-      return part.url.length + part.mediaType.length;
+      return stringLength(part.url) + stringLength(part.mediaType);
     case 'source-url':
-      return (part.title ?? '').length + part.url.length;
+      return stringLength(part.title) + stringLength(part.url);
     case 'source-document':
-      return part.title.length + part.mediaType.length;
+      return stringLength(part.title) + stringLength(part.mediaType);
     case 'step-start':
       return 0;
     default: {
@@ -62,13 +65,17 @@ function partCharacterCount(part: GhostbuildPart): number {
         invocation.state === 'output-available'
           ? stringifyLength(invocation.output)
           : invocation.state === 'output-error'
-            ? invocation.errorText.length
+            ? stringLength(invocation.errorText)
             : invocation.state === 'output-denied'
-              ? stringifyLength(invocation.approval.reason)
+              ? stringifyLength(invocation.approval?.reason)
               : 0;
       return stringifyLength(invocation.input) + terminalSize;
     }
   }
+}
+
+function stringLength(value: unknown): number {
+  return typeof value === 'string' ? value.length : 0;
 }
 
 function stringifyLength(value: unknown): number {

@@ -112,7 +112,9 @@ export function findPackageVersionAlignmentErrors(
 }
 
 export function findCloudflareAiPeerCompatibilityErrors(pkg, label) {
-  const peers = ["agents", "@cloudflare/ai-chat"].filter((name) => packageDependencyVersion(pkg, name));
+  const peers = ["agents", "@cloudflare/ai-chat"].filter((name) =>
+    packageDependencyVersion(pkg, name),
+  );
   if (peers.length === 0) {
     return [];
   }

@@ -1,6 +1,5 @@
 import type { Message, TextContent, ToolCall, ToolResultMessage } from '@earendil-works/pi-ai';
 import type { ModelMessage } from './message-conversion';
-import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 
 // Converts AI SDK ModelMessage[] (produced by prepareModelInput/pruneMessages) to Pi Message[].
 // Structure is intentionally loose — both use OpenAI-compatible shapes. This preserves text +
@@ -21,14 +20,23 @@ export function modelMessagesToPi(messages: ModelMessage[]): Message[] {
           api: 'openai-completions',
           provider: 'cloudflare-workers-ai',
           model: 'pi-bridge',
-          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
           stopReason: 'stop',
         } as unknown as Message;
       }
       if (Array.isArray(content)) {
         const blocks = (content as unknown[]).map((part) => {
           const p = part as Record<string, unknown>;
-          if (p.type === 'text' && typeof p.text === 'string') return { type: 'text', text: p.text } as TextContent;
+          if (p.type === 'text' && typeof p.text === 'string') {
+            return { type: 'text', text: p.text } as TextContent;
+          }
           if (p.type === 'tool-call') {
             return {
               type: 'toolCall',
@@ -37,7 +45,9 @@ export function modelMessagesToPi(messages: ModelMessage[]): Message[] {
               arguments: (p.args ?? p.input ?? {}) as Record<string, unknown>,
             } as ToolCall;
           }
-          if (typeof p.text === 'string') return { type: 'text', text: p.text } as TextContent;
+          if (typeof p.text === 'string') {
+            return { type: 'text', text: p.text } as TextContent;
+          }
           return { type: 'text', text: JSON.stringify(p) } as TextContent;
         });
         return {
@@ -47,7 +57,14 @@ export function modelMessagesToPi(messages: ModelMessage[]): Message[] {
           api: 'openai-completions',
           provider: 'cloudflare-workers-ai',
           model: 'pi-bridge',
-          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
           stopReason: 'stop',
         } as unknown as Message;
       }
@@ -55,16 +72,29 @@ export function modelMessagesToPi(messages: ModelMessage[]): Message[] {
 
     if (role === 'tool') {
       const toolResults = Array.isArray(content) ? content : [content];
-      const first = toolResults[0] as Record<string, unknown> | undefined;
+      const resultPart = toolResults.find(
+        (part) => typeof part === 'object' && part !== null && (part as Record<string, unknown>).type === 'tool-result',
+      ) as Record<string, unknown> | undefined;
       // AI SDK tool content: [{ type: 'tool-result', toolCallId, toolName, result/output }]
-      if (first && first.type === 'tool-result') {
-        const r = first as unknown as { toolCallId: string; toolName?: string; result?: unknown; output?: unknown };
+      if (resultPart) {
+        const r = resultPart as unknown as {
+          toolCallId: string;
+          toolName?: string;
+          result?: unknown;
+          output?: unknown;
+        };
+        const output = r.result ?? unwrapToolOutput(r.output);
         return {
           role: 'toolResult',
           toolCallId: r.toolCallId,
           toolName: r.toolName ?? 'unknown',
-          content: [{ type: 'text', text: typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? r.output ?? '') }],
-          isError: false,
+          content: [
+            {
+              type: 'text',
+              text: typeof output === 'string' ? output : stringify(output),
+            },
+          ],
+          isError: isErrorToolOutput(r.output),
           timestamp: Date.now(),
         } as unknown as ToolResultMessage;
       }
@@ -81,7 +111,11 @@ export function modelMessagesToPi(messages: ModelMessage[]): Message[] {
     }
     if (Array.isArray(content)) {
       const text = (content as unknown[])
-        .map((c) => (typeof (c as Record<string, unknown>).text === 'string' ? (c as Record<string, unknown>).text as string : JSON.stringify(c)))
+        .map((c) =>
+          typeof (c as Record<string, unknown>).text === 'string'
+            ? ((c as Record<string, unknown>).text as string)
+            : JSON.stringify(c),
+        )
         .join('');
       return { role: role as Message['role'], content: text, timestamp: Date.now() } as Message;
     }
@@ -89,27 +123,22 @@ export function modelMessagesToPi(messages: ModelMessage[]): Message[] {
   });
 }
 
-// GhostbuildMessage (UIMessage parts) -> pi Message for cases without ModelMessage pruning.
-// Used only for deterministic completion shortcut path.
-export function ghostbuildMessagesToPi(messages: GhostbuildMessage[]): Message[] {
-  return messages.map((m) => {
-    const text = m.parts
-      .filter((p) => p.type === 'text')
-      .map((p) => (p as { text: string }).text)
-      .join('');
-    const toolParts = m.parts.filter((p) => (p as { type: string }).type?.startsWith('tool-'));
-    if (m.role === 'assistant' && toolParts.length > 0) {
-      return {
-        role: 'assistant',
-        content: [{ type: 'text', text }],
-        timestamp: Date.now(),
-        api: 'openai-completions',
-        provider: 'cloudflare-workers-ai',
-        model: 'pi-bridge',
-        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-        stopReason: 'stop',
-      } as unknown as Message;
-    }
-    return { role: m.role as Message['role'], content: text, timestamp: Date.now() } as Message;
-  });
+function unwrapToolOutput(output: unknown): unknown {
+  return isRecord(output) && 'value' in output ? output.value : output;
+}
+
+function isErrorToolOutput(output: unknown): boolean {
+  return isRecord(output) && typeof output.type === 'string' && output.type.startsWith('error-');
+}
+
+function stringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value ?? '');
+  } catch {
+    return String(value ?? '');
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

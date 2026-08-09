@@ -1,7 +1,5 @@
 import type { PiStreamChunk } from './pi-stream';
 
-export type UIMessageChunk = PiStreamChunk;
-
 export function appendDeterministicCompletion(
   stream: ReadableStream<PiStreamChunk>,
   completion: () => string | undefined,
@@ -35,6 +33,12 @@ export function appendDeterministicCompletion(
 
 export function normalizeTextPartBoundaries(stream: ReadableStream<PiStreamChunk>): ReadableStream<PiStreamChunk> {
   const openTextPartIds = new Set<string>();
+  const closeOpenTextParts = (controller: TransformStreamDefaultController<PiStreamChunk>) => {
+    for (const id of openTextPartIds) {
+      controller.enqueue({ type: 'text-end', id });
+    }
+    openTextPartIds.clear();
+  };
   return stream.pipeThrough(
     new TransformStream<PiStreamChunk, PiStreamChunk>({
       transform(chunk, controller) {
@@ -58,8 +62,14 @@ export function normalizeTextPartBoundaries(stream: ReadableStream<PiStreamChunk
             openTextPartIds.delete(chunk.id);
             return;
           default:
+            if (chunk.type === 'finish' || chunk.type === 'error') {
+              closeOpenTextParts(controller);
+            }
             controller.enqueue(chunk);
         }
+      },
+      flush(controller) {
+        closeOpenTextParts(controller);
       },
     }),
   );

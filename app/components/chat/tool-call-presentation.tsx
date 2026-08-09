@@ -173,10 +173,10 @@ function isErrorResult(invocation: GhostbuildToolInvocation): boolean {
 
 function toolInvocationResultSummary(invocation: GhostbuildToolInvocation): string {
   if (invocation.state === 'output-error') {
-    return invocation.errorText;
+    return invocation.errorText ?? 'Tool execution failed.';
   }
   if (invocation.state === 'output-denied') {
-    return invocation.approval.reason ?? 'Tool execution was denied.';
+    return invocation.approval?.reason ?? 'Tool execution was denied.';
   }
   return invocation.state === 'output-available' ? toolResultSummary(invocation.output) : '';
 }

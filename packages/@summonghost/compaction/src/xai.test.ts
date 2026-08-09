@@ -1,14 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from 'vitest';
 import {
   buildXaiCompactionInput,
   createXaiCompactionAdapter,
   parseXaiNativeUsage,
   readXaiCompletedResponseOutput,
   readXaiResponseInput,
-} from "./index.js";
+} from './index.js';
 
-describe("xAI compaction adapter", () => {
-  it("counts serialized native input through an injected transport", async () => {
+describe('xAI compaction adapter', () => {
+  it('counts serialized native input through an injected transport', async () => {
     const request = vi.fn(async () =>
       Response.json({
         token_ids: [{ token_id: 1 }, { token_id: 2 }, { token_id: 3 }],
@@ -18,28 +18,28 @@ describe("xAI compaction adapter", () => {
 
     await expect(
       adapter.countInputTokens({
-        items: [{ role: "user", content: "hello" }],
-        model: "grok-4.5",
+        items: [{ role: 'user', content: 'hello' }],
+        model: 'grok-4.5',
       }),
     ).resolves.toBe(3);
     expect(request).toHaveBeenCalledWith({
       body: {
-        model: "grok-4.5",
-        text: JSON.stringify([{ role: "user", content: "hello" }]),
+        model: 'grok-4.5',
+        text: JSON.stringify([{ role: 'user', content: 'hello' }]),
       },
-      path: "/tokenize-text",
+      path: '/tokenize-text',
       signal: expect.any(AbortSignal),
     });
   });
 
-  it("compacts through an injected transport and preserves opaque items", async () => {
+  it('compacts through an injected transport and preserves opaque items', async () => {
     const request = vi.fn(async () =>
       Response.json({
         output: [
           {
-            type: "compaction",
-            id: "cmp-1",
-            encrypted_content: "opaque-context",
+            type: 'compaction',
+            id: 'cmp-1',
+            encrypted_content: 'opaque-context',
           },
         ],
         usage: {
@@ -56,16 +56,16 @@ describe("xAI compaction adapter", () => {
 
     await expect(
       adapter.compactInput({
-        conversationId: "conversation-1",
-        items: [{ role: "user", content: "hello" }],
-        model: "grok-4.5",
+        conversationId: 'conversation-1',
+        items: [{ role: 'user', content: 'hello' }],
+        model: 'grok-4.5',
       }),
     ).resolves.toEqual({
       items: [
         {
-          type: "compaction",
-          id: "cmp-1",
-          encrypted_content: "opaque-context",
+          type: 'compaction',
+          id: 'cmp-1',
+          encrypted_content: 'opaque-context',
         },
       ],
       usage: {
@@ -80,16 +80,16 @@ describe("xAI compaction adapter", () => {
     });
     expect(request).toHaveBeenCalledWith({
       body: {
-        model: "grok-4.5",
-        input: [{ role: "user", content: "hello" }],
+        model: 'grok-4.5',
+        input: [{ role: 'user', content: 'hello' }],
       },
-      conversationId: "conversation-1",
-      path: "/responses/compact",
+      conversationId: 'conversation-1',
+      path: '/responses/compact',
       signal: expect.any(AbortSignal),
     });
   });
 
-  it("uses a byte upper bound, precise counting, and a fail-closed fallback", async () => {
+  it('uses a byte upper bound, precise counting, and a fail-closed fallback', async () => {
     const request = vi
       .fn()
       .mockResolvedValueOnce(
@@ -99,26 +99,26 @@ describe("xAI compaction adapter", () => {
           })),
         }),
       )
-      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }));
+      .mockResolvedValueOnce(new Response('unavailable', { status: 503 }));
     const adapter = createXaiCompactionAdapter({ request });
 
     await expect(
       adapter.shouldCompactInput({
         hardLimitTokens: 1_000,
-        items: [{ role: "user", content: "short" }],
+        items: [{ role: 'user', content: 'short' }],
         knownTokens: 100,
-        model: "grok-4.5",
+        model: 'grok-4.5',
       }),
     ).resolves.toBe(false);
     expect(request).not.toHaveBeenCalled();
 
-    const largeItems = [{ role: "user", content: "x".repeat(1_000) }];
+    const largeItems = [{ role: 'user', content: 'x'.repeat(1_000) }];
     await expect(
       adapter.shouldCompactInput({
         hardLimitTokens: 1_000,
         items: largeItems,
         knownTokens: 990,
-        model: "grok-4.5",
+        model: 'grok-4.5',
       }),
     ).resolves.toBe(true);
     await expect(
@@ -126,55 +126,55 @@ describe("xAI compaction adapter", () => {
         hardLimitTokens: 1_000,
         items: largeItems,
         knownTokens: 1,
-        model: "grok-4.5",
+        model: 'grok-4.5',
       }),
     ).resolves.toBe(true);
     expect(request).toHaveBeenCalledTimes(2);
   });
 
-  it("rejects invalid compaction responses and bounded provider errors", async () => {
+  it('rejects invalid compaction responses and bounded provider errors', async () => {
     const invalid = createXaiCompactionAdapter({
-      request: async () => Response.json({ output: [{ type: "message" }] }),
+      request: async () => Response.json({ output: [{ type: 'message' }] }),
     });
     await expect(
       invalid.compactInput({
-        items: [{ role: "user", content: "hello" }],
-        model: "grok-4.5",
+        items: [{ role: 'user', content: 'hello' }],
+        model: 'grok-4.5',
       }),
-    ).rejects.toThrow("returned no valid compaction item");
+    ).rejects.toThrow('returned no valid compaction item');
 
     const failed = createXaiCompactionAdapter({
-      request: async () => new Response("provider detail", { status: 429 }),
+      request: async () => new Response('provider detail', { status: 429 }),
     });
     await expect(
       failed.compactInput({
-        items: [{ role: "user", content: "hello" }],
-        model: "grok-4.5",
+        items: [{ role: 'user', content: 'hello' }],
+        model: 'grok-4.5',
       }),
-    ).rejects.toThrow("xAI context compaction failed (429): provider detail");
+    ).rejects.toThrow('xAI context compaction failed (429): provider detail');
 
     const invalidUsage = createXaiCompactionAdapter({
       request: async () =>
         Response.json({
           output: [
             {
-              type: "compaction",
-              id: "cmp-1",
-              encrypted_content: "opaque-context",
+              type: 'compaction',
+              id: 'cmp-1',
+              encrypted_content: 'opaque-context',
             },
           ],
-          usage: { input_tokens: "unknown", output_tokens: 10 },
+          usage: { input_tokens: 'unknown', output_tokens: 10 },
         }),
     });
     await expect(
       invalidUsage.compactInput({
-        items: [{ role: "user", content: "hello" }],
-        model: "grok-4.5",
+        items: [{ role: 'user', content: 'hello' }],
+        model: 'grok-4.5',
       }),
-    ).rejects.toThrow("returned invalid usage");
+    ).rejects.toThrow('returned invalid usage');
   });
 
-  it("times out even when the injected transport ignores its abort signal", async () => {
+  it('times out even when the injected transport ignores its abort signal', async () => {
     const adapter = createXaiCompactionAdapter({
       timeoutMs: 1,
       request: () => new Promise<Response>(() => undefined),
@@ -182,13 +182,13 @@ describe("xAI compaction adapter", () => {
 
     await expect(
       adapter.countInputTokens({
-        items: [{ role: "user", content: "hello" }],
-        model: "grok-4.5",
+        items: [{ role: 'user', content: 'hello' }],
+        model: 'grok-4.5',
       }),
-    ).rejects.toThrow("xAI context token counting timed out");
+    ).rejects.toThrow('xAI context token counting timed out');
   });
 
-  it("rejects unsafe token estimates instead of coercing them to zero", async () => {
+  it('rejects unsafe token estimates instead of coercing them to zero', async () => {
     const adapter = createXaiCompactionAdapter({
       request: async () => Response.json({ token_ids: [] }),
     });
@@ -198,41 +198,38 @@ describe("xAI compaction adapter", () => {
         hardLimitTokens: 1_000,
         items: [],
         knownTokens: Number.POSITIVE_INFINITY,
-        model: "grok-4.5",
+        model: 'grok-4.5',
       }),
-    ).rejects.toThrow("knownTokens must be a non-negative safe integer");
+    ).rejects.toThrow('knownTokens must be a non-negative safe integer');
   });
 });
 
-describe("xAI native response helpers", () => {
-  it("captures terminal output and excludes system input from compaction", () => {
+describe('xAI native response helpers', () => {
+  it('captures terminal output and excludes system input from compaction', () => {
     const input = [
-      { role: "system", content: "current instructions" },
-      { role: "user", content: "hello" },
+      { role: 'system', content: 'current instructions' },
+      { role: 'user', content: 'hello' },
     ];
     const output = [
       {
-        type: "reasoning",
-        id: "reasoning-1",
-        encrypted_content: "opaque-reasoning",
+        type: 'reasoning',
+        id: 'reasoning-1',
+        encrypted_content: 'opaque-reasoning',
       },
     ];
     expect(readXaiResponseInput({ input })).toEqual(input);
     expect(
       readXaiCompletedResponseOutput(
         JSON.stringify({
-          type: "response.incomplete",
+          type: 'response.incomplete',
           response: { output },
         }),
       ),
     ).toEqual(output);
-    expect(buildXaiCompactionInput({ input, output })).toEqual([
-      input[1],
-      output[0],
-    ]);
+    expect(buildXaiCompactionInput({ input, output })).toEqual([input[1], output[0]]);
   });
 
-  it("normalizes native usage without floating-point cost conversion", () => {
+  it('normalizes native usage without floating-point cost conversion', () => {
     expect(
       parseXaiNativeUsage({
         input_tokens: 1_000,
@@ -252,7 +249,7 @@ describe("xAI native response helpers", () => {
     });
   });
 
-  it("rejects malformed optional native usage instead of coercing it", () => {
+  it('rejects malformed optional native usage instead of coercing it', () => {
     const usage = {
       input_tokens: 1_000,
       output_tokens: 50,
@@ -262,7 +259,7 @@ describe("xAI native response helpers", () => {
     expect(
       parseXaiNativeUsage({
         ...usage,
-        input_tokens_details: { cached_tokens: "unknown" },
+        input_tokens_details: { cached_tokens: 'unknown' },
       }),
     ).toBeNull();
     expect(
@@ -271,9 +268,7 @@ describe("xAI native response helpers", () => {
         num_server_side_tools_used: -1,
       }),
     ).toBeNull();
-    expect(
-      parseXaiNativeUsage({ ...usage, cost_in_usd_ticks: 1.5 }),
-    ).toBeNull();
+    expect(parseXaiNativeUsage({ ...usage, cost_in_usd_ticks: 1.5 })).toBeNull();
     expect(parseXaiNativeUsage(usage)).toMatchObject({
       cacheReadInputTokens: 0,
       costUsdTicks: null,

@@ -55,7 +55,7 @@ function StructuredResultTool({ invocation }: { invocation: GhostbuildToolInvoca
     return <ToolResultFrame>{invocation.errorText}</ToolResultFrame>;
   }
   if (invocation.state === 'output-denied') {
-    return <ToolResultFrame>{invocation.approval.reason ?? 'Tool execution was denied.'}</ToolResultFrame>;
+    return <ToolResultFrame>{invocation.approval?.reason ?? 'Tool execution was denied.'}</ToolResultFrame>;
   }
   if (!isGhostbuildToolResult(invocation.output)) {
     return <ToolResultFrame>{toolResultSummary(invocation.output)}</ToolResultFrame>;

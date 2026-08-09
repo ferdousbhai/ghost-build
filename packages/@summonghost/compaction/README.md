@@ -4,7 +4,7 @@ Provider-neutral policy helpers and an xAI-native execution adapter for
 conversation compaction.
 
 ```ts
-import { decideConversationCompaction } from "@summonghost/compaction";
+import { decideConversationCompaction } from '@summonghost/compaction';
 
 const action = decideConversationCompaction({
   estimatedTokens: 72_000,
@@ -27,8 +27,7 @@ Provider work stays behind injected callbacks:
 const controller = createConversationCompactionController({
   policy,
   countInputTokens: ({ messages }) => tokenCounter(messages),
-  createSnapshot: ({ messages, sequence }) =>
-    summarizer({ messages, sequence }),
+  createSnapshot: ({ messages, sequence }) => summarizer({ messages, sequence }),
   applySnapshot: ({ snapshot }) => [renderSummary(snapshot)],
   scheduleCompaction: ({ run }) => backgroundQueue.enqueue(run),
 });
@@ -67,16 +66,16 @@ consumer injects an authenticated transport and therefore retains credentials,
 gateway selection, request metadata, and billing:
 
 ```ts
-import { createXaiCompactionAdapter } from "@summonghost/compaction";
+import { createXaiCompactionAdapter } from '@summonghost/compaction';
 
 const xaiCompaction = createXaiCompactionAdapter({
   request: ({ body, conversationId, path, signal }) =>
     fetch(`${configuredXaiBaseUrl}${path}`, {
-      method: "POST",
+      method: 'POST',
       headers: {
         authorization: configuredAuthorization,
-        "content-type": "application/json",
-        ...(conversationId && { "x-grok-conv-id": conversationId }),
+        'content-type': 'application/json',
+        ...(conversationId && { 'x-grok-conv-id': conversationId }),
       },
       body: JSON.stringify(body),
       signal,
@@ -84,7 +83,7 @@ const xaiCompaction = createXaiCompactionAdapter({
 });
 
 const result = await xaiCompaction.compactInput({
-  model: "grok-4.5",
+  model: 'grok-4.5',
   items: nativeResponsesInput,
   conversationId,
 });
