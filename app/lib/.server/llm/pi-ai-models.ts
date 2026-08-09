@@ -91,6 +91,7 @@ function makeHandle(args: HandleArgs): ModelHandle {
   const handle: ModelHandle = {
     model: args.model,
     stream: (model, context, options = {}) => {
+      recordPiStage('stream_created', model.id);
       handle.lastResponse = undefined;
       const streamOptions = { ...options };
       delete streamOptions.thinking;
@@ -171,6 +172,7 @@ export function getPiModel(
 
 function createWorkersAiBindingFetch(binding: Ai, modelId: WorkersAiRuntimeModelId): FetchFunction {
   return async (input, init) => {
+    recordPiStage('binding_fetch_enter', modelId);
     const request = new Request(input, init);
     request.signal.throwIfAborted();
     const payload = (await request.json()) as Record<string, unknown>;
@@ -183,9 +185,16 @@ function createWorkersAiBindingFetch(binding: Ai, modelId: WorkersAiRuntimeModel
         options: { returnRawResponse: true; signal: AbortSignal },
       ) => Promise<Response>;
     };
-    return rawBinding.run(modelId, payload, {
+    recordPiStage('binding_run_start', modelId);
+    const response = await rawBinding.run(modelId, payload, {
       returnRawResponse: true,
       signal: request.signal,
     });
+    recordPiStage('binding_run_response', modelId, response.status);
+    return response;
   };
+}
+
+function recordPiStage(stage: string, modelId: string, status?: number): void {
+  console.info({ event: 'ghostbuild_pi_stage', stage, modelId, ...(status === undefined ? {} : { status }) });
 }

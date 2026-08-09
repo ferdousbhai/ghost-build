@@ -166,6 +166,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   const providerModel = languageModelId({ modelId } as unknown as { modelId: string }, modelId);
 
   const piMessages = withPreparationStage('message_conversion', () => modelMessagesToPi(modelInput.messages));
+  recordPiStage('prepared', modelId);
 
   // Bridge AgentEvent -> UIMessageChunk via a TransformStream. This keeps frontend on UIMessage
   // protocol during strangler, while LLM loop is fully Pi (runAgentLoopContinue).
@@ -254,6 +255,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   // Run loop in background, writing chunks as events arrive
   (async () => {
     try {
+      recordPiStage('loop_start', modelId);
       const loopConfig: AgentLoopConfig & { toolChoice: AgentToolChoice } = {
         model: piProvider.handle.model,
         convertToLlm: (msgs) => msgs as unknown as Message[],
@@ -281,6 +283,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         // Timeout via abortSignal + builder budget
       };
       await runAgentLoopContinue(context, loopConfig, emit, abortSignal, piProvider.handle.stream);
+      recordPiStage('loop_complete', modelId);
 
       // Handle budget exceeded as error
       if (builderTurnStepBudgetExceeded(stepCount, false) && !currentValidatedBuildCompletion) {
@@ -304,6 +307,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         startedAt,
       });
     } catch (error) {
+      recordPiStage('loop_error', modelId);
       logProviderFailure(logger, 'Pi agent runner failed.', classifyBuilderTimeout(error) ?? (error as Error));
       const budgetError =
         error instanceof BuilderTurnBudgetExceededError ? error : classifyBuilderTimeout(error as Error);
@@ -356,6 +360,10 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   return normalizeTextPartBoundaries(
     appendDeterministicCompletion(framedStream, () => currentValidatedBuildCompletion),
   );
+}
+
+function recordPiStage(stage: string, modelId: string): void {
+  console.info({ event: 'ghostbuild_pi_stage', stage, modelId });
 }
 
 function selectPiTools(
