@@ -7,7 +7,7 @@ import {
 } from './npmInstall.js';
 import { packageNameFromInstallSpec } from '../utils/stackPolicy.js';
 
-describe('npmInstall tool parameters', () => {
+describe('dependency command parameters', () => {
   it('accepts ordinary package specs', () => {
     expect(
       npmInstallToolParameters.parse({
@@ -51,7 +51,7 @@ describe('npmInstall tool parameters', () => {
     const parsed = npmInstallToolParameters.safeParse({ packages: '-D date-fns' });
 
     expect(parsed.success).toBe(false);
-    expect(parsed.error?.issues[0]?.message).toBe('pnpm flags are not allowed in npmInstall packages: -D');
+    expect(parsed.error?.issues[0]?.message).toBe('pnpm flags are not allowed in dependency package specs: -D');
   });
 
   it('rejects non-registry package sources before pnpm sees them', () => {

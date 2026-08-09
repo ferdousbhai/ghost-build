@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   steps: [] as TestStep[],
   piRun: vi.fn(),
   getValidatedBuildCompletion: vi.fn(),
-  getWorkersAiToolSettings: vi.fn(),
   prepareModelInput: vi.fn(async (options: { messages: unknown[] }) => ({
     messages: [],
     promptMessages: options.messages,
@@ -20,6 +19,7 @@ const mocks = vi.hoisted(() => ({
     estimatedTokens: 1,
   })),
   getPiProvider: vi.fn(() => ({ handle: { model: { id: 'test-workers-ai' }, stream: vi.fn() }, maxTokens: 1_000 })),
+  recordFinish: vi.fn(),
 }));
 
 vi.mock('@earendil-works/pi-agent-core', () => ({
@@ -27,13 +27,10 @@ vi.mock('@earendil-works/pi-agent-core', () => ({
 }));
 vi.mock('./provider', () => ({
   getPiProvider: mocks.getPiProvider,
-  getProvider: vi.fn(() => ({ model: { modelId: 'test-workers-ai' }, maxTokens: 1_000 })),
 }));
-vi.mock('./message-conversion', () => ({
-  asAiSdkTools: (tools: unknown) => tools,
-  asOriginalMessages: (messages: unknown) => messages,
-}));
-vi.mock('./model-input', () => ({
+
+vi.mock('./model-input', async (importOriginal) => ({
+  ...(await importOriginal()),
   prepareModelInput: mocks.prepareModelInput,
 }));
 vi.mock('./pi-message-conversion', () => ({
@@ -51,20 +48,18 @@ vi.mock('./pi-tools-adapter', () => ({
 vi.mock('./workers-ai-tools', () => ({
   createWorkersAiTools: vi.fn(() => ({})),
   getValidatedBuildCompletion: mocks.getValidatedBuildCompletion,
-  getWorkersAiToolSettings: mocks.getWorkersAiToolSettings,
 }));
 vi.mock('./workers-ai-telemetry', () => ({
   recordFirstWorkersAiResponse: vi.fn(),
-  recordWorkersAiFinish: vi.fn(),
+  recordWorkersAiFinish: mocks.recordFinish,
 }));
-import { workersAiAgent } from './workers-ai-agent';
+import { piAgentRunner } from './pi-agent-runner';
 
-describe('workersAiAgent turn budgets (Pi)', () => {
+describe('piAgentRunner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.completion = undefined;
     mocks.steps = [];
-    mocks.getWorkersAiToolSettings.mockReturnValue({ activeTools: [], toolChoice: 'none' });
     mocks.getValidatedBuildCompletion.mockImplementation((_messages: unknown, currentStepResults: unknown[] = []) =>
       currentStepResults.length > 0 ? mocks.completion : undefined,
     );
@@ -86,7 +81,12 @@ describe('workersAiAgent turn budgets (Pi)', () => {
         for (let i = 0; i < BUILDER_TURN_MAX_MODEL_STEPS; i++) {
           await emit({
             type: 'turn_end',
-            message: {} as unknown as { role: string },
+            message: {
+              role: 'assistant',
+              content: [{ type: 'toolCall', id: `call-${i}`, name: 'read', arguments: { path: 'x' } }],
+              usage: piUsage(),
+              stopReason: 'toolUse',
+            },
             toolResults: [],
           } as unknown as never);
         }
@@ -102,6 +102,49 @@ describe('workersAiAgent turn budgets (Pi)', () => {
           'id' in (chunk as Record<string, unknown>) && (chunk as { id: string }).id === 'validated-build-completion',
       ),
     ).toBe(false);
+  });
+
+  it('records native Pi usage without turning successful completion into an error', async () => {
+    mocks.piRun.mockImplementation(async (_ctx: unknown, _cfg: unknown, emit: (event: unknown) => Promise<void>) => {
+      await emit({
+        type: 'turn_end',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Done' }],
+          usage: piUsage({ input: 40, output: 5, totalTokens: 45 }),
+          stopReason: 'stop',
+        },
+        toolResults: [],
+      });
+    });
+
+    const chunks = await collectChunks(await createAgentStream());
+
+    expect(chunks.some((chunk) => chunk.type === 'error')).toBe(false);
+    expect(mocks.recordFinish).toHaveBeenCalledWith(
+      expect.objectContaining({ usage: expect.objectContaining({ input: 40, output: 5, totalTokens: 45 }) }),
+    );
+  });
+
+  it('surfaces provider protocol failures instead of finishing an empty successful turn', async () => {
+    mocks.piRun.mockImplementation(async (_ctx: unknown, _cfg: unknown, emit: (event: unknown) => Promise<void>) => {
+      await emit({
+        type: 'turn_end',
+        message: {
+          role: 'assistant',
+          content: [],
+          usage: piUsage(),
+          stopReason: 'error',
+          errorMessage: 'upstream failed',
+        },
+        toolResults: [],
+      });
+    });
+
+    const chunks = await collectChunks(await createAgentStream());
+
+    expect(chunks).toContainEqual({ type: 'error', errorText: 'The model request failed. Please retry.' });
+    expect(mocks.recordFinish).not.toHaveBeenCalled();
   });
 
   it('routes the validated model selection to the Pi provider', async () => {
@@ -281,38 +324,15 @@ describe('workersAiAgent turn budgets (Pi)', () => {
     );
   });
 
-  it('keeps the four primitive Pi tools stable between model turns', async () => {
-    mocks.getWorkersAiToolSettings.mockReturnValue({
-      activeTools: ['read', 'write', 'edit', 'exec'],
-      toolChoice: 'auto',
-    });
-    let nextToolNames: string[] = [];
+  it('exposes exactly the four primitive Pi tools with automatic selection', async () => {
     mocks.piRun.mockImplementation(
-      async (
-        context: { tools: Array<{ name: string }> },
-        config: {
-          prepareNextTurn?: (args: { context: { tools: Array<{ name: string }> } }) => unknown;
-          toolChoice: string;
-        },
-        emit: (event: unknown) => Promise<void>,
-      ) => {
+      async (context: { tools: Array<{ name: string }> }, config: { toolChoice: string }) => {
         expect(context.tools.map((tool) => tool.name)).toEqual(['read', 'write', 'edit', 'exec']);
-        await emit({
-          type: 'tool_execution_end',
-          toolCallId: 'write-1',
-          toolName: 'write',
-          result: { details: { validation: { ok: true } } },
-          isError: false,
-        });
-        await config.prepareNextTurn?.({ context });
-        nextToolNames = context.tools.map((tool) => tool.name);
         expect(config.toolChoice).toBe('auto');
       },
     );
 
     await collectChunks(await createAgentStream());
-
-    expect(nextToolNames).toEqual(['read', 'write', 'edit', 'exec']);
   });
 
   it('detects validated completion from a primitive mutation result', async () => {
@@ -340,8 +360,8 @@ describe('workersAiAgent turn budgets (Pi)', () => {
   });
 });
 
-function createAgentStream(modelId: Parameters<typeof workersAiAgent>[0]['modelId'] = '@cf/zai-org/glm-5.2') {
-  return workersAiAgent({
+function createAgentStream(modelId: Parameters<typeof piAgentRunner>[0]['modelId'] = '@cf/zai-org/glm-5.2') {
+  return piAgentRunner({
     firstUserMessage: false,
     messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'Build it' }] }],
     modelId,
@@ -356,6 +376,18 @@ function createAgentStream(modelId: Parameters<typeof workersAiAgent>[0]['modelI
     workspace: {} as never,
     runWithKeepAlive: (operation) => operation(),
   });
+}
+
+function piUsage(overrides: Partial<{ input: number; output: number; totalTokens: number }> = {}) {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    ...overrides,
+  };
 }
 
 async function collectChunks(stream: ReadableStream<UIMessageChunk>): Promise<UIMessageChunk[]> {

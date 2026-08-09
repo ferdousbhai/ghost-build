@@ -1,8 +1,7 @@
 import type { StreamStatus } from '~/lib/common/types';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
-export type BuildProgressPhase =
-  'planning' | 'creating' | 'saving' | 'installing' | 'validating' | 'checking' | 'recovering';
+export type BuildProgressPhase = 'planning' | 'creating' | 'saving' | 'validating' | 'recovering';
 
 export type BuildProgress = {
   phase: BuildProgressPhase;
@@ -70,16 +69,6 @@ function buildPhase(args: {
   if (args.validationStage) {
     return 'validating';
   }
-  // Keep historical tool names readable for resumed pre-refactor transcripts.
-  if (args.activeToolNames.includes('npmInstall')) {
-    return 'installing';
-  }
-  if (args.activeToolNames.includes('validateProject')) {
-    return 'validating';
-  }
-  if (args.activeToolNames.includes('deploy')) {
-    return 'checking';
-  }
   if (args.activeToolNames.some((name) => name === 'write' || name === 'edit' || name === 'exec')) {
     return 'saving';
   }
@@ -101,12 +90,8 @@ function phaseMessage(
       return isProjectUpdate ? 'Updating your project…' : 'Creating your project…';
     case 'saving':
       return 'Saving changes…';
-    case 'installing':
-      return 'Installing dependencies…';
     case 'validating':
       return validationStageMessage(validationStage);
-    case 'checking':
-      return 'Checking that everything works…';
     case 'recovering':
       return 'Recovering the interrupted build…';
   }
@@ -125,12 +110,8 @@ function activityLabel(
       return isProjectUpdate ? 'updating your project' : 'creating your project';
     case 'saving':
       return 'saving changes';
-    case 'installing':
-      return 'installing dependencies';
     case 'validating':
       return validationStageActivity(validationStage);
-    case 'checking':
-      return 'checking the preview';
     case 'recovering':
       return 'recovering the build';
   }

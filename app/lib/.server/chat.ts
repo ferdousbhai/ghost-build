@@ -1,5 +1,5 @@
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { workersAiAgent } from '~/lib/.server/llm/workers-ai-agent';
+import { piAgentRunner } from '~/lib/.server/llm/pi-agent-runner';
 import { createPiStreamResponse } from './llm/pi-stream';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { ContextCompactionUnavailableError, ModelInputBudgetExceededError } from './llm/model-input';
@@ -36,7 +36,7 @@ export async function createChatResponseFromBody({
   runWithKeepAlive,
 }: {
   abortSignal?: AbortSignal;
-  body: Pick<ChatRequestBody, 'messages' | 'chatInitialId' | 'modelId'>;
+  body: Pick<ChatRequestBody, 'messages' | 'modelId'>;
   compaction: {
     current: ContextCompaction | null;
     pending: boolean;
@@ -58,7 +58,7 @@ export async function createChatResponseFromBody({
   logger.info('Using Cloudflare AI');
 
   try {
-    const dataStream = await workersAiAgent({
+    const dataStream = await piAgentRunner({
       abortSignal,
       firstUserMessage,
       messages: transcriptMessages,

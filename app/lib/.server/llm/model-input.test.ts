@@ -28,7 +28,6 @@ function prepare(messages: GhostbuildMessage[], options: Partial<Parameters<type
     summarize: async () => '## Current State\nCompacted.',
     systemPrompts: [],
     tools,
-    toolChoice: 'auto',
     ...options,
   });
 }
@@ -47,16 +46,6 @@ describe('prepareModelInput', () => {
     expect(JSON.stringify(result.messages)).toContain('earlier requirement');
     expect(JSON.stringify(result.messages)).not.toContain('System');
     expect(summarize).not.toHaveBeenCalled();
-  });
-
-  test('estimates only tool definitions enabled for the provider call', async () => {
-    const allTools = await prepare([message('user-1', 'Inspect it')]);
-    const readOnly = await prepare([message('user-1', 'Inspect it')], {
-      toolChoice: 'required',
-      activeTools: ['read'],
-    });
-
-    expect(readOnly.estimatedTokens).toBeLessThan(allTools.estimatedTokens);
   });
 
   test('compacts once after the actual provider input crosses 100K', async () => {

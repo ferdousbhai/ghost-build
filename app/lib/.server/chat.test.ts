@@ -1,22 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const logger = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn() }));
-const workersAiAgent = vi.hoisted(() => vi.fn());
+const piAgentRunner = vi.hoisted(() => vi.fn());
 
 vi.mock('ghostbuild-agent/utils/logger', () => ({ createScopedLogger: () => logger }));
-vi.mock('~/lib/.server/llm/workers-ai-agent', () => ({ workersAiAgent }));
+vi.mock('~/lib/.server/llm/pi-agent-runner', () => ({ piAgentRunner }));
 
 import { createChatResponseFromBody } from './chat';
+import { ContextCompactionUnavailableError, ModelInputBudgetExceededError } from './llm/model-input';
 
 describe('chat provider error boundary', () => {
   beforeEach(() => {
     logger.error.mockReset();
     logger.info.mockReset();
-    workersAiAgent.mockReset();
+    piAgentRunner.mockReset();
   });
 
   it('does not log provider errors or request bodies', async () => {
-    workersAiAgent.mockRejectedValueOnce(
+    piAgentRunner.mockRejectedValueOnce(
       Object.assign(new Error('provider included private request values'), {
         requestBodyValues: { prompt: 'SECRET_PROVIDER_PROMPT' },
       }),
@@ -24,7 +25,7 @@ describe('chat provider error boundary', () => {
 
     await expect(
       createChatResponseFromBody({
-        body: { chatInitialId: 'chat-id', messages: [], modelId: '@cf/zai-org/glm-5.2' },
+        body: { messages: [], modelId: '@cf/zai-org/glm-5.2' },
         compaction: {
           current: null,
           pending: false,
@@ -44,11 +45,20 @@ describe('chat provider error boundary', () => {
     expect(JSON.stringify(logger.error.mock.calls)).not.toContain('private request values');
   });
 
+  it.each([
+    [new ModelInputBudgetExceededError(10, 5), 413],
+    [new ContextCompactionUnavailableError(new Error('summary failed')), 503],
+  ])('preserves actionable model-input failures with status %i', async (error, status) => {
+    piAgentRunner.mockRejectedValueOnce(error);
+
+    await expect(createResponse()).rejects.toMatchObject({ status });
+  });
+
   it('forwards the selected allowlisted model to the builder agent', async () => {
-    workersAiAgent.mockResolvedValueOnce(new ReadableStream());
+    piAgentRunner.mockResolvedValueOnce(new ReadableStream());
 
     await createChatResponseFromBody({
-      body: { chatInitialId: 'chat-id', messages: [], modelId: 'deepseek/deepseek-v4-pro' },
+      body: { messages: [], modelId: 'deepseek/deepseek-v4-pro' },
       compaction: {
         current: null,
         pending: false,
@@ -62,6 +72,18 @@ describe('chat provider error boundary', () => {
       runWithKeepAlive: (operation) => operation(),
     });
 
-    expect(workersAiAgent).toHaveBeenCalledWith(expect.objectContaining({ modelId: 'deepseek/deepseek-v4-pro' }));
+    expect(piAgentRunner).toHaveBeenCalledWith(expect.objectContaining({ modelId: 'deepseek/deepseek-v4-pro' }));
   });
 });
+
+function createResponse() {
+  return createChatResponseFromBody({
+    body: { messages: [], modelId: '@cf/zai-org/glm-5.2' },
+    compaction: { current: null, pending: false, summarize: vi.fn(), save: vi.fn() },
+    firstUserMessage: true,
+    accountCredentials: { binding: {} as Ai },
+    sessionAffinity: 'session',
+    workspace: {} as never,
+    runWithKeepAlive: (operation) => operation(),
+  });
+}

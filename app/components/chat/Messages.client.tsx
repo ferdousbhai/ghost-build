@@ -12,11 +12,10 @@ interface MessagesProps {
   id?: string;
   className?: string;
   messages?: GhostbuildMessage[];
-  isStreaming?: boolean;
 }
 
 export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messages(
-  { id, messages = [], className, isStreaming }: MessagesProps,
+  { id, messages = [], className }: MessagesProps,
   ref: ForwardedRef<HTMLDivElement> | undefined,
 ) {
   const profile = useStore(profileStore);
@@ -24,13 +23,13 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messa
   return (
     <div id={id} className={className} ref={ref}>
       {messages.length > 0 ? (
-        messages.map((message, index) => {
+        messages.map((message) => {
           const { role } = message;
           const isUserMessage = role === 'user';
 
           return (
             <div
-              key={index}
+              key={message.id}
               className={classNames(styles.Message, 'relative flex w-full gap-3', {
                 [styles.UserMessage]: isUserMessage,
                 [styles.AssistantMessage]: !isUserMessage,
@@ -51,11 +50,7 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messa
                   )}
                 </div>
               )}
-              {isUserMessage ? (
-                <UserMessage content={messageText(message)} />
-              ) : (
-                <AssistantMessage message={message} isStreaming={isStreaming && index === messages.length - 1} />
-              )}
+              {isUserMessage ? <UserMessage content={messageText(message)} /> : <AssistantMessage message={message} />}
             </div>
           );
         })

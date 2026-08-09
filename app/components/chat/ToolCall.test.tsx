@@ -26,10 +26,10 @@ describe('ToolCall', () => {
   });
 
   it.each([
-    ['validateProject', 'Project validation stopped', 'Validating the project'],
-    ['npmInstall', 'Dependency install stopped', 'Installing dependencies'],
-    ['deploy', 'Deployment stopped', 'Checking the project'],
+    ['read', 'File read stopped', 'Reading'],
     ['write', 'File write stopped', 'Writing a file'],
+    ['edit', 'File edit stopped', 'Editing'],
+    ['exec', 'Command stopped', 'Running'],
   ])('presents an incomplete %s tool from an inactive turn as stopped', async (toolName, stopped, active) => {
     const partId = makePartId('message-1', 0);
     const invocation: GhostbuildToolInvocation = {

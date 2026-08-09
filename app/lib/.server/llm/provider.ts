@@ -24,12 +24,3 @@ export function getPiProvider(
     maxTokens: MODEL_MAX_OUTPUT_TOKENS,
   };
 }
-
-export function getProvider(
-  _env: Env,
-  accountCredentials: WorkersAiAccountCredentials,
-  modelId: string = CLOUDFLARE_WORKERS_AI_MODEL,
-  settings?: { sessionAffinity?: string; feature?: string },
-): PiProvider {
-  return getPiProvider(accountCredentials, modelId, settings);
-}

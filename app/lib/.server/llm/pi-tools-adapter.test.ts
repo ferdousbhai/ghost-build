@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MODEL_TOOL_INPUT_SCHEMAS } from 'ghostbuild-agent/model-tool-inputs';
 import type { Tool } from 'ghostbuild-agent/tool';
 
 const mocks = vi.hoisted(() => ({
@@ -11,7 +12,7 @@ vi.mock('./workers-ai-tools', () => ({
   MODEL_TOOL_NAMES: ['read', 'write', 'edit', 'exec'],
 }));
 
-import { createPiToolBundle, createPiTools } from './pi-tools-adapter';
+import { createPiToolBundle } from './pi-tools-adapter';
 
 describe('Pi tool adapter', () => {
   beforeEach(() => {
@@ -19,23 +20,27 @@ describe('Pi tool adapter', () => {
     mocks.execute.mockResolvedValue({ ok: true, summary: 'done' });
     mocks.createWorkersAiTools.mockReturnValue(
       Object.fromEntries(
-        ['read', 'ls', 'write', 'edit', 'exec', 'lookupDocs', 'npmInstall', 'validateProject', 'deploy'].map((name) => [
+        (['read', 'write', 'edit', 'exec'] as const).map((name) => [
           name,
-          { description: `${name} description`, execute: mocks.execute } satisfies Tool,
+          {
+            description: `${name} description`,
+            inputSchema: MODEL_TOOL_INPUT_SCHEMAS[name],
+            execute: mocks.execute,
+          } satisfies Tool,
         ]),
       ),
     );
   });
 
-  it('delegates computer execution to the canonical wrapped tool', async () => {
-    const tools = createPiTools({} as never, operationContext());
+  it('delegates execution to the canonical wrapped tool', async () => {
+    const tools = createPiToolBundle({} as never, operationContext()).piTools;
     const signal = new AbortController().signal;
 
-    await tools.write!.execute('write-1', { path: '/home/project/src/app.ts', content: 'export {};' }, signal);
+    await tools.write.execute('write-1', { path: '/home/project/src/app.ts', content: 'export {};' }, signal);
 
     expect(mocks.execute).toHaveBeenCalledWith(
       { path: '/home/project/src/app.ts', content: 'export {};' },
-      { toolCallId: 'write-1', abortSignal: signal, onUpdate: undefined },
+      { toolCallId: 'write-1', abortSignal: expect.any(AbortSignal), onUpdate: undefined },
     );
   });
 
@@ -44,10 +49,10 @@ describe('Pi tool adapter', () => {
       options.onUpdate?.({ stdout: 'building\n', running: true });
       return { exitCode: 0, stdout: 'done\n', stderr: '' };
     });
-    const tools = createPiTools({} as never, operationContext());
+    const tools = createPiToolBundle({} as never, operationContext()).piTools;
     const onUpdate = vi.fn();
 
-    await tools.exec!.execute('exec-1', { command: 'pnpm test' }, undefined, onUpdate);
+    await tools.exec.execute('exec-1', { command: 'pnpm test' }, undefined, onUpdate);
 
     expect(onUpdate).toHaveBeenCalledWith({
       content: [{ type: 'text', text: JSON.stringify({ stdout: 'building\n', running: true }) }],
@@ -55,16 +60,16 @@ describe('Pi tool adapter', () => {
     });
   });
 
-  it('publishes only the four minimal model tools with exact argument contracts', () => {
-    const tools = createPiTools({} as never, operationContext());
+  it('publishes only the four model tools using the canonical schemas', () => {
+    const tools = createPiToolBundle({} as never, operationContext()).piTools;
 
     expect(Object.keys(tools)).toEqual(['read', 'write', 'edit', 'exec']);
-    expect(Object.keys((tools.edit!.parameters as { properties: object }).properties)).toEqual([
+    expect(Object.keys((tools.edit.parameters as { properties: object }).properties)).toEqual([
       'path',
       'base',
       'edits',
     ]);
-    expect(Object.keys((tools.exec!.parameters as { properties: object }).properties)).toEqual([
+    expect(Object.keys((tools.exec.parameters as { properties: object }).properties)).toEqual([
       'command',
       'cwd',
       'backend',

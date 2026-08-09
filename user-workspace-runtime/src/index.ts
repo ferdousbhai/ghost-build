@@ -324,6 +324,8 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   #activeValidation: ActiveValidation | null = null;
   readonly #activeSyncRecoveries = new Map<string, Promise<boolean>>();
   readonly #activeCommandKills = new Map<string, () => Promise<void>>();
+  readonly #activeCommandStreams = new Set<string>();
+  readonly #pendingCommandCancellations = new Set<string>();
   #containerKeepAliveOperations = 0;
 
   constructor(ctx: DurableObjectState<{}>, env: RuntimeEnv) {
@@ -1037,6 +1039,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     const encoder = new TextEncoder();
     let cancelCommand: (() => Promise<void>) | undefined;
     let cancelled = false;
+    this.#activeCommandStreams.add(request.operationKey);
     return new ReadableStream<Uint8Array>({
       start: (controller) => {
         void this.withStatefulOperation('exec', request.operationKey, () =>
@@ -1053,6 +1056,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
               onHandle: (kill) => {
                 cancelCommand = kill;
                 this.#activeCommandKills.set(request.operationKey, kill);
+                if (cancelled || this.#pendingCommandCancellations.delete(request.operationKey)) {
+                  void kill().catch(() => undefined);
+                }
               },
               onSyncPending: request.toolCallId
                 ? (result) => {
@@ -1072,11 +1078,17 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           )
           .finally(() => {
             this.#activeCommandKills.delete(request.operationKey);
+            this.#activeCommandStreams.delete(request.operationKey);
+            this.#pendingCommandCancellations.delete(request.operationKey);
           });
       },
       cancel: async () => {
         cancelled = true;
-        await cancelCommand?.();
+        if (cancelCommand) {
+          await cancelCommand();
+        } else {
+          this.#pendingCommandCancellations.add(request.operationKey);
+        }
       },
     });
   }
@@ -1084,7 +1096,12 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   async cancelExecution(value: unknown): Promise<void> {
     const input = record(value);
     const operationKey = requireString(input.operationKey, 'operationKey', 512);
-    await this.#activeCommandKills.get(operationKey)?.();
+    const kill = this.#activeCommandKills.get(operationKey);
+    if (kill) {
+      await kill();
+    } else if (this.#activeCommandStreams.has(operationKey)) {
+      this.#pendingCommandCancellations.add(operationKey);
+    }
   }
 
   private async commandRequest(value: unknown) {
@@ -1223,7 +1240,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     input: unknown,
     cancellation: ValidationCancellation,
   ): Promise<GhostbuildToolResult> {
-    return this.runToolOperation(toolCallId, 'validateProject', input, () =>
+    return this.runToolOperation(toolCallId, 'validation', input, () =>
       this.withStatefulOperation('validate', `tool:${toolCallId}`, async () => {
         cancellation.requireActive();
         const before = await this.checkpoint();

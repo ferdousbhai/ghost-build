@@ -4,11 +4,11 @@ import { estimateStringTokens } from 'agents/experimental/memory/utils';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { MAX_ESTIMATED_MODEL_INPUT_TOKENS } from 'ghostbuild-agent/context-limits';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
-import type { GhostbuildToolName, GhostbuildToolSet } from 'ghostbuild-agent/types';
+import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
 import { assembleCompactedContext, compactContext, type ContextCompaction } from './context-compaction';
 import { cleanupAssistantMessages } from './message-conversion';
 import { injectTurnContext } from './turn-context';
-import { serializeWorkersAiToolDefinitions, type AgentToolChoice } from './workers-ai-tools';
+import { serializeWorkersAiToolDefinitions } from './workers-ai-tools';
 
 type ModelInputLogger = {
   info(message: string, data?: Record<string, unknown>): void;
@@ -59,8 +59,6 @@ export async function prepareModelInput(args: {
   scheduleCompaction?: () => Promise<void>;
   systemPrompts: string[];
   tools: GhostbuildToolSet;
-  toolChoice: AgentToolChoice;
-  activeTools?: GhostbuildToolName[];
   logger?: ModelInputLogger;
 }): Promise<PreparedModelInput> {
   let assembled = assembleCompactedContext(args.messages, args.currentCompaction);
@@ -136,16 +134,15 @@ export async function prepareModelInput(args: {
 
 async function assembleModelInput(
   uiMessages: GhostbuildMessage[],
-  args: Pick<Parameters<typeof prepareModelInput>[0], 'activeTools' | 'systemPrompts' | 'tools' | 'toolChoice'>,
+  args: Pick<Parameters<typeof prepareModelInput>[0], 'systemPrompts' | 'tools'>,
 ): Promise<{ messages: ModelMessage[]; estimatedTokens: number }> {
-  const messages = await cleanupAssistantMessages(uiMessages, args.tools);
+  const messages = cleanupAssistantMessages(uiMessages);
   const estimatedTokens = estimateStringTokens(
     JSON.stringify({
       instructions: args.systemPrompts,
       messages,
-      activeTools: args.activeTools,
-      tools: serializeWorkersAiToolDefinitions(args.tools, args.activeTools),
-      toolChoice: args.toolChoice,
+      tools: serializeWorkersAiToolDefinitions(args.tools),
+      toolChoice: 'auto',
     }),
   );
   return { messages, estimatedTokens };

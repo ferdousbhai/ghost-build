@@ -1,6 +1,6 @@
 import type { AbsolutePath } from './utils/workDir.js';
 import type { Tool } from './tool.js';
-import type { ComputerToolName } from './cloudflare-computer.js';
+import type { ModelToolName } from './model-tool-inputs.js';
 
 export interface EditorDocument {
   value: string;
@@ -24,15 +24,7 @@ interface Folder {
   type: 'folder';
 }
 
-export type GhostbuildToolSet = Record<ComputerToolName, Tool>;
-
-export type GhostbuildToolName = keyof GhostbuildToolSet;
-
-export const READ_ONLY_TOOL_NAMES = ['read', 'ls'] as const satisfies readonly GhostbuildToolName[];
-
-export function isReadOnlyToolName(toolName: string): boolean {
-  return (READ_ONLY_TOOL_NAMES as readonly string[]).includes(toolName);
-}
+export type GhostbuildToolSet = Record<ModelToolName, Tool>;
 
 export type Dirent = File | Folder;
 

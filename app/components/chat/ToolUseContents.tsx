@@ -1,12 +1,8 @@
-import { lazy, memo, Suspense, useEffect } from 'react';
+import { memo, useEffect } from 'react';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { isGhostbuildToolResult, toolResultSucceeded, toolResultSummary } from 'ghostbuild-agent/tool-result';
 import { ToolResultFrame } from './ToolResultFrame';
 import { captureProductEvent } from '~/lib/telemetry.client';
-
-const ToolLookupDocsResult = lazy(() =>
-  import('./ToolLookupDocsResult').then((module) => ({ default: module.ToolLookupDocsResult })),
-);
 
 export const ToolUseContents = memo(function ToolUseContents({
   invocation,
@@ -18,27 +14,14 @@ export const ToolUseContents = memo(function ToolUseContents({
   if (isToolInvocationInProgress(invocation)) {
     return <RunningToolContents invocation={invocation} progress={progress} />;
   }
-  switch (invocation.toolName) {
-    case 'deploy':
-      return <StructuredResultTool invocation={invocation} />;
-    case 'npmInstall':
-    case 'validateProject':
-    case 'ls':
-    case 'exec':
-    case 'read':
-      return <StructuredResultTool invocation={invocation} />;
-    case 'edit':
-    case 'write':
-      return <StructuredResultTool invocation={invocation} />;
-    case 'lookupDocs':
-      return (
-        <Suspense fallback={null}>
-          <ToolLookupDocsResult invocation={invocation} />
-        </Suspense>
-      );
-    default:
-      return <pre className="overflow-x-auto whitespace-pre-wrap">{JSON.stringify(invocation, null, 2)}</pre>;
-  }
+  return invocation.toolName === 'read' ||
+    invocation.toolName === 'write' ||
+    invocation.toolName === 'edit' ||
+    invocation.toolName === 'exec' ? (
+    <StructuredResultTool invocation={invocation} />
+  ) : (
+    <pre className="overflow-x-auto whitespace-pre-wrap">{JSON.stringify(invocation, null, 2)}</pre>
+  );
 });
 
 function RunningToolContents({ invocation, progress }: { invocation: GhostbuildToolInvocation; progress?: unknown }) {
@@ -96,9 +79,7 @@ function StructuredResultTool({ invocation }: { invocation: GhostbuildToolInvoca
     invocation.output !== null &&
     'validation' in invocation.output
       ? invocation.output.validation
-      : invocation.toolName === 'validateProject'
-        ? invocation.output
-        : undefined;
+      : undefined;
   const validationSucceeded = isGhostbuildToolResult(validation) && validation.ok;
   useEffect(() => {
     if (!complete) {

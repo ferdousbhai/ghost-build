@@ -347,6 +347,34 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     });
   });
 
+  it('updates its cached revision when a Computer write commits', async () => {
+    const state = (revision: number) => ({
+      initialized: true,
+      revision,
+      resetRevision: 0,
+      fileCount: 1,
+      totalBytes: 3,
+      seeding: false,
+    });
+    let revision = 1;
+    const { client, stub } = harness((operation) => {
+      if (operation === 'getWorkspaceSnapshot') {
+        return { state: state(revision), files: [] };
+      }
+      if (operation === 'applyChanges') {
+        revision = 2;
+        return { ok: true, state: state(revision), changedPaths: ['/home/project/a.ts'] };
+      }
+      return undefined;
+    });
+
+    await client.refresh();
+    await client.computer.fs.writeFile('/home/project/a.ts', new TextEncoder().encode('new'));
+
+    expect(client.getState().revision).toBe(2);
+    expect(stub.applyChanges).toHaveBeenCalledOnce();
+  });
+
   it('uses RPC-native bytes and streams and performs no internal HTTP fetch', async () => {
     const bytes = new Uint8Array([0, 1, 2, 255]);
     const stream = new Blob([bytes]).stream();
@@ -456,6 +484,8 @@ function harness(respond: (operation: string, value: unknown) => unknown, userId
     streamWorkspaceFile: method('streamWorkspaceFile'),
     executeStream: method('executeStream'),
     cancelExecution: method('cancelExecution'),
+    getWorkspaceSnapshot: method('getWorkspaceSnapshot'),
+    applyChanges: method('applyChanges'),
   };
   const namespace = {
     idFromName: vi.fn(() => ({ id: 'project-do-id' })),

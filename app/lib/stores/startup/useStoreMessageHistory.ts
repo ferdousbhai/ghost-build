@@ -3,6 +3,7 @@ import { lastCompleteMessageInfoStore } from '~/lib/stores/startup/messages';
 import { isToolPart, isToolResult, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { StreamStatus } from '~/lib/common/types';
 import { digestTranscriptMessages, type TranscriptCheckpoint } from 'ghostbuild-agent/transcript';
+import { subchatIndexStore } from '~/lib/stores/subchats';
 
 /**
  * This returns a function that takes in `messages` and `streamStatus` and updates
@@ -20,7 +21,12 @@ export function useStoreMessageHistory() {
       streamStatus: StreamStatus,
       transcriptCheckpoint: TranscriptCheckpoint | null,
     ) => {
-      if (messages.length === 0 || transcriptCheckpoint === null || streamStatus === 'streaming') {
+      if (
+        messages.length === 0 ||
+        transcriptCheckpoint === null ||
+        transcriptCheckpoint.subchatIndex !== subchatIndexStore.get() ||
+        streamStatus === 'streaming'
+      ) {
         return;
       }
 

@@ -81,8 +81,8 @@ duplicate project blob in the control plane.
 
 The model receives only four primitive tools: `read`, `write`, `edit`, and `exec`. `write` and `exec` adapt the reviewed
 `@cloudflare/computer/tools` contracts; Ghostbuild's `read` returns numbered lines with a compact tag bound to the full
-file SHA-256, and `edit` applies non-overlapping line operations only when that exact snapshot is still current. `ls`
-remains an internal Computer capability and directory discovery goes through `exec`. `read` also exposes immutable
+file SHA-256, and `edit` applies non-overlapping line operations only when that exact snapshot is still current.
+Directory discovery goes through `exec`; no `ls` schema is included in model input or prompt accounting. `read` also exposes immutable
 bundled guidance under `/home/project/.ghost/docs/` without adding those files to
 the project revision or deployment artifact. Model tools and editor reads use the same workspace API. Browser saves use
 compare-and-swap against the numeric revision the browser loaded; a conflict refreshes from the user runtime and never
@@ -91,7 +91,9 @@ persistence layer. That local data is a performance and offline-start replica, n
 
 Tool-call arguments stream to the browser as the model produces them. `exec` additionally streams bounded transient
 stdout/stderr updates while retaining only a bounded final tail for the model; completion still waits for the Container's
-filesystem pull to become durable. Approved `pnpm add <packages>` and `pnpm install --lockfile-only` commands route to
+filesystem pull to become durable. The Pi loop enforces a total turn limit, model-stream inactivity limit, model-step
+ceiling, and per-tool limits. A cancellation requested before a Container process handle exists is retained and applied
+as soon as that handle becomes available. Approved `pnpm add <packages>` and `pnpm install --lockfile-only` commands route to
 the reviewed dependency installer rather than an unrestricted package-manager shell. Every source or dependency mutation runs full
 validation automatically and returns the revision-bound receipt with the primitive tool result. Production deployment
 is not a model capability: an authenticated user command verifies the current receipt, prepares the exact-revision plan,
@@ -149,9 +151,9 @@ an architecture review: tests pin the installed version, tool names, complete AI
 the build lifecycle, read-only behavior, backend selector, and backend capability description. Tool configuration
 explicitly disables Computer's optional `publish` capability and pins the reviewed default limits: 2,000 lines or 256
 KiB per read, 2 MiB per write/edit, and 64 KiB for each exec output stream. These gates detect drift; they cannot turn a
-preview dependency into a stable production contract. AI SDK cancellation is checked before a queued tool starts, but
-Computer 0.1.1's published tool executors neither consume nor forward `ToolExecutionOptions.abortSignal`; an operation
-already in flight therefore relies on the workspace runtime's bounded timeout instead of client cancellation.
+preview dependency into a stable production contract. Computer 0.1.1's published write executor does not forward `ToolExecutionOptions.abortSignal`, so an in-flight vendor
+write still relies on the workspace runtime's bounded operation. Ghostbuild's custom streamed `exec` adapter does forward
+cancellation to its Container process.
 
 ## Model Context and Prefix Caching
 
@@ -161,10 +163,9 @@ compaction, the model reacquires authoritative facts on demand through Computer'
 searches. Retrieved source remains untrusted project data.
 
 Workers AI prefix caching is automatic for supported models. Ghostbuild sends an opaque, stable session-affinity value
-per transcript generation, keeps system instructions at the front of the prompt, and leaves dynamic project context in
-the latest user turn. Cache availability never changes the model-visible input or correctness path. Finish telemetry
-reads AI SDK `totalUsage.inputTokenDetails.cacheReadTokens`, distinguishes hit, miss, and unavailable states, and logs a
-privacy-safe model-input fingerprint without logging prompt contents. Small historical samples observed lower affinity
+per transcript generation through either the REST header or binding `extraHeaders`, keeps system instructions at the
+front of the prompt, and leaves dynamic project context in the latest user turn. Cache availability never changes the model-visible input or correctness path. Finish telemetry aggregates Pi's native
+`usage.cacheRead` across model turns and reports cache hits or misses without logging prompt contents. Small historical samples observed lower affinity
 latency but reported zero cached tokens, so Ghostbuild claims no verified cached-token cost savings. The retained
 decision record is `scripts/evaluations/DECISIONS.md`.
 

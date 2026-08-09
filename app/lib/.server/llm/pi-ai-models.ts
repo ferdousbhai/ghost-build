@@ -14,10 +14,10 @@ import { stream as openaiCompletionsStream } from '@earendil-works/pi-ai/api/ope
 import { CLOUDFLARE_WORKERS_AI_MODELS } from '@earendil-works/pi-ai/providers/cloudflare-workers-ai.models';
 import { MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
 import { getWorkersAiModel, isWorkersAiModelId, type WorkersAiRuntimeModelId } from '~/lib/workers-ai-model';
+import { recordPiStage } from './pi-telemetry';
 
-// Mirrors cloudflare-os/packages/workshop-backend/src/ai-models.ts — adapted for ghost-build's
-// Workers-AI-only catalog. Importing pi's other provider implementations would bundle their
-// Node-only SDKs into each user-owned runtime even though Ghostbuild can never route to them.
+// Keep the runtime on the Workers-AI-only catalog; importing unrelated provider SDKs would
+// add Node-only code to every user-owned runtime.
 
 type GhostbuildModelConfig = {
   provider: 'cloudflare';
@@ -125,9 +125,7 @@ export function getPiModel(
   const catalog = catalogModel(config.model);
   const win = modelTokenWindow(config, catalog);
 
-  // Ghost-build historically routes Workers AI through the Workers AI gateway/binding.
-  // For pi, speak Workers AI's OpenAI-compat endpoint; auth is via account credentials / binding.
-  // Direct REST shape mirrors cloudflare-os getModelDirect for cloudflare provider.
+  // Use the OpenAI-compatible protocol for both the binding and direct account credentials.
   if ('binding' in accountCredentials) {
     const model: Model<Api> = {
       id: config.model,
@@ -143,8 +141,8 @@ export function getPiModel(
     };
     return makeHandle({
       model,
-      // pi's OpenAI-compatible serializer requires a non-empty key before calling custom fetch.
-      // The binding fetch below never forwards this local sentinel or any request headers.
+      // Pi's OpenAI-compatible serializer requires a non-empty key before calling custom fetch.
+      // The binding adapter forwards only the reviewed session-affinity header.
       apiKey: 'workers-ai-binding',
       fetch: createWorkersAiBindingFetch(accountCredentials.binding, config.model),
       sessionAffinity: settings?.sessionAffinity,
@@ -182,19 +180,17 @@ function createWorkersAiBindingFetch(binding: Ai, modelId: WorkersAiRuntimeModel
       run: (
         model: string,
         inputs: Record<string, unknown>,
-        options: { returnRawResponse: true; signal: AbortSignal },
+        options: { returnRawResponse: true; signal: AbortSignal; extraHeaders?: Record<string, string> },
       ) => Promise<Response>;
     };
     recordPiStage('binding_run_start', modelId);
+    const sessionAffinity = request.headers.get('x-session-affinity');
     const response = await rawBinding.run(modelId, payload, {
       returnRawResponse: true,
       signal: request.signal,
+      ...(sessionAffinity ? { extraHeaders: { 'x-session-affinity': sessionAffinity } } : {}),
     });
     recordPiStage('binding_run_response', modelId, response.status);
     return response;
   };
-}
-
-function recordPiStage(stage: string, modelId: string, status?: number): void {
-  console.info({ event: 'ghostbuild_pi_stage', stage, modelId, ...(status === undefined ? {} : { status }) });
 }

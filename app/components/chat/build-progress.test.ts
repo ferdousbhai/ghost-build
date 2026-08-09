@@ -52,9 +52,7 @@ describe('getBuildProgress', () => {
   it.each([
     ['write', 'saving', 'Saving changes…'],
     ['edit', 'saving', 'Saving changes…'],
-    ['npmInstall', 'installing', 'Installing dependencies…'],
-    ['validateProject', 'validating', 'Validating your project…'],
-    ['deploy', 'checking', 'Checking that everything works…'],
+    ['exec', 'saving', 'Saving changes…'],
   ] as const)('translates %s into concise user-facing progress', (toolName, phase, message) => {
     expect(
       getBuildProgress({
@@ -91,15 +89,22 @@ describe('getBuildProgress', () => {
       getBuildProgress({
         streamStatus: 'streaming',
         isRecovering: false,
-        activeToolNames: ['validateProject'],
+        activeToolNames: ['write'],
+        validationStage: 'computer validation',
         inactiveForMs: BUILD_PROGRESS_STALL_MS,
       }),
-    ).toMatchObject({ phase: 'validating', delayed: false, stalled: false, message: 'Validating your project…' });
+    ).toMatchObject({
+      phase: 'validating',
+      delayed: false,
+      stalled: false,
+      message: 'Validating your project with Cloudflare Computer…',
+    });
     expect(
       getBuildProgress({
         streamStatus: 'streaming',
         isRecovering: false,
-        activeToolNames: ['validateProject'],
+        activeToolNames: ['write'],
+        validationStage: 'computer validation',
         inactiveForMs: VALIDATION_PROGRESS_DELAY_MS,
       }),
     ).toMatchObject({ delayed: true, stalled: false });
@@ -107,7 +112,8 @@ describe('getBuildProgress', () => {
       getBuildProgress({
         streamStatus: 'streaming',
         isRecovering: false,
-        activeToolNames: ['validateProject'],
+        activeToolNames: ['write'],
+        validationStage: 'computer validation',
         inactiveForMs: VALIDATION_PROGRESS_STALL_MS,
       }),
     ).toMatchObject({ delayed: true, stalled: true });
@@ -142,12 +148,13 @@ describe('getBuildProgress', () => {
       getBuildProgress({
         streamStatus: 'streaming',
         isRecovering: false,
-        activeToolNames: ['write', 'validateProject'],
+        activeToolNames: ['write'],
+        validationStage: 'computer validation',
         inactiveForMs: BUILD_PROGRESS_STALL_MS,
       }),
     ).toMatchObject({
       phase: 'validating',
-      message: 'Validating your project…',
+      message: 'Validating your project with Cloudflare Computer…',
       delayed: false,
       stalled: false,
     });

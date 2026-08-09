@@ -242,7 +242,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                             ref={messageRef}
                             className="z-[1] mx-auto flex w-full max-w-chat flex-1 flex-col gap-3 px-3 pb-8 sm:px-0"
                             messages={messages}
-                            isStreaming={isStreaming}
                           />
                         </motion.div>
                       </AnimatePresence>

@@ -36,7 +36,9 @@ describe('Pi Workers AI model binding', () => {
           { headers: { 'content-type': 'text/event-stream' } },
         ),
     );
-    const handle = getPiModel({ binding: { run } as unknown as Ai }, modelId);
+    const handle = getPiModel({ binding: { run } as unknown as Ai }, modelId, {
+      sessionAffinity: 'opaque-session',
+    });
     const messages: Message[] = [{ role: 'user', content: 'Hi', timestamp: 1 }];
 
     const result = await handle
@@ -65,7 +67,11 @@ describe('Pi Workers AI model binding', () => {
         tool_choice: 'required',
         tools: expect.any(Array),
       }),
-      expect.objectContaining({ returnRawResponse: true, signal: expect.any(AbortSignal) }),
+      expect.objectContaining({
+        returnRawResponse: true,
+        signal: expect.any(AbortSignal),
+        extraHeaders: { 'x-session-affinity': 'opaque-session' },
+      }),
     );
   });
 });

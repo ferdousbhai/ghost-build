@@ -58,14 +58,14 @@ export const npmInstallToolParameters = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['packages'],
-        message: 'Install at most 50 packages in one npmInstall call.',
+        message: 'Install at most 50 packages in one dependency command.',
       });
     }
     const invalidSpecs = findInvalidNpmInstallSpecs(packages);
     if (invalidSpecs.length > 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `pnpm flags are not allowed in npmInstall packages: ${invalidSpecs.join(', ')}`,
+        message: `pnpm flags are not allowed in dependency package specs: ${invalidSpecs.join(', ')}`,
       });
     }
     const nonRegistrySpecs = splitPackageSpecs(packages).filter((spec) => !isRegistryPackageSpec(spec));

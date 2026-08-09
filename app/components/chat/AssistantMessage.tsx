@@ -1,5 +1,4 @@
-import { memo } from 'react';
-import { Markdown } from './Markdown';
+import { lazy, memo, Suspense } from 'react';
 import { ToolCall } from './ToolCall';
 import { makePartId, type PartId } from 'ghostbuild-agent/partId.js';
 import {
@@ -12,16 +11,19 @@ import { captureMessage } from '~/lib/telemetry.client';
 import { DeploymentApproval } from './DeploymentApproval.client';
 import { parsePendingDeploymentApprovalData } from '~/lib/deployment-approval';
 
+const Markdown = lazy(() => import('./Markdown').then((module) => ({ default: module.Markdown })));
+
 interface AssistantMessageProps {
   message: GhostbuildMessage;
-  isStreaming?: boolean;
 }
 
 export const AssistantMessage = memo(function AssistantMessage({ message }: AssistantMessageProps) {
   if (!message.parts) {
     return (
       <div className="w-full overflow-hidden">
-        <Markdown>{messageText(message)}</Markdown>
+        <Suspense fallback={null}>
+          <Markdown>{messageText(message)}</Markdown>
+        </Suspense>
       </div>
     );
   }
@@ -44,7 +46,11 @@ function AssistantMessagePart({ part, partId }: { part: GhostbuildPart; partId: 
   }
 
   if (part.type === 'text') {
-    return typeof part.text === 'string' ? <Markdown>{part.text}</Markdown> : null;
+    return typeof part.text === 'string' ? (
+      <Suspense fallback={null}>
+        <Markdown>{part.text}</Markdown>
+      </Suspense>
+    ) : null;
   }
 
   if (part.type === 'data-deployment-approval') {

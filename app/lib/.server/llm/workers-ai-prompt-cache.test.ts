@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { createWorkersAiSessionAffinity, fingerprintWorkersAiModelInput } from './workers-ai-prompt-cache';
+import { createWorkersAiSessionAffinity } from './workers-ai-prompt-cache';
 
 describe('Workers AI prompt-cache identity', () => {
   test('uses an opaque stable affinity per transcript generation', async () => {
@@ -13,41 +13,5 @@ describe('Workers AI prompt-cache identity', () => {
       affinity,
     );
     expect(await createWorkersAiSessionAffinity(identity, '@cf/openai/gpt-oss-120b')).not.toBe(affinity);
-  });
-
-  test('invalidates the privacy-safe fingerprint for every model-visible cache boundary', async () => {
-    const base = {
-      privacySalt: 'opaque-session-affinity',
-      model: '@cf/zai-org/glm-5.2',
-      instructions: 'stable',
-      messages: [{ role: 'user', content: 'project instructions A' }],
-      tools: { read: { description: 'read' } },
-      activeTools: ['read'],
-      toolChoice: 'auto',
-    };
-    const fingerprint = await fingerprintWorkersAiModelInput(base);
-
-    await expect(fingerprintWorkersAiModelInput(base)).resolves.toBe(fingerprint);
-    await expect(
-      fingerprintWorkersAiModelInput({ ...base, privacySalt: 'different-transcript-generation' }),
-    ).resolves.not.toBe(fingerprint);
-
-    await expect(fingerprintWorkersAiModelInput({ ...base, model: '@cf/zai-org/glm-next' })).resolves.not.toBe(
-      fingerprint,
-    );
-    await expect(fingerprintWorkersAiModelInput({ ...base, instructions: 'changed prompt' })).resolves.not.toBe(
-      fingerprint,
-    );
-    await expect(
-      fingerprintWorkersAiModelInput({ ...base, tools: { read: { description: 'changed schema' } } }),
-    ).resolves.not.toBe(fingerprint);
-    await expect(
-      fingerprintWorkersAiModelInput({
-        ...base,
-        messages: [{ role: 'user', content: 'project instructions B' }],
-      }),
-    ).resolves.not.toBe(fingerprint);
-    await expect(fingerprintWorkersAiModelInput({ ...base, activeTools: [] })).resolves.not.toBe(fingerprint);
-    await expect(fingerprintWorkersAiModelInput({ ...base, toolChoice: 'required' })).resolves.not.toBe(fingerprint);
   });
 });

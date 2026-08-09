@@ -403,11 +403,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
             );
           },
         },
-        body: {
-          messages,
-          chatInitialId,
-          modelId,
-        },
+        body: { messages, modelId },
       });
     } catch (error) {
       this.finishTurn(turn, {

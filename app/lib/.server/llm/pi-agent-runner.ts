@@ -5,52 +5,33 @@ import {
   type AgentLoopConfig,
   type AgentMessage,
 } from '@earendil-works/pi-agent-core';
-import type { Message } from '@earendil-works/pi-ai';
+import type { AssistantMessage, Message, Usage } from '@earendil-works/pi-ai';
 import type { PiStreamChunk } from './pi-stream';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { calculatePromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
 import { generalSystemPrompt, ROLE_SYSTEM_PROMPT } from 'ghostbuild-agent/prompts/system';
-
-type UIMessageChunk = PiStreamChunk;
-
-function createUIMessageStream(options: {
-  originalMessages: unknown[];
-  execute: (ctx: { writer: { write: (chunk: PiStreamChunk) => void } }) => void;
-  onError: (error: unknown) => string;
-}): ReadableStream<PiStreamChunk> {
-  return new ReadableStream<PiStreamChunk>({
-    start(controller) {
-      const writer = { write: (chunk: PiStreamChunk) => controller.enqueue(chunk) };
-      try {
-        options.execute({ writer });
-        controller.enqueue({ type: 'finish', finishReason: 'stop' } as PiStreamChunk);
-      } catch (error) {
-        controller.enqueue({ type: 'error', errorText: options.onError(error) } as PiStreamChunk);
-      }
-      controller.close();
-    },
-  });
-}
+import { toolResultSucceeded } from 'ghostbuild-agent/tool-result';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { logger } from 'ghostbuild-agent/utils/logger';
 import type { WorkersAiModelId } from '~/lib/workers-ai-model';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 import {
+  BUILDER_TURN_BUDGET_ERROR_CODE,
+  BUILDER_TURN_MAX_MODEL_STEPS,
+  BUILDER_TURN_TIMEOUTS,
   BuilderTurnBudgetExceededError,
-  builderTurnStepBudgetExceeded,
   classifyBuilderTimeout,
 } from './builder-turn-budget';
 import type { ContextCompaction } from './context-compaction';
-import { prepareModelInput } from './model-input';
-import { asOriginalMessages } from './message-conversion';
+import { ContextCompactionUnavailableError, ModelInputBudgetExceededError, prepareModelInput } from './model-input';
 import { modelMessagesToPi } from './pi-message-conversion';
+import { recordPiStage } from './pi-telemetry';
 import { getPiProvider, type WorkersAiAccountCredentials } from './provider';
 import { appendDeterministicCompletion, normalizeTextPartBoundaries } from './workers-ai-stream';
 import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
-import { getValidatedBuildCompletion, getWorkersAiToolSettings, type AgentToolChoice } from './workers-ai-tools';
+import { getValidatedBuildCompletion } from './workers-ai-tools';
 import { createPiToolBundle, piToolsToList } from './pi-tools-adapter';
-import { languageModelId } from 'ghostbuild-agent/ai-compat';
 import {
   cloudflareAiFundingRequiredMessage,
   isCloudflareAiFundingError,
@@ -60,6 +41,7 @@ import {
 import { logProviderFailure } from './provider-error-logging';
 
 type Messages = GhostbuildMessage[];
+type UIMessageChunk = PiStreamChunk;
 
 interface PiAgentOptions {
   abortSignal?: AbortSignal;
@@ -93,7 +75,6 @@ class PiAgentPreparationError extends Error {
   }
 }
 
-// New Pi-backed implementation — mirrors cloudflare-os runAgent loop pattern
 export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableStream<UIMessageChunk>> {
   const {
     abortSignal,
@@ -111,24 +92,17 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
 
   logger.debug('Starting Pi agent runner');
   const startedAt = Date.now();
-  let recordedFirstResponse = false;
-
   const piProvider = getPiProvider(accountCredentials, modelId, { sessionAffinity });
   const { canonicalTools, piTools } = withPreparationStage('tool_setup', () =>
-    createPiToolBundle(workspace, {
-      onValidationStage,
-      runWithKeepAlive,
-    }),
+    createPiToolBundle(workspace, { onValidationStage, runWithKeepAlive }),
   );
-  const piToolsList = piToolsToList(piTools);
 
   const validatedBuildCompletion = getValidatedBuildCompletion(messages);
   if (validatedBuildCompletion) {
     logger.info('Returning validated build completion without another model turn (pi)');
-    return createValidatedBuildCompletionStream(messages, validatedBuildCompletion);
+    return createValidatedBuildCompletionStream(validatedBuildCompletion);
   }
 
-  let toolSettings = getWorkersAiToolSettings(messages);
   const systemPrompts = [ROLE_SYSTEM_PROMPT, generalSystemPrompt()];
   const modelInput = await withPreparationStage('model_input', () =>
     prepareModelInput({
@@ -140,8 +114,6 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       scheduleCompaction: compaction.schedule,
       systemPrompts,
       tools: canonicalTools,
-      toolChoice: toolSettings.toolChoice,
-      activeTools: toolSettings.activeTools,
       logger,
     }),
   );
@@ -152,18 +124,19 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   const promptCharacterCounts = withPreparationStage('prompt_metrics', () =>
     calculatePromptCharacterCounts(modelInput.promptMessages, systemPrompts),
   );
-  const providerModel = languageModelId({ modelId } as unknown as { modelId: string }, modelId);
-
   const piMessages = withPreparationStage('message_conversion', () => modelMessagesToPi(modelInput.messages));
   recordPiStage('prepared', modelId);
 
-  // Bridge AgentEvent -> UIMessageChunk via a TransformStream. This keeps frontend on UIMessage
-  // protocol during strangler, while LLM loop is fully Pi (runAgentLoopContinue).
   let currentValidatedBuildCompletion: string | undefined;
   const currentRunToolResults: Array<{ toolName: string; result: unknown }> = [];
   const streamedToolCalls = new Map<number, { toolCallId: string; toolName: string }>();
   const completedToolInputs = new Set<string>();
+  let recordedFirstResponse = false;
   let stepCount = 0;
+  let stepBudgetStopped = false;
+  let toolBudgetError: BuilderTurnBudgetExceededError | undefined;
+  let terminalAssistant: AssistantMessage | undefined;
+  let totalUsage = emptyUsage();
 
   const { readable, writable } = new TransformStream<UIMessageChunk, UIMessageChunk>();
   const writer = writable.getWriter();
@@ -176,17 +149,13 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       }
       const assistantEvent = event.assistantMessageEvent as unknown as Record<string, unknown>;
       const type = assistantEvent.type as string | undefined;
-      const textPartId = `pi-${event.message?.timestamp ?? Date.now()}-${assistantEvent.contentIndex ?? 0}`;
-      // Map AssistantMessageEvent to UIMessage text deltas
+      const textPartId = `pi-${event.message.timestamp}-${assistantEvent.contentIndex ?? 0}`;
       if (type === 'text_start') {
         await writer.write({ type: 'text-start', id: textPartId });
       } else if (type === 'text_delta' && typeof assistantEvent.delta === 'string' && assistantEvent.delta) {
         await writer.write({ type: 'text-delta', id: textPartId, delta: assistantEvent.delta });
       } else if (type === 'text_end') {
         await writer.write({ type: 'text-end', id: textPartId });
-      }
-      if (type === 'thinking_delta') {
-        // reasoning/thinking is not exposed as separate part in ghost-build UIMessage yet; ignore or map
       } else if (type === 'toolcall_start') {
         const streamed = streamedToolCall(assistantEvent);
         if (streamed) {
@@ -223,7 +192,10 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
           });
         }
       }
-    } else if (event.type === 'tool_execution_start') {
+      return;
+    }
+
+    if (event.type === 'tool_execution_start') {
       if (!completedToolInputs.has(event.toolCallId)) {
         await writer.write({
           type: 'tool-input-start',
@@ -240,151 +212,154 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         });
         completedToolInputs.add(event.toolCallId);
       }
-    } else if (event.type === 'tool_execution_update') {
-      // Partial results are transient presentation state and never enter the model transcript.
+      return;
+    }
+
+    if (event.type === 'tool_execution_update') {
       await writer.write({
         type: 'data-tool-progress',
         id: event.toolCallId,
         data: { toolCallId: event.toolCallId, toolName: event.toolName, result: event.partialResult },
         transient: true,
       });
-    } else if (event.type === 'tool_execution_end') {
+      return;
+    }
+
+    if (event.type === 'tool_execution_end') {
       const result = piToolResultDetails(event.result);
+      toolBudgetError ??= event.isError ? toolBudgetErrorFromResult(event.result) : undefined;
       currentRunToolResults.push({ toolName: event.toolName, result });
-      await writer.write(
-        event.isError
-          ? {
-              type: 'tool-output-error',
-              toolCallId: event.toolCallId,
-              errorText: piToolResultError(event.result),
-              dynamic: true,
-            }
-          : {
-              type: 'tool-output-available',
-              toolCallId: event.toolCallId,
-              output: result,
-              dynamic: true,
-            },
-      );
-      // Check validated build completion like streamText stopWhen did
-      currentValidatedBuildCompletion = getValidatedBuildCompletion(messages, currentRunToolResults);
-    } else if (event.type === 'turn_end') {
-      stepCount += 1;
-      if (currentValidatedBuildCompletion) {
-        // Pi's shouldStopAfterTurn will handle, but we also track for telemetry
-      } else if (builderTurnStepBudgetExceeded(stepCount, false)) {
-        // surface as error chunk — pi loop will throw via shouldStop
+      if (event.isError && !hasStructuredToolResult(event.result)) {
+        await writer.write({
+          type: 'tool-output-error',
+          toolCallId: event.toolCallId,
+          errorText: piToolResultError(event.result),
+          dynamic: true,
+        });
+      } else {
+        await writer.write({
+          type: 'tool-output-available',
+          toolCallId: event.toolCallId,
+          output: result,
+          dynamic: true,
+        });
       }
-    } else if (event.type === 'agent_end') {
-      // finish
+      currentValidatedBuildCompletion = getValidatedBuildCompletion(messages, currentRunToolResults);
+      return;
+    }
+
+    if (event.type === 'turn_end') {
+      stepCount += 1;
+      if (isAssistantMessage(event.message)) {
+        terminalAssistant = event.message;
+        totalUsage = addUsage(totalUsage, event.message.usage);
+      }
     }
   };
 
   const context: AgentContext = {
     systemPrompt: systemPrompts.join('\n\n'),
     messages: piMessages as unknown as AgentMessage[],
-    tools: selectPiTools(piToolsList, toolSettings),
+    tools: piToolsToList(piTools),
   };
+  const totalTimeoutSignal = AbortSignal.timeout(BUILDER_TURN_TIMEOUTS.totalMs);
+  const loopSignal = abortSignal ? AbortSignal.any([abortSignal, totalTimeoutSignal]) : totalTimeoutSignal;
 
-  // Run loop in background, writing chunks as events arrive
-  (async () => {
+  void (async () => {
     try {
       recordPiStage('loop_start', modelId);
-      const loopConfig: AgentLoopConfig & { toolChoice: AgentToolChoice } = {
+      const loopConfig: AgentLoopConfig & { toolChoice: 'auto' } = {
         model: piProvider.handle.model,
-        convertToLlm: (msgs) => msgs as unknown as Message[],
-        shouldStopAfterTurn: () => {
-          // Validation is automatic after each mutation; only the model can decide when implementation is complete.
-          // Stop here solely for the bounded agent-loop budget.
-          // Also stop on turn budget
-          if (builderTurnStepBudgetExceeded(stepCount, false)) {
-            return true;
-          }
-          return false;
+        convertToLlm: (agentMessages) => agentMessages as unknown as Message[],
+        shouldStopAfterTurn: ({ message }) => {
+          const wouldContinue = isAssistantMessage(message) && message.content.some((part) => part.type === 'toolCall');
+          stepBudgetStopped = stepCount >= BUILDER_TURN_MAX_MODEL_STEPS && wouldContinue;
+          return toolBudgetError !== undefined || stepBudgetStopped;
         },
-        prepareNextTurn: ({ context: nextContext }) => {
-          toolSettings = getWorkersAiToolSettings(messages, currentRunToolResults);
-          nextContext.tools = selectPiTools(piToolsList, toolSettings);
-          // Mutate the current context so the low-level loop retains the config getter below.
-          return undefined;
-        },
+        afterToolCall: async ({ result, isError }) =>
+          !isError && !toolResultSucceeded(result.details) ? { isError: true } : undefined,
         maxTokens: piProvider.maxTokens,
-        get toolChoice() {
-          return toolSettings.toolChoice;
-        },
-        // Timeout via abortSignal + builder budget
+        timeoutMs: BUILDER_TURN_TIMEOUTS.modelStreamMs,
+        toolChoice: 'auto',
       };
-      await runAgentLoopContinue(context, loopConfig, emit, abortSignal, piProvider.handle.stream);
+      await runAgentLoopContinue(context, loopConfig, emit, loopSignal, piProvider.handle.stream);
       recordPiStage('loop_complete', modelId);
+      stepBudgetStopped ||=
+        stepCount >= BUILDER_TURN_MAX_MODEL_STEPS &&
+        terminalAssistant?.content.some((part) => part.type === 'toolCall') === true;
 
-      // Handle budget exceeded as error
-      if (builderTurnStepBudgetExceeded(stepCount, false) && !currentValidatedBuildCompletion) {
+      if (totalTimeoutSignal.aborted && !abortSignal?.aborted) {
+        throw new BuilderTurnBudgetExceededError('total_timeout');
+      }
+      if (toolBudgetError) {
+        throw toolBudgetError;
+      }
+      if (terminalAssistant?.stopReason === 'error') {
+        if (/time(?:d out|out)/i.test(terminalAssistant.errorMessage ?? '')) {
+          throw new BuilderTurnBudgetExceededError('stream_stall');
+        }
+        throw new Error(terminalAssistant.errorMessage || 'The model request failed.');
+      }
+      if (terminalAssistant?.stopReason === 'aborted' && !abortSignal?.aborted) {
+        throw new Error(terminalAssistant.errorMessage || 'The model request was aborted.');
+      }
+      if (stepBudgetStopped && !currentValidatedBuildCompletion) {
         await writer.write({
           type: 'error',
           errorText: new BuilderTurnBudgetExceededError('model_steps').message,
-        } as unknown as UIMessageChunk);
+        });
       }
 
       recordWorkersAiFinish({
-        result: {
-          finishReason: currentValidatedBuildCompletion ? 'stop' : 'stop',
-          totalUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-        } as unknown as Parameters<typeof recordWorkersAiFinish>[0]['result'],
+        usage: totalUsage,
+        finishReason: stepBudgetStopped ? 'length' : (terminalAssistant?.stopReason ?? 'stop'),
         firstUserMessage,
         contextReduced: modelInput.contextCompacted,
         estimatedContextTokens: modelInput.estimatedTokens,
         promptCharacterCounts,
-        providerModel,
-        promptCacheAttempted: true,
+        providerModel: modelId,
         startedAt,
       });
     } catch (error) {
       recordPiStage('loop_error', modelId);
-      logProviderFailure(logger, 'Pi agent runner failed.', classifyBuilderTimeout(error) ?? (error as Error));
       const budgetError =
-        error instanceof BuilderTurnBudgetExceededError ? error : classifyBuilderTimeout(error as Error);
+        error instanceof BuilderTurnBudgetExceededError ? error : classifyBuilderTimeout(error, 'total_timeout');
+      logProviderFailure(logger, 'Pi agent runner failed.', budgetError ?? error);
       if (budgetError) {
-        await writer.write({ type: 'error', errorText: budgetError.message } as unknown as UIMessageChunk);
+        await writer.write({ type: 'error', errorText: budgetError.message });
       } else if (isWorkersAiFreeAllocationError(error)) {
-        await writer.write({ type: 'error', errorText: workersPaidRequiredMessage() } as unknown as UIMessageChunk);
+        await writer.write({ type: 'error', errorText: workersPaidRequiredMessage() });
       } else if (isCloudflareAiFundingError(error)) {
-        await writer.write({
-          type: 'error',
-          errorText: cloudflareAiFundingRequiredMessage(),
-        } as unknown as UIMessageChunk);
-      } else {
-        await writer.write({
-          type: 'error',
-          errorText: error instanceof Error ? error.message : 'An error occurred.',
-        } as unknown as UIMessageChunk);
+        await writer.write({ type: 'error', errorText: cloudflareAiFundingRequiredMessage() });
+      } else if (!abortSignal?.aborted) {
+        await writer.write({ type: 'error', errorText: 'The model request failed. Please retry.' });
       }
     } finally {
-      try {
-        await writer.close();
-      } catch {}
+      await writer.close().catch(() => undefined);
     }
   })();
 
-  // Wrap readable in UIMessageStream framing so frontend's useChat/useBuilderAgentChat still works
   const framedStream = new ReadableStream<UIMessageChunk>({
     async start(controller) {
       const reader = readable.getReader();
-      // Emit start + originalMessages framing like toUIMessageStream does
-      // Let the downstream normalize handle it; we inject a minimal start chunk
-      controller.enqueue({ type: 'start' } as unknown as UIMessageChunk);
+      controller.enqueue({ type: 'start' });
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) {
             break;
           }
-          // Pass through pi->UIMessage deltas, plus inject deterministic completion at end
           controller.enqueue(value);
         }
-        controller.enqueue({ type: 'finish', finishReason: 'stop' } as unknown as UIMessageChunk);
+        controller.enqueue({
+          type: 'finish',
+          finishReason: stepBudgetStopped || terminalAssistant?.stopReason === 'length' ? 'length' : 'stop',
+        });
         controller.close();
-      } catch (e) {
-        controller.error(e);
+      } catch (error) {
+        controller.error(error);
+      } finally {
+        reader.releaseLock();
       }
     },
   });
@@ -394,41 +369,27 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   );
 }
 
-function recordPiStage(stage: string, modelId: string): void {
-  console.info({ event: 'ghostbuild_pi_stage', stage, modelId });
-}
-
-function selectPiTools(
-  tools: AgentContext['tools'],
-  settings: ReturnType<typeof getWorkersAiToolSettings>,
-): AgentContext['tools'] {
-  const availableTools = tools ?? [];
-  if (settings.toolChoice === 'none') {
-    return [];
-  }
-  if (!settings.activeTools) {
-    return availableTools;
-  }
-  const activeToolNames = new Set<string>(settings.activeTools);
-  return availableTools.filter((tool) => activeToolNames.has(tool.name));
-}
-
-function createValidatedBuildCompletionStream(messages: Messages, text: string): ReadableStream<UIMessageChunk> {
-  return createUIMessageStream({
-    originalMessages: asOriginalMessages(messages),
-    execute: ({ writer }) => {
+function createValidatedBuildCompletionStream(text: string): ReadableStream<UIMessageChunk> {
+  return new ReadableStream({
+    start(controller) {
       const id = 'validated-build-completion';
-      writer.write({ type: 'start' });
-      writer.write({ type: 'text-start', id });
-      writer.write({ type: 'text-delta', id, delta: text });
-      writer.write({ type: 'text-end', id });
+      controller.enqueue({ type: 'start' });
+      controller.enqueue({ type: 'text-start', id });
+      controller.enqueue({ type: 'text-delta', id, delta: text });
+      controller.enqueue({ type: 'text-end', id });
+      controller.enqueue({ type: 'finish', finishReason: 'stop' });
+      controller.close();
     },
-    onError: (error) => (error instanceof Error ? error.message : 'An error occurred.'),
-  }) as ReadableStream<UIMessageChunk>;
+  });
 }
 
 function piToolResultDetails(result: unknown): unknown {
   return isRecord(result) && 'details' in result ? result.details : result;
+}
+
+function hasStructuredToolResult(result: unknown): boolean {
+  const details = piToolResultDetails(result);
+  return isRecord(details) && Object.keys(details).length > 0;
 }
 
 function piToolResultError(result: unknown): string {
@@ -445,6 +406,59 @@ function piToolResultError(result: unknown): string {
   return isRecord(details) && typeof details.summary === 'string' ? details.summary : 'Tool execution failed.';
 }
 
+function toolBudgetErrorFromResult(result: unknown): BuilderTurnBudgetExceededError | undefined {
+  if (!isRecord(result) || !Array.isArray(result.content)) {
+    return undefined;
+  }
+  const text = result.content.find(
+    (block): block is { type: 'text'; text: string } =>
+      isRecord(block) && block.type === 'text' && typeof block.text === 'string',
+  )?.text;
+  if (!text) {
+    return undefined;
+  }
+  try {
+    const payload = JSON.parse(text) as { code?: unknown; reason?: unknown };
+    return payload.code === BUILDER_TURN_BUDGET_ERROR_CODE && payload.reason === 'tool_timeout'
+      ? new BuilderTurnBudgetExceededError('tool_timeout')
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isAssistantMessage(message: AgentMessage): message is AssistantMessage {
+  return message.role === 'assistant';
+}
+
+function emptyUsage(): Usage {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+}
+
+function addUsage(total: Usage, usage: Usage): Usage {
+  return {
+    input: total.input + usage.input,
+    output: total.output + usage.output,
+    cacheRead: total.cacheRead + usage.cacheRead,
+    cacheWrite: total.cacheWrite + usage.cacheWrite,
+    totalTokens: total.totalTokens + usage.totalTokens,
+    cost: {
+      input: total.cost.input + usage.cost.input,
+      output: total.cost.output + usage.cost.output,
+      cacheRead: total.cost.cacheRead + usage.cost.cacheRead,
+      cacheWrite: total.cost.cacheWrite + usage.cost.cacheWrite,
+      total: total.cost.total + usage.cost.total,
+    },
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -456,7 +470,7 @@ function numericContentIndex(value: Record<string, unknown>): number | undefined
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
+  return isRecord(value) ? value : undefined;
 }
 
 function streamedToolCall(
@@ -477,12 +491,15 @@ function withPreparationStage<T>(stage: PiPreparationStage, operation: () => T):
 function withPreparationStage<T>(stage: PiPreparationStage, operation: () => T | Promise<T>): T | Promise<T> {
   try {
     const result = operation();
-    return result instanceof Promise
-      ? result.catch((error: unknown) => {
-          throw new PiAgentPreparationError(stage, error);
-        })
-      : result;
+    return result instanceof Promise ? result.catch((error: unknown) => rethrowPreparationError(stage, error)) : result;
   } catch (error) {
-    throw new PiAgentPreparationError(stage, error);
+    return rethrowPreparationError(stage, error);
   }
+}
+
+function rethrowPreparationError(stage: PiPreparationStage, error: unknown): never {
+  if (error instanceof ModelInputBudgetExceededError || error instanceof ContextCompactionUnavailableError) {
+    throw error;
+  }
+  throw new PiAgentPreparationError(stage, error);
 }

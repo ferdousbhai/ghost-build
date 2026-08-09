@@ -378,8 +378,9 @@ export function useBuilderAgentChat(args: {
   }, [builderAgent]);
 
   const stop = useCallback(() => {
-    chat.stop();
+    void chat.stop();
     toolActivityStore.abortActive();
+    toolProgressStore.clear();
     const cancellation = settleBuilderStop({
       cancel: () => builderAgent.call('cancelActiveTurn', [], { timeout: AGENT_CANCEL_SETTLE_TIMEOUT_MS }),
       reconcileMessages: (messages) => setMessagesRef.current(messages as UIMessage[]),
@@ -390,14 +391,14 @@ export function useBuilderAgentChat(args: {
       .then(() => undefined)
       .catch((error) => {
         logger.error('Failed to durably cancel and reconcile the active builder turn', error);
-        throw error;
+        captureMessage('Failed to process chat request', { level: 'error' });
       });
     stopBarrierRef.current = cancellation;
-    void cancellation.catch(() => undefined);
   }, [builderAgent, chat]);
 
   useEffect(() => {
     toolActivityStore.abortActive();
+    toolProgressStore.clear();
     setMessagesRef.current(initialMessagesRef.current as UIMessage[]);
     contextManager.current.reset();
   }, [currentSubchatIndex]);

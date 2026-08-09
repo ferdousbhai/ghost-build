@@ -1,21 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { cachedPromptTokens, cachedPromptTokenCount, getToolInvocation, messageText } from './ai-compat.js';
+import { getToolInvocation, messageText } from './ai-compat.js';
 
-describe('AI compatibility helpers', () => {
-  it('handles cyclic provider metadata while finding cached token usage', () => {
-    const metadata: Record<string, unknown> = {};
-    metadata.self = metadata;
-    metadata.cloudflare = { cachedPromptTokens: 42 };
-
-    expect(cachedPromptTokens(metadata)).toBe(42);
-    expect(cachedPromptTokenCount(metadata)).toBe(42);
-    expect(cachedPromptTokenCount({ cloudflare: { prompt_tokens_details: { cached_tokens: 0 } } })).toBe(0);
-    expect(cachedPromptTokenCount({ inputTokenDetails: { cacheReadTokens: 17 } })).toBe(17);
-    expect(cachedPromptTokenCount({ cloudflare: {} })).toBeUndefined();
-    expect(cachedPromptTokenCount({ first: { cacheRead: 0 }, second: { cacheRead: 7 } })).toBe(7);
-    expect(cachedPromptTokenCount({ cacheRead: -1 })).toBeUndefined();
-  });
-
+describe('chat message helpers', () => {
   it('reads message text exclusively from native parts', () => {
     expect(messageText({ parts: [{ type: 'text', text: 'hello' }] })).toBe('hello');
   });

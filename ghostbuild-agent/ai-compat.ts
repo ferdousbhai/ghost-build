@@ -1,16 +1,3 @@
-import type {
-  Message as PiMessage,
-  AssistantMessage as PiAssistantMessage,
-  TextContent as PiTextContent,
-  ToolCall as PiToolCall,
-  Usage as PiUsage,
-} from '@earendil-works/pi-ai';
-import type { AgentEvent as PiAgentEvent } from '@earendil-works/pi-agent-core';
-
-// Ghostbuild now canonicalizes on Pi harness types (mirrors workshop-backend).
-// UIMessage compatibility shim is retained during strangler for frontend hooks that still
-// consume UIMessage-shaped parts; new code should prefer PiMessage / PiAgentEvent.
-
 export type PendingDeploymentApproval = {
   id: string;
   planDigest: string;
@@ -104,9 +91,6 @@ export type GhostbuildMessage = {
   createdAt?: Date | number | string;
 };
 
-// Re-export Pi primitives for callers migrating off ai SDK
-export type { PiMessage, PiAssistantMessage, PiTextContent, PiToolCall, PiUsage, PiAgentEvent };
-
 export function messageText(message: Pick<GhostbuildMessage, 'parts'>): string {
   return message.parts
     .map((part) =>
@@ -132,65 +116,6 @@ export function createdAtMillis(message: Pick<GhostbuildMessage, 'createdAt'>): 
   return undefined;
 }
 
-export function cachedPromptTokens(metadata?: unknown): number {
-  return cachedPromptTokenCount(metadata) ?? 0;
-}
-
-export function cachedPromptTokenCount(metadata?: unknown): number | undefined {
-  return findNumericCacheRead(metadata, new WeakSet());
-}
-
-export function languageModelId(model: unknown, fallback: string): string {
-  const modelId = (model as { modelId?: unknown } | null | undefined)?.modelId;
-  return typeof modelId === 'string' && modelId.length > 0 ? modelId : fallback;
-}
-
-function findNumericCacheRead(value: unknown, seen: WeakSet<object>): number | undefined {
-  if (!value || typeof value !== 'object') {
-    return undefined;
-  }
-  if (seen.has(value)) {
-    return undefined;
-  }
-  seen.add(value);
-  const record = value as Record<string, unknown>;
-  let observedZero = false;
-  for (const key of [
-    'cachedPromptTokens',
-    'cachedInputTokens',
-    'cacheReadInputTokens',
-    'cacheReadTokens',
-    'cacheRead',
-  ]) {
-    const candidate = record[key];
-    if (isPositiveSafeInteger(candidate)) {
-      return candidate;
-    }
-    observedZero ||= candidate === 0;
-  }
-  const promptTokenDetails = record.prompt_tokens_details;
-  if (promptTokenDetails && typeof promptTokenDetails === 'object') {
-    const cachedTokens = (promptTokenDetails as Record<string, unknown>).cached_tokens;
-    if (isPositiveSafeInteger(cachedTokens)) {
-      return cachedTokens;
-    }
-    observedZero ||= cachedTokens === 0;
-  }
-  for (const candidate of Object.values(record)) {
-    const nested = findNumericCacheRead(candidate, seen);
-    if (nested !== undefined && nested > 0) {
-      return nested;
-    }
-    observedZero ||= nested === 0;
-  }
-  return observedZero ? 0 : undefined;
-}
-
-function isPositiveSafeInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
-}
-
-// Lightweight tool helpers — no longer depend on ai's isToolUIPart/getToolName
 export function isToolPart(part: GhostbuildPart): boolean {
   return typeof part.type === 'string' && (part.type.startsWith('tool-') || part.type === 'dynamic-tool');
 }
@@ -230,28 +155,6 @@ export function isToolInvocationInProgress(invocation: Pick<GhostbuildToolInvoca
     invocation.state === 'approval-requested' ||
     invocation.state === 'approval-responded'
   );
-}
-
-// Compatibility helper: convert legacy UIMessage shape (from ai) to GhostbuildMessage
-export function fromUIMessage(message: unknown): GhostbuildMessage {
-  return message as GhostbuildMessage;
-}
-
-// Pi Message -> GhostbuildMessage text helper
-export function piMessageText(piMessage: PiMessage): string {
-  if (piMessage.role === 'user' && typeof piMessage.content === 'string') {
-    return piMessage.content;
-  }
-  if ('content' in piMessage && Array.isArray((piMessage as PiAssistantMessage).content)) {
-    return ((piMessage as PiAssistantMessage).content as Array<PiTextContent | PiToolCall>)
-      .filter((b) => (b as { type: string }).type === 'text')
-      .map((b) => (b as PiTextContent).text)
-      .join('');
-  }
-  if (typeof (piMessage as { content?: unknown }).content === 'string') {
-    return (piMessage as { content: string }).content;
-  }
-  return '';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

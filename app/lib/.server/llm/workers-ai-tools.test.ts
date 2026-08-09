@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { GhostbuildMessage, GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
+import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
@@ -9,8 +9,6 @@ import {
   createTurnStatefulToolCoordinator,
   createWorkersAiTools,
   getValidatedBuildCompletion,
-  getWorkersAiToolSettings,
-  MODEL_TOOL_NAMES,
 } from './workers-ai-tools';
 
 type Tool = {
@@ -23,10 +21,7 @@ describe('minimal Workers AI tool surface', () => {
   it('keeps the reviewed Computer schemas behind four active model tools', () => {
     const tools = createWorkersAiTools(workspaceStub(), operationContext());
 
-    expect(getWorkersAiToolSettings([])).toEqual({
-      activeTools: MODEL_TOOL_NAMES,
-      toolChoice: 'auto',
-    });
+    expect(Object.keys(tools)).toEqual(['read', 'write', 'edit', 'exec']);
     expect(
       toolInputSchema(tools.read).safeParse({ path: '/home/project/package.json', offset: 1, limit: 20 }).success,
     ).toBe(true);
@@ -154,7 +149,7 @@ describe('minimal Workers AI tool surface', () => {
   });
 
   it('automatically validates write and edit mutations', async () => {
-    const validation = validationResult('prepare-deployment');
+    const validation = validationResult();
     const workspace = workspaceStub({ validation });
     const onValidationStage = vi.fn();
     const tools = createWorkersAiTools(workspace, operationContext({ onValidationStage }));
@@ -191,7 +186,7 @@ describe('minimal Workers AI tool surface', () => {
   });
 
   it('routes approved dependency commands through the durable installer and validates them', async () => {
-    const workspace = workspaceStub({ validation: validationResult('prepare-deployment') });
+    const workspace = workspaceStub({ validation: validationResult() });
     const tools = createWorkersAiTools(workspace, operationContext());
 
     const result = await executeTool(tools.exec, { command: 'pnpm add date-fns' });
@@ -253,28 +248,19 @@ describe('minimal Workers AI tool surface', () => {
     expect(
       getValidatedBuildCompletion(
         [user('Build it')],
-        [{ toolName: 'write', result: { validation: validationResult('sign-in-required') } }],
+        [{ toolName: 'write', result: { validation: validationResult() } }],
       ),
-    ).toContain('Sign in when you are ready to deploy');
+    ).toBe('Done. I built and validated the app. It is ready for the user to review and deploy.');
 
     expect(
       getValidatedBuildCompletion(
         [user('Build it')],
         [
-          { toolName: 'write', result: { validation: validationResult('prepare-deployment') } },
+          { toolName: 'write', result: { validation: validationResult() } },
           { toolName: 'edit', result: { validation: toolFailure('Build failed') } },
         ],
       ),
     ).toBeUndefined();
-  });
-
-  it('continues to recognize legacy explicit validation receipts', () => {
-    expect(
-      getValidatedBuildCompletion([
-        user('Build it'),
-        toolResult('validateProject', {}, validationResult('prepare-deployment')),
-      ]),
-    ).toBe('Done. I built and validated the app. It is ready for the user to review and deploy.');
   });
 
   it('serializes stateful work and keeps read-only work outside the queue', async () => {
@@ -292,23 +278,23 @@ describe('minimal Workers AI tool surface', () => {
       });
       events.push('write-end');
     });
-    const validation = coordinate('validateProject', async () => events.push('validation'));
+    const edit = coordinate('edit', async () => events.push('edit'));
     await expect(coordinate('read', async () => 'contents')).resolves.toBe('contents');
 
     await Promise.resolve();
     expect(events).toEqual(['write-start']);
     finishWrite?.();
-    await Promise.all([write, validation]);
-    expect(events).toEqual(['write-start', 'write-end', 'validation']);
+    await Promise.all([write, edit]);
+    expect(events).toEqual(['write-start', 'write-end', 'edit']);
     expect(keepAliveCalls).toBe(2);
   });
 });
 
-function validationResult(nextAction: 'sign-in-required' | 'prepare-deployment') {
+function validationResult() {
   return toolSuccess('validated', {
     level: 'full',
     revision: 'a'.repeat(64),
-    nextAction,
+    nextAction: 'prepare-deployment',
   });
 }
 
@@ -389,25 +375,13 @@ function workspaceStub(
       localRevision += 1;
       return toolSuccess('installed');
     }),
-    validate: vi.fn(async () => options.validation ?? validationResult('prepare-deployment')),
+    validate: vi.fn(async () => options.validation ?? validationResult()),
   };
   return workspace as unknown as BuilderWorkspaceApi;
 }
 
 function user(text: string): GhostbuildMessage {
   return { id: crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text }] };
-}
-
-function toolResult(toolName: string, input: unknown, output: unknown): GhostbuildMessage {
-  const invocation: GhostbuildToolInvocation = {
-    type: 'dynamic-tool',
-    state: 'output-available',
-    toolCallId: crypto.randomUUID(),
-    toolName,
-    input,
-    output,
-  };
-  return { id: crypto.randomUUID(), role: 'assistant', parts: [invocation] };
 }
 
 async function executeTool(definition: Tool, input: unknown, abortSignal?: AbortSignal) {

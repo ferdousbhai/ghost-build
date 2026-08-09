@@ -2,9 +2,7 @@ import { getToolInvocation, type GhostbuildMessage } from 'ghostbuild-agent/ai-c
 import {
   COMPUTER_AI_TOOL_OPTIONS,
   COMPUTER_EXEC_APPLICATION_POLICY,
-  COMPUTER_TOOL_NAMES,
   computerSyncUnconfirmedToolResult,
-  type ComputerToolName,
 } from 'ghostbuild-agent/cloudflare-computer';
 import { createAITools } from '@cloudflare/computer/tools';
 import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
@@ -16,7 +14,7 @@ import {
   lineEditToolParameters,
   type LineEditToolInput,
 } from 'ghostbuild-agent/line-edit';
-import { MODEL_TOOL_INPUT_SCHEMAS } from 'ghostbuild-agent/model-tool-inputs';
+import { MODEL_TOOL_INPUT_SCHEMAS, MODEL_TOOL_NAMES, type ModelToolName } from 'ghostbuild-agent/model-tool-inputs';
 import { parseNpmInstallCommand } from 'ghostbuild-agent/tools/npmInstall';
 import { isGhostbuildToolResult, toolFailure } from 'ghostbuild-agent/tool-result';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
@@ -29,15 +27,6 @@ type ToolSet = Record<string, Tool>;
 type BuilderOperationContext = {
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
-};
-
-export type AgentToolChoice = 'auto' | 'none' | 'required';
-export const MODEL_TOOL_NAMES = ['read', 'write', 'edit', 'exec'] as const;
-type ModelToolName = (typeof MODEL_TOOL_NAMES)[number];
-
-type AgentToolSettings = {
-  activeTools: ModelToolName[];
-  toolChoice: AgentToolChoice;
 };
 
 type ToolResultEvent = {
@@ -57,20 +46,22 @@ export function createWorkersAiTools(
   operationContext: BuilderOperationContext,
 ): GhostbuildToolSet {
   const coordinateStatefulTool = createTurnStatefulToolCoordinator(operationContext.runWithKeepAlive);
-  const computerTools = requireComputerTools(
-    createAITools({
-      workspace: workspace.computer,
-      ...COMPUTER_AI_TOOL_OPTIONS,
-    }) as unknown as ToolSet,
-  );
-  // Ghostbuild owns the model-facing read/edit protocol: reads mint compact
-  // snapshot tags and edits address numbered lines against that exact snapshot.
-  computerTools.read = lineAnchoredReadTool(workspace);
-  computerTools.edit = lineAnchoredEditTool(workspace);
-  computerTools.exec = streamingExecTool(workspace);
-  const tools = { ...computerTools } as GhostbuildToolSet;
+  const computerTools = createAITools({
+    workspace: workspace.computer,
+    ...COMPUTER_AI_TOOL_OPTIONS,
+  }) as unknown as ToolSet;
+  const write = computerTools.write;
+  if (!write) {
+    throw new Error('Cloudflare Computer did not expose the required write tool.');
+  }
+  const tools: GhostbuildToolSet = {
+    read: lineAnchoredReadTool(workspace),
+    write,
+    edit: lineAnchoredEditTool(workspace),
+    exec: streamingExecTool(workspace),
+  };
 
-  for (const toolName of COMPUTER_TOOL_NAMES) {
+  for (const toolName of MODEL_TOOL_NAMES) {
     tools[toolName] = computerWorkspaceTool(
       toolName,
       tools[toolName],
@@ -80,18 +71,6 @@ export function createWorkersAiTools(
     );
   }
   return tools;
-}
-
-function requireComputerTools(tools: ToolSet): Record<ComputerToolName, Tool> {
-  return Object.fromEntries(
-    COMPUTER_TOOL_NAMES.map((toolName) => {
-      const definition = tools[toolName];
-      if (!definition) {
-        throw new Error(`Cloudflare Computer did not expose the required ${toolName} tool.`);
-      }
-      return [toolName, definition];
-    }),
-  ) as Record<ComputerToolName, Tool>;
 }
 
 function lineAnchoredReadTool(workspace: BuilderWorkspaceApi): Tool {
@@ -176,7 +155,7 @@ function countLogicalLines(content: string): number {
 }
 
 function computerWorkspaceTool(
-  toolName: ComputerToolName,
+  toolName: ModelToolName,
   definition: Tool,
   workspace: BuilderWorkspaceApi,
   context: BuilderOperationContext,
@@ -229,7 +208,7 @@ function computerWorkspaceTool(
             dependencyMutation = true;
           } else {
             result =
-              toolName === 'read' || toolName === 'ls'
+              toolName === 'read'
                 ? await definition.execute(input, options)
                 : await workspace.executeToolOnce(options.toolCallId, toolName, input, () =>
                     definition.execute!(input, options),
@@ -252,10 +231,11 @@ function computerWorkspaceTool(
                 : { error: String(error) });
         }
 
-        if (toolName === 'read' || toolName === 'ls' || isSyncUnconfirmedResult(result)) {
+        if (toolName === 'read' || isSyncUnconfirmedResult(result)) {
           return result;
         }
-        const revisionAfter = (await workspace.refresh()).revision;
+        const revisionAfter =
+          toolName === 'exec' ? (await workspace.refresh()).revision : workspace.getState().revision;
         const mutationOccurred = dependencyMutation || revisionBefore !== revisionAfter;
         if (!mutationOccurred) {
           return result;
@@ -343,7 +323,7 @@ export function createTurnStatefulToolCoordinator(
 ): TurnStatefulToolCoordinator {
   let tail = Promise.resolve();
   return (toolName, operation) => {
-    if (toolName === 'read' || toolName === 'ls') {
+    if (toolName === 'read') {
       return operation();
     }
     const scheduled = tail.then(() => runWithKeepAlive(operation));
@@ -355,31 +335,18 @@ export function createTurnStatefulToolCoordinator(
   };
 }
 
-export function serializeWorkersAiToolDefinitions(tools: GhostbuildToolSet, activeTools?: readonly string[]): string {
-  const activeToolNames = activeTools ? new Set(activeTools) : null;
+export function serializeWorkersAiToolDefinitions(tools: GhostbuildToolSet): string {
   return JSON.stringify(
     Object.fromEntries(
-      Object.entries(tools)
-        .filter(([name]) => !activeToolNames || activeToolNames.has(name))
-        .map(([name, tool]) => [
-          name,
-          {
-            description: tool.description,
-            inputSchema: z.toJSONSchema(tool.inputSchema as ZodType),
-          },
-        ]),
+      Object.entries(tools).map(([name, tool]) => [
+        name,
+        {
+          description: tool.description,
+          inputSchema: z.toJSONSchema(tool.inputSchema as ZodType),
+        },
+      ]),
     ),
   );
-}
-
-export function getWorkersAiToolSettings(
-  _messages: GhostbuildMessage[],
-  _currentStepResults: ReadonlyArray<ToolResultEvent> = [],
-): AgentToolSettings {
-  return {
-    activeTools: [...MODEL_TOOL_NAMES],
-    toolChoice: 'auto',
-  };
 }
 
 export function getValidatedBuildCompletion(
@@ -400,9 +367,6 @@ export function getValidatedBuildCompletion(
     return undefined;
   }
 
-  if (validationNextAction(validation) === 'sign-in-required') {
-    return 'Done. I built and validated the app in the isolated production build environment, and it is ready to preview here. Sign in when you are ready to deploy it to Cloudflare production.';
-  }
   return 'Done. I built and validated the app. It is ready for the user to review and deploy.';
 }
 
@@ -410,7 +374,7 @@ function latestSuccessfulValidation(results: ReadonlyArray<ToolResultEvent>): un
   for (let index = results.length - 1; index >= 0; index -= 1) {
     const result = results[index]?.result;
     const candidate = validationResult(result);
-    if ((isRecord(result) && 'validation' in result) || results[index]?.toolName === 'validateProject') {
+    if (isRecord(result) && 'validation' in result) {
       return isSuccessfulValidationResult(candidate) ? candidate : undefined;
     }
   }
@@ -418,11 +382,7 @@ function latestSuccessfulValidation(results: ReadonlyArray<ToolResultEvent>): un
 }
 
 function validationResult(result: unknown): unknown {
-  if (isRecord(result) && 'validation' in result) {
-    return result.validation;
-  }
-  // Preserve recognition of transcripts created before automatic validation.
-  return result;
+  return isRecord(result) ? result.validation : undefined;
 }
 
 function collectToolResults(messages: GhostbuildMessage[]): Array<{
@@ -459,10 +419,8 @@ function validationRevision(result: unknown): string | undefined {
   return typeof result.data.revision === 'string' ? result.data.revision : undefined;
 }
 
-function validationNextAction(result: unknown): 'sign-in-required' | 'prepare-deployment' | undefined {
-  if (!isGhostbuildToolResult(result) || !isRecord(result.data)) {
-    return undefined;
-  }
-  const nextAction = result.data.nextAction;
-  return nextAction === 'sign-in-required' || nextAction === 'prepare-deployment' ? nextAction : undefined;
+function validationNextAction(result: unknown): 'prepare-deployment' | undefined {
+  return isGhostbuildToolResult(result) && isRecord(result.data) && result.data.nextAction === 'prepare-deployment'
+    ? 'prepare-deployment'
+    : undefined;
 }

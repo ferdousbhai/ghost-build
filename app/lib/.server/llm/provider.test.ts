@@ -3,17 +3,14 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 const getPiModel = vi.hoisted(() => vi.fn(() => ({ model: { id: 'workers-ai-model' }, stream: vi.fn() })));
 vi.mock('./pi-ai-models', () => ({ getPiModel }));
 
-import { getProvider, getPiProvider } from './provider';
+import { getPiProvider } from './provider';
 
 describe('Workers AI provider (Pi)', () => {
   beforeEach(() => vi.clearAllMocks());
 
   test('uses the connected account credential with Pi ModelHandle', () => {
     const credentials = { accountId: 'account-1', apiKey: 'oauth-token' };
-    getProvider({} as Env, credentials, '@cf/zai-org/glm-5.2', {
-      sessionAffinity: 'gb-opaque',
-      feature: 'builder-chat',
-    });
+    getPiProvider(credentials, '@cf/zai-org/glm-5.2', { sessionAffinity: 'gb-opaque' });
 
     expect(getPiModel).toHaveBeenCalledWith(
       credentials,

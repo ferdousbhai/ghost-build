@@ -1,8 +1,6 @@
 import type { TranscriptIdentity } from 'ghostbuild-agent/transcript';
 import type { WorkersAiModelId } from '~/lib/workers-ai-model';
 
-export type WorkersAiPromptCacheStatus = 'hit' | 'miss' | 'unavailable';
-
 export async function createWorkersAiSessionAffinity(
   identity: TranscriptIdentity,
   modelId: WorkersAiModelId,
@@ -15,18 +13,6 @@ export async function createWorkersAiSessionAffinity(
       modelId,
     }),
   )}`;
-}
-
-export async function fingerprintWorkersAiModelInput(input: {
-  privacySalt: string;
-  model: string;
-  instructions: unknown;
-  messages: unknown;
-  tools: unknown;
-  activeTools: unknown;
-  toolChoice: unknown;
-}): Promise<string> {
-  return sha256Hex(JSON.stringify(input));
 }
 
 async function sha256Hex(value: string): Promise<string> {

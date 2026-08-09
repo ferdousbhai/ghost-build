@@ -1,86 +1,57 @@
-import { cachedPromptTokenCount } from 'ghostbuild-agent/ai-compat';
 import type { PromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
 import type { Usage } from '@earendil-works/pi-ai';
-import type { WorkersAiPromptCacheStatus } from './workers-ai-prompt-cache';
-
-type GenerateTextEndEvent = {
-  usage: Usage & { inputTokens?: number; outputTokens?: number; totalTokens?: number };
-  finishReason: string;
-  finalStep: { providerMetadata: unknown };
-};
 
 interface FinishTelemetryOptions {
-  result: GenerateTextEndEvent;
+  usage: Usage;
+  finishReason: string;
   firstUserMessage: boolean;
   contextReduced: boolean;
   estimatedContextTokens?: number;
   promptCharacterCounts: PromptCharacterCounts;
   providerModel: string;
-  promptCacheAttempted: boolean;
   startedAt: number;
 }
 
 export function recordWorkersAiFinish(options: FinishTelemetryOptions): void {
-  const { result } = options;
-  const finalUsage = result.usage;
   const usage = {
-    outputTokens: normalizeUsage(finalUsage.outputTokens),
-    inputTokens: normalizeUsage(finalUsage.inputTokens),
-    totalTokens: normalizeUsage(finalUsage.totalTokens),
+    inputTokens: normalizeUsage(options.usage.input),
+    outputTokens: normalizeUsage(options.usage.output),
+    totalTokens: normalizeUsage(options.usage.totalTokens),
   };
-  const cache = workersAiPromptCacheTelemetry(
-    [result.usage, result.finalStep.providerMetadata],
-    options.promptCacheAttempted,
-    usage.inputTokens,
-  );
-  const event = {
+  console.info({
     event: 'workers_ai_finished',
     firstUserMessage: options.firstUserMessage,
     model: options.providerModel,
-    finishReason: result.finishReason,
+    finishReason: options.finishReason,
     usage,
     contextReduced: options.contextReduced,
     estimatedContextTokens: options.estimatedContextTokens,
     promptCharacterCounts: options.promptCharacterCounts,
     durationMs: Date.now() - options.startedAt,
-    promptCache: cache,
-  };
-  console.info(event);
+    promptCache: workersAiPromptCacheTelemetry(options.usage, usage.inputTokens),
+  });
 }
 
 export function workersAiPromptCacheTelemetry(
-  usageAndProviderMetadata: unknown,
-  attempted: boolean,
+  usage: Usage,
   inputTokens: number,
 ): {
-  attempted: boolean;
-  status: WorkersAiPromptCacheStatus;
+  attempted: true;
+  status: 'hit' | 'miss';
   cachedInputTokens: number;
 } {
-  const normalizedInputTokens = normalizeUsage(inputTokens);
-  if (!attempted) {
-    return {
-      attempted: false,
-      status: 'unavailable',
-      cachedInputTokens: 0,
-    };
-  }
-  const reportedCachedTokens = cachedPromptTokenCount(usageAndProviderMetadata);
-  const cachedInputTokens = Math.min(normalizedInputTokens, reportedCachedTokens ?? 0);
-  const status: WorkersAiPromptCacheStatus =
-    reportedCachedTokens === undefined ? 'unavailable' : cachedInputTokens > 0 ? 'hit' : 'miss';
+  const cachedInputTokens = Math.min(normalizeUsage(inputTokens), normalizeUsage(usage.cacheRead));
   return {
-    attempted,
-    status,
+    attempted: true,
+    status: cachedInputTokens > 0 ? 'hit' : 'miss',
     cachedInputTokens,
   };
 }
 
 export function recordFirstWorkersAiResponse(startedAt: number): void {
-  const timeToFirstResponse = Date.now() - startedAt;
   console.info({
     event: 'workers_ai_first_response',
-    timeToFirstResponseMs: timeToFirstResponse,
+    timeToFirstResponseMs: Date.now() - startedAt,
     platform: 'Cloudflare AI',
   });
 }

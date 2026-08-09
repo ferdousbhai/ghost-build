@@ -44,7 +44,7 @@ describe('cleanupAssistantMessages', () => {
     ]);
   });
 
-  it('keeps output-error and output-denied typed through model conversion', async () => {
+  it('keeps failed tool output typed through model conversion', async () => {
     const messages = await cleanupAssistantMessages([
       assistantToolMessage({
         type: 'tool-read',
@@ -52,13 +52,6 @@ describe('cleanupAssistantMessages', () => {
         state: 'output-error',
         input: { path: '/home/project/missing.ts' },
         errorText: 'File not found',
-      }),
-      assistantToolMessage({
-        type: 'tool-exec',
-        toolCallId: 'exec-denied',
-        state: 'output-denied',
-        input: { command: 'dangerous' },
-        approval: { id: 'approval-1', approved: false, reason: 'User denied execution' },
       }),
     ]);
 
@@ -73,23 +66,45 @@ describe('cleanupAssistantMessages', () => {
         },
       ],
     });
-    expect(messages).toContainEqual({
-      role: 'tool',
-      content: [
-        {
-          type: 'tool-approval-response',
-          approvalId: 'approval-1',
-          approved: false,
-          reason: 'User denied execution',
-        },
-        {
-          type: 'tool-result',
-          toolCallId: 'exec-denied',
-          toolName: 'exec',
-          output: { type: 'error-text', value: 'User denied execution' },
-        },
-      ],
-    });
+  });
+
+  it('preserves tool-result ordering before later assistant text', async () => {
+    const messages = await cleanupAssistantMessages([
+      {
+        id: 'assistant-ordered',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-read',
+            toolCallId: 'read-ordered',
+            state: 'output-available',
+            input: { path: '/home/project/package.json' },
+            output: toolSuccess('Read package.json'),
+          },
+          { type: 'text', text: 'Now I can answer.' },
+        ],
+      },
+    ]);
+
+    expect(messages.map((message) => message.role)).toEqual(['assistant', 'tool', 'assistant']);
+    expect(messages.at(-1)).toEqual({ role: 'assistant', content: [{ type: 'text', text: 'Now I can answer.' }] });
+  });
+
+  it('removes every hidden reasoning block before the transcript returns to the model', async () => {
+    const messages = await cleanupAssistantMessages([
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'text',
+            text: '<think>private one</think>Visible<div class="__ghostbuildThought__">private two</div> answer',
+          },
+        ],
+      },
+    ]);
+
+    expect(messages).toEqual([{ role: 'assistant', content: [{ type: 'text', text: 'Visible answer' }] }]);
   });
 });
 

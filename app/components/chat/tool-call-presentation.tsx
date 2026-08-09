@@ -1,41 +1,20 @@
 import type { ReactNode } from 'react';
 import { CheckIcon, CircleIcon, Cross2Icon, FileIcon, Pencil1Icon } from '@radix-ui/react-icons';
-import { FolderIcon } from '@heroicons/react/24/outline';
-import type { ZodError, ZodType } from 'zod';
 import { Spinner } from '@ui/Spinner';
 import type { ToolActivityStatus } from '~/lib/common/types';
 import { classNames } from '~/utils/classNames';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
-import { deployToolParameters } from 'ghostbuild-agent/tools/deploy';
-import { lookupDocsParameters } from 'ghostbuild-agent/tools/lookupDocs';
-import { npmInstallToolParameters } from 'ghostbuild-agent/tools/npmInstall';
 import { getRelativePath } from 'ghostbuild-agent/utils/workDir';
-import { loggingSafeParse } from 'ghostbuild-agent/utils/zodUtil';
-import { validateProjectParameters } from 'ghostbuild-agent/tools/validateProject';
-import type { GhostbuildToolName } from 'ghostbuild-agent/types';
 import { MODEL_TOOL_INPUT_SCHEMAS } from 'ghostbuild-agent/model-tool-inputs';
-import {
-  isGhostbuildToolResult,
-  toolFailure,
-  toolResultSucceeded,
-  toolResultSummary,
-} from 'ghostbuild-agent/tool-result';
+import { toolFailure, toolResultSucceeded } from 'ghostbuild-agent/tool-result';
 
-const {
-  edit: editSchema,
-  exec: execSchema,
-  ls: pathSchema,
-  read: readSchema,
-  write: writeSchema,
-} = MODEL_TOOL_INPUT_SCHEMAS;
-
-const ghostbuildIcon = (
-  <span aria-hidden className="mr-1 text-base leading-none">
-    👻
-  </span>
-);
-
-const validationIcon = <FileIcon className="mr-1 size-4 text-content-secondary" />;
+const MAX_TOOL_TITLE_VALUE_CHARACTERS = 160;
+const STOPPED_TOOL_TITLES: Record<string, string> = {
+  read: 'File read stopped',
+  write: 'File write stopped',
+  edit: 'File edit stopped',
+  exec: 'Command stopped',
+};
 
 const emptyInvocation: GhostbuildToolInvocation = {
   type: 'dynamic-tool',
@@ -45,40 +24,15 @@ const emptyInvocation: GhostbuildToolInvocation = {
   input: {},
 };
 
-const TOOL_INPUT_SCHEMAS: Record<string, ZodType> = {
-  deploy: deployToolParameters,
-  ...MODEL_TOOL_INPUT_SCHEMAS,
-  lookupDocs: lookupDocsParameters,
-  npmInstall: npmInstallToolParameters,
-  validateProject: validateProjectParameters,
-};
-
-const MAX_TOOL_TITLE_VALUE_CHARACTERS = 160;
-
-const STOPPED_TOOL_TITLES: Record<string, string> = {
-  deploy: 'Deployment stopped',
-  edit: 'File edit stopped',
-  exec: 'Command stopped',
-  lookupDocs: 'Documentation lookup stopped',
-  ls: 'File listing stopped',
-  npmInstall: 'Dependency install stopped',
-  read: 'File read stopped',
-  validateProject: 'Project validation stopped',
-  write: 'File write stopped',
-};
-
 export function normalizeToolInvocation(invocation: GhostbuildToolInvocation | undefined): GhostbuildToolInvocation {
-  if (!invocation) {
-    return emptyInvocation;
+  if (!invocation || invocation.state !== 'output-available' || isErrorResult(invocation)) {
+    return invocation ?? emptyInvocation;
   }
-  if (invocation.state !== 'output-available' || isErrorResult(invocation)) {
-    return invocation;
-  }
-  const error = toolArgumentError(invocation);
-  if (error) {
-    return { ...invocation, output: toolFailure(`Could not parse arguments: ${error.message}`) };
-  }
-  return invocation;
+  const schema = MODEL_TOOL_INPUT_SCHEMAS[invocation.toolName as keyof typeof MODEL_TOOL_INPUT_SCHEMAS];
+  const parsed = schema?.safeParse(invocation.input);
+  return parsed?.success === false
+    ? { ...invocation, output: toolFailure(`Could not parse arguments: ${parsed.error.message}`) }
+    : invocation;
 }
 
 export function statusIcon(status: ToolActivityStatus, invocation: GhostbuildToolInvocation): ReactNode {
@@ -94,43 +48,23 @@ export function statusIcon(status: ToolActivityStatus, invocation: GhostbuildToo
       return icon(<CheckIcon />, 'text-bolt-elements-icon-success');
     case 'aborted':
       return icon(<Cross2Icon />, 'text-content-secondary');
-    default:
-      return null;
   }
+  return null;
 }
 
 export function toolTitle(invocation: GhostbuildToolInvocation, status: ToolActivityStatus): ReactNode {
   if (status === 'aborted') {
-    const title = STOPPED_TOOL_TITLES[invocation.toolName as GhostbuildToolName] ?? 'Tool stopped';
-    return titleRow(title, invocation.toolName === 'validateProject' ? validationIcon : undefined);
+    return STOPPED_TOOL_TITLES[invocation.toolName] ?? 'Tool stopped';
   }
-  const resultText = toolInvocationResultSummary(invocation);
   switch (invocation.toolName) {
     case 'read':
       return readTitle(invocation, status);
-    case 'npmInstall':
-      return packageTitle(invocation);
-    case 'deploy':
-      return deployTitle(invocation, resultText);
-    case 'edit':
-      return editTitle(invocation, status);
     case 'write':
       return writeTitle(invocation);
-    case 'lookupDocs': {
-      const args = loggingSafeParse(lookupDocsParameters, invocation.input);
-      return args.success
-        ? titleRow(`Looked up documentation for: ${args.data.docs.join(', ')}`, <FileIcon />)
-        : 'Looking up documentation...';
-    }
-    case 'ls': {
-      const args = loggingSafeParse(pathSchema, invocation.input);
-      return titleRow(
-        `Listed ${args.success ? compactToolLabel(getRelativePath(args.data.path) || '/home/project') : 'project files'}`,
-        <FolderIcon className="size-4" />,
-      );
-    }
+    case 'edit':
+      return editTitle(invocation, status);
     case 'exec': {
-      const args = loggingSafeParse(execSchema, invocation.input);
+      const args = MODEL_TOOL_INPUT_SCHEMAS.exec.safeParse(invocation.input);
       return titleRow(
         args.success
           ? `${status === 'running' ? 'Running' : 'Ran'} ${compactToolLabel(args.data.command)}`
@@ -140,27 +74,9 @@ export function toolTitle(invocation: GhostbuildToolInvocation, status: ToolActi
         <FileIcon />,
       );
     }
-    case 'validateProject':
-      return titleRow(
-        isToolInvocationInProgress(invocation)
-          ? 'Validating the project...'
-          : isErrorResult(invocation)
-            ? 'Project validation failed'
-            : 'Project validation passed',
-        validationIcon,
-      );
     default:
       return invocation.toolName;
   }
-}
-
-function toolArgumentError(invocation: GhostbuildToolInvocation): ZodError | null {
-  const schema = TOOL_INPUT_SCHEMAS[invocation.toolName as GhostbuildToolName];
-  if (!schema) {
-    return null;
-  }
-  const result = loggingSafeParse(schema, invocation.input);
-  return result.success ? null : result.error;
 }
 
 function icon(content: ReactNode, color: string): ReactNode {
@@ -175,16 +91,6 @@ function isErrorResult(invocation: GhostbuildToolInvocation): boolean {
   );
 }
 
-function toolInvocationResultSummary(invocation: GhostbuildToolInvocation): string {
-  if (invocation.state === 'output-error') {
-    return invocation.errorText ?? 'Tool execution failed.';
-  }
-  if (invocation.state === 'output-denied') {
-    return invocation.approval?.reason ?? 'Tool execution was denied.';
-  }
-  return invocation.state === 'output-available' ? toolResultSummary(invocation.output) : '';
-}
-
 function titleRow(children: ReactNode, iconContent?: ReactNode): ReactNode {
   return (
     <div className="flex items-center gap-2">
@@ -195,61 +101,17 @@ function titleRow(children: ReactNode, iconContent?: ReactNode): ReactNode {
 }
 
 function readTitle(invocation: GhostbuildToolInvocation, status: ToolActivityStatus): ReactNode {
-  const args = loggingSafeParse(readSchema, invocation.input);
+  const args = MODEL_TOOL_INPUT_SCHEMAS.read.safeParse(invocation.input);
   const renderedPath = args.success ? compactToolLabel(getRelativePath(args.data.path) || '/home/project') : 'a file';
   const extra = args.success && args.data.offset ? ` (from line ${args.data.offset})` : '';
   return titleRow(
     `${status === 'running' ? 'Reading' : 'Read'} ${renderedPath}${extra}`,
-    <div className="text-content-secondary">
-      <FileIcon />
-    </div>,
+    <FileIcon className="text-content-secondary" />,
   );
-}
-
-function packageTitle(invocation: GhostbuildToolInvocation): ReactNode {
-  if (isToolInvocationInProgress(invocation)) {
-    return 'Installing dependencies...';
-  }
-  if (isErrorResult(invocation)) {
-    return 'Failed to install dependencies';
-  }
-  const args = loggingSafeParse(npmInstallToolParameters, invocation.input);
-  return args.success ? (
-    <span className="font-mono text-sm">
-      {args.data.mode === 'sync-lockfile' ? 'pnpm install --lockfile-only' : `pnpm add ${args.data.packages}`}
-    </span>
-  ) : (
-    'Failed to install dependencies'
-  );
-}
-
-function deployTitle(invocation: GhostbuildToolInvocation, resultText: string): ReactNode {
-  if (isToolInvocationInProgress(invocation)) {
-    return titleRow('Checking the project...', validationIcon);
-  }
-  if (isErrorResult(invocation)) {
-    if (/preview|render|vite|server rendering|smoke/i.test(resultText)) {
-      return titleRow('Preview validation failed', ghostbuildIcon);
-    }
-    if (/typecheck|tsc|verify:stack|generate-routes|cf-typegen/i.test(resultText)) {
-      return titleRow('App verification failed', validationIcon);
-    }
-    return titleRow('Cloudflare deploy failed');
-  }
-  const state =
-    invocation.state === 'output-available' &&
-    isGhostbuildToolResult(invocation.output) &&
-    typeof invocation.output.data === 'object' &&
-    invocation.output.data
-      ? (invocation.output.data as { state?: unknown }).state
-      : undefined;
-  return state === 'awaiting-approval' || resultText.includes('Deployment plan ready for your approval')
-    ? titleRow('Deployment ready for approval', ghostbuildIcon)
-    : titleRow('Deployed Cloudflare Worker', ghostbuildIcon);
 }
 
 function editTitle(invocation: GhostbuildToolInvocation, status: ToolActivityStatus): ReactNode {
-  const args = loggingSafeParse(editSchema, invocation.input);
+  const args = MODEL_TOOL_INPUT_SCHEMAS.edit.safeParse(invocation.input);
   return titleRow(
     `${status === 'running' ? 'Editing' : 'Edited'} ${args.success ? compactToolLabel(getRelativePath(args.data.path) || args.data.path) : 'a file'}`,
     <Pencil1Icon className="text-content-secondary" />,
@@ -260,7 +122,7 @@ function writeTitle(invocation: GhostbuildToolInvocation): ReactNode {
   if (isToolInvocationInProgress(invocation)) {
     return titleRow('Writing a file...', <FileIcon className="text-content-secondary" />);
   }
-  const args = writeSchema.safeParse(invocation.input);
+  const args = MODEL_TOOL_INPUT_SCHEMAS.write.safeParse(invocation.input);
   return titleRow(
     `Wrote ${args.success ? compactToolLabel(getRelativePath(args.data.path) || args.data.path) : 'a file'}`,
     <FileIcon className="text-content-secondary" />,

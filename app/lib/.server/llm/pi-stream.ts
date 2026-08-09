@@ -1,4 +1,5 @@
-// Pi-native stream chunk — replaces ai:UIMessageChunk
+import { createUIMessageStreamResponse, type UIMessageChunk } from 'ai';
+
 export type PiStreamChunk =
   | { type: 'text-start'; id: string }
   | { type: 'text-delta'; id: string; delta: string }
@@ -25,4 +26,3 @@ export function createPiStreamResponse(stream: ReadableStream<PiStreamChunk>): R
     stream: stream as ReadableStream<UIMessageChunk>,
   });
 }
-import { createUIMessageStreamResponse, type UIMessageChunk } from 'ai';
