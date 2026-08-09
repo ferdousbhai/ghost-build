@@ -9,6 +9,14 @@ import {
 import { createAITools } from '@cloudflare/computer/tools';
 import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
 import { isVirtualDocPath, readVirtualDoc } from 'ghostbuild-agent/virtual-docs';
+import {
+  applyLineEdits,
+  lineAnchoredRead,
+  lineEditBaseTag,
+  lineEditToolParameters,
+  type LineEditToolInput,
+} from 'ghostbuild-agent/line-edit';
+import { MODEL_TOOL_INPUT_SCHEMAS } from 'ghostbuild-agent/model-tool-inputs';
 import { parseNpmInstallCommand } from 'ghostbuild-agent/tools/npmInstall';
 import { isGhostbuildToolResult, toolFailure } from 'ghostbuild-agent/tool-result';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
@@ -55,6 +63,11 @@ export function createWorkersAiTools(
       ...COMPUTER_AI_TOOL_OPTIONS,
     }) as unknown as ToolSet,
   );
+  // Ghostbuild owns the model-facing read/edit protocol: reads mint compact
+  // snapshot tags and edits address numbered lines against that exact snapshot.
+  computerTools.read = lineAnchoredReadTool(workspace);
+  computerTools.edit = lineAnchoredEditTool(workspace);
+  computerTools.exec = streamingExecTool(workspace);
   const tools = { ...computerTools } as GhostbuildToolSet;
 
   for (const toolName of COMPUTER_TOOL_NAMES) {
@@ -79,6 +92,87 @@ function requireComputerTools(tools: ToolSet): Record<ComputerToolName, Tool> {
       return [toolName, definition];
     }),
   ) as Record<ComputerToolName, Tool>;
+}
+
+function lineAnchoredReadTool(workspace: BuilderWorkspaceApi): Tool {
+  return {
+    description:
+      'Read a UTF-8 project file as numbered lines. Returns a compact base snapshot tag required by edit. Output is bounded; use offset and limit to continue.',
+    inputSchema: MODEL_TOOL_INPUT_SCHEMAS.read,
+    execute: async (input) => {
+      const parsed = input as { path: string; offset?: number; limit?: number };
+      const file = await workspace.readText(parsed.path);
+      return lineAnchoredRead({
+        path: file.path,
+        content: file.content,
+        sha256: file.sha256,
+        offset: parsed.offset,
+        limit: parsed.limit,
+        maxLines: COMPUTER_AI_TOOL_OPTIONS.read.maxLines,
+        maxBytes: COMPUTER_AI_TOOL_OPTIONS.read.maxBytes,
+      });
+    },
+  };
+}
+
+function streamingExecTool(workspace: BuilderWorkspaceApi): Tool {
+  return {
+    description: 'Run a shell command in the project workspace using its Cloudflare Container.',
+    inputSchema: MODEL_TOOL_INPUT_SCHEMAS.exec,
+    execute: async (input, options) => {
+      const parsed = input as { command: string; cwd?: string; backend?: string };
+      const result = await workspace.executeCommand({
+        command: parsed.command,
+        cwd: parsed.cwd,
+        backend: parsed.backend,
+        onUpdate: options.onUpdate,
+        abortSignal: options.abortSignal,
+      });
+      return {
+        command: parsed.command,
+        cwd: parsed.cwd ?? null,
+        backend: parsed.backend ?? 'container-shell',
+        ...result,
+        ...(result.exitCode === 0 ? {} : { error: `Command exited with code ${result.exitCode}.` }),
+      };
+    },
+  };
+}
+
+function lineAnchoredEditTool(workspace: BuilderWorkspaceApi): Tool {
+  return {
+    description:
+      'Edit one existing file by replacing numbered original line ranges or inserting after an original line. The base tag must come from the latest read or successful edit. All operations address the same original snapshot and must not overlap.',
+    inputSchema: lineEditToolParameters,
+    execute: async (input) => {
+      const parsed = lineEditToolParameters.parse(input) as LineEditToolInput;
+      const before = await workspace.readText(parsed.path);
+      const liveBase = lineEditBaseTag(before.sha256);
+      if (parsed.base !== liveBase) {
+        throw new Error(
+          `Edit rejected because ${parsed.path} changed after it was read. Read the file again and use its current base tag.`,
+        );
+      }
+      const applied = applyLineEdits(before.content, parsed.edits);
+      await workspace.computer.fs.writeFile(parsed.path, new TextEncoder().encode(applied.content));
+      const after = await workspace.readText(parsed.path);
+      return {
+        path: after.path,
+        base: lineEditBaseTag(after.sha256),
+        editsApplied: applied.editsApplied,
+        firstChangedLine: applied.firstChangedLine,
+        totalLines: countLogicalLines(after.content),
+      };
+    },
+  };
+}
+
+function countLogicalLines(content: string): number {
+  if (content.length === 0) {
+    return 0;
+  }
+  const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  return normalized.endsWith('\n') ? normalized.slice(0, -1).split('\n').length : normalized.split('\n').length;
 }
 
 function computerWorkspaceTool(

@@ -311,6 +311,42 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     expect(stub.failToolOperation).not.toHaveBeenCalled();
   });
 
+  it('streams command progress while preserving the bounded final result', async () => {
+    const encoder = new TextEncoder();
+    const events = [
+      { type: 'output', channel: 'stdout', chunk: 'building\n' },
+      { type: 'output', channel: 'stderr', chunk: 'warning\n' },
+      {
+        type: 'result',
+        streamTruncated: false,
+        result: { exitCode: 0, stdout: 'building\n', stderr: 'warning\n' },
+      },
+    ];
+    const onUpdate = vi.fn();
+    const { client, stub } = harness((operation) =>
+      operation === 'executeStream'
+        ? new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode(events.map((event) => JSON.stringify(event)).join('\n') + '\n'));
+              controller.close();
+            },
+          })
+        : undefined,
+    );
+
+    await expect(
+      client.executeCommand({ command: 'pnpm test', backend: 'container-shell', onUpdate }),
+    ).resolves.toEqual({ exitCode: 0, stdout: 'building\n', stderr: 'warning\n' });
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ command: 'pnpm test', stdout: 'building\n', running: true }),
+    );
+    expect(stub.executeStream).toHaveBeenCalledWith({
+      command: 'pnpm test',
+      cwd: undefined,
+      backend: 'container-shell',
+    });
+  });
+
   it('uses RPC-native bytes and streams and performs no internal HTTP fetch', async () => {
     const bytes = new Uint8Array([0, 1, 2, 255]);
     const stream = new Blob([bytes]).stream();
@@ -418,6 +454,8 @@ function harness(respond: (operation: string, value: unknown) => unknown, userId
     cancelValidation: method('cancelValidation'),
     readWorkspaceFile: method('readWorkspaceFile'),
     streamWorkspaceFile: method('streamWorkspaceFile'),
+    executeStream: method('executeStream'),
+    cancelExecution: method('cancelExecution'),
   };
   const namespace = {
     idFromName: vi.fn(() => ({ id: 'project-do-id' })),

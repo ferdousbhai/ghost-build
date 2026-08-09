@@ -36,7 +36,8 @@ describe('minimal Workers AI tool surface', () => {
     expect(
       toolInputSchema(tools.edit).safeParse({
         path: '/home/project/app.ts',
-        edits: [{ oldText: 'before', newText: 'after' }],
+        base: 'A'.repeat(24),
+        edits: [{ startLine: 1, endLine: 1, content: 'after' }],
       }).success,
     ).toBe(true);
     expect(toolInputSchema(tools.exec).safeParse({ command: 'rg TODO', backend: 'container-shell' }).success).toBe(
@@ -66,6 +67,57 @@ describe('minimal Workers AI tool surface', () => {
     expect(workspace.validate).not.toHaveBeenCalled();
   });
 
+  it('returns numbered project lines and the snapshot tag required by edit', async () => {
+    const workspace = workspaceStub({ files: { '/home/project/src/app.ts': 'one\ntwo\nthree\n' } });
+    const tools = createWorkersAiTools(workspace, operationContext());
+
+    await expect(
+      executeTool(tools.read, { path: '/home/project/src/app.ts', offset: 2, limit: 1 }),
+    ).resolves.toMatchObject({
+      path: '/home/project/src/app.ts',
+      base: expect.stringMatching(/^[A-F0-9]{24}$/),
+      content: '2:two',
+      startLine: 2,
+      endLine: 2,
+      totalLines: 3,
+      nextOffset: 3,
+    });
+  });
+
+  it('rejects stale line edits and validates an exact-snapshot edit', async () => {
+    const path = '/home/project/src/app.ts';
+    const workspace = workspaceStub({ files: { [path]: 'one\ntwo\nthree\n' } });
+    const tools = createWorkersAiTools(workspace, operationContext());
+    const read = (await executeTool(tools.read, { path })) as { base: string };
+
+    await expect(
+      executeTool(tools.edit, {
+        path,
+        base: 'F'.repeat(24),
+        edits: [{ startLine: 2, endLine: 2, content: 'stale' }],
+      }),
+    ).resolves.toMatchObject({ error: expect.stringContaining('changed after it was read') });
+    expect(workspace.validate).not.toHaveBeenCalled();
+
+    await expect(
+      executeTool(tools.edit, {
+        path,
+        base: read.base,
+        edits: [
+          { startLine: 2, endLine: 2, content: 'TWO' },
+          { afterLine: 3, content: 'four' },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      base: expect.stringMatching(/^[A-F0-9]{24}$/),
+      editsApplied: 2,
+      firstChangedLine: 2,
+      totalLines: 4,
+      validation: { ok: true },
+    });
+    await expect(workspace.readText(path)).resolves.toMatchObject({ content: 'one\nTWO\nthree\nfour\n' });
+  });
+
   it('does not validate read-only exec commands', async () => {
     const runtimeExec = vi.fn(async () => ({
       result: async () => ({ exitCode: 0, stdout: 'src\n', stderr: '' }),
@@ -83,6 +135,22 @@ describe('minimal Workers AI tool surface', () => {
       backend: 'container-shell',
     });
     expect(workspace.validate).not.toHaveBeenCalled();
+  });
+
+  it('preserves command output while marking a non-zero exit as a tool failure', async () => {
+    const workspace = workspaceStub({
+      runtimeExec: vi.fn(async () => ({
+        result: async () => ({ exitCode: 2, stdout: 'tests ran\n', stderr: 'failed\n' }),
+      })),
+    });
+    const tools = createWorkersAiTools(workspace, operationContext());
+
+    await expect(executeTool(tools.exec, { command: 'pnpm test' })).resolves.toMatchObject({
+      exitCode: 2,
+      stdout: 'tests ran\n',
+      stderr: 'failed\n',
+      error: 'Command exited with code 2.',
+    });
   });
 
   it('automatically validates write and edit mutations', async () => {
@@ -261,11 +329,13 @@ function workspaceStub(
     ) => Promise<{ result(): Promise<{ exitCode: number; stdout: string; stderr: string }> }>;
     validation?: unknown;
     revision?: () => number;
+    files?: Record<string, string>;
   } = {},
 ): BuilderWorkspaceApi {
   const runtimeExec =
     options.runtimeExec ?? vi.fn(async () => ({ result: async () => ({ exitCode: 0, stdout: '', stderr: '' }) }));
   let localRevision = 1;
+  const files = new Map(Object.entries(options.files ?? {}));
   const revision = options.revision ?? (() => localRevision);
   const state = () => ({
     initialized: true,
@@ -280,7 +350,8 @@ function workspaceStub(
       fs: {
         stat: vi.fn(async () => ({ size: 0, mtime: 0, mode: 0, isFile: true, isDirectory: false })),
         readFile: vi.fn(),
-        writeFile: vi.fn(async () => {
+        writeFile: vi.fn(async (path: string, content: Uint8Array) => {
+          files.set(path, new TextDecoder().decode(content));
           localRevision += 1;
         }),
         mkdir: vi.fn(),
@@ -291,6 +362,28 @@ function workspaceStub(
     },
     refresh: vi.fn(async () => state()),
     getState: vi.fn(() => state()),
+    readText: vi.fn(async (path: string) => {
+      const content = files.get(path);
+      if (content === undefined) {
+        throw new Error(`File not found: ${path}`);
+      }
+      return {
+        path,
+        content,
+        encoding: 'utf8' as const,
+        size: new TextEncoder().encode(content).byteLength,
+        sha256: await sha256(content),
+        revision: revision(),
+      };
+    }),
+    executeCommand: vi.fn(async (args) => {
+      const handle = await runtimeExec(args.command, {
+        cwd: args.cwd,
+        encoding: 'utf8',
+        backend: args.backend ?? 'container-shell',
+      });
+      return handle.result();
+    }),
     executeToolOnce: vi.fn(async (_toolCallId, _toolName, _input, execute) => execute()),
     installDependencies: vi.fn(async () => {
       localRevision += 1;
@@ -326,4 +419,9 @@ async function executeTool(definition: Tool, input: unknown, abortSignal?: Abort
 
 function toolInputSchema(definition: Tool): ZodType {
   return definition.inputSchema as ZodType;
+}
+
+async function sha256(value: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }

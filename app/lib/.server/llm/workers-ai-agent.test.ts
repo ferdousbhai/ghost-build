@@ -192,6 +192,64 @@ describe('workersAiAgent turn budgets (Pi)', () => {
     );
   });
 
+  it('streams Pi tool arguments and transient execution progress before the final result', async () => {
+    const call = { type: 'toolCall', id: 'exec-1', name: 'exec', arguments: {} };
+    mocks.piRun.mockImplementation(async (_ctx: unknown, _cfg: unknown, emit: (event: unknown) => Promise<void>) => {
+      const message = { timestamp: 123 };
+      await emit({
+        type: 'message_update',
+        message,
+        assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0, partial: { content: [call] } },
+      });
+      await emit({
+        type: 'message_update',
+        message,
+        assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 0, delta: '{"command":"pnpm test"}' },
+      });
+      await emit({
+        type: 'message_update',
+        message,
+        assistantMessageEvent: {
+          type: 'toolcall_end',
+          contentIndex: 0,
+          toolCall: { ...call, arguments: { command: 'pnpm test' } },
+        },
+      });
+      await emit({
+        type: 'tool_execution_start',
+        toolCallId: 'exec-1',
+        toolName: 'exec',
+        args: { command: 'pnpm test' },
+      });
+      await emit({
+        type: 'tool_execution_update',
+        toolCallId: 'exec-1',
+        toolName: 'exec',
+        args: { command: 'pnpm test' },
+        partialResult: { details: { stdout: 'building\n' } },
+      });
+    });
+
+    const chunks = await collectChunks(await createAgentStream());
+
+    expect(chunks.filter((chunk) => chunk.type === 'tool-input-start')).toHaveLength(1);
+    expect(chunks).toEqual(
+      expect.arrayContaining([
+        { type: 'tool-input-delta', toolCallId: 'exec-1', inputTextDelta: '{"command":"pnpm test"}' },
+        expect.objectContaining({
+          type: 'tool-input-available',
+          toolCallId: 'exec-1',
+          input: { command: 'pnpm test' },
+        }),
+        expect.objectContaining({
+          type: 'data-tool-progress',
+          id: 'exec-1',
+          transient: true,
+        }),
+      ]),
+    );
+  });
+
   it('preserves Pi text part boundaries in the chat stream', async () => {
     mocks.piRun.mockImplementation(async (_ctx: unknown, _cfg: unknown, emit: (event: unknown) => Promise<void>) => {
       const message = { timestamp: 123 };

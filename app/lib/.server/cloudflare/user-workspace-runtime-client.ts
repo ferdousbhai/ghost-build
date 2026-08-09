@@ -162,6 +162,104 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     return this.#stub().then((stub) => stub.checkpoint());
   }
 
+  async executeCommand(args: {
+    command: string;
+    cwd?: string;
+    backend?: string;
+    onUpdate?: (partialResult: unknown) => void;
+    abortSignal?: AbortSignal;
+  }): Promise<{ exitCode: number; stdout: string; stderr: string; streamTruncated?: boolean }> {
+    args.abortSignal?.throwIfAborted();
+    const stub = await this.#stub();
+    const operationKey = this.#activeTool ? `tool:${this.#activeTool.toolCallId}` : undefined;
+    const stream = await stub.executeStream({
+      command: args.command,
+      cwd: args.cwd,
+      backend: args.backend,
+      ...(operationKey ? { operationKey } : {}),
+    });
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let stdout = '';
+    let stderr = '';
+    let finalResult: { exitCode: number; stdout: string; stderr: string; streamTruncated?: boolean } | undefined;
+    let updateTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastUpdateAt = 0;
+    const emitUpdate = () => {
+      updateTimer = undefined;
+      lastUpdateAt = Date.now();
+      args.onUpdate?.({
+        command: args.command,
+        cwd: args.cwd ?? null,
+        backend: args.backend ?? 'container-shell',
+        stdout,
+        stderr,
+        running: true,
+      });
+    };
+    const scheduleUpdate = () => {
+      if (!args.onUpdate) {
+        return;
+      }
+      const delay = 100 - (Date.now() - lastUpdateAt);
+      if (delay <= 0) {
+        emitUpdate();
+      } else {
+        updateTimer ??= setTimeout(emitUpdate, delay);
+      }
+    };
+    const cancel = () => {
+      if (operationKey) {
+        void stub.cancelExecution({ operationKey }).catch(() => undefined);
+      }
+    };
+    args.abortSignal?.addEventListener('abort', cancel, { once: true });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        let newline = buffer.indexOf('\n');
+        while (newline !== -1) {
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          if (line) {
+            const event = JSON.parse(line) as unknown;
+            if (isCommandOutputEvent(event)) {
+              if (event.channel === 'stdout') {
+                stdout = appendOutputTail(stdout, event.chunk);
+              } else {
+                stderr = appendOutputTail(stderr, event.chunk);
+              }
+              scheduleUpdate();
+            } else if (isCommandResultEvent(event)) {
+              finalResult = {
+                exitCode: event.result.exitCode,
+                stdout: event.result.stdout,
+                stderr: event.result.stderr,
+                ...(event.streamTruncated ? { streamTruncated: true } : {}),
+              };
+            }
+          }
+          newline = buffer.indexOf('\n');
+        }
+      }
+      if (!finalResult) {
+        throw new Error('The command stream ended without a final result.');
+      }
+      return finalResult;
+    } finally {
+      if (updateTimer) {
+        clearTimeout(updateTimer);
+      }
+      args.abortSignal?.removeEventListener('abort', cancel);
+      reader.releaseLock();
+    }
+  }
+
   async executeToolOnce<T>(toolCallIdValue: unknown, toolName: string, args: unknown, execute: () => Promise<T>) {
     const toolCallId = requireToolCallId(toolCallIdValue);
     const argsJson = JSON.stringify(stableValue(args));
@@ -294,7 +392,11 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       }
       try {
         const completed = await stub.completeToolOperation({ toolCallId, result });
-        return (isComputerToolError(result) && isCompletedMutationReceipt(completed) ? completed : result) as T;
+        const committedFileMutation =
+          (toolName === 'write' || toolName === 'edit') &&
+          isComputerToolError(result) &&
+          isCompletedMutationReceipt(completed);
+        return (committedFileMutation ? completed : result) as T;
       } catch (error) {
         if (toolName !== 'write' && toolName !== 'edit') {
           throw error;
@@ -388,6 +490,49 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     await stub.initializeProjectIdentity({ projectId: this.projectId, userId });
     return stub;
   }
+}
+
+const COMMAND_UPDATE_TAIL_CHARACTERS = 64 * 1024;
+
+type CommandOutputEvent = { type: 'output'; channel: 'stdout' | 'stderr'; chunk: string };
+type CommandResultEvent = {
+  type: 'result';
+  streamTruncated: boolean;
+  result: { exitCode: number; stdout: string; stderr: string };
+};
+
+function isCommandOutputEvent(value: unknown): value is CommandOutputEvent {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const event = value as Record<string, unknown>;
+  return (
+    event.type === 'output' &&
+    (event.channel === 'stdout' || event.channel === 'stderr') &&
+    typeof event.chunk === 'string'
+  );
+}
+
+function isCommandResultEvent(value: unknown): value is CommandResultEvent {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const event = value as Record<string, unknown>;
+  if (event.type !== 'result' || !event.result || typeof event.result !== 'object') {
+    return false;
+  }
+  const result = event.result as Record<string, unknown>;
+  return (
+    typeof event.streamTruncated === 'boolean' &&
+    typeof result.exitCode === 'number' &&
+    typeof result.stdout === 'string' &&
+    typeof result.stderr === 'string'
+  );
+}
+
+function appendOutputTail(current: string, chunk: string): string {
+  const next = `${current}${chunk}`;
+  return next.length <= COMMAND_UPDATE_TAIL_CHARACTERS ? next : next.slice(-COMMAND_UPDATE_TAIL_CHARACTERS);
 }
 
 function isPendingMutationReceipt(value: unknown): boolean {

@@ -35,15 +35,35 @@ describe('Pi tool adapter', () => {
 
     expect(mocks.execute).toHaveBeenCalledWith(
       { path: '/home/project/src/app.ts', content: 'export {};' },
-      { toolCallId: 'write-1', abortSignal: signal },
+      { toolCallId: 'write-1', abortSignal: signal, onUpdate: undefined },
     );
+  });
+
+  it('forwards canonical progress through Pi partial tool results', async () => {
+    mocks.execute.mockImplementationOnce(async (_input, options) => {
+      options.onUpdate?.({ stdout: 'building\n', running: true });
+      return { exitCode: 0, stdout: 'done\n', stderr: '' };
+    });
+    const tools = createPiTools({} as never, operationContext());
+    const onUpdate = vi.fn();
+
+    await tools.exec!.execute('exec-1', { command: 'pnpm test' }, undefined, onUpdate);
+
+    expect(onUpdate).toHaveBeenCalledWith({
+      content: [{ type: 'text', text: JSON.stringify({ stdout: 'building\n', running: true }) }],
+      details: { stdout: 'building\n', running: true },
+    });
   });
 
   it('publishes only the four minimal model tools with exact argument contracts', () => {
     const tools = createPiTools({} as never, operationContext());
 
     expect(Object.keys(tools)).toEqual(['read', 'write', 'edit', 'exec']);
-    expect(Object.keys((tools.edit!.parameters as { properties: object }).properties)).toEqual(['path', 'edits']);
+    expect(Object.keys((tools.edit!.parameters as { properties: object }).properties)).toEqual([
+      'path',
+      'base',
+      'edits',
+    ]);
     expect(Object.keys((tools.exec!.parameters as { properties: object }).properties)).toEqual([
       'command',
       'cwd',

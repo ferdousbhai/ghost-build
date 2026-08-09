@@ -7,6 +7,7 @@ import type { GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { makePartId } from 'ghostbuild-agent/partId';
 import { toolSuccess } from 'ghostbuild-agent/tool-result';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
+import { toolProgressStore } from '~/lib/stores/tool-progress.client';
 import { ToolCall } from './ToolCall';
 
 describe('ToolCall', () => {
@@ -21,6 +22,7 @@ describe('ToolCall', () => {
     root = createRoot(container);
     toolActivityStore.activities.set({});
     toolActivityStore.startTurn();
+    toolProgressStore.clear();
   });
 
   it.each([
@@ -49,6 +51,28 @@ describe('ToolCall', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     document.body.replaceChildren();
+  });
+
+  it('shows streamed command arguments and output while execution is active', async () => {
+    const invocation: GhostbuildToolInvocation = {
+      type: 'dynamic-tool',
+      state: 'input-available',
+      toolCallId: 'exec-1',
+      toolName: 'exec',
+      input: { command: 'pnpm test' },
+    };
+    toolProgressStore.record({
+      toolCallId: 'exec-1',
+      toolName: 'exec',
+      result: { details: { stdout: 'building\n', running: true } },
+    });
+
+    await act(async () => root.render(<ToolCall partId={makePartId('message-1', 0)} invocation={invocation} />));
+
+    expect(container.querySelector('button')?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain('Running pnpm test');
+    expect(container.textContent).toContain('$ pnpm test');
+    expect(container.textContent).toContain('building');
   });
 
   it('expands valid tool-result markup through its single header control', async () => {

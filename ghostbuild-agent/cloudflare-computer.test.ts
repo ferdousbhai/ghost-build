@@ -13,7 +13,6 @@ import {
   COMPUTER_TOOL_NAMES,
   computerSyncUnconfirmedToolResult,
 } from './cloudflare-computer.js';
-import { COMPUTER_TOOL_INPUT_SCHEMAS } from './cloudflare-computer-inputs.js';
 
 const EXPECTED_TOOL_SCHEMA = {
   edit: { properties: ['edits', 'path'], required: ['path', 'edits'] },
@@ -61,24 +60,12 @@ describe('Cloudflare Computer preview contract', () => {
     expect(Object.keys(tools).sort()).toEqual([...COMPUTER_TOOL_NAMES].sort());
     for (const [toolName, expected] of Object.entries(EXPECTED_TOOL_SCHEMA)) {
       const schema = jsonSchema(requireTool(tools[toolName], toolName));
-      const presentationSchema = schemaJson(
-        COMPUTER_TOOL_INPUT_SCHEMAS[toolName as keyof typeof COMPUTER_TOOL_INPUT_SCHEMAS],
-      );
       expect(Object.keys(schema.properties ?? {}).sort(), toolName).toEqual([...expected.properties].sort());
       expect(schema.required, toolName).toEqual(expected.required);
-      expect(Object.keys(presentationSchema.properties ?? {}).sort(), `${toolName} presentation`).toEqual(
-        [...expected.properties].sort(),
-      );
-      expect(presentationSchema.required, `${toolName} presentation`).toEqual(expected.required);
-      expect(withoutDescriptions(presentationSchema), `${toolName} presentation contract`).toEqual(
-        withoutDescriptions(schema),
-      );
     }
 
     const execSchema = jsonSchema(requireTool(tools.exec, 'exec'));
-    const presentationExecSchema = schemaJson(COMPUTER_TOOL_INPUT_SCHEMAS.exec);
     expect(execSchema.properties?.backend?.enum).toEqual(COMPUTER_SHELL_BACKEND_IDS);
-    expect(presentationExecSchema.properties?.backend?.enum).toEqual(COMPUTER_SHELL_BACKEND_IDS);
   });
 
   it('keeps backend selection explicit and inspection-only mode non-executable', () => {
@@ -139,18 +126,4 @@ function jsonFile<T>(path: string): T {
 
 function textFile(path: string): string {
   return readFileSync(new URL(path, import.meta.url), 'utf8');
-}
-
-function withoutDescriptions(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(withoutDescriptions);
-  }
-  if (!value || typeof value !== 'object') {
-    return value;
-  }
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([key]) => key !== 'description')
-      .map(([key, entry]) => [key, withoutDescriptions(entry)]),
-  );
 }

@@ -79,16 +79,20 @@ stores files directly in the Durable Object's SQLite VFS. Its container backend 
 Container through FUSE and reconciles changes back to the VFS. There is no application-level ZIP archive, R2 backup, or
 duplicate project blob in the control plane.
 
-The model receives only four primitive tools: `read`, `write`, `edit`, and `exec`. They adapt the reviewed
-`@cloudflare/computer/tools` contracts; `ls` remains an internal Computer capability and directory discovery goes through
-`exec`. `read` also exposes immutable bundled guidance under `/home/project/.ghost/docs/` without adding those files to
+The model receives only four primitive tools: `read`, `write`, `edit`, and `exec`. `write` and `exec` adapt the reviewed
+`@cloudflare/computer/tools` contracts; Ghostbuild's `read` returns numbered lines with a compact tag bound to the full
+file SHA-256, and `edit` applies non-overlapping line operations only when that exact snapshot is still current. `ls`
+remains an internal Computer capability and directory discovery goes through `exec`. `read` also exposes immutable
+bundled guidance under `/home/project/.ghost/docs/` without adding those files to
 the project revision or deployment artifact. Model tools and editor reads use the same workspace API. Browser saves use
 compare-and-swap against the numeric revision the browser loaded; a conflict refreshes from the user runtime and never
 overwrites newer state. TanStack DB collections combine the server query collection with a per-account browser SQLite
 persistence layer. That local data is a performance and offline-start replica, not an authority.
 
-Approved `pnpm add <packages>` and `pnpm install --lockfile-only` commands sent through `exec` route to the reviewed
-dependency installer rather than an unrestricted package-manager shell. Every source or dependency mutation runs full
+Tool-call arguments stream to the browser as the model produces them. `exec` additionally streams bounded transient
+stdout/stderr updates while retaining only a bounded final tail for the model; completion still waits for the Container's
+filesystem pull to become durable. Approved `pnpm add <packages>` and `pnpm install --lockfile-only` commands route to
+the reviewed dependency installer rather than an unrestricted package-manager shell. Every source or dependency mutation runs full
 validation automatically and returns the revision-bound receipt with the primitive tool result. Production deployment
 is not a model capability: an authenticated user command verifies the current receipt, prepares the exact-revision plan,
 and then enters the explicit billing approval flow. Preview and deployment operate on checkpoints from the same VFS, so

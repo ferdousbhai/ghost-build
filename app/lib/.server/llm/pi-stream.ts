@@ -4,9 +4,16 @@ export type PiStreamChunk =
   | { type: 'text-delta'; id: string; delta: string }
   | { type: 'text-end'; id: string }
   | { type: 'tool-input-start'; toolCallId: string; toolName: string; dynamic?: boolean }
+  | { type: 'tool-input-delta'; toolCallId: string; inputTextDelta: string }
   | { type: 'tool-input-available'; toolCallId: string; toolName: string; input: unknown; dynamic?: boolean }
   | { type: 'tool-output-available'; toolCallId: string; output: unknown; dynamic?: boolean }
   | { type: 'tool-output-error'; toolCallId: string; errorText: string; dynamic?: boolean }
+  | {
+      type: 'data-tool-progress';
+      id: string;
+      data: { toolCallId: string; toolName: string; result: unknown };
+      transient: true;
+    }
   | { type: 'finish'; finishReason: 'stop' | 'error' | 'tool-calls' | 'length' }
   | { type: 'error'; errorText: string }
   | { type: 'data-deployment-approval'; data: unknown }

@@ -161,6 +161,8 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   // protocol during strangler, while LLM loop is fully Pi (runAgentLoopContinue).
   let currentValidatedBuildCompletion: string | undefined;
   const currentRunToolResults: Array<{ toolName: string; result: unknown }> = [];
+  const streamedToolCalls = new Map<number, { toolCallId: string; toolName: string }>();
+  const completedToolInputs = new Set<string>();
   let stepCount = 0;
 
   const { readable, writable } = new TransformStream<UIMessageChunk, UIMessageChunk>();
@@ -185,20 +187,66 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       }
       if (type === 'thinking_delta') {
         // reasoning/thinking is not exposed as separate part in ghost-build UIMessage yet; ignore or map
+      } else if (type === 'toolcall_start') {
+        const streamed = streamedToolCall(assistantEvent);
+        if (streamed) {
+          streamedToolCalls.set(streamed.contentIndex, streamed);
+          await writer.write({
+            type: 'tool-input-start',
+            toolCallId: streamed.toolCallId,
+            toolName: streamed.toolName,
+            dynamic: true,
+          });
+        }
+      } else if (type === 'toolcall_delta' && typeof assistantEvent.delta === 'string') {
+        const contentIndex = numericContentIndex(assistantEvent);
+        const streamed = contentIndex === undefined ? undefined : streamedToolCalls.get(contentIndex);
+        if (streamed) {
+          await writer.write({
+            type: 'tool-input-delta',
+            toolCallId: streamed.toolCallId,
+            inputTextDelta: assistantEvent.delta,
+          });
+        }
+      } else if (type === 'toolcall_end') {
+        const toolCall = recordValue(assistantEvent.toolCall);
+        const toolCallId = typeof toolCall?.id === 'string' ? toolCall.id : undefined;
+        const toolName = typeof toolCall?.name === 'string' ? toolCall.name : undefined;
+        if (toolCall && toolCallId && toolName) {
+          completedToolInputs.add(toolCallId);
+          await writer.write({
+            type: 'tool-input-available',
+            toolCallId,
+            toolName,
+            input: toolCall.arguments,
+            dynamic: true,
+          });
+        }
       }
     } else if (event.type === 'tool_execution_start') {
+      if (!completedToolInputs.has(event.toolCallId)) {
+        await writer.write({
+          type: 'tool-input-start',
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          dynamic: true,
+        });
+        await writer.write({
+          type: 'tool-input-available',
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          input: event.args,
+          dynamic: true,
+        });
+        completedToolInputs.add(event.toolCallId);
+      }
+    } else if (event.type === 'tool_execution_update') {
+      // Partial results are transient presentation state and never enter the model transcript.
       await writer.write({
-        type: 'tool-input-start',
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        dynamic: true,
-      });
-      await writer.write({
-        type: 'tool-input-available',
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        input: event.args,
-        dynamic: true,
+        type: 'data-tool-progress',
+        id: event.toolCallId,
+        data: { toolCallId: event.toolCallId, toolName: event.toolName, result: event.partialResult },
+        transient: true,
       });
     } else if (event.type === 'tool_execution_end') {
       const result = piToolResultDetails(event.result);
@@ -399,6 +447,29 @@ function piToolResultError(result: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function numericContentIndex(value: Record<string, unknown>): number | undefined {
+  return typeof value.contentIndex === 'number' && Number.isInteger(value.contentIndex)
+    ? value.contentIndex
+    : undefined;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
+}
+
+function streamedToolCall(
+  event: Record<string, unknown>,
+): { contentIndex: number; toolCallId: string; toolName: string } | undefined {
+  const contentIndex = numericContentIndex(event);
+  const partial = recordValue(event.partial);
+  const content = Array.isArray(partial?.content) ? partial.content : [];
+  const call = contentIndex === undefined ? undefined : recordValue(content[contentIndex]);
+  if (contentIndex === undefined || typeof call?.id !== 'string' || typeof call.name !== 'string') {
+    return undefined;
+  }
+  return { contentIndex, toolCallId: call.id, toolName: call.name };
 }
 
 function withPreparationStage<T>(stage: PiPreparationStage, operation: () => Promise<T>): Promise<T>;

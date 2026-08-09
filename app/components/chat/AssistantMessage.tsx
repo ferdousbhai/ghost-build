@@ -17,7 +17,7 @@ interface AssistantMessageProps {
   isStreaming?: boolean;
 }
 
-export const AssistantMessage = memo(function AssistantMessage({ message, isStreaming }: AssistantMessageProps) {
+export const AssistantMessage = memo(function AssistantMessage({ message }: AssistantMessageProps) {
   if (!message.parts) {
     return (
       <div className="w-full overflow-hidden">
@@ -30,30 +30,17 @@ export const AssistantMessage = memo(function AssistantMessage({ message, isStre
     <div className="w-full overflow-hidden text-sm">
       <div className="flex flex-col gap-2">
         {message.parts.map((part, index) => (
-          <AssistantMessagePart
-            key={index}
-            part={part}
-            partId={makePartId(message.id, index)}
-            hideToolCalls={isStreaming === true}
-          />
+          <AssistantMessagePart key={index} part={part} partId={makePartId(message.id, index)} />
         ))}
       </div>
     </div>
   );
 });
 
-function AssistantMessagePart({
-  part,
-  partId,
-  hideToolCalls,
-}: {
-  part: GhostbuildPart;
-  partId: PartId;
-  hideToolCalls: boolean;
-}) {
+function AssistantMessagePart({ part, partId }: { part: GhostbuildPart; partId: PartId }) {
   const toolInvocation = getToolInvocation(part);
   if (toolInvocation) {
-    return hideToolCalls ? null : <ToolCall partId={partId} invocation={toolInvocation} />;
+    return <ToolCall partId={partId} invocation={toolInvocation} />;
   }
 
   if (part.type === 'text') {

@@ -50,6 +50,8 @@ export interface ProjectWorkspaceRpc extends Rpc.DurableObjectBranded {
   readDirectory(path: unknown): Promise<Array<{ name: string; isFile: boolean; isDirectory: boolean }>>;
   makeDirectory(path: unknown): Promise<void>;
   execute(value: unknown): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  executeStream(value: unknown): Promise<ReadableStream<Uint8Array>>;
+  cancelExecution(value: unknown): Promise<void>;
   checkpoint(): Promise<BuilderWorkspaceCheckpoint>;
   installDependenciesTool(value: unknown): Promise<GhostbuildToolResult>;
   validateTool(value: unknown): Promise<GhostbuildToolResult>;
@@ -109,6 +111,13 @@ export interface BuilderWorkspaceApi {
   }>;
   listFiles(): BuilderWorkspaceFileMetadata[];
   checkpoint(): Promise<BuilderWorkspaceCheckpoint>;
+  executeCommand(args: {
+    command: string;
+    cwd?: string;
+    backend?: string;
+    onUpdate?: (partialResult: unknown) => void;
+    abortSignal?: AbortSignal;
+  }): Promise<{ exitCode: number; stdout: string; stderr: string; streamTruncated?: boolean }>;
   executeToolOnce<T>(toolCallId: unknown, toolName: string, args: unknown, execute: () => Promise<T>): Promise<T>;
   installDependencies(args: {
     toolCallId: string;

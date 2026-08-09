@@ -323,6 +323,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   readonly #activeOperationOwners = new Set<string>();
   #activeValidation: ActiveValidation | null = null;
   readonly #activeSyncRecoveries = new Map<string, Promise<boolean>>();
+  readonly #activeCommandKills = new Map<string, () => Promise<void>>();
   #containerKeepAliveOperations = 0;
 
   constructor(ctx: DurableObjectState<{}>, env: RuntimeEnv) {
@@ -1012,6 +1013,81 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   }
 
   async execute(value: unknown): Promise<WorkspaceRuntimeResult<'utf8'>> {
+    const request = await this.commandRequest(value);
+    return this.withStatefulOperation('exec', request.operationKey, () =>
+      this.withComputer((workspace) =>
+        runCommand(workspace, request.command, {
+          cwd: request.cwd,
+          backend: request.backend,
+          timeoutMs: 5 * 60_000,
+          ...(request.toolCallId
+            ? {
+                onSyncPending: (result: WorkspaceRuntimeResult<'utf8'>) => {
+                  this.recordPendingCommand(request, result);
+                },
+              }
+            : {}),
+        }),
+      ),
+    );
+  }
+
+  async executeStream(value: unknown): Promise<ReadableStream<Uint8Array>> {
+    const request = await this.commandRequest(value);
+    const encoder = new TextEncoder();
+    let cancelCommand: (() => Promise<void>) | undefined;
+    let cancelled = false;
+    return new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        void this.withStatefulOperation('exec', request.operationKey, () =>
+          this.withComputer((workspace) =>
+            streamCommand(workspace, request.command, {
+              cwd: request.cwd,
+              backend: request.backend,
+              timeoutMs: 5 * 60_000,
+              emit: (event) => {
+                if (!cancelled) {
+                  controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+                }
+              },
+              onHandle: (kill) => {
+                cancelCommand = kill;
+                this.#activeCommandKills.set(request.operationKey, kill);
+              },
+              onSyncPending: request.toolCallId
+                ? (result) => {
+                    this.recordPendingCommand(request, result);
+                  }
+                : undefined,
+            }),
+          ),
+        )
+          .then(
+            () => {
+              if (!cancelled) controller.close();
+            },
+            (error) => {
+              if (!cancelled) controller.error(error);
+            },
+          )
+          .finally(() => {
+            this.#activeCommandKills.delete(request.operationKey);
+          });
+      },
+      cancel: async () => {
+        cancelled = true;
+        await cancelCommand?.();
+      },
+    });
+  }
+
+  async cancelExecution(value: unknown): Promise<void> {
+    const input = record(value);
+    const operationKey = requireString(input.operationKey, 'operationKey', 512);
+    await this.#activeCommandKills.get(operationKey)?.();
+  }
+
+  private async commandRequest(value: unknown) {
     const input = record(value);
     const command = requireString(input.command, 'command', 64 * 1024);
     const cwd = input.cwd === undefined ? PROJECT_ROOT : requireProjectPath(input.cwd, true);
@@ -1020,34 +1096,34 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       typeof input.operationKey === 'string'
         ? requireString(input.operationKey, 'operationKey', 512)
         : `exec:${await sha256Text(JSON.stringify([command, cwd, backend]))}`;
-    const toolCallId = operationKey.startsWith('tool:') ? operationKey.slice('tool:'.length) : null;
-    return this.withStatefulOperation('exec', operationKey, () =>
-      this.withComputer((workspace) =>
-        runCommand(workspace, command, {
-          cwd,
-          backend,
-          timeoutMs: 5 * 60_000,
-          ...(toolCallId
-            ? {
-                onSyncPending: (result: WorkspaceRuntimeResult<'utf8'>) => {
-                  this.registerPendingCommand({
-                    backend,
-                    toolCallId,
-                    result: {
-                      command,
-                      cwd,
-                      backend,
-                      exitCode: result.exitCode,
-                      stdout: result.stdout,
-                      stderr: result.stderr,
-                    },
-                  });
-                },
-              }
-            : {}),
-        }),
-      ),
-    );
+    return {
+      command,
+      cwd,
+      backend,
+      operationKey,
+      toolCallId: operationKey.startsWith('tool:') ? operationKey.slice('tool:'.length) : null,
+    };
+  }
+
+  private recordPendingCommand(
+    request: Awaited<ReturnType<ProjectWorkspace['commandRequest']>>,
+    result: WorkspaceRuntimeResult<'utf8'>,
+  ): void {
+    if (!request.toolCallId) {
+      return;
+    }
+    this.registerPendingCommand({
+      backend: request.backend,
+      toolCallId: request.toolCallId,
+      result: {
+        command: request.command,
+        cwd: request.cwd,
+        backend: request.backend,
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr,
+      },
+    });
   }
 
   async checkpoint() {
@@ -2419,6 +2495,142 @@ async function writeWorkspaceFile(
   const slash = path.lastIndexOf('/');
   await workspace.fs.mkdir(path.slice(0, slash) || '/', { recursive: true });
   await workspace.fs.writeFile(path, bytes, mode === undefined ? undefined : { mode });
+}
+
+const EXEC_STREAM_MAX_LIVE_BYTES = 1024 * 1024;
+const EXEC_STREAM_RESULT_BYTES_PER_CHANNEL = 64 * 1024;
+
+type StreamCommandEvent =
+  | { type: 'output'; channel: 'stdout' | 'stderr'; chunk: string }
+  | { type: 'result'; result: WorkspaceRuntimeResult<'utf8'>; streamTruncated: boolean };
+
+async function streamCommand(
+  workspace: WorkspaceClient,
+  command: string,
+  options: {
+    cwd: string;
+    backend: 'container-shell';
+    timeoutMs: number;
+    emit: (event: StreamCommandEvent) => void;
+    onHandle?: (kill: () => Promise<void>) => void;
+    onSyncPending?: (result: WorkspaceRuntimeResult<'utf8'>) => void;
+  },
+): Promise<WorkspaceRuntimeResult<'utf8'>> {
+  const handle = await workspace.runtime.exec(command, {
+    cwd: options.cwd,
+    backend: options.backend,
+    encoding: 'utf8',
+    timeoutMs: options.timeoutMs,
+  });
+  options.onHandle?.(() => handle.kill('SIGTERM'));
+  let stdout = '';
+  let stderr = '';
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  let exitCode = -1;
+  let liveBytes = 0;
+  let streamTruncated = false;
+  try {
+    try {
+      for await (const event of handle) {
+        if (event.name === 'exit') {
+          exitCode = event.value;
+          continue;
+        }
+        if (event.name !== 'stdout' && event.name !== 'stderr') {
+          continue;
+        }
+        const chunk = event.value;
+        const chunkBytes = new TextEncoder().encode(chunk).byteLength;
+        if (event.name === 'stdout') {
+          stdoutBytes += chunkBytes;
+          stdout = appendUtf8Tail(stdout, chunk, EXEC_STREAM_RESULT_BYTES_PER_CHANNEL);
+        } else {
+          stderrBytes += chunkBytes;
+          stderr = appendUtf8Tail(stderr, chunk, EXEC_STREAM_RESULT_BYTES_PER_CHANNEL);
+        }
+        streamTruncated ||=
+          stdoutBytes > EXEC_STREAM_RESULT_BYTES_PER_CHANNEL || stderrBytes > EXEC_STREAM_RESULT_BYTES_PER_CHANNEL;
+        if (liveBytes < EXEC_STREAM_MAX_LIVE_BYTES) {
+          const available = EXEC_STREAM_MAX_LIVE_BYTES - liveBytes;
+          const streamedChunk = truncateUtf8Head(chunk, available);
+          if (streamedChunk) {
+            options.emit({ type: 'output', channel: event.name, chunk: streamedChunk });
+            liveBytes += new TextEncoder().encode(streamedChunk).byteLength;
+          }
+          streamTruncated ||= chunkBytes > available;
+        } else {
+          streamTruncated = true;
+        }
+      }
+    } catch (error) {
+      const pending: WorkspaceRuntimeResult<'utf8'> = {
+        status: 'failed',
+        exitCode,
+        stdout,
+        stderr,
+        pushed: 0,
+        pulled: 0,
+        skipped: [],
+        sync: {
+          status: 'pending',
+          applied: 0,
+          skipped: [],
+          error: error instanceof Error ? error.message : String(error),
+        },
+      };
+      options.onSyncPending?.(pending);
+      return requireDurableCommandResult(pending, options.backend);
+    }
+
+    const result: WorkspaceRuntimeResult<'utf8'> = {
+      status: exitCode === 0 ? 'completed' : 'failed',
+      exitCode,
+      stdout,
+      stderr,
+      pushed: 0,
+      pulled: 0,
+      skipped: [],
+      sync: { status: 'complete', applied: 0, skipped: [] },
+    };
+    options.emit({ type: 'result', result, streamTruncated });
+    return result;
+  } finally {
+    const id = handle.id;
+    handle[Symbol.dispose]();
+    await workspace.runtime.disposeExec(id, { backend: options.backend }).catch(() => undefined);
+  }
+}
+
+function appendUtf8Tail(current: string, chunk: string, maxBytes: number): string {
+  const bytes = new TextEncoder().encode(`${current}${chunk}`);
+  if (bytes.byteLength <= maxBytes) {
+    return `${current}${chunk}`;
+  }
+  let start = bytes.byteLength - maxBytes;
+  while (start < bytes.byteLength && isUtf8ContinuationByte(bytes[start]!)) {
+    start += 1;
+  }
+  return new TextDecoder().decode(bytes.slice(start));
+}
+
+function truncateUtf8Head(value: string, maxBytes: number): string {
+  if (maxBytes <= 0) {
+    return '';
+  }
+  const bytes = new TextEncoder().encode(value);
+  if (bytes.byteLength <= maxBytes) {
+    return value;
+  }
+  let end = maxBytes;
+  while (end > 0 && isUtf8ContinuationByte(bytes[end]!)) {
+    end -= 1;
+  }
+  return new TextDecoder().decode(bytes.slice(0, end));
+}
+
+function isUtf8ContinuationByte(value: number): boolean {
+  return (value & 0xc0) === 0x80;
 }
 
 async function runCommand(

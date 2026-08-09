@@ -13,7 +13,7 @@ import { getRelativePath } from 'ghostbuild-agent/utils/workDir';
 import { loggingSafeParse } from 'ghostbuild-agent/utils/zodUtil';
 import { validateProjectParameters } from 'ghostbuild-agent/tools/validateProject';
 import type { GhostbuildToolName } from 'ghostbuild-agent/types';
-import { COMPUTER_TOOL_INPUT_SCHEMAS } from 'ghostbuild-agent/cloudflare-computer-inputs';
+import { MODEL_TOOL_INPUT_SCHEMAS } from 'ghostbuild-agent/model-tool-inputs';
 import {
   isGhostbuildToolResult,
   toolFailure,
@@ -27,7 +27,7 @@ const {
   ls: pathSchema,
   read: readSchema,
   write: writeSchema,
-} = COMPUTER_TOOL_INPUT_SCHEMAS;
+} = MODEL_TOOL_INPUT_SCHEMAS;
 
 const ghostbuildIcon = (
   <span aria-hidden className="mr-1 text-base leading-none">
@@ -47,7 +47,7 @@ const emptyInvocation: GhostbuildToolInvocation = {
 
 const TOOL_INPUT_SCHEMAS: Record<string, ZodType> = {
   deploy: deployToolParameters,
-  ...COMPUTER_TOOL_INPUT_SCHEMAS,
+  ...MODEL_TOOL_INPUT_SCHEMAS,
   lookupDocs: lookupDocsParameters,
   npmInstall: npmInstallToolParameters,
   validateProject: validateProjectParameters,
@@ -107,13 +107,13 @@ export function toolTitle(invocation: GhostbuildToolInvocation, status: ToolActi
   const resultText = toolInvocationResultSummary(invocation);
   switch (invocation.toolName) {
     case 'read':
-      return readTitle(invocation);
+      return readTitle(invocation, status);
     case 'npmInstall':
       return packageTitle(invocation);
     case 'deploy':
       return deployTitle(invocation, resultText);
     case 'edit':
-      return editTitle(invocation);
+      return editTitle(invocation, status);
     case 'write':
       return writeTitle(invocation);
     case 'lookupDocs': {
@@ -132,7 +132,11 @@ export function toolTitle(invocation: GhostbuildToolInvocation, status: ToolActi
     case 'exec': {
       const args = loggingSafeParse(execSchema, invocation.input);
       return titleRow(
-        args.success ? `Ran ${compactToolLabel(args.data.command)}` : 'Ran a workspace command',
+        args.success
+          ? `${status === 'running' ? 'Running' : 'Ran'} ${compactToolLabel(args.data.command)}`
+          : status === 'running'
+            ? 'Running a workspace command'
+            : 'Ran a workspace command',
         <FileIcon />,
       );
     }
@@ -190,12 +194,12 @@ function titleRow(children: ReactNode, iconContent?: ReactNode): ReactNode {
   );
 }
 
-function readTitle(invocation: GhostbuildToolInvocation): ReactNode {
+function readTitle(invocation: GhostbuildToolInvocation, status: ToolActivityStatus): ReactNode {
   const args = loggingSafeParse(readSchema, invocation.input);
   const renderedPath = args.success ? compactToolLabel(getRelativePath(args.data.path) || '/home/project') : 'a file';
   const extra = args.success && args.data.offset ? ` (from line ${args.data.offset})` : '';
   return titleRow(
-    `Read ${renderedPath}${extra}`,
+    `${status === 'running' ? 'Reading' : 'Read'} ${renderedPath}${extra}`,
     <div className="text-content-secondary">
       <FileIcon />
     </div>,
@@ -244,10 +248,10 @@ function deployTitle(invocation: GhostbuildToolInvocation, resultText: string): 
     : titleRow('Deployed Cloudflare Worker', ghostbuildIcon);
 }
 
-function editTitle(invocation: GhostbuildToolInvocation): ReactNode {
+function editTitle(invocation: GhostbuildToolInvocation, status: ToolActivityStatus): ReactNode {
   const args = loggingSafeParse(editSchema, invocation.input);
   return titleRow(
-    `Edited ${args.success ? compactToolLabel(getRelativePath(args.data.path) || args.data.path) : 'a file'}`,
+    `${status === 'running' ? 'Editing' : 'Edited'} ${args.success ? compactToolLabel(getRelativePath(args.data.path) || args.data.path) : 'a file'}`,
     <Pencil1Icon className="text-content-secondary" />,
   );
 }

@@ -29,6 +29,7 @@ import {
 } from 'ghostbuild-agent/transcript';
 import { BuilderWorkspaceSyncController } from '~/lib/stores/builder-workspace-sync.client';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
+import { toolProgressStore } from '~/lib/stores/tool-progress.client';
 import { useQueryClient } from '@tanstack/react-query';
 import { subchatQueryKey } from '~/lib/cloudflare/data-hooks';
 import { settleBuilderStop } from './builder-stop';
@@ -143,11 +144,25 @@ export function useBuilderAgentChat(args: {
       };
     },
     autoContinueAfterToolResult: true,
+    onData: (part) => {
+      if (part.type !== 'data-tool-progress' || !part.data || typeof part.data !== 'object') {
+        return;
+      }
+      const progress = part.data as Record<string, unknown>;
+      if (typeof progress.toolCallId === 'string' && typeof progress.toolName === 'string' && 'result' in progress) {
+        toolProgressStore.record({
+          toolCallId: progress.toolCallId,
+          toolName: progress.toolName,
+          result: progress.result,
+        });
+      }
+    },
     onError: (error: Error) => {
       captureMessage('Failed to process chat request', { level: 'error' });
       logger.error('Chat request failed', error);
       recordChatFailure(error.message.includes(STATUS_MESSAGES.error));
       toolActivityStore.abortActive();
+      toolProgressStore.clear();
       if (error.message.includes(WORKERS_PAID_REQUIRED_MARKER)) {
         showWorkersPaidRequiredToast();
       } else if (error.message.includes(CLOUDFLARE_AI_FUNDING_REQUIRED_MARKER)) {
@@ -160,6 +175,7 @@ export function useBuilderAgentChat(args: {
       );
     },
     onFinish: ({ finishReason, message }) => {
+      toolProgressStore.clear();
       if (activePresentationRef.current === args.presentationId) {
         // Record final tool outputs before stopping any provider-ended incomplete
         // calls; sampled message processing may not have observed the last chunk yet.

@@ -1,6 +1,7 @@
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { COMPUTER_SHELL_BACKEND_IDS, type ComputerToolName } from 'ghostbuild-agent/cloudflare-computer';
+import { LINE_EDIT_BASE_TAG_HEX_LENGTH, LINE_EDIT_MAX_OPERATIONS } from 'ghostbuild-agent/line-edit';
 import { MODEL_TOOL_NAMES } from './workers-ai-tools';
 import type { Tool } from 'ghostbuild-agent/tool';
 import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
@@ -23,14 +24,26 @@ const computerParameters = {
   write: Type.Object({ path: Type.String(), content: Type.String() }),
   edit: Type.Object({
     path: Type.String(),
+    base: Type.String({ pattern: `^[A-F0-9]{${LINE_EDIT_BASE_TAG_HEX_LENGTH}}$` }),
     edits: Type.Array(
-      Type.Object(
-        {
-          oldText: Type.String(),
-          newText: Type.String(),
-        },
-        { additionalProperties: false },
-      ),
+      Type.Union([
+        Type.Object(
+          {
+            startLine: Type.Integer({ minimum: 1 }),
+            endLine: Type.Integer({ minimum: 1 }),
+            content: Type.String(),
+          },
+          { additionalProperties: false },
+        ),
+        Type.Object(
+          {
+            afterLine: Type.Integer({ minimum: 0 }),
+            content: Type.String({ minLength: 1 }),
+          },
+          { additionalProperties: false },
+        ),
+      ]),
+      { minItems: 1, maxItems: LINE_EDIT_MAX_OPERATIONS },
     ),
   }),
   exec: Type.Object({
@@ -89,12 +102,16 @@ function adaptTool<T extends ReturnType<typeof Type.Object>>(
     label,
     description: typeof definition.description === 'string' ? definition.description : `${label}.`,
     parameters,
-    execute: async (toolCallId, args, signal) => {
+    execute: async (toolCallId, args, signal, onUpdate) => {
       signal?.throwIfAborted();
       if (!definition.execute) {
         throw new Error(`${name} is not executable.`);
       }
-      const result = await definition.execute(args, { toolCallId, abortSignal: signal });
+      const result = await definition.execute(args, {
+        toolCallId,
+        abortSignal: signal,
+        onUpdate: onUpdate ? (partialResult) => onUpdate(toPiToolResult(partialResult)) : undefined,
+      });
       signal?.throwIfAborted();
       return toPiToolResult(result);
     },

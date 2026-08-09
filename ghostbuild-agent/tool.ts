@@ -3,5 +3,12 @@ export type Tool = {
   type?: string;
   description?: string;
   inputSchema?: unknown;
-  execute?: (input: unknown, options: { toolCallId: string; abortSignal?: AbortSignal }) => Promise<unknown>;
+  execute?: (
+    input: unknown,
+    options: {
+      toolCallId: string;
+      abortSignal?: AbortSignal;
+      onUpdate?: (partialResult: unknown) => void;
+    },
+  ) => Promise<unknown>;
 };
