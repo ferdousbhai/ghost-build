@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import {
   deployAndVerifyProduction,
   deployProduction,
+  findUnexpectedDeployChanges,
   resolveCurrentCommitSha,
   resolveDeployableCommitSha,
   validateCommitSha,
@@ -30,6 +31,20 @@ function expectOrdered(content: string, steps: readonly string[]) {
 }
 
 describe('production deploy wrapper', () => {
+  it('allows only validation-generated build output changes in Workers Builds', () => {
+    const generatedChanges = [' M app/generated/user-workspace-runtime.generated.ts', ' M app/routeTree.gen.ts'].join(
+      '\n',
+    );
+    expect(findUnexpectedDeployChanges(generatedChanges, { workersBuild: true })).toEqual([]);
+    expect(findUnexpectedDeployChanges(generatedChanges)).toEqual(generatedChanges.split('\n'));
+    expect(
+      findUnexpectedDeployChanges(`${generatedChanges}\n M app/server.ts\n?? unexpected.txt`, { workersBuild: true }),
+    ).toEqual([' M app/server.ts', '?? unexpected.txt']);
+    expect(
+      findUnexpectedDeployChanges(' D app/generated/user-workspace-runtime.generated.ts', { workersBuild: true }),
+    ).toEqual([' D app/generated/user-workspace-runtime.generated.ts']);
+  });
+
   it('exposes only the ordered Workers Builds production path', () => {
     const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
       scripts: Record<string, string>;

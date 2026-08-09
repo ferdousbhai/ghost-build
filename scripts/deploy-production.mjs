@@ -7,6 +7,10 @@ const CLIENT_ID_ENV = 'CLOUDFLARE_OAUTH_CLIENT_ID';
 const MAX_CLIENT_ID_LENGTH = 512;
 const COMMIT_SHA_PATTERN = /^[a-f0-9]{40}$/;
 const WORKERS_BUILD_UUID_PATTERN = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+const WORKERS_BUILD_GENERATED_OUTPUTS = new Set([
+  'app/generated/user-workspace-runtime.generated.ts',
+  'app/routeTree.gen.ts',
+]);
 
 /**
  * @typedef {(command: string, args: readonly string[], options: {stdio: 'inherit'}) => {
@@ -102,6 +106,28 @@ export function validateWorkersBuildMetadata({ env = process.env, spawn = spawnS
 }
 
 /**
+ * Validation regenerates these two checked-in build artifacts using the pinned
+ * Linux toolchain. Permit only ordinary modifications to those exact paths;
+ * every other tracked or untracked change still fails closed.
+ */
+export function findUnexpectedDeployChanges(status, { workersBuild = false } = {}) {
+  if (typeof status !== 'string' || status.trim().length === 0) {
+    return [];
+  }
+  return status
+    .split('\n')
+    .filter(Boolean)
+    .filter((line) => {
+      if (!workersBuild) {
+        return true;
+      }
+      const state = line.slice(0, 2);
+      const path = line.slice(3);
+      return !(/^[ M]{2}$/.test(state) && state.includes('M') && WORKERS_BUILD_GENERATED_OUTPUTS.has(path));
+    });
+}
+
+/**
  * Resolve a commit that exactly describes the files being deployed. Tracked or
  * untracked changes would make COMMIT_SHA misleading, so production fails closed.
  * @param {{spawn?: typeof spawnSync, env?: Record<string, string | undefined>}} [options]
@@ -120,8 +146,11 @@ export function resolveDeployableCommitSha({ spawn = spawnSync, env = process.en
     const detail = typeof result.stderr === 'string' ? result.stderr.trim() : '';
     throw new Error(`Unable to verify the production worktree${detail ? `: ${detail}` : '.'}`);
   }
-  if (typeof result.stdout !== 'string' || result.stdout.trim().length > 0) {
-    throw new Error('Production deploy requires a clean Git worktree so COMMIT_SHA exactly identifies the build.');
+  const unexpectedChanges = findUnexpectedDeployChanges(result.stdout, { workersBuild: env.WORKERS_CI === '1' });
+  if (unexpectedChanges.length > 0) {
+    throw new Error(
+      `Production deploy requires a clean Git worktree so COMMIT_SHA exactly identifies the build. Unexpected changes: ${unexpectedChanges.join(', ')}`,
+    );
   }
   const ignoredEnvironmentFiles = spawn(
     'git',
