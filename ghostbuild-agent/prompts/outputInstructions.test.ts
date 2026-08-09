@@ -9,11 +9,14 @@ describe('Ghostbuild filesystem output instructions', () => {
     expect(prompt).toContain('never replace a TanStack file route with only a default export');
   });
 
-  it('keeps shell execution out of project mutation accounting', () => {
+  it('keeps source mutation explicit while routing safe dependency commands through exec', () => {
     const prompt = outputInstructions();
 
-    expect(prompt).toContain('Do not use exec to mutate project files or dependency manifests');
+    expect(prompt).toContain('Do not use exec to mutate project source or configuration');
     expect(prompt).toContain('Use write or edit for source changes');
-    expect(prompt).toContain('npmInstall for dependency or lockfile changes');
+    expect(prompt).toContain('pnpm install --lockfile-only');
+    expect(prompt).toContain('/home/project/.ghost/docs/index.md');
+    expect(prompt).toContain('Ghostbuild automatically');
+    expect(prompt).toContain('validates after each source or dependency mutation');
   });
 });

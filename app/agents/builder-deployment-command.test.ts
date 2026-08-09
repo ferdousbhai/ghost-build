@@ -4,14 +4,13 @@ const mocks = vi.hoisted(() => ({
   createDeployment: vi.fn(),
 }));
 
-vi.mock('@cloudflare/sandbox', () => ({ getSandbox: vi.fn() }));
 vi.mock('~/server-handlers/deployments', () => ({
   createOrReplayDeploymentPlanForUser: mocks.createDeployment,
 }));
 
-import { executeBuilderOperationTool } from './builder-operation-tools';
+import { prepareDeploymentPlanForBuilder, validatedDeploymentCheckpoint } from './builder-deployment-command';
 
-describe('server Builder operation tools', () => {
+describe('builder deployment command', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.createDeployment.mockResolvedValue({
@@ -21,44 +20,24 @@ describe('server Builder operation tools', () => {
     });
   });
 
-  it('validates the exact durable backup in the user-owned runtime', async () => {
+  it('reports readiness only for the exact checkpoint with a durable validation receipt', async () => {
     const workspace = workspaceStub();
-    const onValidationStage = vi.fn();
-    const result = await executeBuilderOperationTool({
-      context: { ...operationContext(), onValidationStage },
-      workspace: workspace as never,
-      toolCallId: 'validation-call',
-      toolName: 'validateProject',
-      input: {},
-    });
 
-    expect(result).toMatchObject({
-      ok: true,
-      data: {
-        revision: 'a'.repeat(64),
-        workspaceRevision: 7,
-        buildEnvironment: 'user-cloudflare-sandbox',
-      },
+    await expect(validatedDeploymentCheckpoint(workspace as never)).resolves.toBeNull();
+    workspace.hasSuccessfulValidation.mockResolvedValue(true);
+    await expect(validatedDeploymentCheckpoint(workspace as never)).resolves.toEqual({
+      workspaceRevision: 7,
+      revision: 'a'.repeat(64),
     });
-    expect(workspace.validate).toHaveBeenCalledWith({
-      toolCallId: 'validation-call',
-      input: {},
-      abortSignal: undefined,
-    });
-    expect(onValidationStage.mock.calls).toEqual([
-      ['validation-call', 'computer validation'],
-      ['validation-call', null],
-    ]);
   });
 
-  it('refuses deployment when the requested validation revision differs from the durable source', async () => {
+  it('refuses a plan when the requested validation revision is stale', async () => {
     const workspace = workspaceStub();
-    const result = await executeBuilderOperationTool({
+    const result = await prepareDeploymentPlanForBuilder({
       context: operationContext(),
       workspace: workspace as never,
-      toolCallId: 'deploy-call',
-      toolName: 'deploy',
-      input: { validatedRevision: 'c'.repeat(64) },
+      toolCallId: 'deploy-command',
+      validatedRevision: 'c'.repeat(64),
     });
 
     expect(result).toMatchObject({
@@ -68,15 +47,14 @@ describe('server Builder operation tools', () => {
     expect(mocks.createDeployment).not.toHaveBeenCalled();
   });
 
-  it('prepares an idempotent deployment plan from the exact durably validated bytes', async () => {
+  it('prepares an idempotent approval plan from exact validated bytes', async () => {
     const workspace = workspaceStub();
     workspace.hasSuccessfulValidation.mockResolvedValue(true);
-    const result = await executeBuilderOperationTool({
+    const result = await prepareDeploymentPlanForBuilder({
       context: operationContext(),
       workspace: workspace as never,
-      toolCallId: 'deploy-call',
-      toolName: 'deploy',
-      input: { validatedRevision: 'a'.repeat(64) },
+      toolCallId: 'deploy-command',
+      validatedRevision: 'a'.repeat(64),
     });
 
     expect(result).toMatchObject({
@@ -101,19 +79,9 @@ describe('server Builder operation tools', () => {
 });
 
 function workspaceStub() {
-  const workspace = {
-    getState: vi.fn(() => ({ initialized: true, revision: 7 })),
+  return {
     checkpoint: vi.fn(async () => ({ workspaceRevision: 7, revision: 'a'.repeat(64) })),
     executeToolOnce: vi.fn(async (_id, _name, _args, execute: () => Promise<unknown>) => execute()),
-    validate: vi.fn(async () => ({
-      ok: true,
-      message: 'validated',
-      data: {
-        revision: 'a'.repeat(64),
-        workspaceRevision: 7,
-        buildEnvironment: 'user-cloudflare-sandbox',
-      },
-    })),
     hasSuccessfulValidation: vi.fn(async () => false),
     prepareDeployment: vi.fn(async () => ({
       workspaceRevision: 7,
@@ -121,7 +89,6 @@ function workspaceStub() {
       project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, appAgent: true } },
     })),
   };
-  return workspace;
 }
 
 function operationContext() {

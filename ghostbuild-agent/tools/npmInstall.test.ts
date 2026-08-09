@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { findForbiddenNpmInstallPackages, npmInstallToolParameters, splitPackageSpecs } from './npmInstall.js';
+import {
+  findForbiddenNpmInstallPackages,
+  npmInstallToolParameters,
+  parseNpmInstallCommand,
+  splitPackageSpecs,
+} from './npmInstall.js';
 import { packageNameFromInstallSpec } from '../utils/stackPolicy.js';
 
 describe('npmInstall tool parameters', () => {
@@ -73,6 +78,22 @@ describe('npmInstall tool parameters', () => {
     expect(npmInstallToolParameters.parse({ mode: 'sync-lockfile' })).toEqual({ mode: 'sync-lockfile' });
     expect(npmInstallToolParameters.safeParse({ mode: 'sync-lockfile', packages: 'date-fns' }).success).toBe(false);
     expect(npmInstallToolParameters.safeParse({ mode: 'add' }).success).toBe(false);
+  });
+
+  it('parses only the dependency command subset exposed through exec', () => {
+    expect(parseNpmInstallCommand('pnpm add date-fns chart.js@^4')).toEqual({
+      mode: 'add',
+      packages: ['date-fns', 'chart.js@^4'],
+    });
+    expect(parseNpmInstallCommand('pnpm install --lockfile-only')).toEqual({
+      mode: 'sync-lockfile',
+      packages: [],
+    });
+    expect(parseNpmInstallCommand('pnpm test')).toBeNull();
+    expect(() => parseNpmInstallCommand('pnpm install')).toThrow('exec accepts only');
+    expect(() => parseNpmInstallCommand('npm install date-fns')).toThrow('exec accepts only');
+    expect(() => parseNpmInstallCommand('yarn add date-fns')).toThrow('exec accepts only');
+    expect(() => parseNpmInstallCommand('pnpm add date-fns && touch owned')).toThrow('Only npm registry');
   });
 
   it('splits package specs by whitespace', () => {

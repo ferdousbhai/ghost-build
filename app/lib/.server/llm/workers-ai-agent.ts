@@ -11,9 +11,7 @@ import type { WorkersAiAccountCredentials } from './provider';
 
 type Messages = GhostbuildMessage[];
 export interface WorkersAiAgentOptions {
-  env: Env;
   abortSignal?: AbortSignal;
-  chatInitialId: string;
   firstUserMessage: boolean;
   messages: Messages;
   modelId: WorkersAiModelId;
@@ -28,8 +26,6 @@ export interface WorkersAiAgentOptions {
   accountCredentials: WorkersAiAccountCredentials;
   sessionAffinity: string;
   workspace: BuilderWorkspaceApi;
-  userId: string;
-  agentName: string;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
 }

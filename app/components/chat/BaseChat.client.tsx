@@ -22,6 +22,9 @@ import { api } from '~/lib/cloudflare/data-api';
 import { subchatIndexStore, useIsSubchatLoaded } from '~/lib/stores/subchats';
 import type { BuildProgress } from './build-progress';
 import type { SubchatSummary } from './subchat-model';
+import type { PendingDeploymentApproval } from '~/lib/deployment-approval';
+import { DeploymentApproval } from './DeploymentApproval.client';
+import { Button } from '@ui/Button';
 
 const Workbench = lazy(() =>
   import('~/components/workbench/Workbench.client').then((module) => ({ default: module.Workbench })),
@@ -48,6 +51,8 @@ interface BaseChatProps {
   messages: GhostbuildMessage[];
   disabledReason: ReactNode | null;
   runtimeNotice: ReactNode;
+  deploymentApproval?: PendingDeploymentApproval | null;
+  onPrepareDeployment?: () => Promise<PendingDeploymentApproval>;
 
   // Subchat navigation props
   subchats?: SubchatSummary[];
@@ -71,6 +76,8 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       buildProgress,
       disabledReason,
       runtimeNotice,
+      deploymentApproval,
+      onPrepareDeployment,
       subchats,
       onSubchatTitleChange,
     },
@@ -254,6 +261,24 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                         {runtimeNotice}
                       </div>
                     )}
+                    {deploymentApproval ? (
+                      <div className="mb-3">
+                        <DeploymentApproval deployment={deploymentApproval} />
+                      </div>
+                    ) : onPrepareDeployment && !isStreaming ? (
+                      <div className="mb-2 flex justify-end px-1">
+                        <Button
+                          variant="neutral"
+                          onClick={() => {
+                            void onPrepareDeployment().catch((error) =>
+                              toast.error(error instanceof Error ? error.message : 'Unable to prepare deployment.'),
+                            );
+                          }}
+                        >
+                          Deploy
+                        </Button>
+                      </div>
+                    ) : null}
                     {(!subchats || (currentSubchatIndex >= subchats.length - 1 && isSubchatLoaded)) && (
                       <>
                         {!disabledReason && (

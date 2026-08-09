@@ -45,7 +45,7 @@ export function solutionConstraints() {
       a Worker-only project, set package.json ghostbuild.projectType to "worker", remove unused TanStack/React
       dependencies and route-generation steps, set its build script to a Wrangler dry-run targeting dist/worker, and
       set dev and preview to "wrangler dev", remove web-only provisioning and migration steps from deploy, and remove
-      unused bindings from wrangler.jsonc. Then call npmInstall with mode "sync-lockfile" to synchronize
+      unused bindings from wrangler.jsonc. Then run \`pnpm install --lockfile-only\` through exec to synchronize
       pnpm-lock.yaml. Keep the marker absent (or set it to "web_app") for a TanStack
       browser application.
 

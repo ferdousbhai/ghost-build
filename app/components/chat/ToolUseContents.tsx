@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense, useEffect } from 'react';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
-import { isGhostbuildToolResult, toolResultSummary } from 'ghostbuild-agent/tool-result';
+import { isGhostbuildToolResult, toolResultSucceeded, toolResultSummary } from 'ghostbuild-agent/tool-result';
 import { ToolResultFrame } from './ToolResultFrame';
 import { captureProductEvent } from '~/lib/telemetry.client';
 
@@ -34,8 +34,17 @@ export const ToolUseContents = memo(function ToolUseContents({ invocation }: { i
 
 function StructuredResultTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
   const complete = !isToolInvocationInProgress(invocation);
-  const succeeded =
-    invocation.state === 'output-available' && isGhostbuildToolResult(invocation.output) && invocation.output.ok;
+  const succeeded = invocation.state === 'output-available' && toolResultSucceeded(invocation.output);
+  const validation =
+    invocation.state === 'output-available' &&
+    typeof invocation.output === 'object' &&
+    invocation.output !== null &&
+    'validation' in invocation.output
+      ? invocation.output.validation
+      : invocation.toolName === 'validateProject'
+        ? invocation.output
+        : undefined;
+  const validationSucceeded = isGhostbuildToolResult(validation) && validation.ok;
   useEffect(() => {
     if (!complete) {
       return;
@@ -43,10 +52,10 @@ function StructuredResultTool({ invocation }: { invocation: GhostbuildToolInvoca
     void captureProductEvent('first_tool_completed', {
       outcome: succeeded ? 'success' : invocation.state === 'output-denied' ? 'cancelled' : 'failure',
     });
-    if (invocation.toolName === 'validateProject' && succeeded) {
+    if (validationSucceeded) {
       void captureProductEvent('validation_succeeded', { outcome: 'success' });
     }
-  }, [complete, invocation.state, invocation.toolCallId, invocation.toolName, succeeded]);
+  }, [complete, invocation.state, invocation.toolCallId, succeeded, validationSucceeded]);
 
   if (isToolInvocationInProgress(invocation)) {
     return null;

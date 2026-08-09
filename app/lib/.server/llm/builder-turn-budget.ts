@@ -2,27 +2,22 @@ export const BUILDER_TURN_MAX_MODEL_STEPS = 32;
 
 /**
  * One source of truth for every wall-clock limit applied to a builder loop.
- * The longest server-owned operation is the 10 minute deployment build, so a
- * step gets 20 minutes and the whole turn gets three such windows. AI SDK
- * chunk inactivity includes time spent executing a tool, so that timeout must
- * outlive every permitted tool instead of preempting one mid-operation.
+ * Primitive mutations include automatic full validation, so a step gets
+ * 20 minutes and the whole turn gets three such windows. Stream inactivity
+ * includes time spent executing a tool, so that timeout must outlive every
+ * permitted tool instead of preempting one mid-operation.
  */
 export const BUILDER_TURN_TIMEOUTS = {
   totalMs: 60 * 60_000,
   stepMs: 20 * 60_000,
   firstChunkMs: 3 * 60_000,
   chunkMs: 13 * 60_000,
-  toolMs: 6 * 60_000,
+  toolMs: 12 * 60_000,
   tools: {
     readMs: 2 * 60_000,
-    lsMs: 2 * 60_000,
-    writeMs: 3 * 60_000,
-    editMs: 3 * 60_000,
-    execMs: 6 * 60_000,
-    lookupDocsMs: 2 * 60_000,
-    npmInstallMs: 6 * 60_000,
-    validateProjectMs: 12 * 60_000,
-    deployMs: 12 * 60_000,
+    writeMs: 12 * 60_000,
+    editMs: 12 * 60_000,
+    execMs: 12 * 60_000,
   },
 } as const;
 

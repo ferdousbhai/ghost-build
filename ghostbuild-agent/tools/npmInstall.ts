@@ -1,23 +1,9 @@
-import type { Tool } from 'ghostbuild-agent/pi-tool-compat';
 import { z } from 'zod';
 import {
   isForbiddenStackDependencyPackageName,
   isRegistryPackageSpec,
   packageNameFromInstallSpec,
 } from '../utils/stackPolicy.js';
-
-const npmInstallToolDescription = `
-Install additional dependencies or synchronize the lockfile for the project with pnpm.
-
-Choose high quality, flexible libraries that are well-maintained and have
-significant adoption. Always use libraries that have TypeScript definitions.
-After directly editing dependency fields in package.json, use mode \`sync-lockfile\`
-so pnpm-lock.yaml remains consistent. Do not pass package names in that mode.
-Keep runtime, data, and AI dependencies inside the Cloudflare platform stack. TanStack Start is the
-default for full web applications, but focused Worker scripts do not need an application framework:
-do not install Convex, Remix, OpenAI, Anthropic, Gemini, xAI, Groq, Mistral,
-or other non-Workers-AI provider SDKs.
-`;
 
 const packagesDescription = `
 Space separated list of packages to install. This will be passed directly to \`pnpm add\`.
@@ -102,7 +88,24 @@ export const npmInstallToolParameters = z
     }
   });
 
-export const npmInstallTool: Tool = {
-  description: npmInstallToolDescription,
-  inputSchema: npmInstallToolParameters,
+export type ParsedNpmInstallCommand = {
+  mode: 'add' | 'sync-lockfile';
+  packages: string[];
 };
+
+/** Parse the small, safe dependency-command subset accepted by the exec tool. */
+export function parseNpmInstallCommand(command: string): ParsedNpmInstallCommand | null {
+  const normalized = command.trim();
+  if (normalized === 'pnpm install --lockfile-only') {
+    return { mode: 'sync-lockfile', packages: [] };
+  }
+  if (normalized.startsWith('pnpm add ')) {
+    const packagesText = normalized.slice('pnpm add '.length);
+    npmInstallToolParameters.parse({ mode: 'add', packages: packagesText });
+    return { mode: 'add', packages: splitPackageSpecs(packagesText) };
+  }
+  if (/^(?:pnpm|npm|yarn|bun)\s+(?:add|install|remove|uninstall|update|up)\b/.test(normalized)) {
+    throw new Error('exec accepts only `pnpm add <packages>` or `pnpm install --lockfile-only` for dependencies.');
+  }
+  return null;
+}

@@ -25,6 +25,8 @@ import { chatTurnContextSchema, type ChatTurnContext } from 'ghostbuild-agent/tu
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from 'ai';
 import { latestPendingDeploymentPlan } from './deployment-continuation';
+import { prepareDeploymentPlanForBuilder, validatedDeploymentCheckpoint } from './builder-deployment-command';
+import { parsePendingDeploymentApproval, type PendingDeploymentApproval } from '~/lib/deployment-approval';
 import { generateProjectTitle } from '~/lib/.server/llm/project-title';
 import {
   setGeneratedDescriptionIfMissing,
@@ -108,6 +110,8 @@ export type BuilderAgentState = {
     stage: BuilderValidationStage;
     updatedAt: string;
   } | null;
+  deploymentApproval?: PendingDeploymentApproval | null;
+  deploymentReady?: boolean;
 };
 
 type ChatBody = Partial<ChatRequestBody> & { transcript?: unknown };
@@ -129,6 +133,8 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     transcript: null,
     preview: idleBuilderPreviewState(0),
     validationProgress: null,
+    deploymentApproval: null,
+    deploymentReady: false,
   };
 
   override messageConcurrency = 'drop' as const;
@@ -347,6 +353,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.setState({
       ...this.state,
       activeTurn: turn,
+      deploymentApproval: null,
       updatedAt: turn.updatedAt,
     });
     this.turnStore.record(turn);
@@ -361,15 +368,12 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       this.stashTurn(turn);
       const compactionPending = await this.hasPendingContextCompaction();
       return await createChatResponseFromBody({
-        env: this.env,
         abortSignal: options?.abortSignal,
         firstUserMessage,
         turnContext,
         accountCredentials,
         sessionAffinity: await createWorkersAiSessionAffinity(transcript, modelId),
         workspace: this.workspace,
-        userId: durableIdentity.userId,
-        agentName: this.name,
         onValidationStage: (toolCallId, stage) => this.setValidationProgress(toolCallId, stage),
         runWithKeepAlive: (operation) => this.keepAliveWhile(operation),
         compaction: {
@@ -472,6 +476,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       status,
       error: result.error,
     });
+    await this.refreshDeploymentReadiness();
     if (status === 'completed') {
       await this.requestPreviewInternal({ requireValidation: true }).catch(() =>
         logger.warn('Unable to queue the automatic remote preview'),
@@ -522,7 +527,9 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (!this.transcriptBinding) {
       throw new Response('Agent authentication is required.', { status: 401 });
     }
-    return this.initializeWorkspace(this.transcriptBinding);
+    const state = await this.initializeWorkspace(this.transcriptBinding);
+    await this.refreshDeploymentReadiness();
+    return state;
   }
 
   @callable()
@@ -533,6 +540,14 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   @callable()
   async applyWorkspaceClientChanges(request: unknown): Promise<BuilderWorkspaceApplyResult> {
     const result = await this.workspace.applyClientChanges(request);
+    if (result.ok && result.changedPaths.length > 0) {
+      this.setState({
+        ...this.state,
+        deploymentApproval: null,
+        deploymentReady: false,
+        updatedAt: new Date().toISOString(),
+      });
+    }
     this.updatePreviewForWorkspace(result.state.revision);
     return result;
   }
@@ -540,6 +555,42 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   @callable()
   getPreviewState(): BuilderPreviewState {
     return this.currentPreviewState();
+  }
+
+  @callable()
+  async prepareDeployment(): Promise<PendingDeploymentApproval> {
+    const identity = await this.hydrateDurableIdentity({ required: true, reason: 'prepare_deployment' });
+    if (!identity) {
+      throw new Response('Agent authentication is required.', { status: 401 });
+    }
+    const snapshot = await validatedDeploymentCheckpoint(this.workspace);
+    if (!snapshot) {
+      throw new Error('The current project revision must pass validation before deployment.');
+    }
+    const result = await this.keepAliveWhile(() =>
+      prepareDeploymentPlanForBuilder({
+        context: {
+          env: this.env,
+          userId: identity.userId,
+          chatInitialId: identity.transcript.chatInitialId,
+          agentName: this.name,
+        },
+        workspace: this.workspace,
+        toolCallId: `deploy-command:${snapshot.workspaceRevision}:${snapshot.revision}`,
+        validatedRevision: snapshot.revision,
+      }),
+    );
+    const approval = parsePendingDeploymentApproval(result);
+    if (!approval) {
+      throw new Error(result.summary || 'The project is not ready to deploy.');
+    }
+    this.setState({
+      ...this.state,
+      deploymentApproval: approval,
+      deploymentReady: true,
+      updatedAt: new Date().toISOString(),
+    });
+    return approval;
   }
 
   @callable()
@@ -1010,6 +1061,21 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.setState({ ...this.state, preview, updatedAt: preview.updatedAt });
   }
 
+  private async refreshDeploymentReadiness(): Promise<void> {
+    let deploymentReady = false;
+    try {
+      deploymentReady = (await validatedDeploymentCheckpoint(this.workspace)) !== null;
+    } catch {
+      logger.warn('Unable to refresh deployment readiness');
+    }
+    this.setState({
+      ...this.state,
+      deploymentReady,
+      ...(deploymentReady ? {} : { deploymentApproval: null }),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   private setValidationProgress(toolCallId: string, stage: BuilderValidationStage | null): void {
     if (stage === null && this.state.validationProgress?.toolCallId !== toolCallId) {
       return;
@@ -1018,6 +1084,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.setState({
       ...this.state,
       validationProgress: stage ? { toolCallId, stage, updatedAt } : null,
+      ...(stage ? { deploymentApproval: null, deploymentReady: false } : {}),
       updatedAt,
     });
   }

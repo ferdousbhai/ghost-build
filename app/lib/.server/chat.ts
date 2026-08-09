@@ -27,14 +27,11 @@ export async function createChatResponseFromBody({
   abortSignal,
   body,
   compaction,
-  env,
   firstUserMessage,
   turnContext,
   accountCredentials,
   sessionAffinity,
   workspace,
-  userId,
-  agentName,
   onValidationStage,
   runWithKeepAlive,
 }: {
@@ -47,27 +44,22 @@ export async function createChatResponseFromBody({
     save: (compaction: ContextCompaction) => void;
     schedule?: () => Promise<void>;
   };
-  env: Env;
   firstUserMessage: boolean;
   turnContext?: ChatTurnContext;
   accountCredentials: WorkersAiAccountCredentials;
   sessionAffinity: string;
   workspace: BuilderWorkspaceApi;
-  userId: string;
-  agentName: string;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
 }) {
-  const { messages, chatInitialId, modelId } = body;
+  const { messages, modelId } = body;
   const transcriptMessages = messages ?? [];
 
   logger.info('Using Cloudflare AI');
 
   try {
     const dataStream = await workersAiAgent({
-      env,
       abortSignal,
-      chatInitialId,
       firstUserMessage,
       messages: transcriptMessages,
       modelId,
@@ -76,8 +68,6 @@ export async function createChatResponseFromBody({
       accountCredentials,
       sessionAffinity,
       workspace,
-      userId,
-      agentName,
       onValidationStage,
       runWithKeepAlive,
     });

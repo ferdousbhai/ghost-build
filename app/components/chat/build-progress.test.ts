@@ -113,12 +113,12 @@ describe('getBuildProgress', () => {
     ).toMatchObject({ delayed: true, stalled: true });
   });
 
-  it('shows the current Computer validation operation', () => {
+  it('shows automatic Computer validation inside a primitive mutation', () => {
     expect(
       getBuildProgress({
         streamStatus: 'streaming',
         isRecovering: false,
-        activeToolNames: ['validateProject'],
+        activeToolNames: ['write'],
         validationStage: 'computer validation',
         inactiveForMs: 0,
       }),
@@ -127,7 +127,7 @@ describe('getBuildProgress', () => {
       getBuildProgress({
         streamStatus: 'streaming',
         isRecovering: false,
-        activeToolNames: ['validateProject'],
+        activeToolNames: ['write'],
         validationStage: 'computer validation',
         inactiveForMs: VALIDATION_PROGRESS_DELAY_MS,
       }),

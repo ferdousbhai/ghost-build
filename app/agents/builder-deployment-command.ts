@@ -1,89 +1,43 @@
-import { deployToolParameters } from 'ghostbuild-agent/tools/deploy';
-import { npmInstallToolParameters, splitPackageSpecs } from 'ghostbuild-agent/tools/npmInstall';
-import { validateProjectParameters } from 'ghostbuild-agent/tools/validateProject';
 import { toolFailure, toolSuccess, type GhostbuildToolResult } from 'ghostbuild-agent/tool-result';
 import { createOrReplayDeploymentPlanForUser } from '~/server-handlers/deployments';
-import { runLookupDocs } from '~/lib/runtime/action-runner/lookup-docs';
-import type { BuilderWorkspaceApi } from './builder-workspace-api';
-import type { ServerOperationToolName } from './builder-workspace-types';
-import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
+import type { BuilderWorkspaceApi, BuilderWorkspaceCheckpoint } from './builder-workspace-api';
 
-type BuilderOperationContext = {
+type BuilderDeploymentContext = {
   env: Env;
   userId: string;
   chatInitialId: string;
   agentName: string;
-  onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
 };
 
-export async function executeBuilderOperationTool(args: {
-  context: BuilderOperationContext;
+export async function validatedDeploymentCheckpoint(
+  workspace: BuilderWorkspaceApi,
+): Promise<BuilderWorkspaceCheckpoint | null> {
+  const snapshot = await workspace.checkpoint();
+  return (await workspace.hasSuccessfulValidation(snapshot.revision)) ? snapshot : null;
+}
+
+/** Prepare an exact-revision deployment plan for the authenticated user command. */
+export async function prepareDeploymentPlanForBuilder(args: {
+  context: BuilderDeploymentContext;
   workspace: BuilderWorkspaceApi;
   toolCallId: string;
-  toolName: ServerOperationToolName;
-  input: unknown;
+  validatedRevision: string;
   abortSignal?: AbortSignal;
 }): Promise<GhostbuildToolResult> {
-  switch (args.toolName) {
-    case 'lookupDocs':
-      return runLookupDocs(args.input);
-    case 'npmInstall':
-      return runDependencyInstall(args);
-    case 'validateProject':
-      return runValidation(args);
-    case 'deploy':
-      return runDeployment(args);
-    default:
-      throw new Error(`Unsupported server operation tool: ${String(args.toolName)}`);
-  }
-}
-
-async function runDependencyInstall(
-  args: Parameters<typeof executeBuilderOperationTool>[0],
-): Promise<GhostbuildToolResult> {
-  const input = npmInstallToolParameters.parse(args.input);
-  const mode = input.mode ?? 'add';
-  const packages = splitPackageSpecs(input.packages ?? '');
-  args.abortSignal?.throwIfAborted();
-  return args.workspace.installDependencies({
-    toolCallId: args.toolCallId,
-    input: args.input,
-    mode,
-    packages,
-  });
-}
-
-async function runValidation(args: Parameters<typeof executeBuilderOperationTool>[0]): Promise<GhostbuildToolResult> {
-  validateProjectParameters.parse(args.input);
-  args.abortSignal?.throwIfAborted();
-  args.context.onValidationStage?.(args.toolCallId, 'computer validation');
-  try {
-    return await args.workspace.validate({
-      toolCallId: args.toolCallId,
-      input: args.input,
-      abortSignal: args.abortSignal,
-    });
-  } finally {
-    args.context.onValidationStage?.(args.toolCallId, null);
-  }
-}
-
-async function runDeployment(args: Parameters<typeof executeBuilderOperationTool>[0]): Promise<GhostbuildToolResult> {
-  const input = deployToolParameters.parse(args.input);
   const snapshot = await args.workspace.checkpoint();
   return args.workspace.executeToolOnce(
     args.toolCallId,
-    args.toolName,
+    'deploy',
     {
-      input: args.input,
+      validatedRevision: args.validatedRevision,
       workspaceRevision: snapshot.workspaceRevision,
       snapshotRevision: snapshot.revision,
     },
     async () => {
-      if (snapshot.revision !== input.validatedRevision) {
-        return toolFailure('The durable project changed after validation. Run full validation again.', {
+      if (snapshot.revision !== args.validatedRevision) {
+        return toolFailure('The durable project changed after validation. Run validation again.', {
           state: 'validation-stale',
-          validatedRevision: input.validatedRevision,
+          validatedRevision: args.validatedRevision,
           currentRevision: snapshot.revision,
         });
       }

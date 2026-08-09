@@ -65,7 +65,12 @@ function buildPhase(args: {
   streamStatus: StreamStatus;
   isRecovering: boolean;
   activeToolNames: string[];
+  validationStage?: BuilderValidationStage | null;
 }): BuildProgressPhase {
+  if (args.validationStage) {
+    return 'validating';
+  }
+  // Keep historical tool names readable for resumed pre-refactor transcripts.
   if (args.activeToolNames.includes('npmInstall')) {
     return 'installing';
   }

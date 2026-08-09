@@ -29,6 +29,8 @@ Prefer `main` — branches/PRs only if asked or for isolated experiments. For sm
 - [app/lib/cloudflare/data.server.ts](app/lib/cloudflare/data.server.ts) — authenticated data facade
 - [app/lib/cloudflare/data/](app/lib/cloudflare/data/) — user-runtime D1 repositories and services
 - [app/lib/cloudflare/data-api.ts](app/lib/cloudflare/data-api.ts) — browser/server operation contract
+- [app/agents/builder-deployment-command.ts](app/agents/builder-deployment-command.ts) — authenticated exact-revision
+  deployment-plan command
 - [app/lib/.server/cloudflare/user-workspace-deployment-executor.ts](app/lib/.server/cloudflare/user-workspace-deployment-executor.ts)
   — user-owned deployment execution
 - [app/lib/.server/cloudflare/deployment-security-baseline.ts](app/lib/.server/cloudflare/deployment-security-baseline.ts)

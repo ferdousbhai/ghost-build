@@ -28,26 +28,26 @@ describe('useBuildProgress', () => {
     document.body.appendChild(container);
     root = createRoot(container);
 
-    function Harness({ activeToolNames }: { activeToolNames: string[] }) {
+    function Harness({ validating }: { validating: boolean }) {
       const progress = useBuildProgress({
         streamStatus: 'streaming',
         isRecovering: false,
         isProjectUpdate: false,
-        activeToolNames,
-        validationStage: 'computer validation',
+        activeToolNames: validating ? ['write'] : [],
+        validationStage: validating ? 'computer validation' : null,
         toolActivityRevision: 1,
         messages: [],
       });
       return <span>{progress?.message}</span>;
     }
 
-    await act(async () => root?.render(<Harness activeToolNames={['validateProject']} />));
+    await act(async () => root?.render(<Harness validating />));
     await act(async () => vi.advanceTimersByTime(VALIDATION_PROGRESS_DELAY_MS));
     expect(container.textContent).toBe(
       'Taking longer than usual — still validating your project with cloudflare computer',
     );
 
-    await act(async () => root?.render(<Harness activeToolNames={[]} />));
+    await act(async () => root?.render(<Harness validating={false} />));
     expect(container.textContent).toBe('Creating your project…');
   });
 });

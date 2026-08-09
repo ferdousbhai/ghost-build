@@ -1,22 +1,14 @@
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
-import {
-  COMPUTER_SHELL_BACKEND_IDS,
-  COMPUTER_TOOL_NAMES,
-  type ComputerToolName,
-} from 'ghostbuild-agent/cloudflare-computer';
-import { docKeys } from 'ghostbuild-agent/references/index';
-import type { Tool } from 'ghostbuild-agent/pi-tool-compat';
+import { COMPUTER_SHELL_BACKEND_IDS, type ComputerToolName } from 'ghostbuild-agent/cloudflare-computer';
+import { MODEL_TOOL_NAMES } from './workers-ai-tools';
+import type { Tool } from 'ghostbuild-agent/tool';
 import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 import { createWorkersAiTools } from './workers-ai-tools';
 
 type BuilderOperationContext = {
-  env: Env;
-  userId: string;
-  chatInitialId: string;
-  agentName: string;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
 };
@@ -48,36 +40,12 @@ const computerParameters = {
   }),
 } as const satisfies Record<ComputerToolName, ReturnType<typeof Type.Object>>;
 
-const serverParameters = {
-  lookupDocs: Type.Object({
-    docs: Type.Array(Type.Union(docKeys.map((key) => Type.Literal(key)) as never[]), {
-      minItems: 1,
-      maxItems: 3,
-    }),
-    section: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })),
-    query: Type.Optional(Type.String({ minLength: 2, maxLength: 300 })),
-    cursor: Type.Optional(Type.String({ maxLength: 64 })),
-  }),
-  npmInstall: Type.Object({
-    mode: Type.Optional(Type.Union([Type.Literal('add'), Type.Literal('sync-lockfile')])),
-    packages: Type.Optional(Type.String({ maxLength: 2_000 })),
-  }),
-  validateProject: Type.Object({}),
-  deploy: Type.Object({
-    validatedRevision: Type.String({ pattern: '^[a-f0-9]{64}$' }),
-  }),
-} as const;
-
 const toolLabels = {
   read: 'Read file',
   ls: 'List files',
   write: 'Write file',
   edit: 'Edit file',
   exec: 'Run command',
-  lookupDocs: 'Look up documentation',
-  npmInstall: 'Install dependencies',
-  validateProject: 'Validate project',
-  deploy: 'Deploy project',
 } as const;
 
 /**
@@ -99,11 +67,8 @@ export function createPiToolBundle(
   const canonicalTools = createWorkersAiTools(workspace, operationContext);
   const tools: Record<string, AgentTool> = {};
 
-  for (const name of COMPUTER_TOOL_NAMES) {
+  for (const name of MODEL_TOOL_NAMES) {
     tools[name] = adaptTool(name, toolLabels[name], canonicalTools[name], computerParameters[name]);
-  }
-  for (const name of ['lookupDocs', 'npmInstall', 'validateProject', 'deploy'] as const) {
-    tools[name] = adaptTool(name, toolLabels[name], canonicalTools[name], serverParameters[name]);
   }
 
   return { canonicalTools, piTools: tools };

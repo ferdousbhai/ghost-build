@@ -62,9 +62,7 @@ import { logProviderFailure } from './provider-error-logging';
 type Messages = GhostbuildMessage[];
 
 interface PiAgentOptions {
-  env: Env;
   abortSignal?: AbortSignal;
-  chatInitialId: string;
   firstUserMessage: boolean;
   messages: Messages;
   modelId: WorkersAiModelId;
@@ -79,8 +77,6 @@ interface PiAgentOptions {
   accountCredentials: WorkersAiAccountCredentials;
   sessionAffinity: string;
   workspace: BuilderWorkspaceApi;
-  userId: string;
-  agentName: string;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
 }
@@ -101,7 +97,6 @@ class PiAgentPreparationError extends Error {
 export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableStream<UIMessageChunk>> {
   const {
     abortSignal,
-    chatInitialId,
     firstUserMessage,
     messages,
     modelId,
@@ -110,8 +105,6 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     accountCredentials,
     sessionAffinity,
     workspace,
-    userId,
-    agentName,
     onValidationStage,
     runWithKeepAlive,
   } = options;
@@ -123,10 +116,6 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   const piProvider = getPiProvider(accountCredentials, modelId, { sessionAffinity });
   const { canonicalTools, piTools } = withPreparationStage('tool_setup', () =>
     createPiToolBundle(workspace, {
-      env: options.env,
-      userId,
-      agentName,
-      chatInitialId,
       onValidationStage,
       runWithKeepAlive,
     }),
@@ -230,10 +219,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
             },
       );
       // Check validated build completion like streamText stopWhen did
-      const completion = getValidatedBuildCompletion(messages, currentRunToolResults);
-      if (completion) {
-        currentValidatedBuildCompletion = completion;
-      }
+      currentValidatedBuildCompletion = getValidatedBuildCompletion(messages, currentRunToolResults);
     } else if (event.type === 'turn_end') {
       stepCount += 1;
       if (currentValidatedBuildCompletion) {
@@ -260,10 +246,8 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         model: piProvider.handle.model,
         convertToLlm: (msgs) => msgs as unknown as Message[],
         shouldStopAfterTurn: () => {
-          // Mirror previous stopWhen: stop when validated build completion is achieved
-          if (currentValidatedBuildCompletion) {
-            return true;
-          }
+          // Validation is automatic after each mutation; only the model can decide when implementation is complete.
+          // Stop here solely for the bounded agent-loop budget.
           // Also stop on turn budget
           if (builderTurnStepBudgetExceeded(stepCount, false)) {
             return true;

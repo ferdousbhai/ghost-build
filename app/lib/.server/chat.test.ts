@@ -31,13 +31,10 @@ describe('chat provider error boundary', () => {
           summarize: vi.fn(),
           save: vi.fn(),
         },
-        env: {} as Env,
         firstUserMessage: true,
         accountCredentials: { binding: {} as Ai },
         sessionAffinity: 'session',
         workspace: {} as never,
-        userId: 'user-id',
-        agentName: 'agent',
         runWithKeepAlive: (operation) => operation(),
       }),
     ).rejects.toMatchObject({ status: 500 });
@@ -58,13 +55,10 @@ describe('chat provider error boundary', () => {
         summarize: vi.fn(),
         save: vi.fn(),
       },
-      env: {} as Env,
       firstUserMessage: true,
       accountCredentials: { binding: {} as Ai },
       sessionAffinity: 'session',
       workspace: {} as never,
-      userId: 'user-id',
-      agentName: 'agent',
       runWithKeepAlive: (operation) => operation(),
     });
 

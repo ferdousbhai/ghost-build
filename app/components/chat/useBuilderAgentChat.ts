@@ -355,6 +355,12 @@ export function useBuilderAgentChat(args: {
     [builderAgent, chat, readAuthoritativeTranscript, workspaceGateRef],
   );
 
+  const prepareDeployment = useCallback(async () => {
+    return (await builderAgent.call('prepareDeployment', [], { timeout: 10 * 60_000 })) as NonNullable<
+      BuilderAgentState['deploymentApproval']
+    >;
+  }, [builderAgent]);
+
   const stop = useCallback(() => {
     chat.stop();
     toolActivityStore.abortActive();
@@ -421,6 +427,9 @@ export function useBuilderAgentChat(args: {
         ? builderAgent.state.transcript
         : null,
     validationStage: builderAgent.state?.validationProgress?.stage ?? null,
+    deploymentApproval: builderAgent.state?.deploymentApproval ?? null,
+    deploymentReady: builderAgent.state?.deploymentReady === true,
+    prepareDeployment,
     workspacePresentationState,
   };
 }

@@ -42,9 +42,10 @@ vi.mock('./pi-message-conversion', () => ({
 vi.mock('./pi-tools-adapter', () => ({
   createPiToolBundle: vi.fn(() => ({ canonicalTools: { write: { inputSchema: 'canonical-schema' } }, piTools: {} })),
   piToolsToList: vi.fn(() => [
+    { name: 'read', description: 'read' },
     { name: 'write', description: 'write' },
-    { name: 'validateProject', description: 'validate' },
-    { name: 'deploy', description: 'deploy' },
+    { name: 'edit', description: 'edit' },
+    { name: 'exec', description: 'exec' },
   ]),
 }));
 vi.mock('./workers-ai-tools', () => ({
@@ -137,8 +138,8 @@ describe('workersAiAgent turn budgets (Pi)', () => {
       await emit({
         type: 'tool_execution_end',
         toolCallId: '1',
-        toolName: 'validateProject',
-        result: {},
+        toolName: 'write',
+        result: { details: { validation: { ok: true } } },
         isError: false,
       } as unknown as never);
       for (let i = 0; i < BUILDER_TURN_MAX_MODEL_STEPS - 1; i++) {
@@ -222,12 +223,11 @@ describe('workersAiAgent turn budgets (Pi)', () => {
     );
   });
 
-  it('updates the available Pi tools between model turns', async () => {
-    mocks.getWorkersAiToolSettings.mockImplementation((_messages: unknown, results: unknown[] = []) =>
-      results.length === 0
-        ? { activeTools: ['write'], toolChoice: 'required' }
-        : { activeTools: ['validateProject'], toolChoice: 'required' },
-    );
+  it('keeps the four primitive Pi tools stable between model turns', async () => {
+    mocks.getWorkersAiToolSettings.mockReturnValue({
+      activeTools: ['read', 'write', 'edit', 'exec'],
+      toolChoice: 'auto',
+    });
     let nextToolNames: string[] = [];
     mocks.piRun.mockImplementation(
       async (
@@ -238,47 +238,36 @@ describe('workersAiAgent turn budgets (Pi)', () => {
         },
         emit: (event: unknown) => Promise<void>,
       ) => {
-        expect(context.tools.map((tool) => tool.name)).toEqual(['write']);
+        expect(context.tools.map((tool) => tool.name)).toEqual(['read', 'write', 'edit', 'exec']);
         await emit({
           type: 'tool_execution_end',
           toolCallId: 'write-1',
           toolName: 'write',
-          result: { details: { ok: true } },
+          result: { details: { validation: { ok: true } } },
           isError: false,
         });
         await config.prepareNextTurn?.({ context });
         nextToolNames = context.tools.map((tool) => tool.name);
-        expect(config.toolChoice).toBe('required');
+        expect(config.toolChoice).toBe('auto');
       },
     );
 
     await collectChunks(await createAgentStream());
 
-    expect(nextToolNames).toEqual(['validateProject']);
+    expect(nextToolNames).toEqual(['read', 'write', 'edit', 'exec']);
   });
 
-  it('retains tool results across Pi turns when detecting validated completion', async () => {
+  it('detects validated completion from a primitive mutation result', async () => {
     mocks.getValidatedBuildCompletion.mockImplementation(
-      (_messages: unknown, results: Array<{ toolName: string }> = []) =>
-        results.some(({ toolName }) => toolName === 'write') &&
-        results.some(({ toolName }) => toolName === 'validateProject')
-          ? 'Project validation passed.'
-          : undefined,
+      (_messages: unknown, results: Array<{ result?: { validation?: unknown } }> = []) =>
+        results.some(({ result }) => result?.validation) ? 'Project validation passed.' : undefined,
     );
     mocks.piRun.mockImplementation(async (_ctx: unknown, _cfg: unknown, emit: (event: unknown) => Promise<void>) => {
       await emit({
         type: 'tool_execution_end',
         toolCallId: 'write-1',
         toolName: 'write',
-        result: { details: { ok: true } },
-        isError: false,
-      });
-      await emit({ type: 'turn_end', message: {}, toolResults: [] });
-      await emit({
-        type: 'tool_execution_end',
-        toolCallId: 'validate-1',
-        toolName: 'validateProject',
-        result: { details: { ok: true } },
+        result: { details: { validation: { ok: true } } },
         isError: false,
       });
     });
@@ -295,8 +284,6 @@ describe('workersAiAgent turn budgets (Pi)', () => {
 
 function createAgentStream(modelId: Parameters<typeof workersAiAgent>[0]['modelId'] = '@cf/zai-org/glm-5.2') {
   return workersAiAgent({
-    env: {} as Env,
-    chatInitialId: 'chat-1',
     firstUserMessage: false,
     messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'Build it' }] }],
     modelId,
@@ -309,8 +296,6 @@ function createAgentStream(modelId: Parameters<typeof workersAiAgent>[0]['modelI
     accountCredentials: { accountId: 'account-1', apiKey: 'secret' },
     sessionAffinity: 'opaque-session',
     workspace: {} as never,
-    userId: 'user-1',
-    agentName: 'agent-1',
     runWithKeepAlive: (operation) => operation(),
   });
 }

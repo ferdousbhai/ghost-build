@@ -1,8 +1,4 @@
 import { getToolInvocation, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
-import { deployTool } from 'ghostbuild-agent/tools/deploy';
-import { lookupDocsTool } from 'ghostbuild-agent/tools/lookupDocs';
-import { npmInstallTool } from 'ghostbuild-agent/tools/npmInstall';
-import { validateProjectTool } from 'ghostbuild-agent/tools/validateProject';
 import {
   COMPUTER_AI_TOOL_OPTIONS,
   COMPUTER_EXEC_APPLICATION_POLICY,
@@ -11,46 +7,42 @@ import {
   type ComputerToolName,
 } from 'ghostbuild-agent/cloudflare-computer';
 import { createAITools } from '@cloudflare/computer/tools';
-import type { GhostbuildToolName, GhostbuildToolSet } from 'ghostbuild-agent/types';
-import { z, type ZodType } from 'zod';
+import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
+import { isVirtualDocPath, readVirtualDoc } from 'ghostbuild-agent/virtual-docs';
+import { parseNpmInstallCommand } from 'ghostbuild-agent/tools/npmInstall';
 import { isGhostbuildToolResult, toolFailure } from 'ghostbuild-agent/tool-result';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
-import type { Tool } from 'ghostbuild-agent/pi-tool-compat';
+import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
+import type { Tool } from 'ghostbuild-agent/tool';
+import { z, type ZodType } from 'zod';
 
 type ToolSet = Record<string, Tool>;
-import type { ServerOperationToolName } from '~/agents/builder-workspace-types';
-import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 type BuilderOperationContext = {
-  env: Env;
-  userId: string;
-  chatInitialId: string;
-  agentName: string;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
 };
 
 export type AgentToolChoice = 'auto' | 'none' | 'required';
+export const MODEL_TOOL_NAMES = ['read', 'write', 'edit', 'exec'] as const;
+type ModelToolName = (typeof MODEL_TOOL_NAMES)[number];
+
 type AgentToolSettings = {
-  activeTools?: GhostbuildToolName[];
+  activeTools: ModelToolName[];
   toolChoice: AgentToolChoice;
 };
+
 type ToolResultEvent = {
   toolName: string;
   result: unknown;
 };
-type TurnStatefulToolCoordinator = <T>(toolName: GhostbuildToolName, operation: () => Promise<T>) => Promise<T>;
-type BuildLifecycle =
-  | { stage: 'needs-implementation' }
-  | { stage: 'needs-validation' }
-  | { stage: 'validation-failed' }
-  | { stage: 'guest-validated' }
-  | { stage: 'needs-deploy' }
-  | { stage: 'deploy-failed' }
-  | { stage: 'deployment-ready'; production: boolean };
 
-const AUTOMATIC_TOOLS: GhostbuildToolName[] = [...COMPUTER_TOOL_NAMES, 'lookupDocs', 'npmInstall', 'validateProject'];
-const IMPLEMENTATION_TOOLS = AUTOMATIC_TOOLS.filter((toolName) => toolName !== 'validateProject');
+type TurnStatefulToolCoordinator = <T>(toolName: string, operation: () => Promise<T>) => Promise<T>;
+
+type AutoValidatedResult = Record<string, unknown> & {
+  validation?: unknown;
+  dependencyMutation?: boolean;
+};
 
 export function createWorkersAiTools(
   workspace: BuilderWorkspaceApi,
@@ -63,18 +55,10 @@ export function createWorkersAiTools(
       ...COMPUTER_AI_TOOL_OPTIONS,
     }) as unknown as ToolSet,
   );
-  const tools: GhostbuildToolSet = {
-    ...computerTools,
-    deploy: deployTool as unknown as Tool,
-    lookupDocs: lookupDocsTool() as unknown as Tool,
-    npmInstall: npmInstallTool as unknown as Tool,
-    validateProject: validateProjectTool as unknown as Tool,
-  };
+  const tools = { ...computerTools } as GhostbuildToolSet;
+
   for (const toolName of COMPUTER_TOOL_NAMES) {
-    tools[toolName] = computerWorkspaceTool(toolName, tools[toolName], workspace, coordinateStatefulTool);
-  }
-  for (const toolName of ['lookupDocs', 'npmInstall', 'validateProject', 'deploy'] as const) {
-    tools[toolName] = serverOperationTool(
+    tools[toolName] = computerWorkspaceTool(
       toolName,
       tools[toolName],
       workspace,
@@ -97,51 +81,11 @@ function requireComputerTools(tools: ToolSet): Record<ComputerToolName, Tool> {
   ) as Record<ComputerToolName, Tool>;
 }
 
-function serverOperationTool(
-  toolName: ServerOperationToolName,
-  definition: Tool,
-  workspace: BuilderWorkspaceApi,
-  context: BuilderOperationContext,
-  coordinateStatefulTool: TurnStatefulToolCoordinator,
-): Tool {
-  return {
-    ...definition,
-    execute: async (input, options) => {
-      options.abortSignal?.throwIfAborted();
-      return coordinateStatefulTool(toolName, async () => {
-        options.abortSignal?.throwIfAborted();
-        try {
-          const { executeBuilderOperationTool } = await import('~/agents/builder-operation-tools');
-          return await executeBuilderOperationTool({
-            context,
-            workspace,
-            toolCallId: options.toolCallId,
-            toolName,
-            input,
-            abortSignal: options.abortSignal,
-          });
-        } catch (error) {
-          options.abortSignal?.throwIfAborted();
-          const syncResult = computerSyncUnconfirmedToolResult(error);
-          if (syncResult) {
-            return syncResult;
-          }
-          const message = error instanceof Error ? error.message : String(error);
-          return toolFailure(
-            message.length <= 4_000
-              ? message
-              : `${toolName} failed; its unusually large internal error was omitted from the model response.`,
-          );
-        }
-      });
-    },
-  };
-}
-
 function computerWorkspaceTool(
   toolName: ComputerToolName,
   definition: Tool,
   workspace: BuilderWorkspaceApi,
+  context: BuilderOperationContext,
   coordinateStatefulTool: TurnStatefulToolCoordinator,
 ): Tool {
   if (definition.type === 'provider') {
@@ -151,42 +95,153 @@ function computerWorkspaceTool(
     ...definition,
     description:
       toolName === 'exec'
-        ? `Run a shell command in the project workspace using its Cloudflare Container.\n\n${COMPUTER_EXEC_APPLICATION_POLICY}`
+        ? `Run a shell command in the project workspace using its Cloudflare Container.\n\n${COMPUTER_EXEC_APPLICATION_POLICY}\nUse read for Ghostbuild guidance under /home/project/.ghost/docs/.`
         : definition.description,
     execute: async (input, options) => {
       options.abortSignal?.throwIfAborted();
       return coordinateStatefulTool(toolName, async () => {
         options.abortSignal?.throwIfAborted();
+
+        const virtualDoc =
+          toolName === 'read' ? readVirtualDoc(input as { path: string; offset?: number; limit?: number }) : null;
+        if (virtualDoc) {
+          return virtualDoc;
+        }
+        if ((toolName === 'write' || toolName === 'edit') && isPathInput(input) && isVirtualDocPath(input.path)) {
+          return { error: 'Ghostbuild documentation is an immutable virtual filesystem overlay.' };
+        }
+
+        let result: unknown;
+        let dependencyMutation = false;
+        const revisionBefore =
+          toolName === 'write' || toolName === 'edit' || toolName === 'exec'
+            ? await currentWorkspaceRevision(workspace)
+            : undefined;
         try {
-          const execute = definition.execute;
-          if (!execute) {
+          if (!definition.execute) {
             throw new Error(`${toolName} is not executable.`);
           }
-          const result =
-            toolName === 'read' || toolName === 'ls'
-              ? await execute(input, options)
-              : await workspace.executeToolOnce(options.toolCallId, toolName, input, () => execute(input, options));
-          if (toolName === 'exec') {
-            await workspace.refresh();
+
+          const dependencyCommand =
+            toolName === 'exec' && isExecInput(input) ? parseNpmInstallCommand(input.command) : null;
+          if (dependencyCommand) {
+            result = await workspace.installDependencies({
+              toolCallId: options.toolCallId,
+              input: { mode: dependencyCommand.mode, packages: dependencyCommand.packages.join(' ') || undefined },
+              mode: dependencyCommand.mode,
+              packages: dependencyCommand.packages,
+            });
+            result = markDependencyMutation(result);
+            dependencyMutation = true;
+          } else {
+            result =
+              toolName === 'read' || toolName === 'ls'
+                ? await definition.execute(input, options)
+                : await workspace.executeToolOnce(options.toolCallId, toolName, input, () =>
+                    definition.execute!(input, options),
+                  );
           }
-          return result;
         } catch (error) {
           options.abortSignal?.throwIfAborted();
           const syncResult = computerSyncUnconfirmedToolResult(error);
-          if (syncResult) {
-            return syncResult;
-          }
-          const message = error instanceof Error ? error.message : String(error);
-          return {
-            error:
-              message.length <= 4_000
-                ? message
-                : `${toolName} failed; its unusually large internal error was omitted from the model response.`,
-          };
+          result =
+            syncResult ??
+            (error instanceof Error
+              ? {
+                  error:
+                    error.message.length <= 4_000
+                      ? error.message
+                      : `${toolName} failed; its unusually large internal error was omitted from the model response.`,
+                }
+              : isRecord(error)
+                ? error
+                : { error: String(error) });
         }
+
+        if (toolName === 'read' || toolName === 'ls' || isSyncUnconfirmedResult(result)) {
+          return result;
+        }
+        const revisionAfter = (await workspace.refresh()).revision;
+        const mutationOccurred = dependencyMutation || revisionBefore !== revisionAfter;
+        if (!mutationOccurred) {
+          return result;
+        }
+
+        const validation = await validateMutation(workspace, context, options.toolCallId, options.abortSignal);
+        return attachValidation(result, validation);
       });
     },
   };
+}
+
+async function validateMutation(
+  workspace: BuilderWorkspaceApi,
+  context: BuilderOperationContext,
+  toolCallId: string,
+  abortSignal?: AbortSignal,
+) {
+  abortSignal?.throwIfAborted();
+  const validationToolCallId = await derivedValidationToolCallId(toolCallId);
+  context.onValidationStage?.(toolCallId, 'computer validation');
+  try {
+    return await workspace.validate({
+      toolCallId: validationToolCallId,
+      input: {},
+      abortSignal,
+    });
+  } catch (error) {
+    abortSignal?.throwIfAborted();
+    return toolFailure(error instanceof Error ? error.message : String(error));
+  } finally {
+    context.onValidationStage?.(toolCallId, null);
+  }
+}
+
+async function derivedValidationToolCallId(toolCallId: string): Promise<string> {
+  if (toolCallId.length <= 501) {
+    return `${toolCallId}:validation`;
+  }
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(toolCallId)));
+  return `validation:${[...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function attachValidation(result: unknown, validation: unknown): AutoValidatedResult {
+  if (isRecord(result)) {
+    return { ...result, validation };
+  }
+  return { result, validation };
+}
+
+function markDependencyMutation(result: unknown): unknown {
+  return { ...attachValidationMarker(result), dependencyMutation: true };
+}
+
+function attachValidationMarker(result: unknown): AutoValidatedResult {
+  return isRecord(result) ? { ...result } : { result };
+}
+
+function isExecInput(input: unknown): input is { command: string } {
+  return isRecord(input) && typeof input.command === 'string';
+}
+
+function isPathInput(input: unknown): input is { path: string } {
+  return isRecord(input) && typeof input.path === 'string';
+}
+
+async function currentWorkspaceRevision(workspace: BuilderWorkspaceApi): Promise<number> {
+  try {
+    return workspace.getState().revision;
+  } catch {
+    return (await workspace.refresh()).revision;
+  }
+}
+
+function isSyncUnconfirmedResult(result: unknown): boolean {
+  return isRecord(result) && result.kind === 'workspace-sync-unconfirmed';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 export function createTurnStatefulToolCoordinator(
@@ -194,7 +249,7 @@ export function createTurnStatefulToolCoordinator(
 ): TurnStatefulToolCoordinator {
   let tail = Promise.resolve();
   return (toolName, operation) => {
-    if (!isStatefulTool(toolName)) {
+    if (toolName === 'read' || toolName === 'ls') {
       return operation();
     }
     const scheduled = tail.then(() => runWithKeepAlive(operation));
@@ -206,26 +261,12 @@ export function createTurnStatefulToolCoordinator(
   };
 }
 
-function isStatefulTool(toolName: GhostbuildToolName): boolean {
-  return (
-    toolName === 'edit' ||
-    toolName === 'write' ||
-    toolName === 'exec' ||
-    toolName === 'npmInstall' ||
-    toolName === 'validateProject' ||
-    toolName === 'deploy'
-  );
-}
-
-export function serializeWorkersAiToolDefinitions(
-  tools: GhostbuildToolSet,
-  activeTools?: GhostbuildToolName[],
-): string {
+export function serializeWorkersAiToolDefinitions(tools: GhostbuildToolSet, activeTools?: readonly string[]): string {
   const activeToolNames = activeTools ? new Set(activeTools) : null;
   return JSON.stringify(
     Object.fromEntries(
       Object.entries(tools)
-        .filter(([name]) => !activeToolNames || activeToolNames.has(name as GhostbuildToolName))
+        .filter(([name]) => !activeToolNames || activeToolNames.has(name))
         .map(([name, tool]) => [
           name,
           {
@@ -238,132 +279,12 @@ export function serializeWorkersAiToolDefinitions(
 }
 
 export function getWorkersAiToolSettings(
-  messages: GhostbuildMessage[],
-  currentStepResults: ReadonlyArray<ToolResultEvent> = [],
+  _messages: GhostbuildMessage[],
+  _currentStepResults: ReadonlyArray<ToolResultEvent> = [],
 ): AgentToolSettings {
-  const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
-  const toolResults = collectToolResults(messages);
-  const currentTurnResults = [
-    ...toolResults.filter(({ messageIndex }) => messageIndex > lastUserIndex),
-    ...currentStepResults,
-  ];
-  const currentTurnLifecycle = analyzeBuildLifecycle(currentTurnResults);
-  if (currentTurnLifecycle) {
-    return currentTurnLifecycleToolSettings(currentTurnLifecycle);
-  }
-
-  const priorLifecycle = analyzeBuildLifecycle([...toolResults, ...currentStepResults]);
-  if (priorLifecycle) {
-    const priorSettings = lifecycleToolSettings(priorLifecycle);
-    if (priorSettings.toolChoice !== 'none') {
-      return priorSettings;
-    }
-  }
-
-  return automaticToolSettings();
-}
-
-function currentTurnLifecycleToolSettings(lifecycle: BuildLifecycle): AgentToolSettings {
-  switch (lifecycle.stage) {
-    case 'needs-implementation':
-      return {
-        activeTools: [...IMPLEMENTATION_TOOLS],
-        toolChoice: 'required',
-      };
-    case 'needs-validation':
-    case 'validation-failed':
-      return {
-        activeTools: [...AUTOMATIC_TOOLS],
-        toolChoice: 'required',
-      };
-    case 'deploy-failed':
-      return {
-        activeTools: [...AUTOMATIC_TOOLS, 'deploy'],
-        toolChoice: 'required',
-      };
-    default:
-      return lifecycleToolSettings(lifecycle);
-  }
-}
-
-function analyzeBuildLifecycle(toolResults: ReadonlyArray<ToolResultEvent>): BuildLifecycle | undefined {
-  const implementationIndex = toolResults.findLastIndex(isImplementationMutationResult);
-  const dependencyIndex = toolResults.findLastIndex(isDependencyMutationResult);
-  if (implementationIndex === -1 && dependencyIndex === -1) {
-    return undefined;
-  }
-  if (implementationIndex === -1) {
-    return { stage: 'needs-implementation' };
-  }
-  const mutationIndex = Math.max(implementationIndex, dependencyIndex);
-  const lastValidationIndex = toolResults.findLastIndex(
-    ({ toolName }, index) => toolName === 'validateProject' && index > mutationIndex,
-  );
-  if (lastValidationIndex === -1) {
-    return { stage: 'needs-validation' };
-  }
-  const validationResult = toolResults[lastValidationIndex].result;
-  if (!isSuccessfulValidationResult(validationResult)) {
-    return { stage: 'validation-failed' };
-  }
-  if (validationNextAction(validationResult) === 'sign-in-required') {
-    return { stage: 'guest-validated' };
-  }
-  const lastDeployIndex = toolResults.findLastIndex(
-    ({ toolName }, index) => toolName === 'deploy' && index > lastValidationIndex,
-  );
-  if (lastDeployIndex === -1) {
-    return { stage: 'needs-deploy' };
-  }
-  const deployResult = toolResults[lastDeployIndex].result;
-  if (isProductionDeployResult(deployResult)) {
-    return { stage: 'deployment-ready', production: true };
-  }
-  if (isSuccessfulDeployResult(deployResult, validationRevision(validationResult))) {
-    return { stage: 'deployment-ready', production: false };
-  }
-  return { stage: 'deploy-failed' };
-}
-
-function lifecycleToolSettings(lifecycle: BuildLifecycle): AgentToolSettings {
-  switch (lifecycle.stage) {
-    case 'needs-implementation':
-      return {
-        activeTools: [...IMPLEMENTATION_TOOLS],
-        toolChoice: 'required',
-      };
-    case 'needs-validation':
-      return requiredToolSettings('validateProject');
-    case 'validation-failed':
-      return automaticToolSettings();
-    case 'guest-validated':
-    case 'deployment-ready':
-      return { toolChoice: 'none' };
-    case 'needs-deploy':
-      return requiredToolSettings('deploy');
-    case 'deploy-failed':
-      return {
-        activeTools: [...AUTOMATIC_TOOLS, 'deploy'],
-        toolChoice: 'auto',
-      };
-    default: {
-      const unsupported: never = lifecycle;
-      throw new Error(`Unsupported build lifecycle: ${JSON.stringify(unsupported)}`);
-    }
-  }
-}
-
-function automaticToolSettings(): AgentToolSettings {
   return {
-    activeTools: [...AUTOMATIC_TOOLS],
+    activeTools: [...MODEL_TOOL_NAMES],
     toolChoice: 'auto',
-  };
-}
-
-function requiredToolSettings(toolName: GhostbuildToolName): AgentToolSettings {
-  return {
-    activeTools: [toolName],
-    toolChoice: 'required',
   };
 }
 
@@ -376,19 +297,38 @@ export function getValidatedBuildCompletion(
     return undefined;
   }
 
-  const lifecycle = analyzeBuildLifecycle([
+  const results = [
     ...collectToolResults(messages).filter(({ messageIndex }) => messageIndex > lastUserIndex),
     ...currentStepResults,
-  ]);
-  if (lifecycle?.stage === 'guest-validated') {
-    return 'Done. I built and validated the app in the isolated production build environment, and it is ready to preview here. Sign in when you are ready to deploy it to Cloudflare production.';
-  }
-  if (lifecycle?.stage !== 'deployment-ready') {
+  ];
+  const validation = latestSuccessfulValidation(results);
+  if (!validation) {
     return undefined;
   }
-  return lifecycle.production
-    ? 'Done. I built, validated, and deployed the app to Cloudflare production.'
-    : 'Done. I built and validated the app. The production deployment plan is ready for your approval.';
+
+  if (validationNextAction(validation) === 'sign-in-required') {
+    return 'Done. I built and validated the app in the isolated production build environment, and it is ready to preview here. Sign in when you are ready to deploy it to Cloudflare production.';
+  }
+  return 'Done. I built and validated the app. It is ready for the user to review and deploy.';
+}
+
+function latestSuccessfulValidation(results: ReadonlyArray<ToolResultEvent>): unknown | undefined {
+  for (let index = results.length - 1; index >= 0; index -= 1) {
+    const result = results[index]?.result;
+    const candidate = validationResult(result);
+    if ((isRecord(result) && 'validation' in result) || results[index]?.toolName === 'validateProject') {
+      return isSuccessfulValidationResult(candidate) ? candidate : undefined;
+    }
+  }
+  return undefined;
+}
+
+function validationResult(result: unknown): unknown {
+  if (isRecord(result) && 'validation' in result) {
+    return result.validation;
+  }
+  // Preserve recognition of transcripts created before automatic validation.
+  return result;
 }
 
 function collectToolResults(messages: GhostbuildMessage[]): Array<{
@@ -402,52 +342,9 @@ function collectToolResults(messages: GhostbuildMessage[]): Array<{
       if (invocation?.state !== 'output-available') {
         return [];
       }
-      return [
-        {
-          messageIndex,
-          toolName: invocation.toolName,
-          result: invocation.output,
-        },
-      ];
+      return [{ messageIndex, toolName: invocation.toolName, result: invocation.output }];
     }),
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function isImplementationMutationResult(result: { toolName: string; result?: unknown }): boolean {
-  if (result.toolName === 'exec') {
-    // Official Computer exec is intentionally arbitrary. A command may write
-    // source before succeeding, failing, timing out, or returning pending sync.
-    return true;
-  }
-  if (result.toolName !== 'write' && result.toolName !== 'edit') {
-    return false;
-  }
-  if (!isRecord(result.result)) {
-    return false;
-  }
-  if (
-    result.result.kind === 'workspace-mutation-receipt' &&
-    result.result.version === 1 &&
-    result.result.committed === true &&
-    result.result.acknowledgement === 'complete' &&
-    result.result.tool === result.toolName
-  ) {
-    return true;
-  }
-  if (typeof result.result.path !== 'string' || typeof result.result.error === 'string') {
-    return false;
-  }
-  return result.toolName === 'write'
-    ? Number.isSafeInteger(result.result.bytesWritten) && Number(result.result.bytesWritten) >= 0
-    : Number.isSafeInteger(result.result.editsApplied) && Number(result.result.editsApplied) > 0;
-}
-
-function isDependencyMutationResult(result: { toolName: string; result?: unknown }): boolean {
-  return result.toolName === 'npmInstall';
 }
 
 function isSuccessfulValidationResult(result: unknown): boolean {
@@ -474,18 +371,4 @@ function validationNextAction(result: unknown): 'sign-in-required' | 'prepare-de
   }
   const nextAction = result.data.nextAction;
   return nextAction === 'sign-in-required' || nextAction === 'prepare-deployment' ? nextAction : undefined;
-}
-
-function isSuccessfulDeployResult(result: unknown, expectedRevision?: string): boolean {
-  return (
-    isGhostbuildToolResult(result) &&
-    result.ok &&
-    isRecord(result.data) &&
-    result.data.state === 'awaiting-approval' &&
-    (expectedRevision === undefined || result.data.revision === expectedRevision)
-  );
-}
-
-function isProductionDeployResult(result: unknown): boolean {
-  return isGhostbuildToolResult(result) && result.ok && isRecord(result.data) && result.data.state === 'deployed';
 }

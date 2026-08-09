@@ -2,160 +2,221 @@ import { describe, expect, it, vi } from 'vitest';
 import type { GhostbuildMessage, GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
+import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
+import type { ZodType } from 'zod';
+import { COMPUTER_EXEC_APPLICATION_POLICY } from 'ghostbuild-agent/cloudflare-computer';
+import {
+  createTurnStatefulToolCoordinator,
+  createWorkersAiTools,
+  getValidatedBuildCompletion,
+  getWorkersAiToolSettings,
+  MODEL_TOOL_NAMES,
+} from './workers-ai-tools';
 
 type Tool = {
   description?: string;
   inputSchema?: unknown;
-  execute?: (input: unknown, options: ToolExecutionOptions) => Promise<unknown>;
+  execute?: (input: unknown, options: { toolCallId: string; abortSignal?: AbortSignal }) => Promise<unknown>;
 };
-type ToolExecutionOptions = { toolCallId: string; abortSignal?: AbortSignal };
-import type { ZodType } from 'zod';
-import { COMPUTER_EXEC_APPLICATION_POLICY, COMPUTER_TOOL_NAMES } from 'ghostbuild-agent/cloudflare-computer';
-import { UserWorkspaceRuntimeClient } from '~/lib/.server/cloudflare/user-workspace-runtime-client';
-import {
-  createWorkersAiTools,
-  createTurnStatefulToolCoordinator,
-  getValidatedBuildCompletion,
-  getWorkersAiToolSettings,
-} from './workers-ai-tools';
 
-const AUTOMATIC_TOOLS = [...COMPUTER_TOOL_NAMES, 'lookupDocs', 'npmInstall', 'validateProject'];
+describe('minimal Workers AI tool surface', () => {
+  it('keeps the reviewed Computer schemas behind four active model tools', () => {
+    const tools = createWorkersAiTools(workspaceStub(), operationContext());
 
-describe('Workers AI tool lifecycle', () => {
-  it('exposes the clean-break Cloudflare Computer filesystem schemas', () => {
-    const tools = createWorkersAiTools(
-      workspaceStub(async () => ({ result: async () => ({ exitCode: 0, stdout: '', stderr: '' }) })),
-      operationContext(),
-    );
-
+    expect(getWorkersAiToolSettings([])).toEqual({
+      activeTools: MODEL_TOOL_NAMES,
+      toolChoice: 'auto',
+    });
     expect(
       toolInputSchema(tools.read).safeParse({ path: '/home/project/package.json', offset: 1, limit: 20 }).success,
     ).toBe(true);
-    expect(toolInputSchema(tools.ls).safeParse({ path: '/home/project/src' }).success).toBe(true);
     expect(toolInputSchema(tools.write).safeParse({ path: '/home/project/new.ts', content: 'export {}' }).success).toBe(
       true,
     );
     expect(
       toolInputSchema(tools.edit).safeParse({
         path: '/home/project/app.ts',
-        edits: [{ oldText: 'const before = true;', newText: 'const after = true;' }],
+        edits: [{ oldText: 'before', newText: 'after' }],
       }).success,
     ).toBe(true);
-    expect(
-      toolInputSchema(tools.edit).safeParse({
-        path: '/home/project/app.ts',
-        edits: [{ old: 'const before = true;', new: 'const after = true;' }],
-      }).success,
-    ).toBe(false);
+    expect(toolInputSchema(tools.exec).safeParse({ command: 'rg TODO', backend: 'container-shell' }).success).toBe(
+      true,
+    );
   });
 
-  it('uses the official Computer exec contract and forwards the selected backend', async () => {
-    const runtimeExec = vi.fn(async () => ({
-      result: async () => ({ exitCode: 0, stdout: 'checked\n', stderr: '' }),
-    }));
-    const workspace = workspaceStub(runtimeExec);
-    const tools = createWorkersAiTools(workspace, operationContext());
-    const input = {
-      command: 'pnpm test',
-      cwd: '/home/project',
-      backend: 'container-shell',
-    };
+  it('presents one concrete exec backend plus the mutation policy', () => {
+    const tools = createWorkersAiTools(workspaceStub(), operationContext());
 
     expect(tools.exec.description).toContain(COMPUTER_EXEC_APPLICATION_POLICY);
     expect(tools.exec.description).not.toContain('multiple backends');
-
-    await expect(executeTool(tools.exec, input)).resolves.toEqual({
-      ...input,
-      exitCode: 0,
-      stdout: 'checked\n',
-      stderr: '',
-    });
-    expect(runtimeExec).toHaveBeenCalledWith('pnpm test', {
-      cwd: '/home/project',
-      encoding: 'utf8',
-      backend: 'container-shell',
-    });
-    expect(workspace.executeToolOnce).toHaveBeenCalledWith('tool-call', 'exec', input, expect.any(Function));
-    expect(workspace.refresh).toHaveBeenCalledOnce();
+    expect(tools.exec.description).toContain('/home/project/.ghost/docs/');
   });
 
-  it('defaults Computer exec to the production container backend without changing its result shape', async () => {
+  it('reads immutable bundled guidance through the normal read tool', async () => {
+    const workspace = workspaceStub();
+    const tools = createWorkersAiTools(workspace, operationContext());
+
+    const index = await executeTool(tools.read, { path: '/home/project/.ghost/docs/index.md', limit: 20 });
+    expect(JSON.stringify(index)).toContain('cloudflarePlatform.md');
+    expect(workspace.computer.fs.readFile).not.toHaveBeenCalled();
+
+    await expect(
+      executeTool(tools.write, { path: '/home/project/.ghost/docs/index.md', content: 'replace docs' }),
+    ).resolves.toEqual({ error: 'Ghostbuild documentation is an immutable virtual filesystem overlay.' });
+    expect(workspace.validate).not.toHaveBeenCalled();
+  });
+
+  it('does not validate read-only exec commands', async () => {
     const runtimeExec = vi.fn(async () => ({
       result: async () => ({ exitCode: 0, stdout: 'src\n', stderr: '' }),
     }));
-    const tools = createWorkersAiTools(workspaceStub(runtimeExec), operationContext());
+    const workspace = workspaceStub({ runtimeExec });
+    const tools = createWorkersAiTools(workspace, operationContext());
 
-    await expect(executeTool(tools.exec, { command: 'ls /home/project' })).resolves.toEqual({
-      command: 'ls /home/project',
-      cwd: null,
-      backend: 'container-shell',
+    await expect(executeTool(tools.exec, { command: 'rg TODO', backend: 'container-shell' })).resolves.toMatchObject({
       exitCode: 0,
       stdout: 'src\n',
-      stderr: '',
     });
-    expect(runtimeExec).toHaveBeenCalledWith('ls /home/project', {
+    expect(runtimeExec).toHaveBeenCalledWith('rg TODO', {
       cwd: undefined,
       encoding: 'utf8',
       backend: 'container-shell',
     });
+    expect(workspace.validate).not.toHaveBeenCalled();
   });
 
-  it('turns the official Computer exec error wrapper into a typed nonterminal sync result', async () => {
-    const completeToolOperation = vi.fn();
-    const failToolOperation = vi.fn();
-    const stub = {
-      initializeProjectIdentity: vi.fn(),
-      beginToolOperation: vi.fn().mockResolvedValue({ status: 'execute' }),
-      completeToolOperation,
-      failToolOperation,
-      execute: vi.fn().mockRejectedValue(new Error('[workspace_sync_pending] Computer synchronization is pending.')),
-      getWorkspaceState: vi.fn(),
-      listWorkspaceFiles: vi.fn(),
-    };
-    const workspace = new UserWorkspaceRuntimeClient(
-      {
-        GHOSTBUILD_USER_RUNTIME: '1',
-        GHOSTBUILD_USER_ID: 'user-1',
-        PROJECT_WORKSPACE: {
-          idFromName: vi.fn(() => ({ id: 'project-1' })),
-          get: vi.fn(() => stub),
-        },
-      } as unknown as Env,
-      'project-1',
-      () => 'user-1',
-    );
-    const tools = createWorkersAiTools(workspace, operationContext());
+  it('automatically validates write and edit mutations', async () => {
+    const validation = validationResult('prepare-deployment');
+    const workspace = workspaceStub({ validation });
+    const onValidationStage = vi.fn();
+    const tools = createWorkersAiTools(workspace, operationContext({ onValidationStage }));
 
-    await expect(executeTool(tools.exec, { command: 'touch marker', backend: 'container-shell' })).resolves.toEqual({
-      kind: 'workspace-sync-unconfirmed',
-      version: 1,
-      acknowledgement: 'pending',
-      status: 'pending',
-      code: 'workspace_sync_pending',
-      error: '[workspace_sync_pending] Computer synchronization is pending.',
+    const result = await executeTool(tools.write, {
+      path: '/home/project/src/app.ts',
+      content: 'export const ready = true;',
     });
-    expect(completeToolOperation).not.toHaveBeenCalled();
-    expect(failToolOperation).not.toHaveBeenCalled();
+
+    expect(result).toMatchObject({ validation });
+    expect(workspace.validate).toHaveBeenCalledWith({
+      toolCallId: 'tool-call:validation',
+      input: {},
+      abortSignal: undefined,
+    });
+    expect(onValidationStage.mock.calls).toEqual([
+      ['tool-call', 'computer validation'],
+      ['tool-call', null],
+    ]);
   });
 
-  it('does not start a queued Computer tool after the turn is aborted', async () => {
-    const runtimeExec = vi.fn();
-    const workspace = workspaceStub(runtimeExec);
+  it('does not claim completion when a failed write left the durable revision unchanged', async () => {
+    const workspace = workspaceStub();
+    workspace.computer.fs.writeFile = vi.fn(async () => {
+      throw new Error('write failed');
+    });
     const tools = createWorkersAiTools(workspace, operationContext());
-    const controller = new AbortController();
-    controller.abort(new Error('turn aborted'));
 
-    await expect(executeTool(tools.read, { path: '/home/project/source.ts' }, controller.signal)).rejects.toThrow(
-      'turn aborted',
-    );
-    expect(workspace.computer.fs.stat).not.toHaveBeenCalled();
-    expect(runtimeExec).not.toHaveBeenCalled();
+    const result = await executeTool(tools.write, { path: '/home/project/src/app.ts', content: 'bad' });
+
+    expect(result).toMatchObject({ error: expect.stringContaining('write failed') });
+    expect(result).not.toHaveProperty('validation');
+    expect(workspace.validate).not.toHaveBeenCalled();
   });
 
-  it('serializes writes and validation in model tool-call order', async () => {
-    const coordinate = createTurnStatefulToolCoordinator((operation) => operation());
-    let finishWrite: (() => void) | undefined;
+  it('routes approved dependency commands through the durable installer and validates them', async () => {
+    const workspace = workspaceStub({ validation: validationResult('prepare-deployment') });
+    const tools = createWorkersAiTools(workspace, operationContext());
+
+    const result = await executeTool(tools.exec, { command: 'pnpm add date-fns' });
+
+    expect(workspace.installDependencies).toHaveBeenCalledWith({
+      toolCallId: 'tool-call',
+      input: { mode: 'add', packages: 'date-fns' },
+      mode: 'add',
+      packages: ['date-fns'],
+    });
+    expect(result).toMatchObject({ dependencyMutation: true, validation: { ok: true } });
+    expect(workspace.computer.runtime!.exec).not.toHaveBeenCalled();
+  });
+
+  it('does not let malformed dependency commands fall through to the shell', async () => {
+    const workspace = workspaceStub();
+    const tools = createWorkersAiTools(workspace, operationContext());
+
+    await expect(executeTool(tools.exec, { command: 'pnpm install' })).resolves.toMatchObject({
+      error: expect.stringContaining('exec accepts only'),
+    });
+    expect(workspace.computer.runtime!.exec).not.toHaveBeenCalled();
+    expect(workspace.installDependencies).not.toHaveBeenCalled();
+  });
+
+  it('validates an exec command only when the durable workspace revision changes', async () => {
+    let revision = 1;
+    const runtimeExec = vi.fn(async () => ({
+      result: async () => {
+        revision = 2;
+        return { exitCode: 0, stdout: '', stderr: '' };
+      },
+    }));
+    const workspace = workspaceStub({ runtimeExec, revision: () => revision });
+    const tools = createWorkersAiTools(workspace, operationContext());
+
+    const result = await executeTool(tools.exec, { command: 'custom-command' });
+
+    expect(result).toMatchObject({ validation: { ok: true } });
+    expect(workspace.validate).toHaveBeenCalledOnce();
+  });
+
+  it('returns validation failures inside the mutation result for model repair', async () => {
+    const validation = toolFailure('Typecheck failed', { diagnostics: ['src/app.ts:1'] });
+    const workspace = workspaceStub({ validation });
+    const tools = createWorkersAiTools(workspace, operationContext());
+
+    await expect(executeTool(tools.write, { path: '/home/project/src/app.ts', content: 'bad' })).resolves.toMatchObject(
+      {
+        validation,
+      },
+    );
+    expect(
+      getValidatedBuildCompletion([user('Build it')], [{ toolName: 'write', result: { validation } }]),
+    ).toBeUndefined();
+  });
+
+  it('derives completion from the latest automatic validation receipt', () => {
+    expect(
+      getValidatedBuildCompletion(
+        [user('Build it')],
+        [{ toolName: 'write', result: { validation: validationResult('sign-in-required') } }],
+      ),
+    ).toContain('Sign in when you are ready to deploy');
+
+    expect(
+      getValidatedBuildCompletion(
+        [user('Build it')],
+        [
+          { toolName: 'write', result: { validation: validationResult('prepare-deployment') } },
+          { toolName: 'edit', result: { validation: toolFailure('Build failed') } },
+        ],
+      ),
+    ).toBeUndefined();
+  });
+
+  it('continues to recognize legacy explicit validation receipts', () => {
+    expect(
+      getValidatedBuildCompletion([
+        user('Build it'),
+        toolResult('validateProject', {}, validationResult('prepare-deployment')),
+      ]),
+    ).toBe('Done. I built and validated the app. It is ready for the user to review and deploy.');
+  });
+
+  it('serializes stateful work and keeps read-only work outside the queue', async () => {
     const events: string[] = [];
+    let finishWrite: (() => void) | undefined;
+    let keepAliveCalls = 0;
+    const coordinate = createTurnStatefulToolCoordinator(async (operation) => {
+      keepAliveCalls += 1;
+      return operation();
+    });
     const write = coordinate('write', async () => {
       events.push('write-start');
       await new Promise<void>((resolve) => {
@@ -163,466 +224,104 @@ describe('Workers AI tool lifecycle', () => {
       });
       events.push('write-end');
     });
-    const validation = coordinate('validateProject', async () => {
-      events.push('validate-start');
-    });
+    const validation = coordinate('validateProject', async () => events.push('validation'));
+    await expect(coordinate('read', async () => 'contents')).resolves.toBe('contents');
 
     await Promise.resolve();
     expect(events).toEqual(['write-start']);
     finishWrite?.();
     await Promise.all([write, validation]);
-    expect(events).toEqual(['write-start', 'write-end', 'validate-start']);
-  });
-
-  it('does not let a failed stateful tool block the remaining turn', async () => {
-    const coordinate = createTurnStatefulToolCoordinator((operation) => operation());
-    const failedWrite = coordinate('write', async () => {
-      throw new Error('write failed');
-    });
-    const validation = coordinate('validateProject', async () => 'validated');
-
-    await expect(failedWrite).rejects.toThrow('write failed');
-    await expect(validation).resolves.toBe('validated');
-  });
-
-  it('keeps the agent alive while a stateful tool runs', async () => {
-    const events: string[] = [];
-    let keepAliveCalls = 0;
-    const runWithKeepAlive = async <T>(operation: () => Promise<T>): Promise<T> => {
-      keepAliveCalls += 1;
-      events.push('keep-alive-start');
-      const result = await operation();
-      events.push('keep-alive-end');
-      return result;
-    };
-    const coordinate = createTurnStatefulToolCoordinator(runWithKeepAlive);
-
-    await expect(
-      coordinate('validateProject', async () => {
-        events.push('validation');
-        return 'validated';
-      }),
-    ).resolves.toBe('validated');
-
-    expect(events).toEqual(['keep-alive-start', 'validation', 'keep-alive-end']);
-    expect(keepAliveCalls).toBe(1);
-  });
-
-  it('releases keep-alive after a failure and keeps the stateful queue usable', async () => {
-    const events: string[] = [];
-    const runWithKeepAlive = async <T>(operation: () => Promise<T>): Promise<T> => {
-      events.push('keep-alive-start');
-      try {
-        return await operation();
-      } finally {
-        events.push('keep-alive-end');
-      }
-    };
-    const coordinate = createTurnStatefulToolCoordinator(runWithKeepAlive);
-
-    const failedWrite = coordinate('write', async () => {
-      events.push('write');
-      throw new Error('write failed');
-    });
-    const validation = coordinate('validateProject', async () => {
-      events.push('validation');
-      return 'validated';
-    });
-
-    await expect(failedWrite).rejects.toThrow('write failed');
-    await expect(validation).resolves.toBe('validated');
-    expect(events).toEqual([
-      'keep-alive-start',
-      'write',
-      'keep-alive-end',
-      'keep-alive-start',
-      'validation',
-      'keep-alive-end',
-    ]);
-  });
-
-  it('does not keep the agent alive for read-only tools', async () => {
-    let keepAliveCalls = 0;
-    const runWithKeepAlive = <T>(operation: () => Promise<T>): Promise<T> => {
-      keepAliveCalls += 1;
-      return operation();
-    };
-    const coordinate = createTurnStatefulToolCoordinator(runWithKeepAlive);
-
-    await expect(coordinate('read', async () => 'contents')).resolves.toBe('contents');
-    await expect(coordinate('ls', async () => ['src'])).resolves.toEqual(['src']);
-    await expect(coordinate('lookupDocs', async () => 'guidance')).resolves.toBe('guidance');
-
-    expect(keepAliveCalls).toBe(0);
-  });
-
-  it('gives the model all non-deployment tools before a mutation', () => {
-    expect(getWorkersAiToolSettings([user('Build a habit tracker')])).toEqual({
-      activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'auto',
-    });
-
-    expect(
-      getWorkersAiToolSettings([
-        user('Build a habit tracker'),
-        toolResult('read', {}, { path: '/home/project/package.json', content: '{}' }),
-        toolResult('lookupDocs', {}, toolSuccess('looked up guidance')),
-      ]),
-    ).toEqual({
-      activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'auto',
-    });
-  });
-
-  it('requires concrete implementation or validation work after native and recovered mutations', () => {
-    for (const [toolName, result] of [
-      ['write', writeResult()],
-      [
-        'edit',
-        {
-          path: '/home/project/src/router.tsx',
-          editsApplied: 1,
-          diff: '',
-          patch: '',
-          firstChangedLine: 1,
-        },
-      ],
-      ['write', writeReceipt()],
-    ] as const) {
-      expect(
-        getWorkersAiToolSettings([
-          user('Build a habit tracker'),
-          toolResult(toolName, { path: '/home/project/src/router.tsx' }, result),
-        ]),
-      ).toEqual({
-        activeTools: AUTOMATIC_TOOLS,
-        toolChoice: 'required',
-      });
-    }
-  });
-
-  it('does not treat malformed, pending, or failed write output as a committed implementation mutation', () => {
-    const base = [user('Build a habit tracker')];
-    for (const result of [
-      { path: '/home/project/a.ts' },
-      { path: '/home/project/a.ts', bytesWritten: -1 },
-      { ...writeReceipt(), acknowledgement: 'pending' },
-      { ...writeReceipt(), committed: false },
-      { error: 'write failed' },
-    ]) {
-      expect(getWorkersAiToolSettings([...base, toolResult('write', {}, result)])).toEqual({
-        activeTools: AUTOMATIC_TOOLS,
-        toolChoice: 'auto',
-      });
-    }
-  });
-
-  it('conservatively requires validation after every attempted model-facing Computer exec', () => {
-    for (const result of [
-      { exitCode: 0, stdout: '', stderr: '' },
-      { exitCode: 1, stdout: '', stderr: 'failed after writing' },
-      { error: 'timed out after writing' },
-      {
-        kind: 'workspace-sync-unconfirmed',
-        version: 1,
-        acknowledgement: 'pending',
-        status: 'pending',
-        code: 'workspace_sync_pending',
-      },
-    ]) {
-      expect(
-        getWorkersAiToolSettings([user('Explain the project'), toolResult('exec', { command: 'rg TODO' }, result)]),
-      ).toEqual({ activeTools: AUTOMATIC_TOOLS, toolChoice: 'required' });
-    }
-  });
-
-  it('requires implementation work after dependency setup instead of forcing premature validation', () => {
-    expect(
-      getWorkersAiToolSettings([
-        user('Build a Three.js game'),
-        toolResult('npmInstall', { packages: 'three @types/three' }, toolSuccess('installed')),
-      ]),
-    ).toEqual({
-      activeTools: AUTOMATIC_TOOLS.filter((toolName) => toolName !== 'validateProject'),
-      toolChoice: 'required',
-    });
-  });
-
-  it('invalidates validation when dependency installation fails after a possible manifest or lockfile write', () => {
-    expect(
-      getWorkersAiToolSettings([
-        user('Add a chart'),
-        toolResult('npmInstall', { packages: 'recharts' }, toolFailure('pnpm failed after updating the lockfile')),
-      ]),
-    ).toEqual({
-      activeTools: AUTOMATIC_TOOLS.filter((toolName) => toolName !== 'validateProject'),
-      toolChoice: 'required',
-    });
-  });
-
-  it('uses every result in a multi-tool model step', () => {
-    expect(
-      getWorkersAiToolSettings(
-        [user('Build a habit tracker')],
-        [
-          { toolName: 'write', result: writeResult() },
-          { toolName: 'read', result: { path: '/home/project/package.json', content: '{}' } },
-        ],
-      ),
-    ).toEqual({
-      activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'required',
-    });
-  });
-
-  it('finishes an unfinished mutation before starting a later turn', () => {
-    expect(
-      getWorkersAiToolSettings([
-        user('Build a habit tracker'),
-        toolResult('write', { path: '/home/project/src/routes/index.tsx' }, writeResult()),
-        { ...user('Is it ready?'), id: 'user-2' },
-      ]),
-    ).toEqual({
-      activeTools: ['validateProject'],
-      toolChoice: 'required',
-    });
-  });
-
-  it('returns control after read failures and requires repair work after validation failures', () => {
-    expect(
-      getWorkersAiToolSettings([
-        user('Explain the project'),
-        toolResult('read', {}, { error: 'Unable to read that range' }),
-      ]),
-    ).toEqual({
-      activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'auto',
-    });
-
-    expect(
-      getWorkersAiToolSettings([
-        user('Build a habit tracker'),
-        toolResult('write', {}, writeResult()),
-        toolResult('validateProject', {}, toolFailure('Preview validation failed')),
-      ]),
-    ).toEqual({
-      activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'required',
-    });
-
-    expect(
-      getWorkersAiToolSettings([
-        user('Build a habit tracker'),
-        toolResult('write', {}, writeResult()),
-        toolResult('validateProject', {}, toolSuccess('missing next action', { level: 'full', revision: 'abc' })),
-      ]),
-    ).toEqual({
-      activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'required',
-    });
-  });
-
-  it('prepares deployment only after exact-revision validation', () => {
-    const messages = [
-      user('Build a habit tracker'),
-      toolResult('write', {}, writeResult()),
-      toolResult('validateProject', {}, validationResult('prepare-deployment', 'abc')),
-    ];
-    expect(getWorkersAiToolSettings(messages)).toEqual({
-      activeTools: ['deploy'],
-      toolChoice: 'required',
-    });
-
-    expect(
-      getWorkersAiToolSettings([
-        ...messages,
-        toolResult('deploy', { validatedRevision: 'abc' }, toolFailure('Cloudflare is temporarily unavailable')),
-      ]),
-    ).toEqual({
-      activeTools: [...AUTOMATIC_TOOLS, 'deploy'],
-      toolChoice: 'required',
-    });
-
-    expect(
-      getWorkersAiToolSettings([
-        ...messages,
-        toolResult(
-          'deploy',
-          { validatedRevision: 'abc' },
-          toolSuccess('ready', { state: 'awaiting-approval', revision: 'abc' }),
-        ),
-      ]),
-    ).toEqual({ toolChoice: 'none' });
-  });
-
-  it('stops tool work after guest validation', () => {
-    expect(
-      getWorkersAiToolSettings([
-        user('Build a habit tracker'),
-        toolResult('write', {}, writeResult()),
-        toolResult('validateProject', {}, validationResult('sign-in-required')),
-      ]),
-    ).toEqual({ toolChoice: 'none' });
-  });
-
-  it('returns deterministic completion copy from validated lifecycle receipts', () => {
-    expect(
-      getValidatedBuildCompletion([
-        user('Build a habit tracker'),
-        toolResult('write', {}, writeResult()),
-        toolResult('validateProject', {}, validationResult('sign-in-required')),
-      ]),
-    ).toBe(
-      'Done. I built and validated the app in the isolated production build environment, and it is ready to preview here. Sign in when you are ready to deploy it to Cloudflare production.',
-    );
-  });
-
-  it('returns deterministic approval copy from tool results produced in the current model call', () => {
-    expect(
-      getValidatedBuildCompletion(
-        [user('Build a habit tracker')],
-        [
-          { toolName: 'write', result: writeResult() },
-          { toolName: 'validateProject', result: validationResult('prepare-deployment') },
-          {
-            toolName: 'deploy',
-            result: toolSuccess('ready', { state: 'awaiting-approval', revision: 'a'.repeat(64) }),
-          },
-        ],
-      ),
-    ).toBe('Done. I built and validated the app. The production deployment plan is ready for your approval.');
-  });
-
-  it('does not complete from an obsolete successful validation receipt', () => {
-    const messages = [
-      user('Build a habit tracker'),
-      toolResult('write', {}, writeResult()),
-      toolResult('validateProject', {}, validationResult('sign-in-required')),
-      toolResult('validateProject', {}, toolFailure('The project no longer validates')),
-    ];
-
-    expect(getWorkersAiToolSettings(messages)).toEqual({
-      activeTools: AUTOMATIC_TOOLS,
-      toolChoice: 'required',
-    });
-    expect(getValidatedBuildCompletion(messages)).toBeUndefined();
+    expect(events).toEqual(['write-start', 'write-end', 'validation']);
+    expect(keepAliveCalls).toBe(2);
   });
 });
 
-function user(text: string): GhostbuildMessage {
-  return {
-    id: crypto.randomUUID(),
-    role: 'user',
-    parts: [{ type: 'text', text }],
-  };
-}
-
-function toolResult(toolName: string, args: unknown, result: unknown): GhostbuildMessage {
-  const invocation: GhostbuildToolInvocation = {
-    type: 'dynamic-tool',
-    state: 'output-available',
-    toolCallId: crypto.randomUUID(),
-    toolName,
-    input: args,
-    output: result,
-  };
-  return {
-    id: crypto.randomUUID(),
-    role: 'assistant',
-    parts: [invocation],
-  };
-}
-
-function validationResult(nextAction: 'sign-in-required' | 'prepare-deployment', revision = 'a'.repeat(64)) {
+function validationResult(nextAction: 'sign-in-required' | 'prepare-deployment') {
   return toolSuccess('validated', {
     level: 'full',
-    revision,
+    revision: 'a'.repeat(64),
     nextAction,
   });
 }
 
-function writeResult() {
+function operationContext(
+  overrides: { onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void } = {},
+) {
   return {
-    path: '/home/project/src/routes/index.tsx',
-    bytesWritten: 42,
-  };
-}
-
-function writeReceipt() {
-  return {
-    kind: 'workspace-mutation-receipt',
-    version: 1,
-    committed: true,
-    acknowledgement: 'complete',
-    tool: 'write',
-    files: [
-      {
-        path: '/home/project/src/routes/index.tsx',
-        revision: 2,
-        size: 42,
-        sha256: 'a'.repeat(64),
-        deleted: false,
-      },
-    ],
-    changedRanges: [],
-    diffSummary: null,
-    truncated: { result: false, diff: false, paths: false, omittedBytes: 0 },
-  };
-}
-
-function operationContext() {
-  return {
-    env: {} as Env,
-    userId: 'user',
-    chatInitialId: 'chat',
-    agentName: 'agent',
+    onValidationStage: overrides.onValidationStage,
     runWithKeepAlive: <T>(operation: () => Promise<T>) => operation(),
   };
 }
 
 function workspaceStub(
-  runtimeExec: (
-    command: string,
-    options: { cwd?: string; encoding: 'utf8'; backend?: string },
-  ) => Promise<{
-    result(): Promise<{ exitCode: number; stdout: string; stderr: string }>;
-  }>,
+  options: {
+    runtimeExec?: (
+      command: string,
+      options: { cwd?: string; encoding: 'utf8'; backend?: string },
+    ) => Promise<{ result(): Promise<{ exitCode: number; stdout: string; stderr: string }> }>;
+    validation?: unknown;
+    revision?: () => number;
+  } = {},
 ): BuilderWorkspaceApi {
-  const state = {
+  const runtimeExec =
+    options.runtimeExec ?? vi.fn(async () => ({ result: async () => ({ exitCode: 0, stdout: '', stderr: '' }) }));
+  let localRevision = 1;
+  const revision = options.revision ?? (() => localRevision);
+  const state = () => ({
     initialized: true,
-    revision: 1,
+    revision: revision(),
     resetRevision: 0,
     fileCount: 0,
     totalBytes: 0,
     seeding: false,
-  };
-  return {
+  });
+  const workspace = {
     computer: {
       fs: {
-        stat: vi.fn(),
+        stat: vi.fn(async () => ({ size: 0, mtime: 0, mode: 0, isFile: true, isDirectory: false })),
         readFile: vi.fn(),
-        writeFile: vi.fn(),
+        writeFile: vi.fn(async () => {
+          localRevision += 1;
+        }),
         mkdir: vi.fn(),
         rm: vi.fn(),
         readdir: vi.fn(),
       },
       runtime: { exec: runtimeExec },
     },
-    refresh: vi.fn(async () => state),
-    getState: vi.fn(() => state),
+    refresh: vi.fn(async () => state()),
+    getState: vi.fn(() => state()),
     executeToolOnce: vi.fn(async (_toolCallId, _toolName, _input, execute) => execute()),
-  } as unknown as BuilderWorkspaceApi;
+    installDependencies: vi.fn(async () => {
+      localRevision += 1;
+      return toolSuccess('installed');
+    }),
+    validate: vi.fn(async () => options.validation ?? validationResult('prepare-deployment')),
+  };
+  return workspace as unknown as BuilderWorkspaceApi;
+}
+
+function user(text: string): GhostbuildMessage {
+  return { id: crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text }] };
+}
+
+function toolResult(toolName: string, input: unknown, output: unknown): GhostbuildMessage {
+  const invocation: GhostbuildToolInvocation = {
+    type: 'dynamic-tool',
+    state: 'output-available',
+    toolCallId: crypto.randomUUID(),
+    toolName,
+    input,
+    output,
+  };
+  return { id: crypto.randomUUID(), role: 'assistant', parts: [invocation] };
 }
 
 async function executeTool(definition: Tool, input: unknown, abortSignal?: AbortSignal) {
   if (!definition.execute) {
     throw new Error('Expected an executable tool.');
   }
-  const options: ToolExecutionOptions = {
-    toolCallId: 'tool-call',
-    abortSignal,
-  };
-  return definition.execute(input, options);
+  return definition.execute(input, { toolCallId: 'tool-call', abortSignal });
 }
 
 function toolInputSchema(definition: Tool): ZodType {

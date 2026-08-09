@@ -165,6 +165,9 @@ const AuthenticatedChat = memo(
       contextManager,
       transcriptCheckpoint,
       validationStage,
+      deploymentApproval,
+      deploymentReady,
+      prepareDeployment,
       workspacePresentationState,
     } = useBuilderAgentChat({
       accountId,
@@ -245,7 +248,6 @@ const AuthenticatedChat = memo(
       () => applyLiveSubchatTitle(subchats, liveSubchatTitle, transcript),
       [liveSubchatTitle, subchats, transcript],
     );
-
     return (
       <BaseChat
         messageRef={messageRef}
@@ -260,6 +262,8 @@ const AuthenticatedChat = memo(
         buildProgress={buildProgress}
         messages={visibleMessages /* Note that parsedMessages are throttled. */}
         disabledReason={disabledReason}
+        deploymentApproval={deploymentApproval}
+        onPrepareDeployment={deploymentReady ? prepareDeployment : undefined}
         runtimeNotice={
           workspacePresentationState === 'presentation-error'
             ? 'Editor unavailable. Chat, builds, and previews still work.'

@@ -45,7 +45,7 @@ const emptyInvocation: GhostbuildToolInvocation = {
   input: {},
 };
 
-const TOOL_INPUT_SCHEMAS: Record<GhostbuildToolName, ZodType> = {
+const TOOL_INPUT_SCHEMAS: Record<string, ZodType> = {
   deploy: deployToolParameters,
   ...COMPUTER_TOOL_INPUT_SCHEMAS,
   lookupDocs: lookupDocsParameters,
@@ -55,7 +55,7 @@ const TOOL_INPUT_SCHEMAS: Record<GhostbuildToolName, ZodType> = {
 
 const MAX_TOOL_TITLE_VALUE_CHARACTERS = 160;
 
-const STOPPED_TOOL_TITLES: Record<GhostbuildToolName, string> = {
+const STOPPED_TOOL_TITLES: Record<string, string> = {
   deploy: 'Deployment stopped',
   edit: 'File edit stopped',
   exec: 'Command stopped',
