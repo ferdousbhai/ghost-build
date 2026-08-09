@@ -5,26 +5,19 @@ import type {
   Model,
   ModelCost,
   OpenAICompletionsCompat,
-  AnthropicMessagesCompat,
   FetchFunction,
   ProviderHeaders,
   SimpleStreamOptions,
   StreamFunction,
 } from '@earendil-works/pi-ai';
-import { stream as anthropicMessagesStream } from '@earendil-works/pi-ai/api/anthropic-messages';
-import { stream as googleGenerativeAiStream } from '@earendil-works/pi-ai/api/google-generative-ai';
 import { stream as openaiCompletionsStream } from '@earendil-works/pi-ai/api/openai-completions';
-import { stream as openaiResponsesStream } from '@earendil-works/pi-ai/api/openai-responses';
-import { ANTHROPIC_MODELS } from '@earendil-works/pi-ai/providers/anthropic.models';
 import { CLOUDFLARE_WORKERS_AI_MODELS } from '@earendil-works/pi-ai/providers/cloudflare-workers-ai.models';
-import { GOOGLE_MODELS } from '@earendil-works/pi-ai/providers/google.models';
-import { OPENAI_MODELS } from '@earendil-works/pi-ai/providers/openai.models';
 import { MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
 import { getWorkersAiModel, isWorkersAiModelId, type WorkersAiRuntimeModelId } from '~/lib/workers-ai-model';
 
 // Mirrors cloudflare-os/packages/workshop-backend/src/ai-models.ts — adapted for ghost-build's
-// Workers-AI-only catalog. Multi-provider catalogs are kept for pi's type parity, but ghost-build
-// only routes Workers AI via its gateway account binding at runtime.
+// Workers-AI-only catalog. Importing pi's other provider implementations would bundle their
+// Node-only SDKs into each user-owned runtime even though Ghostbuild can never route to them.
 
 type GhostbuildModelConfig = {
   provider: 'cloudflare';
@@ -43,28 +36,12 @@ export type ModelHandle = {
   lastResponse?: { status: number; aiGatewayLogId?: string };
 };
 
-const API_STREAMS: Record<string, StreamFunction<Api, SimpleStreamOptions>> = {
-  'anthropic-messages': anthropicMessagesStream as StreamFunction<Api, SimpleStreamOptions>,
-  'openai-responses': openaiResponsesStream as StreamFunction<Api, SimpleStreamOptions>,
-  'openai-completions': openaiCompletionsStream as StreamFunction<Api, SimpleStreamOptions>,
-  'google-generative-ai': googleGenerativeAiStream as StreamFunction<Api, SimpleStreamOptions>,
-};
+const WORKERS_AI_STREAM = openaiCompletionsStream as StreamFunction<Api, SimpleStreamOptions>;
 
 const ZERO_COST: ModelCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
-function catalogModel(provider: string, modelId: string): Model<Api> | undefined {
-  switch (provider) {
-    case 'anthropic':
-      return (ANTHROPIC_MODELS as Record<string, Model<Api>>)[modelId];
-    case 'openai':
-      return (OPENAI_MODELS as Record<string, Model<Api>>)[modelId];
-    case 'google':
-      return (GOOGLE_MODELS as Record<string, Model<Api>>)[modelId];
-    case 'cloudflare':
-      return (CLOUDFLARE_WORKERS_AI_MODELS as Record<string, Model<Api>>)[modelId];
-    default:
-      return undefined;
-  }
+function catalogModel(modelId: string): Model<Api> | undefined {
+  return (CLOUDFLARE_WORKERS_AI_MODELS as Record<string, Model<Api>>)[modelId];
 }
 
 function modelTokenWindow(config: GhostbuildModelConfig, catalog: Model<Api> | undefined) {
@@ -107,42 +84,32 @@ type HandleArgs = {
 };
 
 function makeHandle(args: HandleArgs): ModelHandle {
-  const streamFn = API_STREAMS[args.model.api];
-  if (!streamFn) {
-    throw new Error(`Unsupported model API "${args.model.api}".`);
+  if (args.model.api !== 'openai-completions') {
+    throw new Error(`Workers AI requires the OpenAI Completions protocol; received "${args.model.api}".`);
   }
-
-  const anthropicCompat = args.model.compat as AnthropicMessagesCompat | undefined;
-  const apiExtras: Record<string, unknown> =
-    args.model.api === 'anthropic-messages'
-      ? anthropicCompat?.forceAdaptiveThinking === true
-        ? { thinkingEnabled: true }
-        : {}
-      : args.model.api === 'openai-responses'
-        ? { reasoningEffort: 'medium' }
-        : {};
 
   const handle: ModelHandle = {
     model: args.model,
-    stream: (model, context, { thinking = true, ...options } = {}) => {
+    stream: (model, context, options = {}) => {
       handle.lastResponse = undefined;
-      const headers: ProviderHeaders = { ...args.headers, ...options.headers };
+      const streamOptions = { ...options };
+      delete streamOptions.thinking;
+      const headers: ProviderHeaders = { ...args.headers, ...streamOptions.headers };
       const merged: SimpleStreamOptions = {
-        ...(thinking ? apiExtras : args.model.api === 'anthropic-messages' ? { thinkingEnabled: false } : {}),
-        ...options,
+        ...streamOptions,
         ...(args.apiKey !== undefined ? { apiKey: args.apiKey } : {}),
         ...(args.fetch !== undefined ? { fetch: args.fetch } : {}),
         ...(Object.keys(headers).length > 0 ? { headers } : {}),
-        sessionId: options.sessionId ?? args.sessionAffinity,
+        sessionId: streamOptions.sessionId ?? args.sessionAffinity,
         onResponse: async (response, responseModel) => {
           handle.lastResponse = {
             status: response.status,
             aiGatewayLogId: getHeader(response.headers, 'cf-aig-log-id'),
           };
-          await options.onResponse?.(response, responseModel);
+          await streamOptions.onResponse?.(response, responseModel);
         },
       };
-      return streamFn(model, context, merged);
+      return WORKERS_AI_STREAM(model, context, merged);
     },
   };
   return handle;
@@ -154,7 +121,7 @@ export function getPiModel(
   settings?: { sessionAffinity?: string },
 ): ModelHandle {
   const config: GhostbuildModelConfig = { provider: 'cloudflare', model: modelId };
-  const catalog = catalogModel(config.provider, config.model);
+  const catalog = catalogModel(config.model);
   const win = modelTokenWindow(config, catalog);
 
   // Ghost-build historically routes Workers AI through the Workers AI gateway/binding.
