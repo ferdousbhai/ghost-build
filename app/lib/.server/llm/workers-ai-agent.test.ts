@@ -12,6 +12,13 @@ const mocks = vi.hoisted(() => ({
   piRun: vi.fn(),
   getValidatedBuildCompletion: vi.fn(),
   getWorkersAiToolSettings: vi.fn(),
+  prepareModelInput: vi.fn(async (options: { messages: unknown[] }) => ({
+    messages: [],
+    promptMessages: options.messages,
+    nextCompaction: null,
+    contextCompacted: false,
+    estimatedTokens: 1,
+  })),
   getPiProvider: vi.fn(() => ({ handle: { model: { id: 'test-workers-ai' }, stream: vi.fn() }, maxTokens: 1_000 })),
 }));
 
@@ -27,19 +34,13 @@ vi.mock('./message-conversion', () => ({
   asOriginalMessages: (messages: unknown) => messages,
 }));
 vi.mock('./model-input', () => ({
-  prepareModelInput: vi.fn(async (options: { messages: unknown[] }) => ({
-    messages: [],
-    promptMessages: options.messages,
-    nextCompaction: null,
-    contextCompacted: false,
-    estimatedTokens: 1,
-  })),
+  prepareModelInput: mocks.prepareModelInput,
 }));
 vi.mock('./pi-message-conversion', () => ({
   modelMessagesToPi: vi.fn(() => []),
 }));
 vi.mock('./pi-tools-adapter', () => ({
-  createPiTools: vi.fn(() => ({})),
+  createPiToolBundle: vi.fn(() => ({ canonicalTools: { write: { inputSchema: 'canonical-schema' } }, piTools: {} })),
   piToolsToList: vi.fn(() => [
     { name: 'write', description: 'write' },
     { name: 'validateProject', description: 'validate' },
@@ -109,6 +110,14 @@ describe('workersAiAgent turn budgets (Pi)', () => {
       expect.anything(),
       'deepseek/deepseek-v4-pro',
       expect.objectContaining({ sessionAffinity: expect.any(String) }),
+    );
+  });
+
+  it('uses canonical tool schemas for prompt accounting', async () => {
+    await collectChunks(await createAgentStream());
+
+    expect(mocks.prepareModelInput).toHaveBeenCalledWith(
+      expect.objectContaining({ tools: { write: { inputSchema: 'canonical-schema' } } }),
     );
   });
 

@@ -49,7 +49,7 @@ import { getPiProvider, type WorkersAiAccountCredentials } from './provider';
 import { appendDeterministicCompletion, normalizeTextPartBoundaries } from './workers-ai-stream';
 import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
 import { getValidatedBuildCompletion, getWorkersAiToolSettings, type AgentToolChoice } from './workers-ai-tools';
-import { createPiTools, piToolsToList } from './pi-tools-adapter';
+import { createPiToolBundle, piToolsToList } from './pi-tools-adapter';
 import { languageModelId } from 'ghostbuild-agent/ai-compat';
 import {
   cloudflareAiFundingRequiredMessage,
@@ -109,7 +109,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   let recordedFirstResponse = false;
 
   const piProvider = getPiProvider(accountCredentials, modelId, { sessionAffinity });
-  const piToolsRecord = createPiTools(workspace, {
+  const { canonicalTools, piTools } = createPiToolBundle(workspace, {
     env: options.env,
     userId,
     agentName,
@@ -117,21 +117,13 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     onValidationStage,
     runWithKeepAlive,
   });
-  const piToolsList = piToolsToList(piToolsRecord);
+  const piToolsList = piToolsToList(piTools);
 
   const validatedBuildCompletion = getValidatedBuildCompletion(messages);
   if (validatedBuildCompletion) {
     logger.info('Returning validated build completion without another model turn (pi)');
     return createValidatedBuildCompletionStream(messages, validatedBuildCompletion);
   }
-
-  // Keep ghost-build's existing compaction/model-input pipeline (still AI SDK ModelMessage based),
-  // then bridge to pi Message[] — faithful to OS where compaction budgets use SUGGESTED_MODELS but
-  // ghost-build keeps its own MAX_ESTIMATED_MODEL_INPUT_TOKENS.
-  // We synthesize a GhostbuildToolSet-shaped object for prepareModelInput via cast.
-  const legacyToolsForInput = Object.fromEntries(
-    piToolsList.map((t) => [t.name, { description: t.description }]),
-  ) as unknown as Parameters<typeof prepareModelInput>[0]['tools'];
 
   let toolSettings = getWorkersAiToolSettings(messages);
   const systemPrompts = [ROLE_SYSTEM_PROMPT, generalSystemPrompt()];
@@ -143,7 +135,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     summarize: compaction.summarize,
     scheduleCompaction: compaction.schedule,
     systemPrompts,
-    tools: legacyToolsForInput,
+    tools: canonicalTools,
     toolChoice: toolSettings.toolChoice,
     activeTools: toolSettings.activeTools,
     logger,

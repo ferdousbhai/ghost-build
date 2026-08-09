@@ -7,6 +7,7 @@ import {
 } from 'ghostbuild-agent/cloudflare-computer';
 import { docKeys } from 'ghostbuild-agent/references/index';
 import type { Tool } from 'ghostbuild-agent/pi-tool-compat';
+import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 import { createWorkersAiTools } from './workers-ai-tools';
@@ -87,6 +88,14 @@ export function createPiTools(
   workspace: BuilderWorkspaceApi,
   operationContext: BuilderOperationContext,
 ): Record<string, AgentTool> {
+  return createPiToolBundle(workspace, operationContext).piTools;
+}
+
+/** Build both tool representations once so prompt accounting keeps the canonical Zod schemas. */
+export function createPiToolBundle(
+  workspace: BuilderWorkspaceApi,
+  operationContext: BuilderOperationContext,
+): { canonicalTools: GhostbuildToolSet; piTools: Record<string, AgentTool> } {
   const canonicalTools = createWorkersAiTools(workspace, operationContext);
   const tools: Record<string, AgentTool> = {};
 
@@ -97,7 +106,7 @@ export function createPiTools(
     tools[name] = adaptTool(name, toolLabels[name], canonicalTools[name], serverParameters[name]);
   }
 
-  return tools;
+  return { canonicalTools, piTools: tools };
 }
 
 export function piToolsToList(tools: Record<string, AgentTool>): AgentTool[] {

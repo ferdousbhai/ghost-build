@@ -10,7 +10,7 @@ vi.mock('./workers-ai-tools', () => ({
   createWorkersAiTools: mocks.createWorkersAiTools,
 }));
 
-import { createPiTools } from './pi-tools-adapter';
+import { createPiToolBundle, createPiTools } from './pi-tools-adapter';
 
 describe('Pi tool adapter', () => {
   beforeEach(() => {
@@ -51,6 +51,16 @@ describe('Pi tool adapter', () => {
       'mode',
       'packages',
     ]);
+  });
+
+  it('returns the canonical tools alongside their Pi adapters', () => {
+    const canonicalTools = mocks.createWorkersAiTools();
+    mocks.createWorkersAiTools.mockReturnValueOnce(canonicalTools);
+
+    const bundle = createPiToolBundle({} as never, operationContext());
+
+    expect(bundle.canonicalTools).toBe(canonicalTools);
+    expect(Object.keys(bundle.piTools)).toEqual(Object.keys(canonicalTools));
   });
 });
 
