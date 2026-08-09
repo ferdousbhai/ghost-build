@@ -121,6 +121,15 @@ describe('workersAiAgent turn budgets (Pi)', () => {
     );
   });
 
+  it('classifies pre-stream preparation failures without exposing their cause', async () => {
+    mocks.prepareModelInput.mockRejectedValueOnce(new Error('private prompt details'));
+
+    await expect(createAgentStream()).rejects.toMatchObject({
+      name: 'PiAgentPreparationError',
+      diagnosticCode: 'pi_prepare:model_input',
+    });
+  });
+
   it('preserves validated completion on the final allowed model step', async () => {
     mocks.completion = 'Validated on the final allowed step.';
     mocks.piRun.mockImplementation(async (_ctx: unknown, _cfg: unknown, emit: (e: unknown) => Promise<void>) => {

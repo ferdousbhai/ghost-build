@@ -42,7 +42,7 @@ describe('chat provider error boundary', () => {
       }),
     ).rejects.toMatchObject({ status: 500 });
 
-    expect(logger.error).toHaveBeenCalledWith('Workers AI chat request failed');
+    expect(logger.error).toHaveBeenCalledWith('Workers AI chat request failed', { kind: 'Error' });
     expect(JSON.stringify(logger.error.mock.calls)).not.toContain('SECRET_PROVIDER_PROMPT');
     expect(JSON.stringify(logger.error.mock.calls)).not.toContain('private request values');
   });

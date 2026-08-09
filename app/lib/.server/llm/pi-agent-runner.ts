@@ -85,6 +85,18 @@ interface PiAgentOptions {
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
 }
 
+type PiPreparationStage = 'tool_setup' | 'model_input' | 'prompt_metrics' | 'message_conversion';
+
+class PiAgentPreparationError extends Error {
+  readonly diagnosticCode: string;
+
+  constructor(stage: PiPreparationStage, cause: unknown) {
+    super(`Pi agent preparation failed during ${stage}.`, { cause });
+    this.name = 'PiAgentPreparationError';
+    this.diagnosticCode = `pi_prepare:${stage}`;
+  }
+}
+
 // New Pi-backed implementation — mirrors cloudflare-os runAgent loop pattern
 export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableStream<UIMessageChunk>> {
   const {
@@ -109,14 +121,16 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   let recordedFirstResponse = false;
 
   const piProvider = getPiProvider(accountCredentials, modelId, { sessionAffinity });
-  const { canonicalTools, piTools } = createPiToolBundle(workspace, {
-    env: options.env,
-    userId,
-    agentName,
-    chatInitialId,
-    onValidationStage,
-    runWithKeepAlive,
-  });
+  const { canonicalTools, piTools } = withPreparationStage('tool_setup', () =>
+    createPiToolBundle(workspace, {
+      env: options.env,
+      userId,
+      agentName,
+      chatInitialId,
+      onValidationStage,
+      runWithKeepAlive,
+    }),
+  );
   const piToolsList = piToolsToList(piTools);
 
   const validatedBuildCompletion = getValidatedBuildCompletion(messages);
@@ -127,27 +141,31 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
 
   let toolSettings = getWorkersAiToolSettings(messages);
   const systemPrompts = [ROLE_SYSTEM_PROMPT, generalSystemPrompt()];
-  const modelInput = await prepareModelInput({
-    messages,
-    turnContext,
-    currentCompaction: compaction.current,
-    compactionPending: compaction.pending,
-    summarize: compaction.summarize,
-    scheduleCompaction: compaction.schedule,
-    systemPrompts,
-    tools: canonicalTools,
-    toolChoice: toolSettings.toolChoice,
-    activeTools: toolSettings.activeTools,
-    logger,
-  });
+  const modelInput = await withPreparationStage('model_input', () =>
+    prepareModelInput({
+      messages,
+      turnContext,
+      currentCompaction: compaction.current,
+      compactionPending: compaction.pending,
+      summarize: compaction.summarize,
+      scheduleCompaction: compaction.schedule,
+      systemPrompts,
+      tools: canonicalTools,
+      toolChoice: toolSettings.toolChoice,
+      activeTools: toolSettings.activeTools,
+      logger,
+    }),
+  );
   if (modelInput.nextCompaction) {
     compaction.save(modelInput.nextCompaction);
   }
 
-  const promptCharacterCounts = calculatePromptCharacterCounts(modelInput.promptMessages, systemPrompts);
+  const promptCharacterCounts = withPreparationStage('prompt_metrics', () =>
+    calculatePromptCharacterCounts(modelInput.promptMessages, systemPrompts),
+  );
   const providerModel = languageModelId({ modelId } as unknown as { modelId: string }, modelId);
 
-  const piMessages = modelMessagesToPi(modelInput.messages);
+  const piMessages = withPreparationStage('message_conversion', () => modelMessagesToPi(modelInput.messages));
 
   // Bridge AgentEvent -> UIMessageChunk via a TransformStream. This keeps frontend on UIMessage
   // protocol during strangler, while LLM loop is fully Pi (runAgentLoopContinue).
@@ -389,4 +407,19 @@ function piToolResultError(result: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function withPreparationStage<T>(stage: PiPreparationStage, operation: () => Promise<T>): Promise<T>;
+function withPreparationStage<T>(stage: PiPreparationStage, operation: () => T): T;
+function withPreparationStage<T>(stage: PiPreparationStage, operation: () => T | Promise<T>): T | Promise<T> {
+  try {
+    const result = operation();
+    return result instanceof Promise
+      ? result.catch((error: unknown) => {
+          throw new PiAgentPreparationError(stage, error);
+        })
+      : result;
+  } catch (error) {
+    throw new PiAgentPreparationError(stage, error);
+  }
 }
