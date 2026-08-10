@@ -122,6 +122,7 @@ const SYNC_BATCH_FILES = BUILDER_WORKSPACE_SYNC_BATCH_FILES;
 const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.tanstack', '.wrangler']);
 const INSTALL_COMMAND =
   'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/';
+const INSTALL_TIMEOUT_MS = 10 * 60_000;
 const COMPUTERD_PROCESS_ID = 'ghostbuild-computerd';
 const COMPUTERD_ENV = { PORT: '8080', MOUNT_POINT: '/home', FUSE_MOUNT: 'auto' } as const;
 const TRANSIENT_COMMAND_PROCESS_ID = 'ghostbuild-transient-command';
@@ -1175,7 +1176,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             await runCommand(
               workspace,
               'pnpm install --lockfile-only --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
-              { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: 4 * 60_000 },
+              { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: INSTALL_TIMEOUT_MS },
             ),
           );
         });
@@ -1263,7 +1264,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
               throw new Error('The project changed while validation was being isolated. Validate the new revision.');
             }
             cancellation.requireActive();
-            await this.runValidationCommand(cancellation, isolatedRoot, INSTALL_COMMAND, 4 * 60_000);
+            await this.runValidationCommand(cancellation, isolatedRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
             cancellation.requireActive();
             for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
               await this.runValidationCommand(cancellation, isolatedRoot, command, 5 * 60_000);
@@ -1555,7 +1556,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             2 * 60_000,
           );
           await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
-          await this.runTransientCommand(snapshotRoot, INSTALL_COMMAND, 4 * 60_000);
+          await this.runTransientCommand(snapshotRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
           this.requirePreviewNotCancelled(previewId);
           await this.runTransientCommand(
             snapshotRoot,
@@ -1770,7 +1771,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           2 * 60_000,
         );
         await this.assertDeploymentSession({ sessionId });
-        await this.runTransientCommand(isolatedRoot, INSTALL_COMMAND, 4 * 60_000);
+        await this.runTransientCommand(isolatedRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
         for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
           await this.runTransientCommand(isolatedRoot, command, 5 * 60_000);
         }

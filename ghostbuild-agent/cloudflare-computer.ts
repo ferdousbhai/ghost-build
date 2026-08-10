@@ -107,7 +107,7 @@ function syncUnconfirmedMessage(
 }
 
 export const COMPUTER_EXEC_APPLICATION_POLICY =
-  'Ghostbuild policy: use exec for inspection, checks, and approved dependency commands only. Use write or edit for project source and configuration changes. Dependency changes are limited to pnpm add <packages> and pnpm install --lockfile-only so mutations remain journaled.';
+  'Ghostbuild policy: use exec for inspection, finite checks, and approved dependency commands only. Do not start dev, preview, watch, or other long-running server processes with exec; Ghostbuild manages previews after validation. Use write or edit for project source and configuration changes. Dependency changes are limited to pnpm add <packages> and pnpm install --lockfile-only so mutations remain journaled.';
 
 export const COMPUTER_TOOL_LIMITS = {
   readMaxBytes: 256 * 1024,

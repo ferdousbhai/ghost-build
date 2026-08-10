@@ -7,6 +7,7 @@ import {
   GENERATED_PROJECT_PNPM_VERSION,
   COMPUTER_AI_TOOL_OPTIONS,
   COMPUTER_DEFAULT_SHELL_BACKEND,
+  COMPUTER_EXEC_APPLICATION_POLICY,
   COMPUTER_SHELL_BACKEND_IDS,
   COMPUTER_SHELL_TOOL_OPTIONS,
   COMPUTER_TOOL_LIMITS,
@@ -86,6 +87,8 @@ describe('Cloudflare Computer preview contract', () => {
     ).toBe(true);
     expect(COMPUTER_SHELL_TOOL_OPTIONS.backends['container-shell'].description).toContain('public network access');
     expect(COMPUTER_SHELL_TOOL_OPTIONS.backends['container-shell'].description).toContain('pnpm');
+    expect(COMPUTER_EXEC_APPLICATION_POLICY).toContain('Do not start dev, preview, watch');
+    expect(COMPUTER_EXEC_APPLICATION_POLICY).toContain('Ghostbuild manages previews after validation');
 
     const readonlyTools = createAITools({ workspace: workspaceStub(), readonly: true });
     expect(Object.keys(readonlyTools).sort()).toEqual(['ls', 'read']);

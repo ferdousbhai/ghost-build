@@ -75,6 +75,8 @@ describe('BuilderModelSelector', () => {
 
     const trigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Builder model"]');
     expect(trigger?.disabled).toBe(true);
+    expect(trigger?.title).toContain('Stop or wait');
+    expect(trigger?.getAttribute('aria-label')).toContain('before switching models');
     expect(document.querySelector('[role="menu"]')).toBeNull();
     expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
   });
