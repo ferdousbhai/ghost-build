@@ -40,9 +40,10 @@ export async function createChatResponseFromBody({
   compaction: {
     current: ContextCompaction | null;
     pending: boolean;
-    summarize: (prompt: string) => Promise<string>;
+    summarize: (prompt: string, signal?: AbortSignal) => Promise<string>;
     save: (compaction: ContextCompaction) => void;
     schedule?: () => Promise<void>;
+    requestDurableCompaction?: () => void;
   };
   firstUserMessage: boolean;
   turnContext?: ChatTurnContext;

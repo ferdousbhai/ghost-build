@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { MAX_ESTIMATED_MODEL_INPUT_TOKENS } from 'ghostbuild-agent/context-limits';
 import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
-import { ModelInputBudgetExceededError, prepareModelInput } from './model-input';
+import { ModelInputBudgetExceededError, modelCompactionPolicy, prepareModelInput } from './model-input';
 import type { ContextCompactionUnavailableError } from './model-input';
 
 const tools = {
@@ -26,6 +26,7 @@ function prepare(messages: GhostbuildMessage[], options: Partial<Parameters<type
   return prepareModelInput({
     messages,
     summarize: async () => '## Current State\nCompacted.',
+    contextWindow: 128_000,
     systemPrompts: [],
     tools,
     ...options,
@@ -33,6 +34,14 @@ function prepare(messages: GhostbuildMessage[], options: Partial<Parameters<type
 }
 
 describe('prepareModelInput', () => {
+  test('derives compaction boundaries from the model window and output reserve', () => {
+    expect(modelCompactionPolicy(128_000)).toEqual({
+      proactiveTokens: 79_328,
+      hardLimitTokens: 99_328,
+    });
+    expect(modelCompactionPolicy(256_000).hardLimitTokens).toBe(MAX_ESTIMATED_MODEL_INPUT_TOKENS);
+  });
+
   test('builds small provider inputs once with complete history', async () => {
     const summarize = vi.fn(async () => 'summary');
     const messages = [message('old-user', 'earlier requirement'), message('current-user', 'Build it')];
@@ -48,7 +57,7 @@ describe('prepareModelInput', () => {
     expect(summarize).not.toHaveBeenCalled();
   });
 
-  test('compacts once after the actual provider input crosses 100K', async () => {
+  test('compacts once after the actual provider input reaches the model-safe limit', async () => {
     const result = await prepare(largeHistory());
 
     expect(result.nextCompaction?.summary).toContain('Compacted');
@@ -114,7 +123,7 @@ describe('prepareModelInput', () => {
     const first = await prepare(largeHistory());
     const extended = [
       ...largeHistory(),
-      ...Array.from({ length: 12 }, (_, index) => message(`new-${index}`, 'y'.repeat(20_000))),
+      ...Array.from({ length: 20 }, (_, index) => message(`new-${index}`, 'y'.repeat(20_000))),
     ];
 
     const second = await prepare(extended, {
@@ -125,6 +134,15 @@ describe('prepareModelInput', () => {
     expect(second.contextCompacted).toBe(true);
     expect(second.nextCompaction?.summary).toBe('updated summary');
     expect(second.nextCompaction?.fromMessageId).toBe(first.nextCompaction?.fromMessageId);
+  });
+
+  test('preserves cancellation instead of reporting compaction failure', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(prepare(largeHistory(), { signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
   });
 
   test('fails clearly without mutating or omitting history when summary generation fails', async () => {

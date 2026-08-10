@@ -2,10 +2,15 @@ import { decideConversationCompaction, type ConversationCompactionAction } from 
 import type { ModelMessage } from './message-conversion';
 import { estimateStringTokens } from 'agents/experimental/memory/utils';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
-import { MAX_ESTIMATED_MODEL_INPUT_TOKENS } from 'ghostbuild-agent/context-limits';
+import { MAX_ESTIMATED_MODEL_INPUT_TOKENS, MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
-import { assembleCompactedContext, compactContext, type ContextCompaction } from './context-compaction';
+import {
+  assembleCompactedContext,
+  compactContext,
+  CONTEXT_COMPACTION_KEEP_RECENT_TOKENS,
+  type ContextCompaction,
+} from './context-compaction';
 import { cleanupAssistantMessages } from './message-conversion';
 import { injectTurnContext } from './turn-context';
 import { serializeWorkersAiToolDefinitions } from './workers-ai-tools';
@@ -24,10 +29,18 @@ type PreparedModelInput = {
   compactionAction: ConversationCompactionAction;
 };
 
-const GHOSTBUILD_COMPACTION_POLICY = {
-  proactiveTokens: 80_000,
-  hardLimitTokens: MAX_ESTIMATED_MODEL_INPUT_TOKENS,
-} as const;
+const COMPACTION_SAFETY_TOKENS = 4_096;
+
+export function modelCompactionPolicy(contextWindow: number) {
+  const hardLimitTokens = Math.min(
+    MAX_ESTIMATED_MODEL_INPUT_TOKENS,
+    Math.max(1, contextWindow - MODEL_MAX_OUTPUT_TOKENS - COMPACTION_SAFETY_TOKENS),
+  );
+  return {
+    proactiveTokens: Math.max(1, hardLimitTokens - CONTEXT_COMPACTION_KEEP_RECENT_TOKENS),
+    hardLimitTokens,
+  };
+}
 
 export class ModelInputBudgetExceededError extends Error {
   constructor(
@@ -55,8 +68,10 @@ export async function prepareModelInput(args: {
   turnContext?: ChatTurnContext;
   currentCompaction?: ContextCompaction | null;
   compactionPending?: boolean;
-  summarize: (prompt: string) => Promise<string>;
+  summarize: (prompt: string, signal?: AbortSignal) => Promise<string>;
   scheduleCompaction?: () => Promise<void>;
+  signal?: AbortSignal;
+  contextWindow: number;
   systemPrompts: string[];
   tools: GhostbuildToolSet;
   logger?: ModelInputLogger;
@@ -64,10 +79,11 @@ export async function prepareModelInput(args: {
   let assembled = assembleCompactedContext(args.messages, args.currentCompaction);
   let promptMessages = injectTurnContext(assembled.messages, args.turnContext);
   let modelInput = await assembleModelInput(promptMessages, args);
+  const policy = modelCompactionPolicy(args.contextWindow);
   const compactionAction = decideConversationCompaction({
     estimatedTokens: modelInput.estimatedTokens,
     pending: args.compactionPending,
-    policy: GHOSTBUILD_COMPACTION_POLICY,
+    policy,
   });
 
   if (compactionAction !== 'blocking') {
@@ -94,8 +110,10 @@ export async function prepareModelInput(args: {
       messages: args.messages,
       current: args.currentCompaction,
       summarize: args.summarize,
+      signal: args.signal,
     });
   } catch (error) {
+    args.signal?.throwIfAborted();
     args.logger?.warn('Automatic context compaction failed; preserving the full transcript', {
       error: error instanceof Error ? error.message : String(error),
       estimatedTokens: modelInput.estimatedTokens,
@@ -104,7 +122,7 @@ export async function prepareModelInput(args: {
   }
 
   if (!nextCompaction) {
-    throw new ModelInputBudgetExceededError(modelInput.estimatedTokens, MAX_ESTIMATED_MODEL_INPUT_TOKENS);
+    throw new ModelInputBudgetExceededError(modelInput.estimatedTokens, policy.hardLimitTokens);
   }
 
   const tokensBefore = modelInput.estimatedTokens;
@@ -112,8 +130,8 @@ export async function prepareModelInput(args: {
   assembled = assembleCompactedContext(args.messages, nextCompaction);
   promptMessages = injectTurnContext(assembled.messages, args.turnContext);
   modelInput = await assembleModelInput(promptMessages, args);
-  if (modelInput.estimatedTokens > MAX_ESTIMATED_MODEL_INPUT_TOKENS) {
-    throw new ModelInputBudgetExceededError(modelInput.estimatedTokens, MAX_ESTIMATED_MODEL_INPUT_TOKENS);
+  if (modelInput.estimatedTokens >= policy.hardLimitTokens) {
+    throw new ModelInputBudgetExceededError(modelInput.estimatedTokens, policy.hardLimitTokens);
   }
 
   args.logger?.info('Automatically compacted Ghostbuild context', {

@@ -12,6 +12,7 @@ type WorkersAiTextOptions = {
   user: string;
   maxTokens?: number;
   temperature?: number;
+  signal?: AbortSignal;
 };
 
 async function generateWorkersAiText(
@@ -26,6 +27,7 @@ async function generateWorkersAiText(
       systemPrompt: options.system,
       prompt: options.user,
       maxTokens: maxOutputTokens,
+      signal: options.signal,
     })
   ).trim();
   if (!text) {
@@ -38,6 +40,7 @@ export async function summarizeBuilderContext(
   env: Env,
   prompt: string,
   accountCredentials: WorkersAiAccountCredentials,
+  signal?: AbortSignal,
 ): Promise<string> {
   try {
     return await generateWorkersAiText(
@@ -47,10 +50,12 @@ export async function summarizeBuilderContext(
         user: prompt,
         maxTokens: CONTEXT_SUMMARY_MAX_TOKENS,
         temperature: 0.1,
+        signal,
       },
       accountCredentials,
     );
   } catch (error) {
+    signal?.throwIfAborted();
     if (isWorkersAiFreeAllocationError(error)) {
       throw new Error(workersPaidRequiredMessage());
     }

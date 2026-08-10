@@ -112,6 +112,7 @@ export type BuilderAgentState = {
   } | null;
   deploymentApproval?: PendingDeploymentApproval | null;
   deploymentReady?: boolean;
+  contextCompactionRequestedTurnId?: string | null;
 };
 
 type ChatBody = Partial<ChatRequestBody> & { transcript?: unknown };
@@ -135,6 +136,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     validationProgress: null,
     deploymentApproval: null,
     deploymentReady: false,
+    contextCompactionRequestedTurnId: null,
   };
 
   override messageConcurrency = 'drop' as const;
@@ -379,28 +381,22 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         compaction: {
           current: this.contextCompaction.getCompaction(),
           pending: compactionPending,
-          summarize: (prompt) => summarizeBuilderContext(this.env, prompt, accountCredentials),
+          summarize: (prompt, signal) => summarizeBuilderContext(this.env, prompt, accountCredentials, signal),
           save: (compaction) => this.contextCompaction.saveCompaction(compaction),
           schedule: async () => {
             const throughMessageId = messages.at(-1)?.id;
-            if (!throughMessageId || (await this.hasPendingContextCompaction())) {
-              return;
+            if (throughMessageId) {
+              await this.scheduleContextCompaction(throughMessageId, messages.length, accountCredentials);
             }
-            await this.startFiber(
-              CONTEXT_COMPACTION_FIBER,
-              async (fiber) => {
-                fiber.stash({ throughMessageId, version: 1 });
-                await this.runContextCompaction(throughMessageId, accountCredentials);
-              },
-              {
-                idempotencyKey: conversationCompactionKey({
-                  scope: this.name,
-                  throughId: throughMessageId,
-                  revision: messages.length,
-                }),
-                metadata: { throughMessageId },
-              },
-            );
+          },
+          requestDurableCompaction: () => {
+            if (this.state.activeTurn?.id === turn.id && this.state.contextCompactionRequestedTurnId !== turn.id) {
+              this.setState({
+                ...this.state,
+                contextCompactionRequestedTurnId: turn.id,
+                updatedAt: new Date().toISOString(),
+              });
+            }
           },
         },
         body: { messages, modelId },
@@ -412,6 +408,31 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       });
       throw error;
     }
+  }
+
+  private async scheduleContextCompaction(
+    throughMessageId: string,
+    revision: number,
+    accountCredentials: Awaited<ReturnType<typeof getUserWorkersAiCredentials>>,
+  ): Promise<void> {
+    if (await this.hasPendingContextCompaction()) {
+      return;
+    }
+    await this.startFiber(
+      CONTEXT_COMPACTION_FIBER,
+      async (fiber) => {
+        fiber.stash({ throughMessageId, version: 1 });
+        await this.runContextCompaction(throughMessageId, accountCredentials);
+      },
+      {
+        idempotencyKey: conversationCompactionKey({
+          scope: this.name,
+          throughId: throughMessageId,
+          revision,
+        }),
+        metadata: { throughMessageId },
+      },
+    );
   }
 
   private async runContextCompaction(
@@ -467,13 +488,28 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
 
     const status: BuilderTurnStatus =
       result.status === 'completed' ? 'completed' : result.status === 'aborted' ? 'aborted' : 'error';
+    const compactAfterTurn = this.state.contextCompactionRequestedTurnId === currentTurn.id;
     this.finishTurn(currentTurn, {
       requestId: result.requestId,
       status,
       error: result.error,
     });
+    if (compactAfterTurn) {
+      this.setState({ ...this.state, contextCompactionRequestedTurnId: null });
+    }
     await this.refreshDeploymentReadiness();
     if (status === 'completed') {
+      if (compactAfterTurn && this.userId) {
+        const throughMessageId = this.messages.at(-1)?.id;
+        if (throughMessageId) {
+          try {
+            const credentials = await getUserWorkersAiCredentials(this.env, this.userId);
+            await this.scheduleContextCompaction(throughMessageId, this.messages.length, credentials);
+          } catch {
+            logger.warn('Unable to queue post-turn context compaction');
+          }
+        }
+      }
       await this.requestPreviewInternal({ requireValidation: true }).catch(() =>
         logger.warn('Unable to queue the automatic remote preview'),
       );

@@ -5,7 +5,7 @@ import {
   type AgentLoopConfig,
   type AgentMessage,
 } from '@earendil-works/pi-agent-core';
-import type { AssistantMessage, Message, Usage } from '@earendil-works/pi-ai';
+import { isContextOverflow, type AssistantMessage, type Message, type Usage } from '@earendil-works/pi-ai';
 import type { PiStreamChunk } from './pi-stream';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { calculatePromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
@@ -23,8 +23,13 @@ import {
   BuilderTurnBudgetExceededError,
   classifyBuilderTimeout,
 } from './builder-turn-budget';
-import type { ContextCompaction } from './context-compaction';
-import { ContextCompactionUnavailableError, ModelInputBudgetExceededError, prepareModelInput } from './model-input';
+import { compactPiContext, estimatePiContextTokens, type ContextCompaction } from './context-compaction';
+import {
+  ContextCompactionUnavailableError,
+  ModelInputBudgetExceededError,
+  modelCompactionPolicy,
+  prepareModelInput,
+} from './model-input';
 import { modelMessagesToPi } from './pi-message-conversion';
 import { recordPiStage } from './pi-telemetry';
 import { getPiProvider, type WorkersAiAccountCredentials } from './provider';
@@ -52,9 +57,10 @@ interface PiAgentOptions {
   compaction: {
     current: ContextCompaction | null;
     pending: boolean;
-    summarize: (prompt: string) => Promise<string>;
+    summarize: (prompt: string, signal?: AbortSignal) => Promise<string>;
     save: (compaction: ContextCompaction) => void;
     schedule?: () => Promise<void>;
+    requestDurableCompaction?: () => void;
   };
   accountCredentials: WorkersAiAccountCredentials;
   sessionAffinity: string;
@@ -93,6 +99,9 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   logger.debug('Starting Pi agent runner');
   const startedAt = Date.now();
   const piProvider = getPiProvider(accountCredentials, modelId, { sessionAffinity });
+  const totalTimeoutSignal = AbortSignal.timeout(BUILDER_TURN_TIMEOUTS.totalMs);
+  const loopSignal = abortSignal ? AbortSignal.any([abortSignal, totalTimeoutSignal]) : totalTimeoutSignal;
+  const compactionPolicy = modelCompactionPolicy(piProvider.handle.model.contextWindow);
   const { canonicalTools, piTools } = withPreparationStage('tool_setup', () =>
     createPiToolBundle(workspace, { onValidationStage, runWithKeepAlive }),
   );
@@ -112,6 +121,8 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       compactionPending: compaction.pending,
       summarize: compaction.summarize,
       scheduleCompaction: compaction.schedule,
+      signal: loopSignal,
+      contextWindow: piProvider.handle.model.contextWindow,
       systemPrompts,
       tools: canonicalTools,
       logger,
@@ -137,11 +148,19 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   let toolBudgetError: BuilderTurnBudgetExceededError | undefined;
   let terminalAssistant: AssistantMessage | undefined;
   let totalUsage = emptyUsage();
+  let currentTurnStreamedContent = false;
+  let runtimeContextCompacted = false;
+  let runtimeCompactionError: ContextCompactionUnavailableError | undefined;
 
   const { readable, writable } = new TransformStream<UIMessageChunk, UIMessageChunk>();
   const writer = writable.getWriter();
 
   const emit = async (event: AgentEvent) => {
+    if (event.type === 'turn_start') {
+      currentTurnStreamedContent = false;
+      return;
+    }
+
     if (event.type === 'message_update') {
       if (!recordedFirstResponse) {
         recordedFirstResponse = true;
@@ -149,6 +168,12 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       }
       const assistantEvent = event.assistantMessageEvent as unknown as Record<string, unknown>;
       const type = assistantEvent.type as string | undefined;
+      currentTurnStreamedContent ||=
+        type === 'text_start' ||
+        type === 'text_delta' ||
+        type === 'toolcall_start' ||
+        type === 'toolcall_delta' ||
+        type === 'toolcall_end';
       const textPartId = `pi-${event.message.timestamp}-${assistantEvent.contentIndex ?? 0}`;
       if (type === 'text_start') {
         await writer.write({ type: 'text-start', id: textPartId });
@@ -257,13 +282,39 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     }
   };
 
-  const context: AgentContext = {
+  let context: AgentContext = {
     systemPrompt: systemPrompts.join('\n\n'),
     messages: piMessages as unknown as AgentMessage[],
     tools: piToolsToList(piTools),
   };
-  const totalTimeoutSignal = AbortSignal.timeout(BUILDER_TURN_TIMEOUTS.totalMs);
-  const loopSignal = abortSignal ? AbortSignal.any([abortSignal, totalTimeoutSignal]) : totalTimeoutSignal;
+
+  const compactRuntimeContext = async (source: AgentContext): Promise<AgentContext | undefined> => {
+    try {
+      const compacted = await compactPiContext({
+        messages: source.messages,
+        summarize: compaction.summarize,
+        signal: loopSignal,
+      });
+      if (!compacted) {
+        runtimeCompactionError = new ContextCompactionUnavailableError(
+          new Error('The active turn has no safe compaction boundary.'),
+        );
+        return undefined;
+      }
+      runtimeContextCompacted = true;
+      compaction.requestDurableCompaction?.();
+      logger.info('Compacted live Pi context', {
+        tokensBefore: compacted.tokensBefore,
+        tokensAfter: compacted.tokensAfter,
+      });
+      return { ...source, messages: compacted.messages };
+    } catch (error) {
+      loopSignal.throwIfAborted();
+      runtimeCompactionError =
+        error instanceof ContextCompactionUnavailableError ? error : new ContextCompactionUnavailableError(error);
+      return undefined;
+    }
+  };
 
   void (async () => {
     try {
@@ -271,10 +322,27 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       const loopConfig: AgentLoopConfig & { toolChoice: 'auto' } = {
         model: piProvider.handle.model,
         convertToLlm: (agentMessages) => agentMessages as unknown as Message[],
+        prepareNextTurn: async ({ message, context: turnContext }) => {
+          const wouldContinue = message.content.some((part) => part.type === 'toolCall');
+          if (
+            !wouldContinue ||
+            stepCount >= BUILDER_TURN_MAX_MODEL_STEPS ||
+            toolBudgetError ||
+            estimatePiContextTokens(turnContext.messages) < compactionPolicy.hardLimitTokens
+          ) {
+            return undefined;
+          }
+          const compacted = await compactRuntimeContext(turnContext);
+          if (!compacted) {
+            return undefined;
+          }
+          context = compacted;
+          return { context: compacted };
+        },
         shouldStopAfterTurn: ({ message }) => {
           const wouldContinue = isAssistantMessage(message) && message.content.some((part) => part.type === 'toolCall');
           stepBudgetStopped = stepCount >= BUILDER_TURN_MAX_MODEL_STEPS && wouldContinue;
-          return toolBudgetError !== undefined || stepBudgetStopped;
+          return runtimeCompactionError !== undefined || toolBudgetError !== undefined || stepBudgetStopped;
         },
         afterToolCall: async ({ result, isError }) =>
           !isError && !toolResultSucceeded(result.details) ? { isError: true } : undefined,
@@ -282,26 +350,56 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         timeoutMs: BUILDER_TURN_TIMEOUTS.modelStreamMs,
         toolChoice: 'auto',
       };
-      await runAgentLoopContinue(context, loopConfig, emit, loopSignal, piProvider.handle.stream);
+
+      let overflowRecoveryAttempted = false;
+      while (true) {
+        terminalAssistant = undefined;
+        await runAgentLoopContinue(context, loopConfig, emit, loopSignal, piProvider.handle.stream);
+        if (
+          !terminalAssistant ||
+          !isContextOverflow(terminalAssistant, piProvider.handle.model.contextWindow) ||
+          overflowRecoveryAttempted ||
+          currentTurnStreamedContent ||
+          totalTimeoutSignal.aborted ||
+          abortSignal?.aborted
+        ) {
+          break;
+        }
+
+        overflowRecoveryAttempted = true;
+        if (context.messages.at(-1)?.role === 'assistant') {
+          context = { ...context, messages: context.messages.slice(0, -1) };
+        }
+        const compacted = await compactRuntimeContext(context);
+        if (!compacted) {
+          break;
+        }
+        context = compacted;
+      }
+
       recordPiStage('loop_complete', modelId);
+      const finalAssistant = assistantMessageValue(terminalAssistant);
       stepBudgetStopped ||=
         stepCount >= BUILDER_TURN_MAX_MODEL_STEPS &&
-        terminalAssistant?.content.some((part) => part.type === 'toolCall') === true;
+        finalAssistant?.content.some((part) => part.type === 'toolCall') === true;
 
       if (totalTimeoutSignal.aborted && !abortSignal?.aborted) {
         throw new BuilderTurnBudgetExceededError('total_timeout');
       }
+      if (runtimeCompactionError) {
+        throw runtimeCompactionError;
+      }
       if (toolBudgetError) {
         throw toolBudgetError;
       }
-      if (terminalAssistant?.stopReason === 'error') {
-        if (/time(?:d out|out)/i.test(terminalAssistant.errorMessage ?? '')) {
+      if (finalAssistant?.stopReason === 'error') {
+        if (/time(?:d out|out)/i.test(finalAssistant.errorMessage ?? '')) {
           throw new BuilderTurnBudgetExceededError('stream_stall');
         }
-        throw new Error(terminalAssistant.errorMessage || 'The model request failed.');
+        throw new Error(finalAssistant.errorMessage || 'The model request failed.');
       }
-      if (terminalAssistant?.stopReason === 'aborted' && !abortSignal?.aborted) {
-        throw new Error(terminalAssistant.errorMessage || 'The model request was aborted.');
+      if (finalAssistant?.stopReason === 'aborted' && !abortSignal?.aborted) {
+        throw new Error(finalAssistant.errorMessage || 'The model request was aborted.');
       }
       if (stepBudgetStopped && !currentValidatedBuildCompletion) {
         await writer.write({
@@ -310,12 +408,16 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         });
       }
 
+      const finalContextTokens = estimatePiContextTokens(context.messages);
+      if (finalContextTokens >= compactionPolicy.proactiveTokens) {
+        compaction.requestDurableCompaction?.();
+      }
       recordWorkersAiFinish({
         usage: totalUsage,
-        finishReason: stepBudgetStopped ? 'length' : (terminalAssistant?.stopReason ?? 'stop'),
+        finishReason: stepBudgetStopped ? 'length' : (finalAssistant?.stopReason ?? 'stop'),
         firstUserMessage,
-        contextReduced: modelInput.contextCompacted,
-        estimatedContextTokens: modelInput.estimatedTokens,
+        contextReduced: modelInput.contextCompacted || runtimeContextCompacted,
+        estimatedContextTokens: Math.max(modelInput.estimatedTokens, finalContextTokens),
         promptCharacterCounts,
         providerModel: modelId,
         startedAt,
@@ -327,6 +429,8 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       logProviderFailure(logger, 'Pi agent runner failed.', budgetError ?? error);
       if (budgetError) {
         await writer.write({ type: 'error', errorText: budgetError.message });
+      } else if (error instanceof ContextCompactionUnavailableError && !abortSignal?.aborted) {
+        await writer.write({ type: 'error', errorText: error.message });
       } else if (isWorkersAiFreeAllocationError(error)) {
         await writer.write({ type: 'error', errorText: workersPaidRequiredMessage() });
       } else if (isCloudflareAiFundingError(error)) {
@@ -425,6 +529,10 @@ function toolBudgetErrorFromResult(result: unknown): BuilderTurnBudgetExceededEr
   } catch {
     return undefined;
   }
+}
+
+function assistantMessageValue(message: AssistantMessage | undefined): AssistantMessage | undefined {
+  return message;
 }
 
 function isAssistantMessage(message: AgentMessage): message is AssistantMessage {

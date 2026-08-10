@@ -14,11 +14,13 @@ describe('summarizeBuilderContext', () => {
 
   beforeEach(() => vi.clearAllMocks());
 
-  test('returns a trimmed readable summary using the connected account', async () => {
+  test('returns a trimmed readable summary using the connected account and cancellation signal', async () => {
     mocks.completeText.mockResolvedValue('  current state  ');
     const env = {} as Env;
-    await expect(summarizeBuilderContext(env, 'conversation', credentials)).resolves.toBe('current state');
+    const signal = new AbortController().signal;
+    await expect(summarizeBuilderContext(env, 'conversation', credentials, signal)).resolves.toBe('current state');
     expect(mocks.getPiModel).toHaveBeenCalled();
+    expect(mocks.completeText).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ signal }));
   });
 
   test('uses a fixed safe error when generation fails', async () => {

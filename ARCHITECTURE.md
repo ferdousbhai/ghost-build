@@ -158,9 +158,13 @@ cancellation to its Container process.
 ## Model Context and Prefix Caching
 
 The browser sends open, recently used, and locally modified file context as a bounded turn attachment. The server adds
-that attachment only to the current model view; it never persists the generated context as a transcript message. After
-compaction, the model reacquires authoritative facts on demand through Computer's paged `read` tool and bounded `exec`
-searches. Retrieved source remains untrusted project data.
+that attachment only to the current model view; it never persists the generated context as a transcript message.
+Ghostbuild derives compaction thresholds from the selected model window while reserving its full output budget. It
+summarizes old turns into a branch-anchored checkpoint, retains about 20K recent tokens, and leaves the authoritative
+transcript unchanged. Long tool loops can also compact their in-memory Pi context before another model step; an invisible
+provider context-overflow response is compacted and retried once. After the response is durably persisted, the existing
+recoverable fiber records an equivalent transcript checkpoint. The model reacquires authoritative facts on demand through
+Computer's paged `read` tool and bounded `exec` searches. Retrieved source remains untrusted project data.
 
 Workers AI prefix caching is automatic for supported models. Ghostbuild sends an opaque, stable session-affinity value
 per transcript generation through either the REST header or binding `extraHeaders`, keeps system instructions at the

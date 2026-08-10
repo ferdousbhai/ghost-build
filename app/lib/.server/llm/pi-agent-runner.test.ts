@@ -9,6 +9,7 @@ type TestStep = { toolResults: Array<{ toolName: string; output: unknown }> };
 const mocks = vi.hoisted(() => ({
   completion: undefined as string | undefined,
   steps: [] as TestStep[],
+  piMessages: [] as unknown[],
   piRun: vi.fn(),
   getValidatedBuildCompletion: vi.fn(),
   prepareModelInput: vi.fn(async (options: { messages: unknown[] }) => ({
@@ -18,7 +19,10 @@ const mocks = vi.hoisted(() => ({
     contextCompacted: false,
     estimatedTokens: 1,
   })),
-  getPiProvider: vi.fn(() => ({ handle: { model: { id: 'test-workers-ai' }, stream: vi.fn() }, maxTokens: 1_000 })),
+  getPiProvider: vi.fn(() => ({
+    handle: { model: { id: 'test-workers-ai', contextWindow: 128_000 }, stream: vi.fn() },
+    maxTokens: 1_000,
+  })),
   recordFinish: vi.fn(),
 }));
 
@@ -34,7 +38,7 @@ vi.mock('./model-input', async (importOriginal) => ({
   prepareModelInput: mocks.prepareModelInput,
 }));
 vi.mock('./pi-message-conversion', () => ({
-  modelMessagesToPi: vi.fn(() => []),
+  modelMessagesToPi: vi.fn(() => mocks.piMessages),
 }));
 vi.mock('./pi-tools-adapter', () => ({
   createPiToolBundle: vi.fn(() => ({ canonicalTools: { write: { inputSchema: 'canonical-schema' } }, piTools: {} })),
@@ -60,6 +64,7 @@ describe('piAgentRunner', () => {
     vi.clearAllMocks();
     mocks.completion = undefined;
     mocks.steps = [];
+    mocks.piMessages = [];
     mocks.getValidatedBuildCompletion.mockImplementation((_messages: unknown, currentStepResults: unknown[] = []) =>
       currentStepResults.length > 0 ? mocks.completion : undefined,
     );
@@ -358,9 +363,127 @@ describe('piAgentRunner', () => {
       delta: 'Project validation passed.',
     });
   });
+
+  it('compacts live tool-loop context before another model step', async () => {
+    const summarize = vi.fn(async () => '## Goal\nFinish the build.');
+    const requestDurableCompaction = vi.fn();
+    mocks.piMessages = runtimeHistory();
+    mocks.piRun.mockImplementation(
+      async (
+        context: { messages: unknown[] },
+        config: { prepareNextTurn?: (value: unknown) => Promise<{ context?: { messages: unknown[] } } | undefined> },
+        emit: (event: unknown) => Promise<void>,
+      ) => {
+        const toolMessage = assistantMessage([{ type: 'toolCall', id: 'read-1', name: 'read', arguments: {} }]);
+        const next = await config.prepareNextTurn?.({
+          message: toolMessage,
+          context,
+          newMessages: [],
+          toolResults: [],
+        });
+        expect(next?.context?.messages[0]).toMatchObject({ role: 'user' });
+        expect(JSON.stringify(next?.context?.messages[0])).toContain('<summary>');
+        await emit({ type: 'turn_end', message: assistantMessage([{ type: 'text', text: 'Done' }]), toolResults: [] });
+      },
+    );
+
+    const chunks = await collectChunks(
+      await createAgentStream('@cf/zai-org/glm-5.2', { summarize, requestDurableCompaction }),
+    );
+
+    expect(chunks.some((chunk) => chunk.type === 'error')).toBe(false);
+    expect(summarize).toHaveBeenCalled();
+    expect(requestDurableCompaction).toHaveBeenCalled();
+  });
+
+  it('compacts and retries one invisible context-overflow response', async () => {
+    const summarize = vi.fn(async () => '## Goal\nRecover the build.');
+    const requestDurableCompaction = vi.fn();
+    mocks.piMessages = runtimeHistory();
+    mocks.piRun
+      .mockImplementationOnce(
+        async (context: { messages: unknown[] }, _config: unknown, emit: (event: unknown) => Promise<void>) => {
+          const overflow = assistantMessage([], {
+            stopReason: 'error',
+            errorMessage: 'The prompt exceeds the context window.',
+          });
+          context.messages.push(overflow);
+          await emit({ type: 'turn_end', message: overflow, toolResults: [] });
+        },
+      )
+      .mockImplementationOnce(
+        async (context: { messages: unknown[] }, _config: unknown, emit: (event: unknown) => Promise<void>) => {
+          expect(JSON.stringify(context.messages[0])).toContain('<summary>');
+          await emit({
+            type: 'turn_end',
+            message: assistantMessage([{ type: 'text', text: 'Recovered' }]),
+            toolResults: [],
+          });
+        },
+      );
+
+    const chunks = await collectChunks(
+      await createAgentStream('@cf/zai-org/glm-5.2', { summarize, requestDurableCompaction }),
+    );
+
+    expect(mocks.piRun).toHaveBeenCalledTimes(2);
+    expect(chunks.some((chunk) => chunk.type === 'error')).toBe(false);
+    expect(requestDurableCompaction).toHaveBeenCalled();
+  });
+
+  it('does not retry a second invisible overflow', async () => {
+    mocks.piMessages = runtimeHistory();
+    const overflowRun = async (
+      context: { messages: unknown[] },
+      _config: unknown,
+      emit: (event: unknown) => Promise<void>,
+    ) => {
+      const overflow = assistantMessage([], {
+        stopReason: 'error',
+        errorMessage: 'The prompt exceeds the context window.',
+      });
+      context.messages.push(overflow);
+      await emit({ type: 'turn_end', message: overflow, toolResults: [] });
+    };
+    mocks.piRun.mockImplementation(overflowRun);
+
+    const chunks = await collectChunks(
+      await createAgentStream('@cf/zai-org/glm-5.2', { summarize: async () => 'Checkpoint' }),
+    );
+
+    expect(mocks.piRun).toHaveBeenCalledTimes(2);
+    expect(chunks).toContainEqual({ type: 'error', errorText: 'The model request failed. Please retry.' });
+  });
+
+  it('does not retry an overflow after model content was streamed', async () => {
+    mocks.piMessages = runtimeHistory();
+    mocks.piRun.mockImplementation(
+      async (context: { messages: unknown[] }, _config: unknown, emit: (event: unknown) => Promise<void>) => {
+        await emit({
+          type: 'message_update',
+          message: { timestamp: 123 },
+          assistantMessageEvent: { type: 'text_start', contentIndex: 0 },
+        });
+        const overflow = assistantMessage([], {
+          stopReason: 'error',
+          errorMessage: 'The prompt exceeds the context window.',
+        });
+        context.messages.push(overflow);
+        await emit({ type: 'turn_end', message: overflow, toolResults: [] });
+      },
+    );
+
+    const chunks = await collectChunks(await createAgentStream());
+
+    expect(mocks.piRun).toHaveBeenCalledOnce();
+    expect(chunks).toContainEqual({ type: 'error', errorText: 'The model request failed. Please retry.' });
+  });
 });
 
-function createAgentStream(modelId: Parameters<typeof piAgentRunner>[0]['modelId'] = '@cf/zai-org/glm-5.2') {
+function createAgentStream(
+  modelId: Parameters<typeof piAgentRunner>[0]['modelId'] = '@cf/zai-org/glm-5.2',
+  compactionOverrides: Partial<Parameters<typeof piAgentRunner>[0]['compaction']> = {},
+) {
   return piAgentRunner({
     firstUserMessage: false,
     messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'Build it' }] }],
@@ -370,12 +493,35 @@ function createAgentStream(modelId: Parameters<typeof piAgentRunner>[0]['modelId
       pending: false,
       summarize: async () => 'summary',
       save: vi.fn(),
+      ...compactionOverrides,
     },
     accountCredentials: { accountId: 'account-1', apiKey: 'secret' },
     sessionAffinity: 'opaque-session',
     workspace: {} as never,
     runWithKeepAlive: (operation) => operation(),
   });
+}
+
+function runtimeHistory() {
+  return Array.from({ length: 6 }, (_, index) => ({
+    role: 'user',
+    content: `${index}:${'x'.repeat(70_000)}`,
+    timestamp: index,
+  }));
+}
+
+function assistantMessage(content: unknown[], overrides: { stopReason?: string; errorMessage?: string } = {}) {
+  return {
+    role: 'assistant',
+    content,
+    timestamp: Date.now(),
+    api: 'openai-completions',
+    provider: 'cloudflare-workers-ai',
+    model: 'test-workers-ai',
+    usage: piUsage(),
+    stopReason: overrides.stopReason ?? 'stop',
+    ...(overrides.errorMessage ? { errorMessage: overrides.errorMessage } : {}),
+  };
 }
 
 function piUsage(overrides: Partial<{ input: number; output: number; totalTokens: number }> = {}) {

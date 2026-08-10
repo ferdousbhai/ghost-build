@@ -29,6 +29,24 @@ describe('BuilderAgent preview lifecycle', () => {
     );
   });
 
+  it('persists requested runtime compaction only after the completed response', () => {
+    const chatMessage = source.slice(
+      source.indexOf('override async onChatMessage('),
+      source.indexOf('private async scheduleContextCompaction('),
+    );
+    const response = source.slice(
+      source.indexOf('protected override async onChatResponse('),
+      source.indexOf('@callable()\n  getTurnHistory'),
+    );
+
+    expect(chatMessage).toContain('requestDurableCompaction: () =>');
+    expect(response).toContain('const compactAfterTurn =');
+    expect(response).toContain('this.scheduleContextCompaction(throughMessageId, this.messages.length, credentials)');
+    expect(response.indexOf('await this.advanceTranscriptCheckpoint')).toBeLessThan(
+      response.indexOf('this.scheduleContextCompaction'),
+    );
+  });
+
   it('keeps the agent alive while stateful Computer tools run', () => {
     const chatMessage = source.slice(
       source.indexOf('override async onChatMessage('),
