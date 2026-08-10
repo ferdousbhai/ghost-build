@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUILDER_TURN_BUDGET_ERROR_CODE,
+  BUILDER_MUTATION_TOOL_TIMEOUT_MS,
   BUILDER_TURN_TIMEOUTS,
   BuilderTurnBudgetExceededError,
   classifyBuilderTimeout,
@@ -13,6 +14,7 @@ describe('builder turn budgets', () => {
       expect(timeoutMs).toBeGreaterThan(0);
       expect(timeoutMs).toBeLessThan(BUILDER_TURN_TIMEOUTS.totalMs);
     }
+    expect(BUILDER_MUTATION_TOOL_TIMEOUT_MS).toBeGreaterThan(30 * 60_000);
   });
 
   it('distinguishes timeouts from user cancellation and exposes a typed retryable payload', () => {

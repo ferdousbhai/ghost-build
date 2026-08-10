@@ -1,4 +1,5 @@
 export const BUILDER_TURN_MAX_MODEL_STEPS = 32;
+export const BUILDER_MUTATION_TOOL_TIMEOUT_MS = 35 * 60_000;
 
 /** Limits that are actively enforced by the Pi loop and tool adapter. */
 export const BUILDER_TURN_TIMEOUTS = {
@@ -6,9 +7,9 @@ export const BUILDER_TURN_TIMEOUTS = {
   modelStreamMs: 13 * 60_000,
   tools: {
     read: 2 * 60_000,
-    write: 12 * 60_000,
-    edit: 12 * 60_000,
-    exec: 12 * 60_000,
+    write: BUILDER_MUTATION_TOOL_TIMEOUT_MS,
+    edit: BUILDER_MUTATION_TOOL_TIMEOUT_MS,
+    exec: BUILDER_MUTATION_TOOL_TIMEOUT_MS,
   },
 } as const;
 
