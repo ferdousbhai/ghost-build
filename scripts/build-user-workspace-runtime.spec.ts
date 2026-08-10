@@ -9,6 +9,7 @@ describe('user workspace runtime bundle', () => {
     expect(USER_WORKSPACE_RUNTIME_SOURCE).not.toContain('import.meta.url');
     expect(USER_WORKSPACE_RUNTIME_SOURCE).not.toContain('./impl/format');
     expect(USER_WORKSPACE_RUNTIME_SOURCE).not.toContain('node:process');
+    expect(USER_WORKSPACE_RUNTIME_SOURCE).not.toMatch(/\b[A-Za-z_$][\w$]*\(["'](?:node:)?process["']\)/);
     expect(USER_WORKSPACE_RUNTIME_SOURCE).not.toContain('fetch-blob');
   });
 });

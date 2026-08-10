@@ -1,18 +1,22 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outputPath = resolve(root, 'app/generated/user-workspace-runtime.generated.ts');
+const pathBrowserifyEntry = createRequire(resolve(root, 'ghostbuild-agent/package.json')).resolve('path-browserify');
 const result = await build({
   entryPoints: [resolve(root, 'user-workspace-runtime/src/index.ts')],
   bundle: true,
   write: false,
   format: 'esm',
-  platform: 'node',
-  mainFields: ['module', 'main'],
+  platform: 'neutral',
+  conditions: ['workerd', 'worker', 'browser'],
+  mainFields: ['browser', 'module', 'main'],
+  alias: { path: pathBrowserifyEntry },
   target: 'es2022',
   minify: true,
   legalComments: 'none',
