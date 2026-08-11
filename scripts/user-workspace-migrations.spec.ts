@@ -2,7 +2,14 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, test } from 'vitest';
 
-const workloadTables = ['agent_gc_candidates', 'chat_transcripts', 'chats', 'deployment_resources', 'deployments'];
+const workloadTables = [
+  'agent_gc_candidates',
+  'app_resource_gc_candidates',
+  'chat_transcripts',
+  'chats',
+  'deployment_resources',
+  'deployments',
+];
 
 describe('user-owned workspace D1 schema', () => {
   test('contains only chat and deployment workload metadata', () => {
@@ -57,6 +64,23 @@ describe('user-owned workspace D1 schema', () => {
 
     expect(columns).not.toContain('url_id');
     expect(indexes).not.toContain('idx_chats_active_url');
+  });
+
+  test('backfills provider cleanup for projects deleted before the resource outbox existed', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    db.exec(readFileSync('user-workspace-migrations/0001_user_workspace.sql', 'utf8'));
+    db.exec(readFileSync('user-workspace-migrations/0002_remove_chat_url_id.sql', 'utf8'));
+    db.prepare(
+      `INSERT INTO chats (id, creator_id, initial_id, timestamp, is_deleted)
+       VALUES ('deleted-chat', 'user-1', 'initial-1', '2026-08-01T00:00:00.000Z', 1)`,
+    ).run();
+
+    db.exec(readFileSync('user-workspace-migrations/0003_app_resource_gc.sql', 'utf8'));
+
+    expect(db.prepare('SELECT chat_id, not_before, attempts FROM app_resource_gc_candidates').all()).toEqual([
+      { chat_id: 'deleted-chat', not_before: 0, attempts: 0 },
+    ]);
   });
 
   test('removes the alternate URL identity without changing chat rows', () => {

@@ -185,10 +185,12 @@ function PrivacyPage() {
         </p>
         <p>
           Removing a project hides it from the active project list and makes its Agent and workspace eligible for
-          teardown no earlier than 30 minutes later; cleanup can be delayed and retried. It is not complete erasure:
-          catalog, transcript, deployment, observability, browser, and customer-controlled Cloudflare records remain
-          unless removed through a separate applicable process. You can download individual project source before
-          removal. Resources deployed to your Cloudflare account remain until you remove them there, and browser data
+          teardown no earlier than 30 minutes later. Ghostbuild also schedules deletion of the project’s generated
+          Worker and its Durable Objects, D1 databases, KV namespaces, and R2 buckets from your connected Cloudflare
+          account. R2 objects are emptied in bounded batches before the bucket is deleted; provider failures or revoked
+          authorization can delay cleanup and are retried while access remains available. It is not complete erasure:
+          catalog, transcript, deployment, provider-retained observability, and browser records remain under their
+          applicable retention boundaries. You can download individual project source before removal, and browser data
           remains until you clear it.
         </p>
         <p>

@@ -138,6 +138,85 @@ describe('UserCloudflareAccountApi', () => {
     ).rejects.toBeInstanceOf(CloudflareAccountApiError);
   });
 
+  test('deletes managed Worker, D1, and KV resources idempotently by their approved names', async () => {
+    const d1Id = '12345678-1234-1234-1234-123456789abc';
+    const kvId = '0123456789abcdef0123456789abcdef';
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ uuid: d1Id, name: 'ghostbuild-deployment-1' }] }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: {} }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ id: kvId, title: 'ghostbuild-deployment-1-cache' }] }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+    const api = new UserCloudflareAccountApi('account-1', 'token', request);
+
+    await api.deleteManagedWorker('ghostbuild-deployment-1');
+    await api.deleteD1Database('ghostbuild-deployment-1');
+    await api.deleteKvNamespace('ghostbuild-deployment-1-cache');
+
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-deployment-1?force=true',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      3,
+      `https://api.cloudflare.com/client/v4/accounts/account-1/d1/database/${d1Id}`,
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      5,
+      `https://api.cloudflare.com/client/v4/accounts/account-1/storage/kv/namespaces/${kvId}`,
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+
+  test('empties R2 in bounded batches before deleting the bucket', async () => {
+    const bucket = 'ghostbuild-deployment-1-storage';
+    const present = () => Response.json({ success: true, result: { name: bucket } });
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(present())
+      .mockResolvedValueOnce(Response.json({ success: true, result: {} }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: {} }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ key: '../retained.txt' }, { key: 'folder/a file?.txt' }] }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: { key: 'folder/a file?.txt' } }))
+      .mockResolvedValueOnce(present())
+      .mockResolvedValueOnce(Response.json({ success: true, result: {} }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: {} }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: [] }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const api = new UserCloudflareAccountApi('account-1', 'token', request);
+
+    await expect(api.deleteR2Bucket(bucket)).resolves.toBe(false);
+    await expect(api.deleteR2Bucket(bucket)).resolves.toBe(true);
+
+    expect(request).toHaveBeenNthCalledWith(
+      5,
+      `https://api.cloudflare.com/client/v4/accounts/account-1/r2/buckets/${bucket}/objects/folder/a%20file%3F.txt`,
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+    expect(request).not.toHaveBeenCalledWith(expect.stringContaining('/objects/%2E%2E/'), expect.anything());
+    expect(request).toHaveBeenNthCalledWith(
+      3,
+      `https://api.cloudflare.com/client/v4/accounts/account-1/r2/buckets/${bucket}/lifecycle`,
+      expect.objectContaining({
+        method: 'PUT',
+        body: expect.stringContaining('ghostbuild-project-deletion'),
+      }),
+    );
+    expect(request).toHaveBeenLastCalledWith(
+      `https://api.cloudflare.com/client/v4/accounts/account-1/r2/buckets/${bucket}`,
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+
   test('reuses already provisioned plan resources after an interrupted deployment', async () => {
     const request = vi
       .fn<typeof fetch>()

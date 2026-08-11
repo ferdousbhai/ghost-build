@@ -10,6 +10,7 @@ import {
 } from '~/lib/cloudflare/data-pagination';
 import { SubchatLimitError } from './errors';
 import { EMPTY_CHAT_DISCARD_PREDICATE } from './empty-chat.server';
+import { prepareAppResourceGcCandidateStatement } from './app-resource-gc.server';
 
 export async function initializeChat(
   db: D1Database,
@@ -22,6 +23,11 @@ export async function initializeChat(
 export async function discardEmptyChat(db: D1Database, args: { sessionId: string; id: string }): Promise<null> {
   await db.batch([
     prepareEmptyChatAgentGcCandidatesStatement(db, { ownerId: args.sessionId, initialId: args.id }),
+    prepareAppResourceGcCandidateStatement(db, {
+      ownerId: args.sessionId,
+      initialId: args.id,
+      requireEmpty: true,
+    }),
     db
       .prepare(
         `UPDATE chats
@@ -189,6 +195,7 @@ export async function setSubchatDescription(
 export async function removeChat(db: D1Database, args: { sessionId: string; id: string }) {
   await db.batch([
     prepareChatAgentGcCandidatesStatement(db, { initialId: args.id, ownerId: args.sessionId }),
+    prepareAppResourceGcCandidateStatement(db, { initialId: args.id, ownerId: args.sessionId }),
     db
       .prepare(
         `UPDATE chats

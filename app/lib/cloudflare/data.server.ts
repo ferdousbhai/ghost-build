@@ -25,6 +25,7 @@ import {
   setSubchatDescription,
 } from './data/chat-service.server';
 import { sweepAgentGcCandidatesBestEffort } from './data/agent-gc.server';
+import { sweepAppResourceGcCandidatesBestEffort } from './data/app-resource-gc.server';
 import { ensureDataBindings, internalErrorResponse, parseRequestQuery } from './data/http.server';
 import { requireChatTranscript, transcriptIdentity } from './data/transcript-repository.server';
 import { retryDurableObjectRpc } from './durable-object-rpc.server';
@@ -70,6 +71,7 @@ export async function userRuntimeDataAction(args: {
     }
     const result = runKnownDataOperation(args.env.DB, body.path, body.args);
     args.executionCtx?.waitUntil(sweepAgentGcCandidatesBestEffort(args.env));
+    args.executionCtx?.waitUntil(sweepAppResourceGcCandidatesBestEffort(args.env));
     return Response.json({ result: await result });
   } catch (error) {
     return internalErrorResponse(error, 'Unknown data error');

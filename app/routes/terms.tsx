@@ -61,8 +61,9 @@ function TermsPage() {
         </p>
         <p>
           You are responsible for the applications you publish, including their content, users, security, monitoring,
-          legal notices, data handling, and compliance. Removing a project or Ghostbuild-held account data does not
-          remove resources from your Cloudflare account.
+          legal notices, data handling, and compliance. Removing a project schedules cleanup of the generated resources
+          associated with that project. Cleanup depends on your Cloudflare authorization remaining available and may be
+          delayed or retried as described in the Privacy notice.
         </p>
       </TrustSection>
       <TrustSection title="Acceptable use">
@@ -85,9 +86,9 @@ function TermsPage() {
         <p>
           You may stop using Ghostbuild at any time and revoke its Cloudflare access. Ghostbuild may limit or suspend
           access when reasonably necessary for security, abuse prevention, legal compliance, service integrity, or a
-          material breach of these Terms. Notice will be provided when reasonably practical. Removal from Ghostbuild
-          does not remove customer-controlled Cloudflare resources, and the retention boundaries in the{' '}
-          <Link to="/privacy">Privacy notice</Link> continue to apply.
+          material breach of these Terms. Notice will be provided when reasonably practical. Stopping use, losing
+          access, or revoking Cloudflare authorization does not by itself delete resources from your Cloudflare account,
+          and the retention boundaries in the <Link to="/privacy">Privacy notice</Link> continue to apply.
         </p>
       </TrustSection>
       <TrustSection title="Warranty and liability">

@@ -232,8 +232,9 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
                     .
                   </p>
                   <p className="text-content-secondary">
-                    This removes it from your project list and schedules workspace cleanup. It does not remove deployed
-                    Cloudflare resources or every retained record. See the <Link to="/privacy">Privacy notice</Link>.
+                    This removes it from your project list and schedules cleanup of its workspace and deployed
+                    Cloudflare resources. Provider-retained logs and browser data are not erased. See the{' '}
+                    <Link to="/privacy">Privacy notice</Link>.
                   </p>
                 </div>
               }

@@ -135,14 +135,16 @@ describe('empty chat lifecycle', () => {
       discardEmptyChat({ prepare, batch } as unknown as D1Database, { sessionId: 'user-1', id: 'chat-1' }),
     ).resolves.toBeNull();
 
-    expect(statements).toHaveLength(2);
+    expect(statements).toHaveLength(3);
     expect(statements[0].query).toContain('INSERT INTO agent_gc_candidates');
     expect(statements[0].query).toContain('chat_transcripts.head_revision > 0');
     expect(statements[0].query).not.toContain('TRIM(chats.description)');
     expect(Number(statements[0].values[0]) - Number(statements[0].values[1])).toBe(AGENT_GC_GRACE_PERIOD_MS);
-    expect(statements[1].query).toContain('SET is_deleted = 1');
-    expect(statements[1].query).not.toContain('TRIM(description)');
-    expect(statements[1].values).toEqual(['user-1', 'chat-1']);
+    expect(statements[1].query).toContain('INSERT INTO app_resource_gc_candidates');
+    expect(statements[1].query).toContain('chat_transcripts.head_revision > 0');
+    expect(statements[2].query).toContain('SET is_deleted = 1');
+    expect(statements[2].query).not.toContain('TRIM(description)');
+    expect(statements[2].values).toEqual(['user-1', 'chat-1']);
   });
 
   it('discards a titled empty chat while preserving chats with durable content', async () => {
@@ -171,6 +173,9 @@ describe('empty chat lifecycle', () => {
       { id: 'message-row', is_deleted: 0 },
     ]);
     expect(database.sqlite.prepare(`SELECT chat_id FROM agent_gc_candidates`).all()).toEqual([
+      { chat_id: 'empty-row' },
+    ]);
+    expect(database.sqlite.prepare(`SELECT chat_id FROM app_resource_gc_candidates`).all()).toEqual([
       { chat_id: 'empty-row' },
     ]);
   });
@@ -271,12 +276,13 @@ describe('chat deletion', () => {
 
     await removeChat(db, { sessionId: 'owner', id: 'chat' });
 
-    expect(statements).toHaveLength(2);
+    expect(statements).toHaveLength(3);
     expect(statements[0].query).toContain('INSERT INTO agent_gc_candidates');
     expect(statements[0].query).toContain('JOIN chat_transcripts');
     expect(Number(statements[0].values[0]) - Number(statements[0].values[1])).toBe(AGENT_GC_GRACE_PERIOD_MS);
-    expect(statements[1].query).toContain('SET is_deleted = 1');
-    expect(statements[1].query).not.toContain('snapshot_key');
+    expect(statements[1].query).toContain('INSERT INTO app_resource_gc_candidates');
+    expect(statements[2].query).toContain('SET is_deleted = 1');
+    expect(statements[2].query).not.toContain('snapshot_key');
   });
 });
 
@@ -382,6 +388,12 @@ function emptyChatDatabase(): { sqlite: DatabaseSync; db: D1Database } {
       created_at INTEGER NOT NULL,
       attempts INTEGER NOT NULL,
       PRIMARY KEY (chat_id, subchat_index)
+    );
+    CREATE TABLE app_resource_gc_candidates (
+      chat_id TEXT PRIMARY KEY,
+      not_before INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      attempts INTEGER NOT NULL
     );
   `);
   const db = {

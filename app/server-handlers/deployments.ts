@@ -145,6 +145,7 @@ async function runDeploymentAction(args: {
 
   const connection = runtimeCloudflareIdentity(args.env, userId);
   const currentDeployment = await requireDeploymentForUser(args.env.DB, args.deploymentId, userId);
+  await requireActiveDeploymentChat(args.env.DB, currentDeployment);
   if (!isCurrentDeploymentPlan(currentDeployment.plan)) {
     return Response.json(
       {
@@ -204,6 +205,21 @@ async function runDeploymentAction(args: {
 
 class DeploymentConnectionRequiredError extends Error {}
 class DeploymentChatNotFoundError extends Error {}
+
+async function requireActiveDeploymentChat(db: D1Database, deployment: Deployment): Promise<void> {
+  const active = await db
+    .prepare(
+      `SELECT 1 AS found
+       FROM chats
+       WHERE id = ? AND creator_id = ? AND is_deleted = 0
+       LIMIT 1`,
+    )
+    .bind(deployment.chatId, deployment.userId)
+    .first<{ found: number }>();
+  if (!active) {
+    throw new DeploymentChatNotFoundError();
+  }
+}
 
 function runtimeCloudflareIdentity(env: Env, userId: string): { id: string; generation: number } {
   const runtime = env as Env & {

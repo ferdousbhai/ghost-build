@@ -223,6 +223,12 @@ export async function claimApprovedDeployment(args: {
          WHERE id = ? AND user_id = ? AND connection_id = ? AND connection_generation = ?
            AND execution_generation = ? AND status = 'approved' AND updated_at = ?
            AND approved_digest = plan_digest
+           AND EXISTS (
+             SELECT 1 FROM chats
+             WHERE chats.id = deployments.chat_id
+               AND chats.creator_id = deployments.user_id
+               AND chats.is_deleted = 0
+           )
            AND NOT EXISTS (
              SELECT 1 FROM deployments AS active
              WHERE active.user_id = ? AND active.id <> ?

@@ -263,7 +263,7 @@ export async function resolveFreshCloudflareAccessToken(
   return body.accessToken;
 }
 
-async function createUserAccountApi(
+export async function createUserAccountApi(
   env: {
     GHOSTBUILD_CONTROL_PLANE_ENDPOINT?: string;
     CONTROL_PLANE_SECRET?: string;

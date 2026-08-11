@@ -94,11 +94,19 @@
     {
       "system": "User-owned deployed Cloudflare resources",
       "owner": "user Cloudflare account",
-      "categories": ["Workers", "D1 databases", "R2 buckets", "Containers", "Durable Objects", "Agents"],
+      "categories": [
+        "Workers",
+        "D1 databases",
+        "R2 buckets",
+        "KV namespaces",
+        "Containers",
+        "Durable Objects",
+        "Agents"
+      ],
       "secrets": "deployed bindings and secrets must never be exported by Ghostbuild",
-      "currentRetention": "resources remain in the user's account until explicitly changed or removed",
+      "currentRetention": "generated resources remain in the user's account while the project is active; project deletion queues bounded provider cleanup after a 30-minute grace period, and provider failures or unavailable authorization can delay retries",
       "currentExport": "deployment inventory is not available as an account export",
-      "currentDeletion": "retained in the user Cloudflare account; deployment approval, Terms, and Privacy state that resources may continue to incur charges until the user removes them"
+      "currentDeletion": "project deletion durably queues cleanup derived from every deployment plan: Workers are force-deleted with their script-owned Durable Objects, D1 databases and KV namespaces are deleted, and R2 objects are emptied in bounded batches before bucket deletion; missing resources are idempotent success and failed cleanup is retried while authorization remains available"
     },
     {
       "system": "User-owned generated-application observability",

@@ -112,7 +112,11 @@ describe('deployment handlers', () => {
   it('executes approved deployment work in the user-owned runtime', async () => {
     const approved = deployment('approved');
     mocks.requireDeployment.mockResolvedValue(approved);
-    const env = runtimeEnv({} as D1Database);
+    const env = runtimeEnv({
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({ first: vi.fn(async () => ({ found: 1 })) })),
+      })),
+    } as unknown as D1Database);
     const response = await userRuntimeDeploymentAction({
       request: new Request('https://ghostbuild.dev/api/deployments/deployment-1/execute', { method: 'POST' }),
       env,

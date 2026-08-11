@@ -24,6 +24,9 @@ const MAX_ASSET_UPLOAD_JWT_BYTES = 16 * 1024;
 const ASSET_HASH_PATTERN = /^[a-f0-9]{32}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const R2_BUCKET_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
+const R2_CLEANUP_BATCH_SIZE = 100;
+const R2_CLEANUP_LIFECYCLE_ID = 'ghostbuild-project-deletion';
+const R2_CLEANUP_MAX_AGE_SECONDS = 24 * 60 * 60;
 const CONTAINER_ROLLOUT_DEADLINE_MS = 20 * 60_000;
 const CONTAINER_ROLLOUT_POLL_INTERVAL_MS = 5_000;
 
@@ -339,6 +342,81 @@ export class UserCloudflareAccountApi {
       throw new CloudflareAccountApiError('Cloudflare returned an invalid KV namespace.');
     }
     return { id, name: resourceName };
+  }
+
+  /** Remove a Ghostbuild-managed Worker and its script-owned Durable Objects. */
+  async deleteManagedWorker(workerName: string): Promise<void> {
+    requireWorkerName(workerName);
+    await this.deleteOptional(`/workers/scripts/${encodeURIComponent(workerName)}?force=true`);
+  }
+
+  async deleteD1Database(resourceName: string): Promise<void> {
+    requireCloudflareResourceName(resourceName);
+    const databases = await this.call<unknown>(`/d1/database?name=${encodeURIComponent(resourceName)}`, {
+      method: 'GET',
+    });
+    const databaseId = existingD1DatabaseId(databases, resourceName);
+    if (databaseId) {
+      await this.deleteOptional(`/d1/database/${encodeURIComponent(databaseId)}`);
+    }
+  }
+
+  async deleteKvNamespace(resourceName: string): Promise<void> {
+    const namespace = await this.findKvNamespace(resourceName);
+    if (namespace) {
+      await this.deleteOptional(`/storage/kv/namespaces/${encodeURIComponent(namespace.id)}`);
+    }
+  }
+
+  /** Empty one bounded object batch, then delete the bucket once it is empty. */
+  async deleteR2Bucket(resourceName: string): Promise<boolean> {
+    requireR2BucketName(resourceName);
+    const bucketPath = `/r2/buckets/${encodeURIComponent(resourceName)}`;
+    const bucket = await this.callOptional<{ name?: string }>(bucketPath, { method: 'GET' });
+    if (bucket === null) {
+      return true;
+    }
+    if (bucket.name !== resourceName) {
+      throw new CloudflareAccountApiError('Cloudflare returned an invalid R2 resource.');
+    }
+
+    // A deleted project cannot retain user-configured object locks that would
+    // otherwise prevent its bucket from being emptied.
+    await this.callOptional<unknown>(`${bucketPath}/lock`, {
+      method: 'PUT',
+      body: JSON.stringify({ rules: [] }),
+    });
+    // Lifecycle deletion covers multipart uploads and object keys that cannot
+    // safely be represented in a normalized URL path (notably `.` and `..`).
+    await this.callOptional<unknown>(`${bucketPath}/lifecycle`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        rules: [
+          {
+            id: R2_CLEANUP_LIFECYCLE_ID,
+            enabled: true,
+            conditions: { prefix: '' },
+            deleteObjectsTransition: {
+              condition: { type: 'Age', maxAge: R2_CLEANUP_MAX_AGE_SECONDS },
+            },
+            abortMultipartUploadsTransition: {
+              condition: { type: 'Age', maxAge: R2_CLEANUP_MAX_AGE_SECONDS },
+            },
+          },
+        ],
+      }),
+    });
+    const objectKeys = await this.listR2ObjectKeys(resourceName);
+    if (objectKeys.length > 0) {
+      await Promise.all(
+        objectKeys
+          .filter(isR2ObjectKeySafeForPathDeletion)
+          .map((key) => this.deleteOptional(`${bucketPath}/objects/${encodeR2ObjectKey(key)}`)),
+      );
+      return false;
+    }
+    await this.deleteOptional(bucketPath);
+    return true;
   }
 
   /** Upload an immutable, server-owned Worker version and promote exactly it to production. */
@@ -953,6 +1031,57 @@ export class UserCloudflareAccountApi {
     return result;
   }
 
+  private async listR2ObjectKeys(bucketName: string): Promise<string[]> {
+    const response = await this.callRaw(
+      `/r2/buckets/${encodeURIComponent(bucketName)}/objects?per_page=${R2_CLEANUP_BATCH_SIZE}`,
+      { method: 'GET' },
+    );
+    const payload = await readBoundedJson<CloudflareEnvelope<unknown>>(response);
+    if (response.status === 404) {
+      return [];
+    }
+    if (!response.ok || payload?.success !== true || !Array.isArray(payload.result)) {
+      const providerMessage = payload?.errors?.find((error) => error.message)?.message;
+      throw new CloudflareAccountApiError(providerMessage || `Cloudflare API request failed (${response.status}).`);
+    }
+    return payload.result.map((value) => {
+      if (!isRecord(value) || typeof value.key !== 'string' || value.key.length === 0 || value.key.length > 1_024) {
+        throw new CloudflareAccountApiError('Cloudflare returned an invalid R2 object list.');
+      }
+      return value.key;
+    });
+  }
+
+  private async deleteOptional(path: string): Promise<void> {
+    const response = await this.callRaw(path, { method: 'DELETE' });
+    if (response.status === 404) {
+      await response.body?.cancel().catch(() => undefined);
+      return;
+    }
+    const text = await readBoundedResponseText(response, MAX_CLOUDFLARE_RESPONSE_BYTES);
+    if (!response.ok || text === null) {
+      throw new CloudflareAccountApiError(`Cloudflare API request failed (${response.status}).`);
+    }
+    if (text.length === 0) {
+      return;
+    }
+    try {
+      const payload = JSON.parse(text) as CloudflareEnvelope<unknown>;
+      if (payload.success === true) {
+        return;
+      }
+      throw new CloudflareAccountApiError(
+        payload.errors?.find((error) => error.message)?.message ||
+          `Cloudflare API request failed (${response.status}).`,
+      );
+    } catch (error) {
+      if (error instanceof CloudflareAccountApiError) {
+        throw error;
+      }
+      throw new CloudflareAccountApiError('Cloudflare returned an invalid deletion response.');
+    }
+  }
+
   private async callOptional<T>(path: string, init: RequestInit): Promise<T | null> {
     const response = await this.callRaw(path, {
       ...init,
@@ -1058,6 +1187,14 @@ function requireWorkerName(name: string): void {
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(name)) {
     throw new CloudflareAccountApiError('Worker name is invalid.');
   }
+}
+
+function encodeR2ObjectKey(key: string): string {
+  return key.split('/').map(encodeURIComponent).join('/');
+}
+
+function isR2ObjectKeySafeForPathDeletion(key: string): boolean {
+  return key.split('/').every((segment) => segment !== '.' && segment !== '..');
 }
 
 function requireCloudflareResourceName(name: string): void {
