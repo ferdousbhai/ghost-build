@@ -79,7 +79,7 @@ describe('minimal Workers AI tool surface', () => {
     });
   });
 
-  it('rejects stale line edits and validates an exact-snapshot edit', async () => {
+  it('rejects stale line edits and applies an exact-snapshot edit without an intermediate validation', async () => {
     const path = '/home/project/src/app.ts';
     const workspace = workspaceStub({ files: { [path]: 'one\ntwo\nthree\n' } });
     const tools = createWorkersAiTools(workspace, operationContext());
@@ -108,8 +108,8 @@ describe('minimal Workers AI tool surface', () => {
       editsApplied: 2,
       firstChangedLine: 2,
       totalLines: 4,
-      validation: { ok: true },
     });
+    expect(workspace.validate).not.toHaveBeenCalled();
     await expect(workspace.readText(path)).resolves.toMatchObject({ content: 'one\nTWO\nthree\nfour\n' });
   });
 
@@ -148,9 +148,8 @@ describe('minimal Workers AI tool surface', () => {
     });
   });
 
-  it('automatically validates write and edit mutations', async () => {
-    const validation = validationResult();
-    const workspace = workspaceStub({ validation });
+  it('defers validation while related file mutations are being batched', async () => {
+    const workspace = workspaceStub();
     const onValidationStage = vi.fn();
     const tools = createWorkersAiTools(workspace, operationContext({ onValidationStage }));
 
@@ -159,16 +158,9 @@ describe('minimal Workers AI tool surface', () => {
       content: 'export const ready = true;',
     });
 
-    expect(result).toMatchObject({ validation });
-    expect(workspace.validate).toHaveBeenCalledWith({
-      toolCallId: 'tool-call:validation',
-      input: {},
-      abortSignal: undefined,
-    });
-    expect(onValidationStage.mock.calls).toEqual([
-      ['tool-call', 'computer validation'],
-      ['tool-call', null],
-    ]);
+    expect(result).not.toHaveProperty('validation');
+    expect(workspace.validate).not.toHaveBeenCalled();
+    expect(onValidationStage).not.toHaveBeenCalled();
   });
 
   it('does not claim completion when a failed write left the durable revision unchanged', async () => {
@@ -185,8 +177,8 @@ describe('minimal Workers AI tool surface', () => {
     expect(workspace.validate).not.toHaveBeenCalled();
   });
 
-  it('routes approved dependency commands through the durable installer and validates them', async () => {
-    const workspace = workspaceStub({ validation: validationResult() });
+  it('routes approved dependency commands through the durable installer without an intermediate validation', async () => {
+    const workspace = workspaceStub();
     const tools = createWorkersAiTools(workspace, operationContext());
 
     const result = await executeTool(tools.exec, { command: 'pnpm add date-fns' });
@@ -197,7 +189,9 @@ describe('minimal Workers AI tool surface', () => {
       mode: 'add',
       packages: ['date-fns'],
     });
-    expect(result).toMatchObject({ dependencyMutation: true, validation: { ok: true } });
+    expect(result).toMatchObject({ dependencyMutation: true });
+    expect(result).not.toHaveProperty('validation');
+    expect(workspace.validate).not.toHaveBeenCalled();
     expect(workspace.computer.runtime!.exec).not.toHaveBeenCalled();
   });
 
@@ -212,7 +206,7 @@ describe('minimal Workers AI tool surface', () => {
     expect(workspace.installDependencies).not.toHaveBeenCalled();
   });
 
-  it('validates an exec command only when the durable workspace revision changes', async () => {
+  it('does not infer validation from arbitrary exec mutations', async () => {
     let revision = 1;
     const runtimeExec = vi.fn(async () => ({
       result: async () => {
@@ -225,30 +219,37 @@ describe('minimal Workers AI tool surface', () => {
 
     const result = await executeTool(tools.exec, { command: 'custom-command' });
 
-    expect(result).toMatchObject({ validation: { ok: true } });
-    expect(workspace.validate).toHaveBeenCalledOnce();
+    expect(result).not.toHaveProperty('validation');
+    expect(workspace.validate).not.toHaveBeenCalled();
   });
 
-  it('returns validation failures inside the mutation result for model repair', async () => {
+  it('runs one explicit durable validation and reports failures for model repair', async () => {
     const validation = toolFailure('Typecheck failed', { diagnostics: ['src/app.ts:1'] });
     const workspace = workspaceStub({ validation });
-    const tools = createWorkersAiTools(workspace, operationContext());
+    const onValidationStage = vi.fn();
+    const tools = createWorkersAiTools(workspace, operationContext({ onValidationStage }));
 
-    await expect(executeTool(tools.write, { path: '/home/project/src/app.ts', content: 'bad' })).resolves.toMatchObject(
-      {
-        validation,
-      },
-    );
+    await expect(executeTool(tools.exec, { command: 'pnpm run validate' })).resolves.toMatchObject({ validation });
+    expect(workspace.validate).toHaveBeenCalledWith({
+      toolCallId: 'tool-call:validation',
+      input: {},
+      abortSignal: undefined,
+    });
+    expect(onValidationStage.mock.calls).toEqual([
+      ['tool-call', 'computer validation'],
+      ['tool-call', null],
+    ]);
+    expect(workspace.computer.runtime!.exec).not.toHaveBeenCalled();
     expect(
-      getValidatedBuildCompletion([user('Build it')], [{ toolName: 'write', result: { validation } }]),
+      getValidatedBuildCompletion([user('Build it')], [{ toolName: 'exec', result: { validation } }]),
     ).toBeUndefined();
   });
 
-  it('derives completion from the latest automatic validation receipt', () => {
+  it('derives completion from the latest explicit validation receipt', () => {
     expect(
       getValidatedBuildCompletion(
         [user('Build it')],
-        [{ toolName: 'write', result: { validation: validationResult() } }],
+        [{ toolName: 'exec', result: { validation: validationResult() } }],
       ),
     ).toBe('Done. I built and validated the app. It is ready for the user to review and deploy.');
 
@@ -256,8 +257,8 @@ describe('minimal Workers AI tool surface', () => {
       getValidatedBuildCompletion(
         [user('Build it')],
         [
-          { toolName: 'write', result: { validation: validationResult() } },
-          { toolName: 'edit', result: { validation: toolFailure('Build failed') } },
+          { toolName: 'exec', result: { validation: validationResult() } },
+          { toolName: 'exec', result: { validation: toolFailure('Build failed') } },
         ],
       ),
     ).toBeUndefined();

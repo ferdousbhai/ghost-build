@@ -187,12 +187,12 @@ function computerWorkspaceTool(
           return { error: 'Ghostbuild documentation is an immutable virtual filesystem overlay.' };
         }
 
+        if (toolName === 'exec' && isExecInput(input) && isFullValidationCommand(input.command)) {
+          const validation = await validateWorkspace(workspace, context, options.toolCallId, options.abortSignal);
+          return attachValidation({ command: input.command }, validation);
+        }
+
         let result: unknown;
-        let dependencyMutation = false;
-        const revisionBefore =
-          toolName === 'write' || toolName === 'edit' || toolName === 'exec'
-            ? await currentWorkspaceRevision(workspace)
-            : undefined;
         try {
           if (!definition.execute) {
             throw new Error(`${toolName} is not executable.`);
@@ -208,7 +208,6 @@ function computerWorkspaceTool(
               packages: dependencyCommand.packages,
             });
             result = markDependencyMutation(result);
-            dependencyMutation = true;
           } else {
             result =
               toolName === 'read'
@@ -234,24 +233,13 @@ function computerWorkspaceTool(
                 : { error: String(error) });
         }
 
-        if (toolName === 'read' || isSyncUnconfirmedResult(result)) {
-          return result;
-        }
-        const revisionAfter =
-          toolName === 'exec' ? (await workspace.refresh()).revision : workspace.getState().revision;
-        const mutationOccurred = dependencyMutation || revisionBefore !== revisionAfter;
-        if (!mutationOccurred) {
-          return result;
-        }
-
-        const validation = await validateMutation(workspace, context, options.toolCallId, options.abortSignal);
-        return attachValidation(result, validation);
+        return result;
       });
     },
   };
 }
 
-async function validateMutation(
+async function validateWorkspace(
   workspace: BuilderWorkspaceApi,
   context: BuilderOperationContext,
   toolCallId: string,
@@ -301,20 +289,12 @@ function isExecInput(input: unknown): input is { command: string } {
   return isRecord(input) && typeof input.command === 'string';
 }
 
+function isFullValidationCommand(command: string): boolean {
+  return command.trim() === 'pnpm run validate';
+}
+
 function isPathInput(input: unknown): input is { path: string } {
   return isRecord(input) && typeof input.path === 'string';
-}
-
-async function currentWorkspaceRevision(workspace: BuilderWorkspaceApi): Promise<number> {
-  try {
-    return workspace.getState().revision;
-  } catch {
-    return (await workspace.refresh()).revision;
-  }
-}
-
-function isSyncUnconfirmedResult(result: unknown): boolean {
-  return isRecord(result) && result.kind === 'workspace-sync-unconfirmed';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

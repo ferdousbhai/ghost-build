@@ -18,6 +18,7 @@ describe('Ghostbuild filesystem output instructions', () => {
     expect(prompt).toContain('shell text rewriting when write or edit');
     expect(prompt).toContain('pnpm install --lockfile-only');
     expect(prompt).toContain('/home/project/.ghost/docs/index.md');
-    expect(prompt).toContain('validates after each source or dependency mutation');
+    expect(prompt).toContain('run `pnpm run validate` once through exec');
+    expect(prompt).toContain('Do not validate between related mutations');
   });
 });
