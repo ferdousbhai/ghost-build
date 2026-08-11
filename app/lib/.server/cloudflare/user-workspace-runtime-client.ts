@@ -331,13 +331,15 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
   async cancelActiveValidation(): Promise<void> {
     const toolCallId = this.#activeValidationToolCallId;
     if (!toolCallId) {
+      // The BuilderAgent can restart while ProjectWorkspace still owns the validation.
+      await this.#cancelValidation();
       return;
     }
     await this.#cancelValidation(toolCallId);
   }
 
-  async #cancelValidation(toolCallId: string): Promise<void> {
-    await (await this.#stub()).cancelValidation({ toolCallId });
+  async #cancelValidation(toolCallId?: string): Promise<void> {
+    await (await this.#stub()).cancelValidation(toolCallId ? { toolCallId } : {});
   }
 
   hasSuccessfulValidation(revision: string): Promise<boolean> {

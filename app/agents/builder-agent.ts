@@ -1064,12 +1064,13 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       return;
     }
     const current = this.currentPreviewState();
-    const revision = (
-      await this.workspace.refresh().catch((refreshError) => {
-        logger.warn('Unable to refresh workspace revision for preview failure', refreshError);
-        return null;
-      })
-    )?.revision ?? current.currentWorkspaceRevision;
+    const revision =
+      (
+        await this.workspace.refresh().catch((refreshError) => {
+          logger.warn('Unable to refresh workspace revision for preview failure', refreshError);
+          return null;
+        })
+      )?.revision ?? current.currentWorkspaceRevision;
     this.setPreviewState(failedBuilderPreviewState(current, revision, error));
   }
 

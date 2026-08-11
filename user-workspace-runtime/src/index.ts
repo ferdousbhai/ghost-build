@@ -1277,9 +1277,10 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   }
 
   async cancelValidation(value: unknown): Promise<void> {
-    const toolCallId = requireString(record(value).toolCallId, 'toolCallId', 512);
+    const input = record(value);
+    const toolCallId = input.toolCallId === undefined ? null : requireString(input.toolCallId, 'toolCallId', 512);
     const active = this.#activeValidation;
-    if (!active || active.toolCallId !== toolCallId) {
+    if (!active || (toolCallId !== null && active.toolCallId !== toolCallId)) {
       return;
     }
     await Promise.race([

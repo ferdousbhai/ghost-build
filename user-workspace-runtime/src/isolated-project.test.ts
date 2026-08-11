@@ -120,6 +120,10 @@ describe('isolated project command', () => {
     expect(source).toContain("const TRANSIENT_COMMAND_PROCESS_ROLE = 'transient-command'");
     expect(validation).toContain('async cancelValidation(');
     expect(validation).toContain('active.cancellation.cancel()');
+    expect(validation).toContain(
+      "input.toolCallId === undefined ? null : requireString(input.toolCallId, 'toolCallId', 512)",
+    );
+    expect(validation).toContain('toolCallId !== null && active.toolCallId !== toolCallId');
     expect(validation).toContain('this.#activeValidation.inputJson !== inputJson');
     expect(validation).toContain('cancellation.requireActive()');
     expect(validation).toContain('this.runValidationCommand(');

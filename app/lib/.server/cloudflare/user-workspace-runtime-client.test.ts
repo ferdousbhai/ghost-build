@@ -211,7 +211,15 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     finishValidation({ content: 'cancelled' });
     await expect(validation).resolves.toEqual({ content: 'cancelled' });
     await client.cancelActiveValidation();
-    expect(stub.cancelValidation).toHaveBeenCalledOnce();
+    expect(stub.cancelValidation).toHaveBeenLastCalledWith({});
+  });
+
+  it('cancels a remotely active validation after volatile client state is lost', async () => {
+    const { client, stub } = harness(() => undefined);
+
+    await client.cancelActiveValidation();
+
+    expect(stub.cancelValidation).toHaveBeenCalledWith({});
   });
 
   it('cancels the exact validation when the AI SDK abort signal fires', async () => {
