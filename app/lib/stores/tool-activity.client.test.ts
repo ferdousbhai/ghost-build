@@ -192,6 +192,7 @@ describe('ToolActivityStore', () => {
     store.startTurn();
 
     store.handoffActiveTurn();
+    store.activateScope('provisional');
     store.activateScope('durable');
     store.record(partId, {
       type: 'dynamic-tool',

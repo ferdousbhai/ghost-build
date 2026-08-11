@@ -17,7 +17,6 @@ export class ToolActivityStore {
 
   activateScope(scope: string): void {
     if (this.#scope === scope) {
-      this.#turnHandoffPending = false;
       return;
     }
     this.#scope = scope;

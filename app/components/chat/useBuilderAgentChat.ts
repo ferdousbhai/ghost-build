@@ -74,7 +74,8 @@ export function useBuilderAgentChat(args: {
     }),
     [args.transcript.agentName, args.transcript.generation, args.transcript.subchatIndex],
   );
-  const currentSubchatIndex = useStore(subchatIndexStore);
+  const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
+  const previousSubchatIndexRef = useRef(currentSubchatIndex);
   const workspaceReplica = useAccountLocalReplica(args.accountId);
   const [workspacePresentationState, setWorkspacePresentationState] = useState<
     'connecting' | 'ready' | 'presentation-error'
@@ -396,6 +397,10 @@ export function useBuilderAgentChat(args: {
   }, [builderAgent, chat]);
 
   useEffect(() => {
+    if (previousSubchatIndexRef.current === currentSubchatIndex) {
+      return;
+    }
+    previousSubchatIndexRef.current = currentSubchatIndex;
     toolActivityStore.abortActive();
     toolProgressStore.clear();
     setMessagesRef.current(initialMessagesRef.current as UIMessage[]);
