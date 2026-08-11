@@ -44,8 +44,7 @@ both facts whenever the plan or account membership changes.
 The exact latency budget, dashboard URLs, alert destinations, paging schedule, and backup owner are external operational
 configuration and remain launch blockers until recorded here. `ferdousbhai` is the public-beta primary owner. The
 twice-weekday contact-channel inspection and remaining notification drills are recorded in
-`contact-channel-operations.md`. If the configured abuse alias becomes Cloudflare's account abuse contact, its separate
-daily-monitoring and 24-hour response obligation applies as documented there; it does not create a public SLA.
+`contact-channel-operations.md`.
 
 ## Incident procedure
 

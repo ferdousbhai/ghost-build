@@ -10,7 +10,6 @@
 
 import { Route as rootRouteImport } from './routes/__root';
 import { Route as IndexRouteImport } from './routes/index';
-import { Route as AbuseRouteImport } from './routes/abuse';
 import { Route as PrivacyRouteImport } from './routes/privacy';
 import { Route as SecurityRouteImport } from './routes/security';
 import { Route as SettingsRouteImport } from './routes/settings';
@@ -21,11 +20,6 @@ import { Route as ChatIdRouteImport } from './routes/chat.$id';
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const AbuseRoute = AbuseRouteImport.update({
-  id: '/abuse',
-  path: '/abuse',
   getParentRoute: () => rootRouteImport,
 } as any);
 const PrivacyRoute = PrivacyRouteImport.update({
@@ -61,7 +55,6 @@ const ChatIdRoute = ChatIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute;
-  '/abuse': typeof AbuseRoute;
   '/privacy': typeof PrivacyRoute;
   '/security': typeof SecurityRoute;
   '/settings': typeof SettingsRoute;
@@ -71,7 +64,6 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute;
-  '/abuse': typeof AbuseRoute;
   '/privacy': typeof PrivacyRoute;
   '/security': typeof SecurityRoute;
   '/settings': typeof SettingsRoute;
@@ -82,7 +74,6 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   '/': typeof IndexRoute;
-  '/abuse': typeof AbuseRoute;
   '/privacy': typeof PrivacyRoute;
   '/security': typeof SecurityRoute;
   '/settings': typeof SettingsRoute;
@@ -94,7 +85,6 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
   fullPaths:
     | '/'
-    | '/abuse'
     | '/privacy'
     | '/security'
     | '/settings'
@@ -104,7 +94,6 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo;
   to:
     | '/'
-    | '/abuse'
     | '/privacy'
     | '/security'
     | '/settings'
@@ -114,7 +103,6 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/abuse'
     | '/privacy'
     | '/security'
     | '/settings'
@@ -125,7 +113,6 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
-  AbuseRoute: typeof AbuseRoute;
   PrivacyRoute: typeof PrivacyRoute;
   SecurityRoute: typeof SecurityRoute;
   SettingsRoute: typeof SettingsRoute;
@@ -141,13 +128,6 @@ declare module '@tanstack/react-router' {
       path: '/';
       fullPath: '/';
       preLoaderRoute: typeof IndexRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/abuse': {
-      id: '/abuse';
-      path: '/abuse';
-      fullPath: '/abuse';
-      preLoaderRoute: typeof AbuseRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/privacy': {
@@ -197,7 +177,6 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AbuseRoute: AbuseRoute,
   PrivacyRoute: PrivacyRoute,
   SecurityRoute: SecurityRoute,
   SettingsRoute: SettingsRoute,

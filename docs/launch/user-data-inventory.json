@@ -114,16 +114,16 @@
       "currentDeletion": "deployment removal does not immediately erase provider-retained observability; the user and Cloudflare account controls govern deletion, and Cloudflare automatically expires retained records at applicable boundaries"
     },
     {
-      "system": "GitHub support, abuse, and private security intake",
+      "system": "GitHub support and private security intake",
       "owner": "DOUS SOFTWARE INC. (controller); repository maintained through ferdousbhai",
       "categories": [
         "GitHub account and issue or report metadata",
-        "public support and abuse issue content and attachments",
+        "public support issue content and attachments",
         "private vulnerability report content and attachments",
         "response and repository audit history"
       ],
-      "secrets": "public support and abuse forms instruct requesters not to submit credentials, personal data, exploit details, or sensitive project content; vulnerability details belong only in GitHub private vulnerability reporting",
-      "currentRetention": "public issues and private vulnerability reports remain under GitHub policies and repository controls while needed for support, safety, security, fraud prevention, legal compliance, or claims",
+      "secrets": "the public support form instructs requesters not to submit credentials, personal data, exploit details, or sensitive project content; vulnerability details belong only in GitHub private vulnerability reporting",
+      "currentRetention": "public issues and private vulnerability reports remain under GitHub policies and repository controls while needed for support, security, fraud prevention, legal compliance, or claims",
       "currentExport": "no Ghostbuild self-service export exists; public issues are publicly readable, private reports are limited by GitHub repository permissions, and manual requests remain subject to identity verification and provider controls",
       "currentDeletion": "the operator may minimize or remove records through available GitHub controls when no longer needed, subject to provider behavior and lawful retention exceptions"
     },
@@ -132,12 +132,12 @@
       "owner": "DOUS SOFTWARE INC. (controller)",
       "categories": [
         "sender and recipient addresses",
-        "support, privacy, and abuse message content and attachments",
+        "support and privacy message content and attachments",
         "routing and delivery metadata",
         "case identifiers and response history"
       ],
-      "secrets": "once activated, requesters will be instructed not to send credentials, recovery codes, identity documents, exploit payloads, illegal imagery, or unnecessary project content; the private forwarding destination must never be committed",
-      "currentRetention": "once activated, closed support email will be reviewed after 90 days and deleted when no longer needed; privacy, abuse, and security case content will be minimized and reviewed annually while a legal, safety, fraud, or claims need remains; provider backup and routing metadata follow provider controls",
+      "secrets": "once activated, requesters will be instructed not to send credentials, recovery codes, identity documents, exploit payloads, or unnecessary project content; the private forwarding destination must never be committed",
+      "currentRetention": "once activated, closed support email will be reviewed after 90 days and deleted when no longer needed; privacy and security case content will be minimized and reviewed annually while a legal, safety, fraud, or claims need remains; provider backup and routing metadata follow provider controls",
       "currentExport": "provisioned before launch but not advertised or accepted as rights-request intake until an external receive/reply drill passes; once activated, requests are handled manually after proportionate identity verification",
       "currentDeletion": "no case data is expected before activation; once activated, deletion is handled manually subject to identity verification, provider controls, and lawful retention exceptions"
     },
@@ -160,7 +160,7 @@
   "launchBlockers": [
     "drill one synthetic privacy-rights request for the narrow operator-held D1 dataset, including identity verification, secret exclusion, case evidence, and Time Travel recovery boundaries",
     "publish tested instructions for project download, user-owned Cloudflare resource management, and clearing OPFS SQLite, localStorage, and sessionStorage that server-side deletion cannot reach",
-    "complete external receive/reply drills for support@, privacy@, and abuse@ and confirm mailbox deletion behavior"
+    "complete external receive/reply drills for support@ and privacy@ and confirm mailbox deletion behavior"
   ],
   "postLaunchHardening": [
     "evaluate self-service export and deletion for operator-held account and connection records after the manual process is proven",

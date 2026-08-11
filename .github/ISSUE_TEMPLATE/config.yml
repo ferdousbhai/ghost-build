@@ -6,6 +6,3 @@ contact_links:
   - name: Product support
     url: https://github.com/ferdousbhai/ghost-build/issues/new?template=support_request.yml
     about: Ask a non-sensitive product, Ghostbuild sign-in, or privacy question.
-  - name: Report abuse
-    url: https://github.com/ferdousbhai/ghost-build/issues/new?template=abuse_report.yml
-    about: Report harmful or prohibited use. Do not include vulnerability details or secrets.

@@ -26,10 +26,10 @@ function PrivacyPage() {
           {GHOSTBUILD_OPERATOR.registrationNumber}), operates Ghostbuild and is the controller for personal data
           Ghostbuild processes to operate the service. Its business correspondence address is{' '}
           {GHOSTBUILD_OPERATOR.correspondenceAddress}. This includes account, authentication, Cloudflare-connection,
-          requested AI-building workflow, support, security, abuse, and optional product-telemetry processing.
-          Persistent server-side project and conversation state remains in the connected Cloudflare account. You control
-          that account and are responsible for processing performed by applications you publish. Cloudflare and GitHub
-          also process data under their own terms and privacy roles.
+          requested AI-building workflow, support, security, and optional product-telemetry processing. Persistent
+          server-side project and conversation state remains in the connected Cloudflare account. You control that
+          account and are responsible for processing performed by applications you publish. Cloudflare and GitHub also
+          process data under their own terms and privacy roles.
         </p>
       </TrustSection>
 
@@ -64,8 +64,8 @@ function PrivacyPage() {
             credentials, and raw tool output are not intended log fields.
           </li>
           <li>
-            <strong>Support, abuse, privacy, and legal records:</strong> contact details, message contents, attachments,
-            case metadata, and reports you submit. These are used for the operator’s legitimate interests in answering
+            <strong>Support, privacy, and legal records:</strong> contact details, message contents, attachments, case
+            metadata, and reports you submit. These are used for the operator’s legitimate interests in answering
             requests, protecting users and infrastructure, enforcing the Terms, and establishing or defending legal
             claims, or to meet a legal obligation.
           </li>
@@ -126,10 +126,10 @@ function PrivacyPage() {
           Cloudflare provides authentication integration, Workers, D1, R2, Durable Objects, Containers, Computer,
           Workers AI, the Cloudflare AI model catalog, observability, and related infrastructure. A model provider
           listed in the selector also processes the request when you choose its partner-hosted model. GitHub processes
-          information submitted through public support and abuse issues or private security reports. Control-plane
-          observability is held in the operator’s Cloudflare account; workspace, Computer, and generated-application
-          observability is held in your connected Cloudflare account. Ghostbuild does not sell personal data, share it
-          for cross-context behavioral advertising, or use it for targeted advertising.
+          information submitted through public support issues or private security reports. Control-plane observability
+          is held in the operator’s Cloudflare account; workspace, Computer, and generated-application observability is
+          held in your connected Cloudflare account. Ghostbuild does not sell personal data, share it for cross-context
+          behavioral advertising, or use it for targeted advertising.
         </p>
       </TrustSection>
 
@@ -192,9 +192,9 @@ function PrivacyPage() {
           remains until you clear it.
         </p>
         <p>
-          GitHub retains public support and abuse issues and private security reports according to its policies and
-          repository controls. Records may also need to remain for security, fraud prevention, legal compliance,
-          disputes, or backups.
+          GitHub retains public support issues and private security reports according to its policies and repository
+          controls. Records may also need to remain for security, fraud prevention, legal compliance, disputes, or
+          backups.
         </p>
       </TrustSection>
 

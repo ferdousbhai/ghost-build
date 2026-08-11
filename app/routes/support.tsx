@@ -46,8 +46,7 @@ function SupportPage() {
           Ghostbuild support is not an emergency service. For immediate danger, contact local emergency services. For a
           compromised Cloudflare account or an active Cloudflare platform incident, use{' '}
           <a href="https://developers.cloudflare.com/support/contacting-cloudflare-support/">Cloudflare support</a>. Use{' '}
-          <Link to="/abuse">Report abuse</Link> for harmful content and <Link to="/security">Security</Link> for a
-          vulnerability.
+          <Link to="/security">Security</Link> to report a vulnerability in Ghostbuild.
         </p>
       </TrustSection>
     </TrustPage>

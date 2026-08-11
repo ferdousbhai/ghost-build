@@ -42,5 +42,5 @@ body:
       options:
         - label: I removed credentials, personal data, private project content, and Cloudflare account identifiers.
           required: true
-        - label: This is not a security vulnerability or abuse report.
+        - label: This is not a security vulnerability.
           required: true

@@ -85,7 +85,6 @@ test('renders the public trust routes and persists the telemetry choice', async 
   const routes = [
     ['/terms', 'You approve the build. You control the cloud account.'],
     ['/support', 'Get help through the right channel.'],
-    ['/abuse', 'Report harmful use through the right channel.'],
     ['/security', 'Keep vulnerability details private.'],
   ] as const;
 

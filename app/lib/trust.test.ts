@@ -2,8 +2,6 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import {
-  CLOUDFLARE_ABUSE_URL,
-  GHOSTBUILD_ABUSE_URL,
   GHOSTBUILD_OPERATOR,
   GHOSTBUILD_SECURITY_URL,
   GHOSTBUILD_SUPPORT_URL,
@@ -21,10 +19,9 @@ describe('public trust contract', () => {
     });
   });
 
-  it('keeps public support and abuse separate from private vulnerability reporting', () => {
-    expect(new Set([GHOSTBUILD_SUPPORT_URL, GHOSTBUILD_ABUSE_URL, GHOSTBUILD_SECURITY_URL]).size).toBe(3);
+  it('keeps public support separate from private vulnerability reporting', () => {
+    expect(GHOSTBUILD_SUPPORT_URL).not.toBe(GHOSTBUILD_SECURITY_URL);
     expect(GHOSTBUILD_SUPPORT_URL).toContain('support_request.yml');
-    expect(GHOSTBUILD_ABUSE_URL).toContain('abuse_report.yml');
     expect(GHOSTBUILD_SECURITY_URL).toContain('/security/advisories/new');
   });
 
@@ -44,18 +41,12 @@ describe('public trust contract', () => {
 
   it('keeps the public issue forms explicit about sensitive data and emergencies', () => {
     const support = issueForm('.github/ISSUE_TEMPLATE/support_request.yml');
-    const abuse = issueForm('.github/ISSUE_TEMPLATE/abuse_report.yml');
 
     expect(support.introduction).toContain('This issue is public');
     expect(support.introduction).toContain('Do not include');
     expect(support.introduction).toContain('do not provide sensitive information');
     expect(support.introduction).toContain('local emergency services');
     expect(support.assignees).toEqual(['ferdousbhai']);
-    expect(abuse.introduction).toContain('This issue is public');
-    expect(abuse.introduction).toContain('Do not download, copy, or attach suspected illegal imagery');
-    expect(abuse.introduction).toContain(CLOUDFLARE_ABUSE_URL);
-    expect(abuse.introduction).toContain('local emergency services');
-    expect(abuse.assignees).toEqual(['ferdousbhai']);
   });
 
   it('publishes every trust route in the sitemap', () => {

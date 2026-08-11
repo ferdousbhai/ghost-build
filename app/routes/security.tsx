@@ -17,7 +17,7 @@ function SecurityPage() {
     <TrustPage
       eyebrow="Security"
       title="Keep vulnerability details private."
-      summary="Use GitHub private vulnerability reporting for suspected vulnerabilities in Ghostbuild. Do not open a public support, abuse, or bug issue with exploit details."
+      summary="Use GitHub private vulnerability reporting for suspected vulnerabilities in Ghostbuild. Do not open a public support or bug issue with exploit details."
     >
       <TrustSection title="Private reporting">
         <p>
