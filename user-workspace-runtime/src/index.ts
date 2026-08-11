@@ -13,7 +13,8 @@ import {
   type IWorkspaceContainerAPI,
   type WorkspaceRef,
 } from '@cloudflare/computer/backends/container';
-import { Sandbox } from '@cloudflare/sandbox';
+import { Sandbox, type SandboxCommand } from '@cloudflare/sandbox';
+import { createExtensionProcessSandbox } from '@cloudflare/sandbox/extensions';
 import { parse } from 'jsonc-parser';
 import { BuilderAgent } from '../../app/agents/builder-agent';
 import {
@@ -25,6 +26,7 @@ import {
 } from '../../app/agents/builder-workspace-types';
 import { routeUserRuntimeAgentRequest } from '../../app/lib/.server/agent-request-identity';
 import { createTrustedDeploymentConfig } from '../../app/lib/.server/cloudflare/deployment-config';
+import { deploymentProjectProfileFromConfig } from '../../app/lib/.server/cloudflare/deployment-project-profile';
 import {
   type UserWorkspaceReadinessCheck,
   type UserWorkspaceReadinessComponent,
@@ -79,7 +81,6 @@ import { requireDeploymentMigrationName, requireWorkspaceFileEncoding } from './
 import { withCors } from './http-cors';
 import {
   runTrackedSandboxCommand,
-  sandboxCommandFailureMessage,
   SandboxProcessTerminationUnconfirmedError,
   terminateTrackedSandboxProcess,
 } from './tracked-command';
@@ -108,7 +109,6 @@ interface RuntimeEnv {
   GHOSTBUILD_USER_RUNTIME_ENDPOINT: string;
   GHOSTBUILD_CONTROL_PLANE_ENDPOINT: string;
   GHOSTBUILD_RUNTIME_VERSION: string;
-  SANDBOX_TRANSPORT: 'rpc';
 }
 
 const PROJECT_ROOT = DEPLOYMENT_PROJECT_ROOT;
@@ -123,9 +123,9 @@ const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.
 const INSTALL_COMMAND =
   'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/';
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
-const COMPUTERD_PROCESS_ID = 'ghostbuild-computerd';
+const COMPUTERD_PROCESS_ROLE = 'computerd';
 const COMPUTERD_ENV = { PORT: '8080', MOUNT_POINT: '/home', FUSE_MOUNT: 'auto' } as const;
-const TRANSIENT_COMMAND_PROCESS_ID = 'ghostbuild-transient-command';
+const TRANSIENT_COMMAND_PROCESS_ROLE = 'transient-command';
 const VALIDATION_CANCELLATION_SETTLE_MS = 45_000;
 const PREVIEW_BUILD_CLEANUP_DEADLINE_MS = 30 * 60_000;
 const OPERATION_LEASE_MS = {
@@ -199,6 +199,7 @@ type DeploymentSessionRow = {
 };
 
 class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
+  protected readonly sandboxProcesses = createExtensionProcessSandbox(this);
   readonly containerBackend = new CloudflareContainerBackend({
     container: () => this,
     workspace: { binding: 'PROJECT_WORKSPACE', id: this.ctx.id.toString() },
@@ -214,44 +215,91 @@ class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
   }
 
   async startComputerd(env: Record<string, string>): Promise<void> {
-    requireSandboxExecSuccess(await this.exec(containerToolchainBootstrapCommand(), { timeout: 2 * 60_000 }));
-    const existing = await this.getProcess(COMPUTERD_PROCESS_ID).catch(() => null);
-    if (existing && (existing.status === 'starting' || existing.status === 'running')) {
+    await this.runSandboxShellCommand(containerToolchainBootstrapCommand(), 2 * 60_000);
+    const existing = await this.processForRole(COMPUTERD_PROCESS_ROLE);
+    if (existing && (await existing.status()).state === 'running') {
       return;
     }
-    await this.cleanupCompletedProcesses().catch(() => undefined);
-    requireSandboxExecSuccess(await this.exec(computerdBootstrapCommand(), { timeout: 5 * 60_000 }));
-    await this.startProcess(shellQuote(COMPUTERD_BINARY), {
-      processId: COMPUTERD_PROCESS_ID,
-      autoCleanup: false,
+    await this.runSandboxShellCommand(computerdBootstrapCommand(), 5 * 60_000);
+    const process = await this.sandboxProcesses.exec([COMPUTERD_BINARY], {
       env: { ...env, FUSE_MOUNT: 'auto' },
     });
+    this.setProcessForRole(COMPUTERD_PROCESS_ROLE, process.id);
   }
 
   async restartComputerd(env: Record<string, string>): Promise<void> {
-    const existing = await this.getProcess(COMPUTERD_PROCESS_ID).catch(() => null);
-    await existing?.kill('SIGKILL').catch(() => undefined);
-    await this.exec('fusermount3 -uz /home >/dev/null 2>&1 || true', { timeout: 30_000 }).catch(() => undefined);
-    await this.cleanupCompletedProcesses().catch(() => undefined);
+    const existing = await this.processForRole(COMPUTERD_PROCESS_ROLE);
+    await existing?.kill(9).catch(() => undefined);
+    this.clearProcessForRole(COMPUTERD_PROCESS_ROLE);
+    await this.runSandboxShellCommand('fusermount3 -uz /home >/dev/null 2>&1 || true', 30_000).catch(() => undefined);
     await this.startComputerd(env);
   }
 
   async computerdStatus(): Promise<{ running: boolean; exit: { exitedAt: number; reason: string } | null }> {
-    const process = await this.getProcess(COMPUTERD_PROCESS_ID).catch(() => null);
+    const process = await this.processForRole(COMPUTERD_PROCESS_ROLE);
     if (!process) {
       return { running: false, exit: null };
     }
-    const status = await process.getStatus().catch(() => process.status);
-    const running = status === 'starting' || status === 'running';
+    const status = await process.status();
+    const running = status.state === 'running';
     return {
       running,
       exit: running
         ? null
         : {
-            exitedAt: process.endTime?.getTime() ?? Date.now(),
-            reason: `computerd ${status}${process.exitCode === undefined ? '' : ` (${process.exitCode})`}`,
+            exitedAt: Date.parse(status.endedAt),
+            reason:
+              status.state === 'exited'
+                ? `computerd exited (${status.exit.code})`
+                : `computerd error (${status.error.code})`,
           },
     };
+  }
+
+  private async runSandboxShellCommand(command: string, timeout: number): Promise<void> {
+    await runTrackedSandboxCommand({
+      command: sandboxShellCommand(command),
+      timeout,
+      exec: (argv, options) => this.sandboxProcesses.exec(argv, options),
+    });
+  }
+
+  protected async processForRole(role: string) {
+    const row = first(
+      this.ctx.storage.sql.exec<{ process_id: string }>(
+        'SELECT process_id FROM ghostbuild_sandbox_processes WHERE role = ?',
+        role,
+      ),
+    );
+    if (!row) {
+      return null;
+    }
+    const process = await this.sandboxProcesses.getProcess(row.process_id).catch(() => null);
+    if (!process) {
+      this.clearProcessForRole(role);
+    }
+    return process;
+  }
+
+  protected setProcessForRole(role: string, processId: string): void {
+    this.ctx.storage.sql.exec(
+      `INSERT INTO ghostbuild_sandbox_processes (role, process_id) VALUES (?, ?)
+       ON CONFLICT(role) DO UPDATE SET process_id = excluded.process_id`,
+      role,
+      processId,
+    );
+  }
+
+  protected clearProcessForRole(role: string, processId?: string): void {
+    if (processId) {
+      this.ctx.storage.sql.exec(
+        'DELETE FROM ghostbuild_sandbox_processes WHERE role = ? AND process_id = ?',
+        role,
+        processId,
+      );
+      return;
+    }
+    this.ctx.storage.sql.exec('DELETE FROM ghostbuild_sandbox_processes WHERE role = ?', role);
   }
 
   interceptWorkspaceOutbound(host: string, ref: WorkspaceRef): Promise<void> {
@@ -364,6 +412,12 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       (kind) => kind === 'validate' || kind === 'preview',
     );
     this.#operationLane.initialize();
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ghostbuild_sandbox_processes (
+         role TEXT PRIMARY KEY,
+         process_id TEXT NOT NULL
+       )`,
+    );
     this.ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS ghostbuild_workspace_state (
          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -1354,23 +1408,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     if (!wrangler || wrangler.main !== 'src/server.ts') {
       throw new Error('The generated Worker entrypoint is invalid.');
     }
-    const hasArrayBinding = (value: unknown, binding: string) =>
-      Array.isArray(value) && value.some((entry) => recordOrNull(entry)?.binding === binding);
     return {
       ...checkpoint,
-      project: {
-        type: configuredType === 'worker' ? ('worker' as const) : ('web_app' as const),
-        bindings: {
-          ai: recordOrNull(wrangler.ai)?.binding === 'AI',
-          d1: hasArrayBinding(wrangler.d1_databases, 'DB'),
-          r2: hasArrayBinding(wrangler.r2_buckets, 'APP_STORAGE'),
-          appAgent:
-            Array.isArray(recordOrNull(wrangler.durable_objects)?.bindings) &&
-            (recordOrNull(wrangler.durable_objects)?.bindings as unknown[]).some(
-              (entry) => recordOrNull(entry)?.name === 'AppAgent',
-            ),
-        },
-      },
+      project: deploymentProjectProfileFromConfig(wrangler, configuredType === 'worker' ? 'worker' : 'web_app'),
     };
   }
 
@@ -1528,11 +1568,10 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         await this.cleanupPendingPreviews();
         const previous = this.activePreviewRow();
         const port = previewPort(previewId, previous?.port);
-        const execId = `preview-${previewId}`;
         const snapshotRoot = `${PREVIEW_SNAPSHOT_ROOT}/${previewId}`;
         const candidate: ActivePreviewRow = {
           preview_id: previewId,
-          exec_id: execId,
+          exec_id: '',
           port,
           snapshot_root: snapshotRoot,
           snapshot_revision: expectedSnapshotRevision,
@@ -1568,18 +1607,21 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           const expiresAt = Date.now() + PREVIEW_TTL_MS;
           await this.schedule(new Date(expiresAt), 'expirePreview', { previewId });
           this.upsertPendingPreview(candidate, expiresAt);
-          await this.startProcess(
-            createContainerDirectoryCommand({
-              directory: snapshotRoot,
-              command: `timeout --signal=KILL ${Math.ceil(PREVIEW_TTL_MS / 1_000)}s pnpm exec vite preview --mode ghostbuild-isolated-preview --host 0.0.0.0 --port ${port} --strictPort`,
-              quote: shellQuote,
-            }),
+          const previewProcess = await this.sandboxProcesses.exec(
+            sandboxShellCommand(
+              createContainerDirectoryCommand({
+                directory: snapshotRoot,
+                command: `pnpm exec vite preview --mode ghostbuild-isolated-preview --host 0.0.0.0 --port ${port} --strictPort`,
+                quote: shellQuote,
+              }),
+            ),
             {
-              processId: execId,
-              autoCleanup: false,
+              timeout: PREVIEW_TTL_MS,
               env: { __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: '.trycloudflare.com,container' },
             },
           );
+          candidate.exec_id = previewProcess.id;
+          this.upsertPendingPreview(candidate, expiresAt);
           await waitForHttpPort(this.ctx.container!.getTcpPort(port));
           const tunnel = await createReachablePreviewTunnel(this.tunnels, port, {
             assertActive: () => this.requirePreviewNotCancelled(previewId),
@@ -1610,7 +1652,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
                workspace_revision = excluded.workspace_revision,
                activated_at = excluded.activated_at`,
               previewId,
-              execId,
+              candidate.exec_id,
               port,
               snapshotRoot,
               expectedSnapshotRevision,
@@ -1891,16 +1933,22 @@ export class ProjectWorkspace extends ComputerSandboxBase {
 
   private async runTransientCommand(directory: string, command: string, timeout: number): Promise<void> {
     await this.terminateTransientCommand();
-    await runTrackedSandboxCommand({
-      command: createContainerDirectoryCommand({
-        directory,
-        command: `timeout --signal=KILL ${Math.ceil(timeout / 1_000)}s sh -lc ${shellQuote(command)}`,
-        quote: shellQuote,
-      }),
-      timeout,
-      processId: TRANSIENT_COMMAND_PROCESS_ID,
-      startProcess: (trackedCommand, options) => this.startProcess(trackedCommand, options),
-    });
+    let processId: string | undefined;
+    try {
+      await runTrackedSandboxCommand({
+        command: sandboxShellCommand(createContainerDirectoryCommand({ directory, command, quote: shellQuote })),
+        timeout,
+        exec: (trackedCommand, options) => this.sandboxProcesses.exec(trackedCommand, options),
+        onProcess: (process) => {
+          processId = process.id;
+          this.setProcessForRole(TRANSIENT_COMMAND_PROCESS_ROLE, process.id);
+        },
+      });
+    } finally {
+      if (processId) {
+        this.clearProcessForRole(TRANSIENT_COMMAND_PROCESS_ROLE, processId);
+      }
+    }
   }
 
   private async runValidationCommand(
@@ -1914,41 +1962,39 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     let process: Parameters<ValidationCancellation['attachProcess']>[0] | undefined;
     try {
       await runTrackedSandboxCommand({
-        command: createContainerDirectoryCommand({
-          directory,
-          command: `timeout --signal=KILL ${Math.ceil(timeout / 1_000)}s sh -lc ${shellQuote(command)}`,
-          quote: shellQuote,
-        }),
+        command: sandboxShellCommand(createContainerDirectoryCommand({ directory, command, quote: shellQuote })),
         timeout,
-        processId: TRANSIENT_COMMAND_PROCESS_ID,
-        startProcess: (trackedCommand, options) => this.startProcess(trackedCommand, options),
+        exec: (trackedCommand, options) => this.sandboxProcesses.exec(trackedCommand, options),
         onProcess: async (startedProcess) => {
           process = startedProcess;
+          this.setProcessForRole(TRANSIENT_COMMAND_PROCESS_ROLE, startedProcess.id);
           await cancellation.attachProcess(startedProcess);
         },
       });
     } finally {
       if (process) {
         cancellation.detachProcess(process);
+        this.clearProcessForRole(TRANSIENT_COMMAND_PROCESS_ROLE, process.id);
       }
     }
   }
 
   private async terminateTransientCommand(): Promise<void> {
-    const existing = await this.getProcess(TRANSIENT_COMMAND_PROCESS_ID);
+    const existing = await this.processForRole(TRANSIENT_COMMAND_PROCESS_ROLE);
     if (existing) {
-      const status = await existing.getStatus();
-      if (status === 'starting' || status === 'running') {
+      const status = await existing.status();
+      if (status.state === 'running') {
         await terminateTrackedSandboxProcess(existing);
       }
+      this.clearProcessForRole(TRANSIENT_COMMAND_PROCESS_ROLE, existing.id);
     }
   }
 
   private async cleanupPreviewProcess(row: Pick<ActivePreviewRow, 'exec_id' | 'snapshot_root'>): Promise<void> {
-    const process = await this.getProcess(row.exec_id);
+    const process = row.exec_id ? await this.sandboxProcesses.getProcess(row.exec_id) : null;
     if (process) {
-      const status = await process.getStatus();
-      if (status === 'starting' || status === 'running') {
+      const status = await process.status();
+      if (status.state === 'running') {
         await terminateTrackedSandboxProcess(process);
       }
     }
@@ -2999,10 +3045,8 @@ function assertDeploymentSessionIdentity(
   }
 }
 
-function requireSandboxExecSuccess(result: { success: boolean; stdout: string; stderr: string }): void {
-  if (!result.success) {
-    throw new Error(sandboxCommandFailureMessage(result));
-  }
+function sandboxShellCommand(command: string): SandboxCommand {
+  return ['/bin/bash', '-lc', command];
 }
 
 function shellQuote(value: string): string {

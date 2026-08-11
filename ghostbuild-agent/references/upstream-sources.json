@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "sources": [
     {
       "id": "cloudflare-skills",
@@ -16,15 +16,35 @@
         "skills/workers-best-practices",
         "skills/wrangler",
         "skills/cloudflare-email-service",
-        "skills/sandbox-sdk",
+        "skills/sandbox-migrate-to-next",
+        "skills/sandbox-next",
         "skills/turnstile-spin",
         "skills/web-perf"
       ],
+      "discovery": {
+        "root": "skills",
+        "entrypoint": "SKILL.md",
+        "knownPaths": [
+          "skills/agents-sdk",
+          "skills/cloudflare",
+          "skills/cloudflare-email-service",
+          "skills/cloudflare-one",
+          "skills/cloudflare-one-migrations",
+          "skills/durable-objects",
+          "skills/sandbox-migrate-to-next",
+          "skills/sandbox-next",
+          "skills/sandbox-stable",
+          "skills/turnstile-spin",
+          "skills/web-perf",
+          "skills/workers-best-practices",
+          "skills/wrangler"
+        ]
+      },
       "localReferences": ["ghostbuild-agent/references/cloudflare.ts"],
       "lastReviewedRelease": null,
-      "lastReviewedRevision": "70215303d44a81a0db3219428f4825b604fc6061",
-      "lastReviewedAt": "2026-07-20",
-      "lastReviewOutcome": "Initial Ghostbuild reference set introduced; scheduled upstream review not yet run."
+      "lastReviewedRevision": "f96bff754e428838818017f75817f0f9428acd48",
+      "lastReviewedAt": "2026-08-11",
+      "lastReviewOutcome": "Reviewed current Cloudflare skills inventory and package launches. Replaced removed sandbox-sdk guidance with sandbox-next plus migration rules, hardened Turnstile validation, added focused guidance for Think/Shell, Voice, Code Mode, RealtimeKit, Flagship, Workers Vitest, and Computer, and recorded the complete skill inventory for addition/removal discovery. Cloudflare One skills remain discovered but are outside generated-application scope."
     }
   ]
 }

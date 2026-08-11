@@ -5,7 +5,7 @@ import {
   cloudflareAgentsSdk,
   cloudflareEmailService,
   cloudflarePlatform,
-  cloudflareSandboxSdk,
+  cloudflareSandboxNext,
   cloudflareTurnstile,
   durableObjects,
   webPerf,
@@ -22,6 +22,11 @@ type UpstreamSource = {
     url: string;
   };
   trackedPaths: string[];
+  discovery: {
+    root: string;
+    entrypoint: string;
+    knownPaths: string[];
+  };
   localReferences: string[];
   lastReviewedRelease: {
     id: number;
@@ -51,7 +56,7 @@ describe('upstream reference sources', () => {
       workersBestPractices,
       wrangler,
       cloudflareEmailService,
-      cloudflareSandboxSdk,
+      cloudflareSandboxNext,
       cloudflareTurnstile,
       webPerf,
     ].join('\n');
@@ -65,7 +70,7 @@ describe('upstream reference sources', () => {
   });
 
   it('keeps review checkpoints and local targets machine-readable', () => {
-    expect(manifest.version).toBe(1);
+    expect(manifest.version).toBe(2);
 
     for (const source of manifest.sources) {
       expect(source.lastReviewedRevision).toMatch(/^[0-9a-f]{40}$/);
@@ -81,6 +86,13 @@ describe('upstream reference sources', () => {
         expect(source.lastReviewedRelease.revision).toBe(source.lastReviewedRevision);
       }
       expect(source.localReferences.length).toBeGreaterThan(0);
+      expect(source.discovery.root).toMatch(/^[a-z0-9-]+$/);
+      expect(source.discovery.entrypoint).toBe('SKILL.md');
+      expect(source.discovery.knownPaths).toEqual(source.discovery.knownPaths.toSorted());
+      expect(new Set(source.discovery.knownPaths).size).toBe(source.discovery.knownPaths.length);
+      for (const trackedPath of source.trackedPaths) {
+        expect(source.discovery.knownPaths).toContain(trackedPath);
+      }
       for (const path of source.localReferences) {
         expect(path).toMatch(/^ghostbuild-agent\/references\/[A-Za-z0-9._-]+\.ts$/);
         expect(path.split('/')).not.toContain('..');

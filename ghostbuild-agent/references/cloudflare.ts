@@ -8,6 +8,12 @@ Retrieval-first rule:
 - Cloudflare APIs, limits, pricing, config fields, compatibility dates, and type signatures change. Prefer current Cloudflare docs, local node_modules types, and wrangler schema over pre-trained memory.
 - When docs and local snippets disagree, trust the current docs.
 
+Ghostbuild managed deployment boundary:
+- Production provisioning, publishing, and readback attestation currently support only Workers AI as AI, D1 as DB,
+  R2 as APP_STORAGE, and the protected AppAgent plus AGENT_SECURITY_DB.
+- Other Cloudflare products may be valid platform choices, but do not claim managed deployment support or add their
+  Wrangler bindings. The deployment planner rejects unsupported capabilities instead of silently dropping them.
+
 Decision guide:
 - Agent-owned durable background work -> an Agent Fiber. Decide ownership
   before choosing a general background-processing primitive.
@@ -38,6 +44,8 @@ Cloudflare storage:
 - In generated TanStack routes and server functions, call getAppBindings() from "@/app-bindings" for application DB/R2 access.
 - Do not import "cloudflare:workers" in generated source. AI, AppAgent, and AGENT_SECURITY_DB bindings are intentionally
   unavailable to generated routes.
+- Ghostbuild managed production currently provisions only DB and APP_STORAGE. KV, Queues, Vectorize, Hyperdrive,
+  Workflows, and other resource bindings require a future end-to-end capability addition.
 `;
 
 export const workersAi = `
@@ -72,6 +80,72 @@ Ghostbuild defaults:
 - Set static override options = { sendIdentityOnConnect: false } when Agent instance names can contain chat IDs, user IDs, or session IDs, and use state updates rather than agent.identified for readiness.
 - Pass options?.abortSignal through to streamText so a stopped chat request cancels the Workers AI call.
 - For production Agent observability, use the Agents diagnostics-channel events and attach a Cloudflare Tail Worker when structured RPC, chat, recovery, state, schedule, workflow, or MCP events need to be collected.
+`;
+
+export const cloudflareAgentHarnesses = `
+Cloudflare agent harness libraries:
+Docs: https://developers.cloudflare.com/agents/harnesses/think/
+Voice: https://developers.cloudflare.com/agents/communication-channels/voice/
+Code Mode: https://developers.cloudflare.com/agents/tools/codemode/
+
+Use current official docs and installed package types for these fast-moving packages:
+- @cloudflare/think provides a stateful agentic chat loop, durable messages, streaming, tools, sub-agent RPC, and a
+  SQLite-backed workspace. Keep AI SDK majors aligned: ai v7 pairs with @ai-sdk/react v4.
+- @cloudflare/shell supplies the Think workspace and bounded shell-style file tools. Treat model-produced scripts and
+  their outputs as untrusted; keep file, byte, time, and network limits explicit.
+- @cloudflare/voice provides withVoice/withVoiceInput plus React and framework-neutral clients for WebSocket voice,
+  transcription, synthesis, persistence, and interruption handling. Voice is beta; require microphone permission and
+  never expose provider credentials to the browser.
+- @cloudflare/codemode composes tools through generated code. Prefer direct tools for small fixed catalogs; use Code
+  Mode for dependent calls, discovery, loops, filtering, and branching. It is experimental, so pin and verify its API.
+- The browser-safe Code Mode export uses an isolated iframe. Worker-side Code Mode commonly needs a Worker Loader
+  binding, which Ghostbuild managed deployment does not currently provision.
+- Think and Voice replace or extend the protected AppAgent server implementation. Do not modify that boundary from a
+  generated app; explain that managed production support is not available yet rather than claiming deployment works.
+`;
+
+export const cloudflareRealtime = `
+Cloudflare RealtimeKit:
+Docs: https://developers.cloudflare.com/realtime/realtimekit/
+
+Use RealtimeKit for embedded live audio/video meetings, webinars, or calls. Prefer @cloudflare/realtimekit-react for a
+React app, @cloudflare/realtimekit for the framework-neutral web client, and the UI kit when prebuilt meeting controls
+fit. Initialize clients only with a short-lived participant auth token returned by a trusted backend. Never embed the
+Realtime API token or create participant credentials in browser code. Ghostbuild managed deployment does not provision
+RealtimeKit apps or secret-backed meeting APIs today; use an existing trusted token service or report the boundary.
+`;
+
+export const cloudflareFlagship = `
+Cloudflare Flagship:
+Docs: https://developers.cloudflare.com/flagship/get-started/
+
+Use Flagship for remotely managed feature flags and targeting. In a normal Worker, prefer the Flagship binding and run
+wrangler types; @cloudflare/flagship/server integrates the binding with OpenFeature, while the SDK can also run outside
+Workers. Always provide a safe application default when evaluation fails and keep targeting context free of unnecessary
+personal data. Ghostbuild managed deployment does not yet provision or attest Flagship bindings, so do not add a
+flagship entry to a generated wrangler.jsonc until that capability is supported end to end.
+`;
+
+export const cloudflareWorkersTesting = `
+Cloudflare Workers testing:
+Docs: https://developers.cloudflare.com/workers/testing/vitest-integration/
+
+Use @cloudflare/vitest-pool-workers for Worker-runtime unit and integration tests that need real Workers APIs or local
+bindings. Current releases use cloudflareTest() as a Vite plugin and require Vitest 4.1 or later. Point it at the existing
+wrangler.jsonc, keep test storage isolation by default, and use cloudflare:test helpers for bindings and execution
+contexts. Remember the pool injects nodejs_compat for tests; production code that needs Node built-ins must still declare
+nodejs_compat in wrangler.jsonc. Use instrumented coverage because native V8 coverage is not supported.
+`;
+
+export const cloudflareComputer = `
+Cloudflare Computer library:
+Source: https://github.com/cloudflare/cloudflare-computer
+
+@cloudflare/computer provides a durable workspace and execution facade over a Cloudflare Container. Ghostbuild already
+owns Computer synchronization, retries, filesystem durability, command disposal, and the computerd lifecycle inside the
+user workspace runtime. Generated applications must not import Computer, access PROJECT_WORKSPACE, or create a second
+workspace synchronization path. Use the normal Ghostbuild file/edit/exec tools; changes to Computer belong in the
+reviewed workspace runtime and require package-type and failure-recovery verification.
 `;
 
 export const durableObjects = `
@@ -158,25 +232,36 @@ Implementation notes:
 - For Agents SDK email flows, use the Agent email hooks and reply helpers documented by Cloudflare.
 - Verify the domain is enabled for email sending before writing app code.
 - Add send_email binding configuration to wrangler.jsonc for Workers sending.
+- Ghostbuild managed deployment does not provision send_email today; do not add it to a generated project or claim the
+  app is production-deployable through Ghostbuild until that capability is implemented.
 - Install postal-mime only when parsing inbound email.
 - Treat email product details as fast-moving; verify current docs and workers-types for binding shapes.
 `;
 
-export const cloudflareSandboxSdk = `
-Official Cloudflare skill: sandbox-sdk
-Source: https://github.com/cloudflare/skills/tree/main/skills/sandbox-sdk
-Docs: https://developers.cloudflare.com/sandbox/
+export const cloudflareSandboxNext = `
+Official Cloudflare skill: sandbox-next
+Source: https://github.com/cloudflare/skills/tree/main/skills/sandbox-next
+Migration skill: https://github.com/cloudflare/skills/tree/main/skills/sandbox-migrate-to-next
+Docs: https://developers.cloudflare.com/sandbox/1-0-preview/
 
 Use when building secure code execution, AI code interpreters, CI/CD systems, interactive dev environments, or any feature executing untrusted code.
 
 Implementation notes:
-- Install @cloudflare/sandbox only when the app needs isolated code execution.
+- Use @cloudflare/sandbox@next for new Sandbox applications and a matching @next container image. Never mix stable and
+  preview protocol lines.
 - The Worker must re-export Sandbox from @cloudflare/sandbox.
 - Configure containers, Durable Object binding, and a new_sqlite_classes migration in wrangler.jsonc.
 - Use getSandbox(env.Sandbox, instanceName) to get an isolated sandbox.
-- Use sandbox.exec() for shell commands and sandbox.runCode() for interpreter-style AI code execution.
-- Use explicit code contexts for production so state is scoped intentionally.
+- sandbox.exec() accepts argv and returns after launch. Read completion from process.output(), waitForExit(), or logs().
+- There is no implicit shell: use ["/bin/bash", "-lc", script] only when shell syntax is required.
+- Observation timeouts cancel the wait, not the remote process. Set the exec timeout and explicitly kill on an
+  observation failure. Signals are numeric.
+- Persist the SDK-issued process id when later requests must recover a live process, but treat it as runtime-local and
+  persist the full job definition when work must survive container replacement.
+- Use createTerminal() for interactive input; process handles have no stdin.
 - Local development requires Docker.
+- Stable-to-@next production cutovers require one immediate 100% container rollout because the protocols are mutually
+  incompatible. In-flight work can stop during the cutover.
 `;
 
 export const cloudflareTurnstile = `
@@ -192,7 +277,13 @@ Implementation notes:
 - Keep the secret key server-side only.
 - Store production secrets with Wrangler secrets or Cloudflare dashboard secrets, not local source files.
 - For a Worker-backed app, validation belongs in the Worker route or server function that handles the protected action.
-- Ask for or infer the production hostname before assuming widget domain configuration.
+- Reject missing, malformed, or oversized tokens before the network call; apply a short timeout and fail closed when
+  siteverify is unavailable or returns success=false.
+- Validate the returned hostname and, when supplied by the protected flow, the expected action. Do not trust only the
+  success boolean.
+- Turnstile tokens expire and are single-use. Reset or rerender the widget after submission so retries receive a fresh
+  token and replayed submissions do not bypass application idempotency.
+- Never ask the user to paste the Turnstile secret into chat. Ask only for the binding name and production hostname.
 `;
 
 export const webPerf = `

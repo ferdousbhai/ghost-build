@@ -1,10 +1,15 @@
 import {
   cloudflareAgentsSdk,
+  cloudflareAgentHarnesses,
+  cloudflareComputer,
   cloudflareEmailService,
+  cloudflareFlagship,
   cloudflarePlatform,
-  cloudflareSandboxSdk,
+  cloudflareRealtime,
+  cloudflareSandboxNext,
   cloudflareStorage,
   cloudflareTurnstile,
+  cloudflareWorkersTesting,
   durableObjects,
   webPerf,
   workersAi,
@@ -46,6 +51,26 @@ const docCatalog = {
       'Official Cloudflare Agents SDK skill guidance for AIChatAgent, Agent classes, state, routing, and MCP.',
     content: cloudflareAgentsSdk,
   },
+  cloudflareAgentHarnesses: {
+    description: 'Cloudflare Think, Shell, Voice, and Code Mode library guidance and managed-deployment limits.',
+    content: cloudflareAgentHarnesses,
+  },
+  cloudflareRealtime: {
+    description: 'Cloudflare RealtimeKit client, token, and production-boundary guidance.',
+    content: cloudflareRealtime,
+  },
+  cloudflareFlagship: {
+    description: 'Cloudflare Flagship feature flag, OpenFeature, binding, and deployment-boundary guidance.',
+    content: cloudflareFlagship,
+  },
+  cloudflareWorkersTesting: {
+    description: 'Cloudflare Workers Vitest integration setup, isolation, bindings, and runtime caveats.',
+    content: cloudflareWorkersTesting,
+  },
+  cloudflareComputer: {
+    description: 'Cloudflare Computer durable workspace guidance and Ghostbuild ownership boundary.',
+    content: cloudflareComputer,
+  },
   durableObjects: {
     description:
       'Official Durable Objects skill guidance for stateful coordination, SQLite storage, alarms, and WebSockets.',
@@ -69,9 +94,9 @@ const docCatalog = {
       'Official Cloudflare Email Service skill guidance for transactional sending, routing, and Agent email flows.',
     content: cloudflareEmailService,
   },
-  cloudflareSandboxSdk: {
-    description: 'Official Sandbox SDK skill guidance for secure code execution and AI code interpreters.',
-    content: cloudflareSandboxSdk,
+  cloudflareSandboxNext: {
+    description: 'Official Sandbox @next guidance for secure code execution, processes, and stable-to-next migration.',
+    content: cloudflareSandboxNext,
   },
   cloudflareTurnstile: {
     description: 'Official Turnstile skill guidance for CAPTCHA, bot protection, widgets, and siteverify.',

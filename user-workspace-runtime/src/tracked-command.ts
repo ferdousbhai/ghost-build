@@ -1,10 +1,15 @@
+import type { ExecOptions, ProcessExit, ProcessOutput, ProcessStatus, SandboxCommand } from '@cloudflare/sandbox';
+
 const MAX_SANDBOX_FAILURE_MESSAGE_LENGTH = 4_000;
+const SANDBOX_OUTPUT_BYTES = MAX_SANDBOX_FAILURE_MESSAGE_LENGTH * 2;
+const PROCESS_OBSERVATION_GRACE_MS = 30_000;
 
 export type TrackedSandboxProcess = {
-  waitForExit(timeout?: number): Promise<{ exitCode: number }>;
-  kill(signal?: string): Promise<void>;
-  getStatus(): Promise<'starting' | 'running' | 'completed' | 'failed' | 'killed' | 'error'>;
-  getLogs(): Promise<{ stdout: string; stderr: string }>;
+  readonly id: string;
+  output(options: { encoding: 'utf8'; maxBytes: number; timeout: number }): Promise<ProcessOutput<string>>;
+  waitForExit(options: { timeout: number }): Promise<ProcessExit>;
+  kill(signal?: number): Promise<void>;
+  status(): Promise<ProcessStatus>;
 };
 
 export class SandboxProcessTerminationUnconfirmedError extends Error {
@@ -15,76 +20,58 @@ export class SandboxProcessTerminationUnconfirmedError extends Error {
 }
 
 type RunTrackedSandboxCommandOptions = {
-  command: string;
+  command: SandboxCommand;
   timeout: number;
-  processId: string;
-  startProcess: (
-    command: string,
-    options: {
-      processId: string;
-      autoCleanup: false;
-      onOutput: (stream: 'stdout' | 'stderr', data: string) => void;
-    },
-  ) => Promise<TrackedSandboxProcess>;
+  exec: (command: SandboxCommand, options: ExecOptions) => Promise<TrackedSandboxProcess>;
   onProcess?: (process: TrackedSandboxProcess) => void | Promise<void>;
 };
 
 export async function runTrackedSandboxCommand(options: RunTrackedSandboxCommandOptions): Promise<void> {
-  const logs = { stdout: '', stderr: '' };
-  const process = await options.startProcess(options.command, {
-    processId: options.processId,
-    autoCleanup: false,
-    onOutput: (stream, data) => {
-      logs[stream] = `${logs[stream]}${data}`.slice(-MAX_SANDBOX_FAILURE_MESSAGE_LENGTH);
-    },
-  });
+  // @next exec resolves on launch, so the remote timeout belongs on exec and completion is observed through the handle.
+  const process = await options.exec(options.command, { timeout: options.timeout });
   await options.onProcess?.(process);
-  let exitCode: number;
+  let result: ProcessOutput<string>;
   try {
-    exitCode = (await process.waitForExit(options.timeout)).exitCode;
+    result = await process.output({
+      encoding: 'utf8',
+      maxBytes: SANDBOX_OUTPUT_BYTES,
+      timeout: options.timeout + PROCESS_OBSERVATION_GRACE_MS,
+    });
   } catch {
     await terminateTrackedSandboxProcess(process);
-    await recoverTrackedSandboxProcessLogs(process, logs);
+    throw new Error(`Sandbox command could not be observed for ${options.timeout}ms and was terminated.`);
+  }
+  if (result.timedOut) {
     throw new Error(
-      sandboxCommandFailureMessage(logs, {
+      sandboxCommandFailureMessage(result, {
         summary: `Sandbox command timed out after ${options.timeout}ms.`,
       }),
     );
   }
-  if (exitCode !== 0) {
-    await recoverTrackedSandboxProcessLogs(process, logs);
+  if (result.exitCode !== 0) {
     throw new Error(
-      sandboxCommandFailureMessage(logs, {
-        summary: `Sandbox command failed with exit code ${exitCode}.`,
+      sandboxCommandFailureMessage(result, {
+        summary: `Sandbox command failed with exit code ${result.exitCode}.`,
       }),
     );
   }
 }
 
-async function recoverTrackedSandboxProcessLogs(
-  process: TrackedSandboxProcess,
-  streamedLogs: { stdout: string; stderr: string },
-): Promise<void> {
-  const persistedLogs = await process.getLogs().catch(() => undefined);
-  if (!persistedLogs) {
-    return;
-  }
-  for (const stream of ['stdout', 'stderr'] as const) {
-    if (persistedLogs[stream]) {
-      streamedLogs[stream] = persistedLogs[stream].slice(-MAX_SANDBOX_FAILURE_MESSAGE_LENGTH);
-    }
-  }
-}
-
 export async function terminateTrackedSandboxProcess(process: TrackedSandboxProcess): Promise<void> {
-  await process.kill('SIGKILL').catch(() => undefined);
-  let status: Awaited<ReturnType<TrackedSandboxProcess['getStatus']>>;
+  await process.kill(9).catch(() => undefined);
   try {
-    status = await process.getStatus();
+    await process.waitForExit({ timeout: 10_000 });
+    return;
+  } catch {
+    // A kill can race an already-completed process or a transient RPC failure; status is the final confirmation.
+  }
+  let status: ProcessStatus;
+  try {
+    status = await process.status();
   } catch {
     throw new SandboxProcessTerminationUnconfirmedError();
   }
-  if (status === 'starting' || status === 'running') {
+  if (status.state === 'running') {
     throw new SandboxProcessTerminationUnconfirmedError();
   }
 }

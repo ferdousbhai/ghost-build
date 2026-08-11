@@ -9,6 +9,7 @@ const completeCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const cloudflareConnectionStatusAction = vi.hoisted(() => vi.fn());
 const startCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const pruneCloudflareAuthDataBestEffort = vi.hoisted(() => vi.fn());
+const runCloudflareSkillAudit = vi.hoisted(() => vi.fn());
 const runtimeCredentialAction = vi.hoisted(() => vi.fn());
 const clientTelemetryAction = vi.hoisted(() => vi.fn());
 
@@ -29,6 +30,7 @@ vi.mock('./server-handlers/version', () => ({ versionAction: vi.fn() }));
 vi.mock('./server-handlers/runtime-credential', () => ({ runtimeCredentialAction }));
 vi.mock('./server-handlers/client-telemetry', () => ({ clientTelemetryAction }));
 vi.mock('./lib/cloudflare/data/cloudflare-auth-retention.server', () => ({ pruneCloudflareAuthDataBestEffort }));
+vi.mock('./lib/.server/cloudflare/upstream-skill-audit.server', () => ({ runCloudflareSkillAudit }));
 
 import server from './server';
 
@@ -51,6 +53,7 @@ describe('server Agent routing boundary', () => {
       .mockReset()
       .mockResolvedValue(Response.json({ error: 'Invalid request.' }, { status: 400 }));
     pruneCloudflareAuthDataBestEffort.mockReset().mockResolvedValue(undefined);
+    runCloudflareSkillAudit.mockReset().mockResolvedValue({ headRevision: 'a'.repeat(40) });
     runtimeCredentialAction.mockReset().mockResolvedValue(Response.json({ accessToken: 'fresh' }));
     clientTelemetryAction.mockReset().mockResolvedValue(new Response(null, { status: 202 }));
   });
@@ -297,5 +300,19 @@ describe('server Agent routing boundary', () => {
     await waitUntil.mock.calls[0][0];
     expect(calls).toEqual(['auth-retention']);
     expect(pruneCloudflareAuthDataBestEffort).toHaveBeenCalledWith(env.DB);
+    expect(runCloudflareSkillAudit).not.toHaveBeenCalled();
+  });
+
+  it('runs the upstream Cloudflare skill audit only on its weekly Cloudflare cron', async () => {
+    const waitUntil = vi.fn();
+    const env = { OPENROUTER_API_KEY: { get: async () => 'secret' } } as Env;
+
+    server.scheduled({ cron: '23 5 * * 1' } as ScheduledController, env, {
+      waitUntil,
+    } as unknown as ExecutionContext);
+
+    await waitUntil.mock.calls[0][0];
+    expect(runCloudflareSkillAudit).toHaveBeenCalledWith(env);
+    expect(pruneCloudflareAuthDataBestEffort).not.toHaveBeenCalled();
   });
 });

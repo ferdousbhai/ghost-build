@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./package.json": "./package.json",
+    "./references/upstream-sources.json": "./references/upstream-sources.json",
     "./*.js": "./*.ts",
     "./*": "./*.ts"
   },

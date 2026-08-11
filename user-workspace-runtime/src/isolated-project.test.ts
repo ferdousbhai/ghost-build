@@ -114,10 +114,10 @@ describe('isolated project command', () => {
       'await this.runTransientCommand(snapshotRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);\n' +
         '          this.requirePreviewNotCancelled(previewId);',
     );
-    expect(preview).toContain('await this.startProcess(');
+    expect(preview).toContain('const previewProcess = await this.sandboxProcesses.exec(');
     expect(preview).toContain('assertActive: () => this.requirePreviewNotCancelled(previewId)');
     expect(source).toContain("await this.#workspace.push('container-shell')");
-    expect(source).toContain("const TRANSIENT_COMMAND_PROCESS_ID = 'ghostbuild-transient-command'");
+    expect(source).toContain("const TRANSIENT_COMMAND_PROCESS_ROLE = 'transient-command'");
     expect(validation).toContain('async cancelValidation(');
     expect(validation).toContain('active.cancellation.cancel()');
     expect(validation).toContain('this.#activeValidation.inputJson !== inputJson');
@@ -130,7 +130,7 @@ describe('isolated project command', () => {
       source.indexOf('private async runTransientCommand('),
       source.indexOf('private async cleanupPreviewProcess('),
     );
-    expect(transientCommand).toContain('processId: TRANSIENT_COMMAND_PROCESS_ID');
+    expect(transientCommand).toContain('this.setProcessForRole(TRANSIENT_COMMAND_PROCESS_ROLE, process.id)');
     expect(transientCommand).not.toContain('crypto.randomUUID()');
     expect(source).toContain("(kind) => kind === 'validate' || kind === 'preview'");
     expect(source).not.toContain("cwd: '/tmp'");

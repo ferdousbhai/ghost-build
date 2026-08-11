@@ -3,10 +3,19 @@ import { ProjectValidationCancelledError, ValidationCancellation } from './valid
 
 function processHarness() {
   return {
-    waitForExit: vi.fn(async () => ({ exitCode: 0 })),
+    id: 'process-1',
+    output: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0, timedOut: false, truncated: false })),
+    waitForExit: vi.fn(async () => ({ code: 137, timedOut: false })),
     kill: vi.fn(async () => undefined),
-    getStatus: vi.fn(async () => 'killed' as const),
-    getLogs: vi.fn(async () => ({ stdout: '', stderr: '' })),
+    status: vi.fn(async () => ({
+      id: 'process-1',
+      pid: 123,
+      command: ['/bin/true'] as const,
+      startedAt: '2026-08-11T00:00:00.000Z',
+      endedAt: '2026-08-11T00:00:01.000Z',
+      state: 'exited' as const,
+      exit: { code: 137, timedOut: false },
+    })),
   };
 }
 
@@ -28,7 +37,7 @@ describe('validation cancellation', () => {
 
     await expect(cancellation.attachProcess(validationProcess)).rejects.toBeInstanceOf(ProjectValidationCancelledError);
 
-    expect(validationProcess.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(validationProcess.kill).toHaveBeenCalledWith(9);
   });
 
   it('kills only the attached validation process', async () => {
@@ -39,7 +48,7 @@ describe('validation cancellation', () => {
 
     await cancellation.cancel();
 
-    expect(validationProcess.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(validationProcess.kill).toHaveBeenCalledWith(9);
     expect(unrelatedProcess.kill).not.toHaveBeenCalled();
   });
 

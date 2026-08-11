@@ -16,7 +16,7 @@
     },
   ],
   "triggers": {
-    "crons": ["*/15 * * * *"],
+    "crons": ["*/15 * * * *", "23 5 * * 1"],
   },
   "observability": {
     "enabled": true,
@@ -53,6 +53,13 @@
   "secrets": {
     "required": ["CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY", "CLOUDFLARE_OAUTH_CLIENT_SECRET"],
   },
+  "secrets_store_secrets": [
+    {
+      "binding": "OPENROUTER_API_KEY",
+      "store_id": "a436a6cefedc4acd8bb920cdbc202c1c",
+      "secret_name": "open-router",
+    },
+  ],
   "upload_source_maps": true,
   // Configure production secrets in Cloudflare, not local env files.
   // Deployment credentials are supplied by the CI environment, not as Worker runtime secrets.

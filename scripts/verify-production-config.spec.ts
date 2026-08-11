@@ -9,6 +9,8 @@ import {
   findWorkerGcScheduleErrors,
   findWorkerRoutingErrors,
   findWorkerRuntimeSecretErrors,
+  findWorkerSkillAuditScheduleErrors,
+  findWorkerUpstreamAuditSecretErrors,
   findWorkerVariableSourceErrors,
   verifyProductionConfig,
   workflowPathsFromDirectoryEntries,
@@ -99,6 +101,37 @@ describe('findWorkerGcScheduleErrors', () => {
     expect(findWorkerGcScheduleErrors({ triggers: { crons: ['*/15 * * * *'] } }, 'wrangler.jsonc')).toEqual([]);
     expect(findWorkerGcScheduleErrors({}, 'wrangler.jsonc')).toEqual([
       'wrangler.jsonc must schedule bounded authentication-metadata retention every 15 minutes.',
+    ]);
+  });
+});
+
+describe('findWorkerSkillAuditScheduleErrors', () => {
+  it('requires the weekly Cloudflare upstream skill audit cron', () => {
+    expect(findWorkerSkillAuditScheduleErrors({ triggers: { crons: ['23 5 * * 1'] } }, 'wrangler.jsonc')).toEqual([]);
+    expect(findWorkerSkillAuditScheduleErrors({}, 'wrangler.jsonc')).toEqual([
+      'wrangler.jsonc must schedule the Cloudflare upstream skill inventory audit weekly.',
+    ]);
+  });
+});
+
+describe('findWorkerUpstreamAuditSecretErrors', () => {
+  it('pins the existing account-level open-router secret binding', () => {
+    expect(
+      findWorkerUpstreamAuditSecretErrors(
+        {
+          secrets_store_secrets: [
+            {
+              binding: 'OPENROUTER_API_KEY',
+              store_id: 'a436a6cefedc4acd8bb920cdbc202c1c',
+              secret_name: 'open-router',
+            },
+          ],
+        },
+        'wrangler.jsonc',
+      ),
+    ).toEqual([]);
+    expect(findWorkerUpstreamAuditSecretErrors({}, 'wrangler.jsonc')).toEqual([
+      'wrangler.jsonc must bind the account open-router secret as OPENROUTER_API_KEY.',
     ]);
   });
 });

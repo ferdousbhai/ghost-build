@@ -158,14 +158,15 @@ describe('ProjectWorkspace preview lifecycle', () => {
     const schedule = create.indexOf("await this.schedule(new Date(cleanupDeadline), 'expirePreview'");
     const persist = create.indexOf('this.upsertPendingPreview(candidate, cleanupDeadline)');
     const isolate = create.indexOf('createIsolatedProjectCommand');
-    const launch = create.indexOf('await this.startProcess(');
+    const launch = create.indexOf('const previewProcess = await this.sandboxProcesses.exec(');
 
     expect(schedule).toBeGreaterThan(0);
     expect(persist).toBeGreaterThan(0);
     expect(persist).toBeLessThan(schedule);
     expect(schedule).toBeLessThan(isolate);
     expect(persist).toBeLessThan(launch);
-    expect(create).toContain('timeout --signal=KILL ${Math.ceil(PREVIEW_TTL_MS / 1_000)}s');
+    expect(create).toContain('timeout: PREVIEW_TTL_MS');
+    expect(create).toContain('candidate.exec_id = previewProcess.id');
     expect(create).toContain('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?');
   });
 

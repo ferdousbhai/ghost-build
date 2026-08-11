@@ -5,164 +5,164 @@ import {
   SandboxProcessTerminationUnconfirmedError,
 } from './tracked-command';
 
+const command = ['/bin/bash', '-lc', 'pnpm run build'] as const;
+
+function runningStatus() {
+  return {
+    id: 'process-1',
+    pid: 123,
+    command,
+    startedAt: '2026-08-11T00:00:00.000Z',
+    state: 'running' as const,
+  };
+}
+
+function exitedStatus(code = 0) {
+  return {
+    id: 'process-1',
+    pid: 123,
+    command,
+    startedAt: '2026-08-11T00:00:00.000Z',
+    endedAt: '2026-08-11T00:00:01.000Z',
+    state: 'exited' as const,
+    exit: { code, timedOut: false },
+  };
+}
+
+function output(overrides: Partial<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean }> = {}) {
+  return {
+    stdout: '',
+    stderr: '',
+    exitCode: 0,
+    timedOut: false,
+    truncated: false,
+    ...overrides,
+  };
+}
+
 describe('tracked Sandbox commands', () => {
-  it('exposes the exact started process before waiting for it', async () => {
+  it('uses argv exec and exposes the exact process before observing output', async () => {
     const events: string[] = [];
     const process = {
-      waitForExit: vi.fn(async () => {
-        events.push('wait');
-        return { exitCode: 0 };
+      id: 'process-1',
+      output: vi.fn(async () => {
+        events.push('output');
+        return output();
       }),
+      waitForExit: vi.fn(async () => ({ code: 0, timedOut: false })),
       kill: vi.fn(async () => undefined),
-      getStatus: vi.fn(async () => 'completed' as const),
-      getLogs: vi.fn(async () => ({ stdout: '', stderr: '' })),
+      status: vi.fn(async () => exitedStatus()),
     };
+    const exec = vi.fn(async () => process);
 
     await runTrackedSandboxCommand({
-      command: 'pnpm run build',
+      command,
       timeout: 30_000,
-      processId: 'transient-1',
-      startProcess: async () => process,
+      exec,
       onProcess: (startedProcess) => {
         expect(startedProcess).toBe(process);
         events.push('attach');
       },
     });
 
-    expect(events).toEqual(['attach', 'wait']);
+    expect(exec).toHaveBeenCalledWith(command, { timeout: 30_000 });
+    expect(events).toEqual(['attach', 'output']);
   });
 
-  it('kills a timed-out process before cleanup returns to the caller', async () => {
+  it('reports a remote process timeout with bounded output', async () => {
+    const process = {
+      id: 'process-1',
+      output: vi.fn(async () => output({ stderr: 'build timed out', exitCode: 137, timedOut: true })),
+      waitForExit: vi.fn(async () => ({ code: 137, timedOut: true })),
+      kill: vi.fn(async () => undefined),
+      status: vi.fn(async () => exitedStatus(137)),
+    };
+
+    await expect(runTrackedSandboxCommand({ command, timeout: 30_000, exec: async () => process })).rejects.toThrow(
+      'Sandbox command timed out after 30000ms.\nbuild timed out',
+    );
+  });
+
+  it('kills a process when local output observation fails', async () => {
     const events: string[] = [];
     const process = {
-      waitForExit: vi.fn(async () => {
-        events.push('wait');
-        throw new Error('timeout');
+      id: 'process-1',
+      output: vi.fn(async () => {
+        events.push('output');
+        throw new Error('RPC unavailable');
       }),
       kill: vi.fn(async () => {
         events.push('kill');
       }),
-      getStatus: vi.fn(async () => {
+      waitForExit: vi.fn(async () => {
+        events.push('wait');
+        throw new Error('RPC unavailable');
+      }),
+      status: vi.fn(async () => {
         events.push('status');
-        return 'killed' as const;
-      }),
-      getLogs: vi.fn(async () => {
-        events.push('logs');
-        return { stdout: '', stderr: 'build timed out' };
+        return exitedStatus(137);
       }),
     };
 
-    await expect(
-      runTrackedSandboxCommand({
-        command: 'pnpm run build',
-        timeout: 30_000,
-        processId: 'transient-1',
-        startProcess: async (_command, options) => {
-          expect(options.autoCleanup).toBe(false);
-          return process;
-        },
-      }),
-    ).rejects.toThrow('Sandbox command timed out after 30000ms.');
-    events.push('rm');
-
-    expect(events).toEqual(['wait', 'kill', 'status', 'logs', 'rm']);
-    expect(process.kill).toHaveBeenCalledWith('SIGKILL');
+    await expect(runTrackedSandboxCommand({ command, timeout: 30_000, exec: async () => process })).rejects.toThrow(
+      'Sandbox command could not be observed for 30000ms and was terminated.',
+    );
+    expect(events).toEqual(['output', 'kill', 'wait', 'status']);
+    expect(process.kill).toHaveBeenCalledWith(9);
   });
 
-  it('fails closed when timeout cleanup cannot confirm termination', async () => {
+  it('fails closed when termination cannot be confirmed', async () => {
     const process = {
-      waitForExit: vi.fn(async () => {
-        throw new Error('timeout');
+      id: 'process-1',
+      output: vi.fn(async () => {
+        throw new Error('RPC unavailable');
       }),
       kill: vi.fn(async () => {
-        throw new Error('rpc unavailable');
+        throw new Error('RPC unavailable');
       }),
-      getStatus: vi.fn(async () => {
-        throw new Error('rpc unavailable');
+      waitForExit: vi.fn(async () => {
+        throw new Error('RPC unavailable');
       }),
-      getLogs: vi.fn(async () => {
-        throw new Error('rpc unavailable');
+      status: vi.fn(async () => {
+        throw new Error('RPC unavailable');
       }),
     };
 
     await expect(
-      runTrackedSandboxCommand({
-        command: 'pnpm run build',
-        timeout: 30_000,
-        processId: 'transient-1',
-        startProcess: async () => process,
-      }),
+      runTrackedSandboxCommand({ command, timeout: 30_000, exec: async () => process }),
     ).rejects.toBeInstanceOf(SandboxProcessTerminationUnconfirmedError);
-    expect(process.getStatus).toHaveBeenCalledOnce();
-    expect(process.getLogs).not.toHaveBeenCalled();
   });
 
-  it('accepts a kill race when status proves the process already exited', async () => {
+  it('does not treat an unconfirmed running process as terminated', async () => {
     const process = {
+      id: 'process-1',
+      output: vi.fn(async () => {
+        throw new Error('RPC unavailable');
+      }),
+      kill: vi.fn(async () => undefined),
       waitForExit: vi.fn(async () => {
-        throw new Error('timeout');
+        throw new Error('RPC unavailable');
       }),
-      kill: vi.fn(async () => {
-        throw new Error('not found');
-      }),
-      getStatus: vi.fn(async () => 'completed' as const),
-      getLogs: vi.fn(async () => ({ stdout: '', stderr: '' })),
+      status: vi.fn(async () => runningStatus()),
     };
 
     await expect(
-      runTrackedSandboxCommand({
-        command: 'pnpm run build',
-        timeout: 30_000,
-        processId: 'transient-1',
-        startProcess: async () => process,
-      }),
-    ).rejects.toThrow('Sandbox command timed out after 30000ms.');
-    expect(process.getStatus).toHaveBeenCalledOnce();
+      runTrackedSandboxCommand({ command, timeout: 30_000, exec: async () => process }),
+    ).rejects.toBeInstanceOf(SandboxProcessTerminationUnconfirmedError);
   });
 
-  it('recovers persisted output when a fast failure outruns output callbacks', async () => {
+  it('reports retained output for a fast command failure', async () => {
     const process = {
-      waitForExit: vi.fn(async () => ({ exitCode: 1 })),
+      id: 'process-1',
+      output: vi.fn(async () => output({ stdout: 'build output', stderr: 'compiler failed', exitCode: 1 })),
+      waitForExit: vi.fn(async () => ({ code: 1, timedOut: false })),
       kill: vi.fn(async () => undefined),
-      getStatus: vi.fn(async () => 'failed' as const),
-      getLogs: vi.fn(async () => ({ stdout: 'build output', stderr: 'compiler failed' })),
+      status: vi.fn(async () => exitedStatus(1)),
     };
 
-    await expect(
-      runTrackedSandboxCommand({
-        command: 'pnpm run build',
-        timeout: 30_000,
-        processId: 'transient-1',
-        startProcess: async () => process,
-      }),
-    ).rejects.toThrow('Sandbox command failed with exit code 1.\ncompiler failed\nbuild output');
-    expect(process.getLogs).toHaveBeenCalledOnce();
-  });
-
-  it('retains streamed output when persisted logs cannot be read', async () => {
-    let emitOutput: ((stream: 'stdout' | 'stderr', data: string) => void) | undefined;
-    const process = {
-      waitForExit: vi.fn(async () => ({ exitCode: 1 })),
-      kill: vi.fn(async () => undefined),
-      getStatus: vi.fn(async () => 'failed' as const),
-      getLogs: vi.fn(async () => {
-        throw new Error('log RPC unavailable');
-      }),
-    };
-
-    await expect(
-      runTrackedSandboxCommand({
-        command: 'pnpm run build',
-        timeout: 30_000,
-        processId: 'transient-1',
-        startProcess: async (_command, options) => {
-          emitOutput = options.onOutput;
-          emitOutput('stderr', 'streamed failure');
-          return process;
-        },
-      }),
-    ).rejects.toThrow('Sandbox command failed with exit code 1.\nstreamed failure');
-    expect(emitOutput).toBeDefined();
+    await expect(runTrackedSandboxCommand({ command, timeout: 30_000, exec: async () => process })).rejects.toThrow(
+      'Sandbox command failed with exit code 1.\ncompiler failed\nbuild output',
+    );
   });
 
   it('bounds persisted command output while retaining the failure summary', () => {

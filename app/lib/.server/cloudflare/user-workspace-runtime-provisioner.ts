@@ -16,7 +16,7 @@ import { UserCloudflareAccountApi } from './user-account-api';
 import { waitForUserWorkspaceRuntimeReadiness } from './user-workspace-runtime-readiness';
 
 const USER_WORKSPACE_SANDBOX_IMAGE =
-  'docker.io/cloudflare/sandbox:0.12.4@sha256:e83bb4d6d9748b93a4b876ce0852b5e93d8e0893da10c59d425770aef0d73738';
+  'docker.io/cloudflare/sandbox:0.13.0-next.724.1@sha256:d5856e09ccb02c2cd00f73946360369d5655faa9b67b156e0d8627bf143619f1';
 const PROVISIONING_LEASE_MS = 40 * 60_000;
 
 export const LEGACY_USER_WORKSPACE_MIGRATION_ATTESTATIONS = {

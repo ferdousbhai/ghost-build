@@ -12,6 +12,7 @@ import { authSessionAction, signOutAction } from './server-handlers/auth';
 import { runtimeCredentialAction } from './server-handlers/runtime-credential';
 import { clientTelemetryAction } from './server-handlers/client-telemetry';
 import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudflare-auth-retention.server';
+import { runCloudflareSkillAudit } from './lib/.server/cloudflare/upstream-skill-audit.server';
 import { CSP_NONCE_REQUEST_HEADER } from './lib/csp-nonce';
 
 const APPLICATION_CSP_BASELINE = "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
@@ -165,12 +166,17 @@ export default {
     const nonce = crypto.randomUUID();
     return withApplicationSecurityHeaders(await routeApplicationRequest(request, env, nonce), pathname, nonce);
   },
-  scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runScheduledMaintenance(env));
+  scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(runScheduledMaintenance(controller.cron, env));
   },
 } satisfies ExportedHandler<Env>;
 
-async function runScheduledMaintenance(env: Env) {
+async function runScheduledMaintenance(cron: string, env: Env) {
+  if (cron === '23 5 * * 1') {
+    const result = await runCloudflareSkillAudit(env);
+    console.info('Cloudflare upstream skill audit completed', result);
+    return;
+  }
   await pruneCloudflareAuthDataBestEffort(env.DB);
 }
 

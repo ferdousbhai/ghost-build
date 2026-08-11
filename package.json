@@ -65,7 +65,7 @@
     "@ai-sdk/react": "4.0.51",
     "@cloudflare/ai-chat": "^0.10.1",
     "@cloudflare/computer": "0.1.1",
-    "@cloudflare/sandbox": "0.12.4",
+    "@cloudflare/sandbox": "0.13.0-next.724.1",
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-cpp": "^6.0.3",

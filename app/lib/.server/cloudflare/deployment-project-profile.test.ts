@@ -1,0 +1,50 @@
+import { describe, expect, test } from 'vitest';
+import { deploymentProjectProfileFromConfig } from './deployment-project-profile';
+
+const supportedConfig = {
+  ai: { binding: 'AI' },
+  d1_databases: [{ binding: 'DB' }, { binding: 'AGENT_SECURITY_DB' }],
+  r2_buckets: [{ binding: 'APP_STORAGE' }],
+  durable_objects: { bindings: [{ name: 'AppAgent', class_name: 'AppAgent' }] },
+  exports: { AppAgent: { type: 'durable-object', storage: 'sqlite' } },
+  triggers: { crons: ['0 3 * * *'] },
+};
+
+describe('managed deployment capability boundary', () => {
+  test('returns the exact provisioned and attested capability profile', () => {
+    expect(deploymentProjectProfileFromConfig(supportedConfig, 'web_app')).toEqual({
+      type: 'web_app',
+      bindings: { ai: true, d1: true, r2: true, appAgent: true },
+    });
+  });
+
+  test.each([
+    'kv_namespaces',
+    'queues',
+    'vectorize',
+    'hyperdrive',
+    'workflows',
+    'flagship',
+    'ai_search',
+    'worker_loaders',
+  ])('rejects unsupported %s configuration instead of silently dropping it', (key) => {
+    expect(() =>
+      deploymentProjectProfileFromConfig({ ...supportedConfig, [key]: [{ binding: 'EXTRA' }] }, 'web_app'),
+    ).toThrow(`Ghostbuild managed deployment does not support these Wrangler capabilities: ${key}.`);
+  });
+
+  test('rejects unknown binding names on otherwise supported products', () => {
+    expect(() =>
+      deploymentProjectProfileFromConfig(
+        { ...supportedConfig, d1_databases: [...supportedConfig.d1_databases, { binding: 'ANALYTICS' }] },
+        'web_app',
+      ),
+    ).toThrow('Ghostbuild managed deployment supports only these D1 bindings: DB, AGENT_SECURITY_DB.');
+  });
+
+  test('requires AppAgent, its security database, export, and cleanup cron as one capability', () => {
+    expect(() =>
+      deploymentProjectProfileFromConfig({ ...supportedConfig, d1_databases: [{ binding: 'DB' }] }, 'web_app'),
+    ).toThrow('The AppAgent and AGENT_SECURITY_DB managed deployment capabilities must be configured together.');
+  });
+});

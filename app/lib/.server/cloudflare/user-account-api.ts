@@ -664,7 +664,6 @@ export class UserCloudflareAccountApi {
         { type: 'plain_text', name: 'GHOSTBUILD_CONTROL_PLANE_ENDPOINT', text: GHOSTBUILD_CONTROL_PLANE_ENDPOINT },
         { type: 'plain_text', name: 'GHOSTBUILD_USER_RUNTIME', text: '1' },
         { type: 'plain_text', name: 'GHOSTBUILD_RUNTIME_VERSION', text: args.runtimeVersion },
-        { type: 'plain_text', name: 'SANDBOX_TRANSPORT', text: 'rpc' },
       ],
       exports: {
         ProjectWorkspace: {
@@ -806,6 +805,8 @@ export class UserCloudflareAccountApi {
         method: 'POST',
         body: JSON.stringify({
           description: `Ghostbuild workspace runtime update for ${applicationName}`,
+          // A single 100% step is the direct-API equivalent of Wrangler's required --containers-rollout=immediate
+          // cutover. Stable and @next Sandbox control protocols cannot coexist during a gradual rollout.
           strategy: 'rolling',
           target_configuration: targetConfiguration,
           step_percentage: 100,

@@ -975,13 +975,15 @@ describe('UserCloudflareAccountApi', () => {
           name: 'PROJECT_WORKSPACE',
           class_name: 'ProjectWorkspace',
         }),
-        expect.objectContaining({ type: 'plain_text', name: 'SANDBOX_TRANSPORT', text: 'rpc' }),
         expect.objectContaining({
           type: 'plain_text',
           name: 'GHOSTBUILD_CONTROL_PLANE_ENDPOINT',
           text: 'https://ghostbuild.dev',
         }),
       ]),
+    );
+    expect(metadata.bindings).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'SANDBOX_TRANSPORT' })]),
     );
     expect(metadata.bindings).not.toEqual(expect.arrayContaining([expect.objectContaining({ type: 'worker_loader' })]));
     expect(metadata.bindings).not.toEqual(expect.arrayContaining([expect.objectContaining({ type: 'r2_bucket' })]));
