@@ -180,7 +180,12 @@ function createWorkersAiBindingFetch(binding: Ai, modelId: WorkersAiRuntimeModel
       run: (
         model: string,
         inputs: Record<string, unknown>,
-        options: { returnRawResponse: true; signal: AbortSignal; extraHeaders?: Record<string, string> },
+        options: {
+          returnRawResponse: true;
+          signal: AbortSignal;
+          extraHeaders?: Record<string, string>;
+          gateway?: { id: string };
+        },
       ) => Promise<Response>;
     };
     recordPiStage('binding_run_start', modelId);
@@ -188,6 +193,9 @@ function createWorkersAiBindingFetch(binding: Ai, modelId: WorkersAiRuntimeModel
     const response = await rawBinding.run(modelId, payload, {
       returnRawResponse: true,
       signal: request.signal,
+      ...(isWorkersAiModelId(modelId) && getWorkersAiModel(modelId).availability === 'cloudflare-partner'
+        ? { gateway: { id: 'default' } }
+        : {}),
       ...(sessionAffinity ? { extraHeaders: { 'x-session-affinity': sessionAffinity } } : {}),
     });
     recordPiStage('binding_run_response', modelId, response.status);
