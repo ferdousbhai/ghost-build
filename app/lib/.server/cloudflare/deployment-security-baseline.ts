@@ -1,6 +1,6 @@
 import { BUILDER_TEMPLATE_SOURCE_SHA256 } from '~/agents/builder-template.generated';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 31 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 32 as const;
 export {
   DEPLOYMENT_SECURITY_BASELINE_BINDING,
   DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
@@ -36,8 +36,8 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/lib/project-policy/worker-policy.mjs': '9f908807030d1a91c99b442b41488048d2e49b996783a18900b413e046f3edbc',
   'scripts/lib/project-policy/workflow-policy.mjs': 'e4c172b80ffe2f551a4ca25d4f8a4d0ea19195a7cef0ee056536e331d3993fab',
   'scripts/lib/project-policy/workspace-policy.mjs': '765e1bab8bad64631645513f2f5ac2f66c83fdb52d9bcf60f99e518b06d7ec46',
-  'scripts/provision-cloudflare-production.mjs': '5e55ec67b6aec6395b01119b8b18ff76d3c37cc03c448153647e8d2348edebbf',
-  'scripts/verify-production-config.mjs': 'f4c28d005c92d4a68e1101157b75cd95f8e4bc0d2d5379a69275e79680c3c8e5',
+  'scripts/provision-cloudflare-production.mjs': '2680b6345c9d9cdc99924fae8b7d1e1379d52a0a436610fbad2fff089733d922',
+  'scripts/verify-production-config.mjs': 'c18120967c164c5b570872f2eb020b25062f93fec6a8f2c99ef53124be47902b',
   'scripts/verify-production-licenses.mjs': '22952be32b45c416551ca2681a202b72c616aca61c6643ce946868373320a82d',
   'scripts/verify-stack-alignment.mjs': 'e95b0ee0291186b45143e8d9e96ad2a2089b8d08e5aed61a75e25eb9ef002388',
   'src/agent-routing.ts': '0000bd8d4daa8b0b84d5e176c955b8ee0983e013b87079fa47414b79f7963b57',
@@ -45,7 +45,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'src/agents/anonymous-retention.ts': '38489c93827bc38bcf48deac80005fbe03c6bbb31a6c4fe885c6064e22eb05ae',
   'src/agents/app-agent.ts': '38db7b77ad8420ec8d39cc2144f2510d5c5493a9e7c047bbee354a122ef0b2d3',
   'src/agents/chat-policy.ts': '16a806aa0e26b5c7057e70fecb59cbbfd08921e36e8d2b967102eab6b7e6dec2',
-  'src/app-bindings.ts': '6f5fd82619b6bd55d20ee66428ad264aaf8dfee7b179efeb7cf3eb09906a7998',
+  'src/app-bindings.ts': '88f1db64a430b254a3dc1cc901bb477ff065818a939732b145d9fbf2436606a5',
   'src/application-response.ts': '70f3c2a456f3bd7ae96385d78ec06c4555e5b7d0bf2845594e5f5ba9949d5fec',
   'src/preview-server.ts': '951ab600e7dee5704506a4d2c3a640e2bcd1356b41a2b31519dea973741cc27e',
   'src/server.ts': '464dc8fc95be9e8f9a843a4aed82e9152afd0080b11ec6293855247f282a6c78',
@@ -53,10 +53,10 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'tailwind.config.js': 'c43ce7f83ee3ef0259121fa47ebc98dcb67a25a106aea5318fb0559ce72bc558',
   'tsconfig.json': 'c14eb952e03148b89b4ff6b8f2a60762f5465b7fd7361a32e7c987eb22a320e6',
   'vite.config.ts': 'a19e677583fb7af45068519f5451aa7993b0dcbfff429f39b2945e5158b00541',
-  'wrangler.preview.jsonc': 'b7e17326710f92a9d1bf3b828612ddf7823af0b87a0c86bedfd0077f362587bb',
+  'wrangler.preview.jsonc': '626444c576448d7c8a70572092d7d68ec0d0fb6d577978fed0a146018053fde8',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '491899e8ebb1f74cc70cb7934c74b359cdef24cf7aa491ec83167a4f9c21a82f';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '626558c4d58f2e81d5f165d49b4b69016c4d9b7a01bc69dc0c7af6851769df36';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
   '0b9d16c0b631ec77600d4ac8b751e7d320e4dd54e7c85c52dc2713289e8baaf9';
@@ -68,7 +68,7 @@ export function isCurrentDeploymentSecurityIdentity(value: {
   securityBoundarySha256?: unknown;
 }): boolean {
   return (
-    value.version === 2 &&
+    value.version === 3 &&
     value.templateSourceSha256 === TEMPLATE_SOURCE_SHA256 &&
     value.securityBaselineVersion === DEPLOYMENT_SECURITY_BASELINE_VERSION &&
     value.securityBoundarySha256 === APP_AGENT_SECURITY_BOUNDARY_SHA256

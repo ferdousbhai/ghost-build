@@ -5,6 +5,7 @@ import {
   cloudflareEmailService,
   cloudflareFlagship,
   cloudflarePlatform,
+  cloudflareWeekly,
   cloudflareRealtime,
   cloudflareSandboxNext,
   cloudflareStorage,
@@ -41,6 +42,10 @@ const docCatalog = {
     description:
       'Official Cloudflare platform skill guidance for product selection and retrieval-first Cloudflare work.',
     content: cloudflarePlatform,
+  },
+  cloudflareWeekly: {
+    description: 'Owner-approved guidance produced by the private weekly Cloudflare skills review.',
+    content: cloudflareWeekly,
   },
   workersAi: {
     description: 'Workers AI binding and Ghostbuild default model guidance.',

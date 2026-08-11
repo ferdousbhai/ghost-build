@@ -18,4 +18,10 @@
       "bucket_name": "ghostbuild-cloudflare-app-storage-preview",
     },
   ],
+  "kv_namespaces": [
+    {
+      "binding": "APP_CACHE",
+      "id": "00000000000000000000000000000000",
+    },
+  ],
 }

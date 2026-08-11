@@ -1,6 +1,7 @@
 import { docDescriptions, docKeys, docs, type DocKey } from './references/index.js';
 
 export const VIRTUAL_DOCS_ROOT = '/home/project/.ghost/docs';
+export type VirtualDocOverrides = Partial<Record<DocKey, string>>;
 
 export function isVirtualDocPath(path: string): boolean {
   const normalized = normalizePath(path);
@@ -23,13 +24,13 @@ type ReadResult = {
 };
 
 /** Read the immutable Ghostbuild guidance overlay through the normal read tool. */
-export function readVirtualDoc(input: ReadInput): ReadResult | null {
+export function readVirtualDoc(input: ReadInput, overrides: VirtualDocOverrides = {}): ReadResult | null {
   const path = normalizePath(input.path);
   if (!isVirtualDocPath(path)) {
     return null;
   }
 
-  const { content, resolvedPath } = resolveVirtualDoc(path);
+  const { content, resolvedPath } = resolveVirtualDoc(path, overrides);
   const lines = content.split('\n');
   const offset = input.offset ?? 1;
   const limit = input.limit;
@@ -71,7 +72,7 @@ export function readVirtualDoc(input: ReadInput): ReadResult | null {
   };
 }
 
-function resolveVirtualDoc(path: string): { resolvedPath: string; content: string } {
+function resolveVirtualDoc(path: string, overrides: VirtualDocOverrides): { resolvedPath: string; content: string } {
   if (path === VIRTUAL_DOCS_ROOT || path === `${VIRTUAL_DOCS_ROOT}/index.md`) {
     const index = [
       '# Ghostbuild documentation',
@@ -88,7 +89,7 @@ function resolveVirtualDoc(path: string): { resolvedPath: string; content: strin
   if (!key || !docKeys.includes(key)) {
     throw new Error(`Unknown virtual documentation path ${path}. Read ${VIRTUAL_DOCS_ROOT}/index.md first.`);
   }
-  return { resolvedPath: `${VIRTUAL_DOCS_ROOT}/${key}.md`, content: docs[key] };
+  return { resolvedPath: `${VIRTUAL_DOCS_ROOT}/${key}.md`, content: overrides[key] ?? docs[key] };
 }
 
 function normalizePath(path: string): string {

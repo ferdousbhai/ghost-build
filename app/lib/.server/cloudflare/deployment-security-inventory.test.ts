@@ -39,6 +39,12 @@ describe('deployment security attestation', () => {
         }
       },
     ],
+    [
+      'the wrong KV namespace',
+      (value: ReturnType<typeof readback>) => {
+        value.bindings.push({ name: 'APP_CACHE', type: 'kv_namespace', namespace_id: 'wrong-kv' });
+      },
+    ],
   ])('rejects %s as drift', (_name, mutate) => {
     const value = readback();
     mutate(value);
@@ -58,6 +64,7 @@ describe('deployment security attestation', () => {
         accountApi: { readActiveWorkerDeployment },
         expectedPublishedVersionId: 'published-version',
         expectedAgentSecurityD1DatabaseId: 'agent-security-d1-id',
+        expectedKvNamespaceId: 'application-kv-id',
         attempts: 2,
         retryDelay,
       }),
@@ -74,6 +81,7 @@ describe('deployment security attestation', () => {
         accountApi: { readActiveWorkerDeployment: vi.fn(async () => null) },
         expectedPublishedVersionId: 'published-version',
         expectedAgentSecurityD1DatabaseId: 'agent-security-d1-id',
+        expectedKvNamespaceId: 'application-kv-id',
         attempts: 1,
       }),
     ).rejects.toBeInstanceOf(DeploymentSecurityAttestationError);
@@ -87,6 +95,7 @@ function evaluate(value: ReturnType<typeof readback>) {
     expectedSecurityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
     expectedSecurityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
     expectedAgentSecurityD1DatabaseId: 'agent-security-d1-id',
+    expectedKvNamespaceId: 'application-kv-id',
     requireExpectedAgentSecurityD1Identity: true,
     requiresAgentCleanup: true,
     expectedCompatibilityDate: '2026-07-21',
@@ -99,6 +108,7 @@ function evaluate(value: ReturnType<typeof readback>) {
       { name: 'AI', type: 'ai' },
       { name: 'DB', type: 'd1' },
       { name: 'AGENT_SECURITY_DB', type: 'd1' },
+      { name: 'APP_CACHE', type: 'kv_namespace' },
       { name: 'AppAgent', type: 'durable_object_namespace' },
     ],
   });
@@ -127,6 +137,7 @@ function readback(): ActiveWorkerDeploymentReadback {
       { name: 'AI', type: 'ai' },
       { name: 'DB', type: 'd1', database_id: 'application-d1-id' },
       { name: 'AGENT_SECURITY_DB', type: 'd1', database_id: 'agent-security-d1-id' },
+      { name: 'APP_CACHE', type: 'kv_namespace', namespace_id: 'application-kv-id' },
       { name: 'AppAgent', type: 'durable_object_namespace' },
     ],
     crons: ['0 3 * * *'],
@@ -144,13 +155,13 @@ function deployment(): Deployment {
     workspaceReference: `workspace-runtime:project:1:${'a'.repeat(64)}`,
     status: 'deploying',
     plan: {
-      version: 2,
+      version: 3,
       deploymentId: 'deployment-1',
       sourceSha256: 'a'.repeat(64),
       templateSourceSha256: TEMPLATE_SOURCE_SHA256,
       securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
       securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
-      project: { type: 'web_app', bindings: { ai: true, d1: true, r2: false, appAgent: true } },
+      project: { type: 'web_app', bindings: { ai: true, d1: true, r2: false, kv: true, appAgent: true } },
       billing: {
         infrastructure: 'user_cloudflare_account',
         workersAi: 'user_cloudflare_account',
@@ -159,6 +170,7 @@ function deployment(): Deployment {
       resources: [
         { type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-deployment-1' },
         { type: 'd1', logicalName: 'AGENT_SECURITY_DB', proposedName: 'ghostbuild-deployment-1-agent-security' },
+        { type: 'kv', logicalName: 'APP_CACHE', proposedName: 'ghostbuild-deployment-1-cache' },
       ],
     },
     planDigest: 'b'.repeat(64),

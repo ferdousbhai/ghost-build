@@ -15,6 +15,7 @@ import {
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const allowUnprovisioned = process.argv.includes("--allow-unprovisioned");
 const placeholderDatabaseId = "00000000-0000-0000-0000-000000000000";
+const placeholderKvNamespaceId = "00000000000000000000000000000000";
 const previewScripts = new Map([
   ["dev", "vite dev --host 0.0.0.0"],
   ["preview", "vite preview --host 0.0.0.0"],
@@ -165,6 +166,18 @@ function verifyWorker(errors, config) {
     r2?.bucket_name,
     "ghostbuild-cloudflare-app-storage",
   );
+  const kv = config?.kv_namespaces?.find(
+    (item) => item?.binding === "APP_CACHE",
+  );
+  if (
+    !kv ||
+    !/^[a-f0-9]{32}$/.test(kv.id ?? "") ||
+    (!allowUnprovisioned && kv.id === placeholderKvNamespaceId)
+  ) {
+    errors.push(
+      "wrangler.jsonc must contain a provisioned APP_CACHE KV namespace id.",
+    );
+  }
   if (
     !config?.durable_objects?.bindings?.some(
       (item) => item?.class_name === "AppAgent",

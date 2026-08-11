@@ -6,12 +6,14 @@ import type { Tool } from 'ghostbuild-agent/tool';
 import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
+import type { VirtualDocOverrides } from 'ghostbuild-agent/virtual-docs';
 import { BUILDER_TURN_TIMEOUTS, BuilderTurnBudgetExceededError } from './builder-turn-budget';
 import { createWorkersAiTools } from './workers-ai-tools';
 
 type BuilderOperationContext = {
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
+  virtualDocs?: VirtualDocOverrides;
 };
 
 const toolLabels: Record<ModelToolName, string> = {

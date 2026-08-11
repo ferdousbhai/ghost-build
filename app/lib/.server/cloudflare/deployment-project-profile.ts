@@ -8,6 +8,7 @@ export type DeploymentProjectProfile = {
     ai: boolean;
     d1: boolean;
     r2: boolean;
+    kv: boolean;
     appAgent: boolean;
   };
 };
@@ -24,7 +25,6 @@ const UNSUPPORTED_MANAGED_DEPLOYMENT_KEYS = [
   'flagship',
   'hyperdrive',
   'images',
-  'kv_namespaces',
   'logfwdr',
   'mtls_certificates',
   'pipelines',
@@ -61,6 +61,7 @@ export function deploymentProjectProfileFromConfig(
   }
   const d1Bindings = requireExactBindings(config.d1_databases, 'D1', ['DB', 'AGENT_SECURITY_DB']);
   const r2Bindings = requireExactBindings(config.r2_buckets, 'R2', ['APP_STORAGE']);
+  const kvBindings = requireExactBindings(config.kv_namespaces, 'KV', ['APP_CACHE']);
   const durableObjects = recordOrNull(config.durable_objects);
   const durableBindings = requireExactBindings(durableObjects?.bindings, 'Durable Object', ['AppAgent'], 'name');
   const appAgent = durableBindings.has('AppAgent');
@@ -84,6 +85,7 @@ export function deploymentProjectProfileFromConfig(
       ai: ai !== null,
       d1: d1Bindings.has('DB'),
       r2: r2Bindings.has('APP_STORAGE'),
+      kv: kvBindings.has('APP_CACHE'),
       appAgent,
     },
   };

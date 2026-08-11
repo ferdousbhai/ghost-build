@@ -9,6 +9,7 @@ const rootDir = process.env.GHOSTBUILD_PROVISION_ROOT
   : resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const configPath = resolve(rootDir, "wrangler.jsonc");
 const PLACEHOLDER_D1_ID = "00000000-0000-0000-0000-000000000000";
+const PLACEHOLDER_KV_ID = "00000000000000000000000000000000";
 const isDryRun = process.argv.includes("--dry-run");
 const isCheck = process.argv.includes("--check");
 
@@ -313,6 +314,63 @@ function updateD1DatabaseId(raw, d1Index, databaseId, bindingName) {
   return nextRaw;
 }
 
+function updateKvNamespaceId(raw, kvIndex, namespaceId) {
+  if (!namespaceId || namespaceId === PLACEHOLDER_KV_ID) return raw;
+  const nextRaw = applyEdits(
+    raw,
+    modify(raw, ["kv_namespaces", kvIndex, "id"], namespaceId, {
+      formattingOptions: { insertSpaces: true, tabSize: 2, eol: "\n" },
+    }),
+  );
+  if (nextRaw !== raw) {
+    writeFileSync(configPath, nextRaw);
+    console.log(
+      `Updated wrangler.jsonc APP_CACHE KV namespace id to ${namespaceId}.`,
+    );
+  }
+  return nextRaw;
+}
+
+function ensureKvNamespace(kv) {
+  const title = kv.binding?.title ?? "ghostbuild-cloudflare-app-cache";
+  const configuredId = kv.binding?.id;
+  const hasConfiguredId = configuredId && configuredId !== PLACEHOLDER_KV_ID;
+  if (isCheck && !hasConfiguredId) {
+    fail(
+      "wrangler.jsonc APP_CACHE must have a non-placeholder namespace id before production release.",
+    );
+  }
+  if (isDryRun) {
+    console.log(`[dry-run] Would ensure KV namespace ${title} exists.`);
+    return configuredId ?? PLACEHOLDER_KV_ID;
+  }
+  const list = parseJsonOutput(
+    runWrangler(["kv", "namespace", "list"]).stdout,
+    "wrangler kv namespace list",
+  );
+  if (!Array.isArray(list))
+    fail("wrangler kv namespace list returned an unexpected shape.");
+  const byId = hasConfiguredId
+    ? list.find((item) => item?.id === configuredId)
+    : undefined;
+  if (byId) return configuredId;
+  if (hasConfiguredId || isCheck)
+    fail(`KV namespace ${title} must already exist before production release.`);
+  const existing = list.find((item) => item?.title === title);
+  if (typeof existing?.id === "string") return existing.id;
+  runWrangler(["kv", "namespace", "create", title]);
+  const refreshed = parseJsonOutput(
+    runWrangler(["kv", "namespace", "list"]).stdout,
+    "wrangler kv namespace list",
+  );
+  const created = Array.isArray(refreshed)
+    ? refreshed.find((item) => item?.title === title)
+    : undefined;
+  if (typeof created?.id !== "string")
+    fail(`Unable to determine KV namespace id for ${title}.`);
+  return created.id;
+}
+
 export function r2BucketExists(output, bucketName) {
   const expectedBucketName = bucketName.trim();
   if (!expectedBucketName) {
@@ -393,6 +451,15 @@ export function main() {
   const r2 = Array.isArray(config.r2_buckets)
     ? config.r2_buckets.find((binding) => binding?.binding === "APP_STORAGE")
     : undefined;
+  const kvIndex = Array.isArray(config.kv_namespaces)
+    ? config.kv_namespaces.findIndex(
+        (binding) => binding?.binding === "APP_CACHE",
+      )
+    : -1;
+  const kv =
+    kvIndex === -1
+      ? undefined
+      : { binding: config.kv_namespaces[kvIndex], index: kvIndex };
 
   const applicationDatabaseId = ensureD1Database(applicationD1);
   const agentSecurityDatabaseId = agentSecurityD1
@@ -423,6 +490,13 @@ export function main() {
   }
   if (r2) {
     ensureR2Bucket({ binding: r2 });
+  }
+  if (kv) {
+    updateKvNamespaceId(
+      readFileSync(configPath, "utf8"),
+      kv.index,
+      ensureKvNamespace(kv),
+    );
   }
 }
 

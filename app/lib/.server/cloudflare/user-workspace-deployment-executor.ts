@@ -12,23 +12,6 @@ import { validatePreparedDeploymentArtifact } from './deployment-artifact';
 import { UserCloudflareAccountApi } from './user-account-api';
 import { GHOSTBUILD_CONTROL_PLANE_ENDPOINT } from './user-workspace-runtime-policy';
 
-export const LEGACY_AGENT_SECURITY_MIGRATION_ATTESTATIONS = {
-  '0001_agent_security.sql': `SELECT CASE WHEN
-    EXISTS (SELECT 1 FROM sqlite_schema WHERE type='table' AND name='app_agent_sessions'
-      AND lower(replace(replace(replace(replace(sql,char(9),''),char(10),''),char(13),''),' ','')) =
-        'createtableapp_agent_sessions(token_hashtextprimarykeynotnullcheck(length(token_hash)=64),agent_nametextnotnulluniquecheck(length(agent_name)between16and80),expires_atintegernotnull,created_atintegernotnull)')
-    AND EXISTS (SELECT 1 FROM sqlite_schema WHERE type='table' AND name='app_agent_rate_limits'
-      AND lower(replace(replace(replace(replace(sql,char(9),''),char(10),''),char(13),''),' ','')) =
-        'createtableapp_agent_rate_limits(buckettextnotnull,window_startintegernotnull,countintegernotnullcheck(count>0),primarykey(bucket,window_start))')
-    AND EXISTS (SELECT 1 FROM sqlite_schema WHERE type='index' AND name='app_agent_sessions_expires_at_idx'
-      AND lower(replace(replace(replace(replace(sql,char(9),''),char(10),''),char(13),''),' ','')) =
-        'createindexapp_agent_sessions_expires_at_idxonapp_agent_sessions(expires_at)')
-    AND EXISTS (SELECT 1 FROM sqlite_schema WHERE type='index' AND name='app_agent_rate_limits_window_start_idx'
-      AND lower(replace(replace(replace(replace(sql,char(9),''),char(10),''),char(13),''),' ','')) =
-        'createindexapp_agent_rate_limits_window_start_idxonapp_agent_rate_limits(window_start)')
-    THEN 1 ELSE 0 END AS attested`,
-} as const;
-
 type UserOwnedDeploymentArgs = {
   env: Env;
   deploymentId: string;
@@ -99,7 +82,8 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
     const d1Name = deploymentPlanResourceName(deployment.plan, 'd1', 'DB');
     const agentD1Name = deploymentPlanResourceName(deployment.plan, 'd1', 'AGENT_SECURITY_DB');
     const r2Name = deploymentPlanResourceName(deployment.plan, 'r2', 'APP_STORAGE');
-    providerChangesPossible = Boolean(d1Name || agentD1Name || r2Name);
+    const kvName = deploymentPlanResourceName(deployment.plan, 'kv', 'APP_CACHE');
+    providerChangesPossible = Boolean(d1Name || agentD1Name || r2Name || kvName);
     const d1 = d1Name ? await accountApi.ensureD1ForPlan(deployment.plan) : null;
     if (d1) {
       await recordResource(args.env.DB, deployment.id, 'd1', 'DB', d1.id);
@@ -111,6 +95,10 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
     const r2 = r2Name ? await accountApi.ensureR2ForPlan(deployment.plan) : null;
     if (r2) {
       await recordResource(args.env.DB, deployment.id, 'r2', 'APP_STORAGE', r2.id);
+    }
+    const kv = kvName ? await accountApi.ensureKvForPlan(deployment.plan) : null;
+    if (kv) {
+      await recordResource(args.env.DB, deployment.id, 'kv', 'APP_CACHE', kv.id);
     }
     await transitionDeployment({
       db: args.env.DB,
@@ -137,6 +125,7 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
         agentSecurityD1DatabaseId: agentD1?.id,
         agentSecurityD1DatabaseName: agentD1?.name,
         r2BucketName: r2?.name,
+        kvNamespaceId: kv?.id,
         securityBaselineVersion: String(deployment.plan.securityBaselineVersion),
         securityBoundarySha256: deployment.plan.securityBoundarySha256,
         templateSourceSha256: deployment.plan.templateSourceSha256,
@@ -150,14 +139,10 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
     const publishApi = await createUserAccountApi(runtimeEnv, request, true);
     await workspace.assertDeploymentSession({ sessionId });
     if (d1) {
-      await publishApi.applyD1Migrations(d1.id, artifact.migrations.DB, {
-        trustLegacyReceiptsWithoutDigest: true,
-      });
+      await publishApi.applyD1Migrations(d1.id, artifact.migrations.DB);
     }
     if (agentD1) {
-      await publishApi.applyD1Migrations(agentD1.id, artifact.migrations.AGENT_SECURITY_DB, {
-        legacyReceiptAttestations: LEGACY_AGENT_SECURITY_MIGRATION_ATTESTATIONS,
-      });
+      await publishApi.applyD1Migrations(agentD1.id, artifact.migrations.AGENT_SECURITY_DB);
     }
     providerChangesPossible = true;
     const result = await publishApi.deployManagedWorker({
@@ -172,6 +157,7 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       d1DatabaseId: d1?.id,
       agentSecurityD1DatabaseId: agentD1?.id,
       r2BucketName: r2?.name,
+      kvNamespaceId: kv?.id,
       securityBaselineVersion: String(deployment.plan.securityBaselineVersion),
       securityBoundarySha256: deployment.plan.securityBoundarySha256,
       templateSourceSha256: deployment.plan.templateSourceSha256,
@@ -184,6 +170,7 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       accountApi: publishApi,
       expectedPublishedVersionId: result.workerVersionId,
       expectedAgentSecurityD1DatabaseId: agentD1?.id,
+      expectedKvNamespaceId: kv?.id,
     });
     await recordResource(args.env.DB, deployment.id, 'worker', 'app', workerName);
     const workersSubdomain = await publishApi.getWorkersSubdomain();
@@ -377,7 +364,7 @@ function requireResourceName(deployment: Deployment, type: 'worker', logicalName
 function recordResource(
   db: D1Database,
   deploymentId: string,
-  resourceType: 'worker' | 'd1' | 'r2',
+  resourceType: 'worker' | 'd1' | 'r2' | 'kv',
   logicalName: string,
   providerResourceId: string,
 ) {

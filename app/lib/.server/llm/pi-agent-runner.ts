@@ -44,6 +44,7 @@ import {
   workersPaidRequiredMessage,
 } from '~/lib/workers-paid';
 import { logProviderFailure } from './provider-error-logging';
+import type { VirtualDocOverrides } from 'ghostbuild-agent/virtual-docs';
 
 type Messages = GhostbuildMessage[];
 type UIMessageChunk = PiStreamChunk;
@@ -67,6 +68,7 @@ interface PiAgentOptions {
   workspace: BuilderWorkspaceApi;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
+  virtualDocs?: VirtualDocOverrides;
 }
 
 type PiPreparationStage = 'tool_setup' | 'model_input' | 'prompt_metrics' | 'message_conversion';
@@ -94,6 +96,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     workspace,
     onValidationStage,
     runWithKeepAlive,
+    virtualDocs,
   } = options;
 
   logger.debug('Starting Pi agent runner');
@@ -103,7 +106,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   const loopSignal = abortSignal ? AbortSignal.any([abortSignal, totalTimeoutSignal]) : totalTimeoutSignal;
   const compactionPolicy = modelCompactionPolicy(piProvider.handle.model.contextWindow);
   const { canonicalTools, piTools } = withPreparationStage('tool_setup', () =>
-    createPiToolBundle(workspace, { onValidationStage, runWithKeepAlive }),
+    createPiToolBundle(workspace, { onValidationStage, runWithKeepAlive, virtualDocs }),
   );
 
   const validatedBuildCompletion = getValidatedBuildCompletion(messages);

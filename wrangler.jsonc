@@ -72,8 +72,14 @@
       "migrations_dir": "migrations",
     },
   ],
+  "kv_namespaces": [
+    {
+      "binding": "SYSTEM_DOCS",
+      "id": "6901be08c9e14e40b599be00e49df484",
+    },
+  ],
   "vars": {
     "GHOSTBUILD_ADMIN_EMAIL": "ferdousbd@gmail.com",
-    "CLOUDFLARE_OAUTH_SCOPES": "account-settings.read user-details.read workers-scripts.write containers.write d1.write workers-r2.write ai.read",
+    "CLOUDFLARE_OAUTH_SCOPES": "account-settings.read user-details.read workers-scripts.write containers.write d1.write workers-r2.write workers-kv-storage.write ai.read",
   },
 }

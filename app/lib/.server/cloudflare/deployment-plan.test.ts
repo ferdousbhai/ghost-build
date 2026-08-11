@@ -15,12 +15,12 @@ describe('buildDeploymentPlanFromSource', () => {
     const result = await buildDeploymentPlanFromSource({
       deploymentId: 'deployment-1',
       sourceSha256: SOURCE_ONE,
-      project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, appAgent: true } },
+      project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, kv: true, appAgent: true } },
     });
 
     expect(result.digest).toMatch(/^[a-f0-9]{64}$/);
     expect(result.plan).toMatchObject({
-      version: 2,
+      version: 3,
       sourceSha256: SOURCE_ONE,
       templateSourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
       securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
@@ -35,13 +35,14 @@ describe('buildDeploymentPlanFromSource', () => {
       'd1',
       'd1',
       'r2',
+      'kv',
       'durable_object',
       'workers_ai',
     ]);
   });
 
   it('changes the approval digest when the exact backup revision changes', async () => {
-    const project = { type: 'web_app' as const, bindings: { ai: true, d1: true, r2: true, appAgent: true } };
+    const project = { type: 'web_app' as const, bindings: { ai: true, d1: true, r2: true, kv: true, appAgent: true } };
     const first = await buildDeploymentPlanFromSource({
       deploymentId: 'deployment-1',
       sourceSha256: SOURCE_ONE,
@@ -59,7 +60,7 @@ describe('buildDeploymentPlanFromSource', () => {
     const result = await buildDeploymentPlanFromSource({
       deploymentId: 'deployment-1',
       sourceSha256: SOURCE_ONE,
-      project: { type: 'worker', bindings: { ai: false, d1: false, r2: false, appAgent: false } },
+      project: { type: 'worker', bindings: { ai: false, d1: false, r2: false, kv: false, appAgent: false } },
     });
     expect(result.plan.resources.map(({ type }) => type)).toEqual(['worker']);
   });
@@ -68,7 +69,7 @@ describe('buildDeploymentPlanFromSource', () => {
     const { plan } = await buildDeploymentPlanFromSource({
       deploymentId: 'deployment-2',
       sourceSha256: SOURCE_ONE,
-      project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, appAgent: true } },
+      project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, kv: true, appAgent: true } },
     });
     expect(deploymentPlanResourceName(plan, 'worker', 'app')).toBe('ghostbuild-deployment-2');
     expect(deploymentPlanResourceName(plan, 'd1', 'AGENT_SECURITY_DB')).toBe('ghostbuild-deployment-2-agent-security');
@@ -88,7 +89,7 @@ describe('buildDeploymentPlanFromSource', () => {
       buildDeploymentPlanFromSource({
         deploymentId: 'deployment-1',
         sourceSha256: 'latest',
-        project: { type: 'worker', bindings: { ai: false, d1: false, r2: false, appAgent: false } },
+        project: { type: 'worker', bindings: { ai: false, d1: false, r2: false, kv: false, appAgent: false } },
       }),
     ).rejects.toThrow('Deployment source digest is invalid.');
   });
@@ -97,7 +98,7 @@ describe('buildDeploymentPlanFromSource', () => {
     const { plan } = await buildDeploymentPlanFromSource({
       deploymentId: 'deployment-1',
       sourceSha256: SOURCE_ONE,
-      project: { type: 'worker', bindings: { ai: false, d1: false, r2: false, appAgent: false } },
+      project: { type: 'worker', bindings: { ai: false, d1: false, r2: false, kv: false, appAgent: false } },
     });
     const { project: _project, ...missingProject } = plan;
 

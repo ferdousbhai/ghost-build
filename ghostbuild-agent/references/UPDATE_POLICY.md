@@ -15,12 +15,15 @@ maintained until both are documented in the manifest.
 
 ## Review cadence and triggers
 
-The production Ghostbuild Worker runs `runCloudflareSkillAudit` every Monday through a Cloudflare Cron Trigger. It first
+The private Ghostbuild operations Worker runs `runCloudflareSkillAudit` every Monday through a Cloudflare Cron Trigger. It first
 compares the complete top-level `skills/*/SKILL.md` inventory with `discovery.knownPaths`, so a new upstream skill is
 reported even when it is not already cited or tracked. It then compares the reviewed revision with current default-branch
 HEAD and sends only bounded relevant diff evidence to `~deepseek/deepseek-v4-flash-latest` through OpenRouter. Model output is
-advisory; repository paths, patches, and model text remain untrusted data. Results go to Workers observability logs. The
-checker never edits the repository or advances a review checkpoint.
+advisory; repository paths, patches, and model text remain untrusted data. The private Worker records a durable receipt and
+may stage a bounded `cloudflareWeekly` virtual-document candidate in the system-document KV namespace. A candidate is not
+visible to Ghost Builder until the configured owner reviews and publishes it from the private admin service. New or removed
+skills and incomplete or oversized diffs always remain manual-review events. The checker never edits the repository or
+advances a repository review checkpoint.
 
 An agent review is required when either of these events occurs:
 

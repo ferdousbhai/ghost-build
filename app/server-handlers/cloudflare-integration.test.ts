@@ -268,7 +268,7 @@ describe('Cloudflare-only authentication', () => {
     expect(database.state?.returnTo).toBe('/create/example?tab=code');
     expect(orchestrator.startConnection).toHaveBeenCalledWith({
       returnUrl: expect.stringContaining('/connect/return?state='),
-      requestedCapabilities: ['workers', 'containers', 'd1', 'r2', 'durable_objects', 'workers_ai'],
+      requestedCapabilities: ['workers', 'containers', 'd1', 'r2', 'kv', 'durable_objects', 'workers_ai'],
     });
   });
 

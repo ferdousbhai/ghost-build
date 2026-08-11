@@ -1,6 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
 
 const mocks = vi.hoisted(() => ({
   attestManagedDeploymentSecurity: vi.fn(),
@@ -41,10 +39,7 @@ vi.mock('./user-account-api', () => ({
   UserCloudflareAccountApi: mocks.UserCloudflareAccountApi,
 }));
 
-import {
-  executeUserOwnedDeployment,
-  LEGACY_AGENT_SECURITY_MIGRATION_ATTESTATIONS,
-} from './user-workspace-deployment-executor';
+import { executeUserOwnedDeployment } from './user-workspace-deployment-executor';
 
 describe('executeUserOwnedDeployment credential-free Computer flow', () => {
   beforeEach(() => {
@@ -66,40 +61,10 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
     mocks.transitionDeployment.mockResolvedValue(undefined);
   });
 
-  it('requires the complete immutable agent-security schema before upgrading a legacy receipt', () => {
-    const attestation = LEGACY_AGENT_SECURITY_MIGRATION_ATTESTATIONS['0001_agent_security.sql'];
-    const db = new DatabaseSync(':memory:');
-    db.exec(readFileSync('template/agent-security-migrations/0001_agent_security.sql', 'utf8'));
-
-    expect(db.prepare(attestation).get()).toEqual({ attested: 1 });
-  });
-
-  it.each([
-    [
-      'commented-out checks',
-      (migration: string) =>
-        migration
-          .replace('CHECK (length(token_hash) = 64)', '/* CHECK (length(token_hash) = 64) */')
-          .replace('CHECK (length(agent_name) BETWEEN 16 AND 80)', '/* agent name check removed */')
-          .replace('CHECK (count > 0)', '/* count check removed */'),
-    ],
-    [
-      'a partial expiration index',
-      (migration: string) => migration.replace('(expires_at);', '(expires_at) WHERE expires_at > 0;'),
-    ],
-  ])('rejects Agent Security schema with %s', (_label, mutate) => {
-    const db = new DatabaseSync(':memory:');
-    db.exec(mutate(readFileSync('template/agent-security-migrations/0001_agent_security.sql', 'utf8')));
-
-    expect(db.prepare(LEGACY_AGENT_SECURITY_MIGRATION_ATTESTATIONS['0001_agent_security.sql']).get()).toEqual({
-      attested: 0,
-    });
-  });
-
   it('passes no credential to ProjectWorkspace and publishes only through the trusted account API', async () => {
     const revision = 'a'.repeat(64);
     const plan = {
-      version: 2,
+      version: 3,
       deploymentId: 'deployment-1',
       sourceSha256: revision,
       templateSourceSha256: 'b'.repeat(64),
@@ -107,7 +72,7 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
       securityBoundarySha256: 'c'.repeat(64),
       project: {
         type: 'worker',
-        bindings: { ai: false, d1: false, r2: false, appAgent: false },
+        bindings: { ai: false, d1: false, r2: false, kv: false, appAgent: false },
       },
       billing: {
         infrastructure: 'user_cloudflare_account',

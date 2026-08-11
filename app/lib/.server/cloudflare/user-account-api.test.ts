@@ -10,13 +10,13 @@ import {
 import { USER_WORKSPACE_RUNTIME_GC_CRON } from './user-workspace-runtime-policy';
 
 const plan: DeploymentPlan = {
-  version: 2,
+  version: 3,
   deploymentId: 'deployment-1',
   sourceSha256: 'a'.repeat(64),
   templateSourceSha256: TEMPLATE_SOURCE_SHA256,
   securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
   securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
-  project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, appAgent: true } },
+  project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, kv: true, appAgent: true } },
   billing: {
     infrastructure: 'user_cloudflare_account',
     workersAi: 'user_cloudflare_account',
@@ -30,6 +30,7 @@ const plan: DeploymentPlan = {
       proposedName: 'ghostbuild-deployment-1-agent-security',
     },
     { type: 'r2', logicalName: 'APP_STORAGE', proposedName: 'ghostbuild-deployment-1-storage' },
+    { type: 'kv', logicalName: 'APP_CACHE', proposedName: 'ghostbuild-deployment-1-cache' },
   ],
 };
 
@@ -155,6 +156,37 @@ describe('UserCloudflareAccountApi', () => {
     });
     expect(request).toHaveBeenCalledTimes(2);
     expect(request.mock.calls.every((call) => call[1]?.method === 'GET')).toBe(true);
+  });
+
+  test('creates only the KV namespace fixed by the approved plan', async () => {
+    const namespaceId = '0123456789abcdef0123456789abcdef';
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: [] }))
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: { id: namespaceId, title: 'ghostbuild-deployment-1-cache' },
+        }),
+      );
+
+    await expect(new UserCloudflareAccountApi('account-1', 'token', request).ensureKvForPlan(plan)).resolves.toEqual({
+      id: namespaceId,
+      name: 'ghostbuild-deployment-1-cache',
+    });
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      'https://api.cloudflare.com/client/v4/accounts/account-1/storage/kv/namespaces?per_page=1000',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      'https://api.cloudflare.com/client/v4/accounts/account-1/storage/kv/namespaces',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ title: 'ghostbuild-deployment-1-cache' }),
+      }),
+    );
   });
 
   test('rejects a matching D1 readback without an identity instead of creating a replacement', async () => {
@@ -393,44 +425,7 @@ describe('UserCloudflareAccountApi', () => {
     expect(request).toHaveBeenCalledTimes(3);
   });
 
-  test('upgrades a pre-digest receipt only after its legacy schema attestation succeeds', async () => {
-    const sql = 'CREATE TABLE chats (id TEXT PRIMARY KEY)';
-    const digest = await textDigest(sql);
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
-      .mockResolvedValueOnce(
-        Response.json({ success: true, result: [{ success: true, results: [{ name: 'digest' }] }] }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: [{ success: true, results: [{ name: '0001_user_workspace.sql', digest: null }] }],
-        }),
-      )
-      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [{ attested: 1 }] }] }))
-      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: [{ success: true, results: [{ name: '0001_user_workspace.sql', digest }] }],
-        }),
-      );
-
-    await expect(
-      new UserCloudflareAccountApi('account-1', 'token', request).applyD1Migrations(
-        '0123456789abcdef0123456789abcdef',
-        [{ name: '0001_user_workspace.sql', sql }],
-        { legacyReceiptAttestations: { '0001_user_workspace.sql': 'SELECT 1 AS attested' } },
-      ),
-    ).resolves.toBeUndefined();
-    expect(request).toHaveBeenCalledTimes(6);
-  });
-
-  test.each([
-    ['missing', undefined],
-    ['failed', 'SELECT 0 AS attested'],
-  ])('rejects a pre-digest receipt with %s schema attestation', async (_label, attestationSql) => {
+  test('rejects a pre-digest migration receipt without modifying it', async () => {
     const request = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
@@ -443,55 +438,17 @@ describe('UserCloudflareAccountApi', () => {
           result: [{ success: true, results: [{ name: '0001_user_workspace.sql', digest: null }] }],
         }),
       );
-    if (attestationSql) {
-      request.mockResolvedValueOnce(
-        Response.json({ success: true, result: [{ success: true, results: [{ attested: 0 }] }] }),
-      );
-    }
 
     await expect(
       new UserCloudflareAccountApi('account-1', 'token', request).applyD1Migrations(
         '0123456789abcdef0123456789abcdef',
         [{ name: '0001_user_workspace.sql', sql: 'CREATE TABLE chats (id TEXT PRIMARY KEY)' }],
-        attestationSql ? { legacyReceiptAttestations: { '0001_user_workspace.sql': attestationSql } } : {},
       ),
-    ).rejects.toThrow(attestationSql ? 'schema attestation failed' : 'receipt lacks a digest');
+    ).rejects.toThrow('receipt lacks a digest');
+    expect(request).toHaveBeenCalledTimes(3);
     expect(request.mock.calls.map((call) => String(call[1]?.body)).join('\n')).not.toContain(
       'UPDATE ghostbuild_runtime_migrations',
     );
-  });
-
-  test('trusts a user-authored pre-digest receipt once, then records its digest', async () => {
-    const sql = 'ALTER TABLE notes ADD COLUMN archived INTEGER';
-    const digest = await textDigest(sql);
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
-      .mockResolvedValueOnce(
-        Response.json({ success: true, result: [{ success: true, results: [{ name: 'digest' }] }] }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: [{ success: true, results: [{ name: '0002_archive.sql', digest: null }] }],
-        }),
-      )
-      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: [{ success: true, results: [{ name: '0002_archive.sql', digest }] }],
-        }),
-      );
-
-    await expect(
-      new UserCloudflareAccountApi('account-1', 'token', request).applyD1Migrations(
-        '0123456789abcdef0123456789abcdef',
-        [{ name: '0002_archive.sql', sql }],
-        { trustLegacyReceiptsWithoutDigest: true },
-      ),
-    ).resolves.toBeUndefined();
-    expect(request).toHaveBeenCalledTimes(5);
   });
 
   test('replaces runtime schedules with exactly one deterministic GC trigger', async () => {
@@ -711,6 +668,7 @@ describe('UserCloudflareAccountApi', () => {
         d1DatabaseId: '0123456789abcdef0123456789abcdef',
         agentSecurityD1DatabaseId: 'abcdef0123456789abcdef0123456789',
         r2BucketName: 'ghostbuild-storage',
+        kvNamespaceId: '0123456789abcdef0123456789abcdef',
         securityBaselineVersion: '24',
         securityBoundarySha256: 'b'.repeat(64),
         templateSourceSha256: 'c'.repeat(64),
@@ -741,6 +699,13 @@ describe('UserCloudflareAccountApi', () => {
       main_module: 'index.js',
       assets: { jwt: 'asset-completion-jwt' },
       compatibility_date: '2026-07-21',
+      bindings: expect.arrayContaining([
+        {
+          type: 'kv_namespace',
+          name: 'APP_CACHE',
+          namespace_id: '0123456789abcdef0123456789abcdef',
+        },
+      ]),
     });
     expect(JSON.stringify(metadata)).not.toMatch(/oauth-token|CLOUDFLARE_API_TOKEN|apiToken/);
     expect(workerForm.get('index.js')).toBeInstanceOf(Blob);

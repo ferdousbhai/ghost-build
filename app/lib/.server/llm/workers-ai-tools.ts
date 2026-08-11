@@ -6,7 +6,7 @@ import {
 } from 'ghostbuild-agent/cloudflare-computer';
 import { createAITools } from '@cloudflare/computer/tools';
 import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
-import { isVirtualDocPath, readVirtualDoc } from 'ghostbuild-agent/virtual-docs';
+import { isVirtualDocPath, readVirtualDoc, type VirtualDocOverrides } from 'ghostbuild-agent/virtual-docs';
 import {
   applyLineEdits,
   lineAnchoredRead,
@@ -27,6 +27,7 @@ type ToolSet = Record<string, Tool>;
 type BuilderOperationContext = {
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
+  virtualDocs?: VirtualDocOverrides;
 };
 
 type ToolResultEvent = {
@@ -176,7 +177,9 @@ function computerWorkspaceTool(
         options.abortSignal?.throwIfAborted();
 
         const virtualDoc =
-          toolName === 'read' ? readVirtualDoc(input as { path: string; offset?: number; limit?: number }) : null;
+          toolName === 'read'
+            ? readVirtualDoc(input as { path: string; offset?: number; limit?: number }, context.virtualDocs)
+            : null;
         if (virtualDoc) {
           return virtualDoc;
         }

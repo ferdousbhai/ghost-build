@@ -68,6 +68,7 @@ describe('trusted deployment config', () => {
       ].sort(),
     );
     expect(config.version_metadata.binding).toBe(DEPLOYMENT_VERSION_METADATA_BINDING);
+    expect(config.kv_namespaces).toEqual([{ binding: 'APP_CACHE', id: '1'.repeat(32) }]);
     expect(
       evaluateDeploymentSecurityAttestation({
         readback,
@@ -94,6 +95,7 @@ function input(overrides: { projectType?: 'web_app' | 'worker' } = {}) {
     agentSecurityD1DatabaseId: 'agent-security-d1-id',
     agentSecurityD1DatabaseName: 'ghostbuild-deployment-1-agent-security',
     r2BucketName: 'ghostbuild-deployment-1-storage',
+    kvNamespaceId: '1'.repeat(32),
     securityBaselineVersion: String(DEPLOYMENT_SECURITY_BASELINE_VERSION),
     securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
     templateSourceSha256: TEMPLATE_SOURCE_SHA256,

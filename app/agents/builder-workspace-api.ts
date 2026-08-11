@@ -65,7 +65,7 @@ export interface ProjectWorkspaceRpc extends Rpc.DurableObjectBranded {
   }): Promise<{ sessionId: string }>;
   assertDeploymentSession(value: { sessionId: string }): Promise<BuilderWorkspaceCheckpoint>;
   prepareDeploymentArtifact(
-    value: Record<string, unknown> & { sessionId: string },
+    value: Record<string, unknown> & { sessionId: string; kvNamespaceId?: string },
   ): Promise<PreparedDeploymentArtifact>;
   finishDeploymentSession(value: {
     sessionId: string;

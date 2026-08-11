@@ -32,6 +32,7 @@ type WorkerBinding = {
   type?: string;
   text?: string;
   database_id?: string;
+  namespace_id?: string;
 };
 
 type DurableObjectNamespaceReadback = {
@@ -73,11 +74,6 @@ type CloudflareEnvelope<T> = {
 type D1QueryResult = {
   success?: boolean;
   results?: unknown[];
-};
-
-type D1MigrationOptions = {
-  legacyReceiptAttestations?: Readonly<Record<string, string>>;
-  trustLegacyReceiptsWithoutDigest?: boolean;
 };
 
 export class UserCloudflareAccountApi {
@@ -167,11 +163,7 @@ export class UserCloudflareAccountApi {
     return result as D1QueryResult[];
   }
 
-  async applyD1Migrations(
-    databaseId: string,
-    migrations: readonly { name: string; sql: string }[],
-    options: D1MigrationOptions = {},
-  ): Promise<void> {
+  async applyD1Migrations(databaseId: string, migrations: readonly { name: string; sql: string }[]): Promise<void> {
     await this.executeD1(
       databaseId,
       `CREATE TABLE IF NOT EXISTS ghostbuild_runtime_migrations (
@@ -199,14 +191,7 @@ export class UserCloudflareAccountApi {
         throw new CloudflareAccountApiError(`User-runtime D1 migration digest mismatch: ${migration.name}`);
       }
       if (receipt) {
-        await this.attestAndUpgradeLegacyD1MigrationReceipt(
-          databaseId,
-          migration.name,
-          digest,
-          options.legacyReceiptAttestations?.[migration.name],
-          options.trustLegacyReceiptsWithoutDigest === true,
-        );
-        continue;
+        throw new CloudflareAccountApiError(`User-runtime D1 migration receipt lacks a digest: ${migration.name}`);
       }
       try {
         await this.executeD1Batch(databaseId, [
@@ -243,49 +228,6 @@ export class UserCloudflareAccountApi {
       return;
     }
     await this.executeD1(databaseId, 'ALTER TABLE ghostbuild_runtime_migrations ADD COLUMN digest TEXT');
-  }
-
-  private async attestAndUpgradeLegacyD1MigrationReceipt(
-    databaseId: string,
-    name: string,
-    digest: string,
-    attestationSql: string | undefined,
-    trustWithoutAttestation: boolean,
-  ): Promise<void> {
-    if (!attestationSql?.trim() && !trustWithoutAttestation) {
-      throw new CloudflareAccountApiError(`User-runtime D1 migration receipt lacks a digest: ${name}`);
-    }
-    if (attestationSql?.trim()) {
-      const attestation = await this.executeD1(databaseId, attestationSql);
-      if (!d1ResultsContain(attestation, (row) => row.attested === 1)) {
-        throw new CloudflareAccountApiError(`User-runtime D1 migration schema attestation failed: ${name}`);
-      }
-    }
-    try {
-      await this.executeD1(
-        databaseId,
-        'UPDATE ghostbuild_runtime_migrations SET digest = ? WHERE name = ? AND digest IS NULL',
-        [digest, name],
-      );
-    } catch (error) {
-      const committed = await this.executeD1(
-        databaseId,
-        'SELECT name, digest FROM ghostbuild_runtime_migrations WHERE name = ?',
-        [name],
-      ).catch(() => []);
-      if (d1MigrationReceipt(committed, name)?.digest === digest) {
-        return;
-      }
-      throw error;
-    }
-    const readback = await this.executeD1(
-      databaseId,
-      'SELECT name, digest FROM ghostbuild_runtime_migrations WHERE name = ?',
-      [name],
-    );
-    if (d1MigrationReceipt(readback, name)?.digest !== digest) {
-      throw new CloudflareAccountApiError(`User-runtime D1 migration receipt upgrade failed: ${name}`);
-    }
   }
 
   async ensureD1ForPlan(
@@ -347,6 +289,55 @@ export class UserCloudflareAccountApi {
     }
   }
 
+  async ensureKvForPlan(plan: DeploymentPlan): Promise<{ id: string; name: string }> {
+    const resourceName = requirePlanResourceName(plan, 'kv', 'APP_CACHE');
+    const existing = await this.findKvNamespace(resourceName);
+    if (existing) {
+      return existing;
+    }
+    try {
+      const created = await this.call<{ id?: string; title?: string }>('/storage/kv/namespaces', {
+        method: 'POST',
+        body: JSON.stringify({ title: resourceName }),
+      });
+      if (!created.id || !/^[a-f0-9]{32}$/.test(created.id) || created.title !== resourceName) {
+        throw new CloudflareAccountApiError('Cloudflare returned an invalid KV namespace.');
+      }
+      return { id: created.id, name: resourceName };
+    } catch (error) {
+      if (!(error instanceof CloudflareAccountApiError)) {
+        throw error;
+      }
+      const raced = await this.findKvNamespace(resourceName);
+      if (raced) {
+        return raced;
+      }
+      throw error;
+    }
+  }
+
+  private async findKvNamespace(resourceName: string): Promise<{ id: string; name: string } | null> {
+    requireCloudflareResourceName(resourceName);
+    const namespaces = await this.call<unknown>('/storage/kv/namespaces?per_page=1000', { method: 'GET' });
+    if (!Array.isArray(namespaces)) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid KV namespaces.');
+    }
+    const matches = namespaces.filter(
+      (value) => isRecord(value) && value.title === resourceName && typeof value.id === 'string',
+    );
+    if (matches.length > 1) {
+      throw new CloudflareAccountApiError('Cloudflare returned ambiguous KV namespaces.');
+    }
+    const id = matches[0]?.id;
+    if (id === undefined) {
+      return null;
+    }
+    if (typeof id !== 'string' || !/^[a-f0-9]{32}$/.test(id)) {
+      throw new CloudflareAccountApiError('Cloudflare returned an invalid KV namespace.');
+    }
+    return { id, name: resourceName };
+  }
+
   /** Upload an immutable, server-owned Worker version and promote exactly it to production. */
   async deployManagedWorker(args: {
     workerName: string;
@@ -360,6 +351,7 @@ export class UserCloudflareAccountApi {
     d1DatabaseId?: string;
     agentSecurityD1DatabaseId?: string;
     r2BucketName?: string;
+    kvNamespaceId?: string;
     securityBaselineVersion: string;
     securityBoundarySha256: string;
     templateSourceSha256: string;
@@ -370,6 +362,7 @@ export class UserCloudflareAccountApi {
       args.mainModule !== expectedMain ||
       !/^[a-f0-9]{64}$/.test(args.sourceSha256) ||
       args.modules.filter((module) => module.path === expectedMain).length !== 1 ||
+      (args.kvNamespaceId !== undefined && !/^[a-f0-9]{32}$/.test(args.kvNamespaceId)) ||
       (args.projectType === 'worker' && args.assets.length !== 0)
     ) {
       throw new CloudflareAccountApiError('Managed Worker deployment artifact is invalid.');
@@ -388,6 +381,7 @@ export class UserCloudflareAccountApi {
         ? [{ type: 'd1', name: 'AGENT_SECURITY_DB', id: args.agentSecurityD1DatabaseId }]
         : []),
       ...(args.r2BucketName ? [{ type: 'r2_bucket', name: 'APP_STORAGE', bucket_name: args.r2BucketName }] : []),
+      ...(args.kvNamespaceId ? [{ type: 'kv_namespace', name: 'APP_CACHE', namespace_id: args.kvNamespaceId }] : []),
       ...(args.appAgent ? [{ type: 'durable_object_namespace', name: 'AppAgent', class_name: 'AppAgent' }] : []),
     ];
     const metadata = {

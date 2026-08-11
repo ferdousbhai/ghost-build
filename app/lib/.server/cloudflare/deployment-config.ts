@@ -38,6 +38,7 @@ type TrustedDeploymentConfig = {
     migrations_dir: string;
   }>;
   r2_buckets?: Array<{ binding: 'APP_STORAGE'; bucket_name: string }>;
+  kv_namespaces?: Array<{ binding: 'APP_CACHE'; id: string }>;
   durable_objects?: { bindings: Array<{ name: 'AppAgent'; class_name: 'AppAgent' }> };
   exports?: { AppAgent: typeof APP_AGENT_DECLARATIVE_EXPORT };
   triggers?: { crons: Array<typeof DEPLOYMENT_SECURITY_CLEANUP_CRON> };
@@ -100,12 +101,23 @@ export function createTrustedDeploymentConfig(args: DeploymentConfigInput): Trus
       { binding: 'APP_STORAGE', bucket_name: requireCloudflareName(args.r2BucketName, 'r2BucketName') },
     ];
   }
+  if (typeof args.kvNamespaceId === 'string') {
+    config.kv_namespaces = [{ binding: 'APP_CACHE', id: requireHexId(args.kvNamespaceId, 'kvNamespaceId') }];
+  }
   if (args.appAgent === true) {
     config.durable_objects = { bindings: [{ name: 'AppAgent', class_name: 'AppAgent' }] };
     config.exports = { AppAgent: APP_AGENT_DECLARATIVE_EXPORT };
     config.triggers = { crons: [DEPLOYMENT_SECURITY_CLEANUP_CRON] };
   }
   return config;
+}
+
+function requireHexId(value: unknown, name: string): string {
+  const result = requireString(value, name, 64);
+  if (!/^[a-f0-9]{32}$/.test(result)) {
+    throw new SyntaxError(`Invalid ${name}.`);
+  }
+  return result;
 }
 
 function requireString(value: unknown, name: string, maxLength: number): string {

@@ -34,6 +34,7 @@ export function evaluateDeploymentSecurityAttestation(args: {
   expectedSecurityBaselineVersion: number;
   expectedSecurityBoundarySha256: string;
   expectedAgentSecurityD1DatabaseId?: string;
+  expectedKvNamespaceId?: string;
   requireExpectedAgentSecurityD1Identity?: boolean;
   requiresAgentCleanup: boolean;
   expectedBindings?: ReadonlyArray<{ name: string; type: string }>;
@@ -61,6 +62,12 @@ export function evaluateDeploymentSecurityAttestation(args: {
       agentSecurityBinding.database_id.length > 0 &&
       (args.expectedAgentSecurityD1DatabaseId === undefined ||
         agentSecurityBinding.database_id === args.expectedAgentSecurityD1DatabaseId));
+  const kvBindings = args.readback.bindings.filter((binding) => binding.name === 'APP_CACHE');
+  const hasExpectedKvNamespace =
+    args.expectedKvNamespaceId === undefined ||
+    (kvBindings.length === 1 &&
+      kvBindings[0]?.type === 'kv_namespace' &&
+      kvBindings[0].namespace_id === args.expectedKvNamespaceId);
   const current =
     observedTemplateSourceSha256 === args.expectedTemplateSourceSha256 &&
     observedSecurityBaselineVersion === args.expectedSecurityBaselineVersion &&
@@ -68,6 +75,7 @@ export function evaluateDeploymentSecurityAttestation(args: {
     hasVersionMetadata &&
     hasCleanup &&
     hasAgentSecurityDb &&
+    hasExpectedKvNamespace &&
     (!args.expectedBindings || exactBindingInventory(args.readback.bindings, args.expectedBindings)) &&
     (args.expectedCompatibilityDate === undefined ||
       args.readback.compatibilityDate === args.expectedCompatibilityDate) &&
@@ -96,6 +104,7 @@ export async function attestManagedDeploymentSecurity(args: {
   accountApi: Pick<UserCloudflareAccountApi, 'readActiveWorkerDeployment'>;
   expectedPublishedVersionId: string;
   expectedAgentSecurityD1DatabaseId?: string;
+  expectedKvNamespaceId?: string;
   attempts?: number;
   retryDelay?: (milliseconds: number) => Promise<void>;
 }): Promise<DeploymentSecurityAttestation> {
@@ -104,6 +113,11 @@ export async function attestManagedDeploymentSecurity(args: {
   if (requiresAgentSecurityDb && !args.expectedAgentSecurityD1DatabaseId) {
     throw new DeploymentSecurityAttestationError(
       'Published AppAgent Worker is missing its provisioned agent security D1 identity.',
+    );
+  }
+  if (profile.bindings.kv && !args.expectedKvNamespaceId) {
+    throw new DeploymentSecurityAttestationError(
+      'Published Worker with APP_CACHE is missing its provisioned KV namespace identity.',
     );
   }
   const attempts = args.attempts ?? MANAGED_ATTESTATION_ATTEMPTS;
@@ -120,6 +134,7 @@ export async function attestManagedDeploymentSecurity(args: {
         expectedSecurityBoundarySha256: args.deployment.plan.securityBoundarySha256,
         expectedWorkerVersionId: args.expectedPublishedVersionId,
         expectedAgentSecurityD1DatabaseId: args.expectedAgentSecurityD1DatabaseId,
+        expectedKvNamespaceId: args.expectedKvNamespaceId,
         requireExpectedAgentSecurityD1Identity: requiresAgentSecurityDb,
         requiresAgentCleanup: requiresAgentSecurityDb,
         expectedBindings: expectedManagedBindings(profile.bindings),
@@ -144,6 +159,7 @@ function expectedManagedBindings(bindings: {
   ai: boolean;
   d1: boolean;
   r2: boolean;
+  kv: boolean;
   appAgent: boolean;
 }): Array<{ name: string; type: string }> {
   return [
@@ -155,6 +171,7 @@ function expectedManagedBindings(bindings: {
     ...(bindings.d1 ? [{ name: 'DB', type: 'd1' }] : []),
     ...(bindings.appAgent ? [{ name: 'AGENT_SECURITY_DB', type: 'd1' }] : []),
     ...(bindings.r2 ? [{ name: 'APP_STORAGE', type: 'r2_bucket' }] : []),
+    ...(bindings.kv ? [{ name: 'APP_CACHE', type: 'kv_namespace' }] : []),
     ...(bindings.appAgent ? [{ name: 'AppAgent', type: 'durable_object_namespace' }] : []),
   ];
 }

@@ -5,7 +5,7 @@ describe('generated application binding boundary', () => {
   test('exposes only application storage and never the protected agent security database', () => {
     const source = readFileSync('template/src/app-bindings.ts', 'utf8');
 
-    expect(source).toContain('Pick<Env, "DB" | "APP_STORAGE">');
+    expect(source).toContain('Pick<Env, "DB" | "APP_STORAGE" | "APP_CACHE">');
     expect(source).not.toContain('AGENT_SECURITY_DB');
   });
 

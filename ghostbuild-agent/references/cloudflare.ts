@@ -9,8 +9,8 @@ Retrieval-first rule:
 - When docs and local snippets disagree, trust the current docs.
 
 Ghostbuild managed deployment boundary:
-- Production provisioning, publishing, and readback attestation currently support only Workers AI as AI, D1 as DB,
-  R2 as APP_STORAGE, and the protected AppAgent plus AGENT_SECURITY_DB.
+- Production provisioning, publishing, and readback attestation support Workers AI as AI, D1 as DB, R2 as APP_STORAGE,
+  KV as APP_CACHE, and the protected AppAgent plus AGENT_SECURITY_DB.
 - Other Cloudflare products may be valid platform choices, but do not claim managed deployment support or add their
   Wrangler bindings. The deployment planner rejects unsupported capabilities instead of silently dropping them.
 
@@ -33,6 +33,12 @@ Decision guide:
 - Do not provision a product or introduce a framework merely because it exists in the starter template.
 `;
 
+export const cloudflareWeekly = `
+Cloudflare weekly review:
+- No owner-approved weekly guidance update is currently published.
+- Continue using the bundled Cloudflare guidance and verify fast-moving APIs against current official documentation.
+`;
+
 export const cloudflareStorage = `
 Cloudflare storage:
 - Use D1 for relational data.
@@ -41,11 +47,11 @@ Cloudflare storage:
 - Use an Agent Fiber for async work owned by an Agent.
 - Use Queues for application-owned, message-driven async jobs.
 - Use Vectorize for vector search.
-- In generated TanStack routes and server functions, call getAppBindings() from "@/app-bindings" for application DB/R2 access.
+- In generated TanStack routes and server functions, call getAppBindings() from "@/app-bindings" for application DB/R2/KV access.
 - Do not import "cloudflare:workers" in generated source. AI, AppAgent, and AGENT_SECURITY_DB bindings are intentionally
   unavailable to generated routes.
-- Ghostbuild managed production currently provisions only DB and APP_STORAGE. KV, Queues, Vectorize, Hyperdrive,
-  Workflows, and other resource bindings require a future end-to-end capability addition.
+- Ghostbuild managed production provisions DB, APP_STORAGE, and APP_CACHE. Queues, Vectorize, Hyperdrive, Workflows,
+  and other resource bindings require a future end-to-end capability addition.
 `;
 
 export const workersAi = `

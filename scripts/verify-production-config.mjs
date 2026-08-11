@@ -28,9 +28,10 @@ export {
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REQUIRED_COMPATIBILITY_DATE = '2026-07-21';
 const REQUIRED_OAUTH_SCOPES =
-  'account-settings.read user-details.read workers-scripts.write containers.write d1.write workers-r2.write ai.read';
+  'account-settings.read user-details.read workers-scripts.write containers.write d1.write workers-r2.write workers-kv-storage.write ai.read';
 const REQUIRED_SECRET_NAMES = ['CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY', 'CLOUDFLARE_OAUTH_CLIENT_SECRET'];
 const ACCOUNT_SECRET_STORE_ID = 'a436a6cefedc4acd8bb920cdbc202c1c';
+const SYSTEM_DOCS_KV_ID = '6901be08c9e14e40b599be00e49df484';
 const PLACEHOLDER_D1_ID = '00000000-0000-0000-0000-000000000000';
 const workerTargets = [
   {
@@ -132,6 +133,16 @@ export function findWorkerOpsAuthSecretErrors(config, label) {
   return errors;
 }
 
+export function findWorkerSystemDocsErrors(config, label) {
+  const errors = [];
+  const binding = findBinding(config?.kv_namespaces, 'SYSTEM_DOCS');
+  if (!binding) {
+    return [`${label} must bind the reviewed system-document namespace as SYSTEM_DOCS.`];
+  }
+  requireEqual(errors, `${label} SYSTEM_DOCS namespace id`, binding.id, SYSTEM_DOCS_KV_ID);
+  return errors;
+}
+
 export function findDurableObjectLifecycleErrors(config, label, classNames) {
   const errors = [];
   if (Object.hasOwn(config ?? {}, 'migrations')) {
@@ -173,6 +184,7 @@ function verifyWorker(errors, config, target) {
     ...findWorkerVariableSourceErrors(config, label),
     ...findWorkerGcScheduleErrors(config, label),
     ...findWorkerOpsAuthSecretErrors(config, label),
+    ...findWorkerSystemDocsErrors(config, label),
     ...findDurableObjectLifecycleErrors(config, label, target.durableObjects),
     ...findWorkerRuntimeSecretErrors(config, label, 'configure values as Cloudflare bindings'),
   );

@@ -23,6 +23,7 @@ import { compactContext } from '~/lib/.server/llm/context-compaction';
 import { summarizeBuilderContext } from '~/lib/.server/llm/workers-ai-text';
 import { chatTurnContextSchema, type ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
+import { loadSystemVirtualDocs } from '~/lib/.server/cloudflare/system-virtual-docs';
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from 'ai';
 import { latestPendingDeploymentPlan } from './deployment-continuation';
 import { prepareDeploymentPlanForBuilder, validatedDeploymentCheckpoint } from './builder-deployment-command';
@@ -369,6 +370,10 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       }
       this.stashTurn(turn);
       const compactionPending = await this.hasPendingContextCompaction();
+      const virtualDocs = await loadSystemVirtualDocs(this.env.SYSTEM_DOCS).catch(() => {
+        console.error('Published system documentation is unavailable; using the bundled fallback');
+        return {};
+      });
       return await createChatResponseFromBody({
         abortSignal: options?.abortSignal,
         firstUserMessage,
@@ -378,6 +383,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         workspace: this.workspace,
         onValidationStage: (toolCallId, stage) => this.setValidationProgress(toolCallId, stage),
         runWithKeepAlive: (operation) => this.keepAliveWhile(operation),
+        virtualDocs,
         compaction: {
           current: this.contextCompaction.getCompaction(),
           pending: compactionPending,

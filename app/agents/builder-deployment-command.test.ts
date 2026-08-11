@@ -86,7 +86,7 @@ function workspaceStub() {
     prepareDeployment: vi.fn(async () => ({
       workspaceRevision: 7,
       revision: 'a'.repeat(64),
-      project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, appAgent: true } },
+      project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, kv: true, appAgent: true } },
     })),
   };
 }

@@ -30,7 +30,7 @@ import {
   CLOUDFLARE_AUTHORIZATION_ERROR_VALUE,
 } from '~/lib/cloudflare/authorization-recovery';
 
-const requestedCapabilities = ['workers', 'containers', 'd1', 'r2', 'durable_objects', 'workers_ai'] as const;
+const requestedCapabilities = ['workers', 'containers', 'd1', 'r2', 'kv', 'durable_objects', 'workers_ai'] as const;
 export const CLOUDFLARE_CONNECTION_CALLBACK_METHOD = 'GET' as const;
 const OAUTH_STATE_COOKIE = 'ghostbuild_oauth_state';
 const OAUTH_STATE_COOKIE_MAX_AGE_SECONDS = 10 * 60;

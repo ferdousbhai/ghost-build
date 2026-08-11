@@ -8,6 +8,7 @@ import {
   findWorkerOAuthStartRateLimitErrors,
   findWorkerGcScheduleErrors,
   findWorkerOpsAuthSecretErrors,
+  findWorkerSystemDocsErrors,
   findWorkerRoutingErrors,
   findWorkerRuntimeSecretErrors,
   findWorkerVariableSourceErrors,
@@ -122,6 +123,20 @@ describe('findWorkerOpsAuthSecretErrors', () => {
     ).toEqual([]);
     expect(findWorkerOpsAuthSecretErrors({}, 'wrangler.jsonc')).toEqual([
       'wrangler.jsonc must bind the shared private-operations authentication secret as OPS_AUTH_SECRET.',
+    ]);
+  });
+});
+
+describe('findWorkerSystemDocsErrors', () => {
+  it('pins the reviewed system-document KV namespace', () => {
+    expect(
+      findWorkerSystemDocsErrors(
+        { kv_namespaces: [{ binding: 'SYSTEM_DOCS', id: '6901be08c9e14e40b599be00e49df484' }] },
+        'wrangler.jsonc',
+      ),
+    ).toEqual([]);
+    expect(findWorkerSystemDocsErrors({}, 'wrangler.jsonc')).toEqual([
+      'wrangler.jsonc must bind the reviewed system-document namespace as SYSTEM_DOCS.',
     ]);
   });
 });

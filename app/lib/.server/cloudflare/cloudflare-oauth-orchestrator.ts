@@ -22,6 +22,7 @@ export const REQUIRED_CLOUDFLARE_OAUTH_SCOPES = [
   'containers.write',
   'd1.write',
   'workers-r2.write',
+  'workers-kv-storage.write',
   'ai.read',
 ] as const;
 

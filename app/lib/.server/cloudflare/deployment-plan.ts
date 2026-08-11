@@ -7,9 +7,9 @@ import {
   TEMPLATE_SOURCE_SHA256,
 } from './deployment-security-baseline';
 
-const DEPLOYMENT_PLAN_VERSION = 2 as const;
+const DEPLOYMENT_PLAN_VERSION = 3 as const;
 
-export type DeploymentResourceType = 'worker' | 'd1' | 'r2' | 'durable_object' | 'workers_ai';
+export type DeploymentResourceType = 'worker' | 'd1' | 'r2' | 'kv' | 'durable_object' | 'workers_ai';
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const deploymentProjectProfileSchema: z.ZodType<DeploymentProjectProfile> = z.strictObject({
@@ -18,11 +18,12 @@ const deploymentProjectProfileSchema: z.ZodType<DeploymentProjectProfile> = z.st
     ai: z.boolean(),
     d1: z.boolean(),
     r2: z.boolean(),
+    kv: z.boolean(),
     appAgent: z.boolean(),
   }),
 });
 const deploymentPlanResourceSchema = z.strictObject({
-  type: z.enum(['worker', 'd1', 'r2', 'durable_object', 'workers_ai']),
+  type: z.enum(['worker', 'd1', 'r2', 'kv', 'durable_object', 'workers_ai']),
   logicalName: z.string().min(1),
   proposedName: z.string().min(1),
 });
@@ -81,6 +82,9 @@ export async function buildDeploymentPlanFromSource(args: {
         : []),
       ...(project.bindings.r2
         ? [{ type: 'r2' as const, logicalName: 'APP_STORAGE', proposedName: `${baseName}-storage` }]
+        : []),
+      ...(project.bindings.kv
+        ? [{ type: 'kv' as const, logicalName: 'APP_CACHE', proposedName: `${baseName}-cache` }]
         : []),
       ...(project.bindings.appAgent
         ? [{ type: 'durable_object' as const, logicalName: 'AppAgent', proposedName: 'AppAgent' }]

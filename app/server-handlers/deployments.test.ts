@@ -24,12 +24,12 @@ import {
 } from '~/lib/.server/cloudflare/deployment-security-baseline';
 import { createOrReplayDeploymentPlanForUser, userRuntimeDeploymentAction } from './deployments';
 
-const project = { type: 'web_app' as const, bindings: { ai: true, d1: true, r2: true, appAgent: true } };
+const project = { type: 'web_app' as const, bindings: { ai: true, d1: true, r2: true, kv: true, appAgent: true } };
 const revision = 'a'.repeat(64);
 
 function deployment(status = 'awaiting_approval') {
   const plan = {
-    version: 2 as const,
+    version: 3 as const,
     deploymentId: 'deployment-1',
     sourceSha256: revision,
     templateSourceSha256: TEMPLATE_SOURCE_SHA256,
@@ -50,6 +50,7 @@ function deployment(status = 'awaiting_approval') {
         proposedName: 'ghostbuild-deployment-1-agent-security',
       },
       { type: 'r2' as const, logicalName: 'APP_STORAGE', proposedName: 'ghostbuild-deployment-1-storage' },
+      { type: 'kv' as const, logicalName: 'APP_CACHE', proposedName: 'ghostbuild-deployment-1-cache' },
       { type: 'durable_object' as const, logicalName: 'AppAgent', proposedName: 'AppAgent' },
       { type: 'workers_ai' as const, logicalName: 'AI', proposedName: 'AI' },
     ],

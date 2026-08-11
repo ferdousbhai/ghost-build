@@ -16,13 +16,13 @@ import { DEPLOYMENT_SECURITY_BASELINE_VERSION } from './deployment-security-base
 const sourceSha256 = 'a'.repeat(64);
 const planDigest = 'b'.repeat(64);
 const plan: DeploymentPlan = {
-  version: 2,
+  version: 3,
   deploymentId: 'deployment-1',
   sourceSha256,
   templateSourceSha256: 'c'.repeat(64),
   securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
   securityBoundarySha256: 'd'.repeat(64),
-  project: { type: 'web_app', bindings: { ai: false, d1: false, r2: false, appAgent: false } },
+  project: { type: 'web_app', bindings: { ai: false, d1: false, r2: false, kv: false, appAgent: false } },
   billing: {
     infrastructure: 'user_cloudflare_account',
     workersAi: 'user_cloudflare_account',

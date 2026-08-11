@@ -17,6 +17,16 @@ describe('virtual Ghostbuild documentation', () => {
     expect(result?.content[0].text).toContain('Use offset=6 to continue');
   });
 
+  it('uses a validated runtime override without changing the virtual path', () => {
+    const result = readVirtualDoc(
+      { path: `${VIRTUAL_DOCS_ROOT}/cloudflareWeekly.md` },
+      { cloudflareWeekly: 'Owner-approved weekly guidance.' },
+    );
+
+    expect(result?.content[0].text).toBe('Owner-approved weekly guidance.');
+    expect(result?.details.path).toBe(`${VIRTUAL_DOCS_ROOT}/cloudflareWeekly.md`);
+  });
+
   it('returns null for project files and rejects unknown overlay paths', () => {
     expect(readVirtualDoc({ path: '/home/project/src/app.ts' })).toBeNull();
     expect(() => readVirtualDoc({ path: `${VIRTUAL_DOCS_ROOT}/missing.md` })).toThrow(`${VIRTUAL_DOCS_ROOT}/index.md`);
