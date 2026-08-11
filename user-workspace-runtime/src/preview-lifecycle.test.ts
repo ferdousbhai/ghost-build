@@ -145,10 +145,13 @@ describe('ProjectWorkspace preview lifecycle', () => {
 
   it('applies the isolated local D1 schema before building Preview', () => {
     const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
-    const create = source.slice(source.indexOf('async createPreview('), source.indexOf('async stopPreview('));
-    expect(create).toContain('pnpm exec wrangler d1 migrations apply DB --local --config wrangler.preview.jsonc');
-    expect(create.indexOf('d1 migrations apply DB --local')).toBeLessThan(
-      create.indexOf('pnpm run build:isolated-preview'),
+    const commands = source.slice(
+      source.indexOf('const PREVIEW_PREPARATION_COMMANDS'),
+      source.indexOf('const COMPUTERD_PROCESS_ROLE'),
+    );
+    expect(commands).toContain('pnpm exec wrangler d1 migrations apply DB --local --config wrangler.preview.jsonc');
+    expect(commands.indexOf('d1 migrations apply DB --local')).toBeLessThan(
+      commands.indexOf('pnpm run build:isolated-preview'),
     );
   });
 
@@ -157,13 +160,13 @@ describe('ProjectWorkspace preview lifecycle', () => {
     const create = source.slice(source.indexOf('async createPreview('), source.indexOf('async stopPreview('));
     const schedule = create.indexOf("await this.schedule(new Date(cleanupDeadline), 'expirePreview'");
     const persist = create.indexOf('this.upsertPendingPreview(candidate, cleanupDeadline)');
-    const isolate = create.indexOf('createIsolatedProjectCommand');
+    const prepare = create.indexOf('this.preparePreviewSnapshot({');
     const launch = create.indexOf('const previewProcess = await this.sandboxProcesses.exec(');
 
     expect(schedule).toBeGreaterThan(0);
     expect(persist).toBeGreaterThan(0);
     expect(persist).toBeLessThan(schedule);
-    expect(schedule).toBeLessThan(isolate);
+    expect(schedule).toBeLessThan(prepare);
     expect(persist).toBeLessThan(launch);
     expect(create).toContain('timeout: PREVIEW_TTL_MS');
     expect(create).toContain('candidate.exec_id = previewProcess.id');

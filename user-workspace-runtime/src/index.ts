@@ -123,6 +123,19 @@ const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.
 const INSTALL_COMMAND =
   'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/';
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
+const PREPARED_VALIDATION_ROOT = `${ISOLATED_PROJECT_ROOT}/validated-preview`;
+const REVISION_CHECK_COMMANDS = [
+  { command: 'pnpm run typecheck', timeoutMs: 5 * 60_000 },
+  { command: 'pnpm run verify:stack', timeoutMs: 5 * 60_000 },
+  { command: 'pnpm run lint', timeoutMs: 5 * 60_000 },
+] as const;
+const PREVIEW_PREPARATION_COMMANDS = [
+  {
+    command: 'pnpm exec wrangler d1 migrations apply DB --local --config wrangler.preview.jsonc',
+    timeoutMs: 60_000,
+  },
+  { command: 'pnpm run build:isolated-preview', timeoutMs: 5 * 60_000 },
+] as const;
 const COMPUTERD_PROCESS_ROLE = 'computerd';
 const COMPUTERD_ENV = { PORT: '8080', MOUNT_POINT: '/home', FUSE_MOUNT: 'auto' } as const;
 const TRANSIENT_COMMAND_PROCESS_ROLE = 'transient-command';
@@ -186,6 +199,12 @@ type PreviewResultRow = {
   workspace_revision: number;
   ready_at: number;
   expires_at: number;
+};
+
+type PreparedValidationRow = {
+  revision: string;
+  workspace_revision: number;
+  snapshot_root: string;
 };
 
 type DeploymentSessionRow = {
@@ -437,6 +456,14 @@ export class ProjectWorkspace extends ComputerSandboxBase {
          workspace_revision INTEGER NOT NULL,
          validated_at INTEGER NOT NULL
       )`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ghostbuild_prepared_validation (
+         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+         revision TEXT NOT NULL,
+         workspace_revision INTEGER NOT NULL,
+         snapshot_root TEXT NOT NULL
+       )`,
     );
     this.ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS ghostbuild_workspace_identity (
@@ -1303,38 +1330,29 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         const before = await this.checkpoint();
         cancellation.requireActive();
         const startedAt = Date.now();
-        const isolatedRoot = `${ISOLATED_PROJECT_ROOT}/validation-${crypto.randomUUID()}`;
+        const isolatedRoot = PREPARED_VALIDATION_ROOT;
+        let preparedForPreview = false;
+        let cleanupAllowed = true;
         try {
-          let cleanupAllowed = true;
-          try {
-            await this.pushDurableProjectToContainer();
+          await this.discardPreparedValidationSnapshot();
+          await this.pushDurableProjectToContainer();
+          cancellation.requireActive();
+          await this.runValidationCommand(
+            cancellation,
+            PROJECT_ROOT,
+            createIsolatedProjectCommand({ projectRoot: PROJECT_ROOT, isolatedRoot, quote: shellQuote }),
+            2 * 60_000,
+          );
+          cancellation.requireActive();
+          if ((await this.checkpoint()).revision !== before.revision) {
+            throw new Error('The project changed while validation was being isolated. Validate the new revision.');
+          }
+          cancellation.requireActive();
+          await this.runValidationCommand(cancellation, isolatedRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
+          cancellation.requireActive();
+          for (const { command, timeoutMs } of [...REVISION_CHECK_COMMANDS, ...PREVIEW_PREPARATION_COMMANDS]) {
+            await this.runValidationCommand(cancellation, isolatedRoot, command, timeoutMs);
             cancellation.requireActive();
-            await this.runValidationCommand(
-              cancellation,
-              PROJECT_ROOT,
-              createIsolatedProjectCommand({ projectRoot: PROJECT_ROOT, isolatedRoot, quote: shellQuote }),
-              2 * 60_000,
-            );
-            cancellation.requireActive();
-            if ((await this.checkpoint()).revision !== before.revision) {
-              throw new Error('The project changed while validation was being isolated. Validate the new revision.');
-            }
-            cancellation.requireActive();
-            await this.runValidationCommand(cancellation, isolatedRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
-            cancellation.requireActive();
-            for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
-              await this.runValidationCommand(cancellation, isolatedRoot, command, 5 * 60_000);
-              cancellation.requireActive();
-            }
-          } catch (error) {
-            cleanupAllowed = !(error instanceof SandboxProcessTerminationUnconfirmedError);
-            throw error;
-          } finally {
-            if (cleanupAllowed) {
-              await this.runTransientCommand(PROJECT_ROOT, `rm -rf ${shellQuote(isolatedRoot)}`, 30_000).catch(
-                () => undefined,
-              );
-            }
           }
           cancellation.requireActive();
           const after = await this.checkpoint();
@@ -1342,15 +1360,28 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           if (after.revision !== before.revision) {
             throw new Error('The project changed while validation was running. Validate the new revision.');
           }
-          this.ctx.storage.sql.exec(
-            `INSERT INTO ghostbuild_validations (revision, workspace_revision, validated_at)
-           VALUES (?, ?, ?)
-           ON CONFLICT(revision) DO UPDATE SET workspace_revision = excluded.workspace_revision,
-             validated_at = excluded.validated_at`,
-            after.revision,
-            after.workspaceRevision,
-            Date.now(),
-          );
+          this.ctx.storage.transactionSync(() => {
+            this.ctx.storage.sql.exec(
+              `INSERT INTO ghostbuild_validations (revision, workspace_revision, validated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(revision) DO UPDATE SET workspace_revision = excluded.workspace_revision,
+                 validated_at = excluded.validated_at`,
+              after.revision,
+              after.workspaceRevision,
+              Date.now(),
+            );
+            this.ctx.storage.sql.exec(
+              `INSERT INTO ghostbuild_prepared_validation (singleton, revision, workspace_revision, snapshot_root)
+               VALUES (1, ?, ?, ?)
+               ON CONFLICT(singleton) DO UPDATE SET revision = excluded.revision,
+                 workspace_revision = excluded.workspace_revision,
+                 snapshot_root = excluded.snapshot_root`,
+              after.revision,
+              after.workspaceRevision,
+              isolatedRoot,
+            );
+          });
+          preparedForPreview = true;
           return toolSuccess(`Project validation passed at durable source revision ${after.revision}.`, {
             level: 'full',
             revision: after.revision,
@@ -1361,13 +1392,15 @@ export class ProjectWorkspace extends ComputerSandboxBase {
               'dependency-installation',
               'typecheck',
               'stack-verification',
-              'build',
               'lint',
+              'preview-database',
+              'preview-build',
             ].map((name) => ({ name, status: 'passed' as const })),
             durationMs: Date.now() - startedAt,
             nextAction: 'prepare-deployment',
           });
         } catch (error) {
+          cleanupAllowed = !(error instanceof SandboxProcessTerminationUnconfirmedError);
           if (error instanceof WorkspaceSyncPendingError) {
             throw error;
           }
@@ -1377,8 +1410,14 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             workspaceRevision: before.workspaceRevision,
             currentWorkspaceRevision: this.currentRevision(),
             buildEnvironment: 'cloudflare-computer-container',
-            checks: [{ name: 'production-build', status: 'failed' as const }],
+            checks: [{ name: 'revision-finalization', status: 'failed' as const }],
           });
+        } finally {
+          if (!preparedForPreview && cleanupAllowed) {
+            await this.runTransientCommand(PROJECT_ROOT, `rm -rf ${shellQuote(isolatedRoot)}`, 30_000).catch(
+              () => undefined,
+            );
+          }
         }
       }),
     );
@@ -1586,25 +1625,12 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           this.upsertPendingPreview(candidate, cleanupDeadline);
           await this.schedule(new Date(cleanupDeadline), 'expirePreview', { previewId });
           await this.cleanupPreviewProcess(candidate);
-          await this.pushDurableProjectToContainer();
-          await this.runTransientCommand(
-            PROJECT_ROOT,
-            createIsolatedProjectCommand({
-              projectRoot: PROJECT_ROOT,
-              isolatedRoot: snapshotRoot,
-              quote: shellQuote,
-            }),
-            2 * 60_000,
-          );
-          await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
-          await this.runTransientCommand(snapshotRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
-          this.requirePreviewNotCancelled(previewId);
-          await this.runTransientCommand(
+          await this.preparePreviewSnapshot({
+            previewId,
             snapshotRoot,
-            'pnpm exec wrangler d1 migrations apply DB --local --config wrangler.preview.jsonc',
-            60_000,
-          );
-          await this.runTransientCommand(snapshotRoot, 'pnpm run build:isolated-preview', 5 * 60_000);
+            expectedWorkspaceRevision,
+            expectedSnapshotRevision,
+          });
           await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
           const expiresAt = Date.now() + PREVIEW_TTL_MS;
           await this.schedule(new Date(expiresAt), 'expirePreview', { previewId });
@@ -1818,9 +1844,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         );
         await this.assertDeploymentSession({ sessionId });
         await this.runTransientCommand(isolatedRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
-        for (const command of ['pnpm run typecheck', 'pnpm run verify:stack', 'pnpm run build', 'pnpm run lint']) {
-          await this.runTransientCommand(isolatedRoot, command, 5 * 60_000);
-        }
+        await this.runTransientCommand(isolatedRoot, 'pnpm run build', 5 * 60_000);
         const configWrite = await this.writeFile(
           wranglerConfigPath,
           JSON.stringify(
@@ -1891,6 +1915,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       await this.stopActivePreview();
       await this.withComputer((workspace) => workspace.fs.rm(PROJECT_ROOT, { recursive: true, force: true }));
       this.ctx.storage.sql.exec('DELETE FROM ghostbuild_validations');
+      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_prepared_validation');
       this.ctx.storage.sql.exec(
         `UPDATE ghostbuild_workspace_state
          SET initialized = 0, seed_id = NULL, reset_revision = ?
@@ -1908,6 +1933,55 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     }
     await this.setKeepAlive(false).catch(() => undefined);
     this.ctx.storage.sql.exec('DELETE FROM ghostbuild_active_preview WHERE singleton = 1');
+  }
+
+  private async preparePreviewSnapshot(args: {
+    previewId: string;
+    snapshotRoot: string;
+    expectedWorkspaceRevision: number;
+    expectedSnapshotRevision: string;
+  }): Promise<void> {
+    const prepared = this.preparedValidationSnapshot();
+    if (
+      prepared?.revision === args.expectedSnapshotRevision &&
+      prepared.workspace_revision === args.expectedWorkspaceRevision &&
+      prepared.snapshot_root === PREPARED_VALIDATION_ROOT &&
+      (await this.exists(PREPARED_VALIDATION_ROOT)).exists
+    ) {
+      await this.runTransientCommand(
+        '/',
+        `mkdir -p ${shellQuote(PREVIEW_SNAPSHOT_ROOT)}\nmv -- ${shellQuote(PREPARED_VALIDATION_ROOT)} ${shellQuote(args.snapshotRoot)}`,
+        2 * 60_000,
+      );
+      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_prepared_validation WHERE singleton = 1');
+      return;
+    }
+
+    await this.discardPreparedValidationSnapshot();
+    await this.pushDurableProjectToContainer();
+    await this.runTransientCommand(
+      PROJECT_ROOT,
+      createIsolatedProjectCommand({
+        projectRoot: PROJECT_ROOT,
+        isolatedRoot: args.snapshotRoot,
+        quote: shellQuote,
+      }),
+      2 * 60_000,
+    );
+    await this.assertPreviewCheckpoint(args.expectedWorkspaceRevision, args.expectedSnapshotRevision, false);
+    await this.runTransientCommand(args.snapshotRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
+    this.requirePreviewNotCancelled(args.previewId);
+    for (const { command, timeoutMs } of PREVIEW_PREPARATION_COMMANDS) {
+      await this.runTransientCommand(args.snapshotRoot, command, timeoutMs);
+      this.requirePreviewNotCancelled(args.previewId);
+    }
+  }
+
+  private async discardPreparedValidationSnapshot(): Promise<void> {
+    this.ctx.storage.sql.exec('DELETE FROM ghostbuild_prepared_validation WHERE singleton = 1');
+    await this.runTransientCommand('/', `rm -rf ${shellQuote(PREPARED_VALIDATION_ROOT)}`, 30_000).catch(
+      () => undefined,
+    );
   }
 
   private async cleanupPreviewResources(row: ActivePreviewRow): Promise<void> {
@@ -2151,6 +2225,17 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           revision,
         ),
       )?.found === 1
+    );
+  }
+
+  private preparedValidationSnapshot(): PreparedValidationRow | null {
+    return (
+      first(
+        this.ctx.storage.sql.exec<PreparedValidationRow>(
+          `SELECT revision, workspace_revision, snapshot_root
+           FROM ghostbuild_prepared_validation WHERE singleton = 1`,
+        ),
+      ) ?? null
     );
   }
 

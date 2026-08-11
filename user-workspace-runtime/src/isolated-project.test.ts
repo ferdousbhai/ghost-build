@@ -97,7 +97,7 @@ describe('isolated project command', () => {
       source.indexOf('async deleteProject('),
     );
 
-    for (const operation of [validation, preview, deployment]) {
+    for (const operation of [validation, deployment]) {
       expect(operation).toContain('createIsolatedProjectCommand');
       expect(operation).toContain('pushDurableProjectToContainer');
       expect(operation).toContain('runTransientCommand');
@@ -105,15 +105,14 @@ describe('isolated project command', () => {
       expect(operation).not.toContain('workspace.runtime.exec');
       expect(operation).not.toContain('removeDerivedFiles');
     }
+    expect(preview).toContain('this.preparePreviewSnapshot({');
+    expect(preview).not.toContain('INSTALL_COMMAND');
+    expect(preview).not.toContain('pnpm run build:isolated-preview');
     expect(source).toContain('const INSTALL_TIMEOUT_MS = 10 * 60_000;');
     expect(deployment).toContain('rebaseDeploymentConfigPaths');
     expect(deployment).toContain('collectSandboxFiles(this, artifactRoot');
     expect(deployment).toContain('collectSandboxMigrations(this, `${isolatedRoot}/migrations`)');
     expect(preview).toContain("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: '.trycloudflare.com,container'");
-    expect(preview).toContain(
-      'await this.runTransientCommand(snapshotRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);\n' +
-        '          this.requirePreviewNotCancelled(previewId);',
-    );
     expect(preview).toContain('const previewProcess = await this.sandboxProcesses.exec(');
     expect(preview).toContain('assertActive: () => this.requirePreviewNotCancelled(previewId)');
     expect(source).toContain("await this.#workspace.push('container-shell')");
@@ -127,6 +126,12 @@ describe('isolated project command', () => {
     expect(validation).toContain('this.#activeValidation.inputJson !== inputJson');
     expect(validation).toContain('cancellation.requireActive()');
     expect(validation).toContain('this.runValidationCommand(');
+    expect(validation).toContain('PREVIEW_PREPARATION_COMMANDS');
+    expect(validation).toContain('ghostbuild_prepared_validation');
+    expect(deployment).toContain("await this.runTransientCommand(isolatedRoot, 'pnpm run build', 5 * 60_000)");
+    expect(deployment).not.toContain('pnpm run typecheck');
+    expect(deployment).not.toContain('pnpm run verify:stack');
+    expect(deployment).not.toContain('pnpm run lint');
     const initialCheckpoint = validation.indexOf('const before = await this.checkpoint()');
     const durablePush = validation.indexOf('await this.pushDurableProjectToContainer()');
     expect(validation.indexOf('cancellation.requireActive()', initialCheckpoint)).toBeLessThan(durablePush);
@@ -157,6 +162,23 @@ describe('isolated project command', () => {
     expect(materialization).toContain('await this.#workspace.close()');
     expect(materialization).toContain('await this.restartComputerd(COMPUTERD_ENV)');
     expect(materialization).toContain('if (!(await this.exists(PROJECT_ROOT)).exists)');
+  });
+
+  it('reuses the validated snapshot for Preview and rebuilds only after container loss', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const prepare = source.slice(
+      source.indexOf('private async preparePreviewSnapshot('),
+      source.indexOf('private async discardPreparedValidationSnapshot('),
+    );
+    const reusable = prepare.indexOf('prepared?.revision === args.expectedSnapshotRevision');
+    const move = prepare.indexOf('mv -- ${shellQuote(PREPARED_VALIDATION_ROOT)}');
+    const fallbackInstall = prepare.indexOf('INSTALL_COMMAND, INSTALL_TIMEOUT_MS');
+
+    expect(reusable).toBeGreaterThan(0);
+    expect(move).toBeGreaterThan(reusable);
+    expect(fallbackInstall).toBeGreaterThan(move);
+    expect(prepare).toContain('PREVIEW_PREPARATION_COMMANDS');
+    expect(prepare).toContain('DELETE FROM ghostbuild_prepared_validation WHERE singleton = 1');
   });
 
   it('keeps the Computer container alive for stateful and deployment operations', () => {
