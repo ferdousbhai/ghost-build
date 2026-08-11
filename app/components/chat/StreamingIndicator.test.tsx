@@ -15,7 +15,6 @@ describe('StreamingIndicator', () => {
         buildProgress={null}
         isProjectUpdate
         submissionPending={false}
-        onStop={vi.fn()}
         resendMessage={vi.fn()}
       />,
     );

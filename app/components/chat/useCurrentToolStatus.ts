@@ -4,18 +4,21 @@ import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { makePartId, type PartId } from 'ghostbuild-agent/partId';
 import { isToolActivityStatusActive } from '~/lib/common/types';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
+import { toolProgressStore } from '~/lib/stores/tool-progress.client';
 
 type ToolActivities = ReturnType<(typeof toolActivityStore.activities)['get']>;
 
 export function useCurrentToolStatus(messages: GhostbuildMessage[]): {
   activeToolNames: string[];
   activityRevision: number;
+  progressRevision: number;
 } {
   const activities = useStore(toolActivityStore.activities);
   const activityRevision = useStore(toolActivityStore.revision);
+  const progressRevision = useStore(toolProgressStore.revision);
   return useMemo(
-    () => currentToolStatus(messages, activities, activityRevision),
-    [activities, activityRevision, messages],
+    () => ({ ...currentToolStatus(messages, activities, activityRevision), progressRevision }),
+    [activities, activityRevision, messages, progressRevision],
   );
 }
 

@@ -290,7 +290,7 @@ function isExecInput(input: unknown): input is { command: string } {
 }
 
 function isFullValidationCommand(command: string): boolean {
-  return command.trim() === 'pnpm run validate';
+  return /^pnpm\s+run\s+validate(?:\s+2>&1)?$/.test(command.trim());
 }
 
 function isPathInput(input: unknown): input is { path: string } {

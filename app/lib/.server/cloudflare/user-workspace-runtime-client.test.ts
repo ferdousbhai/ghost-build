@@ -355,6 +355,61 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     });
   });
 
+  it('drops a disconnected command stub and surfaces a retryable terminal error', async () => {
+    const encoder = new TextEncoder();
+    const disconnectedStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error('ReadableStream received over RPC disconnected prematurely.'));
+      },
+    });
+    const completedStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `${JSON.stringify({
+              type: 'result',
+              streamTruncated: false,
+              result: { exitCode: 0, stdout: 'complete\n', stderr: '' },
+            })}\n`,
+          ),
+        );
+        controller.close();
+      },
+    });
+    const staleStub = workspaceStub({
+      executeStream: vi.fn().mockResolvedValue(disconnectedStream),
+    });
+    const currentStub = workspaceStub({
+      executeStream: vi.fn().mockResolvedValue(completedStream),
+    });
+    const namespace = {
+      idFromName: vi.fn(() => ({ id: 'project-do-id' })),
+      get: vi.fn().mockReturnValueOnce(staleStub).mockReturnValue(currentStub),
+    };
+    const client = new UserWorkspaceRuntimeClient(
+      {
+        GHOSTBUILD_USER_RUNTIME: '1',
+        GHOSTBUILD_USER_ID: 'user-1',
+        PROJECT_WORKSPACE: namespace,
+      } as unknown as Env,
+      'project-1',
+      () => 'user-1',
+    );
+
+    await expect(client.executeCommand({ command: 'pnpm test' })).rejects.toThrow(
+      'The workspace command connection dropped before completion. The connection was reset; retry the command.',
+    );
+    await expect(client.executeCommand({ command: 'pnpm test' })).resolves.toEqual({
+      exitCode: 0,
+      stdout: 'complete\n',
+      stderr: '',
+    });
+
+    expect(namespace.get).toHaveBeenCalledTimes(2);
+    expect(staleStub.initializeProjectIdentity).toHaveBeenCalledOnce();
+    expect(currentStub.initializeProjectIdentity).toHaveBeenCalledOnce();
+  });
+
   it('updates its cached revision when a Computer write commits', async () => {
     const state = (revision: number) => ({
       initialized: true,

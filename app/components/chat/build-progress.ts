@@ -1,22 +1,18 @@
 import type { StreamStatus } from '~/lib/common/types';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
-export type BuildProgressPhase = 'planning' | 'creating' | 'saving' | 'validating' | 'recovering';
+export type BuildProgressPhase = 'planning' | 'creating' | 'saving' | 'running' | 'validating' | 'recovering';
 
 export type BuildProgress = {
   phase: BuildProgressPhase;
   message: string;
   delayed: boolean;
-  stalled: boolean;
 };
 
 export const BUILD_PROGRESS_DELAY_MS = 45_000;
-export const BUILD_PROGRESS_STALL_MS = 90_000;
 // Validation is one bounded Computer operation, so these windows cover the full pipeline.
 export const VALIDATION_PROGRESS_DELAY_MS = 2 * 60_000;
-export const VALIDATION_PROGRESS_STALL_MS = 6 * 60_000;
 export const RECOVERY_PROGRESS_DELAY_MS = 5 * 60_000;
-export const RECOVERY_PROGRESS_STALL_MS = 30 * 60_000;
 
 export function getBuildProgress(args: {
   streamStatus: StreamStatus;
@@ -37,26 +33,14 @@ export function getBuildProgress(args: {
       : phase === 'recovering'
         ? RECOVERY_PROGRESS_DELAY_MS
         : BUILD_PROGRESS_DELAY_MS;
-  const stallMs =
-    phase === 'validating'
-      ? VALIDATION_PROGRESS_STALL_MS
-      : phase === 'recovering'
-        ? RECOVERY_PROGRESS_STALL_MS
-        : BUILD_PROGRESS_STALL_MS;
   const delayed = args.inactiveForMs >= delayMs;
-  const stalled = args.inactiveForMs >= stallMs;
   const normalMessage = phaseMessage(phase, args.isProjectUpdate === true, args.validationStage);
   const activity = activityLabel(phase, args.isProjectUpdate === true, args.validationStage);
 
   return {
     phase,
     delayed,
-    stalled,
-    message: stalled
-      ? `This may be stuck — last progress: ${activity}`
-      : delayed
-        ? `Taking longer than usual — still ${activity}`
-        : normalMessage,
+    message: delayed ? quietMessage(phase, activity, args.inactiveForMs) : normalMessage,
   };
 }
 
@@ -69,7 +53,10 @@ function buildPhase(args: {
   if (args.validationStage) {
     return 'validating';
   }
-  if (args.activeToolNames.some((name) => name === 'write' || name === 'edit' || name === 'exec')) {
+  if (args.activeToolNames.includes('exec')) {
+    return 'running';
+  }
+  if (args.activeToolNames.some((name) => name === 'write' || name === 'edit')) {
     return 'saving';
   }
   if (args.isRecovering) {
@@ -90,6 +77,8 @@ function phaseMessage(
       return isProjectUpdate ? 'Updating your project…' : 'Creating your project…';
     case 'saving':
       return 'Saving changes…';
+    case 'running':
+      return 'Running command…';
     case 'validating':
       return validationStageMessage(validationStage);
     case 'recovering':
@@ -110,6 +99,8 @@ function activityLabel(
       return isProjectUpdate ? 'updating your project' : 'creating your project';
     case 'saving':
       return 'saving changes';
+    case 'running':
+      return 'running the command';
     case 'validating':
       return validationStageActivity(validationStage);
     case 'recovering':
@@ -126,4 +117,22 @@ function validationStageMessage(stage?: BuilderValidationStage | null): string {
 
 function validationStageActivity(stage?: BuilderValidationStage | null): string {
   return validationStageMessage(stage).replace(/…$/, '').toLowerCase();
+}
+
+function quietMessage(phase: BuildProgressPhase, activity: string, inactiveForMs: number): string {
+  const quietFor = formatDuration(inactiveForMs);
+  if (phase === 'running') {
+    return `Command is still running — no new output for ${quietFor}`;
+  }
+  return `Still ${activity} — no new update for ${quietFor}`;
+}
+
+function formatDuration(milliseconds: number): string {
+  const seconds = Math.max(1, Math.floor(milliseconds / 1_000));
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return remainingSeconds === 0 ? `${minutes}m` : `${minutes}m ${remainingSeconds}s`;
 }

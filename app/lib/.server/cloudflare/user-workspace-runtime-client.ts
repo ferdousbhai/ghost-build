@@ -172,12 +172,20 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     args.abortSignal?.throwIfAborted();
     const stub = await this.#stub();
     const operationKey = this.#activeTool ? `tool:${this.#activeTool.toolCallId}` : undefined;
-    const stream = await stub.executeStream({
-      command: args.command,
-      cwd: args.cwd,
-      backend: args.backend,
-      ...(operationKey ? { operationKey } : {}),
-    });
+    let stream: ReadableStream<Uint8Array>;
+    try {
+      stream = await stub.executeStream({
+        command: args.command,
+        cwd: args.cwd,
+        backend: args.backend,
+        ...(operationKey ? { operationKey } : {}),
+      });
+    } catch (error) {
+      if (isRpcStreamDisconnect(error)) {
+        throw workspaceCommandDisconnectError(error);
+      }
+      throw error;
+    }
     const reader = stream.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -251,6 +259,14 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
         throw new Error('The command stream ended without a final result.');
       }
       return finalResult;
+    } catch (error) {
+      if (isDurableObjectTransportReset(error)) {
+        this.#stubPromise = null;
+      }
+      if (isRpcStreamDisconnect(error)) {
+        throw workspaceCommandDisconnectError(error);
+      }
+      throw error;
     } finally {
       if (updateTimer) {
         clearTimeout(updateTimer);
@@ -464,13 +480,13 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
         return (...args: unknown[]) => {
           try {
             return Promise.resolve(Reflect.apply(value, target, args)).catch((error: unknown) => {
-              if (isDurableObjectCodeReset(error)) {
+              if (isDurableObjectTransportReset(error)) {
                 invalidate();
               }
               throw error;
             });
           } catch (error) {
-            if (isDurableObjectCodeReset(error)) {
+            if (isDurableObjectTransportReset(error)) {
               invalidate();
             }
             throw error;
@@ -576,6 +592,27 @@ function isDurableObjectCodeReset(error: unknown): boolean {
     typeof error.message === 'string' &&
     error.message.includes('Durable Object reset because its code was updated')
   );
+}
+
+function isRpcStreamDisconnect(error: unknown): boolean {
+  return errorMessage(error).includes('ReadableStream received over RPC disconnected prematurely');
+}
+
+function isDurableObjectTransportReset(error: unknown): boolean {
+  return isDurableObjectCodeReset(error) || isRpcStreamDisconnect(error);
+}
+
+function workspaceCommandDisconnectError(cause: unknown): Error {
+  return new Error(
+    'The workspace command connection dropped before completion. The connection was reset; retry the command.',
+    { cause },
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+    ? error.message
+    : '';
 }
 
 function stableValue(value: unknown): unknown {

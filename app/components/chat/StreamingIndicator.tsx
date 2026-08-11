@@ -17,7 +17,6 @@ interface StreamingIndicatorProps {
   buildProgress: BuildProgress | null;
   isProjectUpdate: boolean;
   submissionPending: boolean;
-  onStop: () => void;
   resendMessage: () => void;
 }
 
@@ -77,7 +76,7 @@ export default function StreamingIndicator(props: StreamingIndicatorProps) {
     switch (streamStatus) {
       case 'submitted':
       case 'streaming':
-        icon = props.buildProgress?.stalled ? <WarningIcon /> : <LoadingIcon />;
+        icon = <LoadingIcon />;
         message =
           props.buildProgress?.message ?? (props.isRecovering ? STATUS_MESSAGES.recovering : STATUS_MESSAGES.building);
         break;
@@ -112,11 +111,6 @@ export default function StreamingIndicator(props: StreamingIndicatorProps) {
                   <div>{icon}</div>
                   {message}
                   <div className="min-h-6 grow" />
-                  {props.buildProgress?.stalled && streamStatus === 'streaming' && (
-                    <Button type="button" className="ml-2 h-auto" onClick={props.onStop}>
-                      Stop
-                    </Button>
-                  )}
                   {aborted && streamStatus === 'ready' && (
                     <Button type="button" className="ml-2 h-auto" onClick={props.resendMessage} icon={<ResetIcon />}>
                       Try again

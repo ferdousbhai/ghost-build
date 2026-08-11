@@ -247,7 +247,7 @@ const AuthenticatedChat = memo(
       toolActivityStore.abortActive();
     };
 
-    const { activeToolNames, activityRevision } = useCurrentToolStatus(messages);
+    const { activeToolNames, activityRevision, progressRevision } = useCurrentToolStatus(messages);
     const buildProgress = useBuildProgress({
       streamStatus,
       isRecovering,
@@ -255,6 +255,7 @@ const AuthenticatedChat = memo(
       activeToolNames,
       validationStage,
       toolActivityRevision: activityRevision,
+      toolProgressRevision: progressRevision,
       messages,
     });
 

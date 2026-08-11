@@ -1,19 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUILD_PROGRESS_DELAY_MS,
-  BUILD_PROGRESS_STALL_MS,
   getBuildProgress,
   RECOVERY_PROGRESS_DELAY_MS,
-  RECOVERY_PROGRESS_STALL_MS,
   VALIDATION_PROGRESS_DELAY_MS,
-  VALIDATION_PROGRESS_STALL_MS,
 } from './build-progress';
 
 describe('getBuildProgress', () => {
   it('shows a meaningful phase instead of an unexplained loader', () => {
     expect(
       getBuildProgress({ streamStatus: 'submitted', isRecovering: false, activeToolNames: [], inactiveForMs: 0 }),
-    ).toMatchObject({ phase: 'planning', message: 'Planning your project…', delayed: false, stalled: false });
+    ).toMatchObject({ phase: 'planning', message: 'Planning your project…', delayed: false });
     expect(
       getBuildProgress({ streamStatus: 'streaming', isRecovering: false, activeToolNames: [], inactiveForMs: 0 }),
     ).toMatchObject({ phase: 'creating', message: 'Creating your project…' });
@@ -46,13 +43,13 @@ describe('getBuildProgress', () => {
         activeToolNames: [],
         inactiveForMs: BUILD_PROGRESS_DELAY_MS,
       }),
-    ).toMatchObject({ message: 'Taking longer than usual — still updating your project' });
+    ).toMatchObject({ message: 'Still updating your project — no new update for 45s' });
   });
 
   it.each([
     ['write', 'saving', 'Saving changes…'],
     ['edit', 'saving', 'Saving changes…'],
-    ['exec', 'saving', 'Saving changes…'],
+    ['exec', 'running', 'Running command…'],
   ] as const)('translates %s into concise user-facing progress', (toolName, phase, message) => {
     expect(
       getBuildProgress({
@@ -64,24 +61,23 @@ describe('getBuildProgress', () => {
     ).toMatchObject({ phase, message });
   });
 
-  it('communicates delays and stalls without exposing internal identifiers', () => {
+  it('reports quiet commands as running without guessing that they are stuck', () => {
     const delayed = getBuildProgress({
       streamStatus: 'streaming',
       isRecovering: false,
-      activeToolNames: ['write'],
+      activeToolNames: ['exec'],
       inactiveForMs: BUILD_PROGRESS_DELAY_MS,
     });
-    const stalled = getBuildProgress({
+    const longer = getBuildProgress({
       streamStatus: 'streaming',
       isRecovering: false,
-      activeToolNames: ['write'],
-      inactiveForMs: BUILD_PROGRESS_STALL_MS,
+      activeToolNames: ['exec'],
+      inactiveForMs: 90_000,
     });
-    expect(delayed).toMatchObject({ delayed: true, stalled: false });
-    expect(delayed?.message).toBe('Taking longer than usual — still saving changes');
-    expect(stalled).toMatchObject({ delayed: true, stalled: true });
-    expect(stalled?.message).toBe('This may be stuck — last progress: saving changes');
-    expect(stalled?.message).not.toMatch(/(?:request|tool|call)[-_ ]?id/i);
+    expect(delayed).toMatchObject({ delayed: true });
+    expect(delayed?.message).toBe('Command is still running — no new output for 45s');
+    expect(longer?.message).toBe('Command is still running — no new output for 1m 30s');
+    expect(longer?.message).not.toMatch(/(?:maybe|stuck|request|tool|call)[-_ ]?id/i);
   });
 
   it('allows the isolated full validation contract more time than ordinary model activity', () => {
@@ -91,12 +87,11 @@ describe('getBuildProgress', () => {
         isRecovering: false,
         activeToolNames: ['write'],
         validationStage: 'computer validation',
-        inactiveForMs: BUILD_PROGRESS_STALL_MS,
+        inactiveForMs: 90_000,
       }),
     ).toMatchObject({
       phase: 'validating',
       delayed: false,
-      stalled: false,
       message: 'Validating your project with Cloudflare Computer…',
     });
     expect(
@@ -107,16 +102,22 @@ describe('getBuildProgress', () => {
         validationStage: 'computer validation',
         inactiveForMs: VALIDATION_PROGRESS_DELAY_MS,
       }),
-    ).toMatchObject({ delayed: true, stalled: false });
+    ).toMatchObject({
+      delayed: true,
+      message: 'Still validating your project with cloudflare computer — no new update for 2m',
+    });
     expect(
       getBuildProgress({
         streamStatus: 'streaming',
         isRecovering: false,
         activeToolNames: ['write'],
         validationStage: 'computer validation',
-        inactiveForMs: VALIDATION_PROGRESS_STALL_MS,
+        inactiveForMs: 6 * 60_000,
       }),
-    ).toMatchObject({ delayed: true, stalled: true });
+    ).toMatchObject({
+      delayed: true,
+      message: 'Still validating your project with cloudflare computer — no new update for 6m',
+    });
   });
 
   it('shows automatic Computer validation inside a primitive mutation', () => {
@@ -139,7 +140,7 @@ describe('getBuildProgress', () => {
       }),
     ).toMatchObject({
       delayed: true,
-      message: 'Taking longer than usual — still validating your project with cloudflare computer',
+      message: 'Still validating your project with cloudflare computer — no new update for 2m',
     });
   });
 
@@ -150,13 +151,12 @@ describe('getBuildProgress', () => {
         isRecovering: false,
         activeToolNames: ['write'],
         validationStage: 'computer validation',
-        inactiveForMs: BUILD_PROGRESS_STALL_MS,
+        inactiveForMs: 90_000,
       }),
     ).toMatchObject({
       phase: 'validating',
       message: 'Validating your project with Cloudflare Computer…',
       delayed: false,
-      stalled: false,
     });
   });
 
@@ -176,15 +176,15 @@ describe('getBuildProgress', () => {
         activeToolNames: [],
         inactiveForMs: RECOVERY_PROGRESS_DELAY_MS,
       }),
-    ).toMatchObject({ delayed: true, stalled: false });
+    ).toMatchObject({ delayed: true, message: 'Still recovering the build — no new update for 5m' });
     expect(
       getBuildProgress({
         streamStatus: 'submitted',
         isRecovering: true,
         activeToolNames: [],
-        inactiveForMs: RECOVERY_PROGRESS_STALL_MS,
+        inactiveForMs: 30 * 60_000,
       }),
-    ).toMatchObject({ delayed: true, stalled: true });
+    ).toMatchObject({ delayed: true, message: 'Still recovering the build — no new update for 30m' });
     expect(
       getBuildProgress({ streamStatus: 'ready', isRecovering: false, activeToolNames: [], inactiveForMs: 0 }),
     ).toBeNull();

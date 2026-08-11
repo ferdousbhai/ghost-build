@@ -13,12 +13,13 @@ export function useBuildProgress(args: {
   activeToolNames: string[];
   validationStage: BuilderValidationStage | null;
   toolActivityRevision: number;
+  toolProgressRevision: number;
   messages: GhostbuildMessage[];
 }) {
   const activeToolActivity = args.activeToolNames.toSorted().join(',');
   const activityKey = useMemo(
     () =>
-      `${messageActivityKey(args.messages)}:${args.toolActivityRevision}:${activeToolActivity}:${args.streamStatus}:${args.isRecovering}:${args.isProjectUpdate}:${args.validationStage ?? ''}`,
+      `${messageActivityKey(args.messages)}:${args.toolActivityRevision}:${args.toolProgressRevision}:${activeToolActivity}:${args.streamStatus}:${args.isRecovering}:${args.isProjectUpdate}:${args.validationStage ?? ''}`,
     [
       activeToolActivity,
       args.isProjectUpdate,
@@ -26,6 +27,7 @@ export function useBuildProgress(args: {
       args.messages,
       args.streamStatus,
       args.toolActivityRevision,
+      args.toolProgressRevision,
       args.validationStage,
     ],
   );
