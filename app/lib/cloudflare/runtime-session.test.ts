@@ -3,6 +3,7 @@ import {
   fetchUserRuntime,
   getUserRuntimeSession,
   resetUserRuntimeSession,
+  UserRuntimeSessionError,
   userRuntimeEndpointStore,
 } from './runtime-session';
 
@@ -45,6 +46,28 @@ describe('user runtime session', () => {
 
     await expect(getUserRuntimeSession()).rejects.toThrow('Unable to deploy the workspace.');
     expect(userRuntimeEndpointStore.get()).toBeNull();
+  });
+
+  it('preserves a stable recovery code without exposing provider details', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json(
+          {
+            code: 'workspace_plan_required',
+            error: 'Enable Workers Paid in Cloudflare, then return and try again.',
+          },
+          { status: 502 },
+        ),
+      ),
+    );
+
+    await expect(getUserRuntimeSession()).rejects.toEqual(
+      new UserRuntimeSessionError(
+        'Enable Workers Paid in Cloudflare, then return and try again.',
+        'workspace_plan_required',
+      ),
+    );
   });
 
   it('waits for the request that owns the provisioning lease', async () => {

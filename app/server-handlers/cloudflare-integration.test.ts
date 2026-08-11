@@ -172,7 +172,32 @@ describe('Cloudflare-only authentication', () => {
     });
 
     expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toEqual({ error: 'Cloudflare rejected the runtime deployment.' });
+    await expect(response.json()).resolves.toEqual({
+      code: 'workspace_preparation_failed',
+      error:
+        'Cloudflare could not create your workspace. Check the Workers settings for this Cloudflare account, then try again.',
+    });
+  });
+
+  it('gives actionable recovery steps when Cloudflare Containers requires Workers Paid', async () => {
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection());
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([null]),
+      provision: vi
+        .fn()
+        .mockRejectedValue(
+          new Error('Unauthorized: You do not have access to Cloudflare Containers. Workers Paid plan required.'),
+        ),
+    });
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      code: 'workspace_plan_required',
+      error:
+        'Cloudflare Containers requires the Workers Paid plan. Enable Workers Paid in Cloudflare, then return here and try again. Ghostbuild does not change your plan automatically.',
+    });
   });
 
   it('tells the client to wait when another request owns the provisioning lease', async () => {

@@ -38,6 +38,10 @@ const OAUTH_START_RATE_LIMIT_RETRY_SECONDS = 60;
 const MAX_OAUTH_START_REQUEST_BYTES = 4 * 1024;
 const MAX_OAUTH_CALLBACK_CODE_LENGTH = 4_096;
 const MAX_OAUTH_CALLBACK_TEXT_LENGTH = 2_048;
+const WORKSPACE_PLAN_REQUIRED_MESSAGE =
+  'Cloudflare Containers requires the Workers Paid plan. Enable Workers Paid in Cloudflare, then return here and try again. Ghostbuild does not change your plan automatically.';
+const WORKSPACE_PREPARATION_FAILED_MESSAGE =
+  'Cloudflare could not create your workspace. Check the Workers settings for this Cloudflare account, then try again.';
 const startPayloadSchema = z.object({ callbackURL: z.string().url().max(2_048).optional() });
 const callbackPayloadSchema = z
   .object({
@@ -143,8 +147,12 @@ export async function cloudflareRuntimeSessionAction({
         );
       }
       console.error('User-owned Cloudflare workspace runtime provisioning failed');
+      const planRequired = isWorkspacePlanRequiredError(error);
       return Response.json(
-        { error: error instanceof Error ? error.message : 'Unable to prepare the project workspace.' },
+        {
+          code: planRequired ? 'workspace_plan_required' : 'workspace_preparation_failed',
+          error: planRequired ? WORKSPACE_PLAN_REQUIRED_MESSAGE : WORKSPACE_PREPARATION_FAILED_MESSAGE,
+        },
         { status: 502, headers: { 'Cache-Control': 'private, no-store' } },
       );
     }
@@ -177,6 +185,14 @@ export async function cloudflareRuntimeSessionAction({
   return Response.json(
     { endpoint: currentRuntime.endpoint, ...capability },
     { headers: { 'Cache-Control': 'private, no-store' } },
+  );
+}
+
+export function isWorkspacePlanRequiredError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /cloudflare\s+containers?/i.test(message) &&
+    /(workers\s+paid|paid\s+plan|upgrade\s+your\s+plan|requires?\s+the\s+workers\s+paid)/i.test(message)
   );
 }
 

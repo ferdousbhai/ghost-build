@@ -6,6 +6,18 @@ type UserRuntimeSession = {
   expiresAt: number;
 };
 
+export type UserRuntimeErrorCode = 'workspace_plan_required' | 'workspace_preparation_failed';
+
+export class UserRuntimeSessionError extends Error {
+  constructor(
+    message: string,
+    readonly code: UserRuntimeErrorCode | null,
+  ) {
+    super(message);
+    this.name = 'UserRuntimeSessionError';
+  }
+}
+
 const REFRESH_SKEW_MS = 30_000;
 const PREPARATION_RETRY_DEADLINE_MS = 15 * 60_000;
 const PREPARATION_RETRY_MAX_DELAY_MS = 5_000;
@@ -107,7 +119,10 @@ async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<User
       !Number.isSafeInteger(payload.expiresAt) ||
       new URL(payload.endpoint).protocol !== 'https:'
     ) {
-      throw new Error(payload?.error ?? 'The user-owned Ghostbuild runtime is unavailable.');
+      throw new UserRuntimeSessionError(
+        payload?.error ?? 'The user-owned Ghostbuild runtime is unavailable.',
+        isUserRuntimeErrorCode(payload?.code) ? payload.code : null,
+      );
     }
     const session: UserRuntimeSession = {
       endpoint: new URL(payload.endpoint).origin,
@@ -116,6 +131,10 @@ async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<User
     };
     return session;
   }
+}
+
+function isUserRuntimeErrorCode(value: unknown): value is UserRuntimeErrorCode {
+  return value === 'workspace_plan_required' || value === 'workspace_preparation_failed';
 }
 
 export function requireUserRuntimeEndpoint(): string {

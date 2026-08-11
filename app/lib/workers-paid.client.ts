@@ -1,6 +1,6 @@
 import { toast } from 'sonner';
 
-const WORKERS_PAID_URL = 'https://dash.cloudflare.com/?to=/:account/workers/plans';
+export const WORKERS_PAID_URL = 'https://dash.cloudflare.com/?to=/:account/workers/plans';
 const AI_GATEWAY_URL = 'https://dash.cloudflare.com/?to=/:account/ai/ai-gateway';
 
 export function showWorkersPaidRequiredToast(): void {

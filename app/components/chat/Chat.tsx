@@ -17,11 +17,18 @@ import { appendPendingUserMessage, useChatMessageSubmission } from './useChatMes
 import { deriveProvisionalTitle } from '@summonghost/title-generation';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { applyLiveSubchatTitle, type LiveSubchatTitle } from './subchat-model';
-import { getUserRuntimeSession, userRuntimeEndpointStore } from '~/lib/cloudflare/runtime-session';
+import {
+  getUserRuntimeSession,
+  UserRuntimeSessionError,
+  userRuntimeEndpointStore,
+  type UserRuntimeErrorCode,
+} from '~/lib/cloudflare/runtime-session';
 import { Loading } from '~/components/Loading';
 import { Button } from '@ui/Button';
 import { LinkButton } from '~/components/ui/LinkButton';
+import { buttonClassNames } from '~/components/ui/primitives/Button';
 import { workbenchStore } from '~/lib/stores/workbench.client';
+import { WORKERS_PAID_URL } from '~/lib/workers-paid.client';
 
 const logger = createScopedLogger('Chat');
 
@@ -41,7 +48,10 @@ export const Chat = memo(
     const clearPendingInitialMessage = useCallback(() => setPendingInitialMessage(null), []);
     const userId = useUserIdOrNullOrLoading();
     const runtimeEndpoint = useStore(userRuntimeEndpointStore);
-    const [runtimeConnectionError, setRuntimeConnectionError] = useState<string | null>(null);
+    const [runtimeConnectionError, setRuntimeConnectionError] = useState<{
+      message: string;
+      code: UserRuntimeErrorCode | null;
+    } | null>(null);
     const [runtimeConnectionAttempt, setRuntimeConnectionAttempt] = useState(0);
     useEffect(() => {
       if (typeof userId !== 'string' || runtimeEndpoint) {
@@ -52,9 +62,10 @@ export const Chat = memo(
       void getUserRuntimeSession().catch((error) => {
         if (!canceled) {
           logger.error('Unable to connect to the user-owned runtime', error);
-          setRuntimeConnectionError(
-            error instanceof Error ? error.message : 'Unable to connect to your Cloudflare workspace.',
-          );
+          setRuntimeConnectionError({
+            message: error instanceof Error ? error.message : 'Unable to connect to your Cloudflare workspace.',
+            code: error instanceof UserRuntimeSessionError ? error.code : null,
+          });
         }
       });
       return () => {
@@ -69,7 +80,8 @@ export const Chat = memo(
     if (!runtimeEndpoint) {
       return runtimeConnectionError ? (
         <WorkspaceRuntimeConnectionError
-          message={runtimeConnectionError}
+          message={runtimeConnectionError.message}
+          code={runtimeConnectionError.code}
           onRetry={() => setRuntimeConnectionAttempt((attempt) => attempt + 1)}
         />
       ) : (
@@ -96,7 +108,16 @@ export const Chat = memo(
 );
 Chat.displayName = 'Chat';
 
-function WorkspaceRuntimeConnectionError({ message, onRetry }: { message: string; onRetry: () => void }) {
+function WorkspaceRuntimeConnectionError({
+  message,
+  code,
+  onRetry,
+}: {
+  message: string;
+  code: UserRuntimeErrorCode | null;
+  onRetry: () => void;
+}) {
+  const planRequired = code === 'workspace_plan_required';
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center p-5">
       <section className="app-card w-full max-w-lg p-6 text-center" aria-labelledby="workspace-connection-heading">
@@ -106,8 +127,27 @@ function WorkspaceRuntimeConnectionError({ message, onRetry }: { message: string
         <p className="mt-3 break-words text-sm text-content-secondary" role="alert">
           {message}
         </p>
+        {planRequired ? (
+          <ol className="mx-auto mt-5 max-w-md list-decimal space-y-2 pl-5 text-left text-sm text-content-secondary">
+            <li>Open Cloudflare and enable the Workers Paid plan.</li>
+            <li>Return to this tab. You do not need to reconnect your account.</li>
+            <li>Select “Try again” to finish creating the workspace.</li>
+          </ol>
+        ) : null}
         <div className="mt-6 flex flex-wrap justify-center gap-3">
-          <Button onClick={onRetry}>Try again</Button>
+          {planRequired ? (
+            <a
+              className={buttonClassNames({ variant: 'primary', size: 'md' })}
+              href={WORKERS_PAID_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open Workers plan
+            </a>
+          ) : null}
+          <Button variant={planRequired ? 'neutral' : 'primary'} onClick={onRetry}>
+            Try again
+          </Button>
           <LinkButton to="/settings" hash="cloudflare" variant="neutral">
             Cloudflare account
           </LinkButton>
