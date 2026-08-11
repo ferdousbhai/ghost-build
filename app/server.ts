@@ -12,7 +12,8 @@ import { authSessionAction, signOutAction } from './server-handlers/auth';
 import { runtimeCredentialAction } from './server-handlers/runtime-credential';
 import { clientTelemetryAction } from './server-handlers/client-telemetry';
 import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudflare-auth-retention.server';
-import { runCloudflareSkillAudit } from './lib/.server/cloudflare/upstream-skill-audit.server';
+import { runRecordedUpstreamMonitor } from './lib/.server/cloudflare/upstream-monitor.server';
+import { adminOverviewAction, adminReconcileRuntimeAction } from './server-handlers/admin';
 import { CSP_NONCE_REQUEST_HEADER } from './lib/csp-nonce';
 
 const APPLICATION_CSP_BASELINE = "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
@@ -149,6 +150,14 @@ const exactRoutes: Record<string, ServerRoute> = {
     method: 'GET',
     handler: (_request, env) => versionAction({ env }),
   },
+  '/api/admin/overview': {
+    method: 'GET',
+    handler: (request, env) => adminOverviewAction({ request, env }),
+  },
+  '/api/admin/runtimes/reconcile': {
+    method: 'POST',
+    handler: (request, env) => adminReconcileRuntimeAction({ request, env }),
+  },
 };
 
 export default {
@@ -173,8 +182,8 @@ export default {
 
 async function runScheduledMaintenance(cron: string, env: Env) {
   if (cron === '23 5 * * 1') {
-    const result = await runCloudflareSkillAudit(env);
-    console.info('Cloudflare upstream skill audit completed', result);
+    const result = await runRecordedUpstreamMonitor(env);
+    console.info('Cloudflare upstream monitor completed', result);
     return;
   }
   await pruneCloudflareAuthDataBestEffort(env.DB);

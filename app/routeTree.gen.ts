@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root';
 import { Route as IndexRouteImport } from './routes/index';
 import { Route as AbuseRouteImport } from './routes/abuse';
+import { Route as AdminRouteImport } from './routes/admin';
 import { Route as PrivacyRouteImport } from './routes/privacy';
 import { Route as SecurityRouteImport } from './routes/security';
 import { Route as SettingsRouteImport } from './routes/settings';
@@ -26,6 +27,11 @@ const IndexRoute = IndexRouteImport.update({
 const AbuseRoute = AbuseRouteImport.update({
   id: '/abuse',
   path: '/abuse',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any);
 const PrivacyRoute = PrivacyRouteImport.update({
@@ -62,6 +68,7 @@ const ChatIdRoute = ChatIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute;
   '/abuse': typeof AbuseRoute;
+  '/admin': typeof AdminRoute;
   '/privacy': typeof PrivacyRoute;
   '/security': typeof SecurityRoute;
   '/settings': typeof SettingsRoute;
@@ -72,6 +79,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute;
   '/abuse': typeof AbuseRoute;
+  '/admin': typeof AdminRoute;
   '/privacy': typeof PrivacyRoute;
   '/security': typeof SecurityRoute;
   '/settings': typeof SettingsRoute;
@@ -83,6 +91,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   '/': typeof IndexRoute;
   '/abuse': typeof AbuseRoute;
+  '/admin': typeof AdminRoute;
   '/privacy': typeof PrivacyRoute;
   '/security': typeof SecurityRoute;
   '/settings': typeof SettingsRoute;
@@ -95,6 +104,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/abuse'
+    | '/admin'
     | '/privacy'
     | '/security'
     | '/settings'
@@ -105,6 +115,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/abuse'
+    | '/admin'
     | '/privacy'
     | '/security'
     | '/settings'
@@ -115,6 +126,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/abuse'
+    | '/admin'
     | '/privacy'
     | '/security'
     | '/settings'
@@ -126,6 +138,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
   AbuseRoute: typeof AbuseRoute;
+  AdminRoute: typeof AdminRoute;
   PrivacyRoute: typeof PrivacyRoute;
   SecurityRoute: typeof SecurityRoute;
   SettingsRoute: typeof SettingsRoute;
@@ -148,6 +161,13 @@ declare module '@tanstack/react-router' {
       path: '/abuse';
       fullPath: '/abuse';
       preLoaderRoute: typeof AbuseRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/admin': {
+      id: '/admin';
+      path: '/admin';
+      fullPath: '/admin';
+      preLoaderRoute: typeof AdminRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/privacy': {
@@ -198,6 +218,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AbuseRoute: AbuseRoute,
+  AdminRoute: AdminRoute,
   PrivacyRoute: PrivacyRoute,
   SecurityRoute: SecurityRoute,
   SettingsRoute: SettingsRoute,

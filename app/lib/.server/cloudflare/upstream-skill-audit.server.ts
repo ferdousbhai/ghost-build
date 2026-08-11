@@ -2,14 +2,18 @@ import upstreamSources from 'ghostbuild-agent/references/upstream-sources.json';
 
 const GITHUB_API = 'https://api.github.com';
 const OPENROUTER_API = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_KEY_API = 'https://openrouter.ai/api/v1/auth/key';
+const OPENROUTER_MODEL_ENDPOINTS_API =
+  'https://openrouter.ai/api/v1/models/~deepseek/deepseek-v4-flash-latest/endpoints';
 const OPENROUTER_MODEL = '~deepseek/deepseek-v4-flash-latest';
 const MAX_UPSTREAM_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_PATCH_EVIDENCE_CHARS = 80_000;
 const MAX_MODEL_OUTPUT_CHARS = 16_000;
+const MAX_MODEL_EVIDENCE_FILES = 100;
 
 type SkillSource = (typeof upstreamSources.sources)[number];
 
-type CloudflareSkillAuditResult = {
+export type CloudflareSkillAuditResult = {
   repository: string;
   reviewedRevision: string;
   headRevision: string;
@@ -17,7 +21,10 @@ type CloudflareSkillAuditResult = {
   removedSkills: string[];
   changedTrackedFiles: string[];
   assessment: string | null;
+  requiresManualReview: boolean;
 };
+
+type GitTreeEntry = { path: string; sha: string; type: string; size?: number };
 
 export async function runCloudflareSkillAudit(
   env: { OPENROUTER_API_KEY: { get(): Promise<string> } },
@@ -35,16 +42,9 @@ export async function runCloudflareSkillAudit(
     { headers },
   );
   const headRevision = requireRevision(commit.sha, 'Cloudflare skills HEAD');
-  const tree = await fetchBoundedJson<{ truncated?: unknown; tree?: unknown }>(
-    request,
-    `${GITHUB_API}/repos/${source.repository}/git/trees/${headRevision}?recursive=1`,
-    { headers },
-  );
-  if (tree.truncated === true || !Array.isArray(tree.tree)) {
-    throw new Error('Cloudflare skills inventory could not be read completely.');
-  }
+  const headTree = await fetchCompleteTree(request, source.repository, headRevision, headers, 'Cloudflare skills HEAD');
   const discovered = discoverSkillPaths(
-    tree.tree.map((entry) => (isRecord(entry) && typeof entry.path === 'string' ? entry.path : '')),
+    headTree.map(({ path }) => path),
     source.discovery.root,
     source.discovery.entrypoint,
   );
@@ -58,26 +58,20 @@ export async function runCloudflareSkillAudit(
       removedSkills,
       changedTrackedFiles: [],
       assessment: null,
+      requiresManualReview: false,
     };
   }
 
-  const comparison = await fetchBoundedJson<{ files?: unknown }>(
+  const baseTree = await fetchCompleteTree(
     request,
-    `${GITHUB_API}/repos/${source.repository}/compare/${source.lastReviewedRevision}...${headRevision}`,
-    { headers },
+    source.repository,
+    source.lastReviewedRevision,
+    headers,
+    'reviewed Cloudflare skills revision',
   );
-  const changedFiles = Array.isArray(comparison.files) ? comparison.files.filter(isRecord) : [];
   const relevantRoots = new Set([...source.trackedPaths, ...addedSkills, ...removedSkills]);
-  const relevantFiles = changedFiles.filter((file) => {
-    const filename = file.filename;
-    return (
-      typeof filename === 'string' &&
-      [...relevantRoots].some((root) => filename === root || filename.startsWith(`${root}/`))
-    );
-  });
-  const changedTrackedFiles = relevantFiles
-    .map((file) => file.filename)
-    .filter((filename): filename is string => typeof filename === 'string')
+  const changedTrackedFiles = diffTrees(baseTree, headTree)
+    .filter((path) => [...relevantRoots].some((root) => path === root || path.startsWith(`${root}/`)))
     .toSorted();
   if (addedSkills.length === 0 && removedSkills.length === 0 && changedTrackedFiles.length === 0) {
     return {
@@ -88,17 +82,29 @@ export async function runCloudflareSkillAudit(
       removedSkills,
       changedTrackedFiles,
       assessment: null,
+      requiresManualReview: false,
     };
   }
-  const evidence = relevantFiles
-    .map((file) => ({
-      filename: file.filename,
-      status: file.status,
-      patch: typeof file.patch === 'string' ? file.patch : '[patch unavailable]',
-    }))
-    .map((file) => JSON.stringify(file))
-    .join('\n')
-    .slice(0, MAX_PATCH_EVIDENCE_CHARS);
+  const evidenceResult = await readChangedBlobEvidence({
+    request,
+    repository: source.repository,
+    headers,
+    changedPaths: changedTrackedFiles,
+    baseTree,
+    headTree,
+  });
+  if (!evidenceResult.complete) {
+    return {
+      repository: source.repository,
+      reviewedRevision: source.lastReviewedRevision,
+      headRevision,
+      addedSkills,
+      removedSkills,
+      changedTrackedFiles,
+      assessment: null,
+      requiresManualReview: true,
+    };
+  }
   const assessment = await assessSkillChanges(
     await env.OPENROUTER_API_KEY.get(),
     {
@@ -108,7 +114,7 @@ export async function runCloudflareSkillAudit(
       addedSkills,
       removedSkills,
       changedTrackedFiles,
-      evidence,
+      evidence: evidenceResult.evidence,
     },
     request,
   );
@@ -120,7 +126,28 @@ export async function runCloudflareSkillAudit(
     removedSkills,
     changedTrackedFiles,
     assessment,
+    requiresManualReview: false,
   };
+}
+
+export async function runOpenRouterCanary(
+  env: { OPENROUTER_API_KEY: { get(): Promise<string> } },
+  request: typeof fetch = fetch,
+): Promise<{ model: string; authorized: true; endpointCount: number }> {
+  const apiKey = requireOpenRouterApiKey(await env.OPENROUTER_API_KEY.get());
+  await fetchBoundedJson(request, OPENROUTER_KEY_API, {
+    headers: { authorization: `Bearer ${apiKey}` },
+  });
+  const endpoints = await fetchBoundedJson<{ data?: { endpoints?: unknown } }>(
+    request,
+    OPENROUTER_MODEL_ENDPOINTS_API,
+    {},
+  );
+  const endpointList = endpoints.data?.endpoints;
+  if (!Array.isArray(endpointList) || endpointList.length === 0) {
+    throw new Error('The configured OpenRouter model has no available endpoints.');
+  }
+  return { model: OPENROUTER_MODEL, authorized: true, endpointCount: endpointList.length };
 }
 
 export function discoverSkillPaths(paths: readonly string[], root: string, entrypoint: string): string[] {
@@ -149,9 +176,7 @@ async function assessSkillChanges(
   evidence: Record<string, unknown>,
   request: typeof fetch,
 ): Promise<string> {
-  if (!apiKey || apiKey.length > 4_096) {
-    throw new Error('OpenRouter skill-audit credentials are not configured.');
-  }
+  apiKey = requireOpenRouterApiKey(apiKey);
   const response = await fetchBoundedJson<{ choices?: unknown }>(request, OPENROUTER_API, {
     method: 'POST',
     headers: {
@@ -181,6 +206,121 @@ async function assessSkillChanges(
     throw new Error('OpenRouter returned an invalid skill-audit assessment.');
   }
   return content.slice(0, MAX_MODEL_OUTPUT_CHARS);
+}
+
+async function fetchCompleteTree(
+  request: typeof fetch,
+  repository: string,
+  revision: string,
+  headers: HeadersInit,
+  label: string,
+): Promise<GitTreeEntry[]> {
+  const tree = await fetchBoundedJson<{ truncated?: unknown; tree?: unknown }>(
+    request,
+    `${GITHUB_API}/repos/${repository}/git/trees/${revision}?recursive=1`,
+    { headers },
+  );
+  if (tree.truncated === true || !Array.isArray(tree.tree)) {
+    throw new Error(`${label} inventory could not be read completely.`);
+  }
+  return tree.tree.map(requireTreeEntry).filter((entry) => entry.type === 'blob');
+}
+
+function requireTreeEntry(value: unknown): GitTreeEntry {
+  if (
+    !isRecord(value) ||
+    typeof value.path !== 'string' ||
+    typeof value.sha !== 'string' ||
+    typeof value.type !== 'string' ||
+    !/^[a-f0-9]{40}$/.test(value.sha)
+  ) {
+    throw new Error('Cloudflare skills inventory contained an invalid tree entry.');
+  }
+  return {
+    path: value.path,
+    sha: value.sha,
+    type: value.type,
+    ...(typeof value.size === 'number' ? { size: value.size } : {}),
+  };
+}
+
+export function diffTrees(baseTree: readonly GitTreeEntry[], headTree: readonly GitTreeEntry[]): string[] {
+  const base = new Map(baseTree.map((entry) => [entry.path, entry.sha]));
+  const head = new Map(headTree.map((entry) => [entry.path, entry.sha]));
+  return [...new Set([...base.keys(), ...head.keys()])].filter((path) => base.get(path) !== head.get(path)).toSorted();
+}
+
+async function readChangedBlobEvidence({
+  request,
+  repository,
+  headers,
+  changedPaths,
+  baseTree,
+  headTree,
+}: {
+  request: typeof fetch;
+  repository: string;
+  headers: HeadersInit;
+  changedPaths: readonly string[];
+  baseTree: readonly GitTreeEntry[];
+  headTree: readonly GitTreeEntry[];
+}): Promise<{ complete: true; evidence: string } | { complete: false }> {
+  if (changedPaths.length > MAX_MODEL_EVIDENCE_FILES) {
+    return { complete: false };
+  }
+  const base = new Map(baseTree.map((entry) => [entry.path, entry]));
+  const head = new Map(headTree.map((entry) => [entry.path, entry]));
+  const evidence: string[] = [];
+  let evidenceChars = 0;
+  for (const path of changedPaths) {
+    const beforeEntry = base.get(path);
+    const afterEntry = head.get(path);
+    if (!beforeEntry && !afterEntry) {
+      throw new Error('Cloudflare skills diff referenced a missing blob.');
+    }
+    const before = beforeEntry ? await readBlob(request, repository, beforeEntry.sha, headers) : null;
+    const after = afterEntry ? await readBlob(request, repository, afterEntry.sha, headers) : null;
+    const item = JSON.stringify({
+      path,
+      status: afterEntry ? (beforeEntry ? 'modified' : 'added') : 'removed',
+      before,
+      after,
+    });
+    evidenceChars += item.length + 1;
+    if (evidenceChars > MAX_PATCH_EVIDENCE_CHARS) {
+      return { complete: false };
+    }
+    evidence.push(item);
+  }
+  return { complete: true, evidence: evidence.join('\n') };
+}
+
+async function readBlob(request: typeof fetch, repository: string, sha: string, headers: HeadersInit): Promise<string> {
+  const blob = await fetchBoundedJson<{ content?: unknown; encoding?: unknown }>(
+    request,
+    `${GITHUB_API}/repos/${repository}/git/blobs/${sha}`,
+    { headers },
+  );
+  if (blob.encoding !== 'base64' || typeof blob.content !== 'string') {
+    throw new Error('Cloudflare skills blob response was incomplete.');
+  }
+  return decodeBase64Utf8(blob.content);
+}
+
+function decodeBase64Utf8(value: string): string {
+  try {
+    const bytes = Uint8Array.from(atob(value.replaceAll('\n', '')), (character) => character.charCodeAt(0));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error('Cloudflare skills blob was not valid UTF-8 content.');
+  }
+}
+
+function requireOpenRouterApiKey(value: string): string {
+  if (!value || value.length > 4_096) {
+    throw new Error('OpenRouter skill-audit credentials are not configured.');
+  }
+  return value;
 }
 
 async function fetchBoundedJson<T>(request: typeof fetch, url: string, init: RequestInit): Promise<T> {
