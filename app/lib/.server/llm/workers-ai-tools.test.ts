@@ -223,30 +223,32 @@ describe('minimal Workers AI tool surface', () => {
     expect(workspace.validate).not.toHaveBeenCalled();
   });
 
-  it.each(['pnpm run validate', 'pnpm run validate 2>&1'])(
-    'routes %s through one durable validation and reports failures for model repair',
-    async (command) => {
-      const validation = toolFailure('Typecheck failed', { diagnostics: ['src/app.ts:1'] });
-      const workspace = workspaceStub({ validation });
-      const onValidationStage = vi.fn();
-      const tools = createWorkersAiTools(workspace, operationContext({ onValidationStage }));
+  it.each([
+    'pnpm run validate',
+    'pnpm run validate 2>&1',
+    'cd /home/project && pnpm run validate',
+    'cd /home/project && pnpm run validate 2>&1',
+  ])('routes %s through one durable validation and reports failures for model repair', async (command) => {
+    const validation = toolFailure('Typecheck failed', { diagnostics: ['src/app.ts:1'] });
+    const workspace = workspaceStub({ validation });
+    const onValidationStage = vi.fn();
+    const tools = createWorkersAiTools(workspace, operationContext({ onValidationStage }));
 
-      await expect(executeTool(tools.exec, { command })).resolves.toMatchObject({ validation });
-      expect(workspace.validate).toHaveBeenCalledWith({
-        toolCallId: 'tool-call:validation',
-        input: {},
-        abortSignal: undefined,
-      });
-      expect(onValidationStage.mock.calls).toEqual([
-        ['tool-call', 'computer validation'],
-        ['tool-call', null],
-      ]);
-      expect(workspace.computer.runtime!.exec).not.toHaveBeenCalled();
-      expect(
-        getValidatedBuildCompletion([user('Build it')], [{ toolName: 'exec', result: { validation } }]),
-      ).toBeUndefined();
-    },
-  );
+    await expect(executeTool(tools.exec, { command })).resolves.toMatchObject({ validation });
+    expect(workspace.validate).toHaveBeenCalledWith({
+      toolCallId: 'tool-call:validation',
+      input: {},
+      abortSignal: undefined,
+    });
+    expect(onValidationStage.mock.calls).toEqual([
+      ['tool-call', 'computer validation'],
+      ['tool-call', null],
+    ]);
+    expect(workspace.computer.runtime!.exec).not.toHaveBeenCalled();
+    expect(
+      getValidatedBuildCompletion([user('Build it')], [{ toolName: 'exec', result: { validation } }]),
+    ).toBeUndefined();
+  });
 
   it('derives completion from the latest explicit validation receipt', () => {
     expect(
