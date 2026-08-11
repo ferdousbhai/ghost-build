@@ -366,7 +366,7 @@ function computerWorkspaceOptions(
 }
 
 export class ProjectWorkspace extends ComputerSandboxBase {
-  readonly #workspace: Workspace;
+  #workspace: Workspace;
   readonly #toolOperations: ToolOperationJournal;
   readonly #operationLane: WorkspaceOperationLane;
   readonly #syncRetries: DurableWorkspaceSyncRetryScheduler;
@@ -2040,6 +2040,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         throw new Error('Timed out while recovering the ProjectWorkspace preview container.');
       }),
     ]);
+    // Workspace.close() invalidates transport handles but intentionally retains its serialized mutation queues.
+    // A fresh coordinator prevents an interrupted sync from blocking the replacement container indefinitely.
+    this.#workspace = new Workspace(computerWorkspaceOptions(this, this.#syncRetries));
     this.ctx.storage.transactionSync(() => {
       this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews');
       this.ctx.storage.sql.exec('DELETE FROM ghostbuild_active_preview');

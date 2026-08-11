@@ -216,6 +216,12 @@ describe('ProjectWorkspace preview lifecycle', () => {
     expect(recovery.indexOf('this.destroy()')).toBeLessThan(
       recovery.indexOf('DELETE FROM ghostbuild_pending_previews'),
     );
+    expect(recovery.indexOf('this.destroy()')).toBeLessThan(
+      recovery.indexOf('this.#workspace = new Workspace(computerWorkspaceOptions(this, this.#syncRetries))'),
+    );
+    expect(
+      recovery.indexOf('this.#workspace = new Workspace(computerWorkspaceOptions(this, this.#syncRetries))'),
+    ).toBeLessThan(recovery.indexOf('DELETE FROM ghostbuild_pending_previews'));
     expect(recovery).toContain('DELETE FROM ghostbuild_active_preview');
     expect(recovery).toContain('DELETE FROM ghostbuild_preview_results');
     expect(recovery).toContain('DELETE FROM ghostbuild_sandbox_processes');
