@@ -16,7 +16,7 @@
     },
   ],
   "triggers": {
-    "crons": ["*/15 * * * *", "23 5 * * 1"],
+    "crons": ["*/15 * * * *"],
   },
   "observability": {
     "enabled": true,
@@ -55,9 +55,9 @@
   },
   "secrets_store_secrets": [
     {
-      "binding": "OPENROUTER_API_KEY",
+      "binding": "OPS_AUTH_SECRET",
       "store_id": "a436a6cefedc4acd8bb920cdbc202c1c",
-      "secret_name": "open-router",
+      "secret_name": "ghostbuild-ops-auth",
     },
   ],
   "upload_source_maps": true,

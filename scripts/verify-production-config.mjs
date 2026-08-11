@@ -30,7 +30,7 @@ const REQUIRED_COMPATIBILITY_DATE = '2026-07-21';
 const REQUIRED_OAUTH_SCOPES =
   'account-settings.read user-details.read workers-scripts.write containers.write d1.write workers-r2.write ai.read';
 const REQUIRED_SECRET_NAMES = ['CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY', 'CLOUDFLARE_OAUTH_CLIENT_SECRET'];
-const OPENROUTER_SECRET_STORE_ID = 'a436a6cefedc4acd8bb920cdbc202c1c';
+const ACCOUNT_SECRET_STORE_ID = 'a436a6cefedc4acd8bb920cdbc202c1c';
 const PLACEHOLDER_D1_ID = '00000000-0000-0000-0000-000000000000';
 const workerTargets = [
   {
@@ -121,20 +121,14 @@ export function findWorkerGcScheduleErrors(config, label) {
     : [`${label} must schedule bounded authentication-metadata retention every 15 minutes.`];
 }
 
-export function findWorkerSkillAuditScheduleErrors(config, label) {
-  return config?.triggers?.crons?.includes('23 5 * * 1')
-    ? []
-    : [`${label} must schedule the Cloudflare upstream skill inventory audit weekly.`];
-}
-
-export function findWorkerUpstreamAuditSecretErrors(config, label) {
+export function findWorkerOpsAuthSecretErrors(config, label) {
   const errors = [];
-  const binding = findBinding(config?.secrets_store_secrets, 'OPENROUTER_API_KEY');
+  const binding = findBinding(config?.secrets_store_secrets, 'OPS_AUTH_SECRET');
   if (!binding) {
-    return [`${label} must bind the account open-router secret as OPENROUTER_API_KEY.`];
+    return [`${label} must bind the shared private-operations authentication secret as OPS_AUTH_SECRET.`];
   }
-  requireEqual(errors, `${label} OpenRouter Secrets Store store_id`, binding.store_id, OPENROUTER_SECRET_STORE_ID);
-  requireEqual(errors, `${label} OpenRouter Secrets Store secret_name`, binding.secret_name, 'open-router');
+  requireEqual(errors, `${label} operations Secrets Store store_id`, binding.store_id, ACCOUNT_SECRET_STORE_ID);
+  requireEqual(errors, `${label} operations Secrets Store secret_name`, binding.secret_name, 'ghostbuild-ops-auth');
   return errors;
 }
 
@@ -178,8 +172,7 @@ function verifyWorker(errors, config, target) {
     ...findWorkerRoutingErrors(config, label, target.customDomains),
     ...findWorkerVariableSourceErrors(config, label),
     ...findWorkerGcScheduleErrors(config, label),
-    ...findWorkerSkillAuditScheduleErrors(config, label),
-    ...findWorkerUpstreamAuditSecretErrors(config, label),
+    ...findWorkerOpsAuthSecretErrors(config, label),
     ...findDurableObjectLifecycleErrors(config, label, target.durableObjects),
     ...findWorkerRuntimeSecretErrors(config, label, 'configure values as Cloudflare bindings'),
   );

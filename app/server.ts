@@ -12,8 +12,11 @@ import { authSessionAction, signOutAction } from './server-handlers/auth';
 import { runtimeCredentialAction } from './server-handlers/runtime-credential';
 import { clientTelemetryAction } from './server-handlers/client-telemetry';
 import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudflare-auth-retention.server';
-import { runRecordedUpstreamMonitor } from './lib/.server/cloudflare/upstream-monitor.server';
-import { adminOverviewAction, adminReconcileRuntimeAction } from './server-handlers/admin';
+import {
+  operationsReconcileRuntimeAction,
+  operationsRuntimeVersionAction,
+  operationsSessionAction,
+} from './server-handlers/operations-boundary';
 import { CSP_NONCE_REQUEST_HEADER } from './lib/csp-nonce';
 
 const APPLICATION_CSP_BASELINE = "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
@@ -150,13 +153,17 @@ const exactRoutes: Record<string, ServerRoute> = {
     method: 'GET',
     handler: (_request, env) => versionAction({ env }),
   },
-  '/api/admin/overview': {
+  '/api/ops/session': {
     method: 'GET',
-    handler: (request, env) => adminOverviewAction({ request, env }),
+    handler: (request, env) => operationsSessionAction({ request, env }),
   },
-  '/api/admin/runtimes/reconcile': {
+  '/api/internal/ops/runtime-version': {
+    method: 'GET',
+    handler: (request, env) => operationsRuntimeVersionAction({ request, env }),
+  },
+  '/api/internal/ops/runtimes/reconcile': {
     method: 'POST',
-    handler: (request, env) => adminReconcileRuntimeAction({ request, env }),
+    handler: (request, env) => operationsReconcileRuntimeAction({ request, env }),
   },
 };
 
@@ -180,12 +187,7 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-async function runScheduledMaintenance(cron: string, env: Env) {
-  if (cron === '23 5 * * 1') {
-    const result = await runRecordedUpstreamMonitor(env);
-    console.info('Cloudflare upstream monitor completed', result);
-    return;
-  }
+async function runScheduledMaintenance(_cron: string, env: Env) {
   await pruneCloudflareAuthDataBestEffort(env.DB);
 }
 

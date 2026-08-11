@@ -7,10 +7,9 @@ import {
   findWorkerObservabilityErrors,
   findWorkerOAuthStartRateLimitErrors,
   findWorkerGcScheduleErrors,
+  findWorkerOpsAuthSecretErrors,
   findWorkerRoutingErrors,
   findWorkerRuntimeSecretErrors,
-  findWorkerSkillAuditScheduleErrors,
-  findWorkerUpstreamAuditSecretErrors,
   findWorkerVariableSourceErrors,
   verifyProductionConfig,
   workflowPathsFromDirectoryEntries,
@@ -105,33 +104,24 @@ describe('findWorkerGcScheduleErrors', () => {
   });
 });
 
-describe('findWorkerSkillAuditScheduleErrors', () => {
-  it('requires the weekly Cloudflare upstream skill audit cron', () => {
-    expect(findWorkerSkillAuditScheduleErrors({ triggers: { crons: ['23 5 * * 1'] } }, 'wrangler.jsonc')).toEqual([]);
-    expect(findWorkerSkillAuditScheduleErrors({}, 'wrangler.jsonc')).toEqual([
-      'wrangler.jsonc must schedule the Cloudflare upstream skill inventory audit weekly.',
-    ]);
-  });
-});
-
-describe('findWorkerUpstreamAuditSecretErrors', () => {
-  it('pins the existing account-level open-router secret binding', () => {
+describe('findWorkerOpsAuthSecretErrors', () => {
+  it('pins the shared private-operations authentication secret binding', () => {
     expect(
-      findWorkerUpstreamAuditSecretErrors(
+      findWorkerOpsAuthSecretErrors(
         {
           secrets_store_secrets: [
             {
-              binding: 'OPENROUTER_API_KEY',
+              binding: 'OPS_AUTH_SECRET',
               store_id: 'a436a6cefedc4acd8bb920cdbc202c1c',
-              secret_name: 'open-router',
+              secret_name: 'ghostbuild-ops-auth',
             },
           ],
         },
         'wrangler.jsonc',
       ),
     ).toEqual([]);
-    expect(findWorkerUpstreamAuditSecretErrors({}, 'wrangler.jsonc')).toEqual([
-      'wrangler.jsonc must bind the account open-router secret as OPENROUTER_API_KEY.',
+    expect(findWorkerOpsAuthSecretErrors({}, 'wrangler.jsonc')).toEqual([
+      'wrangler.jsonc must bind the shared private-operations authentication secret as OPS_AUTH_SECRET.',
     ]);
   });
 });

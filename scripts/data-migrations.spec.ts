@@ -7,7 +7,6 @@ const controlPlaneTables = [
   'cloudflare_connections',
   'cloudflare_credentials',
   'cloudflare_oauth_states',
-  'upstream_monitor_runs',
   'user',
   'user_computer_runtimes',
 ];
@@ -21,7 +20,7 @@ function applyControlPlaneMigrations(db: DatabaseSync): void {
 }
 
 describe('Ghostbuild control-plane D1 schema', () => {
-  test('ends with only the current control-plane, monitor receipt, and Computer locator schema', () => {
+  test('ends with only the current control-plane and Computer locator schema', () => {
     const db = new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys = ON');
     applyControlPlaneMigrations(db);

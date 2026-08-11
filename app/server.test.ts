@@ -9,11 +9,11 @@ const completeCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const cloudflareConnectionStatusAction = vi.hoisted(() => vi.fn());
 const startCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const pruneCloudflareAuthDataBestEffort = vi.hoisted(() => vi.fn());
-const runRecordedUpstreamMonitor = vi.hoisted(() => vi.fn());
 const runtimeCredentialAction = vi.hoisted(() => vi.fn());
 const clientTelemetryAction = vi.hoisted(() => vi.fn());
-const adminOverviewAction = vi.hoisted(() => vi.fn());
-const adminReconcileRuntimeAction = vi.hoisted(() => vi.fn());
+const operationsSessionAction = vi.hoisted(() => vi.fn());
+const operationsRuntimeVersionAction = vi.hoisted(() => vi.fn());
+const operationsReconcileRuntimeAction = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-start/server-entry', () => ({ default: { fetch: tanstackFetch } }));
 vi.mock('agents', () => ({ routeAgentRequest }));
@@ -31,9 +31,12 @@ vi.mock('./server-handlers/health', () => ({ healthAction }));
 vi.mock('./server-handlers/version', () => ({ versionAction: vi.fn() }));
 vi.mock('./server-handlers/runtime-credential', () => ({ runtimeCredentialAction }));
 vi.mock('./server-handlers/client-telemetry', () => ({ clientTelemetryAction }));
-vi.mock('./server-handlers/admin', () => ({ adminOverviewAction, adminReconcileRuntimeAction }));
+vi.mock('./server-handlers/operations-boundary', () => ({
+  operationsSessionAction,
+  operationsRuntimeVersionAction,
+  operationsReconcileRuntimeAction,
+}));
 vi.mock('./lib/cloudflare/data/cloudflare-auth-retention.server', () => ({ pruneCloudflareAuthDataBestEffort }));
-vi.mock('./lib/.server/cloudflare/upstream-monitor.server', () => ({ runRecordedUpstreamMonitor }));
 
 import server from './server';
 
@@ -56,11 +59,11 @@ describe('server Agent routing boundary', () => {
       .mockReset()
       .mockResolvedValue(Response.json({ error: 'Invalid request.' }, { status: 400 }));
     pruneCloudflareAuthDataBestEffort.mockReset().mockResolvedValue(undefined);
-    runRecordedUpstreamMonitor.mockReset().mockResolvedValue({ audit: { headRevision: 'a'.repeat(40) } });
     runtimeCredentialAction.mockReset().mockResolvedValue(Response.json({ accessToken: 'fresh' }));
     clientTelemetryAction.mockReset().mockResolvedValue(new Response(null, { status: 202 }));
-    adminOverviewAction.mockReset().mockResolvedValue(Response.json({ metrics: {} }));
-    adminReconcileRuntimeAction.mockReset().mockResolvedValue(Response.json({ status: 'ready' }));
+    operationsSessionAction.mockReset().mockResolvedValue(new Response(null, { status: 302 }));
+    operationsRuntimeVersionAction.mockReset().mockResolvedValue(Response.json({ runtimeVersion: 'a'.repeat(64) }));
+    operationsReconcileRuntimeAction.mockReset().mockResolvedValue(Response.json({ status: 'ready' }));
   });
 
   it('leaves non-Builder Agent-looking routes to the application router', async () => {
@@ -305,33 +308,24 @@ describe('server Agent routing boundary', () => {
     await waitUntil.mock.calls[0][0];
     expect(calls).toEqual(['auth-retention']);
     expect(pruneCloudflareAuthDataBestEffort).toHaveBeenCalledWith(env.DB);
-    expect(runRecordedUpstreamMonitor).not.toHaveBeenCalled();
   });
 
-  it('runs the upstream Cloudflare skill audit only on its weekly Cloudflare cron', async () => {
-    const waitUntil = vi.fn();
-    const env = { OPENROUTER_API_KEY: { get: async () => 'secret' } } as Env;
-
-    server.scheduled({ cron: '23 5 * * 1' } as ScheduledController, env, {
-      waitUntil,
-    } as unknown as ExecutionContext);
-
-    await waitUntil.mock.calls[0][0];
-    expect(runRecordedUpstreamMonitor).toHaveBeenCalledWith(env);
-    expect(pruneCloudflareAuthDataBestEffort).not.toHaveBeenCalled();
-  });
-
-  it('keeps admin reads and runtime mutations on exact method-constrained routes', async () => {
+  it('keeps private-operations adapters on exact method-constrained routes', async () => {
     const env = {} as Env;
-    const overviewRequest = new Request('https://ghostbuild.dev/api/admin/overview');
-    const reconcileRequest = new Request('https://ghostbuild.dev/api/admin/runtimes/reconcile', { method: 'POST' });
+    const sessionRequest = new Request('https://ghostbuild.dev/api/ops/session');
+    const versionRequest = new Request('https://ghostbuild.dev/api/internal/ops/runtime-version');
+    const reconcileRequest = new Request('https://ghostbuild.dev/api/internal/ops/runtimes/reconcile', {
+      method: 'POST',
+    });
 
-    expect((await server.fetch(overviewRequest, env)).status).toBe(200);
-    expect(adminOverviewAction).toHaveBeenCalledWith({ request: overviewRequest, env });
+    expect((await server.fetch(sessionRequest, env)).status).toBe(302);
+    expect(operationsSessionAction).toHaveBeenCalledWith({ request: sessionRequest, env });
+    expect((await server.fetch(versionRequest, env)).status).toBe(200);
+    expect(operationsRuntimeVersionAction).toHaveBeenCalledWith({ request: versionRequest, env });
     expect((await server.fetch(reconcileRequest, env)).status).toBe(200);
-    expect(adminReconcileRuntimeAction).toHaveBeenCalledWith({ request: reconcileRequest, env });
-    expect((await server.fetch(new Request('https://ghostbuild.dev/api/admin/runtimes/reconcile'), env)).status).toBe(
-      405,
-    );
+    expect(operationsReconcileRuntimeAction).toHaveBeenCalledWith({ request: reconcileRequest, env });
+    expect(
+      (await server.fetch(new Request('https://ghostbuild.dev/api/internal/ops/runtimes/reconcile'), env)).status,
+    ).toBe(405);
   });
 });
