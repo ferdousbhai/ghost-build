@@ -188,7 +188,7 @@ export async function cloudflareRuntimeSessionAction({
   );
 }
 
-export function isWorkspacePlanRequiredError(error: unknown): boolean {
+function isWorkspacePlanRequiredError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return (
     /cloudflare\s+containers?/i.test(message) &&
