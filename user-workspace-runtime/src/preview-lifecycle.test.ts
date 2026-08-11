@@ -183,10 +183,10 @@ describe('ProjectWorkspace preview lifecycle', () => {
     );
 
     expect(stop).toContain('pendingPreviewRow(previewId)');
-    expect(stop).toContain('cleanupPreviewResources(pending)');
+    expect(stop).toContain('cleanupPreviewResourcesOrRecover(pending)');
     expect(stop).toContain('pending && !this.activePreviewRow()');
     expect(expire).toContain("await this.schedule(30, 'expirePreview', { previewId })");
-    expect(cleanup.indexOf('await this.cleanupPreviewResources(row)')).toBeLessThan(
+    expect(cleanup.indexOf('await this.cleanupPreviewResourcesOrRecover(row)')).toBeLessThan(
       cleanup.indexOf('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?'),
     );
     expect(cleanup.indexOf('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?')).toBeLessThan(
@@ -194,6 +194,32 @@ describe('ProjectWorkspace preview lifecycle', () => {
     );
     expect(source).toContain('CREATE TABLE IF NOT EXISTS ghostbuild_pending_previews');
     expect(source).not.toContain("this.deleteSchedules('expirePreview')");
+  });
+
+  it('recycles only the ephemeral container when interrupted Preview cleanup cannot reconnect', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const cleanup = source.slice(
+      source.indexOf('private async cleanupPendingPreviews('),
+      source.indexOf('private pendingPreviewRow('),
+    );
+    const recovery = cleanup.slice(cleanup.indexOf('private async recoverPreviewContainer('));
+    const stopActive = source.slice(
+      source.indexOf('private async stopActivePreview('),
+      source.indexOf('private async cleanupPreviewResources('),
+    );
+
+    expect(source).toContain('const PREVIEW_CONTAINER_RECOVERY_TIMEOUT_MS = 60_000;');
+    expect(cleanup).toContain('await this.cleanupPreviewResourcesOrRecover(row)');
+    expect(stopActive).toContain('await this.cleanupPreviewResourcesOrRecover(row)');
+    expect(cleanup).toContain('await this.recoverPreviewContainer(row, error)');
+    expect(recovery).toContain('await this.#workspace.close()');
+    expect(recovery.indexOf('this.destroy()')).toBeLessThan(
+      recovery.indexOf('DELETE FROM ghostbuild_pending_previews'),
+    );
+    expect(recovery).toContain('DELETE FROM ghostbuild_active_preview');
+    expect(recovery).toContain('DELETE FROM ghostbuild_preview_results');
+    expect(recovery).toContain('DELETE FROM ghostbuild_sandbox_processes');
+    expect(recovery).not.toContain('workspace.fs.rm(PROJECT_ROOT');
   });
 
   it('preserves the prior Preview as pending until replacement cleanup succeeds', () => {

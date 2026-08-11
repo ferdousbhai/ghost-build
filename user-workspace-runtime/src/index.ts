@@ -127,6 +127,7 @@ const COMPUTERD_PROCESS_ROLE = 'computerd';
 const COMPUTERD_ENV = { PORT: '8080', MOUNT_POINT: '/home', FUSE_MOUNT: 'auto' } as const;
 const TRANSIENT_COMMAND_PROCESS_ROLE = 'transient-command';
 const VALIDATION_CANCELLATION_SETTLE_MS = 45_000;
+const PREVIEW_CONTAINER_RECOVERY_TIMEOUT_MS = 60_000;
 const PREVIEW_BUILD_CLEANUP_DEADLINE_MS = 30 * 60_000;
 const OPERATION_LEASE_MS = {
   seed: 10 * 60_000,
@@ -1741,7 +1742,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     await this.withStatefulOperation('preview', `preview:stop:${previewId}`, async () => {
       const pending = this.pendingPreviewRow(previewId);
       if (pending) {
-        await this.cleanupPreviewResources(pending);
+        if (!(await this.cleanupPreviewResourcesOrRecover(pending))) {
+          return;
+        }
         this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?', previewId);
       }
       const row = this.activePreviewRow();
@@ -1900,8 +1903,8 @@ export class ProjectWorkspace extends ComputerSandboxBase {
 
   private async stopActivePreview() {
     const row = this.activePreviewRow();
-    if (row) {
-      await this.cleanupPreviewResources(row);
+    if (row && !(await this.cleanupPreviewResourcesOrRecover(row))) {
+      return;
     }
     await this.setKeepAlive(false).catch(() => undefined);
     this.ctx.storage.sql.exec('DELETE FROM ghostbuild_active_preview WHERE singleton = 1');
@@ -2004,17 +2007,45 @@ export class ProjectWorkspace extends ComputerSandboxBase {
 
   private async cleanupPendingPreviews(): Promise<void> {
     for (const row of this.pendingPreviewRows()) {
-      try {
-        await this.cleanupPreviewResources(row);
-        this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?', row.preview_id);
-      } catch (error) {
-        console.warn('Unable to clean up an interrupted ProjectWorkspace preview', {
-          previewId: row.preview_id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        throw error;
+      if (!(await this.cleanupPreviewResourcesOrRecover(row))) {
+        return;
       }
+      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?', row.preview_id);
     }
+  }
+
+  private async cleanupPreviewResourcesOrRecover(row: ActivePreviewRow): Promise<boolean> {
+    try {
+      await this.cleanupPreviewResources(row);
+      return true;
+    } catch (error) {
+      await this.recoverPreviewContainer(row, error);
+      return false;
+    }
+  }
+
+  private async recoverPreviewContainer(row: ActivePreviewRow, cleanupError: unknown): Promise<void> {
+    console.warn('Recovering ProjectWorkspace preview container after cleanup failed', {
+      previewId: row.preview_id,
+      error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+    });
+    await this.#workspace.close().catch((error) =>
+      console.warn('Unable to close the Computer workspace before preview container recovery', {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    await Promise.race([
+      this.destroy(),
+      scheduler.wait(PREVIEW_CONTAINER_RECOVERY_TIMEOUT_MS).then(() => {
+        throw new Error('Timed out while recovering the ProjectWorkspace preview container.');
+      }),
+    ]);
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews');
+      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_active_preview');
+      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_preview_results');
+      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_sandbox_processes');
+    });
   }
 
   private pendingPreviewRow(previewId: string): PendingPreviewRow | null {
