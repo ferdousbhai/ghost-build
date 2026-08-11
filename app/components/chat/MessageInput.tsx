@@ -15,7 +15,7 @@ interface MessageInputProps {
   isStreaming: boolean;
   sendMessageInProgress: boolean;
   onStop: () => void;
-  onSend: (message: string) => Promise<boolean>;
+  onSend: (message: string, onAccepted?: () => void) => Promise<boolean>;
   disabled: boolean;
   numMessages: number | undefined;
 }

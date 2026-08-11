@@ -18,21 +18,29 @@ afterEach(() => {
 describe('submitMessageInput', () => {
   it('keeps the prompt when submission is rejected', async () => {
     const onAccepted = vi.fn();
-    const onSend = vi.fn().mockResolvedValue(false);
+    const onSend = vi.fn(async () => false);
 
     await expect(submitMessageInput('  keep this prompt  ', onSend, onAccepted)).resolves.toBe(false);
 
-    expect(onSend).toHaveBeenCalledWith('keep this prompt');
+    expect(onSend).toHaveBeenCalledWith('keep this prompt', onAccepted);
     expect(onAccepted).not.toHaveBeenCalled();
   });
 
-  it('clears the prompt only after submission is accepted', async () => {
+  it('accepts the prompt at request dispatch rather than stream completion', async () => {
     const onAccepted = vi.fn();
-    const onSend = vi.fn().mockResolvedValue(true);
-
-    await expect(submitMessageInput('send this', onSend, onAccepted)).resolves.toBe(true);
+    let finish!: (accepted: boolean) => void;
+    const onSend = vi.fn(
+      (_message: string, accept: () => void = () => undefined) =>
+        new Promise<boolean>((resolve) => {
+          accept();
+          finish = resolve;
+        }),
+    );
+    const submission = submitMessageInput('send this', onSend, onAccepted);
 
     expect(onAccepted).toHaveBeenCalledOnce();
+    finish(true);
+    await expect(submission).resolves.toBe(true);
   });
 });
 

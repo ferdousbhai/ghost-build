@@ -345,7 +345,12 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         shouldStopAfterTurn: ({ message }) => {
           const wouldContinue = isAssistantMessage(message) && message.content.some((part) => part.type === 'toolCall');
           stepBudgetStopped = stepCount >= BUILDER_TURN_MAX_MODEL_STEPS && wouldContinue;
-          return runtimeCompactionError !== undefined || toolBudgetError !== undefined || stepBudgetStopped;
+          return (
+            currentValidatedBuildCompletion !== undefined ||
+            runtimeCompactionError !== undefined ||
+            toolBudgetError !== undefined ||
+            stepBudgetStopped
+          );
         },
         afterToolCall: async ({ result, isError }) =>
           !isError && !toolResultSucceeded(result.details) ? { isError: true } : undefined,

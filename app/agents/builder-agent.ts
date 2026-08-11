@@ -60,7 +60,7 @@ import {
   builderAgentIdentitiesEqual,
   type BuilderAgentDurableIdentity,
 } from './builder-agent-identity';
-import type { BuilderWorkspaceApi } from './builder-workspace-api';
+import type { BuilderWorkspaceApi, BuilderWorkspaceCheckpoint } from './builder-workspace-api';
 import { UserWorkspaceRuntimeClient } from '~/lib/.server/cloudflare/user-workspace-runtime-client';
 import type {
   BuilderWorkspaceFileInput,
@@ -503,7 +503,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (compactAfterTurn) {
       this.setState({ ...this.state, contextCompactionRequestedTurnId: null });
     }
-    await this.refreshDeploymentReadiness();
+    const validatedSnapshot = await this.refreshDeploymentReadiness();
     if (status === 'completed') {
       if (compactAfterTurn && this.userId) {
         const throughMessageId = this.messages.at(-1)?.id;
@@ -516,9 +516,11 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
           }
         }
       }
-      await this.requestPreviewInternal({ requireValidation: true }).catch(() =>
-        logger.warn('Unable to queue the automatic remote preview'),
-      );
+      if (validatedSnapshot) {
+        await this.requestPreviewInternal({ validatedSnapshot }).catch(() =>
+          logger.warn('Unable to queue the automatic remote preview'),
+        );
+      }
     }
   }
 
@@ -936,16 +938,15 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     return seedBuilderWorkspace(this.workspace, seedId, entries);
   }
 
-  private async requestPreviewInternal(options: { requireValidation?: boolean } = {}): Promise<BuilderPreviewState> {
+  private async requestPreviewInternal(
+    options: { validatedSnapshot?: BuilderWorkspaceCheckpoint } = {},
+  ): Promise<BuilderPreviewState> {
     if (!this.ownerId || !this.userId || !this.transcriptBinding) {
       throw new Response('Agent authentication is required.', { status: 401 });
     }
     const workspace = await this.initializeWorkspace(this.transcriptBinding);
     const current = this.currentPreviewState();
-    const snapshot = await this.workspace.checkpoint();
-    if (options.requireValidation && !(await this.workspace.hasSuccessfulValidation(snapshot.revision))) {
-      return current;
-    }
+    const snapshot = options.validatedSnapshot ?? (await this.workspace.checkpoint());
     if (
       current.workspaceRevision === workspace.revision &&
       (current.status === 'queued' || current.status === 'building')
@@ -1105,19 +1106,21 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.setState({ ...this.state, preview, updatedAt: preview.updatedAt });
   }
 
-  private async refreshDeploymentReadiness(): Promise<void> {
-    let deploymentReady = false;
+  private async refreshDeploymentReadiness(): Promise<BuilderWorkspaceCheckpoint | null> {
+    let validatedSnapshot: BuilderWorkspaceCheckpoint | null = null;
     try {
-      deploymentReady = (await validatedDeploymentCheckpoint(this.workspace)) !== null;
+      validatedSnapshot = await validatedDeploymentCheckpoint(this.workspace);
     } catch {
       logger.warn('Unable to refresh deployment readiness');
     }
+    const deploymentReady = validatedSnapshot !== null;
     this.setState({
       ...this.state,
       deploymentReady,
       ...(deploymentReady ? {} : { deploymentApproval: null }),
       updatedAt: new Date().toISOString(),
     });
+    return validatedSnapshot;
   }
 
   private setValidationProgress(toolCallId: string, stage: BuilderValidationStage | null): void {

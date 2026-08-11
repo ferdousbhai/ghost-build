@@ -23,10 +23,10 @@ describe('BuilderAgent preview lifecycle', () => {
       source.indexOf('private async runPreviewBuild('),
     );
 
-    expect(response).toContain('this.requestPreviewInternal({ requireValidation: true })');
-    expect(preview).toContain(
-      'options.requireValidation && !(await this.workspace.hasSuccessfulValidation(snapshot.revision))',
-    );
+    expect(response).toContain('const validatedSnapshot = await this.refreshDeploymentReadiness()');
+    expect(response).toContain('this.requestPreviewInternal({ validatedSnapshot })');
+    expect(preview).toContain('options.validatedSnapshot ?? (await this.workspace.checkpoint())');
+    expect(preview).not.toContain('hasSuccessfulValidation');
   });
 
   it('persists requested runtime compaction only after the completed response', () => {

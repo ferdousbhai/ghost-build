@@ -44,7 +44,7 @@ export function useChatMessageSubmission(args: {
   const sendMessageInProgressRef = useRef(false);
   const pendingMessageSequenceRef = useRef(0);
 
-  const sendMessage = async (messageInput: string): Promise<boolean> => {
+  const sendMessage = async (messageInput: string, onAccepted: () => void = () => undefined): Promise<boolean> => {
     const retries = getChatRetryState();
     if (retries.numFailures >= MAX_CHAT_RETRIES || Date.now() < retries.nextRetry) {
       const retryMessage =
@@ -83,7 +83,10 @@ export function useChatMessageSubmission(args: {
         initializeChat: args.initializeChat,
         discardEmptyChat: args.discardEmptyChat,
         onStartChat: args.onStartChat,
-        onBuilderRequestStart: args.onBuilderRequestStart,
+        onBuilderRequestStart: () => {
+          args.onBuilderRequestStart();
+          onAccepted();
+        },
         submit: (onRequestStart) =>
           submitMessage(
             args.messages,
@@ -135,14 +138,16 @@ export function useChatMessageSubmission(args: {
       messageInputStore.set(pendingMessage);
     }
     void (async () => {
-      const sent = await sendMessageRef.current(pendingMessage);
+      const sent = await sendMessageRef.current(pendingMessage, () => {
+        if (messageInputStore.get() === pendingMessage) {
+          messageInputStore.set('');
+        }
+      });
       if (!mountedRef.current) {
         return;
       }
       clearPendingMessage();
-      if (sent && messageInputStore.get() === pendingMessage) {
-        messageInputStore.set('');
-      } else if (!sent) {
+      if (!sent && !messageInputStore.get()) {
         messageInputStore.set(pendingMessage);
       }
     })();

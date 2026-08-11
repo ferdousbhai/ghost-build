@@ -364,6 +364,43 @@ describe('piAgentRunner', () => {
     });
   });
 
+  it('stops the model loop as soon as the exact revision is validated', async () => {
+    mocks.completion = 'Project validation passed.';
+    mocks.piRun.mockImplementation(
+      async (
+        _context: unknown,
+        config: { shouldStopAfterTurn: (value: { message: ReturnType<typeof assistantMessage> }) => boolean },
+        emit: (event: unknown) => Promise<void>,
+      ) => {
+        await emit({
+          type: 'tool_execution_end',
+          toolCallId: 'validate-1',
+          toolName: 'exec',
+          result: { details: { validation: { ok: true } } },
+          isError: false,
+        });
+        expect(
+          config.shouldStopAfterTurn({
+            message: assistantMessage([{ type: 'toolCall', id: 'validate-1', name: 'exec', arguments: {} }]),
+          }),
+        ).toBe(true);
+        await emit({
+          type: 'turn_end',
+          message: assistantMessage([{ type: 'toolCall', id: 'validate-1', name: 'exec', arguments: {} }]),
+          toolResults: [],
+        });
+      },
+    );
+
+    const chunks = await collectChunks(await createAgentStream());
+
+    expect(chunks).toContainEqual({
+      type: 'text-delta',
+      id: 'validated-build-completion',
+      delta: 'Project validation passed.',
+    });
+  });
+
   it('compacts live tool-loop context before another model step', async () => {
     const summarize = vi.fn(async () => '## Goal\nFinish the build.');
     const requestDurableCompaction = vi.fn();

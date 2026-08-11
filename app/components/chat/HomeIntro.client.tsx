@@ -10,7 +10,7 @@ interface HomeIntroProps {
   disabledReason: ReactNode | null;
   isStreaming: boolean;
   messagesLength: number;
-  onSend: (messageInput: string) => Promise<boolean>;
+  onSend: (messageInput: string, onAccepted?: () => void) => Promise<boolean>;
   onStop: () => void;
   sendMessageInProgress: boolean;
 }

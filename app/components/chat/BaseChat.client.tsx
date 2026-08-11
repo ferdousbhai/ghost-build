@@ -40,7 +40,7 @@ interface BaseChatProps {
 
   // Chat user interactions
   onStop: () => void;
-  onSend: (messageInput: string) => Promise<boolean>;
+  onSend: (messageInput: string, onAccepted?: () => void) => Promise<boolean>;
   sendMessageInProgress: boolean;
 
   // Current chat history props

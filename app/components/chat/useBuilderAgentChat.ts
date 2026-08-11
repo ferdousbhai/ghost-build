@@ -143,7 +143,6 @@ export function useBuilderAgentChat(args: {
         },
       };
     },
-    autoContinueAfterToolResult: true,
     onData: (part) => {
       if (part.type !== 'data-tool-progress' || !part.data || typeof part.data !== 'object') {
         return;

@@ -16,7 +16,7 @@ import { useGhostbuildAuth } from './GhostbuildAuthWrapper';
 interface MessageInputControllerOptions {
   isStreaming: boolean;
   onStop: () => void;
-  onSend: (message: string) => Promise<boolean>;
+  onSend: (message: string, onAccepted?: () => void) => Promise<boolean>;
   prefillEnabled?: boolean;
 }
 
@@ -51,7 +51,7 @@ export function useMessageInputController({
     await submitMessageInput(input, onSend, () => {
       cachePrompt.cancel();
       removePendingPrompt();
-      messageInputStore.set('');
+      replacePromptIfUnchanged(input, '');
     });
   }, [input, onSend]);
 
@@ -232,17 +232,12 @@ function removePendingPrompt(): void {
 
 export async function submitMessageInput(
   input: string,
-  onSend: (message: string) => Promise<boolean>,
+  onSend: (message: string, onAccepted?: () => void) => Promise<boolean>,
   onAccepted: () => void,
 ): Promise<boolean> {
   const message = input.trim();
   if (!message) {
     return false;
   }
-  const accepted = await onSend(message);
-  if (!accepted) {
-    return false;
-  }
-  onAccepted();
-  return true;
+  return onSend(message, onAccepted);
 }

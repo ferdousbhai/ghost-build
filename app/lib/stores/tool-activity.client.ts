@@ -12,14 +12,16 @@ export class ToolActivityStore {
   readonly activities = map<Record<PartId, ToolActivity>>({});
   readonly revision = atom(0);
   #scope: string | null = null;
-  #turnActive = true;
+  #turnActive = false;
 
-  activateScope(scope: string): void {
+  activateScope(scope: string, options: { preserveActiveTurn?: boolean } = {}): void {
     if (this.#scope === scope) {
       return;
     }
     this.#scope = scope;
-    this.#turnActive = false;
+    if (!options.preserveActiveTurn) {
+      this.#turnActive = false;
+    }
     if (Object.keys(this.activities.get()).length > 0) {
       this.activities.set({});
       this.#bumpRevision();

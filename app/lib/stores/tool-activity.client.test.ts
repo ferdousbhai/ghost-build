@@ -6,6 +6,7 @@ describe('ToolActivityStore', () => {
   it('presents SDK tool progress without executing anything in the browser', () => {
     const store = new ToolActivityStore();
     const partId = 'message:0' as PartId;
+    store.startTurn();
 
     store.record(partId, {
       type: 'dynamic-tool',
@@ -33,6 +34,7 @@ describe('ToolActivityStore', () => {
     const latePart = 'message:1' as PartId;
     const lateActivePart = 'message:2' as PartId;
     const movedLateActivePart = 'message:3' as PartId;
+    store.startTurn();
 
     store.record(firstPart, {
       type: 'dynamic-tool',
@@ -93,6 +95,7 @@ describe('ToolActivityStore', () => {
   it('does not downgrade a completed call when stale progress arrives', () => {
     const store = new ToolActivityStore();
     const partId = 'message:0' as PartId;
+    store.startTurn();
     store.record(partId, {
       type: 'dynamic-tool',
       state: 'output-available',
@@ -118,6 +121,7 @@ describe('ToolActivityStore', () => {
     const store = new ToolActivityStore();
     const completedPart = makePartId('message', 0);
     const incompletePart = makePartId('message', 1);
+    store.startTurn();
     store.record(completedPart, {
       type: 'dynamic-tool',
       state: 'input-available',
@@ -179,5 +183,56 @@ describe('ToolActivityStore', () => {
 
     expect(store.activities.get()[firstPart]).toBeUndefined();
     expect(store.activities.get()[secondPart]?.status).toBe('running');
+  });
+
+  it('keeps a live turn active while its provisional presentation becomes durable', () => {
+    const store = new ToolActivityStore();
+    const partId = 'message:0' as PartId;
+    store.activateScope('provisional');
+    store.startTurn();
+
+    store.activateScope('durable', { preserveActiveTurn: true });
+    store.record(partId, {
+      type: 'dynamic-tool',
+      state: 'input-available',
+      toolCallId: 'tool-1',
+      toolName: 'write',
+      input: { path: '/home/project/src/index.tsx' },
+    });
+
+    expect(store.activities.get()[partId]?.status).toBe('running');
+  });
+
+  it('marks restored incomplete tools stopped when no turn has started', () => {
+    const store = new ToolActivityStore();
+    const partId = 'message:0' as PartId;
+    store.activateScope('historical');
+    store.record(partId, {
+      type: 'dynamic-tool',
+      state: 'input-available',
+      toolCallId: 'tool-1',
+      toolName: 'write',
+      input: { path: '/home/project/src/index.tsx' },
+    });
+
+    expect(store.activities.get()[partId]?.status).toBe('aborted');
+  });
+
+  it('does not carry a live turn into an unrelated presentation', () => {
+    const store = new ToolActivityStore();
+    const partId = 'message:0' as PartId;
+    store.activateScope('first');
+    store.startTurn();
+
+    store.activateScope('second');
+    store.record(partId, {
+      type: 'dynamic-tool',
+      state: 'input-available',
+      toolCallId: 'tool-1',
+      toolName: 'write',
+      input: { path: '/home/project/src/index.tsx' },
+    });
+
+    expect(store.activities.get()[partId]?.status).toBe('aborted');
   });
 });
