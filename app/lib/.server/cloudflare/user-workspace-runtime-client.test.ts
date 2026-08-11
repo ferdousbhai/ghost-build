@@ -487,43 +487,46 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     expect(namespace.get).not.toHaveBeenCalled();
   });
 
-  it('drops a cached ProjectWorkspace stub after Cloudflare replaces its Durable Object code', async () => {
-    const reset = new Error('Durable Object reset because its code was updated.');
-    const staleStub = workspaceStub({
-      getWorkspaceSnapshot: vi.fn().mockRejectedValue(reset),
-    });
-    const currentState = {
-      initialized: true,
-      revision: 1,
-      resetRevision: 0,
-      fileCount: 0,
-      totalBytes: 0,
-      seeding: false,
-    };
-    const currentStub = workspaceStub({
-      getWorkspaceSnapshot: vi.fn().mockResolvedValue({ state: currentState, files: [] }),
-    });
-    const namespace = {
-      idFromName: vi.fn(() => ({ id: 'project-do-id' })),
-      get: vi.fn().mockReturnValueOnce(staleStub).mockReturnValue(currentStub),
-    };
-    const client = new UserWorkspaceRuntimeClient(
-      {
-        GHOSTBUILD_USER_RUNTIME: '1',
-        GHOSTBUILD_USER_ID: 'user-1',
-        PROJECT_WORKSPACE: namespace,
-      } as unknown as Env,
-      'project-1',
-      () => 'user-1',
-    );
+  it.each(['Durable Object reset because its code was updated.', 'Container service disconnected.'])(
+    'drops a cached ProjectWorkspace stub after a transport reset: %s',
+    async (message) => {
+      const reset = new Error(message);
+      const staleStub = workspaceStub({
+        getWorkspaceSnapshot: vi.fn().mockRejectedValue(reset),
+      });
+      const currentState = {
+        initialized: true,
+        revision: 1,
+        resetRevision: 0,
+        fileCount: 0,
+        totalBytes: 0,
+        seeding: false,
+      };
+      const currentStub = workspaceStub({
+        getWorkspaceSnapshot: vi.fn().mockResolvedValue({ state: currentState, files: [] }),
+      });
+      const namespace = {
+        idFromName: vi.fn(() => ({ id: 'project-do-id' })),
+        get: vi.fn().mockReturnValueOnce(staleStub).mockReturnValue(currentStub),
+      };
+      const client = new UserWorkspaceRuntimeClient(
+        {
+          GHOSTBUILD_USER_RUNTIME: '1',
+          GHOSTBUILD_USER_ID: 'user-1',
+          PROJECT_WORKSPACE: namespace,
+        } as unknown as Env,
+        'project-1',
+        () => 'user-1',
+      );
 
-    await expect(client.refresh()).rejects.toBe(reset);
-    await expect(client.refresh()).resolves.toEqual(currentState);
+      await expect(client.refresh()).rejects.toBe(reset);
+      await expect(client.refresh()).resolves.toEqual(currentState);
 
-    expect(namespace.get).toHaveBeenCalledTimes(2);
-    expect(staleStub.initializeProjectIdentity).toHaveBeenCalledOnce();
-    expect(currentStub.initializeProjectIdentity).toHaveBeenCalledOnce();
-  });
+      expect(namespace.get).toHaveBeenCalledTimes(2);
+      expect(staleStub.initializeProjectIdentity).toHaveBeenCalledOnce();
+      expect(currentStub.initializeProjectIdentity).toHaveBeenCalledOnce();
+    },
+  );
 });
 
 type RpcCall = { operation: string; value: unknown };

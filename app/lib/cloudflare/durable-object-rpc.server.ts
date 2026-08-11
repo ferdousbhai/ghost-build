@@ -22,7 +22,7 @@ export async function retryDurableObjectRpc<T>(call: () => Promise<T>): Promise<
   }
 }
 
-function isRetryableDurableObjectError(error: unknown): boolean {
+export function isRetryableDurableObjectError(error: unknown): boolean {
   if (!error || typeof error !== 'object') {
     return false;
   }
@@ -32,7 +32,9 @@ function isRetryableDurableObjectError(error: unknown): boolean {
   }
   return (
     candidate.retryable === true ||
-    (typeof candidate.message === 'string' && candidate.message.includes('reset because its code was updated'))
+    (typeof candidate.message === 'string' &&
+      (candidate.message.includes('reset because its code was updated') ||
+        candidate.message.includes('Container service disconnected')))
   );
 }
 

@@ -12,6 +12,7 @@ import type {
   BuilderWorkspaceState,
   BuilderWorkspaceSyncPage,
 } from '~/agents/builder-workspace-types';
+import { isRetryableDurableObjectError } from '~/lib/cloudflare/durable-object-rpc.server';
 type ProjectWorkspaceStub = DurableObjectStub<ProjectWorkspaceRpc>;
 
 type ToolOperationStartResult =
@@ -584,22 +585,12 @@ function requireToolCallId(value: unknown): string {
   return value;
 }
 
-function isDurableObjectCodeReset(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'message' in error &&
-    typeof error.message === 'string' &&
-    error.message.includes('Durable Object reset because its code was updated')
-  );
-}
-
 function isRpcStreamDisconnect(error: unknown): boolean {
   return errorMessage(error).includes('ReadableStream received over RPC disconnected prematurely');
 }
 
 function isDurableObjectTransportReset(error: unknown): boolean {
-  return isDurableObjectCodeReset(error) || isRpcStreamDisconnect(error);
+  return isRetryableDurableObjectError(error) || isRpcStreamDisconnect(error);
 }
 
 function workspaceCommandDisconnectError(cause: unknown): Error {
