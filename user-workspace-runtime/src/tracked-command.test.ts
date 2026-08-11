@@ -111,6 +111,31 @@ describe('tracked Sandbox commands', () => {
     expect(process.kill).toHaveBeenCalledWith(9);
   });
 
+  it('kills a process when the output observer never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      const process = {
+        id: 'process-1',
+        output: vi.fn(() => new Promise<ReturnType<typeof output>>(() => undefined)),
+        kill: vi.fn(async () => undefined),
+        waitForExit: vi.fn(async () => ({ code: 137, timedOut: false })),
+        status: vi.fn(async () => exitedStatus(137)),
+      };
+
+      const completion = runTrackedSandboxCommand({ command, timeout: 30_000, exec: async () => process });
+      const expectation = expect(completion).rejects.toThrow(
+        'Sandbox command timed out after 30000ms and was terminated.',
+      );
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await expectation;
+      expect(process.kill).toHaveBeenCalledWith(9);
+      expect(process.waitForExit).toHaveBeenCalledWith({ timeout: 10_000 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('fails closed when termination cannot be confirmed', async () => {
     const process = {
       id: 'process-1',

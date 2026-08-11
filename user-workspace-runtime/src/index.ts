@@ -83,6 +83,7 @@ import {
   runTrackedSandboxCommand,
   SandboxProcessTerminationUnconfirmedError,
   terminateTrackedSandboxProcess,
+  type TrackedSandboxProcess,
 } from './tracked-command';
 import { ValidationCancellation } from './validation-cancellation';
 import {
@@ -1336,23 +1337,19 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         try {
           await this.discardPreparedValidationSnapshot();
           await this.pushDurableProjectToContainer();
-          cancellation.requireActive();
-          await this.runValidationCommand(
-            cancellation,
+          await this.runTransientCommand(
             PROJECT_ROOT,
             createIsolatedProjectCommand({ projectRoot: PROJECT_ROOT, isolatedRoot, quote: shellQuote }),
             2 * 60_000,
+            cancellation,
           );
           cancellation.requireActive();
           if ((await this.checkpoint()).revision !== before.revision) {
             throw new Error('The project changed while validation was being isolated. Validate the new revision.');
           }
-          cancellation.requireActive();
-          await this.runValidationCommand(cancellation, isolatedRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
-          cancellation.requireActive();
+          await this.runTransientCommand(isolatedRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS, cancellation);
           for (const { command, timeoutMs } of [...REVISION_CHECK_COMMANDS, ...PREVIEW_PREPARATION_COMMANDS]) {
-            await this.runValidationCommand(cancellation, isolatedRoot, command, timeoutMs);
-            cancellation.requireActive();
+            await this.runTransientCommand(isolatedRoot, command, timeoutMs, cancellation);
           }
           cancellation.requireActive();
           const after = await this.checkpoint();
@@ -2009,35 +2006,15 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     }
   }
 
-  private async runTransientCommand(directory: string, command: string, timeout: number): Promise<void> {
-    await this.terminateTransientCommand();
-    let processId: string | undefined;
-    try {
-      await runTrackedSandboxCommand({
-        command: sandboxShellCommand(createContainerDirectoryCommand({ directory, command, quote: shellQuote })),
-        timeout,
-        exec: (trackedCommand, options) => this.sandboxProcesses.exec(trackedCommand, options),
-        onProcess: (process) => {
-          processId = process.id;
-          this.setProcessForRole(TRANSIENT_COMMAND_PROCESS_ROLE, process.id);
-        },
-      });
-    } finally {
-      if (processId) {
-        this.clearProcessForRole(TRANSIENT_COMMAND_PROCESS_ROLE, processId);
-      }
-    }
-  }
-
-  private async runValidationCommand(
-    cancellation: ValidationCancellation,
+  private async runTransientCommand(
     directory: string,
     command: string,
     timeout: number,
+    cancellation?: ValidationCancellation,
   ): Promise<void> {
     await this.terminateTransientCommand();
-    cancellation.requireActive();
-    let process: Parameters<ValidationCancellation['attachProcess']>[0] | undefined;
+    cancellation?.requireActive();
+    let process: TrackedSandboxProcess | undefined;
     try {
       await runTrackedSandboxCommand({
         command: sandboxShellCommand(createContainerDirectoryCommand({ directory, command, quote: shellQuote })),
@@ -2046,12 +2023,12 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         onProcess: async (startedProcess) => {
           process = startedProcess;
           this.setProcessForRole(TRANSIENT_COMMAND_PROCESS_ROLE, startedProcess.id);
-          await cancellation.attachProcess(startedProcess);
+          await cancellation?.attachProcess(startedProcess);
         },
       });
     } finally {
       if (process) {
-        cancellation.detachProcess(process);
+        cancellation?.detachProcess(process);
         this.clearProcessForRole(TRANSIENT_COMMAND_PROCESS_ROLE, process.id);
       }
     }

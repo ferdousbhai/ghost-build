@@ -3,6 +3,7 @@ import type { ExecOptions, ProcessExit, ProcessOutput, ProcessStatus, SandboxCom
 const MAX_SANDBOX_FAILURE_MESSAGE_LENGTH = 4_000;
 const SANDBOX_OUTPUT_BYTES = MAX_SANDBOX_FAILURE_MESSAGE_LENGTH * 2;
 const PROCESS_OBSERVATION_GRACE_MS = 30_000;
+const LOCAL_PROCESS_DEADLINE = Symbol('local-process-deadline');
 
 export type TrackedSandboxProcess = {
   readonly id: string;
@@ -31,15 +32,26 @@ export async function runTrackedSandboxCommand(options: RunTrackedSandboxCommand
   const process = await options.exec(options.command, { timeout: options.timeout });
   await options.onProcess?.(process);
   let result: ProcessOutput<string>;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
-    result = await process.output({
-      encoding: 'utf8',
-      maxBytes: SANDBOX_OUTPUT_BYTES,
-      timeout: options.timeout + PROCESS_OBSERVATION_GRACE_MS,
-    });
-  } catch {
+    result = await Promise.race([
+      process.output({
+        encoding: 'utf8',
+        maxBytes: SANDBOX_OUTPUT_BYTES,
+        timeout: options.timeout + PROCESS_OBSERVATION_GRACE_MS,
+      }),
+      new Promise<never>((_, reject) => {
+        deadline = setTimeout(() => reject(LOCAL_PROCESS_DEADLINE), options.timeout + PROCESS_OBSERVATION_GRACE_MS);
+      }),
+    ]);
+  } catch (error) {
     await terminateTrackedSandboxProcess(process);
+    if (error === LOCAL_PROCESS_DEADLINE) {
+      throw new Error(`Sandbox command timed out after ${options.timeout}ms and was terminated.`);
+    }
     throw new Error(`Sandbox command could not be observed for ${options.timeout}ms and was terminated.`);
+  } finally {
+    clearTimeout(deadline);
   }
   if (result.timedOut) {
     throw new Error(

@@ -125,7 +125,8 @@ describe('isolated project command', () => {
     expect(validation).toContain('toolCallId !== null && active.toolCallId !== toolCallId');
     expect(validation).toContain('this.#activeValidation.inputJson !== inputJson');
     expect(validation).toContain('cancellation.requireActive()');
-    expect(validation).toContain('this.runValidationCommand(');
+    expect(validation).not.toContain('runValidationCommand');
+    expect(validation).toContain('INSTALL_TIMEOUT_MS, cancellation');
     expect(validation).toContain('PREVIEW_PREPARATION_COMMANDS');
     expect(validation).toContain('ghostbuild_prepared_validation');
     expect(deployment).toContain("await this.runTransientCommand(isolatedRoot, 'pnpm run build', 5 * 60_000)");
@@ -139,7 +140,7 @@ describe('isolated project command', () => {
       source.indexOf('private async runTransientCommand('),
       source.indexOf('private async cleanupPreviewProcess('),
     );
-    expect(transientCommand).toContain('this.setProcessForRole(TRANSIENT_COMMAND_PROCESS_ROLE, process.id)');
+    expect(transientCommand).toContain('this.setProcessForRole(TRANSIENT_COMMAND_PROCESS_ROLE, startedProcess.id)');
     expect(transientCommand).not.toContain('crypto.randomUUID()');
     expect(source).toContain("(kind) => kind === 'validate' || kind === 'preview'");
     expect(source).not.toContain("cwd: '/tmp'");
