@@ -204,11 +204,10 @@ async function syncCheckpoint(
     return;
   }
 
-  const formData = buildCheckpointFormData(update.firstMessage);
   let response: Response | undefined;
   let requestError: Error | null = null;
   try {
-    response = await fetchUserRuntime(`/v1/chats/store?${searchParams}`, { method: 'POST', body: formData, signal });
+    response = await fetchUserRuntime(`/v1/chats/store?${searchParams}`, { method: 'POST', signal });
   } catch (error) {
     if (signal.aborted) {
       throw error;
@@ -246,14 +245,6 @@ async function syncCheckpoint(
       ? { persistedTranscriptCheckpoint: completeMessageInfo.transcriptCheckpoint }
       : {}),
   });
-}
-
-function buildCheckpointFormData(firstMessage: string | undefined): FormData {
-  const formData = new FormData();
-  if (firstMessage) {
-    formData.append('firstMessage', firstMessage);
-  }
-  return formData;
 }
 
 async function handleSyncFailure(

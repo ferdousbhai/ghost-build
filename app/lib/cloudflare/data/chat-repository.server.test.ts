@@ -22,19 +22,32 @@ describe('current chat checkpoint persistence', () => {
     transcriptMocks.requireChatTranscript.mockReset().mockResolvedValue(transcript());
   });
 
-  it('updates only transcript metadata and the active chat pointer', async () => {
+  it('updates the transcript catalog projection with one statement', async () => {
     const database = new ChatRepositoryDatabase();
 
     await expect(updateChatCheckpoint(database.db, updateArgs())).resolves.toEqual({ accepted: true });
 
-    expect(database.batchStatements).toHaveLength(2);
-    expect(database.batchStatements[0].query).toContain('UPDATE chat_transcripts');
-    expect(database.batchStatements[0].query).toContain('last_message_rank = ?');
-    expect(database.batchStatements[0].query).toContain('chats.creator_id = ?');
-    expect(database.batchStatements[1].query).toContain('UPDATE chats');
-    expect(database.batchStatements.map((statement) => statement.query).join('\n')).not.toMatch(
-      /storage_key|snapshot_key|chat_message_states/,
+    expect(database.runStatements).toHaveLength(1);
+    expect(database.runStatements[0].query).toContain('UPDATE chat_transcripts');
+    expect(database.runStatements[0].query).toContain('last_message_rank = ?');
+    expect(database.runStatements[0].query).toContain('chats.creator_id = ?');
+    expect(database.runStatements[0].query).not.toMatch(/storage_key|snapshot_key|chat_message_states/);
+  });
+
+  it('accepts an exact replay without writing', async () => {
+    transcriptMocks.requireChatTranscript.mockResolvedValue(
+      transcript({
+        head_revision: 1,
+        head_digest: 'a'.repeat(64),
+        head_message_count: 6,
+        last_message_rank: 5,
+        part_index: 2,
+      }),
     );
+    const database = new ChatRepositoryDatabase();
+
+    await expect(updateChatCheckpoint(database.db, updateArgs())).resolves.toEqual({ accepted: true });
+    expect(database.runStatements).toHaveLength(0);
   });
 
   it('rejects a stale transcript checkpoint without writing', async () => {
@@ -43,7 +56,7 @@ describe('current chat checkpoint persistence', () => {
     await expect(
       updateChatCheckpoint(database.db, updateArgs({ checkpoint: { ...updateArgs().checkpoint, generation: 1 } })),
     ).resolves.toEqual({ accepted: false });
-    expect(database.batchStatements).toHaveLength(0);
+    expect(database.runStatements).toHaveLength(0);
   });
 
   it('rejects a checkpoint that moves the catalog position backwards', async () => {
@@ -51,7 +64,7 @@ describe('current chat checkpoint persistence', () => {
     const database = new ChatRepositoryDatabase();
 
     await expect(updateChatCheckpoint(database.db, updateArgs())).resolves.toEqual({ accepted: false });
-    expect(database.batchStatements).toHaveLength(0);
+    expect(database.runStatements).toHaveLength(0);
   });
 });
 
@@ -79,7 +92,6 @@ function updateArgs(overrides: Partial<Parameters<typeof updateChatCheckpoint>[1
     lastMessageRank: 5,
     subchatIndex: 0,
     partIndex: 2,
-    initialDescription: 'Initial title',
     ...overrides,
     checkpoint: overrides.checkpoint ?? {
       agentName: 'chat',
@@ -128,11 +140,12 @@ function transcript(overrides: Partial<ChatTranscriptRow> = {}): ChatTranscriptR
 
 class ChatRepositoryDatabase {
   readonly batchStatements: PreparedStatement[] = [];
+  readonly runStatements: PreparedStatement[] = [];
   readonly db: D1Database;
 
   constructor() {
     this.db = {
-      prepare: (query: string) => new PreparedStatement(query),
+      prepare: (query: string) => new PreparedStatement(query, this.runStatements),
       batch: async (statements: D1PreparedStatement[]) => {
         this.batchStatements.push(...(statements as unknown as PreparedStatement[]));
         return statements.map(() => ({ meta: { changes: 1 } })) as D1Result[];
@@ -144,7 +157,10 @@ class ChatRepositoryDatabase {
 class PreparedStatement {
   values: unknown[] = [];
 
-  constructor(readonly query: string) {}
+  constructor(
+    readonly query: string,
+    private readonly runStatements: PreparedStatement[] = [],
+  ) {}
 
   bind(...values: unknown[]) {
     this.values = values;
@@ -156,5 +172,10 @@ class PreparedStatement {
       return chat() as T;
     }
     return null;
+  }
+
+  async run(): Promise<D1Result> {
+    this.runStatements.push(this);
+    return { meta: { changes: 1 } } as D1Result;
   }
 }

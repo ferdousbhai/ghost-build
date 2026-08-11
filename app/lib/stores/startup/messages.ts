@@ -1,6 +1,6 @@
 import { atom } from 'nanostores';
 import { waitForStoreCondition } from '~/lib/stores/waitForStore';
-import { createdAtMillis, messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import { createdAtMillis, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import {
   stripTranscriptBaseMetadata,
   transcriptCheckpointsEqual,
@@ -33,11 +33,10 @@ export function prepareMessageHistory(args: {
   update: {
     messageIndex: number;
     partIndex: number;
-    firstMessage: string | undefined;
   } | null;
 } {
   const { chatId, sessionId, completeMessageInfo, persistedMessageInfo } = args;
-  const { messageIndex, partIndex, allMessages } = completeMessageInfo;
+  const { messageIndex, partIndex } = completeMessageInfo;
   const searchParams = new URLSearchParams();
 
   searchParams.set('chatId', chatId);
@@ -45,7 +44,6 @@ export function prepareMessageHistory(args: {
   searchParams.set('lastMessageRank', messageIndex.toString());
   searchParams.set('partIndex', partIndex.toString());
   searchParams.set('lastSubchatIndex', args.subchatIndex.toString());
-  const firstMessage = allMessages.length > 0 ? messageText(allMessages[0]) : undefined;
   if (!completeMessageInfo.transcriptCheckpoint) {
     return { searchParams, update: null };
   }
@@ -64,7 +62,7 @@ export function prepareMessageHistory(args: {
     return { searchParams, update: null };
   }
 
-  return { searchParams, update: { messageIndex, partIndex, firstMessage } };
+  return { searchParams, update: { messageIndex, partIndex } };
 }
 
 export function waitForNewMessages(

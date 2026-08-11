@@ -1,4 +1,3 @@
-import { deriveProvisionalTitle } from '@summonghost/title-generation';
 import {
   TRANSCRIPT_HISTORY_FORMAT_VERSION,
   transcriptCheckpointsEqual,
@@ -9,7 +8,6 @@ import {
 import { z } from 'zod';
 import type { BuilderAgent } from '~/agents/builder-agent';
 import { readJsonBodyWithLimit } from '~/lib/bounded-body';
-import { readMultipartBodyWithLimits } from '~/lib/bounded-multipart';
 import { MAX_SUBCHAT_INDEX } from './data-pagination';
 import type { DataOperationPath } from './data-api';
 import { dataOperationArgSchemas } from './data-operation-schemas';
@@ -55,7 +53,6 @@ const initialMessagesRequestSchema = chatRequestSchema.extend({
 });
 const MAX_DATA_REQUEST_BYTES = 64 * 1024;
 const MAX_INITIAL_MESSAGES_REQUEST_BYTES = 8 * 1024;
-const MAX_FIRST_MESSAGE_BYTES = 64 * 1024;
 
 export async function userRuntimeDataAction(args: {
   request: Request;
@@ -118,19 +115,12 @@ export async function userRuntimeStoreChatAction(args: {
     if (!transcriptCheckpointsEqual(checkpoint, durable.checkpoint)) {
       return transcriptConflictResponse(durable.checkpoint);
     }
-    const parts = await readMultipartBodyWithLimits(args.request, {
-      label: 'Chat metadata',
-      maximumBytes: MAX_FIRST_MESSAGE_BYTES + 16 * 1024,
-      fields: { firstMessage: { kind: 'text', maximumBytes: MAX_FIRST_MESSAGE_BYTES } },
-    });
-    const firstMessage = parts.get('firstMessage');
     const update = await updateChatCheckpoint(args.env.DB, {
       sessionId,
       chatId,
       lastMessageRank,
       subchatIndex,
       partIndex,
-      initialDescription: typeof firstMessage === 'string' ? deriveProvisionalTitle(firstMessage) : null,
       checkpoint,
     });
     return update.accepted ? new Response(null, { status: 200 }) : transcriptConflictResponse();

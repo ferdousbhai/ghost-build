@@ -20,7 +20,6 @@ type UpdateChatCheckpointArgs = {
   lastMessageRank: number;
   subchatIndex: number;
   partIndex: number;
-  initialDescription?: string | null;
   checkpoint: TranscriptCheckpoint;
 };
 
@@ -105,69 +104,53 @@ export async function updateChatCheckpoint(
   ) {
     return { accepted: false };
   }
+  if (
+    transcript.head_revision === args.checkpoint.revision &&
+    transcript.head_digest === args.checkpoint.digest &&
+    transcript.head_message_count === args.checkpoint.messageCount &&
+    transcript.last_message_rank === args.lastMessageRank &&
+    transcript.part_index === args.partIndex
+  ) {
+    return { accepted: true };
+  }
 
-  const results = await db.batch([
-    db
-      .prepare(
-        `UPDATE chat_transcripts
-         SET head_revision = ?, head_digest = ?, head_message_count = ?,
-             last_message_rank = ?, part_index = ?, description = COALESCE(description, ?), updated_at = ?
-         WHERE chat_id = ? AND subchat_index = ? AND generation = ? AND agent_name = ?
-           AND head_revision <= ?
-           AND (head_revision < ? OR head_digest IS NULL OR head_digest = ?)
-           AND (last_message_rank < ? OR (last_message_rank = ? AND part_index <= ?))
-           AND EXISTS (
-             SELECT 1 FROM chats
-             WHERE chats.id = chat_transcripts.chat_id AND chats.creator_id = ? AND chats.is_deleted = 0
-           )`,
-      )
-      .bind(
-        args.checkpoint.revision,
-        args.checkpoint.digest,
-        args.checkpoint.messageCount,
-        args.lastMessageRank,
-        args.partIndex,
-        args.initialDescription ?? null,
-        Date.now(),
-        chat.id,
-        args.subchatIndex,
-        args.checkpoint.generation,
-        args.checkpoint.agentName,
-        args.checkpoint.revision,
-        args.checkpoint.revision,
-        args.checkpoint.digest,
-        args.lastMessageRank,
-        args.lastMessageRank,
-        args.partIndex,
-        args.sessionId,
-      ),
-    db
-      .prepare(
-        `UPDATE chats
-         SET last_subchat_index = ?
-         WHERE id = ? AND creator_id = ? AND is_deleted = 0
-           AND EXISTS (
-             SELECT 1 FROM chat_transcripts
-             WHERE chat_id = chats.id AND subchat_index = ? AND generation = ? AND agent_name = ?
-               AND head_revision = ? AND head_digest = ? AND head_message_count = ?
-               AND last_message_rank = ? AND part_index = ?
-           )`,
-      )
-      .bind(
-        args.subchatIndex,
-        chat.id,
-        args.sessionId,
-        args.subchatIndex,
-        args.checkpoint.generation,
-        args.checkpoint.agentName,
-        args.checkpoint.revision,
-        args.checkpoint.digest,
-        args.checkpoint.messageCount,
-        args.lastMessageRank,
-        args.partIndex,
-      ),
-  ]);
-  return { accepted: results.every((result) => result.meta.changes === 1) };
+  // BuilderAgent owns message history. D1 keeps one monotonic catalog projection;
+  // subchat creation already advances chats.last_subchat_index transactionally.
+  const result = await db
+    .prepare(
+      `UPDATE chat_transcripts
+       SET head_revision = ?, head_digest = ?, head_message_count = ?,
+           last_message_rank = ?, part_index = ?, updated_at = ?
+       WHERE chat_id = ? AND subchat_index = ? AND generation = ? AND agent_name = ?
+         AND head_revision <= ?
+         AND (head_revision < ? OR head_digest IS NULL OR head_digest = ?)
+         AND (last_message_rank < ? OR (last_message_rank = ? AND part_index <= ?))
+         AND EXISTS (
+           SELECT 1 FROM chats
+           WHERE chats.id = chat_transcripts.chat_id AND chats.creator_id = ? AND chats.is_deleted = 0
+         )`,
+    )
+    .bind(
+      args.checkpoint.revision,
+      args.checkpoint.digest,
+      args.checkpoint.messageCount,
+      args.lastMessageRank,
+      args.partIndex,
+      Date.now(),
+      chat.id,
+      args.subchatIndex,
+      args.checkpoint.generation,
+      args.checkpoint.agentName,
+      args.checkpoint.revision,
+      args.checkpoint.revision,
+      args.checkpoint.digest,
+      args.lastMessageRank,
+      args.lastMessageRank,
+      args.partIndex,
+      args.sessionId,
+    )
+    .run();
+  return { accepted: result.meta.changes === 1 };
 }
 
 function prepareInsertChat(db: D1Database, args: ChatInsertArgs, ignoreInitialConflict = false): D1PreparedStatement {
