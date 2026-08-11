@@ -15,7 +15,9 @@ import {
 } from '~/lib/.server/cloudflare/cloudflare-orchestrator';
 import { InvalidJsonBodyError, PayloadTooLargeError, readJsonBodyWithLimit } from '~/lib/bounded-body';
 import {
+  missingUserWorkspaceRuntimeCapabilities,
   provisionUserWorkspaceRuntime,
+  USER_WORKSPACE_REQUIRED_CAPABILITIES,
   UserWorkspaceRuntimeProvisioningInProgressError,
 } from '~/lib/.server/cloudflare/user-workspace-runtime-provisioner';
 import {
@@ -30,7 +32,7 @@ import {
   CLOUDFLARE_AUTHORIZATION_ERROR_VALUE,
 } from '~/lib/cloudflare/authorization-recovery';
 
-const requestedCapabilities = ['workers', 'containers', 'd1', 'r2', 'kv', 'durable_objects', 'workers_ai'] as const;
+const requestedCapabilities = USER_WORKSPACE_REQUIRED_CAPABILITIES;
 export const CLOUDFLARE_CONNECTION_CALLBACK_METHOD = 'GET' as const;
 const OAUTH_STATE_COOKIE = 'ghostbuild_oauth_state';
 const OAUTH_STATE_COOKIE_MAX_AGE_SECONDS = 10 * 60;
@@ -42,6 +44,8 @@ const WORKSPACE_PLAN_REQUIRED_MESSAGE =
   'Cloudflare Containers requires the Workers Paid plan. Enable Workers Paid in Cloudflare, then return here and try again. Ghostbuild does not change your plan automatically.';
 const WORKSPACE_PREPARATION_FAILED_MESSAGE =
   'Cloudflare could not create your workspace. Check the Workers settings for this Cloudflare account, then try again.';
+const CLOUDFLARE_REAUTHORIZATION_REQUIRED_MESSAGE =
+  'Ghostbuild needs updated Cloudflare permissions for this workspace. Reauthorize Cloudflare, approve the requested permissions, then try again.';
 const startPayloadSchema = z.object({ callbackURL: z.string().url().max(2_048).optional() });
 const callbackPayloadSchema = z
   .object({
@@ -130,6 +134,15 @@ export async function cloudflareRuntimeSessionAction({
   }
   if (!env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY) {
     return Response.json({ error: 'Runtime authorization is unavailable.' }, { status: 503 });
+  }
+  if (missingUserWorkspaceRuntimeCapabilities(connection).length > 0) {
+    return Response.json(
+      {
+        code: 'cloudflare_reauthorization_required',
+        error: CLOUDFLARE_REAUTHORIZATION_REQUIRED_MESSAGE,
+      },
+      { status: 409, headers: { 'Cache-Control': 'private, no-store' } },
+    );
   }
   const runtime = await findUserWorkspaceRuntime(env.DB, session.user.id);
   if (!isCurrentWorkspaceRuntime(runtime, connection)) {

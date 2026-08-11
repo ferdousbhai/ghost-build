@@ -18,6 +18,15 @@ import { waitForUserWorkspaceRuntimeReadiness } from './user-workspace-runtime-r
 const USER_WORKSPACE_SANDBOX_IMAGE =
   'docker.io/cloudflare/sandbox:0.13.0-next.724.1@sha256:d5856e09ccb02c2cd00f73946360369d5655faa9b67b156e0d8627bf143619f1';
 const PROVISIONING_LEASE_MS = 40 * 60_000;
+export const USER_WORKSPACE_REQUIRED_CAPABILITIES = [
+  'workers',
+  'containers',
+  'd1',
+  'r2',
+  'kv',
+  'durable_objects',
+  'workers_ai',
+] as const;
 
 export class UserWorkspaceRuntimeProvisioningInProgressError extends Error {
   constructor() {
@@ -121,11 +130,14 @@ export async function provisionUserWorkspaceRuntime(args: {
 }
 
 function requireRuntimeCapabilities(connection: CloudflareConnection): void {
-  const required = ['workers', 'containers', 'd1', 'r2', 'kv', 'durable_objects', 'workers_ai'];
-  const missing = required.filter((capability) => !connection.grantedScopes.includes(capability));
+  const missing = missingUserWorkspaceRuntimeCapabilities(connection);
   if (missing.length > 0) {
     throw new Error(`Reconnect Cloudflare with workspace runtime access: ${missing.join(', ')}.`);
   }
+}
+
+export function missingUserWorkspaceRuntimeCapabilities(connection: CloudflareConnection): string[] {
+  return USER_WORKSPACE_REQUIRED_CAPABILITIES.filter((capability) => !connection.grantedScopes.includes(capability));
 }
 
 async function sha256(value: string): Promise<string> {

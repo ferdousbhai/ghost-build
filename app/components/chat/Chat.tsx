@@ -118,6 +118,7 @@ function WorkspaceRuntimeConnectionError({
   onRetry: () => void;
 }) {
   const planRequired = code === 'workspace_plan_required';
+  const reauthorizationRequired = code === 'cloudflare_reauthorization_required';
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center p-5">
       <section className="app-card w-full max-w-lg p-6 text-center" aria-labelledby="workspace-connection-heading">
@@ -134,6 +135,13 @@ function WorkspaceRuntimeConnectionError({
             <li>Select “Try again” to finish creating the workspace.</li>
           </ol>
         ) : null}
+        {reauthorizationRequired ? (
+          <ol className="mx-auto mt-5 max-w-md list-decimal space-y-2 pl-5 text-left text-sm text-content-secondary">
+            <li>Open your Cloudflare account settings below.</li>
+            <li>Reauthorize Ghostbuild and approve the updated permissions.</li>
+            <li>Return to the builder and select “Try again”.</li>
+          </ol>
+        ) : null}
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           {planRequired ? (
             <a
@@ -148,8 +156,8 @@ function WorkspaceRuntimeConnectionError({
           <Button variant={planRequired ? 'neutral' : 'primary'} onClick={onRetry}>
             Try again
           </Button>
-          <LinkButton to="/settings" hash="cloudflare" variant="neutral">
-            Cloudflare account
+          <LinkButton to="/settings" hash="cloudflare" variant={reauthorizationRequired ? 'primary' : 'neutral'}>
+            {reauthorizationRequired ? 'Reauthorize Cloudflare' : 'Cloudflare account'}
           </LinkButton>
         </div>
       </section>

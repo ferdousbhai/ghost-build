@@ -6,7 +6,8 @@ type UserRuntimeSession = {
   expiresAt: number;
 };
 
-export type UserRuntimeErrorCode = 'workspace_plan_required' | 'workspace_preparation_failed';
+export type UserRuntimeErrorCode =
+  'cloudflare_reauthorization_required' | 'workspace_plan_required' | 'workspace_preparation_failed';
 
 export class UserRuntimeSessionError extends Error {
   constructor(
@@ -134,7 +135,11 @@ async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<User
 }
 
 function isUserRuntimeErrorCode(value: unknown): value is UserRuntimeErrorCode {
-  return value === 'workspace_plan_required' || value === 'workspace_preparation_failed';
+  return (
+    value === 'cloudflare_reauthorization_required' ||
+    value === 'workspace_plan_required' ||
+    value === 'workspace_preparation_failed'
+  );
 }
 
 export function requireUserRuntimeEndpoint(): string {

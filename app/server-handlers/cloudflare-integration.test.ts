@@ -179,6 +179,27 @@ describe('Cloudflare-only authentication', () => {
     });
   });
 
+  it('requires reauthorization when the connection is missing a current workspace capability', async () => {
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(
+      activeConnection(1, ['workers', 'containers', 'd1', 'r2', 'durable_objects', 'workers_ai']),
+    );
+    const provision = vi.fn();
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([runtimeRow()]),
+      provision,
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      code: 'cloudflare_reauthorization_required',
+      error:
+        'Ghostbuild needs updated Cloudflare permissions for this workspace. Reauthorize Cloudflare, approve the requested permissions, then try again.',
+    });
+    expect(provision).not.toHaveBeenCalled();
+  });
+
   it('gives actionable recovery steps when Cloudflare Containers requires Workers Paid', async () => {
     mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
     mocks.findConnection.mockResolvedValue(activeConnection());
@@ -904,7 +925,10 @@ describe('Cloudflare-only authentication', () => {
   });
 });
 
-function activeConnection(generation = 1) {
+function activeConnection(
+  generation = 1,
+  grantedScopes = ['workers', 'containers', 'd1', 'r2', 'kv', 'durable_objects', 'workers_ai'],
+) {
   return {
     id: 'connection-1',
     userId: 'user-1',
@@ -912,7 +936,7 @@ function activeConnection(generation = 1) {
     accountName: 'User Cloudflare',
     status: 'active' as const,
     credentialHandle: 'credential-1',
-    grantedScopes: ['workers', 'containers', 'd1', 'r2', 'durable_objects', 'workers_ai'],
+    grantedScopes,
     aiBillingEnabled: true,
     connectedAt: 100,
     updatedAt: 100,

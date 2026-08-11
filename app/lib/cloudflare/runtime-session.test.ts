@@ -70,6 +70,25 @@ describe('user runtime session', () => {
     );
   });
 
+  it('preserves the Cloudflare reauthorization recovery code', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json(
+          {
+            code: 'cloudflare_reauthorization_required',
+            error: 'Reauthorize Cloudflare, then try again.',
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    await expect(getUserRuntimeSession()).rejects.toEqual(
+      new UserRuntimeSessionError('Reauthorize Cloudflare, then try again.', 'cloudflare_reauthorization_required'),
+    );
+  });
+
   it('waits for the request that owns the provisioning lease', async () => {
     vi.useFakeTimers();
     const request = vi
