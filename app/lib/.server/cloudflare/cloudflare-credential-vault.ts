@@ -49,7 +49,10 @@ export class D1CloudflareCredentialVault {
         ...encrypted,
         createdAt: now,
         rotatedAt: null,
-      }).catch(() => false);
+      }).catch((readError) => {
+        console.warn('Unable to verify Cloudflare credential commit', readError);
+        return false;
+      });
       if (!committed) {
         throw error;
       }
@@ -120,7 +123,10 @@ export class D1CloudflareCredentialVault {
         signal: AbortSignal.timeout(OAUTH_REFRESH_TIMEOUT_MS),
       });
     } catch (error) {
-      const concurrent = await this.readConcurrentRefresh(credentialHandle, stored).catch(() => null);
+      const concurrent = await this.readConcurrentRefresh(credentialHandle, stored).catch((readError) => {
+        console.warn('Unable to read concurrent credential refresh', readError);
+        return null;
+      });
       if (concurrent) {
         return concurrent;
       }
@@ -132,7 +138,10 @@ export class D1CloudflareCredentialVault {
       expires_in?: number;
     } | null;
     if (!response.ok || !token?.access_token) {
-      const concurrent = await this.readConcurrentRefresh(credentialHandle, stored).catch(() => null);
+      const concurrent = await this.readConcurrentRefresh(credentialHandle, stored).catch((readError) => {
+        console.warn('Unable to read concurrent credential refresh', readError);
+        return null;
+      });
       if (concurrent) {
         return concurrent;
       }
@@ -171,11 +180,17 @@ export class D1CloudflareCredentialVault {
         ...encrypted,
         createdAt: stored.created_at,
         rotatedAt,
-      }).catch(() => false);
+      }).catch((readError) => {
+        console.warn('Unable to verify credential rotation commit', readError);
+        return false;
+      });
       if (committed) {
         return refreshed.accessToken;
       }
-      const concurrent = await this.readConcurrentRefresh(credentialHandle, stored, encrypted).catch(() => null);
+      const concurrent = await this.readConcurrentRefresh(credentialHandle, stored, encrypted).catch((readError) => {
+        console.warn('Unable to read concurrent credential refresh', readError);
+        return null;
+      });
       if (concurrent) {
         return concurrent;
       }
@@ -191,7 +206,10 @@ export class D1CloudflareCredentialVault {
     ) {
       return refreshed.accessToken;
     }
-    const concurrent = await this.readConcurrentRefresh(credentialHandle, stored, encrypted).catch(() => null);
+    const concurrent = await this.readConcurrentRefresh(credentialHandle, stored, encrypted).catch((readError) => {
+      console.warn('Unable to read concurrent credential refresh', readError);
+      return null;
+    });
     if (concurrent) {
       return concurrent;
     }

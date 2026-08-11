@@ -366,17 +366,24 @@ export async function completeCloudflareConnectionAction(args: {
       } catch (error) {
         const racedConnection =
           error instanceof CloudflareConnectionChangedError
-            ? await findCloudflareConnectionForUser(args.env.DB, userId).catch(() => null)
+            ? await findCloudflareConnectionForUser(args.env.DB, userId).catch((readError) => {
+                console.warn('Unable to read raced Cloudflare connection', readError);
+                return null;
+              })
             : null;
         const canAdoptRace =
           racedConnection && isEquivalentRacedConnection(racedConnection, userId, result, previous?.generation ?? null);
-        await vault.deleteIfUnreferenced(credentialHandle).catch(() => undefined);
+        await vault.deleteIfUnreferenced(credentialHandle).catch((cleanupError) => {
+          console.warn('Unable to clean up orphaned Cloudflare credential', cleanupError);
+        });
         if (!canAdoptRace) {
           throw error;
         }
       }
       if (previous?.credentialHandle && previous.credentialHandle !== credentialHandle) {
-        await vault.deleteIfUnreferenced(previous.credentialHandle).catch(() => undefined);
+        await vault.deleteIfUnreferenced(previous.credentialHandle).catch((cleanupError) => {
+          console.warn('Unable to clean up previous Cloudflare credential', cleanupError);
+        });
       }
       await checkpointAuthenticatedOAuthUser({
         db: args.env.DB,
@@ -453,7 +460,10 @@ async function checkpointAuthenticatedOAuthUser(args: {
   } catch (error) {
     if (
       await isExactOAuthState(args.db, args.stateId, args.expected, 'pending', args.userId, updatedAt).catch(
-        () => false,
+        (readError) => {
+          console.warn('Unable to verify OAuth checkpoint state', readError);
+          return false;
+        },
       )
     ) {
       return;
@@ -495,7 +505,10 @@ async function completeOAuthState(args: {
   } catch (error) {
     if (
       await isExactOAuthState(args.db, args.stateId, args.expected, 'completed', args.userId, updatedAt).catch(
-        () => false,
+        (readError) => {
+          console.warn('Unable to verify OAuth completion state', readError);
+          return false;
+        },
       )
     ) {
       return;
@@ -538,7 +551,10 @@ async function failOAuthState(args: { db: D1Database; stateId: string; expected:
         'error',
         args.expected.authenticated_user_id,
         updatedAt,
-      ).catch(() => false)
+      ).catch((readError) => {
+        console.warn('Unable to verify OAuth error state', readError);
+        return false;
+      })
     ) {
       return;
     }

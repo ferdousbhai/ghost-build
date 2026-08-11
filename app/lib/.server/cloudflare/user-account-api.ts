@@ -209,7 +209,10 @@ export class UserCloudflareAccountApi {
           databaseId,
           'SELECT name, digest FROM ghostbuild_runtime_migrations WHERE name = ?',
           [migration.name],
-        ).catch(() => []);
+        ).catch((readError) => {
+          console.warn('Unable to verify D1 migration commit', readError);
+          return [];
+        });
         const committedReceipt = d1MigrationReceipt(committed, migration.name);
         if (committedReceipt?.digest === digest) {
           continue;

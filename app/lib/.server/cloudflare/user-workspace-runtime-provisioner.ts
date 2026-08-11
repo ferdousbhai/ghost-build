@@ -124,7 +124,9 @@ export async function provisionUserWorkspaceRuntime(args: {
       runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
       attemptId,
       error: error instanceof Error ? error.message : 'Workspace runtime provisioning failed.',
-    }).catch(() => undefined);
+    }).catch((persistError) => {
+      console.warn('Unable to persist workspace runtime provisioning failure', persistError);
+    });
     throw error;
   }
 }

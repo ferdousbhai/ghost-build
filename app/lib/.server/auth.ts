@@ -100,7 +100,10 @@ export async function createAuthSession(env: Env, session: PreparedAuthSession):
       .bind(session.id, session.userId, session.tokenHash, session.expiresAt, session.createdAt, session.createdAt)
       .run();
   } catch (error) {
-    const committed = await isExactAuthSessionCommitted(env.DB, session).catch(() => false);
+    const committed = await isExactAuthSessionCommitted(env.DB, session).catch((readError) => {
+      console.warn('Unable to verify auth session commit', readError);
+      return false;
+    });
     if (!committed) {
       throw error;
     }
@@ -167,11 +170,17 @@ export async function upsertCloudflareUser(
       image,
       createdAt: now,
       updatedAt: now,
-    }).catch(() => false);
+    }).catch((readError) => {
+      console.warn('Unable to verify Cloudflare user commit', readError);
+      return false;
+    });
     if (committed) {
       return { id, name, email, image };
     }
-    const racedUser = await findCloudflareUserBySubjectOrEmail(db, identity).catch(() => null);
+    const racedUser = await findCloudflareUserBySubjectOrEmail(db, identity).catch((readError) => {
+      console.warn('Unable to read raced Cloudflare user', readError);
+      return null;
+    });
     if (!racedUser) {
       throw error;
     }
@@ -243,7 +252,10 @@ async function updateUser(
       emailVerified,
       image,
       updatedAt: now,
-    }).catch(() => false);
+    }).catch((readError) => {
+      console.warn('Unable to verify Cloudflare user update', readError);
+      return false;
+    });
     if (!committed) {
       throw error;
     }
