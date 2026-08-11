@@ -29,7 +29,6 @@ import { LinkButton } from '~/components/ui/LinkButton';
 import { buttonClassNames } from '~/components/ui/primitives/Button';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { WORKERS_PAID_URL } from '~/lib/workers-paid.client';
-import { isStreamStatusActive } from '~/lib/common/types';
 
 const logger = createScopedLogger('Chat');
 
@@ -188,6 +187,7 @@ const AuthenticatedChat = memo(
     const presentationId = workspacePresentationId(accountId, transcript.agentName);
     useLayoutEffect(() => {
       workbenchStore.activateWorkspace(presentationId);
+      toolActivityStore.activateScope(presentationId);
     }, [presentationId]);
     const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
     const hasMultipleSubchats = (subchats?.length ?? 0) > 1;
@@ -225,11 +225,6 @@ const AuthenticatedChat = memo(
       presentationId,
       transcript,
     });
-    useLayoutEffect(() => {
-      toolActivityStore.activateScope(presentationId, {
-        preserveActiveTurn: isRecovering || isStreamStatusActive(streamStatus),
-      });
-    }, [isRecovering, presentationId, streamStatus]);
     const parsedMessages = useChatHistoryProcessing({
       messages,
       initialMessages,

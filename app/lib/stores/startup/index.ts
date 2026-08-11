@@ -10,6 +10,7 @@ import { subchatIndexStore } from '~/lib/stores/subchats';
 import { useStore } from '@nanostores/react';
 import { transcriptAgentName } from 'ghostbuild-agent/transcript';
 import { useNavigateToChat } from '~/lib/stores/chatId';
+import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 
 const EMPTY_INITIAL_MESSAGES: GhostbuildMessage[] = [];
 
@@ -35,6 +36,7 @@ export function useChatHomepage(chatId: string) {
     subchats?.find((subchat) => subchat.subchatIndex === subchatIndex)?.transcript ??
     ({ agentName: transcriptAgentName(chatId, subchatIndex, 0), generation: 0, subchatIndex } as const);
   const onBuilderRequestStart = useCallback(() => {
+    toolActivityStore.handoffActiveTurn();
     void navigateToChat(chatId);
   }, [chatId, navigateToChat]);
 

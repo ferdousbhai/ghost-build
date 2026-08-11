@@ -13,15 +13,18 @@ export class ToolActivityStore {
   readonly revision = atom(0);
   #scope: string | null = null;
   #turnActive = false;
+  #turnHandoffPending = false;
 
-  activateScope(scope: string, options: { preserveActiveTurn?: boolean } = {}): void {
+  activateScope(scope: string): void {
     if (this.#scope === scope) {
+      this.#turnHandoffPending = false;
       return;
     }
     this.#scope = scope;
-    if (!options.preserveActiveTurn) {
+    if (!this.#turnHandoffPending) {
       this.#turnActive = false;
     }
+    this.#turnHandoffPending = false;
     if (Object.keys(this.activities.get()).length > 0) {
       this.activities.set({});
       this.#bumpRevision();
@@ -62,6 +65,10 @@ export class ToolActivityStore {
     this.#turnActive = true;
   }
 
+  handoffActiveTurn(): void {
+    this.#turnHandoffPending = this.#turnActive;
+  }
+
   finishTurn(message: GhostbuildMessage): void {
     message.parts?.forEach((part, index) => {
       const invocation = getToolInvocation(part);
@@ -74,6 +81,7 @@ export class ToolActivityStore {
 
   abortActive(): void {
     this.#turnActive = false;
+    this.#turnHandoffPending = false;
     let changed = false;
     for (const [partId, activity] of Object.entries(this.activities.get()) as Array<[PartId, ToolActivity]>) {
       if (!isToolActivityStatusActive(activity.status)) {

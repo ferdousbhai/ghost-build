@@ -191,7 +191,8 @@ describe('ToolActivityStore', () => {
     store.activateScope('provisional');
     store.startTurn();
 
-    store.activateScope('durable', { preserveActiveTurn: true });
+    store.handoffActiveTurn();
+    store.activateScope('durable');
     store.record(partId, {
       type: 'dynamic-tool',
       state: 'input-available',
@@ -201,6 +202,25 @@ describe('ToolActivityStore', () => {
     });
 
     expect(store.activities.get()[partId]?.status).toBe('running');
+  });
+
+  it('uses a turn handoff for only the next presentation', () => {
+    const store = new ToolActivityStore();
+    store.activateScope('provisional');
+    store.startTurn();
+    store.handoffActiveTurn();
+    store.activateScope('durable');
+
+    store.activateScope('unrelated');
+    store.record('message:0' as PartId, {
+      type: 'dynamic-tool',
+      state: 'input-available',
+      toolCallId: 'tool-1',
+      toolName: 'write',
+      input: { path: '/home/project/src/index.tsx' },
+    });
+
+    expect(store.activities.get()['message:0' as PartId]?.status).toBe('aborted');
   });
 
   it('marks restored incomplete tools stopped when no turn has started', () => {
