@@ -350,7 +350,7 @@ export function getValidatedBuildCompletion(
     return undefined;
   }
 
-  return 'Done. I built and validated the app. It is ready for the user to review and deploy.';
+  return 'Done. I built and validated the app. Deployment is starting automatically.';
 }
 
 function latestSuccessfulValidation(results: ReadonlyArray<ToolResultEvent>): unknown | undefined {

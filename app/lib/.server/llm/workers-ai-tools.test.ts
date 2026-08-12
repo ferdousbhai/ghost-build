@@ -256,7 +256,7 @@ describe('minimal Workers AI tool surface', () => {
         [user('Build it')],
         [{ toolName: 'exec', result: { validation: validationResult() } }],
       ),
-    ).toBe('Done. I built and validated the app. It is ready for the user to review and deploy.');
+    ).toBe('Done. I built and validated the app. Deployment is starting automatically.');
 
     expect(
       getValidatedBuildCompletion(
