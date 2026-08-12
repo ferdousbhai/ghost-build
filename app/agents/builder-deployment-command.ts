@@ -50,14 +50,14 @@ export async function prepareDeploymentPlanForBuilder(args: {
       args.abortSignal?.throwIfAborted();
       const deploymentSource = await args.workspace.prepareDeployment(snapshot.revision);
       const deploymentId = await deterministicDeploymentId(
-        `${args.context.agentName}:${args.toolCallId}:${snapshot.revision}`,
+        `${args.workspace.projectId}:${args.toolCallId}:${snapshot.revision}`,
       );
       const deployment = await createOrReplayDeploymentPlanForUser({
         env: args.context.env,
         userId: args.context.userId,
         chatId: args.context.chatInitialId,
         deploymentId,
-        projectId: args.context.agentName,
+        projectId: args.workspace.projectId,
         revision: deploymentSource.revision,
         workspaceRevision: deploymentSource.workspaceRevision,
         project: deploymentSource.project,

@@ -70,7 +70,7 @@ describe('builder deployment command', () => {
         userId: 'user-1',
         chatId: 'chat-1',
         deploymentId: expect.stringMatching(/^[0-9a-f-]{36}$/),
-        projectId: 'agent-1',
+        projectId: 'workspace-1',
         revision: 'a'.repeat(64),
         workspaceRevision: 7,
       }),
@@ -80,6 +80,7 @@ describe('builder deployment command', () => {
 
 function workspaceStub() {
   return {
+    projectId: 'workspace-1',
     checkpoint: vi.fn(async () => ({ workspaceRevision: 7, revision: 'a'.repeat(64) })),
     executeToolOnce: vi.fn(async (_id, _name, _args, execute: () => Promise<unknown>) => execute()),
     hasSuccessfulValidation: vi.fn(async () => false),

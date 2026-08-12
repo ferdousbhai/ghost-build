@@ -83,6 +83,7 @@ export interface ProjectWorkspaceRpc extends Rpc.DurableObjectBranded {
  * exposes product operations without exposing the underlying DO storage.
  */
 export interface BuilderWorkspaceApi {
+  readonly projectId: string;
   readonly computer: CreateAIToolsOptions['workspace'];
   refresh(): Promise<BuilderWorkspaceState>;
   getState(): BuilderWorkspaceState;

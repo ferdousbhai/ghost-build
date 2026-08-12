@@ -93,7 +93,7 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
 
   constructor(
     private readonly env: Env,
-    private readonly projectId: string,
+    readonly projectId: string,
     private readonly getUserId: () => string | null,
   ) {}
 
