@@ -158,7 +158,7 @@ describe('isolated project command', () => {
       source.indexOf('private async pushDurableProjectToContainer('),
       source.indexOf('private async runTransientCommand('),
     );
-    expect(materialization.match(/await this\.#workspace\.push\('container-shell'\)/g)).toHaveLength(2);
+    expect(materialization.match(/await this\.#workspace\.push\('container-shell'\)/g)).toHaveLength(1);
     expect(materialization).toContain('if ((await this.exists(PROJECT_ROOT)).exists)');
     expect(materialization).toContain('await this.#workspace.close()');
     expect(materialization).toContain('await this.restartComputerd(COMPUTERD_ENV)');
