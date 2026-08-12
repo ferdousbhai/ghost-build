@@ -75,6 +75,12 @@ describe('builder deployment command', () => {
         workspaceRevision: 7,
       }),
     );
+    expect(workspace.executeToolOnce).toHaveBeenCalledWith(
+      'deployment-plan:workspace-1:deploy-command',
+      'deploy',
+      expect.any(Object),
+      expect.any(Function),
+    );
   });
 });
 

@@ -25,8 +25,9 @@ export async function prepareDeploymentPlanForBuilder(args: {
   abortSignal?: AbortSignal;
 }): Promise<GhostbuildToolResult> {
   const snapshot = await args.workspace.checkpoint();
+  const operationId = `deployment-plan:${args.workspace.projectId}:${args.toolCallId}`;
   return args.workspace.executeToolOnce(
-    args.toolCallId,
+    operationId,
     'deploy',
     {
       validatedRevision: args.validatedRevision,
@@ -49,9 +50,7 @@ export async function prepareDeploymentPlanForBuilder(args: {
       }
       args.abortSignal?.throwIfAborted();
       const deploymentSource = await args.workspace.prepareDeployment(snapshot.revision);
-      const deploymentId = await deterministicDeploymentId(
-        `${args.workspace.projectId}:${args.toolCallId}:${snapshot.revision}`,
-      );
+      const deploymentId = await deterministicDeploymentId(`${operationId}:${snapshot.revision}`);
       const deployment = await createOrReplayDeploymentPlanForUser({
         env: args.context.env,
         userId: args.context.userId,
