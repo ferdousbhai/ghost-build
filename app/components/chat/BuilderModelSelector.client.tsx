@@ -2,13 +2,9 @@ import { useStore } from '@nanostores/react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { CheckIcon, ChevronDownIcon } from '@radix-ui/react-icons';
 import { useEffect, useState } from 'react';
+import { getWorkersAiModel, isWorkersAiModelId, WORKERS_AI_MODELS } from '~/lib/workers-ai-model';
 import {
-  CLOUDFLARE_WORKERS_AI_MODEL,
-  getWorkersAiModel,
-  isWorkersAiModelId,
-  WORKERS_AI_MODELS,
-} from '~/lib/workers-ai-model';
-import {
+  builderDefaultModelStore,
   builderModelStore,
   loadBuilderModelPreference,
   setBuilderModel,
@@ -18,6 +14,7 @@ import { classNames } from '~/utils/classNames';
 
 export function BuilderModelSelector({ compact = false, disabled = false }: { compact?: boolean; disabled?: boolean }) {
   const modelId = useStore(builderModelStore);
+  const defaultModelId = useStore(builderDefaultModelStore);
   const model = getWorkersAiModel(modelId);
   const [open, setOpen] = useState(false);
 
@@ -50,9 +47,7 @@ export function BuilderModelSelector({ compact = false, disabled = false }: { co
           }
         >
           <span className="truncate">{model.label}</span>
-          {model.id === CLOUDFLARE_WORKERS_AI_MODEL && (
-            <span className="shrink-0 text-content-tertiary">· default</span>
-          )}
+          {model.id === defaultModelId && <span className="shrink-0 text-content-tertiary">· default</span>}
           <ChevronDownIcon
             className="ml-auto size-3.5 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180"
             aria-hidden="true"
@@ -76,9 +71,19 @@ export function BuilderModelSelector({ compact = false, disabled = false }: { co
               }
             }}
           >
-            <ModelGroup label="Cloudflare hosted" availability="cloudflare-hosted" disabled={disabled} />
+            <ModelGroup
+              label="Cloudflare hosted"
+              availability="cloudflare-hosted"
+              disabled={disabled}
+              defaultModelId={defaultModelId}
+            />
             <DropdownMenu.Separator className="mx-2 my-1.5 h-px bg-bolt-elements-borderColor" />
-            <ModelGroup label="Partner via Cloudflare" availability="cloudflare-partner" disabled={disabled} />
+            <ModelGroup
+              label="Third-party via Cloudflare"
+              availability="cloudflare-partner"
+              disabled={disabled}
+              defaultModelId={defaultModelId}
+            />
           </DropdownMenu.RadioGroup>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
@@ -90,10 +95,12 @@ function ModelGroup({
   label,
   availability,
   disabled,
+  defaultModelId,
 }: {
   label: string;
   availability: (typeof WORKERS_AI_MODELS)[number]['availability'];
   disabled: boolean;
+  defaultModelId: (typeof WORKERS_AI_MODELS)[number]['id'];
 }) {
   return (
     <DropdownMenu.Group>
@@ -116,7 +123,7 @@ function ModelGroup({
           <span className="min-w-0 grow">
             <span className="flex items-center gap-2">
               <span className="truncate text-sm font-semibold text-content-primary">{model.label}</span>
-              {model.id === CLOUDFLARE_WORKERS_AI_MODEL && (
+              {model.id === defaultModelId && (
                 <span className="shrink-0 rounded-full border border-accent-500/30 bg-accent-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-content-accent">
                   Default
                 </span>

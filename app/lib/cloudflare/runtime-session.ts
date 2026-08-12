@@ -1,9 +1,11 @@
 import { atom } from 'nanostores';
+import { isAiGatewayCreditStatus, type AiGatewayCreditStatus } from './ai-gateway-credit';
 
 type UserRuntimeSession = {
   endpoint: string;
   token: string;
   expiresAt: number;
+  aiGatewayCreditStatus?: AiGatewayCreditStatus;
 };
 
 export type UserRuntimeErrorCode =
@@ -24,6 +26,7 @@ const PREPARATION_RETRY_DEADLINE_MS = 15 * 60_000;
 const PREPARATION_RETRY_MAX_DELAY_MS = 5_000;
 let pending: Promise<UserRuntimeSession> | null = null;
 export const userRuntimeEndpointStore = atom<string | null>(null);
+export const aiGatewayCreditStatusStore = atom<AiGatewayCreditStatus>('unknown');
 let current: UserRuntimeSession | null = null;
 let generation = 0;
 
@@ -42,6 +45,7 @@ export async function getUserRuntimeSession(signal?: AbortSignal): Promise<UserR
         throw new Error('The runtime session request was canceled.');
       }
       current = session;
+      aiGatewayCreditStatusStore.set(session.aiGatewayCreditStatus ?? 'unknown');
       userRuntimeEndpointStore.set(session.endpoint);
       return session;
     })
@@ -103,6 +107,7 @@ async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<User
       expiresAt?: number;
       code?: string;
       error?: string;
+      aiGatewayCreditStatus?: unknown;
     } | null;
     if (response.status === 409 && payload?.code === 'workspace_preparing' && Date.now() < deadline) {
       if (!isCurrent()) {
@@ -129,6 +134,9 @@ async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<User
       endpoint: new URL(payload.endpoint).origin,
       token: payload.token,
       expiresAt: payload.expiresAt!,
+      aiGatewayCreditStatus: isAiGatewayCreditStatus(payload.aiGatewayCreditStatus)
+        ? payload.aiGatewayCreditStatus
+        : 'unknown',
     };
     return session;
   }
@@ -164,4 +172,5 @@ export function resetUserRuntimeSession(): void {
   current = null;
   pending = null;
   userRuntimeEndpointStore.set(null);
+  aiGatewayCreditStatusStore.set('unknown');
 }

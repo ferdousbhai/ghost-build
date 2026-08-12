@@ -30,7 +30,9 @@ describe('Workers Paid consent boundary', () => {
     expect(isCloudflareAiFundingError(error)).toBe(true);
     expect(isWorkersAiFreeAllocationError(error)).toBe(false);
     expect(cloudflareAiFundingRequiredMessage()).toContain(CLOUDFLARE_AI_FUNDING_REQUIRED_MARKER);
-    expect(cloudflareAiFundingRequiredMessage()).toContain('prepaid AI Gateway credits');
+    expect(cloudflareAiFundingRequiredMessage()).toContain('AI Gateway Unified Billing');
+    expect(cloudflareAiFundingRequiredMessage()).toContain('Credits Available');
+    expect(cloudflareAiFundingRequiredMessage()).toContain('Top-up credits');
     expect(cloudflareAiFundingRequiredMessage()).toContain('Ghostbuild did not make a purchase');
   });
 

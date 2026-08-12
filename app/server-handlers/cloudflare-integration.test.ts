@@ -148,6 +148,63 @@ describe('Cloudflare-only authentication', () => {
     });
   });
 
+  it.each(['available', 'unavailable'] as const)(
+    'returns only the AI Gateway credit availability status when credits are %s',
+    async (aiGatewayCreditStatus) => {
+      mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+      mocks.findConnection.mockResolvedValue(activeConnection());
+      const readAiGatewayCreditStatus = vi.fn().mockResolvedValue(aiGatewayCreditStatus);
+      const response = await cloudflareRuntimeSessionAction({
+        request: runtimeSessionRequest(),
+        env: runtimeEnv([runtimeRow(), runtimeRow()]),
+        provision: vi.fn(),
+        readAiGatewayCreditStatus,
+      });
+
+      await expect(response.json()).resolves.toMatchObject({ aiGatewayCreditStatus });
+      expect(readAiGatewayCreditStatus).toHaveBeenCalledWith({
+        env: expect.anything(),
+        connection: activeConnection(),
+      });
+    },
+  );
+
+  it('falls back to an unknown credit status when the optional check fails', async () => {
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection());
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([runtimeRow(), runtimeRow()]),
+      provision: vi.fn(),
+      readAiGatewayCreditStatus: vi.fn().mockRejectedValue(new Error('provider detail')),
+    });
+
+    await expect(response.json()).resolves.toMatchObject({ aiGatewayCreditStatus: 'unknown' });
+  });
+
+  it('does not block runtime access when the credit check stalls', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+      mocks.findConnection.mockResolvedValue(activeConnection());
+      const pendingResponse = cloudflareRuntimeSessionAction({
+        request: runtimeSessionRequest(),
+        env: runtimeEnv([runtimeRow(), runtimeRow()]),
+        provision: vi.fn(),
+        readAiGatewayCreditStatus: vi.fn(() => new Promise<'available'>(() => undefined)),
+      });
+
+      await vi.waitFor(() => expect(vi.getTimerCount()).toBeGreaterThan(0));
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      const response = await pendingResponse;
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ aiGatewayCreditStatus: 'unknown' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reuses a current runtime without provisioning', async () => {
     mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
     mocks.findConnection.mockResolvedValue(activeConnection());

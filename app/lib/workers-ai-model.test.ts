@@ -3,6 +3,7 @@ import {
   CLOUDFLARE_WORKERS_AI_MODEL,
   getWorkersAiModel,
   isWorkersAiModelId,
+  PREFERRED_BUILDER_MODEL,
   WORKERS_AI_MODELS,
 } from './workers-ai-model';
 import { MAX_ESTIMATED_MODEL_INPUT_TOKENS, MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
@@ -13,6 +14,7 @@ describe('Workers AI model catalog', () => {
 
     expect(new Set(ids).size).toBe(ids.length);
     expect(isWorkersAiModelId(CLOUDFLARE_WORKERS_AI_MODEL)).toBe(true);
+    expect(isWorkersAiModelId(PREFERRED_BUILDER_MODEL)).toBe(true);
   });
 
   it('keeps every user-facing option accessible and explicit about availability', () => {

@@ -37,7 +37,7 @@ export const WORKERS_AI_MODELS = [
   {
     id: 'deepseek/deepseek-v4-pro',
     label: 'DeepSeek V4 Pro',
-    description: 'Partner model served by Fireworks; requires prepaid Cloudflare AI Gateway credits.',
+    description: 'Third-party model served by Fireworks; uses AI Gateway Unified Billing credits.',
     availability: 'cloudflare-partner',
     contextTokens: 131_072,
   },
@@ -47,6 +47,7 @@ export type WorkersAiModel = (typeof WORKERS_AI_MODELS)[number];
 export type WorkersAiModelId = WorkersAiModel['id'];
 
 export const CLOUDFLARE_WORKERS_AI_MODEL = WORKERS_AI_MODELS[0].id;
+export const PREFERRED_BUILDER_MODEL = 'deepseek/deepseek-v4-pro' satisfies WorkersAiModelId;
 export const CLOUDFLARE_PROJECT_TITLE_MODEL = '@cf/meta/llama-3.2-1b-instruct';
 export type WorkersAiRuntimeModelId = WorkersAiModelId | typeof CLOUDFLARE_PROJECT_TITLE_MODEL;
 

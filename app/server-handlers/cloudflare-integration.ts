@@ -31,6 +31,8 @@ import {
   CLOUDFLARE_AUTHORIZATION_ERROR_PARAM,
   CLOUDFLARE_AUTHORIZATION_ERROR_VALUE,
 } from '~/lib/cloudflare/authorization-recovery';
+import { UserCloudflareAccountApi } from '~/lib/.server/cloudflare/user-account-api';
+import type { AiGatewayCreditStatus } from '~/lib/cloudflare/ai-gateway-credit';
 
 const requestedCapabilities = USER_WORKSPACE_REQUIRED_CAPABILITIES;
 export const CLOUDFLARE_CONNECTION_CALLBACK_METHOD = 'GET' as const;
@@ -40,6 +42,7 @@ const OAUTH_START_RATE_LIMIT_RETRY_SECONDS = 60;
 const MAX_OAUTH_START_REQUEST_BYTES = 4 * 1024;
 const MAX_OAUTH_CALLBACK_CODE_LENGTH = 4_096;
 const MAX_OAUTH_CALLBACK_TEXT_LENGTH = 2_048;
+const AI_GATEWAY_CREDIT_CHECK_TIMEOUT_MS = 5_000;
 const WORKSPACE_PLAN_REQUIRED_MESSAGE =
   'Cloudflare Containers requires the Workers Paid plan. Enable Workers Paid in Cloudflare, then return here and try again. Ghostbuild does not change your plan automatically.';
 const WORKSPACE_PREPARATION_FAILED_MESSAGE =
@@ -116,10 +119,12 @@ export async function cloudflareRuntimeSessionAction({
   request,
   env,
   provision = provisionUserWorkspaceRuntime,
+  readAiGatewayCreditStatus,
 }: {
   request: Request;
   env: Env;
   provision?: typeof provisionUserWorkspaceRuntime;
+  readAiGatewayCreditStatus?: ReadAiGatewayCreditStatus;
 }): Promise<Response> {
   if (!hasSameOrigin(request)) {
     return Response.json({ error: 'Invalid request origin.' }, { status: 403 });
@@ -190,16 +195,68 @@ export async function cloudflareRuntimeSessionAction({
     accountId: currentConnection.accountId,
     connectionGeneration: currentConnection.generation,
   });
-  const capability = await mintRuntimeCapability({
-    secret,
-    subject: session.user.id,
-    origin: new URL(request.url).origin,
-  });
+  const [capability, aiGatewayCreditStatus] = await Promise.all([
+    mintRuntimeCapability({
+      secret,
+      subject: session.user.id,
+      origin: new URL(request.url).origin,
+    }),
+    readAiGatewayCreditStatusWithTimeout(
+      (readAiGatewayCreditStatus ?? getAiGatewayCreditStatus)({
+        env,
+        connection: currentConnection,
+      }),
+    ),
+  ]);
   return Response.json(
-    { endpoint: currentRuntime.endpoint, ...capability },
+    { endpoint: currentRuntime.endpoint, ...capability, aiGatewayCreditStatus },
     { headers: { 'Cache-Control': 'private, no-store' } },
   );
 }
+
+async function readAiGatewayCreditStatusWithTimeout(
+  operation: Promise<AiGatewayCreditStatus>,
+): Promise<AiGatewayCreditStatus> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<AiGatewayCreditStatus>((resolve) => {
+    timer = setTimeout(() => resolve('unknown'), AI_GATEWAY_CREDIT_CHECK_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([operation.catch(() => 'unknown' as const), timeout]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+async function getAiGatewayCreditStatus({
+  env,
+  connection,
+}: {
+  env: Env;
+  connection: CloudflareConnection;
+}): Promise<AiGatewayCreditStatus> {
+  if (!connection.credentialHandle) {
+    return 'unknown';
+  }
+  try {
+    const signal = AbortSignal.timeout(AI_GATEWAY_CREDIT_CHECK_TIMEOUT_MS);
+    const accessToken = await D1CloudflareCredentialVault.fromEnv(env).resolve(connection.credentialHandle);
+    const balance = await new UserCloudflareAccountApi(connection.accountId, accessToken).getAiGatewayCreditBalance(
+      signal,
+    );
+    return balance > 0 ? 'available' : 'unavailable';
+  } catch {
+    console.warn('Unable to check AI Gateway Unified Billing credit availability.');
+    return 'unknown';
+  }
+}
+
+type ReadAiGatewayCreditStatus = (args: {
+  env: Env;
+  connection: CloudflareConnection;
+}) => Promise<AiGatewayCreditStatus>;
 
 function isWorkspacePlanRequiredError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);

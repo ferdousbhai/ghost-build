@@ -18,6 +18,7 @@ import { deriveProvisionalTitle } from '~/lib/title-generation';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { applyLiveSubchatTitle, type LiveSubchatTitle } from './subchat-model';
 import {
+  aiGatewayCreditStatusStore,
   getUserRuntimeSession,
   UserRuntimeSessionError,
   userRuntimeEndpointStore,
@@ -28,7 +29,8 @@ import { Button } from '@ui/Button';
 import { LinkButton } from '~/components/ui/LinkButton';
 import { buttonClassNames } from '~/components/ui/primitives/Button';
 import { workbenchStore } from '~/lib/stores/workbench.client';
-import { WORKERS_PAID_URL } from '~/lib/workers-paid.client';
+import { showDeepSeekCreditRecommendationToast, WORKERS_PAID_URL } from '~/lib/workers-paid.client';
+import { initializeBuilderModelPreference } from '~/lib/stores/builder-model.client';
 import { toast } from 'sonner';
 
 const logger = createScopedLogger('Chat');
@@ -186,6 +188,15 @@ const AuthenticatedChat = memo(
   }) => {
     const chatInitialId = useChatId();
     const presentationId = workspacePresentationId(accountId, transcript.agentName);
+    const aiGatewayCreditStatus = useStore(aiGatewayCreditStatusStore);
+    useLayoutEffect(() => {
+      initializeBuilderModelPreference(aiGatewayCreditStatus);
+    }, [aiGatewayCreditStatus]);
+    useEffect(() => {
+      if (aiGatewayCreditStatus === 'unavailable') {
+        showDeepSeekCreditRecommendationToast();
+      }
+    }, [aiGatewayCreditStatus]);
     useLayoutEffect(() => {
       workbenchStore.activateWorkspace(presentationId);
       toolActivityStore.activateScope(presentationId);
