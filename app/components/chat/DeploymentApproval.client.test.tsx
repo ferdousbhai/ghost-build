@@ -104,6 +104,45 @@ describe('DeploymentApproval', () => {
     expect(container.textContent).not.toContain('Deployment failed');
   });
 
+  it('shows live deployment activity while the execute request is still running', async () => {
+    let statusReads = 0;
+    mocks.fetchUserRuntime.mockImplementation(async (path: string) => {
+      if (path.endsWith('/execute')) {
+        return new Promise<Response>(() => undefined);
+      }
+      statusReads += 1;
+      return Response.json({
+        deployment: {
+          status: statusReads === 1 ? 'approved' : 'deploying',
+          activity:
+            statusReads < 3
+              ? [{ sequence: 10, message: 'Preparing Cloudflare resources', createdAt: 1 }]
+              : [
+                  { sequence: 10, message: 'Preparing Cloudflare resources', createdAt: 1 },
+                  { sequence: 32, message: 'Installing app dependencies', createdAt: 2 },
+                ],
+        },
+      });
+    });
+
+    await act(async () => {
+      root.render(
+        <DeploymentApproval
+          deployment={{
+            id: 'deployment-1',
+            planDigest: 'a'.repeat(64),
+            resources: [{ type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-app' }],
+          }}
+        />,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 1_600));
+    });
+
+    expect(container.textContent).toContain('Deploying…');
+    expect(container.textContent).toContain('Preparing Cloudflare resources');
+    expect(container.textContent).toContain('Installing app dependencies');
+  });
+
   it('prepares a current-revision plan after a terminal deployment failure', async () => {
     mocks.fetchUserRuntime.mockImplementation(async (path: string) =>
       Response.json({

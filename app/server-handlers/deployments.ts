@@ -9,6 +9,7 @@ import {
   DeploymentConnectionChangedError,
   DeploymentNotFoundError,
   DeploymentStateConflictError,
+  listDeploymentActivity,
   prepareDeploymentRetry,
   requireDeploymentForUser,
   type Deployment,
@@ -140,7 +141,8 @@ async function runDeploymentAction(args: {
   const userId = args.userId;
   if (args.operation === 'get') {
     const deployment = await requireDeploymentForUser(args.env.DB, args.deploymentId, userId);
-    return Response.json({ deployment: publicDeployment(deployment) });
+    const activity = await listDeploymentActivity(args.env.DB, deployment.id, deployment.executionGeneration);
+    return Response.json({ deployment: { ...publicDeployment(deployment), activity } });
   }
 
   const connection = runtimeCloudflareIdentity(args.env, userId);

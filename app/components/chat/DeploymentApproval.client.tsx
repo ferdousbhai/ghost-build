@@ -16,14 +16,16 @@ export function DeploymentApproval({
   const [error, setError] = useState<string | null>(null);
   const [canRetry, setCanRetry] = useState(false);
   const [productionUrl, setProductionUrl] = useState<string | null>(null);
+  const [activity, setActivity] = useState<DeploymentActivity[]>([]);
   const visibleError = error && !/^Deployment cannot continue from status \w+\.?$/u.test(error) ? error : null;
 
   const deploy = useCallback(async (target: PendingDeploymentApproval, signal?: AbortSignal) => {
     setStatus('submitting');
     setError(null);
     setCanRetry(false);
+    setActivity([]);
     try {
-      const completed = await approveAndResumeDeployment(target, signal, () => setStatus('deploying'));
+      const completed = await approveAndResumeDeployment(target, signal, () => setStatus('deploying'), setActivity);
       if (signal?.aborted) {
         return;
       }
@@ -115,9 +117,21 @@ export function DeploymentApproval({
           </Button>
         </>
       ) : (
-        <p className="text-content-secondary" role="status">
-          Deploying…
-        </p>
+        <div className="space-y-2" role="status" aria-live="polite">
+          <p className="text-content-primary font-medium">Deploying…</p>
+          {activity.length > 0 ? (
+            <ol className="space-y-1 font-mono text-xs text-content-secondary" aria-label="Deployment activity">
+              {activity.map((entry, index) => (
+                <li key={entry.sequence} className="flex gap-2">
+                  <span aria-hidden="true">{index === activity.length - 1 ? '›' : '✓'}</span>
+                  <span>{entry.message}</span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-xs text-content-secondary">Starting Cloudflare deployment…</p>
+          )}
+        </div>
       )}
       {visibleError ? <p className="text-bolt-elements-icon-error">{visibleError}</p> : null}
     </section>
@@ -131,6 +145,7 @@ async function approveAndResumeDeployment(
   deployment: PendingDeploymentApproval,
   signal: AbortSignal | undefined,
   onRunning: () => void,
+  onActivity: (activity: DeploymentActivity[]) => void,
 ): Promise<{ productionUrl?: string | null }> {
   const current = await getDeployment(deployment.id, signal);
   if (current.status === 'awaiting_approval') {
@@ -152,7 +167,7 @@ async function approveAndResumeDeployment(
       throw new Error(payload?.error || 'Unable to start deployment.');
     }
   }
-  const completed = await resumeDeployment(deployment.id, signal, onRunning);
+  const completed = await resumeDeployment(deployment.id, signal, onRunning, onActivity);
   if (!completed) {
     throw new Error('Unable to start deployment.');
   }
@@ -163,8 +178,10 @@ async function resumeDeployment(
   deploymentId: string,
   signal: AbortSignal | undefined,
   onRunning: () => void,
+  onActivity: (activity: DeploymentActivity[]) => void,
 ): Promise<{ productionUrl?: string | null } | null> {
   const current = await getDeployment(deploymentId, signal);
+  onActivity(current.activity ?? []);
   if (current.status === 'awaiting_approval') {
     return null;
   }
@@ -175,39 +192,40 @@ async function resumeDeployment(
     throw new DeploymentTerminalError(current.error?.message || 'Production deployment failed.');
   }
   onRunning();
+  let executionError: unknown = null;
   if (current.status === 'approved') {
-    try {
-      const response = await deploymentFetch(deploymentId, 'execute', {
-        method: 'POST',
-        signal,
+    void deploymentFetch(deploymentId, 'execute', {
+      method: 'POST',
+      signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(payload?.error || 'Unable to resume the production deployment.');
+        }
+      })
+      .catch((error) => {
+        if (!signal?.aborted) {
+          executionError = error;
+        }
       });
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(payload?.error || 'Unable to resume the production deployment.');
-      }
-    } catch (error) {
-      if (signal?.aborted) {
-        throw error;
-      }
-      const afterExecute = await getDeployment(deploymentId, signal);
-      if (afterExecute.status === 'succeeded') {
-        return afterExecute;
-      }
-      if (afterExecute.status === 'failed' || afterExecute.status === 'canceled') {
-        throw new DeploymentTerminalError(afterExecute.error?.message || 'Production deployment failed.');
-      }
-      if (afterExecute.status === 'approved') {
-        throw error;
-      }
-    }
   }
-  return pollDeployment(deploymentId, signal);
+  return pollDeployment(deploymentId, signal, onActivity, () => executionError);
 }
 
-async function pollDeployment(deploymentId: string, signal?: AbortSignal): Promise<{ productionUrl?: string | null }> {
+async function pollDeployment(
+  deploymentId: string,
+  signal: AbortSignal | undefined,
+  onActivity: (activity: DeploymentActivity[]) => void,
+  executionError: () => unknown,
+): Promise<{ productionUrl?: string | null }> {
   const deadline = Date.now() + DEPLOYMENT_POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const current = await getDeployment(deploymentId, signal);
+    onActivity(current.activity ?? []);
+    if (current.status === 'approved' && executionError()) {
+      throw executionError();
+    }
     if (current.status === 'succeeded') {
       return current;
     }
@@ -227,7 +245,10 @@ type DeploymentStatusPayload = {
   status?: string;
   productionUrl?: string | null;
   error?: { message?: string } | null;
+  activity?: DeploymentActivity[];
 };
+
+type DeploymentActivity = { sequence: number; message: string; createdAt: number };
 
 async function getDeployment(deploymentId: string, signal?: AbortSignal): Promise<DeploymentStatusPayload> {
   const response = await deploymentFetch(deploymentId, undefined, { signal });

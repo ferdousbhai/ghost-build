@@ -6,7 +6,9 @@ import {
   claimApprovedDeployment,
   createDeployment,
   DeploymentConcurrencyLimitError,
+  listDeploymentActivity,
   prepareDeploymentRetry,
+  recordDeploymentActivity,
   requireDeploymentForUser,
   transitionDeployment,
 } from './deployment-repository';
@@ -38,6 +40,7 @@ beforeEach(() => {
   sqlite = new DatabaseSync(':memory:');
   sqlite.exec('PRAGMA foreign_keys = ON');
   sqlite.exec(readFileSync('user-workspace-migrations/0001_user_workspace.sql', 'utf8'));
+  sqlite.exec(readFileSync('user-workspace-migrations/0005_deployment_activity.sql', 'utf8'));
   sqlite
     .prepare(
       `INSERT INTO chats (id, creator_id, initial_id, timestamp) VALUES ('chat-1', 'user-1', 'initial-1', 'now')`,
@@ -117,6 +120,32 @@ describe('deployment repository', () => {
       status: 'succeeded',
       productionUrl: 'https://app.example.workers.dev',
     });
+  });
+
+  it('records ordered activity independently for each retry generation', async () => {
+    const approved = await approvedDeployment(1);
+    await recordDeploymentActivity({
+      db,
+      deploymentId: approved.id,
+      executionGeneration: approved.executionGeneration,
+      sequence: 20,
+      message: 'Cloudflare resources ready',
+      now: 22,
+    });
+    await recordDeploymentActivity({
+      db,
+      deploymentId: approved.id,
+      executionGeneration: approved.executionGeneration,
+      sequence: 10,
+      message: 'Preparing Cloudflare resources',
+      now: 21,
+    });
+
+    await expect(listDeploymentActivity(db, approved.id, approved.executionGeneration)).resolves.toEqual([
+      { sequence: 10, message: 'Preparing Cloudflare resources', createdAt: 21 },
+      { sequence: 20, message: 'Cloudflare resources ready', createdAt: 22 },
+    ]);
+    await expect(listDeploymentActivity(db, approved.id, approved.executionGeneration + 1)).resolves.toEqual([]);
   });
 
   it('allows only one active deployment per user', async () => {
@@ -310,6 +339,9 @@ function prepared(statement: StatementSync, afterRun?: () => void) {
     },
     async first<T>() {
       return (statement.get(...values) as T | undefined) ?? null;
+    },
+    async all<T>() {
+      return { results: statement.all(...values) as T[] };
     },
   };
 }

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   attestManagedDeploymentSecurity: vi.fn(),
   claimApprovedDeployment: vi.fn(),
+  recordDeploymentActivity: vi.fn(),
   recordDeploymentResource: vi.fn(),
   requireDeployment: vi.fn(),
   transitionDeployment: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('./deployment-plan', () => ({
 }));
 vi.mock('./deployment-repository', () => ({
   claimApprovedDeployment: mocks.claimApprovedDeployment,
+  recordDeploymentActivity: mocks.recordDeploymentActivity,
   recordDeploymentResource: mocks.recordDeploymentResource,
   requireDeployment: mocks.requireDeployment,
   transitionDeployment: mocks.transitionDeployment,
@@ -58,6 +60,7 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
     mocks.accountApi.getWorkersSubdomain.mockResolvedValue('user-subdomain');
     mocks.attestManagedDeploymentSecurity.mockResolvedValue({ status: 'current' });
     mocks.recordDeploymentResource.mockResolvedValue(undefined);
+    mocks.recordDeploymentActivity.mockResolvedValue(undefined);
     mocks.transitionDeployment.mockResolvedValue(undefined);
   });
 

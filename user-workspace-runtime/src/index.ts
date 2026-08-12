@@ -26,6 +26,7 @@ import {
 } from '../../app/agents/builder-workspace-types';
 import { routeUserRuntimeAgentRequest } from '../../app/lib/.server/agent-request-identity';
 import { createTrustedDeploymentConfig } from '../../app/lib/.server/cloudflare/deployment-config';
+import { recordDeploymentActivity } from '../../app/lib/.server/cloudflare/deployment-repository';
 import { deploymentProjectProfileFromConfig } from '../../app/lib/.server/cloudflare/deployment-project-profile';
 import {
   type UserWorkspaceReadinessCheck,
@@ -1829,6 +1830,23 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     const sessionId = requireString(input.sessionId, 'sessionId', 256);
     const revision = requireString(input.revision, 'revision', 64);
     const session = this.requireActiveDeploymentSession(sessionId);
+    const deploymentId = requireString(input.deploymentId, 'deploymentId', 128);
+    const executionGeneration = requireInteger(
+      input.executionGeneration,
+      'executionGeneration',
+      Number.MAX_SAFE_INTEGER,
+    );
+    if (session.operation_id !== `${deploymentId}:${executionGeneration}`) {
+      throw new Error('The deployment activity identity does not match its active deployment session.');
+    }
+    const activity = (sequence: number, message: string) =>
+      recordDeploymentActivity({
+        db: this.env.DB,
+        deploymentId,
+        executionGeneration,
+        sequence,
+        message,
+      });
     if (revision !== session.expected_snapshot_revision) {
       throw new Error('The deployment artifact revision does not match its active deployment session.');
     }
@@ -1854,6 +1872,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       let artifact: PreparedDeploymentArtifact;
       let cleanupAllowed = true;
       try {
+        await activity(31, 'Copying validated source');
         await this.pushDurableProjectToContainer();
         await this.runTransientCommand(
           PROJECT_ROOT,
@@ -1861,7 +1880,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           2 * 60_000,
         );
         await this.assertDeploymentSession({ sessionId });
+        await activity(32, 'Installing app dependencies');
         await this.runTransientCommand(isolatedRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
+        await activity(33, 'Building production app');
         await this.runTransientCommand(isolatedRoot, 'pnpm run build', 5 * 60_000);
         const configWrite = await this.writeFile(
           wranglerConfigPath,
@@ -1876,6 +1897,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         if (!configWrite.success) {
           throw new Error('The isolated deployment configuration could not be written.');
         }
+        await activity(34, 'Checking Cloudflare deployment package');
         await this.runTransientCommand(
           isolatedRoot,
           `pnpm exec wrangler deploy --dry-run --outdir ${shellQuote(artifactRoot)} --config ${shellQuote(wranglerConfigPath)}`,
@@ -1884,12 +1906,14 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         if (projectType === 'web_app') {
           // Cloudflare's direct script upload can acknowledge a multipart request while omitting an additional
           // generated module. Collapse Wrangler's verified output to one module so publication is atomic.
+          const builtMainPath = `${isolatedRoot}/dist/server/index.js`;
           const mainPath = `${artifactRoot}/index.js`;
           const bundledPath = `${isolatedRoot}/.ghostbuild-worker.js`;
+          await activity(35, 'Bundling Worker modules');
           await this.runTransientCommand(
             isolatedRoot,
             [
-              `node --input-type=module --eval ${shellQuote(WEB_APP_BUNDLE_SCRIPT)} ${shellQuote(mainPath)} ${shellQuote(bundledPath)}`,
+              `node --input-type=module --eval ${shellQuote(WEB_APP_BUNDLE_SCRIPT)} ${shellQuote(builtMainPath)} ${shellQuote(bundledPath)}`,
               `rm -rf ${shellQuote(artifactRoot)}`,
               `mkdir -p ${shellQuote(artifactRoot)}`,
               `mv ${shellQuote(bundledPath)} ${shellQuote(mainPath)}`,
@@ -1897,6 +1921,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             2 * 60_000,
           );
         }
+        await activity(36, 'Build artifact ready');
         artifact = {
           revision,
           mainModule: projectType === 'worker' ? 'server.js' : 'index.js',

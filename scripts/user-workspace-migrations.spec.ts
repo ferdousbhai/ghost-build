@@ -7,6 +7,7 @@ const workloadTables = [
   'app_resource_gc_candidates',
   'chat_transcripts',
   'chats',
+  'deployment_activity',
   'deployment_resources',
   'deployments',
 ];
