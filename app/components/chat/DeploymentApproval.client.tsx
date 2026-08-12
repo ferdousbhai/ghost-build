@@ -37,7 +37,7 @@ export function DeploymentApproval({
         return;
       }
       setCanRetry(deploymentError instanceof DeploymentTerminalError);
-      setError(deploymentError instanceof Error ? deploymentError.message : 'Unable to deploy the app.');
+      setError(publicDeploymentError(deploymentError, 'Unable to deploy the app.'));
       setStatus('error');
     }
   }, []);
@@ -56,15 +56,6 @@ export function DeploymentApproval({
     setStatus('retrying');
     setError(null);
     try {
-      if (onPrepareDeployment) {
-        const next = await onPrepareDeployment();
-        if (next.id !== activeDeployment.id) {
-          setProductionUrl(null);
-          setCanRetry(false);
-          setActiveDeployment(next);
-          return;
-        }
-      }
       const response = await deploymentFetch(activeDeployment.id, 'retry', {
         method: 'POST',
       });
@@ -78,6 +69,13 @@ export function DeploymentApproval({
       } | null;
       const next = payload?.deployment;
       if (!response.ok || !next?.id || !next.planDigest || !next.plan?.resources) {
+        if (onPrepareDeployment) {
+          const preparedCurrent = await onPrepareDeployment();
+          setProductionUrl(null);
+          setCanRetry(false);
+          setActiveDeployment(preparedCurrent);
+          return;
+        }
         throw new Error(payload?.error || 'Unable to prepare a deployment retry.');
       }
       setProductionUrl(null);
@@ -86,7 +84,7 @@ export function DeploymentApproval({
       await deploy(prepared);
     } catch (retryError) {
       setCanRetry(true);
-      setError(retryError instanceof Error ? retryError.message : 'Unable to prepare a deployment retry.');
+      setError(publicDeploymentError(retryError, 'Unable to prepare a deployment retry.'));
       setStatus('error');
     }
   };
@@ -249,6 +247,13 @@ type DeploymentStatusPayload = {
 };
 
 type DeploymentActivity = { sequence: number; message: string; createdAt: number };
+
+function publicDeploymentError(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) {
+    return fallback;
+  }
+  return error.message.split('\n', 1)[0]?.trim().slice(0, 240) || fallback;
+}
 
 async function getDeployment(deploymentId: string, signal?: AbortSignal): Promise<DeploymentStatusPayload> {
   const response = await deploymentFetch(deploymentId, undefined, { signal });

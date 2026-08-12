@@ -145,11 +145,13 @@ describe('DeploymentApproval', () => {
 
   it('prepares a current-revision plan after a terminal deployment failure', async () => {
     mocks.fetchUserRuntime.mockImplementation(async (path: string) =>
-      Response.json({
-        deployment: path.includes('deployment-1')
-          ? { status: 'failed', error: { message: 'The project changed.' } }
-          : { status: 'awaiting_approval' },
-      }),
+      path.endsWith('/retry')
+        ? Response.json({ error: 'Deployment plan is stale.' }, { status: 409 })
+        : Response.json({
+            deployment: path.includes('deployment-1')
+              ? { status: 'failed', error: { message: 'The project changed.' } }
+              : { status: 'awaiting_approval' },
+          }),
     );
     const onPrepareDeployment = vi.fn(async () => ({
       id: 'deployment-2',
@@ -177,7 +179,7 @@ describe('DeploymentApproval', () => {
 
     expect(onPrepareDeployment).toHaveBeenCalledOnce();
     expect(container.textContent).not.toContain('usage charges');
-    expect(mocks.fetchUserRuntime.mock.calls.some(([path]) => String(path).endsWith('/retry'))).toBe(false);
+    expect(mocks.fetchUserRuntime.mock.calls.some(([path]) => String(path).endsWith('/retry'))).toBe(true);
   });
 
   it('resets the failed row when the current revision keeps the same plan', async () => {
@@ -217,7 +219,7 @@ describe('DeploymentApproval', () => {
     );
     await act(async () => retry?.click());
 
-    expect(onPrepareDeployment).toHaveBeenCalledOnce();
+    expect(onPrepareDeployment).not.toHaveBeenCalled();
     expect(mocks.fetchUserRuntime.mock.calls.some(([path]) => String(path).endsWith('/retry'))).toBe(true);
     expect(container.textContent).not.toContain('usage charges');
   });
@@ -244,5 +246,31 @@ describe('DeploymentApproval', () => {
     expect(container.textContent).toContain('Try again');
     expect(container.textContent).not.toContain('Publish this app');
     expect(container.textContent).not.toContain('status failed');
+  });
+
+  it('shows only the concise first line of an internal deployment error', async () => {
+    mocks.fetchUserRuntime.mockImplementation(async () =>
+      Response.json({
+        deployment: {
+          status: 'failed',
+          error: { message: 'Cloudflare build failed.\nInternal stack trace\nSecret implementation detail' },
+        },
+      }),
+    );
+    await act(async () => {
+      root.render(
+        <DeploymentApproval
+          deployment={{
+            id: 'deployment-1',
+            planDigest: 'a'.repeat(64),
+            resources: [{ type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-app' }],
+          }}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('Cloudflare build failed.');
+    expect(container.textContent).not.toContain('Internal stack trace');
+    expect(container.textContent).not.toContain('Secret implementation detail');
   });
 });
