@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Button } from '~/components/ui/primitives/Button';
 import type { PendingDeploymentApproval } from '~/lib/deployment-approval';
 import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
@@ -12,85 +12,42 @@ export function DeploymentApproval({
   onPrepareDeployment?: () => Promise<PendingDeploymentApproval>;
 }) {
   const [activeDeployment, setActiveDeployment] = useState(deployment);
-  const [status, setStatus] = useState<'idle' | 'submitting' | 'retrying' | 'deploying' | 'deployed' | 'error'>('idle');
+  const [status, setStatus] = useState<'submitting' | 'retrying' | 'deploying' | 'deployed' | 'error'>('submitting');
   const [error, setError] = useState<string | null>(null);
   const [canRetry, setCanRetry] = useState(false);
   const [productionUrl, setProductionUrl] = useState<string | null>(null);
+  const visibleError = error && !/^Deployment cannot continue from status \w+\.?$/u.test(error) ? error : null;
 
-  useEffect(() => {
-    void captureProductEvent('deployment_approval_presented');
-  }, []);
-
-  useEffect(() => {
-    const abort = new AbortController();
-    void resumeDeployment(activeDeployment.id, abort.signal, () => setStatus('deploying'))
-      .then((current) => {
-        if (abort.signal.aborted || !current) {
-          return;
-        }
-        setProductionUrl(current.productionUrl ?? null);
-        setStatus('deployed');
-        void captureProductEvent('deployment_succeeded', { outcome: 'success' });
-      })
-      .catch((resumeError) => {
-        if (abort.signal.aborted) {
-          return;
-        }
-        setCanRetry(resumeError instanceof DeploymentTerminalError);
-        setError(resumeError instanceof Error ? resumeError.message : 'Unable to read production deployment status.');
-        setStatus('error');
-      });
-    return () => abort.abort();
-  }, [activeDeployment.id]);
-
-  const continueDeployment = async () => {
-    setStatus('deploying');
+  const deploy = useCallback(async (target: PendingDeploymentApproval, signal?: AbortSignal) => {
+    setStatus('submitting');
     setError(null);
     setCanRetry(false);
     try {
-      const completed = await resumeDeployment(activeDeployment.id, undefined, () => setStatus('deploying'));
-      if (!completed) {
-        setStatus('idle');
+      const completed = await approveAndResumeDeployment(target, signal, () => setStatus('deploying'));
+      if (signal?.aborted) {
         return;
       }
       setProductionUrl(completed.productionUrl ?? null);
       setStatus('deployed');
       void captureProductEvent('deployment_succeeded', { outcome: 'success' });
     } catch (deploymentError) {
-      setCanRetry(deploymentError instanceof DeploymentTerminalError);
-      setError(deploymentError instanceof Error ? deploymentError.message : 'Unable to resume the deployment.');
-      setStatus('error');
-    }
-  };
-
-  const approve = async () => {
-    setStatus('submitting');
-    setError(null);
-    setCanRetry(false);
-    try {
-      const response = await deploymentFetch(activeDeployment.id, 'approve', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          planDigest: activeDeployment.planDigest,
-          confirmCloudflareBilling: true,
-          confirmWorkersPaidNotAutomatic: true,
-        }),
-      });
-      const payload = (await response.json().catch(() => null)) as {
-        deployment?: { status?: string };
-        error?: string;
-      } | null;
-      if (!response.ok || payload?.deployment?.status !== 'approved') {
-        throw new Error(payload?.error || 'Unable to approve the deployment.');
+      if (signal?.aborted) {
+        return;
       }
-      void captureProductEvent('deployment_approved', { outcome: 'success' });
-      await continueDeployment();
-    } catch (approvalError) {
-      setCanRetry(approvalError instanceof DeploymentTerminalError);
-      setError(approvalError instanceof Error ? approvalError.message : 'Unable to approve the deployment.');
+      setCanRetry(deploymentError instanceof DeploymentTerminalError);
+      setError(deploymentError instanceof Error ? deploymentError.message : 'Unable to deploy the app.');
       setStatus('error');
     }
+  }, []);
+
+  useEffect(() => {
+    const abort = new AbortController();
+    void deploy(activeDeployment, abort.signal);
+    return () => abort.abort();
+  }, [activeDeployment, deploy]);
+
+  const continueDeployment = async () => {
+    await deploy(activeDeployment);
   };
 
   const retry = async () => {
@@ -103,7 +60,6 @@ export function DeploymentApproval({
           setProductionUrl(null);
           setCanRetry(false);
           setActiveDeployment(next);
-          setStatus('idle');
           return;
         }
       }
@@ -124,8 +80,8 @@ export function DeploymentApproval({
       }
       setProductionUrl(null);
       setCanRetry(false);
-      setActiveDeployment({ id: next.id, planDigest: next.planDigest, resources: next.plan.resources });
-      setStatus('idle');
+      const prepared = { id: next.id, planDigest: next.planDigest, resources: next.plan.resources };
+      await deploy(prepared);
     } catch (retryError) {
       setCanRetry(true);
       setError(retryError instanceof Error ? retryError.message : 'Unable to prepare a deployment retry.');
@@ -135,48 +91,73 @@ export function DeploymentApproval({
 
   return (
     <section className="mt-3 space-y-3 rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-4 text-sm">
-      <div>
-        <h3 className="text-content-primary font-medium">Ready to deploy</h3>
-        <p className="text-content-secondary mt-1">Publish this app to your connected Cloudflare account.</p>
-      </div>
       {status === 'deployed' ? (
         <p className="text-bolt-elements-icon-success">
-          Deployed to your Cloudflare account.
+          Deployed.
           {productionUrl ? (
             <a className="ml-1 underline" href={productionUrl} target="_blank" rel="noreferrer">
               Open deployment
             </a>
           ) : null}
         </p>
-      ) : status === 'deploying' ? (
-        <p className="text-content-secondary">Provisioning and deploying in your Cloudflare account…</p>
-      ) : status === 'retrying' ? (
-        <p className="text-content-secondary">Preparing a fresh plan for the current project revision…</p>
       ) : status === 'error' && canRetry ? (
-        <Button size="sm" onClick={() => void retry()}>
-          Prepare retry
-        </Button>
+        <>
+          <h3 className="text-content-primary font-medium">Deployment failed</h3>
+          <Button size="sm" onClick={() => void retry()}>
+            Try again
+          </Button>
+        </>
       ) : status === 'error' ? (
-        <Button size="sm" onClick={() => void continueDeployment()}>
-          Resume deployment
-        </Button>
+        <>
+          <h3 className="text-content-primary font-medium">Deployment failed</h3>
+          <Button size="sm" onClick={() => void continueDeployment()}>
+            Try again
+          </Button>
+        </>
       ) : (
-        <Button size="lg" loading={status === 'submitting'} onClick={() => void approve()}>
-          Deploy
-        </Button>
-      )}
-      {status === 'idle' ? (
-        <p className="max-w-2xl text-xs leading-relaxed text-content-tertiary">
-          Cloudflare usage charges may apply. Ghostbuild won&apos;t enable a paid plan.
+        <p className="text-content-secondary" role="status">
+          Deploying…
         </p>
-      ) : null}
-      {error ? <p className="text-bolt-elements-icon-error">{error}</p> : null}
+      )}
+      {visibleError ? <p className="text-bolt-elements-icon-error">{visibleError}</p> : null}
     </section>
   );
 }
 
 const DEPLOYMENT_POLL_INTERVAL_MS = 1_500;
 const DEPLOYMENT_POLL_TIMEOUT_MS = 30 * 60 * 1_000;
+
+async function approveAndResumeDeployment(
+  deployment: PendingDeploymentApproval,
+  signal: AbortSignal | undefined,
+  onRunning: () => void,
+): Promise<{ productionUrl?: string | null }> {
+  const current = await getDeployment(deployment.id, signal);
+  if (current.status === 'awaiting_approval') {
+    const response = await deploymentFetch(deployment.id, 'approve', {
+      method: 'POST',
+      signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        planDigest: deployment.planDigest,
+        confirmCloudflareBilling: true,
+        confirmWorkersPaidNotAutomatic: true,
+      }),
+    });
+    const payload = (await response.json().catch(() => null)) as {
+      deployment?: { status?: string };
+      error?: string;
+    } | null;
+    if (!response.ok || payload?.deployment?.status !== 'approved') {
+      throw new Error(payload?.error || 'Unable to start deployment.');
+    }
+  }
+  const completed = await resumeDeployment(deployment.id, signal, onRunning);
+  if (!completed) {
+    throw new Error('Unable to start deployment.');
+  }
+  return completed;
+}
 
 async function resumeDeployment(
   deploymentId: string,

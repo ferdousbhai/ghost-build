@@ -19,8 +19,8 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
 vi.mock('./ToolCall', () => ({ ToolCall: () => null }));
 vi.mock('./Markdown', () => ({ Markdown: ({ children }: { children: string }) => <span>{children}</span> }));
 
-describe('AssistantMessage deployment approval', () => {
-  it('renders a native deployment approval data part', () => {
+describe('AssistantMessage deployment continuation', () => {
+  it('does not render a duplicate deployment control', () => {
     const deployment = {
       id: 'deployment-1',
       planDigest: 'a'.repeat(64),
@@ -37,10 +37,7 @@ describe('AssistantMessage deployment approval', () => {
 
     document.body.innerHTML = renderToStaticMarkup(<AssistantMessage message={message} />);
 
-    expect(document.body.textContent).toContain('Ready to deploy');
-    expect(document.body.textContent).toContain('Deploy');
-    expect(document.body.textContent).toContain('Cloudflare usage charges may apply');
-    expect(document.body.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    expect(document.body.textContent).not.toContain('Ready to deploy');
     expect(document.body.textContent).not.toContain('deployment-1');
   });
 });

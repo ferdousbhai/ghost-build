@@ -8,8 +8,6 @@ import {
   type GhostbuildPart,
 } from 'ghostbuild-agent/ai-compat';
 import { captureMessage } from '~/lib/telemetry.client';
-import { DeploymentApproval } from './DeploymentApproval.client';
-import { parsePendingDeploymentApprovalData } from '~/lib/deployment-approval';
 
 const Markdown = lazy(() => import('./Markdown').then((module) => ({ default: module.Markdown })));
 
@@ -54,8 +52,7 @@ function AssistantMessagePart({ part, partId }: { part: GhostbuildPart; partId: 
   }
 
   if (part.type === 'data-deployment-approval') {
-    const deployment = parsePendingDeploymentApprovalData(part.data);
-    return deployment ? <DeploymentApproval deployment={deployment} /> : null;
+    return null;
   }
 
   if (part.type === 'step-start' || part.type === 'reasoning' || part.type === 'reasoning-file') {

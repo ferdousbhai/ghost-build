@@ -46,7 +46,7 @@ describe('DeploymentApproval', () => {
     document.body.replaceChildren();
   });
 
-  it('records both disclosures from one clear Deploy action', async () => {
+  it('starts an approved deployment automatically without a consent card', async () => {
     await act(async () => {
       root.render(
         <DeploymentApproval
@@ -59,14 +59,6 @@ describe('DeploymentApproval', () => {
       );
     });
 
-    const button = Array.from(container.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent === 'Deploy',
-    );
-    expect(button).toBeDefined();
-    expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
-
-    await act(async () => button?.click());
-
     const approvalCall = mocks.fetchUserRuntime.mock.calls.find(([path]) => String(path).endsWith('/approve'));
     expect(approvalCall).toBeDefined();
     expect(JSON.parse(String((approvalCall?.[1] as RequestInit).body))).toEqual({
@@ -74,6 +66,9 @@ describe('DeploymentApproval', () => {
       confirmCloudflareBilling: true,
       confirmWorkersPaidNotAutomatic: true,
     });
+    expect(container.textContent).toContain('Deployed');
+    expect(container.textContent).not.toContain('usage charges');
+    expect(container.querySelectorAll('button')).toHaveLength(0);
   });
 
   it('prepares a current-revision plan after a terminal deployment failure', async () => {
@@ -103,13 +98,13 @@ describe('DeploymentApproval', () => {
     });
 
     const retry = Array.from(container.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent === 'Prepare retry',
+      (candidate) => candidate.textContent === 'Try again',
     );
     expect(retry).toBeDefined();
     await act(async () => retry?.click());
 
     expect(onPrepareDeployment).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain("Ghostbuild won't enable a paid plan");
+    expect(container.textContent).not.toContain('usage charges');
     expect(mocks.fetchUserRuntime.mock.calls.some(([path]) => String(path).endsWith('/retry'))).toBe(false);
   });
 
@@ -146,12 +141,36 @@ describe('DeploymentApproval', () => {
     });
 
     const retry = Array.from(container.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent === 'Prepare retry',
+      (candidate) => candidate.textContent === 'Try again',
     );
     await act(async () => retry?.click());
 
     expect(onPrepareDeployment).toHaveBeenCalledOnce();
     expect(mocks.fetchUserRuntime.mock.calls.some(([path]) => String(path).endsWith('/retry'))).toBe(true);
-    expect(container.textContent).toContain('Deploy');
+    expect(container.textContent).not.toContain('usage charges');
+  });
+
+  it('collapses an internal failed-state conflict to one clear retry action', async () => {
+    mocks.fetchUserRuntime.mockResolvedValue(
+      Response.json({
+        deployment: { status: 'failed', error: { message: 'Deployment cannot continue from status failed.' } },
+      }),
+    );
+    await act(async () => {
+      root.render(
+        <DeploymentApproval
+          deployment={{
+            id: 'deployment-1',
+            planDigest: 'a'.repeat(64),
+            resources: [{ type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-app' }],
+          }}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('Deployment failed');
+    expect(container.textContent).toContain('Try again');
+    expect(container.textContent).not.toContain('Publish this app');
+    expect(container.textContent).not.toContain('status failed');
   });
 });

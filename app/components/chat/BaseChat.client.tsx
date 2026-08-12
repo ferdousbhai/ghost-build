@@ -24,7 +24,6 @@ import type { BuildProgress } from './build-progress';
 import type { SubchatSummary } from './subchat-model';
 import type { PendingDeploymentApproval } from '~/lib/deployment-approval';
 import { DeploymentApproval } from './DeploymentApproval.client';
-import { Button } from '@ui/Button';
 
 const Workbench = lazy(() =>
   import('~/components/workbench/Workbench.client').then((module) => ({ default: module.Workbench })),
@@ -263,19 +262,6 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                     {deploymentApproval ? (
                       <div className="mb-3">
                         <DeploymentApproval deployment={deploymentApproval} onPrepareDeployment={onPrepareDeployment} />
-                      </div>
-                    ) : onPrepareDeployment && !isStreaming ? (
-                      <div className="mb-2 flex justify-end px-1">
-                        <Button
-                          variant="neutral"
-                          onClick={() => {
-                            void onPrepareDeployment().catch((error) =>
-                              toast.error(error instanceof Error ? error.message : 'Unable to prepare deployment.'),
-                            );
-                          }}
-                        >
-                          Deploy
-                        </Button>
                       </div>
                     ) : null}
                     {(!subchats || (currentSubchatIndex >= subchats.length - 1 && isSubchatLoaded)) && (
