@@ -1507,6 +1507,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     try {
       // Deployment owns the container from this point forward. Retire the long-lived preview first so its
       // server cannot compete with artifact preparation or survive across an immutable publication session.
+      await this.setKeepAlive(true);
       await this.cleanupPendingPreviews();
       await this.stopActivePreview();
       await this.assertDeploymentSession({ sessionId: operationId });
@@ -1559,6 +1560,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         this.#operationLane.release(lease);
       }
       this.#activeOperationOwners.delete(session.owner);
+      await this.releaseContainerKeepAliveIfIdle();
       return { status };
     }
     if (session.status !== 'active') {
@@ -1576,6 +1578,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       sessionId,
     );
     this.#activeOperationOwners.delete(session.owner);
+    await this.releaseContainerKeepAliveIfIdle();
     return { status };
   }
 
@@ -1932,8 +1935,8 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     if (row && !(await this.cleanupPreviewResourcesOrRecover(row))) {
       return;
     }
-    await this.setKeepAlive(false).catch(() => undefined);
     this.ctx.storage.sql.exec('DELETE FROM ghostbuild_active_preview WHERE singleton = 1');
+    await this.releaseContainerKeepAliveIfIdle();
   }
 
   private async preparePreviewSnapshot(args: {
@@ -2383,9 +2386,18 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       return await operation();
     } finally {
       this.#containerKeepAliveOperations -= 1;
-      if (this.#containerKeepAliveOperations === 0 && !this.activePreviewRow()) {
-        await this.setKeepAlive(false).catch(() => undefined);
-      }
+      await this.releaseContainerKeepAliveIfIdle();
+    }
+  }
+
+  private async releaseContainerKeepAliveIfIdle(): Promise<void> {
+    const deploymentActive = first(
+      this.ctx.storage.sql.exec<{ active: number }>(
+        `SELECT 1 AS active FROM ghostbuild_deployment_sessions WHERE status = 'active' LIMIT 1`,
+      ),
+    );
+    if (this.#containerKeepAliveOperations === 0 && !this.activePreviewRow() && !deploymentActive) {
+      await this.setKeepAlive(false).catch(() => undefined);
     }
   }
 

@@ -202,7 +202,10 @@ describe('isolated project command', () => {
     expect(keepAlive).toContain('this.#containerKeepAliveOperations += 1');
     expect(keepAlive).toContain('await this.setKeepAlive(true)');
     expect(keepAlive).toContain('this.#containerKeepAliveOperations -= 1');
-    expect(keepAlive).toContain('this.#containerKeepAliveOperations === 0 && !this.activePreviewRow()');
+    expect(keepAlive).toContain("ghostbuild_deployment_sessions WHERE status = 'active'");
+    expect(keepAlive).toContain(
+      'this.#containerKeepAliveOperations === 0 && !this.activePreviewRow() && !deploymentActive',
+    );
     expect(keepAlive).toContain('await this.setKeepAlive(false)');
   });
 
@@ -212,11 +215,13 @@ describe('isolated project command', () => {
       source.indexOf('async beginDeploymentSession('),
       source.indexOf('async createPreview('),
     );
+    const retain = session.indexOf('await this.setKeepAlive(true)');
     const cleanup = session.indexOf('await this.cleanupPendingPreviews()');
     const stop = session.indexOf('await this.stopActivePreview()');
     const assertion = session.lastIndexOf('await this.assertDeploymentSession({ sessionId: operationId })');
 
-    expect(cleanup).toBeGreaterThan(0);
+    expect(retain).toBeGreaterThan(0);
+    expect(cleanup).toBeGreaterThan(retain);
     expect(stop).toBeGreaterThan(cleanup);
     expect(assertion).toBeGreaterThan(stop);
   });
