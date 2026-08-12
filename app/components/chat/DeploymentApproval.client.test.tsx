@@ -71,6 +71,39 @@ describe('DeploymentApproval', () => {
     expect(container.querySelectorAll('button')).toHaveLength(0);
   });
 
+  it('keeps polling when the execute request times out after the deployment starts', async () => {
+    let statusReads = 0;
+    mocks.fetchUserRuntime.mockImplementation(async (path: string) => {
+      if (path.endsWith('/execute')) {
+        throw new Error('Request timed out');
+      }
+      statusReads += 1;
+      return Response.json({
+        deployment: {
+          status: statusReads === 1 ? 'approved' : statusReads === 2 ? 'deploying' : 'succeeded',
+          productionUrl: statusReads >= 3 ? 'https://app.example' : null,
+        },
+      });
+    });
+
+    await act(async () => {
+      root.render(
+        <DeploymentApproval
+          deployment={{
+            id: 'deployment-1',
+            planDigest: 'a'.repeat(64),
+            resources: [{ type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-app' }],
+          }}
+        />,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 1_600));
+    });
+
+    expect(container.textContent).toContain('Deployed');
+    expect(container.querySelector('a')?.href).toBe('https://app.example/');
+    expect(container.textContent).not.toContain('Deployment failed');
+  });
+
   it('prepares a current-revision plan after a terminal deployment failure', async () => {
     mocks.fetchUserRuntime.mockImplementation(async (path: string) =>
       Response.json({

@@ -176,13 +176,29 @@ async function resumeDeployment(
   }
   onRunning();
   if (current.status === 'approved') {
-    const response = await deploymentFetch(deploymentId, 'execute', {
-      method: 'POST',
-      signal,
-    });
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(payload?.error || 'Unable to resume the production deployment.');
+    try {
+      const response = await deploymentFetch(deploymentId, 'execute', {
+        method: 'POST',
+        signal,
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error || 'Unable to resume the production deployment.');
+      }
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      const afterExecute = await getDeployment(deploymentId, signal);
+      if (afterExecute.status === 'succeeded') {
+        return afterExecute;
+      }
+      if (afterExecute.status === 'failed' || afterExecute.status === 'canceled') {
+        throw new DeploymentTerminalError(afterExecute.error?.message || 'Production deployment failed.');
+      }
+      if (afterExecute.status === 'approved') {
+        throw error;
+      }
     }
   }
   return pollDeployment(deploymentId, signal);
