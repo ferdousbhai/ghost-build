@@ -560,20 +560,21 @@ export class UserCloudflareAccountApi {
       { method: 'POST', body: JSON.stringify({ manifest }) },
     );
     let completionJwt = requireAssetUploadJwt(session.jwt);
-    const singleAssetUploads = usesSingleAssetUploadProtocol(completionJwt);
     if (!Array.isArray(session.buckets) || session.buckets.length > byHash.size) {
       throw new CloudflareAccountApiError('Cloudflare returned invalid asset upload buckets.');
     }
-    const uploadBuckets = singleAssetUploads
-      ? session.buckets.flatMap((bucket) => (Array.isArray(bucket) ? bucket.map((hash) => [hash]) : [bucket]))
-      : session.buckets;
+    if (session.buckets.length > 0) {
+      requireSingleAssetUploadProtocol(completionJwt);
+    }
+    const uploadBuckets = session.buckets.flatMap((bucket) =>
+      Array.isArray(bucket) ? bucket.map((hash) => [hash]) : [bucket],
+    );
     const requested = new Set<string>();
     let receivedCompletionJwt = session.buckets.length === 0;
     for (const [bucketIndex, rawBucket] of uploadBuckets.entries()) {
       if (!Array.isArray(rawBucket) || rawBucket.length === 0 || rawBucket.length > byHash.size) {
         throw new CloudflareAccountApiError('Cloudflare returned invalid asset upload buckets.');
       }
-      const form = new FormData();
       for (const rawHash of rawBucket) {
         if (typeof rawHash !== 'string' || !ASSET_HASH_PATTERN.test(rawHash) || requested.has(rawHash)) {
           throw new CloudflareAccountApiError('Cloudflare returned invalid asset upload buckets.');
@@ -583,35 +584,21 @@ export class UserCloudflareAccountApi {
           throw new CloudflareAccountApiError('Cloudflare requested an unknown managed Worker asset.');
         }
         requested.add(rawHash);
-        form.set(
-          rawHash,
-          new Blob([bytesToBase64(asset.bytes)], { type: staticAssetContentType(asset.path) }),
-          rawHash,
-        );
       }
-      let response: Response;
-      if (singleAssetUploads) {
-        const singleHash = rawBucket[0];
-        const singleAsset = typeof singleHash === 'string' ? byHash.get(singleHash) : null;
-        if (rawBucket.length !== 1 || !singleAsset) {
-          throw new CloudflareAccountApiError('Cloudflare returned invalid single-file asset upload buckets.');
-        }
-        response = await this.executeRaw(
-          `/workers/assets/upload/${encodeURIComponent(singleHash)}`,
-          {
-            method: 'POST',
-            headers: { 'content-type': staticAssetContentType(singleAsset.path) },
-            body: new Uint8Array(singleAsset.bytes).buffer,
-          },
-          completionJwt,
-        );
-      } else {
-        response = await this.executeRaw(
-          '/workers/assets/upload?base64=true',
-          { method: 'POST', body: form },
-          completionJwt,
-        );
+      const singleHash = rawBucket[0];
+      const singleAsset = typeof singleHash === 'string' ? byHash.get(singleHash) : null;
+      if (rawBucket.length !== 1 || !singleAsset) {
+        throw new CloudflareAccountApiError('Cloudflare returned invalid single-file asset upload buckets.');
       }
+      const response = await this.executeRaw(
+        `/workers/assets/upload/${encodeURIComponent(singleHash)}`,
+        {
+          method: 'POST',
+          headers: { 'content-type': staticAssetContentType(singleAsset.path) },
+          body: new Uint8Array(singleAsset.bytes).buffer,
+        },
+        completionJwt,
+      );
       if (response.status === 401) {
         await response.body?.cancel().catch(() => undefined);
         throw new AssetUploadSessionExpiredError();
@@ -1331,20 +1318,23 @@ function requireAssetUploadJwt(value: unknown): string {
   return value;
 }
 
-function usesSingleAssetUploadProtocol(jwt: string): boolean {
+function requireSingleAssetUploadProtocol(jwt: string): void {
   const payload = jwt.split('.')[1];
   if (!payload) {
-    return false;
+    throw new CloudflareAccountApiError('Cloudflare returned an invalid current asset upload identity.');
   }
+  let claims: unknown;
   try {
     const base64 = payload
       .replaceAll('-', '+')
       .replaceAll('_', '/')
       .padEnd(Math.ceil(payload.length / 4) * 4, '=');
-    const claims: unknown = JSON.parse(atob(base64));
-    return isRecord(claims) && claims.wrangler_single_asset_uploads === true;
+    claims = JSON.parse(atob(base64));
   } catch {
-    return false;
+    throw new CloudflareAccountApiError('Cloudflare returned an invalid current asset upload identity.');
+  }
+  if (!isRecord(claims) || claims.wrangler_single_asset_uploads !== true) {
+    throw new CloudflareAccountApiError('Cloudflare did not advertise the current single-asset upload protocol.');
   }
 }
 
@@ -1571,14 +1561,6 @@ function staticAssetContentType(path: string): string {
       } as Record<string, string>
     )[extension] ?? 'application/octet-stream'
   );
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let index = 0; index < bytes.length; index += 32_768) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + 32_768));
-  }
-  return btoa(binary);
 }
 
 function equalBytes(left: Uint8Array, right: Uint8Array): boolean {

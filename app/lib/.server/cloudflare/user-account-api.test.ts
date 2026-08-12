@@ -45,6 +45,14 @@ async function artifactFile(path: string, contents: string): Promise<DeploymentA
   };
 }
 
+function currentAssetUploadJwt(): string {
+  const claims = btoa(JSON.stringify({ wrangler_single_asset_uploads: true }))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replaceAll('=', '');
+  return `e30.${claims}.signature`;
+}
+
 async function textDigest(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
@@ -700,14 +708,13 @@ describe('UserCloudflareAccountApi', () => {
     const asset = await artifactFile('index.html', '<h1>Ghostbuild</h1>');
     const duplicateAsset = await artifactFile('nested/index.html', '<h1>Ghostbuild</h1>');
     const assetHash = await deploymentAssetHash(asset);
+    const sessionJwt = currentAssetUploadJwt();
     const workerVersionId = '11111111-1111-4111-8111-111111111111';
     const providerDeploymentId = '22222222-2222-4222-8222-222222222222';
     const versions = [{ percentage: 100, version_id: workerVersionId }];
     const request = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json({ success: true, result: { jwt: 'asset-session-jwt', buckets: [[assetHash]] } }),
-      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: { jwt: sessionJwt, buckets: [[assetHash]] } }))
       .mockResolvedValueOnce(Response.json({ success: true, result: { jwt: 'asset-completion-jwt' } }))
       .mockResolvedValueOnce(Response.json({ success: true, result: { id: 'ghostbuild-app', etag: 'managed-etag' } }))
       .mockResolvedValueOnce(
@@ -756,7 +763,7 @@ describe('UserCloudflareAccountApi', () => {
 
     expect(request.mock.calls.map(([url]) => String(url))).toEqual([
       'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/assets-upload-session',
-      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/assets/upload?base64=true',
+      `https://api.cloudflare.com/client/v4/accounts/account-1/workers/assets/upload/${assetHash}`,
       'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app?excludeScript=true&bindings_inherit=strict',
       'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/deployments',
       `https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/versions/${workerVersionId}`,
@@ -769,8 +776,11 @@ describe('UserCloudflareAccountApi', () => {
         '/nested/index.html': { hash: assetHash, size: duplicateAsset.size },
       },
     });
-    expect(request.mock.calls[1]?.[1]?.headers).toMatchObject({ authorization: 'Bearer asset-session-jwt' });
-    expect([...(request.mock.calls[1]?.[1]?.body as FormData).keys()]).toEqual([assetHash]);
+    expect(request.mock.calls[1]?.[1]?.headers).toMatchObject({
+      authorization: `Bearer ${sessionJwt}`,
+      'content-type': 'text/html',
+    });
+    expect(new Uint8Array(request.mock.calls[1]?.[1]?.body as ArrayBuffer)).toEqual(asset.bytes);
     const workerForm = request.mock.calls[2]?.[1]?.body as FormData;
     expect(request.mock.calls[2]?.[1]?.method).toBe('PUT');
     const metadata = JSON.parse(await (workerForm.get('metadata') as Blob).text()) as Record<string, unknown>;
@@ -788,72 +798,6 @@ describe('UserCloudflareAccountApi', () => {
     });
     expect(JSON.stringify(metadata)).not.toMatch(/oauth-token|CLOUDFLARE_API_TOKEN|apiToken/);
     expect(workerForm.get('index.js')).toBeInstanceOf(Blob);
-  });
-
-  test('uses Cloudflare single-file asset uploads when the session JWT enables them', async () => {
-    const module = await artifactFile('index.js', 'export default { fetch() { return new Response("ok") } }');
-    const asset = await artifactFile('index.html', '<h1>Ghostbuild</h1>');
-    const assetHash = await deploymentAssetHash(asset);
-    const claims = btoa(JSON.stringify({ wrangler_single_asset_uploads: true }))
-      .replaceAll('+', '-')
-      .replaceAll('/', '_')
-      .replaceAll('=', '');
-    const sessionJwt = `e30.${claims}.signature`;
-    const workerVersionId = '11111111-1111-4111-8111-111111111111';
-    const providerDeploymentId = '22222222-2222-4222-8222-222222222222';
-    const versions = [{ percentage: 100, version_id: workerVersionId }];
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json({ success: true, result: { jwt: sessionJwt, buckets: [[assetHash]] } }))
-      .mockResolvedValueOnce(Response.json({ success: true, result: { jwt: 'asset-completion-jwt' } }, { status: 201 }))
-      .mockResolvedValueOnce(Response.json({ success: true, result: { id: 'ghostbuild-app', etag: 'managed-etag' } }))
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: {
-            deployments: [{ id: providerDeploymentId, created_on: '2026-07-21T00:00:00Z', versions }],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: {
-            id: workerVersionId,
-            resources: {
-              bindings: [],
-              script: { etag: 'managed-etag' },
-              script_runtime: { compatibility_date: '2026-07-21', compatibility_flags: ['nodejs_compat'] },
-            },
-          },
-        }),
-      )
-      .mockResolvedValueOnce(Response.json({ success: true, result: { schedules: [] } }));
-
-    await expect(
-      new UserCloudflareAccountApi('account-1', 'oauth-token', request).deployManagedWorker({
-        workerName: 'ghostbuild-app',
-        projectType: 'web_app',
-        sourceSha256: 'a'.repeat(64),
-        mainModule: 'index.js',
-        modules: [module],
-        assets: [asset],
-        workersAi: false,
-        appAgent: true,
-        securityBaselineVersion: '24',
-        securityBoundarySha256: 'b'.repeat(64),
-        templateSourceSha256: 'c'.repeat(64),
-      }),
-    ).resolves.toEqual({ workerVersionId });
-
-    expect(String(request.mock.calls[1]?.[0])).toBe(
-      `https://api.cloudflare.com/client/v4/accounts/account-1/workers/assets/upload/${assetHash}`,
-    );
-    expect(request.mock.calls[1]?.[1]?.headers).toMatchObject({
-      authorization: `Bearer ${sessionJwt}`,
-      'content-type': 'text/html',
-    });
-    expect(new Uint8Array(request.mock.calls[1]?.[1]?.body as ArrayBuffer)).toEqual(asset.bytes);
   });
 
   test('promotes an immutable version when a plain Worker already exists', async () => {
@@ -927,7 +871,7 @@ describe('UserCloudflareAccountApi', () => {
     const unknownBucket = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
-        Response.json({ success: true, result: { jwt: 'session-jwt', buckets: [['f'.repeat(32)]] } }),
+        Response.json({ success: true, result: { jwt: currentAssetUploadJwt(), buckets: [['f'.repeat(32)]] } }),
       );
     await expect(deploy(unknownBucket)).rejects.toThrow('unknown managed Worker asset');
     expect(unknownBucket).toHaveBeenCalledOnce();
@@ -935,10 +879,20 @@ describe('UserCloudflareAccountApi', () => {
     const assetHash = await deploymentAssetHash(asset);
     const missingCompletion = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json({ success: true, result: { jwt: 'session-jwt', buckets: [[assetHash]] } }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: { jwt: currentAssetUploadJwt(), buckets: [[assetHash]] } }),
+      )
       .mockResolvedValueOnce(Response.json({ success: true, result: {} }, { status: 201 }));
     await expect(deploy(missingCompletion)).rejects.toThrow('invalid asset upload identity');
     expect(missingCompletion).toHaveBeenCalledTimes(2);
+
+    const legacySession = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: { jwt: 'e30.e30.signature', buckets: [[assetHash]] } }),
+      );
+    await expect(deploy(legacySession)).rejects.toThrow('did not advertise the current single-asset upload protocol');
+    expect(legacySession).toHaveBeenCalledOnce();
   });
 
   test('forces one credential refresh and retries exactly once on a Cloudflare 401', async () => {
