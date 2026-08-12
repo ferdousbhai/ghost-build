@@ -215,6 +215,7 @@ describe('isolated project command', () => {
       source.indexOf('async beginDeploymentSession('),
       source.indexOf('async createPreview('),
     );
+    expect(session.match(/await this\.setKeepAlive\(true\)/g)).toHaveLength(2);
     const retain = session.indexOf('await this.setKeepAlive(true)');
     const cleanup = session.indexOf('await this.cleanupPendingPreviews()');
     const stop = session.indexOf('await this.stopActivePreview()');

@@ -1480,6 +1480,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         );
         throw new WorkspaceOperationIndeterminateError('deployment');
       }
+      await this.setKeepAlive(true);
       await this.assertDeploymentSession({ sessionId: operationId });
       return { sessionId: operationId };
     }
