@@ -64,9 +64,3 @@ vite.config.ts.timestamp-*.mjs
 .env*.local
 
 temp_envars
-
-# vendored @summonghost packages - keep built output self-contained
-!packages/@summonghost/compaction/dist/
-!packages/@summonghost/compaction/dist/**
-!packages/@summonghost/title-generation/dist/
-!packages/@summonghost/title-generation/dist/**

@@ -22,8 +22,6 @@ import { recordPiStage } from './pi-telemetry';
 type GhostbuildModelConfig = {
   provider: 'cloudflare';
   model: WorkersAiRuntimeModelId;
-  apiToken?: string;
-  apiUrl?: string;
 };
 
 export type ModelStreamOptions = SimpleStreamOptions & {
@@ -117,44 +115,19 @@ function makeHandle(args: HandleArgs): ModelHandle {
 }
 
 export function getPiModel(
-  accountCredentials: { accountId: string; apiKey: string } | { binding: Ai },
+  accountCredentials: { binding: Ai },
   modelId: WorkersAiRuntimeModelId,
   settings?: { sessionAffinity?: string },
 ): ModelHandle {
   const config: GhostbuildModelConfig = { provider: 'cloudflare', model: modelId };
   const catalog = catalogModel(config.model);
   const win = modelTokenWindow(config, catalog);
-
-  // Use the OpenAI-compatible protocol for both the binding and direct account credentials.
-  if ('binding' in accountCredentials) {
-    const model: Model<Api> = {
-      id: config.model,
-      name: catalog?.name ?? config.model,
-      api: 'openai-completions',
-      provider: 'cloudflare-workers-ai',
-      baseUrl: 'https://workers-ai-binding.invalid/v1',
-      reasoning: catalog?.reasoning ?? false,
-      input: catalog?.input ?? ['text'],
-      cost: catalog?.cost ?? ZERO_COST,
-      ...win,
-      compat: workersAiCompat(catalog),
-    };
-    return makeHandle({
-      model,
-      // Pi's OpenAI-compatible serializer requires a non-empty key before calling custom fetch.
-      // The binding adapter forwards only the reviewed session-affinity header.
-      apiKey: 'workers-ai-binding',
-      fetch: createWorkersAiBindingFetch(accountCredentials.binding, config.model),
-      sessionAffinity: settings?.sessionAffinity,
-    });
-  }
-
   const model: Model<Api> = {
     id: config.model,
     name: catalog?.name ?? config.model,
     api: 'openai-completions',
     provider: 'cloudflare-workers-ai',
-    baseUrl: `https://api.cloudflare.com/client/v4/accounts/${accountCredentials.accountId}/ai/v1`,
+    baseUrl: 'https://workers-ai-binding.invalid/v1',
     reasoning: catalog?.reasoning ?? false,
     input: catalog?.input ?? ['text'],
     cost: catalog?.cost ?? ZERO_COST,
@@ -163,7 +136,10 @@ export function getPiModel(
   };
   return makeHandle({
     model,
-    apiKey: accountCredentials.apiKey,
+    // Pi's OpenAI-compatible serializer requires a non-empty key before calling custom fetch.
+    // The binding adapter forwards only the reviewed session-affinity header.
+    apiKey: 'workers-ai-binding',
+    fetch: createWorkersAiBindingFetch(accountCredentials.binding, config.model),
     sessionAffinity: settings?.sessionAffinity,
   });
 }

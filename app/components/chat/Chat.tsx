@@ -14,7 +14,7 @@ import { useChatHistoryProcessing } from './useChatHistoryProcessing';
 import { useCurrentToolStatus } from './useCurrentToolStatus';
 import { useBuildProgress } from './useBuildProgress';
 import { appendPendingUserMessage, useChatMessageSubmission } from './useChatMessageSubmission';
-import { deriveProvisionalTitle } from '@summonghost/title-generation';
+import { deriveProvisionalTitle } from '~/lib/title-generation';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { applyLiveSubchatTitle, type LiveSubchatTitle } from './subchat-model';
 import {

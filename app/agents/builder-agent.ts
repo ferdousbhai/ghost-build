@@ -6,7 +6,7 @@ import {
   type ChatResponseResult,
 } from '@cloudflare/ai-chat';
 import { callable, type FiberRecoveryContext, type FiberRecoveryResult } from 'agents';
-import { canApplyConversationCompaction, conversationCompactionKey } from '@summonghost/compaction';
+import { canApplyConversationCompaction, conversationCompactionKey } from '~/lib/compaction';
 import { createChatResponseFromBody, type ChatRequestBody } from '~/lib/.server/chat';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import {
@@ -28,10 +28,12 @@ import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } 
 import { latestPendingDeploymentPlan } from './deployment-continuation';
 import { prepareDeploymentPlanForBuilder, validatedDeploymentCheckpoint } from './builder-deployment-command';
 import { parsePendingDeploymentApproval, type PendingDeploymentApproval } from '~/lib/deployment-approval';
-import { generateProjectTitle } from '~/lib/.server/llm/project-title';
+import { generateConversationTitle, generateProjectTitle } from '~/lib/.server/llm/workers-ai-title';
 import {
-  setGeneratedDescriptionIfMissing,
+  setGeneratedProjectDescription,
   setGeneratedSubchatDescription,
+  setHeuristicProjectDescriptionIfMissing,
+  setHeuristicSubchatDescriptionIfMissing,
 } from '~/lib/cloudflare/data/chat-service.server';
 import { messageText } from 'ghostbuild-agent/ai-compat';
 import {
@@ -70,7 +72,7 @@ import type {
 } from './builder-workspace-types';
 import { builderTemplateSeedId, loadBuilderTemplate } from './builder-template';
 import { parentBuilderWorkspaceSeedId, seedBuilderWorkspace } from './builder-workspace-seed';
-import { deriveProvisionalTitle } from '@summonghost/title-generation';
+import { deriveProvisionalTitle, shouldGenerateConversationTitle } from '~/lib/title-generation';
 import {
   failedBuilderPreviewState,
   idleBuilderPreviewState,
@@ -86,6 +88,8 @@ const MAX_CHAT_RECOVERY_ATTEMPTS = 2;
 const CHAT_NO_PROGRESS_TIMEOUT_MS = 14 * 60 * 1000;
 const CONTEXT_COMPACTION_FIBER = 'background:context_compaction';
 const PREVIEW_BUILD_FIBER = 'background:builder_preview';
+const TITLE_GENERATION_FIBER = 'background:title_generation';
+const TITLE_GENERATION_JOB_MAX_PROMPT_CHARACTERS = 4_000;
 const CHAT_CANCELLATION_SETTLE_TIMEOUT_MS = 4.5 * 60 * 1000;
 
 type PreviewBuildJob = {
@@ -93,6 +97,14 @@ type PreviewBuildJob = {
   workspaceRevision: number;
   snapshotRevision: string;
   requestedAt: number;
+};
+
+type TitleGenerationJob = {
+  chatInitialId: string;
+  firstPrompt: boolean;
+  prompt: string;
+  promptGeneration: number;
+  subchatIndex: number;
 };
 
 export type BuilderAgentState = {
@@ -282,6 +294,15 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       reason: 'fiber_recovery',
       incidentId: typeof ctx.id === 'string' ? ctx.id : undefined,
     });
+    if (ctx.name === TITLE_GENERATION_FIBER) {
+      const job = parseTitleGenerationJob(ctx.metadata);
+      if (!job || !this.userId) {
+        return { status: 'error', error: 'missing title generation recovery data' };
+      }
+      const credentials = await getUserWorkersAiCredentials(this.env, this.userId);
+      await this.generateTitlesForPrompt({ ...job, accountCredentials: credentials });
+      return { status: 'completed', snapshot: ctx.snapshot };
+    }
     if (ctx.name === PREVIEW_BUILD_FIBER) {
       const job = parsePreviewBuildJob(ctx.metadata);
       if (!job) {
@@ -338,9 +359,11 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     await this.advanceTranscriptCheckpoint(transcript);
     this.contextCompaction.migrateLegacySubchat(subchatIndex);
     const turnContext = parseTurnContext(body.turnContext);
-    const firstUserMessage =
-      !options?.continuation && messages.filter((message: { role?: string }) => message.role === 'user').length === 1;
-    const firstPrompt = firstUserMessage ? messages.find((message) => message.role === 'user') : undefined;
+    const userMessages = messages.filter((message: { role?: string }) => message.role === 'user');
+    const firstUserMessage = !options?.continuation && userMessages.length === 1;
+    const latestPrompt = !options?.continuation ? userMessages.at(-1) : undefined;
+    const latestPromptText = latestPrompt ? messageText(latestPrompt) : '';
+    const shouldGenerateTitle = shouldGenerateConversationTitle(latestPromptText, userMessages.length);
     const turn = createBuilderTurn({
       requestId: options?.requestId,
       chatInitialId,
@@ -363,9 +386,16 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
 
     try {
       const accountCredentials = await getUserWorkersAiCredentials(this.env, durableIdentity.userId);
-      if (firstPrompt) {
-        this.ctx.waitUntil(
-          this.generateTitlesForFirstPrompt(chatInitialId, subchatIndex, messageText(firstPrompt), accountCredentials),
+      if (shouldGenerateTitle) {
+        await this.scheduleTitleGeneration(
+          {
+            chatInitialId,
+            firstPrompt: firstUserMessage,
+            prompt: latestPromptText.slice(0, TITLE_GENERATION_JOB_MAX_PROMPT_CHARACTERS),
+            promptGeneration: userMessages.length,
+            subchatIndex,
+          },
+          accountCredentials,
         );
       }
       this.stashTurn(turn);
@@ -387,7 +417,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         compaction: {
           current: this.contextCompaction.getCompaction(),
           pending: compactionPending,
-          summarize: (prompt, signal) => summarizeBuilderContext(this.env, prompt, accountCredentials, signal),
+          summarize: (prompt, signal) => summarizeBuilderContext(prompt, accountCredentials, signal),
           save: (compaction) => this.contextCompaction.saveCompaction(compaction),
           schedule: async () => {
             const throughMessageId = messages.at(-1)?.id;
@@ -455,7 +485,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     const next = await compactContext({
       messages: sourceMessages,
       current: expected,
-      summarize: (prompt) => summarizeBuilderContext(this.env, prompt, accountCredentials),
+      summarize: (prompt) => summarizeBuilderContext(prompt, accountCredentials),
     });
     if (!next) {
       return;
@@ -837,48 +867,116 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
   }
 
-  private async generateTitlesForFirstPrompt(
-    chatInitialId: string,
-    subchatIndex: number,
-    firstPrompt: string,
+  private async scheduleTitleGeneration(
+    job: TitleGenerationJob,
     accountCredentials: Awaited<ReturnType<typeof getUserWorkersAiCredentials>>,
   ): Promise<void> {
-    if (!this.ownerId) {
+    await this.startFiber(
+      TITLE_GENERATION_FIBER,
+      async (fiber) => {
+        fiber.stash({ ...job, version: 1 });
+        await this.generateTitlesForPrompt({ ...job, accountCredentials });
+      },
+      {
+        idempotencyKey: `${TITLE_GENERATION_FIBER}:${job.subchatIndex}:${job.promptGeneration}`,
+        metadata: job,
+      },
+    );
+  }
+
+  private async generateTitlesForPrompt(
+    args: TitleGenerationJob & {
+      accountCredentials: Awaited<ReturnType<typeof getUserWorkersAiCredentials>>;
+    },
+  ): Promise<void> {
+    const ownerId = this.ownerId;
+    if (!ownerId) {
       return;
     }
-    try {
-      const title = await generateProjectTitle(this.env, firstPrompt, accountCredentials);
-      if (!title) {
-        return;
-      }
-      const [savedProjectTitle, savedSubchatTitle] = await Promise.all([
-        setGeneratedDescriptionIfMissing(this.env.DB, {
-          sessionId: this.ownerId,
-          id: chatInitialId,
-          description: title,
-        }),
-        setGeneratedSubchatDescription(this.env.DB, {
-          sessionId: this.ownerId,
-          id: chatInitialId,
-          subchatIndex,
-          description: title,
-          provisionalDescription: deriveProvisionalTitle(firstPrompt),
-        }),
-      ]);
-      if (savedSubchatTitle) {
-        const updatedAt = new Date().toISOString();
-        this.setState({
-          ...this.state,
-          generatedSubchatTitle: { subchatIndex, title, updatedAt },
-          updatedAt,
+
+    // Start model work before persistence so the background request leaves the
+    // critical chat path as soon as the first prompt is accepted.
+    const conversationTitlePromise = generateConversationTitle(args.prompt, args.accountCredentials);
+    const projectTitlePromise =
+      args.firstPrompt && args.subchatIndex === 0 ? generateProjectTitle(args.prompt, args.accountCredentials) : null;
+    const provisionalTitle = args.firstPrompt ? deriveProvisionalTitle(args.prompt) : null;
+
+    if (provisionalTitle) {
+      try {
+        const [savedHeuristicProject, savedHeuristicSubchat] = await Promise.all([
+          args.subchatIndex === 0
+            ? setHeuristicProjectDescriptionIfMissing(this.env.DB, {
+                sessionId: ownerId,
+                id: args.chatInitialId,
+                description: provisionalTitle,
+              })
+            : Promise.resolve(false),
+          setHeuristicSubchatDescriptionIfMissing(this.env.DB, {
+            sessionId: ownerId,
+            id: args.chatInitialId,
+            subchatIndex: args.subchatIndex,
+            description: provisionalTitle,
+            promptGeneration: args.promptGeneration,
+          }),
+        ]);
+        if (savedHeuristicSubchat) {
+          const updatedAt = new Date().toISOString();
+          this.setState({
+            ...this.state,
+            generatedSubchatTitle: { subchatIndex: args.subchatIndex, title: provisionalTitle, updatedAt },
+            updatedAt,
+          });
+        }
+        logger.info('Saved heuristic titles for first prompt', {
+          savedHeuristicProject,
+          savedHeuristicSubchat,
         });
+      } catch {
+        logger.warn('Heuristic title save failed; continuing generated title work');
       }
-      logger.info('Generated titles for first prompt', {
-        savedProjectTitle,
-        savedSubchatTitle,
-      });
-    } catch {
-      logger.warn('Title generation failed; keeping first-prompt fallback');
+    }
+
+    const [conversationResult, projectResult] = await Promise.allSettled([
+      conversationTitlePromise,
+      projectTitlePromise ?? Promise.resolve(null),
+    ]);
+
+    if (conversationResult.status === 'fulfilled' && conversationResult.value) {
+      try {
+        const savedSubchatTitle = await setGeneratedSubchatDescription(this.env.DB, {
+          sessionId: ownerId,
+          id: args.chatInitialId,
+          subchatIndex: args.subchatIndex,
+          description: conversationResult.value,
+          promptGeneration: args.promptGeneration,
+        });
+        if (savedSubchatTitle) {
+          const updatedAt = new Date().toISOString();
+          this.setState({
+            ...this.state,
+            generatedSubchatTitle: { subchatIndex: args.subchatIndex, title: conversationResult.value, updatedAt },
+            updatedAt,
+          });
+        }
+      } catch {
+        logger.warn('Generated conversation title could not be saved');
+      }
+    } else if (conversationResult.status === 'rejected') {
+      logger.warn('Conversation title generation failed; keeping the current title');
+    }
+
+    if (projectResult.status === 'fulfilled' && projectResult.value) {
+      try {
+        await setGeneratedProjectDescription(this.env.DB, {
+          sessionId: ownerId,
+          id: args.chatInitialId,
+          description: projectResult.value,
+        });
+      } catch {
+        logger.warn('Generated project title could not be saved');
+      }
+    } else if (projectResult.status === 'rejected') {
+      logger.warn('Project title generation failed; keeping the first-prompt title');
     }
   }
 
@@ -1165,6 +1263,25 @@ function parseTurnContext(value: unknown): ChatTurnContext | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseTitleGenerationJob(value: unknown): TitleGenerationJob | null {
+  if (
+    !isRecord(value) ||
+    typeof value.chatInitialId !== 'string' ||
+    value.chatInitialId.length === 0 ||
+    typeof value.firstPrompt !== 'boolean' ||
+    typeof value.prompt !== 'string' ||
+    value.prompt.length === 0 ||
+    value.prompt.length > TITLE_GENERATION_JOB_MAX_PROMPT_CHARACTERS ||
+    !Number.isSafeInteger(value.promptGeneration) ||
+    (value.promptGeneration as number) < 1 ||
+    !Number.isSafeInteger(value.subchatIndex) ||
+    (value.subchatIndex as number) < 0
+  ) {
+    return null;
+  }
+  return value as TitleGenerationJob;
 }
 
 function parsePreviewBuildJob(value: unknown): PreviewBuildJob | null {

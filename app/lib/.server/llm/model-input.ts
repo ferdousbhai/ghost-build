@@ -1,4 +1,4 @@
-import { decideConversationCompaction, type ConversationCompactionAction } from '@summonghost/compaction';
+import { decideConversationCompaction, type ConversationCompactionAction } from '~/lib/compaction';
 import type { ModelMessage } from './message-conversion';
 import { estimateStringTokens } from 'agents/experimental/memory/utils';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';

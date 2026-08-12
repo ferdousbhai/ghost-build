@@ -532,7 +532,7 @@ function createAgentStream(
       save: vi.fn(),
       ...compactionOverrides,
     },
-    accountCredentials: { accountId: 'account-1', apiKey: 'secret' },
+    accountCredentials: { binding: {} as Ai },
     sessionAffinity: 'opaque-session',
     workspace: {} as never,
     runWithKeepAlive: (operation) => operation(),

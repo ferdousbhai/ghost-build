@@ -26,6 +26,7 @@ export async function completeText(
     prompt?: string;
     messages?: Message[];
     maxTokens?: number;
+    temperature?: number;
     signal?: AbortSignal;
   },
 ): Promise<string> {
@@ -33,7 +34,7 @@ export async function completeText(
   const stream = await handle.stream(
     handle.model,
     { systemPrompt: args.systemPrompt, messages },
-    { maxTokens: args.maxTokens, signal: args.signal, thinking: false },
+    { maxTokens: args.maxTokens, temperature: args.temperature, signal: args.signal, thinking: false },
   );
   const message = await stream.result();
   if (message.stopReason === 'error' || message.stopReason === 'aborted') {

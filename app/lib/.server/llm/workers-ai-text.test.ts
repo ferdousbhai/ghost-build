@@ -21,17 +21,19 @@ vi.mock('./pi-ai-models', () => ({ getPiModel: mocks.getPiModel }));
 import { summarizeBuilderContext } from './workers-ai-text';
 
 describe('summarizeBuilderContext', () => {
-  const credentials = { accountId: 'account-1', apiKey: 'token' };
+  const credentials = { binding: {} as Ai };
 
   beforeEach(() => vi.clearAllMocks());
 
   test('returns a trimmed readable summary using the connected account and cancellation signal', async () => {
     mocks.completeText.mockResolvedValue('  current state  ');
-    const env = {} as Env;
     const signal = new AbortController().signal;
-    await expect(summarizeBuilderContext(env, 'conversation', credentials, signal)).resolves.toBe('current state');
+    await expect(summarizeBuilderContext('conversation', credentials, signal)).resolves.toBe('current state');
     expect(mocks.getPiModel).toHaveBeenCalled();
-    expect(mocks.completeText).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ signal }));
+    expect(mocks.completeText).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ signal, temperature: 0.1 }),
+    );
   });
 
   test('retries one transient provider failure', async () => {
@@ -39,14 +41,14 @@ describe('summarizeBuilderContext', () => {
       .mockRejectedValueOnce(new mocks.AgentTurnError('temporarily unavailable', 503))
       .mockResolvedValueOnce('recovered state');
 
-    await expect(summarizeBuilderContext({} as Env, 'conversation', credentials)).resolves.toBe('recovered state');
+    await expect(summarizeBuilderContext('conversation', credentials)).resolves.toBe('recovered state');
     expect(mocks.completeText).toHaveBeenCalledTimes(2);
   });
 
   test('does not retry a deterministic provider failure', async () => {
     mocks.completeText.mockRejectedValue(new mocks.AgentTurnError('invalid request', 400));
 
-    await expect(summarizeBuilderContext({} as Env, 'conversation', credentials)).rejects.toThrow(
+    await expect(summarizeBuilderContext('conversation', credentials)).rejects.toThrow(
       'Context compaction generation failed.',
     );
     expect(mocks.completeText).toHaveBeenCalledOnce();
@@ -54,7 +56,7 @@ describe('summarizeBuilderContext', () => {
 
   test('uses a fixed safe error when generation fails', async () => {
     mocks.completeText.mockRejectedValue(new Error('provider detail'));
-    await expect(summarizeBuilderContext({} as Env, 'conversation', credentials)).rejects.toThrow(
+    await expect(summarizeBuilderContext('conversation', credentials)).rejects.toThrow(
       'Context compaction generation failed.',
     );
   });

@@ -66,6 +66,21 @@ describe('user-owned workspace D1 schema', () => {
     expect(indexes).not.toContain('idx_chats_active_url');
   });
 
+  test('tracks automatic and manual project and conversation titles', () => {
+    const db = database();
+    const chatColumns = db
+      .prepare('PRAGMA table_info(chats)')
+      .all()
+      .map((row) => String(row.name));
+    const transcriptColumns = db
+      .prepare('PRAGMA table_info(chat_transcripts)')
+      .all()
+      .map((row) => String(row.name));
+
+    expect(chatColumns).toContain('description_source');
+    expect(transcriptColumns).toEqual(expect.arrayContaining(['description_source', 'description_generation']));
+  });
+
   test('backfills provider cleanup for projects deleted before the resource outbox existed', () => {
     const db = new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys = ON');

@@ -121,19 +121,23 @@ export async function setDescription(
   args: { sessionId: string; id: string; description: string },
 ): Promise<null> {
   const chat = await requireChat(db, { id: args.id, sessionId: args.sessionId });
-  await db.prepare('UPDATE chats SET description = ? WHERE id = ?').bind(args.description, chat.id).run();
+  await db
+    .prepare(`UPDATE chats SET description = ?, description_source = 'user' WHERE id = ?`)
+    .bind(args.description, chat.id)
+    .run();
   return null;
 }
 
-export async function setGeneratedDescriptionIfMissing(
+export async function setHeuristicProjectDescriptionIfMissing(
   db: D1Database,
   args: { sessionId: string; id: string; description: string },
 ): Promise<boolean> {
   const result = await db
     .prepare(
       `UPDATE chats
-       SET description = ?
+       SET description = ?, description_source = 'heuristic'
        WHERE creator_id = ? AND initial_id = ? AND is_deleted = 0
+         AND description_source IS NULL
          AND NULLIF(TRIM(description), '') IS NULL`,
     )
     .bind(args.description, args.sessionId, args.id)
@@ -141,6 +145,27 @@ export async function setGeneratedDescriptionIfMissing(
   return result.meta.changes > 0;
 }
 
+/** Finalize the one automatic project title; later prompts never call this transition. */
+export async function setGeneratedProjectDescription(
+  db: D1Database,
+  args: { sessionId: string; id: string; description: string },
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE chats
+       SET description = ?, description_source = 'generated'
+       WHERE creator_id = ? AND initial_id = ? AND is_deleted = 0
+         AND (
+           description_source = 'heuristic'
+           OR (description_source IS NULL AND NULLIF(TRIM(description), '') IS NULL)
+         )`,
+    )
+    .bind(args.description, args.sessionId, args.id)
+    .run();
+  return result.meta.changes > 0;
+}
+
+/** Apply an automatic conversation title unless a manual rename or newer prompt won. */
 export async function setGeneratedSubchatDescription(
   db: D1Database,
   args: {
@@ -148,24 +173,46 @@ export async function setGeneratedSubchatDescription(
     id: string;
     subchatIndex: number;
     description: string;
-    provisionalDescription: string | null;
+    promptGeneration: number;
   },
 ): Promise<boolean> {
   const result = await db
     .prepare(
       `UPDATE chat_transcripts
-       SET description = ?
+       SET description = ?, description_source = 'generated', description_generation = ?
        WHERE chat_id = (
          SELECT id FROM chats
          WHERE creator_id = ? AND initial_id = ? AND is_deleted = 0
        )
          AND subchat_index = ?
+         AND description_generation <= ?
          AND (
-           description IS NULL
-           OR description = ?
+           description_source IN ('heuristic', 'generated')
+           OR (description_source IS NULL AND description IS NULL)
          )`,
     )
-    .bind(args.description, args.sessionId, args.id, args.subchatIndex, args.provisionalDescription)
+    .bind(args.description, args.promptGeneration, args.sessionId, args.id, args.subchatIndex, args.promptGeneration)
+    .run();
+  return result.meta.changes > 0;
+}
+
+export async function setHeuristicSubchatDescriptionIfMissing(
+  db: D1Database,
+  args: { sessionId: string; id: string; subchatIndex: number; description: string; promptGeneration: number },
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE chat_transcripts
+       SET description = ?, description_source = 'heuristic', description_generation = ?
+       WHERE chat_id = (
+         SELECT id FROM chats
+         WHERE creator_id = ? AND initial_id = ? AND is_deleted = 0
+       )
+         AND subchat_index = ?
+         AND description_source IS NULL
+         AND description IS NULL`,
+    )
+    .bind(args.description, args.promptGeneration, args.sessionId, args.id, args.subchatIndex)
     .run();
   return result.meta.changes > 0;
 }
@@ -177,7 +224,7 @@ export async function setSubchatDescription(
   const result = await db
     .prepare(
       `UPDATE chat_transcripts
-       SET description = ?
+       SET description = ?, description_source = 'user'
        WHERE chat_id = (
          SELECT id FROM chats
          WHERE creator_id = ? AND initial_id = ? AND is_deleted = 0

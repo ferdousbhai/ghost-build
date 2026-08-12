@@ -8,8 +8,8 @@ import { getPiProvider } from './provider';
 describe('Workers AI provider (Pi)', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  test('uses the connected account credential with Pi ModelHandle', () => {
-    const credentials = { accountId: 'account-1', apiKey: 'oauth-token' };
+  test('uses the user-runtime binding with Pi ModelHandle', () => {
+    const credentials = { binding: {} as Ai };
     getPiProvider(credentials, '@cf/zai-org/glm-5.2', { sessionAffinity: 'gb-opaque' });
 
     expect(getPiModel).toHaveBeenCalledWith(
@@ -20,7 +20,7 @@ describe('Workers AI provider (Pi)', () => {
   });
 
   test('passes a Cloudflare catalog partner slug through Pi provider', () => {
-    const creds = { accountId: 'account-1', apiKey: 'oauth-token' };
+    const creds = { binding: {} as Ai };
     getPiProvider(creds, 'deepseek/deepseek-v4-pro', { sessionAffinity: 'gb-opaque' });
     expect(getPiModel).toHaveBeenCalledWith(
       creds,

@@ -6,39 +6,41 @@ import {
   getAllChats,
   getSubchats,
   removeChat,
-  setGeneratedDescriptionIfMissing,
+  setGeneratedProjectDescription,
   setGeneratedSubchatDescription,
+  setHeuristicProjectDescriptionIfMissing,
   setSubchatDescription,
 } from './chat-service.server';
 import type { ChatRow, ChatTranscriptRow } from './types';
 import { AGENT_GC_GRACE_PERIOD_MS } from './agent-gc.server';
 
-describe('setGeneratedDescriptionIfMissing', () => {
-  it('sets a generated title only through an owner-scoped conditional update', async () => {
+describe('project title transitions', () => {
+  it('sets the first heuristic title only through an owner-scoped conditional update', async () => {
     const run = vi.fn().mockResolvedValue({ meta: { changes: 1 } });
     const bind = vi.fn(() => ({ run }));
     const prepare = vi.fn(() => ({ bind }));
 
     await expect(
-      setGeneratedDescriptionIfMissing({ prepare } as unknown as D1Database, {
+      setHeuristicProjectDescriptionIfMissing({ prepare } as unknown as D1Database, {
         sessionId: 'user-1',
         id: 'chat-1',
         description: 'Cloudflare Verification App',
       }),
     ).resolves.toBe(true);
 
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining("description_source = 'heuristic'"));
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining("NULLIF(TRIM(description), '') IS NULL"));
     expect(bind).toHaveBeenCalledWith('Cloudflare Verification App', 'user-1', 'chat-1');
   });
 
-  it('does not overwrite a title that already exists', async () => {
+  it('does not overwrite a project title that already exists', async () => {
     const run = vi.fn().mockResolvedValue({ meta: { changes: 0 } });
     const db = {
       prepare: vi.fn(() => ({ bind: vi.fn(() => ({ run })) })),
     } as unknown as D1Database;
 
     await expect(
-      setGeneratedDescriptionIfMissing(db, {
+      setGeneratedProjectDescription(db, {
         sessionId: 'user-1',
         id: 'chat-1',
         description: 'Generated title',
@@ -59,13 +61,13 @@ describe('setGeneratedSubchatDescription', () => {
         id: 'chat-1',
         subchatIndex: 2,
         description: 'Pocket Poll',
-        provisionalDescription: 'polling app',
+        promptGeneration: 3,
       }),
     ).resolves.toBe(true);
 
-    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('SET description = ?'));
-    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('UPDATE chat_transcripts'));
-    expect(bind).toHaveBeenCalledWith('Pocket Poll', 'user-1', 'chat-1', 2, 'polling app');
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining("description_source = 'generated'"));
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('description_generation <= ?'));
+    expect(bind).toHaveBeenCalledWith('Pocket Poll', 3, 'user-1', 'chat-1', 2, 3);
   });
 
   it('does not replace a manual title that raced the generated title', async () => {
@@ -80,7 +82,7 @@ describe('setGeneratedSubchatDescription', () => {
         id: 'chat-1',
         subchatIndex: 0,
         description: 'Generated title',
-        provisionalDescription: 'provisional title',
+        promptGeneration: 1,
       }),
     ).resolves.toBe(false);
   });
@@ -101,6 +103,7 @@ describe('setSubchatDescription', () => {
       }),
     ).resolves.toBeNull();
 
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining("description_source = 'user'"));
     expect(bind).toHaveBeenCalledWith('My custom title', 'user-1', 'chat-1', 0);
   });
 });

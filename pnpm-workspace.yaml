@@ -1,6 +1,5 @@
 packages:
   - 'ghostbuild-agent'
-  - 'packages/@summonghost/*'
   - 'template'
 ignoreWorkspaceRootCheck: true
 minimumReleaseAge: 1440

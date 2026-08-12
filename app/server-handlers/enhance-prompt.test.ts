@@ -25,7 +25,7 @@ function request() {
 describe('userRuntimeEnhancePromptAction billing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getCredentials.mockResolvedValue({ accountId: 'account-1', apiKey: 'token' });
+    mocks.getCredentials.mockResolvedValue({ binding: {} as Ai });
     mocks.completeText.mockResolvedValue('Build a detailed calendar');
   });
 
@@ -43,8 +43,8 @@ describe('userRuntimeEnhancePromptAction billing', () => {
     expect(mocks.completeText).not.toHaveBeenCalled();
   });
 
-  it('uses only connected-user credentials', async () => {
-    const credentials = { accountId: 'account-1', apiKey: 'token' };
+  it('uses only the user-runtime binding', async () => {
+    const credentials = { binding: {} as Ai };
     mocks.getCredentials.mockResolvedValue(credentials);
     const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
     expect(response.status).toBe(200);
@@ -52,7 +52,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
   });
 
   it('asks for explicit Workers Paid authorization when the connected free allocation is exhausted', async () => {
-    mocks.getCredentials.mockResolvedValue({ accountId: 'account-1', apiKey: 'token' });
+    mocks.getCredentials.mockResolvedValue({ binding: {} as Ai });
     mocks.completeText.mockRejectedValue(new Error('Workers Paid plan required after free AI allocation'));
     const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
     expect(response.status).toBe(402);

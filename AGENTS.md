@@ -24,6 +24,12 @@ Prefer `main` — branches/PRs only if asked or for isolated experiments. For sm
 - [app/lib/stores/startup/](app/lib/stores/startup/) — workspace bootstrap and restoration
 - [app/components/editor/codemirror/](app/components/editor/codemirror/) — editor integration
 
+## Resource Ownership
+
+All user workloads and backing Cloudflare resources—including every AI inference path (builder turns, titles, compaction,
+prompt enhancement, and generated apps)—must run in the authenticated user's connected Cloudflare account/runtime.
+Never fall back to Ghostbuild-owned resources or credentials; fail closed when the required user resource is unavailable.
+
 ## Persistence and Deployment
 
 - [app/lib/cloudflare/data.server.ts](app/lib/cloudflare/data.server.ts) — authenticated data facade
