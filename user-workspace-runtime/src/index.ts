@@ -124,6 +124,12 @@ const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.
 const INSTALL_COMMAND =
   'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/';
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
+const WEB_APP_BUNDLE_SCRIPT = [
+  "import { createRequire } from 'node:module';",
+  "const require = createRequire(import.meta.resolve('vite'));",
+  "const { build } = require('esbuild');",
+  "await build({ entryPoints: [process.argv[1]], bundle: true, minify: true, format: 'esm', platform: 'node', external: ['cloudflare:*'], outfile: process.argv[2] });",
+].join('');
 const PREPARED_VALIDATION_ROOT = `${ISOLATED_PROJECT_ROOT}/validated-preview`;
 const REVISION_CHECK_COMMANDS = [
   { command: 'pnpm run typecheck', timeoutMs: 5 * 60_000 },
@@ -1883,7 +1889,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           await this.runTransientCommand(
             isolatedRoot,
             [
-              `pnpm exec esbuild ${shellQuote(mainPath)} --bundle --minify --format=esm --platform=node ${shellQuote('--external:cloudflare:*')} --outfile=${shellQuote(bundledPath)}`,
+              `node --input-type=module --eval ${shellQuote(WEB_APP_BUNDLE_SCRIPT)} ${shellQuote(mainPath)} ${shellQuote(bundledPath)}`,
               `rm -rf ${shellQuote(artifactRoot)}`,
               `mkdir -p ${shellQuote(artifactRoot)}`,
               `mv ${shellQuote(bundledPath)} ${shellQuote(mainPath)}`,
