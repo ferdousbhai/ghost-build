@@ -109,7 +109,7 @@ describe('DeploymentApproval', () => {
     await act(async () => retry?.click());
 
     expect(onPrepareDeployment).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain("this app's 1 resource");
+    expect(container.textContent).toContain("Ghostbuild won't enable a paid plan");
     expect(mocks.fetchUserRuntime.mock.calls.some(([path]) => String(path).endsWith('/retry'))).toBe(false);
   });
 });

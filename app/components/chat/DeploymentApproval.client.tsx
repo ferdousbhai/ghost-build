@@ -3,7 +3,6 @@ import { Button } from '~/components/ui/primitives/Button';
 import type { PendingDeploymentApproval } from '~/lib/deployment-approval';
 import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
 import { captureProductEvent } from '~/lib/telemetry.client';
-import { Link } from '@tanstack/react-router';
 
 export function DeploymentApproval({
   deployment,
@@ -166,20 +165,7 @@ export function DeploymentApproval({
       )}
       {status === 'idle' ? (
         <p className="max-w-2xl text-xs leading-relaxed text-content-tertiary">
-          By clicking Deploy, you approve Cloudflare billing for this app&apos;s {activeDeployment.resources.length}{' '}
-          resource{activeDeployment.resources.length === 1 ? '' : 's'} and inference. Ghostbuild never enables Workers
-          Paid automatically.{' '}
-          <Link className="underline underline-offset-4" to="/terms">
-            Terms
-          </Link>{' '}
-          ·{' '}
-          <Link className="underline underline-offset-4" to="/privacy">
-            Privacy
-          </Link>{' '}
-          ·{' '}
-          <Link className="underline underline-offset-4" to="/support">
-            Support
-          </Link>
+          Cloudflare usage charges may apply. Ghostbuild won&apos;t enable a paid plan.
         </p>
       ) : null}
       {error ? <p className="text-bolt-elements-icon-error">{error}</p> : null}

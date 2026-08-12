@@ -39,7 +39,7 @@ describe('AssistantMessage deployment approval', () => {
 
     expect(document.body.textContent).toContain('Ready to deploy');
     expect(document.body.textContent).toContain('Deploy');
-    expect(document.body.textContent).toContain("Cloudflare billing for this app's 1 resource");
+    expect(document.body.textContent).toContain('Cloudflare usage charges may apply');
     expect(document.body.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
     expect(document.body.textContent).not.toContain('deployment-1');
   });
