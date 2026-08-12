@@ -1536,6 +1536,13 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       );
       const checkpoint = await this.checkpoint();
       if (checkpoint.revision !== session.expected_snapshot_revision) {
+        console.error('ProjectWorkspace deployment checkpoint mismatch', {
+          sessionId,
+          expectedWorkspaceRevision: session.expected_workspace_revision,
+          currentWorkspaceRevision: checkpoint.workspaceRevision,
+          expectedSnapshotRevision: session.expected_snapshot_revision,
+          currentSnapshotRevision: checkpoint.revision,
+        });
         throw new Error('The project changed during its deployment session. Publication was cancelled.');
       }
       return checkpoint;
