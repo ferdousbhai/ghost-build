@@ -16,6 +16,7 @@ import {
 import { Sandbox, type SandboxCommand } from '@cloudflare/sandbox';
 import { createExtensionProcessSandbox } from '@cloudflare/sandbox/extensions';
 import { parse } from 'jsonc-parser';
+import { terminateWorkspaceCommand } from './command-termination';
 import { BuilderAgent } from '../../app/agents/builder-agent';
 import {
   BUILDER_WORKSPACE_MAX_FILE_BYTES,
@@ -395,6 +396,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   readonly #activeSyncRecoveries = new Map<string, Promise<boolean>>();
   readonly #activeCommandKills = new Map<string, () => Promise<void>>();
   readonly #activeCommandStreams = new Set<string>();
+  readonly #activeCommandSettlements = new Map<string, Promise<unknown>>();
   readonly #pendingCommandCancellations = new Set<string>();
   #containerKeepAliveOperations = 0;
 
@@ -1126,9 +1128,10 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     this.#activeCommandStreams.add(request.operationKey);
     return new ReadableStream<Uint8Array>({
       start: (controller) => {
-        void this.withStatefulOperation('exec', request.operationKey, () =>
+        const settlement = this.withStatefulOperation('exec', request.operationKey, () =>
           this.withComputer((workspace) =>
             streamCommand(workspace, request.command, {
+              id: request.operationKey,
               cwd: request.cwd,
               backend: request.backend,
               timeoutMs: 5 * 60_000,
@@ -1151,28 +1154,37 @@ export class ProjectWorkspace extends ComputerSandboxBase {
                 : undefined,
             }),
           ),
-        )
+        );
+        this.#activeCommandSettlements.set(request.operationKey, settlement);
+        void settlement
           .then(
             () => {
-              if (!cancelled) controller.close();
+              if (!cancelled) {
+                controller.close();
+              }
             },
             (error) => {
-              if (!cancelled) controller.error(error);
+              if (!cancelled) {
+                controller.error(error);
+              }
             },
           )
           .finally(() => {
             this.#activeCommandKills.delete(request.operationKey);
             this.#activeCommandStreams.delete(request.operationKey);
+            this.#activeCommandSettlements.delete(request.operationKey);
             this.#pendingCommandCancellations.delete(request.operationKey);
           });
       },
       cancel: async () => {
         cancelled = true;
+        const settlement = this.#activeCommandSettlements.get(request.operationKey);
         if (cancelCommand) {
           await cancelCommand();
         } else {
           this.#pendingCommandCancellations.add(request.operationKey);
         }
+        await settlement?.catch(() => undefined);
       },
     });
   }
@@ -1180,12 +1192,18 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   async cancelExecution(value: unknown): Promise<void> {
     const input = record(value);
     const operationKey = requireString(input.operationKey, 'operationKey', 512);
+    const settlement = this.#activeCommandSettlements.get(operationKey);
     const kill = this.#activeCommandKills.get(operationKey);
     if (kill) {
       await kill();
     } else if (this.#activeCommandStreams.has(operationKey)) {
       this.#pendingCommandCancellations.add(operationKey);
+    } else {
+      await this.withComputer((workspace) =>
+        terminateWorkspaceCommand(workspace.runtime, operationKey, 'container-shell'),
+      );
     }
+    await settlement?.catch(() => undefined);
   }
 
   private async commandRequest(value: unknown) {
@@ -2545,12 +2563,10 @@ async function handleUserRequest(
       userId: capability.subject,
     });
   } else {
-    const deployment = /^\/v1\/deployments\/([^/]+)(?:\/(approve|execute|retry))?$/.exec(url.pathname);
+    const deployment = /^\/v1\/deployments\/([^/]+)(?:\/(deploy))?$/.exec(url.pathname);
     if (deployment && (request.method === 'GET' || request.method === 'POST')) {
-      const operation =
-        deployment[2] === 'approve' || deployment[2] === 'execute' || deployment[2] === 'retry' ? deployment[2] : 'get';
+      const operation = deployment[2] === 'deploy' ? 'deploy' : 'get';
       response = await userRuntimeDeploymentAction({
-        request,
         env: env as unknown as Env,
         userId: capability.subject,
         deploymentId: decodeURIComponent(deployment[1]!),
@@ -2692,6 +2708,7 @@ async function streamCommand(
   workspace: WorkspaceClient,
   command: string,
   options: {
+    id: string;
     cwd: string;
     backend: 'container-shell';
     timeoutMs: number;
@@ -2701,12 +2718,18 @@ async function streamCommand(
   },
 ): Promise<WorkspaceRuntimeResult<'utf8'>> {
   const handle = await workspace.runtime.exec(command, {
+    id: options.id,
     cwd: options.cwd,
     backend: options.backend,
     encoding: 'utf8',
     timeoutMs: options.timeoutMs,
   });
-  options.onHandle?.(() => handle.kill('SIGTERM'));
+  let cancellation: Promise<void> | undefined;
+  const terminate = () => {
+    cancellation ??= terminateWorkspaceCommand(workspace.runtime, handle.id, options.backend);
+    return cancellation;
+  };
+  options.onHandle?.(terminate);
   let stdout = '';
   let stderr = '';
   let stdoutBytes = 0;
@@ -2748,6 +2771,8 @@ async function streamCommand(
         }
       }
     } catch (error) {
+      // A broken event stream is not proof that the process stopped.
+      await terminate();
       const pending: WorkspaceRuntimeResult<'utf8'> = {
         status: 'failed',
         exitCode,
@@ -2781,6 +2806,7 @@ async function streamCommand(
     return result;
   } finally {
     const id = handle.id;
+    await cancellation;
     handle[Symbol.dispose]();
     await workspace.runtime.disposeExec(id, { backend: options.backend }).catch(() => undefined);
   }
@@ -2841,6 +2867,9 @@ async function runCommand(
       options.onSyncPending?.(result);
     }
     return requireDurableCommandResult(result, options.backend);
+  } catch (error) {
+    await terminateWorkspaceCommand(workspace.runtime, handle.id, options.backend);
+    throw error;
   } finally {
     const id = handle.id;
     handle[Symbol.dispose]();
@@ -2995,8 +3024,8 @@ function requireBackend(value: unknown): 'container-shell' {
   throw new SyntaxError('Invalid Computer execution backend.');
 }
 
-function requireRemoteToolName(value: unknown): 'write' | 'edit' | 'exec' | 'deploy' {
-  if (value === 'write' || value === 'edit' || value === 'exec' || value === 'deploy') {
+function requireRemoteToolName(value: unknown): 'write' | 'edit' | 'exec' {
+  if (value === 'write' || value === 'edit' || value === 'exec') {
     return value;
   }
   throw new SyntaxError('Invalid stateful workspace tool name.');

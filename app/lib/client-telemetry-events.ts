@@ -18,7 +18,6 @@ export const PRODUCT_TELEMETRY_EVENTS = [
   'validation_succeeded',
   'preview_ready',
   'deployment_approval_presented',
-  'deployment_approved',
   'deployment_succeeded',
 ] as const;
 

@@ -147,8 +147,13 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     return page;
   }
 
-  readText(path: unknown) {
-    return this.#stub().then((stub) => stub.readText(path));
+  async readText(path: unknown, abortSignal?: AbortSignal) {
+    abortSignal?.throwIfAborted();
+    const stub = await this.#stub();
+    abortSignal?.throwIfAborted();
+    const result = await stub.readText(path);
+    abortSignal?.throwIfAborted();
+    return result;
   }
 
   readFile(path: unknown) {
@@ -172,7 +177,16 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
   }): Promise<{ exitCode: number; stdout: string; stderr: string; streamTruncated?: boolean }> {
     args.abortSignal?.throwIfAborted();
     const stub = await this.#stub();
+    args.abortSignal?.throwIfAborted();
     const operationKey = this.#activeTool ? `tool:${this.#activeTool.toolCallId}` : undefined;
+    let cancellation: Promise<void> | undefined;
+    const cancel = () => {
+      if (operationKey) {
+        cancellation ??= this.#cancelExecutionUntilSettled(operationKey);
+        void cancellation.catch(() => undefined);
+      }
+    };
+    args.abortSignal?.addEventListener('abort', cancel, { once: true });
     let stream: ReadableStream<Uint8Array>;
     try {
       stream = await stub.executeStream({
@@ -181,7 +195,13 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
         backend: args.backend,
         ...(operationKey ? { operationKey } : {}),
       });
+      args.abortSignal?.throwIfAborted();
     } catch (error) {
+      args.abortSignal?.removeEventListener('abort', cancel);
+      if (args.abortSignal?.aborted) {
+        cancel();
+        await cancellation;
+      }
       if (isRpcStreamDisconnect(error)) {
         throw workspaceCommandDisconnectError(error);
       }
@@ -197,6 +217,9 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     let lastUpdateAt = 0;
     const emitUpdate = () => {
       updateTimer = undefined;
+      if (args.abortSignal?.aborted) {
+        return;
+      }
       lastUpdateAt = Date.now();
       args.onUpdate?.({
         command: args.command,
@@ -218,15 +241,11 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
         updateTimer ??= setTimeout(emitUpdate, delay);
       }
     };
-    const cancel = () => {
-      if (operationKey) {
-        void stub.cancelExecution({ operationKey }).catch(() => undefined);
-      }
-    };
-    args.abortSignal?.addEventListener('abort', cancel, { once: true });
     try {
       while (true) {
+        args.abortSignal?.throwIfAborted();
         const { done, value } = await reader.read();
+        args.abortSignal?.throwIfAborted();
         if (done) {
           break;
         }
@@ -259,8 +278,13 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       if (!finalResult) {
         throw new Error('The command stream ended without a final result.');
       }
+      args.abortSignal?.throwIfAborted();
       return finalResult;
     } catch (error) {
+      if (args.abortSignal?.aborted) {
+        cancel();
+        await cancellation;
+      }
       if (isDurableObjectTransportReset(error)) {
         this.#stubPromise = null;
       }
@@ -277,7 +301,14 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     }
   }
 
-  async executeToolOnce<T>(toolCallIdValue: unknown, toolName: string, args: unknown, execute: () => Promise<T>) {
+  async executeToolOnce<T>(
+    toolCallIdValue: unknown,
+    toolName: string,
+    args: unknown,
+    execute: () => Promise<T>,
+    abortSignal?: AbortSignal,
+  ) {
+    abortSignal?.throwIfAborted();
     const toolCallId = requireToolCallId(toolCallIdValue);
     const argsJson = JSON.stringify(stableValue(args));
     const existing = this.#inFlight.get(toolCallId);
@@ -285,9 +316,11 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       if (existing.toolName !== toolName || existing.argsJson !== argsJson) {
         throw new Error('A workspace tool-call identifier was reused with different arguments.');
       }
-      return (await existing.promise) as T;
+      const result = (await existing.promise) as T;
+      abortSignal?.throwIfAborted();
+      return result;
     }
-    const promise = this.#executeTool<T>(toolCallId, toolName, argsJson, execute);
+    const promise = this.#executeTool<T>(toolCallId, toolName, argsJson, execute, abortSignal);
     this.#inFlight.set(toolCallId, { toolName, argsJson, promise });
     try {
       return await promise;
@@ -296,18 +329,22 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     }
   }
 
-  installDependencies(args: {
+  async installDependencies(args: {
     toolCallId: string;
     input: unknown;
     mode: 'add' | 'sync-lockfile';
     packages: string[];
+    abortSignal?: AbortSignal;
   }): Promise<GhostbuildToolResult> {
-    return this.#stub()
-      .then((stub) => stub.installDependenciesTool(args))
-      .then(async (result) => {
-        await this.refresh();
-        return result;
-      });
+    const { abortSignal, ...input } = args;
+    abortSignal?.throwIfAborted();
+    const stub = await this.#stub();
+    abortSignal?.throwIfAborted();
+    const result = await stub.installDependenciesTool(input);
+    // Installation may have committed before cancellation; refresh the local facade before surfacing it.
+    await this.refresh();
+    abortSignal?.throwIfAborted();
+    return result;
   }
 
   async validate(args: {
@@ -359,6 +396,38 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     await (await this.#stub()).cancelValidation(toolCallId ? { toolCallId } : {});
   }
 
+  async #cancelExecutionUntilSettled(operationKey: string): Promise<void> {
+    while (true) {
+      try {
+        await (await this.#stub()).cancelExecution({ operationKey });
+        return;
+      } catch {
+        // A timeout cannot be reported until the runtime confirms terminal settlement.
+        await delay(1_000);
+      }
+    }
+  }
+
+  async #waitForCancelledToolSettlement(toolCallId: string, toolName: string, argsJson: string): Promise<void> {
+    while (true) {
+      try {
+        const status = (await (
+          await this.#stub()
+        ).beginToolOperation({
+          toolCallId,
+          toolName,
+          argsJson,
+        })) as ToolOperationStartResult;
+        if (status.status === 'completed' || status.status === 'failed') {
+          return;
+        }
+      } catch {
+        // Retry transport failures; ambiguity must not be exposed as a settled timeout.
+      }
+      await delay(1_000);
+    }
+  }
+
   hasSuccessfulValidation(revision: string): Promise<boolean> {
     return this.#stub()
       .then((stub) => stub.validationStatus(revision))
@@ -387,12 +456,23 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     this.#files = [];
   }
 
-  async #executeTool<T>(toolCallId: string, toolName: string, argsJson: string, execute: () => Promise<T>) {
+  async #executeTool<T>(
+    toolCallId: string,
+    toolName: string,
+    argsJson: string,
+    execute: () => Promise<T>,
+    abortSignal?: AbortSignal,
+  ) {
+    abortSignal?.throwIfAborted();
     const stub = await this.#stub();
+    abortSignal?.throwIfAborted();
     const started = (await stub.beginToolOperation({ toolCallId, toolName, argsJson })) as ToolOperationStartResult;
     if (started.status === 'completed') {
       if (isPendingMutationReceipt(started.result)) {
-        return (await stub.completeToolOperation({ toolCallId, result: started.result })) as T;
+        abortSignal?.throwIfAborted();
+        const completed = (await stub.completeToolOperation({ toolCallId, result: started.result })) as T;
+        abortSignal?.throwIfAborted();
+        return completed;
       }
       return started.result as T;
     }
@@ -403,20 +483,27 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       throw new Error('ProjectWorkspace tools are serialized; a second mutation cannot start concurrently.');
     }
     this.#activeTool = { toolCallId, toolName };
+    let executionStarted = false;
     try {
+      abortSignal?.throwIfAborted();
+      executionStarted = true;
       const result = await execute();
+      abortSignal?.throwIfAborted();
       const syncError = computerSyncUnconfirmedError(result);
       if (syncError) {
         throw syncError;
       }
       try {
+        abortSignal?.throwIfAborted();
         const completed = await stub.completeToolOperation({ toolCallId, result });
+        abortSignal?.throwIfAborted();
         const committedFileMutation =
           (toolName === 'write' || toolName === 'edit') &&
           isComputerToolError(result) &&
           isCompletedMutationReceipt(completed);
         return (committedFileMutation ? completed : result) as T;
       } catch (error) {
+        abortSignal?.throwIfAborted();
         if (toolName !== 'write' && toolName !== 'edit') {
           throw error;
         }
@@ -430,7 +517,10 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
         return (isComputerToolError(result) && isCompletedMutationReceipt(completed) ? completed : result) as T;
       }
     } catch (error) {
-      if (!isComputerSyncUnconfirmedError(error)) {
+      const cancelledDuringExecution = executionStarted && abortSignal?.aborted === true;
+      if (cancelledDuringExecution) {
+        await this.#waitForCancelledToolSettlement(toolCallId, toolName, argsJson);
+      } else if (!isComputerSyncUnconfirmedError(error)) {
         await stub
           .failToolOperation({
             toolCallId,
@@ -604,6 +694,10 @@ function errorMessage(error: unknown): string {
   return typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
     ? error.message
     : '';
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function stableValue(value: unknown): unknown {

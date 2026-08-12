@@ -36,7 +36,7 @@ describe('local secret file paths', () => {
 
   it('throws with Cloudflare binding guidance', () => {
     expect(() => assertNotLocalSecretFilePath('.npmrc')).toThrow(
-      /Use Cloudflare Worker bindings or wrangler secret put NAME/,
+      /Use a per-Worker secret or, for an exported project, an account-level Cloudflare Secrets Store binding/,
     );
   });
 

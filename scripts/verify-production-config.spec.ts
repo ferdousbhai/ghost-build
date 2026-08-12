@@ -128,7 +128,7 @@ describe('findWorkerOpsAuthSecretErrors', () => {
 });
 
 describe('findWorkerSystemDocsErrors', () => {
-  it('pins the reviewed system-document KV namespace', () => {
+  it('accepts the owner-provisioned system-document KV namespace', () => {
     expect(
       findWorkerSystemDocsErrors(
         { kv_namespaces: [{ binding: 'SYSTEM_DOCS', id: '6901be08c9e14e40b599be00e49df484' }] },
@@ -136,8 +136,14 @@ describe('findWorkerSystemDocsErrors', () => {
       ),
     ).toEqual([]);
     expect(findWorkerSystemDocsErrors({}, 'wrangler.jsonc')).toEqual([
-      'wrangler.jsonc must bind the reviewed system-document namespace as SYSTEM_DOCS.',
+      'wrangler.jsonc must bind the owner-controlled system-document namespace as SYSTEM_DOCS.',
     ]);
+    expect(
+      findWorkerSystemDocsErrors(
+        { kv_namespaces: [{ binding: 'SYSTEM_DOCS', id: 'not-provisioned' }] },
+        'wrangler.jsonc',
+      ),
+    ).toEqual(['wrangler.jsonc SYSTEM_DOCS namespace id must be a provisioned 32-character hexadecimal id.']);
   });
 });
 

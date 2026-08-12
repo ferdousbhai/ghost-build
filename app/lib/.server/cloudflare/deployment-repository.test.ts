@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  approveDeployment,
   claimApprovedDeployment,
   createDeployment,
   DeploymentConcurrencyLimitError,
@@ -16,18 +15,13 @@ import { DEPLOYMENT_SECURITY_BASELINE_VERSION } from './deployment-security-base
 const sourceSha256 = 'a'.repeat(64);
 const planDigest = 'b'.repeat(64);
 const plan: DeploymentPlan = {
-  version: 3,
+  version: 4,
   deploymentId: 'deployment-1',
   sourceSha256,
   templateSourceSha256: 'c'.repeat(64),
   securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
   securityBoundarySha256: 'd'.repeat(64),
   project: { type: 'web_app', bindings: { ai: false, d1: false, r2: false, kv: false, appAgent: false } },
-  billing: {
-    infrastructure: 'user_cloudflare_account',
-    workersAi: 'user_cloudflare_account',
-    workersPaidUpgrade: 'explicit_user_authorization_required',
-  },
   resources: [{ type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-deployment-1' }],
 };
 
@@ -71,18 +65,9 @@ describe('deployment repository', () => {
     await expect(requireDeploymentForUser(db, 'deployment-1', 'user-1')).rejects.toThrow();
   });
 
-  it('approves, claims, and completes the exact connection-bound execution', async () => {
-    await create(1);
-    const approved = await approveDeployment({
-      db,
-      deploymentId: 'deployment-1',
-      userId: 'user-1',
-      connectionId: 'connection-1',
-      connectionGeneration: 1,
-      approvedDigest: planDigest,
-      now: 20,
-    });
-    expect(approved).toMatchObject({ status: 'approved', executionGeneration: 1, approvedAt: 20 });
+  it('claims and completes the exact connection-bound execution', async () => {
+    const approved = await create(1);
+    expect(approved).toMatchObject({ status: 'approved', executionGeneration: 1 });
 
     const claimed = await claimApprovedDeployment({
       db,
@@ -144,17 +129,7 @@ describe('deployment repository', () => {
   });
 
   it('recovers exact deployment writes when D1 commits before losing the acknowledgement', async () => {
-    const created = await create(1);
-    const approved = await approveDeployment({
-      db: d1(sqlite, true),
-      deploymentId: created.id,
-      userId: created.userId,
-      connectionId: created.connectionId,
-      connectionGeneration: created.connectionGeneration,
-      approvedDigest: created.planDigest,
-      now: 20,
-    });
-    expect(approved).toMatchObject({ status: 'approved', executionGeneration: 1, approvedAt: 20 });
+    const approved = await create(1);
 
     const claimed = await claimApprovedDeployment({
       db: d1(sqlite, true),
@@ -203,16 +178,15 @@ describe('deployment repository', () => {
         now: 60,
       }),
     ).resolves.toMatchObject({
-      status: 'awaiting_approval',
-      approvedDigest: null,
-      approvedAt: null,
+      status: 'approved',
+      executionGeneration: 2,
       errorCode: null,
       errorMessage: null,
       updatedAt: 60,
     });
   });
 
-  it('returns a failed deployment to approval without artifact cleanup', async () => {
+  it('returns a failed deployment to the executable state without artifact cleanup', async () => {
     const approved = await approvedDeployment(1);
     await claimApprovedDeployment({
       db,
@@ -245,9 +219,8 @@ describe('deployment repository', () => {
         now: 50,
       }),
     ).resolves.toMatchObject({
-      status: 'awaiting_approval',
-      approvedDigest: null,
-      approvedAt: null,
+      status: 'approved',
+      executionGeneration: 2,
       errorCode: null,
       errorMessage: null,
     });
@@ -270,16 +243,7 @@ async function create(index: number) {
 }
 
 async function approvedDeployment(index: number) {
-  const deployment = await create(index);
-  return approveDeployment({
-    db,
-    deploymentId: deployment.id,
-    userId: deployment.userId,
-    connectionId: deployment.connectionId,
-    connectionGeneration: deployment.connectionGeneration,
-    approvedDigest: deployment.planDigest,
-    now: 10 + index,
-  });
+  return create(index);
 }
 
 function d1(database: DatabaseSync, throwAfterNextRun = false): D1Database {

@@ -90,7 +90,7 @@ export class AppAgent extends AIChatAgent<Env> {
       abortSignal: options?.abortSignal,
       maxOutputTokens: MAX_AGENT_OUTPUT_TOKENS,
       instructions:
-        "You are a concise coding assistant running on Cloudflare Workers AI. Prefer TanStack Start, Cloudflare Workers, Workers AI, Cloudflare D1, R2, and Cloudflare Agents patterns.",
+        "You are a concise assistant for this application. Help the user with the product experience implemented in this project.",
       messages: pruneMessages({
         messages: modelMessages,
         reasoning: "before-last-message",

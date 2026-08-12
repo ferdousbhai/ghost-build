@@ -8,7 +8,7 @@ export type PromptCharacterCounts = {
 
 export function calculatePromptCharacterCounts(
   messages: GhostbuildMessage[],
-  systemPrompts: string[] = [],
+  systemPrompt = '',
 ): PromptCharacterCounts {
   const currentTurnIndex = messages.at(-1)?.role === 'user' ? messages.length - 1 : -1;
   let messageHistoryChars = 0;
@@ -23,11 +23,10 @@ export function calculatePromptCharacterCounts(
     }
   });
 
-  const systemPromptChars = systemPrompts.reduce((total, prompt) => total + prompt.length, 0);
   return {
     messageHistoryChars,
     currentTurnChars,
-    totalPromptChars: messageHistoryChars + currentTurnChars + systemPromptChars,
+    totalPromptChars: messageHistoryChars + currentTurnChars + systemPrompt.length,
   };
 }
 

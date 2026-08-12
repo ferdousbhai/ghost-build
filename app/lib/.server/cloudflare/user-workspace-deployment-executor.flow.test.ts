@@ -64,7 +64,7 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
   it('passes no credential to ProjectWorkspace and publishes only through the trusted account API', async () => {
     const revision = 'a'.repeat(64);
     const plan = {
-      version: 3,
+      version: 4,
       deploymentId: 'deployment-1',
       sourceSha256: revision,
       templateSourceSha256: 'b'.repeat(64),
@@ -73,11 +73,6 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
       project: {
         type: 'worker',
         bindings: { ai: false, d1: false, r2: false, kv: false, appAgent: false },
-      },
-      billing: {
-        infrastructure: 'user_cloudflare_account',
-        workersAi: 'user_cloudflare_account',
-        workersPaidUpgrade: 'explicit_user_authorization_required',
       },
       resources: [{ type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-deployment-1' }],
     };
@@ -92,8 +87,6 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
       status: 'approved',
       plan,
       planDigest: 'digest-1',
-      approvedDigest: 'digest-1',
-      approvedAt: 1,
       productionUrl: null,
       errorCode: null,
       errorMessage: null,

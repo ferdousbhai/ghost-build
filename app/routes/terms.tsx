@@ -16,8 +16,8 @@ function TermsPage() {
   return (
     <TrustPage
       eyebrow="Terms"
-      title="You approve the build. You control the cloud account."
-      summary="These terms govern the Ghostbuild public beta. The service can generate and operate project code inside the Cloudflare account you authorize, and production deployment requires your explicit approval."
+      title="You control the cloud account."
+      summary="These terms govern the Ghostbuild public beta. The service can generate, validate, and deploy project code inside the Cloudflare account you authorize."
     >
       <TrustSection title="Operator, acceptance, and eligibility">
         <p>

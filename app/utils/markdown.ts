@@ -4,7 +4,7 @@ import type { PluggableList } from 'unified';
 import rehypeSanitize, { defaultSchema, type Options as RehypeSanitizeOptions } from 'rehype-sanitize';
 import { visit } from 'unist-util-visit';
 import type { Node as UnistNode } from 'unist';
-import { allowedHTMLElements } from 'ghostbuild-agent/prompts/formattingInstructions';
+import { allowedHTMLElements } from 'ghostbuild-agent/allowed-html-elements';
 
 type HtmlNode = UnistNode & {
   type: 'html';

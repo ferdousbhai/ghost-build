@@ -67,7 +67,25 @@ describe('WorkbenchStore editor flush boundaries', () => {
     expect(store.unsavedFiles.get()).not.toContain(fileA);
   });
 
-  it('includes visible unsaved content in the next-turn file context', () => {
+  it('saves every browser-only edit before a builder turn', async () => {
+    const store = createStore();
+    const apply = vi.fn(async () => ({
+      ok: true as const,
+      changedPaths: [fileA],
+      state: { initialized: true, revision: 2, resetRevision: 0, fileCount: 2, totalBytes: 4, seeding: false },
+    }));
+    store.setWorkspaceChangeListener(apply);
+    store.setDocumentContent(fileA, 'a1');
+    store.setDocumentContent(fileB, 'b1');
+
+    await store.saveUnsavedFiles();
+
+    expect(apply).toHaveBeenNthCalledWith(1, [{ kind: 'write', path: fileA, content: 'a1', encoding: 'utf8' }]);
+    expect(apply).toHaveBeenNthCalledWith(2, [{ kind: 'write', path: fileB, content: 'b1', encoding: 'utf8' }]);
+    expect(store.unsavedFiles.get()).toEqual(new Set());
+  });
+
+  it('tracks visible unsaved content until it is durably saved', () => {
     const store = createStore();
     store.registerPendingEditorChangeFlusher(() => store.setDocumentContent(fileA, 'latest visible content'));
 

@@ -22,8 +22,8 @@ import { api } from '~/lib/cloudflare/data-api';
 import { subchatIndexStore, useIsSubchatLoaded } from '~/lib/stores/subchats';
 import type { BuildProgress } from './build-progress';
 import type { SubchatSummary } from './subchat-model';
-import type { PendingDeploymentApproval } from '~/lib/deployment-approval';
-import { DeploymentApproval } from './DeploymentApproval.client';
+import type { BuilderDeploymentState } from '~/agents/builder-deployment-command';
+import { DeploymentStatus } from './DeploymentStatus.client';
 
 const Workbench = lazy(() =>
   import('~/components/workbench/Workbench.client').then((module) => ({ default: module.Workbench })),
@@ -50,8 +50,8 @@ interface BaseChatProps {
   messages: GhostbuildMessage[];
   disabledReason: ReactNode | null;
   runtimeNotice: ReactNode;
-  deploymentApproval?: PendingDeploymentApproval | null;
-  onPrepareDeployment?: () => Promise<PendingDeploymentApproval>;
+  deployment?: BuilderDeploymentState | null;
+  onDeploy?: () => Promise<BuilderDeploymentState>;
 
   // Subchat navigation props
   subchats?: SubchatSummary[];
@@ -75,8 +75,8 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       buildProgress,
       disabledReason,
       runtimeNotice,
-      deploymentApproval,
-      onPrepareDeployment,
+      deployment,
+      onDeploy,
       subchats,
       onSubchatTitleChange,
     },
@@ -259,9 +259,9 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                         {runtimeNotice}
                       </div>
                     )}
-                    {deploymentApproval ? (
+                    {deployment ? (
                       <div className="mb-3">
-                        <DeploymentApproval deployment={deploymentApproval} onPrepareDeployment={onPrepareDeployment} />
+                        <DeploymentStatus deployment={deployment} onRetry={onDeploy} />
                       </div>
                     ) : null}
                     {(!subchats || (currentSubchatIndex >= subchats.length - 1 && isSubchatLoaded)) && (

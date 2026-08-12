@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   createDeployment: vi.fn(),
   requireDeployment: vi.fn(),
-  approveDeployment: vi.fn(),
   executeUserOwnedDeployment: vi.fn(),
 }));
 
@@ -11,7 +10,6 @@ vi.mock('~/lib/.server/cloudflare/deployment-repository', async (importOriginal)
   ...(await importOriginal()),
   createDeployment: mocks.createDeployment,
   requireDeploymentForUser: mocks.requireDeployment,
-  approveDeployment: mocks.approveDeployment,
 }));
 vi.mock('~/lib/.server/cloudflare/user-workspace-deployment-executor', () => ({
   executeUserOwnedDeployment: mocks.executeUserOwnedDeployment,
@@ -22,39 +20,12 @@ import {
   DEPLOYMENT_SECURITY_BASELINE_VERSION,
   TEMPLATE_SOURCE_SHA256,
 } from '~/lib/.server/cloudflare/deployment-security-baseline';
-import { createOrReplayDeploymentPlanForUser, userRuntimeDeploymentAction } from './deployments';
+import { createOrReplayDeploymentPlanForUser, deployForUser } from './deployments';
 
-const project = { type: 'web_app' as const, bindings: { ai: true, d1: true, r2: true, kv: true, appAgent: true } };
+const project = { type: 'worker' as const, bindings: { ai: false, d1: false, r2: false, kv: false, appAgent: false } };
 const revision = 'a'.repeat(64);
 
-function deployment(status = 'awaiting_approval') {
-  const plan = {
-    version: 3 as const,
-    deploymentId: 'deployment-1',
-    sourceSha256: revision,
-    templateSourceSha256: TEMPLATE_SOURCE_SHA256,
-    securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
-    securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
-    project,
-    billing: {
-      infrastructure: 'user_cloudflare_account' as const,
-      workersAi: 'user_cloudflare_account' as const,
-      workersPaidUpgrade: 'explicit_user_authorization_required' as const,
-    },
-    resources: [
-      { type: 'worker' as const, logicalName: 'app', proposedName: 'ghostbuild-deployment-1' },
-      { type: 'd1' as const, logicalName: 'DB', proposedName: 'ghostbuild-deployment-1' },
-      {
-        type: 'd1' as const,
-        logicalName: 'AGENT_SECURITY_DB',
-        proposedName: 'ghostbuild-deployment-1-agent-security',
-      },
-      { type: 'r2' as const, logicalName: 'APP_STORAGE', proposedName: 'ghostbuild-deployment-1-storage' },
-      { type: 'kv' as const, logicalName: 'APP_CACHE', proposedName: 'ghostbuild-deployment-1-cache' },
-      { type: 'durable_object' as const, logicalName: 'AppAgent', proposedName: 'AppAgent' },
-      { type: 'workers_ai' as const, logicalName: 'AI', proposedName: 'AI' },
-    ],
-  };
+function deployment(status: 'approved' | 'succeeded' = 'approved') {
   return {
     id: 'deployment-1',
     chatId: 'chat-row-1',
@@ -64,10 +35,17 @@ function deployment(status = 'awaiting_approval') {
     executionGeneration: 1,
     workspaceReference: `workspace-runtime:agent-1:7:${revision}`,
     status,
-    plan,
+    plan: {
+      version: 4 as const,
+      deploymentId: 'deployment-1',
+      sourceSha256: revision,
+      templateSourceSha256: TEMPLATE_SOURCE_SHA256,
+      securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
+      securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
+      project,
+      resources: [],
+    },
     planDigest: 'b'.repeat(64),
-    approvedDigest: status === 'approved' ? 'b'.repeat(64) : null,
-    approvedAt: status === 'approved' ? 123 : null,
     productionUrl: status === 'succeeded' ? 'https://app.example.workers.dev' : null,
     errorCode: null,
     errorMessage: null,
@@ -88,11 +66,7 @@ describe('deployment handlers', () => {
     mocks.requireDeployment.mockRejectedValueOnce(
       new (await import('~/lib/.server/cloudflare/deployment-repository')).DeploymentNotFoundError(),
     );
-    const db = {
-      prepare: vi.fn(() => ({
-        bind: vi.fn(() => ({ first: vi.fn(async () => ({ id: 'chat-row-1' })) })),
-      })),
-    } as unknown as D1Database;
+    const db = activeChatDb();
     const result = await createOrReplayDeploymentPlanForUser({
       env: runtimeEnv(db),
       userId: 'user-1',
@@ -103,28 +77,19 @@ describe('deployment handlers', () => {
       workspaceRevision: 7,
       project,
     });
-    expect(result).toMatchObject({ id: 'deployment-1' });
+    expect(result).toMatchObject({ id: 'deployment-1', status: 'approved' });
     expect(mocks.createDeployment).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceReference: `workspace-runtime:agent-1:7:${revision}` }),
     );
   });
 
-  it('executes approved deployment work in the user-owned runtime', async () => {
-    const approved = deployment('approved');
-    mocks.requireDeployment.mockResolvedValue(approved);
-    const env = runtimeEnv({
-      prepare: vi.fn(() => ({
-        bind: vi.fn(() => ({ first: vi.fn(async () => ({ found: 1 })) })),
-      })),
-    } as unknown as D1Database);
-    const response = await userRuntimeDeploymentAction({
-      request: new Request('https://ghostbuild.dev/api/deployments/deployment-1/execute', { method: 'POST' }),
-      env,
-      deploymentId: 'deployment-1',
-      operation: 'execute',
-      userId: 'user-1',
+  it('executes a prepared deployment as one authenticated server operation', async () => {
+    mocks.requireDeployment.mockResolvedValue(deployment());
+    const env = runtimeEnv(activeChatDb());
+    await expect(deployForUser({ env, deploymentId: 'deployment-1', userId: 'user-1' })).resolves.toMatchObject({
+      status: 'succeeded',
+      productionUrl: 'https://app.example.workers.dev',
     });
-    expect(response.status).toBe(200);
     expect(mocks.executeUserOwnedDeployment).toHaveBeenCalledWith({
       env,
       deploymentId: 'deployment-1',
@@ -134,6 +99,12 @@ describe('deployment handlers', () => {
     });
   });
 });
+
+function activeChatDb(): D1Database {
+  return {
+    prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first: vi.fn(async () => ({ found: 1, id: 'chat-row-1' })) })) })),
+  } as unknown as D1Database;
+}
 
 function runtimeEnv(db: D1Database): Env {
   return {

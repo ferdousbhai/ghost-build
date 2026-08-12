@@ -26,6 +26,7 @@ type GhostbuildModelConfig = {
 
 export type ModelStreamOptions = SimpleStreamOptions & {
   thinking?: boolean;
+  toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
 };
 
 export type ModelHandle = {

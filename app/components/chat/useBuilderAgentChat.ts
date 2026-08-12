@@ -2,11 +2,10 @@ import { useAgentChat } from '@cloudflare/ai-chat/react';
 import { useAgent } from 'agents/react';
 import { useStore } from '@nanostores/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { BuilderAgent, BuilderAgentState } from '~/agents/builder-agent';
+import type { BuilderAgent, BuilderAgentState, BuilderSteeringInput } from '~/agents/builder-agent';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { isAuthenticated } from '~/lib/stores/userId';
 import { captureMessage } from '~/lib/telemetry.client';
-import { ChatContextManager } from 'ghostbuild-agent/ChatContextManager';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import type { UIMessage } from 'ai';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
@@ -82,13 +81,6 @@ export function useBuilderAgentChat(args: {
   >('connecting');
   const queryClient = useQueryClient();
   const generatedSubchatTitleUpdatedAtRef = useRef<string | null>(null);
-  const contextManager = useRef(
-    new ChatContextManager(
-      () => workbenchStore.currentDocument.get(),
-      () => workbenchStore.files.get(),
-      () => workbenchStore.userWrites,
-    ),
-  );
   const runtimeEndpoint = new URL(requireUserRuntimeEndpoint());
   const runtimeOrigin = runtimeEndpoint.origin;
   const builderAgent = useAgent<BuilderAgent, BuilderAgentState>({
@@ -371,11 +363,24 @@ export function useBuilderAgentChat(args: {
     [builderAgent, chat, readAuthoritativeTranscript, workspaceGateRef],
   );
 
-  const prepareDeployment = useCallback(async () => {
-    return (await builderAgent.call('prepareDeployment', [], { timeout: 10 * 60_000 })) as NonNullable<
-      BuilderAgentState['deploymentApproval']
+  const deployValidatedRevision = useCallback(async () => {
+    return (await builderAgent.call('deployValidatedRevision', [], { timeout: 30 * 60_000 })) as NonNullable<
+      BuilderAgentState['deployment']
     >;
   }, [builderAgent]);
+
+  const steerMessage = useCallback(
+    async (input: BuilderSteeringInput) => {
+      const workspaceGate = workspaceGateRef.current;
+      await workspaceGate.promise;
+      if (workspaceGate.error) {
+        throw workspaceGate.error;
+      }
+      await waitForAgentSocketOpen(builderAgent, AGENT_SEND_READY_TIMEOUT_MS, { requireIdentity: false });
+      await builderAgent.call('steerActiveTurn', [input]);
+    },
+    [builderAgent, workspaceGateRef],
+  );
 
   const stop = useCallback(() => {
     void chat.stop();
@@ -404,7 +409,6 @@ export function useBuilderAgentChat(args: {
     toolActivityStore.abortActive();
     toolProgressStore.clear();
     setMessagesRef.current(initialMessagesRef.current as UIMessage[]);
-    contextManager.current.reset();
   }, [currentSubchatIndex]);
 
   useEffect(() => {
@@ -440,17 +444,16 @@ export function useBuilderAgentChat(args: {
     ...chat,
     stop,
     sendMessage,
+    steerMessage,
     messages: chat.messages as GhostbuildMessage[],
-    contextManager: contextManager.current,
     streamStatus: chat.isRecovering ? ('submitted' as const) : chat.isStreaming ? ('streaming' as const) : chat.status,
     transcriptCheckpoint:
       builderAgent.state?.transcript && transcriptIdentitiesEqual(builderAgent.state.transcript, transcript)
         ? builderAgent.state.transcript
         : null,
     validationStage: builderAgent.state?.validationProgress?.stage ?? null,
-    deploymentApproval: builderAgent.state?.deploymentApproval ?? null,
-    deploymentReady: builderAgent.state?.deploymentReady === true,
-    prepareDeployment,
+    deployment: builderAgent.state?.deployment ?? null,
+    deployValidatedRevision,
     workspacePresentationState,
   };
 }

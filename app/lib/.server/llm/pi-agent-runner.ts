@@ -9,20 +9,13 @@ import { isContextOverflow, type AssistantMessage, type Message, type Usage } fr
 import type { PiStreamChunk } from './pi-stream';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { calculatePromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
-import { generalSystemPrompt, ROLE_SYSTEM_PROMPT } from 'ghostbuild-agent/prompts/system';
+import { systemPrompt } from 'ghostbuild-agent/prompts/system';
 import { toolResultSucceeded } from 'ghostbuild-agent/tool-result';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { logger } from 'ghostbuild-agent/utils/logger';
 import type { WorkersAiModelId } from '~/lib/workers-ai-model';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
-import {
-  BUILDER_TURN_BUDGET_ERROR_CODE,
-  BUILDER_TURN_MAX_MODEL_STEPS,
-  BUILDER_TURN_TIMEOUTS,
-  BuilderTurnBudgetExceededError,
-  classifyBuilderTimeout,
-} from './builder-turn-budget';
 import { compactPiContext, estimatePiContextTokens, type ContextCompaction } from './context-compaction';
 import {
   ContextCompactionUnavailableError,
@@ -37,6 +30,7 @@ import { appendDeterministicCompletion, normalizeTextPartBoundaries } from './wo
 import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
 import { getValidatedBuildCompletion } from './workers-ai-tools';
 import { createPiToolBundle, piToolsToList } from './pi-tools-adapter';
+import { createBuilderSkillContext } from './builder-skills';
 import {
   cloudflareAiFundingRequiredMessage,
   isCloudflareAiFundingError,
@@ -44,7 +38,8 @@ import {
   workersPaidRequiredMessage,
 } from '~/lib/workers-paid';
 import { logProviderFailure } from './provider-error-logging';
-import type { VirtualDocOverrides } from 'ghostbuild-agent/virtual-docs';
+import type { SystemDocsBundle } from 'ghostbuild-agent/system-docs';
+import type { PiSteeringQueue } from './pi-steering';
 
 type Messages = GhostbuildMessage[];
 type UIMessageChunk = PiStreamChunk;
@@ -68,7 +63,9 @@ interface PiAgentOptions {
   workspace: BuilderWorkspaceApi;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
-  virtualDocs?: VirtualDocOverrides;
+  systemDocs: SystemDocsBundle;
+  steering: PiSteeringQueue;
+  onSettled: () => void;
 }
 
 type PiPreparationStage = 'tool_setup' | 'model_input' | 'prompt_metrics' | 'message_conversion';
@@ -96,26 +93,33 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     workspace,
     onValidationStage,
     runWithKeepAlive,
-    virtualDocs,
+    systemDocs,
+    steering,
+    onSettled,
   } = options;
 
   logger.debug('Starting Pi agent runner');
   const startedAt = Date.now();
   const piProvider = getPiProvider(accountCredentials, modelId, { sessionAffinity });
-  const totalTimeoutSignal = AbortSignal.timeout(BUILDER_TURN_TIMEOUTS.totalMs);
-  const loopSignal = abortSignal ? AbortSignal.any([abortSignal, totalTimeoutSignal]) : totalTimeoutSignal;
+  const loopSignal = abortSignal;
   const compactionPolicy = modelCompactionPolicy(piProvider.handle.model.contextWindow);
-  const { canonicalTools, piTools } = withPreparationStage('tool_setup', () =>
-    createPiToolBundle(workspace, { onValidationStage, runWithKeepAlive, virtualDocs }),
-  );
+  const { skillContext, piTools } = await withPreparationStage('tool_setup', async () => {
+    const skillContext = await createBuilderSkillContext(systemDocs);
+    return {
+      skillContext,
+      piTools: createPiToolBundle(workspace, { onValidationStage, runWithKeepAlive }, skillContext.tools),
+    };
+  });
 
   const validatedBuildCompletion = getValidatedBuildCompletion(messages);
-  if (validatedBuildCompletion) {
+  if (validatedBuildCompletion && !steering.hasPending()) {
     logger.info('Returning validated build completion without another model turn (pi)');
+    steering.close();
+    onSettled();
     return createValidatedBuildCompletionStream(validatedBuildCompletion);
   }
 
-  const systemPrompts = [ROLE_SYSTEM_PROMPT, generalSystemPrompt()];
+  const instructions = systemPrompt(skillContext.catalogPrompt);
   const modelInput = await withPreparationStage('model_input', () =>
     prepareModelInput({
       messages,
@@ -126,8 +130,8 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       scheduleCompaction: compaction.schedule,
       signal: loopSignal,
       contextWindow: piProvider.handle.model.contextWindow,
-      systemPrompts,
-      tools: canonicalTools,
+      systemPrompt: instructions,
+      tools: piToolsToList(piTools),
       logger,
     }),
   );
@@ -136,7 +140,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   }
 
   const promptCharacterCounts = withPreparationStage('prompt_metrics', () =>
-    calculatePromptCharacterCounts(modelInput.promptMessages, systemPrompts),
+    calculatePromptCharacterCounts(modelInput.promptMessages, instructions),
   );
   const piMessages = withPreparationStage('message_conversion', () => modelMessagesToPi(modelInput.messages));
   recordPiStage('prepared', modelId);
@@ -146,9 +150,6 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   const streamedToolCalls = new Map<number, { toolCallId: string; toolName: string }>();
   const completedToolInputs = new Set<string>();
   let recordedFirstResponse = false;
-  let stepCount = 0;
-  let stepBudgetStopped = false;
-  let toolBudgetError: BuilderTurnBudgetExceededError | undefined;
   let terminalAssistant: AssistantMessage | undefined;
   let totalUsage = emptyUsage();
   let currentTurnStreamedContent = false;
@@ -255,7 +256,6 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
 
     if (event.type === 'tool_execution_end') {
       const result = piToolResultDetails(event.result);
-      toolBudgetError ??= event.isError ? toolBudgetErrorFromResult(event.result) : undefined;
       currentRunToolResults.push({ toolName: event.toolName, result });
       if (event.isError && !hasStructuredToolResult(event.result)) {
         await writer.write({
@@ -277,7 +277,6 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     }
 
     if (event.type === 'turn_end') {
-      stepCount += 1;
       if (isAssistantMessage(event.message)) {
         terminalAssistant = event.message;
         totalUsage = addUsage(totalUsage, event.message.usage);
@@ -286,7 +285,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   };
 
   let context: AgentContext = {
-    systemPrompt: systemPrompts.join('\n\n'),
+    systemPrompt: instructions,
     messages: piMessages as unknown as AgentMessage[],
     tools: piToolsToList(piTools),
   };
@@ -312,7 +311,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       });
       return { ...source, messages: compacted.messages };
     } catch (error) {
-      loopSignal.throwIfAborted();
+      loopSignal?.throwIfAborted();
       runtimeCompactionError =
         error instanceof ContextCompactionUnavailableError ? error : new ContextCompactionUnavailableError(error);
       return undefined;
@@ -325,14 +324,16 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       const loopConfig: AgentLoopConfig & { toolChoice: 'auto' } = {
         model: piProvider.handle.model,
         convertToLlm: (agentMessages) => agentMessages as unknown as Message[],
+        getSteeringMessages: async () => {
+          const messages = await steering.drain();
+          if (messages.length > 0) {
+            currentValidatedBuildCompletion = undefined;
+          }
+          return messages;
+        },
         prepareNextTurn: async ({ message, context: turnContext }) => {
           const wouldContinue = message.content.some((part) => part.type === 'toolCall');
-          if (
-            !wouldContinue ||
-            stepCount >= BUILDER_TURN_MAX_MODEL_STEPS ||
-            toolBudgetError ||
-            estimatePiContextTokens(turnContext.messages) < compactionPolicy.hardLimitTokens
-          ) {
+          if (!wouldContinue || estimatePiContextTokens(turnContext.messages) < compactionPolicy.hardLimitTokens) {
             return undefined;
           }
           const compacted = await compactRuntimeContext(turnContext);
@@ -342,20 +343,12 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
           context = compacted;
           return { context: compacted };
         },
-        shouldStopAfterTurn: ({ message }) => {
-          const wouldContinue = isAssistantMessage(message) && message.content.some((part) => part.type === 'toolCall');
-          stepBudgetStopped = stepCount >= BUILDER_TURN_MAX_MODEL_STEPS && wouldContinue;
-          return (
-            currentValidatedBuildCompletion !== undefined ||
-            runtimeCompactionError !== undefined ||
-            toolBudgetError !== undefined ||
-            stepBudgetStopped
-          );
-        },
+        shouldStopAfterTurn: () =>
+          runtimeCompactionError !== undefined ||
+          (currentValidatedBuildCompletion !== undefined && !steering.hasPending()),
         afterToolCall: async ({ result, isError }) =>
           !isError && !toolResultSucceeded(result.details) ? { isError: true } : undefined,
         maxTokens: piProvider.maxTokens,
-        timeoutMs: BUILDER_TURN_TIMEOUTS.modelStreamMs,
         toolChoice: 'auto',
       };
 
@@ -368,7 +361,6 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
           !isContextOverflow(terminalAssistant, piProvider.handle.model.contextWindow) ||
           overflowRecoveryAttempted ||
           currentTurnStreamedContent ||
-          totalTimeoutSignal.aborted ||
           abortSignal?.aborted
         ) {
           break;
@@ -387,42 +379,22 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
 
       recordPiStage('loop_complete', modelId);
       const finalAssistant = assistantMessageValue(terminalAssistant);
-      stepBudgetStopped ||=
-        stepCount >= BUILDER_TURN_MAX_MODEL_STEPS &&
-        finalAssistant?.content.some((part) => part.type === 'toolCall') === true;
-
-      if (totalTimeoutSignal.aborted && !abortSignal?.aborted) {
-        throw new BuilderTurnBudgetExceededError('total_timeout');
-      }
       if (runtimeCompactionError) {
         throw runtimeCompactionError;
       }
-      if (toolBudgetError) {
-        throw toolBudgetError;
-      }
       if (finalAssistant?.stopReason === 'error') {
-        if (/time(?:d out|out)/i.test(finalAssistant.errorMessage ?? '')) {
-          throw new BuilderTurnBudgetExceededError('stream_stall');
-        }
         throw new Error(finalAssistant.errorMessage || 'The model request failed.');
       }
       if (finalAssistant?.stopReason === 'aborted' && !abortSignal?.aborted) {
         throw new Error(finalAssistant.errorMessage || 'The model request was aborted.');
       }
-      if (stepBudgetStopped && !currentValidatedBuildCompletion) {
-        await writer.write({
-          type: 'error',
-          errorText: new BuilderTurnBudgetExceededError('model_steps').message,
-        });
-      }
-
       const finalContextTokens = estimatePiContextTokens(context.messages);
       if (finalContextTokens >= compactionPolicy.proactiveTokens) {
         compaction.requestDurableCompaction?.();
       }
       recordWorkersAiFinish({
         usage: totalUsage,
-        finishReason: stepBudgetStopped ? 'length' : (finalAssistant?.stopReason ?? 'stop'),
+        finishReason: finalAssistant?.stopReason ?? 'stop',
         firstUserMessage,
         contextReduced: modelInput.contextCompacted || runtimeContextCompacted,
         estimatedContextTokens: Math.max(modelInput.estimatedTokens, finalContextTokens),
@@ -432,12 +404,8 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       });
     } catch (error) {
       recordPiStage('loop_error', modelId);
-      const budgetError =
-        error instanceof BuilderTurnBudgetExceededError ? error : classifyBuilderTimeout(error, 'total_timeout');
-      logProviderFailure(logger, 'Pi agent runner failed.', budgetError ?? error);
-      if (budgetError) {
-        await writer.write({ type: 'error', errorText: budgetError.message });
-      } else if (error instanceof ContextCompactionUnavailableError && !abortSignal?.aborted) {
+      logProviderFailure(logger, 'Pi agent runner failed.', error);
+      if (error instanceof ContextCompactionUnavailableError && !abortSignal?.aborted) {
         await writer.write({ type: 'error', errorText: error.message });
       } else if (isWorkersAiFreeAllocationError(error)) {
         await writer.write({ type: 'error', errorText: workersPaidRequiredMessage() });
@@ -447,6 +415,8 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         await writer.write({ type: 'error', errorText: 'The model request failed. Please retry.' });
       }
     } finally {
+      steering.close();
+      onSettled();
       await writer.close().catch(() => undefined);
     }
   })();
@@ -465,7 +435,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         }
         controller.enqueue({
           type: 'finish',
-          finishReason: stepBudgetStopped || terminalAssistant?.stopReason === 'length' ? 'length' : 'stop',
+          finishReason: terminalAssistant?.stopReason === 'length' ? 'length' : 'stop',
         });
         controller.close();
       } catch (error) {
@@ -516,27 +486,6 @@ function piToolResultError(result: unknown): string {
   }
   const details = piToolResultDetails(result);
   return isRecord(details) && typeof details.summary === 'string' ? details.summary : 'Tool execution failed.';
-}
-
-function toolBudgetErrorFromResult(result: unknown): BuilderTurnBudgetExceededError | undefined {
-  if (!isRecord(result) || !Array.isArray(result.content)) {
-    return undefined;
-  }
-  const text = result.content.find(
-    (block): block is { type: 'text'; text: string } =>
-      isRecord(block) && block.type === 'text' && typeof block.text === 'string',
-  )?.text;
-  if (!text) {
-    return undefined;
-  }
-  try {
-    const payload = JSON.parse(text) as { code?: unknown; reason?: unknown };
-    return payload.code === BUILDER_TURN_BUDGET_ERROR_CODE && payload.reason === 'tool_timeout'
-      ? new BuilderTurnBudgetExceededError('tool_timeout')
-      : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function assistantMessageValue(message: AssistantMessage | undefined): AssistantMessage | undefined {

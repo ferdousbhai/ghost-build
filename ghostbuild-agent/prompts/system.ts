@@ -1,35 +1,9 @@
-import { stripIndents } from '../utils/stripIndent.js';
-import { solutionConstraints } from './solutionConstraints.js';
-import { formattingInstructions } from './formattingInstructions.js';
-import { exampleDataInstructions } from './exampleDataInstructions.js';
-import { secretsInstructions } from './secretsInstructions.js';
-import { outputInstructions } from './outputInstructions.js';
-import { emailGuidelines } from './emailGuidelines.js';
+const BASE_SYSTEM_PROMPT = `You are Ghostbuild, a coding agent that builds applications in /home/project for the user's connected Cloudflare account.
 
-// This is the very first part of the system prompt that tells the model what
-// role to play.
-export const ROLE_SYSTEM_PROMPT = stripIndents`
-You are Ghostbuild, an expert AI assistant and exceptional senior software developer with vast
-knowledge across software development. You are helping the user develop and deploy a project on Cloudflare.
-For a web application, default to TanStack Start when the user does not request a framework and
-prefer it whenever its routing, rendering, and server functions fit the product. Do not force a web
-framework onto a request that only needs a supported Worker, API, webhook, or fetch handler,
-or other focused Cloudflare script. Choose Cloudflare primitives that fit the requested capability. Work persistently
-toward a validated result, respecting user approval and external blockers. You are concise.
-`;
-const GENERAL_SYSTEM_PROMPT_PRELUDE = 'Here are important guidelines for working with Ghostbuild:';
+Work directly in the existing project. Its source, package.json, wrangler.jsonc, and validation checks define the supported architecture and runtime contract. Keep generated backend, storage, and AI workloads on Cloudflare and use the project's bindings. For Durable Object class lifecycle, use declarative Wrangler exports with SQLite storage; never generate the legacy migrations, new_classes, or new_sqlite_classes flow. Do not put secret values in project files.
 
-const GENERAL_SYSTEM_PROMPT = stripIndents`${GENERAL_SYSTEM_PROMPT_PRELUDE}
-${solutionConstraints()}
-${formattingInstructions()}
-${exampleDataInstructions()}
-${secretsInstructions()}
-${emailGuidelines()}
-${outputInstructions()}
-`;
+Before implementation, activate the cloudflare-app-builder skill and read the relevant owner-published references. Implement the user's request completely, then run pnpm run validate.`;
 
-// This system prompt explains how to work within Ghostbuild's durable workspace. It
-// doesn't contain any details specific to the current session.
-export function generalSystemPrompt() {
-  return GENERAL_SYSTEM_PROMPT;
+export function systemPrompt(skillCatalog: string): string {
+  return `${BASE_SYSTEM_PROMPT}\n\n${skillCatalog}`;
 }

@@ -9,6 +9,7 @@ import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import { EnhancePromptButton } from './EnhancePromptButton.client';
 import { getMessageInputPrimaryActionLabel, useMessageInputController } from './useMessageInputController';
 import { BuilderModelSelector } from './BuilderModelSelector.client';
+import { PromptRefinementDialog } from './PromptRefinementDialog.client';
 
 interface MessageInputProps {
   chatStarted: boolean;
@@ -31,15 +32,17 @@ export const MessageInput = memo(function MessageInput({
 }: MessageInputProps) {
   const controller = useMessageInputController({ isStreaming, onStop, onSend, prefillEnabled: !chatStarted });
   const { authState, input } = controller;
-  const primaryActionLabel = getMessageInputPrimaryActionLabel(authState.kind, isStreaming);
+  const primaryActionLabel = getMessageInputPrimaryActionLabel(authState.kind, isStreaming, input.trim().length > 0);
   const hasActiveSession = authState.kind === 'fullyLoggedIn';
   const modelSelector = (!chatStarted || hasActiveSession) && (
     <BuilderModelSelector compact={chatStarted} disabled={disabled || isStreaming || sendMessageInProgress} />
   );
   const placeholder = chatStarted
-    ? numMessages !== undefined && numMessages > 0
-      ? 'What would you like to do next?'
-      : 'Start this chat with a prompt…'
+    ? isStreaming
+      ? 'Add guidance while Ghostbuild works…'
+      : numMessages !== undefined && numMessages > 0
+        ? 'What would you like to do next?'
+        : 'Start this chat with a prompt…'
     : 'Describe the app, workflow, and data you want to build…';
   const inputStatus = input.length > 3 ? <NewLineShortcut /> : null;
   const actions = (
@@ -49,19 +52,16 @@ export const MessageInput = memo(function MessageInput({
           <span>Connect Cloudflare</span>
         </Button>
       )}
-      {chatStarted && hasActiveSession && (
+      {hasActiveSession && (
         <EnhancePromptButton
           isEnhancing={controller.isEnhancing}
-          disabled={disabled || input.length === 0}
+          disabled={disabled || isStreaming || sendMessageInProgress || input.trim().length === 0}
           onClick={controller.enhancePrompt}
         />
       )}
       <Button
         disabled={
-          (!isStreaming && input.length === 0) ||
-          authState.kind === 'loading' ||
-          (sendMessageInProgress && !isStreaming) ||
-          disabled
+          (!isStreaming && input.length === 0) || authState.kind === 'loading' || sendMessageInProgress || disabled
         }
         tip={authState.kind === 'unauthenticated' ? 'Connect Cloudflare to continue' : undefined}
         onClick={controller.handleButtonClick}
@@ -69,9 +69,9 @@ export const MessageInput = memo(function MessageInput({
         className={classNames('ml-1 h-8 min-w-8 rounded-full', !chatStarted ? 'ghost-message-input__send' : '')}
         aria-label={primaryActionLabel}
         icon={
-          sendMessageInProgress && !isStreaming ? (
+          sendMessageInProgress ? (
             <Spinner className="text-white" />
-          ) : !isStreaming ? (
+          ) : primaryActionLabel === 'Send' ? (
             <ArrowRightIcon />
           ) : (
             <StopIcon />
@@ -82,55 +82,66 @@ export const MessageInput = memo(function MessageInput({
   );
 
   return (
-    <div
-      className={classNames(
-        'relative z-20 mx-auto w-full transition-all duration-200',
-        chatStarted ? 'max-w-chat' : 'ghost-message-input--home max-w-none',
-      )}
-    >
+    <>
       <div
         className={classNames(
-          'ghost-message-input__surface rounded-2xl bg-bolt-elements-background-depth-1 shadow-[0_12px_36px_color-mix(in_srgb,var(--ghost-home-accent-2)_10%,transparent)]',
-          !chatStarted ? 'p-2' : '',
+          'relative z-20 mx-auto w-full transition-all duration-200',
+          chatStarted ? 'max-w-chat' : 'ghost-message-input--home max-w-none',
         )}
       >
         <div
           className={classNames(
-            'ghost-message-input__editor relative border border-bolt-elements-borderColor transition-all has-[textarea:focus]:border-border-selected',
-            chatStarted ? 'rounded-2xl' : 'rounded-xl',
+            'ghost-message-input__surface rounded-2xl bg-bolt-elements-background-depth-1 shadow-[0_12px_36px_color-mix(in_srgb,var(--ghost-home-accent-2)_10%,transparent)]',
+            !chatStarted ? 'p-2' : '',
           )}
         >
-          <PromptTextarea
-            onKeyDown={controller.handleKeyDown}
-            onChange={controller.handleChange}
-            value={input}
-            minHeight={chatStarted ? 72 : 44}
-            maxHeight={chatStarted ? 400 : 180}
-            placeholder={placeholder}
-            disabled={disabled}
-            contentClassName={chatStarted ? 'pb-14' : undefined}
-          />
-          {chatStarted && (
-            <div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex items-end gap-2">
-              <div className="pointer-events-auto flex min-w-0 flex-1 items-center gap-2 pl-1">
-                {modelSelector}
-                <div className="hidden min-w-0 sm:block">{inputStatus}</div>
+          <div
+            className={classNames(
+              'ghost-message-input__editor relative border border-bolt-elements-borderColor transition-all has-[textarea:focus]:border-border-selected',
+              chatStarted ? 'rounded-2xl' : 'rounded-xl',
+            )}
+          >
+            <PromptTextarea
+              onKeyDown={controller.handleKeyDown}
+              onChange={controller.handleChange}
+              value={input}
+              minHeight={chatStarted ? 72 : 44}
+              maxHeight={chatStarted ? 400 : 180}
+              placeholder={placeholder}
+              disabled={disabled}
+              contentClassName={chatStarted ? 'pb-14' : undefined}
+            />
+            {chatStarted && (
+              <div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex items-end gap-2">
+                <div className="pointer-events-auto flex min-w-0 flex-1 items-center gap-2 pl-1">
+                  {modelSelector}
+                  <div className="hidden min-w-0 sm:block">{inputStatus}</div>
+                </div>
+                <div className="pointer-events-auto ml-auto flex items-center gap-1">{actions}</div>
               </div>
-              <div className="pointer-events-auto ml-auto flex items-center gap-1">{actions}</div>
+            )}
+          </div>
+          {!chatStarted && (
+            <div className="ghost-message-input__footer flex flex-wrap items-center gap-2 rounded-b-xl border border-t-0 border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-1.5 text-sm">
+              {modelSelector}
+              <div className="ml-auto flex items-center gap-1">{actions}</div>
             </div>
           )}
         </div>
-        {!chatStarted && (
-          <div className="ghost-message-input__footer flex flex-wrap items-center gap-2 rounded-b-xl border border-t-0 border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-1.5 text-sm">
-            {modelSelector}
-            <div className="ml-auto flex items-center gap-1">{actions}</div>
-          </div>
+        {authState.kind === 'unauthenticated' && (
+          <CloudflareConnectLegalNotice className="mx-auto mt-2 max-w-2xl px-2 text-center text-[11px] leading-relaxed text-content-tertiary" />
         )}
       </div>
-      {authState.kind === 'unauthenticated' && (
-        <CloudflareConnectLegalNotice className="mx-auto mt-2 max-w-2xl px-2 text-center text-[11px] leading-relaxed text-content-tertiary" />
+      {controller.refinement && (
+        <PromptRefinementDialog
+          key={controller.refinement.questions.map((question) => question.id).join(':')}
+          questions={controller.refinement.questions}
+          isLoading={controller.isEnhancing}
+          onSubmit={(answers) => void controller.answerRefinementQuestions(answers)}
+          onCancel={controller.cancelRefinement}
+        />
       )}
-    </div>
+    </>
   );
 });
 

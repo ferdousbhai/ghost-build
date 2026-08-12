@@ -17,8 +17,8 @@ export const EnhancePromptButton = React.memo(function EnhancePromptButton({
   return (
     <Button
       variant="neutral"
-      tip="Enhance your prompt"
-      aria-label={isEnhancing ? 'Enhancing prompt' : 'Enhance prompt'}
+      tip="Refine your build plan"
+      aria-label={isEnhancing ? 'Refining build plan' : 'Refine build plan'}
       aria-busy={isEnhancing}
       disabled={disabled || isEnhancing}
       inline

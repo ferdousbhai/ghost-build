@@ -1,18 +1,19 @@
 import { describe, expect, test, vi } from 'vitest';
-import { z } from 'zod';
+import type { AgentTool } from '@earendil-works/pi-agent-core';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { MAX_ESTIMATED_MODEL_INPUT_TOKENS } from 'ghostbuild-agent/context-limits';
-import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
 import { ModelInputBudgetExceededError, modelCompactionPolicy, prepareModelInput } from './model-input';
 import type { ContextCompactionUnavailableError } from './model-input';
 
-const tools = {
-  read: { description: 'Read a file', inputSchema: z.object({ path: z.string() }) },
-  write: {
+const tools = [
+  { name: 'read', label: 'Read', description: 'Read a file', parameters: { type: 'object' } },
+  {
+    name: 'write',
+    label: 'Write',
     description: 'Write a file with a deliberately longer definition',
-    inputSchema: z.object({ path: z.string(), content: z.string() }),
+    parameters: { type: 'object' },
   },
-} as unknown as GhostbuildToolSet;
+] as unknown as AgentTool[];
 
 function message(id: string, text: string): GhostbuildMessage {
   return { id, role: 'user', parts: [{ type: 'text', text }] };
@@ -27,7 +28,7 @@ function prepare(messages: GhostbuildMessage[], options: Partial<Parameters<type
     messages,
     summarize: async () => '## Current State\nCompacted.',
     contextWindow: 128_000,
-    systemPrompts: [],
+    systemPrompt: '',
     tools,
     ...options,
   });
@@ -46,7 +47,7 @@ describe('prepareModelInput', () => {
     const summarize = vi.fn(async () => 'summary');
     const messages = [message('old-user', 'earlier requirement'), message('current-user', 'Build it')];
 
-    const result = await prepare(messages, { summarize, systemPrompts: ['System'] });
+    const result = await prepare(messages, { summarize, systemPrompt: 'System' });
 
     expect(result.contextCompacted).toBe(false);
     expect(result.nextCompaction).toBeNull();

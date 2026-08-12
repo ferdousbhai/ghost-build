@@ -338,7 +338,6 @@ function requireExecutionIdentity(deployment: Deployment, args: UserOwnedDeploym
     deployment.connectionId !== args.connectionId ||
     deployment.executionGeneration !== args.executionGeneration ||
     deployment.status !== 'approved' ||
-    deployment.approvedDigest !== deployment.planDigest ||
     !isCurrentDeploymentPlan(deployment.plan)
   ) {
     throw new Error('Deployment no longer matches the approved user-owned execution.');

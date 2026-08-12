@@ -3,7 +3,7 @@ import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
-import type { ZodType } from 'zod';
+import { z, type ZodType } from 'zod';
 import { COMPUTER_EXEC_APPLICATION_POLICY } from 'ghostbuild-agent/cloudflare-computer';
 import {
   createTurnStatefulToolCoordinator,
@@ -35,9 +35,8 @@ describe('minimal Workers AI tool surface', () => {
         edits: [{ startLine: 1, endLine: 1, content: 'after' }],
       }).success,
     ).toBe(true);
-    expect(toolInputSchema(tools.exec).safeParse({ command: 'rg TODO', backend: 'container-shell' }).success).toBe(
-      true,
-    );
+    expect(toolInputSchema(tools.exec).safeParse({ command: 'rg TODO' }).success).toBe(true);
+    expect(Object.keys(z.toJSONSchema(toolInputSchema(tools.exec)).properties ?? {})).toEqual(['command', 'cwd']);
   });
 
   it('presents one concrete exec backend plus the mutation policy', () => {
@@ -45,21 +44,7 @@ describe('minimal Workers AI tool surface', () => {
 
     expect(tools.exec.description).toContain(COMPUTER_EXEC_APPLICATION_POLICY);
     expect(tools.exec.description).not.toContain('multiple backends');
-    expect(tools.exec.description).toContain('/home/project/.ghost/docs/');
-  });
-
-  it('reads immutable bundled guidance through the normal read tool', async () => {
-    const workspace = workspaceStub();
-    const tools = createWorkersAiTools(workspace, operationContext());
-
-    const index = await executeTool(tools.read, { path: '/home/project/.ghost/docs/index.md', limit: 20 });
-    expect(JSON.stringify(index)).toContain('cloudflarePlatform.md');
-    expect(workspace.computer.fs.readFile).not.toHaveBeenCalled();
-
-    await expect(
-      executeTool(tools.write, { path: '/home/project/.ghost/docs/index.md', content: 'replace docs' }),
-    ).resolves.toEqual({ error: 'Ghostbuild documentation is an immutable virtual filesystem overlay.' });
-    expect(workspace.validate).not.toHaveBeenCalled();
+    expect(tools.exec.description).not.toContain('/home/project/.ghost/docs/');
   });
 
   it('returns numbered project lines and the snapshot tag required by edit', async () => {
@@ -77,6 +62,95 @@ describe('minimal Workers AI tool surface', () => {
       totalLines: 3,
       nextOffset: 3,
     });
+  });
+
+  it('does not let an edit resume to write after cancellation while its snapshot read is pending', async () => {
+    const path = '/home/project/src/app.ts';
+    const workspace = workspaceStub();
+    const snapshot = deferred<Awaited<ReturnType<BuilderWorkspaceApi['readText']>>>();
+    workspace.readText = vi.fn(() => snapshot.promise);
+    const tools = createWorkersAiTools(workspace, operationContext());
+    const controller = new AbortController();
+    const reason = new DOMException('edit timed out', 'TimeoutError');
+
+    const execution = executeTool(
+      tools.edit,
+      {
+        path,
+        base: 'A'.repeat(24),
+        edits: [{ startLine: 1, endLine: 1, content: 'after' }],
+      },
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(workspace.readText).toHaveBeenCalledWith(path, controller.signal));
+    controller.abort(reason);
+    snapshot.resolve({
+      path,
+      content: 'before\n',
+      encoding: 'utf8',
+      size: 7,
+      sha256: await sha256('before\n'),
+      revision: 1,
+    });
+
+    await expect(execution).rejects.toBe(reason);
+    expect(workspace.computer.fs.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('waits for an in-flight edit write to settle and skips the post-write read after cancellation', async () => {
+    const path = '/home/project/src/app.ts';
+    const workspace = workspaceStub({ files: { [path]: 'before\n' } });
+    const write = deferred<void>();
+    workspace.computer.fs.writeFile = vi.fn(() => write.promise);
+    const tools = createWorkersAiTools(workspace, operationContext());
+    const controller = new AbortController();
+    const reason = new DOMException('edit timed out', 'TimeoutError');
+
+    const execution = executeTool(
+      tools.edit,
+      {
+        path,
+        base: ((await executeTool(tools.read, { path })) as { base: string }).base,
+        edits: [{ startLine: 1, endLine: 1, content: 'after' }],
+      },
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(workspace.computer.fs.writeFile).toHaveBeenCalledOnce());
+    controller.abort(reason);
+
+    let settled = false;
+    void execution.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    write.resolve();
+    await expect(execution).rejects.toBe(reason);
+    expect(workspace.readText).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let a write resume after cancellation while file metadata is pending', async () => {
+    const path = '/home/project/src/app.ts';
+    const workspace = workspaceStub();
+    const stat = deferred<{ size: number; mtime: number; mode: number; isFile: boolean; isDirectory: boolean }>();
+    workspace.computer.fs.stat = vi.fn(() => stat.promise);
+    const tools = createWorkersAiTools(workspace, operationContext());
+    const controller = new AbortController();
+    const reason = new DOMException('write timed out', 'TimeoutError');
+
+    const execution = executeTool(tools.write, { path, content: 'after\n' }, controller.signal);
+    await vi.waitFor(() => expect(workspace.computer.fs.stat).toHaveBeenCalledWith(path));
+    controller.abort(reason);
+    stat.resolve({ size: 7, mtime: 1, mode: 0o755, isFile: true, isDirectory: false });
+
+    await expect(execution).rejects.toBe(reason);
+    expect(workspace.computer.fs.writeFile).not.toHaveBeenCalled();
   });
 
   it('rejects stale line edits and applies an exact-snapshot edit without an intermediate validation', async () => {
@@ -120,7 +194,7 @@ describe('minimal Workers AI tool surface', () => {
     const workspace = workspaceStub({ runtimeExec });
     const tools = createWorkersAiTools(workspace, operationContext());
 
-    await expect(executeTool(tools.exec, { command: 'rg TODO', backend: 'container-shell' })).resolves.toMatchObject({
+    await expect(executeTool(tools.exec, { command: 'rg TODO' })).resolves.toMatchObject({
       exitCode: 0,
       stdout: 'src\n',
     });
@@ -130,6 +204,26 @@ describe('minimal Workers AI tool surface', () => {
       backend: 'container-shell',
     });
     expect(workspace.validate).not.toHaveBeenCalled();
+  });
+
+  it('propagates cancellation through exec and rejects a result completed after abort', async () => {
+    const command = deferred<{ exitCode: number; stdout: string; stderr: string }>();
+    const workspace = workspaceStub();
+    workspace.executeCommand = vi.fn(() => command.promise);
+    const tools = createWorkersAiTools(workspace, operationContext());
+    const controller = new AbortController();
+    const reason = new DOMException('exec timed out', 'TimeoutError');
+
+    const execution = executeTool(tools.exec, { command: 'pnpm test' }, controller.signal);
+    await vi.waitFor(() =>
+      expect(workspace.executeCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ command: 'pnpm test', abortSignal: controller.signal }),
+      ),
+    );
+    controller.abort(reason);
+    command.resolve({ exitCode: 0, stdout: 'late\n', stderr: '' });
+
+    await expect(execution).rejects.toBe(reason);
   });
 
   it('preserves command output while marking a non-zero exit as a tool failure', async () => {
@@ -305,7 +399,9 @@ function validationResult() {
 }
 
 function operationContext(
-  overrides: { onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void } = {},
+  overrides: {
+    onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
+  } = {},
 ) {
   return {
     onValidationStage: overrides.onValidationStage,
@@ -404,4 +500,12 @@ function toolInputSchema(definition: Tool): ZodType {
 async function sha256(value: string): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
   return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
 }

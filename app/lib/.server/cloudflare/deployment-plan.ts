@@ -7,7 +7,7 @@ import {
   TEMPLATE_SOURCE_SHA256,
 } from './deployment-security-baseline';
 
-const DEPLOYMENT_PLAN_VERSION = 3 as const;
+const DEPLOYMENT_PLAN_VERSION = 4 as const;
 
 export type DeploymentResourceType = 'worker' | 'd1' | 'r2' | 'kv' | 'durable_object' | 'workers_ai';
 
@@ -28,18 +28,13 @@ const deploymentPlanResourceSchema = z.strictObject({
   proposedName: z.string().min(1),
 });
 const deploymentPlanSchema = z.strictObject({
-  version: z.number().int().nonnegative(),
+  version: z.literal(DEPLOYMENT_PLAN_VERSION),
   deploymentId: z.string().min(1),
   sourceSha256: sha256Schema,
   templateSourceSha256: sha256Schema,
   securityBaselineVersion: z.number().int().nonnegative(),
   securityBoundarySha256: sha256Schema,
   project: deploymentProjectProfileSchema,
-  billing: z.strictObject({
-    infrastructure: z.literal('user_cloudflare_account'),
-    workersAi: z.literal('user_cloudflare_account'),
-    workersPaidUpgrade: z.literal('explicit_user_authorization_required'),
-  }),
   resources: z.array(deploymentPlanResourceSchema),
 });
 
@@ -63,11 +58,6 @@ export async function buildDeploymentPlanFromSource(args: {
     securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
     securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
     project,
-    billing: {
-      infrastructure: 'user_cloudflare_account',
-      workersAi: 'user_cloudflare_account',
-      workersPaidUpgrade: 'explicit_user_authorization_required',
-    },
     resources: [
       { type: 'worker', logicalName: 'app', proposedName: baseName },
       ...(project.bindings.d1 ? [{ type: 'd1' as const, logicalName: 'DB', proposedName: baseName }] : []),

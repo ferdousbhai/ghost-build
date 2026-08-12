@@ -34,6 +34,6 @@ export function assertNotLocalSecretFilePath(filePath: string) {
   }
 
   throw new Error(
-    `Local secret files are disabled for Ghostbuild projects: ${filePath}. Use Cloudflare Worker bindings or wrangler secret put NAME instead.`,
+    `Local secret files are disabled for Ghostbuild projects: ${filePath}. Use a per-Worker secret or, for an exported project, an account-level Cloudflare Secrets Store binding instead.`,
   );
 }

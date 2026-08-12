@@ -2,7 +2,7 @@ import { memo, useMemo } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { markdownRehypePlugins, markdownRemarkPlugins } from '~/utils/markdown';
-import { allowedHTMLElements } from 'ghostbuild-agent/prompts/formattingInstructions';
+import { allowedHTMLElements } from 'ghostbuild-agent/allowed-html-elements';
 import { CodeBlock } from './CodeBlock';
 
 import styles from './Markdown.module.css';

@@ -1,6 +1,6 @@
 import { parseDeploymentPlanJson, type DeploymentPlan } from './deployment-plan';
 
-export type DeploymentStatus = 'awaiting_approval' | 'approved' | 'provisioning' | 'deploying' | 'succeeded' | 'failed';
+export type DeploymentStatus = 'approved' | 'provisioning' | 'deploying' | 'succeeded' | 'failed';
 
 export type Deployment = {
   id: string;
@@ -13,8 +13,6 @@ export type Deployment = {
   status: DeploymentStatus;
   plan: DeploymentPlan;
   planDigest: string;
-  approvedDigest: string | null;
-  approvedAt: number | null;
   productionUrl: string | null;
   errorCode: string | null;
   errorMessage: string | null;
@@ -33,8 +31,6 @@ type DeploymentRow = {
   status: DeploymentStatus;
   plan_json: string;
   plan_digest: string;
-  approved_digest: string | null;
-  approved_at: number | null;
   production_url: string | null;
   error_code: string | null;
   error_message: string | null;
@@ -43,7 +39,7 @@ type DeploymentRow = {
 };
 
 const DEPLOYMENT_COLUMNS = `id, chat_id, user_id, connection_id, connection_generation, execution_generation,
-  workspace_reference, status, plan_json, plan_digest, approved_digest, approved_at, production_url,
+  workspace_reference, status, plan_json, plan_digest, production_url,
   error_code, error_message, created_at, updated_at`;
 
 export async function createDeployment(args: {
@@ -65,7 +61,7 @@ export async function createDeployment(args: {
         `INSERT INTO deployments (
            id, chat_id, user_id, connection_id, connection_generation, execution_generation,
            workspace_reference, status, plan_json, plan_digest, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, 0, ?, 'awaiting_approval', ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, 1, ?, 'approved', ?, ?, ?, ?)`,
       )
       .bind(
         args.id,
@@ -121,80 +117,6 @@ export async function requireDeployment(db: D1Database, deploymentId: string): P
   return deploymentFromRow(row);
 }
 
-export async function approveDeployment(args: {
-  db: D1Database;
-  deploymentId: string;
-  userId: string;
-  connectionId: string;
-  connectionGeneration: number;
-  approvedDigest: string;
-  now?: number;
-}): Promise<Deployment> {
-  const expected = await requireDeploymentForUser(args.db, args.deploymentId, args.userId);
-  requireCurrentConnection(expected, args);
-  if (expected.planDigest !== args.approvedDigest) {
-    throw new DeploymentApprovalDigestMismatchError();
-  }
-  if (
-    expected.status !== 'awaiting_approval' ||
-    expected.approvedDigest !== null ||
-    expected.approvedAt !== null ||
-    expected.executionGeneration >= Number.MAX_SAFE_INTEGER ||
-    expected.plan.deploymentId !== expected.id
-  ) {
-    throw new DeploymentStateConflictError(expected.status);
-  }
-  const now = args.now ?? Date.now();
-  let result: D1Result;
-  try {
-    result = await args.db
-      .prepare(
-        `UPDATE deployments
-         SET status = 'approved', approved_digest = ?, approved_at = ?,
-             execution_generation = execution_generation + 1, updated_at = ?
-         WHERE id = ? AND user_id = ? AND connection_id = ? AND connection_generation = ?
-           AND execution_generation = ? AND status = 'awaiting_approval' AND updated_at = ?
-           AND plan_digest = ? AND workspace_reference = ?
-           AND approved_digest IS NULL AND approved_at IS NULL`,
-      )
-      .bind(
-        args.approvedDigest,
-        now,
-        now,
-        expected.id,
-        expected.userId,
-        expected.connectionId,
-        expected.connectionGeneration,
-        expected.executionGeneration,
-        expected.updatedAt,
-        expected.planDigest,
-        expected.workspaceReference,
-      )
-      .run();
-  } catch (error) {
-    const committed = await requireDeploymentForUser(args.db, expected.id, expected.userId).catch(() => null);
-    if (committed && isExactDeploymentApproval(committed, expected, args.approvedDigest, now)) {
-      return committed;
-    }
-    throw error;
-  }
-  if (result.meta.changes !== 1) {
-    const committed = await requireDeploymentForUser(args.db, expected.id, expected.userId);
-    if (isExactDeploymentApproval(committed, expected, args.approvedDigest, now)) {
-      return committed;
-    }
-    throw new DeploymentStateConflictError(committed.status);
-  }
-  return {
-    ...expected,
-    executionGeneration: expected.executionGeneration + 1,
-    status: 'approved',
-    approvedDigest: args.approvedDigest,
-    approvedAt: now,
-    updatedAt: now,
-  };
-}
-
 export async function claimApprovedDeployment(args: {
   db: D1Database;
   deploymentId: string;
@@ -206,11 +128,7 @@ export async function claimApprovedDeployment(args: {
 }): Promise<Deployment> {
   const expected = await requireDeploymentForUser(args.db, args.deploymentId, args.userId);
   requireCurrentConnection(expected, args);
-  if (
-    expected.executionGeneration !== args.executionGeneration ||
-    expected.status !== 'approved' ||
-    expected.approvedDigest !== expected.planDigest
-  ) {
+  if (expected.executionGeneration !== args.executionGeneration || expected.status !== 'approved') {
     throw new DeploymentStateConflictError(expected.status);
   }
   const now = args.now ?? Date.now();
@@ -222,7 +140,6 @@ export async function claimApprovedDeployment(args: {
          SET status = 'provisioning', updated_at = ?
          WHERE id = ? AND user_id = ? AND connection_id = ? AND connection_generation = ?
            AND execution_generation = ? AND status = 'approved' AND updated_at = ?
-           AND approved_digest = plan_digest
            AND EXISTS (
              SELECT 1 FROM chats
              WHERE chats.id = deployments.chat_id
@@ -308,7 +225,7 @@ export async function prepareDeploymentRetry(args: {
     result = await args.db
       .prepare(
         `UPDATE deployments
-         SET status = 'awaiting_approval', approved_digest = NULL, approved_at = NULL,
+         SET status = 'approved', execution_generation = execution_generation + 1,
              production_url = NULL, error_code = NULL, error_message = NULL, updated_at = ?
          WHERE id = ? AND user_id = ? AND connection_id = ? AND connection_generation = ?
            AND execution_generation = ? AND status = 'failed' AND updated_at = ?
@@ -342,9 +259,8 @@ export async function prepareDeploymentRetry(args: {
   }
   return {
     ...expected,
-    status: 'awaiting_approval',
-    approvedDigest: null,
-    approvedAt: null,
+    executionGeneration: expected.executionGeneration + 1,
+    status: 'approved',
     productionUrl: null,
     errorCode: null,
     errorMessage: null,
@@ -448,27 +364,10 @@ function isExactDeploymentTransition(
   );
 }
 
-function isExactDeploymentApproval(
-  deployment: Deployment,
-  expected: Deployment,
-  approvedDigest: string,
-  now: number,
-): boolean {
-  return (
-    deployment.executionGeneration === expected.executionGeneration + 1 &&
-    deployment.status === 'approved' &&
-    deployment.approvedDigest === approvedDigest &&
-    deployment.approvedAt === now &&
-    deployment.updatedAt === now &&
-    sameDeploymentIdentity(deployment, expected)
-  );
-}
-
 function isExactDeploymentRetry(deployment: Deployment, expected: Deployment, now: number): boolean {
   return (
-    deployment.status === 'awaiting_approval' &&
-    deployment.approvedDigest === null &&
-    deployment.approvedAt === null &&
+    deployment.status === 'approved' &&
+    deployment.executionGeneration === expected.executionGeneration + 1 &&
     deployment.productionUrl === null &&
     deployment.errorCode === null &&
     deployment.errorMessage === null &&
@@ -512,8 +411,6 @@ function deploymentFromRow(row: DeploymentRow): Deployment {
     status: row.status,
     plan: parseDeploymentPlanJson(row.plan_json),
     planDigest: row.plan_digest,
-    approvedDigest: row.approved_digest,
-    approvedAt: row.approved_at,
     productionUrl: row.production_url,
     errorCode: row.error_code,
     errorMessage: row.error_message,
@@ -526,13 +423,6 @@ export class DeploymentNotFoundError extends Error {
   constructor() {
     super('Deployment not found.');
     this.name = 'DeploymentNotFoundError';
-  }
-}
-
-export class DeploymentApprovalDigestMismatchError extends Error {
-  constructor() {
-    super('The deployment plan changed and must be reviewed again.');
-    this.name = 'DeploymentApprovalDigestMismatchError';
   }
 }
 

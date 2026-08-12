@@ -1,19 +1,15 @@
-import type { Type } from '@earendil-works/pi-ai';
-import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
-import { z, type ZodType } from 'zod';
+import type { AgentTool } from '@earendil-works/pi-agent-core';
+import { adaptPiTool, type ToolDefinition, type ToolInputSchema } from '@summonghost/pi-tool-adapter';
 import { MODEL_TOOL_NAMES, type ModelToolName } from 'ghostbuild-agent/model-tool-inputs';
 import type { Tool } from 'ghostbuild-agent/tool';
-import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
-import type { VirtualDocOverrides } from 'ghostbuild-agent/virtual-docs';
-import { BUILDER_TURN_TIMEOUTS, BuilderTurnBudgetExceededError } from './builder-turn-budget';
+import type { ToolSet } from 'ai';
 import { createWorkersAiTools } from './workers-ai-tools';
 
 type BuilderOperationContext = {
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
-  virtualDocs?: VirtualDocOverrides;
 };
 
 const toolLabels: Record<ModelToolName, string> = {
@@ -23,68 +19,45 @@ const toolLabels: Record<ModelToolName, string> = {
   exec: 'Run command',
 };
 
-/** Build both representations once so Pi execution and prompt accounting share one Zod schema. */
+/** Adapt workspace and official Agent Skills tools to Pi's validated tool contract. */
 export function createPiToolBundle(
   workspace: BuilderWorkspaceApi,
   operationContext: BuilderOperationContext,
-): { canonicalTools: GhostbuildToolSet; piTools: Record<ModelToolName, AgentTool> } {
+  additionalTools: ToolSet = {},
+): Record<string, AgentTool> {
   const canonicalTools = createWorkersAiTools(workspace, operationContext);
-  const piTools = Object.fromEntries(
-    MODEL_TOOL_NAMES.map((name) => [name, adaptTool(name, canonicalTools[name])]),
-  ) as Record<ModelToolName, AgentTool>;
-  return { canonicalTools, piTools };
+  const tools: Record<string, AgentTool> = Object.fromEntries(
+    MODEL_TOOL_NAMES.map((name) => [name, adaptTool(name, canonicalTools[name], toolLabels[name])]),
+  );
+  for (const [name, definition] of Object.entries(additionalTools)) {
+    if (name in tools) {
+      throw new Error(`Additional tool ${name} conflicts with a workspace tool.`);
+    }
+    tools[name] = adaptTool(name, definition, skillToolLabel(name));
+  }
+  return tools;
 }
 
-export function piToolsToList(tools: Record<ModelToolName, AgentTool>): AgentTool[] {
-  return MODEL_TOOL_NAMES.map((name) => tools[name]);
+export function piToolsToList(tools: Record<string, AgentTool>): AgentTool[] {
+  return Object.values(tools);
 }
 
-function adaptTool(name: ModelToolName, definition: Tool): AgentTool {
-  const parameters = z.toJSONSchema(definition.inputSchema as ZodType) as unknown as ReturnType<typeof Type.Object>;
-  return {
+function adaptTool(name: string, definition: Tool | ToolSet[string], label: string): AgentTool {
+  const canonical = definition as unknown as ToolDefinition;
+  if (!canonical.inputSchema) {
+    throw new Error(`${name} does not define an input schema.`);
+  }
+
+  return adaptPiTool({
     name,
-    label: toolLabels[name],
-    description: typeof definition.description === 'string' ? definition.description : `${toolLabels[name]}.`,
-    parameters,
-    execute: async (toolCallId, args, signal, onUpdate) => {
-      signal?.throwIfAborted();
-      if (!definition.execute) {
-        throw new Error(`${name} is not executable.`);
-      }
-      const timeoutSignal = AbortSignal.timeout(BUILDER_TURN_TIMEOUTS.tools[name]);
-      const executionSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-      try {
-        const result = await definition.execute(args, {
-          toolCallId,
-          abortSignal: executionSignal,
-          onUpdate: onUpdate ? (partialResult) => onUpdate(toPiToolResult(partialResult)) : undefined,
-        });
-        executionSignal.throwIfAborted();
-        return toPiToolResult(result);
-      } catch (error) {
-        if (timeoutSignal.aborted && !signal?.aborted) {
-          throw new BuilderTurnBudgetExceededError('tool_timeout');
-        }
-        throw error;
-      }
+    label,
+    definition: {
+      ...canonical,
+      inputSchema: canonical.inputSchema as ToolInputSchema,
     },
-  };
+  }) as AgentTool;
 }
 
-function toPiToolResult(result: unknown): AgentToolResult<unknown> {
-  return {
-    content: [{ type: 'text', text: stringifyToolResult(result) }],
-    details: result,
-  };
-}
-
-function stringifyToolResult(result: unknown): string {
-  if (typeof result === 'string') {
-    return result;
-  }
-  try {
-    return JSON.stringify(result) ?? String(result);
-  } catch {
-    return String(result);
-  }
+function skillToolLabel(name: string): string {
+  return name === 'activate_skill' ? 'Activate guidance' : name === 'read_skill_resource' ? 'Read guidance' : name;
 }

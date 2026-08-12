@@ -50,9 +50,11 @@ describe('getMessageInputPrimaryAction', () => {
     expect(getMessageInputPrimaryAction('unauthenticated', false)).toBe('sign-in');
     expect(getMessageInputPrimaryAction('fullyLoggedIn', false)).toBe('send');
     expect(getMessageInputPrimaryAction('unauthenticated', true)).toBe('stop');
+    expect(getMessageInputPrimaryAction('fullyLoggedIn', true, true)).toBe('send');
     expect(getMessageInputPrimaryActionLabel('unauthenticated', false)).toBe('Connect Cloudflare');
     expect(getMessageInputPrimaryActionLabel('fullyLoggedIn', false)).toBe('Send');
     expect(getMessageInputPrimaryActionLabel('unauthenticated', true)).toBe('Stop');
+    expect(getMessageInputPrimaryActionLabel('fullyLoggedIn', true, true)).toBe('Send');
   });
 });
 

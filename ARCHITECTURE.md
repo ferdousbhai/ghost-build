@@ -79,12 +79,17 @@ stores files directly in the Durable Object's SQLite VFS. Its container backend 
 Container through FUSE and reconciles changes back to the VFS. There is no application-level ZIP archive, R2 backup, or
 duplicate project blob in the control plane.
 
-The model receives only four primitive tools: `read`, `write`, `edit`, and `exec`. `write` and `exec` adapt the reviewed
+The model receives four project-operation primitives: `read`, `write`, `edit`, and `exec`, plus the official
+`activate_skill` and `read_skill_resource` guidance tools. `write` and `exec` adapt the reviewed
 `@cloudflare/computer/tools` contracts; Ghostbuild's `read` returns numbered lines with a compact tag bound to the full
 file SHA-256, and `edit` applies non-overlapping line operations only when that exact snapshot is still current.
-Directory discovery goes through `exec`; no `ls` schema is included in model input or prompt accounting. `read` also exposes immutable
-bundled guidance under `/home/project/.ghost/docs/` without adding those files to
-the project revision or deployment artifact. Model tools and editor reads use the same workspace API. Browser saves use
+Directory discovery goes through `exec`; no `ls` schema is included in model input or prompt accounting.
+Owner-published guidance from the `SYSTEM_DOCS` KV namespace is converted into an official Agent Skills manifest at
+turn preparation. The Pi harness receives the framework-independent `activate_skill` and `read_skill_resource` tools
+from `agents/skills`; guidance never enters the project VFS, revision, or deployment artifact. Ghostbuild consumes only
+the minimal `{ version, documents }` runtime view. Maintainer provenance, revisions, hashes, and publication history stay
+in `ghost-build-ops`. Missing or invalid published guidance fails the turn instead of silently degrading it.
+Model tools and editor reads use the same workspace API. Browser saves use
 compare-and-swap against the numeric revision the browser loaded; a conflict refreshes from the user runtime and never
 overwrites newer state. TanStack DB collections combine the server query collection with a per-account browser SQLite
 persistence layer. That local data is a performance and offline-start replica, not an authority.
@@ -94,11 +99,12 @@ stdout/stderr updates while retaining only a bounded final tail for the model; c
 filesystem pull to become durable. The Pi loop enforces a total turn limit, model-stream inactivity limit, model-step
 ceiling, and per-tool limits. A cancellation requested before a Container process handle exists is retained and applied
 as soon as that handle becomes available. Approved `pnpm add <packages>` and `pnpm install --lockfile-only` commands route to
-the reviewed dependency installer rather than an unrestricted package-manager shell. Every source or dependency mutation runs full
-validation automatically and returns the revision-bound receipt with the primitive tool result. Production deployment
-is not a model capability: an authenticated user command verifies the current receipt, prepares the exact-revision plan,
-and then enters the explicit billing approval flow. Preview and deployment operate on checkpoints from the same VFS, so
-deployment cannot proceed after the project changes.
+the reviewed dependency installer rather than an unrestricted package-manager shell. After related mutations are complete,
+the model requests one full validation and receives its revision-bound receipt. Production deployment
+is not a model capability: after validation, `BuilderAgent` admits a durable deployment fiber that runs one authenticated,
+idempotent server operation, verifies the current receipt, prepares the exact-revision plan, and executes it in the user's
+account. The browser can request a retry but is not responsible for starting deployment. Preview and deployment use
+checkpoints from the same VFS, so deployment cannot proceed after the project changes.
 
 ## Preview Boundary
 
@@ -112,7 +118,7 @@ not passed to generated project processes.
 
 ## Deployment Boundary
 
-Deployment planning and approval are recorded in the user workspace D1. Execution verifies that Computer's current
+Deployment state and resource intent are recorded in the user workspace D1. Execution verifies that Computer's current
 content checkpoint still matches the validated revision, repeats the production checks through the container backend,
 provisions the requested resources through the user's Cloudflare API authorization, applies migrations, and publishes
 with Wrangler. Ghostbuild stores no deployment archive.

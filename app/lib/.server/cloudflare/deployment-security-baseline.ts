@@ -1,6 +1,6 @@
 import { BUILDER_TEMPLATE_SOURCE_SHA256 } from '~/agents/builder-template.generated';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 32 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 33 as const;
 export {
   DEPLOYMENT_SECURITY_BASELINE_BINDING,
   DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
@@ -43,7 +43,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'src/agent-routing.ts': '0000bd8d4daa8b0b84d5e176c955b8ee0983e013b87079fa47414b79f7963b57',
   'src/agent-security.ts': '72f32a6bc2dd1b8d36c4f1c57dce2c00ed29ae30662e1f26b1d8011cdc8c8124',
   'src/agents/anonymous-retention.ts': '38489c93827bc38bcf48deac80005fbe03c6bbb31a6c4fe885c6064e22eb05ae',
-  'src/agents/app-agent.ts': '38db7b77ad8420ec8d39cc2144f2510d5c5493a9e7c047bbee354a122ef0b2d3',
+  'src/agents/app-agent.ts': '4c59718f613bec05702540ed50b7a124a88655f22dfd96d2908680e167304f30',
   'src/agents/chat-policy.ts': '16a806aa0e26b5c7057e70fecb59cbbfd08921e36e8d2b967102eab6b7e6dec2',
   'src/app-bindings.ts': '88f1db64a430b254a3dc1cc901bb477ff065818a939732b145d9fbf2436606a5',
   'src/application-response.ts': '70f3c2a456f3bd7ae96385d78ec06c4555e5b7d0bf2845594e5f5ba9949d5fec',
@@ -56,7 +56,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'wrangler.preview.jsonc': '626444c576448d7c8a70572092d7d68ec0d0fb6d577978fed0a146018053fde8',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '626558c4d58f2e81d5f165d49b4b69016c4d9b7a01bc69dc0c7af6851769df36';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'd629193c74359dc6098f2b76168baf3d34d275188313be0d130599705f1a4750';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
   '0b9d16c0b631ec77600d4ac8b751e7d320e4dd54e7c85c52dc2713289e8baaf9';
@@ -68,7 +68,7 @@ export function isCurrentDeploymentSecurityIdentity(value: {
   securityBoundarySha256?: unknown;
 }): boolean {
   return (
-    value.version === 3 &&
+    value.version === 4 &&
     value.templateSourceSha256 === TEMPLATE_SOURCE_SHA256 &&
     value.securityBaselineVersion === DEPLOYMENT_SECURITY_BASELINE_VERSION &&
     value.securityBoundarySha256 === APP_AGENT_SECURITY_BOUNDARY_SHA256

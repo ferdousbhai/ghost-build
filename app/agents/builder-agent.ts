@@ -10,24 +10,25 @@ import { canApplyConversationCompaction, conversationCompactionKey } from '~/lib
 import { createChatResponseFromBody, type ChatRequestBody } from '~/lib/.server/chat';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import {
-  BuilderTurnStore,
   completeBuilderTurn,
   createBuilderTurn,
   createRecoveryTurn,
   exhaustedBuilderTurnResult,
   type BuilderTurnState,
   type BuilderTurnStatus,
-} from './builder-turn-store';
+} from './builder-turn-state';
 import { DurableObjectContextCompactionRepository } from '~/lib/.server/llm/context-compaction-store';
 import { compactContext } from '~/lib/.server/llm/context-compaction';
 import { summarizeBuilderContext } from '~/lib/.server/llm/workers-ai-text';
 import { chatTurnContextSchema, type ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
-import { loadSystemVirtualDocs } from '~/lib/.server/cloudflare/system-virtual-docs';
-import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from 'ai';
-import { latestPendingDeploymentPlan } from './deployment-continuation';
-import { prepareDeploymentPlanForBuilder, validatedDeploymentCheckpoint } from './builder-deployment-command';
-import { parsePendingDeploymentApproval, type PendingDeploymentApproval } from '~/lib/deployment-approval';
+import { loadSystemDocs } from '~/lib/.server/cloudflare/system-docs';
+import type { UIMessage } from 'ai';
+import {
+  deployValidatedRevisionForBuilder,
+  validatedDeploymentCheckpoint,
+  type BuilderDeploymentState,
+} from './builder-deployment-command';
 import { generateConversationTitle, generateProjectTitle } from '~/lib/.server/llm/workers-ai-title';
 import {
   setGeneratedProjectDescription,
@@ -50,7 +51,6 @@ import { createWorkersAiSessionAffinity } from '~/lib/.server/llm/workers-ai-pro
 import {
   boundBuilderMessageForPersistence,
   loadBuilderTranscriptBinding,
-  MAX_BUILDER_AGENT_MESSAGES,
   requireBuilderRequestScope,
   requireBuilderTranscriptIdentity,
   type BuilderTranscriptBinding,
@@ -81,13 +81,13 @@ import {
 } from './builder-preview-types';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 import { waitForCancellationBeforeDeadline } from './builder-cancellation';
+import { PiSteeringQueue } from '~/lib/.server/llm/pi-steering';
+import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 
 const logger = createScopedLogger('BuilderAgent');
-const STALE_CHAT_RECOVERY_MS = 15 * 60 * 1000;
-const MAX_CHAT_RECOVERY_ATTEMPTS = 2;
-const CHAT_NO_PROGRESS_TIMEOUT_MS = 14 * 60 * 1000;
 const CONTEXT_COMPACTION_FIBER = 'background:context_compaction';
 const PREVIEW_BUILD_FIBER = 'background:builder_preview';
+const DEPLOYMENT_FIBER = 'background:builder_deployment';
 const TITLE_GENERATION_FIBER = 'background:title_generation';
 const TITLE_GENERATION_JOB_MAX_PROMPT_CHARACTERS = 4_000;
 const CHAT_CANCELLATION_SETTLE_TIMEOUT_MS = 4.5 * 60 * 1000;
@@ -98,6 +98,8 @@ type PreviewBuildJob = {
   snapshotRevision: string;
   requestedAt: number;
 };
+
+type DeploymentJob = BuilderWorkspaceCheckpoint;
 
 type TitleGenerationJob = {
   chatInitialId: string;
@@ -123,9 +125,13 @@ export type BuilderAgentState = {
     stage: BuilderValidationStage;
     updatedAt: string;
   } | null;
-  deploymentApproval?: PendingDeploymentApproval | null;
-  deploymentReady?: boolean;
+  deployment?: BuilderDeploymentState | null;
   contextCompactionRequestedTurnId?: string | null;
+};
+
+export type BuilderSteeringInput = {
+  text: string;
+  turnContext?: ChatTurnContext;
 };
 
 type ChatBody = Partial<ChatRequestBody> & { transcript?: unknown };
@@ -147,22 +153,12 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     transcript: null,
     preview: idleBuilderPreviewState(0),
     validationProgress: null,
-    deploymentApproval: null,
-    deploymentReady: false,
+    deployment: null,
     contextCompactionRequestedTurnId: null,
   };
 
-  override messageConcurrency = 'drop' as const;
-
-  override maxPersistedMessages = MAX_BUILDER_AGENT_MESSAGES;
-
-  override waitForMcpConnections = { timeout: 10_000 };
-
   override chatRecovery = {
-    maxAttempts: MAX_CHAT_RECOVERY_ATTEMPTS,
-    noProgressTimeoutMs: CHAT_NO_PROGRESS_TIMEOUT_MS,
     terminalMessage: 'The builder was interrupted. Please send your message again.',
-    shouldKeepRecovering: ({ ageMs }: { ageMs: number }) => ageMs <= STALE_CHAT_RECOVERY_MS,
     onExhausted: (context: ChatRecoveryExhaustedContext) => {
       const activeTurn = this.state.activeTurn;
       if (!activeTurn) {
@@ -175,15 +171,13 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     },
   };
 
-  override chatStreamStallTimeoutMs = CHAT_NO_PROGRESS_TIMEOUT_MS;
-
-  private readonly turnStore = new BuilderTurnStore(this);
   private readonly contextCompaction = new DurableObjectContextCompactionRepository(this);
   private readonly identityRepository: BuilderAgentIdentityRepository;
   private readonly workspace: BuilderWorkspaceApi;
   private ownerId: string | null = null;
   private userId: string | null = null;
   private transcriptBinding: BuilderTranscriptBinding | null = null;
+  private activeSteering: { turnId: string; queue: PiSteeringQueue } | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -256,15 +250,12 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       });
       return { persist: true, continue: false };
     }
-    const ageMs = Date.now() - ctx.createdAt;
     const nextTurn = createRecoveryTurn(ctx, this.state.activeTurn);
     this.setState({
       ...this.state,
       activeTurn: nextTurn,
       updatedAt: nextTurn.updatedAt,
     });
-    this.turnStore.record(nextTurn);
-
     logger.warn('Recovering interrupted Ghostbuild chat turn', {
       incidentId: nextTurn.recovery?.incidentId,
       recoveryKind: ctx.recoveryKind,
@@ -272,18 +263,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       hasPartialOutput: ctx.partialText.length > 0,
       hasRecoveryData: ctx.recoveryData !== undefined,
     });
-
-    if (ageMs > STALE_CHAT_RECOVERY_MS) {
-      logger.warn('Skipping automatic continuation for stale Ghostbuild chat turn', {
-        incidentId: ctx.incidentId,
-      });
-      this.finishTurn(nextTurn, {
-        requestId: ctx.requestId,
-        status: 'aborted',
-        error: 'Automatic recovery expired before the interrupted turn could continue.',
-      });
-      return { persist: true, continue: false };
-    }
 
     return {};
   }
@@ -311,6 +290,19 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       await this.runPreviewBuild(job);
       return { status: 'completed', snapshot: ctx.snapshot };
     }
+    if (ctx.name === DEPLOYMENT_FIBER) {
+      const job = parseDeploymentJob(ctx.metadata);
+      if (!job) {
+        return { status: 'error', error: 'missing deployment recovery data' };
+      }
+      try {
+        await this.runDeployment(job);
+        return { status: 'completed', snapshot: ctx.snapshot };
+      } catch (error) {
+        this.failDeployment(job, error);
+        return { status: 'error', error: deploymentErrorMessage(error) };
+      }
+    }
     if (ctx.name !== CONTEXT_COMPACTION_FIBER) {
       return super.onFiberRecovered(ctx);
     }
@@ -337,22 +329,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       body,
       durableIdentity.transcript,
     );
-    const pendingDeploymentPlan = options?.continuation ? latestPendingDeploymentPlan(messages) : null;
-    if (pendingDeploymentPlan) {
-      console.info({
-        event: 'builder_deployment_plan_continuation_stopped',
-      });
-      return createUIMessageStreamResponse({
-        stream: createUIMessageStream<UIMessage>({
-          execute: ({ writer }) => {
-            writer.write({
-              type: 'data-deployment-approval',
-              data: pendingDeploymentPlan,
-            });
-          },
-        }),
-      });
-    }
     if (!options?.continuation) {
       await this.cancelPreview();
     }
@@ -379,10 +355,15 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.setState({
       ...this.state,
       activeTurn: turn,
-      deploymentApproval: null,
       updatedAt: turn.updatedAt,
     });
-    this.turnStore.record(turn);
+    const steering = new PiSteeringQueue();
+    this.activeSteering = { turnId: turn.id, queue: steering };
+    const settleSteering = () => {
+      if (this.activeSteering?.turnId === turn.id) {
+        this.activeSteering = null;
+      }
+    };
 
     try {
       const accountCredentials = await getUserWorkersAiCredentials(this.env, durableIdentity.userId);
@@ -400,10 +381,16 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       }
       this.stashTurn(turn);
       const compactionPending = await this.hasPendingContextCompaction();
-      const virtualDocs = await loadSystemVirtualDocs(this.env.SYSTEM_DOCS).catch(() => {
-        console.error('Published system documentation is unavailable; using the bundled fallback');
-        return {};
+      const systemDocs = await loadSystemDocs(this.env.SYSTEM_DOCS).catch(() => {
+        logger.error('Published system documentation is unavailable');
+        return null;
       });
+      if (!systemDocs) {
+        throw new Response('Ghostbuild guidance is temporarily unavailable. Please retry.', {
+          status: 503,
+          statusText: 'System documentation unavailable',
+        });
+      }
       return await createChatResponseFromBody({
         abortSignal: options?.abortSignal,
         firstUserMessage,
@@ -413,7 +400,9 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         workspace: this.workspace,
         onValidationStage: (toolCallId, stage) => this.setValidationProgress(toolCallId, stage),
         runWithKeepAlive: (operation) => this.keepAliveWhile(operation),
-        virtualDocs,
+        systemDocs,
+        steering,
+        onSettled: settleSteering,
         compaction: {
           current: this.contextCompaction.getCompaction(),
           pending: compactionPending,
@@ -438,6 +427,8 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         body: { messages, modelId },
       });
     } catch (error) {
+      steering.close();
+      settleSteering();
       this.finishTurn(turn, {
         status: 'error',
         error: error instanceof Error ? error.message : String(error),
@@ -547,16 +538,53 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         }
       }
       if (validatedSnapshot) {
-        await this.requestPreviewInternal({ validatedSnapshot }).catch(() =>
-          logger.warn('Unable to queue the automatic remote preview'),
-        );
+        await Promise.all([
+          this.requestPreviewInternal({ validatedSnapshot }).catch(() =>
+            logger.warn('Unable to queue the automatic remote preview'),
+          ),
+          this.scheduleDeployment(validatedSnapshot).catch(() =>
+            logger.warn('Unable to queue the automatic deployment'),
+          ),
+        ]);
       }
     }
   }
 
   @callable()
-  getTurnHistory(limit = 20) {
-    return this.turnStore.getHistory(limit);
+  async steerActiveTurn(input: unknown): Promise<{ accepted: true }> {
+    await this.hydrateDurableIdentity({ required: true, reason: 'steer_active_turn' });
+    if (!isRecord(input) || typeof input.text !== 'string') {
+      throw new Response('Invalid steering message', { status: 400 });
+    }
+    const text = input.text.trim();
+    if (!text || text.length > MAX_USER_MESSAGE_CHARACTERS) {
+      throw new Response('Invalid steering message', { status: 400 });
+    }
+    const active = this.activeSteering;
+    if (!active || this.state.activeTurn?.id !== active.turnId) {
+      throw new Response('The builder is not currently running.', { status: 409 });
+    }
+
+    const message: UIMessage = {
+      id: `steering-${crypto.randomUUID()}`,
+      role: 'user',
+      parts: [{ type: 'text', text }],
+    };
+    const reservation = active.queue.reserve(message, parseTurnContext(input.turnContext));
+    if (!reservation) {
+      throw new Response('The builder turn has already finished.', { status: 409 });
+    }
+    try {
+      await this.persistMessages([...this.messages, message]);
+      if (this.state.transcript) {
+        await this.advanceTranscriptCheckpoint(this.state.transcript);
+      }
+      reservation.commit();
+      return { accepted: true };
+    } catch (error) {
+      reservation.reject(error);
+      throw error;
+    }
   }
 
   @callable()
@@ -613,8 +641,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (result.ok && result.changedPaths.length > 0) {
       this.setState({
         ...this.state,
-        deploymentApproval: null,
-        deploymentReady: false,
+        deployment: null,
         updatedAt: new Date().toISOString(),
       });
     }
@@ -628,39 +655,17 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   @callable()
-  async prepareDeployment(): Promise<PendingDeploymentApproval> {
-    const identity = await this.hydrateDurableIdentity({ required: true, reason: 'prepare_deployment' });
-    if (!identity) {
-      throw new Response('Agent authentication is required.', { status: 401 });
-    }
+  async deployValidatedRevision(): Promise<BuilderDeploymentState> {
+    await this.hydrateDurableIdentity({ required: true, reason: 'deploy_validated_revision' });
     const snapshot = await validatedDeploymentCheckpoint(this.workspace);
     if (!snapshot) {
       throw new Error('The current project revision must pass validation before deployment.');
     }
-    const result = await this.keepAliveWhile(() =>
-      prepareDeploymentPlanForBuilder({
-        context: {
-          env: this.env,
-          userId: identity.userId,
-          chatInitialId: identity.transcript.chatInitialId,
-          agentName: this.name,
-        },
-        workspace: this.workspace,
-        toolCallId: `deploy-command:${snapshot.workspaceRevision}:${snapshot.revision}`,
-        validatedRevision: snapshot.revision,
-      }),
-    );
-    const approval = parsePendingDeploymentApproval(result);
-    if (!approval) {
-      throw new Error(result.summary || 'The project is not ready to deploy.');
+    try {
+      return await this.runDeployment(snapshot);
+    } catch (error) {
+      return this.failDeployment(snapshot, error);
     }
-    this.setState({
-      ...this.state,
-      deploymentApproval: approval,
-      deploymentReady: true,
-      updatedAt: new Date().toISOString(),
-    });
-    return approval;
   }
 
   @callable()
@@ -857,8 +862,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         kind: 'ghostbuild-chat-turn',
         turn,
         recoveryPlan: {
-          onRecovery: 'Persist partial output and continue only when the turn is recent.',
-          staleRecoveryMs: STALE_CHAT_RECOVERY_MS,
+          onRecovery: 'Persist partial output and continue.',
           contextSource: 'durable AIChatAgent transcript plus this turn checkpoint',
         },
       });
@@ -1036,6 +1040,59 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     return seedBuilderWorkspace(this.workspace, seedId, entries);
   }
 
+  private async scheduleDeployment(job: DeploymentJob): Promise<void> {
+    await this.startFiber(
+      DEPLOYMENT_FIBER,
+      async (fiber) => {
+        fiber.stash(job);
+        try {
+          await this.runDeployment(job);
+        } catch (error) {
+          this.failDeployment(job, error);
+          throw error;
+        }
+      },
+      {
+        idempotencyKey: `builder-deployment:${this.name}:${job.workspaceRevision}:${job.revision}`,
+        metadata: job,
+      },
+    );
+  }
+
+  private async runDeployment(job: DeploymentJob): Promise<BuilderDeploymentState> {
+    const userId = this.userId;
+    const transcriptBinding = this.transcriptBinding;
+    if (!userId || !transcriptBinding) {
+      throw new Response('Agent authentication is required.', { status: 401 });
+    }
+    this.setState({
+      ...this.state,
+      deployment: { status: 'deploying', ...job },
+      updatedAt: new Date().toISOString(),
+    });
+    const deployment = await this.keepAliveWhile(() =>
+      deployValidatedRevisionForBuilder({
+        context: {
+          env: this.env,
+          userId,
+          chatInitialId: transcriptBinding.chatInitialId,
+        },
+        workspace: this.workspace,
+        toolCallId: `deploy-command:${job.workspaceRevision}:${job.revision}`,
+        validatedRevision: job.revision,
+      }),
+    );
+    const revisionBoundDeployment = { ...deployment, ...job };
+    this.setState({ ...this.state, deployment: revisionBoundDeployment, updatedAt: new Date().toISOString() });
+    return revisionBoundDeployment;
+  }
+
+  private failDeployment(job: DeploymentJob, error: unknown): BuilderDeploymentState {
+    const deployment = { status: 'failed' as const, ...job, error: deploymentErrorMessage(error) };
+    this.setState({ ...this.state, deployment, updatedAt: new Date().toISOString() });
+    return deployment;
+  }
+
   private async requestPreviewInternal(
     options: { validatedSnapshot?: BuilderWorkspaceCheckpoint } = {},
   ): Promise<BuilderPreviewState> {
@@ -1211,11 +1268,15 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     } catch {
       logger.warn('Unable to refresh deployment readiness');
     }
-    const deploymentReady = validatedSnapshot !== null;
+    const currentDeployment = this.state.deployment;
+    const deployment = validatedSnapshot
+      ? currentDeployment?.revision === validatedSnapshot.revision
+        ? currentDeployment
+        : { status: 'ready' as const, ...validatedSnapshot }
+      : null;
     this.setState({
       ...this.state,
-      deploymentReady,
-      ...(deploymentReady ? {} : { deploymentApproval: null }),
+      deployment,
       updatedAt: new Date().toISOString(),
     });
     return validatedSnapshot;
@@ -1229,7 +1290,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.setState({
       ...this.state,
       validationProgress: stage ? { toolCallId, stage, updatedAt } : null,
-      ...(stage ? { deploymentApproval: null, deploymentReady: false } : {}),
       updatedAt,
     });
   }
@@ -1246,7 +1306,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       validationProgress: null,
       updatedAt: finishedTurn.updatedAt,
     });
-    this.turnStore.record(finishedTurn);
   }
 }
 
@@ -1282,6 +1341,23 @@ function parseTitleGenerationJob(value: unknown): TitleGenerationJob | null {
     return null;
   }
   return value as TitleGenerationJob;
+}
+
+function parseDeploymentJob(value: unknown): DeploymentJob | null {
+  if (
+    !isRecord(value) ||
+    !Number.isSafeInteger(value.workspaceRevision) ||
+    (value.workspaceRevision as number) < 0 ||
+    typeof value.revision !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(value.revision)
+  ) {
+    return null;
+  }
+  return value as DeploymentJob;
+}
+
+function deploymentErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Deployment failed.';
 }
 
 function parsePreviewBuildJob(value: unknown): PreviewBuildJob | null {

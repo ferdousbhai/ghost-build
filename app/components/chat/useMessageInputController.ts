@@ -11,6 +11,11 @@ import { messageInputStore } from '~/lib/stores/messageInput';
 import { isAuthenticated } from '~/lib/stores/userId';
 import { debounce } from '~/utils/debounce';
 import { PENDING_PROMPT_STORAGE_KEY } from '~/utils/constants';
+import {
+  promptRefinementResultSchema,
+  type PromptRefinementAnswer,
+  type PromptRefinementQuestion,
+} from '~/lib/prompt-refinement';
 import { useGhostbuildAuth } from './GhostbuildAuthWrapper';
 
 interface MessageInputControllerOptions {
@@ -20,6 +25,12 @@ interface MessageInputControllerOptions {
   prefillEnabled?: boolean;
 }
 
+export interface PromptRefinementSession {
+  sourceInput: string;
+  answers: PromptRefinementAnswer[];
+  questions: PromptRefinementQuestion[];
+}
+
 export function useMessageInputController({
   isStreaming,
   onStop,
@@ -27,6 +38,7 @@ export function useMessageInputController({
   prefillEnabled = true,
 }: MessageInputControllerOptions) {
   const [isEnhancing, setIsEnhancing] = useState(false);
+  const [refinement, setRefinement] = useState<PromptRefinementSession | null>(null);
   const enhanceRequestRef = useRef<AbortController | null>(null);
   const authState = useGhostbuildAuth();
   const input = useStore(messageInputStore);
@@ -66,7 +78,7 @@ export function useMessageInputController({
   }, [input]);
 
   const runPrimaryAction = useCallback(() => {
-    switch (getMessageInputPrimaryAction(authState.kind, isStreaming)) {
+    switch (getMessageInputPrimaryAction(authState.kind, isStreaming, input.trim().length > 0)) {
       case 'stop':
         onStop();
         return;
@@ -79,7 +91,7 @@ export function useMessageInputController({
       case 'wait':
         return;
     }
-  }, [authState.kind, isStreaming, onStop, send, signIn]);
+  }, [authState.kind, input, isStreaming, onStop, send, signIn]);
 
   const handleButtonClick = useCallback(() => {
     runPrimaryAction();
@@ -103,20 +115,12 @@ export function useMessageInputController({
     cachePrompt(event.target.value);
   }, []);
 
-  const enhancePrompt = useCallback(async () => {
-    const sourceInput = input;
-    enhanceRequestRef.current?.abort();
-    const controller = new AbortController();
-    enhanceRequestRef.current = controller;
-    try {
-      setIsEnhancing(true);
-      if (!isAuthenticated()) {
-        throw new Error('Not authenticated');
-      }
+  const requestPromptRefinement = useCallback(
+    async (sourceInput: string, answers: PromptRefinementAnswer[], controller: AbortController) => {
       const response = await fetchUserRuntime('/v1/enhance-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: input.trim() }),
+        body: JSON.stringify({ prompt: sourceInput.trim(), answers }),
         signal: controller.signal,
       });
       if (!response.ok) {
@@ -128,34 +132,98 @@ export function useMessageInputController({
           showWorkersPaidRequiredToast();
           return;
         }
-        throw new Error(payload?.error || 'Failed to enhance prompt. Please try again.');
+        throw new Error(payload?.error || 'Failed to refine the build plan. Please try again.');
       }
-      const data = (await response.json()) as { enhancedPrompt?: string };
-      if (data.enhancedPrompt && !controller.signal.aborted) {
-        replacePromptIfUnchanged(sourceInput, data.enhancedPrompt);
+      const result = promptRefinementResultSchema.safeParse(await response.json());
+      if (!result.success) {
+        throw new Error('Ghostbuild returned an invalid plan refinement response.');
       }
+      if (controller.signal.aborted) {
+        return;
+      }
+      if (result.data.kind === 'complete') {
+        setRefinement(null);
+        replacePromptIfUnchanged(sourceInput, result.data.enhancedPrompt);
+        return;
+      }
+      setRefinement({ sourceInput, answers, questions: result.data.questions });
+    },
+    [],
+  );
+
+  const enhancePrompt = useCallback(async () => {
+    const sourceInput = input;
+    enhanceRequestRef.current?.abort();
+    const controller = new AbortController();
+    enhanceRequestRef.current = controller;
+    try {
+      setIsEnhancing(true);
+      if (!isAuthenticated()) {
+        throw new Error('Not authenticated');
+      }
+      setRefinement(null);
+      await requestPromptRefinement(sourceInput, [], controller);
     } catch (error) {
       if (isAbortError(error)) {
         return;
       }
       captureException('Failed to enhance prompt', error, { level: 'error' });
-      toast.error(error instanceof Error ? error.message : 'Failed to enhance prompt. Please try again.');
+      toast.error(error instanceof Error ? error.message : 'Failed to refine the build plan. Please try again.');
     } finally {
       if (enhanceRequestRef.current === controller) {
         enhanceRequestRef.current = null;
         setIsEnhancing(false);
       }
     }
-  }, [input]);
+  }, [input, requestPromptRefinement]);
+
+  const answerRefinementQuestions = useCallback(
+    async (roundAnswers: PromptRefinementAnswer[]) => {
+      if (!refinement || isEnhancing) {
+        return;
+      }
+      enhanceRequestRef.current?.abort();
+      const controller = new AbortController();
+      enhanceRequestRef.current = controller;
+      const answers = [...refinement.answers, ...roundAnswers];
+      try {
+        setIsEnhancing(true);
+        await requestPromptRefinement(refinement.sourceInput, answers, controller);
+      } catch (error) {
+        if (isAbortError(error)) {
+          return;
+        }
+        captureException('Failed to enhance prompt', error, { level: 'error' });
+        toast.error(error instanceof Error ? error.message : 'Failed to refine the build plan. Please try again.');
+      } finally {
+        if (enhanceRequestRef.current === controller) {
+          enhanceRequestRef.current = null;
+          setIsEnhancing(false);
+        }
+      }
+    },
+    [isEnhancing, refinement, requestPromptRefinement],
+  );
+
+  const cancelRefinement = useCallback(() => {
+    const controller = enhanceRequestRef.current;
+    enhanceRequestRef.current = null;
+    controller?.abort();
+    setIsEnhancing(false);
+    setRefinement(null);
+  }, []);
 
   return {
+    answerRefinementQuestions,
     authState,
+    cancelRefinement,
     enhancePrompt,
     handleButtonClick,
     handleChange,
     handleKeyDown,
     input,
     isEnhancing,
+    refinement,
     signIn,
   };
 }
@@ -163,9 +231,10 @@ export function useMessageInputController({
 export function getMessageInputPrimaryAction(
   authKind: 'loading' | 'unauthenticated' | 'fullyLoggedIn',
   isStreaming: boolean,
+  hasInput = false,
 ): 'stop' | 'sign-in' | 'send' | 'wait' {
   if (isStreaming) {
-    return 'stop';
+    return hasInput ? 'send' : 'stop';
   }
   if (authKind === 'loading') {
     return 'wait';
@@ -176,8 +245,9 @@ export function getMessageInputPrimaryAction(
 export function getMessageInputPrimaryActionLabel(
   authKind: 'loading' | 'unauthenticated' | 'fullyLoggedIn',
   isStreaming: boolean,
+  hasInput = false,
 ): 'Stop' | 'Connect Cloudflare' | 'Send' {
-  const action = getMessageInputPrimaryAction(authKind, isStreaming);
+  const action = getMessageInputPrimaryAction(authKind, isStreaming, hasInput);
   return action === 'stop' ? 'Stop' : action === 'sign-in' ? 'Connect Cloudflare' : 'Send';
 }
 

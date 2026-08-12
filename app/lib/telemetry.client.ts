@@ -19,7 +19,6 @@ const ONCE_PER_JOURNEY_EVENTS = new Set<ProductTelemetryEvent>([
   'validation_succeeded',
   'preview_ready',
   'deployment_approval_presented',
-  'deployment_approved',
   'deployment_succeeded',
 ]);
 

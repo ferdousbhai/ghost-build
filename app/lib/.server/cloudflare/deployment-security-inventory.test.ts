@@ -155,18 +155,13 @@ function deployment(): Deployment {
     workspaceReference: `workspace-runtime:project:1:${'a'.repeat(64)}`,
     status: 'deploying',
     plan: {
-      version: 3,
+      version: 4,
       deploymentId: 'deployment-1',
       sourceSha256: 'a'.repeat(64),
       templateSourceSha256: TEMPLATE_SOURCE_SHA256,
       securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
       securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
       project: { type: 'web_app', bindings: { ai: true, d1: true, r2: false, kv: true, appAgent: true } },
-      billing: {
-        infrastructure: 'user_cloudflare_account',
-        workersAi: 'user_cloudflare_account',
-        workersPaidUpgrade: 'explicit_user_authorization_required',
-      },
       resources: [
         { type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-deployment-1' },
         { type: 'd1', logicalName: 'AGENT_SECURITY_DB', proposedName: 'ghostbuild-deployment-1-agent-security' },
@@ -174,8 +169,6 @@ function deployment(): Deployment {
       ],
     },
     planDigest: 'b'.repeat(64),
-    approvedDigest: 'b'.repeat(64),
-    approvedAt: 1,
     productionUrl: null,
     errorCode: null,
     errorMessage: null,

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MODEL_TOOL_INPUT_SCHEMAS } from 'ghostbuild-agent/model-tool-inputs';
 import type { Tool } from 'ghostbuild-agent/tool';
+import { tool } from 'ai';
+import { z } from 'zod';
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
@@ -12,7 +14,7 @@ vi.mock('./workers-ai-tools', () => ({
   MODEL_TOOL_NAMES: ['read', 'write', 'edit', 'exec'],
 }));
 
-import { createPiToolBundle } from './pi-tools-adapter';
+import { createPiToolBundle, piToolsToList } from './pi-tools-adapter';
 
 describe('Pi tool adapter', () => {
   beforeEach(() => {
@@ -33,7 +35,7 @@ describe('Pi tool adapter', () => {
   });
 
   it('delegates execution to the canonical wrapped tool', async () => {
-    const tools = createPiToolBundle({} as never, operationContext()).piTools;
+    const tools = createPiToolBundle({} as never, operationContext());
     const signal = new AbortController().signal;
 
     await tools.write.execute('write-1', { path: '/home/project/src/app.ts', content: 'export {};' }, signal);
@@ -49,7 +51,7 @@ describe('Pi tool adapter', () => {
       options.onUpdate?.({ stdout: 'building\n', running: true });
       return { exitCode: 0, stdout: 'done\n', stderr: '' };
     });
-    const tools = createPiToolBundle({} as never, operationContext()).piTools;
+    const tools = createPiToolBundle({} as never, operationContext());
     const onUpdate = vi.fn();
 
     await tools.exec.execute('exec-1', { command: 'pnpm test' }, undefined, onUpdate);
@@ -60,30 +62,50 @@ describe('Pi tool adapter', () => {
     });
   });
 
-  it('publishes only the four model tools using the canonical schemas', () => {
-    const tools = createPiToolBundle({} as never, operationContext()).piTools;
+  it('rejects invalid Zod input before canonical execution', async () => {
+    const tools = createPiToolBundle({} as never, operationContext());
 
-    expect(Object.keys(tools)).toEqual(['read', 'write', 'edit', 'exec']);
+    await expect(tools.write.execute('write-invalid', { path: '/home/project/src/app.ts' })).rejects.toThrow(
+      'Invalid tool input for "write"',
+    );
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it('adapts official Agent Skills tools after the workspace tools', async () => {
+    const activate = vi.fn(async ({ name }: { name: string }) => `<skill_content name="${name}">Guide</skill_content>`);
+    const tools = createPiToolBundle({} as never, operationContext(), {
+      activate_skill: tool({
+        description: 'Activate guidance.',
+        inputSchema: z.object({ name: z.string() }),
+        execute: activate,
+      }),
+    });
+
+    await expect(tools.activate_skill!.execute('skill-1', { name: 'builder' })).resolves.toMatchObject({
+      details: '<skill_content name="builder">Guide</skill_content>',
+    });
+    expect(activate).toHaveBeenCalledWith(
+      { name: 'builder' },
+      expect.objectContaining({ toolCallId: 'skill-1' }),
+    );
+    expect(piToolsToList(tools).map(({ name }) => name)).toEqual(['read', 'write', 'edit', 'exec', 'activate_skill']);
+  });
+
+  it('publishes the curated labels, schemas, and exact four-tool order', () => {
+    const tools = createPiToolBundle({} as never, operationContext());
+
+    expect(piToolsToList(tools).map(({ name, label }) => ({ name, label }))).toEqual([
+      { name: 'read', label: 'Read file' },
+      { name: 'write', label: 'Write file' },
+      { name: 'edit', label: 'Edit file' },
+      { name: 'exec', label: 'Run command' },
+    ]);
     expect(Object.keys((tools.edit.parameters as { properties: object }).properties)).toEqual([
       'path',
       'base',
       'edits',
     ]);
-    expect(Object.keys((tools.exec.parameters as { properties: object }).properties)).toEqual([
-      'command',
-      'cwd',
-      'backend',
-    ]);
-  });
-
-  it('returns the canonical tools alongside their Pi adapters', () => {
-    const canonicalTools = mocks.createWorkersAiTools();
-    mocks.createWorkersAiTools.mockReturnValueOnce(canonicalTools);
-
-    const bundle = createPiToolBundle({} as never, operationContext());
-
-    expect(bundle.canonicalTools).toBe(canonicalTools);
-    expect(Object.keys(bundle.piTools)).toEqual(['read', 'write', 'edit', 'exec']);
+    expect(Object.keys((tools.exec.parameters as { properties: object }).properties)).toEqual(['command', 'cwd']);
   });
 });
 

@@ -51,10 +51,6 @@ function AssistantMessagePart({ part, partId }: { part: GhostbuildPart; partId: 
     ) : null;
   }
 
-  if (part.type === 'data-deployment-approval') {
-    return null;
-  }
-
   if (part.type === 'step-start' || part.type === 'reasoning' || part.type === 'reasoning-file') {
     return null;
   }

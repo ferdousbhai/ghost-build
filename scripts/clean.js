@@ -6,7 +6,6 @@ const generatedPaths = [
   '.tanstack',
   '.wrangler',
   'dist',
-  'ghostbuild-system-prompts.txt',
   'worker-configuration.d.ts',
   'package-lock.json',
   'template/.tanstack',

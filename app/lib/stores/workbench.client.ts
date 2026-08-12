@@ -63,10 +63,6 @@ export class WorkbenchStore {
     return this.#filesStore.files;
   }
 
-  get userWrites() {
-    return this.#filesStore.userWrites;
-  }
-
   setWorkspaceChangeListener(listener: WorkspaceChangeListener | null): void {
     this.#filesStore.setWorkspaceChangeListener(listener);
   }
@@ -221,6 +217,13 @@ export class WorkbenchStore {
     const current = this.currentDocument.get();
     if (current) {
       await this.saveFile(current.filePath);
+    }
+  }
+
+  async saveUnsavedFiles(): Promise<void> {
+    this.flushPendingEditorChange();
+    for (const filePath of [...this.unsavedFiles.get()]) {
+      await this.saveFile(filePath);
     }
   }
 

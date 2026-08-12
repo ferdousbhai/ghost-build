@@ -1,13 +1,3 @@
-export type PendingDeploymentApproval = {
-  id: string;
-  planDigest: string;
-  resources: Array<{ type: string; logicalName: string; proposedName: string }>;
-};
-
-export type GhostbuildDataTypes = {
-  'deployment-approval': PendingDeploymentApproval;
-};
-
 // Pi-native ghost message — kept structurally compatible with UIMessage parts shapes used by chat UI.
 export type GhostbuildPart =
   | { type: 'text'; text: string }

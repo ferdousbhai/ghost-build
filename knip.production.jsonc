@@ -4,7 +4,7 @@
   },
   "workspaces": {
     ".": {
-      "entry": ["app/router.tsx", "user-workspace-runtime/src/index.ts", "buildSystemPrompts.ts"],
+      "entry": ["app/router.tsx", "user-workspace-runtime/src/index.ts"],
       "project": [
         "**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!",
         "!**/*.test.{ts,tsx}",

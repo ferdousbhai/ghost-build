@@ -2,9 +2,9 @@ import { decideConversationCompaction, type ConversationCompactionAction } from 
 import type { ModelMessage } from './message-conversion';
 import { estimateStringTokens } from 'agents/experimental/memory/utils';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { MAX_ESTIMATED_MODEL_INPUT_TOKENS, MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
-import type { GhostbuildToolSet } from 'ghostbuild-agent/types';
 import {
   assembleCompactedContext,
   compactContext,
@@ -13,7 +13,6 @@ import {
 } from './context-compaction';
 import { cleanupAssistantMessages } from './message-conversion';
 import { injectTurnContext } from './turn-context';
-import { serializeWorkersAiToolDefinitions } from './workers-ai-tools';
 
 type ModelInputLogger = {
   info(message: string, data?: Record<string, unknown>): void;
@@ -72,8 +71,8 @@ export async function prepareModelInput(args: {
   scheduleCompaction?: () => Promise<void>;
   signal?: AbortSignal;
   contextWindow: number;
-  systemPrompts: string[];
-  tools: GhostbuildToolSet;
+  systemPrompt: string;
+  tools: AgentTool[];
   logger?: ModelInputLogger;
 }): Promise<PreparedModelInput> {
   let assembled = assembleCompactedContext(args.messages, args.currentCompaction);
@@ -152,14 +151,14 @@ export async function prepareModelInput(args: {
 
 async function assembleModelInput(
   uiMessages: GhostbuildMessage[],
-  args: Pick<Parameters<typeof prepareModelInput>[0], 'systemPrompts' | 'tools'>,
+  args: Pick<Parameters<typeof prepareModelInput>[0], 'systemPrompt' | 'tools'>,
 ): Promise<{ messages: ModelMessage[]; estimatedTokens: number }> {
   const messages = cleanupAssistantMessages(uiMessages);
   const estimatedTokens = estimateStringTokens(
     JSON.stringify({
-      instructions: args.systemPrompts,
+      instructions: args.systemPrompt,
       messages,
-      tools: serializeWorkersAiToolDefinitions(args.tools),
+      tools: args.tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
       toolChoice: 'auto',
     }),
   );

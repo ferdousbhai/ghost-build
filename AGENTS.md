@@ -6,6 +6,12 @@ Use this file as a source map. Prefer the implementation, types, tests, and conf
 
 Prefer `main` — branches/PRs only if asked or for isolated experiments. For small/docs changes, lightweight checks are fine; otherwise simplify diff, fix blocking issues, run checks, then commit and push `origin/main`.
 
+## Shared `ghosts` packages
+
+Portable mechanisms shared with SummonGhost or Ask Dan belong in the public [`ghosts`](../ghosts) repository; Ghostbuild-specific authorization, user-owned-resource policy, billing, persistence, prompts, and telemetry stay here. Consumers must pin a publicly reachable full commit SHA, never a branch or moving `main`.
+
+For coordinated local changes: update `ghosts` and run its `pnpm check` first; temporarily use `link:<relative-path-to-ghosts>/packages/<package>` (relative to the consuming package manifest) only locally; run affected Ghostbuild checks; commit and push `ghosts`; replace the link with `github:ferdousbhai/ghosts#<full-sha>&path:/packages/<package>`; refresh the lockfile; rerun complete checks. Never commit or push `link:`, `file:`, branch, or moving-main dependencies, and never push Ghostbuild before its pinned shared commit is reachable. Remove superseded local implementations in the same change.
+
 ## Primary Entry Points
 
 - [app/server.ts](app/server.ts) — control-plane Worker dispatch and scheduled auth cleanup
@@ -36,7 +42,7 @@ Never fall back to Ghostbuild-owned resources or credentials; fail closed when t
 - [app/lib/cloudflare/data/](app/lib/cloudflare/data/) — user-runtime D1 repositories and services
 - [app/lib/cloudflare/data-api.ts](app/lib/cloudflare/data-api.ts) — browser/server operation contract
 - [app/agents/builder-deployment-command.ts](app/agents/builder-deployment-command.ts) — authenticated exact-revision
-  deployment-plan command
+  deployment command
 - [app/lib/.server/cloudflare/user-workspace-deployment-executor.ts](app/lib/.server/cloudflare/user-workspace-deployment-executor.ts)
   — user-owned deployment execution
 - [app/lib/.server/cloudflare/deployment-security-baseline.ts](app/lib/.server/cloudflare/deployment-security-baseline.ts)

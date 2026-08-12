@@ -11,7 +11,7 @@ const SOURCE_ONE = '1'.repeat(64);
 const SOURCE_TWO = '2'.repeat(64);
 
 describe('buildDeploymentPlanFromSource', () => {
-  it('binds the user-account billing policy and exact backup revision into an immutable plan', async () => {
+  it('binds the exact revision and resource intent into an immutable plan', async () => {
     const result = await buildDeploymentPlanFromSource({
       deploymentId: 'deployment-1',
       sourceSha256: SOURCE_ONE,
@@ -20,15 +20,10 @@ describe('buildDeploymentPlanFromSource', () => {
 
     expect(result.digest).toMatch(/^[a-f0-9]{64}$/);
     expect(result.plan).toMatchObject({
-      version: 3,
+      version: 4,
       sourceSha256: SOURCE_ONE,
       templateSourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
       securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
-    });
-    expect(result.plan.billing).toEqual({
-      infrastructure: 'user_cloudflare_account',
-      workersAi: 'user_cloudflare_account',
-      workersPaidUpgrade: 'explicit_user_authorization_required',
     });
     expect(result.plan.resources.map(({ type }) => type)).toEqual([
       'worker',
@@ -41,7 +36,7 @@ describe('buildDeploymentPlanFromSource', () => {
     ]);
   });
 
-  it('changes the approval digest when the exact backup revision changes', async () => {
+  it('changes the plan digest when the exact backup revision changes', async () => {
     const project = { type: 'web_app' as const, bindings: { ai: true, d1: true, r2: true, kv: true, appAgent: true } };
     const first = await buildDeploymentPlanFromSource({
       deploymentId: 'deployment-1',

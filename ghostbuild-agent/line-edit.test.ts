@@ -51,11 +51,20 @@ describe('line-anchored editing', () => {
         { startLine: 1, endLine: 2, content: 'changed' },
         { afterLine: 1, content: 'inside' },
       ]),
-    ).toThrow('inserts inside');
-    expect(() => applyLineEdits('one', [{ afterLine: 2, content: 'later' }])).toThrow('beyond end of file');
+    ).toThrow('overlap');
+    expect(() => applyLineEdits('one', [{ afterLine: 2, content: 'later' }])).toThrow('beyond insertion line');
   });
 
-  it('requires the complete line-edit contract with no exact-text fallback', () => {
+  it('preserves insertion-at-replacement-start behavior', () => {
+    expect(
+      applyLineEdits('one\ntwo\nthree', [
+        { startLine: 2, endLine: 2, content: 'TWO' },
+        { afterLine: 1, content: 'between' },
+      ]).content,
+    ).toBe('one\nbetween\nTWO\nthree');
+  });
+
+  it('preserves the complete strict line-edit schema, 24-character base, and 100-operation cap', () => {
     expect(
       lineEditToolParameters.safeParse({
         path: '/home/project/src/app.ts',
@@ -63,6 +72,20 @@ describe('line-anchored editing', () => {
         edits: [{ startLine: 1, endLine: 1, content: 'changed' }],
       }).success,
     ).toBe(true);
+    expect(
+      lineEditToolParameters.safeParse({
+        path: '/home/project/src/app.ts',
+        base: lineEditBaseTag(SHA),
+        edits: [{ afterLine: 0, content: 'first', unexpected: true }],
+      }).success,
+    ).toBe(false);
+    expect(
+      lineEditToolParameters.safeParse({
+        path: '/home/project/src/app.ts',
+        base: lineEditBaseTag(SHA),
+        edits: Array.from({ length: 101 }, () => ({ afterLine: 0, content: 'too many' })),
+      }).success,
+    ).toBe(false);
     expect(
       lineEditToolParameters.safeParse({
         path: '/home/project/src/app.ts',

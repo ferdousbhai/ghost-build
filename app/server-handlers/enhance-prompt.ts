@@ -1,17 +1,28 @@
+import type { Tool } from '@earendil-works/pi-ai';
 import { z } from 'zod';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { getPiProvider } from '~/lib/.server/llm/provider';
-import { completeText } from '~/lib/.server/llm/pi-ai-invoke';
-import { ENHANCE_PROMPT_SYSTEM_PROMPT } from './enhance-prompt-prompt';
+import { completeToolCall } from '~/lib/.server/llm/pi-ai-invoke';
+import { PROMPT_REFINEMENT_SYSTEM_PROMPT } from './enhance-prompt-prompt';
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
 import { logProviderFailure } from '~/lib/.server/llm/provider-error-logging';
 import { InvalidJsonBodyError, PayloadTooLargeError, readJsonBodyWithLimit } from '~/lib/bounded-body';
+import {
+  promptRefinementRequestSchema,
+  promptRefinementResultSchema,
+  recommendedOptionFirst,
+} from '~/lib/prompt-refinement';
 
 const logger = createScopedLogger('EnhancePrompt');
-const requestSchema = z.object({ prompt: z.string().min(1) });
 const ENHANCE_PROMPT_MAX_OUTPUT_TOKENS = 2_048;
 const MAX_ENHANCE_PROMPT_REQUEST_BYTES = 64 * 1024;
+const PROMPT_REFINEMENT_TOOL_NAME = 'submit_refined_app_plan';
+const promptRefinementTool: Tool = {
+  name: PROMPT_REFINEMENT_TOOL_NAME,
+  description: 'Submit either the next product decision or the finalized app brief.',
+  parameters: z.toJSONSchema(promptRefinementResultSchema) as unknown as Tool['parameters'],
+};
 
 export async function userRuntimeEnhancePromptAction(args: { request: Request; env: Env; userId: string }) {
   return enhancePromptForUser(args);
@@ -19,26 +30,38 @@ export async function userRuntimeEnhancePromptAction(args: { request: Request; e
 
 async function enhancePromptForUser({ request, env, userId }: { request: Request; env: Env; userId: string }) {
   try {
-    const parsedRequest = requestSchema.safeParse(
+    const parsedRequest = promptRefinementRequestSchema.safeParse(
       await readJsonBodyWithLimit(request, MAX_ENHANCE_PROMPT_REQUEST_BYTES, 'Prompt enhancement request'),
     );
     if (!parsedRequest.success) {
       return Response.json({ error: 'Invalid prompt' }, { status: 400 });
     }
-    const { prompt } = parsedRequest.data;
+    const { prompt, answers } = parsedRequest.data;
     const accountCredentials = await getUserWorkersAiCredentials(env, userId);
     const handle = getPiProvider(accountCredentials).handle;
-    const enhancedPrompt = (
-      await completeText(handle, {
-        systemPrompt: ENHANCE_PROMPT_SYSTEM_PROMPT,
-        prompt,
+    const result = promptRefinementResultSchema.safeParse(
+      await completeToolCall(handle, {
+        systemPrompt: PROMPT_REFINEMENT_SYSTEM_PROMPT,
+        prompt: JSON.stringify({ draft: prompt, priorDecisions: answers }),
+        tool: promptRefinementTool,
         maxTokens: ENHANCE_PROMPT_MAX_OUTPUT_TOKENS,
-      })
-    ).trim();
-    if (!enhancedPrompt) {
-      throw new Error('Workers AI returned an empty enhanced prompt.');
+      }),
+    );
+    if (!result.success) {
+      throw new Error('Workers AI returned an invalid prompt refinement result.');
     }
-    return Response.json({ enhancedPrompt });
+    if (result.data.kind === 'questions') {
+      const questions = result.data.questions;
+      const answeredQuestionIds = new Set(answers.map((answer) => answer.questionId));
+      if (questions.some((question) => answeredQuestionIds.has(question.id))) {
+        throw new Error('Workers AI repeated a prompt refinement question.');
+      }
+      return Response.json({
+        ...result.data,
+        questions: questions.map(recommendedOptionFirst),
+      });
+    }
+    return Response.json(result.data);
   } catch (error) {
     if (error instanceof PayloadTooLargeError) {
       return Response.json({ error: error.message }, { status: 413 });

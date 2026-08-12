@@ -8,6 +8,7 @@ vi.mock('~/lib/.server/llm/pi-agent-runner', () => ({ piAgentRunner }));
 
 import { createChatResponseFromBody } from './chat';
 import { ContextCompactionUnavailableError, ModelInputBudgetExceededError } from './llm/model-input';
+import { PiSteeringQueue } from './llm/pi-steering';
 
 describe('chat provider error boundary', () => {
   beforeEach(() => {
@@ -37,6 +38,8 @@ describe('chat provider error boundary', () => {
         sessionAffinity: 'session',
         workspace: {} as never,
         runWithKeepAlive: (operation) => operation(),
+        systemDocs: docs(),
+        ...steering(),
       }),
     ).rejects.toMatchObject({ status: 500 });
 
@@ -70,6 +73,8 @@ describe('chat provider error boundary', () => {
       sessionAffinity: 'session',
       workspace: {} as never,
       runWithKeepAlive: (operation) => operation(),
+      systemDocs: docs(),
+      ...steering(),
     });
 
     expect(piAgentRunner).toHaveBeenCalledWith(expect.objectContaining({ modelId: 'deepseek/deepseek-v4-pro' }));
@@ -85,5 +90,15 @@ function createResponse() {
     sessionAffinity: 'session',
     workspace: {} as never,
     runWithKeepAlive: (operation) => operation(),
+    systemDocs: docs(),
+    ...steering(),
   });
+}
+
+function steering() {
+  return { steering: new PiSteeringQueue(), onSettled: vi.fn() };
+}
+
+function docs() {
+  return { version: 1 as const, documents: [{ id: 'docs', description: 'Guidance.', content: 'Guidance.' }] };
 }

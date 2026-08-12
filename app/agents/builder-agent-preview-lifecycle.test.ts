@@ -16,7 +16,7 @@ describe('BuilderAgent preview lifecycle', () => {
   it('automatically previews only an exactly validated durable revision', () => {
     const response = source.slice(
       source.indexOf('protected override async onChatResponse('),
-      source.indexOf('@callable()\n  getTurnHistory'),
+      source.indexOf('@callable()\n  async steerActiveTurn'),
     );
     const preview = source.slice(
       source.indexOf('private async requestPreviewInternal('),
@@ -25,6 +25,7 @@ describe('BuilderAgent preview lifecycle', () => {
 
     expect(response).toContain('const validatedSnapshot = await this.refreshDeploymentReadiness()');
     expect(response).toContain('this.requestPreviewInternal({ validatedSnapshot })');
+    expect(response).toContain('this.scheduleDeployment(validatedSnapshot)');
     expect(preview).toContain('options.validatedSnapshot ?? (await this.workspace.checkpoint())');
     expect(preview).not.toContain('hasSuccessfulValidation');
   });
@@ -36,7 +37,7 @@ describe('BuilderAgent preview lifecycle', () => {
     );
     const response = source.slice(
       source.indexOf('protected override async onChatResponse('),
-      source.indexOf('@callable()\n  getTurnHistory'),
+      source.indexOf('@callable()\n  async steerActiveTurn'),
     );
 
     expect(chatMessage).toContain('requestDurableCompaction: () =>');

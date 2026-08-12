@@ -93,7 +93,10 @@ export interface BuilderWorkspaceApi {
   abortSeed(seedId: unknown): Promise<BuilderWorkspaceState>;
   applyClientChanges(value: unknown): Promise<BuilderWorkspaceApplyResult>;
   getSyncPage(value: unknown): Promise<BuilderWorkspaceSyncPage>;
-  readText(path: unknown): Promise<{
+  readText(
+    path: unknown,
+    abortSignal?: AbortSignal,
+  ): Promise<{
     path: string;
     content: string;
     encoding: 'utf8';
@@ -119,12 +122,19 @@ export interface BuilderWorkspaceApi {
     onUpdate?: (partialResult: unknown) => void;
     abortSignal?: AbortSignal;
   }): Promise<{ exitCode: number; stdout: string; stderr: string; streamTruncated?: boolean }>;
-  executeToolOnce<T>(toolCallId: unknown, toolName: string, args: unknown, execute: () => Promise<T>): Promise<T>;
+  executeToolOnce<T>(
+    toolCallId: unknown,
+    toolName: string,
+    args: unknown,
+    execute: () => Promise<T>,
+    abortSignal?: AbortSignal,
+  ): Promise<T>;
   installDependencies(args: {
     toolCallId: string;
     input: unknown;
     mode: 'add' | 'sync-lockfile';
     packages: string[];
+    abortSignal?: AbortSignal;
   }): Promise<GhostbuildToolResult>;
   validate(args: { toolCallId: string; input: unknown; abortSignal?: AbortSignal }): Promise<GhostbuildToolResult>;
   cancelActiveValidation(): Promise<void>;

@@ -1,14 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PiStreamChunk } from './pi-stream';
-import { BUILDER_TURN_MAX_MODEL_STEPS } from './builder-turn-budget';
 
 type UIMessageChunk = PiStreamChunk;
 
-type TestStep = { toolResults: Array<{ toolName: string; output: unknown }> };
-
 const mocks = vi.hoisted(() => ({
   completion: undefined as string | undefined,
-  steps: [] as TestStep[],
   piMessages: [] as unknown[],
   piRun: vi.fn(),
   getValidatedBuildCompletion: vi.fn(),
@@ -41,13 +37,10 @@ vi.mock('./pi-message-conversion', () => ({
   modelMessagesToPi: vi.fn(() => mocks.piMessages),
 }));
 vi.mock('./pi-tools-adapter', () => ({
-  createPiToolBundle: vi.fn(() => ({ canonicalTools: { write: { inputSchema: 'canonical-schema' } }, piTools: {} })),
-  piToolsToList: vi.fn(() => [
-    { name: 'read', description: 'read' },
-    { name: 'write', description: 'write' },
-    { name: 'edit', description: 'edit' },
-    { name: 'exec', description: 'exec' },
-  ]),
+  createPiToolBundle: vi.fn(() => ({
+    write: { name: 'write', description: 'write', parameters: 'canonical-schema' },
+  })),
+  piToolsToList: vi.fn((tools: object) => Object.values(tools)),
 }));
 vi.mock('./workers-ai-tools', () => ({
   createWorkersAiTools: vi.fn(() => ({})),
@@ -58,55 +51,17 @@ vi.mock('./workers-ai-telemetry', () => ({
   recordWorkersAiFinish: mocks.recordFinish,
 }));
 import { piAgentRunner } from './pi-agent-runner';
+import { PiSteeringQueue } from './pi-steering';
 
 describe('piAgentRunner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.completion = undefined;
-    mocks.steps = [];
     mocks.piMessages = [];
     mocks.getValidatedBuildCompletion.mockImplementation((_messages: unknown, currentStepResults: unknown[] = []) =>
       currentStepResults.length > 0 ? mocks.completion : undefined,
     );
-    // Default pi run just succeeds without tool calls
-    mocks.piRun.mockImplementation(async (_ctx: unknown, _cfg: unknown, _emit: (e: unknown) => Promise<void>) => {
-      // Simulate budget check: if steps exceed, still emit nothing — piAgentRunner handles budget
-      if (mocks.steps.length >= BUILDER_TURN_MAX_MODEL_STEPS) {
-        // budget will be detected in piAgentRunner final check
-      }
-    });
-  });
-
-  it('emits a typed error and no deterministic completion when the model-step budget is exhausted', async () => {
-    mocks.steps = Array.from({ length: BUILDER_TURN_MAX_MODEL_STEPS }, () => ({ toolResults: [] }));
-    // Simulate pi loop that would exceed steps: piAgentRunner tracks stepCount via turn_end events.
-    // For this test, make piRun emit turn_end events that drive stepCount to max
-    mocks.piRun.mockImplementation(
-      async (_ctx: unknown, _cfg: unknown, emit: (e: { type: string }) => Promise<void>) => {
-        for (let i = 0; i < BUILDER_TURN_MAX_MODEL_STEPS; i++) {
-          await emit({
-            type: 'turn_end',
-            message: {
-              role: 'assistant',
-              content: [{ type: 'toolCall', id: `call-${i}`, name: 'read', arguments: { path: 'x' } }],
-              usage: piUsage(),
-              stopReason: 'toolUse',
-            },
-            toolResults: [],
-          } as unknown as never);
-        }
-      },
-    );
-
-    const chunks = await collectChunks(await createAgentStream());
-
-    expect(chunks.some((c) => c.type === 'error')).toBe(true);
-    expect(
-      chunks.some(
-        (chunk) =>
-          'id' in (chunk as Record<string, unknown>) && (chunk as { id: string }).id === 'validated-build-completion',
-      ),
-    ).toBe(false);
+    mocks.piRun.mockResolvedValue(undefined);
   });
 
   it('records native Pi usage without turning successful completion into an error', async () => {
@@ -162,11 +117,13 @@ describe('piAgentRunner', () => {
     );
   });
 
-  it('uses canonical tool schemas for prompt accounting', async () => {
+  it('uses the final Pi tool schemas for prompt accounting', async () => {
     await collectChunks(await createAgentStream());
 
     expect(mocks.prepareModelInput).toHaveBeenCalledWith(
-      expect.objectContaining({ tools: { write: { inputSchema: 'canonical-schema' } } }),
+      expect.objectContaining({
+        tools: expect.arrayContaining([expect.objectContaining({ name: 'write', parameters: 'canonical-schema' })]),
+      }),
     );
   });
 
@@ -179,8 +136,8 @@ describe('piAgentRunner', () => {
     });
   });
 
-  it('preserves validated completion on the final allowed model step', async () => {
-    mocks.completion = 'Validated on the final allowed step.';
+  it('preserves validated completion from a tool result', async () => {
+    mocks.completion = 'Validated.';
     mocks.piRun.mockImplementation(async (_ctx: unknown, _cfg: unknown, emit: (e: unknown) => Promise<void>) => {
       // Emit a tool result that triggers completion
       await emit({
@@ -190,9 +147,6 @@ describe('piAgentRunner', () => {
         result: { details: { validation: { ok: true } } },
         isError: false,
       } as unknown as never);
-      for (let i = 0; i < BUILDER_TURN_MAX_MODEL_STEPS - 1; i++) {
-        await emit({ type: 'turn_end', message: {} as unknown as never, toolResults: [] } as unknown as never);
-      }
     });
 
     const chunks = await collectChunks(await createAgentStream());
@@ -338,6 +292,26 @@ describe('piAgentRunner', () => {
     );
 
     await collectChunks(await createAgentStream());
+  });
+
+  it('exposes Pi one-at-a-time steering without a model timeout', async () => {
+    const steering = new PiSteeringQueue();
+    mocks.piMessages = [{ role: 'user', content: 'Use blue instead', timestamp: 1 }];
+    steering.reserve({ id: 'steer-1', role: 'user', parts: [{ type: 'text', text: 'Use blue instead' }] })?.commit();
+    mocks.piRun.mockImplementation(
+      async (
+        _context: unknown,
+        config: { getSteeringMessages: () => Promise<Array<{ role: string; content: string }>>; timeoutMs?: number },
+      ) => {
+        await expect(config.getSteeringMessages()).resolves.toEqual([
+          expect.objectContaining({ role: 'user', content: 'Use blue instead' }),
+        ]);
+        await expect(config.getSteeringMessages()).resolves.toEqual([]);
+        expect(config.timeoutMs).toBeUndefined();
+      },
+    );
+
+    await collectChunks(await createAgentStream('@cf/zai-org/glm-5.2', {}, steering));
   });
 
   it('detects validated completion from a primitive mutation result', async () => {
@@ -520,6 +494,7 @@ describe('piAgentRunner', () => {
 function createAgentStream(
   modelId: Parameters<typeof piAgentRunner>[0]['modelId'] = '@cf/zai-org/glm-5.2',
   compactionOverrides: Partial<Parameters<typeof piAgentRunner>[0]['compaction']> = {},
+  steering = new PiSteeringQueue(),
 ) {
   return piAgentRunner({
     firstUserMessage: false,
@@ -536,6 +511,9 @@ function createAgentStream(
     sessionAffinity: 'opaque-session',
     workspace: {} as never,
     runWithKeepAlive: (operation) => operation(),
+    systemDocs: { version: 1, documents: [{ id: 'docs', description: 'Guidance.', content: 'Guidance.' }] },
+    steering,
+    onSettled: vi.fn(),
   });
 }
 

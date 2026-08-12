@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  completeText: vi.fn(),
+  completeToolCall: vi.fn(),
   getCredentials: vi.fn(),
   getPiProvider: vi.fn(() => ({ handle: { model: { id: 'test' } } })),
 }));
@@ -10,15 +10,15 @@ vi.mock('~/lib/.server/cloudflare/workers-ai-billing-context', () => ({
   getUserWorkersAiCredentials: mocks.getCredentials,
 }));
 vi.mock('~/lib/.server/llm/provider', () => ({ getPiProvider: mocks.getPiProvider }));
-vi.mock('~/lib/.server/llm/pi-ai-invoke', () => ({ completeText: mocks.completeText }));
+vi.mock('~/lib/.server/llm/pi-ai-invoke', () => ({ completeToolCall: mocks.completeToolCall }));
 
 import { userRuntimeEnhancePromptAction } from './enhance-prompt';
 
-function request() {
+function request(body: Record<string, unknown> = { prompt: 'Build a calendar' }) {
   return new Request('https://ghostbuild.dev/api/enhance-prompt', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ prompt: 'Build a calendar' }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -26,7 +26,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getCredentials.mockResolvedValue({ binding: {} as Ai });
-    mocks.completeText.mockResolvedValue('Build a detailed calendar');
+    mocks.completeToolCall.mockResolvedValue({ kind: 'complete', enhancedPrompt: 'Build a detailed calendar' });
   });
 
   it('rejects an oversized prompt body before calling the provider', async () => {
@@ -40,7 +40,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
     });
 
     expect(response.status).toBe(413);
-    expect(mocks.completeText).not.toHaveBeenCalled();
+    expect(mocks.completeToolCall).not.toHaveBeenCalled();
   });
 
   it('uses only the user-runtime binding', async () => {
@@ -53,7 +53,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
 
   it('asks for explicit Workers Paid authorization when the connected free allocation is exhausted', async () => {
     mocks.getCredentials.mockResolvedValue({ binding: {} as Ai });
-    mocks.completeText.mockRejectedValue(new Error('Workers Paid plan required after free AI allocation'));
+    mocks.completeToolCall.mockRejectedValue(new Error('Workers Paid plan required after free AI allocation'));
     const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
     expect(response.status).toBe(402);
     await expect(response.json()).resolves.toMatchObject({
@@ -67,7 +67,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
     const providerError = Object.assign(new Error('provider failure'), {
       requestBodyValues: { prompt: 'SECRET_PROMPT_MARKER' },
     });
-    mocks.completeText.mockRejectedValue(providerError);
+    mocks.completeToolCall.mockRejectedValue(providerError);
 
     const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
 
@@ -77,13 +77,143 @@ describe('userRuntimeEnhancePromptAction billing', () => {
     consoleError.mockRestore();
   });
 
-  it('rejects an empty provider result instead of returning the original prompt as a successful enhancement', async () => {
-    mocks.completeText.mockResolvedValue('   ');
+  it('rejects an invalid provider result instead of returning the original prompt as a successful enhancement', async () => {
+    mocks.completeToolCall.mockResolvedValue({ kind: 'complete', enhancedPrompt: '   ' });
 
     const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({ error: 'Error enhancing prompt' });
+  });
+
+  it('returns a validated question batch with each recommended option first', async () => {
+    mocks.completeToolCall.mockResolvedValue({
+      kind: 'questions',
+      questions: [
+        {
+          id: 'sharing',
+          header: 'Sharing',
+          question: 'Who should be able to see each calendar?',
+          options: [
+            { id: 'private', label: 'Private', description: 'Only the creator can view it.' },
+            { id: 'team', label: 'Shared team', description: 'Invited teammates can collaborate.' },
+          ],
+          recommendedOptionId: 'team',
+        },
+        {
+          id: 'views',
+          header: 'Views',
+          question: 'Which views matter?',
+          options: [
+            { id: 'month', label: 'Month', description: 'Plan across the full month.' },
+            { id: 'week', label: 'Week', description: 'Focus on the current week.' },
+          ],
+          multi: true,
+          recommendedOptionId: 'month',
+        },
+      ],
+    });
+
+    const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      kind: 'questions',
+      questions: [
+        { options: [{ id: 'team' }, { id: 'private' }] },
+        { options: [{ id: 'month' }, { id: 'week' }], multi: true },
+      ],
+    });
+  });
+
+  it('passes prior decisions as untrusted user content', async () => {
+    mocks.completeToolCall.mockResolvedValue({ kind: 'complete', enhancedPrompt: 'Build a shared team calendar.' });
+    const answers = [
+      {
+        questionId: 'sharing',
+        question: 'Who should be able to see each calendar?',
+        selectedOptions: ['Shared team'],
+        note: 'Guests can view a read-only public link.',
+      },
+    ];
+
+    const response = await userRuntimeEnhPrompt({
+      request: request({ prompt: 'Build a calendar', answers }),
+      env: { DB: {} } as Env,
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.completeToolCall).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: JSON.stringify({ draft: 'Build a calendar', priorDecisions: answers }),
+      }),
+    );
+  });
+
+  it('allows another adaptive question batch when prior answers reveal a new material decision', async () => {
+    mocks.completeToolCall.mockResolvedValue({
+      kind: 'questions',
+      questions: [
+        {
+          id: 'extra',
+          header: 'Extra',
+          question: 'One more decision?',
+          options: [
+            { id: 'yes', label: 'Yes', description: 'Include it.' },
+            { id: 'no', label: 'No', description: 'Leave it out.' },
+          ],
+          recommendedOptionId: 'no',
+        },
+      ],
+    });
+    const answers = Array.from({ length: 6 }, (_, index) => ({
+      questionId: `question-${index}`,
+      question: `Question ${index}`,
+      selectedOptions: [`Answer ${index}`],
+    }));
+
+    const response = await userRuntimeEnhPrompt({
+      request: request({ prompt: 'Build a calendar', answers }),
+      env: { DB: {} } as Env,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ kind: 'questions', questions: [{ id: 'extra' }] });
+  });
+
+  it('fails closed if the model repeats an answered question', async () => {
+    mocks.completeToolCall.mockResolvedValue({
+      kind: 'questions',
+      questions: [
+        {
+          id: 'sharing',
+          header: 'Sharing',
+          question: 'Who should be able to see each calendar?',
+          options: [
+            { id: 'private', label: 'Private', description: 'Only the creator can view it.' },
+            { id: 'team', label: 'Shared team', description: 'Invited teammates can collaborate.' },
+          ],
+          recommendedOptionId: 'team',
+        },
+      ],
+    });
+
+    const response = await userRuntimeEnhPrompt({
+      request: request({
+        prompt: 'Build a calendar',
+        answers: [
+          {
+            questionId: 'sharing',
+            question: 'Who should be able to see each calendar?',
+            selectedOptions: ['Shared team'],
+          },
+        ],
+      }),
+      env: { DB: {} } as Env,
+    });
+
+    expect(response.status).toBe(500);
   });
 });
 

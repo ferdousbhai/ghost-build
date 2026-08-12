@@ -95,6 +95,13 @@ const migrations: readonly SchemaMigration[] = [
       `);
     },
   },
+  {
+    version: 6,
+    name: 'remove_builder_turns',
+    apply(sql) {
+      sql.exec('DROP TABLE IF EXISTS builder_turns');
+    },
+  },
 ];
 
 type AppliedMigration = {

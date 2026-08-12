@@ -172,6 +172,29 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     ]);
   });
 
+  it('does not start a mutation after cancellation wins while its journal begin is pending', async () => {
+    const controller = new AbortController();
+    const reason = new DOMException('tool timed out', 'TimeoutError');
+    const execute = vi.fn(async () => ({ ok: true }));
+    const { client, stub } = harness((operation) => {
+      if (operation === 'beginToolOperation') {
+        controller.abort(reason);
+        return { status: 'execute' };
+      }
+      return undefined;
+    });
+
+    await expect(
+      client.executeToolOnce('call-timeout', 'write', { path: '/project/a.ts' }, execute, controller.signal),
+    ).rejects.toBe(reason);
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(stub.failToolOperation).toHaveBeenCalledWith({
+      toolCallId: 'call-timeout',
+      error: 'tool timed out',
+    });
+  });
+
   it('rejects concurrent identifier reuse with different arguments', async () => {
     let resolveExecution!: (value: { ok: true }) => void;
     const execution = new Promise<{ ok: true }>((resolve) => {
@@ -188,6 +211,125 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     ).rejects.toThrow('reused with different arguments');
     resolveExecution({ ok: true });
     await expect(first).resolves.toEqual({ ok: true });
+  });
+
+  it('waits for command termination and preserves an aborted mutating exec as indeterminate', async () => {
+    const controller = new AbortController();
+    const reason = new DOMException('exec timed out', 'TimeoutError');
+    let closeStream!: () => void;
+    const stream = new ReadableStream<Uint8Array>({
+      start(streamController) {
+        closeStream = () => streamController.close();
+      },
+    });
+    const cancellation = deferred<void>();
+    let begins = 0;
+    const { client, stub } = harness((operation) => {
+      if (operation === 'beginToolOperation') {
+        begins += 1;
+        return begins === 1 ? { status: 'execute' } : { status: 'failed', error: 'cancelled' };
+      }
+      if (operation === 'executeStream') {
+        return stream;
+      }
+      if (operation === 'cancelExecution') {
+        return cancellation.promise.then(closeStream);
+      }
+      return undefined;
+    });
+
+    const execution = client.executeToolOnce(
+      'call-exec-timeout',
+      'exec',
+      { command: 'touch changed' },
+      () => client.executeCommand({ command: 'touch changed', abortSignal: controller.signal }),
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(stub.executeStream).toHaveBeenCalledOnce());
+    controller.abort(reason);
+    await vi.waitFor(() =>
+      expect(stub.cancelExecution).toHaveBeenCalledWith({ operationKey: 'tool:call-exec-timeout' }),
+    );
+
+    let settled = false;
+    void execution.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    cancellation.resolve();
+    await expect(execution).rejects.toBe(reason);
+    expect(stub.failToolOperation).not.toHaveBeenCalled();
+    expect(stub.completeToolOperation).not.toHaveBeenCalled();
+  });
+
+  it('does not report an exec timeout while cancellation confirmation is retrying', async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const reason = new DOMException('exec timed out', 'TimeoutError');
+      let closeStream!: () => void;
+      const stream = new ReadableStream<Uint8Array>({
+        start(streamController) {
+          closeStream = () => streamController.close();
+        },
+      });
+      const cancellation = deferred<void>();
+      let cancellationAttempts = 0;
+      let begins = 0;
+      const { client, stub } = harness((operation) => {
+        if (operation === 'beginToolOperation') {
+          begins += 1;
+          return begins === 1 ? { status: 'execute' } : { status: 'failed', error: 'cancelled' };
+        }
+        if (operation === 'executeStream') {
+          return stream;
+        }
+        if (operation === 'cancelExecution') {
+          cancellationAttempts += 1;
+          if (cancellationAttempts === 1) {
+            throw new Error('cancellation transport reset');
+          }
+          return cancellation.promise.then(closeStream);
+        }
+        return undefined;
+      });
+
+      const execution = client.executeToolOnce(
+        'call-exec-retry',
+        'exec',
+        { command: 'touch changed' },
+        () => client.executeCommand({ command: 'touch changed', abortSignal: controller.signal }),
+        controller.signal,
+      );
+      await vi.waitFor(() => expect(stub.executeStream).toHaveBeenCalledOnce());
+      controller.abort(reason);
+      await vi.waitFor(() => expect(stub.cancelExecution).toHaveBeenCalledTimes(1));
+
+      let settled = false;
+      void execution.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(stub.cancelExecution).toHaveBeenCalledTimes(2);
+      expect(settled).toBe(false);
+
+      cancellation.resolve();
+      await expect(execution).rejects.toBe(reason);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('cancels the exact active validation and forgets it after the RPC settles', async () => {
@@ -579,4 +721,12 @@ function workspaceStub(overrides: Record<string, unknown> = {}) {
     initializeProjectIdentity: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   } as unknown as ProjectWorkspaceRpc;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
 }

@@ -1,9 +1,7 @@
 import type { ChatRecoveryContext, ChatRecoveryExhaustedContext } from '@cloudflare/ai-chat';
-import type { SqlProvider } from 'agents/experimental/memory/session';
 import { messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 
 const MAX_PROMPT_PREVIEW_LENGTH = 500;
-const MAX_PERSISTED_TURNS = 100;
 const MAX_TURN_ERROR_LENGTH = 2_000;
 const MAX_TURN_IDENTIFIER_LENGTH = 512;
 
@@ -28,77 +26,6 @@ export type BuilderTurnState = {
   };
   error?: string;
 };
-
-type PersistedTurnRow = {
-  id: string;
-  request_id: string;
-  chat_initial_id: string;
-  status: BuilderTurnStatus;
-  started_at: string;
-  updated_at: string;
-  continuation: number;
-  first_user_message: number;
-  message_count: number;
-  last_user_message_preview: string | null;
-  recovery_incident_id: string | null;
-  recovery_attempt: number | null;
-  recovery_kind: string | null;
-  partial_text_length: number | null;
-  error: string | null;
-};
-
-export class BuilderTurnStore {
-  constructor(private readonly db: SqlProvider) {}
-
-  record(turn: BuilderTurnState): void {
-    void this.db.sql`
-      INSERT OR REPLACE INTO builder_turns (
-        id, request_id, chat_initial_id, status, started_at, updated_at,
-        continuation, first_user_message, message_count, last_user_message_preview,
-        recovery_incident_id, recovery_attempt, recovery_kind, partial_text_length, error
-      ) VALUES (
-        ${turn.id},
-        ${turn.requestId},
-        ${turn.chatInitialId},
-        ${turn.status},
-        ${turn.startedAt},
-        ${turn.updatedAt},
-        ${turn.continuation ? 1 : 0},
-        ${turn.firstUserMessage ? 1 : 0},
-        ${turn.messageCount},
-        ${turn.lastUserMessagePreview ?? null},
-        ${turn.recovery?.incidentId ?? null},
-        ${turn.recovery?.attempt ?? null},
-        ${turn.recovery?.recoveryKind ?? null},
-        ${turn.recovery?.partialTextLength ?? null},
-        ${turn.error ?? null}
-      )
-    `;
-    void this.db.sql`
-      DELETE FROM builder_turns
-      WHERE id IN (
-        SELECT id
-        FROM builder_turns
-        ORDER BY updated_at DESC
-        LIMIT -1 OFFSET ${MAX_PERSISTED_TURNS}
-      )
-    `;
-  }
-
-  getHistory(limit: number): PersistedTurnRow[] {
-    return this.db.sql<PersistedTurnRow>`
-      SELECT *
-      FROM builder_turns
-      ORDER BY updated_at DESC
-      LIMIT ${boundedHistoryLimit(limit)}
-    `;
-  }
-}
-
-function boundedHistoryLimit(limit: number, fallback = 20): number {
-  const numericLimit = Number.isFinite(limit) ? limit : fallback;
-  return Math.min(Math.max(Math.trunc(numericLimit), 1), 50);
-}
 
 export function createBuilderTurn(args: {
   requestId: unknown;

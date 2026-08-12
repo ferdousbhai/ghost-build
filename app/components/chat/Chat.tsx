@@ -1,5 +1,5 @@
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useSnapScroll } from '~/lib/hooks/useSnapScroll';
 import { chatStore } from '~/lib/stores/chatId';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
@@ -29,7 +29,6 @@ import { LinkButton } from '~/components/ui/LinkButton';
 import { buttonClassNames } from '~/components/ui/primitives/Button';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { WORKERS_PAID_URL } from '~/lib/workers-paid.client';
-import { toast } from 'sonner';
 
 const logger = createScopedLogger('Chat');
 
@@ -208,15 +207,14 @@ const AuthenticatedChat = memo(
       messages,
       stop,
       sendMessage: sendChatMessage,
+      steerMessage,
       error,
       isRecovering,
       streamStatus,
-      contextManager,
       transcriptCheckpoint,
       validationStage,
-      deploymentApproval,
-      deploymentReady,
-      prepareDeployment,
+      deployment,
+      deployValidatedRevision,
       workspacePresentationState,
     } = useBuilderAgentChat({
       accountId,
@@ -226,21 +224,6 @@ const AuthenticatedChat = memo(
       presentationId,
       transcript,
     });
-    const automaticDeploymentRequestedRef = useRef(false);
-    useEffect(() => {
-      if (!deploymentReady) {
-        automaticDeploymentRequestedRef.current = false;
-        return;
-      }
-      if (deploymentApproval || automaticDeploymentRequestedRef.current) {
-        return;
-      }
-      automaticDeploymentRequestedRef.current = true;
-      void prepareDeployment().catch((deploymentError) => {
-        automaticDeploymentRequestedRef.current = false;
-        toast.error(deploymentError instanceof Error ? deploymentError.message : 'Unable to start deployment.');
-      });
-    }, [deploymentApproval, deploymentReady, prepareDeployment]);
     const parsedMessages = useChatHistoryProcessing({
       messages,
       initialMessages,
@@ -285,14 +268,13 @@ const AuthenticatedChat = memo(
     const { messageRef, scrollRef, enableAutoScroll } = useSnapScroll();
     const { pendingUserMessage, sendMessage, sendMessageInProgress } = useChatMessageSubmission({
       messages,
-      contextManager,
       chatStarted,
       streamStatus,
       initializeChat,
       discardEmptyChat,
       sendChatMessage,
+      steerChatMessage: steerMessage,
       enableAutoScroll,
-      onAbort: abort,
       onStartChat: startChat,
       onFirstPrompt: (prompt) => {
         const title = deriveProvisionalTitle(prompt);
@@ -326,8 +308,8 @@ const AuthenticatedChat = memo(
         buildProgress={buildProgress}
         messages={visibleMessages /* Note that parsedMessages are throttled. */}
         disabledReason={disabledReason}
-        deploymentApproval={deploymentApproval}
-        onPrepareDeployment={deploymentReady ? prepareDeployment : undefined}
+        deployment={deployment}
+        onDeploy={deployValidatedRevision}
         runtimeNotice={
           workspacePresentationState === 'presentation-error'
             ? 'Editor unavailable. Chat, builds, and previews still work.'

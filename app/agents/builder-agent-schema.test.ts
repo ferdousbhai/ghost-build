@@ -40,8 +40,9 @@ describe('BuilderAgent schema migrations', () => {
       { version: 3, name: 'create_builder_tool_replays' },
       { version: 4, name: 'remove_builder_tool_replays' },
       { version: 5, name: 'persist_builder_identity' },
+      { version: 6, name: 'remove_builder_turns' },
     ]);
-    expect(storage.transactionCount).toBe(5);
+    expect(storage.transactionCount).toBe(6);
     expect(storage.statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS builder_turns'))).toBe(
       true,
     );
@@ -54,6 +55,7 @@ describe('BuilderAgent schema migrations', () => {
     expect(
       storage.statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS builder_identity')),
     ).toBe(true);
+    expect(storage.statements).toContain('DROP TABLE IF EXISTS builder_turns');
   });
 
   it('is idempotent after the current schema has been recorded', () => {
@@ -78,11 +80,12 @@ describe('BuilderAgent schema migrations', () => {
 
     runBuilderAgentSchemaMigrations(storage as never);
 
-    expect(storage.applied.slice(-2)).toEqual([
+    expect(storage.applied.slice(-3)).toEqual([
       { version: 4, name: 'remove_builder_tool_replays' },
       { version: 5, name: 'persist_builder_identity' },
+      { version: 6, name: 'remove_builder_turns' },
     ]);
-    expect(storage.transactionCount).toBe(2);
+    expect(storage.transactionCount).toBe(3);
     expect(storage.statements).toContain('DROP TABLE IF EXISTS builder_workspace_tool_results');
   });
 
@@ -107,6 +110,6 @@ describe('BuilderAgent schema migrations', () => {
 
     expect(blockConcurrencyWhile).toHaveBeenCalledOnce();
     await expect(initialization).resolves.toBeUndefined();
-    expect(storage.applied).toHaveLength(5);
+    expect(storage.applied).toHaveLength(6);
   });
 });

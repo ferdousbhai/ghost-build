@@ -3,7 +3,6 @@ import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import type { UIMessage } from 'ai';
 import { isWorkersAiModelId, type WorkersAiModelId } from '~/lib/workers-ai-model';
 
-export const MAX_BUILDER_AGENT_MESSAGES = 500;
 const MAX_BUILDER_AGENT_NAME_LENGTH = 512;
 const MAX_BUILDER_SUBCHAT_INDEX = 10_000;
 

@@ -1,17 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { formatDistanceStrict } from 'date-fns';
 import { toast } from 'sonner';
-import type { ChatContextManager } from 'ghostbuild-agent/ChatContextManager';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { filesToTurnContext } from '~/utils/fileUtils';
+import { workspaceHintsToTurnContext } from '~/utils/fileUtils';
 import { captureMessage, captureProductEvent } from '~/lib/telemetry.client';
 import { isStreamStatusActive, type StreamStatus } from '~/lib/common/types';
 import { chatStore } from '~/lib/stores/chatId';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { messageInputStore } from '~/lib/stores/messageInput';
 import { getChatRetryState, MAX_CHAT_RETRIES } from './chat-retry';
-import { MAX_EPHEMERAL_CONTEXT_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { builderModelStore } from '~/lib/stores/builder-model.client';
@@ -21,30 +19,34 @@ const logger = createScopedLogger('ChatMessageSubmission');
 
 export function useChatMessageSubmission(args: {
   messages: GhostbuildMessage[];
-  contextManager: ChatContextManager;
   chatStarted: boolean;
   streamStatus: StreamStatus;
   initializeChat: () => Promise<{ created: boolean }>;
   discardEmptyChat: () => Promise<void>;
   sendChatMessage: (
     message: { text: string },
-    options?: { body?: { turnContext?: ChatTurnContext; modelId?: WorkersAiModelId } },
+    options?: {
+      body?: { turnContext?: ChatTurnContext; modelId?: WorkersAiModelId };
+    },
     onRequestStart?: () => void,
   ) => Promise<unknown>;
+  steerChatMessage: (input: { text: string; turnContext: ChatTurnContext }) => Promise<void>;
   enableAutoScroll: () => void;
-  onAbort: () => void;
   onStartChat: () => void | Promise<void>;
   onFirstPrompt: (prompt: string) => void;
   onBuilderRequestStart: () => void;
   pendingMessage: string | null;
   clearPendingMessage: () => void;
 }) {
-  const [sendMessageInProgress, setSendMessageInProgress] = useState(false);
+  const [turnSubmissionInProgress, setTurnSubmissionInProgress] = useState(false);
+  const [steeringInProgress, setSteeringInProgress] = useState(false);
   const [pendingUserMessage, setPendingUserMessage] = useState<PendingUserMessage | null>(null);
-  const sendMessageInProgressRef = useRef(false);
+  const turnSubmissionInProgressRef = useRef(false);
+  const steeringInProgressRef = useRef(false);
   const pendingMessageSequenceRef = useRef(0);
 
   const sendMessage = async (messageInput: string, onAccepted: () => void = () => undefined): Promise<boolean> => {
+    const steering = isStreamStatusActive(args.streamStatus);
     const retries = getChatRetryState();
     if (retries.numFailures >= MAX_CHAT_RETRIES || Date.now() < retries.nextRetry) {
       const retryMessage =
@@ -58,24 +60,35 @@ export function useChatMessageSubmission(args: {
       captureMessage('User tried to send message but Ghostbuild is too busy');
       return false;
     }
-    if (isStreamStatusActive(args.streamStatus)) {
-      args.onAbort();
-      return false;
-    }
-    if (sendMessageInProgressRef.current) {
+    const admissionRef = steering ? steeringInProgressRef : turnSubmissionInProgressRef;
+    if (admissionRef.current) {
       logger.debug('Message submission already in progress');
       return false;
     }
+    const pending: PendingUserMessage = {
+      id: `pending-user-message-${Date.now()}-${pendingMessageSequenceRef.current++}`,
+      text: messageInput,
+      previousUserMessageCount: args.messages.filter((message) => message.role === 'user').length,
+    };
     try {
-      const modelId = builderModelStore.get();
-      sendMessageInProgressRef.current = true;
-      setSendMessageInProgress(true);
-      setPendingUserMessage({
-        id: `pending-user-message-${Date.now()}-${pendingMessageSequenceRef.current++}`,
-        text: messageInput,
-        previousUserMessageCount: args.messages.filter((message) => message.role === 'user').length,
-      });
+      admissionRef.current = true;
+      if (steering) {
+        setSteeringInProgress(true);
+      } else {
+        setTurnSubmissionInProgress(true);
+      }
+      setPendingUserMessage(pending);
       args.enableAutoScroll();
+      if (steering) {
+        const { turnContext, modifiedFiles } = await prepareTurnContext(args.chatStarted);
+        await args.steerChatMessage({ text: messageInput, turnContext });
+        if (modifiedFiles) {
+          workbenchStore.resetAllFileModifications();
+        }
+        onAccepted();
+        return true;
+      }
+      const modelId = builderModelStore.get();
       if (!args.messages.some((message) => message.role === 'user')) {
         args.onFirstPrompt(messageInput);
       }
@@ -88,15 +101,7 @@ export function useChatMessageSubmission(args: {
           onAccepted();
         },
         submit: (onRequestStart) =>
-          submitMessage(
-            args.messages,
-            args.contextManager,
-            messageInput,
-            args.chatStarted,
-            modelId,
-            args.sendChatMessage,
-            onRequestStart,
-          ),
+          submitMessage(messageInput, args.chatStarted, modelId, args.sendChatMessage, onRequestStart),
       });
       return true;
     } catch (error) {
@@ -106,9 +111,13 @@ export function useChatMessageSubmission(args: {
       captureMessage('Failed to submit chat message', { level: 'error' });
       return false;
     } finally {
-      sendMessageInProgressRef.current = false;
-      setSendMessageInProgress(false);
-      setPendingUserMessage(null);
+      admissionRef.current = false;
+      if (steering) {
+        setSteeringInProgress(false);
+      } else {
+        setTurnSubmissionInProgress(false);
+      }
+      setPendingUserMessage((current) => (current?.id === pending.id ? null : current));
     }
   };
 
@@ -153,7 +162,11 @@ export function useChatMessageSubmission(args: {
     })();
   }, [clearPendingMessage, pendingMessage]);
 
-  return { pendingUserMessage, sendMessage, sendMessageInProgress };
+  return {
+    pendingUserMessage,
+    sendMessage,
+    sendMessageInProgress: isStreamStatusActive(args.streamStatus) ? steeringInProgress : turnSubmissionInProgress,
+  };
 }
 
 export interface PendingUserMessage {
@@ -215,31 +228,19 @@ export async function runChatSubmissionLifecycle(args: {
 }
 
 async function submitMessage(
-  messages: GhostbuildMessage[],
-  contextManager: ChatContextManager,
   messageInput: string,
   chatStarted: boolean,
   modelId: WorkersAiModelId,
   sendChatMessage: (
     message: { text: string },
-    options?: { body?: { turnContext?: ChatTurnContext; modelId?: WorkersAiModelId } },
+    options?: {
+      body?: { turnContext?: ChatTurnContext; modelId?: WorkersAiModelId };
+    },
     onRequestStart?: () => void,
   ) => Promise<unknown>,
   onRequestStart: () => void,
 ): Promise<void> {
-  const id = `${Date.now()}`;
-  workbenchStore.flushPendingEditorChange();
-  void captureProductEvent('prompt_submitted');
-  const modifiedFiles = chatStarted ? workbenchStore.getModifiedFiles() : undefined;
-  const modifiedContext = modifiedFiles ? filesToTurnContext(modifiedFiles) : '';
-  const separatorCharacters = modifiedContext ? 2 : 0;
-  const relevantBudget = Math.max(0, MAX_EPHEMERAL_CONTEXT_CHARACTERS - modifiedContext.length - separatorCharacters);
-  const relevantContext = contextManager
-    .relevantFiles(messages, id, relevantBudget)
-    .parts.map((part) => (part.type === 'text' ? part.text : ''))
-    .join('');
-  const content = [modifiedContext, relevantContext].filter(Boolean).join('\n\n');
-  const turnContext: ChatTurnContext = { version: 1, content };
+  const { turnContext, modifiedFiles } = await prepareTurnContext(chatStarted);
 
   toolActivityStore.startTurn();
   chatStore.setKey('aborted', false);
@@ -247,4 +248,19 @@ async function submitMessage(
   if (modifiedFiles) {
     workbenchStore.resetAllFileModifications();
   }
+}
+
+async function prepareTurnContext(
+  chatStarted: boolean,
+): Promise<{ turnContext: ChatTurnContext; modifiedFiles: boolean }> {
+  workbenchStore.flushPendingEditorChange();
+  await workbenchStore.saveUnsavedFiles();
+  void captureProductEvent('prompt_submitted');
+  const modifiedFiles = workbenchStore.getModifiedFiles();
+  const currentFile = workbenchStore.currentDocument.get()?.filePath;
+  const content = workspaceHintsToTurnContext({
+    currentFile: chatStarted || modifiedFiles ? currentFile : undefined,
+    changedFiles: modifiedFiles ? Object.keys(modifiedFiles) : undefined,
+  });
+  return { turnContext: { version: 1, content }, modifiedFiles: modifiedFiles !== undefined };
 }

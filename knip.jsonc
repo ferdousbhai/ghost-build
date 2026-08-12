@@ -14,8 +14,6 @@
         "tests/workerd/server-dependencies.stub.ts",
         // Bundled and deployed into each user's Cloudflare account.
         "user-workspace-runtime/src/index.ts",
-        // manual build processes
-        "buildSystemPrompts.ts",
       ],
       "project": ["**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!", "!.ghostbuild-runtime-security-*/**"],
       "ignore": ["template/**", "app/test/cloudflare-workers-shim.ts"],

@@ -1,28 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({
-  createDeployment: vi.fn(),
-}));
+const mocks = vi.hoisted(() => ({ createDeployment: vi.fn(), deployForUser: vi.fn() }));
 
 vi.mock('~/server-handlers/deployments', () => ({
   createOrReplayDeploymentPlanForUser: mocks.createDeployment,
+  deployForUser: mocks.deployForUser,
 }));
 
-import { prepareDeploymentPlanForBuilder, validatedDeploymentCheckpoint } from './builder-deployment-command';
+import { deployValidatedRevisionForBuilder, validatedDeploymentCheckpoint } from './builder-deployment-command';
 
 describe('builder deployment command', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.createDeployment.mockResolvedValue({
+    mocks.createDeployment.mockResolvedValue({ id: '11111111-1111-5111-8111-111111111111', status: 'approved' });
+    mocks.deployForUser.mockResolvedValue({
       id: '11111111-1111-5111-8111-111111111111',
-      planDigest: 'b'.repeat(64),
-      plan: { resources: [{ type: 'worker', logicalName: 'app', proposedName: 'app' }] },
+      status: 'succeeded',
+      productionUrl: 'https://app.example.com',
+      error: null,
     });
   });
 
   it('reports readiness only for the exact checkpoint with a durable validation receipt', async () => {
     const workspace = workspaceStub();
-
     await expect(validatedDeploymentCheckpoint(workspace as never)).resolves.toBeNull();
     workspace.hasSuccessfulValidation.mockResolvedValue(true);
     await expect(validatedDeploymentCheckpoint(workspace as never)).resolves.toEqual({
@@ -31,39 +31,34 @@ describe('builder deployment command', () => {
     });
   });
 
-  it('refuses a plan when the requested validation revision is stale', async () => {
+  it('refuses deployment when the validated revision is stale', async () => {
     const workspace = workspaceStub();
-    const result = await prepareDeploymentPlanForBuilder({
-      context: operationContext(),
-      workspace: workspace as never,
-      toolCallId: 'deploy-command',
-      validatedRevision: 'c'.repeat(64),
-    });
-
-    expect(result).toMatchObject({
-      ok: false,
-      data: { state: 'validation-stale', currentRevision: 'a'.repeat(64) },
-    });
+    await expect(
+      deployValidatedRevisionForBuilder({
+        context: operationContext(),
+        workspace: workspace as never,
+        toolCallId: 'deploy-command',
+        validatedRevision: 'c'.repeat(64),
+      }),
+    ).rejects.toThrow('changed after validation');
     expect(mocks.createDeployment).not.toHaveBeenCalled();
   });
 
-  it('prepares an idempotent approval plan from exact validated bytes', async () => {
+  it('creates and executes one idempotent exact-revision deployment', async () => {
     const workspace = workspaceStub();
     workspace.hasSuccessfulValidation.mockResolvedValue(true);
-    const result = await prepareDeploymentPlanForBuilder({
-      context: operationContext(),
-      workspace: workspace as never,
-      toolCallId: 'deploy-command',
-      validatedRevision: 'a'.repeat(64),
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      data: {
-        state: 'awaiting-approval',
-        revision: 'a'.repeat(64),
-        deployment: { id: '11111111-1111-5111-8111-111111111111' },
-      },
+    await expect(
+      deployValidatedRevisionForBuilder({
+        context: operationContext(),
+        workspace: workspace as never,
+        toolCallId: 'deploy-command',
+        validatedRevision: 'a'.repeat(64),
+      }),
+    ).resolves.toEqual({
+      id: '11111111-1111-5111-8111-111111111111',
+      status: 'succeeded',
+      productionUrl: 'https://app.example.com',
+      error: null,
     });
     expect(mocks.createDeployment).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -75,11 +70,8 @@ describe('builder deployment command', () => {
         workspaceRevision: 7,
       }),
     );
-    expect(workspace.executeToolOnce).toHaveBeenCalledWith(
-      'deployment-plan:workspace-1:deploy-command',
-      'deploy',
-      expect.any(Object),
-      expect.any(Function),
+    expect(mocks.deployForUser).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1', deploymentId: expect.stringMatching(/^[0-9a-f-]{36}$/) }),
     );
   });
 });
@@ -88,7 +80,6 @@ function workspaceStub() {
   return {
     projectId: 'workspace-1',
     checkpoint: vi.fn(async () => ({ workspaceRevision: 7, revision: 'a'.repeat(64) })),
-    executeToolOnce: vi.fn(async (_id, _name, _args, execute: () => Promise<unknown>) => execute()),
     hasSuccessfulValidation: vi.fn(async () => false),
     prepareDeployment: vi.fn(async () => ({
       workspaceRevision: 7,
@@ -99,10 +90,5 @@ function workspaceStub() {
 }
 
 function operationContext() {
-  return {
-    env: {} as Env,
-    userId: 'user-1',
-    chatInitialId: 'chat-1',
-    agentName: 'agent-1',
-  };
+  return { env: {} as Env, userId: 'user-1', chatInitialId: 'chat-1' };
 }

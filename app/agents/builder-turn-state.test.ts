@@ -1,14 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { ChatRecoveryExhaustedContext } from '@cloudflare/ai-chat';
-import {
-  BuilderTurnStore,
-  completeBuilderTurn,
-  createBuilderTurn,
-  exhaustedBuilderTurnResult,
-} from './builder-turn-store';
+import { completeBuilderTurn, createBuilderTurn, exhaustedBuilderTurnResult } from './builder-turn-state';
 
-describe('BuilderTurnStore', () => {
+describe('builder turn state', () => {
   it('bounds identifiers, prompt previews, and terminal errors', () => {
     const turn = createBuilderTurn({
       requestId: 'r'.repeat(1_000),
@@ -28,29 +23,6 @@ describe('BuilderTurnStore', () => {
     expect(turn.lastUserMessagePreview).toHaveLength(500);
     expect(completed.requestId).toHaveLength(512);
     expect(completed.error).toHaveLength(2_000);
-  });
-
-  it('prunes old turn rows after every write', () => {
-    const statements: Array<{ text: string; values: unknown[] }> = [];
-    const sql = (strings: TemplateStringsArray, ...values: unknown[]) => {
-      statements.push({ text: strings.join('?'), values });
-      return [];
-    };
-    const store = new BuilderTurnStore({ sql } as never);
-
-    store.record(
-      createBuilderTurn({
-        requestId: 'request',
-        chatInitialId: 'chat',
-        continuation: false,
-        firstUserMessage: true,
-        messages: [message('m', 'hello')],
-      }),
-    );
-
-    expect(statements).toHaveLength(2);
-    expect(statements[1]?.text).toContain('LIMIT -1 OFFSET');
-    expect(statements[1]?.values).toEqual([100]);
   });
 
   it('terminalizes only the active turn that belongs to the exhausted recovery', () => {

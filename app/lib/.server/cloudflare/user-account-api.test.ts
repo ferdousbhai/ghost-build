@@ -10,18 +10,13 @@ import {
 import { USER_WORKSPACE_RUNTIME_GC_CRON } from './user-workspace-runtime-policy';
 
 const plan: DeploymentPlan = {
-  version: 3,
+  version: 4,
   deploymentId: 'deployment-1',
   sourceSha256: 'a'.repeat(64),
   templateSourceSha256: TEMPLATE_SOURCE_SHA256,
   securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
   securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
   project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, kv: true, appAgent: true } },
-  billing: {
-    infrastructure: 'user_cloudflare_account',
-    workersAi: 'user_cloudflare_account',
-    workersPaidUpgrade: 'explicit_user_authorization_required',
-  },
   resources: [
     { type: 'd1', logicalName: 'DB', proposedName: 'ghostbuild-deployment-1' },
     {
@@ -43,6 +38,14 @@ async function artifactFile(path: string, contents: string): Promise<DeploymentA
     size: bytes.byteLength,
     sha256: [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join(''),
   };
+}
+
+function currentAssetUploadJwt(): string {
+  const claims = btoa(JSON.stringify({ wrangler_single_asset_uploads: true }))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replaceAll('=', '');
+  return `e30.${claims}.signature`;
 }
 
 async function textDigest(value: string): Promise<string> {
@@ -700,15 +703,14 @@ describe('UserCloudflareAccountApi', () => {
     const asset = await artifactFile('index.html', '<h1>Ghostbuild</h1>');
     const duplicateAsset = await artifactFile('nested/index.html', '<h1>Ghostbuild</h1>');
     const assetHash = await deploymentAssetHash(asset);
+    const sessionJwt = currentAssetUploadJwt();
     const workerVersionId = '11111111-1111-4111-8111-111111111111';
     const providerDeploymentId = '22222222-2222-4222-8222-222222222222';
     const versions = [{ percentage: 100, version_id: workerVersionId }];
     const request = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json({ success: true, result: { jwt: 'asset-session-jwt', buckets: [[assetHash]] } }),
-      )
-      .mockResolvedValueOnce(Response.json({ success: true, result: { jwt: 'asset-completion-jwt' } }, { status: 201 }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: { jwt: sessionJwt, buckets: [[assetHash]] } }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: { jwt: 'asset-completion-jwt' } }))
       .mockResolvedValueOnce(Response.json({ success: true, result: { id: 'ghostbuild-app', etag: 'managed-etag' } }))
       .mockResolvedValueOnce(
         Response.json({
@@ -756,7 +758,7 @@ describe('UserCloudflareAccountApi', () => {
 
     expect(request.mock.calls.map(([url]) => String(url))).toEqual([
       'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/assets-upload-session',
-      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/assets/upload?base64=true',
+      `https://api.cloudflare.com/client/v4/accounts/account-1/workers/assets/upload/${assetHash}`,
       'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app?excludeScript=true&bindings_inherit=strict',
       'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/deployments',
       `https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/versions/${workerVersionId}`,
@@ -769,8 +771,11 @@ describe('UserCloudflareAccountApi', () => {
         '/nested/index.html': { hash: assetHash, size: duplicateAsset.size },
       },
     });
-    expect(request.mock.calls[1]?.[1]?.headers).toMatchObject({ authorization: 'Bearer asset-session-jwt' });
-    expect([...(request.mock.calls[1]?.[1]?.body as FormData).keys()]).toEqual([assetHash]);
+    expect(request.mock.calls[1]?.[1]?.headers).toMatchObject({
+      authorization: `Bearer ${sessionJwt}`,
+      'content-type': 'text/html',
+    });
+    expect(new Uint8Array(request.mock.calls[1]?.[1]?.body as ArrayBuffer)).toEqual(asset.bytes);
     const workerForm = request.mock.calls[2]?.[1]?.body as FormData;
     expect(request.mock.calls[2]?.[1]?.method).toBe('PUT');
     const metadata = JSON.parse(await (workerForm.get('metadata') as Blob).text()) as Record<string, unknown>;
@@ -861,7 +866,7 @@ describe('UserCloudflareAccountApi', () => {
     const unknownBucket = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
-        Response.json({ success: true, result: { jwt: 'session-jwt', buckets: [['f'.repeat(32)]] } }),
+        Response.json({ success: true, result: { jwt: currentAssetUploadJwt(), buckets: [['f'.repeat(32)]] } }),
       );
     await expect(deploy(unknownBucket)).rejects.toThrow('unknown managed Worker asset');
     expect(unknownBucket).toHaveBeenCalledOnce();
@@ -869,10 +874,20 @@ describe('UserCloudflareAccountApi', () => {
     const assetHash = await deploymentAssetHash(asset);
     const missingCompletion = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json({ success: true, result: { jwt: 'session-jwt', buckets: [[assetHash]] } }))
-      .mockResolvedValueOnce(Response.json({ success: true, result: {} }, { status: 201 }));
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: { jwt: currentAssetUploadJwt(), buckets: [[assetHash]] } }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: {} }));
     await expect(deploy(missingCompletion)).rejects.toThrow('invalid asset upload identity');
     expect(missingCompletion).toHaveBeenCalledTimes(2);
+
+    const legacySession = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: { jwt: 'e30.e30.signature', buckets: [[assetHash]] } }),
+      );
+    await expect(deploy(legacySession)).rejects.toThrow('did not advertise the current single-asset upload protocol');
+    expect(legacySession).toHaveBeenCalledOnce();
   });
 
   test('forces one credential refresh and retries exactly once on a Cloudflare 401', async () => {

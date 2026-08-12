@@ -25,7 +25,6 @@ type WorkspaceChangeListener = (changes: BuilderWorkspaceClientChange[]) => Prom
  */
 export class FilesStore {
   files: MapStore<FileMap> = import.meta.hot?.data.files ?? map({});
-  userWrites: Map<AbsolutePath, number> = import.meta.hot?.data.userWrites ?? new Map();
   #modifiedFiles: Map<AbsolutePath, string> = import.meta.hot?.data.modifiedFiles ?? new Map();
   #workspaceChangeListener: WorkspaceChangeListener | null = null;
 
@@ -33,7 +32,6 @@ export class FilesStore {
     if (import.meta.hot) {
       import.meta.hot.data.files = this.files;
       import.meta.hot.data.modifiedFiles = this.#modifiedFiles;
-      import.meta.hot.data.userWrites = this.userWrites;
     }
   }
 
@@ -90,7 +88,6 @@ export class FilesStore {
       this.#modifiedFiles.set(filePath, oldContent);
     }
     this.files.setKey(filePath, { type: 'file', content, isBinary: false });
-    this.userWrites.set(filePath, Date.now());
   }
 
   applyWorkspaceSyncEntries(entries: BuilderWorkspaceSyncEntry[]): void {
@@ -115,7 +112,6 @@ export class FilesStore {
   replaceWorkspaceSnapshot(entries: BuilderWorkspaceSyncEntry[]): void {
     this.files.set({});
     this.#modifiedFiles.clear();
-    this.userWrites.clear();
     this.applyWorkspaceSyncEntries(entries);
   }
 
@@ -135,11 +131,6 @@ export class FilesStore {
     for (const candidatePath of this.#modifiedFiles.keys()) {
       if (candidatePath === filePath || candidatePath.startsWith(childPrefix)) {
         this.#modifiedFiles.delete(candidatePath);
-      }
-    }
-    for (const candidatePath of this.userWrites.keys()) {
-      if (candidatePath === filePath || candidatePath.startsWith(childPrefix)) {
-        this.userWrites.delete(candidatePath);
       }
     }
   }

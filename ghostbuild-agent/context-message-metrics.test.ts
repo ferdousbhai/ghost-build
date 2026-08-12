@@ -17,7 +17,7 @@ describe('calculatePromptCharacterCounts', () => {
       },
     ];
 
-    expect(calculatePromptCharacterCounts(messages, ['system'])).toEqual({
+    expect(calculatePromptCharacterCounts(messages, 'system')).toEqual({
       messageHistoryChars: 11,
       currentTurnChars: 4,
       totalPromptChars: 21,

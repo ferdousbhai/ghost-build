@@ -3,7 +3,6 @@ import type { UIMessage } from 'ai';
 import {
   boundBuilderMessageForPersistence,
   loadBuilderTranscriptBinding,
-  MAX_BUILDER_AGENT_MESSAGES,
   requireBuilderRequestScope,
   requireBuilderTranscriptIdentity,
   type BuilderTranscriptBinding,
@@ -85,10 +84,6 @@ describe('BuilderAgent request policy', () => {
     expect(() =>
       requireBuilderTranscriptIdentity({ agentName: binding.agentName, generation: 3, subchatIndex: 2 }, null),
     ).toThrow(expect.objectContaining({ status: 409 }));
-  });
-
-  it('keeps the persisted transcript window finite', () => {
-    expect(MAX_BUILDER_AGENT_MESSAGES).toBe(500);
   });
 
   it('bounds direct-client user text without altering assistant tool parts', () => {
