@@ -2002,9 +2002,8 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   }
 
   private async pushDurableProjectToContainer(): Promise<void> {
-    // Computer owns durable project state; Sandbox commands below reuse its container for transient /tmp builds.
-    // One explicit push avoids a full Computer push/pull cycle around every validation, preview, and deploy command.
-    await this.#workspace.push('container-shell');
+    // Computer owns durable project state and exposes it through the container's mounted /home tree. A completed
+    // sync barrier plus an existing project mount is sufficient; another push can wait indefinitely under load.
     if ((await this.exists(PROJECT_ROOT)).exists) {
       return;
     }
@@ -2546,12 +2545,10 @@ async function handleUserRequest(
       userId: capability.subject,
     });
   } else {
-    const deployment = /^\/v1\/deployments\/([^/]+)(?:\/(approve|execute|retry))?$/.exec(url.pathname);
+    const deployment = /^\/v1\/deployments\/([^/]+)(?:\/(deploy))?$/.exec(url.pathname);
     if (deployment && (request.method === 'GET' || request.method === 'POST')) {
-      const operation =
-        deployment[2] === 'approve' || deployment[2] === 'execute' || deployment[2] === 'retry' ? deployment[2] : 'get';
+      const operation = deployment[2] === 'deploy' ? 'deploy' : 'get';
       response = await userRuntimeDeploymentAction({
-        request,
         env: env as unknown as Env,
         userId: capability.subject,
         deploymentId: decodeURIComponent(deployment[1]!),
@@ -2996,8 +2993,8 @@ function requireBackend(value: unknown): 'container-shell' {
   throw new SyntaxError('Invalid Computer execution backend.');
 }
 
-function requireRemoteToolName(value: unknown): 'write' | 'edit' | 'exec' | 'deploy' {
-  if (value === 'write' || value === 'edit' || value === 'exec' || value === 'deploy') {
+function requireRemoteToolName(value: unknown): 'write' | 'edit' | 'exec' {
+  if (value === 'write' || value === 'edit' || value === 'exec') {
     return value;
   }
   throw new SyntaxError('Invalid stateful workspace tool name.');
