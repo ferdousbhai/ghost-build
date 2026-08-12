@@ -1875,6 +1875,22 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           `pnpm exec wrangler deploy --dry-run --outdir ${shellQuote(artifactRoot)} --config ${shellQuote(wranglerConfigPath)}`,
           10 * 60_000,
         );
+        if (projectType === 'web_app') {
+          // Cloudflare's direct script upload can acknowledge a multipart request while omitting an additional
+          // generated module. Collapse Wrangler's verified output to one module so publication is atomic.
+          const mainPath = `${artifactRoot}/index.js`;
+          const bundledPath = `${isolatedRoot}/.ghostbuild-worker.js`;
+          await this.runTransientCommand(
+            isolatedRoot,
+            [
+              `pnpm exec esbuild ${shellQuote(mainPath)} --bundle --minify --format=esm --platform=node ${shellQuote('--external:cloudflare:*')} --outfile=${shellQuote(bundledPath)}`,
+              `rm -rf ${shellQuote(artifactRoot)}`,
+              `mkdir -p ${shellQuote(artifactRoot)}`,
+              `mv ${shellQuote(bundledPath)} ${shellQuote(mainPath)}`,
+            ].join(' && '),
+            2 * 60_000,
+          );
+        }
         artifact = {
           revision,
           mainModule: projectType === 'worker' ? 'server.js' : 'index.js',
