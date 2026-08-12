@@ -112,4 +112,46 @@ describe('DeploymentApproval', () => {
     expect(container.textContent).toContain("Ghostbuild won't enable a paid plan");
     expect(mocks.fetchUserRuntime.mock.calls.some(([path]) => String(path).endsWith('/retry'))).toBe(false);
   });
+
+  it('resets the failed row when the current revision keeps the same plan', async () => {
+    mocks.fetchUserRuntime.mockImplementation(async (path: string) =>
+      path.endsWith('/retry')
+        ? Response.json({
+            deployment: {
+              id: 'deployment-1',
+              planDigest: 'a'.repeat(64),
+              plan: {
+                resources: [{ type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-app' }],
+              },
+            },
+          })
+        : Response.json({ deployment: { status: 'failed', error: { message: 'The project changed.' } } }),
+    );
+    const onPrepareDeployment = vi.fn(async () => ({
+      id: 'deployment-1',
+      planDigest: 'a'.repeat(64),
+      resources: [{ type: 'worker' as const, logicalName: 'app', proposedName: 'ghostbuild-app' }],
+    }));
+    await act(async () => {
+      root.render(
+        <DeploymentApproval
+          deployment={{
+            id: 'deployment-1',
+            planDigest: 'a'.repeat(64),
+            resources: [{ type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-app' }],
+          }}
+          onPrepareDeployment={onPrepareDeployment}
+        />,
+      );
+    });
+
+    const retry = Array.from(container.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent === 'Prepare retry',
+    );
+    await act(async () => retry?.click());
+
+    expect(onPrepareDeployment).toHaveBeenCalledOnce();
+    expect(mocks.fetchUserRuntime.mock.calls.some(([path]) => String(path).endsWith('/retry'))).toBe(true);
+    expect(container.textContent).toContain('Deploy');
+  });
 });

@@ -99,11 +99,13 @@ export function DeploymentApproval({
     try {
       if (onPrepareDeployment) {
         const next = await onPrepareDeployment();
-        setProductionUrl(null);
-        setCanRetry(false);
-        setActiveDeployment(next);
-        setStatus('idle');
-        return;
+        if (next.id !== activeDeployment.id) {
+          setProductionUrl(null);
+          setCanRetry(false);
+          setActiveDeployment(next);
+          setStatus('idle');
+          return;
+        }
       }
       const response = await deploymentFetch(activeDeployment.id, 'retry', {
         method: 'POST',
