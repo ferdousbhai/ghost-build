@@ -211,6 +211,7 @@ const AuthenticatedChat = memo(
       error,
       isRecovering,
       streamStatus,
+      contextManager,
       transcriptCheckpoint,
       validationStage,
       deploymentApproval,
@@ -284,6 +285,7 @@ const AuthenticatedChat = memo(
     const { messageRef, scrollRef, enableAutoScroll } = useSnapScroll();
     const { pendingUserMessage, sendMessage, sendMessageInProgress } = useChatMessageSubmission({
       messages,
+      contextManager,
       chatStarted,
       streamStatus,
       initializeChat,
