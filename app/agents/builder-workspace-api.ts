@@ -71,6 +71,9 @@ export interface ProjectWorkspaceRpc extends Rpc.DurableObjectBranded {
     sessionId: string;
     status: 'completed' | 'failed';
   }): Promise<{ status: 'completed' | 'failed' }>;
+  terminalizeInterruptedDeploymentSession(value: {
+    sessionId: string;
+  }): Promise<{ status: 'absent' | 'completed' | 'failed' }>;
   createPreview(value: unknown): Promise<BuilderPreviewSuccess>;
   stopPreview(previewId: unknown): Promise<void>;
   deleteProject(): Promise<void>;

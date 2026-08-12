@@ -1569,6 +1569,29 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     }
   }
 
+  async terminalizeInterruptedDeploymentSession(value: unknown) {
+    const sessionId = requireString(record(value).sessionId, 'sessionId', 256);
+    const session = this.deploymentSessionRow(sessionId);
+    if (!session) {
+      return { status: 'absent' as const };
+    }
+    const lease = this.#operationLane.find(session.idempotency_key, session.owner);
+    if (lease) {
+      this.#operationLane.release(lease);
+    }
+    this.#activeOperationOwners.delete(session.owner);
+    if (session.status !== 'completed' && session.status !== 'failed') {
+      this.ctx.storage.sql.exec(
+        `UPDATE ghostbuild_deployment_sessions SET status = 'failed', updated_at = ?
+         WHERE operation_id = ? AND status IN ('active', 'indeterminate')`,
+        Date.now(),
+        sessionId,
+      );
+    }
+    await this.releaseContainerKeepAliveIfIdle();
+    return { status: session.status === 'completed' ? ('completed' as const) : ('failed' as const) };
+  }
+
   async finishDeploymentSession(value: unknown) {
     const input = record(value);
     const sessionId = requireString(input.sessionId, 'sessionId', 256);
@@ -3116,10 +3139,6 @@ function record(value: unknown): Record<string, unknown> {
     throw new SyntaxError('Workspace request must be an object.');
   }
   return value as Record<string, unknown>;
-}
-
-function recordOrNull(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
 function stableValue(value: unknown): unknown {

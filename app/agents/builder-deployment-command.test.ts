@@ -1,13 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ createDeployment: vi.fn(), deployForUser: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  createDeployment: vi.fn(),
+  deployForUser: vi.fn(),
+  terminalizeInterrupted: vi.fn(),
+}));
 
 vi.mock('~/server-handlers/deployments', () => ({
   createOrReplayDeploymentPlanForUser: mocks.createDeployment,
   deployForUser: mocks.deployForUser,
+  terminalizeInterruptedDeploymentForUser: mocks.terminalizeInterrupted,
 }));
 
-import { deployValidatedRevisionForBuilder, validatedDeploymentCheckpoint } from './builder-deployment-command';
+import {
+  deployValidatedRevisionForBuilder,
+  terminalizeInterruptedDeploymentForBuilder,
+  validatedDeploymentCheckpoint,
+} from './builder-deployment-command';
 
 describe('builder deployment command', () => {
   beforeEach(() => {
@@ -18,6 +27,12 @@ describe('builder deployment command', () => {
       status: 'succeeded',
       productionUrl: 'https://app.example.com',
       error: null,
+    });
+    mocks.terminalizeInterrupted.mockResolvedValue({
+      id: '11111111-1111-5111-8111-111111111111',
+      status: 'failed',
+      productionUrl: null,
+      error: { message: 'Deployment was interrupted.' },
     });
   });
 
@@ -42,6 +57,35 @@ describe('builder deployment command', () => {
       }),
     ).rejects.toThrow('changed after validation');
     expect(mocks.createDeployment).not.toHaveBeenCalled();
+  });
+
+  it('terminalizes the same deterministic deployment after fiber interruption', async () => {
+    const workspace = workspaceStub();
+    await terminalizeInterruptedDeploymentForBuilder({
+      context: operationContext(),
+      workspace: workspace as never,
+      toolCallId: 'deploy-command:7:revision',
+      validatedRevision: 'a'.repeat(64),
+    });
+
+    expect(mocks.terminalizeInterrupted).toHaveBeenCalledWith({
+      env: expect.anything(),
+      userId: 'user-1',
+      deploymentId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    });
+  });
+
+  it('accepts recovery before the deterministic deployment row was created', async () => {
+    mocks.terminalizeInterrupted.mockResolvedValueOnce(null);
+
+    await expect(
+      terminalizeInterruptedDeploymentForBuilder({
+        context: operationContext(),
+        workspace: workspaceStub() as never,
+        toolCallId: 'deploy-command:7:revision',
+        validatedRevision: 'a'.repeat(64),
+      }),
+    ).resolves.toMatchObject({ status: 'failed', error: expect.stringContaining('before execution started') });
   });
 
   it('creates and executes one idempotent exact-revision deployment', async () => {

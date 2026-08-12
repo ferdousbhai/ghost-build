@@ -1,4 +1,8 @@
-import { createOrReplayDeploymentPlanForUser, deployForUser } from '~/server-handlers/deployments';
+import {
+  createOrReplayDeploymentPlanForUser,
+  deployForUser,
+  terminalizeInterruptedDeploymentForUser,
+} from '~/server-handlers/deployments';
 import type { BuilderWorkspaceApi, BuilderWorkspaceCheckpoint } from './builder-workspace-api';
 
 type BuilderDeploymentContext = {
@@ -21,6 +25,33 @@ export async function validatedDeploymentCheckpoint(
 ): Promise<BuilderWorkspaceCheckpoint | null> {
   const snapshot = await workspace.checkpoint();
   return (await workspace.hasSuccessfulValidation(snapshot.revision)) ? snapshot : null;
+}
+
+export async function terminalizeInterruptedDeploymentForBuilder(args: {
+  context: BuilderDeploymentContext;
+  workspace: Pick<BuilderWorkspaceApi, 'projectId'>;
+  toolCallId: string;
+  validatedRevision: string;
+}): Promise<BuilderDeploymentState> {
+  const operationId = `deployment:${args.workspace.projectId}:${args.toolCallId}`;
+  const deploymentId = await deterministicDeploymentId(`${operationId}:${args.validatedRevision}`);
+  const deployment = await terminalizeInterruptedDeploymentForUser({
+    env: args.context.env,
+    userId: args.context.userId,
+    deploymentId,
+  });
+  return deployment
+    ? {
+        id: deployment.id,
+        status:
+          deployment.status === 'succeeded' ? 'succeeded' : deployment.status === 'failed' ? 'failed' : 'deploying',
+        productionUrl: deployment.productionUrl,
+        error: deployment.error?.message ?? null,
+      }
+    : {
+        status: 'failed',
+        error: 'Deployment was interrupted before execution started.',
+      };
 }
 
 /** Deploy the exact durably validated revision as one idempotent server operation. */

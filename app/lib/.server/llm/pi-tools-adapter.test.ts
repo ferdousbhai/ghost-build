@@ -84,10 +84,7 @@ describe('Pi tool adapter', () => {
     await expect(tools.activate_skill!.execute('skill-1', { name: 'builder' })).resolves.toMatchObject({
       details: '<skill_content name="builder">Guide</skill_content>',
     });
-    expect(activate).toHaveBeenCalledWith(
-      { name: 'builder' },
-      expect.objectContaining({ toolCallId: 'skill-1' }),
-    );
+    expect(activate).toHaveBeenCalledWith({ name: 'builder' }, expect.objectContaining({ toolCallId: 'skill-1' }));
     expect(piToolsToList(tools).map(({ name }) => name)).toEqual(['read', 'write', 'edit', 'exec', 'activate_skill']);
   });
 

@@ -39,7 +39,10 @@ vi.mock('./user-account-api', () => ({
   UserCloudflareAccountApi: mocks.UserCloudflareAccountApi,
 }));
 
-import { executeUserOwnedDeployment } from './user-workspace-deployment-executor';
+import {
+  executeUserOwnedDeployment,
+  terminalizeInterruptedUserOwnedDeployment,
+} from './user-workspace-deployment-executor';
 
 describe('executeUserOwnedDeployment credential-free Computer flow', () => {
   beforeEach(() => {
@@ -59,6 +62,93 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
     mocks.attestManagedDeploymentSecurity.mockResolvedValue({ status: 'current' });
     mocks.recordDeploymentResource.mockResolvedValue(undefined);
     mocks.transitionDeployment.mockResolvedValue(undefined);
+  });
+
+  it('releases the workspace session and terminalizes an interrupted active execution', async () => {
+    const revision = 'a'.repeat(64);
+    const deployment = {
+      id: 'deployment-1',
+      chatId: 'chat-1',
+      userId: 'user-1',
+      connectionId: 'connection-1',
+      connectionGeneration: 3,
+      executionGeneration: 4,
+      workspaceReference: `workspace-runtime:project-1:7:${revision}`,
+      status: 'deploying',
+      plan: { sourceSha256: revision },
+      planDigest: 'digest-1',
+      productionUrl: null,
+      errorCode: null,
+      errorMessage: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const terminalizeInterruptedDeploymentSession = vi.fn().mockResolvedValue({ status: 'failed' });
+    const projectNamespace = {
+      idFromName: vi.fn((name: string) => `id:${name}`),
+      get: vi.fn(() => ({ terminalizeInterruptedDeploymentSession })),
+    };
+    mocks.requireDeployment
+      .mockResolvedValueOnce(deployment)
+      .mockResolvedValueOnce({ ...deployment, status: 'failed' });
+
+    await terminalizeInterruptedUserOwnedDeployment({
+      env: { DB: {} as D1Database, PROJECT_WORKSPACE: projectNamespace } as unknown as Env,
+      deploymentId: deployment.id,
+      userId: deployment.userId,
+      connectionId: deployment.connectionId,
+      executionGeneration: deployment.executionGeneration,
+    });
+
+    expect(terminalizeInterruptedDeploymentSession).toHaveBeenCalledWith({ sessionId: 'deployment-1:4' });
+    expect(mocks.transitionDeployment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deploymentId: 'deployment-1',
+        executionGeneration: 4,
+        expectedStatus: 'deploying',
+        nextStatus: 'failed',
+        errorCode: 'cloudflare_cleanup_required',
+      }),
+    );
+  });
+
+  it('does not make an interrupted deployment retryable until its workspace session is released', async () => {
+    const revision = 'a'.repeat(64);
+    const deployment = {
+      id: 'deployment-1',
+      chatId: 'chat-1',
+      userId: 'user-1',
+      connectionId: 'connection-1',
+      connectionGeneration: 3,
+      executionGeneration: 4,
+      workspaceReference: `workspace-runtime:project-1:7:${revision}`,
+      status: 'deploying',
+      plan: { sourceSha256: revision },
+      planDigest: 'digest-1',
+      productionUrl: null,
+      errorCode: null,
+      errorMessage: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const projectNamespace = {
+      idFromName: vi.fn((name: string) => `id:${name}`),
+      get: vi.fn(() => ({
+        terminalizeInterruptedDeploymentSession: vi.fn().mockRejectedValue(new Error('workspace unavailable')),
+      })),
+    };
+    mocks.requireDeployment.mockResolvedValue(deployment);
+
+    await expect(
+      terminalizeInterruptedUserOwnedDeployment({
+        env: { DB: {} as D1Database, PROJECT_WORKSPACE: projectNamespace } as unknown as Env,
+        deploymentId: deployment.id,
+        userId: deployment.userId,
+        connectionId: deployment.connectionId,
+        executionGeneration: deployment.executionGeneration,
+      }),
+    ).rejects.toThrow('workspace unavailable');
+    expect(mocks.transitionDeployment).not.toHaveBeenCalled();
   });
 
   it('passes no credential to ProjectWorkspace and publishes only through the trusted account API', async () => {

@@ -13,7 +13,7 @@ describe('BuilderAgent preview lifecycle', () => {
     expect(chatMessage).toContain('if (!options?.continuation) {\n      await this.cancelPreview();\n    }');
   });
 
-  it('automatically previews only an exactly validated durable revision', () => {
+  it('automatically deploys then previews only an exactly validated durable revision', () => {
     const response = source.slice(
       source.indexOf('protected override async onChatResponse('),
       source.indexOf('@callable()\n  async steerActiveTurn'),
@@ -24,8 +24,9 @@ describe('BuilderAgent preview lifecycle', () => {
     );
 
     expect(response).toContain('const validatedSnapshot = await this.refreshDeploymentReadiness()');
-    expect(response).toContain('this.requestPreviewInternal({ validatedSnapshot })');
     expect(response).toContain('this.scheduleDeployment(validatedSnapshot)');
+    expect(response).not.toContain('this.requestPreviewInternal({ validatedSnapshot })');
+    expect(source).toContain('this.requestPreviewInternal({ validatedSnapshot: job })');
     expect(preview).toContain('options.validatedSnapshot ?? (await this.workspace.checkpoint())');
     expect(preview).not.toContain('hasSuccessfulValidation');
   });
@@ -46,6 +47,17 @@ describe('BuilderAgent preview lifecycle', () => {
     expect(response.indexOf('await this.advanceTranscriptCheckpoint')).toBeLessThan(
       response.indexOf('this.scheduleContextCompaction'),
     );
+  });
+
+  it('terminalizes an interrupted deployment again before admitting a manual retry', () => {
+    const retry = source.slice(
+      source.indexOf('async deployValidatedRevision()'),
+      source.indexOf('@callable()\n  requestPreview'),
+    );
+
+    expect(retry).toContain("current.status === 'failed'");
+    expect(retry).toContain('await this.terminalizeDeployment(snapshot)');
+    expect(retry.indexOf('terminalizeDeployment')).toBeLessThan(retry.indexOf('scheduleDeployment'));
   });
 
   it('keeps the agent alive while stateful Computer tools run', () => {

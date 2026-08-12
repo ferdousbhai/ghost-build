@@ -22,6 +22,26 @@ type UserOwnedDeploymentArgs = {
 };
 
 /** Execute an approved build entirely in the user's workspace Sandbox. */
+export async function terminalizeInterruptedUserOwnedDeployment(args: UserOwnedDeploymentArgs): Promise<Deployment> {
+  const deployment = await requireDeployment(args.env.DB, args.deploymentId);
+  requireExecutionIdentityForRecovery(deployment, args);
+  const reference = parseWorkspaceReference(deployment.workspaceReference);
+  const workspace = args.env.PROJECT_WORKSPACE.get(args.env.PROJECT_WORKSPACE.idFromName(reference.projectId));
+  await workspace.terminalizeInterruptedDeploymentSession({
+    sessionId: `${deployment.id}:${args.executionGeneration}`,
+  });
+  await transitionDeployment({
+    db: args.env.DB,
+    deploymentId: deployment.id,
+    executionGeneration: args.executionGeneration,
+    expectedStatus: deployment.status,
+    nextStatus: 'failed',
+    errorCode: 'cloudflare_cleanup_required',
+    errorMessage: 'Deployment was interrupted. Retry to reconcile the exact revision.',
+  });
+  return requireDeployment(args.env.DB, deployment.id);
+}
+
 export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs): Promise<Deployment> {
   let phase: DeploymentStatus = 'approved';
   let providerChangesPossible = false;
@@ -330,6 +350,18 @@ function containsNoStore(value: string): boolean {
     .toLowerCase()
     .split(',')
     .some((directive) => directive.trim() === 'no-store');
+}
+
+function requireExecutionIdentityForRecovery(deployment: Deployment, args: UserOwnedDeploymentArgs): void {
+  if (
+    deployment.userId !== args.userId ||
+    deployment.connectionId !== args.connectionId ||
+    deployment.executionGeneration !== args.executionGeneration ||
+    (deployment.status !== 'provisioning' && deployment.status !== 'deploying') ||
+    !isCurrentDeploymentPlan(deployment.plan)
+  ) {
+    throw new Error('Deployment no longer matches the interrupted user-owned execution.');
+  }
 }
 
 function requireExecutionIdentity(deployment: Deployment, args: UserOwnedDeploymentArgs): void {

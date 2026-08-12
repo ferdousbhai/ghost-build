@@ -11,7 +11,10 @@ import {
   type Deployment,
 } from '~/lib/.server/cloudflare/deployment-repository';
 import { findChat } from '~/lib/cloudflare/data/chat-repository.server';
-import { executeUserOwnedDeployment } from '~/lib/.server/cloudflare/user-workspace-deployment-executor';
+import {
+  executeUserOwnedDeployment,
+  terminalizeInterruptedUserOwnedDeployment,
+} from '~/lib/.server/cloudflare/user-workspace-deployment-executor';
 
 type PublicDeployment = ReturnType<typeof publicDeployment>;
 
@@ -57,6 +60,36 @@ export async function createOrReplayDeploymentPlanForUser(args: {
       workspaceReference: workspaceReference(workspaceArgs),
       plan,
       planDigest: digest,
+    }),
+  );
+}
+
+/** Terminalize an execution whose durable fiber was interrupted so a retry cannot be blocked indefinitely. */
+export async function terminalizeInterruptedDeploymentForUser(args: {
+  env: Env;
+  deploymentId: string;
+  userId: string;
+}): Promise<PublicDeployment | null> {
+  const connection = runtimeCloudflareIdentity(args.env, args.userId);
+  const deployment = await requireDeploymentForUser(args.env.DB, args.deploymentId, args.userId).catch((error) => {
+    if (error instanceof DeploymentNotFoundError) {
+      return null;
+    }
+    throw error;
+  });
+  if (!deployment) {
+    return null;
+  }
+  if (deployment.status !== 'provisioning' && deployment.status !== 'deploying') {
+    return publicDeployment(deployment);
+  }
+  return publicDeployment(
+    await terminalizeInterruptedUserOwnedDeployment({
+      env: args.env,
+      deploymentId: deployment.id,
+      userId: args.userId,
+      connectionId: connection.id,
+      executionGeneration: deployment.executionGeneration,
     }),
   );
 }

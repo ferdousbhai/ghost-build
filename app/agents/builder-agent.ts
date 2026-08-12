@@ -26,6 +26,7 @@ import { loadSystemDocs } from '~/lib/.server/cloudflare/system-docs';
 import type { UIMessage } from 'ai';
 import {
   deployValidatedRevisionForBuilder,
+  terminalizeInterruptedDeploymentForBuilder,
   validatedDeploymentCheckpoint,
   type BuilderDeploymentState,
 } from './builder-deployment-command';
@@ -292,16 +293,19 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
     if (ctx.name === DEPLOYMENT_FIBER) {
       const job = parseDeploymentJob(ctx.metadata);
-      if (!job) {
+      if (!job || !this.userId || !this.transcriptBinding) {
         return { status: 'error', error: 'missing deployment recovery data' };
       }
+      const error = new Error('Deployment was interrupted. Retry to reconcile the exact revision.');
       try {
-        await this.runDeployment(job);
-        return { status: 'completed', snapshot: ctx.snapshot };
-      } catch (error) {
-        this.failDeployment(job, error);
-        return { status: 'error', error: deploymentErrorMessage(error) };
+        await this.retry(() => this.terminalizeDeployment(job));
+      } catch (recoveryError) {
+        logger.error('Unable to terminalize the interrupted deployment', recoveryError);
+        this.failDeployment(job, new Error('Interrupted deployment recovery is pending. Retry to continue.'));
+        return { status: 'error', error: 'Interrupted deployment recovery did not settle safely.' };
       }
+      this.failDeployment(job, error);
+      return { status: 'error', error: error.message };
     }
     if (ctx.name !== CONTEXT_COMPACTION_FIBER) {
       return super.onFiberRecovered(ctx);
@@ -538,14 +542,9 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         }
       }
       if (validatedSnapshot) {
-        await Promise.all([
-          this.requestPreviewInternal({ validatedSnapshot }).catch(() =>
-            logger.warn('Unable to queue the automatic remote preview'),
-          ),
-          this.scheduleDeployment(validatedSnapshot).catch(() =>
-            logger.warn('Unable to queue the automatic deployment'),
-          ),
-        ]);
+        await this.scheduleDeployment(validatedSnapshot).catch(() =>
+          logger.warn('Unable to queue the automatic deployment'),
+        );
       }
     }
   }
@@ -661,11 +660,15 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (!snapshot) {
       throw new Error('The current project revision must pass validation before deployment.');
     }
-    try {
-      return await this.runDeployment(snapshot);
-    } catch (error) {
-      return this.failDeployment(snapshot, error);
+    const current = this.state.deployment;
+    if (current?.revision === snapshot.revision && (current.status === 'deploying' || current.status === 'succeeded')) {
+      return current;
     }
+    if (current?.revision === snapshot.revision && current.status === 'failed') {
+      await this.terminalizeDeployment(snapshot);
+    }
+    await this.scheduleDeployment(snapshot, crypto.randomUUID());
+    return this.state.deployment ?? { status: 'deploying', ...snapshot };
   }
 
   @callable()
@@ -1040,23 +1043,66 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     return seedBuilderWorkspace(this.workspace, seedId, entries);
   }
 
-  private async scheduleDeployment(job: DeploymentJob): Promise<void> {
-    await this.startFiber(
-      DEPLOYMENT_FIBER,
-      async (fiber) => {
-        fiber.stash(job);
-        try {
-          await this.runDeployment(job);
-        } catch (error) {
-          this.failDeployment(job, error);
-          throw error;
-        }
+  private async terminalizeDeployment(job: DeploymentJob): Promise<BuilderDeploymentState> {
+    const userId = this.userId;
+    const transcriptBinding = this.transcriptBinding;
+    if (!userId || !transcriptBinding) {
+      throw new Response('Agent authentication is required.', { status: 401 });
+    }
+    return terminalizeInterruptedDeploymentForBuilder({
+      context: {
+        env: this.env,
+        userId,
+        chatInitialId: transcriptBinding.chatInitialId,
       },
-      {
-        idempotencyKey: `builder-deployment:${this.name}:${job.workspaceRevision}:${job.revision}`,
-        metadata: job,
-      },
-    );
+      workspace: this.workspace,
+      toolCallId: `deploy-command:${job.workspaceRevision}:${job.revision}`,
+      validatedRevision: job.revision,
+    });
+  }
+
+  private async scheduleDeployment(job: DeploymentJob, retryId?: string): Promise<void> {
+    const current = this.state.deployment;
+    if (
+      !retryId &&
+      current?.revision === job.revision &&
+      (current.status === 'deploying' || current.status === 'succeeded' || current.status === 'failed')
+    ) {
+      return;
+    }
+    this.setState({
+      ...this.state,
+      deployment: { status: 'deploying', ...job },
+      updatedAt: new Date().toISOString(),
+    });
+    try {
+      await this.startFiber(
+        DEPLOYMENT_FIBER,
+        async (fiber) => {
+          fiber.stash(job);
+          try {
+            const deployment = await this.runDeployment(job);
+            if (deployment.status === 'succeeded') {
+              await this.requestPreviewInternal({ validatedSnapshot: job }).catch(() =>
+                logger.warn('Unable to queue the post-deployment preview'),
+              );
+            }
+          } catch (error) {
+            this.failDeployment(job, error);
+            throw error;
+          }
+        },
+        {
+          idempotencyKey: `builder-deployment:${this.name}:${job.workspaceRevision}:${job.revision}${
+            retryId ? `:retry:${retryId}` : ''
+          }`,
+          metadata: job,
+        },
+      );
+    } catch (error) {
+      this.failDeployment(job, error);
+      throw error;
+    }
   }
 
   private async runDeployment(job: DeploymentJob): Promise<BuilderDeploymentState> {
@@ -1065,11 +1111,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (!userId || !transcriptBinding) {
       throw new Response('Agent authentication is required.', { status: 401 });
     }
-    this.setState({
-      ...this.state,
-      deployment: { status: 'deploying', ...job },
-      updatedAt: new Date().toISOString(),
-    });
     const deployment = await this.keepAliveWhile(() =>
       deployValidatedRevisionForBuilder({
         context: {
@@ -1083,14 +1124,21 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       }),
     );
     const revisionBoundDeployment = { ...deployment, ...job };
-    this.setState({ ...this.state, deployment: revisionBoundDeployment, updatedAt: new Date().toISOString() });
+    this.setDeploymentResult(job, revisionBoundDeployment);
     return revisionBoundDeployment;
   }
 
   private failDeployment(job: DeploymentJob, error: unknown): BuilderDeploymentState {
     const deployment = { status: 'failed' as const, ...job, error: deploymentErrorMessage(error) };
-    this.setState({ ...this.state, deployment, updatedAt: new Date().toISOString() });
+    this.setDeploymentResult(job, deployment);
     return deployment;
+  }
+
+  private setDeploymentResult(job: DeploymentJob, deployment: BuilderDeploymentState): void {
+    if (this.state.deployment?.revision !== job.revision) {
+      return;
+    }
+    this.setState({ ...this.state, deployment, updatedAt: new Date().toISOString() });
   }
 
   private async requestPreviewInternal(
