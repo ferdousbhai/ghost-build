@@ -206,6 +206,21 @@ describe('isolated project command', () => {
     expect(keepAlive).toContain('await this.setKeepAlive(false)');
   });
 
+  it('retires the active preview before an immutable deployment session starts', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const session = source.slice(
+      source.indexOf('async beginDeploymentSession('),
+      source.indexOf('async createPreview('),
+    );
+    const cleanup = session.indexOf('await this.cleanupPendingPreviews()');
+    const stop = session.indexOf('await this.stopActivePreview()');
+    const assertion = session.lastIndexOf('await this.assertDeploymentSession({ sessionId: operationId })');
+
+    expect(cleanup).toBeGreaterThan(0);
+    expect(stop).toBeGreaterThan(cleanup);
+    expect(assertion).toBeGreaterThan(stop);
+  });
+
   it('uses the public Computer filesystem for durable workspace changes', () => {
     const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
     const applyChanges = source.slice(source.indexOf('async applyChanges('), source.indexOf('async getSyncPage('));

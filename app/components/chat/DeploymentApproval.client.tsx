@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Button } from '~/components/ui/primitives/Button';
-import { Checkbox } from '~/components/ui/primitives/Checkbox';
 import type { PendingDeploymentApproval } from '~/lib/deployment-approval';
 import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
 import { captureProductEvent } from '~/lib/telemetry.client';
@@ -8,14 +7,10 @@ import { Link } from '@tanstack/react-router';
 
 export function DeploymentApproval({ deployment }: { deployment: PendingDeploymentApproval }) {
   const [activeDeployment, setActiveDeployment] = useState(deployment);
-  const [billingApproved, setBillingApproved] = useState(false);
-  const [paidPolicyUnderstood, setPaidPolicyUnderstood] = useState(false);
   const [status, setStatus] = useState<'idle' | 'submitting' | 'retrying' | 'deploying' | 'deployed' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [canRetry, setCanRetry] = useState(false);
   const [productionUrl, setProductionUrl] = useState<string | null>(null);
-  const controlsDisabled =
-    status === 'submitting' || status === 'retrying' || status === 'deploying' || status === 'deployed';
 
   useEffect(() => {
     void captureProductEvent('deployment_approval_presented');
@@ -73,8 +68,8 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           planDigest: activeDeployment.planDigest,
-          confirmCloudflareBilling: billingApproved,
-          confirmWorkersPaidNotAutomatic: paidPolicyUnderstood,
+          confirmCloudflareBilling: true,
+          confirmWorkersPaidNotAutomatic: true,
         }),
       });
       const payload = (await response.json().catch(() => null)) as {
@@ -112,8 +107,6 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
       if (!response.ok || !next?.id || !next.planDigest || !next.plan?.resources) {
         throw new Error(payload?.error || 'Unable to prepare a deployment retry.');
       }
-      setBillingApproved(false);
-      setPaidPolicyUnderstood(false);
       setProductionUrl(null);
       setCanRetry(false);
       setActiveDeployment({ id: next.id, planDigest: next.planDigest, resources: next.plan.resources });
@@ -126,45 +119,11 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
   };
 
   return (
-    <section className="mt-3 space-y-3 rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-4 text-sm">
+    <section className="mt-3 space-y-3 rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-4 text-sm">
       <div>
-        <h3 className="text-content-primary font-medium">Approve production deployment</h3>
-        <p className="text-content-secondary mt-1">
-          {activeDeployment.resources.length} Cloudflare resources will be provisioned in your connected account.
-        </p>
+        <h3 className="text-content-primary font-medium">Ready to deploy</h3>
+        <p className="text-content-secondary mt-1">Publish this app to your connected Cloudflare account.</p>
       </div>
-      <label className="text-content-primary flex items-start gap-2">
-        <Checkbox
-          checked={billingApproved}
-          disabled={controlsDisabled}
-          onChange={(event) => setBillingApproved(event.target.checked)}
-        />
-        <span>I approve Cloudflare billing my account for this project&apos;s infrastructure and inference.</span>
-      </label>
-      <p className="text-xs leading-relaxed text-content-tertiary">
-        Deployment creates customer-owned Cloudflare resources that remain in your account until you remove them. Review
-        the{' '}
-        <Link className="underline underline-offset-4" to="/terms">
-          Terms
-        </Link>
-        ,{' '}
-        <Link className="underline underline-offset-4" to="/privacy">
-          Privacy notice
-        </Link>
-        , and{' '}
-        <Link className="underline underline-offset-4" to="/support">
-          Support
-        </Link>{' '}
-        before approval.
-      </p>
-      <label className="text-content-primary flex items-start gap-2">
-        <Checkbox
-          checked={paidPolicyUnderstood}
-          disabled={controlsDisabled}
-          onChange={(event) => setPaidPolicyUnderstood(event.target.checked)}
-        />
-        <span>I understand Workers Paid will require separate authorization and is not enabled automatically.</span>
-      </label>
       {status === 'deployed' ? (
         <p className="text-bolt-elements-icon-success">
           Deployed to your Cloudflare account.
@@ -187,15 +146,28 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
           Resume deployment
         </Button>
       ) : (
-        <Button
-          size="sm"
-          loading={status === 'submitting'}
-          disabled={!billingApproved || !paidPolicyUnderstood}
-          onClick={() => void approve()}
-        >
-          Approve deployment
+        <Button size="lg" loading={status === 'submitting'} onClick={() => void approve()}>
+          Deploy
         </Button>
       )}
+      {status === 'idle' ? (
+        <p className="max-w-2xl text-xs leading-relaxed text-content-tertiary">
+          By clicking Deploy, you approve Cloudflare billing for this app&apos;s {activeDeployment.resources.length}{' '}
+          resource{activeDeployment.resources.length === 1 ? '' : 's'} and inference. Ghostbuild never enables Workers
+          Paid automatically.{' '}
+          <Link className="underline underline-offset-4" to="/terms">
+            Terms
+          </Link>{' '}
+          ·{' '}
+          <Link className="underline underline-offset-4" to="/privacy">
+            Privacy
+          </Link>{' '}
+          ·{' '}
+          <Link className="underline underline-offset-4" to="/support">
+            Support
+          </Link>
+        </p>
+      ) : null}
       {error ? <p className="text-bolt-elements-icon-error">{error}</p> : null}
     </section>
   );

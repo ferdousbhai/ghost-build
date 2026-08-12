@@ -1505,6 +1505,10 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       lease.acquiredAt,
     );
     try {
+      // Deployment owns the container from this point forward. Retire the long-lived preview first so its
+      // server cannot compete with artifact preparation or survive across an immutable publication session.
+      await this.cleanupPendingPreviews();
+      await this.stopActivePreview();
       await this.assertDeploymentSession({ sessionId: operationId });
       return { sessionId: operationId };
     } catch (error) {
