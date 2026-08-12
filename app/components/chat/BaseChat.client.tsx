@@ -262,7 +262,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                     )}
                     {deploymentApproval ? (
                       <div className="mb-3">
-                        <DeploymentApproval deployment={deploymentApproval} />
+                        <DeploymentApproval deployment={deploymentApproval} onPrepareDeployment={onPrepareDeployment} />
                       </div>
                     ) : onPrepareDeployment && !isStreaming ? (
                       <div className="mb-2 flex justify-end px-1">

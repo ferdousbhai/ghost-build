@@ -75,4 +75,41 @@ describe('DeploymentApproval', () => {
       confirmWorkersPaidNotAutomatic: true,
     });
   });
+
+  it('prepares a current-revision plan after a terminal deployment failure', async () => {
+    mocks.fetchUserRuntime.mockImplementation(async (path: string) =>
+      Response.json({
+        deployment: path.includes('deployment-1')
+          ? { status: 'failed', error: { message: 'The project changed.' } }
+          : { status: 'awaiting_approval' },
+      }),
+    );
+    const onPrepareDeployment = vi.fn(async () => ({
+      id: 'deployment-2',
+      planDigest: 'b'.repeat(64),
+      resources: [{ type: 'worker' as const, logicalName: 'app', proposedName: 'ghostbuild-app-2' }],
+    }));
+    await act(async () => {
+      root.render(
+        <DeploymentApproval
+          deployment={{
+            id: 'deployment-1',
+            planDigest: 'a'.repeat(64),
+            resources: [{ type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-app' }],
+          }}
+          onPrepareDeployment={onPrepareDeployment}
+        />,
+      );
+    });
+
+    const retry = Array.from(container.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent === 'Prepare retry',
+    );
+    expect(retry).toBeDefined();
+    await act(async () => retry?.click());
+
+    expect(onPrepareDeployment).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("this app's 1 resource");
+    expect(mocks.fetchUserRuntime.mock.calls.some(([path]) => String(path).endsWith('/retry'))).toBe(false);
+  });
 });

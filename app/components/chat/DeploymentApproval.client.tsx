@@ -5,7 +5,13 @@ import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
 import { captureProductEvent } from '~/lib/telemetry.client';
 import { Link } from '@tanstack/react-router';
 
-export function DeploymentApproval({ deployment }: { deployment: PendingDeploymentApproval }) {
+export function DeploymentApproval({
+  deployment,
+  onPrepareDeployment,
+}: {
+  deployment: PendingDeploymentApproval;
+  onPrepareDeployment?: () => Promise<PendingDeploymentApproval>;
+}) {
   const [activeDeployment, setActiveDeployment] = useState(deployment);
   const [status, setStatus] = useState<'idle' | 'submitting' | 'retrying' | 'deploying' | 'deployed' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +98,14 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
     setStatus('retrying');
     setError(null);
     try {
+      if (onPrepareDeployment) {
+        const next = await onPrepareDeployment();
+        setProductionUrl(null);
+        setCanRetry(false);
+        setActiveDeployment(next);
+        setStatus('idle');
+        return;
+      }
       const response = await deploymentFetch(activeDeployment.id, 'retry', {
         method: 'POST',
       });
@@ -136,7 +150,7 @@ export function DeploymentApproval({ deployment }: { deployment: PendingDeployme
       ) : status === 'deploying' ? (
         <p className="text-content-secondary">Provisioning and deploying in your Cloudflare account…</p>
       ) : status === 'retrying' ? (
-        <p className="text-content-secondary">Preparing a fresh plan from the same immutable source…</p>
+        <p className="text-content-secondary">Preparing a fresh plan for the current project revision…</p>
       ) : status === 'error' && canRetry ? (
         <Button size="sm" onClick={() => void retry()}>
           Prepare retry
