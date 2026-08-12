@@ -36,6 +36,12 @@ vi.mock('./model-input', async (importOriginal) => ({
 vi.mock('./pi-message-conversion', () => ({
   modelMessagesToPi: vi.fn(() => mocks.piMessages),
 }));
+vi.mock('./builder-skills', () => ({
+  createBuilderSkillContext: vi.fn(async () => ({
+    prompt: 'Owner-published guidance.',
+    reader: { read: vi.fn(async () => null) },
+  })),
+}));
 vi.mock('./pi-tools-adapter', () => ({
   createPiToolBundle: vi.fn(() => ({
     write: { name: 'write', description: 'write', parameters: 'canonical-schema' },
@@ -511,7 +517,7 @@ function createAgentStream(
     sessionAffinity: 'opaque-session',
     workspace: {} as never,
     runWithKeepAlive: (operation) => operation(),
-    systemDocs: { version: 1, documents: [{ id: 'docs', description: 'Guidance.', content: 'Guidance.' }] },
+    skillBucket: {} as R2Bucket,
     steering,
     onSettled: vi.fn(),
   });

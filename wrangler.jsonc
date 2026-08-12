@@ -72,10 +72,10 @@
       "migrations_dir": "migrations",
     },
   ],
-  "kv_namespaces": [
+  "r2_buckets": [
     {
-      "binding": "SYSTEM_DOCS",
-      "id": "6901be08c9e14e40b599be00e49df484",
+      "binding": "BUILDER_SKILLS",
+      "bucket_name": "ghostbuild-builder-skills",
     },
   ],
   "vars": {

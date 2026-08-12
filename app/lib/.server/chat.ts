@@ -10,7 +10,6 @@ import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 import { logProviderFailure } from './llm/provider-error-logging';
 import type { WorkersAiModelId } from '~/lib/workers-ai-model';
-import type { SystemDocsBundle } from 'ghostbuild-agent/system-docs';
 import type { PiSteeringQueue } from './llm/pi-steering';
 
 type Messages = GhostbuildMessage[];
@@ -36,7 +35,7 @@ export async function createChatResponseFromBody({
   workspace,
   onValidationStage,
   runWithKeepAlive,
-  systemDocs,
+  skillBucket,
   steering,
   onSettled,
 }: {
@@ -57,7 +56,7 @@ export async function createChatResponseFromBody({
   workspace: BuilderWorkspaceApi;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
-  systemDocs: SystemDocsBundle;
+  skillBucket: R2Bucket;
   steering: PiSteeringQueue;
   onSettled: () => void;
 }) {
@@ -79,7 +78,7 @@ export async function createChatResponseFromBody({
       workspace,
       onValidationStage,
       runWithKeepAlive,
-      systemDocs,
+      skillBucket,
       steering,
       onSettled,
     });

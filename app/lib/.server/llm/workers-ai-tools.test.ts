@@ -47,6 +47,53 @@ describe('minimal Workers AI tool surface', () => {
     expect(tools.exec.description).not.toContain('/home/project/.ghost/docs/');
   });
 
+  it('reads owner-published skill references through read without consulting the project workspace', async () => {
+    const workspace = workspaceStub();
+    const path = '/__skills__/cloudflare/references/workers-ai/README.md';
+    const tools = createWorkersAiTools(workspace, operationContext(), {
+      read: vi.fn(async (requestedPath) =>
+        requestedPath === path ? { kind: 'file' as const, content: 'one\ntwo\nthree\n' } : null,
+      ),
+    });
+
+    await expect(executeTool(tools.read, { path, offset: 2, limit: 1 })).resolves.toMatchObject({
+      path,
+      content: '2:two',
+      startLine: 2,
+      endLine: 2,
+      totalLines: 3,
+      nextOffset: 3,
+    });
+    expect(workspace.readText).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for unknown skill references and prevents skill writes', async () => {
+    const workspace = workspaceStub();
+    const path = '/__skills__/cloudflare/references/missing.md';
+    const tools = createWorkersAiTools(workspace, operationContext());
+
+    await expect(executeTool(tools.read, { path })).resolves.toMatchObject({
+      error: expect.stringContaining('Skill reference not found'),
+    });
+    await expect(executeTool(tools.write, { path, content: 'changed' })).resolves.toMatchObject({
+      error: expect.stringContaining('Skill files are read-only'),
+    });
+    await expect(
+      executeTool(tools.write, {
+        path: '/home/project/../../../__skills__/cloudflare/references/missing.md',
+        content: 'changed',
+      }),
+    ).resolves.toMatchObject({ error: expect.stringContaining('Skill files are read-only') });
+    await expect(
+      executeTool(tools.write, {
+        path: '//__skills__//cloudflare-app-builder/references/missing.md',
+        content: 'changed',
+      }),
+    ).resolves.toMatchObject({ error: expect.stringContaining('Skill files are read-only') });
+    expect(workspace.readText).not.toHaveBeenCalled();
+    expect(workspace.computer.fs.writeFile).not.toHaveBeenCalled();
+  });
+
   it('returns numbered project lines and the snapshot tag required by edit', async () => {
     const workspace = workspaceStub({ files: { '/home/project/src/app.ts': 'one\ntwo\nthree\n' } });
     const tools = createWorkersAiTools(workspace, operationContext());

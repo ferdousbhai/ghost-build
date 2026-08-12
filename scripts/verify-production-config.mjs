@@ -132,16 +132,14 @@ export function findWorkerOpsAuthSecretErrors(config, label) {
   return errors;
 }
 
-export function findWorkerSystemDocsErrors(config, label) {
-  const errors = [];
-  const binding = findBinding(config?.kv_namespaces, 'SYSTEM_DOCS');
+export function findWorkerBuilderSkillsErrors(config, label) {
+  const binding = findBinding(config?.r2_buckets, 'BUILDER_SKILLS');
   if (!binding) {
-    return [`${label} must bind the owner-controlled system-document namespace as SYSTEM_DOCS.`];
+    return [`${label} must bind the owner-published builder skill bucket as BUILDER_SKILLS.`];
   }
-  if (typeof binding.id !== 'string' || !/^[a-f0-9]{32}$/.test(binding.id)) {
-    errors.push(`${label} SYSTEM_DOCS namespace id must be a provisioned 32-character hexadecimal id.`);
-  }
-  return errors;
+  return binding.bucket_name === 'ghostbuild-builder-skills'
+    ? []
+    : [`${label} BUILDER_SKILLS bucket_name must be ghostbuild-builder-skills.`];
 }
 
 export function findDurableObjectLifecycleErrors(config, label, classNames) {
@@ -185,7 +183,7 @@ function verifyWorker(errors, config, target) {
     ...findWorkerVariableSourceErrors(config, label),
     ...findWorkerGcScheduleErrors(config, label),
     ...findWorkerOpsAuthSecretErrors(config, label),
-    ...findWorkerSystemDocsErrors(config, label),
+    ...findWorkerBuilderSkillsErrors(config, label),
     ...findDurableObjectLifecycleErrors(config, label, target.durableObjects),
     ...findWorkerRuntimeSecretErrors(config, label, 'configure values as Cloudflare bindings'),
   );

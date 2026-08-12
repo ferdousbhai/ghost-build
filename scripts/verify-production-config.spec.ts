@@ -8,7 +8,7 @@ import {
   findWorkerOAuthStartRateLimitErrors,
   findWorkerGcScheduleErrors,
   findWorkerOpsAuthSecretErrors,
-  findWorkerSystemDocsErrors,
+  findWorkerBuilderSkillsErrors,
   findWorkerRoutingErrors,
   findWorkerRuntimeSecretErrors,
   findWorkerVariableSourceErrors,
@@ -127,23 +127,23 @@ describe('findWorkerOpsAuthSecretErrors', () => {
   });
 });
 
-describe('findWorkerSystemDocsErrors', () => {
-  it('accepts the owner-provisioned system-document KV namespace', () => {
+describe('findWorkerBuilderSkillsErrors', () => {
+  it('accepts the owner-provisioned builder skill R2 bucket', () => {
     expect(
-      findWorkerSystemDocsErrors(
-        { kv_namespaces: [{ binding: 'SYSTEM_DOCS', id: '6901be08c9e14e40b599be00e49df484' }] },
+      findWorkerBuilderSkillsErrors(
+        { r2_buckets: [{ binding: 'BUILDER_SKILLS', bucket_name: 'ghostbuild-builder-skills' }] },
         'wrangler.jsonc',
       ),
     ).toEqual([]);
-    expect(findWorkerSystemDocsErrors({}, 'wrangler.jsonc')).toEqual([
-      'wrangler.jsonc must bind the owner-controlled system-document namespace as SYSTEM_DOCS.',
+    expect(findWorkerBuilderSkillsErrors({}, 'wrangler.jsonc')).toEqual([
+      'wrangler.jsonc must bind the owner-published builder skill bucket as BUILDER_SKILLS.',
     ]);
     expect(
-      findWorkerSystemDocsErrors(
-        { kv_namespaces: [{ binding: 'SYSTEM_DOCS', id: 'not-provisioned' }] },
+      findWorkerBuilderSkillsErrors(
+        { r2_buckets: [{ binding: 'BUILDER_SKILLS', bucket_name: 'other' }] },
         'wrangler.jsonc',
       ),
-    ).toEqual(['wrangler.jsonc SYSTEM_DOCS namespace id must be a provisioned 32-character hexadecimal id.']);
+    ).toEqual(['wrangler.jsonc BUILDER_SKILLS bucket_name must be ghostbuild-builder-skills.']);
   });
 });
 

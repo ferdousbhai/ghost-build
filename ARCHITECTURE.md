@@ -79,16 +79,19 @@ stores files directly in the Durable Object's SQLite VFS. Its container backend 
 Container through FUSE and reconciles changes back to the VFS. There is no application-level ZIP archive, R2 backup, or
 duplicate project blob in the control plane.
 
-The model receives four project-operation primitives: `read`, `write`, `edit`, and `exec`, plus the official
-`activate_skill` and `read_skill_resource` guidance tools. `write` and `exec` adapt the reviewed
+The model receives four primitives: `read`, `write`, `edit`, and `exec`. `write` and `exec` adapt the reviewed
 `@cloudflare/computer/tools` contracts; Ghostbuild's `read` returns numbered lines with a compact tag bound to the full
 file SHA-256, and `edit` applies non-overlapping line operations only when that exact snapshot is still current.
 Directory discovery goes through `exec`; no `ls` schema is included in model input or prompt accounting.
-Owner-published guidance from the `SYSTEM_DOCS` KV namespace is converted into an official Agent Skills manifest at
-turn preparation. The Pi harness receives the framework-independent `activate_skill` and `read_skill_resource` tools
-from `agents/skills`; guidance never enters the project VFS, revision, or deployment artifact. Ghostbuild consumes only
-the minimal `{ version, documents }` runtime view. Maintainer provenance, revisions, hashes, and publication history stay
-in `ghost-build-ops`. Missing or invalid published guidance fails the turn instead of silently degrading it.
+Owner-published guidance uses upstream Agent Skills trees unchanged: each skill keeps its official `SKILL.md`,
+frontmatter, references, assets, and license files in a generation-pinned shared R2 bucket. At turn preparation the
+official `agents/skills` R2 source validates and indexes the published generation. The system prompt lists the available
+skills, and the existing `read` tool exposes their text files under `/__skills__/<skill>/`; no activation or separate
+resource-reader tool is added. That namespace is a read-only control-plane overlay: it never enters the project VFS,
+revision, or deployment artifact, and project files cannot shadow it. The evergreen system prompt establishes only
+authority, safety, and workflow precedence; concrete product and API guidance comes from upstream skills, while code and
+deployment boundaries remain enforced by project validation and the managed publisher. Missing, incomplete, or invalid
+published skills fail the turn instead of silently degrading it.
 Model tools and editor reads use the same workspace API. Browser saves use
 compare-and-swap against the numeric revision the browser loaded; a conflict refreshes from the user runtime and never
 overwrites newer state. TanStack DB collections combine the server query collection with a per-account browser SQLite

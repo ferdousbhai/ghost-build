@@ -4,7 +4,7 @@ import { MODEL_TOOL_NAMES, type ModelToolName } from 'ghostbuild-agent/model-too
 import type { Tool } from 'ghostbuild-agent/tool';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
-import type { ToolSet } from 'ai';
+import type { BuilderSkillReader } from './builder-skills';
 import { createWorkersAiTools } from './workers-ai-tools';
 
 type BuilderOperationContext = {
@@ -19,30 +19,23 @@ const toolLabels: Record<ModelToolName, string> = {
   exec: 'Run command',
 };
 
-/** Adapt workspace and official Agent Skills tools to Pi's validated tool contract. */
+/** Adapt the four canonical workspace tools to Pi's validated tool contract. */
 export function createPiToolBundle(
   workspace: BuilderWorkspaceApi,
   operationContext: BuilderOperationContext,
-  additionalTools: ToolSet = {},
+  skillReader?: BuilderSkillReader,
 ): Record<string, AgentTool> {
-  const canonicalTools = createWorkersAiTools(workspace, operationContext);
-  const tools: Record<string, AgentTool> = Object.fromEntries(
+  const canonicalTools = createWorkersAiTools(workspace, operationContext, skillReader);
+  return Object.fromEntries(
     MODEL_TOOL_NAMES.map((name) => [name, adaptTool(name, canonicalTools[name], toolLabels[name])]),
   );
-  for (const [name, definition] of Object.entries(additionalTools)) {
-    if (name in tools) {
-      throw new Error(`Additional tool ${name} conflicts with a workspace tool.`);
-    }
-    tools[name] = adaptTool(name, definition, skillToolLabel(name));
-  }
-  return tools;
 }
 
 export function piToolsToList(tools: Record<string, AgentTool>): AgentTool[] {
   return Object.values(tools);
 }
 
-function adaptTool(name: string, definition: Tool | ToolSet[string], label: string): AgentTool {
+function adaptTool(name: ModelToolName, definition: Tool, label: string): AgentTool {
   const canonical = definition as unknown as ToolDefinition;
   if (!canonical.inputSchema) {
     throw new Error(`${name} does not define an input schema.`);
@@ -56,8 +49,4 @@ function adaptTool(name: string, definition: Tool | ToolSet[string], label: stri
       inputSchema: canonical.inputSchema as ToolInputSchema,
     },
   }) as AgentTool;
-}
-
-function skillToolLabel(name: string): string {
-  return name === 'activate_skill' ? 'Activate guidance' : name === 'read_skill_resource' ? 'Read guidance' : name;
 }

@@ -39,20 +39,25 @@ declared secret values in Cloudflare; never store them in source or local enviro
 The checked-in D1 ID belongs to Ghostbuild production. Before provisioning a fork in another account, replace it with
 `00000000-0000-0000-0000-000000000000`. The provisioner refuses to replace an unknown non-placeholder ID.
 
-System documentation is owner-controlled operational data, not repository content. Put a `manifest.json` and its
-declared `<id>.md` files in the ignored `.ghostbuild/docs/` directory, then validate or publish the initial documents:
+Builder skills are owner-controlled operational data, not repository content. `builder-skills.sources.json` pins every
+selected public GitHub skill directory by commit. Sync those upstream trees unchanged into ignored
+`.ghostbuild/skills/`, then validate or publish them:
 
 ```bash
-pnpm run system-docs:seed -- --dry-run
-pnpm run system-docs:seed -- --local
-pnpm run system-docs:seed -- --remote
+pnpm run builder-skills:sync
+pnpm run builder-skills:publish -- --dry-run
+pnpm run builder-skills:publish -- --local
+pnpm run builder-skills:publish -- --remote
 ```
 
-The remote command writes the minimal runtime catalog to `SYSTEM_DOCS`, records the rich seed metadata separately for a
-maintainer, and verifies the runtime readback. At turn preparation Ghostbuild converts this bounded catalog into an
-official `agents/skills` manifest; the Pi harness remains the inference loop. Self-hosters may rerun it whenever they choose or replace it with their own
-maintainer. The hosted deployment uses it only for initial seeding; private `ghost-build-ops` owns subsequent provenance,
-source checkpoints, history, and runtime publications.
+The remote command uploads an immutable, content-addressed generation to the shared `BUILDER_SKILLS` R2 bucket and
+publishes its small pointer last. At turn preparation Ghostbuild uses the official `agents/skills` R2 source to discover
+that exact generation, puts only the skill catalog in the system prompt, and exposes upstream text files through `read`
+under `/__skills__/<skill>/`; the Pi harness remains the inference loop. Do not edit upstream skill files to add product
+policy. The system prompt contains only evergreen authority, safety, and workflow rules; concrete boundaries remain in
+project validation and deployment enforcement. Self-hosters may rerun the publisher whenever they choose or replace it
+with their own sync process. Private `ghost-build-ops` owns the
+hosted deployment's upstream revisions, provenance, publication history, and recurring GitHub synchronization.
 
 The OAuth callback is `https://<deployment-origin>/connect/return`. Keep its permissions aligned with
 `CLOUDFLARE_OAUTH_SCOPES` in `wrangler.jsonc`. Those permissions let Ghostbuild create a workspace runtime in the

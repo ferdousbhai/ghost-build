@@ -19,6 +19,7 @@ import { isGhostbuildToolResult, toolFailure } from 'ghostbuild-agent/tool-resul
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 import type { Tool } from 'ghostbuild-agent/tool';
+import { type BuilderSkillReader, isBuilderSkillPath } from './builder-skills';
 
 type BuilderOperationContext = {
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
@@ -40,10 +41,11 @@ type AutoValidatedResult = Record<string, unknown> & {
 export function createWorkersAiTools(
   workspace: BuilderWorkspaceApi,
   operationContext: BuilderOperationContext,
+  skillReader?: BuilderSkillReader,
 ): GhostbuildToolSet {
   const coordinateStatefulTool = createTurnStatefulToolCoordinator(operationContext.runWithKeepAlive);
   const tools: GhostbuildToolSet = {
-    read: lineAnchoredReadTool(workspace),
+    read: lineAnchoredReadTool(workspace, skillReader),
     write: abortAwareWriteTool(workspace),
     edit: lineAnchoredEditTool(workspace),
     exec: streamingExecTool(workspace),
@@ -61,14 +63,29 @@ export function createWorkersAiTools(
   return tools;
 }
 
-function lineAnchoredReadTool(workspace: BuilderWorkspaceApi): Tool {
+function lineAnchoredReadTool(workspace: BuilderWorkspaceApi, skillReader?: BuilderSkillReader): Tool {
   return {
     description:
-      'Read a UTF-8 project file as numbered lines. Returns a compact base snapshot tag required by edit. Output is bounded; use offset and limit to continue.',
+      'Read a UTF-8 project or owner-published /__skills__/ reference file as numbered lines. Project reads return a compact base snapshot tag required by edit. Skill files are read-only. Output is bounded; use offset and limit to continue.',
     inputSchema: MODEL_TOOL_INPUT_SCHEMAS.read,
     execute: async (input, options) => {
       const parsed = input as { path: string; offset?: number; limit?: number };
       options.abortSignal?.throwIfAborted();
+      const skillResult = isBuilderSkillPath(parsed.path) ? await skillReader?.read(parsed.path) : null;
+      if (skillResult) {
+        return lineAnchoredRead({
+          path: parsed.path,
+          content: skillResult.content,
+          sha256: await sha256(skillResult.content),
+          offset: parsed.offset,
+          limit: parsed.limit,
+          maxLines: COMPUTER_AI_TOOL_OPTIONS.read.maxLines,
+          maxBytes: COMPUTER_AI_TOOL_OPTIONS.read.maxBytes,
+        });
+      }
+      if (isBuilderSkillPath(parsed.path)) {
+        throw new Error(`Skill reference not found: ${parsed.path}`);
+      }
       const file = await workspace.readText(parsed.path, options.abortSignal);
       options.abortSignal?.throwIfAborted();
       return lineAnchoredRead({
@@ -90,6 +107,9 @@ function abortAwareWriteTool(workspace: BuilderWorkspaceApi): Tool {
     inputSchema: MODEL_TOOL_INPUT_SCHEMAS.write,
     execute: async (input, options) => {
       const parsed = input as { path: string; content: string };
+      if (isBuilderSkillPath(parsed.path)) {
+        throw new Error(`Skill files are read-only: ${parsed.path}`);
+      }
       const bytes = new TextEncoder().encode(parsed.content);
       if (bytes.byteLength > COMPUTER_AI_TOOL_OPTIONS.write.maxBytes) {
         return {
@@ -147,6 +167,9 @@ function lineAnchoredEditTool(workspace: BuilderWorkspaceApi): Tool {
     inputSchema: lineEditToolParameters,
     execute: async (input, options) => {
       const parsed = lineEditToolParameters.parse(input) as LineEditToolInput;
+      if (isBuilderSkillPath(parsed.path)) {
+        throw new Error(`Skill files are read-only: ${parsed.path}`);
+      }
       options.abortSignal?.throwIfAborted();
       const before = await workspace.readText(parsed.path, options.abortSignal);
       options.abortSignal?.throwIfAborted();
@@ -288,6 +311,11 @@ async function validateWorkspace(
   } finally {
     context.onValidationStage?.(toolCallId, null);
   }
+}
+
+async function sha256(value: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function derivedValidationToolCallId(toolCallId: string): Promise<string> {

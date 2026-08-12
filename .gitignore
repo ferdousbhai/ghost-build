@@ -44,8 +44,9 @@ _worker.bundle
 worker-configuration.d.ts
 template/worker-configuration.d.ts
 
-# Owner-controlled system documentation is imported into KV and never bundled from Git.
+# Owner-controlled upstream Agent Skills are published to R2 and never bundled from Git.
 .ghostbuild/docs/
+.ghostbuild/skills/
 
 Modelfile
 modelfiles

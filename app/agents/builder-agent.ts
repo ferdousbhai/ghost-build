@@ -22,7 +22,6 @@ import { compactContext } from '~/lib/.server/llm/context-compaction';
 import { summarizeBuilderContext } from '~/lib/.server/llm/workers-ai-text';
 import { chatTurnContextSchema, type ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
-import { loadSystemDocs } from '~/lib/.server/cloudflare/system-docs';
 import type { UIMessage } from 'ai';
 import {
   deployValidatedRevisionForBuilder,
@@ -385,16 +384,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       }
       this.stashTurn(turn);
       const compactionPending = await this.hasPendingContextCompaction();
-      const systemDocs = await loadSystemDocs(this.env.SYSTEM_DOCS).catch(() => {
-        logger.error('Published system documentation is unavailable');
-        return null;
-      });
-      if (!systemDocs) {
-        throw new Response('Ghostbuild guidance is temporarily unavailable. Please retry.', {
-          status: 503,
-          statusText: 'System documentation unavailable',
-        });
-      }
       return await createChatResponseFromBody({
         abortSignal: options?.abortSignal,
         firstUserMessage,
@@ -404,7 +393,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         workspace: this.workspace,
         onValidationStage: (toolCallId, stage) => this.setValidationProgress(toolCallId, stage),
         runWithKeepAlive: (operation) => this.keepAliveWhile(operation),
-        systemDocs,
+        skillBucket: this.env.BUILDER_SKILLS,
         steering,
         onSettled: settleSteering,
         compaction: {

@@ -38,7 +38,7 @@ describe('chat provider error boundary', () => {
         sessionAffinity: 'session',
         workspace: {} as never,
         runWithKeepAlive: (operation) => operation(),
-        systemDocs: docs(),
+        skillBucket: {} as R2Bucket,
         ...steering(),
       }),
     ).rejects.toMatchObject({ status: 500 });
@@ -73,7 +73,7 @@ describe('chat provider error boundary', () => {
       sessionAffinity: 'session',
       workspace: {} as never,
       runWithKeepAlive: (operation) => operation(),
-      systemDocs: docs(),
+      skillBucket: {} as R2Bucket,
       ...steering(),
     });
 
@@ -90,15 +90,11 @@ function createResponse() {
     sessionAffinity: 'session',
     workspace: {} as never,
     runWithKeepAlive: (operation) => operation(),
-    systemDocs: docs(),
+    skillBucket: {} as R2Bucket,
     ...steering(),
   });
 }
 
 function steering() {
   return { steering: new PiSteeringQueue(), onSettled: vi.fn() };
-}
-
-function docs() {
-  return { version: 1 as const, documents: [{ id: 'docs', description: 'Guidance.', content: 'Guidance.' }] };
 }

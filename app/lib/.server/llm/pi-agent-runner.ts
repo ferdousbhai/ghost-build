@@ -38,7 +38,6 @@ import {
   workersPaidRequiredMessage,
 } from '~/lib/workers-paid';
 import { logProviderFailure } from './provider-error-logging';
-import type { SystemDocsBundle } from 'ghostbuild-agent/system-docs';
 import type { PiSteeringQueue } from './pi-steering';
 
 type Messages = GhostbuildMessage[];
@@ -63,7 +62,7 @@ interface PiAgentOptions {
   workspace: BuilderWorkspaceApi;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
-  systemDocs: SystemDocsBundle;
+  skillBucket: R2Bucket;
   steering: PiSteeringQueue;
   onSettled: () => void;
 }
@@ -93,7 +92,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     workspace,
     onValidationStage,
     runWithKeepAlive,
-    systemDocs,
+    skillBucket,
     steering,
     onSettled,
   } = options;
@@ -104,10 +103,10 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   const loopSignal = abortSignal;
   const compactionPolicy = modelCompactionPolicy(piProvider.handle.model.contextWindow);
   const { skillContext, piTools } = await withPreparationStage('tool_setup', async () => {
-    const skillContext = await createBuilderSkillContext(systemDocs);
+    const skillContext = await createBuilderSkillContext(skillBucket);
     return {
       skillContext,
-      piTools: createPiToolBundle(workspace, { onValidationStage, runWithKeepAlive }, skillContext.tools),
+      piTools: createPiToolBundle(workspace, { onValidationStage, runWithKeepAlive }, skillContext.reader),
     };
   });
 
@@ -119,7 +118,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     return createValidatedBuildCompletionStream(validatedBuildCompletion);
   }
 
-  const instructions = systemPrompt(skillContext.catalogPrompt);
+  const instructions = systemPrompt(skillContext.prompt);
   const modelInput = await withPreparationStage('model_input', () =>
     prepareModelInput({
       messages,

@@ -1,8 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MODEL_TOOL_INPUT_SCHEMAS } from 'ghostbuild-agent/model-tool-inputs';
 import type { Tool } from 'ghostbuild-agent/tool';
-import { tool } from 'ai';
-import { z } from 'zod';
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
@@ -69,23 +67,6 @@ describe('Pi tool adapter', () => {
       'Invalid tool input for "write"',
     );
     expect(mocks.execute).not.toHaveBeenCalled();
-  });
-
-  it('adapts official Agent Skills tools after the workspace tools', async () => {
-    const activate = vi.fn(async ({ name }: { name: string }) => `<skill_content name="${name}">Guide</skill_content>`);
-    const tools = createPiToolBundle({} as never, operationContext(), {
-      activate_skill: tool({
-        description: 'Activate guidance.',
-        inputSchema: z.object({ name: z.string() }),
-        execute: activate,
-      }),
-    });
-
-    await expect(tools.activate_skill!.execute('skill-1', { name: 'builder' })).resolves.toMatchObject({
-      details: '<skill_content name="builder">Guide</skill_content>',
-    });
-    expect(activate).toHaveBeenCalledWith({ name: 'builder' }, expect.objectContaining({ toolCallId: 'skill-1' }));
-    expect(piToolsToList(tools).map(({ name }) => name)).toEqual(['read', 'write', 'edit', 'exec', 'activate_skill']);
   });
 
   it('publishes the curated labels, schemas, and exact four-tool order', () => {
