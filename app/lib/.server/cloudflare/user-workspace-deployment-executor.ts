@@ -139,9 +139,9 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
     );
 
     // The build may take several minutes. Resolve again at the authenticated
-    // boundary and force OAuth refresh, then retry once if Cloudflare still
-    // reports that the access token expired.
-    const publishApi = await createUserAccountApi(runtimeEnv, request, true);
+    // boundary; the credential vault refreshes expiring tokens and the API
+    // client retries once if Cloudflare reports that the token expired.
+    const publishApi = await createUserAccountApi(runtimeEnv, request);
     await workspace.assertDeploymentSession({ sessionId });
     await activity(args, 40, 'Applying database migrations');
     if (d1) {

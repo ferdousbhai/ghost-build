@@ -187,7 +187,7 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
     expect(
       request.mock.calls.every(([url]) => url === 'https://ghostbuild.dev/api/cloudflare/runtime-credential'),
     ).toBe(true);
-    expect(JSON.parse(String(request.mock.calls[1]?.[1]?.body))).toMatchObject({ forceRefresh: true });
+    expect(JSON.parse(String(request.mock.calls[1]?.[1]?.body))).toMatchObject({ forceRefresh: false });
     expect(beginDeploymentSession).toHaveBeenCalledWith({
       operationId: 'deployment-1:4',
       expectedWorkspaceRevision: 7,
