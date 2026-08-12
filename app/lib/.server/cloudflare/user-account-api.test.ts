@@ -877,7 +877,7 @@ describe('UserCloudflareAccountApi', () => {
       .mockResolvedValueOnce(
         Response.json({ success: true, result: { jwt: currentAssetUploadJwt(), buckets: [[assetHash]] } }),
       )
-      .mockResolvedValueOnce(Response.json({ success: true, result: {} }));
+      .mockResolvedValueOnce(Response.json({ success: true, result: {} }, { status: 201 }));
     await expect(deploy(missingCompletion)).rejects.toThrow('invalid asset upload identity');
     expect(missingCompletion).toHaveBeenCalledTimes(2);
 

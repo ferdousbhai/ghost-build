@@ -20,6 +20,12 @@ export type Deployment = {
   updatedAt: number;
 };
 
+type DeploymentActivity = {
+  sequence: number;
+  message: string;
+  createdAt: number;
+};
+
 type DeploymentRow = {
   id: string;
   chat_id: string;
@@ -115,6 +121,41 @@ export async function requireDeployment(db: D1Database, deploymentId: string): P
     throw new DeploymentNotFoundError();
   }
   return deploymentFromRow(row);
+}
+
+export async function recordDeploymentActivity(args: {
+  db: D1Database;
+  deploymentId: string;
+  executionGeneration: number;
+  sequence: number;
+  message: string;
+  now?: number;
+}): Promise<void> {
+  await args.db
+    .prepare(
+      `INSERT OR IGNORE INTO deployment_activity (
+         deployment_id, execution_generation, sequence, message, created_at
+       ) VALUES (?, ?, ?, ?, ?)`,
+    )
+    .bind(args.deploymentId, args.executionGeneration, args.sequence, args.message, args.now ?? Date.now())
+    .run();
+}
+
+export async function listDeploymentActivity(
+  db: D1Database,
+  deploymentId: string,
+  executionGeneration: number,
+): Promise<DeploymentActivity[]> {
+  const result = await db
+    .prepare(
+      `SELECT sequence, message, created_at
+       FROM deployment_activity
+       WHERE deployment_id = ? AND execution_generation = ?
+       ORDER BY sequence`,
+    )
+    .bind(deploymentId, executionGeneration)
+    .all<{ sequence: number; message: string; created_at: number }>();
+  return result.results.map((row) => ({ sequence: row.sequence, message: row.message, createdAt: row.created_at }));
 }
 
 export async function claimApprovedDeployment(args: {

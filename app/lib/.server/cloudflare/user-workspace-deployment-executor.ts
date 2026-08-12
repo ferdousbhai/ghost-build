@@ -1,6 +1,7 @@
 import { deploymentPlanResourceName, deploymentProjectProfile, isCurrentDeploymentPlan } from './deployment-plan';
 import {
   claimApprovedDeployment,
+  recordDeploymentActivity,
   recordDeploymentResource,
   requireDeployment,
   transitionDeployment,
@@ -73,6 +74,7 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       executionGeneration: args.executionGeneration,
     });
     phase = 'provisioning';
+    await activity(args, 10, 'Preparing Cloudflare resources');
     const request = args.request ?? fetch;
     const accountId = runtimeEnv.CLOUDFLARE_ACCOUNT_ID;
     const accountApi = await createUserAccountApi(runtimeEnv, request);
@@ -120,6 +122,7 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
     if (kv) {
       await recordResource(args.env.DB, deployment.id, 'kv', 'APP_CACHE', kv.id);
     }
+    await activity(args, 20, 'Cloudflare resources ready');
     await transitionDeployment({
       db: args.env.DB,
       deploymentId: deployment.id,
@@ -134,6 +137,8 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
     const artifact = await validatePreparedDeploymentArtifact(
       await workspace.prepareDeploymentArtifact({
         sessionId,
+        deploymentId: deployment.id,
+        executionGeneration: args.executionGeneration,
         revision: reference.revision,
         accountId,
         workerName,
@@ -154,10 +159,11 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
     );
 
     // The build may take several minutes. Resolve again at the authenticated
-    // boundary and force OAuth refresh, then retry once if Cloudflare still
-    // reports that the access token expired.
-    const publishApi = await createUserAccountApi(runtimeEnv, request, true);
+    // boundary; the credential vault refreshes expiring tokens and the API
+    // client retries once if Cloudflare reports that the token expired.
+    const publishApi = await createUserAccountApi(runtimeEnv, request);
     await workspace.assertDeploymentSession({ sessionId });
+    await activity(args, 40, 'Applying database migrations');
     if (d1) {
       await publishApi.applyD1Migrations(d1.id, artifact.migrations.DB);
     }
@@ -165,6 +171,7 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       await publishApi.applyD1Migrations(agentD1.id, artifact.migrations.AGENT_SECURITY_DB);
     }
     providerChangesPossible = true;
+    await activity(args, 50, 'Uploading assets and publishing Worker');
     const result = await publishApi.deployManagedWorker({
       workerName,
       projectType: profile.type,
@@ -182,8 +189,10 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       securityBoundarySha256: deployment.plan.securityBoundarySha256,
       templateSourceSha256: deployment.plan.templateSourceSha256,
     });
+    await activity(args, 60, 'Configuring public Cloudflare route');
     await publishApi.configureManagedWorkerSchedule(workerName, profile.bindings.appAgent);
     await publishApi.enableWorkerSubdomain(workerName);
+    await activity(args, 70, 'Verifying deployed Cloudflare resources');
     await attestManagedDeploymentSecurity({
       deployment,
       workerName,
@@ -202,6 +211,7 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       nextStatus: 'succeeded',
       productionUrl: `https://${workerName}.${workersSubdomain}.workers.dev`,
     });
+    await activity(args, 80, 'Deployment complete');
     await deploymentSession.finish('completed');
     return requireDeployment(args.env.DB, deployment.id);
   } catch (error) {
@@ -222,6 +232,16 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
       ?.finish('failed')
       .catch(() => console.error('Unable to finalize ProjectWorkspace deployment session'));
   }
+}
+
+function activity(args: UserOwnedDeploymentArgs, sequence: number, message: string): Promise<void> {
+  return recordDeploymentActivity({
+    db: args.env.DB,
+    deploymentId: args.deploymentId,
+    executionGeneration: args.executionGeneration,
+    sequence,
+    message,
+  });
 }
 
 export async function resolveFreshCloudflareAccessToken(

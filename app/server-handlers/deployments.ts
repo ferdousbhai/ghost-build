@@ -6,6 +6,7 @@ import {
   DeploymentConnectionChangedError,
   DeploymentNotFoundError,
   DeploymentStateConflictError,
+  listDeploymentActivity,
   prepareDeploymentRetry,
   requireDeploymentForUser,
   type Deployment,
@@ -143,11 +144,12 @@ export async function userRuntimeDeploymentAction(args: {
   userId: string;
 }): Promise<Response> {
   try {
-    const deployment =
-      args.operation === 'get'
-        ? publicDeployment(await requireDeploymentForUser(args.env.DB, args.deploymentId, args.userId))
-        : await deployForUser(args);
-    return Response.json({ deployment });
+    if (args.operation === 'get') {
+      const deployment = await requireDeploymentForUser(args.env.DB, args.deploymentId, args.userId);
+      const activity = await listDeploymentActivity(args.env.DB, deployment.id, deployment.executionGeneration);
+      return Response.json({ deployment: { ...publicDeployment(deployment), activity } });
+    }
+    return Response.json({ deployment: await deployForUser(args) });
   } catch (error) {
     return deploymentErrorResponse(error);
   }

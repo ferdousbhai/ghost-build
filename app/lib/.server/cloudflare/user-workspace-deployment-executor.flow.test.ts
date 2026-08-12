@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   attestManagedDeploymentSecurity: vi.fn(),
   claimApprovedDeployment: vi.fn(),
+  recordDeploymentActivity: vi.fn(),
   recordDeploymentResource: vi.fn(),
   requireDeployment: vi.fn(),
   transitionDeployment: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('./deployment-plan', () => ({
 }));
 vi.mock('./deployment-repository', () => ({
   claimApprovedDeployment: mocks.claimApprovedDeployment,
+  recordDeploymentActivity: mocks.recordDeploymentActivity,
   recordDeploymentResource: mocks.recordDeploymentResource,
   requireDeployment: mocks.requireDeployment,
   transitionDeployment: mocks.transitionDeployment,
@@ -61,6 +63,7 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
     mocks.accountApi.getWorkersSubdomain.mockResolvedValue('user-subdomain');
     mocks.attestManagedDeploymentSecurity.mockResolvedValue({ status: 'current' });
     mocks.recordDeploymentResource.mockResolvedValue(undefined);
+    mocks.recordDeploymentActivity.mockResolvedValue(undefined);
     mocks.transitionDeployment.mockResolvedValue(undefined);
   });
 
@@ -267,7 +270,7 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
     expect(
       request.mock.calls.every(([url]) => url === 'https://ghostbuild.dev/api/cloudflare/runtime-credential'),
     ).toBe(true);
-    expect(JSON.parse(String(request.mock.calls[1]?.[1]?.body))).toMatchObject({ forceRefresh: true });
+    expect(JSON.parse(String(request.mock.calls[1]?.[1]?.body))).toMatchObject({ forceRefresh: false });
     expect(beginDeploymentSession).toHaveBeenCalledWith({
       operationId: 'deployment-1:4',
       expectedWorkspaceRevision: 7,

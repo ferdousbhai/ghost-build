@@ -111,6 +111,11 @@ describe('isolated project command', () => {
     expect(source).toContain('const INSTALL_TIMEOUT_MS = 10 * 60_000;');
     expect(deployment).toContain('rebaseDeploymentConfigPaths');
     expect(deployment).toContain('collectSandboxFiles(this, artifactRoot');
+    expect(deployment).toContain('node --input-type=module --eval');
+    expect(deployment).toContain('`${isolatedRoot}/dist/server/index.js`');
+    expect(source).toContain("createRequire(import.meta.resolve('vite'))");
+    expect(source).toContain('cloudflare:*');
+    expect(deployment).not.toContain('pnpm exec esbuild');
     expect(deployment).toContain('collectSandboxMigrations(this, `${isolatedRoot}/migrations`)');
     expect(preview).toContain("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: '.trycloudflare.com,container'");
     expect(preview).toContain('const previewProcess = await this.sandboxProcesses.exec(');
