@@ -2545,10 +2545,12 @@ async function handleUserRequest(
       userId: capability.subject,
     });
   } else {
-    const deployment = /^\/v1\/deployments\/([^/]+)(?:\/(deploy))?$/.exec(url.pathname);
+    const deployment = /^\/v1\/deployments\/([^/]+)(?:\/(approve|execute|retry))?$/.exec(url.pathname);
     if (deployment && (request.method === 'GET' || request.method === 'POST')) {
-      const operation = deployment[2] === 'deploy' ? 'deploy' : 'get';
+      const operation =
+        deployment[2] === 'approve' || deployment[2] === 'execute' || deployment[2] === 'retry' ? deployment[2] : 'get';
       response = await userRuntimeDeploymentAction({
+        request,
         env: env as unknown as Env,
         userId: capability.subject,
         deploymentId: decodeURIComponent(deployment[1]!),
@@ -2993,8 +2995,8 @@ function requireBackend(value: unknown): 'container-shell' {
   throw new SyntaxError('Invalid Computer execution backend.');
 }
 
-function requireRemoteToolName(value: unknown): 'write' | 'edit' | 'exec' {
-  if (value === 'write' || value === 'edit' || value === 'exec') {
+function requireRemoteToolName(value: unknown): 'write' | 'edit' | 'exec' | 'deploy' {
+  if (value === 'write' || value === 'edit' || value === 'exec' || value === 'deploy') {
     return value;
   }
   throw new SyntaxError('Invalid stateful workspace tool name.');
