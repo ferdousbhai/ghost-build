@@ -1,16 +1,18 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CLOUDFLARE_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';
+import { CLOUDFLARE_WORKERS_AI_MODEL, PREFERRED_BUILDER_MODEL } from '~/lib/workers-ai-model';
 import {
+  builderDefaultModelStore,
   builderModelStore,
+  initializeBuilderModelPreference,
   loadBuilderModelPreference,
   setBuilderModel,
   syncBuilderModelPreference,
 } from './builder-model.client';
 
 describe('builder model preference', () => {
-  beforeEach(() => builderModelStore.set(CLOUDFLARE_WORKERS_AI_MODEL));
+  beforeEach(() => initializeBuilderModelPreference('unknown', { getItem: () => null }));
 
   it('loads an allowlisted preference and defaults invalid values', () => {
     loadBuilderModelPreference({ getItem: () => '@cf/openai/gpt-oss-120b' });
@@ -18,6 +20,26 @@ describe('builder model preference', () => {
 
     loadBuilderModelPreference({ getItem: () => '@cf/example/retired' });
     expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
+  });
+
+  it('uses DeepSeek by default when AI Gateway Unified Billing credits are available', () => {
+    initializeBuilderModelPreference('available', { getItem: () => null });
+
+    expect(builderModelStore.get()).toBe(PREFERRED_BUILDER_MODEL);
+    expect(builderDefaultModelStore.get()).toBe(PREFERRED_BUILDER_MODEL);
+  });
+
+  it.each(['unavailable', 'unknown'] as const)('uses the hosted fallback when credit status is %s', (creditStatus) => {
+    initializeBuilderModelPreference(creditStatus, { getItem: () => PREFERRED_BUILDER_MODEL });
+
+    expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
+    expect(builderDefaultModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
+  });
+
+  it('preserves an explicit hosted-model preference when credits are available', () => {
+    initializeBuilderModelPreference('available', { getItem: () => '@cf/openai/gpt-oss-120b' });
+
+    expect(builderModelStore.get()).toBe('@cf/openai/gpt-oss-120b');
   });
 
   it('keeps the in-memory choice when local storage is unavailable', () => {

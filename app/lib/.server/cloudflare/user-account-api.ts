@@ -696,6 +696,17 @@ export class UserCloudflareAccountApi {
     return listed !== null && requireWorkerDeployments(listed).length > 0;
   }
 
+  async getAiGatewayCreditBalance(signal?: AbortSignal): Promise<number> {
+    const result = await this.call<{ balance?: unknown }>('/ai-gateway/billing/credit-balance', {
+      method: 'GET',
+      signal,
+    });
+    if (typeof result.balance !== 'number' || !Number.isFinite(result.balance)) {
+      throw new CloudflareAccountApiError('Cloudflare returned an invalid AI Gateway credit balance.');
+    }
+    return result.balance;
+  }
+
   async getWorkersSubdomain(): Promise<string> {
     const result = await this.call<{ subdomain?: string }>('/workers/subdomain', { method: 'GET' });
     if (!result.subdomain || !/^[a-z0-9-]+$/.test(result.subdomain)) {

@@ -3,8 +3,8 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CLOUDFLARE_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';
-import { builderModelStore } from '~/lib/stores/builder-model.client';
+import { CLOUDFLARE_WORKERS_AI_MODEL, PREFERRED_BUILDER_MODEL } from '~/lib/workers-ai-model';
+import { builderModelStore, initializeBuilderModelPreference } from '~/lib/stores/builder-model.client';
 import { BuilderModelSelector } from './BuilderModelSelector.client';
 
 let root: Root | undefined;
@@ -16,7 +16,7 @@ beforeEach(() => {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value),
   });
-  builderModelStore.set(CLOUDFLARE_WORKERS_AI_MODEL);
+  initializeBuilderModelPreference('unknown', { getItem: () => null });
 });
 
 afterEach(async () => {
@@ -46,7 +46,7 @@ describe('BuilderModelSelector', () => {
 
     const menu = document.querySelector('[role="menu"]');
     expect(menu?.textContent).toContain('Cloudflare hosted');
-    expect(menu?.textContent).toContain('Partner via Cloudflare');
+    expect(menu?.textContent).toContain('Third-party via Cloudflare');
     expect(document.querySelectorAll('[role="menuitemradio"]')).toHaveLength(6);
     const deepSeek = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
       item.textContent?.includes('DeepSeek V4 Pro'),
@@ -56,6 +56,20 @@ describe('BuilderModelSelector', () => {
 
     expect(builderModelStore.get()).toBe('deepseek/deepseek-v4-pro');
     expect(localStorage.getItem('ghostbuild_builder_model')).toBe('deepseek/deepseek-v4-pro');
+  });
+
+  it('shows DeepSeek as the default when Unified Billing credits are available', async () => {
+    initializeBuilderModelPreference('available', { getItem: () => null });
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => root?.render(<BuilderModelSelector />));
+
+    const trigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Builder model"]');
+    expect(trigger?.getAttribute('aria-label')).toContain('DeepSeek V4 Pro');
+    expect(trigger?.textContent).toContain('default');
+    expect(builderModelStore.get()).toBe(PREFERRED_BUILDER_MODEL);
   });
 
   it('closes the menu and prevents changes when a turn becomes active', async () => {

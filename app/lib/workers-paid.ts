@@ -12,7 +12,7 @@ export function isWorkersAiFreeAllocationError(error: unknown): boolean {
 }
 
 export function cloudflareAiFundingRequiredMessage(): string {
-  return `${CLOUDFLARE_AI_FUNDING_REQUIRED_MARKER} This Cloudflare partner model requires prepaid AI Gateway credits. Add credits in Cloudflare to continue; Ghostbuild did not make a purchase.`;
+  return `${CLOUDFLARE_AI_FUNDING_REQUIRED_MARKER} This third-party model uses AI Gateway Unified Billing, but your Cloudflare account has no credits available. In AI Gateway, select Credits Available, Manage, then Top-up credits to continue; Ghostbuild did not make a purchase.`;
 }
 
 export function isCloudflareAiFundingError(error: unknown): boolean {
