@@ -17,11 +17,6 @@
       "skills": ["packages/db/skills/db-core", "packages/react-db/skills/react-db"]
     },
     {
-      "repository": "https://github.com/tanstack-skills/tanstack-skills.git",
-      "revision": "6f5521ecbdfbfa3d54d335eba6c8b4df0b804c03",
-      "skills": ["plugins/tanstack-query/skills/tanstack-query"]
-    },
-    {
       "repository": "https://github.com/anthropics/skills.git",
       "revision": "f17010c9bb483898c1d9c9f42dde2b3a98889434",
       "skills": ["skills/frontend-design"]

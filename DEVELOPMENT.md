@@ -47,11 +47,10 @@ selected public GitHub skill directory by commit. Sync those upstream trees unch
 pnpm run builder-skills:sync
 pnpm run builder-skills:publish -- --dry-run
 pnpm run builder-skills:publish -- --local
-pnpm run builder-skills:publish -- --remote
 ```
 
-The remote command uploads an immutable, content-addressed generation to the shared `BUILDER_SKILLS` R2 bucket and
-publishes its small pointer last. At turn preparation Ghostbuild uses the official `agents/skills` R2 source to discover
+Production generations and the shared R2 pointer are published exclusively by `ghost-build-ops`; this repository cannot
+write them remotely. At turn preparation Ghostbuild uses the official `agents/skills` R2 source to discover
 that exact generation, puts only the skill catalog in the system prompt, and exposes upstream text files through `read`
 under `/__skills__/<skill>/`; the Pi harness remains the inference loop. Do not edit upstream skill files to add product
 policy. The system prompt contains only evergreen authority, safety, and workflow rules; concrete boundaries remain in

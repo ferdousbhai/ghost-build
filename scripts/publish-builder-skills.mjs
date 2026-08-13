@@ -102,11 +102,13 @@ function parseArguments(args) {
     const argument = args[index];
     if (argument === '--') {
       continue;
-    } else if (argument === '--local' || argument === '--remote') {
+    } else if (argument === '--local') {
       if (target) {
-        throw new Error('Choose exactly one of --local or --remote.');
+        throw new Error('Choose --local only once.');
       }
       target = argument;
+    } else if (argument === '--remote') {
+      throw new Error('Production builder skills are published exclusively by ghost-build-ops.');
     } else if (argument === '--dry-run') {
       dryRun = true;
     } else if (argument === '--directory') {
@@ -121,7 +123,7 @@ function parseArguments(args) {
     }
   }
   if (!dryRun && !target) {
-    throw new Error('Choose --local or --remote when publishing builder skills.');
+    throw new Error('Choose --local when publishing builder skills for development.');
   }
   return { target, dryRun, directory, skipSync };
 }
