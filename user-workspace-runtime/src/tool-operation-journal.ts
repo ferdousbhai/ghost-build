@@ -1,4 +1,5 @@
 const MAX_PERSISTED_TOOL_OPERATIONS = 500;
+const MAX_PERSISTED_TOOL_CANCELLATIONS = 500;
 const MAX_INDETERMINATE_TOOL_OPERATIONS = 50;
 const MAX_TOOL_RESULT_BYTES = 512 * 1024;
 const MAX_TOOL_ERROR_LENGTH = 4_000;
@@ -33,10 +34,12 @@ type PendingToolOperation = {
 };
 
 export type ToolOperationStartResult =
-  | { status: 'execute' }
+  | { status: 'execute' | 'active' }
   | { status: 'completed'; result: unknown }
   | { status: 'failed'; error: string }
   | { status: 'indeterminate'; error: string };
+
+export type ToolOperationCancellationResult = { status: 'active' | 'settled' };
 
 export class ToolOperationJournal {
   constructor(private readonly storage: ToolOperationStorage) {}
@@ -54,6 +57,13 @@ export class ToolOperationJournal {
          updated_at INTEGER NOT NULL
        )`,
     );
+    this.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ghostbuild_tool_cancellations (
+         tool_call_id TEXT PRIMARY KEY,
+         error TEXT NOT NULL,
+         cancelled_at INTEGER NOT NULL
+       )`,
+    );
   }
 
   begin(args: { toolCallId: string; toolName: string; argsSha256: string; now?: number }): ToolOperationStartResult {
@@ -62,6 +72,24 @@ export class ToolOperationJournal {
       if (existing) {
         assertSameInvocation(existing, args);
         return startResult(existing);
+      }
+      const cancellation = this.cancellation(args.toolCallId);
+      if (cancellation) {
+        const now = args.now ?? Date.now();
+        this.storage.sql.exec(
+          `INSERT INTO ghostbuild_tool_operations (
+             tool_call_id, tool_name, args_sha256, status, result_json, error, created_at, updated_at
+           ) VALUES (?, ?, ?, 'failed', NULL, ?, ?, ?)`,
+          args.toolCallId,
+          args.toolName,
+          args.argsSha256,
+          cancellation.error,
+          now,
+          now,
+        );
+        this.storage.sql.exec(`DELETE FROM ghostbuild_tool_cancellations WHERE tool_call_id = ?`, args.toolCallId);
+        this.pruneTerminalOperations();
+        return { status: 'failed', error: cancellation.error };
       }
       const running = first(
         this.storage.sql.exec<{ count: number }>(
@@ -84,17 +112,7 @@ export class ToolOperationJournal {
         now,
         now,
       );
-      this.storage.sql.exec(
-        `DELETE FROM ghostbuild_tool_operations
-         WHERE tool_call_id IN (
-           SELECT tool_call_id
-           FROM ghostbuild_tool_operations
-           WHERE status != 'running'
-           ORDER BY updated_at DESC, tool_call_id DESC
-           LIMIT -1 OFFSET ?
-         )`,
-        MAX_PERSISTED_TOOL_OPERATIONS,
-      );
+      this.pruneTerminalOperations();
       return { status: 'execute' };
     });
   }
@@ -103,6 +121,9 @@ export class ToolOperationJournal {
     const resultJson = encodeResult(args.result);
     return this.storage.transactionSync(() => {
       const existing = this.require(args.toolCallId);
+      if (existing.status === 'running' && existing.error !== null) {
+        throw new Error(existing.error);
+      }
       if (existing.status === 'completed') {
         if (existing.result_json !== resultJson) {
           throw new Error('A completed workspace tool operation received a different result.');
@@ -120,6 +141,7 @@ export class ToolOperationJournal {
         args.now ?? Date.now(),
         args.toolCallId,
       );
+      this.pruneTerminalOperations();
       return JSON.parse(resultJson) as unknown;
     });
   }
@@ -153,6 +175,14 @@ export class ToolOperationJournal {
       );
       return acknowledged;
     });
+  }
+
+  has(toolCallId: string): boolean {
+    return this.read(toolCallId) !== undefined;
+  }
+
+  isRunning(toolCallId: string): boolean {
+    return this.read(toolCallId)?.status === 'running';
   }
 
   toolName(toolCallId: string): string {
@@ -226,6 +256,7 @@ export class ToolOperationJournal {
         Date.now(),
         pending.toolCallId,
       );
+      this.pruneTerminalOperations();
       return true;
     });
   }
@@ -233,7 +264,7 @@ export class ToolOperationJournal {
   fail(args: { toolCallId: string; error: string; now?: number }): void {
     this.storage.transactionSync(() => {
       const existing = this.require(args.toolCallId);
-      if (existing.status !== 'running') {
+      if (existing.status !== 'running' || existing.error !== null) {
         return;
       }
       this.storage.sql.exec(
@@ -244,7 +275,105 @@ export class ToolOperationJournal {
         args.now ?? Date.now(),
         args.toolCallId,
       );
+      this.pruneTerminalOperations();
     });
+  }
+
+  cancel(args: { toolCallId: string; error: string; active: boolean; now?: number }): ToolOperationCancellationResult {
+    if (args.active) {
+      this.storage.transactionSync(() => {
+        const existing = this.read(args.toolCallId);
+        if (!existing) {
+          this.recordCancellation(args);
+        } else if (existing.status === 'running' && existing.error === null) {
+          this.storage.sql.exec(
+            `UPDATE ghostbuild_tool_operations
+             SET error = ?, updated_at = ?
+             WHERE tool_call_id = ? AND status = 'running' AND error IS NULL`,
+            args.error.slice(-MAX_TOOL_ERROR_LENGTH),
+            args.now ?? Date.now(),
+            args.toolCallId,
+          );
+        }
+      });
+      return { status: 'active' };
+    }
+    const existing = this.read(args.toolCallId);
+    if (!existing) {
+      this.recordCancellation(args);
+      return { status: 'settled' };
+    }
+    if (existing.status === 'running' && existing.error !== null) {
+      this.storage.sql.exec(
+        `UPDATE ghostbuild_tool_operations
+         SET status = 'failed', result_json = NULL, updated_at = ?
+         WHERE tool_call_id = ? AND status = 'running'`,
+        args.now ?? Date.now(),
+        args.toolCallId,
+      );
+      this.pruneTerminalOperations();
+      return { status: 'settled' };
+    }
+    this.fail(args);
+    return { status: 'settled' };
+  }
+
+  assertRunning(toolCallId: string): void {
+    const existing = this.require(toolCallId);
+    if (existing.status === 'running' && existing.error === null) {
+      return;
+    }
+    if (existing.error !== null) {
+      throw new Error(existing.error);
+    }
+    if (existing.status === 'failed') {
+      throw new Error(existing.error ?? 'The workspace tool operation failed.');
+    }
+    throw new Error('The workspace tool operation already completed.');
+  }
+
+  private recordCancellation(args: { toolCallId: string; error: string; now?: number }): void {
+    this.storage.sql.exec(
+      `INSERT INTO ghostbuild_tool_cancellations (tool_call_id, error, cancelled_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(tool_call_id) DO NOTHING`,
+      args.toolCallId,
+      args.error.slice(-MAX_TOOL_ERROR_LENGTH),
+      args.now ?? Date.now(),
+    );
+    this.storage.sql.exec(
+      `DELETE FROM ghostbuild_tool_cancellations
+       WHERE tool_call_id IN (
+         SELECT tool_call_id
+         FROM ghostbuild_tool_cancellations
+         ORDER BY cancelled_at DESC, tool_call_id DESC
+         LIMIT -1 OFFSET ?
+       )`,
+      MAX_PERSISTED_TOOL_CANCELLATIONS,
+    );
+  }
+
+  private pruneTerminalOperations(): void {
+    this.storage.sql.exec(
+      `DELETE FROM ghostbuild_tool_operations
+       WHERE tool_call_id IN (
+         SELECT tool_call_id
+         FROM ghostbuild_tool_operations
+         WHERE status != 'running'
+         ORDER BY updated_at DESC, tool_call_id DESC
+         LIMIT -1 OFFSET ?
+       )`,
+      MAX_PERSISTED_TOOL_OPERATIONS,
+    );
+  }
+
+  private cancellation(toolCallId: string): { error: string } | undefined {
+    return first(
+      this.storage.sql.exec<{ error: string }>(
+        `SELECT error FROM ghostbuild_tool_cancellations WHERE tool_call_id = ?`,
+        toolCallId,
+      ),
+    );
   }
 
   private require(toolCallId: string): ToolOperationRow {
@@ -274,6 +403,9 @@ function assertSameInvocation(row: ToolOperationRow, invocation: { toolName: str
 }
 
 function startResult(row: ToolOperationRow): ToolOperationStartResult {
+  if (row.status === 'running' && row.error !== null) {
+    return { status: 'indeterminate', error: row.error };
+  }
   if (row.status === 'completed' && row.result_json !== null) {
     return { status: 'completed', result: JSON.parse(row.result_json) };
   }

@@ -232,14 +232,31 @@ describe('isolated project command', () => {
     expect(assertion).toBeGreaterThan(stop);
   });
 
-  it('uses the public Computer filesystem for durable workspace changes', () => {
+  it('publishes each durable workspace change set through one atomic VFS batch', () => {
     const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
     const applyChanges = source.slice(source.indexOf('async applyChanges('), source.indexOf('async getSyncPage('));
 
-    expect(applyChanges).toContain('await this.withComputer');
-    expect(applyChanges).toContain('workspace.fs.rm');
-    expect(applyChanges).toContain('writeWorkspaceFile(workspace');
-    expect(applyChanges).not.toContain('transactionSync');
-    expect(applyChanges).not.toContain('.provider()');
+    expect(applyChanges).toContain('applyAtomicWorkspaceChanges(');
+    expect(applyChanges).toContain('assertMutationAllowed');
+    expect(applyChanges).not.toContain('workspace.fs.rm');
+    expect(applyChanges).not.toContain('writeWorkspaceFile(workspace');
+  });
+
+  it('stages dependency updates away from the live project before atomic publication', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const install = source.slice(
+      source.indexOf('async installDependenciesTool('),
+      source.indexOf('async validateTool('),
+    );
+
+    expect(install).toContain('stagingRoot');
+    expect(install).toContain('cwd: stagingRoot');
+    expect(install).toContain('applyAtomicWorkspaceChanges(');
+    expect(install.indexOf('requireCommandSuccess(await installation)')).toBeLessThan(
+      install.indexOf('applyAtomicWorkspaceChanges('),
+    );
+    expect(install.indexOf('applyAtomicWorkspaceChanges(')).toBeLessThan(
+      install.indexOf('this.#toolOperations.complete({ toolCallId, result })'),
+    );
   });
 });

@@ -1,3 +1,4 @@
+import type { WorkspaceRuntimeExecHandle } from '@cloudflare/computer';
 import {
   type DurableObjectStorageLike,
   getWorkspace,
@@ -16,6 +17,7 @@ import {
 import { Sandbox, type SandboxCommand } from '@cloudflare/sandbox';
 import { createExtensionProcessSandbox } from '@cloudflare/sandbox/extensions';
 import { parse } from 'jsonc-parser';
+import { settleCancelledWorkspaceCommand } from './command-cancellation';
 import { terminateWorkspaceCommand } from './command-termination';
 import { BuilderAgent } from '../../app/agents/builder-agent';
 import {
@@ -51,11 +53,16 @@ import { verifyRuntimeCapability } from '../../app/lib/cloudflare/runtime-capabi
 import { userRuntimeDeploymentAction } from '../../app/server-handlers/deployments';
 import { userRuntimeEnhancePromptAction } from '../../app/server-handlers/enhance-prompt';
 import { toolFailure, toolSuccess, type GhostbuildToolResult } from '../../ghostbuild-agent/tool-result';
+import { applyAtomicWorkspaceChanges } from './atomic-workspace-changes';
 import { isComputerContainerCallback } from './container-fetch-routing';
 import { COMPUTERD_BINARY, computerdBootstrapCommand, containerToolchainBootstrapCommand } from './container-toolchain';
 import { routeUserWorkspaceRuntimeControlPlaneRequest } from './readiness-route';
 import { scheduleUserWorkspaceRuntimeMaintenance } from './scheduled-maintenance';
-import { ToolOperationJournal, type ToolOperationStartResult } from './tool-operation-journal';
+import {
+  ToolOperationJournal,
+  type ToolOperationCancellationResult,
+  type ToolOperationStartResult,
+} from './tool-operation-journal';
 import { createCommittedMutationReceipt } from './mutation-receipt';
 import {
   assertPreviewSourceCheckpoint,
@@ -401,6 +408,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   readonly #activeOperationOwners = new Set<string>();
   #activeValidation: ActiveValidation | null = null;
   readonly #activeSyncRecoveries = new Map<string, Promise<boolean>>();
+  readonly #activeToolOperations = new Set<string>();
+  readonly #ownedToolOperations = new Set<string>();
+  readonly #confirmedCommandCancellations = new Set<string>();
   readonly #activeCommandKills = new Map<string, () => Promise<void>>();
   readonly #activeCommandStreams = new Set<string>();
   readonly #activeCommandSettlements = new Map<string, Promise<unknown>>();
@@ -682,11 +692,23 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
     const toolName = requireRemoteToolName(input.toolName);
     const argsJson = requireString(input.argsJson, 'argsJson', MAX_REQUEST_BYTES);
-    return this.#toolOperations.begin({
+    const started = this.#toolOperations.begin({
       toolCallId,
       toolName,
       argsSha256: await sha256Text(argsJson),
     });
+    if (started.status === 'execute') {
+      this.#ownedToolOperations.add(toolCallId);
+    }
+    if (
+      started.status === 'indeterminate' &&
+      (this.#activeToolOperations.has(toolCallId) ||
+        this.#activeCommandStreams.has(`tool:${toolCallId}`) ||
+        this.#toolOperations.pending().some((operation) => operation.toolCallId === toolCallId))
+    ) {
+      return { status: 'active' };
+    }
+    return started;
   }
 
   completeToolOperation(value: unknown): unknown {
@@ -696,21 +718,55 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     if (toolName === 'write' || toolName === 'edit') {
       const receipt = this.#toolOperations.mutationReceipt(toolCallId);
       if (receipt) {
-        return this.#toolOperations.acknowledgeMutation({ toolCallId, result: input.result });
+        const result = this.#toolOperations.acknowledgeMutation({ toolCallId, result: input.result });
+        this.#ownedToolOperations.delete(toolCallId);
+        return result;
       }
     }
-    return this.#toolOperations.complete({
+    const result = this.#toolOperations.complete({
       toolCallId,
       result: input.result,
     });
+    this.#ownedToolOperations.delete(toolCallId);
+    return result;
   }
 
   failToolOperation(value: unknown): void {
     const input = record(value);
+    const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
     this.#toolOperations.fail({
-      toolCallId: requireString(input.toolCallId, 'toolCallId', 512),
+      toolCallId,
       error: requireString(input.error, 'error', 4_000),
     });
+    this.#ownedToolOperations.delete(toolCallId);
+  }
+
+  cancelToolOperation(value: unknown): ToolOperationCancellationResult {
+    const input = record(value);
+    const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
+    const commandMayStillExist =
+      this.#activeCommandStreams.has(`tool:${toolCallId}`) ||
+      this.#activeCommandKills.has(`tool:${toolCallId}`) ||
+      this.#toolOperations.pending().some((operation) => operation.toolCallId === toolCallId);
+    const commandBackedOperation =
+      this.#toolOperations.has(toolCallId) &&
+      ['exec', 'npmInstall'].includes(this.#toolOperations.toolName(toolCallId));
+    const result = this.#toolOperations.cancel({
+      toolCallId,
+      error: requireString(input.error, 'error', 4_000),
+      active:
+        this.#activeToolOperations.has(toolCallId) ||
+        commandMayStillExist ||
+        (commandBackedOperation &&
+          this.#toolOperations.isRunning(toolCallId) &&
+          !this.#ownedToolOperations.has(toolCallId) &&
+          !this.#confirmedCommandCancellations.has(toolCallId)),
+    });
+    if (result.status === 'settled') {
+      this.#ownedToolOperations.delete(toolCallId);
+      this.#confirmedCommandCancellations.delete(toolCallId);
+    }
+    return result;
   }
 
   async getWorkspaceState(): Promise<WorkspaceState> {
@@ -907,91 +963,120 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     const input = record(value);
     const baseRevision = requireInteger(input.baseRevision, 'baseRevision', Number.MAX_SAFE_INTEGER);
     const changes = requireChanges(input.changes);
+    const toolCallId =
+      typeof input.toolCallId === 'string' ? requireString(input.toolCallId, 'toolCallId', 512) : undefined;
     const operationKey =
       typeof input.operationKey === 'string'
         ? requireString(input.operationKey, 'operationKey', 512)
         : `change:${baseRevision}:${await sha256Text(JSON.stringify(changes))}`;
-    return this.withStatefulOperation('write', operationKey, async () => {
-      if (this.workspaceRow().seed_id !== null) {
-        throw new WorkspaceOperationConflictError('seed', 1_000);
-      }
-      if (baseRevision !== this.currentRevision()) {
-        return { ok: false as const, conflict: true as const, state: await this.getWorkspaceState() };
-      }
-      const existingFiles = await this.withComputer(readProjectFiles);
-      if (baseRevision !== this.currentRevision()) {
-        return { ok: false as const, conflict: true as const, state: await this.getWorkspaceState() };
-      }
-      const projectedFiles = new Map(existingFiles.map((file) => [file.path, { size: file.size, mode: file.mode }]));
-      const decodedWrites = new Map<string, { bytes: Uint8Array; mode?: number; sha256: string }>();
-      for (const change of changes) {
-        if (change.kind === 'delete') {
-          for (const path of projectedFiles.keys()) {
-            if (path === change.path || path.startsWith(`${change.path}/`)) {
-              projectedFiles.delete(path);
-            }
-          }
-          continue;
+    if (toolCallId) {
+      this.#toolOperations.assertRunning(toolCallId);
+      this.#activeToolOperations.add(toolCallId);
+    }
+    try {
+      return await this.withStatefulOperation('write', operationKey, async () => {
+        if (this.workspaceRow().seed_id !== null) {
+          throw new WorkspaceOperationConflictError('seed', 1_000);
         }
-        const bytes = decodeFileContent(change.content, change.encoding);
-        if (bytes.byteLength > MAX_FILE_BYTES) {
-          throw new Error(`Workspace file exceeds ${MAX_FILE_BYTES} bytes.`);
+        if (baseRevision !== this.currentRevision()) {
+          failConflictedToolMutation(this.#toolOperations, toolCallId);
+          return { ok: false as const, conflict: true as const, state: await this.getWorkspaceState() };
         }
-        const mode = change.mode ?? projectedFiles.get(change.path)?.mode;
-        decodedWrites.set(change.path, { bytes, mode, sha256: await sha256Bytes(bytes) });
-        projectedFiles.set(change.path, { size: bytes.byteLength, mode: mode ?? 0o644 });
-      }
-      if (
-        projectedFiles.size > MAX_FILES ||
-        [...projectedFiles.values()].reduce((sum, file) => sum + file.size, 0) > MAX_TOTAL_BYTES
-      ) {
-        throw new Error('The project workspace exceeds its size limit.');
-      }
-      const changedPaths = await this.withComputer(async (workspace) => {
+        const existingFiles = await this.withComputer(readProjectFiles);
+        if (baseRevision !== this.currentRevision()) {
+          failConflictedToolMutation(this.#toolOperations, toolCallId);
+          return { ok: false as const, conflict: true as const, state: await this.getWorkspaceState() };
+        }
+        const projectedFiles = new Map(existingFiles.map((file) => [file.path, { size: file.size, mode: file.mode }]));
+        const decodedWrites = new Map<string, { bytes: Uint8Array; mode?: number; sha256: string }>();
         for (const change of changes) {
           if (change.kind === 'delete') {
-            await workspace.fs.rm(change.path, { recursive: true, force: true });
+            for (const path of projectedFiles.keys()) {
+              if (path === change.path || path.startsWith(`${change.path}/`)) {
+                projectedFiles.delete(path);
+              }
+            }
             continue;
           }
-          const write = decodedWrites.get(change.path)!;
-          await writeWorkspaceFile(workspace, change.path, write.bytes, true, write.mode);
+          const bytes = decodeFileContent(change.content, change.encoding);
+          if (bytes.byteLength > MAX_FILE_BYTES) {
+            throw new Error(`Workspace file exceeds ${MAX_FILE_BYTES} bytes.`);
+          }
+          const mode = change.mode ?? projectedFiles.get(change.path)?.mode;
+          decodedWrites.set(change.path, { bytes, mode, sha256: await sha256Bytes(bytes) });
+          projectedFiles.set(change.path, { size: bytes.byteLength, mode: mode ?? 0o644 });
         }
-        return changes.map((change) => change.path);
-      });
-      const committedRevision = this.currentRevision();
-      if (typeof input.toolCallId === 'string') {
-        const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
-        const toolName = this.#toolOperations.toolName(toolCallId);
-        if (toolName === 'write' || toolName === 'edit') {
-          this.#toolOperations.commitMutation({
-            toolCallId,
-            receipt: createCommittedMutationReceipt({
-              tool: toolName,
-              files: changes.map((change) => {
-                const write = change.kind === 'write' ? decodedWrites.get(change.path)! : null;
-                return {
+        if (
+          projectedFiles.size > MAX_FILES ||
+          [...projectedFiles.values()].reduce((sum, file) => sum + file.size, 0) > MAX_TOTAL_BYTES
+        ) {
+          throw new Error('The project workspace exceeds its size limit.');
+        }
+        const assertMutationAllowed = () => {
+          if (toolCallId) {
+            this.#toolOperations.assertRunning(toolCallId);
+          }
+        };
+        const changedPaths = applyAtomicWorkspaceChanges(
+          this.#workspace,
+          changes.map((change) =>
+            change.kind === 'delete'
+              ? change
+              : {
+                  kind: 'write' as const,
                   path: change.path,
-                  revision: committedRevision,
-                  size: write?.bytes.byteLength ?? 0,
-                  sha256: write?.sha256 ?? null,
-                  deleted: change.kind === 'delete',
-                  ...(write
-                    ? {
-                        changedRange: {
-                          startLine: 1,
-                          endLine: canDecodeUtf8(write.bytes) ? decodeUtf8(write.bytes).split('\n').length : 1,
-                        },
-                      }
-                    : {}),
-                };
+                  ...decodedWrites.get(change.path)!,
+                },
+          ),
+          assertMutationAllowed,
+        );
+        const committedRevision = this.currentRevision();
+        if (toolCallId) {
+          this.#toolOperations.assertRunning(toolCallId);
+          const toolName = this.#toolOperations.toolName(toolCallId);
+          if (toolName === 'write' || toolName === 'edit') {
+            this.#toolOperations.commitMutation({
+              toolCallId,
+              receipt: createCommittedMutationReceipt({
+                tool: toolName,
+                files: changes.map((change) => {
+                  const write = change.kind === 'write' ? decodedWrites.get(change.path)! : null;
+                  return {
+                    path: change.path,
+                    revision: committedRevision,
+                    size: write?.bytes.byteLength ?? 0,
+                    sha256: write?.sha256 ?? null,
+                    deleted: change.kind === 'delete',
+                    ...(write
+                      ? {
+                          changedRange: {
+                            startLine: 1,
+                            endLine: canDecodeUtf8(write.bytes) ? decodeUtf8(write.bytes).split('\n').length : 1,
+                          },
+                        }
+                      : {}),
+                  };
+                }),
               }),
-            }),
-          });
+            });
+          }
         }
+        const state = await this.getWorkspaceState();
+        return { ok: true as const, state, changedPaths };
+      });
+    } catch (error) {
+      if (toolCallId) {
+        this.#toolOperations.fail({
+          toolCallId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
-      const state = await this.getWorkspaceState();
-      return { ok: true as const, state, changedPaths };
-    });
+      throw error;
+    } finally {
+      if (toolCallId) {
+        this.#activeToolOperations.delete(toolCallId);
+      }
+    }
   }
 
   async getSyncPage(value: unknown) {
@@ -1109,12 +1194,24 @@ export class ProjectWorkspace extends ComputerSandboxBase {
 
   async execute(value: unknown): Promise<WorkspaceRuntimeResult<'utf8'>> {
     const request = await this.commandRequest(value);
-    return this.withStatefulOperation('exec', request.operationKey, () =>
+    if (request.toolCallId) {
+      this.#toolOperations.assertRunning(request.toolCallId);
+      this.#activeToolOperations.add(request.toolCallId);
+    }
+    const settlement = this.withStatefulOperation('exec', request.operationKey, () =>
       this.withComputer((workspace) =>
         runCommand(workspace, request.command, {
+          id: request.operationKey,
           cwd: request.cwd,
           backend: request.backend,
           timeoutMs: 5 * 60_000,
+          beforeExec: () => this.assertToolOperationRunning(request.toolCallId),
+          onHandle: (kill) => {
+            this.#activeCommandKills.set(request.operationKey, kill);
+            if (this.#pendingCommandCancellations.delete(request.operationKey)) {
+              void kill().catch(() => undefined);
+            }
+          },
           ...(request.toolCallId
             ? {
                 onSyncPending: (result: WorkspaceRuntimeResult<'utf8'>) => {
@@ -1125,10 +1222,24 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         }),
       ),
     );
+    this.#activeCommandSettlements.set(request.operationKey, settlement);
+    try {
+      return await settlement;
+    } finally {
+      this.#activeCommandKills.delete(request.operationKey);
+      this.#activeCommandSettlements.delete(request.operationKey);
+      this.#pendingCommandCancellations.delete(request.operationKey);
+      if (request.toolCallId) {
+        this.#activeToolOperations.delete(request.toolCallId);
+      }
+    }
   }
 
   async executeStream(value: unknown): Promise<ReadableStream<Uint8Array>> {
     const request = await this.commandRequest(value);
+    if (request.toolCallId) {
+      this.#toolOperations.assertRunning(request.toolCallId);
+    }
     const encoder = new TextEncoder();
     let cancelCommand: (() => Promise<void>) | undefined;
     let cancelled = false;
@@ -1142,6 +1253,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
               cwd: request.cwd,
               backend: request.backend,
               timeoutMs: 5 * 60_000,
+              beforeExec: () => this.assertToolOperationRunning(request.toolCallId),
               emit: (event) => {
                 if (!cancelled) {
                   controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
@@ -1186,12 +1298,26 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       cancel: async () => {
         cancelled = true;
         const settlement = this.#activeCommandSettlements.get(request.operationKey);
+        const actions: Promise<unknown>[] = [];
         if (cancelCommand) {
-          await cancelCommand();
+          actions.push(
+            boundCancellationAction(
+              settleCancelledWorkspaceCommand({ termination: cancelCommand(), settlement }),
+              'streamed command termination and observation',
+            ),
+          );
         } else {
           this.#pendingCommandCancellations.add(request.operationKey);
+          if (settlement) {
+            actions.push(
+              boundCancellationAction(
+                settleCancelledWorkspaceCommand({ settlement }),
+                'pending streamed command termination and observation',
+              ),
+            );
+          }
         }
-        await settlement?.catch(() => undefined);
+        await settleCancellationActions(actions);
       },
     });
   }
@@ -1199,18 +1325,83 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   async cancelExecution(value: unknown): Promise<void> {
     const input = record(value);
     const operationKey = requireString(input.operationKey, 'operationKey', 512);
+    const toolCallId = toolCallIdFromOperationKey(operationKey);
     const settlement = this.#activeCommandSettlements.get(operationKey);
     const kill = this.#activeCommandKills.get(operationKey);
+    const actions: Promise<unknown>[] = [];
     if (kill) {
-      await kill();
-    } else if (this.#activeCommandStreams.has(operationKey)) {
+      actions.push(
+        boundCancellationAction(
+          settleCancelledWorkspaceCommand({ termination: kill(), settlement }),
+          'exact command termination and observation',
+        ),
+      );
+    } else if (
+      this.#activeCommandStreams.has(operationKey) ||
+      (toolCallId && this.#activeToolOperations.has(toolCallId))
+    ) {
       this.#pendingCommandCancellations.add(operationKey);
-    } else {
-      await this.withComputer((workspace) =>
+    } else if (
+      toolCallId &&
+      this.#toolOperations.isRunning(toolCallId) &&
+      !this.#ownedToolOperations.has(toolCallId) &&
+      !this.#toolOperations.pending().some((operation) => operation.toolCallId === toolCallId)
+    ) {
+      const termination = this.withComputer((workspace) =>
         terminateWorkspaceCommand(workspace.runtime, operationKey, 'container-shell'),
+      ).then((result) => {
+        if (isPendingWorkspaceRuntimeResult(result)) {
+          this.registerPendingCommand({
+            backend: 'container-shell',
+            toolCallId,
+            result: toolFailure(
+              'The cancelled workspace command reached a terminal state, but its filesystem synchronization is still pending.',
+            ),
+          });
+        }
+        return result;
+      });
+      actions.push(
+        boundCancellationAction(
+          settleCancelledWorkspaceCommand({ termination, settlement }),
+          'recovered command termination and observation',
+        ).then(() => {
+          this.#confirmedCommandCancellations.add(toolCallId);
+          while (this.#confirmedCommandCancellations.size > MAX_CONFIRMED_COMMAND_CANCELLATIONS) {
+            const oldest = this.#confirmedCommandCancellations.values().next().value;
+            if (oldest === undefined) {
+              break;
+            }
+            this.#confirmedCommandCancellations.delete(oldest);
+          }
+        }),
+      );
+    } else if (!toolCallId) {
+      actions.push(
+        boundCancellationAction(
+          this.withComputer((workspace) =>
+            terminateWorkspaceCommand(workspace.runtime, operationKey, 'container-shell'),
+          ),
+          'command termination',
+        ),
       );
     }
-    await settlement?.catch(() => undefined);
+    if (settlement && !kill && actions.length === 0) {
+      actions.push(
+        boundCancellationAction(
+          settleCancelledWorkspaceCommand({ settlement }),
+          'pending command termination and observation',
+        ),
+      );
+    }
+    await settleCancellationActions(actions);
+    if (
+      toolCallId &&
+      this.#toolOperations.has(toolCallId) &&
+      !this.#toolOperations.pending().some((operation) => operation.toolCallId === toolCallId)
+    ) {
+      this.#toolOperations.fail({ toolCallId, error: 'The workspace command was cancelled.' });
+    }
   }
 
   private async commandRequest(value: unknown) {
@@ -1227,7 +1418,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       cwd,
       backend,
       operationKey,
-      toolCallId: operationKey.startsWith('tool:') ? operationKey.slice('tool:'.length) : null,
+      toolCallId: toolCallIdFromOperationKey(operationKey),
     };
   }
 
@@ -1272,36 +1463,106 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     if (!mode) {
       throw new SyntaxError('Invalid dependency installation mode.');
     }
-    return this.runToolOperation(toolCallId, 'npmInstall', { input: input.input, mode, packages }, () =>
-      this.withStatefulOperation('install', `tool:${toolCallId}`, async () => {
+    return this.runToolOperation(toolCallId, 'npmInstall', { input: input.input, mode, packages }, () => {
+      const operationKey = `tool:${toolCallId}`;
+      const settlement = this.withStatefulOperation('install', operationKey, async () => {
         const startedAt = Date.now();
-        await this.withComputer(async (workspace) => {
+        return this.withComputer(async (workspace) => {
+          const assertMutationAllowed = () => this.#toolOperations.assertRunning(toolCallId);
           const packagePath = `${PROJECT_ROOT}/package.json`;
+          const lockfilePath = `${PROJECT_ROOT}/pnpm-lock.yaml`;
+          const stagingRoot = `${ISOLATED_PROJECT_ROOT}/install-${crypto.randomUUID()}`;
+          const stagedPackagePath = `${stagingRoot}/package.json`;
+          const stagedLockfilePath = `${stagingRoot}/pnpm-lock.yaml`;
           const current = decodeUtf8((await readWorkspaceFile(workspace, packagePath)).bytes);
           const next = mode === 'sync-lockfile' ? current : addRequestedDependencies(current, packages);
-          await writeWorkspaceFile(workspace, packagePath, new TextEncoder().encode(next));
-          requireCommandSuccess(
-            await runCommand(
-              workspace,
-              'pnpm install --lockfile-only --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
-              { cwd: PROJECT_ROOT, backend: 'container-shell', timeoutMs: INSTALL_TIMEOUT_MS },
-            ),
+          await this.mkdir(stagingRoot, { recursive: true });
+          assertMutationAllowed();
+          await this.writeFile(stagedPackagePath, next, { encoding: 'utf8' });
+          assertMutationAllowed();
+          const installationCommand = [
+            'set -eu',
+            `if [ -f ${shellQuote(lockfilePath)} ]; then cp ${shellQuote(lockfilePath)} ${shellQuote(stagedLockfilePath)}; fi`,
+            'pnpm install --lockfile-only --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
+          ].join('\n');
+          const installation = runCommand(workspace, installationCommand, {
+            id: operationKey,
+            cwd: stagingRoot,
+            backend: 'container-shell',
+            timeoutMs: INSTALL_TIMEOUT_MS,
+            beforeExec: assertMutationAllowed,
+            onHandle: (kill) => {
+              this.#activeCommandKills.set(operationKey, kill);
+              if (this.#pendingCommandCancellations.delete(operationKey)) {
+                void kill().catch(() => undefined);
+              }
+            },
+          });
+          try {
+            requireCommandSuccess(await installation);
+          } finally {
+            this.#activeCommandKills.delete(operationKey);
+            this.#pendingCommandCancellations.delete(operationKey);
+          }
+
+          let packageBytes: Uint8Array;
+          let lockfileBytes: Uint8Array;
+          try {
+            const [stagedPackage, stagedLockfile] = await Promise.all([
+              this.readFile(stagedPackagePath, { encoding: 'none' }),
+              this.readFile(stagedLockfilePath, { encoding: 'none' }),
+            ]);
+            if (stagedPackage.size > MAX_FILE_BYTES || stagedLockfile.size > MAX_FILE_BYTES) {
+              throw new Error('The generated package manifest or lockfile exceeds the workspace file limit.');
+            }
+            [packageBytes, lockfileBytes] = await Promise.all([
+              readStream(stagedPackage.content, stagedPackage.size),
+              readStream(stagedLockfile.content, stagedLockfile.size),
+            ]);
+          } finally {
+            await this.runTransientCommand('/', `rm -rf ${shellQuote(stagingRoot)}`, 30_000).catch(() => undefined);
+          }
+          const existingFiles = await readProjectFiles(workspace);
+          const replacedPaths = new Set([packagePath, lockfilePath]);
+          const retainedFiles = existingFiles.filter((file) => !replacedPaths.has(file.path));
+          if (
+            retainedFiles.length + 2 > MAX_FILES ||
+            totalFileBytes(retainedFiles) + packageBytes.byteLength + lockfileBytes.byteLength > MAX_TOTAL_BYTES
+          ) {
+            throw new Error('The project workspace exceeds its size limit.');
+          }
+          assertMutationAllowed();
+          applyAtomicWorkspaceChanges(
+            this.#workspace,
+            [
+              { kind: 'write', path: packagePath, bytes: packageBytes },
+              { kind: 'write', path: lockfilePath, bytes: lockfileBytes },
+            ],
+            assertMutationAllowed,
           );
+          const result = toolSuccess(
+            mode === 'sync-lockfile'
+              ? 'Synchronized the durable project lockfile with package.json.'
+              : `Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'} in the durable project.`,
+            {
+              mode,
+              workspaceRevision: this.currentRevision(),
+              buildEnvironment: 'cloudflare-computer-container',
+              durationMs: Date.now() - startedAt,
+            },
+          );
+          // Publish and journal completion are contiguous synchronous boundaries, so a known commit wins cancellation.
+          this.#toolOperations.complete({ toolCallId, result });
+          return result;
         });
-        const state = await this.getWorkspaceState();
-        return toolSuccess(
-          mode === 'sync-lockfile'
-            ? 'Synchronized the durable project lockfile with package.json.'
-            : `Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'} in the durable project.`,
-          {
-            mode,
-            workspaceRevision: state.revision,
-            buildEnvironment: 'cloudflare-computer-container',
-            durationMs: Date.now() - startedAt,
-          },
-        );
-      }),
-    );
+      });
+      this.#activeCommandSettlements.set(operationKey, settlement);
+      return settlement.finally(() => {
+        this.#activeCommandKills.delete(operationKey);
+        this.#activeCommandSettlements.delete(operationKey);
+        this.#pendingCommandCancellations.delete(operationKey);
+      });
+    });
   }
 
   async validateTool(value: unknown): Promise<GhostbuildToolResult> {
@@ -2414,12 +2675,16 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       toolName,
       argsSha256: await sha256Text(argsJson),
     });
+    if (started.status === 'execute') {
+      this.#ownedToolOperations.add(toolCallId);
+    }
     if (started.status === 'completed') {
       return started.result as T;
     }
     if (started.status === 'failed' || started.status === 'indeterminate') {
       throw new Error(started.error);
     }
+    this.#activeToolOperations.add(toolCallId);
     try {
       const result = await operation();
       return this.#toolOperations.complete({ toolCallId, result }) as T;
@@ -2444,6 +2709,11 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         // A completed journal row wins if its acknowledgement was interrupted.
       }
       throw error;
+    } finally {
+      this.#activeToolOperations.delete(toolCallId);
+      if (!this.#toolOperations.isRunning(toolCallId)) {
+        this.#ownedToolOperations.delete(toolCallId);
+      }
     }
   }
 
@@ -2467,10 +2737,17 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       });
     }
     try {
+      this.assertToolOperationRunning(toolCallIdFromOperationKey(idempotencyKey));
       return await this.withContainerKeepAlive(operation);
     } finally {
       this.#operationLane.release(lease);
       this.#activeOperationOwners.delete(owner);
+    }
+  }
+
+  private assertToolOperationRunning(toolCallId: string | null): void {
+    if (toolCallId) {
+      this.#toolOperations.assertRunning(toolCallId);
     }
   }
 
@@ -2757,18 +3034,52 @@ async function writeWorkspaceFile(
   bytes: Uint8Array,
   projectOnly = true,
   mode?: number,
+  beforeMutation?: () => void,
 ): Promise<void> {
   const path = projectOnly ? requireProjectPath(pathValue) : requireAbsolutePath(pathValue);
   if (bytes.byteLength > MAX_FILE_BYTES) {
     throw new Error(`Workspace file exceeds ${MAX_FILE_BYTES} bytes.`);
   }
   const slash = path.lastIndexOf('/');
+  beforeMutation?.();
   await workspace.fs.mkdir(path.slice(0, slash) || '/', { recursive: true });
+  beforeMutation?.();
   await workspace.fs.writeFile(path, bytes, mode === undefined ? undefined : { mode });
 }
 
 const EXEC_STREAM_MAX_LIVE_BYTES = 1024 * 1024;
 const EXEC_STREAM_RESULT_BYTES_PER_CHANNEL = 64 * 1024;
+const MAX_CONFIRMED_COMMAND_CANCELLATIONS = 500;
+const COMMAND_CANCELLATION_SETTLEMENT_TIMEOUT_MS = 35_000;
+const COMMAND_CANCELLATION_RPC_TIMEOUT_MS = 5_000;
+
+function boundCancellationAction<T>(promise: Promise<T>, description: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error(`${description} remained indeterminate at the cancellation deadline.`)),
+      COMMAND_CANCELLATION_SETTLEMENT_TIMEOUT_MS,
+    );
+    void promise.then(resolve, reject).finally(() => clearTimeout(timeout));
+  });
+}
+
+function boundCancellationRpc<T>(promise: Promise<T>, description: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error(`${description} remained indeterminate at the RPC attempt deadline.`)),
+      COMMAND_CANCELLATION_RPC_TIMEOUT_MS,
+    );
+    void promise.then(resolve, reject).finally(() => clearTimeout(timeout));
+  });
+}
+
+async function settleCancellationActions(actions: Promise<unknown>[]): Promise<void> {
+  const results = await Promise.allSettled(actions);
+  const failures = results.flatMap((result) => (result.status === 'rejected' ? [result.reason] : []));
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Workspace command cancellation could not be fully confirmed.');
+  }
+}
 
 type StreamCommandEvent =
   | { type: 'output'; channel: 'stdout' | 'stderr'; chunk: string }
@@ -2782,21 +3093,40 @@ async function streamCommand(
     cwd: string;
     backend: 'container-shell';
     timeoutMs: number;
+    beforeExec?: () => void;
     emit: (event: StreamCommandEvent) => void;
     onHandle?: (kill: () => Promise<void>) => void;
     onSyncPending?: (result: WorkspaceRuntimeResult<'utf8'>) => void;
   },
 ): Promise<WorkspaceRuntimeResult<'utf8'>> {
-  const handle = await workspace.runtime.exec(command, {
-    id: options.id,
-    cwd: options.cwd,
-    backend: options.backend,
-    encoding: 'utf8',
-    timeoutMs: options.timeoutMs,
-  });
+  options.beforeExec?.();
+  let handle: WorkspaceRuntimeExecHandle<'utf8'>;
+  try {
+    handle = await workspace.runtime.exec(command, {
+      id: options.id,
+      cwd: options.cwd,
+      backend: options.backend,
+      encoding: 'utf8',
+      timeoutMs: options.timeoutMs,
+    });
+  } catch (error) {
+    if (options.id) {
+      const result = await terminateWorkspaceCommand(workspace.runtime, options.id, options.backend);
+      if (isPendingWorkspaceRuntimeResult(result)) {
+        options.onSyncPending?.(result as WorkspaceRuntimeResult<'utf8'>);
+      }
+    }
+    throw error;
+  }
   let cancellation: Promise<void> | undefined;
+  let terminationObservedPending = false;
   const terminate = () => {
-    cancellation ??= terminateWorkspaceCommand(workspace.runtime, handle.id, options.backend);
+    cancellation ??= terminateWorkspaceCommand(workspace.runtime, handle.id, options.backend).then((result) => {
+      if (isPendingWorkspaceRuntimeResult(result)) {
+        terminationObservedPending = true;
+        options.onSyncPending?.(result as WorkspaceRuntimeResult<'utf8'>);
+      }
+    });
     return cancellation;
   };
   options.onHandle?.(terminate);
@@ -2858,7 +3188,9 @@ async function streamCommand(
           error: error instanceof Error ? error.message : String(error),
         },
       };
-      options.onSyncPending?.(pending);
+      if (!terminationObservedPending) {
+        options.onSyncPending?.(pending);
+      }
       return requireDurableCommandResult(pending, options.backend);
     }
 
@@ -2876,9 +3208,15 @@ async function streamCommand(
     return result;
   } finally {
     const id = handle.id;
-    await cancellation;
-    handle[Symbol.dispose]();
-    await workspace.runtime.disposeExec(id, { backend: options.backend }).catch(() => undefined);
+    try {
+      await cancellation;
+    } finally {
+      handle[Symbol.dispose]();
+      await boundCancellationRpc(
+        workspace.runtime.disposeExec(id, { backend: options.backend }),
+        'streamed command disposal',
+      ).catch(() => undefined);
+    }
   }
 }
 
@@ -2917,20 +3255,46 @@ async function runCommand(
   workspace: WorkspaceClient,
   command: string,
   options: {
+    id?: string;
     cwd: string;
     backend: 'container-shell';
     timeoutMs: number;
     env?: Record<string, string>;
+    beforeExec?: () => void;
+    onHandle?: (kill: () => Promise<void>) => void;
     onSyncPending?: (result: WorkspaceRuntimeResult<'utf8'>) => void;
   },
 ): Promise<WorkspaceRuntimeResult<'utf8'>> {
-  const handle = await workspace.runtime.exec(command, {
-    cwd: options.cwd,
-    backend: options.backend,
-    encoding: 'utf8',
-    timeoutMs: options.timeoutMs,
-    env: options.env,
-  });
+  options.beforeExec?.();
+  let handle: WorkspaceRuntimeExecHandle<'utf8'>;
+  try {
+    handle = await workspace.runtime.exec(command, {
+      id: options.id,
+      cwd: options.cwd,
+      backend: options.backend,
+      encoding: 'utf8',
+      timeoutMs: options.timeoutMs,
+      env: options.env,
+    });
+  } catch (error) {
+    if (options.id) {
+      const result = await terminateWorkspaceCommand(workspace.runtime, options.id, options.backend);
+      if (isPendingWorkspaceRuntimeResult(result)) {
+        options.onSyncPending?.(result as WorkspaceRuntimeResult<'utf8'>);
+      }
+    }
+    throw error;
+  }
+  let cancellation: Promise<void> | undefined;
+  const terminate = () => {
+    cancellation ??= terminateWorkspaceCommand(workspace.runtime, handle.id, options.backend).then((result) => {
+      if (isPendingWorkspaceRuntimeResult(result)) {
+        options.onSyncPending?.(result as WorkspaceRuntimeResult<'utf8'>);
+      }
+    });
+    return cancellation;
+  };
+  options.onHandle?.(terminate);
   try {
     const result = await handle.result();
     if (result.sync.status === 'pending') {
@@ -2938,12 +3302,19 @@ async function runCommand(
     }
     return requireDurableCommandResult(result, options.backend);
   } catch (error) {
-    await terminateWorkspaceCommand(workspace.runtime, handle.id, options.backend);
+    await terminate();
     throw error;
   } finally {
     const id = handle.id;
-    handle[Symbol.dispose]();
-    await workspace.runtime.disposeExec(id, { backend: options.backend }).catch(() => undefined);
+    try {
+      await cancellation;
+    } finally {
+      handle[Symbol.dispose]();
+      await boundCancellationRpc(
+        workspace.runtime.disposeExec(id, { backend: options.backend }),
+        'command disposal',
+      ).catch(() => undefined);
+    }
   }
 }
 
@@ -3092,6 +3463,31 @@ function requireBackend(value: unknown): 'container-shell' {
     return 'container-shell';
   }
   throw new SyntaxError('Invalid Computer execution backend.');
+}
+
+function isPendingWorkspaceRuntimeResult(value: unknown): value is { sync: { status: 'pending' } } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'sync' in value &&
+    typeof value.sync === 'object' &&
+    value.sync !== null &&
+    'status' in value.sync &&
+    value.sync.status === 'pending'
+  );
+}
+
+function toolCallIdFromOperationKey(operationKey: string): string | null {
+  return operationKey.startsWith('tool:') ? operationKey.slice('tool:'.length) : null;
+}
+
+function failConflictedToolMutation(toolOperations: ToolOperationJournal, toolCallId: string | undefined): void {
+  if (toolCallId) {
+    toolOperations.fail({
+      toolCallId,
+      error: 'The project changed while the file mutation was starting.',
+    });
+  }
 }
 
 function requireRemoteToolName(value: unknown): 'write' | 'edit' | 'exec' {

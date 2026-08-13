@@ -15,8 +15,8 @@ describe('builder model preference', () => {
   beforeEach(() => initializeBuilderModelPreference('unknown', { getItem: () => null }));
 
   it('loads an allowlisted preference and defaults invalid values', () => {
-    loadBuilderModelPreference({ getItem: () => '@cf/openai/gpt-oss-120b' });
-    expect(builderModelStore.get()).toBe('@cf/openai/gpt-oss-120b');
+    loadBuilderModelPreference({ getItem: () => '@cf/zai-org/glm-5.2' });
+    expect(builderModelStore.get()).toBe('@cf/zai-org/glm-5.2');
 
     loadBuilderModelPreference({ getItem: () => '@cf/example/retired' });
     expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
@@ -37,9 +37,9 @@ describe('builder model preference', () => {
   });
 
   it('preserves an explicit hosted-model preference when credits are available', () => {
-    initializeBuilderModelPreference('available', { getItem: () => '@cf/openai/gpt-oss-120b' });
+    initializeBuilderModelPreference('available', { getItem: () => '@cf/zai-org/glm-5.2' });
 
-    expect(builderModelStore.get()).toBe('@cf/openai/gpt-oss-120b');
+    expect(builderModelStore.get()).toBe('@cf/zai-org/glm-5.2');
   });
 
   it('keeps the in-memory choice when local storage is unavailable', () => {
@@ -47,9 +47,9 @@ describe('builder model preference', () => {
       throw new DOMException('Blocked');
     });
 
-    setBuilderModel('@cf/zai-org/glm-4.7-flash', { setItem });
+    setBuilderModel('@cf/zai-org/glm-5.2', { setItem });
 
-    expect(builderModelStore.get()).toBe('@cf/zai-org/glm-4.7-flash');
+    expect(builderModelStore.get()).toBe('@cf/zai-org/glm-5.2');
     expect(setItem).toHaveBeenCalledOnce();
   });
 

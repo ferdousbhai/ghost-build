@@ -113,7 +113,7 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
       if (operation === 'completeToolOperation') {
         completions += 1;
         if (completions === 1) {
-          throw new Error('RPC response lost after durable commit');
+          throw Object.assign(new Error('RPC response lost after durable commit'), { retryable: true });
         }
         return completed;
       }
@@ -137,9 +137,11 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
         : undefined,
     );
 
-    await expect(client.executeToolOnce('call-1', 'exec', { command: 'npm test' }, execute)).rejects.toThrow(
-      'may already have changed the workspace',
-    );
+    await expect(client.executeToolOnce('call-1', 'exec', { command: 'npm test' }, execute)).rejects.toMatchObject({
+      name: 'WorkspaceToolOperationIndeterminateError',
+      code: 'workspace_tool_operation_indeterminate',
+      message: expect.stringContaining('may already have changed the workspace'),
+    });
     expect(execute).not.toHaveBeenCalled();
   });
 
@@ -172,6 +174,53 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     ]);
   });
 
+  it('polls an active replay to its durable completion without executing it again', async () => {
+    vi.useFakeTimers();
+    try {
+      let begins = 0;
+      const execute = vi.fn(async () => ({ duplicated: true }));
+      const { client, stub } = harness((operation) => {
+        if (operation === 'beginToolOperation') {
+          begins += 1;
+          return begins < 3 ? { status: 'active' } : { status: 'completed', result: { ok: true } };
+        }
+        return undefined;
+      });
+
+      const replay = client.executeToolOnce('call-active-replay', 'write', { path: '/project/a.ts' }, execute);
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      await expect(replay).resolves.toEqual({ ok: true });
+      expect(stub.beginToolOperation).toHaveBeenCalledTimes(3);
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds active replay polling and stops with a typed indeterminate outcome', async () => {
+    vi.useFakeTimers();
+    try {
+      const execute = vi.fn(async () => ({ duplicated: true }));
+      const { client, stub } = harness((operation) =>
+        operation === 'beginToolOperation' ? { status: 'active' } : undefined,
+      );
+      const replay = client.executeToolOnce('call-stuck-replay', 'exec', { command: 'touch changed' }, execute);
+      const rejection = expect(replay).rejects.toMatchObject({
+        name: 'WorkspaceToolOperationIndeterminateError',
+        code: 'workspace_tool_operation_indeterminate',
+        message: expect.stringContaining('active workspace tool replay observation'),
+      });
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      await rejection;
+      expect(stub.beginToolOperation.mock.calls.length).toBeGreaterThan(1);
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not start a mutation after cancellation wins while its journal begin is pending', async () => {
     const controller = new AbortController();
     const reason = new DOMException('tool timed out', 'TimeoutError');
@@ -181,6 +230,9 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
         controller.abort(reason);
         return { status: 'execute' };
       }
+      if (operation === 'cancelToolOperation') {
+        return { status: 'settled' };
+      }
       return undefined;
     });
 
@@ -189,9 +241,9 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     ).rejects.toBe(reason);
 
     expect(execute).not.toHaveBeenCalled();
-    expect(stub.failToolOperation).toHaveBeenCalledWith({
+    expect(stub.cancelToolOperation).toHaveBeenCalledWith({
       toolCallId: 'call-timeout',
-      error: 'tool timed out',
+      error: 'The workspace tool operation was cancelled before execution started.',
     });
   });
 
@@ -213,6 +265,116 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     await expect(first).resolves.toEqual({ ok: true });
   });
 
+  it.each(['write', 'edit'] as const)(
+    'waits for a canceled %s execution to settle without allowing a late mutation',
+    async (toolName) => {
+      const controller = new AbortController();
+      const reason = new DOMException(`${toolName} timed out`, 'TimeoutError');
+      const nativeOperation = deferred<void>();
+      const state = { content: 'before' };
+      const { client, stub } = harness((operation) => {
+        if (operation === 'beginToolOperation') {
+          return { status: 'execute' };
+        }
+        if (operation === 'cancelToolOperation') {
+          return { status: 'settled' };
+        }
+        return undefined;
+      });
+
+      const execution = client.executeToolOnce(
+        `call-${toolName}-timeout`,
+        toolName,
+        { path: '/project/a.ts' },
+        async () => {
+          await nativeOperation.promise;
+          controller.signal.throwIfAborted();
+          state.content = 'after';
+          return { ok: true };
+        },
+        controller.signal,
+      );
+      await vi.waitFor(() => expect(stub.beginToolOperation).toHaveBeenCalledOnce());
+      controller.abort(reason);
+      await vi.waitFor(() => expect(stub.cancelToolOperation).toHaveBeenCalledOnce());
+
+      let settled = false;
+      void execution.catch(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      nativeOperation.resolve();
+      await expect(execution).rejects.toBe(reason);
+      expect(state.content).toBe('before');
+      expect(stub.beginToolOperation).toHaveBeenCalledOnce();
+      expect(stub.cancelToolOperation).toHaveBeenCalledWith({
+        toolCallId: `call-${toolName}-timeout`,
+        error: 'The workspace tool operation was cancelled after its execution settled.',
+      });
+
+      await Promise.resolve();
+      expect(state.content).toBe('before');
+    },
+  );
+
+  it('does not treat an actively executing journal row as safely indeterminate', async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const reason = new DOMException('write timed out', 'TimeoutError');
+      const nativeOperation = deferred<void>();
+      const state = { content: 'before' };
+      let cancellations = 0;
+      const { client, stub } = harness((operation) => {
+        if (operation === 'beginToolOperation') {
+          return { status: 'execute' };
+        }
+        if (operation === 'cancelToolOperation') {
+          cancellations += 1;
+          return { status: cancellations === 1 ? 'active' : 'settled' };
+        }
+        return undefined;
+      });
+
+      const execution = client.executeToolOnce(
+        'call-active-timeout',
+        'write',
+        { path: '/project/a.ts' },
+        async () => {
+          await nativeOperation.promise;
+          controller.signal.throwIfAborted();
+          state.content = 'after';
+          return { ok: true };
+        },
+        controller.signal,
+      );
+      await vi.waitFor(() => expect(stub.beginToolOperation).toHaveBeenCalledOnce());
+      controller.abort(reason);
+      nativeOperation.resolve();
+      await vi.waitFor(() => expect(stub.cancelToolOperation).toHaveBeenCalledOnce());
+
+      let settled = false;
+      void execution.catch(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(execution).rejects.toBe(reason);
+      expect(stub.beginToolOperation).toHaveBeenCalledOnce();
+      expect(stub.cancelToolOperation).toHaveBeenCalledTimes(2);
+      expect(stub.cancelToolOperation).toHaveBeenLastCalledWith({
+        toolCallId: 'call-active-timeout',
+        error: 'The workspace tool operation was cancelled after its execution settled.',
+      });
+      expect(state.content).toBe('before');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('waits for command termination and preserves an aborted mutating exec as indeterminate', async () => {
     const controller = new AbortController();
     const reason = new DOMException('exec timed out', 'TimeoutError');
@@ -223,17 +385,22 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
       },
     });
     const cancellation = deferred<void>();
-    let begins = 0;
+    const state = { commandActive: true, content: 'before' };
     const { client, stub } = harness((operation) => {
       if (operation === 'beginToolOperation') {
-        begins += 1;
-        return begins === 1 ? { status: 'execute' } : { status: 'failed', error: 'cancelled' };
+        return { status: 'execute' };
       }
       if (operation === 'executeStream') {
         return stream;
       }
       if (operation === 'cancelExecution') {
-        return cancellation.promise.then(closeStream);
+        return cancellation.promise.then(() => {
+          state.commandActive = false;
+          closeStream();
+        });
+      }
+      if (operation === 'cancelToolOperation') {
+        return { status: 'settled' };
       }
       return undefined;
     });
@@ -265,8 +432,14 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
 
     cancellation.resolve();
     await expect(execution).rejects.toBe(reason);
-    expect(stub.failToolOperation).not.toHaveBeenCalled();
+    expect(state).toEqual({ commandActive: false, content: 'before' });
+    expect(stub.cancelToolOperation).toHaveBeenCalledWith({
+      toolCallId: 'call-exec-timeout',
+      error: 'The workspace tool operation was cancelled after its execution settled.',
+    });
     expect(stub.completeToolOperation).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(state.content).toBe('before');
   });
 
   it('does not report an exec timeout while cancellation confirmation is retrying', async () => {
@@ -282,11 +455,9 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
       });
       const cancellation = deferred<void>();
       let cancellationAttempts = 0;
-      let begins = 0;
       const { client, stub } = harness((operation) => {
         if (operation === 'beginToolOperation') {
-          begins += 1;
-          return begins === 1 ? { status: 'execute' } : { status: 'failed', error: 'cancelled' };
+          return { status: 'execute' };
         }
         if (operation === 'executeStream') {
           return stream;
@@ -294,9 +465,12 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
         if (operation === 'cancelExecution') {
           cancellationAttempts += 1;
           if (cancellationAttempts === 1) {
-            throw new Error('cancellation transport reset');
+            throw Object.assign(new Error('cancellation transport reset'), { retryable: true });
           }
           return cancellation.promise.then(closeStream);
+        }
+        if (operation === 'cancelToolOperation') {
+          return { status: 'settled' };
         }
         return undefined;
       });
@@ -330,6 +504,227 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('surfaces permanent settlement failures as typed indeterminate outcomes', async () => {
+    const settlementFailure = new SyntaxError('invalid cancellation request');
+    const { client, stub } = harness((operation) => {
+      if (operation === 'beginToolOperation') {
+        return { status: 'execute' };
+      }
+      if (operation === 'cancelToolOperation') {
+        throw settlementFailure;
+      }
+      return undefined;
+    });
+
+    await expect(
+      client.executeToolOnce('call-permanent-settlement', 'exec', { command: 'false' }, async () => {
+        throw new Error('command failed');
+      }),
+    ).rejects.toMatchObject({
+      name: 'WorkspaceToolOperationIndeterminateError',
+      code: 'workspace_tool_operation_indeterminate',
+      cause: settlementFailure,
+    });
+    expect(stub.cancelToolOperation).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces permanent command-cancellation RPC failures as typed indeterminate outcomes', async () => {
+    const controller = new AbortController();
+    const cancellationFailure = new SyntaxError('invalid command cancellation');
+    let closeStream!: () => void;
+    const stream = new ReadableStream<Uint8Array>({
+      start(streamController) {
+        closeStream = () => streamController.close();
+      },
+    });
+    const { client, stub } = harness((operation) => {
+      if (operation === 'beginToolOperation') {
+        return { status: 'execute' };
+      }
+      if (operation === 'executeStream') {
+        return stream;
+      }
+      if (operation === 'cancelExecution') {
+        closeStream();
+        throw cancellationFailure;
+      }
+      if (operation === 'cancelToolOperation') {
+        return { status: 'settled' };
+      }
+      return undefined;
+    });
+
+    const execution = client.executeToolOnce(
+      'call-permanent-command-cancellation',
+      'exec',
+      { command: 'touch changed' },
+      () => client.executeCommand({ command: 'touch changed', abortSignal: controller.signal }),
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(stub.executeStream).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(execution).rejects.toMatchObject({
+      name: 'WorkspaceToolOperationIndeterminateError',
+      code: 'workspace_tool_operation_indeterminate',
+      cause: expect.any(AggregateError),
+    });
+    expect(stub.cancelExecution).toHaveBeenCalledOnce();
+  });
+
+  it('awaits every cancellation branch and aggregates their failures', async () => {
+    const controller = new AbortController();
+    const commandFailure = new SyntaxError('command cancellation failed');
+    const journalFailure = new SyntaxError('journal cancellation failed');
+    const journalSettlement = deferred<never>();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        void controller;
+      },
+    });
+    const { client, stub } = harness((operation) => {
+      if (operation === 'beginToolOperation') {
+        return { status: 'execute' };
+      }
+      if (operation === 'executeStream') {
+        return stream;
+      }
+      if (operation === 'cancelExecution') {
+        throw commandFailure;
+      }
+      if (operation === 'cancelToolOperation') {
+        return journalSettlement.promise;
+      }
+      return undefined;
+    });
+
+    const execution = client.executeToolOnce(
+      'call-aggregate-cancellation',
+      'exec',
+      { command: 'touch changed' },
+      () => client.executeCommand({ command: 'touch changed', abortSignal: controller.signal }),
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(stub.executeStream).toHaveBeenCalledOnce());
+    controller.abort();
+
+    let settled = false;
+    void execution.catch(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    journalSettlement.reject(journalFailure);
+    await expect(execution).rejects.toMatchObject({
+      name: 'WorkspaceToolOperationIndeterminateError',
+      code: 'workspace_tool_operation_indeterminate',
+      cause: expect.any(AggregateError),
+    });
+  });
+
+  it('bounds hung cancellation settlement and reports a typed indeterminate outcome', async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const pending = new Promise<never>(() => undefined);
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          void controller;
+        },
+      });
+      const { client, stub } = harness((operation) => {
+        if (operation === 'beginToolOperation') {
+          return { status: 'execute' };
+        }
+        if (operation === 'executeStream') {
+          return stream;
+        }
+        if (operation === 'cancelExecution' || operation === 'cancelToolOperation') {
+          return pending;
+        }
+        return undefined;
+      });
+      const execution = client.executeToolOnce(
+        'call-bounded-cancellation',
+        'exec',
+        { command: 'touch changed' },
+        () => client.executeCommand({ command: 'touch changed', abortSignal: controller.signal }),
+        controller.signal,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      controller.abort();
+      const rejection = expect(execution).rejects.toMatchObject({
+        name: 'WorkspaceToolOperationIndeterminateError',
+        code: 'workspace_tool_operation_indeterminate',
+      });
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      await rejection;
+      expect(stub.cancelExecution.mock.calls.length).toBeGreaterThan(1);
+      expect(stub.cancelToolOperation.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits for canceled dependency installation to terminate before settling', async () => {
+    const controller = new AbortController();
+    const reason = new DOMException('install timed out', 'TimeoutError');
+    const installation = deferred<{ content: string }>();
+    const cancellation = deferred<void>();
+    const { client, stub } = harness((operation) => {
+      if (operation === 'installDependenciesTool') {
+        return installation.promise;
+      }
+      if (operation === 'cancelExecution') {
+        return cancellation.promise;
+      }
+      if (operation === 'cancelToolOperation') {
+        return { status: 'settled' };
+      }
+      if (operation === 'getWorkspaceSnapshot') {
+        return {
+          state: { initialized: true, revision: 1, resetRevision: 0, fileCount: 0, totalBytes: 0, seeding: false },
+          files: [],
+        };
+      }
+      return undefined;
+    });
+
+    const execution = client.installDependencies({
+      toolCallId: 'call-install-timeout',
+      input: {},
+      mode: 'add',
+      packages: ['example'],
+      abortSignal: controller.signal,
+    });
+    await vi.waitFor(() => expect(stub.installDependenciesTool).toHaveBeenCalledOnce());
+    controller.abort(reason);
+    await vi.waitFor(() =>
+      expect(stub.cancelExecution).toHaveBeenCalledWith({ operationKey: 'tool:call-install-timeout' }),
+    );
+    expect(stub.cancelToolOperation).toHaveBeenCalledWith({
+      toolCallId: 'call-install-timeout',
+      error: 'The workspace tool operation was cancelled after its execution settled.',
+    });
+    installation.resolve({ content: 'installed' });
+
+    let settled = false;
+    void execution.catch(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    cancellation.resolve();
+    await expect(execution).rejects.toBe(reason);
+    expect(stub.cancelToolOperation).toHaveBeenCalledWith({
+      toolCallId: 'call-install-timeout',
+      error: 'The workspace tool operation was cancelled after its execution settled.',
+    });
   });
 
   it('cancels the exact active validation and forgets it after the RPC settles', async () => {
@@ -410,22 +805,29 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     await vi.waitFor(() => expect(stub.validateTool).toHaveBeenCalledOnce());
     controller.abort();
 
-    await expect(aborted).rejects.toBe(cancellationFailure);
+    await expect(aborted).rejects.toMatchObject({
+      name: 'WorkspaceToolOperationIndeterminateError',
+      code: 'workspace_tool_operation_indeterminate',
+      cause: cancellationFailure,
+    });
     await expect(client.validate({ toolCallId: 'validation-2', input: {} })).resolves.toEqual({ content: 'validated' });
   });
 
   it('propagates typed stub failures and preserves the original tool error', async () => {
     const failure = new Error('command failed');
-    const { client, stub } = harness((operation) =>
-      operation === 'beginToolOperation' ? { status: 'execute' } : undefined,
-    );
+    const { client, stub } = harness((operation) => {
+      if (operation === 'beginToolOperation') {
+        return { status: 'execute' };
+      }
+      return operation === 'cancelToolOperation' ? { status: 'settled' } : undefined;
+    });
 
     await expect(
       client.executeToolOnce('call-1', 'exec', { command: 'false' }, async () => {
         throw failure;
       }),
     ).rejects.toBe(failure);
-    expect(stub.failToolOperation).toHaveBeenCalledWith({ toolCallId: 'call-1', error: 'command failed' });
+    expect(stub.cancelToolOperation).toHaveBeenCalledWith({ toolCallId: 'call-1', error: 'command failed' });
   });
 
   it('does not mark a command failed when RPC preserved only the pending-sync message marker', async () => {
@@ -459,6 +861,51 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
 
     expect(stub.completeToolOperation).not.toHaveBeenCalled();
     expect(stub.failToolOperation).not.toHaveBeenCalled();
+  });
+
+  it('races stub resolution and identity initialization as part of an abortable read', async () => {
+    const controller = new AbortController();
+    const reason = new DOMException('read timed out', 'TimeoutError');
+    const identity = deferred<void>();
+    const { client, stub } = harness((operation) =>
+      operation === 'initializeProjectIdentity' ? identity.promise : undefined,
+    );
+
+    const result = client.readText('/home/project/a.ts', controller.signal);
+    await vi.waitFor(() => expect(stub.initializeProjectIdentity).toHaveBeenCalledOnce());
+    controller.abort(reason);
+
+    await expect(result).rejects.toBe(reason);
+    expect(stub.readText).not.toHaveBeenCalled();
+    identity.resolve();
+  });
+
+  it('aborts a pending readText RPC without waiting for the read-only remote work', async () => {
+    const controller = new AbortController();
+    const reason = new DOMException('read timed out', 'TimeoutError');
+    const read = deferred<{
+      path: string;
+      content: string;
+      encoding: 'utf8';
+      size: number;
+      sha256: string;
+      revision: number;
+    }>();
+    const { client, stub } = harness((operation) => (operation === 'readText' ? read.promise : undefined));
+
+    const result = client.readText('/home/project/a.ts', controller.signal);
+    await vi.waitFor(() => expect(stub.readText).toHaveBeenCalledOnce());
+    controller.abort(reason);
+
+    await expect(result).rejects.toBe(reason);
+    read.resolve({
+      path: '/home/project/a.ts',
+      content: 'late',
+      encoding: 'utf8',
+      size: 4,
+      sha256: 'a'.repeat(64),
+      revision: 1,
+    });
   });
 
   it('streams command progress while preserving the bounded final result', async () => {
@@ -686,8 +1133,11 @@ function harness(respond: (operation: string, value: unknown) => unknown, userId
     beginToolOperation: method('beginToolOperation'),
     completeToolOperation: method('completeToolOperation'),
     failToolOperation: method('failToolOperation'),
+    cancelToolOperation: method('cancelToolOperation'),
+    installDependenciesTool: method('installDependenciesTool'),
     validateTool: method('validateTool'),
     cancelValidation: method('cancelValidation'),
+    readText: method('readText'),
     readWorkspaceFile: method('readWorkspaceFile'),
     streamWorkspaceFile: method('streamWorkspaceFile'),
     executeStream: method('executeStream'),
@@ -725,8 +1175,10 @@ function workspaceStub(overrides: Record<string, unknown> = {}) {
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((settle) => {
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((settle, fail) => {
     resolve = settle;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }

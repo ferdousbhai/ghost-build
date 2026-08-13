@@ -1,10 +1,11 @@
 import type { GhostbuildToolResult } from 'ghostbuild-agent/tool-result';
 import { computerSyncUnconfirmedError, isComputerSyncUnconfirmedError } from 'ghostbuild-agent/cloudflare-computer';
-import type {
-  BuilderWorkspaceApi,
-  BuilderWorkspaceCheckpoint,
-  BuilderWorkspaceFileMetadata,
-  ProjectWorkspaceRpc,
+import {
+  WorkspaceToolOperationIndeterminateError,
+  type BuilderWorkspaceApi,
+  type BuilderWorkspaceCheckpoint,
+  type BuilderWorkspaceFileMetadata,
+  type ProjectWorkspaceRpc,
 } from '~/agents/builder-workspace-api';
 import type {
   BuilderWorkspaceApplyResult,
@@ -16,13 +17,14 @@ import { isRetryableDurableObjectError } from '~/lib/cloudflare/durable-object-r
 type ProjectWorkspaceStub = DurableObjectStub<ProjectWorkspaceRpc>;
 
 type ToolOperationStartResult =
-  | { status: 'execute' }
+  | { status: 'execute' | 'active' }
   | { status: 'completed'; result: unknown }
   | { status: 'failed' | 'indeterminate'; error: string };
 
 /** Typed in-process facade over the co-deployed ProjectWorkspace Durable Object. */
 export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
   readonly #inFlight = new Map<string, { toolName: string; argsJson: string; promise: Promise<unknown> }>();
+  readonly #executionCancellations = new Map<string, Promise<void>>();
   #state: BuilderWorkspaceState | null = null;
   #files: BuilderWorkspaceFileMetadata[] = [];
   #stubPromise: Promise<ProjectWorkspaceStub> | null = null;
@@ -149,11 +151,20 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
 
   async readText(path: unknown, abortSignal?: AbortSignal) {
     abortSignal?.throwIfAborted();
-    const stub = await this.#stub();
-    abortSignal?.throwIfAborted();
-    const result = await stub.readText(path);
-    abortSignal?.throwIfAborted();
-    return result;
+    try {
+      return await raceAgainstAbort(
+        this.#stub().then((stub) => {
+          abortSignal?.throwIfAborted();
+          return stub.readText(path);
+        }),
+        abortSignal,
+      );
+    } catch (error) {
+      if (abortSignal?.aborted) {
+        this.#stubPromise = null;
+      }
+      throw error;
+    }
   }
 
   readFile(path: unknown) {
@@ -176,8 +187,6 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     abortSignal?: AbortSignal;
   }): Promise<{ exitCode: number; stdout: string; stderr: string; streamTruncated?: boolean }> {
     args.abortSignal?.throwIfAborted();
-    const stub = await this.#stub();
-    args.abortSignal?.throwIfAborted();
     const operationKey = this.#activeTool ? `tool:${this.#activeTool.toolCallId}` : undefined;
     let cancellation: Promise<void> | undefined;
     const cancel = () => {
@@ -189,13 +198,17 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     args.abortSignal?.addEventListener('abort', cancel, { once: true });
     let stream: ReadableStream<Uint8Array>;
     try {
-      stream = await stub.executeStream({
-        command: args.command,
-        cwd: args.cwd,
-        backend: args.backend,
-        ...(operationKey ? { operationKey } : {}),
-      });
-      args.abortSignal?.throwIfAborted();
+      stream = await raceAgainstAbort(
+        this.#stub().then((stub) =>
+          stub.executeStream({
+            command: args.command,
+            cwd: args.cwd,
+            backend: args.backend,
+            ...(operationKey ? { operationKey } : {}),
+          }),
+        ),
+        args.abortSignal,
+      );
     } catch (error) {
       args.abortSignal?.removeEventListener('abort', cancel);
       if (args.abortSignal?.aborted) {
@@ -244,8 +257,7 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     try {
       while (true) {
         args.abortSignal?.throwIfAborted();
-        const { done, value } = await reader.read();
-        args.abortSignal?.throwIfAborted();
+        const { done, value } = await raceAgainstAbort(reader.read(), args.abortSignal);
         if (done) {
           break;
         }
@@ -297,6 +309,9 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
         clearTimeout(updateTimer);
       }
       args.abortSignal?.removeEventListener('abort', cancel);
+      if (args.abortSignal?.aborted) {
+        this.#stubPromise = null;
+      }
       reader.releaseLock();
     }
   }
@@ -338,13 +353,35 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
   }): Promise<GhostbuildToolResult> {
     const { abortSignal, ...input } = args;
     abortSignal?.throwIfAborted();
-    const stub = await this.#stub();
-    abortSignal?.throwIfAborted();
-    const result = await stub.installDependenciesTool(input);
-    // Installation may have committed before cancellation; refresh the local facade before surfacing it.
-    await this.refresh();
-    abortSignal?.throwIfAborted();
-    return result;
+    let cancellation: Promise<void> | undefined;
+    const cancel = () => {
+      cancellation ??= settleCancellationActions('dependency installation cancellation', [
+        this.#cancelExecutionUntilSettled(`tool:${args.toolCallId}`),
+        this.#terminalizeToolOperationAfterExecution(
+          args.toolCallId,
+          'The workspace tool operation was cancelled after its execution settled.',
+        ),
+      ]);
+      void cancellation.catch(() => undefined);
+    };
+    abortSignal?.addEventListener('abort', cancel, { once: true });
+    try {
+      return await raceAgainstAbort(
+        this.#stub().then(async (stub) => {
+          const result = await stub.installDependenciesTool(input);
+          // Installation may have committed before cancellation; refresh before surfacing it.
+          await this.refresh();
+          return result;
+        }),
+        abortSignal,
+      );
+    } finally {
+      abortSignal?.removeEventListener('abort', cancel);
+      if (abortSignal?.aborted) {
+        cancel();
+        await cancellation;
+      }
+    }
   }
 
   async validate(args: {
@@ -364,9 +401,10 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     };
     args.abortSignal?.addEventListener('abort', cancel, { once: true });
     try {
-      const result = await (await this.#stub()).validateTool({ toolCallId: args.toolCallId, input: args.input });
-      args.abortSignal?.throwIfAborted();
-      return result;
+      return await raceAgainstAbort(
+        this.#stub().then((stub) => stub.validateTool({ toolCallId: args.toolCallId, input: args.input })),
+        args.abortSignal,
+      );
     } finally {
       args.abortSignal?.removeEventListener('abort', cancel);
       try {
@@ -393,38 +431,106 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
   }
 
   async #cancelValidation(toolCallId?: string): Promise<void> {
-    await (await this.#stub()).cancelValidation(toolCallId ? { toolCallId } : {});
-  }
-
-  async #cancelExecutionUntilSettled(operationKey: string): Promise<void> {
-    while (true) {
+    const deadline = Date.now() + SETTLEMENT_OVERALL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
       try {
-        await (await this.#stub()).cancelExecution({ operationKey });
+        await this.#settlementRpcAttempt(
+          () => this.#stub().then((stub) => stub.cancelValidation(toolCallId ? { toolCallId } : {})),
+          deadline,
+          'workspace validation cancellation',
+        );
         return;
-      } catch {
-        // A timeout cannot be reported until the runtime confirms terminal settlement.
-        await delay(1_000);
+      } catch (error) {
+        if (!isRetryableSettlementError(error)) {
+          throw indeterminateSettlementError('workspace validation cancellation', error);
+        }
       }
+      if (Date.now() >= deadline) {
+        break;
+      }
+      await delay(Math.min(SETTLEMENT_RETRY_DELAY_MS, deadline - Date.now()));
     }
+    throw indeterminateSettlementError('workspace validation cancellation', new SettlementDeadlineError());
   }
 
-  async #waitForCancelledToolSettlement(toolCallId: string, toolName: string, argsJson: string): Promise<void> {
-    while (true) {
+  #cancelExecutionUntilSettled(operationKey: string): Promise<void> {
+    const existing = this.#executionCancellations.get(operationKey);
+    if (existing) {
+      return existing;
+    }
+    const cancellation = this.#performExecutionCancellation(operationKey).finally(() => {
+      if (this.#executionCancellations.get(operationKey) === cancellation) {
+        this.#executionCancellations.delete(operationKey);
+      }
+    });
+    this.#executionCancellations.set(operationKey, cancellation);
+    return cancellation;
+  }
+
+  async #performExecutionCancellation(operationKey: string): Promise<void> {
+    const deadline = Date.now() + SETTLEMENT_OVERALL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
       try {
-        const status = (await (
-          await this.#stub()
-        ).beginToolOperation({
-          toolCallId,
-          toolName,
-          argsJson,
-        })) as ToolOperationStartResult;
-        if (status.status === 'completed' || status.status === 'failed') {
+        await this.#settlementRpcAttempt(
+          () => this.#stub().then((stub) => stub.cancelExecution({ operationKey })),
+          deadline,
+          'workspace command cancellation',
+        );
+        return;
+      } catch (error) {
+        if (!isRetryableSettlementError(error)) {
+          throw indeterminateSettlementError('workspace command cancellation', error);
+        }
+      }
+      if (Date.now() >= deadline) {
+        break;
+      }
+      await delay(Math.min(SETTLEMENT_RETRY_DELAY_MS, deadline - Date.now()));
+    }
+    throw indeterminateSettlementError('workspace command cancellation', new SettlementDeadlineError());
+  }
+
+  async #terminalizeToolOperationAfterExecution(toolCallId: string, error: string): Promise<void> {
+    const deadline = Date.now() + SETTLEMENT_OVERALL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      try {
+        const result = await this.#settlementRpcAttempt(
+          () => this.#stub().then((stub) => stub.cancelToolOperation({ toolCallId, error })),
+          deadline,
+          'workspace tool settlement',
+        );
+        if (result.status === 'settled') {
           return;
         }
-      } catch {
-        // Retry transport failures; ambiguity must not be exposed as a settled timeout.
+      } catch (settlementError) {
+        if (!isRetryableSettlementError(settlementError)) {
+          throw indeterminateSettlementError('workspace tool settlement', settlementError);
+        }
       }
-      await delay(1_000);
+      if (Date.now() >= deadline) {
+        break;
+      }
+      await delay(Math.min(SETTLEMENT_RETRY_DELAY_MS, deadline - Date.now()));
+    }
+    throw indeterminateSettlementError('workspace tool settlement', new SettlementDeadlineError());
+  }
+
+  async #settlementRpcAttempt<T>(operation: () => Promise<T>, deadline: number, description: string): Promise<T> {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new SettlementDeadlineError();
+    }
+    try {
+      return await raceAgainstTimeout(
+        operation(),
+        Math.min(SETTLEMENT_RPC_ATTEMPT_TIMEOUT_MS, remaining),
+        () => new SettlementAttemptTimeoutError(description),
+      );
+    } catch (error) {
+      if (error instanceof SettlementAttemptTimeoutError) {
+        this.#stubPromise = null;
+      }
+      throw error;
     }
   }
 
@@ -464,9 +570,26 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     abortSignal?: AbortSignal,
   ) {
     abortSignal?.throwIfAborted();
-    const stub = await this.#stub();
-    abortSignal?.throwIfAborted();
-    const started = (await stub.beginToolOperation({ toolCallId, toolName, argsJson })) as ToolOperationStartResult;
+    let stub: ProjectWorkspaceStub;
+    let started: ToolOperationStartResult;
+    try {
+      stub = await raceAgainstAbort(this.#stub(), abortSignal);
+      started = await raceAgainstAbort(
+        stub.beginToolOperation({ toolCallId, toolName, argsJson }) as Promise<ToolOperationStartResult>,
+        abortSignal,
+      );
+    } catch (error) {
+      if (abortSignal?.aborted) {
+        await this.#terminalizeToolOperationAfterExecution(
+          toolCallId,
+          'The workspace tool operation was cancelled before execution started.',
+        );
+      }
+      throw error;
+    }
+    if (started.status === 'active') {
+      started = await this.#pollActiveToolReplay(toolCallId, toolName, argsJson);
+    }
     if (started.status === 'completed') {
       if (isPendingMutationReceipt(started.result)) {
         abortSignal?.throwIfAborted();
@@ -476,14 +599,37 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       }
       return started.result as T;
     }
-    if (started.status === 'failed' || started.status === 'indeterminate') {
+    if (started.status === 'failed') {
       throw new Error(started.error);
+    }
+    if (started.status === 'indeterminate') {
+      throw new WorkspaceToolOperationIndeterminateError(started.error);
     }
     if (this.#activeTool) {
       throw new Error('ProjectWorkspace tools are serialized; a second mutation cannot start concurrently.');
     }
     this.#activeTool = { toolCallId, toolName };
     let executionStarted = false;
+    let cancellation: Promise<void> | undefined;
+    const cancel = () => {
+      const terminalize = () =>
+        this.#terminalizeToolOperationAfterExecution(
+          toolCallId,
+          'The workspace tool operation was cancelled after its execution settled.',
+        );
+      cancellation ??=
+        toolName === 'exec'
+          ? settleCancellationActions('workspace command and journal cancellation', [
+              this.#cancelExecutionUntilSettled(`tool:${toolCallId}`),
+              terminalize(),
+            ])
+          : terminalize();
+      void cancellation.catch(() => undefined);
+    };
+    abortSignal?.addEventListener('abort', cancel, { once: true });
+    if (abortSignal?.aborted) {
+      cancel();
+    }
     try {
       abortSignal?.throwIfAborted();
       executionStarted = true;
@@ -495,7 +641,7 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       }
       try {
         abortSignal?.throwIfAborted();
-        const completed = await stub.completeToolOperation({ toolCallId, result });
+        const completed = await raceAgainstAbort(stub.completeToolOperation({ toolCallId, result }), abortSignal);
         abortSignal?.throwIfAborted();
         const committedFileMutation =
           (toolName === 'write' || toolName === 'edit') &&
@@ -505,6 +651,9 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       } catch (error) {
         abortSignal?.throwIfAborted();
         if (toolName !== 'write' && toolName !== 'edit') {
+          throw error;
+        }
+        if (!isRetryableDurableObjectError(error)) {
           throw error;
         }
         const replay = (await stub.beginToolOperation({ toolCallId, toolName, argsJson })) as ToolOperationStartResult;
@@ -517,21 +666,56 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
         return (isComputerToolError(result) && isCompletedMutationReceipt(completed) ? completed : result) as T;
       }
     } catch (error) {
-      const cancelledDuringExecution = executionStarted && abortSignal?.aborted === true;
-      if (cancelledDuringExecution) {
-        await this.#waitForCancelledToolSettlement(toolCallId, toolName, argsJson);
+      if (abortSignal?.aborted) {
+        cancel();
+        await cancellation;
       } else if (!isComputerSyncUnconfirmedError(error)) {
-        await stub
-          .failToolOperation({
-            toolCallId,
-            error: error instanceof Error ? error.message : String(error),
-          })
-          .catch(() => undefined);
+        const message = error instanceof Error ? error.message : String(error);
+        if (executionStarted) {
+          await this.#terminalizeToolOperationAfterExecution(toolCallId, message);
+        } else {
+          await stub.failToolOperation({ toolCallId, error: message }).catch(() => undefined);
+        }
       }
       throw error;
     } finally {
+      abortSignal?.removeEventListener('abort', cancel);
       this.#activeTool = null;
     }
+  }
+
+  async #pollActiveToolReplay(
+    toolCallId: string,
+    toolName: string,
+    argsJson: string,
+  ): Promise<Exclude<ToolOperationStartResult, { status: 'active' }>> {
+    const deadline = Date.now() + ACTIVE_REPLAY_OVERALL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await delay(Math.min(ACTIVE_REPLAY_RETRY_DELAY_MS, deadline - Date.now()));
+      try {
+        const replay = await this.#settlementRpcAttempt(
+          () =>
+            this.#stub().then(
+              (stub) =>
+                stub.beginToolOperation({ toolCallId, toolName, argsJson }) as Promise<ToolOperationStartResult>,
+            ),
+          deadline,
+          'active workspace tool replay observation',
+        );
+        if (replay.status === 'active') {
+          continue;
+        }
+        if (replay.status === 'execute') {
+          throw new Error('An active workspace tool replay unexpectedly lost its durable journal row.');
+        }
+        return replay;
+      } catch (error) {
+        if (!isRetryableSettlementError(error)) {
+          throw indeterminateSettlementError('active workspace tool replay observation', error);
+        }
+      }
+    }
+    throw indeterminateSettlementError('active workspace tool replay observation', new SettlementDeadlineError());
   }
 
   #setState(value: BuilderWorkspaceState): BuilderWorkspaceState {
@@ -602,6 +786,25 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
 }
 
 const COMMAND_UPDATE_TAIL_CHARACTERS = 64 * 1024;
+const ACTIVE_REPLAY_RETRY_DELAY_MS = 1_000;
+const ACTIVE_REPLAY_OVERALL_TIMEOUT_MS = 30_000;
+const SETTLEMENT_RPC_ATTEMPT_TIMEOUT_MS = 5_000;
+const SETTLEMENT_OVERALL_TIMEOUT_MS = 30_000;
+const SETTLEMENT_RETRY_DELAY_MS = 1_000;
+
+class SettlementAttemptTimeoutError extends Error {
+  readonly retryable = true;
+
+  constructor(operation: string) {
+    super(`${operation} RPC attempt timed out.`);
+  }
+}
+
+class SettlementDeadlineError extends Error {
+  constructor() {
+    super('The settlement deadline elapsed.');
+  }
+}
 
 type CommandOutputEvent = { type: 'output'; channel: 'stdout' | 'stderr'; chunk: string };
 type CommandResultEvent = {
@@ -698,6 +901,47 @@ function errorMessage(error: unknown): string {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function raceAgainstAbort<T>(promise: Promise<T>, abortSignal?: AbortSignal): Promise<T> {
+  if (!abortSignal) {
+    return promise;
+  }
+  abortSignal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(abortSignal.reason);
+    abortSignal.addEventListener('abort', abort, { once: true });
+    void promise.then(resolve, reject).finally(() => abortSignal.removeEventListener('abort', abort));
+  });
+}
+
+function raceAgainstTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutError: () => Error): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(timeoutError()), Math.max(0, timeoutMs));
+    void promise.then(resolve, reject).finally(() => clearTimeout(timeout));
+  });
+}
+
+async function settleCancellationActions(operation: string, actions: Promise<unknown>[]): Promise<void> {
+  const results = await Promise.allSettled(actions);
+  const failures = results.flatMap((result) => (result.status === 'rejected' ? [result.reason] : []));
+  if (failures.length > 0) {
+    throw indeterminateSettlementError(
+      operation,
+      new AggregateError(failures, `Unable to confirm every action required for ${operation}.`),
+    );
+  }
+}
+
+function isRetryableSettlementError(error: unknown): boolean {
+  return error instanceof SettlementAttemptTimeoutError || isRetryableDurableObjectError(error);
+}
+
+function indeterminateSettlementError(operation: string, cause: unknown): WorkspaceToolOperationIndeterminateError {
+  return new WorkspaceToolOperationIndeterminateError(
+    `Unable to confirm ${operation}; the workspace operation outcome is indeterminate.`,
+    { cause },
+  );
 }
 
 function stableValue(value: unknown): unknown {

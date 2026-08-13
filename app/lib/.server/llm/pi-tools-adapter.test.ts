@@ -12,6 +12,7 @@ vi.mock('./workers-ai-tools', () => ({
   MODEL_TOOL_NAMES: ['read', 'write', 'edit', 'exec'],
 }));
 
+import { BUILDER_TURN_TIMEOUTS, BuilderTurnBudgetExceededError } from './builder-turn-budget';
 import { createPiToolBundle, piToolsToList } from './pi-tools-adapter';
 
 describe('Pi tool adapter', () => {
@@ -42,6 +43,76 @@ describe('Pi tool adapter', () => {
       { path: '/home/project/src/app.ts', content: 'export {};' },
       { toolCallId: 'write-1', abortSignal: expect.any(AbortSignal), onUpdate: undefined },
     );
+  });
+
+  it.each([
+    ['read', { path: '/home/project/src/app.ts' }],
+    ['write', { path: '/home/project/src/app.ts', content: 'export {};' }],
+    [
+      'edit',
+      {
+        path: '/home/project/src/app.ts',
+        base: 'A'.repeat(24),
+        edits: [{ startLine: 1, endLine: 1, content: 'changed' }],
+      },
+    ],
+    ['exec', { command: 'pnpm test' }],
+  ] as const)('enforces the %s deadline with the typed builder timeout error', async (name, input) => {
+    vi.useFakeTimers();
+    try {
+      let executionSignal: AbortSignal | undefined;
+      mocks.execute.mockImplementationOnce(
+        async (_input, options) =>
+          new Promise((_resolve, reject) => {
+            executionSignal = options.abortSignal;
+            executionSignal?.addEventListener('abort', () => reject(executionSignal?.reason), { once: true });
+          }),
+      );
+      const tools = createPiToolBundle({} as never, operationContext());
+      let rejection: unknown;
+      const execution = tools[name].execute(`${name}-timeout`, input).catch((error) => {
+        rejection = error;
+      });
+      const timeoutMs = BUILDER_TURN_TIMEOUTS.tools[name];
+
+      await vi.advanceTimersByTimeAsync(timeoutMs - 1);
+      expect(rejection).toBeUndefined();
+      expect(executionSignal?.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await execution;
+      expect(rejection).toBeInstanceOf(BuilderTurnBudgetExceededError);
+      expect(rejection).toMatchObject({ reason: 'tool_timeout' });
+      expect(executionSignal?.reason).toBe(rejection);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('preserves an indeterminate settlement failure discovered after the tool timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const indeterminate = Object.assign(new Error('workspace outcome is indeterminate'), {
+        code: 'workspace_tool_operation_indeterminate',
+      });
+      mocks.execute.mockImplementationOnce(
+        async (_input, options) =>
+          new Promise((_resolve, reject) => {
+            options.abortSignal?.addEventListener('abort', () => reject(indeterminate), { once: true });
+          }),
+      );
+      const tools = createPiToolBundle({} as never, operationContext());
+      const execution = tools.write.execute('write-indeterminate', {
+        path: '/home/project/src/app.ts',
+        content: 'changed',
+      });
+      const rejection = expect(execution).rejects.toBe(indeterminate);
+
+      await vi.advanceTimersByTimeAsync(BUILDER_TURN_TIMEOUTS.tools.write);
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('forwards canonical progress through Pi partial tool results', async () => {

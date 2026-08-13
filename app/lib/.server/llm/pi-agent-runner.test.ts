@@ -320,6 +320,125 @@ describe('piAgentRunner', () => {
     await collectChunks(await createAgentStream('@cf/zai-org/glm-5.2', {}, steering));
   });
 
+  it('stops before another model turn after a typed tool timeout', async () => {
+    const timeoutPayload = JSON.stringify({
+      code: 'builder_turn_budget_exhausted',
+      error: 'This build reached its safe execution limit before it finished. Send a follow-up to continue.',
+      reason: 'tool_timeout',
+      retryable: true,
+    });
+    mocks.piRun.mockImplementation(
+      async (
+        _context: unknown,
+        config: { shouldStopAfterTurn: () => boolean },
+        emit: (event: unknown) => Promise<void>,
+      ) => {
+        await emit({
+          type: 'tool_execution_end',
+          toolCallId: 'write-timeout',
+          toolName: 'write',
+          result: { content: [{ type: 'text', text: timeoutPayload }], details: {} },
+          isError: true,
+        });
+        expect(config.shouldStopAfterTurn()).toBe(true);
+        await emit({
+          type: 'turn_end',
+          message: assistantMessage([{ type: 'toolCall', id: 'write-timeout', name: 'write', arguments: {} }]),
+          toolResults: [],
+        });
+      },
+    );
+
+    const chunks = await collectChunks(await createAgentStream());
+
+    expect(chunks).toContainEqual({ type: 'error', errorText: timeoutPayload });
+  });
+
+  it('stops before another model turn after an indeterminate tool settlement', async () => {
+    const payload = JSON.stringify({
+      code: 'workspace_tool_operation_indeterminate',
+      error: 'Unable to confirm workspace tool settlement; the workspace operation outcome is indeterminate.',
+      retryable: false,
+    });
+    mocks.piRun.mockImplementation(
+      async (
+        _context: unknown,
+        config: { shouldStopAfterTurn: () => boolean },
+        emit: (event: unknown) => Promise<void>,
+      ) => {
+        await emit({
+          type: 'tool_execution_end',
+          toolCallId: 'write-indeterminate',
+          toolName: 'write',
+          result: { content: [{ type: 'text', text: payload }], details: {} },
+          isError: true,
+        });
+        expect(config.shouldStopAfterTurn()).toBe(true);
+        await emit({
+          type: 'turn_end',
+          message: assistantMessage([{ type: 'toolCall', id: 'write-indeterminate', name: 'write', arguments: {} }]),
+          toolResults: [],
+        });
+      },
+    );
+
+    const chunks = await collectChunks(await createAgentStream());
+
+    expect(chunks).toContainEqual({ type: 'error', errorText: payload });
+  });
+
+  it.each([
+    ['budget result first', ['budget', 'indeterminate']],
+    ['indeterminate result first', ['indeterminate', 'budget']],
+  ] as const)('prioritizes an indeterminate error in a combined parallel batch with the %s', async (_label, order) => {
+    const budgetPayload = JSON.stringify({
+      code: 'builder_turn_budget_exhausted',
+      error: 'This build reached its safe execution limit before it finished. Send a follow-up to continue.',
+      reason: 'tool_timeout',
+      retryable: true,
+    });
+    const indeterminatePayload = JSON.stringify({
+      code: 'workspace_tool_operation_indeterminate',
+      error: 'Unable to confirm workspace tool settlement; the workspace operation outcome is indeterminate.',
+      retryable: false,
+    });
+    const results = {
+      budget: { toolCallId: 'write-timeout', payload: budgetPayload },
+      indeterminate: { toolCallId: 'edit-indeterminate', payload: indeterminatePayload },
+    } as const;
+    mocks.piRun.mockImplementation(
+      async (
+        _context: unknown,
+        config: { shouldStopAfterTurn: () => boolean },
+        emit: (event: unknown) => Promise<void>,
+      ) => {
+        for (const result of order) {
+          await emit({
+            type: 'tool_execution_end',
+            toolCallId: results[result].toolCallId,
+            toolName: result === 'budget' ? 'write' : 'edit',
+            result: { content: [{ type: 'text', text: results[result].payload }], details: {} },
+            isError: true,
+          });
+        }
+        expect(config.shouldStopAfterTurn()).toBe(true);
+        await emit({
+          type: 'turn_end',
+          message: assistantMessage([
+            { type: 'toolCall', id: 'write-timeout', name: 'write', arguments: {} },
+            { type: 'toolCall', id: 'edit-indeterminate', name: 'edit', arguments: {} },
+          ]),
+          toolResults: [],
+        });
+      },
+    );
+
+    const chunks = await collectChunks(await createAgentStream());
+
+    expect(chunks).toContainEqual({ type: 'error', errorText: indeterminatePayload });
+    expect(chunks).not.toContainEqual({ type: 'error', errorText: budgetPayload });
+  });
+
   it('detects validated completion from a primitive mutation result', async () => {
     mocks.getValidatedBuildCompletion.mockImplementation(
       (_messages: unknown, results: Array<{ result?: { validation?: unknown } }> = []) =>

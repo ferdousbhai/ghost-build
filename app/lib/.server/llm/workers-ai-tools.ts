@@ -16,7 +16,7 @@ import {
 import { MODEL_TOOL_INPUT_SCHEMAS, MODEL_TOOL_NAMES, type ModelToolName } from 'ghostbuild-agent/model-tool-inputs';
 import { parseNpmInstallCommand } from 'ghostbuild-agent/tools/npmInstall';
 import { isGhostbuildToolResult, toolFailure } from 'ghostbuild-agent/tool-result';
-import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
+import { isWorkspaceToolOperationIndeterminateError, type BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 import type { Tool } from 'ghostbuild-agent/tool';
 import { type BuilderSkillReader, isBuilderSkillPath } from './builder-skills';
@@ -268,6 +268,9 @@ function computerWorkspaceTool(
           }
           options.abortSignal?.throwIfAborted();
         } catch (error) {
+          if (isWorkspaceToolOperationIndeterminateError(error)) {
+            throw error;
+          }
           options.abortSignal?.throwIfAborted();
           const syncResult = computerSyncUnconfirmedToolResult(error);
           result =
@@ -306,6 +309,9 @@ async function validateWorkspace(
       abortSignal,
     });
   } catch (error) {
+    if (isWorkspaceToolOperationIndeterminateError(error)) {
+      throw error;
+    }
     abortSignal?.throwIfAborted();
     return toolFailure(error instanceof Error ? error.message : String(error));
   } finally {

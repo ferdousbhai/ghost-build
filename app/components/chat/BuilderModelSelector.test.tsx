@@ -47,7 +47,7 @@ describe('BuilderModelSelector', () => {
     const menu = document.querySelector('[role="menu"]');
     expect(menu?.textContent).toContain('Cloudflare hosted');
     expect(menu?.textContent).toContain('Third-party via Cloudflare');
-    expect(document.querySelectorAll('[role="menuitemradio"]')).toHaveLength(6);
+    expect(document.querySelectorAll('[role="menuitemradio"]')).toHaveLength(2);
     const deepSeek = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
       item.textContent?.includes('DeepSeek V4 Pro'),
     );

@@ -14,8 +14,13 @@ import { toolResultSucceeded } from 'ghostbuild-agent/tool-result';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { logger } from 'ghostbuild-agent/utils/logger';
 import type { WorkersAiModelId } from '~/lib/workers-ai-model';
-import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
+import {
+  WORKSPACE_TOOL_OPERATION_INDETERMINATE_CODE,
+  WorkspaceToolOperationIndeterminateError,
+  type BuilderWorkspaceApi,
+} from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
+import { BUILDER_TURN_BUDGET_ERROR_CODE, BuilderTurnBudgetExceededError } from './builder-turn-budget';
 import { compactPiContext, estimatePiContextTokens, type ContextCompaction } from './context-compaction';
 import {
   ContextCompactionUnavailableError,
@@ -154,6 +159,8 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   let currentTurnStreamedContent = false;
   let runtimeContextCompacted = false;
   let runtimeCompactionError: ContextCompactionUnavailableError | undefined;
+  let toolBudgetError: BuilderTurnBudgetExceededError | undefined;
+  let toolIndeterminateError: WorkspaceToolOperationIndeterminateError | undefined;
 
   const { readable, writable } = new TransformStream<UIMessageChunk, UIMessageChunk>();
   const writer = writable.getWriter();
@@ -255,6 +262,8 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
 
     if (event.type === 'tool_execution_end') {
       const result = piToolResultDetails(event.result);
+      toolBudgetError ??= event.isError ? toolBudgetErrorFromResult(event.result) : undefined;
+      toolIndeterminateError ??= event.isError ? toolIndeterminateErrorFromResult(event.result) : undefined;
       currentRunToolResults.push({ toolName: event.toolName, result });
       if (event.isError && !hasStructuredToolResult(event.result)) {
         await writer.write({
@@ -344,6 +353,8 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         },
         shouldStopAfterTurn: () =>
           runtimeCompactionError !== undefined ||
+          toolBudgetError !== undefined ||
+          toolIndeterminateError !== undefined ||
           (currentValidatedBuildCompletion !== undefined && !steering.hasPending()),
         afterToolCall: async ({ result, isError }) =>
           !isError && !toolResultSucceeded(result.details) ? { isError: true } : undefined,
@@ -381,6 +392,12 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       if (runtimeCompactionError) {
         throw runtimeCompactionError;
       }
+      if (toolIndeterminateError) {
+        throw toolIndeterminateError;
+      }
+      if (toolBudgetError) {
+        throw toolBudgetError;
+      }
       if (finalAssistant?.stopReason === 'error') {
         throw new Error(finalAssistant.errorMessage || 'The model request failed.');
       }
@@ -404,7 +421,13 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     } catch (error) {
       recordPiStage('loop_error', modelId);
       logProviderFailure(logger, 'Pi agent runner failed.', error);
-      if (error instanceof ContextCompactionUnavailableError && !abortSignal?.aborted) {
+      if (
+        (error instanceof BuilderTurnBudgetExceededError ||
+          error instanceof WorkspaceToolOperationIndeterminateError) &&
+        !abortSignal?.aborted
+      ) {
+        await writer.write({ type: 'error', errorText: error.message });
+      } else if (error instanceof ContextCompactionUnavailableError && !abortSignal?.aborted) {
         await writer.write({ type: 'error', errorText: error.message });
       } else if (isWorkersAiFreeAllocationError(error)) {
         await writer.write({ type: 'error', errorText: workersPaidRequiredMessage() });
@@ -485,6 +508,38 @@ function piToolResultError(result: unknown): string {
   }
   const details = piToolResultDetails(result);
   return isRecord(details) && typeof details.summary === 'string' ? details.summary : 'Tool execution failed.';
+}
+
+function toolBudgetErrorFromResult(result: unknown): BuilderTurnBudgetExceededError | undefined {
+  const payload = toolErrorPayload(result);
+  return payload?.code === BUILDER_TURN_BUDGET_ERROR_CODE && payload.reason === 'tool_timeout'
+    ? new BuilderTurnBudgetExceededError('tool_timeout')
+    : undefined;
+}
+
+function toolIndeterminateErrorFromResult(result: unknown): WorkspaceToolOperationIndeterminateError | undefined {
+  const payload = toolErrorPayload(result);
+  return payload?.code === WORKSPACE_TOOL_OPERATION_INDETERMINATE_CODE && typeof payload.error === 'string'
+    ? new WorkspaceToolOperationIndeterminateError(payload.error)
+    : undefined;
+}
+
+function toolErrorPayload(result: unknown): { code?: unknown; error?: unknown; reason?: unknown } | undefined {
+  if (!isRecord(result) || !Array.isArray(result.content)) {
+    return undefined;
+  }
+  const text = result.content.find(
+    (block): block is { type: 'text'; text: string } =>
+      isRecord(block) && block.type === 'text' && typeof block.text === 'string',
+  )?.text;
+  if (!text) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(text) as { code?: unknown; error?: unknown; reason?: unknown };
+  } catch {
+    return undefined;
+  }
 }
 
 function assistantMessageValue(message: AssistantMessage | undefined): AssistantMessage | undefined {

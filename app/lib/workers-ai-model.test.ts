@@ -27,8 +27,17 @@ describe('Workers AI model catalog', () => {
     }
   });
 
-  it('rejects arbitrary or retired model IDs', () => {
-    expect(isWorkersAiModelId('@cf/example/arbitrary')).toBe(false);
+  it('exposes only GLM 5.2 and paid DeepSeek', () => {
+    expect(WORKERS_AI_MODELS.map(({ id }) => id)).toEqual(['@cf/zai-org/glm-5.2', 'deepseek/deepseek-v4-pro']);
+    for (const retired of [
+      '@cf/moonshotai/kimi-k2.7-code',
+      '@cf/openai/gpt-oss-120b',
+      '@cf/google/gemma-4-26b-a4b-it',
+      '@cf/zai-org/glm-4.7-flash',
+      '@cf/example/arbitrary',
+    ]) {
+      expect(isWorkersAiModelId(retired)).toBe(false);
+    }
     expect(isWorkersAiModelId(undefined)).toBe(false);
   });
 });

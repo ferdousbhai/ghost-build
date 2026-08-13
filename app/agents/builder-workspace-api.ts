@@ -24,17 +24,45 @@ export type BuilderWorkspaceCheckpoint = {
   revision: string;
 };
 
+export const WORKSPACE_TOOL_OPERATION_INDETERMINATE_CODE = 'workspace_tool_operation_indeterminate';
+
+export function isWorkspaceToolOperationIndeterminateError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === WORKSPACE_TOOL_OPERATION_INDETERMINATE_CODE
+  );
+}
+
+export class WorkspaceToolOperationIndeterminateError extends Error {
+  readonly code = WORKSPACE_TOOL_OPERATION_INDETERMINATE_CODE;
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(
+      JSON.stringify({
+        code: WORKSPACE_TOOL_OPERATION_INDETERMINATE_CODE,
+        error: message,
+        retryable: false,
+      }),
+      options,
+    );
+    this.name = 'WorkspaceToolOperationIndeterminateError';
+  }
+}
+
 export interface ProjectWorkspaceRpc extends Rpc.DurableObjectBranded {
   initializeProjectIdentity(value: { projectId: string; userId: string }): void | Promise<void>;
   beginToolOperation(
     value: unknown,
   ): Promise<
-    | { status: 'execute' }
+    | { status: 'execute' | 'active' }
     | { status: 'completed'; result: unknown }
     | { status: 'failed' | 'indeterminate'; error: string }
   >;
   completeToolOperation(value: unknown): unknown | Promise<unknown>;
   failToolOperation(value: unknown): void | Promise<void>;
+  cancelToolOperation(value: unknown): Promise<{ status: 'active' | 'settled' }>;
   getWorkspaceState(): Promise<BuilderWorkspaceState>;
   getWorkspaceSnapshot(): Promise<{ state: BuilderWorkspaceState; files: BuilderWorkspaceFileMetadata[] }>;
   beginSeed(seedId: unknown): Promise<BuilderWorkspaceSeedStartResult>;

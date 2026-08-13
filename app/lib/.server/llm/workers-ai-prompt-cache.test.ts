@@ -12,6 +12,6 @@ describe('Workers AI prompt-cache identity', () => {
     expect(await createWorkersAiSessionAffinity({ ...identity, generation: 4 }, '@cf/zai-org/glm-5.2')).not.toBe(
       affinity,
     );
-    expect(await createWorkersAiSessionAffinity(identity, '@cf/openai/gpt-oss-120b')).not.toBe(affinity);
+    expect(await createWorkersAiSessionAffinity(identity, 'deepseek/deepseek-v4-pro')).not.toBe(affinity);
   });
 });

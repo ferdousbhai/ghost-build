@@ -21,15 +21,148 @@ describe('ToolOperationJournal', () => {
     });
   });
 
-  it('fails closed instead of repeating an operation interrupted after its durable start', () => {
-    const journal = new ToolOperationJournal(new TestStorage() as never);
+  it.each(['write', 'edit', 'exec'])(
+    'fails closed instead of repeating an interrupted %s operation from real journal state',
+    (toolName) => {
+      const journal = new ToolOperationJournal(new TestStorage() as never);
+      const input = { ...invocation(), toolName };
+      journal.initialize();
+
+      expect(journal.begin(input)).toEqual({ status: 'execute' });
+      expect(journal.begin(input)).toEqual({
+        status: 'indeterminate',
+        error: 'The workspace tool operation was interrupted after it started and will not be repeated automatically.',
+      });
+    },
+  );
+
+  it.each(['write', 'edit', 'exec'])(
+    'durably cancels a settled %s and rejects a delayed side-effect entry',
+    (toolName) => {
+      const journal = new ToolOperationJournal(new TestStorage() as never);
+      const input = { ...invocation(), toolName };
+      journal.initialize();
+
+      expect(journal.begin(input)).toEqual({ status: 'execute' });
+      expect(
+        journal.cancel({ toolCallId: input.toolCallId, error: `${toolName} cancelled`, active: false, now: 2 }),
+      ).toEqual({ status: 'settled' });
+      expect(journal.begin(input)).toEqual({ status: 'failed', error: `${toolName} cancelled` });
+      expect(() => journal.assertRunning(input.toolCallId)).toThrow(`${toolName} cancelled`);
+    },
+  );
+
+  it('persists cancellation before operation start and rejects the delayed side effect', () => {
+    const storage = new TestStorage();
+    const journal = new ToolOperationJournal(storage as never);
     journal.initialize();
 
-    expect(journal.begin(invocation())).toEqual({ status: 'execute' });
-    expect(journal.begin(invocation())).toEqual({
-      status: 'indeterminate',
-      error: 'The workspace tool operation was interrupted after it started and will not be repeated automatically.',
+    expect(journal.cancel({ toolCallId: 'call-1', error: 'cancelled before begin', active: false, now: 1 })).toEqual({
+      status: 'settled',
     });
+    expect(journal.begin(invocation())).toEqual({ status: 'failed', error: 'cancelled before begin' });
+  });
+
+  it('persists active cancellation and rejects delayed mutation and commit boundaries after restart', () => {
+    const storage = new TestStorage();
+    const journal = new ToolOperationJournal(storage as never);
+    journal.initialize();
+    expect(journal.begin(invocation())).toEqual({ status: 'execute' });
+
+    expect(journal.cancel({ toolCallId: 'call-1', error: 'cancelled', active: true, now: 2 })).toEqual({
+      status: 'active',
+    });
+
+    const restarted = new ToolOperationJournal(storage as never);
+    expect(() => restarted.assertRunning('call-1')).toThrow('cancelled');
+    expect(() => restarted.complete({ toolCallId: 'call-1', result: { mutated: true }, now: 3 })).toThrow('cancelled');
+    expect(restarted.begin(invocation())).toEqual({ status: 'indeterminate', error: 'cancelled' });
+    restarted.registerPending({ backend: 'container-shell', toolCallId: 'call-1', result: { exitCode: 0 } });
+    expect(restarted.pending()).toEqual([
+      { backend: 'container-shell', toolCallId: 'call-1', result: { exitCode: 0 } },
+    ]);
+    expect(restarted.completePending('container-shell')).toBe(true);
+    expect(restarted.begin(invocation())).toEqual({ status: 'completed', result: { exitCode: 0 } });
+    expect(restarted.cancel({ toolCallId: 'call-1', error: 'replacement', active: false, now: 4 })).toEqual({
+      status: 'settled',
+    });
+    expect(restarted.begin(invocation())).toEqual({ status: 'completed', result: { exitCode: 0 } });
+  });
+
+  it('keeps a completed mutation authoritative when cancellation arrives after commit', () => {
+    const journal = new ToolOperationJournal(new TestStorage() as never);
+    journal.initialize();
+    journal.begin(invocation());
+    const result = { committed: true };
+
+    journal.complete({ toolCallId: 'call-1', result, now: 2 });
+    expect(journal.cancel({ toolCallId: 'call-1', error: 'cancelled', active: false, now: 3 })).toEqual({
+      status: 'settled',
+    });
+    expect(journal.begin(invocation())).toEqual({ status: 'completed', result });
+  });
+
+  it('terminalizes an active cancellation once observation confirms no mutation completed', () => {
+    const journal = new ToolOperationJournal(new TestStorage() as never);
+    journal.initialize();
+    journal.begin(invocation());
+
+    journal.cancel({ toolCallId: 'call-1', error: 'cancelled', active: true, now: 2 });
+    expect(journal.begin(invocation())).toEqual({ status: 'indeterminate', error: 'cancelled' });
+
+    expect(journal.cancel({ toolCallId: 'call-1', error: 'replacement', active: false, now: 3 })).toEqual({
+      status: 'settled',
+    });
+    expect(journal.begin(invocation())).toEqual({ status: 'failed', error: 'cancelled' });
+  });
+
+  it('retains only a bounded number of cancellation tombstones', () => {
+    const storage = new TestStorage();
+    const journal = new ToolOperationJournal(storage as never);
+    journal.initialize();
+
+    for (let index = 0; index <= 500; index += 1) {
+      journal.cancel({ toolCallId: `cancel-${index}`, error: 'cancelled', active: false, now: index });
+    }
+
+    expect(storage.cancellations.size).toBe(500);
+    expect(storage.cancellations.has('cancel-0')).toBe(false);
+    expect(storage.cancellations.has('cancel-500')).toBe(true);
+  });
+
+  it('bounds ordinary completed operation rows without requiring another begin', () => {
+    const storage = new TestStorage();
+    const journal = new ToolOperationJournal(storage as never);
+    journal.initialize();
+
+    for (let index = 0; index <= 500; index += 1) {
+      const toolCallId = `completed-${index}`;
+      journal.begin({ toolCallId, toolName: 'exec', argsSha256: `sha-${index}`, now: index });
+      journal.complete({ toolCallId, result: { index }, now: index });
+    }
+
+    expect(storage.rows.size).toBe(500);
+    expect(storage.rows.has('completed-0')).toBe(false);
+    expect(storage.rows.has('completed-500')).toBe(true);
+  });
+
+  it('bounds failed rows created when delayed begins consume cancellation tombstones', () => {
+    const storage = new TestStorage();
+    const journal = new ToolOperationJournal(storage as never);
+    journal.initialize();
+
+    for (let index = 0; index <= 500; index += 1) {
+      const toolCallId = `cancelled-begin-${index}`;
+      journal.cancel({ toolCallId, error: 'cancelled', active: false, now: index });
+      expect(journal.begin({ toolCallId, toolName: 'write', argsSha256: `sha-${index}`, now: index })).toEqual({
+        status: 'failed',
+        error: 'cancelled',
+      });
+    }
+
+    expect(storage.rows.size).toBe(500);
+    expect(storage.rows.has('cancelled-begin-0')).toBe(false);
+    expect(storage.rows.has('cancelled-begin-500')).toBe(true);
   });
 
   it('bounds retained indeterminate operations without making them replayable', () => {
@@ -239,12 +372,17 @@ type Row = {
 
 class TestStorage {
   readonly rows = new Map<string, Row>();
+  readonly cancellations = new Map<string, { error: string; cancelledAt: number }>();
   readonly sql = {
     exec: <T>(query: string, ...bindings: unknown[]): T[] => {
       const normalized = query.replace(/\s+/g, ' ').trim();
       if (normalized.startsWith('SELECT tool_name')) {
         const row = this.rows.get(String(bindings[0]));
         return (row ? [row] : []) as T[];
+      }
+      if (normalized.startsWith('SELECT error FROM ghostbuild_tool_cancellations')) {
+        const cancellation = this.cancellations.get(String(bindings[0]));
+        return (cancellation ? [{ error: cancellation.error }] : []) as T[];
       }
       if (normalized.startsWith('SELECT COUNT(*)')) {
         return [{ count: [...this.rows.values()].filter((row) => row.status === 'running').length }] as T[];
@@ -254,15 +392,55 @@ class TestStorage {
           .filter(([, row]) => row.status === 'running' && row.result_json !== null)
           .map(([tool_call_id, row]) => ({ tool_call_id, result_json: row.result_json })) as T[];
       }
-      if (normalized.startsWith('INSERT INTO ghostbuild_tool_operations')) {
+      if (normalized.startsWith('INSERT INTO ghostbuild_tool_cancellations')) {
+        if (!this.cancellations.has(String(bindings[0]))) {
+          this.cancellations.set(String(bindings[0]), {
+            error: String(bindings[1]),
+            cancelledAt: Number(bindings[2]),
+          });
+        }
+      } else if (normalized.startsWith('INSERT INTO ghostbuild_tool_operations')) {
+        const failed = normalized.includes("'failed'");
         this.rows.set(String(bindings[0]), {
           tool_name: String(bindings[1]),
           args_sha256: String(bindings[2]),
-          status: 'running',
+          status: failed ? 'failed' : 'running',
           result_json: null,
-          error: null,
-          updated_at: Number(bindings[4]),
+          error: failed ? String(bindings[3]) : null,
+          updated_at: Number(bindings[failed ? 5 : 4]),
         });
+      } else if (normalized.startsWith('DELETE FROM ghostbuild_tool_cancellations')) {
+        if (normalized.includes('SELECT tool_call_id')) {
+          const keep = Number(bindings[0]);
+          const retained = [...this.cancellations]
+            .sort(
+              ([leftId, left], [rightId, right]) =>
+                right.cancelledAt - left.cancelledAt || rightId.localeCompare(leftId),
+            )
+            .slice(0, keep)
+            .map(([toolCallId]) => toolCallId);
+          for (const toolCallId of this.cancellations.keys()) {
+            if (!retained.includes(toolCallId)) {
+              this.cancellations.delete(toolCallId);
+            }
+          }
+        } else {
+          this.cancellations.delete(String(bindings[0]));
+        }
+      } else if (normalized.startsWith('DELETE FROM ghostbuild_tool_operations')) {
+        const keep = Number(bindings[0]);
+        const retained = [...this.rows]
+          .filter(([, row]) => row.status !== 'running')
+          .sort(
+            ([leftId, left], [rightId, right]) => right.updated_at - left.updated_at || rightId.localeCompare(leftId),
+          )
+          .slice(0, keep)
+          .map(([toolCallId]) => toolCallId);
+        for (const [toolCallId, row] of this.rows) {
+          if (row.status !== 'running' && !retained.includes(toolCallId)) {
+            this.rows.delete(toolCallId);
+          }
+        }
       } else if (normalized.includes("SET status = 'completed'")) {
         const row = this.rows.get(String(bindings[2]))!;
         this.rows.set(String(bindings[2]), {
@@ -273,14 +451,25 @@ class TestStorage {
           updated_at: Number(bindings[1]),
         });
       } else if (normalized.includes("SET status = 'failed'")) {
-        const row = this.rows.get(String(bindings[2]))!;
-        this.rows.set(String(bindings[2]), {
+        const preservesError = normalized.includes('result_json = NULL, updated_at = ?');
+        const key = String(bindings[preservesError ? 1 : 2]);
+        const row = this.rows.get(key)!;
+        this.rows.set(key, {
           ...row,
           status: 'failed',
           result_json: null,
-          error: String(bindings[0]),
-          updated_at: Number(bindings[1]),
+          error: preservesError ? row.error : String(bindings[0]),
+          updated_at: Number(bindings[preservesError ? 0 : 1]),
         });
+      } else if (normalized.includes('SET error = ?')) {
+        const row = this.rows.get(String(bindings[2]))!;
+        if (row.status === 'running' && row.error === null) {
+          this.rows.set(String(bindings[2]), {
+            ...row,
+            error: String(bindings[0]),
+            updated_at: Number(bindings[1]),
+          });
+        }
       } else if (normalized.includes('SET result_json = ?')) {
         const row = this.rows.get(String(bindings[2]))!;
         this.rows.set(String(bindings[2]), {
@@ -295,12 +484,17 @@ class TestStorage {
 
   transactionSync<T>(closure: () => T): T {
     const snapshot = new Map(this.rows);
+    const cancellationSnapshot = new Map(this.cancellations);
     try {
       return closure();
     } catch (error) {
       this.rows.clear();
       for (const [key, row] of snapshot) {
         this.rows.set(key, row);
+      }
+      this.cancellations.clear();
+      for (const [key, value] of cancellationSnapshot) {
+        this.cancellations.set(key, value);
       }
       throw error;
     }
