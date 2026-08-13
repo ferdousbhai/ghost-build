@@ -198,6 +198,46 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     }
   });
 
+  it('cancels command and journal settlement when an active replay is aborted', async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const reason = new DOMException('exec timed out', 'TimeoutError');
+      const execute = vi.fn(async () => ({ duplicated: true }));
+      const { client, stub } = harness((operation) => {
+        if (operation === 'beginToolOperation') {
+          return { status: 'active' };
+        }
+        if (operation === 'cancelExecution') {
+          return undefined;
+        }
+        if (operation === 'cancelToolOperation') {
+          return { status: 'settled' };
+        }
+        return undefined;
+      });
+      const replay = client.executeToolOnce(
+        'call-aborted-active-replay',
+        'exec',
+        { command: 'touch changed' },
+        execute,
+        controller.signal,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      controller.abort(reason);
+
+      await expect(replay).rejects.toBe(reason);
+      expect(stub.cancelExecution).toHaveBeenCalledWith({ operationKey: 'tool:call-aborted-active-replay' });
+      expect(stub.cancelToolOperation).toHaveBeenCalledWith({
+        toolCallId: 'call-aborted-active-replay',
+        error: 'The active workspace tool replay was cancelled.',
+      });
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('bounds active replay polling and stops with a typed indeterminate outcome', async () => {
     vi.useFakeTimers();
     try {

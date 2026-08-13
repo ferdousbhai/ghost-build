@@ -1476,38 +1476,36 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           const stagedLockfilePath = `${stagingRoot}/pnpm-lock.yaml`;
           const current = decodeUtf8((await readWorkspaceFile(workspace, packagePath)).bytes);
           const next = mode === 'sync-lockfile' ? current : addRequestedDependencies(current, packages);
-          await this.mkdir(stagingRoot, { recursive: true });
-          assertMutationAllowed();
-          await this.writeFile(stagedPackagePath, next, { encoding: 'utf8' });
-          assertMutationAllowed();
-          const installationCommand = [
-            'set -eu',
-            `if [ -f ${shellQuote(lockfilePath)} ]; then cp ${shellQuote(lockfilePath)} ${shellQuote(stagedLockfilePath)}; fi`,
-            'pnpm install --lockfile-only --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
-          ].join('\n');
-          const installation = runCommand(workspace, installationCommand, {
-            id: operationKey,
-            cwd: stagingRoot,
-            backend: 'container-shell',
-            timeoutMs: INSTALL_TIMEOUT_MS,
-            beforeExec: assertMutationAllowed,
-            onHandle: (kill) => {
-              this.#activeCommandKills.set(operationKey, kill);
-              if (this.#pendingCommandCancellations.delete(operationKey)) {
-                void kill().catch(() => undefined);
-              }
-            },
-          });
           try {
-            requireCommandSuccess(await installation);
-          } finally {
-            this.#activeCommandKills.delete(operationKey);
-            this.#pendingCommandCancellations.delete(operationKey);
-          }
+            await this.mkdir(stagingRoot, { recursive: true });
+            assertMutationAllowed();
+            await this.writeFile(stagedPackagePath, next, { encoding: 'utf8' });
+            assertMutationAllowed();
+            const installationCommand = [
+              'set -eu',
+              `if [ -f ${shellQuote(lockfilePath)} ]; then cp ${shellQuote(lockfilePath)} ${shellQuote(stagedLockfilePath)}; fi`,
+              'pnpm install --lockfile-only --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/',
+            ].join('\n');
+            const installation = runCommand(workspace, installationCommand, {
+              id: operationKey,
+              cwd: stagingRoot,
+              backend: 'container-shell',
+              timeoutMs: INSTALL_TIMEOUT_MS,
+              beforeExec: assertMutationAllowed,
+              onHandle: (kill) => {
+                this.#activeCommandKills.set(operationKey, kill);
+                if (this.#pendingCommandCancellations.delete(operationKey)) {
+                  void kill().catch(() => undefined);
+                }
+              },
+            });
+            try {
+              requireCommandSuccess(await installation);
+            } finally {
+              this.#activeCommandKills.delete(operationKey);
+              this.#pendingCommandCancellations.delete(operationKey);
+            }
 
-          let packageBytes: Uint8Array;
-          let lockfileBytes: Uint8Array;
-          try {
             const [stagedPackage, stagedLockfile] = await Promise.all([
               this.readFile(stagedPackagePath, { encoding: 'none' }),
               this.readFile(stagedLockfilePath, { encoding: 'none' }),
@@ -1515,45 +1513,45 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             if (stagedPackage.size > MAX_FILE_BYTES || stagedLockfile.size > MAX_FILE_BYTES) {
               throw new Error('The generated package manifest or lockfile exceeds the workspace file limit.');
             }
-            [packageBytes, lockfileBytes] = await Promise.all([
+            const [packageBytes, lockfileBytes] = await Promise.all([
               readStream(stagedPackage.content, stagedPackage.size),
               readStream(stagedLockfile.content, stagedLockfile.size),
             ]);
+            const existingFiles = await readProjectFiles(workspace);
+            const replacedPaths = new Set([packagePath, lockfilePath]);
+            const retainedFiles = existingFiles.filter((file) => !replacedPaths.has(file.path));
+            if (
+              retainedFiles.length + 2 > MAX_FILES ||
+              totalFileBytes(retainedFiles) + packageBytes.byteLength + lockfileBytes.byteLength > MAX_TOTAL_BYTES
+            ) {
+              throw new Error('The project workspace exceeds its size limit.');
+            }
+            assertMutationAllowed();
+            applyAtomicWorkspaceChanges(
+              this.#workspace,
+              [
+                { kind: 'write', path: packagePath, bytes: packageBytes },
+                { kind: 'write', path: lockfilePath, bytes: lockfileBytes },
+              ],
+              assertMutationAllowed,
+            );
+            const result = toolSuccess(
+              mode === 'sync-lockfile'
+                ? 'Synchronized the durable project lockfile with package.json.'
+                : `Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'} in the durable project.`,
+              {
+                mode,
+                workspaceRevision: this.currentRevision(),
+                buildEnvironment: 'cloudflare-computer-container',
+                durationMs: Date.now() - startedAt,
+              },
+            );
+            // Publish and journal completion are contiguous synchronous boundaries, so a known commit wins cancellation.
+            this.#toolOperations.complete({ toolCallId, result });
+            return result;
           } finally {
             await this.runTransientCommand('/', `rm -rf ${shellQuote(stagingRoot)}`, 30_000).catch(() => undefined);
           }
-          const existingFiles = await readProjectFiles(workspace);
-          const replacedPaths = new Set([packagePath, lockfilePath]);
-          const retainedFiles = existingFiles.filter((file) => !replacedPaths.has(file.path));
-          if (
-            retainedFiles.length + 2 > MAX_FILES ||
-            totalFileBytes(retainedFiles) + packageBytes.byteLength + lockfileBytes.byteLength > MAX_TOTAL_BYTES
-          ) {
-            throw new Error('The project workspace exceeds its size limit.');
-          }
-          assertMutationAllowed();
-          applyAtomicWorkspaceChanges(
-            this.#workspace,
-            [
-              { kind: 'write', path: packagePath, bytes: packageBytes },
-              { kind: 'write', path: lockfilePath, bytes: lockfileBytes },
-            ],
-            assertMutationAllowed,
-          );
-          const result = toolSuccess(
-            mode === 'sync-lockfile'
-              ? 'Synchronized the durable project lockfile with package.json.'
-              : `Installed ${packages.length} dependency package${packages.length === 1 ? '' : 's'} in the durable project.`,
-            {
-              mode,
-              workspaceRevision: this.currentRevision(),
-              buildEnvironment: 'cloudflare-computer-container',
-              durationMs: Date.now() - startedAt,
-            },
-          );
-          // Publish and journal completion are contiguous synchronous boundaries, so a known commit wins cancellation.
-          this.#toolOperations.complete({ toolCallId, result });
-          return result;
         });
       });
       this.#activeCommandSettlements.set(operationKey, settlement);

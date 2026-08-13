@@ -588,13 +588,25 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       throw error;
     }
     if (started.status === 'active') {
-      started = await this.#pollActiveToolReplay(toolCallId, toolName, argsJson);
+      try {
+        started = await this.#pollActiveToolReplay(toolCallId, toolName, argsJson, abortSignal);
+      } catch (error) {
+        if (abortSignal?.aborted) {
+          await this.#cancelStartedToolOperation(
+            toolCallId,
+            toolName,
+            'The active workspace tool replay was cancelled.',
+          );
+        }
+        throw error;
+      }
     }
     if (started.status === 'completed') {
       if (isPendingMutationReceipt(started.result)) {
-        abortSignal?.throwIfAborted();
-        const completed = (await stub.completeToolOperation({ toolCallId, result: started.result })) as T;
-        abortSignal?.throwIfAborted();
+        const completed = await raceAgainstAbort(
+          stub.completeToolOperation({ toolCallId, result: started.result }) as Promise<T>,
+          abortSignal,
+        );
         return completed;
       }
       return started.result as T;
@@ -612,18 +624,11 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     let executionStarted = false;
     let cancellation: Promise<void> | undefined;
     const cancel = () => {
-      const terminalize = () =>
-        this.#terminalizeToolOperationAfterExecution(
-          toolCallId,
-          'The workspace tool operation was cancelled after its execution settled.',
-        );
-      cancellation ??=
-        toolName === 'exec'
-          ? settleCancellationActions('workspace command and journal cancellation', [
-              this.#cancelExecutionUntilSettled(`tool:${toolCallId}`),
-              terminalize(),
-            ])
-          : terminalize();
+      cancellation ??= this.#cancelStartedToolOperation(
+        toolCallId,
+        toolName,
+        'The workspace tool operation was cancelled after its execution settled.',
+      );
       void cancellation.catch(() => undefined);
     };
     abortSignal?.addEventListener('abort', cancel, { once: true });
@@ -656,12 +661,15 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
         if (!isRetryableDurableObjectError(error)) {
           throw error;
         }
-        const replay = (await stub.beginToolOperation({ toolCallId, toolName, argsJson })) as ToolOperationStartResult;
+        const replay = await raceAgainstAbort(
+          stub.beginToolOperation({ toolCallId, toolName, argsJson }) as Promise<ToolOperationStartResult>,
+          abortSignal,
+        );
         if (replay.status !== 'completed') {
           throw error;
         }
         const completed = isPendingMutationReceipt(replay.result)
-          ? await stub.completeToolOperation({ toolCallId, result })
+          ? await raceAgainstAbort(stub.completeToolOperation({ toolCallId, result }), abortSignal)
           : replay.result;
         return (isComputerToolError(result) && isCompletedMutationReceipt(completed) ? completed : result) as T;
       }
@@ -684,23 +692,37 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     }
   }
 
+  #cancelStartedToolOperation(toolCallId: string, toolName: string, error: string): Promise<void> {
+    const terminalize = this.#terminalizeToolOperationAfterExecution(toolCallId, error);
+    return toolName === 'exec'
+      ? settleCancellationActions('workspace command and journal cancellation', [
+          this.#cancelExecutionUntilSettled(`tool:${toolCallId}`),
+          terminalize,
+        ])
+      : terminalize;
+  }
+
   async #pollActiveToolReplay(
     toolCallId: string,
     toolName: string,
     argsJson: string,
+    abortSignal?: AbortSignal,
   ): Promise<Exclude<ToolOperationStartResult, { status: 'active' }>> {
     const deadline = Date.now() + ACTIVE_REPLAY_OVERALL_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      await delay(Math.min(ACTIVE_REPLAY_RETRY_DELAY_MS, deadline - Date.now()));
+      await raceAgainstAbort(delay(Math.min(ACTIVE_REPLAY_RETRY_DELAY_MS, deadline - Date.now())), abortSignal);
       try {
-        const replay = await this.#settlementRpcAttempt(
-          () =>
-            this.#stub().then(
-              (stub) =>
-                stub.beginToolOperation({ toolCallId, toolName, argsJson }) as Promise<ToolOperationStartResult>,
-            ),
-          deadline,
-          'active workspace tool replay observation',
+        const replay = await raceAgainstAbort(
+          this.#settlementRpcAttempt(
+            () =>
+              this.#stub().then(
+                (stub) =>
+                  stub.beginToolOperation({ toolCallId, toolName, argsJson }) as Promise<ToolOperationStartResult>,
+              ),
+            deadline,
+            'active workspace tool replay observation',
+          ),
+          abortSignal,
         );
         if (replay.status === 'active') {
           continue;
