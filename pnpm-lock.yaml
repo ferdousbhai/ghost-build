@@ -119,11 +119,11 @@ importers:
         specifier: ^1.3.2
         version: 1.3.2(react@19.2.8)
       '@summonghost/pi-tool-adapter':
-        specifier: github:ferdousbhai/ghosts#0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78&path:/packages/pi-tool-adapter
-        version: https://codeload.github.com/ferdousbhai/ghosts/tar.gz/0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78#path:/packages/pi-tool-adapter
+        specifier: github:ferdousbhai/ghosts#105a2140b475634f18284c42e22c8848a61f1915&path:/packages/pi-tool-adapter
+        version: https://codeload.github.com/ferdousbhai/ghosts/tar.gz/105a2140b475634f18284c42e22c8848a61f1915#path:/packages/pi-tool-adapter
       '@summonghost/title-generation':
-        specifier: github:ferdousbhai/ghosts#0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78&path:/packages/title-generation
-        version: https://codeload.github.com/ferdousbhai/ghosts/tar.gz/0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78#path:/packages/title-generation
+        specifier: github:ferdousbhai/ghosts#105a2140b475634f18284c42e22c8848a61f1915&path:/packages/title-generation
+        version: https://codeload.github.com/ferdousbhai/ghosts/tar.gz/105a2140b475634f18284c42e22c8848a61f1915#path:/packages/title-generation
       '@tanstack/browser-db-sqlite-persistence':
         specifier: 0.2.9
         version: 0.2.9(@journeyapps/wa-sqlite@1.7.2)(typescript@6.0.3)
@@ -324,8 +324,8 @@ importers:
         specifier: 0.1.1
         version: 0.1.1(patch_hash=6c624d9140352e368f5ecbdb093e18018aa30e0a62ee54755ea5d404b3ef7c55)(ai@7.0.48(zod@4.4.3))(zod@4.4.3)
       '@summonghost/line-edit':
-        specifier: github:ferdousbhai/ghosts#0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78&path:/packages/line-edit
-        version: https://codeload.github.com/ferdousbhai/ghosts/tar.gz/0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78#path:/packages/line-edit
+        specifier: github:ferdousbhai/ghosts#105a2140b475634f18284c42e22c8848a61f1915&path:/packages/line-edit
+        version: https://codeload.github.com/ferdousbhai/ghosts/tar.gz/105a2140b475634f18284c42e22c8848a61f1915#path:/packages/line-edit
       ai:
         specifier: 7.0.48
         version: 7.0.48(zod@4.4.3)
@@ -2473,16 +2473,16 @@ packages:
     peerDependencies:
       eslint: '>=8.40.0'
 
-  '@summonghost/line-edit@https://codeload.github.com/ferdousbhai/ghosts/tar.gz/0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78#path:/packages/line-edit':
-    resolution: {gitHosted: true, integrity: sha512-rn3ty18cKqxKn7QDQLFlqA5u7Mk5zA4tvwZXohm10A7HQY2qM+ElmZuFIZ+fKTbCILlI9Svi7kVBmFmbcQFpxA==, path: /packages/line-edit, tarball: https://codeload.github.com/ferdousbhai/ghosts/tar.gz/0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78}
+  '@summonghost/line-edit@https://codeload.github.com/ferdousbhai/ghosts/tar.gz/105a2140b475634f18284c42e22c8848a61f1915#path:/packages/line-edit':
+    resolution: {gitHosted: true, integrity: sha512-53nSVWaDCeoKY3/DmC5ydrxJnMavsOUcbZk08TGcURHDikoMe2QTt15KFrsxMpNaUofkeyrp6hCqugdqVsqgFQ==, path: /packages/line-edit, tarball: https://codeload.github.com/ferdousbhai/ghosts/tar.gz/105a2140b475634f18284c42e22c8848a61f1915}
     version: 0.1.0
 
-  '@summonghost/pi-tool-adapter@https://codeload.github.com/ferdousbhai/ghosts/tar.gz/0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78#path:/packages/pi-tool-adapter':
-    resolution: {gitHosted: true, integrity: sha512-rn3ty18cKqxKn7QDQLFlqA5u7Mk5zA4tvwZXohm10A7HQY2qM+ElmZuFIZ+fKTbCILlI9Svi7kVBmFmbcQFpxA==, path: /packages/pi-tool-adapter, tarball: https://codeload.github.com/ferdousbhai/ghosts/tar.gz/0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78}
+  '@summonghost/pi-tool-adapter@https://codeload.github.com/ferdousbhai/ghosts/tar.gz/105a2140b475634f18284c42e22c8848a61f1915#path:/packages/pi-tool-adapter':
+    resolution: {gitHosted: true, integrity: sha512-53nSVWaDCeoKY3/DmC5ydrxJnMavsOUcbZk08TGcURHDikoMe2QTt15KFrsxMpNaUofkeyrp6hCqugdqVsqgFQ==, path: /packages/pi-tool-adapter, tarball: https://codeload.github.com/ferdousbhai/ghosts/tar.gz/105a2140b475634f18284c42e22c8848a61f1915}
     version: 0.1.0
 
-  '@summonghost/title-generation@https://codeload.github.com/ferdousbhai/ghosts/tar.gz/0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78#path:/packages/title-generation':
-    resolution: {gitHosted: true, integrity: sha512-rn3ty18cKqxKn7QDQLFlqA5u7Mk5zA4tvwZXohm10A7HQY2qM+ElmZuFIZ+fKTbCILlI9Svi7kVBmFmbcQFpxA==, path: /packages/title-generation, tarball: https://codeload.github.com/ferdousbhai/ghosts/tar.gz/0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78}
+  '@summonghost/title-generation@https://codeload.github.com/ferdousbhai/ghosts/tar.gz/105a2140b475634f18284c42e22c8848a61f1915#path:/packages/title-generation':
+    resolution: {gitHosted: true, integrity: sha512-53nSVWaDCeoKY3/DmC5ydrxJnMavsOUcbZk08TGcURHDikoMe2QTt15KFrsxMpNaUofkeyrp6hCqugdqVsqgFQ==, path: /packages/title-generation, tarball: https://codeload.github.com/ferdousbhai/ghosts/tar.gz/105a2140b475634f18284c42e22c8848a61f1915}
     version: 0.2.0
 
   '@tanstack/browser-db-sqlite-persistence@0.2.9':
@@ -8609,11 +8609,11 @@ snapshots:
       - supports-color
       - typescript
 
-  '@summonghost/line-edit@https://codeload.github.com/ferdousbhai/ghosts/tar.gz/0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78#path:/packages/line-edit': {}
+  '@summonghost/line-edit@https://codeload.github.com/ferdousbhai/ghosts/tar.gz/105a2140b475634f18284c42e22c8848a61f1915#path:/packages/line-edit': {}
 
-  '@summonghost/pi-tool-adapter@https://codeload.github.com/ferdousbhai/ghosts/tar.gz/0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78#path:/packages/pi-tool-adapter': {}
+  '@summonghost/pi-tool-adapter@https://codeload.github.com/ferdousbhai/ghosts/tar.gz/105a2140b475634f18284c42e22c8848a61f1915#path:/packages/pi-tool-adapter': {}
 
-  '@summonghost/title-generation@https://codeload.github.com/ferdousbhai/ghosts/tar.gz/0367c96dd87ef7bd6ead90b1a96cfe2a49c9fe78#path:/packages/title-generation': {}
+  '@summonghost/title-generation@https://codeload.github.com/ferdousbhai/ghosts/tar.gz/105a2140b475634f18284c42e22c8848a61f1915#path:/packages/title-generation': {}
 
   '@tanstack/browser-db-sqlite-persistence@0.2.9(@journeyapps/wa-sqlite@1.7.2)(typescript@6.0.3)':
     dependencies:
