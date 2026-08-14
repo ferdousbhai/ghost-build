@@ -184,6 +184,15 @@ type PlannedOperation = {
 
 function planOperation(operation: LineEditOperation, operationIndex: number, totalLines: number): PlannedOperation {
   if ('afterLine' in operation) {
+    if (!Number.isSafeInteger(operation.afterLine) || operation.afterLine < 0) {
+      throw new Error(`edits[${operationIndex}].afterLine must be a non-negative integer.`);
+    }
+    if (typeof operation.content !== 'string') {
+      throw new Error(`edits[${operationIndex}].content must be a string.`);
+    }
+    if (operation.content.length === 0) {
+      throw new Error(`edits[${operationIndex}] does not delete or insert content.`);
+    }
     if (operation.afterLine > totalLines) {
       throw new Error(
         `edits[${operationIndex}].afterLine ${operation.afterLine} is beyond insertion line ${totalLines + 1}.`,
@@ -196,6 +205,11 @@ function planOperation(operation: LineEditOperation, operationIndex: number, tot
       afterLine: operation.afterLine,
       contentLines: splitLogicalText(operation.content).lines,
     };
+  }
+  assertPositiveInteger(operation.startLine, `edits[${operationIndex}].startLine`);
+  assertPositiveInteger(operation.endLine, `edits[${operationIndex}].endLine`);
+  if (typeof operation.content !== 'string') {
+    throw new Error(`edits[${operationIndex}].content must be a string.`);
   }
   if (operation.endLine < operation.startLine) {
     throw new Error(`edits[${operationIndex}].endLine must be greater than or equal to startLine.`);
