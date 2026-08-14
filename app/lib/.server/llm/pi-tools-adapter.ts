@@ -1,5 +1,5 @@
-import type { AgentTool } from '@earendil-works/pi-agent-core';
-import { adaptPiTool, type ToolDefinition, type ToolInputSchema } from '@summonghost/pi-tool-adapter';
+import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
+import { z, type ZodType } from 'zod';
 import { MODEL_TOOL_NAMES, type ModelToolName } from 'ghostbuild-agent/model-tool-inputs';
 import type { Tool } from 'ghostbuild-agent/tool';
 import { isWorkspaceToolOperationIndeterminateError, type BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
@@ -38,20 +38,83 @@ export function piToolsToList(tools: Record<string, AgentTool>): AgentTool[] {
 }
 
 function adaptTool(name: ModelToolName, definition: Tool, label: string): AgentTool {
-  const canonical = definition as unknown as ToolDefinition;
-  if (!canonical.inputSchema) {
+  if (!definition.inputSchema) {
     throw new Error(`${name} does not define an input schema.`);
   }
-
-  return adaptPiTool({
+  const inputSchema = definition.inputSchema as ZodType;
+  return {
     name,
     label,
-    definition: {
-      ...canonical,
-      inputSchema: canonical.inputSchema as ToolInputSchema,
+    description: definition.description ?? name,
+    parameters: z.toJSONSchema(inputSchema, {
+      io: 'input',
+      target: 'draft-07',
+      unrepresentable: 'throw',
+    }) as AgentTool['parameters'],
+    execute: async (toolCallId, rawInput, signal, onUpdate) => {
+      signal?.throwIfAborted();
+      const parsed = await inputSchema.safeParseAsync(rawInput);
+      if (!parsed.success) {
+        throw new Error(`Invalid tool input for "${name}": ${parsed.error.message}`, { cause: parsed.error });
+      }
+      signal?.throwIfAborted();
+      if (!definition.execute) {
+        throw new Error(`${name} is not executable.`);
+      }
+
+      const timeoutController = new AbortController();
+      const timeout = setTimeout(
+        () => timeoutController.abort(new BuilderTurnBudgetExceededError('tool_timeout')),
+        BUILDER_TURN_TIMEOUTS.tools[name],
+      );
+      const executionSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal;
+      let updatesOpen = true;
+      try {
+        const result = await definition.execute(parsed.data, {
+          toolCallId,
+          abortSignal: executionSignal,
+          onUpdate: onUpdate
+            ? (partialResult) => {
+                if (updatesOpen) {
+                  executionSignal.throwIfAborted();
+                  onUpdate(toPiToolResult(partialResult));
+                }
+              }
+            : undefined,
+        });
+        executionSignal.throwIfAborted();
+        return toPiToolResult(result);
+      } catch (error) {
+        if (executionSignal.aborted && !isWorkspaceToolOperationIndeterminateError(error)) {
+          executionSignal.throwIfAborted();
+        }
+        throw error;
+      } finally {
+        updatesOpen = false;
+        clearTimeout(timeout);
+      }
     },
-    timeoutMs: BUILDER_TURN_TIMEOUTS.tools[name],
-    createTimeoutError: () => new BuilderTurnBudgetExceededError('tool_timeout'),
-    preferCaughtErrorOverAbort: isWorkspaceToolOperationIndeterminateError,
-  }) as AgentTool;
+  } as AgentTool;
+}
+
+function toPiToolResult(result: unknown): AgentToolResult<unknown> {
+  return {
+    content: [{ type: 'text', text: stringifyToolResult(result) }],
+    details: result,
+  };
+}
+
+function stringifyToolResult(result: unknown): string {
+  if (typeof result === 'string') {
+    return result;
+  }
+  try {
+    return JSON.stringify(result) ?? String(result);
+  } catch {
+    try {
+      return String(result);
+    } catch {
+      return '[Unserializable tool result]';
+    }
+  }
 }

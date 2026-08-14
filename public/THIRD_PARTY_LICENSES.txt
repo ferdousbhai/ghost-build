@@ -7,8 +7,8 @@ A package whose package-level evidence is <not published> remains exact-version 
 This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-08-09
-Production packages: 707
-Inventory SHA-256: 0f0fddff2fc1a339dcb6663e51b5d78afd608f4f86bc6fa397aa3fe8dd487fdf
+Production packages: 704
+Inventory SHA-256: 40505241757032bfc554c85550dd4dc61e47c20dcb04d99f5ec06613bfcc2fb5
 
 PACKAGE INVENTORY
 =================
@@ -1944,33 +1944,6 @@ Homepage: https://standardschema.dev
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 653b779005a3a4d64a7288c940f7b9a0e8f0b1e0375f6aa6af9473caf131e564)
-
-@summonghost/line-edit@0.1.0
-Declared license: MIT
-Author: <not published>
-Repository: {"type":"git","url":"git+https://github.com/ferdousbhai/ghosts.git","directory":"packages/line-edit"}
-Homepage: <not published>
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 b9755a0ac159878e569e3a5a32b75ef62776971cea849f29547306c3d72ff419)
-
-@summonghost/pi-tool-adapter@0.1.0
-Declared license: MIT
-Author: <not published>
-Repository: {"type":"git","url":"git+https://github.com/ferdousbhai/ghosts.git","directory":"packages/pi-tool-adapter"}
-Homepage: <not published>
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 b9755a0ac159878e569e3a5a32b75ef62776971cea849f29547306c3d72ff419)
-
-@summonghost/title-generation@0.2.0
-Declared license: MIT
-Author: <not published>
-Repository: {"type":"git","url":"git+https://github.com/ferdousbhai/ghosts.git","directory":"packages/title-generation"}
-Homepage: <not published>
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 b9755a0ac159878e569e3a5a32b75ef62776971cea849f29547306c3d72ff419)
 
 @tanstack/browser-db-sqlite-persistence@0.2.9
 Declared license: MIT
@@ -20074,36 +20047,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
------ END VERBATIM CONTENT -----
-
-SHA-256 b9755a0ac159878e569e3a5a32b75ef62776971cea849f29547306c3d72ff419
-Used by:
-- @summonghost/line-edit@0.1.0:LICENSE
-- @summonghost/pi-tool-adapter@0.1.0:LICENSE
-- @summonghost/title-generation@0.2.0:LICENSE
------ BEGIN VERBATIM CONTENT -----
-MIT License
-
-Copyright (c) 2026 Ferdous
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
 ----- END VERBATIM CONTENT -----
 
 SHA-256 bbb380e5c1a717079378d6ea4d33c8a5a81655d4612b749f882e34e46712aab5
