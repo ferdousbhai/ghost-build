@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { formatDistanceStrict } from 'date-fns';
 import { toast } from 'sonner';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
@@ -8,7 +8,7 @@ import { captureMessage, captureProductEvent } from '~/lib/telemetry.client';
 import { isStreamStatusActive, type StreamStatus } from '~/lib/common/types';
 import { chatStore } from '~/lib/stores/chatId';
 import { workbenchStore } from '~/lib/stores/workbench.client';
-import { messageInputStore } from '~/lib/stores/messageInput';
+import { getMessageInputRevision, messageInputStore, setMessageInput } from '~/lib/stores/messageInput';
 import { getChatRetryState, MAX_CHAT_RETRIES } from './chat-retry';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
@@ -122,12 +122,14 @@ export function useChatMessageSubmission(args: {
   };
 
   const sendMessageRef = useRef(sendMessage);
-  sendMessageRef.current = sendMessage;
+  useLayoutEffect(() => {
+    sendMessageRef.current = sendMessage;
+  });
   const pendingMessageStarted = useRef(false);
   const mountedRef = useRef(true);
   const { pendingMessage, clearPendingMessage } = args;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
@@ -144,20 +146,27 @@ export function useChatMessageSubmission(args: {
     }
     pendingMessageStarted.current = true;
     if (!messageInputStore.get()) {
-      messageInputStore.set(pendingMessage);
+      setMessageInput(pendingMessage);
     }
+    const pendingInputRevision = getMessageInputRevision();
     void (async () => {
+      let restoreInputRevision = pendingInputRevision;
       const sent = await sendMessageRef.current(pendingMessage, () => {
-        if (messageInputStore.get() === pendingMessage) {
-          messageInputStore.set('');
+        if (
+          mountedRef.current &&
+          getMessageInputRevision() === pendingInputRevision &&
+          messageInputStore.get() === pendingMessage
+        ) {
+          setMessageInput('');
+          restoreInputRevision = getMessageInputRevision();
         }
       });
       if (!mountedRef.current) {
         return;
       }
       clearPendingMessage();
-      if (!sent && !messageInputStore.get()) {
-        messageInputStore.set(pendingMessage);
+      if (!sent && getMessageInputRevision() === restoreInputRevision && !messageInputStore.get()) {
+        setMessageInput(pendingMessage);
       }
     })();
   }, [clearPendingMessage, pendingMessage]);

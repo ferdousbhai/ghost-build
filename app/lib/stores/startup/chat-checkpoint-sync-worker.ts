@@ -42,6 +42,7 @@ interface ChatSyncWorkerOptions {
 let activeWorker: { token: symbol; signal: AbortSignal } | null = null;
 
 export function initializeCheckpointPosition(
+  accountId: string,
   chatId: string,
   initialMessages: GhostbuildMessage[],
   loadedSubchatIndex: number,
@@ -53,15 +54,24 @@ export function initializeCheckpointPosition(
     partIndex: (lastMessage?.parts?.length ?? 0) - 1,
   };
   const currentState = chatCheckpointSyncState.get();
-  const chatChanged = currentState.chatId !== chatId;
-  const currentCompleteInfo = lastCompleteMessageInfoStore.get();
-  if (!chatChanged && currentState.persistedMessageInfo !== null && loadedSubchatIndex === currentState.subchatIndex) {
+  const scopeChanged = currentState.accountId !== accountId || currentState.chatId !== chatId;
+  const storedCompleteInfo = lastCompleteMessageInfoStore.get();
+  const currentCompleteInfo =
+    storedCompleteInfo?.accountId === accountId &&
+    storedCompleteInfo.chatId === chatId &&
+    storedCompleteInfo.subchatIndex === loadedSubchatIndex
+      ? storedCompleteInfo
+      : null;
+  if (!scopeChanged && currentState.persistedMessageInfo !== null && loadedSubchatIndex === currentState.subchatIndex) {
     if (
       currentCompleteInfo === null &&
       currentState.persistedMessageInfo.messageIndex === initialMessageInfo.messageIndex &&
       currentState.persistedMessageInfo.partIndex === initialMessageInfo.partIndex
     ) {
       lastCompleteMessageInfoStore.set({
+        accountId,
+        chatId,
+        subchatIndex: loadedSubchatIndex,
         ...initialMessageInfo,
         allMessages: initialMessages,
         hasNextPart: false,
@@ -72,8 +82,9 @@ export function initializeCheckpointPosition(
   }
   chatCheckpointSyncState.set({
     ...currentState,
+    accountId,
     chatId,
-    ...(chatChanged
+    ...(scopeChanged
       ? {
           lastSync: 0,
           numFailures: 0,
@@ -85,8 +96,11 @@ export function initializeCheckpointPosition(
     persistedTranscriptCheckpoint: checkpoint,
     subchatIndex: loadedSubchatIndex,
   });
-  if (chatChanged || !isCompleteMessageInfoAtLeast(currentCompleteInfo, initialMessageInfo)) {
+  if (scopeChanged || !isCompleteMessageInfoAtLeast(currentCompleteInfo, initialMessageInfo)) {
     lastCompleteMessageInfoStore.set({
+      accountId,
+      chatId,
+      subchatIndex: loadedSubchatIndex,
       ...initialMessageInfo,
       allMessages: initialMessages,
       hasNextPart: false,
@@ -120,13 +134,22 @@ export async function chatSyncWorker(options: ChatSyncWorkerOptions): Promise<vo
   activeWorker = { token: workerToken, signal };
 
   try {
-    const initialState = await waitForInitialized(options.chatId, signal);
+    const initialState = await waitForInitialized(options.sessionId, options.chatId, signal);
     chatCheckpointSyncState.set({ ...initialState, started: true, subchatIndex: options.currentSubchatIndex });
     while (true) {
-      const state = await waitForInitialized(options.chatId, signal);
-      const completeMessageInfo = lastCompleteMessageInfoStore.get();
+      const state = await waitForInitialized(options.sessionId, options.chatId, signal);
+      const completeMessageInfo = completeMessageInfoForScope(options.sessionId, options.chatId, state.subchatIndex);
       if (completeMessageInfo === null) {
-        await waitForStoreValue(lastCompleteMessageInfoStore, (messageInfo) => messageInfo, { signal });
+        await waitForStoreValue(
+          lastCompleteMessageInfoStore,
+          (messageInfo) =>
+            messageInfo?.accountId === options.sessionId &&
+            messageInfo.chatId === options.chatId &&
+            messageInfo.subchatIndex === state.subchatIndex
+              ? messageInfo
+              : null,
+          { signal },
+        );
         continue;
       }
       if (completeMessageInfo.messageIndex < 0 || completeMessageInfo.partIndex < 0) {
@@ -141,8 +164,12 @@ export async function chatSyncWorker(options: ChatSyncWorkerOptions): Promise<vo
       }
 
       await waitForCheckpointDebounce(state.lastSync, signal);
-      const latestState = await waitForInitialized(options.chatId, signal);
-      const latestCompleteMessageInfo = lastCompleteMessageInfoStore.get();
+      const latestState = await waitForInitialized(options.sessionId, options.chatId, signal);
+      const latestCompleteMessageInfo = completeMessageInfoForScope(
+        options.sessionId,
+        options.chatId,
+        latestState.subchatIndex,
+      );
       if (latestCompleteMessageInfo === null || !hasPendingCheckpointWork(latestState, latestCompleteMessageInfo)) {
         continue;
       }
@@ -156,7 +183,7 @@ export async function chatSyncWorker(options: ChatSyncWorkerOptions): Promise<vo
     if (activeWorker?.token === workerToken) {
       activeWorker = null;
       const state = chatCheckpointSyncState.get();
-      if (state.chatId === options.chatId) {
+      if (state.accountId === options.sessionId && state.chatId === options.chatId) {
         chatCheckpointSyncState.set({ ...state, started: false });
       }
     }
@@ -168,8 +195,13 @@ function hasPendingMessageCheckpoint(
   completeMessageInfo: CompleteMessageInfo | null,
 ): boolean {
   return (
+    currentState.accountId !== null &&
+    currentState.chatId !== null &&
     currentState.persistedMessageInfo !== null &&
     completeMessageInfo !== null &&
+    completeMessageInfo.accountId === currentState.accountId &&
+    completeMessageInfo.chatId === currentState.chatId &&
+    completeMessageInfo.subchatIndex === currentState.subchatIndex &&
     (currentState.persistedMessageInfo.messageIndex !== completeMessageInfo.messageIndex ||
       currentState.persistedMessageInfo.partIndex !== completeMessageInfo.partIndex ||
       !transcriptCheckpointsEqual(currentState.persistedTranscriptCheckpoint, completeMessageInfo.transcriptCheckpoint))
@@ -196,10 +228,17 @@ async function syncCheckpoint(
   if (!update) {
     return;
   }
-  if (currentState.chatId !== chatId || currentState.subchatIndex !== subchatIndexStore.get()) {
-    const state = chatCheckpointSyncState.get();
-    if (state.chatId === chatId) {
-      chatCheckpointSyncState.set({ ...state, persistedMessageInfo: null });
+  const stateBeforeRequest = chatCheckpointSyncState.get();
+  if (
+    currentState.accountId !== sessionId ||
+    currentState.chatId !== chatId ||
+    stateBeforeRequest.accountId !== sessionId ||
+    stateBeforeRequest.chatId !== chatId ||
+    stateBeforeRequest.subchatIndex !== currentState.subchatIndex ||
+    currentState.subchatIndex !== subchatIndexStore.get()
+  ) {
+    if (stateBeforeRequest.accountId === sessionId && stateBeforeRequest.chatId === chatId) {
+      chatCheckpointSyncState.set({ ...stateBeforeRequest, persistedMessageInfo: null });
     }
     return;
   }
@@ -215,11 +254,15 @@ async function syncCheckpoint(
     requestError = error as Error;
   }
   if (requestError || (response && !response.ok)) {
-    await handleSyncFailure(chatId, currentState.subchatIndex, response, requestError, signal);
+    await handleSyncFailure(sessionId, chatId, currentState.subchatIndex, response, requestError, signal);
     return;
   }
   const latestState = chatCheckpointSyncState.get();
-  if (latestState.chatId !== chatId || latestState.subchatIndex !== currentState.subchatIndex) {
+  if (
+    latestState.accountId !== sessionId ||
+    latestState.chatId !== chatId ||
+    latestState.subchatIndex !== currentState.subchatIndex
+  ) {
     return;
   }
   if (latestState.numFailures >= 3) {
@@ -248,6 +291,7 @@ async function syncCheckpoint(
 }
 
 async function handleSyncFailure(
+  attemptedAccountId: string,
   attemptedChatId: string,
   attemptedSubchatIndex: number,
   response: Response | undefined,
@@ -257,25 +301,47 @@ async function handleSyncFailure(
   const errorText = response ? await response.text() : (requestError?.message ?? 'Unknown error');
   signal.throwIfAborted();
   const currentState = chatCheckpointSyncState.get();
-  if (currentState.chatId !== attemptedChatId || currentState.subchatIndex !== attemptedSubchatIndex) {
+  if (
+    currentState.accountId !== attemptedAccountId ||
+    currentState.chatId !== attemptedChatId ||
+    currentState.subchatIndex !== attemptedSubchatIndex
+  ) {
     return;
   }
+  let failureState = currentState;
   if (isTranscriptAdvanceConflict(response?.status, errorText)) {
-    const adopted = await adoptAdvancedTranscriptCheckpoint(errorText, attemptedChatId, attemptedSubchatIndex);
-    if (currentState.numFailures >= 3) {
-      toast.dismiss('chat-save-failure');
-    }
-    chatCheckpointSyncState.set({ ...currentState, numFailures: 0 });
-    logger.info('Retrying chat checkpoint after the durable transcript advanced', {
+    const adopted = await adoptAdvancedTranscriptCheckpoint(
+      errorText,
+      attemptedAccountId,
       attemptedChatId,
       attemptedSubchatIndex,
-      adoptedCheckpoint: adopted,
-    });
-    await abortableDelay(CHECKPOINT_DEBOUNCE_MS, signal);
-    return;
+    );
+    signal.throwIfAborted();
+    const latestState = chatCheckpointSyncState.get();
+    if (
+      latestState.accountId !== attemptedAccountId ||
+      latestState.chatId !== attemptedChatId ||
+      latestState.subchatIndex !== attemptedSubchatIndex
+    ) {
+      return;
+    }
+    if (adopted) {
+      if (latestState.numFailures >= 3) {
+        toast.dismiss('chat-save-failure');
+      }
+      chatCheckpointSyncState.set({ ...latestState, numFailures: 0 });
+      logger.info('Retrying chat checkpoint after adopting the advanced durable transcript', {
+        attemptedAccountId,
+        attemptedChatId,
+        attemptedSubchatIndex,
+      });
+      await abortableDelay(CHECKPOINT_DEBOUNCE_MS, signal);
+      return;
+    }
+    failureState = latestState;
   }
-  const failures = currentState.numFailures + 1;
-  chatCheckpointSyncState.set({ ...currentState, numFailures: failures });
+  const failures = failureState.numFailures + 1;
+  chatCheckpointSyncState.set({ ...failureState, numFailures: failures });
   if (failures >= 3) {
     toast.error('Your chat is having trouble saving and progress may be lost. Download your code to save it.', {
       id: 'chat-save-failure',
@@ -284,6 +350,7 @@ async function handleSyncFailure(
   }
   const delay = checkpointRetryDelay(response, failures);
   logger.error('Failed to save chat checkpoint', {
+    attemptedAccountId,
     attemptedChatId,
     attemptedSubchatIndex,
     failures,
@@ -320,6 +387,7 @@ export function checkpointRetryDelay(response: Response | undefined, failures: n
 
 export async function adoptAdvancedTranscriptCheckpoint(
   responseBody: string,
+  attemptedAccountId: string,
   attemptedChatId: string,
   attemptedSubchatIndex: number,
 ): Promise<boolean> {
@@ -337,11 +405,25 @@ export async function adoptAdvancedTranscriptCheckpoint(
   if (
     !result.success ||
     complete === null ||
+    complete.accountId !== attemptedAccountId ||
+    complete.chatId !== attemptedChatId ||
+    complete.subchatIndex !== attemptedSubchatIndex ||
+    state.accountId !== attemptedAccountId ||
     state.chatId !== attemptedChatId ||
     state.subchatIndex !== attemptedSubchatIndex ||
     (complete.transcriptCheckpoint !== null &&
       !transcriptIdentitiesEqual(complete.transcriptCheckpoint, result.data)) ||
     !(await transcriptCheckpointMatchesMessages(result.data, complete.allMessages))
+  ) {
+    return false;
+  }
+  const latestComplete = lastCompleteMessageInfoStore.get();
+  const latestState = chatCheckpointSyncState.get();
+  if (
+    latestComplete !== complete ||
+    latestState.accountId !== attemptedAccountId ||
+    latestState.chatId !== attemptedChatId ||
+    latestState.subchatIndex !== attemptedSubchatIndex
   ) {
     return false;
   }
@@ -359,6 +441,9 @@ async function waitForNextSyncTrigger(
   signal.addEventListener('abort', abortTriggers, { once: true });
   const triggers = [
     waitForNewMessages(
+      currentState.accountId,
+      currentState.chatId,
+      currentState.subchatIndex,
       currentState.persistedMessageInfo.messageIndex,
       currentState.persistedMessageInfo.partIndex,
       !completeMessageInfo.hasNextPart,
@@ -381,11 +466,29 @@ async function waitForCheckpointDebounce(lastSync: number, signal: AbortSignal):
   }
 }
 
-function waitForInitialized(chatId: string, signal: AbortSignal): Promise<InitializedChatCheckpointSyncState> {
+function completeMessageInfoForScope(
+  accountId: string,
+  chatId: string,
+  subchatIndex: number,
+): CompleteMessageInfo | null {
+  const completeMessageInfo = lastCompleteMessageInfoStore.get();
+  return completeMessageInfo?.accountId === accountId &&
+    completeMessageInfo.chatId === chatId &&
+    completeMessageInfo.subchatIndex === subchatIndex
+    ? completeMessageInfo
+    : null;
+}
+
+function waitForInitialized(
+  accountId: string,
+  chatId: string,
+  signal: AbortSignal,
+): Promise<InitializedChatCheckpointSyncState> {
   return waitForStoreValue(
     chatCheckpointSyncState,
     (state) => {
       if (
+        state.accountId !== accountId ||
         state.chatId !== chatId ||
         state.persistedMessageInfo === null ||
         state.subchatIndex !== subchatIndexStore.get()
@@ -394,6 +497,7 @@ function waitForInitialized(chatId: string, signal: AbortSignal): Promise<Initia
       }
       return {
         ...state,
+        accountId,
         chatId,
         persistedMessageInfo: state.persistedMessageInfo,
       };

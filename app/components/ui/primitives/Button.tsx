@@ -1,4 +1,4 @@
-import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react';
 import { classNames } from '~/utils/classNames';
 
 export type ButtonVariant = 'primary' | 'neutral' | 'danger' | 'ghost';
@@ -20,7 +20,7 @@ export type ButtonVisualProps = {
 
 type NativeButtonProps = ButtonVisualProps & Omit<ButtonHTMLAttributes<HTMLButtonElement>, keyof ButtonVisualProps>;
 
-type ButtonProps = NativeButtonProps;
+type ButtonProps = NativeButtonProps & { ref?: Ref<HTMLButtonElement> };
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary: 'bg-accent-500 text-white hover:bg-accent-600',
@@ -55,23 +55,21 @@ export function buttonClassNames({
   );
 }
 
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  {
-    children,
-    className,
-    icon,
-    tip,
-    variant = 'primary',
-    size = 'md',
-    inline,
-    focused,
-    loading,
-    disabled,
-    type = 'button',
-    ...props
-  },
+export function Button({
+  children,
+  className,
+  icon,
+  tip,
+  variant = 'primary',
+  size = 'md',
+  inline,
+  focused,
+  loading,
+  disabled,
+  type = 'button',
   ref,
-) {
+  ...props
+}: ButtonProps) {
   const classes = buttonClassNames({ className, variant, size, inline, focused });
   const content = (
     <>
@@ -100,4 +98,4 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       {content}
     </button>
   );
-});
+}

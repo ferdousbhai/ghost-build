@@ -4,7 +4,7 @@ import { isStreamStatusActive, type StreamStatus } from '~/lib/common/types';
 import { MessageInput } from './MessageInput';
 import { Messages } from './Messages.client';
 import { useChatId } from '~/lib/stores/chatId';
-import { messageInputStore } from '~/lib/stores/messageInput';
+import { setMessageInput } from '~/lib/stores/messageInput';
 import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { classNames } from '~/utils/classNames';
 import styles from './BaseChat.module.css';
@@ -92,7 +92,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
     const activeChatContextRef = React.useRef<{ chatId: string; userId: string | null | undefined } | null>(null);
     const createSubchatPendingRef = React.useRef<symbol | null>(null);
 
-    React.useEffect(() => {
+    React.useLayoutEffect(() => {
       const context = { chatId, userId };
       activeChatContextRef.current = context;
       createSubchatPendingRef.current = null;
@@ -141,7 +141,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
           return true;
         }
         subchatIndexStore.set(subchatIndex);
-        messageInputStore.set('');
+        setMessageInput('');
         return true;
       } finally {
         if (createSubchatPendingRef.current === attempt) {
@@ -151,9 +151,12 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
     }, [createSubchat, chatId, userId]);
     const handleRenameSubchat = useCallback(
       async (title: string): Promise<boolean> => {
-        if (!userId) {
+        const context = activeChatContextRef.current;
+        if (!userId || context?.chatId !== chatId || context.userId !== userId) {
           return false;
         }
+        const isActiveChat = () =>
+          activeChatContextRef.current === context && (subchatIndexStore.get() ?? 0) === currentSubchatIndex;
         try {
           await setSubchatDescription({
             chatId,
@@ -161,14 +164,30 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
             subchatIndex: currentSubchatIndex,
             description: title,
           });
-          await refreshSubchats({ chatId, sessionId: userId });
-          return true;
         } catch (error) {
-          toast.error(error instanceof Error ? error.message : 'Unable to rename this chat.');
+          if (isActiveChat()) {
+            toast.error(error instanceof Error ? error.message : 'Unable to rename this chat.');
+          }
           return false;
         }
+
+        try {
+          await refreshSubchats({ chatId, sessionId: userId });
+        } catch (error) {
+          if (isActiveChat()) {
+            toast.error(
+              error instanceof Error
+                ? `The chat was renamed, but its history could not refresh: ${error.message}`
+                : 'The chat was renamed, but its history could not refresh. Reload to see the new title.',
+            );
+          }
+        }
+        if (isActiveChat()) {
+          onSubchatTitleChange?.(currentSubchatIndex, title);
+        }
+        return true;
       },
-      [chatId, currentSubchatIndex, userId, setSubchatDescription],
+      [chatId, currentSubchatIndex, userId, setSubchatDescription, onSubchatTitleChange],
     );
 
     const lastUserMessage = messages.findLast((message) => message.role === 'user');
@@ -216,12 +235,12 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                 ) : (
                   <>
                     <SubchatBar
+                      chatId={chatId}
                       subchats={subchats}
                       currentSubchatIndex={currentSubchatIndex}
                       isStreaming={isStreaming}
                       chatDisabled={disabledReason !== null || messages.length === 0}
                       userId={userId ?? null}
-                      onSubchatTitleChange={onSubchatTitleChange}
                       handleCreateSubchat={handleCreateSubchat}
                       handleRenameSubchat={handleRenameSubchat}
                       isSubchatLoaded={isSubchatLoaded}

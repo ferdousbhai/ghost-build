@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkbenchStore } from './workbench.client';
 import type { AbsolutePath } from 'ghostbuild-agent/utils/workDir';
-import type { BuilderWorkspaceSyncEntry } from '~/agents/builder-workspace-types';
+import type {
+  BuilderWorkspaceApplyResult,
+  BuilderWorkspaceClientChange,
+  BuilderWorkspaceSyncEntry,
+} from '~/agents/builder-workspace-types';
 
 const downloadProject = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
@@ -61,9 +65,10 @@ describe('WorkbenchStore editor flush boundaries', () => {
 
     await store.saveCurrentDocument();
 
-    expect(apply).toHaveBeenCalledWith([
-      { kind: 'write', path: fileA, content: 'latest visible content', encoding: 'utf8' },
-    ]);
+    expect(apply).toHaveBeenCalledWith(
+      [{ kind: 'write', path: fileA, content: 'latest visible content', encoding: 'utf8' }],
+      expect.any(Function),
+    );
     expect(store.unsavedFiles.get()).not.toContain(fileA);
   });
 
@@ -80,9 +85,119 @@ describe('WorkbenchStore editor flush boundaries', () => {
 
     await store.saveUnsavedFiles();
 
-    expect(apply).toHaveBeenNthCalledWith(1, [{ kind: 'write', path: fileA, content: 'a1', encoding: 'utf8' }]);
-    expect(apply).toHaveBeenNthCalledWith(2, [{ kind: 'write', path: fileB, content: 'b1', encoding: 'utf8' }]);
+    expect(apply).toHaveBeenNthCalledWith(
+      1,
+      [{ kind: 'write', path: fileA, content: 'a1', encoding: 'utf8' }],
+      expect.any(Function),
+    );
+    expect(apply).toHaveBeenNthCalledWith(
+      2,
+      [{ kind: 'write', path: fileB, content: 'b1', encoding: 'utf8' }],
+      expect.any(Function),
+    );
     expect(store.unsavedFiles.get()).toEqual(new Set());
+  });
+
+  it('waits for a newer same-file edit to become durable before completing a turn-boundary save', async () => {
+    const store = createStore();
+    const finishSaves: Array<(result: BuilderWorkspaceApplyResult) => void> = [];
+    const apply = vi.fn((changes: BuilderWorkspaceClientChange[], isCurrentChange: () => boolean) => {
+      return new Promise<BuilderWorkspaceApplyResult>((resolve) => {
+        finishSaves.push((result) => {
+          const change = changes[0];
+          if (change?.kind === 'write' && isCurrentChange()) {
+            store.applyWorkspaceSyncEntries([syncWrite(fileA, change.content, result.state.revision)]);
+          }
+          resolve(result);
+        });
+      });
+    });
+    store.setWorkspaceChangeListener(apply);
+    let visibleContent = 'older edit';
+    store.registerPendingEditorChangeFlusher(() => store.setDocumentContent(fileA, visibleContent));
+    let saveCompleted = false;
+    const save = store.saveUnsavedFiles().then(() => {
+      saveCompleted = true;
+    });
+
+    visibleContent = 'a0';
+    finishSaves[0]({
+      ok: true,
+      changedPaths: [fileA],
+      state: { initialized: true, revision: 2, resetRevision: 0, fileCount: 2, totalBytes: 4, seeding: false },
+    });
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledTimes(2));
+
+    expect(apply).toHaveBeenNthCalledWith(
+      1,
+      [{ kind: 'write', path: fileA, content: 'older edit', encoding: 'utf8' }],
+      expect.any(Function),
+    );
+    expect(apply).toHaveBeenNthCalledWith(
+      2,
+      [{ kind: 'write', path: fileA, content: 'a0', encoding: 'utf8' }],
+      expect.any(Function),
+    );
+    expect(saveCompleted).toBe(false);
+    expect(store.files.get()[fileA]).toMatchObject({ content: 'a0' });
+    expect(store.currentDocument.get()).toMatchObject({ filePath: fileA, value: 'a0' });
+    expect(store.unsavedFiles.get()).toContain(fileA);
+
+    finishSaves[1]({
+      ok: true,
+      changedPaths: [fileA],
+      state: { initialized: true, revision: 3, resetRevision: 0, fileCount: 2, totalBytes: 4, seeding: false },
+    });
+    await save;
+
+    expect(store.files.get()[fileA]).toMatchObject({ content: 'a0' });
+    expect(store.currentDocument.get()).toMatchObject({ filePath: fileA, value: 'a0' });
+    expect(store.unsavedFiles.get()).not.toContain(fileA);
+  });
+
+  it('does not apply a save completion to a newly activated workspace', async () => {
+    const store = createStore();
+    let finishSave!: (result: {
+      ok: true;
+      changedPaths: AbsolutePath[];
+      state: {
+        initialized: true;
+        revision: number;
+        resetRevision: number;
+        fileCount: number;
+        totalBytes: number;
+        seeding: false;
+      };
+    }) => void;
+    store.setWorkspaceChangeListener(
+      () =>
+        new Promise((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    store.setDocumentContent(fileA, 'workspace-a edit');
+    const save = store.saveCurrentDocument();
+
+    store.activateWorkspace('workspace-b');
+    store.files.set({ [fileB]: { type: 'file', content: 'workspace-b content', isBinary: false } });
+    store.setDocuments(store.files.get());
+    finishSave({
+      ok: true,
+      changedPaths: [fileA],
+      state: { initialized: true, revision: 2, resetRevision: 0, fileCount: 2, totalBytes: 4, seeding: false },
+    });
+
+    await expect(save).rejects.toThrow('active workspace changed');
+    expect(store.files.get()[fileA]).toBeUndefined();
+    expect(store.files.get()[fileB]).toMatchObject({ content: 'workspace-b content' });
+  });
+
+  it('fails instead of retrying forever when an unsaved document becomes unavailable', async () => {
+    const store = createStore();
+    store.setDocumentContent(fileA, 'local edit');
+    store.applyWorkspaceSyncEntries([{ kind: 'delete', path: fileA, revision: 2 }]);
+
+    await expect(store.saveUnsavedFiles()).rejects.toThrow('the editor document is unavailable');
   });
 
   it('tracks visible unsaved content until it is durably saved', () => {
@@ -129,6 +244,21 @@ describe('WorkbenchStore editor flush boundaries', () => {
     expect(store.currentDocument.get()).toMatchObject({ filePath: fileA, value: 'local edit' });
     expect(store.files.get()[fileA]).toMatchObject({ content: 'new durable content' });
     expect(store.unsavedFiles.get()).toContain(fileA);
+  });
+
+  it('selectively reconciles a stale-save snapshot without advancing that file baseline', () => {
+    const store = createStore();
+    store.setDocumentContent(fileA, 'newer local edit');
+
+    store.replaceWorkspaceSnapshot(
+      [syncWrite(fileA, 'stale saved edit'), syncWrite(fileB, 'remote change')],
+      new Set([fileA]),
+    );
+
+    expect(store.files.get()[fileA]).toMatchObject({ content: 'a0' });
+    expect(store.currentDocument.get()).toMatchObject({ filePath: fileA, value: 'newer local edit' });
+    expect(store.unsavedFiles.get()).toContain(fileA);
+    expect(store.files.get()[fileB]).toMatchObject({ content: 'remote change' });
   });
 
   it('keeps an unsaved file as a local recreation when the replacement snapshot deleted it', () => {

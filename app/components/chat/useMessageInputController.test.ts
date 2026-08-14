@@ -1,16 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  clearPromptIfUnchanged,
   getMessageInputPrimaryAction,
   getMessageInputPrimaryActionLabel,
   preservePromptForAuthentication,
   replacePromptIfUnchanged,
   submitMessageInput,
 } from './useMessageInputController';
-import { messageInputStore } from '~/lib/stores/messageInput';
+import { getMessageInputRevision, messageInputStore, setMessageInput } from '~/lib/stores/messageInput';
 import { PENDING_PROMPT_STORAGE_KEY } from '~/utils/constants';
 
 afterEach(() => {
-  messageInputStore.set('');
+  setMessageInput('');
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -90,18 +91,58 @@ describe('preservePromptForAuthentication', () => {
   });
 });
 
+describe('clearPromptIfUnchanged', () => {
+  it('preserves a newer draft and its authentication handoff when an older send is accepted', () => {
+    const storage = new Map([[PENDING_PROMPT_STORAGE_KEY, 'new user input']]);
+    vi.stubGlobal('window', {
+      sessionStorage: {
+        removeItem: (key: string) => storage.delete(key),
+      },
+    });
+    setMessageInput('new user input');
+
+    expect(clearPromptIfUnchanged('sent input', getMessageInputRevision())).toBe(false);
+    expect(messageInputStore.get()).toBe('new user input');
+    expect(storage.get(PENDING_PROMPT_STORAGE_KEY)).toBe('new user input');
+  });
+
+  it('preserves a draft changed programmatically away and back to the submitted value', () => {
+    setMessageInput('sent input');
+    const submittedRevision = getMessageInputRevision();
+
+    setMessageInput('programmatic draft');
+    setMessageInput('sent input');
+
+    expect(clearPromptIfUnchanged('sent input', submittedRevision)).toBe(false);
+    expect(messageInputStore.get()).toBe('sent input');
+  });
+});
+
 describe('replacePromptIfUnchanged', () => {
   it('does not overwrite input edited while prompt enhancement was in flight', () => {
-    messageInputStore.set('new user input');
+    setMessageInput('original input');
+    const sourceRevision = getMessageInputRevision();
+    setMessageInput('new user input');
 
-    expect(replacePromptIfUnchanged('original input', 'enhanced original')).toBe(false);
+    expect(replacePromptIfUnchanged('original input', sourceRevision, 'enhanced original')).toBe(false);
     expect(messageInputStore.get()).toBe('new user input');
   });
 
-  it('applies the enhancement when the source input is still current', () => {
-    messageInputStore.set('original input');
+  it('does not overwrite input changed away and back while prompt enhancement was in flight', () => {
+    setMessageInput('original input');
+    const sourceRevision = getMessageInputRevision();
+    setMessageInput('temporary edit');
+    setMessageInput('original input');
 
-    expect(replacePromptIfUnchanged('original input', 'enhanced original')).toBe(true);
+    expect(replacePromptIfUnchanged('original input', sourceRevision, 'enhanced original')).toBe(false);
+    expect(messageInputStore.get()).toBe('original input');
+  });
+
+  it('applies the enhancement when the source input and revision are still current', () => {
+    setMessageInput('original input');
+    const sourceRevision = getMessageInputRevision();
+
+    expect(replacePromptIfUnchanged('original input', sourceRevision, 'enhanced original')).toBe(true);
     expect(messageInputStore.get()).toBe('enhanced original');
   });
 });

@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useState } from 'react';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { Chat } from './chat/Chat';
 import type { PartCache } from '~/lib/hooks/useProcessedMessages';
@@ -7,7 +7,7 @@ import { useChatHomepage } from '~/lib/stores/startup';
 const EMPTY_MESSAGES: GhostbuildMessage[] = [];
 
 export function HomepageChat({ initialId, initialPrompt }: { initialId: string; initialPrompt: string }) {
-  const partCache = useRef<PartCache>(new Map());
+  const [partCache] = useState<PartCache>(() => new Map());
   const {
     storeMessageHistory,
     initializeChat,
@@ -21,7 +21,7 @@ export function HomepageChat({ initialId, initialPrompt }: { initialId: string; 
   return (
     <Chat
       initialMessages={initialMessages ?? EMPTY_MESSAGES}
-      partCache={partCache.current}
+      partCache={partCache}
       storeMessageHistory={storeMessageHistory}
       initializeChat={initializeChat}
       discardEmptyChat={discardEmptyChat}

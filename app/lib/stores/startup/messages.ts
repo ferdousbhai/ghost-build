@@ -8,6 +8,9 @@ import {
 } from 'ghostbuild-agent/transcript';
 
 export type CompleteMessageInfo = {
+  accountId: string;
+  chatId: string;
+  subchatIndex: number;
   messageIndex: number;
   partIndex: number;
   hasNextPart: boolean;
@@ -66,6 +69,9 @@ export function prepareMessageHistory(args: {
 }
 
 export function waitForNewMessages(
+  accountId: string,
+  chatId: string,
+  subchatIndex: number,
   messageIndex: number,
   partIndex: number,
   alertOnNextPartStart: boolean,
@@ -73,6 +79,9 @@ export function waitForNewMessages(
 ) {
   const hasNewMessages = (lastCompleteMessageInfo: CompleteMessageInfo | null) =>
     lastCompleteMessageInfo !== null &&
+    lastCompleteMessageInfo.accountId === accountId &&
+    lastCompleteMessageInfo.chatId === chatId &&
+    lastCompleteMessageInfo.subchatIndex === subchatIndex &&
     (lastCompleteMessageInfo.messageIndex !== messageIndex ||
       lastCompleteMessageInfo.partIndex !== partIndex ||
       (alertOnNextPartStart && lastCompleteMessageInfo.hasNextPart));

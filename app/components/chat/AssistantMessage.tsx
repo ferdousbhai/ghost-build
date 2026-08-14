@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense } from 'react';
+import { lazy, memo, Suspense, useEffect, useRef } from 'react';
 import { ToolCall } from './ToolCall';
 import { makePartId, type PartId } from 'ghostbuild-agent/partId.js';
 import {
@@ -55,6 +55,19 @@ function AssistantMessagePart({ part, partId }: { part: GhostbuildPart; partId: 
     return null;
   }
 
-  captureMessage('Unknown assistant message part');
+  return <UnknownAssistantMessagePart partId={partId} />;
+}
+
+function UnknownAssistantMessagePart({ partId }: { partId: PartId }) {
+  const capturedPartIdRef = useRef<PartId | null>(null);
+
+  useEffect(() => {
+    if (capturedPartIdRef.current === partId) {
+      return;
+    }
+    capturedPartIdRef.current = partId;
+    captureMessage('Unknown assistant message part');
+  }, [partId]);
+
   return null;
 }

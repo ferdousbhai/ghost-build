@@ -19,7 +19,8 @@ export function useChatHomepage(chatId: string) {
   const [chatInitialized, setChatInitialized] = useState(false);
   const initializeChat = useHomepageInitializeChat(chatId, setChatInitialized);
   const discardEmptyChat = useDiscardEmptyChat(chatId);
-  const storeMessageHistory = useStoreMessageHistory();
+  const userId = useUserIdOrNullOrLoading();
+  const storeMessageHistory = useStoreMessageHistory(chatId, userId);
   const loaded = useInitialMessages(chatInitialized ? chatId : undefined);
   useChatCheckpointSync(
     chatId,
@@ -68,7 +69,8 @@ export function useExistingChat(chatId: string) {
     initialMessages?.deserialized,
     initialMessages?.checkpoint,
   );
-  const storeMessageHistory = useStoreMessageHistory();
+  const userId = useUserIdOrNullOrLoading();
+  const storeMessageHistory = useStoreMessageHistory(chatId, userId);
   const subchatState = useSubchats(chatId);
   const subchats = subchatState.subchats;
   const onBuilderRequestStart = useCallback(() => undefined, []);

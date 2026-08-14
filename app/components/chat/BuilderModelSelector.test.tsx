@@ -93,5 +93,8 @@ describe('BuilderModelSelector', () => {
     expect(trigger?.getAttribute('aria-label')).toContain('before switching models');
     expect(document.querySelector('[role="menu"]')).toBeNull();
     expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
+
+    await act(async () => root?.render(<BuilderModelSelector />));
+    expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 });

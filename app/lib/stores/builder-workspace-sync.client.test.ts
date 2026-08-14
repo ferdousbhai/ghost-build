@@ -25,6 +25,89 @@ describe('BuilderWorkspaceSyncController', () => {
     vi.clearAllMocks();
   });
 
+  test('does not populate a workspace after its initialization owner is disposed', async () => {
+    let releaseState: () => void = () => undefined;
+    const stateBlocked = new Promise<void>((resolve) => {
+      releaseState = resolve;
+    });
+    let current = true;
+    const agent = {
+      call: vi.fn(async (method: string) => {
+        if (method === 'getWorkspaceState') {
+          await stateBlocked;
+          return workspaceState(1);
+        }
+        throw new Error(`Unexpected RPC: ${method}`);
+      }),
+    };
+
+    const initializing = BuilderWorkspaceSyncController.initialize(agent, {
+      workspaceId: 'disposed-workspace',
+      isCurrent: () => current,
+    });
+    await vi.waitFor(() => expect(agent.call).toHaveBeenCalledWith('getWorkspaceState', [], expect.anything()));
+    current = false;
+    releaseState();
+
+    await expect(initializing).rejects.toThrow('durable workspace connection was superseded');
+    expect(workbench.setWorkspaceChangeListener).not.toHaveBeenCalled();
+    expect(workbench.replaceWorkspaceSnapshot).not.toHaveBeenCalled();
+  });
+
+  test('does not leave a workbench listener when ownership is lost during preload', async () => {
+    let releasePreload: () => void = () => undefined;
+    const preloadBlocked = new Promise<void>((resolve) => {
+      releasePreload = resolve;
+    });
+    let markPreloadStarted: () => void = () => undefined;
+    const preloadStarted = new Promise<void>((resolve) => {
+      markPreloadStarted = resolve;
+    });
+    const replica = {
+      persistence: {},
+      persistedCollectionOptions: (options: WorkspaceCollectionOptions) => ({
+        ...options,
+        sync: {
+          ...options.sync,
+          sync: (params: WorkspaceSyncParams) =>
+            options.sync.sync({
+              ...params,
+              markReady: () => {
+                markPreloadStarted();
+                void preloadBlocked.then(params.markReady);
+              },
+            }),
+        },
+      }),
+    } as unknown as AccountLocalReplica;
+    let current = true;
+    const agent = {
+      call: vi.fn(async (method: string, args: unknown[]) => {
+        if (method === 'getWorkspaceState') {
+          return workspaceState(0, 0, 0);
+        }
+        if (method === 'getWorkspaceSyncPage') {
+          const request = args[0] as { fromRevision: number };
+          return syncPage(request.fromRevision, 0, 'current', [], workspaceState(0, 0, 0));
+        }
+        throw new Error(`Unexpected RPC: ${method}`);
+      }),
+    };
+
+    const initializing = BuilderWorkspaceSyncController.initialize(agent, {
+      workspaceId: 'preloading-workspace',
+      replica,
+      isCurrent: () => current,
+    });
+    await preloadStarted;
+    current = false;
+
+    expect(workbench.setWorkspaceChangeListener).not.toHaveBeenCalled();
+    releasePreload();
+    await expect(initializing).rejects.toThrow('durable workspace connection was superseded');
+    expect(workbench.setWorkspaceChangeListener).not.toHaveBeenCalled();
+  });
+
   test('never promotes browser files when the durable workspace is unavailable', async () => {
     const agent = {
       call: vi.fn(async (method: string) => {
@@ -221,6 +304,195 @@ describe('BuilderWorkspaceSyncController', () => {
       expect.objectContaining({ path: '/home/project/src/remote.ts', content: 'remote-change' }),
     ]);
     expect(controller.revision).toBe(2);
+  });
+
+  test('presents unrelated delta entries without advancing a stale own-save baseline', async () => {
+    let revision = 1;
+    let durableContent = 'initial';
+    const agent = {
+      call: vi.fn(async (method: string, args: unknown[]) => {
+        switch (method) {
+          case 'getWorkspaceState':
+            return workspaceState(revision);
+          case 'getWorkspaceSyncPage': {
+            const request = args[0] as { fromRevision: number };
+            return request.fromRevision === 0
+              ? syncPage(0, revision, 'snapshot', [write('/home/project/src/local.ts', durableContent, revision)])
+              : syncPage(request.fromRevision, revision, 'delta', [
+                  write('/home/project/src/local.ts', durableContent, revision),
+                  write('/home/project/src/remote.ts', 'remote change', revision),
+                ]);
+          }
+          case 'applyWorkspaceClientChanges':
+            revision = 2;
+            durableContent = 'older edit';
+            return {
+              ok: true,
+              state: workspaceState(revision),
+              changedPaths: ['/home/project/src/local.ts'],
+            };
+          default:
+            throw new Error(`Unexpected RPC: ${method}`);
+        }
+      }),
+    };
+    const controller = await BuilderWorkspaceSyncController.initialize(agent);
+    const listener = workbench.setWorkspaceChangeListener.mock.calls[0]?.[0] as (
+      changes: BuilderWorkspaceClientChange[],
+      isCurrentChange: () => boolean,
+    ) => Promise<unknown>;
+    workbench.applyWorkspaceSyncEntries.mockClear();
+    workbench.replaceWorkspaceSnapshot.mockClear();
+
+    await listener([{ kind: 'write', path: '/home/project/src/local.ts', content: 'older edit' }], () => false);
+
+    expect(agent.call).toHaveBeenCalledWith(
+      'getWorkspaceSyncPage',
+      [{ fromRevision: 1 }],
+      expect.objectContaining({ timeout: 30_000 }),
+    );
+    expect(controller.revision).toBe(2);
+    expect(workbench.applyWorkspaceSyncEntries).toHaveBeenCalledOnce();
+    expect(workbench.applyWorkspaceSyncEntries).toHaveBeenCalledWith([
+      expect.objectContaining({ path: '/home/project/src/remote.ts', content: 'remote change' }),
+    ]);
+    expect(workbench.replaceWorkspaceSnapshot).not.toHaveBeenCalled();
+  });
+
+  test('selectively reconciles a snapshot after a successful stale own-save', async () => {
+    let revision = 1;
+    let saved = false;
+    const agent = {
+      call: vi.fn(async (method: string, args: unknown[]) => {
+        switch (method) {
+          case 'getWorkspaceState':
+            return workspaceState(revision);
+          case 'getWorkspaceSyncPage': {
+            const request = args[0] as { fromRevision: number };
+            return saved
+              ? syncPage(request.fromRevision, revision, 'snapshot', [
+                  write('/home/project/src/local.ts', 'older edit', revision),
+                  write('/home/project/src/remote.ts', 'remote change', revision),
+                ])
+              : syncPage(request.fromRevision, revision, 'snapshot', [
+                  write('/home/project/src/local.ts', 'initial', revision),
+                ]);
+          }
+          case 'applyWorkspaceClientChanges':
+            revision = 2;
+            saved = true;
+            return {
+              ok: true,
+              state: workspaceState(revision),
+              changedPaths: ['/home/project/src/local.ts'],
+            };
+          default:
+            throw new Error(`Unexpected RPC: ${method}`);
+        }
+      }),
+    };
+    const controller = await BuilderWorkspaceSyncController.initialize(agent);
+    const listener = workbench.setWorkspaceChangeListener.mock.calls[0]?.[0] as (
+      changes: BuilderWorkspaceClientChange[],
+      isCurrentChange: () => boolean,
+    ) => Promise<unknown>;
+    workbench.replaceWorkspaceSnapshot.mockClear();
+
+    await listener([{ kind: 'write', path: '/home/project/src/local.ts', content: 'older edit' }], () => false);
+
+    expect(workbench.replaceWorkspaceSnapshot).toHaveBeenCalledOnce();
+    expect(workbench.replaceWorkspaceSnapshot).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ path: '/home/project/src/local.ts', content: 'older edit' }),
+        expect.objectContaining({ path: '/home/project/src/remote.ts', content: 'remote change' }),
+      ],
+      new Set(['/home/project/src/local.ts']),
+    );
+    expect(controller.revision).toBe(2);
+  });
+
+  test('does not present a pull that completes after the controller is disposed and the same workspace remounts', async () => {
+    let revision = 1;
+    let releasePull: () => void = () => undefined;
+    const pullBlocked = new Promise<void>((resolve) => {
+      releasePull = resolve;
+    });
+    const agent = {
+      call: vi.fn(async (method: string, args: unknown[]) => {
+        if (method === 'getWorkspaceState') {
+          return workspaceState(revision);
+        }
+        if (method === 'getWorkspaceSyncPage') {
+          const request = args[0] as { fromRevision: number };
+          if (request.fromRevision === 0) {
+            return syncPage(0, 1, 'snapshot', [write('/home/project/src/local.ts', 'initial', 1)]);
+          }
+          await pullBlocked;
+          return syncPage(request.fromRevision, revision, 'delta', [
+            write('/home/project/src/remote.ts', 'old mount', revision),
+          ]);
+        }
+        throw new Error(`Unexpected RPC: ${method}`);
+      }),
+    };
+    const controller = await BuilderWorkspaceSyncController.initialize(agent, { workspaceId: 'same-workspace' });
+    workbench.applyWorkspaceSyncEntries.mockClear();
+    revision = 2;
+    const pull = controller.pull();
+    await vi.waitFor(() =>
+      expect(agent.call).toHaveBeenCalledWith(
+        'getWorkspaceSyncPage',
+        [{ fromRevision: 1 }],
+        expect.objectContaining({ timeout: 30_000 }),
+      ),
+    );
+
+    controller.dispose();
+    workbench.activateWorkspace('same-workspace');
+    releasePull();
+
+    await expect(pull).rejects.toThrow('durable workspace connection was closed');
+    expect(workbench.applyWorkspaceSyncEntries).not.toHaveBeenCalled();
+  });
+
+  test('does not present an in-flight conflict after the controller is disposed and the same workspace remounts', async () => {
+    let releaseConflict: () => void = () => undefined;
+    const conflictBlocked = new Promise<void>((resolve) => {
+      releaseConflict = resolve;
+    });
+    const agent = {
+      call: vi.fn(async (method: string, args: unknown[]) => {
+        if (method === 'getWorkspaceState') {
+          return workspaceState(1);
+        }
+        if (method === 'getWorkspaceSyncPage') {
+          const request = args[0] as { fromRevision: number };
+          return syncPage(request.fromRevision, 1, 'snapshot', [write('/home/project/src/local.ts', 'initial', 1)]);
+        }
+        if (method === 'applyWorkspaceClientChanges') {
+          await conflictBlocked;
+          return { ok: false, conflict: true, state: workspaceState(2) };
+        }
+        throw new Error(`Unexpected RPC: ${method}`);
+      }),
+    };
+    const controller = await BuilderWorkspaceSyncController.initialize(agent, { workspaceId: 'same-workspace' });
+    workbench.replaceWorkspaceSnapshot.mockClear();
+    const push = controller.push([{ kind: 'write', path: '/home/project/src/local.ts', content: 'stale local edit' }]);
+    await vi.waitFor(() =>
+      expect(agent.call).toHaveBeenCalledWith(
+        'applyWorkspaceClientChanges',
+        [expect.anything()],
+        expect.objectContaining({ timeout: 30_000 }),
+      ),
+    );
+
+    controller.dispose();
+    workbench.activateWorkspace('same-workspace');
+    releaseConflict();
+
+    await expect(push).rejects.toThrow('durable workspace connection was closed');
+    expect(workbench.replaceWorkspaceSnapshot).not.toHaveBeenCalled();
   });
 
   test('atomically replaces stale rows when the server restarts a paged delta as a snapshot', async () => {

@@ -7,7 +7,7 @@ import { showWorkersPaidRequiredToast } from '~/lib/workers-paid.client';
 import { captureException } from '~/lib/telemetry.client';
 import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
 import { createCloudflareReturnURL, signInWithCloudflare } from '~/lib/auth-client';
-import { messageInputStore } from '~/lib/stores/messageInput';
+import { getMessageInputRevision, messageInputStore, setMessageInput } from '~/lib/stores/messageInput';
 import { isAuthenticated } from '~/lib/stores/userId';
 import { debounce } from '~/utils/debounce';
 import { PENDING_PROMPT_STORAGE_KEY } from '~/utils/constants';
@@ -27,6 +27,7 @@ interface MessageInputControllerOptions {
 
 export interface PromptRefinementSession {
   sourceInput: string;
+  sourceRevision: number;
   answers: PromptRefinementAnswer[];
   questions: PromptRefinementQuestion[];
 }
@@ -49,7 +50,7 @@ export function useMessageInputController({
       return;
     }
 
-    messageInputStore.set(search.prefill || readPendingPrompt() || '');
+    setMessageInput(search.prefill || readPendingPrompt() || '');
   }, [prefillEnabled, search.prefill]);
 
   useEffect(
@@ -60,10 +61,9 @@ export function useMessageInputController({
   );
 
   const send = useCallback(async () => {
+    const inputRevision = getMessageInputRevision();
     await submitMessageInput(input, onSend, () => {
-      cachePrompt.cancel();
-      removePendingPrompt();
-      replacePromptIfUnchanged(input, '');
+      clearPromptIfUnchanged(input, inputRevision);
     });
   }, [input, onSend]);
 
@@ -111,12 +111,17 @@ export function useMessageInputController({
   );
 
   const handleChange: ChangeEventHandler<HTMLTextAreaElement> = useCallback((event) => {
-    messageInputStore.set(event.target.value);
+    setMessageInput(event.target.value);
     cachePrompt(event.target.value);
   }, []);
 
   const requestPromptRefinement = useCallback(
-    async (sourceInput: string, answers: PromptRefinementAnswer[], controller: AbortController) => {
+    async (
+      sourceInput: string,
+      sourceRevision: number,
+      answers: PromptRefinementAnswer[],
+      controller: AbortController,
+    ) => {
       const response = await fetchUserRuntime('/v1/enhance-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -143,16 +148,20 @@ export function useMessageInputController({
       }
       if (result.data.kind === 'complete') {
         setRefinement(null);
-        replacePromptIfUnchanged(sourceInput, result.data.enhancedPrompt);
+        replacePromptIfUnchanged(sourceInput, sourceRevision, result.data.enhancedPrompt);
         return;
       }
-      setRefinement({ sourceInput, answers, questions: result.data.questions });
+      if (!isPromptUnchanged(sourceInput, sourceRevision)) {
+        return;
+      }
+      setRefinement({ sourceInput, sourceRevision, answers, questions: result.data.questions });
     },
     [],
   );
 
   const enhancePrompt = useCallback(async () => {
-    const sourceInput = input;
+    const sourceInput = messageInputStore.get();
+    const sourceRevision = getMessageInputRevision();
     enhanceRequestRef.current?.abort();
     const controller = new AbortController();
     enhanceRequestRef.current = controller;
@@ -162,7 +171,7 @@ export function useMessageInputController({
         throw new Error('Not authenticated');
       }
       setRefinement(null);
-      await requestPromptRefinement(sourceInput, [], controller);
+      await requestPromptRefinement(sourceInput, sourceRevision, [], controller);
     } catch (error) {
       if (isAbortError(error)) {
         return;
@@ -175,7 +184,7 @@ export function useMessageInputController({
         setIsEnhancing(false);
       }
     }
-  }, [input, requestPromptRefinement]);
+  }, [requestPromptRefinement]);
 
   const answerRefinementQuestions = useCallback(
     async (roundAnswers: PromptRefinementAnswer[]) => {
@@ -188,7 +197,7 @@ export function useMessageInputController({
       const answers = [...refinement.answers, ...roundAnswers];
       try {
         setIsEnhancing(true);
-        await requestPromptRefinement(refinement.sourceInput, answers, controller);
+        await requestPromptRefinement(refinement.sourceInput, refinement.sourceRevision, answers, controller);
       } catch (error) {
         if (isAbortError(error)) {
           return;
@@ -251,11 +260,28 @@ export function getMessageInputPrimaryActionLabel(
   return action === 'stop' ? 'Stop' : action === 'sign-in' ? 'Connect Cloudflare' : 'Send';
 }
 
-export function replacePromptIfUnchanged(sourceInput: string, enhancedPrompt: string): boolean {
-  if (messageInputStore.get() !== sourceInput) {
+function isPromptUnchanged(sourceInput: string, expectedRevision: number): boolean {
+  return expectedRevision === getMessageInputRevision() && messageInputStore.get() === sourceInput;
+}
+
+export function replacePromptIfUnchanged(
+  sourceInput: string,
+  expectedRevision: number,
+  enhancedPrompt: string,
+): boolean {
+  if (!isPromptUnchanged(sourceInput, expectedRevision)) {
     return false;
   }
-  messageInputStore.set(enhancedPrompt);
+  setMessageInput(enhancedPrompt);
+  return true;
+}
+
+export function clearPromptIfUnchanged(sourceInput: string, expectedRevision: number): boolean {
+  if (!replacePromptIfUnchanged(sourceInput, expectedRevision, '')) {
+    return false;
+  }
+  cachePrompt.cancel();
+  removePendingPrompt();
   return true;
 }
 

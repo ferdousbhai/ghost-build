@@ -66,12 +66,10 @@ export const CodeMirrorEditor = memo(
     const onChangeRef = useRef(onChange);
     const onSaveRef = useRef(onSave);
     const flushPendingChangeRef = useRef<() => void>(() => undefined);
-    const onSaveWithFlushRef = useRef<OnSaveCallback>(() => undefined);
-
-    onSaveWithFlushRef.current = () => {
+    const onSaveWithFlushRef = useRef<OnSaveCallback>(() => {
       flushPendingChangeRef.current();
       onSaveRef.current?.();
-    };
+    });
 
     useImperativeHandle(ref, () => ({ flushPendingChange: () => flushPendingChangeRef.current() }), []);
 

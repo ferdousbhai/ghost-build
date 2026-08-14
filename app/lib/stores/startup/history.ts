@@ -1,10 +1,10 @@
 import { useStore } from '@nanostores/react';
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { api } from '~/lib/cloudflare/data-api';
 import { useQuery } from '~/lib/cloudflare/data-hooks';
-import { useUserIdOrNullOrLoading, waitForUserId } from '~/lib/stores/userId';
+import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { chatSyncWorker, hasPendingCheckpointWork, initializeCheckpointPosition } from './chat-checkpoint-sync-worker';
@@ -24,14 +24,24 @@ export function useChatCheckpointSync(
   const userId = useUserIdOrNullOrLoading();
   const chatInfo = useQuery(api.messages.get, userId ? { id: chatId, sessionId: userId } : 'skip');
 
+  useLayoutEffect(
+    () => () => {
+      const state = chatCheckpointSyncState.get();
+      if (state.accountId === userId && state.chatId === chatId) {
+        chatCheckpointSyncState.set({ ...state, accountId: null, chatId: null, started: false });
+      }
+    },
+    [chatId, userId],
+  );
+
   useEffect(() => {
     if (loadedSubchatIndex !== undefined && subchatIndexStore.get() !== loadedSubchatIndex) {
       subchatIndexStore.set(loadedSubchatIndex);
     }
-    if (initialMessages !== undefined && loadedSubchatIndex !== undefined) {
-      initializeCheckpointPosition(chatId, initialMessages, loadedSubchatIndex, checkpoint ?? null);
+    if (userId && initialMessages !== undefined && loadedSubchatIndex !== undefined) {
+      initializeCheckpointPosition(userId, chatId, initialMessages, loadedSubchatIndex, checkpoint ?? null);
     }
-  }, [chatId, checkpoint, initialMessages, loadedSubchatIndex]);
+  }, [chatId, checkpoint, initialMessages, loadedSubchatIndex, userId]);
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -49,14 +59,15 @@ export function useChatCheckpointSync(
   useEffect(() => {
     const controller = new AbortController();
     const startWorker = async () => {
-      const activeUserId = await waitForUserId('useChatCheckpointSync');
-      controller.signal.throwIfAborted();
+      if (!userId) {
+        return;
+      }
       if (chatInfo && chatInfo.subchatIndex > 0) {
         workbenchStore.showWorkbench.set(true);
       }
       await chatSyncWorker({
         chatId,
-        sessionId: activeUserId,
+        sessionId: userId,
         currentSubchatIndex: subchatIndex,
         latestSubchatIndex: chatInfo?.subchatIndex ?? loadedSubchatIndex,
         abortSignal: controller.signal,
@@ -68,5 +79,5 @@ export function useChatCheckpointSync(
       }
     });
     return () => controller.abort();
-  }, [chatId, subchatIndex, chatInfo, loadedSubchatIndex]);
+  }, [chatId, subchatIndex, chatInfo, loadedSubchatIndex, userId]);
 }

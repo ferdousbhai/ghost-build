@@ -27,7 +27,8 @@ export class BuilderWorkspaceSyncController {
   #revision = 0;
   #operationQueue: Promise<void> = Promise.resolve();
   #disposed = false;
-  readonly #changeListener = (changes: BuilderWorkspaceClientChange[]) => this.push(changes);
+  readonly #changeListener = (changes: BuilderWorkspaceClientChange[], isCurrentChange: () => boolean) =>
+    this.push(changes, isCurrentChange);
 
   private constructor(
     private readonly agent: BuilderWorkspaceAgent,
@@ -38,12 +39,20 @@ export class BuilderWorkspaceSyncController {
 
   static async initialize(
     agent: BuilderWorkspaceAgent,
-    options: { workspaceId?: string; replica?: AccountLocalReplica | null } = {},
+    options: {
+      workspaceId?: string;
+      replica?: AccountLocalReplica | null;
+      isCurrent?: () => boolean;
+    } = {},
   ): Promise<BuilderWorkspaceSyncController> {
     const workspaceId = options.workspaceId ?? 'active';
+    const isCurrent = options.isCurrent ?? (() => true);
+    if (!isCurrent()) {
+      throw new Error('The durable workspace connection was superseded.');
+    }
     workbenchStore.activateWorkspace(workspaceId);
     const state = await callAgent<BuilderWorkspaceState>(agent, 'getWorkspaceState', []);
-    if (!workbenchStore.isWorkspaceActive(workspaceId)) {
+    if (!isCurrent() || !workbenchStore.isWorkspaceActive(workspaceId)) {
       throw new Error('The durable workspace connection was superseded.');
     }
     if (!state.initialized) {
@@ -55,20 +64,26 @@ export class BuilderWorkspaceSyncController {
       replica: options.replica ?? null,
     });
     const controller = new BuilderWorkspaceSyncController(agent, workspaceId, collection, source);
-    workbenchStore.setWorkspaceChangeListener(controller.#changeListener);
     const initialPullOutcome = source.initialPull.then(
       (pull) => ({ ok: true as const, pull }),
       (error: unknown) => ({ ok: false as const, error }),
     );
     try {
       await collection.preload();
+      if (!isCurrent()) {
+        throw new Error('The durable workspace connection was superseded.');
+      }
       controller.#replacePresentationFromCollection();
       const initialPull = await initialPullOutcome;
       if (!initialPull.ok) {
         throw initialPull.error;
       }
+      if (!isCurrent() || !workbenchStore.isWorkspaceActive(workspaceId)) {
+        throw new Error('The durable workspace connection was superseded.');
+      }
       controller.#revision = initialPull.pull.revision;
       controller.#presentPull(initialPull.pull);
+      workbenchStore.setWorkspaceChangeListener(controller.#changeListener);
       return controller;
     } catch (error) {
       controller.dispose();
@@ -86,7 +101,10 @@ export class BuilderWorkspaceSyncController {
     void this.collection.cleanup();
   }
 
-  async push(changes: BuilderWorkspaceClientChange[]): Promise<BuilderWorkspaceApplyResult> {
+  async push(
+    changes: BuilderWorkspaceClientChange[],
+    isCurrentChange: () => boolean = () => true,
+  ): Promise<BuilderWorkspaceApplyResult> {
     if (this.#disposed) {
       throw new Error('The durable workspace connection was closed.');
     }
@@ -109,7 +127,9 @@ export class BuilderWorkspaceSyncController {
           try {
             const pull = await this.source.pull();
             this.#revision = pull.revision;
-            this.#presentPull(pull);
+            if (!this.#disposed) {
+              this.#presentPull(pull, isCurrentChange() ? undefined : new Set(changes.map((change) => change.path)));
+            }
           } catch (error) {
             // The edit is already durable. Preserve success and let the next
             // normal reconciliation retry the browser replica update.
@@ -139,20 +159,29 @@ export class BuilderWorkspaceSyncController {
     });
   }
 
-  #presentPull(pull: BuilderWorkspacePullResult): void {
-    if (!workbenchStore.isWorkspaceActive(this.workspaceId)) {
+  #presentPull(pull: BuilderWorkspacePullResult, preservedPaths?: ReadonlySet<string>): void {
+    if (this.#disposed || !workbenchStore.isWorkspaceActive(this.workspaceId)) {
       return;
     }
     if (pull.mode === 'snapshot') {
-      this.#replacePresentationFromCollection();
+      this.#replacePresentationFromCollection(preservedPaths);
     } else if (pull.entries.length > 0) {
-      workbenchStore.applyWorkspaceSyncEntries(pull.entries);
+      const entries = preservedPaths ? pull.entries.filter((entry) => !preservedPaths.has(entry.path)) : pull.entries;
+      if (entries.length > 0) {
+        workbenchStore.applyWorkspaceSyncEntries(entries);
+      }
     }
   }
 
-  #replacePresentationFromCollection(): void {
-    if (workbenchStore.isWorkspaceActive(this.workspaceId)) {
-      workbenchStore.replaceWorkspaceSnapshot(workspaceCollectionSnapshot(this.collection));
+  #replacePresentationFromCollection(preservedPaths?: ReadonlySet<string>): void {
+    if (this.#disposed || !workbenchStore.isWorkspaceActive(this.workspaceId)) {
+      return;
+    }
+    const snapshot = workspaceCollectionSnapshot(this.collection);
+    if (preservedPaths) {
+      workbenchStore.replaceWorkspaceSnapshot(snapshot, preservedPaths);
+    } else {
+      workbenchStore.replaceWorkspaceSnapshot(snapshot);
     }
   }
 

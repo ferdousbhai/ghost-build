@@ -16,7 +16,10 @@ import { workbenchCurrentView } from './workbench-ui-state';
 
 export type { WorkbenchViewType } from './workbench-ui-state';
 
-type WorkspaceChangeListener = (changes: BuilderWorkspaceClientChange[]) => Promise<BuilderWorkspaceApplyResult>;
+type WorkspaceChangeListener = (
+  changes: BuilderWorkspaceClientChange[],
+  isCurrentChange: () => boolean,
+) => Promise<BuilderWorkspaceApplyResult>;
 
 export class WorkbenchStore {
   #previewsStore = new PreviewsStore();
@@ -24,6 +27,9 @@ export class WorkbenchStore {
   #editorStore = new EditorStore();
   #flushPendingEditorChange: (() => void) | null = null;
   #workspaceId: string | null = null;
+  #workspaceGeneration = 0;
+  #editVersions = new Map<AbsolutePath, number>();
+  #pendingSaveCounts = new Map<AbsolutePath, number>();
   showWorkbench: WritableAtom<boolean> = import.meta.hot?.data.showWorkbench ?? atom(false);
   currentView = workbenchCurrentView;
   unsavedFiles: WritableAtom<Set<AbsolutePath>> = import.meta.hot?.data.unsavedFiles ?? atom(new Set<AbsolutePath>());
@@ -89,7 +95,10 @@ export class WorkbenchStore {
       return;
     }
     this.#workspaceId = workspaceId;
+    this.#workspaceGeneration += 1;
     this.#flushPendingEditorChange = null;
+    this.#editVersions.clear();
+    this.#pendingSaveCounts.clear();
     this.#filesStore.setWorkspaceChangeListener(null);
     this.unsavedFiles.set(new Set());
     this.#filesStore.replaceWorkspaceSnapshot([]);
@@ -99,6 +108,10 @@ export class WorkbenchStore {
     this.#previewsStore.reset();
     this.currentView.set('code');
     this.showWorkbench.set(false);
+  }
+
+  getActiveWorkspaceId(): string | null {
+    return this.#workspaceId;
   }
 
   isWorkspaceActive(workspaceId: string): boolean {
@@ -111,7 +124,7 @@ export class WorkbenchStore {
     this.setDocuments(this.#filesStore.files.get());
   }
 
-  replaceWorkspaceSnapshot(entries: BuilderWorkspaceSyncEntry[]): void {
+  replaceWorkspaceSnapshot(entries: BuilderWorkspaceSyncEntry[], preservedPaths?: ReadonlySet<string>): void {
     this.flushPendingEditorChange();
 
     const unsavedFiles = this.unsavedFiles.get();
@@ -123,7 +136,7 @@ export class WorkbenchStore {
         ),
     );
 
-    this.#filesStore.replaceWorkspaceSnapshot(entries);
+    this.#filesStore.replaceWorkspaceSnapshot(entries, preservedPaths);
 
     const durableFiles = this.#filesStore.files.get();
     const nextUnsavedFiles = new Set<AbsolutePath>();
@@ -131,7 +144,7 @@ export class WorkbenchStore {
     for (const [filePath, document] of unsavedDocuments) {
       const durableFile = durableFiles[filePath];
       if (durableFile?.type === 'file' && !durableFile.isBinary) {
-        if (durableFile.content !== document.value) {
+        if (durableFile.content !== document.value || preservedPaths?.has(filePath)) {
           nextUnsavedFiles.add(filePath);
         }
         continue;
@@ -177,7 +190,12 @@ export class WorkbenchStore {
       return;
     }
     const originalContent = this.#filesStore.getFile(filePath)?.content;
-    const unsavedChanges = originalContent !== undefined && originalContent !== newContent;
+    const unsavedChanges =
+      originalContent !== undefined &&
+      (originalContent !== newContent || (this.#pendingSaveCounts.get(filePath) ?? 0) > 0);
+    if (document.value !== newContent) {
+      this.#editVersions.set(filePath, (this.#editVersions.get(filePath) ?? 0) + 1);
+    }
     this.#editorStore.updateFile(filePath, newContent);
     const next = new Set(this.unsavedFiles.get());
     if (unsavedChanges) {
@@ -203,14 +221,50 @@ export class WorkbenchStore {
   async saveFile(filePath: string): Promise<void> {
     this.flushPendingEditorChange();
     const absolutePath = getAbsolutePath(filePath);
-    const document = this.#editorStore.documents.get()[absolutePath];
-    if (!document) {
+
+    while (true) {
+      const document = this.#editorStore.documents.get()[absolutePath];
+      if (!document) {
+        if (this.unsavedFiles.get().has(absolutePath)) {
+          throw new Error(`Cannot save ${absolutePath}: the editor document is unavailable.`);
+        }
+        return;
+      }
+      const content = document.value;
+      const editVersion = this.#editVersions.get(absolutePath) ?? 0;
+      const isCurrentEdit = () =>
+        (this.#editVersions.get(absolutePath) ?? 0) === editVersion &&
+        this.#editorStore.documents.get()[absolutePath]?.value === content;
+      const workspaceGeneration = this.#workspaceGeneration;
+      this.#pendingSaveCounts.set(absolutePath, (this.#pendingSaveCounts.get(absolutePath) ?? 0) + 1);
+      let savedCurrentEdit: boolean;
+      try {
+        savedCurrentEdit = await this.#filesStore.saveFile(absolutePath, content, () => {
+          this.flushPendingEditorChange();
+          return isCurrentEdit();
+        });
+      } finally {
+        if (this.#workspaceGeneration === workspaceGeneration) {
+          const remainingSaves = (this.#pendingSaveCounts.get(absolutePath) ?? 1) - 1;
+          if (remainingSaves === 0) {
+            this.#pendingSaveCounts.delete(absolutePath);
+          } else {
+            this.#pendingSaveCounts.set(absolutePath, remainingSaves);
+          }
+        }
+      }
+      this.flushPendingEditorChange();
+      if (!savedCurrentEdit || !isCurrentEdit()) {
+        const next = new Set(this.unsavedFiles.get());
+        next.add(absolutePath);
+        this.unsavedFiles.set(next);
+        continue;
+      }
+      const next = new Set(this.unsavedFiles.get());
+      next.delete(absolutePath);
+      this.unsavedFiles.set(next);
       return;
     }
-    await this.#filesStore.saveFile(absolutePath, document.value);
-    const next = new Set(this.unsavedFiles.get());
-    next.delete(absolutePath);
-    this.unsavedFiles.set(next);
   }
 
   async saveCurrentDocument(): Promise<void> {
@@ -222,8 +276,11 @@ export class WorkbenchStore {
 
   async saveUnsavedFiles(): Promise<void> {
     this.flushPendingEditorChange();
-    for (const filePath of [...this.unsavedFiles.get()]) {
-      await this.saveFile(filePath);
+    while (this.unsavedFiles.get().size > 0) {
+      for (const filePath of [...this.unsavedFiles.get()]) {
+        await this.saveFile(filePath);
+      }
+      this.flushPendingEditorChange();
     }
   }
 

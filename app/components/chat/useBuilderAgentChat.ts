@@ -1,7 +1,7 @@
 import { useAgentChat } from '@cloudflare/ai-chat/react';
 import { useAgent } from 'agents/react';
 import { useStore } from '@nanostores/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BuilderAgent, BuilderAgentState, BuilderSteeringInput } from '~/agents/builder-agent';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { isAuthenticated } from '~/lib/stores/userId';
@@ -56,15 +56,14 @@ export function useBuilderAgentChat(args: {
   transcript: TranscriptIdentity;
 }) {
   const activePresentationRef = useRef<string | null>(args.presentationId);
-  activePresentationRef.current = args.presentationId;
-  useEffect(
-    () => () => {
+  useLayoutEffect(() => {
+    activePresentationRef.current = args.presentationId;
+    return () => {
       if (activePresentationRef.current === args.presentationId) {
         activePresentationRef.current = null;
       }
-    },
-    [args.presentationId],
-  );
+    };
+  }, [args.presentationId]);
   const transcript = useMemo<TranscriptIdentity>(
     () => ({
       agentName: args.transcript.agentName,
@@ -76,9 +75,10 @@ export function useBuilderAgentChat(args: {
   const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
   const previousSubchatIndexRef = useRef(currentSubchatIndex);
   const workspaceReplica = useAccountLocalReplica(args.accountId);
-  const [workspacePresentationState, setWorkspacePresentationState] = useState<
-    'connecting' | 'ready' | 'presentation-error'
-  >('connecting');
+  const [workspacePresentation, setWorkspacePresentation] = useState<{
+    gate: AsyncGate;
+    state: 'ready' | 'presentation-error';
+  } | null>(null);
   const queryClient = useQueryClient();
   const generatedSubchatTitleUpdatedAtRef = useRef<string | null>(null);
   const runtimeEndpoint = new URL(requireUserRuntimeEndpoint());
@@ -115,7 +115,7 @@ export function useBuilderAgentChat(args: {
     },
   });
   const workspaceControllerRef = useRef<BuilderWorkspaceSyncController | null>(null);
-  const workspaceGateRef = useAsyncGate(args.presentationId);
+  const workspaceGateRef = useMemo(() => ({ current: createAsyncGate(args.presentationId) }), [args.presentationId]);
   const chat = useAgentChat<BuilderAgentState, UIMessage>({
     agent: builderAgent,
     getInitialMessages: null,
@@ -137,7 +137,12 @@ export function useBuilderAgentChat(args: {
       };
     },
     onData: (part) => {
-      if (part.type !== 'data-tool-progress' || !part.data || typeof part.data !== 'object') {
+      if (
+        activePresentationRef.current !== args.presentationId ||
+        part.type !== 'data-tool-progress' ||
+        !part.data ||
+        typeof part.data !== 'object'
+      ) {
         return;
       }
       const progress = part.data as Record<string, unknown>;
@@ -150,6 +155,9 @@ export function useBuilderAgentChat(args: {
       }
     },
     onError: (error: Error) => {
+      if (activePresentationRef.current !== args.presentationId) {
+        return;
+      }
       captureMessage('Failed to process chat request', { level: 'error' });
       logger.error('Chat request failed', error);
       recordChatFailure(error.message.includes(STATUS_MESSAGES.error));
@@ -167,12 +175,13 @@ export function useBuilderAgentChat(args: {
       );
     },
     onFinish: ({ finishReason, message }) => {
-      toolProgressStore.clear();
-      if (activePresentationRef.current === args.presentationId) {
-        // Record final tool outputs before stopping any provider-ended incomplete
-        // calls; sampled message processing may not have observed the last chunk yet.
-        toolActivityStore.finishTurn(message as GhostbuildMessage);
+      if (activePresentationRef.current !== args.presentationId) {
+        return;
       }
+      toolProgressStore.clear();
+      // Record final tool outputs before stopping any provider-ended incomplete
+      // calls; sampled message processing may not have observed the last chunk yet.
+      toolActivityStore.finishTurn(message as GhostbuildMessage);
       if (finishReason === 'stop') {
         resetChatRetryState();
       }
@@ -193,11 +202,13 @@ export function useBuilderAgentChat(args: {
   const builderTranscriptRef = useRef(builderAgent.state?.transcript);
   const stopBarrierRef = useRef<Promise<void>>(Promise.resolve());
   const initialMessagesRef = useRef(args.initialMessages);
-  setMessagesRef.current = chat.setMessages;
-  messagesRef.current = chat.messages as GhostbuildMessage[];
-  chatTerminalStateRef.current = { status: chat.status, isRecovering: chat.isRecovering };
-  builderTranscriptRef.current = builderAgent.state?.transcript;
-  initialMessagesRef.current = args.initialMessages;
+  useLayoutEffect(() => {
+    setMessagesRef.current = chat.setMessages;
+    messagesRef.current = chat.messages as GhostbuildMessage[];
+    chatTerminalStateRef.current = { status: chat.status, isRecovering: chat.isRecovering };
+    builderTranscriptRef.current = builderAgent.state?.transcript;
+    initialMessagesRef.current = args.initialMessages;
+  });
 
   const readAuthoritativeTranscript = useCallback(
     () =>
@@ -223,7 +234,7 @@ export function useBuilderAgentChat(args: {
       const state = (await builderAgent.call(method, [], {
         timeout: method === 'getPreviewState' ? 10_000 : 30_000,
       })) as NonNullable<BuilderAgentState['preview']>;
-      if (!disposed) {
+      if (!disposed && activePresentationRef.current === args.presentationId) {
         workbenchStore.updatePreview(state);
       }
       return state;
@@ -236,46 +247,61 @@ export function useBuilderAgentChat(args: {
       disposed = true;
       disconnect();
     };
-  }, [builderAgent]);
+  }, [args.presentationId, builderAgent]);
 
   useEffect(() => {
+    const previousGate = workspaceGateRef.current;
+    const gate = previousGate.started ? createAsyncGate(args.presentationId) : previousGate;
+    workspaceGateRef.current = gate;
+    setWorkspacePresentation((presentation) => (presentation?.gate === gate ? presentation : null));
+    const settleSupersededGate = () => {
+      gate.error ??= new Error('The durable workspace initialization was superseded.');
+      gate.resolve();
+    };
     if (workspaceReplica === undefined) {
-      return () => undefined;
-    }
-    const gate = workspaceGateRef.current;
-    if (gate.key !== args.presentationId || gate.started) {
-      return () => undefined;
+      return () => {
+        if (activePresentationRef.current !== args.presentationId) {
+          settleSupersededGate();
+        }
+      };
     }
     gate.started = true;
     gate.error = null;
     let disposed = false;
     let sendGateResolved = false;
     let activeController: BuilderWorkspaceSyncController | null = null;
+    const isCurrentPresentation = () =>
+      !disposed && activePresentationRef.current === args.presentationId && workspaceGateRef.current === gate;
     void (async () => {
       try {
         await waitForAgentSocketOpen(builderAgent, AGENT_SEND_READY_TIMEOUT_MS, { requireIdentity: false });
+        if (!isCurrentPresentation()) {
+          return;
+        }
         const state = (await builderAgent.call('prepareWorkspace', [])) as { initialized?: boolean };
         if (!state.initialized) {
           throw new Error('The durable project workspace was not initialized.');
         }
-        if (!disposed && workspaceGateRef.current === gate) {
-          sendGateResolved = true;
-          gate.resolve();
+        if (!isCurrentPresentation()) {
+          return;
         }
+        sendGateResolved = true;
+        gate.resolve();
         const controller = await BuilderWorkspaceSyncController.initialize(builderAgent as never, {
           workspaceId: args.presentationId,
           replica: workspaceReplica,
+          isCurrent: isCurrentPresentation,
         });
-        if (disposed || workspaceGateRef.current !== gate) {
+        if (!isCurrentPresentation()) {
           controller.dispose();
           return;
         }
         workspaceControllerRef.current?.dispose();
         activeController = controller;
         workspaceControllerRef.current = controller;
-        setWorkspacePresentationState('ready');
+        setWorkspacePresentation({ gate, state: 'ready' });
       } catch (workspaceError) {
-        if (!disposed && workspaceGateRef.current === gate) {
+        if (isCurrentPresentation()) {
           if (!sendGateResolved) {
             gate.error = workspaceError;
           }
@@ -286,19 +312,19 @@ export function useBuilderAgentChat(args: {
             workspaceError,
           );
           if (sendGateResolved) {
-            setWorkspacePresentationState('presentation-error');
+            setWorkspacePresentation({ gate, state: 'presentation-error' });
           }
         }
       } finally {
-        if (!disposed && workspaceGateRef.current === gate && !sendGateResolved) {
+        if (isCurrentPresentation() && !sendGateResolved) {
           gate.resolve();
         }
       }
     })();
     return () => {
       disposed = true;
+      settleSupersededGate();
       activeController?.dispose();
-      gate.started = false;
       if (workspaceControllerRef.current === activeController) {
         workspaceControllerRef.current = null;
       }
@@ -312,10 +338,17 @@ export function useBuilderAgentChat(args: {
       onRequestStart?: () => void,
     ) => {
       const workspaceGate = workspaceGateRef.current;
+      const assertCurrentPresentation = () => {
+        if (
+          activePresentationRef.current !== args.presentationId ||
+          workspaceGateRef.current !== workspaceGate ||
+          workspaceGate.error
+        ) {
+          throw workspaceGate.error ?? new Error('The durable workspace initialization was superseded.');
+        }
+      };
       await Promise.all([workspaceGate.promise, stopBarrierRef.current]);
-      if (workspaceGate.error) {
-        throw workspaceGate.error;
-      }
+      assertCurrentPresentation();
       try {
         await waitForAgentSocketOpen(builderAgent, AGENT_SEND_READY_TIMEOUT_MS, { requireIdentity: false });
       } catch (error) {
@@ -325,13 +358,16 @@ export function useBuilderAgentChat(args: {
         });
         throw error;
       }
+      assertCurrentPresentation();
       if (message && typeof message === 'object') {
         const snapshot = await readAuthoritativeTranscript();
+        assertCurrentPresentation();
         const localMessages = messagesRef.current;
         const reconciledMessages = await reconcileMessagesForSend({
           snapshot,
           localMessages,
         });
+        assertCurrentPresentation();
         if (reconciledMessages !== localMessages) {
           setMessagesRef.current(reconciledMessages as UIMessage[]);
         }
@@ -360,7 +396,7 @@ export function useBuilderAgentChat(args: {
       onRequestStart?.();
       return request;
     },
-    [builderAgent, chat, readAuthoritativeTranscript, workspaceGateRef],
+    [args.presentationId, builderAgent, chat, readAuthoritativeTranscript, workspaceGateRef],
   );
 
   const deployValidatedRevision = useCallback(async () => {
@@ -372,14 +408,22 @@ export function useBuilderAgentChat(args: {
   const steerMessage = useCallback(
     async (input: BuilderSteeringInput) => {
       const workspaceGate = workspaceGateRef.current;
+      const assertCurrentPresentation = () => {
+        if (
+          activePresentationRef.current !== args.presentationId ||
+          workspaceGateRef.current !== workspaceGate ||
+          workspaceGate.error
+        ) {
+          throw workspaceGate.error ?? new Error('The durable workspace initialization was superseded.');
+        }
+      };
       await workspaceGate.promise;
-      if (workspaceGate.error) {
-        throw workspaceGate.error;
-      }
+      assertCurrentPresentation();
       await waitForAgentSocketOpen(builderAgent, AGENT_SEND_READY_TIMEOUT_MS, { requireIdentity: false });
+      assertCurrentPresentation();
       await builderAgent.call('steerActiveTurn', [input]);
     },
-    [builderAgent, workspaceGateRef],
+    [args.presentationId, builderAgent, workspaceGateRef],
   );
 
   const stop = useCallback(() => {
@@ -417,11 +461,12 @@ export function useBuilderAgentChat(args: {
       return undefined;
     }
     let disposed = false;
+    const isCurrentPresentation = () => !disposed && activePresentationRef.current === args.presentationId;
     void readAuthoritativeTranscript()
       .then(async (snapshot) => {
         const terminal = chatTerminalStateRef.current;
         if (
-          disposed ||
+          !isCurrentPresentation() ||
           (terminal.status !== 'ready' && terminal.status !== 'error') ||
           terminal.isRecovering ||
           !transcriptCheckpointsEqual(builderTranscriptRef.current ?? null, snapshot.checkpoint)
@@ -430,7 +475,7 @@ export function useBuilderAgentChat(args: {
         }
         const localMessages = messagesRef.current;
         const reconciledMessages = await reconcileMessagesForSend({ snapshot, localMessages });
-        if (!disposed && reconciledMessages !== localMessages) {
+        if (isCurrentPresentation() && reconciledMessages !== localMessages) {
           setMessagesRef.current(reconciledMessages as UIMessage[]);
         }
       })
@@ -438,7 +483,13 @@ export function useBuilderAgentChat(args: {
     return () => {
       disposed = true;
     };
-  }, [builderAgent.state?.transcript, chat.isRecovering, chat.status, readAuthoritativeTranscript]);
+  }, [
+    args.presentationId,
+    builderAgent.state?.transcript,
+    chat.isRecovering,
+    chat.status,
+    readAuthoritativeTranscript,
+  ]);
 
   return {
     ...chat,
@@ -454,7 +505,8 @@ export function useBuilderAgentChat(args: {
     validationStage: builderAgent.state?.validationProgress?.stage ?? null,
     deployment: builderAgent.state?.deployment ?? null,
     deployValidatedRevision,
-    workspacePresentationState,
+    workspacePresentationState:
+      workspacePresentation?.gate === workspaceGateRef.current ? workspacePresentation.state : 'connecting',
   };
 }
 
@@ -465,14 +517,6 @@ type AsyncGate = {
   error: unknown;
   started: boolean;
 };
-
-function useAsyncGate(key: string | null): { current: AsyncGate } {
-  const gateRef = useRef<AsyncGate | null>(null);
-  if (gateRef.current?.key !== key) {
-    gateRef.current = createAsyncGate(key);
-  }
-  return gateRef as { current: AsyncGate };
-}
 
 function createAsyncGate(key: string | null): AsyncGate {
   if (key === null) {

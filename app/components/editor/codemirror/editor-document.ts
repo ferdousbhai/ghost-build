@@ -73,7 +73,15 @@ function restoreDocumentPosition(
     const needsScrolling = view.scrollDOM.scrollLeft !== newLeft || view.scrollDOM.scrollTop !== newTop;
     if (autoFocus) {
       if (needsScrolling) {
-        view.scrollDOM.addEventListener('scroll', () => view.focus(), { once: true });
+        view.scrollDOM.addEventListener(
+          'scroll',
+          () => {
+            if (isCurrentDocument()) {
+              view.focus();
+            }
+          },
+          { once: true },
+        );
       } else {
         view.focus();
       }

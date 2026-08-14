@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { markdownRehypePlugins, markdownRemarkPlugins } from '~/utils/markdown';
@@ -13,37 +13,31 @@ interface MarkdownProps {
   children: string;
 }
 
+const markdownComponents = {
+  pre: (props) => {
+    const { children, node, ...preProps } = props;
+    const [firstChild] = node?.children ?? [];
+    const firstCodeChild = firstChild?.type === 'element' ? firstChild.children[0] : undefined;
+
+    if (firstChild?.type === 'element' && firstChild.tagName === 'code' && firstCodeChild?.type === 'text') {
+      const { className, ...codeProps } = firstChild.properties;
+      const [, language = 'plaintext'] = /language-(\w+)/.exec(String(className) || '') ?? [];
+
+      return <CodeBlock code={firstCodeChild.value} language={language} {...codeProps} />;
+    }
+
+    return <pre {...preProps}>{children}</pre>;
+  },
+} satisfies Components;
+
 export const Markdown = memo(function Markdown({ children }: MarkdownProps) {
   logger.trace('Render');
-
-  const components: Components = useMemo(() => {
-    return {
-      pre: (props) => {
-        const { children, node, ...rest } = props;
-        const [firstChild] = node?.children ?? [];
-
-        if (
-          firstChild &&
-          firstChild.type === 'element' &&
-          firstChild.tagName === 'code' &&
-          firstChild.children[0].type === 'text'
-        ) {
-          const { className, ...rest } = firstChild.properties;
-          const [, language = 'plaintext'] = /language-(\w+)/.exec(String(className) || '') ?? [];
-
-          return <CodeBlock code={firstChild.children[0].value} language={language} {...rest} />;
-        }
-
-        return <pre {...rest}>{children}</pre>;
-      },
-    } satisfies Components;
-  }, []);
 
   return (
     <ReactMarkdown
       allowedElements={allowedHTMLElements}
       className={styles.MarkdownContent}
-      components={components}
+      components={markdownComponents}
       remarkPlugins={markdownRemarkPlugins}
       rehypePlugins={markdownRehypePlugins}
     >

@@ -9,7 +9,7 @@ import {
   PlusIcon,
 } from '@radix-ui/react-icons';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import { Spinner } from '@ui/Spinner';
 import { useAreFilesSaving } from '~/lib/stores/fileUpdateCounter';
@@ -17,6 +17,7 @@ import { SubchatDialogs } from './SubchatDialogs';
 import { createSubchatOptions, getSubchatLabel, getSubchatNavigation, type SubchatSummary } from './subchat-model';
 
 interface SubchatBarProps {
+  chatId: string;
   subchats?: SubchatSummary[];
   currentSubchatIndex: number;
   isStreaming: boolean;
@@ -24,11 +25,11 @@ interface SubchatBarProps {
   userId: string | null;
   handleCreateSubchat: () => Promise<boolean>;
   handleRenameSubchat: (title: string) => Promise<boolean>;
-  onSubchatTitleChange?: (subchatIndex: number, title: string) => void;
   isSubchatLoaded: boolean;
 }
 
 export function SubchatBar({
+  chatId,
   subchats,
   currentSubchatIndex,
   isStreaming,
@@ -36,15 +37,25 @@ export function SubchatBar({
   userId,
   handleCreateSubchat,
   handleRenameSubchat,
-  onSubchatTitleChange,
   isSubchatLoaded,
 }: SubchatBarProps) {
-  const [isAddChatModalOpen, setIsAddChatModalOpen] = useState(false);
-  const [isCreatingSubchat, setIsCreatingSubchat] = useState(false);
-  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
-  const [renameValue, setRenameValue] = useState('');
-  const [isRenaming, setIsRenaming] = useState(false);
+  const interactionContext = JSON.stringify([userId, chatId, currentSubchatIndex]);
+  const [createDialog, setCreateDialog] = useState<{ context: string; token: symbol } | null>(null);
+  const activeCreateDialog = createDialog?.context === interactionContext ? createDialog : null;
+  const [pendingCreates, setPendingCreates] = useState<ReadonlyMap<string, symbol>>(() => new Map());
+  const activeCreateToken = pendingCreates.get(interactionContext);
+  const isCreatingSubchat = activeCreateToken !== undefined;
+  const [renameDialog, setRenameDialog] = useState<{ context: string; token: symbol; value: string } | null>(null);
+  const activeRenameDialog = renameDialog?.context === interactionContext ? renameDialog : null;
+  const [pendingRenames, setPendingRenames] = useState<ReadonlyMap<string, symbol>>(() => new Map());
+  const activeRenameToken = pendingRenames.get(interactionContext);
+  const isRenaming = activeRenameToken !== undefined;
   const areFilesSaving = useAreFilesSaving();
+
+  useEffect(() => {
+    setCreateDialog(null);
+    setRenameDialog(null);
+  }, [interactionContext]);
 
   const subchatCount = subchats?.length ?? 1;
   const { hasMultipleSubchats, canNavigatePrev, canNavigateNext, canCreateSubchat } = getSubchatNavigation(
@@ -87,8 +98,7 @@ export function SubchatBar({
   const currentSubchatLabel = currentSubchat?.label ?? fallbackSubchatLabel;
   const chatPositionLabel = `Chat ${currentSubchatIndex + 1} of ${subchatCount}`;
   const openRenameModal = () => {
-    setRenameValue(currentSubchatLabel);
-    setIsRenameModalOpen(true);
+    setRenameDialog({ context: interactionContext, token: Symbol('rename-dialog'), value: currentSubchatLabel });
   };
   const chatTitle = userId ? (
     <button
@@ -114,50 +124,79 @@ export function SubchatBar({
   return (
     <nav aria-label="Chat history" className="mx-auto mb-6 w-full max-w-chat px-3 pt-5 sm:px-0">
       <SubchatDialogs
-        createOpen={isAddChatModalOpen}
-        renameOpen={isRenameModalOpen}
-        renameValue={renameValue}
-        renamePending={isRenaming}
-        renameDisabled={!renameValue.trim() || isRenaming}
+        createOpen={activeCreateDialog !== null}
+        renameOpen={activeRenameDialog !== null}
+        renameValue={activeRenameDialog?.value ?? ''}
+        renamePending={activeRenameDialog !== null && activeRenameDialog.token === activeRenameToken}
+        renameDisabled={!activeRenameDialog?.value.trim() || isRenaming}
         createDisabled={interactionsDisabled}
         closeCreate={() => {
           if (!isCreatingSubchat) {
-            setIsAddChatModalOpen(false);
+            const dialogToken = activeCreateDialog?.token;
+            setCreateDialog((current) =>
+              current?.context === interactionContext && current.token === dialogToken ? null : current,
+            );
           }
         }}
         closeRename={() => {
           if (!isRenaming) {
-            setIsRenameModalOpen(false);
+            const dialogToken = activeRenameDialog?.token;
+            setRenameDialog((current) =>
+              current?.context === interactionContext && current.token === dialogToken ? null : current,
+            );
           }
         }}
-        setRenameValue={setRenameValue}
-        createPending={isCreatingSubchat}
+        setRenameValue={(value) => {
+          const dialogToken = activeRenameDialog?.token;
+          setRenameDialog((current) =>
+            current?.context === interactionContext && current.token === dialogToken ? { ...current, value } : current,
+          );
+        }}
+        createPending={activeCreateDialog !== null && activeCreateDialog.token === activeCreateToken}
         confirmCreate={async () => {
-          if (interactionsDisabled) {
+          if (interactionsDisabled || !activeCreateDialog) {
             return;
           }
-          setIsCreatingSubchat(true);
+          const { context, token } = activeCreateDialog;
+          setPendingCreates((current) => new Map(current).set(context, token));
           try {
             if (await handleCreateSubchat()) {
-              setIsAddChatModalOpen(false);
+              setCreateDialog((current) => (current?.context === context && current.token === token ? null : current));
             }
           } finally {
-            setIsCreatingSubchat(false);
+            setPendingCreates((current) => {
+              if (current.get(context) !== token) {
+                return current;
+              }
+              const next = new Map(current);
+              next.delete(context);
+              return next;
+            });
           }
         }}
         confirmRename={async () => {
-          const title = renameValue.trim();
-          if (!userId || !title || isRenaming) {
+          if (!userId || !activeRenameDialog || isRenaming || activeRenameDialog.context !== interactionContext) {
             return;
           }
-          setIsRenaming(true);
+          const title = activeRenameDialog.value.trim();
+          if (!title) {
+            return;
+          }
+          const { context, token } = activeRenameDialog;
+          setPendingRenames((current) => new Map(current).set(context, token));
           try {
             if (await handleRenameSubchat(title)) {
-              onSubchatTitleChange?.(currentSubchatIndex, title);
-              setIsRenameModalOpen(false);
+              setRenameDialog((current) => (current?.context === context && current.token === token ? null : current));
             }
           } finally {
-            setIsRenaming(false);
+            setPendingRenames((current) => {
+              if (current.get(context) !== token) {
+                return current;
+              }
+              const next = new Map(current);
+              next.delete(context);
+              return next;
+            });
           }
         }}
       />
@@ -279,7 +318,7 @@ export function SubchatBar({
               aria-label="Start a new chat"
               tip={busyTip ?? (chatDisabled ? 'New chat unavailable' : 'Start a new chat with fresh context')}
               onClick={() => {
-                setIsAddChatModalOpen(true);
+                setCreateDialog({ context: interactionContext, token: Symbol('create-dialog') });
               }}
             >
               <span className="hidden sm:inline">New chat</span>

@@ -1,6 +1,6 @@
 import { api } from '~/lib/cloudflare/data-api';
 import { executeDataOperation } from '~/lib/cloudflare/client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { description as descriptionStore } from '~/lib/stores/description';
 import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
@@ -8,6 +8,7 @@ import { useChatId } from '~/lib/stores/chatId';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 
 const logger = createScopedLogger('useEditChatDescription');
+const inFlightDescriptionSubmissions = new Map<string, symbol>();
 
 type DescriptionValidationResult = 'valid' | 'unchanged' | 'invalidLength' | 'invalidCharacters';
 
@@ -48,18 +49,60 @@ export function useEditChatDescription({
 }: EditChatDescriptionOptions): EditChatDescriptionHook {
   const chatIdFromRoute = useChatId();
   const userId = useUserIdOrNullOrLoading();
-  const [editing, setEditing] = useState(false);
-  const [currentDescription, setCurrentDescription] = useState(initialDescription);
   const chatId = customChatId || chatIdFromRoute;
-  useEffect(() => {
-    setCurrentDescription(initialDescription);
+  const editScope = `${chatId ?? ''}:${userId ?? ''}:${syncWithGlobalStore ? 'global' : 'local'}`;
+  const [editingState, setEditingState] = useState({ scope: editScope, value: false });
+  const [descriptionState, setDescriptionState] = useState({
+    scope: editScope,
+    initialDescription,
+    value: initialDescription,
+  });
+  const editing = editingState.scope === editScope && editingState.value;
+  const currentDescription =
+    descriptionState.scope === editScope && descriptionState.initialDescription === initialDescription
+      ? descriptionState.value
+      : initialDescription;
+  const interactionVersionRef = useRef(0);
+  const submittingRef = useRef<symbol | null>(null);
+  const canonicalDescriptionRef = useRef(initialDescription);
+  const cancelPendingInteractions = useCallback(() => {
+    interactionVersionRef.current++;
+    submittingRef.current = null;
+  }, []);
+
+  useLayoutEffect(() => {
+    canonicalDescriptionRef.current = initialDescription;
+    interactionVersionRef.current++;
   }, [initialDescription]);
 
-  const toggleEditMode = useCallback(() => setEditing((prev) => !prev), []);
+  useLayoutEffect(() => {
+    cancelPendingInteractions();
+    const canonicalDescription = canonicalDescriptionRef.current;
+    setEditingState({ scope: editScope, value: false });
+    setDescriptionState({
+      scope: editScope,
+      initialDescription: canonicalDescription,
+      value: canonicalDescription,
+    });
 
-  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setCurrentDescription(e.target.value);
-  }, []);
+    return cancelPendingInteractions;
+  }, [cancelPendingInteractions, editScope]);
+
+  const toggleEditMode = useCallback(() => {
+    interactionVersionRef.current++;
+    setEditingState((current) => ({
+      scope: editScope,
+      value: current.scope === editScope ? !current.value : true,
+    }));
+  }, [editScope]);
+
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      interactionVersionRef.current++;
+      setDescriptionState({ scope: editScope, initialDescription, value: e.target.value });
+    },
+    [editScope, initialDescription],
+  );
 
   const fetchLatestDescription = useCallback(async () => {
     if (!chatId || !userId) {
@@ -76,25 +119,48 @@ export function useEditChatDescription({
   }, [chatId, userId, initialDescription]);
 
   const handleBlur = useCallback(async () => {
+    if (submittingRef.current) {
+      return;
+    }
+    const interactionVersion = ++interactionVersionRef.current;
     const latestDescription = await fetchLatestDescription();
-    setCurrentDescription(latestDescription);
-    toggleEditMode();
-  }, [fetchLatestDescription, toggleEditMode]);
+    if (submittingRef.current || interactionVersionRef.current !== interactionVersion) {
+      return;
+    }
+    setDescriptionState({ scope: editScope, initialDescription, value: latestDescription });
+    setEditingState({ scope: editScope, value: false });
+  }, [editScope, fetchLatestDescription, initialDescription]);
 
   const handleSubmit = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
+      const resourceKey = JSON.stringify([chatId, userId]);
+      if (inFlightDescriptionSubmissions.has(resourceKey)) {
+        return;
+      }
 
-      const validationResult = validateDescription(currentDescription, initialDescription);
+      const submission = Symbol('description-submission');
+      const submittedDescription = currentDescription;
+      inFlightDescriptionSubmissions.set(resourceKey, submission);
+      submittingRef.current = submission;
+      interactionVersionRef.current++;
+
+      const validationResult = validateDescription(submittedDescription, initialDescription);
       if (validationResult === 'unchanged') {
-        toggleEditMode();
+        inFlightDescriptionSubmissions.delete(resourceKey);
+        submittingRef.current = null;
+        setEditingState({ scope: editScope, value: false });
         return;
       }
       if (validationResult === 'invalidLength') {
+        inFlightDescriptionSubmissions.delete(resourceKey);
+        submittingRef.current = null;
         toast.error('Description must be between 1 and 100 characters.');
         return;
       }
       if (validationResult === 'invalidCharacters') {
+        inFlightDescriptionSubmissions.delete(resourceKey);
+        submittingRef.current = null;
         toast.error('Description can only contain letters, numbers, spaces, basic punctuation, and inline Markdown.');
         return;
       }
@@ -108,21 +174,37 @@ export function useEditChatDescription({
         await executeDataOperation(api.messages.setDescription, {
           id: chatId,
           sessionId: userId,
-          description: currentDescription,
+          description: submittedDescription,
         });
+        if (submittingRef.current !== submission) {
+          return;
+        }
 
+        setDescriptionState({
+          scope: editScope,
+          initialDescription: canonicalDescriptionRef.current,
+          value: submittedDescription,
+        });
         if (syncWithGlobalStore) {
-          descriptionStore.set(currentDescription);
+          descriptionStore.set(submittedDescription);
         }
 
         toast.success('Chat description updated successfully');
       } catch (error) {
-        toast.error('Failed to update chat description: ' + errorMessage(error));
+        if (submittingRef.current === submission) {
+          toast.error('Failed to update chat description: ' + errorMessage(error));
+        }
+      } finally {
+        if (inFlightDescriptionSubmissions.get(resourceKey) === submission) {
+          inFlightDescriptionSubmissions.delete(resourceKey);
+        }
+        if (submittingRef.current === submission) {
+          submittingRef.current = null;
+          setEditingState({ scope: editScope, value: false });
+        }
       }
-
-      toggleEditMode();
     },
-    [currentDescription, chatId, initialDescription, toggleEditMode, syncWithGlobalStore, userId],
+    [currentDescription, chatId, editScope, initialDescription, syncWithGlobalStore, userId],
   );
 
   const handleKeyDown = useCallback(

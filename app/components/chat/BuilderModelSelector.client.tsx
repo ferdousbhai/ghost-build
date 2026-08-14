@@ -16,7 +16,8 @@ export function BuilderModelSelector({ compact = false, disabled = false }: { co
   const modelId = useStore(builderModelStore);
   const defaultModelId = useStore(builderDefaultModelStore);
   const model = getWorkersAiModel(modelId);
-  const [open, setOpen] = useState(false);
+  const [openRequested, setOpenRequested] = useState(false);
+  const open = !disabled && openRequested;
 
   useEffect(() => {
     loadBuilderModelPreference();
@@ -26,12 +27,12 @@ export function BuilderModelSelector({ compact = false, disabled = false }: { co
 
   useEffect(() => {
     if (disabled) {
-      setOpen(false);
+      setOpenRequested(false);
     }
   }, [disabled]);
 
   return (
-    <DropdownMenu.Root open={open} onOpenChange={setOpen}>
+    <DropdownMenu.Root open={open} onOpenChange={(nextOpen) => setOpenRequested(!disabled && nextOpen)}>
       <DropdownMenu.Trigger asChild disabled={disabled}>
         <button
           type="button"

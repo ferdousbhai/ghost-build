@@ -1,5 +1,5 @@
 import { useStore } from '@nanostores/react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getAbsolutePath } from 'ghostbuild-agent/utils/workDir';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { toast } from 'sonner';
@@ -25,9 +25,25 @@ export function useWorkbenchController(isStreaming?: boolean) {
   const selectedView = useStore(workbenchStore.currentView);
   const following = useStore(workbenchStore.followingStreamedCode);
   const isSmallViewport = useViewport(1024);
+  const workspaceId = workbenchStore.getActiveWorkspaceId();
   const [hasLoadedPreview, setHasLoadedPreview] = useState(false);
-  const [previewRequesting, setPreviewRequesting] = useState(false);
+  const [previewRequestState, setPreviewRequestState] = useState({ projectId, workspaceId, requesting: false });
+  const previewRequestVersionRef = useRef(0);
+  const manualPreviewRequestRef = useRef<symbol | null>(null);
+  const previewRequesting =
+    previewRequestState.projectId === projectId &&
+    previewRequestState.workspaceId === workspaceId &&
+    previewRequestState.requesting;
   const hasPreview = Boolean(previewState.active ?? previewState.lastSuccessful);
+  const invalidatePreviewRequests = useCallback(() => {
+    previewRequestVersionRef.current++;
+    manualPreviewRequestRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    invalidatePreviewRequests();
+    return invalidatePreviewRequests;
+  }, [invalidatePreviewRequests, projectId, workspaceId]);
 
   useEffect(() => {
     if (hasPreview) {
@@ -69,33 +85,65 @@ export function useWorkbenchController(isStreaming?: boolean) {
   }, []);
   const onFileSave = useCallback(() => {
     workbenchStore.flushPendingEditorChange();
+    const workspaceId = workbenchStore.getActiveWorkspaceId();
+    const requestVersion = ++previewRequestVersionRef.current;
+    const isCurrentRequest = () =>
+      workspaceId !== null &&
+      workbenchStore.isWorkspaceActive(workspaceId) &&
+      previewRequestVersionRef.current === requestVersion;
     void (async () => {
       try {
         await workbenchStore.saveCurrentDocument();
       } catch (error) {
         logger.error('Failed to save the file', error);
-        toast.error('Save failed');
+        if (isCurrentRequest()) {
+          toast.error('Save failed');
+        }
+        return;
+      }
+      if (!isCurrentRequest()) {
         return;
       }
       try {
-        workbenchStore.updatePreview(await workbenchStore.requestPreview());
+        const preview = await workbenchStore.requestPreview();
+        if (isCurrentRequest()) {
+          workbenchStore.updatePreview(preview);
+        }
       } catch (error) {
         logger.warn('Failed to update the preview after a file save', error);
-        toast.error('Preview update failed');
+        if (isCurrentRequest()) {
+          toast.error('Preview update failed');
+        }
       }
     })();
   }, []);
 
   const onPreviewRequest = useCallback(async () => {
-    setPreviewRequesting(true);
+    const workspaceId = workbenchStore.getActiveWorkspaceId();
+    const requestVersion = ++previewRequestVersionRef.current;
+    const manualRequest = Symbol('manual-preview-request');
+    const isCurrentRequest = () =>
+      workspaceId !== null &&
+      workbenchStore.isWorkspaceActive(workspaceId) &&
+      previewRequestVersionRef.current === requestVersion;
+    manualPreviewRequestRef.current = manualRequest;
+    setPreviewRequestState({ projectId, workspaceId, requesting: true });
     try {
-      workbenchStore.updatePreview(await workbenchStore.requestPreview());
+      const preview = await workbenchStore.requestPreview();
+      if (isCurrentRequest()) {
+        workbenchStore.updatePreview(preview);
+      }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to queue a remote preview.');
+      if (isCurrentRequest()) {
+        toast.error(error instanceof Error ? error.message : 'Unable to queue a remote preview.');
+      }
     } finally {
-      setPreviewRequesting(false);
+      if (manualPreviewRequestRef.current === manualRequest) {
+        manualPreviewRequestRef.current = null;
+        setPreviewRequestState({ projectId, workspaceId, requesting: false });
+      }
     }
-  }, []);
+  }, [projectId]);
 
   return {
     close: () => {

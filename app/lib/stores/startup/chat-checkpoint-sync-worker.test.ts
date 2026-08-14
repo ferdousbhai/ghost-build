@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { advanceTranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 import { isCompleteMessageInfoAtLeast } from './chat-checkpoint-sync-policy';
@@ -13,12 +13,27 @@ import { chatCheckpointSyncState } from './chatCheckpointSyncState';
 import { lastCompleteMessageInfoStore } from './messages';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 
+const { fetchUserRuntimeMock, toastErrorMock } = vi.hoisted(() => ({
+  fetchUserRuntimeMock: vi.fn(),
+  toastErrorMock: vi.fn(),
+}));
+
+vi.mock('~/lib/cloudflare/runtime-session', () => ({
+  fetchUserRuntime: fetchUserRuntimeMock,
+}));
+vi.mock('sonner', () => ({
+  toast: { dismiss: vi.fn(), error: toastErrorMock },
+}));
+
 function message(id: string, text: string): GhostbuildMessage {
   return { id, role: 'user', parts: [{ type: 'text', text }] };
 }
 
 beforeEach(() => {
+  fetchUserRuntimeMock.mockReset();
+  toastErrorMock.mockReset();
   chatCheckpointSyncState.set({
+    accountId: null,
     chatId: null,
     lastSync: 0,
     numFailures: 0,
@@ -46,7 +61,7 @@ describe('isCompleteMessageInfoAtLeast', () => {
 describe('initializeCheckpointPosition', () => {
   it('resets message and file checkpoints when navigating to a different chat at the same subchat', () => {
     const firstChatMessages = [message('a-1', 'first'), message('a-2', 'second')];
-    initializeCheckpointPosition('chat-a', firstChatMessages, 0);
+    initializeCheckpointPosition('account-a', 'chat-a', firstChatMessages, 0);
     chatCheckpointSyncState.set({
       ...chatCheckpointSyncState.get(),
       lastSync: 123,
@@ -54,9 +69,10 @@ describe('initializeCheckpointPosition', () => {
     });
 
     const secondChatMessages = [message('b-1', 'new chat')];
-    initializeCheckpointPosition('chat-b', secondChatMessages, 0);
+    initializeCheckpointPosition('account-a', 'chat-b', secondChatMessages, 0);
 
     expect(chatCheckpointSyncState.get()).toMatchObject({
+      accountId: 'account-a',
       chatId: 'chat-b',
       lastSync: 0,
       numFailures: 0,
@@ -64,6 +80,9 @@ describe('initializeCheckpointPosition', () => {
       subchatIndex: 0,
     });
     expect(lastCompleteMessageInfoStore.get()).toEqual({
+      accountId: 'account-a',
+      chatId: 'chat-b',
+      subchatIndex: 0,
       messageIndex: 0,
       partIndex: 0,
       allMessages: secondChatMessages,
@@ -72,15 +91,32 @@ describe('initializeCheckpointPosition', () => {
     });
   });
 
+  it('replaces complete history from another subchat even when its message position is later', () => {
+    const oldSubchatMessages = [message('a-1', 'first'), message('a-2', 'second'), message('a-3', 'third')];
+    initializeCheckpointPosition('account-a', 'chat-a', oldSubchatMessages, 0);
+
+    const newSubchatMessages = [message('b-1', 'new subchat')];
+    initializeCheckpointPosition('account-a', 'chat-a', newSubchatMessages, 1);
+
+    expect(lastCompleteMessageInfoStore.get()).toMatchObject({
+      accountId: 'account-a',
+      chatId: 'chat-a',
+      subchatIndex: 1,
+      messageIndex: 0,
+      partIndex: 0,
+      allMessages: newSubchatMessages,
+    });
+  });
+
   it('preserves progressed checkpoints when the same chat and subchat reinitialize', () => {
     const initialMessages = [message('a-1', 'first')];
-    initializeCheckpointPosition('chat-a', initialMessages, 0);
+    initializeCheckpointPosition('account-a', 'chat-a', initialMessages, 0);
     chatCheckpointSyncState.set({
       ...chatCheckpointSyncState.get(),
       persistedMessageInfo: { messageIndex: 3, partIndex: 2 },
     });
 
-    initializeCheckpointPosition('chat-a', initialMessages, 0);
+    initializeCheckpointPosition('account-a', 'chat-a', initialMessages, 0);
 
     expect(chatCheckpointSyncState.get()).toMatchObject({
       chatId: 'chat-a',
@@ -90,12 +126,15 @@ describe('initializeCheckpointPosition', () => {
 
   it('restores missing complete message state when the same chat reinitializes', () => {
     const initialMessages = [message('a-1', 'first')];
-    initializeCheckpointPosition('chat-a', initialMessages, 0);
+    initializeCheckpointPosition('account-a', 'chat-a', initialMessages, 0);
     lastCompleteMessageInfoStore.set(null);
 
-    initializeCheckpointPosition('chat-a', initialMessages, 0);
+    initializeCheckpointPosition('account-a', 'chat-a', initialMessages, 0);
 
     expect(lastCompleteMessageInfoStore.get()).toEqual({
+      accountId: 'account-a',
+      chatId: 'chat-a',
+      subchatIndex: 0,
       messageIndex: 0,
       partIndex: 0,
       allMessages: initialMessages,
@@ -108,6 +147,7 @@ describe('initializeCheckpointPosition', () => {
 describe('chatSyncWorker', () => {
   it('yields until complete message state is initialized', async () => {
     chatCheckpointSyncState.set({
+      accountId: 'session-a',
       chatId: 'chat-a',
       lastSync: 0,
       numFailures: 0,
@@ -135,6 +175,7 @@ describe('chatSyncWorker', () => {
   it('waits when an unfinished next part follows the persisted checkpoint', async () => {
     const messages = [message('a-1', 'first')];
     chatCheckpointSyncState.set({
+      accountId: 'session-a',
       chatId: 'chat-a',
       lastSync: 0,
       numFailures: 0,
@@ -144,6 +185,9 @@ describe('chatSyncWorker', () => {
       subchatIndex: 0,
     });
     lastCompleteMessageInfoStore.set({
+      accountId: 'session-a',
+      chatId: 'chat-a',
+      subchatIndex: 0,
       messageIndex: 0,
       partIndex: 0,
       allMessages: messages,
@@ -165,6 +209,66 @@ describe('chatSyncWorker', () => {
     controller.abort();
     await expect(worker).resolves.toBeUndefined();
   });
+
+  it('counts and escalates an unadoptable transcript-advance conflict as a normal failure', async () => {
+    const messages = [message('a-1', 'first')];
+    const checkpoint = await advanceTranscriptCheckpoint(
+      null,
+      { agentName: 'chat-a', generation: 0, subchatIndex: 0 },
+      messages,
+    );
+    chatCheckpointSyncState.set({
+      accountId: 'session-a',
+      chatId: 'chat-a',
+      lastSync: 0,
+      numFailures: 2,
+      started: false,
+      persistedMessageInfo: { messageIndex: 0, partIndex: 0 },
+      persistedTranscriptCheckpoint: null,
+      subchatIndex: 0,
+    });
+    lastCompleteMessageInfoStore.set({
+      accountId: 'session-a',
+      chatId: 'chat-a',
+      subchatIndex: 0,
+      messageIndex: 0,
+      partIndex: 0,
+      allMessages: messages,
+      hasNextPart: false,
+      transcriptCheckpoint: checkpoint,
+    });
+    fetchUserRuntimeMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: 'The agent transcript advanced before this checkpoint was saved. Retry with the latest transcript.',
+        }),
+        { status: 409 },
+      ),
+    );
+    const random = vi.spyOn(Math, 'random').mockReturnValue(1);
+    const controller = new AbortController();
+    const worker = chatSyncWorker({
+      chatId: 'chat-a',
+      sessionId: 'session-a',
+      currentSubchatIndex: 0,
+      latestSubchatIndex: 0,
+      abortSignal: controller.signal,
+    });
+
+    try {
+      await vi.waitFor(() => expect(chatCheckpointSyncState.get().numFailures).toBe(3));
+      expect(fetchUserRuntimeMock).toHaveBeenCalledTimes(1);
+      expect(random).toHaveBeenCalledOnce();
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Your chat is having trouble saving and progress may be lost. Download your code to save it.',
+        expect.objectContaining({ id: 'chat-save-failure' }),
+      );
+    } finally {
+      controller.abort();
+      await expect(worker).resolves.toBeUndefined();
+      random.mockRestore();
+    }
+  });
 });
 
 describe('adoptAdvancedTranscriptCheckpoint', () => {
@@ -173,8 +277,11 @@ describe('adoptAdvancedTranscriptCheckpoint', () => {
     const identity = { agentName: 'chat-a', generation: 0, subchatIndex: 0 };
     const stale = await advanceTranscriptCheckpoint(null, identity, messages.slice(0, 1));
     const current = await advanceTranscriptCheckpoint(stale, identity, messages);
-    initializeCheckpointPosition('chat-a', messages, 0, stale);
+    initializeCheckpointPosition('account-a', 'chat-a', messages, 0, stale);
     lastCompleteMessageInfoStore.set({
+      accountId: 'account-a',
+      chatId: 'chat-a',
+      subchatIndex: 0,
       messageIndex: 1,
       partIndex: 0,
       allMessages: messages,
@@ -182,9 +289,9 @@ describe('adoptAdvancedTranscriptCheckpoint', () => {
       transcriptCheckpoint: stale,
     });
 
-    await expect(adoptAdvancedTranscriptCheckpoint(JSON.stringify({ checkpoint: current }), 'chat-a', 0)).resolves.toBe(
-      true,
-    );
+    await expect(
+      adoptAdvancedTranscriptCheckpoint(JSON.stringify({ checkpoint: current }), 'account-a', 'chat-a', 0),
+    ).resolves.toBe(true);
     expect(lastCompleteMessageInfoStore.get()?.transcriptCheckpoint).toEqual(current);
   });
 
@@ -192,15 +299,18 @@ describe('adoptAdvancedTranscriptCheckpoint', () => {
     const messages = [message('a-1', 'first')];
     const identity = { agentName: 'chat-a', generation: 0, subchatIndex: 0 };
     const checkpoint = await advanceTranscriptCheckpoint(null, identity, messages);
-    initializeCheckpointPosition('chat-a', messages, 0, checkpoint);
+    initializeCheckpointPosition('account-a', 'chat-a', messages, 0, checkpoint);
 
-    await expect(adoptAdvancedTranscriptCheckpoint('not json', 'chat-a', 0)).resolves.toBe(false);
-    await expect(adoptAdvancedTranscriptCheckpoint(JSON.stringify({ checkpoint }), 'chat-b', 0)).resolves.toBe(false);
+    await expect(adoptAdvancedTranscriptCheckpoint('not json', 'account-a', 'chat-a', 0)).resolves.toBe(false);
+    await expect(
+      adoptAdvancedTranscriptCheckpoint(JSON.stringify({ checkpoint }), 'account-a', 'chat-b', 0),
+    ).resolves.toBe(false);
     await expect(
       adoptAdvancedTranscriptCheckpoint(
         JSON.stringify({
           checkpoint: { ...checkpoint, digest: 'b'.repeat(64) },
         }),
+        'account-a',
         'chat-a',
         0,
       ),

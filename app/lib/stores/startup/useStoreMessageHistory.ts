@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useLayoutEffect, useRef } from 'react';
 import { lastCompleteMessageInfoStore } from '~/lib/stores/startup/messages';
 import { isToolPart, isToolResult, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { StreamStatus } from '~/lib/common/types';
@@ -14,14 +14,36 @@ import { subchatIndexStore } from '~/lib/stores/subchats';
  * The startup history hook owns the related `beforeunload` protection so this
  * callback remains a pure store update.
  */
-export function useStoreMessageHistory() {
+export function useStoreMessageHistory(chatId: string, accountId: string | null | undefined) {
+  const requestVersionRef = useRef(0);
+
+  useLayoutEffect(
+    () => () => {
+      // Invalidate both pending digests and already-staged global work during
+      // the commit that replaces or unmounts this persistence scope.
+      requestVersionRef.current++;
+      const completeMessageInfo = lastCompleteMessageInfoStore.get();
+      if (
+        completeMessageInfo !== null &&
+        completeMessageInfo.accountId === accountId &&
+        completeMessageInfo.chatId === chatId
+      ) {
+        lastCompleteMessageInfoStore.set(null);
+      }
+    },
+    [accountId, chatId],
+  );
+
   return useCallback(
     async (
       messages: GhostbuildMessage[],
       streamStatus: StreamStatus,
       transcriptCheckpoint: TranscriptCheckpoint | null,
     ) => {
+      const requestVersion = ++requestVersionRef.current;
       if (
+        accountId === null ||
+        accountId === undefined ||
         messages.length === 0 ||
         transcriptCheckpoint === null ||
         transcriptCheckpoint.subchatIndex !== subchatIndexStore.get() ||
@@ -34,12 +56,20 @@ export function useStoreMessageHistory() {
       if (lastCompleteMessageInfo === null) {
         return;
       }
-      if (transcriptCheckpoint.digest !== (await digestTranscriptMessages(messages))) {
+      const digest = await digestTranscriptMessages(messages);
+      if (
+        requestVersionRef.current !== requestVersion ||
+        transcriptCheckpoint.subchatIndex !== subchatIndexStore.get() ||
+        transcriptCheckpoint.digest !== digest
+      ) {
         return;
       }
       const currentLastCompleteMessageInfo = lastCompleteMessageInfoStore.get();
       if (
         currentLastCompleteMessageInfo !== null &&
+        currentLastCompleteMessageInfo.accountId === accountId &&
+        currentLastCompleteMessageInfo.chatId === chatId &&
+        currentLastCompleteMessageInfo.subchatIndex === transcriptCheckpoint.subchatIndex &&
         lastCompleteMessageInfo.messageIndex === currentLastCompleteMessageInfo.messageIndex &&
         lastCompleteMessageInfo.partIndex === currentLastCompleteMessageInfo.partIndex &&
         transcriptCheckpoint.revision === currentLastCompleteMessageInfo.transcriptCheckpoint?.revision &&
@@ -48,6 +78,9 @@ export function useStoreMessageHistory() {
         return;
       }
       lastCompleteMessageInfoStore.set({
+        accountId,
+        chatId,
+        subchatIndex: transcriptCheckpoint.subchatIndex,
         messageIndex: lastCompleteMessageInfo.messageIndex,
         partIndex: lastCompleteMessageInfo.partIndex,
         allMessages: messages,
@@ -55,7 +88,7 @@ export function useStoreMessageHistory() {
         transcriptCheckpoint,
       });
     },
-    [],
+    [accountId, chatId],
   );
 }
 

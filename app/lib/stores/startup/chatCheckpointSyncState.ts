@@ -2,6 +2,7 @@ import { atom } from 'nanostores';
 import type { TranscriptCheckpoint } from 'ghostbuild-agent/transcript';
 
 export const chatCheckpointSyncState = atom<ChatCheckpointSyncState>({
+  accountId: null,
   chatId: null,
   lastSync: 0,
   numFailures: 0,
@@ -12,6 +13,7 @@ export const chatCheckpointSyncState = atom<ChatCheckpointSyncState>({
 });
 
 export type ChatCheckpointSyncState = {
+  accountId: string | null;
   chatId: string | null;
   lastSync: number;
   numFailures: number;
@@ -22,6 +24,7 @@ export type ChatCheckpointSyncState = {
 };
 
 export type InitializedChatCheckpointSyncState = {
+  accountId: string;
   chatId: string;
   lastSync: number;
   numFailures: number;
