@@ -71,16 +71,8 @@ function AuthenticatedExistingChat({ chatId }: { chatId: string }) {
     return <ProjectLoadError error={subchatLoadError} onRetry={retrySubchats} />;
   }
 
-  // Download the account-owned chat after the session gate above has passed.
-  if (initialMessages === undefined) {
-    return <Loading message="Loading project…" />;
-  }
-  if (!transcript) {
-    return <Loading message="Loading project…" />;
-  }
-  // Once we have the chat messages, we can populate the workbench state.
-  // Note that this doesn't actually run any actions.
-  if (reloadState === undefined) {
+  // Wait for the account-owned chat and workbench state without running any actions.
+  if (initialMessages === undefined || !transcript || reloadState === undefined) {
     return <Loading message="Loading project…" />;
   }
   return (

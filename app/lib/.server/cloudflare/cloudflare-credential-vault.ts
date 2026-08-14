@@ -123,10 +123,7 @@ export class D1CloudflareCredentialVault {
         signal: AbortSignal.timeout(OAUTH_REFRESH_TIMEOUT_MS),
       });
     } catch (error) {
-      const concurrent = await this.readConcurrentRefresh(credentialHandle, stored).catch((readError) => {
-        console.warn('Unable to read concurrent credential refresh', readError);
-        return null;
-      });
+      const concurrent = await this.readConcurrentRefreshSafely(credentialHandle, stored);
       if (concurrent) {
         return concurrent;
       }
@@ -138,10 +135,7 @@ export class D1CloudflareCredentialVault {
       expires_in?: number;
     } | null;
     if (!response.ok || !token?.access_token) {
-      const concurrent = await this.readConcurrentRefresh(credentialHandle, stored).catch((readError) => {
-        console.warn('Unable to read concurrent credential refresh', readError);
-        return null;
-      });
+      const concurrent = await this.readConcurrentRefreshSafely(credentialHandle, stored);
       if (concurrent) {
         return concurrent;
       }
@@ -187,10 +181,7 @@ export class D1CloudflareCredentialVault {
       if (committed) {
         return refreshed.accessToken;
       }
-      const concurrent = await this.readConcurrentRefresh(credentialHandle, stored, encrypted).catch((readError) => {
-        console.warn('Unable to read concurrent credential refresh', readError);
-        return null;
-      });
+      const concurrent = await this.readConcurrentRefreshSafely(credentialHandle, stored, encrypted);
       if (concurrent) {
         return concurrent;
       }
@@ -206,14 +197,22 @@ export class D1CloudflareCredentialVault {
     ) {
       return refreshed.accessToken;
     }
-    const concurrent = await this.readConcurrentRefresh(credentialHandle, stored, encrypted).catch((readError) => {
-      console.warn('Unable to read concurrent credential refresh', readError);
-      return null;
-    });
+    const concurrent = await this.readConcurrentRefreshSafely(credentialHandle, stored, encrypted);
     if (concurrent) {
       return concurrent;
     }
     throw new Error('Cloudflare credential changed while its OAuth token was being refreshed.');
+  }
+
+  private readConcurrentRefreshSafely(
+    credentialHandle: string,
+    previous: CredentialRow,
+    rejected?: { ciphertextBase64: string; ivBase64: string },
+  ): Promise<string | null> {
+    return this.readConcurrentRefresh(credentialHandle, previous, rejected).catch((error) => {
+      console.warn('Unable to read concurrent credential refresh', error);
+      return null;
+    });
   }
 
   private async readConcurrentRefresh(

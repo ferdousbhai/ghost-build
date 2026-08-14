@@ -22,6 +22,13 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 
+async function waitForReactUpdate(assertion: () => void): Promise<void> {
+  await vi.waitFor(async () => {
+    await act(() => Promise.resolve());
+    assertion();
+  });
+}
+
 describe('account local replica scope', () => {
   afterEach(async () => {
     await disposeAccountLocalReplicas();
@@ -49,14 +56,14 @@ describe('account local replica scope', () => {
     }
 
     await act(async () => root.render(<Harness sessionId="session-a" />));
-    await vi.waitFor(() => expect(container.textContent).toBe('account-a'));
+    await waitForReactUpdate(() => expect(container.textContent).toBe('account-a'));
 
     await act(async () => root.render(<Harness sessionId="session-b" />));
     expect(container.textContent).toBe('loading');
 
     await vi.waitFor(() => expect(resolveSecond).toBeTypeOf('function'));
     await act(async () => resolveSecond?.({ id: 'account-b', close: vi.fn() }));
-    await vi.waitFor(() => expect(container.textContent).toBe('account-b'));
+    await waitForReactUpdate(() => expect(container.textContent).toBe('account-b'));
     await act(async () => root.unmount());
   });
 });

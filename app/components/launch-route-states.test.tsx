@@ -5,7 +5,7 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...(actual as object),
-    Link: ({ children, to, hash, ...props }: { children: React.ReactNode; to: string; hash?: string }) => (
+    Link: ({ children, to, hash, reloadDocument: _reloadDocument, ...props }: LinkProps) => (
       <a {...props} href={`${to}${hash ? `#${hash}` : ''}`}>
         {children}
       </a>
@@ -13,6 +13,14 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
     useNavigate: () => vi.fn(),
   };
 });
+
+type LinkProps = {
+  children: React.ReactNode;
+  to: string;
+  hash?: string;
+  reloadDocument?: boolean;
+};
+
 import { ExistingChatSessionView, ProjectLoadError } from './ExistingChat.client';
 import { Header } from './header/Header';
 import { RootNotFoundComponent } from '~/routes/__root';

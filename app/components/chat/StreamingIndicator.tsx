@@ -89,6 +89,9 @@ export default function StreamingIndicator(props: StreamingIndicatorProps) {
     }
   }
 
+  const retryLabel =
+    streamStatus === 'error' ? 'Resend' : aborted && streamStatus === 'ready' ? 'Try again' : undefined;
+
   return (
     <motion.div
       className="mb-2 mt-1 w-full max-w-chat"
@@ -111,14 +114,9 @@ export default function StreamingIndicator(props: StreamingIndicatorProps) {
                   <div>{icon}</div>
                   {message}
                   <div className="min-h-6 grow" />
-                  {aborted && streamStatus === 'ready' && (
+                  {retryLabel && (
                     <Button type="button" className="ml-2 h-auto" onClick={props.resendMessage} icon={<ResetIcon />}>
-                      Try again
-                    </Button>
-                  )}
-                  {streamStatus === 'error' && (
-                    <Button type="button" className="ml-2 h-auto" onClick={props.resendMessage} icon={<ResetIcon />}>
-                      Resend
+                      {retryLabel}
                     </Button>
                   )}
                 </div>

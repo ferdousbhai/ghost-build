@@ -31,4 +31,18 @@ describe('StreamingIndicator', () => {
     expect(html).toContain('Generation stopped');
     expect(html).toContain('Try again');
   });
+
+  it('offers to resend after a stream error', () => {
+    const html = renderToStaticMarkup(
+      <StreamingIndicator
+        streamStatus="error"
+        buildProgress={null}
+        isProjectUpdate
+        submissionPending={false}
+        resendMessage={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('Resend');
+  });
 });

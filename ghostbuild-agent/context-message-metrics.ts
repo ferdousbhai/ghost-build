@@ -31,15 +31,7 @@ export function calculatePromptCharacterCounts(
 }
 
 function messageCharacterCount(message: GhostbuildMessage): number {
-  const textSize = message.parts.reduce(
-    (total, part) => total + (part.type === 'text' && typeof part.text === 'string' ? part.text.length : 0),
-    0,
-  );
-  const nonTextSize = message.parts.reduce(
-    (total, part) => total + (part.type === 'text' ? 0 : partCharacterCount(part)),
-    0,
-  );
-  return textSize + nonTextSize;
+  return message.parts.reduce((total, part) => total + partCharacterCount(part), 0);
 }
 
 function partCharacterCount(part: GhostbuildPart): number {

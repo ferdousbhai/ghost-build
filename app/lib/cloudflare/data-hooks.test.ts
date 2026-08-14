@@ -3,7 +3,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from './data-api';
 import { DataOperationError } from './client';
 import { subchatQueryKey, useAllSubchatsState, useQuery as useDataQuery } from './data-hooks';
@@ -45,6 +45,17 @@ function useSubchatHistoryError() {
   return useAllSubchatsState({ chatId: 'error-chat', sessionId: 'error-user' }).error;
 }
 
+async function waitForReactUpdate(assertion: () => void): Promise<void> {
+  await vi.waitFor(async () => {
+    await act(() => Promise.resolve());
+    assertion();
+  });
+}
+
+beforeEach(() => {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+});
+
 afterEach(() => {
   executeDataOperation.mockReset();
   collectionQueryClient.clear();
@@ -67,7 +78,7 @@ describe('Query DB collection errors', () => {
     }
 
     await act(async () => root.render(createElement(Harness)));
-    await vi.waitFor(() => expect(container.textContent).toBe('cold load failed'));
+    await waitForReactUpdate(() => expect(container.textContent).toBe('cold load failed'));
     await act(async () => root.unmount());
   });
 
@@ -94,9 +105,9 @@ describe('Query DB collection errors', () => {
     }
 
     await act(async () => root.render(createElement(Harness)));
-    await vi.waitFor(() => expect(container.textContent).toBe('retry me'));
+    await waitForReactUpdate(() => expect(container.textContent).toBe('retry me'));
     await act(async () => container.querySelector('button')?.click());
-    await vi.waitFor(() => expect(container.textContent).toBe('ready'));
+    await waitForReactUpdate(() => expect(container.textContent).toBe('ready'));
     expect(attempt).toBe(2);
     await act(async () => root.unmount());
   });
@@ -138,7 +149,7 @@ describe('useQuery', () => {
       root.render(createElement(QueryClientProvider, { client: queryClient }, createElement(Harness)));
     });
 
-    await vi.waitFor(() => expect(operationSignal).toBeInstanceOf(AbortSignal));
+    await waitForReactUpdate(() => expect(operationSignal).toBeInstanceOf(AbortSignal));
     await act(async () => root.unmount());
     expect(operationSignal?.aborted).toBe(true);
     queryClient.clear();

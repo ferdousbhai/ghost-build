@@ -45,10 +45,7 @@ export const FileTree = memo(function FileTree({
       return;
     }
     setCollapsedFolders(
-      (previous) =>
-        new Set(
-          fileList.filter((node) => node.kind === 'folder' && previous.has(node.fullPath)).map((node) => node.fullPath),
-        ),
+      (previous) => new Set(folderPathsFromFileList(fileList).filter((folder) => previous.has(folder))),
     );
   }, [fileList, collapsed]);
 

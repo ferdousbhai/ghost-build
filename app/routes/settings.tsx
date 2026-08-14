@@ -7,7 +7,7 @@ import { CloudflareSignInPrompt } from '~/components/CloudflareSignInPrompt';
 import {
   CLOUDFLARE_AUTHORIZATION_ERROR_MESSAGE,
   CLOUDFLARE_AUTHORIZATION_ERROR_PARAM,
-  hasCloudflareAuthorizationError,
+  CLOUDFLARE_AUTHORIZATION_ERROR_VALUE,
 } from '~/lib/cloudflare/authorization-recovery';
 
 type SettingsSearch = {
@@ -34,9 +34,10 @@ function Settings() {
 function SettingsRouteContent() {
   const auth = useGhostbuildAuth();
   const search = Route.useSearch();
-  const authorizationError = hasCloudflareAuthorizationError(new URLSearchParams(toStringRecord(search)))
-    ? CLOUDFLARE_AUTHORIZATION_ERROR_MESSAGE
-    : null;
+  const authorizationError =
+    search.cloudflare_authorization === CLOUDFLARE_AUTHORIZATION_ERROR_VALUE
+      ? CLOUDFLARE_AUTHORIZATION_ERROR_MESSAGE
+      : null;
   return <SettingsRouteView authKind={auth.kind} authorizationError={authorizationError} />;
 }
 
@@ -54,10 +55,4 @@ export function SettingsRouteView({
     return <CloudflareSignInPrompt title="Connect Cloudflare to open settings." initialError={authorizationError} />;
   }
   return <ClientSettingsContent authorizationError={authorizationError} />;
-}
-
-function toStringRecord(search: Record<string, unknown>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(search).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
-  );
 }

@@ -39,7 +39,6 @@ export default [
       '**/dist',
       '**/node_modules',
       '**/.wrangler',
-      '**/bolt/build',
       '**/.history',
       'scripts/fixtures/**',
       'template/**',

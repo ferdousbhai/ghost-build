@@ -213,7 +213,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
           });
         }
       } else if (type === 'toolcall_end') {
-        const toolCall = recordValue(assistantEvent.toolCall);
+        const toolCall = isRecord(assistantEvent.toolCall) ? assistantEvent.toolCall : undefined;
         const toolCallId = typeof toolCall?.id === 'string' ? toolCall.id : undefined;
         const toolName = typeof toolCall?.name === 'string' ? toolCall.name : undefined;
         if (toolCall && toolCallId && toolName) {
@@ -588,17 +588,14 @@ function numericContentIndex(value: Record<string, unknown>): number | undefined
     : undefined;
 }
 
-function recordValue(value: unknown): Record<string, unknown> | undefined {
-  return isRecord(value) ? value : undefined;
-}
-
 function streamedToolCall(
   event: Record<string, unknown>,
 ): { contentIndex: number; toolCallId: string; toolName: string } | undefined {
   const contentIndex = numericContentIndex(event);
-  const partial = recordValue(event.partial);
+  const partial = isRecord(event.partial) ? event.partial : undefined;
   const content = Array.isArray(partial?.content) ? partial.content : [];
-  const call = contentIndex === undefined ? undefined : recordValue(content[contentIndex]);
+  const candidate = contentIndex === undefined ? undefined : content[contentIndex];
+  const call = isRecord(candidate) ? candidate : undefined;
   if (contentIndex === undefined || typeof call?.id !== 'string' || typeof call.name !== 'string') {
     return undefined;
   }

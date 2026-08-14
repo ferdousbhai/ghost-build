@@ -5,13 +5,20 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...(actual as object),
-    Link: ({ children, to, ...props }: { children: React.ReactNode; to: string }) => (
+    Link: ({ children, to, reloadDocument: _reloadDocument, ...props }: LinkProps) => (
       <a {...props} href={to}>
         {children}
       </a>
     ),
   };
 });
+
+type LinkProps = {
+  children: React.ReactNode;
+  to: string;
+  reloadDocument?: boolean;
+};
+
 import { ClientExistingChat, ClientHeader, ClientHomepage, ClientSettingsContent } from './ClientRouteComponents';
 import { HOME_HERO_LEDE } from '~/lib/trust';
 

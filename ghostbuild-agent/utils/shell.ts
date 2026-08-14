@@ -8,17 +8,8 @@ export function cleanTerminalOutput(input: string): string {
     .replace(/\x1b\](\d+;[^\x07\x1b]*|\d+[^\x07\x1b]*)\x07/g, '')
     .replace(/\](\d+;[^\n]*|\d+[^\n]*)/g, '');
 
-  // Step 2: Remove ANSI escape sequences and color codes more thoroughly
-  const removeAnsi = removeOsc
-    // Remove all escape sequences with parameters
-    .replace(/\u001b\[[\?]?[0-9;]*[a-zA-Z]/g, '')
-    .replace(/\x1b\[[\?]?[0-9;]*[a-zA-Z]/g, '')
-    // Remove color codes
-    .replace(/\u001b\[[0-9;]*m/g, '')
-    .replace(/\x1b\[[0-9;]*m/g, '')
-    // Clean up any remaining escape characters
-    .replace(/\u001b/g, '')
-    .replace(/\x1b/g, '');
+  // Step 2: Remove ANSI escape sequences and any remaining escape characters
+  const removeAnsi = removeOsc.replace(/\x1b\[[\?]?[0-9;]*[a-zA-Z]/g, '').replace(/\x1b/g, '');
 
   // Step 3: Clean up carriage returns and newlines
   const cleanNewlines = removeAnsi

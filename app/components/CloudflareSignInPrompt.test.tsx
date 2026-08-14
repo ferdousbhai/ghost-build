@@ -9,13 +9,19 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...(actual as object),
-    Link: ({ children, to, ...props }: { children: React.ReactNode; to: string }) => (
+    Link: ({ children, to, reloadDocument: _reloadDocument, ...props }: LinkProps) => (
       <a {...props} href={to}>
         {children}
       </a>
     ),
   };
 });
+
+type LinkProps = {
+  children: React.ReactNode;
+  to: string;
+  reloadDocument?: boolean;
+};
 
 const auth = vi.hoisted(() => ({
   createCloudflareReturnURL: vi.fn(() => 'http://localhost/'),

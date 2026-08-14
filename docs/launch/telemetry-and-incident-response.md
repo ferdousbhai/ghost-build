@@ -19,12 +19,13 @@ operationally indicative rather than an authenticated ledger.
 
 The launch funnel is:
 
-`landing_viewed → cloudflare_connect_started → prompt_submitted → first_tool_completed → validation_succeeded → preview_ready → deployment_approval_presented → deployment_approved → deployment_succeeded`
+`landing_viewed → cloudflare_connect_started → prompt_submitted → first_tool_completed → validation_succeeded → preview_ready → deployment_approval_presented → deployment_succeeded`
 
 When browser telemetry is enabled, operational failures use the existing typed event names, an error level, a generic
 failure reason where available, and an opaque per-event ID. The journey ID groups events from one browser-session
 journey; neither identifier is an incident record. Cloudflare Worker logs are the current ingestion store.
-`app/lib/client-telemetry-events.test.ts` fails if a declared event loses every production call site.
+`app/lib/client-telemetry-events.ts` defines the accepted events; browser emission and endpoint validation are covered by
+`app/lib/telemetry.client.test.ts` and `app/server-handlers/client-telemetry.test.ts`.
 
 Before launch, the operator must configure a dashboard with conversion and latency by funnel stage and these initial
 engineering objectives:
