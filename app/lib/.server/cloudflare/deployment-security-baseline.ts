@@ -1,6 +1,6 @@
 import { BUILDER_TEMPLATE_SOURCE_SHA256 } from '~/agents/builder-template.generated';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 33 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 34 as const;
 export {
   DEPLOYMENT_SECURITY_BASELINE_BINDING,
   DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
@@ -31,7 +31,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/lib/project-policy/dependency-policy.mjs':
     '9335f533a868ffa2e72e3e552d9f3d4e86d69c099d242aed12c3f2f65a3691a5',
   'scripts/lib/project-policy/generated-project-dependency-policy.json':
-    'ed52dc2a5235d78baa3cab520e0a48b13ab2bfb47ee5f035989e65f56c98bf8e',
+    'd3fe82524093febd3f2fdcc57a5c596fb12cf9e73db0d32a1403c11c48a2a466',
   'scripts/lib/project-policy/source-policy.mjs': 'deed7d40e7c9c1bca8cfb3dbf46503f9dc89a4004988f8ef55871b7ed0c24f86',
   'scripts/lib/project-policy/worker-policy.mjs': '9f908807030d1a91c99b442b41488048d2e49b996783a18900b413e046f3edbc',
   'scripts/lib/project-policy/workflow-policy.mjs': 'e4c172b80ffe2f551a4ca25d4f8a4d0ea19195a7cef0ee056536e331d3993fab',
@@ -56,10 +56,10 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'wrangler.preview.jsonc': '626444c576448d7c8a70572092d7d68ec0d0fb6d577978fed0a146018053fde8',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = 'd629193c74359dc6098f2b76168baf3d34d275188313be0d130599705f1a4750';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '8453a8766b09c7cd0daf95da0a2be14cfe47f699e0c3e650d961776af62a5e43';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
-  '0b9d16c0b631ec77600d4ac8b751e7d320e4dd54e7c85c52dc2713289e8baaf9';
+  'cb02376e281076140a97e91560fc6780740b1bc94ea9d0457397e01642795a15';
 
 export function isCurrentDeploymentSecurityIdentity(value: {
   version?: unknown;

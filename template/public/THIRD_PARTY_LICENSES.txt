@@ -8,7 +8,7 @@ This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-08-02
 Production packages: 296
-Inventory SHA-256: ec22df3dab6cafe3cc6f16d4b11c75f8313d0b8cda7801e7e0a5c2c8aee1553e
+Inventory SHA-256: aafd34129c9e61d0527e2eb2c8b9b7f48d38a194337908697a15e2cfbf697ef0
 
 PACKAGE INVENTORY
 =================
@@ -1908,7 +1908,7 @@ Package-level license evidence: published
 Published license/notice files:
 - license.md (SHA-256 1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801)
 
-nanoid@3.3.17
+nanoid@3.3.18
 Declared license: MIT
 Author: Andrey Sitnik <andrey@sitnik.ru>
 Repository: ai/nanoid
@@ -10715,7 +10715,7 @@ SOFTWARE.
 
 SHA-256 da4db1480d9beea3483a2eda5c53b22238d0827d57da162b48f122e04d2d9987
 Used by:
-- nanoid@3.3.17:LICENSE
+- nanoid@3.3.18:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 The MIT License (MIT)
 

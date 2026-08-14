@@ -282,7 +282,7 @@ overrides:
   'hono@<4.12.34': '4.12.34'
   'ip-address@<=10.3.0': '10.3.1'
   'js-yaml@>=4.0.0 <4.3.1': '4.3.1'
-  'nanoid@<3.3.17': '3.3.17'
+  'nanoid@<3.3.18': '3.3.18'
   'postcss@<=8.5.22': '8.5.25'
   'sharp@<0.35.0': '0.35.3'
   'undici@>=7.0.0 <7.29.0': '7.29.0'
@@ -306,7 +306,7 @@ overrides:
         'pnpm-workspace.yaml overrides must pin hono@<4.12.34 to 4.12.34.',
         'pnpm-workspace.yaml overrides must pin ip-address@<=10.3.0 to 10.3.1.',
         'pnpm-workspace.yaml overrides must pin js-yaml@>=4.0.0 <4.3.1 to 4.3.1.',
-        'pnpm-workspace.yaml overrides must pin nanoid@<3.3.17 to 3.3.17.',
+        'pnpm-workspace.yaml overrides must pin nanoid@<3.3.18 to 3.3.18.',
         'pnpm-workspace.yaml overrides must pin postcss@<=8.5.22 to 8.5.25.',
         'pnpm-workspace.yaml overrides must pin sharp@<0.35.0 to 0.35.3.',
         'pnpm-workspace.yaml overrides must pin undici@>=7.0.0 <7.29.0 to 7.29.0.',
