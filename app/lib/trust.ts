@@ -10,7 +10,7 @@ export const GHOSTBUILD_OPERATOR = {
   correspondenceAddress: '350 Bay Street, Suite 1300B, Toronto, Ontario M5H 2S6, Canada',
 } as const;
 
-export const TRUST_DOCUMENT_VERSION = '1.6 public beta';
+export const TRUST_DOCUMENT_VERSION = '1.7 public beta';
 export const TRUST_DOCUMENT_EFFECTIVE_ISO_DATE = '2026-08-14';
 export const TRUST_DOCUMENT_EFFECTIVE_DATE = 'August 14, 2026';
 export const TRUST_DOCUMENT_STATUS =

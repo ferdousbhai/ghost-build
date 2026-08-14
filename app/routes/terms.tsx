@@ -23,21 +23,27 @@ function TermsPage() {
         <p>
           Ghostbuild is operated by {GHOSTBUILD_OPERATOR.legalName}, an {GHOSTBUILD_OPERATOR.legalForm} (Ontario
           Corporation No. {GHOSTBUILD_OPERATOR.registrationNumber}), with a business correspondence address at{' '}
-          {GHOSTBUILD_OPERATOR.correspondenceAddress}. The{' '}
-          <a href="https://github.com/ferdousbhai/ghost-build">Ghostbuild repository</a> is maintained through the{' '}
-          <a href="https://github.com/ferdousbhai">ferdousbhai GitHub account</a>. These Terms form an agreement between
-          you and {GHOSTBUILD_OPERATOR.legalName}. By connecting Cloudflare or using the signed-in service, you agree to
-          these Terms. You must be at least 18, able to form a binding agreement, and authorized to act for any
-          organization or Cloudflare account you use.
+          {GHOSTBUILD_OPERATOR.correspondenceAddress}. These Terms form an agreement between you and the operator. By
+          connecting Cloudflare or using the signed-in service, you agree to these Terms. You must be at least 18, able
+          to form a binding agreement, and authorized to act for any organization or Cloudflare account you use.
         </p>
       </TrustSection>
-      <TrustSection title="Public-beta service and account access">
+      <TrustSection title="Public-beta service, availability, and costs">
         <p>
-          Ghostbuild is currently a free public beta. It uses AI and preview Cloudflare technology to generate,
-          validate, preview, and deploy applications. You authorize only the Cloudflare scopes shown during connection
-          and must keep your Ghostbuild and Cloudflare access secure. Cloudflare may separately charge your account for
-          inference, storage, builds, network use, and deployed infrastructure. Ghostbuild does not automatically enable
-          Workers Paid.
+          Ghostbuild currently charges no fee for access during the public beta. Using it requires a compatible
+          Cloudflare account, Workers Paid, and Containers. You are responsible for charges from Cloudflare, including
+          inference or prepaid AI Gateway credits, storage, Container compute, builds, network use, and deployed
+          infrastructure. Ghostbuild does not purchase credits or automatically change your Cloudflare plan.
+        </p>
+        <p>
+          Ghostbuild uses AI and preview Cloudflare technology to generate, validate, preview, and deploy applications.
+          It is pre-release software provided on an as-available basis and depends on Cloudflare and other third-party
+          services with changing interfaces. Features may fail, change incompatibly, lose data, or become unavailable.
+          No uptime, support, or emergency-response service level is promised.
+        </p>
+        <p>
+          You authorize only the Cloudflare scopes shown during connection and must keep your Ghostbuild and Cloudflare
+          access secure.
         </p>
       </TrustSection>
       <TrustSection title="Your inputs and generated output">
@@ -63,23 +69,15 @@ function TermsPage() {
           You are responsible for the applications you publish, including their content, users, security, monitoring,
           legal notices, data handling, and compliance. Removing a project schedules cleanup of the generated resources
           associated with that project. Cleanup depends on your Cloudflare authorization remaining available and may be
-          delayed or retried as described in the Privacy notice.
+          delayed or retried as described in the <Link to="/privacy">Privacy notice</Link>.
         </p>
       </TrustSection>
       <TrustSection title="Acceptable use">
         <p>
-          Do not use Ghostbuild to violate law or third-party rights; distribute malware; gain unauthorized access;
-          evade platform safeguards; expose secrets or personal data you lack authority to process; abuse Cloudflare or
-          GitHub services; or generate deceptive, harassing, exploitative, or dangerous systems. We may limit access to
-          protect users, the service, or external platforms.
-        </p>
-      </TrustSection>
-      <TrustSection title="Beta and availability">
-        <p>
-          Ghostbuild is pre-release software provided on an as-available basis. It depends on Cloudflare and other
-          third-party services, including preview technology with changing interfaces. Features may fail, change
-          incompatibly, lose data, or become unavailable. No uptime, support, or emergency-response service level is
-          promised.
+          Do not use Ghostbuild to violate applicable law or third-party rights; create or distribute malware; access
+          systems without authorization; evade safeguards or rate limits; expose credentials or personal data you are
+          not authorized to process; or abuse Cloudflare or GitHub services. Do not use it to build systems whose
+          purpose is fraud, impersonation, harassment, exploitation, or facilitating physical harm.
         </p>
       </TrustSection>
       <TrustSection title="Suspension, termination, and data">
@@ -102,7 +100,7 @@ function TermsPage() {
           If you use Ghostbuild mainly for a trade, business, craft, or profession, then to the maximum extent permitted
           by law the operator will not be liable for indirect, incidental, special, consequential, exemplary, or
           punitive damages, or for lost profits, revenue, data, goodwill, or business interruption. For those business
-          users, the operator’s aggregate liability arising from the service will not exceed the greater of US$100 and
+          users, the operator’s aggregate liability arising from the service will not exceed the greater of C$100 and
           the amount paid directly to Ghostbuild during the 12 months before the event giving rise to the claim.
         </p>
         <p>
@@ -114,10 +112,14 @@ function TermsPage() {
       </TrustSection>
       <TrustSection title="Applicable law and disputes">
         <p>
-          These Terms do not take away mandatory rights available where you live. Applicable law and courts are
-          determined by the conflict-of-law and jurisdiction rules that govern you and the operator. You may use{' '}
-          <Link to="/support">Support</Link> to try to resolve a concern before filing a claim, but doing so is not a
-          condition on any remedy or urgent relief available under applicable law.
+          If you use Ghostbuild mainly for a trade, business, craft, or profession, these Terms are governed by the laws
+          of Ontario and the federal laws of Canada applicable there, without regard to conflict-of-law rules. The
+          courts in Toronto, Ontario have exclusive jurisdiction over disputes with those business users.
+        </p>
+        <p>
+          If you use Ghostbuild as a consumer, these Terms do not take away mandatory rights, governing law, or courts
+          available where you live. You may use <Link to="/support">Support</Link> to try to resolve a concern before
+          filing a claim, but doing so is not a condition on any remedy or urgent relief available under applicable law.
         </p>
       </TrustSection>
       <TrustSection title="Changes, notices, and general terms">

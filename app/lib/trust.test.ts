@@ -40,6 +40,18 @@ describe('public trust contract', () => {
     expect(privacy).toContain('skip AI Gateway caching and log collection');
   });
 
+  it('keeps public-beta pricing and business terms explicit', () => {
+    const terms = readFileSync('app/routes/terms.tsx', 'utf8');
+    expect(terms).toContain('Ghostbuild currently charges no fee');
+    expect(terms).toContain('Workers Paid, and Containers');
+    expect(terms).toContain('does not purchase credits or automatically change your Cloudflare plan');
+    expect(terms).toContain('governed by the laws');
+    expect(terms).toContain('of Ontario and the federal laws of Canada');
+    expect(terms).toContain('C$100');
+    expect(terms).not.toContain('free public beta');
+    expect(terms).not.toContain('ferdousbhai GitHub account');
+  });
+
   it('keeps the public issue forms explicit about sensitive data and emergencies', () => {
     const support = issueForm('.github/ISSUE_TEMPLATE/support_request.yml');
 
