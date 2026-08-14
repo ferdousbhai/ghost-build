@@ -161,7 +161,7 @@ function createWorkersAiBindingFetch(binding: Ai, modelId: WorkersAiRuntimeModel
           returnRawResponse: true;
           signal: AbortSignal;
           extraHeaders?: Record<string, string>;
-          gateway?: { id: string };
+          gateway?: { id: string; collectLog?: boolean; skipCache?: boolean };
         },
       ) => Promise<Response>;
     };
@@ -171,7 +171,7 @@ function createWorkersAiBindingFetch(binding: Ai, modelId: WorkersAiRuntimeModel
       returnRawResponse: true,
       signal: request.signal,
       ...(isWorkersAiModelId(modelId) && getWorkersAiModel(modelId).availability === 'cloudflare-partner'
-        ? { gateway: { id: 'default' } }
+        ? { gateway: { id: 'default', collectLog: false, skipCache: true } }
         : {}),
       ...(sessionAffinity ? { extraHeaders: { 'x-session-affinity': sessionAffinity } } : {}),
     });

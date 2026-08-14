@@ -18,8 +18,23 @@ function PrivacyPage() {
     <TrustPage
       eyebrow="Privacy"
       title="How Ghostbuild handles your data."
-      summary="Ghostbuild stores only narrow account and control-plane records. Server-side project and conversation data stays in the Cloudflare account you connect; your browser may keep an account-local replica."
+      summary="Ghostbuild’s own account stores only the records needed to authenticate you, connect Cloudflare, locate your user-owned runtime, and operate the service, plus narrow product telemetry if you opt in. Project and conversation data stays in the Cloudflare account you connect; your browser may keep an account-local replica."
     >
+      <TrustSection title="What Ghostbuild stores in its own account">
+        <p>
+          The operator control plane stores your Cloudflare user identity and account details, hashed authentication
+          sessions, encrypted OAuth credentials, granted scopes and connection status, user-runtime names and endpoints,
+          provisioning status, and narrow operational records. It also holds sampled service logs and, only if you opt
+          in, allowlisted product telemetry. The control-plane database does not store prompt or transcript bodies,
+          project source, deployment plans, generated application data, or raw AI responses.
+        </p>
+        <p>
+          Chat catalogs, transcripts, generated files, workspace state, deployment records, and generated Cloudflare
+          resources are stored in the connected Cloudflare account. Ghostbuild accesses them to perform your requests,
+          but does not copy them into the operator control-plane database.
+        </p>
+      </TrustSection>
+
       <TrustSection title="Operator, scope, and roles">
         <p>
           {GHOSTBUILD_OPERATOR.legalName}, an {GHOSTBUILD_OPERATOR.legalForm} (Ontario Corporation No.{' '}
@@ -82,17 +97,18 @@ function PrivacyPage() {
       <TrustSection title="AI processing">
         <p>
           The user-owned workspace runtime sends the prompt, conversation context, and project files needed for a
-          request to the builder model you select through Cloudflare AI in the connected account. The selector
-          distinguishes Cloudflare-hosted models from partner models. If you select DeepSeek V4 Pro, Cloudflare lists it
-          as a{' '}
+          request to the configured builder model through Cloudflare AI in the connected account. The in-chat model
+          selector distinguishes Cloudflare-hosted models from partner models. If you select DeepSeek V4 Pro, Cloudflare
+          lists it as a{' '}
           <a href="https://developers.cloudflare.com/ai/models/deepseek/deepseek-v4-pro/">
             third-party model served by Fireworks
           </a>
           , so Fireworks also processes the request content needed for inference. Ghostbuild does not place prompt or
-          source payloads in optional product telemetry. For these calls, Ghostbuild disables AI Gateway request logging
-          at the gateway, model-request, and request-header layers, so it does not use AI Gateway to retain request
-          payloads or request metadata. This does not change the transient processing needed for inference. Cloudflare
-          describes its handling of Workers AI content in its{' '}
+          source payloads in optional product telemetry. For partner-model calls, Ghostbuild uses Cloudflare’s
+          per-request controls to skip AI Gateway caching and log collection. This prevents Ghostbuild’s request from
+          creating an AI Gateway log containing its prompt, response, or request metadata, regardless of the connected
+          account’s gateway default. It does not change the transient processing needed for inference or provider
+          billing. Cloudflare describes its handling of Workers AI content in its{' '}
           <a href="https://developers.cloudflare.com/workers-ai/platform/data-usage/">Workers AI data-usage notice</a>.
           Ghostbuild does not use AI to make decisions that produce legal or similarly significant effects about you.
         </p>
@@ -102,7 +118,8 @@ function PrivacyPage() {
         <p>
           Essential browser storage includes a 30-day authentication cookie, short-lived OAuth and recovery state,
           account-local project replicas, theme and builder-model preferences, and a pending prompt in tab-scoped
-          session storage. Project replicas and preferences remain until replaced or cleared in your browser.
+          session storage. Cached chat catalogs and transcripts become eligible for local cleanup after 30 days of
+          inactivity. Workspace-file replicas and preferences may remain until replaced or cleared in your browser.
         </p>
         <p>
           Optional product telemetry is off until you allow it. Your choice is stored locally. Ghostbuild also honors
@@ -166,9 +183,8 @@ function PrivacyPage() {
         </p>
         <p>
           The operator’s current Cloudflare plan retains sampled control-plane Workers Logs and traces for seven days.
-          Ghostbuild does not copy them to another log or trace store, and access is currently limited to the sole
-          operator-account administrator. Cloudflare may retain aggregate control-plane Worker metrics for up to three
-          months; those metrics are not a user-addressable event ledger.
+          Ghostbuild does not copy them to another log or trace store. Cloudflare may retain aggregate control-plane
+          Worker metrics for up to three months; those metrics are not a user-addressable event ledger.
         </p>
         <p>
           Workspace Worker and Computer container logs, and generated-application Worker logs and traces, remain in your

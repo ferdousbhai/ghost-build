@@ -5,7 +5,7 @@ import { getPiModel, type ModelStreamOptions } from './pi-ai-models';
 describe('Pi Workers AI model binding', () => {
   it.each([
     ['@cf/zai-org/glm-5.2', undefined],
-    ['deepseek/deepseek-v4-pro', { id: 'default' }],
+    ['deepseek/deepseek-v4-pro', { id: 'default', collectLog: false, skipCache: true }],
   ] as const)('routes %s through env.AI.run with the required gateway', async (modelId, expectedGateway) => {
     const run = vi.fn(
       async (_model: string, _inputs: Record<string, unknown>, _options: Record<string, unknown>) =>

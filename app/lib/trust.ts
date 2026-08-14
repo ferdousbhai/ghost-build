@@ -10,9 +10,9 @@ export const GHOSTBUILD_OPERATOR = {
   correspondenceAddress: '350 Bay Street, Suite 1300B, Toronto, Ontario M5H 2S6, Canada',
 } as const;
 
-export const TRUST_DOCUMENT_VERSION = '1.5 public beta';
-export const TRUST_DOCUMENT_EFFECTIVE_ISO_DATE = '2026-08-11';
-export const TRUST_DOCUMENT_EFFECTIVE_DATE = 'August 11, 2026';
+export const TRUST_DOCUMENT_VERSION = '1.6 public beta';
+export const TRUST_DOCUMENT_EFFECTIVE_ISO_DATE = '2026-08-14';
+export const TRUST_DOCUMENT_EFFECTIVE_DATE = 'August 14, 2026';
 export const TRUST_DOCUMENT_STATUS =
   'These pages describe the current service, its public-beta limitations, and the channels that are actually available.';
 export const TRUST_CHANNEL_STATUS =

@@ -37,6 +37,7 @@ describe('public trust contract', () => {
     expect(privacy).toContain('control-plane database does not store prompt or transcript bodies');
     expect(privacy).toContain('remain in the connected Cloudflare account');
     expect(privacy).toContain('browser may keep account-local');
+    expect(privacy).toContain('skip AI Gateway caching and log collection');
   });
 
   it('keeps the public issue forms explicit about sensitive data and emergencies', () => {

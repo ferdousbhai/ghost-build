@@ -34,8 +34,8 @@ export const MessageInput = memo(function MessageInput({
   const { authState, input } = controller;
   const primaryActionLabel = getMessageInputPrimaryActionLabel(authState.kind, isStreaming, input.trim().length > 0);
   const hasActiveSession = authState.kind === 'fullyLoggedIn';
-  const modelSelector = (!chatStarted || hasActiveSession) && (
-    <BuilderModelSelector compact={chatStarted} disabled={disabled || isStreaming || sendMessageInProgress} />
+  const modelSelector = chatStarted && hasActiveSession && (
+    <BuilderModelSelector compact disabled={disabled || isStreaming || sendMessageInProgress} />
   );
   const placeholder = chatStarted
     ? isStreaming
@@ -123,7 +123,6 @@ export const MessageInput = memo(function MessageInput({
           </div>
           {!chatStarted && (
             <div className="ghost-message-input__footer flex flex-wrap items-center gap-2 rounded-b-xl border border-t-0 border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-1.5 text-sm">
-              {modelSelector}
               <div className="ml-auto flex items-center gap-1">{actions}</div>
             </div>
           )}
