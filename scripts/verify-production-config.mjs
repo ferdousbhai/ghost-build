@@ -30,7 +30,6 @@ const REQUIRED_COMPATIBILITY_DATE = '2026-07-21';
 const REQUIRED_OAUTH_SCOPES =
   'account-settings.read user-details.read workers-scripts.write containers.write d1.write workers-r2.write workers-kv-storage.write ai.read';
 const REQUIRED_SECRET_NAMES = ['CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY', 'CLOUDFLARE_OAUTH_CLIENT_SECRET'];
-const ACCOUNT_SECRET_STORE_ID = 'a436a6cefedc4acd8bb920cdbc202c1c';
 const PLACEHOLDER_D1_ID = '00000000-0000-0000-0000-000000000000';
 const workerTargets = [
   {
@@ -121,15 +120,23 @@ export function findWorkerGcScheduleErrors(config, label) {
     : [`${label} must schedule bounded authentication-metadata retention every 15 minutes.`];
 }
 
-export function findWorkerOpsAuthSecretErrors(config, label) {
-  const errors = [];
-  const binding = findBinding(config?.secrets_store_secrets, 'OPS_AUTH_SECRET');
-  if (!binding) {
-    return [`${label} must bind the shared private-operations authentication secret as OPS_AUTH_SECRET.`];
-  }
-  requireEqual(errors, `${label} operations Secrets Store store_id`, binding.store_id, ACCOUNT_SECRET_STORE_ID);
-  requireEqual(errors, `${label} operations Secrets Store secret_name`, binding.secret_name, 'ghostbuild-ops-auth');
-  return errors;
+/**
+ * Private operations are authorized by reachability: `ghostbuild-ops` holds a
+ * Service binding to the `OperationsService` RPC entrypoint, which HTTP can
+ * never dispatch to. Restoring the retired shared secret would put a forgeable
+ * string back on the wire, so that specific binding may not reappear. Other
+ * Secrets Store bindings stay allowed — genuinely account-wide secrets are what
+ * the store is for.
+ */
+export function findWorkerOperationsSecretErrors(config, label) {
+  const revived = (config?.secrets_store_secrets ?? []).filter(
+    (binding) => binding?.binding === 'OPS_AUTH_SECRET' || binding?.secret_name === 'ghostbuild-ops-auth',
+  );
+  return revived.length === 0
+    ? []
+    : [
+        `${label} must not bind the retired operations secret (ghostbuild-ops-auth); private operations are authorized by the OperationsService Service binding.`,
+      ];
 }
 
 export function findWorkerBuilderSkillsErrors(config, label) {
@@ -182,7 +189,7 @@ function verifyWorker(errors, config, target) {
     ...findWorkerRoutingErrors(config, label, target.customDomains),
     ...findWorkerVariableSourceErrors(config, label),
     ...findWorkerGcScheduleErrors(config, label),
-    ...findWorkerOpsAuthSecretErrors(config, label),
+    ...findWorkerOperationsSecretErrors(config, label),
     ...findWorkerBuilderSkillsErrors(config, label),
     ...findDurableObjectLifecycleErrors(config, label, target.durableObjects),
     ...findWorkerRuntimeSecretErrors(config, label, 'configure values as Cloudflare bindings'),

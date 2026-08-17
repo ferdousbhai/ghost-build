@@ -7,7 +7,7 @@ import {
   findWorkerObservabilityErrors,
   findWorkerOAuthStartRateLimitErrors,
   findWorkerGcScheduleErrors,
-  findWorkerOpsAuthSecretErrors,
+  findWorkerOperationsSecretErrors,
   findWorkerBuilderSkillsErrors,
   findWorkerRoutingErrors,
   findWorkerRuntimeSecretErrors,
@@ -105,10 +105,12 @@ describe('findWorkerGcScheduleErrors', () => {
   });
 });
 
-describe('findWorkerOpsAuthSecretErrors', () => {
-  it('pins the shared private-operations authentication secret binding', () => {
+describe('findWorkerOperationsSecretErrors', () => {
+  it('keeps the retired operations credential from returning to the wire', () => {
+    expect(findWorkerOperationsSecretErrors({}, 'wrangler.jsonc')).toEqual([]);
+    expect(findWorkerOperationsSecretErrors({ secrets_store_secrets: [] }, 'wrangler.jsonc')).toEqual([]);
     expect(
-      findWorkerOpsAuthSecretErrors(
+      findWorkerOperationsSecretErrors(
         {
           secrets_store_secrets: [
             {
@@ -120,10 +122,18 @@ describe('findWorkerOpsAuthSecretErrors', () => {
         },
         'wrangler.jsonc',
       ),
-    ).toEqual([]);
-    expect(findWorkerOpsAuthSecretErrors({}, 'wrangler.jsonc')).toEqual([
-      'wrangler.jsonc must bind the shared private-operations authentication secret as OPS_AUTH_SECRET.',
+    ).toEqual([
+      'wrangler.jsonc must not bind the retired operations secret (ghostbuild-ops-auth); private operations are authorized by the OperationsService Service binding.',
     ]);
+  });
+
+  it('still allows genuinely account-wide Secrets Store bindings', () => {
+    expect(
+      findWorkerOperationsSecretErrors(
+        { secrets_store_secrets: [{ binding: 'OPENROUTER_API_KEY', secret_name: 'open-router' }] },
+        'wrangler.jsonc',
+      ),
+    ).toEqual([]);
   });
 });
 

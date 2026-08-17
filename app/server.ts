@@ -12,12 +12,12 @@ import { authSessionAction, signOutAction } from './server-handlers/auth';
 import { runtimeCredentialAction } from './server-handlers/runtime-credential';
 import { clientTelemetryAction } from './server-handlers/client-telemetry';
 import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudflare-auth-retention.server';
-import {
-  operationsReconcileRuntimeAction,
-  operationsRuntimeVersionAction,
-  operationsSessionAction,
-} from './server-handlers/operations-boundary';
 import { CSP_NONCE_REQUEST_HEADER } from './lib/csp-nonce';
+
+// Private operations surface for the `ghostbuild-ops` Worker. Exported from the
+// Worker entry so `ghostbuild-ops` can reach it over its Service binding; RPC
+// methods are never dispatched from HTTP, so this adds no public route.
+export { OperationsService } from './operations-service';
 
 const APPLICATION_CSP_BASELINE = "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
 const HSTS_MIN_AGE_SECONDS = '31536000';
@@ -152,18 +152,6 @@ const exactRoutes: Record<string, ServerRoute> = {
   '/api/version': {
     method: 'GET',
     handler: (_request, env) => versionAction({ env }),
-  },
-  '/api/ops/session': {
-    method: 'GET',
-    handler: (request, env) => operationsSessionAction({ request, env }),
-  },
-  '/api/internal/ops/runtime-version': {
-    method: 'GET',
-    handler: (request, env) => operationsRuntimeVersionAction({ request, env }),
-  },
-  '/api/internal/ops/runtimes/reconcile': {
-    method: 'POST',
-    handler: (request, env) => operationsReconcileRuntimeAction({ request, env }),
   },
 };
 

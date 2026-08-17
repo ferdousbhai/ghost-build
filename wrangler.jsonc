@@ -53,13 +53,6 @@
   "secrets": {
     "required": ["CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY", "CLOUDFLARE_OAUTH_CLIENT_SECRET"],
   },
-  "secrets_store_secrets": [
-    {
-      "binding": "OPS_AUTH_SECRET",
-      "store_id": "a436a6cefedc4acd8bb920cdbc202c1c",
-      "secret_name": "ghostbuild-ops-auth",
-    },
-  ],
   "upload_source_maps": true,
   // Configure production secrets in Cloudflare, not local env files.
   // Deployment credentials are supplied by the CI environment, not as Worker runtime secrets.
@@ -79,7 +72,6 @@
     },
   ],
   "vars": {
-    "GHOSTBUILD_ADMIN_EMAIL": "ferdousbd@gmail.com",
     "CLOUDFLARE_OAUTH_SCOPES": "account-settings.read user-details.read workers-scripts.write containers.write d1.write workers-r2.write workers-kv-storage.write ai.read",
   },
 }

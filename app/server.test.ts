@@ -11,9 +11,6 @@ const startCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const pruneCloudflareAuthDataBestEffort = vi.hoisted(() => vi.fn());
 const runtimeCredentialAction = vi.hoisted(() => vi.fn());
 const clientTelemetryAction = vi.hoisted(() => vi.fn());
-const operationsSessionAction = vi.hoisted(() => vi.fn());
-const operationsRuntimeVersionAction = vi.hoisted(() => vi.fn());
-const operationsReconcileRuntimeAction = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-start/server-entry', () => ({ default: { fetch: tanstackFetch } }));
 vi.mock('agents', () => ({ routeAgentRequest }));
@@ -31,11 +28,6 @@ vi.mock('./server-handlers/health', () => ({ healthAction }));
 vi.mock('./server-handlers/version', () => ({ versionAction: vi.fn() }));
 vi.mock('./server-handlers/runtime-credential', () => ({ runtimeCredentialAction }));
 vi.mock('./server-handlers/client-telemetry', () => ({ clientTelemetryAction }));
-vi.mock('./server-handlers/operations-boundary', () => ({
-  operationsSessionAction,
-  operationsRuntimeVersionAction,
-  operationsReconcileRuntimeAction,
-}));
 vi.mock('./lib/cloudflare/data/cloudflare-auth-retention.server', () => ({ pruneCloudflareAuthDataBestEffort }));
 
 import server from './server';
@@ -61,9 +53,6 @@ describe('server Agent routing boundary', () => {
     pruneCloudflareAuthDataBestEffort.mockReset().mockResolvedValue(undefined);
     runtimeCredentialAction.mockReset().mockResolvedValue(Response.json({ accessToken: 'fresh' }));
     clientTelemetryAction.mockReset().mockResolvedValue(new Response(null, { status: 202 }));
-    operationsSessionAction.mockReset().mockResolvedValue(new Response(null, { status: 302 }));
-    operationsRuntimeVersionAction.mockReset().mockResolvedValue(Response.json({ runtimeVersion: 'a'.repeat(64) }));
-    operationsReconcileRuntimeAction.mockReset().mockResolvedValue(Response.json({ status: 'ready' }));
   });
 
   it('leaves non-Builder Agent-looking routes to the application router', async () => {
@@ -310,22 +299,30 @@ describe('server Agent routing boundary', () => {
     expect(pruneCloudflareAuthDataBestEffort).toHaveBeenCalledWith(env.DB);
   });
 
-  it('keeps private-operations adapters on exact method-constrained routes', async () => {
+  it('exposes no HTTP route for private operations', async () => {
     const env = {} as Env;
-    const sessionRequest = new Request('https://ghostbuild.dev/api/ops/session');
-    const versionRequest = new Request('https://ghostbuild.dev/api/internal/ops/runtime-version');
-    const reconcileRequest = new Request('https://ghostbuild.dev/api/internal/ops/runtimes/reconcile', {
-      method: 'POST',
-    });
 
-    expect((await server.fetch(sessionRequest, env)).status).toBe(302);
-    expect(operationsSessionAction).toHaveBeenCalledWith({ request: sessionRequest, env });
-    expect((await server.fetch(versionRequest, env)).status).toBe(200);
-    expect(operationsRuntimeVersionAction).toHaveBeenCalledWith({ request: versionRequest, env });
-    expect((await server.fetch(reconcileRequest, env)).status).toBe(200);
-    expect(operationsReconcileRuntimeAction).toHaveBeenCalledWith({ request: reconcileRequest, env });
-    expect(
-      (await server.fetch(new Request('https://ghostbuild.dev/api/internal/ops/runtimes/reconcile'), env)).status,
-    ).toBe(405);
+    // Operations are reachable only through the OperationsService RPC
+    // entrypoint. Nothing under these paths may resolve to a dedicated handler,
+    // so each one falls through to the application like any unknown path.
+    for (const request of [
+      new Request('https://ghostbuild.dev/api/ops/session'),
+      new Request('https://ghostbuild.dev/api/internal/ops/runtime-version'),
+      new Request('https://ghostbuild.dev/api/internal/ops/runtimes/reconcile', { method: 'POST' }),
+    ]) {
+      tanstackFetch
+        .mockClear()
+        .mockResolvedValue(new Response('application', { headers: { 'Content-Type': 'text/html' } }));
+      const response = await server.fetch(request, env);
+
+      expect(tanstackFetch).toHaveBeenCalledOnce();
+      expect(await response.text()).toBe('application');
+    }
+  });
+
+  it('exports the private operations entrypoint for the ghostbuild-ops Service binding', async () => {
+    const { OperationsService } = await import('./server');
+
+    expect(typeof OperationsService).toBe('function');
   });
 });
