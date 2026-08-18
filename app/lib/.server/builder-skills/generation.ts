@@ -2,6 +2,7 @@ import { parse } from 'yaml';
 import { BUILDER_SKILLS_POINTER_KEY } from '~/lib/.server/llm/builder-skills';
 import { BUILDER_SKILL_SOURCES, type SkillSource } from './upstream-sources';
 const GITHUB_API = 'https://api.github.com';
+const MAX_GITHUB_ERROR_BYTES = 4 * 1024;
 const MAX_GITHUB_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 16 * 1024 * 1024;
@@ -566,6 +567,18 @@ async function readFile(
   return bytes;
 }
 
+/** GitHub's own explanation for a refusal, bounded and stripped of formatting. */
+async function readErrorSummary(response: Response): Promise<string> {
+  try {
+    const bytes = await readBoundedBody(response, MAX_GITHUB_ERROR_BYTES);
+    const body = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    const message = (JSON.parse(body) as { message?: unknown }).message;
+    return typeof message === 'string' && message.length > 0 ? message : body.replace(/\s+/g, ' ').trim();
+  } catch {
+    return 'no explanation was returned';
+  }
+}
+
 async function fetchBoundedJson<T>(request: typeof fetch, url: string): Promise<T> {
   const response = await request(url, {
     headers: {
@@ -578,8 +591,10 @@ async function fetchBoundedJson<T>(request: typeof fetch, url: string): Promise<
   });
   assertNotRedirected(response, url);
   if (!response.ok) {
-    await response.body?.cancel().catch(() => undefined);
-    throw new Error(`GitHub builder skill request failed (${response.status}).`);
+    // GitHub explains a refusal in the body — a rate limit and a missing repository are
+    // both 403 or 404 and need different action, so discarding it leaves the daily
+    // receipt saying only that something went wrong.
+    throw new Error(`GitHub builder skill request failed (${response.status}): ${await readErrorSummary(response)}`);
   }
   const bytes = await readBoundedBody(response, MAX_GITHUB_RESPONSE_BYTES);
   try {

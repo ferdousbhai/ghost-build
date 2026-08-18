@@ -41,6 +41,13 @@ describe('builder skill mirror', () => {
     expect(modes.every((mode) => mode === 'manual')).toBe(true);
   });
 
+  it("carries GitHub's explanation into the failure, because a 403 can mean two things", async () => {
+    const request = (async () =>
+      Response.json({ message: 'API rate limit exceeded for 1.2.3.4.' }, { status: 403 })) as typeof fetch;
+
+    await expect(resolveSourceRevisions(request)).rejects.toThrow(/failed \(403\): API rate limit exceeded/);
+  });
+
   it('refuses a redirected upstream response instead of trusting its body', async () => {
     const request = (async () =>
       new Response(null, { status: 302, headers: { location: 'https://example.invalid/' } })) as typeof fetch;
