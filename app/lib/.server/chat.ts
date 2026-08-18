@@ -36,7 +36,6 @@ export async function createChatResponseFromBody({
   workspace,
   onValidationStage,
   runWithKeepAlive,
-  skillBucket,
   steering,
   onSettled,
 }: {
@@ -57,7 +56,6 @@ export async function createChatResponseFromBody({
   workspace: BuilderWorkspaceApi;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
-  skillBucket: R2Bucket;
   steering: PiSteeringQueue;
   onSettled: (budget: BuilderTurnBudgetReport) => void;
 }) {
@@ -79,7 +77,6 @@ export async function createChatResponseFromBody({
       workspace,
       onValidationStage,
       runWithKeepAlive,
-      skillBucket,
       steering,
       onSettled,
     });

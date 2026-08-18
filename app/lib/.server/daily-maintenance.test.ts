@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const runUpstreamWatcher = vi.hoisted(() => vi.fn());
 const runAppResourceReconciliation = vi.hoisted(() => vi.fn());
 
-vi.mock('~/lib/.server/builder-skills/upstream-sync', () => ({ runUpstreamWatcher }));
 vi.mock('~/lib/.server/cloudflare/app-resource-reconcile-sweep', () => ({ runAppResourceReconciliation }));
 
 import { runDailyMaintenance } from './daily-maintenance';
@@ -46,18 +44,16 @@ function env(db: FakeDb): Env {
 
 describe('daily maintenance scheduling', () => {
   beforeEach(() => {
-    runUpstreamWatcher.mockReset().mockResolvedValue({ status: 'unchanged' });
     runAppResourceReconciliation.mockReset().mockResolvedValue({ users: 0 });
   });
 
-  it('runs both jobs on the first tick that claims them', async () => {
+  it('runs each job on the first tick that claims it', async () => {
     const db = new FakeDb();
 
     await runDailyMaintenance(env(db), NOW);
 
-    expect(runUpstreamWatcher).toHaveBeenCalledOnce();
     expect(runAppResourceReconciliation).toHaveBeenCalledOnce();
-    expect([...db.claims.keys()]).toEqual(['builder-skill-sync', 'app-resource-reconcile']);
+    expect([...db.claims.keys()]).toEqual(['app-resource-reconcile']);
   });
 
   it('skips the other ninety-five ticks of the day', async () => {
@@ -68,7 +64,6 @@ describe('daily maintenance scheduling', () => {
       await runDailyMaintenance(env(db), NOW + tick * 15 * 60 * 1000);
     }
 
-    expect(runUpstreamWatcher).toHaveBeenCalledOnce();
     expect(runAppResourceReconciliation).toHaveBeenCalledOnce();
   });
 
@@ -78,7 +73,6 @@ describe('daily maintenance scheduling', () => {
     await runDailyMaintenance(env(db), NOW);
     await runDailyMaintenance(env(db), NOW + DAY);
 
-    expect(runUpstreamWatcher).toHaveBeenCalledTimes(2);
     expect(runAppResourceReconciliation).toHaveBeenCalledTimes(2);
   });
 
@@ -90,18 +84,18 @@ describe('daily maintenance scheduling', () => {
     await runDailyMaintenance(env(db), NOW);
     await runDailyMaintenance(env(db), NOW + 3 * DAY);
 
-    expect(runUpstreamWatcher).toHaveBeenCalledTimes(2);
+    expect(runAppResourceReconciliation).toHaveBeenCalledTimes(2);
   });
 
   it('claims before running, so a throwing job waits out its interval', async () => {
     const db = new FakeDb();
-    runUpstreamWatcher.mockRejectedValueOnce(new Error('GitHub builder skill request failed (503).'));
+    runAppResourceReconciliation.mockRejectedValueOnce(new Error('Cloudflare listing failed (503).'));
 
     await runDailyMaintenance(env(db), NOW);
     await runDailyMaintenance(env(db), NOW + 15 * 60 * 1000);
 
-    expect(runUpstreamWatcher).toHaveBeenCalledOnce();
-    // Each job owns its own slot, so the failure never blocks the sweep beside it.
+    // The claim is written before the job runs, so a throw waits out the interval instead of
+    // retrying every fifteen minutes.
     expect(runAppResourceReconciliation).toHaveBeenCalledOnce();
   });
 
@@ -111,7 +105,6 @@ describe('daily maintenance scheduling', () => {
 
     await runDailyMaintenance(env(db), NOW);
 
-    expect(runUpstreamWatcher).not.toHaveBeenCalled();
     expect(runAppResourceReconciliation).not.toHaveBeenCalled();
   });
 });

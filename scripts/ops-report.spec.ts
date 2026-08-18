@@ -3,7 +3,6 @@ import {
   classifyConnections,
   collectReport,
   describeReconcileRun,
-  describeSkillSyncRun,
   describeDailyJobs,
   describeWorkspaceRuntime,
   describeWranglerFailure,
@@ -172,101 +171,33 @@ describe('workspace runtime rows', () => {
   });
 });
 
-describe('skill sync rows', () => {
-  it('renders each recorded outcome', () => {
-    expect(
-      describeSkillSyncRun(
-        { status: 'published', completed_at: NOW - HOUR, generation: 'abcdef0123456789', file_count: 42 },
-        NOW,
-      ),
-    ).toMatchObject({
-      level: 'ok',
-      sentence: 'Builder skills published generation abcdef012345 with 42 files 1h ago.',
-    });
-    expect(
-      describeSkillSyncRun(
-        { status: 'unchanged', completed_at: NOW - 30 * MINUTE, generation: 'abcdef0123456789' },
-        NOW,
-      ),
-    ).toMatchObject({ level: 'ok' });
-    expect(describeSkillSyncRun({ status: 'busy', completed_at: NOW - HOUR }, NOW).level).toBe('attention');
-    expect(
-      describeSkillSyncRun({ status: 'error', completed_at: NOW - HOUR, error: 'rate limited' }, NOW),
-    ).toMatchObject({ level: 'error', sentence: 'The builder skill sync failed 1h ago: rate limited.' });
-  });
-
-  it('escalates a run that has claimed to be running for too long', () => {
-    expect(describeSkillSyncRun({ status: 'running', started_at: NOW - 5 * MINUTE }, NOW).level).toBe('attention');
-    const wedged = describeSkillSyncRun({ status: 'running', started_at: NOW - 6 * HOUR }, NOW);
-    expect(wedged.level).toBe('error');
-    expect(wedged.sentence).toContain('has been running since 6h ago');
-  });
-
-  it('names a missing generation rather than printing an empty hash', () => {
-    expect(
-      describeSkillSyncRun({ status: 'published', completed_at: NOW, generation: null, file_count: 3 }, NOW).sentence,
-    ).toContain('generation unknown');
-  });
-
-  it('refuses to classify a run whose status is not one the schema allows', () => {
-    expect(() => describeSkillSyncRun({ completed_at: NOW, generation: 'gen' }, NOW)).toThrow(
-      'builder_skill_sync_runs rows have no `status` column',
-    );
-    expect(() => describeSkillSyncRun({ status: 'finished', completed_at: NOW }, NOW)).toThrow(
-      'builder_skill_sync_runs.status holds the string "finished"',
-    );
-  });
-
-  it('says a published run recorded no file count rather than reporting zero files', () => {
-    const result = describeSkillSyncRun(
-      { status: 'published', completed_at: NOW, generation: 'gen0123456789', file_count: null },
-      NOW,
-    );
-    expect(result.sentence).toContain('an unrecorded number of files');
-    expect(result.sentence).not.toContain('0 files');
-  });
-});
-
 describe('daily maintenance slots', () => {
   it('passes a job that claimed a slot within the day', () => {
-    const entries = describeDailyJobs(
-      [
-        { job: 'builder-skill-sync', last_started_at: NOW - 20 * HOUR },
-        { job: 'app-resource-reconcile', last_started_at: NOW - 20 * HOUR },
-      ],
-      NOW,
-    );
-    expect(entries.map((entry) => entry.level)).toEqual(['ok', 'ok']);
+    const entries = describeDailyJobs([{ job: 'app-resource-reconcile', last_started_at: NOW - 20 * HOUR }], NOW);
+    expect(entries.map((entry) => entry.level)).toEqual(['ok']);
     expect(entries[0].sentence).toBe('app-resource-reconcile last started 20h ago.');
   });
 
   it('flags a job whose slot is older than the daily interval', () => {
-    const entries = describeDailyJobs(
-      [
-        { job: 'builder-skill-sync', last_started_at: NOW - 3 * DAY },
-        { job: 'app-resource-reconcile', last_started_at: NOW - 20 * HOUR },
-      ],
-      NOW,
-    );
-    const late = entries.find((entry) => entry.job === 'builder-skill-sync');
+    const entries = describeDailyJobs([{ job: 'app-resource-reconcile', last_started_at: NOW - 3 * DAY }], NOW);
+    const late = entries.find((entry) => entry.job === 'app-resource-reconcile');
     expect(late?.level).toBe('attention');
-    expect(late?.sentence).toBe('builder-skill-sync last started 3d ago, so the daily cron is not reaching it.');
+    expect(late?.sentence).toBe('app-resource-reconcile last started 3d ago, so the daily cron is not reaching it.');
   });
 
   it('reports an expected job that has no row at all as never having run', () => {
-    const entries = describeDailyJobs([{ job: 'app-resource-reconcile', last_started_at: NOW - HOUR }], NOW);
-    const missing = entries.find((entry) => entry.job === 'builder-skill-sync');
+    const entries = describeDailyJobs([], NOW);
+    const missing = entries.find((entry) => entry.job === 'app-resource-reconcile');
     expect(missing).toMatchObject({
       level: 'attention',
       at: null,
-      sentence: 'builder-skill-sync has never claimed a maintenance slot.',
+      sentence: 'app-resource-reconcile has never claimed a maintenance slot.',
     });
   });
 
   it('keeps a job the schedule gained that this tool does not know about', () => {
     const entries = describeDailyJobs(
       [
-        { job: 'builder-skill-sync', last_started_at: NOW - HOUR },
         { job: 'app-resource-reconcile', last_started_at: NOW - HOUR },
         { job: 'something-new', last_started_at: NOW - HOUR },
       ],
@@ -555,20 +486,6 @@ function healthyFixture(): Fixture {
         },
       ],
     ],
-    builder_skill_sync_state: [
-      [{ singleton: 1, expected_generation: 'gen0123456789', last_checked_at: NOW - 2 * HOUR, active_run_id: null }],
-    ],
-    builder_skill_sync_runs: [
-      [
-        {
-          id: 'run-1',
-          status: 'unchanged',
-          started_at: NOW - 2 * HOUR,
-          completed_at: NOW - 2 * HOUR,
-          generation: 'gen0123456789',
-        },
-      ],
-    ],
     app_resource_reconcile_runs: [
       [
         {
@@ -589,12 +506,7 @@ function healthyFixture(): Fixture {
         },
       ],
     ],
-    daily_maintenance_jobs: [
-      [
-        { job: 'builder-skill-sync', last_started_at: NOW - 2 * HOUR },
-        { job: 'app-resource-reconcile', last_started_at: NOW - 2 * HOUR },
-      ],
-    ],
+    daily_maintenance_jobs: [[{ job: 'app-resource-reconcile', last_started_at: NOW - 2 * HOUR }]],
   };
 }
 
@@ -626,12 +538,11 @@ describe('report shape', () => {
       database: 'ghostbuild',
       controlPlaneReadable: true,
       status: 'ok',
-      headline: 'Everything is healthy: all 7 checks passed.',
+      headline: 'Everything is healthy: all 6 checks passed.',
     });
     expect(reportOf(report).checks.map((item) => item.id)).toEqual([
       'cloudflare-accounts',
       'workspace-runtimes',
-      'builder-skill-sync',
       'app-resource-sweep',
       'daily-maintenance',
       'users',
@@ -656,7 +567,7 @@ describe('report shape', () => {
       skippedListing: false,
     });
     expect(checkById(report, 'daily-maintenance').sentence).toBe(
-      'All 2 daily maintenance jobs fired within the last day.',
+      'All 1 daily maintenance job fired within the last day.',
     );
   });
 
@@ -693,12 +604,7 @@ describe('report shape', () => {
 
   it('reports every migrated table as unknown before the migration is deployed', async () => {
     const fixture = healthyFixture();
-    for (const table of [
-      'builder_skill_sync_state',
-      'builder_skill_sync_runs',
-      'app_resource_reconcile_runs',
-      'daily_maintenance_jobs',
-    ]) {
+    for (const table of ['app_resource_reconcile_runs', 'daily_maintenance_jobs']) {
       fixture[table] = new Error(`no such table: ${table}: SQLITE_ERROR [code: 7500]`);
     }
 
@@ -709,13 +615,13 @@ describe('report shape', () => {
     });
 
     expect(reportOf(report).status).toBe('unknown');
-    expect(reportOf(report).headline).toBe('3 checks could not be read.');
-    for (const id of ['builder-skill-sync', 'app-resource-sweep', 'daily-maintenance']) {
+    expect(reportOf(report).headline).toBe('2 checks could not be read.');
+    for (const id of ['app-resource-sweep', 'daily-maintenance']) {
       const item = checkById(report, id);
       expect(item.status).toBe('unknown');
       expect(item.sentence).toContain('does not exist in production yet');
     }
-    // The tables that do exist are still reported, so a missing migration costs three checks.
+    // The tables that do exist are still reported, so a missing migration costs two checks.
     expect(checkById(report, 'cloudflare-accounts').status).toBe('ok');
   });
 
@@ -751,12 +657,7 @@ describe('report shape', () => {
 
   it('flags a daily job that has stopped firing', async () => {
     const fixture = healthyFixture();
-    fixture.daily_maintenance_jobs = [
-      [
-        { job: 'builder-skill-sync', last_started_at: NOW - 2 * HOUR },
-        { job: 'app-resource-reconcile', last_started_at: NOW - 5 * DAY },
-      ],
-    ];
+    fixture.daily_maintenance_jobs = [[{ job: 'app-resource-reconcile', last_started_at: NOW - 5 * DAY }]];
 
     const report = await collectReport({
       query: fixtureQuery(fixture),
@@ -765,18 +666,13 @@ describe('report shape', () => {
     });
     const maintenance = checkById(report, 'daily-maintenance');
     expect(maintenance.status).toBe('attention');
-    expect(maintenance.sentence).toBe('1 of 2 daily maintenance jobs did not fire as scheduled.');
+    expect(maintenance.sentence).toBe('1 of 1 daily maintenance job did not fire as scheduled.');
     expect(renderReport(report)).toContain('app-resource-reconcile last started 5d ago');
   });
 
   it('reports a job that claimed its slot but recorded no run as started and died', async () => {
     const fixture = healthyFixture();
-    fixture.daily_maintenance_jobs = [
-      [
-        { job: 'builder-skill-sync', last_started_at: NOW - 2 * HOUR },
-        { job: 'app-resource-reconcile', last_started_at: NOW - 30 * MINUTE },
-      ],
-    ];
+    fixture.daily_maintenance_jobs = [[{ job: 'app-resource-reconcile', last_started_at: NOW - 30 * MINUTE }]];
 
     const report = await collectReport({
       query: fixtureQuery(fixture),
@@ -829,10 +725,9 @@ describe('report shape', () => {
     }
   });
 
-  it('reports an unreadable maintenance or sync row as unknown rather than as a failed run', async () => {
+  it('reports an unreadable maintenance row as unknown rather than as a failed run', async () => {
     const fixture = healthyFixture();
-    fixture.daily_maintenance_jobs = [[{ job: 'builder-skill-sync', last_started_at: null }]];
-    fixture.builder_skill_sync_runs = [[{ id: 'run-1', status: 'shipped', started_at: NOW - HOUR }]];
+    fixture.daily_maintenance_jobs = [[{ job: 'app-resource-reconcile', last_started_at: null }]];
 
     const report = await collectReport({
       query: fixtureQuery(fixture),
@@ -842,14 +737,10 @@ describe('report shape', () => {
     const maintenance = checkById(report, 'daily-maintenance');
     expect(maintenance.status).toBe('unknown');
     expect(maintenance.sentence).toContain('daily_maintenance_jobs.last_started_at holds null');
-    const sync = checkById(report, 'builder-skill-sync');
-    expect(sync.status).toBe('unknown');
-    expect(sync.sentence).toContain('builder_skill_sync_runs.status holds the string "shipped"');
   });
 
   it('treats a job that has never run as attention rather than as health', async () => {
     const fixture = healthyFixture();
-    fixture.builder_skill_sync_runs = [[]];
     fixture.app_resource_reconcile_runs = [[]];
     fixture.daily_maintenance_jobs = [[]];
 
@@ -859,10 +750,9 @@ describe('report shape', () => {
       desiredRuntimeVersion: CURRENT_RUNTIME,
     });
     expect(reportOf(report).status).toBe('attention');
-    expect(checkById(report, 'builder-skill-sync').sentence).toBe('No builder skill sync has ever run.');
     expect(checkById(report, 'app-resource-sweep').sentence).toBe(
       'No app resource reconciliation sweep has been recorded yet.',
     );
-    expect(renderReport(report)).toContain('builder-skill-sync has never claimed a maintenance slot.');
+    expect(renderReport(report)).toContain('app-resource-reconcile has never claimed a maintenance slot.');
   });
 });

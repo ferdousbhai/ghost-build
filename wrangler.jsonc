@@ -65,12 +65,6 @@
       "migrations_dir": "migrations",
     },
   ],
-  "r2_buckets": [
-    {
-      "binding": "BUILDER_SKILLS",
-      "bucket_name": "ghostbuild-builder-skills",
-    },
-  ],
   "vars": {
     "CLOUDFLARE_OAUTH_SCOPES": "account-settings.read user-details.read workers-scripts.write containers.write d1.write workers-r2.write workers-kv-storage.write ai.read",
   },

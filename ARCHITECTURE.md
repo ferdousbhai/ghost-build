@@ -83,15 +83,18 @@ The model receives four primitives: `read`, `write`, `edit`, and `exec`. `write`
 `@cloudflare/computer/tools` contracts; Ghostbuild's `read` returns numbered lines with a compact tag bound to the full
 file SHA-256, and `edit` applies non-overlapping line operations only when that exact snapshot is still current.
 Directory discovery goes through `exec`; no `ls` schema is included in model input or prompt accounting.
-Owner-published guidance uses upstream Agent Skills trees unchanged: each skill keeps its official `SKILL.md`,
-frontmatter, references, assets, and license files in a generation-pinned shared R2 bucket. At turn preparation the
-official `agents/skills` R2 source validates and indexes the published generation. The system prompt lists the available
-skills, and the existing `read` tool exposes their text files under `/__skills__/<skill>/`; no activation or separate
-resource-reader tool is added. That namespace is a read-only control-plane overlay: it never enters the project VFS,
-revision, or deployment artifact, and project files cannot shadow it. The evergreen system prompt establishes only
-authority, safety, and workflow precedence; concrete product and API guidance comes from upstream skills, while code and
-deployment boundaries remain enforced by project validation and the managed publisher. Missing, incomplete, or invalid
-published skills fail the turn instead of silently degrading it.
+Reference guidance is retrieved rather than mirrored. Cloudflare's own documentation is searched live through the
+`search_cloudflare_docs` tool, one stateless request to the public `docs.mcp.cloudflare.com` endpoint that returns
+ranked excerpts with their source URLs; a full page is read by appending `/index.md` to any documentation URL.
+Framework references are read from the packages the project itself installed, so they always match the version it
+builds against. The one skill Ghostbuild maintains ships in this repository and is bundled into the Worker, exposed
+through the existing `read` tool under `/__skills__/<skill>/`; no activation or separate resource-reader tool is
+added. That namespace is a read-only control-plane overlay: it never enters the project VFS, revision, or deployment
+artifact, and project files cannot shadow it. The evergreen system prompt establishes only authority, safety, and
+workflow precedence; concrete product and API guidance comes from retrieval, while code and deployment boundaries
+remain enforced by project validation. A documentation search that fails returns a failed tool result the model can
+act on, rather than ending the turn.
+
 Model tools and editor reads use the same workspace API. Browser saves use
 compare-and-swap against the numeric revision the browser loaded; a conflict refreshes from the user runtime and never
 overwrites newer state. TanStack DB collections combine the server query collection with a per-account browser SQLite

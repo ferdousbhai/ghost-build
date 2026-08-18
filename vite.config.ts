@@ -49,9 +49,7 @@ export default defineConfig((config) => {
       alias: isTest ? { 'cloudflare:workers': fromRoot('./app/test/cloudflare-workers-shim.ts') } : undefined,
     },
     ssr: {
-      noExternal: isTest
-        ? ['@cloudflare/sandbox', '@cloudflare/containers', 'agents', '@cloudflare/codemode']
-        : undefined,
+      noExternal: isTest ? ['@cloudflare/sandbox', '@cloudflare/containers', 'agents'] : undefined,
     },
     test: {
       exclude: [...configDefaults.exclude, 'e2e/**'],

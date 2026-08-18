@@ -46,7 +46,6 @@ template/worker-configuration.d.ts
 
 # Owner-controlled upstream Agent Skills are published to R2 and never bundled from Git.
 .ghostbuild/docs/
-.ghostbuild/skills/
 
 Modelfile
 modelfiles

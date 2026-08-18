@@ -38,7 +38,6 @@ describe('chat provider error boundary', () => {
         sessionAffinity: 'session',
         workspace: {} as never,
         runWithKeepAlive: (operation) => operation(),
-        skillBucket: {} as R2Bucket,
         ...steering(),
       }),
     ).rejects.toMatchObject({ status: 500 });
@@ -73,7 +72,6 @@ describe('chat provider error boundary', () => {
       sessionAffinity: 'session',
       workspace: {} as never,
       runWithKeepAlive: (operation) => operation(),
-      skillBucket: {} as R2Bucket,
       ...steering(),
     });
 
@@ -90,7 +88,6 @@ function createResponse() {
     sessionAffinity: 'session',
     workspace: {} as never,
     runWithKeepAlive: (operation) => operation(),
-    skillBucket: {} as R2Bucket,
     ...steering(),
   });
 }

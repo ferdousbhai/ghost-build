@@ -4,8 +4,6 @@ import { describe, expect, test } from 'vitest';
 
 const controlPlaneTables = [
   'app_resource_reconcile_runs',
-  'builder_skill_sync_runs',
-  'builder_skill_sync_state',
   'cloudflare_auth_sessions',
   'cloudflare_connections',
   'cloudflare_credentials',

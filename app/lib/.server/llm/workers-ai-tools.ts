@@ -13,13 +13,18 @@ import {
   lineEditToolParameters,
   type LineEditToolInput,
 } from 'ghostbuild-agent/line-edit';
-import { MODEL_TOOL_INPUT_SCHEMAS, MODEL_TOOL_NAMES, type ModelToolName } from 'ghostbuild-agent/model-tool-inputs';
+import {
+  MODEL_TOOL_INPUT_SCHEMAS,
+  WORKSPACE_TOOL_NAMES,
+  type WorkspaceToolName,
+} from 'ghostbuild-agent/model-tool-inputs';
 import { parseNpmInstallCommand } from 'ghostbuild-agent/tools/npmInstall';
 import { isGhostbuildToolResult, toolFailure } from 'ghostbuild-agent/tool-result';
 import { isWorkspaceToolOperationIndeterminateError, type BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 import type { Tool } from 'ghostbuild-agent/tool';
 import { type BuilderSkillReader, isBuilderSkillPath } from './builder-skills';
+import { cloudflareDocsSearchTool } from './cloudflare-docs-search';
 
 type BuilderOperationContext = {
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
@@ -49,9 +54,11 @@ export function createWorkersAiTools(
     write: abortAwareWriteTool(workspace),
     edit: lineAnchoredEditTool(workspace),
     exec: streamingExecTool(workspace),
+    // Stateless and remote: it must not take the workspace operation lane.
+    search_cloudflare_docs: cloudflareDocsSearchTool(),
   };
 
-  for (const toolName of MODEL_TOOL_NAMES) {
+  for (const toolName of WORKSPACE_TOOL_NAMES) {
     tools[toolName] = computerWorkspaceTool(
       toolName,
       tools[toolName],
@@ -66,7 +73,7 @@ export function createWorkersAiTools(
 function lineAnchoredReadTool(workspace: BuilderWorkspaceApi, skillReader?: BuilderSkillReader): Tool {
   return {
     description:
-      'Read a UTF-8 project or owner-published /__skills__/ reference file as numbered lines. Project reads return a compact base snapshot tag required by edit. Skill files are read-only. Output is bounded; use offset and limit to continue.',
+      'Read a UTF-8 project or /__skills__/ reference file as numbered lines. Project reads return a compact base snapshot tag required by edit. Skill files are read-only. Output is bounded; use offset and limit to continue.',
     inputSchema: MODEL_TOOL_INPUT_SCHEMAS.read,
     execute: async (input, options) => {
       const parsed = input as { path: string; offset?: number; limit?: number };
@@ -205,7 +212,7 @@ function countLogicalLines(content: string): number {
 }
 
 function computerWorkspaceTool(
-  toolName: ModelToolName,
+  toolName: WorkspaceToolName,
   definition: Tool,
   workspace: BuilderWorkspaceApi,
   context: BuilderOperationContext,

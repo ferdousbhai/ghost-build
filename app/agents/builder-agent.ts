@@ -395,7 +395,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         workspace: this.workspace,
         onValidationStage: (toolCallId, stage) => this.setValidationProgress(toolCallId, stage),
         runWithKeepAlive: (operation) => this.keepAliveWhile(operation),
-        skillBucket: this.env.BUILDER_SKILLS,
         steering,
         onSettled: (budget) => {
           settleSteering();

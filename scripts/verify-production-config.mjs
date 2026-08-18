@@ -139,16 +139,6 @@ export function findWorkerOperationsSecretErrors(config, label) {
       ];
 }
 
-export function findWorkerBuilderSkillsErrors(config, label) {
-  const binding = findBinding(config?.r2_buckets, 'BUILDER_SKILLS');
-  if (!binding) {
-    return [`${label} must bind the owner-published builder skill bucket as BUILDER_SKILLS.`];
-  }
-  return binding.bucket_name === 'ghostbuild-builder-skills'
-    ? []
-    : [`${label} BUILDER_SKILLS bucket_name must be ghostbuild-builder-skills.`];
-}
-
 export function findDurableObjectLifecycleErrors(config, label, classNames) {
   const errors = [];
   if (Object.hasOwn(config ?? {}, 'migrations')) {
@@ -190,7 +180,6 @@ function verifyWorker(errors, config, target) {
     ...findWorkerVariableSourceErrors(config, label),
     ...findWorkerGcScheduleErrors(config, label),
     ...findWorkerOperationsSecretErrors(config, label),
-    ...findWorkerBuilderSkillsErrors(config, label),
     ...findDurableObjectLifecycleErrors(config, label, target.durableObjects),
     ...findWorkerRuntimeSecretErrors(config, label, 'configure values as Cloudflare bindings'),
   );

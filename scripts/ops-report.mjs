@@ -46,7 +46,7 @@ const ORPHAN_SAMPLE_LIMIT = 8;
  * `daily_maintenance_jobs` only holds jobs that have run at least once: a job missing from the
  * table has never fired, which is exactly the failure worth reporting.
  */
-export const EXPECTED_DAILY_JOBS = ['builder-skill-sync', 'app-resource-reconcile'];
+export const EXPECTED_DAILY_JOBS = ['app-resource-reconcile'];
 
 /** Worst first. A report whose headline is "healthy" must have nothing above `ok` in it. */
 const STATUS_RANK = { error: 3, attention: 2, unknown: 1, ok: 0 };
@@ -59,7 +59,6 @@ const STATUS_RANK = { error: 3, attention: 2, unknown: 1, ok: 0 };
 const CHECK_ORDER = [
   { id: 'cloudflare-accounts', title: 'Cloudflare accounts' },
   { id: 'workspace-runtimes', title: 'Workspace runtimes' },
-  { id: 'builder-skill-sync', title: 'Builder skill sync' },
   { id: 'app-resource-sweep', title: 'App resource sweep' },
   { id: 'daily-maintenance', title: 'Daily maintenance' },
   { id: 'users', title: 'Users' },
@@ -331,67 +330,6 @@ export function describeWorkspaceRuntime(row, { now, desiredRuntimeVersion }) {
   return { ...base, level: 'ok', sentence: `${who} is on the current workspace runtime (updated ${when}).` };
 }
 
-/** The `status` values `migrations/0009` allows a builder skill sync run to hold. */
-const SKILL_SYNC_STATUSES = ['running', 'unchanged', 'published', 'busy', 'error'];
-
-/**
- * The most recent builder skill sync attempt, as a status and a sentence.
- *
- * Throws when `builder_skill_sync_runs` does not hold what `migrations/0009` declares:
- * a row this reader cannot classify has to reach the operator as unreadable, never as a
- * sync that merely failed.
- *
- * @param {Record<string, unknown>} row
- * @param {number} now
- */
-export function describeSkillSyncRun(row, now) {
-  const read = rowReader('builder_skill_sync_runs', row);
-  const at = Number.isFinite(row.completed_at) ? Number(row.completed_at) : Number(row.started_at);
-  const when = formatRelativeTime(at, now, { missing: 'at an unrecorded time' });
-  const generation = shortHash(typeof row.generation === 'string' ? row.generation : null);
-  switch (read.text('status', SKILL_SYNC_STATUSES)) {
-    case 'published': {
-      // `file_count` is only written once a run has something to publish.
-      const files = read.nullableInteger('file_count');
-      const counted = files === null ? 'an unrecorded number of files' : `${files} ${plural(files, 'file')}`;
-      return {
-        level: 'ok',
-        at,
-        sentence: `Builder skills published generation ${generation} with ${counted} ${when}.`,
-      };
-    }
-    case 'unchanged':
-      return {
-        level: 'ok',
-        at,
-        sentence: `Builder skills were verified unchanged at generation ${generation} ${when}.`,
-      };
-    case 'running': {
-      const age = ageOf(Number(row.started_at), now);
-      const stuck = age !== null && age > SYNC_RUN_STUCK_MS;
-      return {
-        level: stuck ? 'error' : 'attention',
-        at: Number(row.started_at),
-        sentence: stuck
-          ? `A builder skill sync has been running since ${formatRelativeTime(Number(row.started_at), now)} and has not finished.`
-          : `A builder skill sync started ${formatRelativeTime(Number(row.started_at), now)} and is still running.`,
-      };
-    }
-    case 'busy':
-      return {
-        level: 'attention',
-        at,
-        sentence: `The builder skill sync deferred ${when} because another sync held the lock.`,
-      };
-    default:
-      return {
-        level: 'error',
-        at,
-        sentence: `The builder skill sync failed ${when}: ${cleanErrorText(read.nullableText('error')) ?? 'no error was recorded'}.`,
-      };
-  }
-}
-
 /**
  * The daily maintenance slots, as one entry per job.
  *
@@ -616,8 +554,6 @@ export function coreStatements(now) {
  * re-sorts on the timestamps it reads.
  */
 export const OPTIONAL_STATEMENTS = {
-  skillSyncState: 'SELECT * FROM builder_skill_sync_state LIMIT 1',
-  skillSyncRuns: 'SELECT * FROM builder_skill_sync_runs ORDER BY rowid DESC LIMIT 10',
   reconcileRuns: 'SELECT * FROM app_resource_reconcile_runs ORDER BY rowid DESC LIMIT 10',
   dailyJobs: 'SELECT * FROM daily_maintenance_jobs',
 };
@@ -726,14 +662,12 @@ export async function collectReport({ query, now = Date.now(), desiredRuntimeVer
     buildAccountsCheck(core),
     buildSessionsCheck(core),
     buildRuntimesCheck(core, { now, desiredRuntimeVersion }),
-    buildSkillSyncCheck(optional.skillSyncState, optional.skillSyncRuns, now),
     buildReconcileCheck(optional.reconcileRuns, now),
     buildDailyMaintenanceCheck(optional.dailyJobs, {
       now,
       // Each job writes a `running` receipt as its first act, so a claim newer than every
       // receipt means the job fired and died before it could record anything.
       lastReceiptAt: {
-        'builder-skill-sync': newestStart(optional.skillSyncRuns),
         'app-resource-reconcile': newestStart(optional.reconcileRuns),
       },
     }),
@@ -886,70 +820,6 @@ function buildRuntimesCheck(core, { now, desiredRuntimeVersion }) {
   });
 }
 
-function buildSkillSyncCheck(stateAttempt, runsAttempt, now) {
-  if (!runsAttempt.ok) {
-    return unknownCheck('builder-skill-sync', 'Builder skill sync', runsAttempt, 'Migrated from ghost-build-ops.');
-  }
-  const runs = runsAttempt.value[0] ?? [];
-  const state = stateAttempt.ok ? (stateAttempt.value[0]?.[0] ?? null) : null;
-  const lastChecked = state && Number.isFinite(state.last_checked_at) ? Number(state.last_checked_at) : null;
-  const expectedGeneration = typeof state?.expected_generation === 'string' ? state.expected_generation : null;
-  const stateDetail = {
-    expectedGeneration,
-    lastCheckedAt: lastChecked,
-    activeRunId: state?.active_run_id ?? null,
-    stateReadError: stateAttempt.ok ? null : stateAttempt.error,
-  };
-
-  if (runs.length === 0) {
-    return check('builder-skill-sync', 'Builder skill sync', 'attention', 'No builder skill sync has ever run.', {
-      now,
-      detail: { ...stateDetail, runs: [] },
-    });
-  }
-  let latest;
-  try {
-    latest = describeSkillSyncRun(runs[0], now);
-  } catch (error) {
-    return unknownCheck(
-      'builder-skill-sync',
-      'Builder skill sync',
-      schemaFailure(error),
-      'Migrated from ghost-build-ops.',
-    );
-  }
-  const watcherAge = ageOf(lastChecked, now);
-  const stale = watcherAge !== null && watcherAge > SCHEDULED_JOB_STALE_MS;
-  const level = stale && STATUS_RANK[latest.level] < STATUS_RANK.attention ? 'attention' : latest.level;
-  const sentence = stale
-    ? `${latest.sentence} The watcher has not checked upstream since ${formatRelativeTime(lastChecked, now)}.`
-    : latest.sentence;
-  return check('builder-skill-sync', 'Builder skill sync', level, sentence, {
-    at: latest.at,
-    now,
-    detail: {
-      ...stateDetail,
-      currentGeneration: typeof runs[0].generation === 'string' ? runs[0].generation : expectedGeneration,
-      lastRunStatus: runs[0].status ?? null,
-      runs: runs.slice(0, 5).map((run) => ({
-        status: run.status ?? null,
-        startedAt: Number.isFinite(run.started_at) ? Number(run.started_at) : null,
-        completedAt: Number.isFinite(run.completed_at) ? Number(run.completed_at) : null,
-        generation: run.generation ?? null,
-        fileCount: Number.isFinite(run.file_count) ? Number(run.file_count) : null,
-        error: cleanErrorText(run.error),
-      })),
-    },
-  });
-}
-
-/**
- * The newest `started_at` across a run-receipt table, or `null` when it could not be read.
- *
- * A receipt whose own start time is unreadable makes the whole comparison unreadable: this
- * number is what decides whether a job "started and died", and reading an unreadable row as
- * an older run would accuse a healthy job.
- */
 function newestStart(runsAttempt) {
   if (!runsAttempt?.ok) {
     return null;

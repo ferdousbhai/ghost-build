@@ -38,7 +38,7 @@ vi.mock('./pi-message-conversion', () => ({
 }));
 vi.mock('./builder-skills', () => ({
   createBuilderSkillContext: vi.fn(async () => ({
-    prompt: 'Owner-published guidance.',
+    prompt: 'Bundled guidance.',
     reader: { read: vi.fn(async () => null) },
   })),
 }));
@@ -739,7 +739,6 @@ function createAgentStream(
     sessionAffinity: 'opaque-session',
     workspace: {} as never,
     runWithKeepAlive: (operation) => operation(),
-    skillBucket: {} as R2Bucket,
     steering,
     onSettled: vi.fn(),
     ...overrides,

@@ -1,115 +1,46 @@
-import { createHash } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
-import { BUILDER_SKILLS_POINTER_KEY, createBuilderSkillContext, isBuilderSkillPath } from './builder-skills';
-
-const rawByName = (name: string) => `---\nname: ${name}\ndescription: ${name} guidance.\n---\nBody`;
-const resourceByName = (name: string) => `${name} reference`;
-
-vi.mock('agents/skills', () => ({
-  r2: vi.fn((_bucket, options) => ({
-    id: 'test',
-    fingerprint: 'test',
-    list: vi.fn(async () => [
-      { name: 'cloudflare', description: 'Cloudflare guidance.' },
-      { name: 'frontend-design', description: 'Frontend design guidance.' },
-    ]),
-    load: vi.fn(async (name: string) => ({
-      name,
-      description: `${name} guidance.`,
-      body: 'Body',
-      rawContent: rawByName(name),
-      resources: [{ path: 'references/guide.md', kind: 'reference', encoding: 'text' }],
-    })),
-    readResource: vi.fn(async (name: string, path: string) => ({
-      path,
-      kind: 'reference',
-      encoding: 'text',
-      content: resourceByName(name),
-    })),
-    options,
-  })),
-  SkillRegistry: class {
-    warnings: string[] = [];
-    constructor(private sources: Array<{ list(): Promise<unknown[]> }>) {}
-    async snapshot() {
-      await this.sources[0]!.list();
-      return { catalogPrompt: 'skills', fingerprint: 'test' };
-    }
-  },
-}));
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { createBuilderSkillContext, isBuilderSkillPath, PROJECT_SKILL_POINTERS } from './builder-skills';
 
 describe('builder skills', () => {
-  it('loads exact upstream skills from an integrity-bound R2 generation', async () => {
-    const fixture = publishedFixture();
-    const bucket = r2Bucket(fixture);
-    const context = await createBuilderSkillContext(bucket);
+  it('catalogs the bundled skill using its own frontmatter', () => {
+    const { prompt } = createBuilderSkillContext();
 
-    expect(bucket.get).toHaveBeenCalledWith(BUILDER_SKILLS_POINTER_KEY);
-    expect(context.prompt).toContain('/__skills__/cloudflare/SKILL.md — cloudflare guidance.');
-    expect(context.prompt).toContain('/__skills__/frontend-design/SKILL.md — frontend-design guidance.');
-    expect(await context.reader.read('/__skills__/cloudflare/SKILL.md')).toEqual({
+    expect(prompt).toContain('/__skills__/frontend-design/SKILL.md — Visual design for new or reworked UI');
+    expect(prompt).toContain(PROJECT_SKILL_POINTERS[0].path);
+    expect(prompt).toContain('never fetch llms.txt or llms-full.txt');
+  });
+
+  it('serves the bundled skill through the read tool namespace', async () => {
+    const { reader } = createBuilderSkillContext();
+
+    await expect(reader.read('/__skills__/frontend-design/SKILL.md')).resolves.toEqual({
       kind: 'file',
-      content: expect.stringContaining('name: cloudflare'),
+      content: expect.stringContaining('name: frontend-design'),
     });
-    expect(await context.reader.read('/__skills__/cloudflare/references/')).toEqual({
+    await expect(reader.read('/__skills__/frontend-design')).resolves.toEqual({
       kind: 'directory',
-      content: 'guide.md',
+      content: 'SKILL.md',
     });
-    expect(await context.reader.read('/__skills__/cloudflare/references/guide.md')).toEqual({
-      kind: 'file',
-      content: 'cloudflare reference',
-    });
-    expect(await context.reader.read('/__skills__/unknown/SKILL.md')).toBeNull();
+    await expect(reader.read('/__skills__/frontend-design/LICENSE.txt')).resolves.toBeNull();
+    await expect(reader.read('/__skills__/nothing/SKILL.md')).resolves.toBeNull();
+    // The overlay is not a traversal into the project workspace.
+    await expect(reader.read('/__skills__/../home/project/package.json')).resolves.toBeNull();
   });
 
-  it('fails closed for malformed pointers and manifests', async () => {
-    await expect(createBuilderSkillContext(r2Bucket(new Map([[BUILDER_SKILLS_POINTER_KEY, '{']])))).rejects.toThrow(
-      'pointer is invalid',
-    );
-    const fixture = publishedFixture();
-    fixture.set(
-      BUILDER_SKILLS_POINTER_KEY,
-      JSON.stringify({ ...JSON.parse(fixture.get(BUILDER_SKILLS_POINTER_KEY)!), skills: ['cloudflare'] }),
-    );
-    await expect(createBuilderSkillContext(r2Bucket(fixture))).rejects.toThrow('does not match its pointer');
+  it('recognises the overlay namespace and nothing outside it', () => {
+    expect(isBuilderSkillPath('/__skills__')).toBe(true);
+    expect(isBuilderSkillPath('/__skills__/frontend-design/SKILL.md')).toBe(true);
+    expect(isBuilderSkillPath('/home/project/__skills__/SKILL.md')).toBe(false);
   });
 
-  it('reserves canonical and traversal-equivalent skill paths', () => {
-    expect(isBuilderSkillPath('/__skills__/guide.md')).toBe(true);
-    expect(isBuilderSkillPath('//__skills__//guide.md')).toBe(true);
-    expect(isBuilderSkillPath('/home/project/../../../__skills__/guide.md')).toBe(true);
-    expect(isBuilderSkillPath('/home/project/__skills__/guide.md')).toBe(false);
+  it('points only at framework skills the template actually installs', () => {
+    // These paths are read from the running container, so a package that moves or drops its
+    // skills would leave the catalog advertising a file the model cannot open.
+    for (const { path } of PROJECT_SKILL_POINTERS) {
+      const installed = resolve(process.cwd(), 'template', path.replace('/home/project/', ''));
+      expect(existsSync(installed), `${path} is not installed in template/node_modules`).toBe(true);
+    }
   });
 });
-
-function publishedFixture(): Map<string, string> {
-  const skills = ['cloudflare', 'frontend-design'];
-  const files = skills.flatMap((name) => [
-    file(name, 'SKILL.md', rawByName(name)),
-    file(name, 'references/guide.md', resourceByName(name)),
-  ]);
-  const generation = digest(
-    files.map(({ name, path, sha256, size }) => `${name}\0${path}\0${sha256}\0${size}`).join('\n'),
-  );
-  return new Map([
-    [BUILDER_SKILLS_POINTER_KEY, JSON.stringify({ version: 1, generation, skills })],
-    [`generations/${generation}/manifest.json`, JSON.stringify({ version: 1, generation, files })],
-  ]);
-}
-
-function file(name: string, path: string, content: string) {
-  return { name, path, sha256: digest(content), size: Buffer.byteLength(content) };
-}
-
-function digest(value: string) {
-  return createHash('sha256').update(value).digest('hex');
-}
-
-function r2Bucket(values: Map<string, string>): R2Bucket & { get: ReturnType<typeof vi.fn> } {
-  return {
-    get: vi.fn(async (key: string) => {
-      const value = values.get(key);
-      return value === undefined ? null : { size: Buffer.byteLength(value), text: async () => value };
-    }),
-  } as unknown as R2Bucket & { get: ReturnType<typeof vi.fn> };
-}

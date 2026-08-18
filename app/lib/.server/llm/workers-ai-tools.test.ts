@@ -18,10 +18,10 @@ type Tool = {
 };
 
 describe('minimal Workers AI tool surface', () => {
-  it('keeps the reviewed Computer schemas behind four active model tools', () => {
+  it('keeps the reviewed Computer schemas behind the active model tools', () => {
     const tools = createWorkersAiTools(workspaceStub(), operationContext());
 
-    expect(Object.keys(tools)).toEqual(['read', 'write', 'edit', 'exec']);
+    expect(Object.keys(tools)).toEqual(['read', 'write', 'edit', 'exec', 'search_cloudflare_docs']);
     expect(
       toolInputSchema(tools.read).safeParse({ path: '/home/project/package.json', offset: 1, limit: 20 }).success,
     ).toBe(true);
@@ -47,7 +47,7 @@ describe('minimal Workers AI tool surface', () => {
     expect(tools.exec.description).not.toContain('/home/project/.ghost/docs/');
   });
 
-  it('reads owner-published skill references through read without consulting the project workspace', async () => {
+  it('reads bundled skill references through read without consulting the project workspace', async () => {
     const workspace = workspaceStub();
     const path = '/__skills__/cloudflare/references/workers-ai/README.md';
     const tools = createWorkersAiTools(workspace, operationContext(), {

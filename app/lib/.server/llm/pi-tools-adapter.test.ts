@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('./workers-ai-tools', () => ({
   createWorkersAiTools: mocks.createWorkersAiTools,
-  MODEL_TOOL_NAMES: ['read', 'write', 'edit', 'exec'],
+  MODEL_TOOL_NAMES: ['read', 'write', 'edit', 'exec', 'search_cloudflare_docs'],
 }));
 
 import { BUILDER_TURN_TIMEOUTS, BuilderTurnBudgetExceededError } from './builder-turn-budget';
@@ -21,7 +21,7 @@ describe('Pi tool adapter', () => {
     mocks.execute.mockResolvedValue({ ok: true, summary: 'done' });
     mocks.createWorkersAiTools.mockReturnValue(
       Object.fromEntries(
-        (['read', 'write', 'edit', 'exec'] as const).map((name) => [
+        (['read', 'write', 'edit', 'exec', 'search_cloudflare_docs'] as const).map((name) => [
           name,
           {
             description: `${name} description`,
@@ -140,7 +140,7 @@ describe('Pi tool adapter', () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
-  it('publishes the curated labels, schemas, and exact four-tool order', () => {
+  it('publishes the curated labels, schemas, and exact tool order', () => {
     const tools = createPiToolBundle({} as never, operationContext());
 
     expect(piToolsToList(tools).map(({ name, label }) => ({ name, label }))).toEqual([
@@ -148,6 +148,7 @@ describe('Pi tool adapter', () => {
       { name: 'write', label: 'Write file' },
       { name: 'edit', label: 'Edit file' },
       { name: 'exec', label: 'Run command' },
+      { name: 'search_cloudflare_docs', label: 'Search Cloudflare docs' },
     ]);
     expect(Object.keys((tools.edit.parameters as { properties: object }).properties)).toEqual([
       'path',

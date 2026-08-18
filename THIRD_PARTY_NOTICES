@@ -14,6 +14,15 @@ license expression fails validation until it is reviewed and explicitly added to
 
 --------------------------------------------------------------------------------
 
+Anthropic Agent Skills
+https://github.com/anthropics/skills
+
+The frontend-design skill at app/lib/.server/llm/skills/frontend-design/ is vendored unchanged from
+anthropics/skills at revision f17010c9bb483898c1d9c9f42dde2b3a98889434. Its full license terms are in
+the LICENSE.txt kept alongside it.
+
+--------------------------------------------------------------------------------
+
 Chef
 https://github.com/get-convex/chef
 

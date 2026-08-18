@@ -8,7 +8,6 @@ import {
   findWorkerOAuthStartRateLimitErrors,
   findWorkerGcScheduleErrors,
   findWorkerOperationsSecretErrors,
-  findWorkerBuilderSkillsErrors,
   findWorkerRoutingErrors,
   findWorkerRuntimeSecretErrors,
   findWorkerVariableSourceErrors,
@@ -134,26 +133,6 @@ describe('findWorkerOperationsSecretErrors', () => {
         'wrangler.jsonc',
       ),
     ).toEqual([]);
-  });
-});
-
-describe('findWorkerBuilderSkillsErrors', () => {
-  it('accepts the owner-provisioned builder skill R2 bucket', () => {
-    expect(
-      findWorkerBuilderSkillsErrors(
-        { r2_buckets: [{ binding: 'BUILDER_SKILLS', bucket_name: 'ghostbuild-builder-skills' }] },
-        'wrangler.jsonc',
-      ),
-    ).toEqual([]);
-    expect(findWorkerBuilderSkillsErrors({}, 'wrangler.jsonc')).toEqual([
-      'wrangler.jsonc must bind the owner-published builder skill bucket as BUILDER_SKILLS.',
-    ]);
-    expect(
-      findWorkerBuilderSkillsErrors(
-        { r2_buckets: [{ binding: 'BUILDER_SKILLS', bucket_name: 'other' }] },
-        'wrangler.jsonc',
-      ),
-    ).toEqual(['wrangler.jsonc BUILDER_SKILLS bucket_name must be ghostbuild-builder-skills.']);
   });
 });
 

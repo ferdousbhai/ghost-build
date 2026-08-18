@@ -18,9 +18,10 @@ const toolLabels: Record<ModelToolName, string> = {
   write: 'Write file',
   edit: 'Edit file',
   exec: 'Run command',
+  search_cloudflare_docs: 'Search Cloudflare docs',
 };
 
-/** Adapt the four canonical workspace tools to Pi's validated tool contract. */
+/** Adapt the canonical model tools to Pi's validated tool contract. */
 export function createPiToolBundle(
   workspace: BuilderWorkspaceApi,
   operationContext: BuilderOperationContext,

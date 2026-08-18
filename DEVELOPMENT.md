@@ -39,24 +39,11 @@ declared secret values in Cloudflare; never store them in source or local enviro
 The checked-in D1 ID belongs to Ghostbuild production. Before provisioning a fork in another account, replace it with
 `00000000-0000-0000-0000-000000000000`. The provisioner refuses to replace an unknown non-placeholder ID.
 
-Builder skills are owner-controlled operational data, not repository content. `builder-skills.sources.json` pins every
-selected public GitHub skill directory by commit. Sync those upstream trees unchanged into ignored
-`.ghostbuild/skills/`, then validate or publish them:
-
-```bash
-pnpm run builder-skills:sync
-pnpm run builder-skills:publish -- --dry-run
-pnpm run builder-skills:publish -- --local
-```
-
-Production generations and the shared R2 pointer are published exclusively by `ghost-build-ops`; this repository cannot
-write them remotely. At turn preparation Ghostbuild uses the official `agents/skills` R2 source to discover
-that exact generation, puts only the skill catalog in the system prompt, and exposes upstream text files through `read`
-under `/__skills__/<skill>/`; the Pi harness remains the inference loop. Do not edit upstream skill files to add product
-policy. The system prompt contains only evergreen authority, safety, and workflow rules; concrete boundaries remain in
-project validation and deployment enforcement. Self-hosters may rerun the publisher whenever they choose or replace it
-with their own sync process. Private `ghost-build-ops` owns the
-hosted deployment's upstream revisions, provenance, publication history, and recurring GitHub synchronization.
+Builder references are not mirrored. Cloudflare's documentation is retrieved live by the `search_cloudflare_docs`
+tool, and TanStack's skills are read from the project's own `node_modules`, so neither needs syncing or pinning. The
+single exception is `app/lib/.server/llm/skills/frontend-design/`, which is vendored into this repository, bundled
+into the Worker, and maintained by hand — edit it like any other source file. Its frontmatter `name` and `description`
+are what the system prompt catalogs, so keep them accurate.
 
 The OAuth callback is `https://<deployment-origin>/connect/return`. Keep its permissions aligned with
 `CLOUDFLARE_OAUTH_SCOPES` in `wrangler.jsonc`. Those permissions let Ghostbuild create a workspace runtime in the
@@ -145,7 +132,7 @@ must attest both databases and the complete server-derived security baseline.
 There is no deployed admin dashboard. The operational state of production is reported from a terminal:
 
 ```bash
-pnpm run ops        # connected accounts, runtime staleness, skill sync, resource sweep, daily maintenance
+pnpm run ops        # connected accounts, runtime staleness, resource sweep, daily maintenance
 pnpm run ops:json   # the same report, structured for a coding agent
 ```
 

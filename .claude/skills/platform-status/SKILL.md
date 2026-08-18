@@ -1,6 +1,6 @@
 ---
 name: platform-status
-description: Report the operational state of the Ghostbuild platform - connected Cloudflare accounts, workspace runtime staleness, builder skill sync, the app-resource reconciliation sweep, and whether the daily maintenance jobs are still firing. Use whenever asked for a platform update, a production status report, whether anything is broken or needs attention, or how Ghostbuild is doing. Replaces the retired admin.ghostbuild.dev dashboard.
+description: Report the operational state of the Ghostbuild platform - connected Cloudflare accounts, workspace runtime staleness, the app-resource reconciliation sweep, and whether the daily maintenance jobs are still firing. Use whenever asked for a platform update, a production status report, whether anything is broken or needs attention, or how Ghostbuild is doing. Replaces the retired admin.ghostbuild.dev dashboard.
 ---
 
 # Platform status
@@ -27,7 +27,7 @@ The first line after the header is the whole answer. Everything below it is grou
 | `HEALTHY`           | Nothing to do.                                                 |
 
 A `COULD NOT BE READ` entry naming a table that "does not exist in production yet" means that migration has not been
-applied. Report it as unknown, not as zero orphans or zero syncs.
+applied. Report it as unknown, not as zero orphans.
 
 Three readings are easy to get wrong, so the tool words them explicitly and you should quote it rather than
 paraphrase: a sweep whose resource listing "could not be read" **under-reports** and its orphan count is a floor, not
@@ -53,7 +53,7 @@ of the current checkout. If that generated file is absent the report says stalen
 
 ## When it is not the right tool
 
-- Acting on a finding - upgrading a user's runtime, publishing skills, deleting an orphaned resource. This tool only
+- Acting on a finding - upgrading a user's runtime, deleting an orphaned resource. This tool only
   reports. Those actions live in the control plane under `app/lib/.server/`.
 - Deployment or configuration verification. Use `pnpm run verify:production-config`, `pnpm run verify:stack`, or
   `pnpm run validate`.

@@ -8,6 +8,25 @@ import { build } from 'esbuild';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outputPath = resolve(root, 'app/generated/user-workspace-runtime.generated.ts');
 const pathBrowserifyEntry = createRequire(resolve(root, 'ghostbuild-agent/package.json')).resolve('path-browserify');
+
+/**
+ * Vite resolves `?raw` imports natively; esbuild does not. The bundled builder skills are
+ * markdown kept as markdown in this repository, so both bundlers have to read them the same way.
+ */
+const rawTextPlugin = {
+  name: 'ghostbuild-raw-text',
+  setup(pluginBuild) {
+    pluginBuild.onResolve({ filter: /\?raw$/ }, (args) => ({
+      path: resolve(args.resolveDir, args.path.slice(0, -'?raw'.length)),
+      namespace: 'ghostbuild-raw-text',
+    }));
+    pluginBuild.onLoad({ filter: /.*/, namespace: 'ghostbuild-raw-text' }, async (args) => ({
+      contents: await readFile(args.path, 'utf8'),
+      loader: 'text',
+    }));
+  },
+};
+
 const result = await build({
   entryPoints: [resolve(root, 'user-workspace-runtime/src/index.ts')],
   bundle: true,
@@ -25,6 +44,7 @@ const result = await build({
     js: 'import { createRequire as __ghostbuildCreateRequire } from "node:module"; const require = __ghostbuildCreateRequire("file:///bundle/workspace-runtime.mjs");',
   },
   external: ['cloudflare:*', 'node:*'],
+  plugins: [rawTextPlugin],
 });
 const source = result.outputFiles[0]?.text;
 if (!source) {

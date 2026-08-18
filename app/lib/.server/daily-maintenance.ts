@@ -1,13 +1,12 @@
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { runUpstreamWatcher } from '~/lib/.server/builder-skills/upstream-sync';
 import { runAppResourceReconciliation } from '~/lib/.server/cloudflare/app-resource-reconcile-sweep';
 
 /**
  * Jobs that want a day between runs, hosted on a cron that fires every fifteen minutes.
  *
- * The Worker cron exists for authentication-metadata retention, which wants to run often. These
- * two jobs came from a retired operations Worker whose own cron was `23 5 * * *`, so each one
- * claims a slot in D1 and skips the other ninety-five ticks of the day.
+ * The Worker cron exists for authentication-metadata retention, which wants to run often. This
+ * job came from a retired operations Worker whose own cron was `23 5 * * *`, so it claims a slot
+ * in D1 and skips the other ninety-five ticks of the day.
  *
  * The claim is an elapsed interval rather than a wall-clock window on purpose: a window at a
  * fixed hour silently loses a day whenever a deploy, an outage, or a cold Worker eats that one
@@ -19,12 +18,11 @@ const DAILY_MAINTENANCE_INTERVAL_MS = 23 * 60 * 60 * 1000;
 const logger = createScopedLogger('DailyMaintenance');
 
 const dailyJobs = {
-  'builder-skill-sync': (env: Env) => runUpstreamWatcher(env),
   'app-resource-reconcile': (env: Env) => runAppResourceReconciliation(env),
 } satisfies Record<string, (env: Env) => Promise<unknown>>;
 
 /**
- * Run each daily job whose claim is due. Both jobs record their own outcome in D1, so a failure
+ * Run each daily job whose claim is due. Each job records its own outcome in D1, so a failure
  * here is logged and dropped rather than allowed to abort the rest of the scheduled sweep.
  */
 export async function runDailyMaintenance(env: Env, now = Date.now()): Promise<void> {
