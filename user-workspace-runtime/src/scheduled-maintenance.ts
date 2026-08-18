@@ -3,9 +3,9 @@ import { sweepAgentGcCandidatesBestEffort } from '../../app/lib/cloudflare/data/
 import { sweepAppResourceGcCandidatesBestEffort } from '../../app/lib/cloudflare/data/app-resource-gc.server';
 import { reconcileAppResourcesBestEffort } from '../../app/lib/cloudflare/data/app-resource-reconcile.server';
 
-type RuntimeMaintenanceEnv = Parameters<typeof sweepAppResourceGcCandidatesBestEffort>[0]
-  & Parameters<typeof reconcileAppResourcesBestEffort>[0]
-  & Pick<Env, 'BuilderAgent'>;
+type RuntimeMaintenanceEnv = Parameters<typeof sweepAppResourceGcCandidatesBestEffort>[0] &
+  Parameters<typeof reconcileAppResourcesBestEffort>[0] &
+  Pick<Env, 'BuilderAgent'>;
 
 /** Register the sole user-runtime maintenance job only for its provisioned trigger. */
 export function scheduleUserWorkspaceRuntimeMaintenance(

@@ -49,9 +49,7 @@ describe('orphaned app resource discovery', () => {
     const result = await findOrphanedAppResources(
       api({
         listWorkerNames: vi.fn(async () => [`ghostbuild-${LIVE_DEPLOYMENT}`]),
-        listD1Databases: vi.fn(async () => [
-          { id: 'a', name: `ghostbuild-${LIVE_DEPLOYMENT}`, createdAt: STALE },
-        ]),
+        listD1Databases: vi.fn(async () => [{ id: 'a', name: `ghostbuild-${LIVE_DEPLOYMENT}`, createdAt: STALE }]),
       }),
       NOW,
     );
@@ -85,9 +83,7 @@ describe('orphaned app resource discovery', () => {
     const result = await findOrphanedAppResources(
       api({
         listWorkerNames: vi.fn(async () => []),
-        listD1Databases: vi.fn(async () => [
-          { id: 'a', name: 'ghostbuild-data-18e073433e6fad63', createdAt: STALE },
-        ]),
+        listD1Databases: vi.fn(async () => [{ id: 'a', name: 'ghostbuild-data-18e073433e6fad63', createdAt: STALE }]),
         listR2Buckets: vi.fn(async () => [{ name: 'ghostbuild-builder-skills', createdAt: STALE }]),
       }),
       NOW,
@@ -100,9 +96,7 @@ describe('orphaned app resource discovery', () => {
   it('spares resources still inside the deployment grace period', async () => {
     const result = await findOrphanedAppResources(
       api({
-        listD1Databases: vi.fn(async () => [
-          { id: 'a', name: `ghostbuild-${DEPLOYMENT}`, createdAt: NOW - 1_000 },
-        ]),
+        listD1Databases: vi.fn(async () => [{ id: 'a', name: `ghostbuild-${DEPLOYMENT}`, createdAt: NOW - 1_000 }]),
       }),
       NOW,
     );
@@ -113,9 +107,7 @@ describe('orphaned app resource discovery', () => {
   it('dates a cache namespace by its deployment siblings', async () => {
     const result = await findOrphanedAppResources(
       api({
-        listD1Databases: vi.fn(async () => [
-          { id: 'a', name: `ghostbuild-${DEPLOYMENT}`, createdAt: STALE },
-        ]),
+        listD1Databases: vi.fn(async () => [{ id: 'a', name: `ghostbuild-${DEPLOYMENT}`, createdAt: STALE }]),
         listKvNamespaces: vi.fn(async () => [{ id: 'c', name: `ghostbuild-${DEPLOYMENT}-cache` }]),
       }),
       NOW,

@@ -159,7 +159,10 @@ export async function reconcileAppResources(
 ): Promise<AppResourceReconcileReport> {
   const now = options.now ?? Date.now();
   const dryRun = options.dryRun ?? true;
-  const limit = Math.max(0, Math.min(options.limit ?? APP_RESOURCE_RECONCILE_DELETE_LIMIT, APP_RESOURCE_RECONCILE_DELETE_LIMIT));
+  const limit = Math.max(
+    0,
+    Math.min(options.limit ?? APP_RESOURCE_RECONCILE_DELETE_LIMIT, APP_RESOURCE_RECONCILE_DELETE_LIMIT),
+  );
   const { orphans, scanned, undatable } = await findOrphanedAppResources(api, now);
 
   if (undatable.length > 0) {
