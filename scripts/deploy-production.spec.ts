@@ -8,6 +8,7 @@ import {
   resolveDeployableCommitSha,
   validateCommitSha,
   validateOAuthClientId,
+  validateLocalDeployContext,
   validateWorkersBuildContext,
   validateWorkersBuildMetadata,
   wranglerDeployArgs,
@@ -31,6 +32,42 @@ function expectOrdered(content: string, steps: readonly string[]) {
 }
 
 describe('production deploy wrapper', () => {
+  describe('local deploy context', () => {
+    /** Answer the exact `git` queries the guard makes, in order. */
+    function git(branch: string, remoteSha: string, headSha = commitSha) {
+      return vi.fn((_command: string, args: readonly string[]) => {
+        if (args.includes('--abbrev-ref')) return { status: 0, stdout: `${branch}\n` };
+        if (args.includes('origin/main^{commit}')) return { status: 0, stdout: `${remoteSha}\n` };
+        return { status: 0, stdout: `${headSha}\n` };
+      });
+    }
+
+    it('accepts a clean main checkout that matches the pushed commit', () => {
+      expect(validateLocalDeployContext({ spawn: git('main', commitSha) as never, currentCommitSha: commitSha })).toBe(
+        commitSha,
+      );
+    });
+
+    it('refuses to deploy a branch that is not the production branch', () => {
+      expect(() =>
+        validateLocalDeployContext({ spawn: git('feature', commitSha) as never, currentCommitSha: commitSha }),
+      ).toThrow(/requires the main branch/);
+    });
+
+    it('refuses a commit that has not been pushed, so COMMIT_SHA stays reachable', () => {
+      expect(() =>
+        validateLocalDeployContext({ spawn: git('main', 'b'.repeat(40)) as never, currentCommitSha: commitSha }),
+      ).toThrow(/already-pushed commit/);
+    });
+
+    it('does not require the Workers Builds environment', () => {
+      // The whole point: a workstation has no WORKERS_CI_* metadata to offer.
+      expect(() =>
+        validateLocalDeployContext({ spawn: git('main', commitSha) as never, currentCommitSha: commitSha }),
+      ).not.toThrow();
+    });
+  });
+
   it('allows only validation-generated build output changes in Workers Builds', () => {
     const generatedChanges = [' M app/generated/user-workspace-runtime.generated.ts', ' M app/routeTree.gen.ts'].join(
       '\n',

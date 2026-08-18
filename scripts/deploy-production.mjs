@@ -132,9 +132,45 @@ export function findUnexpectedDeployChanges(status, { workersBuild = false } = {
  * untracked changes would make COMMIT_SHA misleading, so production fails closed.
  * @param {{spawn?: typeof spawnSync, env?: Record<string, string | undefined>}} [options]
  */
-export function resolveDeployableCommitSha({ spawn = spawnSync, env = process.env } = {}) {
+/**
+ * Assert a local checkout describes exactly what is about to ship: on the
+ * production branch, and identical to the pushed commit. Workers Builds proves
+ * this from its own metadata; a workstation has to prove it from the remote.
+ */
+export function validateLocalDeployContext({ spawn = spawnSync, currentCommitSha } = {}) {
+  const branch = runGit(spawn, ['rev-parse', '--abbrev-ref', 'HEAD'], 'resolve the current branch');
+  if (branch !== 'main') {
+    throw new Error(`Local production deploy requires the main branch; found ${branch}.`);
+  }
+  const remoteSha = runGit(spawn, ['rev-parse', '--verify', 'origin/main^{commit}'], 'resolve origin/main');
+  const commitSha = currentCommitSha ?? resolveCurrentCommitSha({ spawn });
+  if (remoteSha !== commitSha) {
+    throw new Error(
+      `Local production deploy requires an already-pushed commit; origin/main is ${remoteSha} but HEAD is ${commitSha}.`,
+    );
+  }
+  return commitSha;
+}
+
+function runGit(spawn, args, purpose) {
+  const result = spawn('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    const detail = typeof result.stderr === 'string' ? result.stderr.trim() : '';
+    throw new Error(`Unable to ${purpose}${detail ? `: ${detail}` : '.'}`);
+  }
+  return typeof result.stdout === 'string' ? result.stdout.trim() : '';
+}
+
+export function resolveDeployableCommitSha({ spawn = spawnSync, env = process.env, local = false } = {}) {
   const commitSha = resolveCurrentCommitSha({ spawn });
-  validateWorkersBuildContext({ env, spawn, currentCommitSha: commitSha });
+  if (local) {
+    validateLocalDeployContext({ spawn, currentCommitSha: commitSha });
+  } else {
+    validateWorkersBuildContext({ env, spawn, currentCommitSha: commitSha });
+  }
   const result = spawn('git', ['status', '--porcelain=v1', '--untracked-files=normal'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -212,11 +248,14 @@ export function deployProduction({
   commitSha,
   env = process.env,
   spawn = spawnSync,
+  local = false,
 } = {}) {
   commitSha =
     commitSha === undefined
-      ? resolveDeployableCommitSha({ spawn, env })
-      : validateWorkersBuildContext({ env, spawn, currentCommitSha: validateCommitSha(commitSha) });
+      ? resolveDeployableCommitSha({ spawn, env, local })
+      : local
+        ? validateLocalDeployContext({ spawn, currentCommitSha: validateCommitSha(commitSha) })
+        : validateWorkersBuildContext({ env, spawn, currentCommitSha: validateCommitSha(commitSha) });
   const args = wranglerDeployArgs(clientId, commitSha);
   const result = spawn('pnpm', args, { stdio: 'inherit' });
   if (result.error) {
@@ -245,9 +284,10 @@ export async function deployAndVerifyProduction({
   commitSha,
   env = process.env,
   spawn = spawnSync,
+  local = false,
   verifyLocal = verifyLocalDeployment,
 } = {}) {
-  const deployedSha = deployProduction({ clientId, commitSha, env, spawn });
+  const deployedSha = deployProduction({ clientId, commitSha, env, spawn, local });
   await verifyLocal({ expectedSha: deployedSha });
   return deployedSha;
 }
@@ -262,16 +302,18 @@ function isMainModule() {
 if (isMainModule()) {
   const main = async () => {
     const [command, ...extraArgs] = process.argv.slice(2);
-    if (extraArgs.length > 0 || (command !== undefined && command !== '--check-workers-builds')) {
-      throw new Error('Usage: node scripts/deploy-production.mjs [--check-workers-builds]');
+    const allowed = new Set([undefined, '--check-workers-builds', '--local']);
+    if (extraArgs.length > 0 || !allowed.has(command)) {
+      throw new Error('Usage: node scripts/deploy-production.mjs [--check-workers-builds | --local]');
     }
+    const local = command === '--local';
     const clientId = validateOAuthClientId(process.env[CLIENT_ID_ENV]);
-    const commitSha = resolveDeployableCommitSha();
+    const commitSha = resolveDeployableCommitSha({ local });
     if (command === '--check-workers-builds') {
       console.log(`Production deploy inputs are valid for commit ${commitSha}.`);
       return;
     }
-    await deployAndVerifyProduction({ clientId, commitSha });
+    await deployAndVerifyProduction({ clientId, commitSha, local });
   };
 
   main().catch((error) => {
