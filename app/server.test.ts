@@ -9,6 +9,7 @@ const completeCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const cloudflareConnectionStatusAction = vi.hoisted(() => vi.fn());
 const startCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const pruneCloudflareAuthDataBestEffort = vi.hoisted(() => vi.fn());
+const runDailyMaintenance = vi.hoisted(() => vi.fn());
 const runtimeCredentialAction = vi.hoisted(() => vi.fn());
 const clientTelemetryAction = vi.hoisted(() => vi.fn());
 
@@ -29,6 +30,7 @@ vi.mock('./server-handlers/version', () => ({ versionAction: vi.fn() }));
 vi.mock('./server-handlers/runtime-credential', () => ({ runtimeCredentialAction }));
 vi.mock('./server-handlers/client-telemetry', () => ({ clientTelemetryAction }));
 vi.mock('./lib/cloudflare/data/cloudflare-auth-retention.server', () => ({ pruneCloudflareAuthDataBestEffort }));
+vi.mock('./lib/.server/daily-maintenance', () => ({ runDailyMaintenance }));
 
 import server from './server';
 
@@ -51,6 +53,7 @@ describe('server Agent routing boundary', () => {
       .mockReset()
       .mockResolvedValue(Response.json({ error: 'Invalid request.' }, { status: 400 }));
     pruneCloudflareAuthDataBestEffort.mockReset().mockResolvedValue(undefined);
+    runDailyMaintenance.mockReset().mockResolvedValue(undefined);
     runtimeCredentialAction.mockReset().mockResolvedValue(Response.json({ accessToken: 'fresh' }));
     clientTelemetryAction.mockReset().mockResolvedValue(new Response(null, { status: 202 }));
   });
@@ -281,12 +284,15 @@ describe('server Agent routing boundary', () => {
     expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains');
   });
 
-  it('limits scheduled maintenance to central authentication metadata', async () => {
+  it('runs authentication-metadata retention before the daily maintenance jobs', async () => {
     const waitUntil = vi.fn();
     const env = { DB: {} as D1Database } as Env;
     const calls: string[] = [];
     pruneCloudflareAuthDataBestEffort.mockImplementationOnce(async () => {
       calls.push('auth-retention');
+    });
+    runDailyMaintenance.mockImplementationOnce(async () => {
+      calls.push('daily-maintenance');
     });
 
     server.scheduled({ cron: '*/15 * * * *' } as ScheduledController, env, {
@@ -295,16 +301,18 @@ describe('server Agent routing boundary', () => {
 
     expect(waitUntil).toHaveBeenCalledOnce();
     await waitUntil.mock.calls[0][0];
-    expect(calls).toEqual(['auth-retention']);
+    // Every tick prunes; `runDailyMaintenance` decides for itself whether a daily job is due.
+    expect(calls).toEqual(['auth-retention', 'daily-maintenance']);
     expect(pruneCloudflareAuthDataBestEffort).toHaveBeenCalledWith(env.DB);
+    expect(runDailyMaintenance).toHaveBeenCalledWith(env);
   });
 
   it('exposes no HTTP route for private operations', async () => {
     const env = {} as Env;
 
-    // Operations are reachable only through the OperationsService RPC
-    // entrypoint. Nothing under these paths may resolve to a dedicated handler,
-    // so each one falls through to the application like any unknown path.
+    // Operations are scheduled work inside this Worker, not a surface anyone can
+    // reach. Nothing under these paths may resolve to a dedicated handler, so
+    // each one falls through to the application like any unknown path.
     for (const request of [
       new Request('https://ghostbuild.dev/api/ops/session'),
       new Request('https://ghostbuild.dev/api/internal/ops/runtime-version'),
@@ -320,9 +328,12 @@ describe('server Agent routing boundary', () => {
     }
   });
 
-  it('exports the private operations entrypoint for the ghostbuild-ops Service binding', async () => {
-    const { OperationsService } = await import('./server');
+  it('exports nothing beyond the Worker handler now that the operations Worker is retired', async () => {
+    // `OperationsService` existed only so a second deployed Worker could reach the control
+    // plane's credentials over RPC. Its caller now runs in this Worker, so the entrypoint - and
+    // the Service binding that authorized it - are gone rather than left reachable.
+    const exported = await import('./server');
 
-    expect(typeof OperationsService).toBe('function');
+    expect(Object.keys(exported)).toEqual(['default']);
   });
 });

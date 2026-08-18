@@ -22,7 +22,7 @@ const DELETE_LIMIT = 5;
  * What a sweep is allowed to do. `report` nominates and logs; `enforce` also deletes, still
  * bounded by `DELETE_LIMIT`.
  */
-export type AppResourceReconcileMode = 'report' | 'enforce';
+type AppResourceReconcileMode = 'report' | 'enforce';
 
 /**
  * Reporting only, until an operator has read a run of real diffs from the logs. Deletion is one
@@ -57,6 +57,8 @@ type AppResourceReconcileReport = {
   scanned: number;
   orphans: OrphanedAppResource[];
   deleted: OrphanedAppResource[];
+  /** Resource kinds whose account listing could not be read, so their orphans are under-reported. */
+  skippedListings: string[];
 };
 
 type DeploymentGroup = {
@@ -72,13 +74,14 @@ type DeploymentGroup = {
 export async function findOrphanedAppResources(
   api: AppResourceReconcileApi,
   now: number,
-): Promise<{ orphans: OrphanedAppResource[]; scanned: number; undatable: string[] }> {
+): Promise<{ orphans: OrphanedAppResource[]; scanned: number; undatable: string[]; skippedListings: string[] }> {
+  const skippedListings: string[] = [];
   // The Worker listing is the one answer that must be complete, so its failure fails the sweep.
   const [workers, databases, namespaces, buckets] = await Promise.all([
     api.listWorkerNames(),
-    listedOrSkipped('D1 database', () => api.listD1Databases()),
-    listedOrSkipped('KV namespace', () => api.listKvNamespaces()),
-    listedOrSkipped('R2 bucket', () => api.listR2Buckets()),
+    listedOrSkipped('D1 database', skippedListings, () => api.listD1Databases()),
+    listedOrSkipped('KV namespace', skippedListings, () => api.listKvNamespaces()),
+    listedOrSkipped('R2 bucket', skippedListings, () => api.listR2Buckets()),
   ]);
 
   const liveWorkers = new Set(workers);
@@ -140,7 +143,7 @@ export async function findOrphanedAppResources(
     orphans.push(...group.resources);
   }
 
-  return { orphans, scanned, undatable };
+  return { orphans, scanned, undatable, skippedListings };
 }
 
 /**
@@ -153,7 +156,7 @@ export async function reconcileAppResources(
 ): Promise<AppResourceReconcileReport> {
   const now = options.now ?? Date.now();
   const mode = options.mode ?? 'report';
-  const { orphans, scanned, undatable } = await findOrphanedAppResources(api, now);
+  const { orphans, scanned, undatable, skippedListings } = await findOrphanedAppResources(api, now);
 
   if (undatable.length > 0) {
     logger.warn(`Skipped ${undatable.length} undatable app deployment(s) with no creation time`);
@@ -162,7 +165,7 @@ export async function reconcileAppResources(
     if (mode === 'report' && orphans.length > 0) {
       logger.info(`Reconcile report found ${orphans.length} orphaned app resource(s) across ${scanned} scanned`);
     }
-    return { scanned, orphans, deleted: [] };
+    return { scanned, orphans, deleted: [], skippedListings };
   }
 
   // Databases first, then caches, then buckets: buckets are the slowest and the most restartable.
@@ -191,19 +194,21 @@ export async function reconcileAppResources(
   if (orphans.length > ordered.length) {
     logger.info(`Reconcile deferred ${orphans.length - ordered.length} orphaned resource(s) past the sweep limit`);
   }
-  return { scanned, orphans, deleted };
+  return { scanned, orphans, deleted, skippedListings };
 }
 
 /**
  * A resource listing that cannot be read - a page over the response cap, a provider error -
  * costs its own kind and nothing else. Under-reporting orphans only makes the sweep do less
- * than it should; losing the whole run to one bad listing helps nobody.
+ * than it should; losing the whole run to one bad listing helps nobody. The skip is named in
+ * the report so a run with a hole in it is never mistaken for a clean account.
  */
-async function listedOrSkipped<T>(kind: string, list: () => Promise<T[]>): Promise<T[]> {
+async function listedOrSkipped<T>(kind: string, skipped: string[], list: () => Promise<T[]>): Promise<T[]> {
   try {
     return await list();
   } catch {
     logger.warn(`Skipped the ${kind} listing: the account could not be read`);
+    skipped.push(kind);
     return [];
   }
 }

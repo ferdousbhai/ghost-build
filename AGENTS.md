@@ -10,6 +10,23 @@ Prefer `main` — branches/PRs only if asked or for isolated experiments. For sm
 
 Ghostbuild is self-contained. Product mechanisms and their tests live in this repository; do not add source dependencies on sibling repositories.
 
+## Platform Status
+
+Asked for an update on the platform — "how is Ghostbuild doing", "anything broken in production", "give me a status
+report" — run this and read the output. Do not go looking for a dashboard; there is no deployed admin UI.
+
+```bash
+pnpm run ops        # terminal report, problems first
+pnpm run ops:json   # same report, structured
+```
+
+[scripts/ops-report.mjs](scripts/ops-report.mjs) reads production control-plane D1 through the operator's own Wrangler
+authentication and issues only `SELECT` statements. It reports connected Cloudflare accounts, per-account workspace
+runtime versions and staleness, the builder skill sync, the app-resource reconciliation sweep, and whether the daily
+maintenance jobs are still firing. A check it cannot read is reported as `unknown` with the reason, never as a healthy
+zero. The first line is the whole answer; exit status is 0 whenever a report was produced and 1 when the control plane
+was unreachable.
+
 ## Primary Entry Points
 
 - [app/server.ts](app/server.ts) — control-plane Worker dispatch and scheduled auth cleanup

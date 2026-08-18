@@ -140,6 +140,21 @@ Generated applications deploy independently inside the user workspace runtime. A
 application data and `AGENT_SECURITY_DB` for Agent sessions, retention, and inference accounting. Deployment readback
 must attest both databases and the complete server-derived security baseline.
 
+## Platform Status
+
+There is no deployed admin dashboard. The operational state of production is reported from a terminal:
+
+```bash
+pnpm run ops        # connected accounts, runtime staleness, skill sync, resource sweep, daily maintenance
+pnpm run ops:json   # the same report, structured for a coding agent
+```
+
+`scripts/ops-report.mjs` reads production control-plane D1 with `wrangler d1 execute ghostbuild --remote --json` under
+your existing Cloudflare authentication. It issues only `SELECT` statements and holds no secret of its own. Problems
+are printed first; a check the tool could not answer is reported as unknown together with the reason, rather than as a
+zero that reads as healthy. Runtime staleness is measured against `app/generated/user-workspace-runtime.generated.ts`,
+so run `pnpm run generate:user-workspace-runtime` first if the report says it has no build to compare against.
+
 ## Historical Evaluations
 
 Experiment conclusions that still constrain the product are summarized in `scripts/evaluations/DECISIONS.md`. The

@@ -44,6 +44,8 @@
     "lint:fix": "pnpm run lint:fix-code && prettier --write .",
     "typecheck": "pnpm run generate-routes && pnpm run cf-typegen && pnpm run generate:user-workspace-runtime && tsc",
     "clean": "node scripts/clean.js",
+    "ops": "node scripts/ops-report.mjs",
+    "ops:json": "node scripts/ops-report.mjs --json",
     "provision:production": "node scripts/provision-cloudflare-production.mjs",
     "provision:production:check": "node scripts/provision-cloudflare-production.mjs --check",
     "verify:stack": "node scripts/verify-stack-alignment.mjs",

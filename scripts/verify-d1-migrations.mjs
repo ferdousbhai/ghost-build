@@ -22,6 +22,8 @@ const migrationPolicies = [
       '0006_remove_launch_controls.sql': '48cb5986ca4291a46609b4714747878adb197dea2024d6c0a8bdd817327bb99f',
       '0007_upstream_monitor_runs.sql': 'f89ee7f275f15543cdf0e96c4bb78acafc8419c0dacb946b96f9d9e53dbe439b',
       '0008_remove_upstream_monitor_runs.sql': '1ca903265be41d756da88c11dcebdec0547309bf4f5fc24c82b2fd9b9f295112',
+      '0009_builder_skill_sync.sql': '22d04accde975bceee06ddba21343ff560b31582ab44235017c924daf5a752bf',
+      '0010_daily_maintenance_receipts.sql': 'b6b5185e35ed10ce4f29bb0c95b19e65a2b78039c0ae77d42ba5972300244748',
     },
     contractAllowlist: {
       // Explicit pre-launch clean break: the Computer locator replaced this

@@ -13,12 +13,8 @@ import { deleteAccountAction } from './server-handlers/account-deletion';
 import { runtimeCredentialAction } from './server-handlers/runtime-credential';
 import { clientTelemetryAction } from './server-handlers/client-telemetry';
 import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudflare-auth-retention.server';
+import { runDailyMaintenance } from './lib/.server/daily-maintenance';
 import { CSP_NONCE_REQUEST_HEADER } from './lib/csp-nonce';
-
-// Private operations surface for the `ghostbuild-ops` Worker. Exported from the
-// Worker entry so `ghostbuild-ops` can reach it over its Service binding; RPC
-// methods are never dispatched from HTTP, so this adds no public route.
-export { OperationsService } from './operations-service';
 
 const APPLICATION_CSP_BASELINE = "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
 const HSTS_MIN_AGE_SECONDS = '31536000';
@@ -182,6 +178,9 @@ export default {
 
 async function runScheduledMaintenance(_cron: string, env: Env) {
   await pruneCloudflareAuthDataBestEffort(env.DB);
+  // The upstream builder-skill mirror and the account-anchored resource sweep want a day between
+  // runs, not fifteen minutes; each claims its own slot in D1 before it does any work.
+  await runDailyMaintenance(env);
 }
 
 async function routeApplicationRequest(request: Request, env: Env, nonce: string): Promise<Response> {

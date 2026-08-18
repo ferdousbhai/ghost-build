@@ -68,3 +68,6 @@ vite.config.ts.timestamp-*.mjs
 .env*.local
 
 temp_envars
+
+# The platform-status skill ships with the repository, overriding a global .claude/ ignore.
+!.claude/
