@@ -42,7 +42,9 @@ test('renders signed-out private routes after browser hydration', async ({ page 
 });
 
 test('keeps the built 404 and mobile shell usable', async ({ page }, testInfo) => {
-  const assertClean = collectBrowserDiagnostics(page, testInfo, [/status of 404 \(Not Found\)/]);
+  // The reason phrase is absent over HTTP/2, so a deployed candidate reports `404 ()`
+  // where the local HTTP/1.1 preview reports `404 (Not Found)`.
+  const assertClean = collectBrowserDiagnostics(page, testInfo, [/status of 404 \(/]);
 
   const response = await page.goto('/does-not-exist');
 
