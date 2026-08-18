@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { USER_WORKSPACE_RUNTIME_GC_CRON } from '../../app/lib/.server/cloudflare/user-workspace-runtime-policy';
 import { sweepAgentGcCandidatesBestEffort } from '../../app/lib/cloudflare/data/agent-gc.server';
 import { sweepAppResourceGcCandidatesBestEffort } from '../../app/lib/cloudflare/data/app-resource-gc.server';
+import { reconcileAppResourcesBestEffort } from '../../app/lib/cloudflare/data/app-resource-reconcile.server';
 import { scheduleUserWorkspaceRuntimeMaintenance } from './scheduled-maintenance';
 
 vi.mock('../../app/lib/cloudflare/data/agent-gc.server', () => ({
@@ -10,47 +11,55 @@ vi.mock('../../app/lib/cloudflare/data/agent-gc.server', () => ({
 vi.mock('../../app/lib/cloudflare/data/app-resource-gc.server', () => ({
   sweepAppResourceGcCandidatesBestEffort: vi.fn(async () => undefined),
 }));
+vi.mock('../../app/lib/cloudflare/data/app-resource-reconcile.server', () => ({
+  reconcileAppResourcesBestEffort: vi.fn(async () => undefined),
+}));
+
+// Every job the provisioned trigger must register. Listing them here is what
+// keeps the call-count assertions from drifting when a sweep is added.
+const MAINTENANCE_JOBS = [
+  sweepAgentGcCandidatesBestEffort,
+  sweepAppResourceGcCandidatesBestEffort,
+  reconcileAppResourcesBestEffort,
+];
+
+function maintenanceEnv() {
+  return { BuilderAgent: {}, DB: {} } as unknown as Parameters<typeof scheduleUserWorkspaceRuntimeMaintenance>[1];
+}
 
 describe('user workspace runtime scheduled maintenance', () => {
   beforeEach(() => {
-    vi.mocked(sweepAgentGcCandidatesBestEffort).mockClear();
-    vi.mocked(sweepAppResourceGcCandidatesBestEffort).mockClear();
+    for (const job of MAINTENANCE_JOBS) {
+      vi.mocked(job).mockClear();
+    }
   });
 
-  it('registers the agent-GC sweep for the exact provisioned cron', async () => {
+  it('registers every maintenance job for the exact provisioned cron', async () => {
     const waitUntil = vi.fn();
-    const env = { BuilderAgent: {}, DB: {} } as unknown as Parameters<
-      typeof scheduleUserWorkspaceRuntimeMaintenance
-    >[1];
+    const env = maintenanceEnv();
 
     expect(scheduleUserWorkspaceRuntimeMaintenance({ cron: USER_WORKSPACE_RUNTIME_GC_CRON }, env, { waitUntil })).toBe(
       true,
     );
 
-    expect(sweepAgentGcCandidatesBestEffort).toHaveBeenCalledOnce();
-    expect(sweepAgentGcCandidatesBestEffort).toHaveBeenCalledWith(env);
-    expect(sweepAppResourceGcCandidatesBestEffort).toHaveBeenCalledOnce();
-    expect(sweepAppResourceGcCandidatesBestEffort).toHaveBeenCalledWith(env);
-    expect(waitUntil).toHaveBeenCalledTimes(2);
-    await expect(Promise.all(waitUntil.mock.calls.map(([promise]) => promise))).resolves.toEqual([
-      undefined,
-      undefined,
-    ]);
+    for (const job of MAINTENANCE_JOBS) {
+      expect(job).toHaveBeenCalledOnce();
+      expect(job).toHaveBeenCalledWith(env);
+    }
+    expect(waitUntil).toHaveBeenCalledTimes(MAINTENANCE_JOBS.length);
+    await expect(Promise.all(waitUntil.mock.calls.map(([promise]) => promise))).resolves.toEqual(
+      MAINTENANCE_JOBS.map(() => undefined),
+    );
   });
 
   it('ignores an unprovisioned trigger', () => {
     const waitUntil = vi.fn();
 
-    expect(
-      scheduleUserWorkspaceRuntimeMaintenance(
-        { cron: '0 0 * * *' },
-        { BuilderAgent: {}, DB: {} } as unknown as Parameters<typeof scheduleUserWorkspaceRuntimeMaintenance>[1],
-        { waitUntil },
-      ),
-    ).toBe(false);
+    expect(scheduleUserWorkspaceRuntimeMaintenance({ cron: '0 0 * * *' }, maintenanceEnv(), { waitUntil })).toBe(false);
 
-    expect(sweepAgentGcCandidatesBestEffort).not.toHaveBeenCalled();
-    expect(sweepAppResourceGcCandidatesBestEffort).not.toHaveBeenCalled();
+    for (const job of MAINTENANCE_JOBS) {
+      expect(job).not.toHaveBeenCalled();
+    }
     expect(waitUntil).not.toHaveBeenCalled();
   });
 });
