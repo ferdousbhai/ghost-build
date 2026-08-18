@@ -2,9 +2,13 @@
 
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { createCloudflareReturnURL, signInWithCloudflare, signOutOfGhostbuild } from './auth-client';
+import { PENDING_SUBMIT_STORAGE_KEY } from '~/utils/constants';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  window.sessionStorage.clear();
+  window.history.replaceState(null, '', '/');
 });
 
 describe('Cloudflare auth client failures', () => {
@@ -34,6 +38,50 @@ describe('Cloudflare auth client failures', () => {
     );
 
     await expect(signOutOfGhostbuild()).rejects.toThrow('The session could not be revoked.');
+  });
+});
+
+describe('the submit an authorization was asked to finish', () => {
+  // A same-document destination, because jsdom leaves cross-document navigation unimplemented.
+  function stubAuthorizationStart() {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ authorizationUrl: `${window.location.href.split('#')[0]}#cloudflare-authorization` }),
+        ),
+    );
+  }
+
+  test('travels with the connection the submit started', async () => {
+    stubAuthorizationStart();
+
+    await signInWithCloudflare('http://localhost/', { continuePrompt: '  Build a launch checklist.  ' });
+
+    expect(window.sessionStorage.getItem(PENDING_SUBMIT_STORAGE_KEY)).toBe('Build a launch checklist.');
+  });
+
+  test('is dropped by any connection no submit started', async () => {
+    window.sessionStorage.setItem(PENDING_SUBMIT_STORAGE_KEY, 'Build a launch checklist.');
+    stubAuthorizationStart();
+
+    // Connecting from settings or the account card must never resume someone else's build.
+    await signInWithCloudflare('http://localhost/settings');
+
+    expect(window.sessionStorage.getItem(PENDING_SUBMIT_STORAGE_KEY)).toBeNull();
+  });
+
+  test('is dropped when the authorization never starts', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(Response.json({ error: 'Cloudflare authorization is unavailable.' }, { status: 503 })),
+    );
+
+    await expect(
+      signInWithCloudflare('http://localhost/', { continuePrompt: 'Build a launch checklist.' }),
+    ).rejects.toThrow('Cloudflare authorization is unavailable.');
+    expect(window.sessionStorage.getItem(PENDING_SUBMIT_STORAGE_KEY)).toBeNull();
   });
 });
 

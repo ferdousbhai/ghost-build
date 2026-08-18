@@ -26,6 +26,7 @@ const migrationPolicies = [
       '0010_daily_maintenance_receipts.sql': 'b6b5185e35ed10ce4f29bb0c95b19e65a2b78039c0ae77d42ba5972300244748',
       '0011_reconcile_skipped_listings.sql': '2041b644d89494af371aa6dc9f87d77df9681f55c76d93aa58ae5e7d9c563192',
       '0012_remove_builder_skill_sync.sql': '5731448cabed0deec30178e99a87419103d1f9a96ca1ecbc6bdc5d36ecf1a708',
+      '0013_user_workspace_runtime_resources.sql': '7e62570b5855931557058c1bcf9561b61c6ea90ba34bdf6efb88b5c7c1609fd9',
     },
     contractAllowlist: {
       // Explicit pre-launch clean break: the Computer locator replaced this

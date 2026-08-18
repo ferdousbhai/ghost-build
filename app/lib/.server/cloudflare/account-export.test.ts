@@ -175,6 +175,7 @@ describe('control-plane account export', () => {
       'computerRuntime',
       'authSessions',
       'oauthStates',
+      'workspaceResources',
     ]);
     warn.mockRestore();
   });

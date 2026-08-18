@@ -9,6 +9,10 @@ import { Toaster } from '~/components/ui/Toaster';
 import { CloudflareSignInPrompt } from '~/components/CloudflareSignInPrompt';
 import { Button } from '@ui/Button';
 import { LinkButton } from '~/components/ui/LinkButton';
+import { useStore } from '@nanostores/react';
+import { userWorkspacePreparingStore } from '~/lib/cloudflare/runtime-session';
+import { isWorkspacePreparingError } from '~/lib/cloudflare/client';
+import { WORKSPACE_PREPARING_MESSAGE, WorkspacePreparingPanel } from '~/components/WorkspacePreparing';
 
 export function ExistingChat({ chatId }: { chatId: string }) {
   return (
@@ -73,7 +77,7 @@ function AuthenticatedExistingChat({ chatId }: { chatId: string }) {
 
   // Wait for the account-owned chat and workbench state without running any actions.
   if (initialMessages === undefined || !transcript || reloadState === undefined) {
-    return <Loading message="Loading project…" />;
+    return <ProjectLoading />;
   }
   return (
     <Chat
@@ -89,8 +93,21 @@ function AuthenticatedExistingChat({ chatId }: { chatId: string }) {
   );
 }
 
+/** The load is indistinguishable from any other until the runtime says it is still provisioning. */
+function ProjectLoading() {
+  const preparing = useStore(userWorkspacePreparingStore);
+  return <Loading message={preparing ? WORKSPACE_PREPARING_MESSAGE : 'Loading project…'} />;
+}
+
 export function ProjectLoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   const message = error instanceof Error ? error.message : 'The project data could not be loaded.';
+  if (isWorkspacePreparingError(error)) {
+    return (
+      <div className="flex h-full items-center justify-center p-5">
+        <WorkspacePreparingPanel onKeepWaiting={onRetry} />
+      </div>
+    );
+  }
   return (
     <div className="flex h-full items-center justify-center p-5">
       <section className="app-card w-full max-w-xl p-6 text-center sm:p-8" aria-labelledby="project-load-heading">

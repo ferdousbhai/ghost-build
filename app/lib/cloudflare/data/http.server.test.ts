@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { internalErrorResponse } from './http.server';
+import { DURABLE_OBJECT_OVERLOADED_MESSAGE, internalErrorResponse } from './http.server';
 import { SubchatLimitError } from './errors';
 
 describe('internalErrorResponse', () => {
@@ -22,7 +22,7 @@ describe('internalErrorResponse', () => {
     expect(await response.json()).toEqual({ error: 'This project has reached the maximum number of subchats.' });
   });
 
-  it('marks Durable Object overloads as non-retryable without exposing provider details', async () => {
+  it('tells the caller a Durable Object overload is worth retrying, without exposing provider details', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const overloaded = Object.assign(new Error('SECRET_PROVIDER_MARKER: queue full'), {
       overloaded: true,
@@ -30,9 +30,27 @@ describe('internalErrorResponse', () => {
     });
 
     const response = internalErrorResponse(overloaded, 'Unknown data error');
+    const body = await response.json();
 
     expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ error: 'Unknown data error', retryable: false });
+    // An overloaded object is busy, not broken, so refusing the retry stranded the caller
+    // on a condition that clears by itself.
+    expect(body).toEqual({ error: DURABLE_OBJECT_OVERLOADED_MESSAGE, retryable: true });
+    // The caller learns it is overload rather than the operation's generic fallback, and
+    // still learns nothing about the provider.
+    expect(JSON.stringify(body)).not.toContain('SECRET_PROVIDER_MARKER');
+    expect(JSON.stringify(body)).not.toContain('Unknown data error');
+    consoleError.mockRestore();
+  });
+
+  it('identifies an unhandled failure in the log without putting it in the response', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const response = internalErrorResponse(new Error('SECRET_PROVIDER_MARKER: exploded'), 'Unknown data error');
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Unknown data error' });
+    expect(consoleError.mock.calls.flat().join(' ')).toContain('SECRET_PROVIDER_MARKER: exploded');
     consoleError.mockRestore();
   });
 });

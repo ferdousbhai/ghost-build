@@ -4,13 +4,17 @@ import {
   collectReport,
   describeReconcileRun,
   describeDailyJobs,
+  describeWorkerInvocations,
   describeWorkspaceRuntime,
   describeWranglerFailure,
   formatDuration,
   formatRelativeTime,
   headlineFor,
   parseD1Response,
+  readInvocationGroups,
+  readWorkerInvocations,
   renderReport,
+  WORKER_INVOCATIONS_QUERY,
 } from './ops-report.mjs';
 
 const NOW = Date.UTC(2026, 7, 18, 12, 0, 0);
@@ -173,8 +177,14 @@ describe('workspace runtime rows', () => {
 
 describe('daily maintenance slots', () => {
   it('passes a job that claimed a slot within the day', () => {
-    const entries = describeDailyJobs([{ job: 'app-resource-reconcile', last_started_at: NOW - 20 * HOUR }], NOW);
-    expect(entries.map((entry) => entry.level)).toEqual(['ok']);
+    const entries = describeDailyJobs(
+      [
+        { job: 'app-resource-reconcile', last_started_at: NOW - 20 * HOUR },
+        { job: 'workspace-runtime-reclaim', last_started_at: NOW - 20 * HOUR },
+      ],
+      NOW,
+    );
+    expect(entries.map((entry) => entry.level)).toEqual(['ok', 'ok']);
     expect(entries[0].sentence).toBe('app-resource-reconcile last started 20h ago.');
   });
 
@@ -384,6 +394,212 @@ describe('reconciliation sweep rows', () => {
   });
 });
 
+describe('control-plane Worker invocations', () => {
+  const group = (status: string, requests: number, sampleInterval = 1) => ({
+    dimensions: { status },
+    sum: { requests, errors: 0 },
+    avg: { sampleInterval },
+  });
+
+  it('reports a Worker that served without failing', () => {
+    const result = describeWorkerInvocations([group('success', 640)]);
+    expect(result.level).toBe('ok');
+    expect(result.sentence).toBe(
+      'ghostbuild served 640 invocations in the last 24h and none of them failed inside the Worker.',
+    );
+    expect(result.detail).toMatchObject({ invocations: 640, faulted: 0, logsAvailable: false });
+  });
+
+  it('treats a window with no invocations as attention, never as a healthy zero', () => {
+    const result = describeWorkerInvocations([]);
+    expect(result.level).toBe('attention');
+    expect(result.sentence).toContain('recorded no invocations at all in the last 24h');
+    expect(result.detail).toMatchObject({ invocations: 0 });
+  });
+
+  it('escalates by how much of the traffic failed, and names what it cannot tell', () => {
+    const rare = describeWorkerInvocations([group('success', 1000), group('scriptThrew', 5)]);
+    expect(rare.level).toBe('attention');
+    expect(rare.sentence).toContain(
+      'failed inside the Worker on 5 of 1005 invocations in the last 24h (scriptThrew 5)',
+    );
+    // The counts are not the exception text, and the report says which one it is offering.
+    expect(rare.sentence).toContain('Workers Logs holds the exception text');
+
+    const outage = describeWorkerInvocations([
+      group('success', 900),
+      group('scriptThrew', 60),
+      group('exceededCpu', 40),
+    ]);
+    expect(outage.level).toBe('error');
+    expect(outage.sentence).toContain('on 100 of 1000 invocations');
+    // Worst first, so the dominant failure leads.
+    expect(outage.sentence).toContain('(scriptThrew 60, exceededCpu 40)');
+  });
+
+  it('counts an outcome it has never seen as a fault rather than dropping it', () => {
+    const result = describeWorkerInvocations([group('success', 10), group('exceededSomethingNew', 10)]);
+    expect(result.level).toBe('error');
+    expect(result.sentence).toContain('exceededSomethingNew 10');
+    expect(result.detail.faulted).toBe(10);
+  });
+
+  it('does not blame the Worker for callers that went away', () => {
+    const result = describeWorkerInvocations([group('success', 90), group('clientDisconnected', 10)]);
+    expect(result.level).toBe('ok');
+    expect(result.detail).toMatchObject({ invocations: 100, faulted: 0, byStatus: { clientDisconnected: 10 } });
+  });
+
+  it('says when the counts are extrapolated from a sample', () => {
+    expect(describeWorkerInvocations([group('success', 640, 4)]).sentence).toContain(
+      'Counts are extrapolated from roughly 1 invocation in 4.0.',
+    );
+    expect(describeWorkerInvocations([group('success', 640, 1)]).sentence).not.toContain('extrapolated');
+  });
+
+  it('refuses to read a group whose shape is not the one it expects', () => {
+    expect(() => describeWorkerInvocations([{ sum: { requests: 1 } }])).toThrow('`dimensions.status`');
+    expect(() => describeWorkerInvocations([{ dimensions: { status: 'success' }, sum: {} }])).toThrow(
+      'workersInvocationsAdaptive.sum.requests holds the undefined undefined, not a number.',
+    );
+  });
+});
+
+describe('workers analytics envelope', () => {
+  const envelope = (groups: unknown) => ({
+    data: { viewer: { accounts: [{ workersInvocationsAdaptive: groups }] } },
+  });
+
+  it('keeps the groups out of a successful answer', () => {
+    expect(readInvocationGroups(envelope([{ dimensions: { status: 'success' } }]), 200)).toEqual([
+      { dimensions: { status: 'success' } },
+    ]);
+  });
+
+  it('never renders a refused read as an empty window', () => {
+    // GraphQL answers a refusal with HTTP 200, so only the envelope tells these apart.
+    expect(() =>
+      readInvocationGroups({ data: null, errors: [{ message: 'not authorized for that account' }] }, 200),
+    ).toThrow('Cloudflare analytics refused the read: not authorized for that account');
+    expect(() => readInvocationGroups({ data: { viewer: { accounts: [] } } }, 200)).toThrow(
+      'no `workersInvocationsAdaptive` result',
+    );
+    expect(() => readInvocationGroups(null, 502)).toThrow('answered HTTP 502 with no readable body');
+  });
+});
+
+describe('reading the Worker as the operator', () => {
+  type Run = (file: string, args: string[]) => Promise<{ stdout: string }>;
+
+  /** Account resolution reads the environment first, so every test states what is in it. */
+  const noEnv: Record<string, string | undefined> = {};
+
+  function wranglerFake(overrides: { accounts?: unknown[]; credential?: unknown } = {}): Run {
+    return async (_file, args) => {
+      if (args.includes('whoami')) {
+        return { stdout: JSON.stringify({ accounts: overrides.accounts ?? [{ id: 'acct-1', name: 'One' }] }) };
+      }
+      return { stdout: JSON.stringify(overrides.credential ?? { type: 'oauth', token: 'oauth-token' }) };
+    };
+  }
+
+  function fetchFake(payload: unknown) {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const impl = async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return { ok: true, status: 200, json: async () => payload } as unknown as Response;
+    };
+    return { impl: impl as unknown as typeof fetch, calls };
+  }
+
+  const groups = [{ dimensions: { status: 'success' }, sum: { requests: 1, errors: 0 }, avg: { sampleInterval: 1 } }];
+  const answer = { data: { viewer: { accounts: [{ workersInvocationsAdaptive: groups }] } } };
+
+  it('asks for one day of the named script with the operator credential', async () => {
+    const fetcher = fetchFake(answer);
+    const rows = await readWorkerInvocations({
+      now: NOW,
+      run: wranglerFake() as never,
+      fetchImpl: fetcher.impl,
+      env: noEnv,
+    });
+
+    expect(rows).toEqual(groups);
+    expect(fetcher.calls).toHaveLength(1);
+    const [{ url, init }] = fetcher.calls;
+    expect(url).toBe('https://api.cloudflare.com/client/v4/graphql');
+    expect((init.headers as Record<string, string>).authorization).toBe('Bearer oauth-token');
+    const body = JSON.parse(String(init.body));
+    expect(body.query).toBe(WORKER_INVOCATIONS_QUERY);
+    expect(body.variables).toEqual({
+      account: 'acct-1',
+      script: 'ghostbuild',
+      from: new Date(NOW - DAY).toISOString(),
+      to: new Date(NOW).toISOString(),
+    });
+  });
+
+  it('authenticates a global API key with the headers that key needs', async () => {
+    const fetcher = fetchFake(answer);
+    await readWorkerInvocations({
+      now: NOW,
+      run: wranglerFake({ credential: { type: 'api_key', key: 'k', email: 'ops@example.com' } }) as never,
+      fetchImpl: fetcher.impl,
+      env: noEnv,
+    });
+    expect(fetcher.calls[0].init.headers).toMatchObject({ 'x-auth-key': 'k', 'x-auth-email': 'ops@example.com' });
+  });
+
+  it('asks which account rather than guessing when wrangler holds several', async () => {
+    await expect(
+      readWorkerInvocations({
+        now: NOW,
+        run: wranglerFake({
+          accounts: [
+            { id: 'a', name: 'One' },
+            { id: 'b', name: 'Two' },
+          ],
+        }) as never,
+        fetchImpl: fetchFake(answer).impl,
+        env: noEnv,
+      }),
+    ).rejects.toThrow('authenticated against 2 accounts (One, Two); set CLOUDFLARE_ACCOUNT_ID');
+  });
+
+  it('follows CLOUDFLARE_ACCOUNT_ID the way wrangler does', async () => {
+    const fetcher = fetchFake(answer);
+    await readWorkerInvocations({
+      now: NOW,
+      run: wranglerFake({ accounts: [{ id: 'a' }, { id: 'b' }] }) as never,
+      fetchImpl: fetcher.impl,
+      env: { CLOUDFLARE_ACCOUNT_ID: 'from-the-environment' },
+    });
+    expect(JSON.parse(String(fetcher.calls[0].init.body)).variables.account).toBe('from-the-environment');
+  });
+
+  it('never quotes the credential command output back into an error', async () => {
+    const run = (async (_file: string, args: string[]) => {
+      if (args.includes('whoami')) {
+        return { stdout: JSON.stringify({ accounts: [{ id: 'acct-1' }] }) };
+      }
+      // `wrangler auth token` prints the credential itself on stdout.
+      throw Object.assign(new Error('Command failed'), {
+        stdout: 'super-secret-token',
+        stderr: 'Not logged in. Please run `wrangler login`.',
+      });
+    }) as never;
+
+    await expect(
+      readWorkerInvocations({ now: NOW, run, fetchImpl: fetchFake(answer).impl, env: noEnv }),
+    ).rejects.toThrow(
+      'Wrangler could not produce a credential for the Worker read: Not logged in. Please run `wrangler login`.',
+    );
+    await expect(
+      readWorkerInvocations({ now: NOW, run, fetchImpl: fetchFake(answer).impl, env: noEnv }),
+    ).rejects.not.toThrow(/super-secret-token/);
+  });
+});
+
 describe('wrangler output handling', () => {
   it('keeps only the rows from each statement envelope', () => {
     const stdout = '\n[{"results":[{"total":2}],"success":true},{"results":[],"success":true}]';
@@ -506,9 +722,21 @@ function healthyFixture(): Fixture {
         },
       ],
     ],
-    daily_maintenance_jobs: [[{ job: 'app-resource-reconcile', last_started_at: NOW - 2 * HOUR }]],
+    daily_maintenance_jobs: [
+      [
+        { job: 'app-resource-reconcile', last_started_at: NOW - 2 * HOUR },
+        { job: 'workspace-runtime-reclaim', last_started_at: NOW - 2 * HOUR },
+      ],
+    ],
   };
 }
+
+/** Invocation groups shaped like the Workers analytics answer, with nothing wrong in them. */
+function healthyInvocationGroups(): Row[] {
+  return [{ dimensions: { status: 'success' }, sum: { requests: 640, errors: 0 }, avg: { sampleInterval: 1 } }];
+}
+
+const healthyInvocations = async () => healthyInvocationGroups();
 
 /** Route a statement to its fixture by the table it reads. */
 function fixtureQuery(fixture: Fixture) {
@@ -528,6 +756,7 @@ describe('report shape', () => {
   it('reports a healthy platform in one line and exposes every check structurally', async () => {
     const report = await collectReport({
       query: fixtureQuery(healthyFixture()),
+      readInvocations: healthyInvocations,
       now: NOW,
       desiredRuntimeVersion: CURRENT_RUNTIME,
     });
@@ -538,9 +767,10 @@ describe('report shape', () => {
       database: 'ghostbuild',
       controlPlaneReadable: true,
       status: 'ok',
-      headline: 'Everything is healthy: all 6 checks passed.',
+      headline: 'Everything is healthy: all 7 checks passed.',
     });
     expect(reportOf(report).checks.map((item) => item.id)).toEqual([
+      'control-plane-worker',
       'cloudflare-accounts',
       'workspace-runtimes',
       'app-resource-sweep',
@@ -567,7 +797,7 @@ describe('report shape', () => {
       skippedListing: false,
     });
     expect(checkById(report, 'daily-maintenance').sentence).toBe(
-      'All 1 daily maintenance job fired within the last day.',
+      'All 2 daily maintenance jobs fired within the last day.',
     );
   });
 
@@ -583,6 +813,7 @@ describe('report shape', () => {
 
     const report = await collectReport({
       query: fixtureQuery(fixture),
+      readInvocations: healthyInvocations,
       now: NOW,
       desiredRuntimeVersion: CURRENT_RUNTIME,
     });
@@ -610,6 +841,7 @@ describe('report shape', () => {
 
     const report = await collectReport({
       query: fixtureQuery(fixture),
+      readInvocations: healthyInvocations,
       now: NOW,
       desiredRuntimeVersion: CURRENT_RUNTIME,
     });
@@ -629,7 +861,12 @@ describe('report shape', () => {
     const fixture = healthyFixture();
     fixture.core = new Error('You are not authenticated.');
 
-    const report = await collectReport({ query: fixtureQuery(fixture), now: NOW, desiredRuntimeVersion: null });
+    const report = await collectReport({
+      query: fixtureQuery(fixture),
+      readInvocations: healthyInvocations,
+      now: NOW,
+      desiredRuntimeVersion: null,
+    });
 
     expect(reportOf(report).controlPlaneReadable).toBe(false);
     expect(reportOf(report).status).toBe('unknown');
@@ -646,6 +883,7 @@ describe('report shape', () => {
   it('cannot judge runtime staleness without a local runtime build', async () => {
     const report = await collectReport({
       query: fixtureQuery(healthyFixture()),
+      readInvocations: healthyInvocations,
       now: NOW,
       desiredRuntimeVersion: null,
     });
@@ -657,25 +895,37 @@ describe('report shape', () => {
 
   it('flags a daily job that has stopped firing', async () => {
     const fixture = healthyFixture();
-    fixture.daily_maintenance_jobs = [[{ job: 'app-resource-reconcile', last_started_at: NOW - 5 * DAY }]];
+    fixture.daily_maintenance_jobs = [
+      [
+        { job: 'app-resource-reconcile', last_started_at: NOW - 5 * DAY },
+        { job: 'workspace-runtime-reclaim', last_started_at: NOW - 2 * HOUR },
+      ],
+    ];
 
     const report = await collectReport({
       query: fixtureQuery(fixture),
+      readInvocations: healthyInvocations,
       now: NOW,
       desiredRuntimeVersion: CURRENT_RUNTIME,
     });
     const maintenance = checkById(report, 'daily-maintenance');
     expect(maintenance.status).toBe('attention');
-    expect(maintenance.sentence).toBe('1 of 1 daily maintenance job did not fire as scheduled.');
+    expect(maintenance.sentence).toBe('1 of 2 daily maintenance jobs did not fire as scheduled.');
     expect(renderReport(report)).toContain('app-resource-reconcile last started 5d ago');
   });
 
   it('reports a job that claimed its slot but recorded no run as started and died', async () => {
     const fixture = healthyFixture();
-    fixture.daily_maintenance_jobs = [[{ job: 'app-resource-reconcile', last_started_at: NOW - 30 * MINUTE }]];
+    fixture.daily_maintenance_jobs = [
+      [
+        { job: 'app-resource-reconcile', last_started_at: NOW - 30 * MINUTE },
+        { job: 'workspace-runtime-reclaim', last_started_at: NOW - 2 * HOUR },
+      ],
+    ];
 
     const report = await collectReport({
       query: fixtureQuery(fixture),
+      readInvocations: healthyInvocations,
       now: NOW,
       desiredRuntimeVersion: CURRENT_RUNTIME,
     });
@@ -709,6 +959,7 @@ describe('report shape', () => {
 
       const report = await collectReport({
         query: fixtureQuery(fixture),
+        readInvocations: healthyInvocations,
         now: NOW,
         desiredRuntimeVersion: CURRENT_RUNTIME,
       });
@@ -727,16 +978,49 @@ describe('report shape', () => {
 
   it('reports an unreadable maintenance row as unknown rather than as a failed run', async () => {
     const fixture = healthyFixture();
-    fixture.daily_maintenance_jobs = [[{ job: 'app-resource-reconcile', last_started_at: null }]];
+    fixture.daily_maintenance_jobs = [
+      [
+        { job: 'app-resource-reconcile', last_started_at: null },
+        { job: 'workspace-runtime-reclaim', last_started_at: NOW - 2 * HOUR },
+      ],
+    ];
 
     const report = await collectReport({
       query: fixtureQuery(fixture),
+      readInvocations: healthyInvocations,
       now: NOW,
       desiredRuntimeVersion: CURRENT_RUNTIME,
     });
     const maintenance = checkById(report, 'daily-maintenance');
     expect(maintenance.status).toBe('unknown');
     expect(maintenance.sentence).toContain('daily_maintenance_jobs.last_started_at holds null');
+  });
+
+  it('reports a Worker it could not read as unknown while the control plane stays readable', async () => {
+    const report = await collectReport({
+      query: fixtureQuery(healthyFixture()),
+      readInvocations: () => Promise.reject(new Error('Cloudflare analytics refused the read: authz')),
+      now: NOW,
+      desiredRuntimeVersion: CURRENT_RUNTIME,
+    });
+
+    const worker = checkById(report, 'control-plane-worker');
+    expect(worker.status).toBe('unknown');
+    expect(worker.sentence).toContain('Cloudflare analytics refused the read: authz');
+    expect(worker.detail.hint).toContain('Workers analytics GraphQL API');
+    // The analytics read is not the control plane, so it must not change the exit status.
+    expect(reportOf(report).controlPlaneReadable).toBe(true);
+    expect(reportOf(report).headline).toBe('1 check could not be read.');
+    expect(renderReport(report)).not.toContain('Everything is healthy');
+  });
+
+  it('reports the Worker as unknown rather than omitting it when no reader is supplied', async () => {
+    const report = await collectReport({
+      query: fixtureQuery(healthyFixture()),
+      now: NOW,
+      desiredRuntimeVersion: CURRENT_RUNTIME,
+    });
+    expect(checkById(report, 'control-plane-worker').status).toBe('unknown');
   });
 
   it('treats a job that has never run as attention rather than as health', async () => {
@@ -746,6 +1030,7 @@ describe('report shape', () => {
 
     const report = await collectReport({
       query: fixtureQuery(fixture),
+      readInvocations: healthyInvocations,
       now: NOW,
       desiredRuntimeVersion: CURRENT_RUNTIME,
     });

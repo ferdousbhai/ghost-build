@@ -23,7 +23,9 @@ pnpm run ops:json   # same report, structured
 [scripts/ops-report.mjs](scripts/ops-report.mjs) reads production control-plane D1 through the operator's own Wrangler
 authentication and issues only `SELECT` statements. It reports connected Cloudflare accounts, per-account workspace
 runtime versions and staleness, the app-resource reconciliation sweep, and whether the daily
-maintenance jobs are still firing. A check it cannot read is reported as `unknown` with the reason, never as a healthy
+maintenance jobs are still firing. It also reads the control-plane Worker's own invocation outcomes from the Workers
+analytics GraphQL API with the same authentication, which is how it answers whether `ghostbuild` is serving and
+throwing. A check it cannot read is reported as `unknown` with the reason, never as a healthy
 zero. The first line is the whole answer; exit status is 0 whenever a report was produced and 1 when the control plane
 was unreachable.
 

@@ -119,13 +119,15 @@ test('keeps waiting for the workspace after a reload during preparation', async 
   });
 
   await page.goto('/chat/recovery-fixture-project');
-  await expect(page.getByText('Loading project…')).toBeVisible();
+  // Named, not a bare spinner and never a timeout: the wait is provisioning, which takes minutes.
+  await expect(page.getByText('Preparing your Cloudflare workspace. This takes a few minutes.')).toBeVisible();
 
   const attemptsBeforeReload = attempts;
   await page.reload();
 
   await expect.poll(() => attempts).toBeGreaterThan(attemptsBeforeReload);
-  await expect(page.getByText('Loading project…')).toBeVisible();
+  await expect(page.getByText('Preparing your Cloudflare workspace. This takes a few minutes.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Ghostbuild could not prepare your workspace.' })).toHaveCount(0);
   await assertClean();
 });

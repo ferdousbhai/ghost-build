@@ -11,6 +11,7 @@ import {
   markUserWorkspaceRuntimeReady,
   type UserWorkspaceRuntime,
 } from './user-workspace-runtime-repository';
+import { recordUserWorkspaceRuntimeResources } from './user-workspace-runtime-resources';
 import { deriveUserWorkspaceRuntimeSecret } from './user-workspace-runtime-secret';
 import { UserCloudflareAccountApi } from './user-account-api';
 import { waitForUserWorkspaceRuntimeReadiness } from './user-workspace-runtime-readiness';
@@ -108,7 +109,27 @@ export async function provisionUserWorkspaceRuntime(args: {
     if (entitlement.status === 'undetermined') {
       throw new UserWorkspaceContainersEligibilityUnknownError(entitlement.reason);
     }
+    // Everything past this point creates something in the user's own account, and an attempt can
+    // stop anywhere. The names are recorded before the calls that use them, so a provisioning
+    // nobody ever retries is still reclaimable; the ids follow as they become known. A failure to
+    // record fails the attempt rather than proceeding unrecorded - the retry resumes from here.
+    await recordUserWorkspaceRuntimeResources({
+      db: args.env.DB,
+      userId: args.userId,
+      accountId: connection.accountId,
+      resources: [
+        { resourceType: 'd1', resourceName: databaseName },
+        { resourceType: 'worker', resourceName: workerName },
+        { resourceType: 'container', resourceName: workerName },
+      ],
+    });
     const database = await accountApi.ensureD1Database(databaseName);
+    await recordUserWorkspaceRuntimeResources({
+      db: args.env.DB,
+      userId: args.userId,
+      accountId: connection.accountId,
+      resources: [{ resourceType: 'd1', resourceName: databaseName, providerResourceId: database.id }],
+    });
     await accountApi.applyD1Migrations(database.id, USER_WORKSPACE_DATA_MIGRATIONS);
     const deployed = await accountApi.deployWorkspaceRuntimeWorker({
       workerName,

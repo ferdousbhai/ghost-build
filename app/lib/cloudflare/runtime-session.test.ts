@@ -6,6 +6,7 @@ import {
   resetUserRuntimeSession,
   UserRuntimeSessionError,
   userRuntimeEndpointStore,
+  userWorkspacePreparingStore,
 } from './runtime-session';
 
 afterEach(() => {
@@ -199,10 +200,40 @@ describe('user runtime session', () => {
     vi.stubGlobal('fetch', request);
 
     const session = getUserRuntimeSession();
+    await vi.advanceTimersByTimeAsync(0);
+    // Everything that waits on the runtime reads this, so a wait for provisioning is never
+    // mistaken for a runtime that cannot answer.
+    expect(userWorkspacePreparingStore.get()).toBe(true);
     await vi.advanceTimersByTimeAsync(1_000);
 
     await expect(session).resolves.toMatchObject({ endpoint: 'https://workspace.example' });
     expect(request).toHaveBeenCalledTimes(2);
+    expect(userWorkspacePreparingStore.get()).toBe(false);
+  });
+
+  it('reports a preparation that outran the readiness deadline as still preparing', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json(
+          { code: 'workspace_preparing', error: 'Ghostbuild is still preparing your workspace.' },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    const session = getUserRuntimeSession();
+    const rejected = expect(session).rejects.toEqual(
+      new UserRuntimeSessionError('Ghostbuild is still preparing your workspace.', 'workspace_preparing'),
+    );
+    // Fifteen minutes of polling, walked in steps so each simulated attempt settles.
+    for (let elapsed = 0; elapsed <= 15 * 60_000; elapsed += 30_000) {
+      await vi.advanceTimersByTimeAsync(30_000);
+    }
+
+    await rejected;
+    expect(userWorkspacePreparingStore.get()).toBe(false);
   });
 
   it('lets a caller cancel its wait without cancelling shared provisioning', async () => {

@@ -33,6 +33,12 @@ test('renders signed-out private routes after browser hydration', async ({ page 
 
   await page.goto('/settings');
   await expect(page.getByRole('heading', { name: /Connect Cloudflare to open settings/i })).toBeVisible();
+  // Never a bounce into Cloudflare's consent screen: the route that asks for eight permissions
+  // states the plan requirement here first, exactly as the composer does.
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByTestId('cloudflare-connect-legal-notice')).toContainText(
+    'Cloudflare Containers, which requires the Workers Paid plan',
+  );
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', /noindex,\s*nofollow/);
 
   await page.goto('/chat/browser-smoke-project');

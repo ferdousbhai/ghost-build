@@ -25,6 +25,7 @@ import {
   type UserRuntimeErrorCode,
 } from '~/lib/cloudflare/runtime-session';
 import { Loading } from '~/components/Loading';
+import { WORKSPACE_PREPARING_MESSAGE, WorkspacePreparingPanel } from '~/components/WorkspacePreparing';
 import { Button } from '@ui/Button';
 import { LinkButton } from '~/components/ui/LinkButton';
 import { buttonClassNames } from '~/components/ui/primitives/Button';
@@ -90,7 +91,7 @@ export const Chat = memo(
           onRetry={() => setRuntimeConnectionAttempt((attempt) => attempt + 1)}
         />
       ) : (
-        <Loading message="Preparing your workspace…" />
+        <Loading message={WORKSPACE_PREPARING_MESSAGE} />
       );
     }
 
@@ -126,6 +127,14 @@ function WorkspaceRuntimeConnectionError({
 }) {
   const planRequired = code === 'workspace_plan_required';
   const reauthorizationRequired = code === 'cloudflare_reauthorization_required';
+  // Preparation that outran the readiness deadline is still preparation, not a refusal.
+  if (code === 'workspace_preparing') {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center p-5">
+        <WorkspacePreparingPanel onKeepWaiting={onRetry} />
+      </div>
+    );
+  }
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center p-5">
       <section className="app-card w-full max-w-lg p-6 text-center" aria-labelledby="workspace-connection-heading">

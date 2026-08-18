@@ -1,5 +1,6 @@
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { runAppResourceReconciliation } from '~/lib/.server/cloudflare/app-resource-reconcile-sweep';
+import { runUserWorkspaceRuntimeReclamation } from '~/lib/.server/cloudflare/user-workspace-runtime-reclaim';
 
 /**
  * Jobs that want a day between runs, hosted on a cron that fires every fifteen minutes.
@@ -19,6 +20,7 @@ const logger = createScopedLogger('DailyMaintenance');
 
 const dailyJobs = {
   'app-resource-reconcile': (env: Env) => runAppResourceReconciliation(env),
+  'workspace-runtime-reclaim': (env: Env) => runUserWorkspaceRuntimeReclamation(env),
 } satisfies Record<string, (env: Env) => Promise<unknown>>;
 
 /**

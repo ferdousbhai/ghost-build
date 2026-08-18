@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   markError: vi.fn(),
   markReady: vi.fn(),
   deriveSecret: vi.fn(),
+  recordResources: vi.fn(),
   waitForReadiness: vi.fn(),
   resolveCredential: vi.fn(),
   accountApi: {
@@ -36,6 +37,9 @@ vi.mock('./user-workspace-runtime-repository', () => ({
   claimUserWorkspaceRuntimeProvisioning: mocks.claim,
   markUserWorkspaceRuntimeError: mocks.markError,
   markUserWorkspaceRuntimeReady: mocks.markReady,
+}));
+vi.mock('./user-workspace-runtime-resources', () => ({
+  recordUserWorkspaceRuntimeResources: mocks.recordResources,
 }));
 vi.mock('./user-workspace-runtime-secret', () => ({ deriveUserWorkspaceRuntimeSecret: mocks.deriveSecret }));
 vi.mock('./user-workspace-runtime-readiness', () => ({
@@ -100,6 +104,7 @@ describe('provisionUserWorkspaceRuntime', () => {
     mocks.resolveCredential.mockResolvedValue('user-token');
     mocks.deriveSecret.mockResolvedValue('s'.repeat(64));
     mocks.claim.mockResolvedValue({ runtime, claimed: true });
+    mocks.recordResources.mockResolvedValue(undefined);
     mocks.markError.mockResolvedValue(runtime);
     mocks.markReady.mockResolvedValue({ ...runtime, status: 'ready' });
     mocks.accountApi.getWorkersSubdomain.mockResolvedValue('user');
@@ -125,6 +130,8 @@ describe('provisionUserWorkspaceRuntime', () => {
     );
     expect(mocks.accountApi.ensureD1Database).not.toHaveBeenCalled();
     expect(mocks.accountApi.deployWorkspaceRuntimeWorker).not.toHaveBeenCalled();
+    // Nothing was created, so nothing may be recorded as created.
+    expect(mocks.recordResources).not.toHaveBeenCalled();
     // The operator report reads this row, so an ineligible plan has to stay visible as a reason.
     expect(mocks.markError).toHaveBeenCalledWith(
       expect.objectContaining({ error: expect.stringContaining('Workers Paid plan') }),
@@ -150,5 +157,59 @@ describe('provisionUserWorkspaceRuntime', () => {
     await expect(provision()).resolves.toEqual(expect.objectContaining({ status: 'ready' }));
     expect(mocks.accountApi.ensureWorkspaceRuntimeContainer).toHaveBeenCalledOnce();
     expect(mocks.markError).not.toHaveBeenCalled();
+  });
+
+  it('records every resource it is about to create before creating it', async () => {
+    mocks.accountApi.readWorkspaceContainersEntitlement.mockResolvedValue({ status: 'entitled' });
+    const order: string[] = [];
+    mocks.recordResources.mockImplementation(() => {
+      order.push('record');
+      return Promise.resolve();
+    });
+    mocks.accountApi.ensureD1Database.mockImplementation(() => {
+      order.push('create');
+      return Promise.resolve({ id: 'database-1', name: 'ghostbuild-data-1' });
+    });
+
+    await provision();
+
+    expect(order[0]).toBe('record');
+    expect(mocks.recordResources).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        userId: 'user-1',
+        accountId: 'account-1',
+        resources: [
+          { resourceType: 'd1', resourceName: expect.stringMatching(/^ghostbuild-data-[0-9a-f]{16}$/) },
+          { resourceType: 'worker', resourceName: expect.stringMatching(/^ghostbuild-workspace-[0-9a-f]{16}$/) },
+          { resourceType: 'container', resourceName: expect.stringMatching(/^ghostbuild-workspace-[0-9a-f]{16}$/) },
+        ],
+      }),
+    );
+    // The database is the one resource Cloudflare addresses by an id rather than by its name.
+    expect(mocks.recordResources).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        resources: [{ resourceType: 'd1', resourceName: expect.any(String), providerResourceId: 'database-1' }],
+      }),
+    );
+  });
+
+  it('leaves a record behind when provisioning fails after creating the database', async () => {
+    mocks.accountApi.readWorkspaceContainersEntitlement.mockResolvedValue({ status: 'entitled' });
+    mocks.accountApi.deployWorkspaceRuntimeWorker.mockRejectedValue(new Error('Cloudflare refused the upload.'));
+
+    await expect(provision()).rejects.toThrow('Cloudflare refused the upload.');
+
+    expect(mocks.recordResources).toHaveBeenCalledTimes(2);
+    expect(mocks.markError).toHaveBeenCalledOnce();
+  });
+
+  it('creates nothing when the record of what it will create cannot be written', async () => {
+    mocks.accountApi.readWorkspaceContainersEntitlement.mockResolvedValue({ status: 'entitled' });
+    mocks.recordResources.mockRejectedValue(new Error('The control plane database is unavailable.'));
+
+    await expect(provision()).rejects.toThrow('The control plane database is unavailable.');
+    expect(mocks.accountApi.ensureD1Database).not.toHaveBeenCalled();
   });
 });

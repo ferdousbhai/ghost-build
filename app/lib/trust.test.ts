@@ -116,6 +116,16 @@ describe('public trust contract', () => {
     expect(staticHeaders).toContain('Content-Type: text/plain; charset=utf-8');
   });
 
+  it('keeps the vulnerability-discovery file unexpired, with enough notice to renew it', () => {
+    const expires = /^Expires: (.+)$/m.exec(readFileSync('public/.well-known/security.txt', 'utf8'))?.[1];
+    // RFC 9116 requires Expires, and a lapsed file is non-conforming. Nothing renews this,
+    // so without a test it goes stale on a date nobody is watching.
+    expect(expires).toBeDefined();
+    const remainingDays = (Date.parse(String(expires)) - Date.now()) / 86_400_000;
+    expect(Number.isNaN(remainingDays)).toBe(false);
+    expect(remainingDays).toBeGreaterThan(30);
+  });
+
   it('keeps private vulnerability reporting as the only documented security-report path', () => {
     const policy = readFileSync('SECURITY.md', 'utf8');
     const issueConfig = parse(readFileSync('.github/ISSUE_TEMPLATE/config.yml', 'utf8')) as {

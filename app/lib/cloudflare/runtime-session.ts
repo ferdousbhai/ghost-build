@@ -13,7 +13,9 @@ export type UserRuntimeErrorCode =
   | 'cloudflare_reauthorization_required'
   | 'workspace_eligibility_unknown'
   | 'workspace_plan_required'
-  | 'workspace_preparation_failed';
+  | 'workspace_preparation_failed'
+  /** Not a failure: the workspace is being built and has not answered yet. */
+  | 'workspace_preparing';
 
 export class UserRuntimeSessionError extends Error {
   constructor(
@@ -33,6 +35,13 @@ const PREPARATION_RETRY_MAX_DELAY_MS = 5_000;
 let pending: Promise<UserRuntimeSession> | null = null;
 export const userRuntimeEndpointStore = atom<string | null>(null);
 export const aiGatewayCreditStatusStore = atom<AiGatewayCreditStatus>('unknown');
+
+/**
+ * Whether the control plane last answered that the workspace is still being prepared.
+ * Provisioning a stale or missing runtime takes minutes, so everything that waits on the
+ * runtime can say so instead of reporting the wait as a fault.
+ */
+export const userWorkspacePreparingStore = atom<boolean>(false);
 
 /**
  * The server-minted identifier for the request that admitted this browser. It lives
@@ -129,11 +138,15 @@ async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<User
       if (!isCurrent()) {
         throw new Error('The runtime session request was canceled.');
       }
+      userWorkspacePreparingStore.set(true);
       await new Promise((resolve) =>
         setTimeout(resolve, Math.min(1_000 * 2 ** retry++, PREPARATION_RETRY_MAX_DELAY_MS)),
       );
       continue;
     }
+    // Every remaining answer is final for this attempt, whether it carries a session or a
+    // refusal, so the browser is no longer waiting on preparation.
+    userWorkspacePreparingStore.set(false);
     if (
       !response.ok ||
       !payload?.endpoint ||
@@ -165,7 +178,8 @@ function isUserRuntimeErrorCode(value: unknown): value is UserRuntimeErrorCode {
     value === 'cloudflare_reauthorization_required' ||
     value === 'workspace_eligibility_unknown' ||
     value === 'workspace_plan_required' ||
-    value === 'workspace_preparation_failed'
+    value === 'workspace_preparation_failed' ||
+    value === 'workspace_preparing'
   );
 }
 
@@ -193,6 +207,18 @@ export async function fetchUserRuntime(path: string, init: RequestInit = {}): Pr
   const signal = init.signal ?? undefined;
   const session = await getUserRuntimeSession(signal);
   signal?.throwIfAborted();
+  return fetchWithRuntimeSession(session, path, init);
+}
+
+/**
+ * The request half of `fetchUserRuntime`, for callers that must bound the request itself
+ * without also bounding the wait for a workspace that is still being prepared.
+ */
+export function fetchWithRuntimeSession(
+  session: UserRuntimeSession,
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${session.token}`);
   return fetch(`${session.endpoint}${path.startsWith('/') ? path : `/${path}`}`, { ...init, headers });
@@ -205,4 +231,5 @@ export function resetUserRuntimeSession(): void {
   userRuntimeEndpointStore.set(null);
   aiGatewayCreditStatusStore.set('unknown');
   telemetryCorrelationIdStore.set(null);
+  userWorkspacePreparingStore.set(false);
 }

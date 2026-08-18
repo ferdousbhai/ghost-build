@@ -3,7 +3,9 @@ import {
   clearPromptIfUnchanged,
   getMessageInputPrimaryAction,
   getMessageInputPrimaryActionLabel,
+  hasFailedCloudflareAuthorization,
   preservePromptForAuthentication,
+  shouldContinuePendingSubmit,
   replacePromptIfUnchanged,
   submitMessageInput,
 } from './useMessageInputController';
@@ -144,5 +146,42 @@ describe('replacePromptIfUnchanged', () => {
 
     expect(replacePromptIfUnchanged('original input', sourceRevision, 'enhanced original')).toBe(true);
     expect(messageInputStore.get()).toBe('enhanced original');
+  });
+});
+
+describe('shouldContinuePendingSubmit', () => {
+  const connected = {
+    authKind: 'fullyLoggedIn',
+    pendingSubmit: 'Build a launch checklist.',
+    prompt: 'Build a launch checklist.',
+    authorizationFailed: false,
+  } as const;
+
+  it('finishes the submit that asked for the connection', () => {
+    expect(shouldContinuePendingSubmit(connected)).toBe(true);
+    expect(shouldContinuePendingSubmit({ ...connected, prompt: '  Build a launch checklist.  ' })).toBe(true);
+  });
+
+  it('never starts a build for a connection no submit asked for', () => {
+    // Connecting from settings or from a bare sign-in screen leaves nothing pending.
+    expect(shouldContinuePendingSubmit({ ...connected, pendingSubmit: null })).toBe(false);
+  });
+
+  it('does not resend a prompt the person changed while connecting', () => {
+    expect(shouldContinuePendingSubmit({ ...connected, prompt: 'Build a launch checklist for the team.' })).toBe(false);
+    expect(shouldContinuePendingSubmit({ ...connected, prompt: '' })).toBe(false);
+  });
+
+  it('stays put after a failed or cancelled authorization', () => {
+    expect(shouldContinuePendingSubmit({ ...connected, authorizationFailed: true })).toBe(false);
+    expect(shouldContinuePendingSubmit({ ...connected, authKind: 'unauthenticated' })).toBe(false);
+  });
+});
+
+describe('hasFailedCloudflareAuthorization', () => {
+  it('reads the marker Cloudflare recovery puts on the return URL', () => {
+    expect(hasFailedCloudflareAuthorization('?cloudflare_authorization=failed')).toBe(true);
+    expect(hasFailedCloudflareAuthorization('?prefill=hello')).toBe(false);
+    expect(hasFailedCloudflareAuthorization('')).toBe(false);
   });
 });

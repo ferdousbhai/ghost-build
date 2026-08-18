@@ -119,8 +119,81 @@ describe('UserCloudflareAccountApi', () => {
       new UserCloudflareAccountApi('account-1', 'user-token', request).readWorkspaceContainersEntitlement(),
     ).resolves.toEqual({
       status: 'undetermined',
-      reason: 'Cloudflare refused the Containers capability check (401): Unauthorized: Account is not authorized',
+      // Nothing here classifies this wording yet, so the verdict carries the evidence to classify
+      // it with once a real Workers Free account has produced one.
+      reason:
+        'Cloudflare refused the Containers capability check. status=401 codes=none wording="Unauthorized: Account is not authorized"',
     });
+  });
+
+  test('records the status, error codes and wording of a refusal it cannot classify', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      Response.json(
+        {
+          success: false,
+          errors: [
+            { code: 10_000, message: 'Authentication error' },
+            { code: 9_109, message: 'Unauthorized to access requested resource' },
+          ],
+        },
+        { status: 403 },
+      ),
+    );
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'user-token', request).readWorkspaceContainersEntitlement(),
+    ).resolves.toEqual({
+      status: 'undetermined',
+      reason:
+        'Cloudflare refused the Containers capability check. status=403 codes=10000,9109 wording="Authentication error"',
+    });
+  });
+
+  test('still records the status when Cloudflare answers with something that is not JSON', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response('<html>gateway</html>', { status: 502 }));
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'user-token', request).readWorkspaceContainersEntitlement(),
+    ).resolves.toEqual({
+      status: 'undetermined',
+      reason: 'Cloudflare refused the Containers capability check. status=502 codes=none wording=none',
+    });
+  });
+
+  test('keeps credential-shaped text out of the refusal it records', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      Response.json(
+        {
+          error:
+            'Refused for account 023e105f4ecef8ad9ca31a8372d0c353 (request 7f3a1c0b-4d2e-4a11-9f8e-2b6c5d4e3f21)\n' +
+            'with Bearer v1.0-abcdefabcdef and ?api_key=supersecretvalue for ops@example.com',
+        },
+        { status: 401 },
+      ),
+    );
+
+    const entitlement = await new UserCloudflareAccountApi(
+      'account-1',
+      'user-token',
+      request,
+    ).readWorkspaceContainersEntitlement();
+
+    expect(entitlement).toEqual({
+      status: 'undetermined',
+      reason: expect.stringContaining('status=401'),
+    });
+    const reason = entitlement.status === 'undetermined' ? entitlement.reason : '';
+    for (const secret of [
+      '023e105f4ecef8ad9ca31a8372d0c353',
+      '7f3a1c0b-4d2e-4a11-9f8e-2b6c5d4e3f21',
+      'v1.0-abcdefabcdef',
+      'supersecretvalue',
+      'ops@example.com',
+    ]) {
+      expect(reason).not.toContain(secret);
+    }
+    // One line, so the row it lands in stays one readable sentence in the operations report.
+    expect(reason).not.toContain('\n');
   });
 
   test('leaves the Containers entitlement undetermined when Cloudflare cannot be reached', async () => {
@@ -141,7 +214,7 @@ describe('UserCloudflareAccountApi', () => {
       new UserCloudflareAccountApi('account-1', 'user-token', request).readWorkspaceContainersEntitlement(),
     ).resolves.toEqual({
       status: 'undetermined',
-      reason: 'Cloudflare returned an unreadable Containers account response.',
+      reason: 'Cloudflare returned an unreadable Containers account response. status=200 codes=none wording=none',
     });
   });
 
@@ -502,6 +575,96 @@ describe('UserCloudflareAccountApi', () => {
         'SELECT 1',
       ),
     ).rejects.toThrow('unsuccessful D1 query result');
+  });
+
+  test('reads a workspace database that was never migrated as holding nothing', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }));
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).workspaceDatabaseHoldsUserData(
+        '0123456789abcdef0123456789abcdef',
+      ),
+    ).resolves.toBe(false);
+    // No `chats` table means the migrations never ran, so there is nothing left to count.
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  test('reads a workspace database with chats in it as holding a workspace', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ success: true, results: [{ name: 'chats' }] }] }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [{ total: 3 }] }] }));
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).workspaceDatabaseHoldsUserData(
+        '0123456789abcdef0123456789abcdef',
+      ),
+    ).resolves.toBe(true);
+  });
+
+  test('reads a migrated but empty workspace database as holding nothing', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ success: true, results: [{ name: 'chats' }] }] }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [{ total: 0 }] }] }));
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).workspaceDatabaseHoldsUserData(
+        '0123456789abcdef0123456789abcdef',
+      ),
+    ).resolves.toBe(false);
+  });
+
+  test('refuses to read an unreadable row count as an empty workspace database', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ success: true, results: [{ name: 'chats' }] }] }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [{}] }] }));
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).workspaceDatabaseHoldsUserData(
+        '0123456789abcdef0123456789abcdef',
+      ),
+    ).rejects.toThrow('unreadable workspace database row count');
+  });
+
+  test('removes the container application attached to a workspace runtime Worker', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ id: 'application-1', name: 'ghostbuild-workspace-1', durable_objects: { namespace_id: 'ns-1' } }],
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await new UserCloudflareAccountApi('account-1', 'token', request).deleteWorkspaceRuntimeContainer(
+      'ghostbuild-workspace-1',
+    );
+
+    expect(request).toHaveBeenLastCalledWith(
+      'https://api.cloudflare.com/client/v4/accounts/account-1/containers/applications/application-1',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+
+  test('leaves a workspace runtime with no container application alone', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ success: true, result: [] }));
+
+    await new UserCloudflareAccountApi('account-1', 'token', request).deleteWorkspaceRuntimeContainer(
+      'ghostbuild-workspace-1',
+    );
+
+    expect(request).toHaveBeenCalledOnce();
   });
 
   test('applies each migration and its marker in one transactional D1 batch', async () => {

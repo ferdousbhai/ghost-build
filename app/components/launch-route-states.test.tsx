@@ -22,6 +22,8 @@ type LinkProps = {
 };
 
 import { ExistingChatSessionView, ProjectLoadError } from './ExistingChat.client';
+import { ErrorDisplay } from './ErrorComponent';
+import { WorkspacePreparingError } from '~/lib/cloudflare/client';
 import { Header } from './header/Header';
 import { RootNotFoundComponent } from '~/routes/__root';
 import { SettingsRouteView } from '~/routes/settings';
@@ -33,6 +35,10 @@ describe('launch route states', () => {
 
     expect(html).toContain('Connect Cloudflare to open settings');
     expect(html).toContain('Back to Ghostbuild');
+    // The one route that used to hand visitors straight to Cloudflare's consent screen must
+    // state the plan requirement before authorization, exactly as the composer does.
+    expect(html).toContain('cloudflare-connect-legal-notice');
+    expect(html).toContain('Cloudflare Containers, which requires the Workers Paid plan');
   });
 
   it('gives a failed Cloudflare authorization a safe retry path', () => {
@@ -65,6 +71,35 @@ describe('launch route states', () => {
     expect(html).toContain('Runtime unavailable');
     expect(html).toContain('Try again');
     expect(html).not.toContain('Loading project');
+  });
+
+  it('tells a workspace that is still being prepared apart from a project that failed to load', () => {
+    const preparing = renderToStaticMarkup(
+      <ProjectLoadError error={new WorkspacePreparingError('messages.get')} onRetry={vi.fn()} />,
+    );
+
+    expect(preparing).toContain('Ghostbuild is still preparing your workspace');
+    expect(preparing).toContain('takes a few minutes');
+    expect(preparing).toContain('Keep waiting');
+    // "Try again" restarts the same wait, so the preparing state must not offer it.
+    expect(preparing).not.toContain('Try again');
+    expect(preparing).not.toContain('could not load this project');
+  });
+
+  it('never reports a workspace that is not ready yet as a page that could not load', () => {
+    const preparing = renderToStaticMarkup(<ErrorDisplay error={new WorkspacePreparingError('messages.get')} />);
+
+    expect(preparing).toContain('Ghostbuild is still preparing your workspace');
+    expect(preparing).toContain('Keep waiting');
+    expect(preparing).not.toContain('This page could not load');
+    expect(preparing).not.toContain('Try again');
+
+    const unreachable = renderToStaticMarkup(
+      <ErrorDisplay error={new Error('Ghostbuild timed out while running messages.get. Please try again.')} />,
+    );
+
+    expect(unreachable).toContain('This page could not load');
+    expect(unreachable).toContain('Try again');
   });
 
   it('renders a branded, semantic root not-found state', () => {

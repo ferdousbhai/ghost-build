@@ -34,6 +34,21 @@ const R2_CLEANUP_LIFECYCLE_ID = 'ghostbuild-project-deletion';
 const R2_CLEANUP_MAX_AGE_SECONDS = 24 * 60 * 60;
 const CONTAINER_ROLLOUT_DEADLINE_MS = 20 * 60_000;
 const CONTAINER_ROLLOUT_POLL_INTERVAL_MS = 5_000;
+/** How much of Cloudflare's own wording one entitlement verdict carries into an operator log. */
+const PROVIDER_TEXT_LIMIT = 400;
+
+/**
+ * Text shapes that must never reach an operator log, whatever Cloudflare put in its refusal.
+ * Every one is global, because these are applied with `replaceAll`.
+ */
+const CREDENTIAL_SHAPED_TEXT: readonly RegExp[] = [
+  /\bbearer\s+\S+/gi,
+  /\beyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]+){1,2}/g,
+  /[^\s@]+@[^\s@]+\.[A-Za-z]{2,}/g,
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+  /\b[0-9a-f]{16,}\b/gi,
+  /[?&](?:key|token|secret|password|api_key|access_token)=[^\s&#]*/gi,
+];
 
 type WorkerBinding = {
   name?: string;
@@ -370,15 +385,47 @@ export class UserCloudflareAccountApi {
     await this.deleteOptional(`/workers/scripts/${encodeURIComponent(workerName)}?force=true`);
   }
 
-  async deleteD1Database(resourceName: string): Promise<void> {
+  /** The id Cloudflare holds for a database name, or null when the account has no such database. */
+  async findD1DatabaseId(resourceName: string): Promise<string | null> {
     requireCloudflareResourceName(resourceName);
     const databases = await this.call<unknown>(`/d1/database?name=${encodeURIComponent(resourceName)}`, {
       method: 'GET',
     });
-    const databaseId = existingD1DatabaseId(databases, resourceName);
+    return existingD1DatabaseId(databases, resourceName);
+  }
+
+  async deleteD1Database(resourceName: string): Promise<void> {
+    const databaseId = await this.findD1DatabaseId(resourceName);
     if (databaseId) {
       await this.deleteOptional(`/d1/database/${encodeURIComponent(databaseId)}`);
     }
+  }
+
+  /**
+   * Whether a workspace database still holds a workspace.
+   *
+   * Reclamation may only ever delete a database that answers a definite no, so an answer that
+   * cannot be read throws instead of returning false: "could not tell" must never be spent as
+   * "empty". A database whose migrations never ran has no `chats` table at all, which is not an
+   * unreadable answer - it is proof that nothing was ever stored in it.
+   */
+  async workspaceDatabaseHoldsUserData(databaseId: string): Promise<boolean> {
+    const [tables] = await this.executeD1(
+      databaseId,
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chats'",
+    );
+    if (!Array.isArray(tables?.results)) {
+      throw new CloudflareAccountApiError('Cloudflare returned an unreadable workspace database table listing.');
+    }
+    if (tables.results.length === 0) {
+      return false;
+    }
+    const [counted] = await this.executeD1(databaseId, 'SELECT COUNT(*) AS total FROM chats');
+    const row = counted?.results?.[0];
+    if (!isRecord(row) || typeof row.total !== 'number' || !Number.isInteger(row.total) || row.total < 0) {
+      throw new CloudflareAccountApiError('Cloudflare returned an unreadable workspace database row count.');
+    }
+    return row.total > 0;
   }
 
   /**
@@ -851,22 +898,32 @@ export class UserCloudflareAccountApi {
     } catch (error) {
       return {
         status: 'undetermined',
-        reason: `Cloudflare did not answer the Containers capability check: ${describeUnknownError(error)}`,
+        reason: `Cloudflare did not answer the Containers capability check: ${boundedProviderText(describeUnknownError(error))}`,
       };
     }
     const payload = await readBoundedJson<CloudflareEnvelope<unknown>>(response).catch(() => null);
     if (response.ok) {
-      return payload?.success === true && isRecord(payload.result) && isRecord(payload.result.limits)
-        ? { status: 'entitled' }
-        : { status: 'undetermined', reason: 'Cloudflare returned an unreadable Containers account response.' };
+      if (payload?.success === true && isRecord(payload.result) && isRecord(payload.result.limits)) {
+        return { status: 'entitled' };
+      }
+      return {
+        status: 'undetermined',
+        reason: `Cloudflare returned an unreadable Containers account response. ${describeContainersAnswer(response.status, payload)}`,
+      };
     }
     const message = cloudflareErrorMessage(payload);
     if (message && isWorkspacePlanRequiredMessage(message)) {
-      return { status: 'plan_required', message, upgradeUrl: workersPlanUpgradeUrl(message) };
+      // The upgrade destination is read from the wording Cloudflare sent, before redaction can
+      // touch it; only the copy that travels onwards into logs and the UI is bounded.
+      return {
+        status: 'plan_required',
+        message: boundedProviderText(message),
+        upgradeUrl: workersPlanUpgradeUrl(message),
+      };
     }
     return {
       status: 'undetermined',
-      reason: `Cloudflare refused the Containers capability check (${response.status})${message ? `: ${message}` : '.'}`,
+      reason: `Cloudflare refused the Containers capability check. ${describeContainersAnswer(response.status, payload)}`,
     };
   }
 
@@ -1119,6 +1176,30 @@ export class UserCloudflareAccountApi {
     throw new CloudflareAccountApiError(
       `Cloudflare did not complete the workspace container rollout for ${args.applicationName} before the deadline.`,
     );
+  }
+
+  /**
+   * Remove the container application a workspace runtime Worker was given, if one is still there.
+   * Deleting the Worker alone leaves the application behind, and nothing else would ever name it.
+   *
+   * The Containers control plane answers a delete with an envelope, a bare object, or an empty
+   * body depending on the path, so only the status is read.
+   */
+  async deleteWorkspaceRuntimeContainer(applicationName: string): Promise<void> {
+    requireWorkerName(applicationName);
+    const applications = await this.callContainer<unknown>('/applications', { method: 'GET' });
+    const existing = existingContainerApplication(applications, applicationName);
+    if (!existing) {
+      return;
+    }
+    const response = await this.callRaw(`/containers/applications/${encodeURIComponent(existing.id)}`, {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+    });
+    await response.body?.cancel().catch(() => undefined);
+    if (!response.ok && response.status !== 404) {
+      throw new CloudflareAccountApiError(`Cloudflare Containers request failed (${response.status}).`);
+    }
   }
 
   async enableWorkerSubdomain(workerName: string): Promise<void> {
@@ -1387,6 +1468,51 @@ function workersPlanUpgradeUrl(message: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The evidence an entitlement verdict Ghostbuild could not classify has to carry.
+ *
+ * Cloudflare answers a missing Containers scope and an ineligible plan on the same endpoint with
+ * the same 401, and only the wording separates them, so `isWorkspacePlanRequiredMessage` is a
+ * guess until a real Workers Free account refuses one of these checks. There is no such account
+ * to test against here, so every unclassified answer records what it actually saw: the status,
+ * Cloudflare's own numeric error codes, and its wording. The provisioner turns this into
+ * `user_computer_runtimes.last_error`, which `pnpm run ops` already reads, so the real wording
+ * gets learned from production rather than guessed at a second time.
+ */
+function describeContainersAnswer(status: number, payload: CloudflareEnvelope<unknown> | null): string {
+  const codes = cloudflareErrorCodes(payload);
+  const wording = boundedProviderText(cloudflareErrorMessage(payload) ?? '');
+  return [
+    `status=${status}`,
+    `codes=${codes.length > 0 ? codes.join(',') : 'none'}`,
+    `wording=${wording ? JSON.stringify(wording) : 'none'}`,
+  ].join(' ');
+}
+
+/** Cloudflare's own numeric error codes: the part of a refusal that carries no wording at all. */
+function cloudflareErrorCodes(payload: CloudflareEnvelope<unknown> | null): number[] {
+  if (!Array.isArray(payload?.errors)) {
+    return [];
+  }
+  return payload.errors
+    .map((error) => error?.code)
+    .filter((code): code is number => typeof code === 'number' && Number.isInteger(code))
+    .slice(0, 8);
+}
+
+/**
+ * Provider text on its way into a log an operator reads: credential-shaped runs replaced, folded
+ * onto one line, and hard-bounded. Redaction is by shape rather than by origin because the point
+ * is to record wording nobody here has seen yet.
+ */
+function boundedProviderText(text: string): string {
+  let redacted = text;
+  for (const pattern of CREDENTIAL_SHAPED_TEXT) {
+    redacted = redacted.replaceAll(pattern, '[redacted]');
+  }
+  return redacted.replaceAll(/\s+/g, ' ').trim().slice(0, PROVIDER_TEXT_LIMIT);
 }
 
 function describeUnknownError(error: unknown): string {

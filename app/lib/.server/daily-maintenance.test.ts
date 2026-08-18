@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const runAppResourceReconciliation = vi.hoisted(() => vi.fn());
+const runUserWorkspaceRuntimeReclamation = vi.hoisted(() => vi.fn());
 
 vi.mock('~/lib/.server/cloudflare/app-resource-reconcile-sweep', () => ({ runAppResourceReconciliation }));
+vi.mock('~/lib/.server/cloudflare/user-workspace-runtime-reclaim', () => ({ runUserWorkspaceRuntimeReclamation }));
 
 import { runDailyMaintenance } from './daily-maintenance';
 
@@ -45,6 +47,7 @@ function env(db: FakeDb): Env {
 describe('daily maintenance scheduling', () => {
   beforeEach(() => {
     runAppResourceReconciliation.mockReset().mockResolvedValue({ users: 0 });
+    runUserWorkspaceRuntimeReclamation.mockReset().mockResolvedValue({ candidates: 0 });
   });
 
   it('runs each job on the first tick that claims it', async () => {
@@ -53,7 +56,8 @@ describe('daily maintenance scheduling', () => {
     await runDailyMaintenance(env(db), NOW);
 
     expect(runAppResourceReconciliation).toHaveBeenCalledOnce();
-    expect([...db.claims.keys()]).toEqual(['app-resource-reconcile']);
+    expect(runUserWorkspaceRuntimeReclamation).toHaveBeenCalledOnce();
+    expect([...db.claims.keys()]).toEqual(['app-resource-reconcile', 'workspace-runtime-reclaim']);
   });
 
   it('skips the other ninety-five ticks of the day', async () => {

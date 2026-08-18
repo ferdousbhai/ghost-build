@@ -2,6 +2,8 @@ import { ExclamationTriangleIcon, ReloadIcon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
 import { LinkButton } from '~/components/ui/LinkButton';
 import { BrandLink } from '~/components/BrandLink';
+import { WorkspacePreparingPanel } from '~/components/WorkspacePreparing';
+import { isWorkspacePreparingError } from '~/lib/cloudflare/client';
 
 interface ErrorDisplayProps {
   error: Error | unknown;
@@ -12,6 +14,15 @@ export function ErrorDisplay({ error, resetErrorBoundary }: ErrorDisplayProps) {
   const isError = error instanceof Error;
   const message = isError ? error.message : String(error);
   const retry = resetErrorBoundary ?? (() => window.location.reload());
+
+  // A workspace that has not finished being built is not a page that could not load.
+  if (isWorkspacePreparingError(error)) {
+    return (
+      <main className="app-page-shell flex min-h-svh items-center justify-center px-4 py-10">
+        <WorkspacePreparingPanel onKeepWaiting={retry} />
+      </main>
+    );
+  }
 
   return (
     <main className="app-page-shell flex min-h-svh items-center px-4 py-10" role="alert" aria-live="assertive">

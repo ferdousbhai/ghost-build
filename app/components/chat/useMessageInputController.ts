@@ -8,9 +8,14 @@ import { captureException } from '~/lib/telemetry.client';
 import { fetchUserRuntime } from '~/lib/cloudflare/runtime-session';
 import { createCloudflareReturnURL, signInWithCloudflare } from '~/lib/auth-client';
 import { getMessageInputRevision, messageInputStore, setMessageInput } from '~/lib/stores/messageInput';
+import { takePendingSubmit } from '~/lib/stores/pending-submit';
 import { isAuthenticated } from '~/lib/stores/userId';
 import { debounce } from '~/utils/debounce';
 import { PENDING_PROMPT_STORAGE_KEY } from '~/utils/constants';
+import {
+  CLOUDFLARE_AUTHORIZATION_ERROR_PARAM,
+  CLOUDFLARE_AUTHORIZATION_ERROR_VALUE,
+} from '~/lib/cloudflare/authorization-recovery';
 import {
   promptRefinementResultSchema,
   type PromptRefinementAnswer,
@@ -60,22 +65,53 @@ export function useMessageInputController({
     [],
   );
 
-  const send = useCallback(async () => {
-    const inputRevision = getMessageInputRevision();
-    await submitMessageInput(input, onSend, () => {
-      clearPromptIfUnchanged(input, inputRevision);
-    });
-  }, [input, onSend]);
+  const send = useCallback(
+    async (prompt = messageInputStore.get()) => {
+      const inputRevision = getMessageInputRevision();
+      await submitMessageInput(prompt, onSend, () => {
+        clearPromptIfUnchanged(prompt, inputRevision);
+      });
+    },
+    [onSend],
+  );
 
-  const signIn = useCallback(async () => {
-    preservePromptForAuthentication(input);
-    try {
-      await signInWithCloudflare(createCloudflareReturnURL());
-    } catch (error) {
-      captureException('Failed to start Cloudflare authorization', error, { level: 'error' });
-      toast.error(error instanceof Error ? error.message : 'Unable to connect Cloudflare. Please try again.');
+  const signIn = useCallback(
+    async ({ continueOnReturn = false }: { continueOnReturn?: boolean } = {}) => {
+      preservePromptForAuthentication(input);
+      try {
+        await signInWithCloudflare(
+          createCloudflareReturnURL(),
+          continueOnReturn ? { continuePrompt: input } : undefined,
+        );
+      } catch (error) {
+        captureException('Failed to start Cloudflare authorization', error, { level: 'error' });
+        toast.error(error instanceof Error ? error.message : 'Unable to connect Cloudflare. Please try again.');
+      }
+    },
+    [input],
+  );
+
+  // Decided once per mount, on the first resolved session: the continuation is written just
+  // before the browser leaves for Cloudflare, so a later render must never re-read it.
+  const continuationDecidedRef = useRef(false);
+  useEffect(() => {
+    if (authState.kind === 'loading' || continuationDecidedRef.current) {
+      return;
     }
-  }, [input]);
+    continuationDecidedRef.current = true;
+    const pendingSubmit = takePendingSubmit();
+    if (
+      pendingSubmit &&
+      shouldContinuePendingSubmit({
+        authKind: authState.kind,
+        pendingSubmit,
+        prompt: messageInputStore.get(),
+        authorizationFailed: hasFailedCloudflareAuthorization(window.location.search),
+      })
+    ) {
+      void send(pendingSubmit);
+    }
+  }, [authState.kind, send]);
 
   const runPrimaryAction = useCallback(() => {
     switch (getMessageInputPrimaryAction(authState.kind, isStreaming, input.trim().length > 0)) {
@@ -83,7 +119,8 @@ export function useMessageInputController({
         onStop();
         return;
       case 'sign-in':
-        void signIn();
+        // Started by a submit, so the connection it opens is allowed to finish that submit.
+        void signIn({ continueOnReturn: true });
         return;
       case 'send':
         void send();
@@ -235,6 +272,34 @@ export function useMessageInputController({
     refinement,
     signIn,
   };
+}
+
+/**
+ * A submit that stopped to connect Cloudflare is finished on return, but only when every part
+ * of that instruction still holds: the connection succeeded, the person is connected, and the
+ * prompt in the composer is still the one they submitted. The intent is spent by reading it,
+ * so this can only ever say yes once.
+ */
+export function shouldContinuePendingSubmit({
+  authKind,
+  pendingSubmit,
+  prompt,
+  authorizationFailed,
+}: {
+  authKind: 'unauthenticated' | 'fullyLoggedIn';
+  pendingSubmit: string | null;
+  prompt: string;
+  authorizationFailed: boolean;
+}): boolean {
+  if (!pendingSubmit || authorizationFailed) {
+    return false;
+  }
+  // Coming back without a session means the authorization failed or was cancelled.
+  return authKind === 'fullyLoggedIn' && prompt.trim() === pendingSubmit;
+}
+
+export function hasFailedCloudflareAuthorization(search: string): boolean {
+  return new URLSearchParams(search).get(CLOUDFLARE_AUTHORIZATION_ERROR_PARAM) === CLOUDFLARE_AUTHORIZATION_ERROR_VALUE;
 }
 
 export function getMessageInputPrimaryAction(
