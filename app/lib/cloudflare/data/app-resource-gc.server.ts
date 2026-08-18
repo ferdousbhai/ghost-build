@@ -16,7 +16,14 @@ type AppResourceGcCandidateRow = {
 };
 
 type DeploymentPlanRow = {
+  id: string;
   plan_json: string;
+};
+
+type DeploymentResourceRow = {
+  deployment_id: string;
+  resource_type: string;
+  provider_resource_id: string;
 };
 
 export function prepareAppResourceGcCandidateStatement(
@@ -92,7 +99,12 @@ export async function sweepAppResourceGcCandidatesBestEffort(
 
 type AppResourceCleanupApi = Pick<
   UserCloudflareAccountApi,
-  'deleteManagedWorker' | 'deleteD1Database' | 'deleteR2Bucket' | 'deleteKvNamespace'
+  | 'deleteManagedWorker'
+  | 'deleteD1Database'
+  | 'deleteD1DatabaseById'
+  | 'deleteR2Bucket'
+  | 'deleteKvNamespace'
+  | 'deleteKvNamespaceById'
 >;
 
 async function cleanupCandidate(
@@ -102,16 +114,42 @@ async function cleanupCandidate(
   now: number,
 ): Promise<number> {
   try {
-    const plans = await db
-      .prepare(
-        `SELECT plan_json
-         FROM deployments
-         WHERE chat_id = ?
-         ORDER BY created_at, id`,
-      )
-      .bind(candidate.chat_id)
-      .all<DeploymentPlanRow>();
+    const [plans, resources] = await Promise.all([
+      db
+        .prepare(
+          `SELECT id, plan_json
+           FROM deployments
+           WHERE chat_id = ?
+           ORDER BY created_at, id`,
+        )
+        .bind(candidate.chat_id)
+        .all<DeploymentPlanRow>(),
+      db
+        .prepare(
+          `SELECT resources.deployment_id, resources.resource_type, resources.provider_resource_id
+           FROM deployment_resources AS resources
+           INNER JOIN deployments ON deployments.id = resources.deployment_id
+           WHERE deployments.chat_id = ?`,
+        )
+        .bind(candidate.chat_id)
+        .all<DeploymentResourceRow>(),
+    ]);
+    const recorded = new Map<string, DeploymentResourceRow[]>();
+    for (const row of resources.results) {
+      recorded.set(row.deployment_id, [...(recorded.get(row.deployment_id) ?? []), row]);
+    }
+
     for (const row of plans.results) {
+      // What was provisioned is recorded durably; the plan is only a fallback for
+      // deployments that predate that record.
+      const owned = recorded.get(row.id);
+      if (owned && owned.length > 0) {
+        if (!(await cleanupRecordedResources(accountApi, owned))) {
+          await rescheduleCandidate(db, candidate, now, false);
+          return 0;
+        }
+        continue;
+      }
       const plan = parsePlanForCleanup(row.plan_json);
       if (!plan) {
         // A plan this build cannot parse will never become parseable, so retrying
@@ -138,6 +176,35 @@ async function cleanupCandidate(
     logger.warn('Unable to remove deferred app Cloudflare resources');
     return 0;
   }
+}
+
+/**
+ * Delete exactly what provisioning recorded, addressing each resource by the
+ * provider id it was created with. Returns false while R2 still has objects, so
+ * the receipt is retried rather than completed.
+ */
+async function cleanupRecordedResources(
+  accountApi: AppResourceCleanupApi,
+  resources: readonly DeploymentResourceRow[],
+): Promise<boolean> {
+  // The Worker goes first so the app stops serving before its data disappears.
+  const order = ['worker', 'd1', 'kv', 'r2'];
+  let drained = true;
+  for (const type of order) {
+    for (const resource of resources.filter((candidate) => candidate.resource_type === type)) {
+      const id = resource.provider_resource_id;
+      if (type === 'worker') {
+        await accountApi.deleteManagedWorker(id);
+      } else if (type === 'd1') {
+        await accountApi.deleteD1DatabaseById(id);
+      } else if (type === 'kv') {
+        await accountApi.deleteKvNamespaceById(id);
+      } else if (!(await accountApi.deleteR2Bucket(id))) {
+        drained = false;
+      }
+    }
+  }
+  return drained;
 }
 
 /** Parse a stored plan, or null when this build's schema no longer accepts it. */

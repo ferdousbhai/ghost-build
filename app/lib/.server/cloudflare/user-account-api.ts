@@ -365,6 +365,21 @@ export class UserCloudflareAccountApi {
     }
   }
 
+  /**
+   * Delete by the provider id recorded at provision time. Deleting by name has
+   * to re-resolve the id first, and only works while the name is still derivable.
+   */
+  async deleteD1DatabaseById(databaseId: string): Promise<void> {
+    requireProviderResourceId(databaseId);
+    await this.deleteOptional(`/d1/database/${encodeURIComponent(databaseId)}`);
+  }
+
+  /** Delete by the provider id recorded at provision time. */
+  async deleteKvNamespaceById(namespaceId: string): Promise<void> {
+    requireProviderResourceId(namespaceId);
+    await this.deleteOptional(`/storage/kv/namespaces/${encodeURIComponent(namespaceId)}`);
+  }
+
   async deleteKvNamespace(resourceName: string): Promise<void> {
     const namespace = await this.findKvNamespace(resourceName);
     if (namespace) {
@@ -1636,6 +1651,13 @@ function staticAssetContentType(path: string): string {
       } as Record<string, string>
     )[extension] ?? 'application/octet-stream'
   );
+}
+
+/** Provider ids are opaque, so only reject shapes that could not have been recorded. */
+function requireProviderResourceId(value: string): void {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 128 || /[^\w.-]/.test(value)) {
+    throw new CloudflareAccountApiError('Cloudflare resource id is invalid.');
+  }
 }
 
 function equalBytes(left: Uint8Array, right: Uint8Array): boolean {

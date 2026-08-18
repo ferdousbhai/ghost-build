@@ -36,8 +36,12 @@ describe('production deploy wrapper', () => {
     /** Answer the exact `git` queries the guard makes, in order. */
     function git(branch: string, remoteSha: string, headSha = commitSha) {
       return vi.fn((_command: string, args: readonly string[]) => {
-        if (args.includes('--abbrev-ref')) return { status: 0, stdout: `${branch}\n` };
-        if (args.includes('origin/main^{commit}')) return { status: 0, stdout: `${remoteSha}\n` };
+        if (args.includes('--abbrev-ref')) {
+          return { status: 0, stdout: `${branch}\n` };
+        }
+        if (args.includes('origin/main^{commit}')) {
+          return { status: 0, stdout: `${remoteSha}\n` };
+        }
         return { status: 0, stdout: `${headSha}\n` };
       });
     }

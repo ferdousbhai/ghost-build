@@ -62,6 +62,43 @@ describe('app resource garbage collection', () => {
     ]);
   });
 
+  it('deletes what provisioning recorded, by provider id, without reading the plan', async () => {
+    // The durable record survives a plan schema this build can no longer parse.
+    const database = new AppResourceGcDatabase([JSON.stringify({ version: 999 })], 0, [
+      { deployment_id: 'deployment-1', resource_type: 'worker', provider_resource_id: 'ghostbuild-app-1' },
+      { deployment_id: 'deployment-1', resource_type: 'd1', provider_resource_id: 'db-id-1' },
+      { deployment_id: 'deployment-1', resource_type: 'kv', provider_resource_id: 'kv-id-1' },
+      { deployment_id: 'deployment-1', resource_type: 'r2', provider_resource_id: 'ghostbuild-app-1-storage' },
+    ]);
+    const accountApi = cleanupApi(true);
+
+    await expect(sweepAppResourceGcCandidates(database.env, { now: 100, accountApi })).resolves.toBe(1);
+
+    expect(accountApi.deleteManagedWorker).toHaveBeenCalledWith('ghostbuild-app-1');
+    expect(accountApi.deleteD1DatabaseById).toHaveBeenCalledWith('db-id-1');
+    expect(accountApi.deleteKvNamespaceById).toHaveBeenCalledWith('kv-id-1');
+    expect(accountApi.deleteR2Bucket).toHaveBeenCalledWith('ghostbuild-app-1-storage');
+    // Name-derived deletion is the fallback and must not have been needed.
+    expect(accountApi.deleteD1Database).not.toHaveBeenCalled();
+    expect(accountApi.deleteManagedWorker.mock.invocationCallOrder[0]).toBeLessThan(
+      accountApi.deleteD1DatabaseById.mock.invocationCallOrder[0]!,
+    );
+    expect(database.candidates).toEqual([]);
+  });
+
+  it('retries the receipt while a recorded R2 bucket is still draining', async () => {
+    const database = new AppResourceGcDatabase([JSON.stringify({ version: 999 })], 0, [
+      { deployment_id: 'deployment-1', resource_type: 'r2', provider_resource_id: 'ghostbuild-app-1-storage' },
+    ]);
+    const accountApi = cleanupApi(false);
+
+    await expect(sweepAppResourceGcCandidates(database.env, { now: 1_000, accountApi })).resolves.toBe(0);
+
+    expect(database.candidates).toEqual([
+      { chat_id: 'chat-row', not_before: 1_000 + AGENT_GC_RETRY_BASE_MS, attempts: 0 },
+    ]);
+  });
+
   it('completes the receipt instead of stalling on a plan this build cannot parse', async () => {
     // A stored plan from a newer schema never becomes parseable, so retrying it
     // forever would block every other deployment behind the same receipt.
@@ -107,6 +144,8 @@ function cleanupApi(r2Complete: boolean) {
     deleteManagedWorker: vi.fn(async (_name: string) => undefined),
     deleteD1Database: vi.fn(async (_name: string) => undefined),
     deleteKvNamespace: vi.fn(async (_name: string) => undefined),
+    deleteD1DatabaseById: vi.fn(async (_id: string) => undefined),
+    deleteKvNamespaceById: vi.fn(async (_id: string) => undefined),
     deleteR2Bucket: vi.fn(async (_name: string) => r2Complete),
   };
 }
@@ -119,6 +158,7 @@ class AppResourceGcDatabase {
   constructor(
     private readonly plans: string[],
     attempts = 0,
+    private readonly resources: { deployment_id: string; resource_type: string; provider_resource_id: string }[] = [],
   ) {
     this.candidates = [{ chat_id: 'chat-row', not_before: 50, attempts }];
   }
@@ -141,8 +181,11 @@ class AppResourceGcDatabase {
         results: this.candidates.filter((candidate) => candidate.not_before <= now).slice(0, limit),
       };
     }
+    if (query.includes('FROM deployment_resources')) {
+      return { results: this.resources };
+    }
     if (query.includes('FROM deployments')) {
-      return { results: this.plans.map((plan_json) => ({ plan_json })) };
+      return { results: this.plans.map((plan_json, index) => ({ id: `deployment-${index + 1}`, plan_json })) };
     }
     return { results: [] };
   }

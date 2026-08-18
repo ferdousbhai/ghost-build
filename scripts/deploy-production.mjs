@@ -128,14 +128,10 @@ export function findUnexpectedDeployChanges(status, { workersBuild = false } = {
 }
 
 /**
- * Resolve a commit that exactly describes the files being deployed. Tracked or
- * untracked changes would make COMMIT_SHA misleading, so production fails closed.
- * @param {{spawn?: typeof spawnSync, env?: Record<string, string | undefined>}} [options]
- */
-/**
  * Assert a local checkout describes exactly what is about to ship: on the
  * production branch, and identical to the pushed commit. Workers Builds proves
  * this from its own metadata; a workstation has to prove it from the remote.
+ * @param {{spawn?: DeploySpawn, currentCommitSha?: string}} [options]
  */
 export function validateLocalDeployContext({ spawn = spawnSync, currentCommitSha } = {}) {
   const branch = runGit(spawn, ['rev-parse', '--abbrev-ref', 'HEAD'], 'resolve the current branch');
@@ -152,6 +148,12 @@ export function validateLocalDeployContext({ spawn = spawnSync, currentCommitSha
   return commitSha;
 }
 
+/**
+ * @param {DeploySpawn} spawn
+ * @param {readonly string[]} args
+ * @param {string} purpose
+ * @returns {string}
+ */
 function runGit(spawn, args, purpose) {
   const result = spawn('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   if (result.error) {
@@ -164,6 +166,11 @@ function runGit(spawn, args, purpose) {
   return typeof result.stdout === 'string' ? result.stdout.trim() : '';
 }
 
+/**
+ * Resolve a commit that exactly describes the files being deployed. Tracked or
+ * untracked changes would make COMMIT_SHA misleading, so production fails closed.
+ * @param {{spawn?: typeof spawnSync, env?: Record<string, string | undefined>, local?: boolean}} [options]
+ */
 export function resolveDeployableCommitSha({ spawn = spawnSync, env = process.env, local = false } = {}) {
   const commitSha = resolveCurrentCommitSha({ spawn });
   if (local) {
@@ -241,6 +248,7 @@ export function wranglerDeployArgs(clientId, commitSha) {
  *   commitSha?: string;
  *   env?: Record<string, string | undefined>;
  *   spawn?: DeploySpawn;
+ *   local?: boolean;
  * }} [options]
  */
 export function deployProduction({
@@ -276,6 +284,7 @@ export function deployProduction({
  *   commitSha?: string;
  *   env?: Record<string, string | undefined>;
  *   spawn?: DeploySpawn;
+ *   local?: boolean;
  *   verifyLocal?: typeof verifyLocalDeployment;
  * }} [options]
  */
