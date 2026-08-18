@@ -20,6 +20,8 @@ import { GHOSTBUILD_CONTROL_PLANE_ENDPOINT, USER_WORKSPACE_RUNTIME_GC_CRON } fro
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
 const CLOUDFLARE_API_TIMEOUT_MS = 30_000;
 const MAX_CLOUDFLARE_RESPONSE_BYTES = 1024 * 1024;
+/** Page size for whole-account listings. A full page means the answer may be truncated. */
+const ACCOUNT_LIST_PAGE_SIZE = 1000;
 const MAX_ASSET_UPLOAD_JWT_BYTES = 16 * 1024;
 const ASSET_HASH_PATTERN = /^[a-f0-9]{32}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -324,7 +326,9 @@ export class UserCloudflareAccountApi {
 
   private async findKvNamespace(resourceName: string): Promise<{ id: string; name: string } | null> {
     requireCloudflareResourceName(resourceName);
-    const namespaces = await this.call<unknown>('/storage/kv/namespaces?per_page=1000', { method: 'GET' });
+    const namespaces = await this.call<unknown>(`/storage/kv/namespaces?per_page=${ACCOUNT_LIST_PAGE_SIZE}`, {
+      method: 'GET',
+    });
     if (!Array.isArray(namespaces)) {
       throw new CloudflareAccountApiError('Cloudflare returned invalid KV namespaces.');
     }
@@ -419,18 +423,27 @@ export class UserCloudflareAccountApi {
     return true;
   }
 
-  /** List every Worker script name in the connected account. */
-  async listWorkerNames(): Promise<string[]> {
-    const scripts = await this.call<unknown>('/workers/scripts', { method: 'GET' });
+  /**
+   * List every Worker script name in the connected account.
+   *
+   * `complete` is false when the account filled the page, because callers that
+   * treat a Worker's presence as proof of liveness must not read a truncated
+   * list as "these deployments are gone".
+   */
+  async listWorkerNames(): Promise<{ names: string[]; complete: boolean }> {
+    const scripts = await this.call<unknown>(`/workers/scripts?per_page=${ACCOUNT_LIST_PAGE_SIZE}`, { method: 'GET' });
     if (!Array.isArray(scripts)) {
       throw new CloudflareAccountApiError('Cloudflare returned invalid Worker scripts.');
     }
-    return scripts.flatMap((value) => (isRecord(value) && typeof value.id === 'string' ? [value.id] : []));
+    return {
+      names: scripts.flatMap((value) => (isRecord(value) && typeof value.id === 'string' ? [value.id] : [])),
+      complete: scripts.length < ACCOUNT_LIST_PAGE_SIZE,
+    };
   }
 
   /** List every D1 database in the connected account, with creation times where provided. */
   async listD1Databases(): Promise<{ id: string; name: string; createdAt: number | null }[]> {
-    const databases = await this.call<unknown>('/d1/database?per_page=1000', { method: 'GET' });
+    const databases = await this.call<unknown>(`/d1/database?per_page=${ACCOUNT_LIST_PAGE_SIZE}`, { method: 'GET' });
     if (!Array.isArray(databases)) {
       throw new CloudflareAccountApiError('Cloudflare returned invalid D1 databases.');
     }
@@ -443,7 +456,9 @@ export class UserCloudflareAccountApi {
 
   /** List every KV namespace in the connected account. Namespaces carry no creation time. */
   async listKvNamespaces(): Promise<{ id: string; name: string }[]> {
-    const namespaces = await this.call<unknown>('/storage/kv/namespaces?per_page=1000', { method: 'GET' });
+    const namespaces = await this.call<unknown>(`/storage/kv/namespaces?per_page=${ACCOUNT_LIST_PAGE_SIZE}`, {
+      method: 'GET',
+    });
     if (!Array.isArray(namespaces)) {
       throw new CloudflareAccountApiError('Cloudflare returned invalid KV namespaces.');
     }

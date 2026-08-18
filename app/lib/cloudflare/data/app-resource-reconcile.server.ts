@@ -83,14 +83,21 @@ export async function findOrphanedAppResources(
   api: AppResourceReconcileApi,
   now: number,
 ): Promise<{ orphans: OrphanedAppResource[]; scanned: number; undatable: string[] }> {
-  const [workerNames, databases, namespaces, buckets] = await Promise.all([
+  const [workers, databases, namespaces, buckets] = await Promise.all([
     api.listWorkerNames(),
     api.listD1Databases(),
     api.listKvNamespaces(),
     api.listR2Buckets(),
   ]);
 
-  const liveWorkers = new Set(workerNames);
+  if (!workers.complete) {
+    // Liveness is proven by a Worker's presence, so a truncated list would
+    // convert live deployments into orphans. Never nominate from partial evidence.
+    logger.warn('Skipped app resource reconciliation: the account Worker listing was truncated');
+    return { orphans: [], scanned: 0, undatable: [] };
+  }
+
+  const liveWorkers = new Set(workers.names);
   const groups = new Map<string, DeploymentGroup>();
 
   const candidates: Array<{ kind: OrphanedAppResourceKind; name: string; createdAt: number | null }> = [
@@ -187,19 +194,19 @@ export async function reconcileAppResources(
   return { scanned, orphans, deleted };
 }
 
-type ReconcileEnv = Parameters<typeof createUserAccountApi>[0] & {
-  /** Set to 'enforce' to allow deletion. Anything else - including unset - stays a dry run. */
-  GHOSTBUILD_RECONCILE_MODE?: string;
-};
+type ReconcileEnv = Parameters<typeof createUserAccountApi>[0];
 
 /**
- * Run reconciliation on the maintenance cron without ever failing it. Deletion stays opt-in via
- * GHOSTBUILD_RECONCILE_MODE so the diff can be watched in logs before it is trusted to act.
+ * Run reconciliation on the maintenance cron without ever failing it.
+ *
+ * This reports and never deletes. Enabling deletion needs an operator-visible
+ * signal first: these logs land in the user's own account, so nobody here can
+ * read the diff this would act on.
  */
 export async function reconcileAppResourcesBestEffort(env: ReconcileEnv): Promise<void> {
   try {
     const api = await createUserAccountApi(env, fetch);
-    const report = await reconcileAppResources(api, { dryRun: env.GHOSTBUILD_RECONCILE_MODE !== 'enforce' });
+    const report = await reconcileAppResources(api, { dryRun: true });
     if (report.orphans.length > 0) {
       logger.info(
         `Reconciled ${report.deleted.length}/${report.orphans.length} orphaned app resource(s) across ${report.scanned} scanned`,

@@ -14,7 +14,7 @@ const STALE = NOW - APP_RESOURCE_RECONCILE_GRACE_MS - 1;
 
 function api(overrides: Partial<AppResourceReconcileApi> = {}): AppResourceReconcileApi {
   return {
-    listWorkerNames: vi.fn(async () => []),
+    listWorkerNames: vi.fn(async () => ({ names: [] as string[], complete: true })),
     listD1Databases: vi.fn(async () => []),
     listKvNamespaces: vi.fn(async () => []),
     listR2Buckets: vi.fn(async () => []),
@@ -45,10 +45,24 @@ describe('app deployment id recovery', () => {
 });
 
 describe('orphaned app resource discovery', () => {
+  it('nominates nothing when the Worker listing is truncated', async () => {
+    // A truncated liveness list would turn live deployments into orphans.
+    const result = await findOrphanedAppResources(
+      api({
+        listWorkerNames: vi.fn(async () => ({ names: [], complete: false })),
+        listD1Databases: vi.fn(async () => [{ id: 'a', name: `ghostbuild-${DEPLOYMENT}`, createdAt: STALE }]),
+      }),
+      NOW,
+    );
+
+    expect(result.orphans).toEqual([]);
+    expect(result.scanned).toBe(0);
+  });
+
   it('treats a present Worker as proof of liveness', async () => {
     const result = await findOrphanedAppResources(
       api({
-        listWorkerNames: vi.fn(async () => [`ghostbuild-${LIVE_DEPLOYMENT}`]),
+        listWorkerNames: vi.fn(async () => ({ names: [`ghostbuild-${LIVE_DEPLOYMENT}`], complete: true })),
         listD1Databases: vi.fn(async () => [{ id: 'a', name: `ghostbuild-${LIVE_DEPLOYMENT}`, createdAt: STALE }]),
       }),
       NOW,
@@ -82,7 +96,7 @@ describe('orphaned app resource discovery', () => {
   it('never collects a live workspace database that shares the prefix', async () => {
     const result = await findOrphanedAppResources(
       api({
-        listWorkerNames: vi.fn(async () => []),
+        listWorkerNames: vi.fn(async () => ({ names: [], complete: true })),
         listD1Databases: vi.fn(async () => [{ id: 'a', name: 'ghostbuild-data-18e073433e6fad63', createdAt: STALE }]),
         listR2Buckets: vi.fn(async () => [{ name: 'ghostbuild-builder-skills', createdAt: STALE }]),
       }),

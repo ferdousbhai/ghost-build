@@ -62,6 +62,20 @@ describe('app resource garbage collection', () => {
     ]);
   });
 
+  it('completes the receipt instead of stalling on a plan this build cannot parse', async () => {
+    // A stored plan from a newer schema never becomes parseable, so retrying it
+    // forever would block every other deployment behind the same receipt.
+    const plan = await deploymentPlan();
+    const database = new AppResourceGcDatabase([JSON.stringify({ ...plan, version: 999 }), JSON.stringify(plan)]);
+    const accountApi = cleanupApi(true);
+
+    await expect(sweepAppResourceGcCandidates(database.env, { now: 100, accountApi })).resolves.toBe(1);
+
+    // The parseable deployment is still cleaned up, and the receipt is retired.
+    expect(accountApi.deleteManagedWorker).toHaveBeenCalledWith(`ghostbuild-deployment-1`);
+    expect(database.candidates).toEqual([]);
+  });
+
   it('backs off and preserves the receipt when Cloudflare cleanup fails', async () => {
     const database = new AppResourceGcDatabase([JSON.stringify(await deploymentPlan())], 2);
     const accountApi = cleanupApi(true);

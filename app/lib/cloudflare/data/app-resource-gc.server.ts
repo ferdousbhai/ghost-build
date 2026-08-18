@@ -112,7 +112,15 @@ async function cleanupCandidate(
       .bind(candidate.chat_id)
       .all<DeploymentPlanRow>();
     for (const row of plans.results) {
-      if (!(await cleanupDeploymentPlan(accountApi, row.plan_json))) {
+      const plan = parsePlanForCleanup(row.plan_json);
+      if (!plan) {
+        // A plan this build cannot parse will never become parseable, so retrying
+        // would stall the candidate forever and block the deployments behind it.
+        // Leave the provider resources for the reconciliation sweep to report.
+        logger.warn('Skipped a deployment whose stored plan this build cannot parse');
+        continue;
+      }
+      if (!(await cleanupDeploymentPlan(accountApi, plan))) {
         await rescheduleCandidate(db, candidate, now, false);
         return 0;
       }
@@ -132,8 +140,19 @@ async function cleanupCandidate(
   }
 }
 
-async function cleanupDeploymentPlan(accountApi: AppResourceCleanupApi, planJson: string): Promise<boolean> {
-  const plan = parseDeploymentPlanJson(planJson);
+/** Parse a stored plan, or null when this build's schema no longer accepts it. */
+function parsePlanForCleanup(planJson: string): ReturnType<typeof parseDeploymentPlanJson> | null {
+  try {
+    return parseDeploymentPlanJson(planJson);
+  } catch {
+    return null;
+  }
+}
+
+async function cleanupDeploymentPlan(
+  accountApi: AppResourceCleanupApi,
+  plan: ReturnType<typeof parseDeploymentPlanJson>,
+): Promise<boolean> {
   const workerName = deploymentPlanResourceName(plan, 'worker', 'app');
   if (!workerName) {
     throw new Error('Deployment cleanup plan has no valid Worker.');
