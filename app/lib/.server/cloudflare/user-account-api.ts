@@ -420,6 +420,55 @@ export class UserCloudflareAccountApi {
   }
 
   /** Upload an immutable, server-owned Worker version and promote exactly it to production. */
+  /** List every Worker script name in the connected account. */
+  async listWorkerNames(): Promise<string[]> {
+    const scripts = await this.call<unknown>('/workers/scripts', { method: 'GET' });
+    if (!Array.isArray(scripts)) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid Worker scripts.');
+    }
+    return scripts.flatMap((value) => (isRecord(value) && typeof value.id === 'string' ? [value.id] : []));
+  }
+
+  /** List every D1 database in the connected account, with creation times where provided. */
+  async listD1Databases(): Promise<{ id: string; name: string; createdAt: number | null }[]> {
+    const databases = await this.call<unknown>('/d1/database?per_page=1000', { method: 'GET' });
+    if (!Array.isArray(databases)) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid D1 databases.');
+    }
+    return databases.flatMap((value) =>
+      isRecord(value) && typeof value.uuid === 'string' && typeof value.name === 'string'
+        ? [{ id: value.uuid, name: value.name, createdAt: parseCloudflareTimestamp(value.created_at) }]
+        : [],
+    );
+  }
+
+  /** List every KV namespace in the connected account. Namespaces carry no creation time. */
+  async listKvNamespaces(): Promise<{ id: string; name: string }[]> {
+    const namespaces = await this.call<unknown>('/storage/kv/namespaces?per_page=1000', { method: 'GET' });
+    if (!Array.isArray(namespaces)) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid KV namespaces.');
+    }
+    return namespaces.flatMap((value) =>
+      isRecord(value) && typeof value.id === 'string' && typeof value.title === 'string'
+        ? [{ id: value.id, name: value.title }]
+        : [],
+    );
+  }
+
+  /** List every R2 bucket in the connected account, with creation times where provided. */
+  async listR2Buckets(): Promise<{ name: string; createdAt: number | null }[]> {
+    const result = await this.call<unknown>('/r2/buckets', { method: 'GET' });
+    const buckets = isRecord(result) ? result.buckets : null;
+    if (!Array.isArray(buckets)) {
+      throw new CloudflareAccountApiError('Cloudflare returned invalid R2 buckets.');
+    }
+    return buckets.flatMap((value) =>
+      isRecord(value) && typeof value.name === 'string'
+        ? [{ name: value.name, createdAt: parseCloudflareTimestamp(value.creation_date) }]
+        : [],
+    );
+  }
+
   async deployManagedWorker(args: {
     workerName: string;
     projectType: 'web_app' | 'worker';
@@ -1576,4 +1625,13 @@ function staticAssetContentType(path: string): string {
 
 function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+}
+
+/** Parse a Cloudflare ISO-8601 timestamp into epoch millis, or null when it is absent or invalid. */
+function parseCloudflareTimestamp(value: unknown): number | null {
+  if (typeof value !== 'string' || value.length === 0) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
