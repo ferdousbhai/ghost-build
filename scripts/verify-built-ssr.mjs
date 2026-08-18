@@ -1,6 +1,39 @@
 import { existsSync } from 'node:fs';
+import { registerHooks } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+
+/**
+ * The built server is a Workers bundle, so it statically imports
+ * `cloudflare:workers` for the private operations RPC entrypoint. Node's ESM
+ * loader cannot resolve that scheme, and workerd is not what this check is for:
+ * it exercises `fetch` route rendering, never RPC. Stub the module so the class
+ * declaration evaluates, and leave every route assertion below untouched.
+ */
+const WORKERS_MODULE_STUB = `
+export class WorkerEntrypoint {
+  constructor(ctx, env) {
+    this.ctx = ctx;
+    this.env = env;
+  }
+}
+export class DurableObject {
+  constructor(ctx, env) {
+    this.ctx = ctx;
+    this.env = env;
+  }
+}
+export class RpcTarget {}
+export const env = {};
+`;
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    return specifier === 'cloudflare:workers'
+      ? { url: `data:text/javascript,${encodeURIComponent(WORKERS_MODULE_STUB)}`, shortCircuit: true }
+      : nextResolve(specifier, context);
+  },
+});
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const builtServerPath = resolve(rootDir, 'dist/server/index.js');
