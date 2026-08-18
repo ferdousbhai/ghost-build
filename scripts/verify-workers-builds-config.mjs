@@ -38,12 +38,16 @@ export function verifyWorkersBuildsConfig() {
         .sort()
         .map((entry) => `.github/workflows/${entry}`)
     : [];
+  const browserGateWorkflowPath = resolve(rootDir, '.github/workflows/browser-gate.yml');
   errors.push(
     ...findWorkersBuildsConfigErrors({
       config,
       packageJson,
       nvmrc,
       githubWorkflowPaths,
+      browserGateWorkflow: existsSync(browserGateWorkflowPath)
+        ? readFileSync(browserGateWorkflowPath, 'utf8')
+        : undefined,
       githubCompositeActionExists: existsSync(resolve(rootDir, '.github/actions/setup-and-build/action.yaml')),
       workerConfig,
     }),

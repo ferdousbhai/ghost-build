@@ -92,6 +92,38 @@ describe('privacy-safe client telemetry', () => {
     expect(sessionStorage.size).toBe(0);
   });
 
+  it('echoes the control-plane correlation ID without exporting the browser journey ID', async () => {
+    const { captureProductEvent } = await import('./telemetry.client');
+    const { telemetryCorrelationIdStore } = await import('./cloudflare/runtime-session');
+    telemetryCorrelationIdStore.set('00000000-0000-4000-8000-0000000000ab');
+
+    await captureProductEvent('prompt_submitted');
+
+    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(payload.correlationId).toBe('00000000-0000-4000-8000-0000000000ab');
+    expect(payload.journeyId).not.toBe(payload.correlationId);
+  });
+
+  it('rejects a correlation ID that is not an opaque identifier', async () => {
+    const { captureProductEvent } = await import('./telemetry.client');
+    const { telemetryCorrelationIdStore } = await import('./cloudflare/runtime-session');
+    telemetryCorrelationIdStore.set('user@example.com');
+
+    await captureProductEvent('prompt_submitted');
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).not.toHaveProperty('correlationId');
+  });
+
+  it('claims a funnel stage once even when session storage is cleared', async () => {
+    const { captureProductEvent } = await import('./telemetry.client');
+
+    await captureProductEvent('first_tool_completed', { outcome: 'success' });
+    sessionStorage.clear();
+    await captureProductEvent('first_tool_completed', { outcome: 'success' });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('uses a credential-free keepalive request', async () => {
     const { captureProductEvent } = await import('./telemetry.client');
 

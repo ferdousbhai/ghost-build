@@ -226,18 +226,9 @@ dangerouslyAllowAllBuilds: true
         'pnpm-workspace.yaml must set minimumReleaseAge to 1440 minutes.',
         'pnpm-workspace.yaml must enable minimumReleaseAgeStrict.',
         'pnpm-workspace.yaml must not define trustLockfile.',
-        'pnpm-workspace.yaml minimumReleaseAgeExclude must not exempt unreviewed package unexpected-installer.',
+        'pnpm-workspace.yaml must not define minimumReleaseAgeExclude.',
       ]),
     );
-  });
-
-  it('allows only the reviewed exact-version Computer release-age exemption', () => {
-    const workspace = `${workspacePolicyFixture(['ghostbuild-agent', 'template'])}
-minimumReleaseAgeExclude:
-  - '@cloudflare/computer@0.1.1'
-`;
-
-    expect(findBuildApprovalErrors(workspace, 'pnpm-workspace.yaml')).toEqual([]);
   });
 
   it.each([
@@ -354,7 +345,9 @@ overrides:
   });
 
   it('keeps GitHub deployment Actions disabled', () => {
-    expect(readdirSync('.github/workflows')).toEqual(['runtime-artifacts.yml']);
+    // The browser gate is the only release check GitHub Actions owns; the
+    // Workers Builds image cannot install Chromium.
+    expect(readdirSync('.github/workflows')).toEqual(['browser-gate.yml', 'runtime-artifacts.yml']);
     expect(existsSync('.github/actions/setup-and-build/action.yaml')).toBe(false);
   });
 

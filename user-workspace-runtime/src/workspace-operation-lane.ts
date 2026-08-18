@@ -1,3 +1,8 @@
+import {
+  WORKSPACE_OPERATION_CONFLICT_ERROR_CODE,
+  workspaceOperationConflictMessage,
+} from '../../ghostbuild-agent/cloudflare-computer';
+
 const WORKSPACE_OPERATION_LEASE_MS = 15 * 60_000;
 
 type OperationLaneStorage = Pick<DurableObjectStorage, 'sql' | 'transactionSync'>;
@@ -20,13 +25,13 @@ export type WorkspaceOperationLease = {
 };
 
 export class WorkspaceOperationConflictError extends Error {
-  readonly code = 'workspace_operation_conflict';
+  readonly code = WORKSPACE_OPERATION_CONFLICT_ERROR_CODE;
 
   constructor(
     readonly activeKind: string,
     readonly retryAfterMs: number,
   ) {
-    super(`ProjectWorkspace is busy with ${activeKind}; retry after ${retryAfterMs}ms.`);
+    super(workspaceOperationConflictMessage({ activeKind, retryAfterMs }));
     this.name = 'WorkspaceOperationConflictError';
   }
 }

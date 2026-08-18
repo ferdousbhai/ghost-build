@@ -1,5 +1,5 @@
 name: Support request
-description: Get product help or start an account or privacy request without sensitive details
+description: Get product help, report abuse, or start an account or privacy request without sensitive details
 title: '[Support]: '
 labels:
   - support
@@ -25,6 +25,7 @@ body:
         - Cloudflare connection
         - Cloudflare billing boundary
         - Account or privacy request (request type only)
+        - Abuse report (prohibited use of Ghostbuild)
         - Other non-sensitive question
     validations:
       required: true

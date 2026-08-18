@@ -1,12 +1,9 @@
 import type { CreateAIToolsOptions } from '@cloudflare/computer/tools';
 
-// Computer 0.1.1 declares itself preview-only. Keep the package, schemas, and
-// backend contract pinned together until a reviewed upgrade changes all three.
+// Computer 0.1.1 declares itself preview-only. Keep the exact pin, the local
+// dist patch, and the durable workspace surfaces reviewed together.
 export const CLOUDFLARE_COMPUTER_VERSION = '0.1.1';
 export const GENERATED_PROJECT_PNPM_VERSION = '11.14.0';
-
-export const COMPUTER_TOOL_NAMES = ['read', 'ls', 'write', 'edit', 'exec'] as const;
-export type ComputerToolName = (typeof COMPUTER_TOOL_NAMES)[number];
 
 export const COMPUTER_SHELL_BACKEND_IDS = ['container-shell'] as const;
 export type ComputerShellBackend = (typeof COMPUTER_SHELL_BACKEND_IDS)[number];
@@ -15,6 +12,23 @@ export const COMPUTER_DEFAULT_SHELL_BACKEND = 'container-shell' satisfies Comput
 
 export const COMPUTER_SYNC_PENDING_ERROR_CODE = 'workspace_sync_pending';
 export const COMPUTER_SYNC_EXHAUSTED_ERROR_CODE = 'workspace_sync_exhausted';
+export const WORKSPACE_OPERATION_CONFLICT_ERROR_CODE = 'workspace_operation_conflict';
+
+export type WorkspaceOperationConflict = { activeKind: string; retryAfterMs: number };
+
+const WORKSPACE_OPERATION_CONFLICT_PATTERN = new RegExp(
+  `^\\[${WORKSPACE_OPERATION_CONFLICT_ERROR_CODE}\\] (.+) is running; retry after (\\d+)ms\\.$`,
+);
+
+/** Stateful ProjectWorkspace operations reject instead of waiting, so the retry budget travels in the message. */
+export function workspaceOperationConflictMessage(conflict: WorkspaceOperationConflict): string {
+  return `[${WORKSPACE_OPERATION_CONFLICT_ERROR_CODE}] ${conflict.activeKind} is running; retry after ${conflict.retryAfterMs}ms.`;
+}
+
+export function workspaceOperationConflict(error: unknown): WorkspaceOperationConflict | null {
+  const match = WORKSPACE_OPERATION_CONFLICT_PATTERN.exec(error instanceof Error ? error.message : '');
+  return match ? { activeKind: match[1]!, retryAfterMs: Number(match[2]) } : null;
+}
 
 export type ComputerSyncUnconfirmedToolResult = {
   kind: 'workspace-sync-unconfirmed';

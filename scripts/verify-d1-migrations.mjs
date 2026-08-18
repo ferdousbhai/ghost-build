@@ -42,6 +42,7 @@ const migrationPolicies = [
       '0003_app_resource_gc.sql': 'e5fb53955e71aaf07132dab062b66cac9826755d69a729733d7ceafb11b34f2b',
       '0004_chat_title_sources.sql': '0b0d6c74cc07870155320d75f2be2d10d8aac09090db0fbcefcfd84fe19b1af9',
       '0005_deployment_activity.sql': 'a092ceefd76d8e0af1afd73e2d11e03ddcae1e9694fc5673a55f985d65854cbd',
+      '0006_runtime_controls.sql': '952b8c35936e312b128eda8aaaf45453a312aef4333f9812a293ef4cc79294e6',
     },
     contractAllowlist: {
       // Chat identity has one immutable key; remove the unused alternate URL column and index.

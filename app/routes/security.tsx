@@ -1,6 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
-import { GHOSTBUILD_SECURITY_URL, TRUST_CHANNEL_STATUS, createPublicBetaTrustPageHead } from '~/lib/trust';
+import {
+  GHOSTBUILD_SECURITY_URL,
+  TRUST_CHANNEL_STATUS,
+  TRUST_PAGE_HEADINGS,
+  createPublicBetaTrustPageHead,
+} from '~/lib/trust';
 
 export const Route = createFileRoute('/security')({
   head: () =>
@@ -16,7 +21,7 @@ function SecurityPage() {
   return (
     <TrustPage
       eyebrow="Security"
-      title="Keep vulnerability details private."
+      title={TRUST_PAGE_HEADINGS.security}
       summary="Use GitHub private vulnerability reporting for suspected vulnerabilities in Ghostbuild. Do not open a public support or bug issue with exploit details."
     >
       <TrustSection title="Private reporting">

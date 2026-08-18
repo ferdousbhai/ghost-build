@@ -1,29 +1,6 @@
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
-
-function collectBrowserDiagnostics(page: Page, testInfo: TestInfo, allowExpectedDocumentNotFound = false) {
-  const diagnostics: string[] = [];
-  let expectedDocumentNotFoundBudget = allowExpectedDocumentNotFound ? 1 : 0;
-  page.on('console', (message) => {
-    if (message.type() === 'error') {
-      if (expectedDocumentNotFoundBudget > 0 && message.text().includes('status of 404 (Not Found)')) {
-        expectedDocumentNotFoundBudget -= 1;
-        return;
-      }
-      diagnostics.push(`console: ${message.text()}`);
-    }
-  });
-  page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
-  page.on('requestfailed', (request) => diagnostics.push(`requestfailed: ${request.method()} ${request.url()}`));
-  return async () => {
-    if (diagnostics.length > 0) {
-      await testInfo.attach('browser-diagnostics', {
-        body: Buffer.from(diagnostics.join('\n')),
-        contentType: 'text/plain',
-      });
-    }
-    expect(diagnostics, 'built browser emitted console, page, or network failures').toEqual([]);
-  };
-}
+import { expect, test } from '@playwright/test';
+import { TRUST_PAGE_HEADINGS } from '~/lib/trust';
+import { collectBrowserDiagnostics } from './browser-diagnostics';
 
 test('hydrates the built landing page without replacing meaningful SSR content', async ({ page }, testInfo) => {
   const assertClean = collectBrowserDiagnostics(page, testInfo);
@@ -37,12 +14,9 @@ test('hydrates the built landing page without replacing meaningful SSR content',
     page.getByText(/Ghostbuild writes, runs, and deploys your app inside your own Cloudflare account/i),
   ).toBeVisible();
   await expect(page.getByPlaceholder(/Describe the app, workflow, and data/i)).toBeVisible();
-  const modelSelector = page.getByRole('combobox', { name: /Builder model/i });
-  await expect(modelSelector).toBeVisible();
-  await modelSelector.selectOption('deepseek/deepseek-v4-pro');
-  await expect(modelSelector).toHaveValue('deepseek/deepseek-v4-pro');
-  await page.reload();
-  await expect(page.getByRole('combobox', { name: /Builder model/i })).toHaveValue('deepseek/deepseek-v4-pro');
+  // The builder model selector belongs to a connected session, so the signed-out
+  // landing page must offer the connect action instead.
+  await expect(page.getByRole('button', { name: /Builder model/i })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Connect Cloudflare' }).first()).toBeVisible();
   const legalNotice = page.getByTestId('cloudflare-connect-legal-notice');
   await expect(legalNotice).toBeVisible();
@@ -68,7 +42,7 @@ test('renders signed-out private routes after browser hydration', async ({ page 
 });
 
 test('keeps the built 404 and mobile shell usable', async ({ page }, testInfo) => {
-  const assertClean = collectBrowserDiagnostics(page, testInfo, true);
+  const assertClean = collectBrowserDiagnostics(page, testInfo, [/status of 404 \(Not Found\)/]);
 
   const response = await page.goto('/does-not-exist');
 
@@ -83,9 +57,9 @@ test('keeps the built 404 and mobile shell usable', async ({ page }, testInfo) =
 test('renders the public trust routes and persists the telemetry choice', async ({ page }, testInfo) => {
   const assertClean = collectBrowserDiagnostics(page, testInfo);
   const routes = [
-    ['/terms', 'You approve the build. You control the cloud account.'],
-    ['/support', 'Get help through the right channel.'],
-    ['/security', 'Keep vulnerability details private.'],
+    ['/terms', TRUST_PAGE_HEADINGS.terms],
+    ['/support', TRUST_PAGE_HEADINGS.support],
+    ['/security', TRUST_PAGE_HEADINGS.security],
   ] as const;
 
   for (const [path, heading] of routes) {
@@ -107,7 +81,7 @@ test('renders the public trust routes and persists the telemetry choice', async 
   );
 
   await page.goto('/privacy');
-  await expect(page.getByRole('heading', { name: 'How Ghostbuild handles your data.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: TRUST_PAGE_HEADINGS.privacy })).toBeVisible();
   await expect(page.getByText(/DOUS SOFTWARE INC\..*is the controller for personal data/)).toBeVisible();
   await expect(page.getByText('Product telemetry is disabled on this browser.')).toBeVisible();
 

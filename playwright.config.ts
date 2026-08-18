@@ -7,6 +7,8 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
+  // Retries hide flake instead of measuring it, and the launch budget needs the
+  // observed rate. Every failure is a failure, including in CI.
   retries: 0,
   workers: process.env.CI ? 1 : undefined,
   timeout: 60_000,
@@ -14,36 +16,39 @@ export default defineConfig({
   outputDir: 'test-results/playwright',
   reporter: process.env.CI ? [['line'], ['html', { outputFolder: 'playwright-report', open: 'never' }]] : 'line',
   use: {
-    baseURL: localBaseUrl,
+    baseURL: externalBaseUrl ?? localBaseUrl,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
   },
-  webServer: {
-    command: 'pnpm exec vite preview --host 127.0.0.1 --port 4173',
-    url: `${localBaseUrl}/api/health`,
-    reuseExistingServer: false,
-    timeout: 120_000,
-  },
+  // A deployed candidate already serves itself; only the local gate builds and
+  // starts the Worker.
+  ...(externalBaseUrl
+    ? {}
+    : {
+        webServer: {
+          command: 'pnpm exec vite preview --host 127.0.0.1 --port 4173',
+          url: `${localBaseUrl}/api/health`,
+          reuseExistingServer: false,
+          timeout: 120_000,
+        },
+      }),
   projects: [
     {
       name: 'chromium',
       testIgnore: /launch-critical-journey\.spec\.ts/,
-      retries: process.env.CI ? 2 : 0,
       use: { ...devices['Desktop Chrome'] },
     },
     {
       name: 'mobile-chromium',
       testIgnore: /launch-critical-journey\.spec\.ts/,
-      retries: process.env.CI ? 2 : 0,
       use: { ...devices['Pixel 7'] },
     },
     {
       name: 'launch-critical-chromium',
       testMatch: /launch-critical-journey\.spec\.ts/,
       // This journey creates billable resources and intentionally has no automatic cleanup yet.
-      retries: 0,
-      use: { ...devices['Desktop Chrome'], baseURL: externalBaseUrl ?? localBaseUrl },
+      use: { ...devices['Desktop Chrome'] },
     },
   ],
 });

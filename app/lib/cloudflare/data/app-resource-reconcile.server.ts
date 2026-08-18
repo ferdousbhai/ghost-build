@@ -1,5 +1,5 @@
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { createUserAccountApi } from '~/lib/.server/cloudflare/user-workspace-deployment-executor';
+import { appDeploymentIdFromResourceName, appResourceName } from '~/lib/cloudflare/app-resource-names';
 import type { UserCloudflareAccountApi } from '~/lib/.server/cloudflare/user-account-api';
 
 /**
@@ -18,24 +18,26 @@ export const APP_RESOURCE_RECONCILE_GRACE_MS = 24 * 60 * 60 * 1000;
 /** Deleting a bounded batch per sweep keeps one bad scan from emptying an account. */
 const DELETE_LIMIT = 5;
 
-const RESOURCE_PREFIX = 'ghostbuild-';
+/**
+ * What a sweep is allowed to do. `report` nominates and logs; `enforce` also deletes, still
+ * bounded by `DELETE_LIMIT`.
+ */
+export type AppResourceReconcileMode = 'report' | 'enforce';
 
 /**
- * Only canonical UUID deployment ids are eligible. This is the safety gate that keeps the sweep
- * away from resources that share the prefix but have a different lifecycle - workspace runtimes
- * (`ghostbuild-workspace-<hex16>`), their databases (`ghostbuild-data-<hex16>`), the shared
- * `ghostbuild-builder-skills` bucket, and the control plane itself.
+ * Reporting only, until an operator has read a run of real diffs from the logs. Deletion is one
+ * reviewed edit away rather than a runtime toggle nobody can audit after the fact.
  */
-const APP_DEPLOYMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-const APP_RESOURCE_SUFFIX = /-(agent-security|storage|cache)$/;
+export const APP_RESOURCE_RECONCILE_MODE: AppResourceReconcileMode = 'report';
 
 const logger = createScopedLogger('CloudflareAppResourceReconcile');
 
-type OrphanedAppResourceKind = 'd1' | 'kv' | 'r2';
+export type OrphanedAppResourceKind = 'd1' | 'kv' | 'r2';
 
 type OrphanedAppResource = {
   kind: OrphanedAppResourceKind;
+  /** The provider id the account listing reported. R2 buckets are addressed by their name. */
+  id: string;
   name: string;
   deploymentId: string;
 };
@@ -46,8 +48,8 @@ export type AppResourceReconcileApi = Pick<
   | 'listD1Databases'
   | 'listKvNamespaces'
   | 'listR2Buckets'
-  | 'deleteD1Database'
-  | 'deleteKvNamespace'
+  | 'deleteD1DatabaseById'
+  | 'deleteKvNamespaceById'
   | 'deleteR2Bucket'
 >;
 
@@ -56,18 +58,6 @@ type AppResourceReconcileReport = {
   orphans: OrphanedAppResource[];
   deleted: OrphanedAppResource[];
 };
-
-/**
- * Recover the app deployment id a resource belongs to, or null when the name is not an app
- * resource. Returning null is always the safe answer - an unrecognised name is never collected.
- */
-export function appDeploymentIdFromResourceName(name: string): string | null {
-  if (!name.startsWith(RESOURCE_PREFIX)) {
-    return null;
-  }
-  const candidate = name.slice(RESOURCE_PREFIX.length).replace(APP_RESOURCE_SUFFIX, '');
-  return APP_DEPLOYMENT_ID.test(candidate) ? candidate : null;
-}
 
 type DeploymentGroup = {
   resources: OrphanedAppResource[];
@@ -83,37 +73,47 @@ export async function findOrphanedAppResources(
   api: AppResourceReconcileApi,
   now: number,
 ): Promise<{ orphans: OrphanedAppResource[]; scanned: number; undatable: string[] }> {
+  // The Worker listing is the one answer that must be complete, so its failure fails the sweep.
   const [workers, databases, namespaces, buckets] = await Promise.all([
     api.listWorkerNames(),
-    api.listD1Databases(),
-    api.listKvNamespaces(),
-    api.listR2Buckets(),
+    listedOrSkipped('D1 database', () => api.listD1Databases()),
+    listedOrSkipped('KV namespace', () => api.listKvNamespaces()),
+    listedOrSkipped('R2 bucket', () => api.listR2Buckets()),
   ]);
 
-  if (!workers.complete) {
-    // Liveness is proven by a Worker's presence, so a truncated list would
-    // convert live deployments into orphans. Never nominate from partial evidence.
-    logger.warn('Skipped app resource reconciliation: the account Worker listing was truncated');
-    return { orphans: [], scanned: 0, undatable: [] };
-  }
-
-  const liveWorkers = new Set(workers.names);
+  const liveWorkers = new Set(workers);
   const groups = new Map<string, DeploymentGroup>();
 
-  const candidates: Array<{ kind: OrphanedAppResourceKind; name: string; createdAt: number | null }> = [
-    ...databases.map((database) => ({ kind: 'd1' as const, name: database.name, createdAt: database.createdAt })),
+  const candidates: Array<{ kind: OrphanedAppResourceKind; id: string; name: string; createdAt: number | null }> = [
+    ...databases.map((database) => ({
+      kind: 'd1' as const,
+      id: database.id,
+      name: database.name,
+      createdAt: database.createdAt,
+    })),
     // KV namespaces carry no creation time; they are dated by their deployment siblings.
-    ...namespaces.map((namespace) => ({ kind: 'kv' as const, name: namespace.name, createdAt: null })),
-    ...buckets.map((bucket) => ({ kind: 'r2' as const, name: bucket.name, createdAt: bucket.createdAt })),
+    ...namespaces.map((namespace) => ({
+      kind: 'kv' as const,
+      id: namespace.id,
+      name: namespace.name,
+      createdAt: null,
+    })),
+    // R2 buckets have no id of their own: the name is the address.
+    ...buckets.map((bucket) => ({
+      kind: 'r2' as const,
+      id: bucket.name,
+      name: bucket.name,
+      createdAt: bucket.createdAt,
+    })),
   ];
 
-  for (const { kind, name, createdAt } of candidates) {
+  for (const { kind, id, name, createdAt } of candidates) {
     const deploymentId = appDeploymentIdFromResourceName(name);
     if (!deploymentId) {
       continue;
     }
     const group = groups.get(deploymentId) ?? { resources: [], newestCreatedAt: null };
-    group.resources.push({ kind, name, deploymentId });
+    group.resources.push({ kind, id, name, deploymentId });
     if (createdAt !== null) {
       group.newestCreatedAt = group.newestCreatedAt === null ? createdAt : Math.max(group.newestCreatedAt, createdAt);
     }
@@ -126,7 +126,7 @@ export async function findOrphanedAppResources(
 
   for (const [deploymentId, group] of groups) {
     scanned += group.resources.length;
-    if (liveWorkers.has(`${RESOURCE_PREFIX}${deploymentId}`)) {
+    if (liveWorkers.has(appResourceName(deploymentId, 'app'))) {
       continue;
     }
     if (group.newestCreatedAt === null) {
@@ -144,23 +144,23 @@ export async function findOrphanedAppResources(
 }
 
 /**
- * Reconcile the account against its live Workers. Defaults to a dry run: callers must opt in
- * before anything is deleted, so the diff can be observed before it is trusted.
+ * Reconcile the account against its live Workers. Reports by default: callers must ask for
+ * `enforce` before anything is deleted, so the diff can be observed before it is trusted.
  */
 export async function reconcileAppResources(
   api: AppResourceReconcileApi,
-  options: { now?: number; dryRun?: boolean } = {},
+  options: { now?: number; mode?: AppResourceReconcileMode } = {},
 ): Promise<AppResourceReconcileReport> {
   const now = options.now ?? Date.now();
-  const dryRun = options.dryRun ?? true;
+  const mode = options.mode ?? 'report';
   const { orphans, scanned, undatable } = await findOrphanedAppResources(api, now);
 
   if (undatable.length > 0) {
     logger.warn(`Skipped ${undatable.length} undatable app deployment(s) with no creation time`);
   }
-  if (dryRun || orphans.length === 0) {
-    if (dryRun && orphans.length > 0) {
-      logger.info(`Reconcile dry run found ${orphans.length} orphaned app resource(s) across ${scanned} scanned`);
+  if (mode === 'report' || orphans.length === 0) {
+    if (mode === 'report' && orphans.length > 0) {
+      logger.info(`Reconcile report found ${orphans.length} orphaned app resource(s) across ${scanned} scanned`);
     }
     return { scanned, orphans, deleted: [] };
   }
@@ -176,9 +176,9 @@ export async function reconcileAppResources(
   for (const resource of ordered) {
     try {
       if (resource.kind === 'd1') {
-        await api.deleteD1Database(resource.name);
+        await api.deleteD1DatabaseById(resource.id);
       } else if (resource.kind === 'kv') {
-        await api.deleteKvNamespace(resource.name);
+        await api.deleteKvNamespaceById(resource.id);
       } else if (!(await api.deleteR2Bucket(resource.name))) {
         // The bucket still holds objects; a later sweep drains the next batch.
         continue;
@@ -194,25 +194,16 @@ export async function reconcileAppResources(
   return { scanned, orphans, deleted };
 }
 
-type ReconcileEnv = Parameters<typeof createUserAccountApi>[0];
-
 /**
- * Run reconciliation on the maintenance cron without ever failing it.
- *
- * This reports and never deletes. Enabling deletion needs an operator-visible
- * signal first: these logs land in the user's own account, so nobody here can
- * read the diff this would act on.
+ * A resource listing that cannot be read - a page over the response cap, a provider error -
+ * costs its own kind and nothing else. Under-reporting orphans only makes the sweep do less
+ * than it should; losing the whole run to one bad listing helps nobody.
  */
-export async function reconcileAppResourcesBestEffort(env: ReconcileEnv): Promise<void> {
+async function listedOrSkipped<T>(kind: string, list: () => Promise<T[]>): Promise<T[]> {
   try {
-    const api = await createUserAccountApi(env, fetch);
-    const report = await reconcileAppResources(api, { dryRun: true });
-    if (report.orphans.length > 0) {
-      logger.info(
-        `Reconciled ${report.deleted.length}/${report.orphans.length} orphaned app resource(s) across ${report.scanned} scanned`,
-      );
-    }
+    return await list();
   } catch {
-    logger.warn('Unable to reconcile orphaned app Cloudflare resources');
+    logger.warn(`Skipped the ${kind} listing: the account could not be read`);
+    return [];
   }
 }

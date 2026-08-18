@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   APP_RESOURCE_RECONCILE_GRACE_MS,
-  appDeploymentIdFromResourceName,
   findOrphanedAppResources,
   reconcileAppResources,
   type AppResourceReconcileApi,
@@ -14,55 +13,52 @@ const STALE = NOW - APP_RESOURCE_RECONCILE_GRACE_MS - 1;
 
 function api(overrides: Partial<AppResourceReconcileApi> = {}): AppResourceReconcileApi {
   return {
-    listWorkerNames: vi.fn(async () => ({ names: [] as string[], complete: true })),
+    listWorkerNames: vi.fn(async () => [] as string[]),
     listD1Databases: vi.fn(async () => []),
     listKvNamespaces: vi.fn(async () => []),
     listR2Buckets: vi.fn(async () => []),
-    deleteD1Database: vi.fn(async () => undefined),
-    deleteKvNamespace: vi.fn(async () => undefined),
+    deleteD1DatabaseById: vi.fn(async () => undefined),
+    deleteKvNamespaceById: vi.fn(async () => undefined),
     deleteR2Bucket: vi.fn(async () => true),
     ...overrides,
   };
 }
 
-describe('app deployment id recovery', () => {
-  it('recovers the deployment id from every app resource suffix', () => {
-    expect(appDeploymentIdFromResourceName(`ghostbuild-${DEPLOYMENT}`)).toBe(DEPLOYMENT);
-    expect(appDeploymentIdFromResourceName(`ghostbuild-${DEPLOYMENT}-agent-security`)).toBe(DEPLOYMENT);
-    expect(appDeploymentIdFromResourceName(`ghostbuild-${DEPLOYMENT}-storage`)).toBe(DEPLOYMENT);
-    expect(appDeploymentIdFromResourceName(`ghostbuild-${DEPLOYMENT}-cache`)).toBe(DEPLOYMENT);
-  });
-
-  it('refuses every prefixed resource that is not a UUID deployment', () => {
-    // Workspace runtimes and their databases are live infrastructure with a separate lifecycle.
-    expect(appDeploymentIdFromResourceName('ghostbuild-workspace-18e073433e6fad63')).toBeNull();
-    expect(appDeploymentIdFromResourceName('ghostbuild-data-18e073433e6fad63')).toBeNull();
-    expect(appDeploymentIdFromResourceName('ghostbuild-builder-skills')).toBeNull();
-    expect(appDeploymentIdFromResourceName('ghostbuild-ops')).toBeNull();
-    expect(appDeploymentIdFromResourceName('ghostbuild')).toBeNull();
-    expect(appDeploymentIdFromResourceName('summonghost-avatars')).toBeNull();
-  });
-});
-
 describe('orphaned app resource discovery', () => {
-  it('nominates nothing when the Worker listing is truncated', async () => {
-    // A truncated liveness list would turn live deployments into orphans.
+  it('fails the sweep when the Worker listing cannot be read', async () => {
+    // Liveness is proven by a Worker's presence, so a partial answer would turn live
+    // deployments into orphans. This is the one listing that must be complete or fail.
+    await expect(
+      findOrphanedAppResources(
+        api({
+          listWorkerNames: vi.fn(async () => {
+            throw new Error('Cloudflare returned more pages than one account listing may read.');
+          }),
+          listD1Databases: vi.fn(async () => [{ id: 'a', name: `ghostbuild-${DEPLOYMENT}`, createdAt: STALE }]),
+        }),
+        NOW,
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('skips only the resource kind whose listing could not be read', async () => {
     const result = await findOrphanedAppResources(
       api({
-        listWorkerNames: vi.fn(async () => ({ names: [], complete: false })),
         listD1Databases: vi.fn(async () => [{ id: 'a', name: `ghostbuild-${DEPLOYMENT}`, createdAt: STALE }]),
+        listR2Buckets: vi.fn(async () => {
+          throw new Error('Cloudflare API request failed (200).');
+        }),
       }),
       NOW,
     );
 
-    expect(result.orphans).toEqual([]);
-    expect(result.scanned).toBe(0);
+    expect(result.orphans.map((resource) => resource.name)).toEqual([`ghostbuild-${DEPLOYMENT}`]);
   });
 
   it('treats a present Worker as proof of liveness', async () => {
     const result = await findOrphanedAppResources(
       api({
-        listWorkerNames: vi.fn(async () => ({ names: [`ghostbuild-${LIVE_DEPLOYMENT}`], complete: true })),
+        listWorkerNames: vi.fn(async () => [`ghostbuild-${LIVE_DEPLOYMENT}`]),
         listD1Databases: vi.fn(async () => [{ id: 'a', name: `ghostbuild-${LIVE_DEPLOYMENT}`, createdAt: STALE }]),
       }),
       NOW,
@@ -93,10 +89,28 @@ describe('orphaned app resource discovery', () => {
     ]);
   });
 
+  it('carries the provider id the listing already reported', async () => {
+    const result = await findOrphanedAppResources(
+      api({
+        listD1Databases: vi.fn(async () => [{ id: 'db-uuid', name: `ghostbuild-${DEPLOYMENT}`, createdAt: STALE }]),
+        listKvNamespaces: vi.fn(async () => [{ id: 'kv-id', name: `ghostbuild-${DEPLOYMENT}-cache` }]),
+        listR2Buckets: vi.fn(async () => [{ name: `ghostbuild-${DEPLOYMENT}-storage`, createdAt: STALE }]),
+      }),
+      NOW,
+    );
+
+    expect(result.orphans.map((resource) => [resource.kind, resource.id])).toEqual([
+      ['d1', 'db-uuid'],
+      ['kv', 'kv-id'],
+      // R2 buckets have no id of their own.
+      ['r2', `ghostbuild-${DEPLOYMENT}-storage`],
+    ]);
+  });
+
   it('never collects a live workspace database that shares the prefix', async () => {
     const result = await findOrphanedAppResources(
       api({
-        listWorkerNames: vi.fn(async () => ({ names: [], complete: true })),
+        listWorkerNames: vi.fn(async () => []),
         listD1Databases: vi.fn(async () => [{ id: 'a', name: 'ghostbuild-data-18e073433e6fad63', createdAt: STALE }]),
         listR2Buckets: vi.fn(async () => [{ name: 'ghostbuild-builder-skills', createdAt: STALE }]),
       }),
@@ -144,32 +158,33 @@ describe('orphaned app resource discovery', () => {
 describe('app resource reconciliation', () => {
   const staleDatabase = { id: 'a', name: `ghostbuild-${DEPLOYMENT}`, createdAt: STALE };
 
-  it('deletes nothing unless the caller opts out of the dry run', async () => {
-    const deleteD1Database = vi.fn(async () => undefined);
+  it('deletes nothing unless the caller asks for enforcement', async () => {
+    const deleteD1DatabaseById = vi.fn(async () => undefined);
     const report = await reconcileAppResources(
-      api({ listD1Databases: vi.fn(async () => [staleDatabase]), deleteD1Database }),
+      api({ listD1Databases: vi.fn(async () => [staleDatabase]), deleteD1DatabaseById }),
       { now: NOW },
     );
 
-    expect(deleteD1Database).not.toHaveBeenCalled();
+    expect(deleteD1DatabaseById).not.toHaveBeenCalled();
     expect(report.orphans).toHaveLength(1);
     expect(report.deleted).toEqual([]);
   });
 
-  it('removes orphaned resources once the dry run is disabled', async () => {
-    const deleteD1Database = vi.fn(async () => undefined);
+  it('removes orphaned resources by their recorded id once enforcing', async () => {
+    const deleteD1DatabaseById = vi.fn(async () => undefined);
     const deleteR2Bucket = vi.fn(async () => true);
     const report = await reconcileAppResources(
       api({
         listD1Databases: vi.fn(async () => [staleDatabase]),
         listR2Buckets: vi.fn(async () => [{ name: `ghostbuild-${DEPLOYMENT}-storage`, createdAt: STALE }]),
-        deleteD1Database,
+        deleteD1DatabaseById,
         deleteR2Bucket,
       }),
-      { now: NOW, dryRun: false },
+      { now: NOW, mode: 'enforce' },
     );
 
-    expect(deleteD1Database).toHaveBeenCalledWith(`ghostbuild-${DEPLOYMENT}`);
+    // The listing already resolved the id, so deletion never re-reads the account to find it.
+    expect(deleteD1DatabaseById).toHaveBeenCalledWith('a');
     expect(deleteR2Bucket).toHaveBeenCalledWith(`ghostbuild-${DEPLOYMENT}-storage`);
     expect(report.deleted).toHaveLength(2);
   });
@@ -180,7 +195,7 @@ describe('app resource reconciliation', () => {
         listR2Buckets: vi.fn(async () => [{ name: `ghostbuild-${DEPLOYMENT}-storage`, createdAt: STALE }]),
         deleteR2Bucket: vi.fn(async () => false),
       }),
-      { now: NOW, dryRun: false },
+      { now: NOW, mode: 'enforce' },
     );
 
     expect(report.deleted).toEqual([]);
@@ -194,13 +209,13 @@ describe('app resource reconciliation', () => {
           staleDatabase,
           { id: 'b', name: `ghostbuild-${DEPLOYMENT}-agent-security`, createdAt: STALE },
         ]),
-        deleteD1Database: vi.fn(async (name: string) => {
-          if (name === `ghostbuild-${DEPLOYMENT}`) {
+        deleteD1DatabaseById: vi.fn(async (databaseId: string) => {
+          if (databaseId === 'a') {
             throw new Error('Cloudflare API request failed (500).');
           }
         }),
       }),
-      { now: NOW, dryRun: false },
+      { now: NOW, mode: 'enforce' },
     );
 
     expect(report.deleted.map((resource) => resource.name)).toEqual([`ghostbuild-${DEPLOYMENT}-agent-security`]);
@@ -212,14 +227,14 @@ describe('app resource reconciliation', () => {
       name: `ghostbuild-${index.toString(16).padStart(8, '0')}-57e1-4d83-9589-1b6c6d982417`,
       createdAt: STALE,
     }));
-    const deleteD1Database = vi.fn(async () => undefined);
+    const deleteD1DatabaseById = vi.fn(async () => undefined);
     const report = await reconcileAppResources(
-      api({ listD1Databases: vi.fn(async () => databases), deleteD1Database }),
-      { now: NOW, dryRun: false },
+      api({ listD1Databases: vi.fn(async () => databases), deleteD1DatabaseById }),
+      { now: NOW, mode: 'enforce' },
     );
 
     expect(report.orphans).toHaveLength(9);
-    expect(deleteD1Database).toHaveBeenCalledTimes(5);
+    expect(deleteD1DatabaseById).toHaveBeenCalledTimes(5);
     expect(report.deleted).toHaveLength(5);
   });
 });

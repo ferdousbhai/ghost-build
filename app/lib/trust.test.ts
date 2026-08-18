@@ -40,6 +40,15 @@ describe('public trust contract', () => {
     expect(privacy).toContain('skip AI Gateway caching and log collection');
   });
 
+  it('describes only the deletion Ghostbuild actually performs', () => {
+    const privacy = readFileSync('app/routes/privacy.tsx', 'utf8');
+
+    expect(privacy).toContain('erases every record the operator holds');
+    expect(privacy).toContain('deployed are retained, keep running, keep billing to your account');
+    expect(privacy).toContain('no machine-readable account export');
+    expect(privacy).not.toContain('self-service export or deletion during public beta');
+  });
+
   it('keeps public-beta pricing and business terms explicit', () => {
     const terms = readFileSync('app/routes/terms.tsx', 'utf8');
     expect(terms).toContain('Ghostbuild currently charges no fee');
@@ -50,6 +59,21 @@ describe('public trust contract', () => {
     expect(terms).toContain('C$100');
     expect(terms).not.toContain('free public beta');
     expect(terms).not.toContain('ferdousbhai GitHub account');
+  });
+
+  it('routes abuse reports through the support form instead of promising a channel that does not exist', () => {
+    const support = readFileSync('app/routes/support.tsx', 'utf8');
+    const terms = readFileSync('app/routes/terms.tsx', 'utf8');
+    const form = parse(readFileSync('.github/ISSUE_TEMPLATE/support_request.yml', 'utf8')) as {
+      body?: Array<{ id?: string; attributes?: { options?: string[] } }>;
+    };
+
+    expect(support).toContain('Report abuse');
+    expect(support).toContain('There is no separate abuse address');
+    expect(terms).toContain('which is also the abuse');
+    expect(form.body?.find((item) => item.id === 'category')?.attributes?.options).toContain(
+      'Abuse report (prohibited use of Ghostbuild)',
+    );
   });
 
   it('keeps the public issue forms explicit about sensitive data and emergencies', () => {

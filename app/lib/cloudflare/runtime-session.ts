@@ -6,6 +6,7 @@ type UserRuntimeSession = {
   token: string;
   expiresAt: number;
   aiGatewayCreditStatus?: AiGatewayCreditStatus;
+  correlationId?: string;
 };
 
 export type UserRuntimeErrorCode =
@@ -27,6 +28,13 @@ const PREPARATION_RETRY_MAX_DELAY_MS = 5_000;
 let pending: Promise<UserRuntimeSession> | null = null;
 export const userRuntimeEndpointStore = atom<string | null>(null);
 export const aiGatewayCreditStatusStore = atom<AiGatewayCreditStatus>('unknown');
+
+/**
+ * The server-minted identifier for the request that admitted this browser. It lives
+ * beside the session that carries it rather than in `telemetry.client`, because
+ * telemetry reads this module and the reverse edge would close an import cycle.
+ */
+export const telemetryCorrelationIdStore = atom<string | null>(null);
 let current: UserRuntimeSession | null = null;
 let generation = 0;
 
@@ -47,6 +55,7 @@ export async function getUserRuntimeSession(signal?: AbortSignal): Promise<UserR
       current = session;
       aiGatewayCreditStatusStore.set(session.aiGatewayCreditStatus ?? 'unknown');
       userRuntimeEndpointStore.set(session.endpoint);
+      telemetryCorrelationIdStore.set(session.correlationId ?? null);
       return session;
     })
     .finally(() => {
@@ -108,6 +117,7 @@ async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<User
       code?: string;
       error?: string;
       aiGatewayCreditStatus?: unknown;
+      correlationId?: unknown;
     } | null;
     if (response.status === 409 && payload?.code === 'workspace_preparing' && Date.now() < deadline) {
       if (!isCurrent()) {
@@ -137,6 +147,7 @@ async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<User
       aiGatewayCreditStatus: isAiGatewayCreditStatus(payload.aiGatewayCreditStatus)
         ? payload.aiGatewayCreditStatus
         : 'unknown',
+      correlationId: typeof payload.correlationId === 'string' ? payload.correlationId : undefined,
     };
     return session;
   }
@@ -173,4 +184,5 @@ export function resetUserRuntimeSession(): void {
   pending = null;
   userRuntimeEndpointStore.set(null);
   aiGatewayCreditStatusStore.set('unknown');
+  telemetryCorrelationIdStore.set(null);
 }

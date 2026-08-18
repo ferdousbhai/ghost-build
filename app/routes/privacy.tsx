@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { ClientTelemetryPreference } from '~/components/ClientRouteComponents';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
-import { GHOSTBUILD_OPERATOR, createPublicBetaTrustPageHead } from '~/lib/trust';
+import { GHOSTBUILD_OPERATOR, TRUST_PAGE_HEADINGS, createPublicBetaTrustPageHead } from '~/lib/trust';
 
 export const Route = createFileRoute('/privacy')({
   head: () =>
@@ -17,7 +17,7 @@ function PrivacyPage() {
   return (
     <TrustPage
       eyebrow="Privacy"
-      title="How Ghostbuild handles your data."
+      title={TRUST_PAGE_HEADINGS.privacy}
       summary="Ghostbuild’s own account stores only the records needed to authenticate you, connect Cloudflare, locate your user-owned runtime, and operate the service, plus narrow product telemetry if you opt in. Project and conversation data stays in the Cloudflare account you connect; your browser may keep an account-local replica."
     >
       <TrustSection title="What Ghostbuild stores in its own account">
@@ -170,16 +170,27 @@ function PrivacyPage() {
           after 30 days, and unreferenced encrypted credential records become eligible for removal after 24 hours.
           Maintenance runs every 15 minutes in bounded batches, so backlog or retries can delay physical removal.
           Account, connection, and runtime-locator records remain while the account and service are active or until they
-          are no longer needed or a verified request is fulfilled. There is no automatic inactive-account purge or
-          self-service export or deletion during public beta; requests are assessed manually and available legal rights
-          still apply.
+          are no longer needed or a verified request is fulfilled. There is no automatic inactive-account purge.
         </p>
         <p>
-          Project, transcript, deployment, Agent, and workspace records remain in the connected Cloudflare account under
-          that account’s controls. Ghostbuild provides project-level download and removal, but no single action erases
-          operator records, user-owned Cloudflare state, and browser replicas together. You can revoke Ghostbuild’s
-          authorization, manage or remove Cloudflare resources in your account, and clear Ghostbuild site data in each
-          browser you use.
+          Settings contains a self-service control that erases every record the operator holds for your account:
+          identity and profile, authentication sessions, encrypted Cloudflare credentials, connection metadata and
+          granted scopes, and your runtime locator. It also asks Cloudflare to revoke Ghostbuild’s authorization, and
+          tells you when Cloudflare did not confirm that revocation so you can remove it yourself. Because erasure is
+          irreversible it requires a Cloudflare sign-in completed in the last ten minutes, an exact typed confirmation,
+          and an explicit acknowledgement of what is retained. Repeating it is harmless. If you have already revoked
+          Ghostbuild’s authorization you can no longer sign in, so use the request path below instead.
+        </p>
+        <p>
+          That control deliberately deletes nothing inside your own Cloudflare account.{' '}
+          <strong>
+            Workers, D1 databases, R2 buckets, KV namespaces, Containers, Durable Objects, and Agents that Ghostbuild
+            deployed are retained, keep running, keep billing to your account, and are yours to remove.
+          </strong>{' '}
+          Chats, transcripts, project files, and deployment records also stay there under that account’s controls. There
+          is no machine-readable account export: download individual project source with Download code in the project
+          header, and use your Cloudflare account’s own tools for the rest. Browser copies are not reachable from the
+          server; clear Ghostbuild site data in every browser you use. Settings lists exactly what to clear.
         </p>
         <p>
           The operator’s current Cloudflare plan retains sampled control-plane Workers Logs and traces for seven days.
@@ -220,7 +231,9 @@ function PrivacyPage() {
         <p>
           Depending on applicable law, you may request access, correction, portability, restriction, objection, or
           erasure and may complain to the data-protection authority responsible where you live or where an alleged
-          infringement occurred. Start with the public <Link to="/support">Support</Link> form and include only the
+          infringement occurred. Erasure of the records the operator holds is self-service in Settings, as described
+          above. For everything else — access, correction, portability, restriction, objection, or a case the Settings
+          control cannot reach — start with the public <Link to="/support">Support</Link> form and include only the
           request type and your GitHub handle. If a private method can be arranged, a maintainer will identify it in the
           issue; until then, do not provide sensitive information. Ghostbuild does not yet provide a verified
           confidential privacy inbox.

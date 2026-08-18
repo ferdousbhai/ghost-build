@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 6,
-  "reviewedAgainstCommit": "working-tree-2026-08-05",
-  "policyStatus": "engineering inventory; the 2026-08-04 public-beta notice adopts enforced lifetimes and active-account/verified-request retention criteria, while complete account lifecycle tooling, jurisdiction-specific legal holds, and external-resource disposition remain explicit limitations",
+  "schemaVersion": 7,
+  "reviewedAgainstCommit": "working-tree-2026-08-18",
+  "policyStatus": "engineering inventory; the 2026-08-04 public-beta notice adopts enforced lifetimes and active-account/verified-request retention criteria; control-plane erasure is now self-service, while account-wide export, cross-account deletion orchestration, jurisdiction-specific legal holds, and external-resource disposition remain explicit limitations",
   "systems": [
     {
       "system": "Ghostbuild control-plane D1",
@@ -15,8 +15,8 @@
       ],
       "secrets": "OAuth tokens are encrypted; ciphertext, IVs, session token hashes, and credential handles must never be exported",
       "currentRetention": "OAuth state expires after 10 minutes, authentication sessions after 30 days, and unreferenced credentials become eligible after 24 hours; 15-minute bounded maintenance can be delayed by backlog or retries; other records remain while the account/service is active or until no longer needed or a verified request is fulfilled, with no inactivity purge",
-      "currentExport": "no self-service account export exists; users can download individual project source and start a privacy or account-data request through the sanitized public Support form, after which a maintainer may arrange a private method",
-      "currentDeletion": "no self-service account deletion exists; users can remove individual projects, revoke Cloudflare authorization, and start a deletion request through the sanitized public Support form; deleted D1 state remains provider-recoverable through the current Paid-plan 30-day Time Travel window and must not be intentionally restored after erasure"
+      "currentExport": "no machine-readable account export exists; users can download individual project source with Download code in the project header and start a privacy or account-data request through the sanitized public Support form, after which a maintainer may arrange a private method; the settings \"Your data\" card states plainly what the operator holds versus what the connected Cloudflare account holds",
+      "currentDeletion": "a re-authentication-gated settings control (POST /api/account/delete) erases every operator-held row for the account — account identity, authentication sessions, encrypted credential records, connection metadata and granted scopes, and the Computer runtime locator — and asks Cloudflare to revoke the OAuth grant; it requires a Cloudflare sign-in within the last 10 minutes, an exact typed confirmation phrase, and an explicit acknowledgement that user-owned Cloudflare resources are retained; it is idempotent, never touches user-owned Cloudflare resources or browser storage, and reports an unconfirmed revocation so the user can remove the authorization in Cloudflare; a user who already revoked authorization cannot sign in and must use the Support request path; deleted D1 state remains provider-recoverable through the current Paid-plan 30-day Time Travel window and must not be intentionally restored after erasure"
     },
     {
       "system": "User-owned workspace runtime D1",
@@ -89,7 +89,7 @@
       "secrets": "the pending prompt can contain user content and remains in tab-scoped session storage",
       "currentRetention": "browser-controlled; pending-prompt and other sessionStorage state lasts until the tab session ends, while OPFS SQLite and localStorage persist until cleared or replaced",
       "currentExport": "no server export includes browser-owned data",
-      "currentDeletion": "users must clear Ghostbuild site data with browser controls; no server-side request can enumerate or erase all browser-owned storage"
+      "currentDeletion": "users must clear Ghostbuild site data with browser controls; the settings \"Your data\" card names the ghostbuild_session cookie, the ghostbuild_theme and ghostbuild_builder_model preferences, the telemetry preference, tab-scoped session state, and the OPFS database to clear, and warns that this must be repeated in every browser and profile; logging out or completing control-plane erasure disposes the account-local replica in that browser only; no server-side request can enumerate or erase all browser-owned storage"
     },
     {
       "system": "User-owned deployed Cloudflare resources",
@@ -106,7 +106,7 @@
       "secrets": "deployed bindings and secrets must never be exported by Ghostbuild",
       "currentRetention": "generated resources remain in the user's account while the project is active; project deletion queues bounded provider cleanup after a 30-minute grace period, and provider failures or unavailable authorization can delay retries",
       "currentExport": "deployment inventory is not available as an account export",
-      "currentDeletion": "project deletion durably queues cleanup derived from every deployment plan: Workers are force-deleted with their script-owned Durable Objects, D1 databases and KV namespaces are deleted, and R2 objects are emptied in bounded batches before bucket deletion; missing resources are idempotent success and failed cleanup is retried while authorization remains available"
+      "currentDeletion": "project deletion durably queues cleanup derived from every deployment plan: Workers are force-deleted with their script-owned Durable Objects, D1 databases and KV namespaces are deleted, and R2 objects are emptied in bounded batches before bucket deletion; missing resources are idempotent success and failed cleanup is retried while authorization remains available; control-plane account erasure deliberately deletes none of these resources and the settings control says so before it is confirmed"
     },
     {
       "system": "User-owned generated-application observability",
@@ -167,11 +167,11 @@
   ],
   "launchBlockers": [
     "drill one synthetic privacy-rights request for the narrow operator-held D1 dataset, including identity verification, secret exclusion, case evidence, and Time Travel recovery boundaries",
-    "publish tested instructions for project download, user-owned Cloudflare resource management, and clearing OPFS SQLite, localStorage, and sessionStorage that server-side deletion cannot reach",
+    "decide and record whether self-service control-plane erasure changes the published retention criteria for user-owned Cloudflare resources, which Ghostbuild still never deletes on account erasure",
     "complete external receive/reply drills for support@ and privacy@ and confirm mailbox deletion behavior"
   ],
   "postLaunchHardening": [
-    "evaluate self-service export and deletion for operator-held account and connection records after the manual process is proven",
+    "evaluate a machine-readable export of the operator-held account and connection records now that control-plane erasure is self-service",
     "improve user-owned runtime cleanup, receipts, and status without silently deleting generated deployments or other customer-controlled resources"
   ]
 }

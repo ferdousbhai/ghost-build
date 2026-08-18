@@ -54,6 +54,7 @@ import { userRuntimeDeploymentAction } from '../../app/server-handlers/deploymen
 import { userRuntimeEnhancePromptAction } from '../../app/server-handlers/enhance-prompt';
 import { toolFailure, toolSuccess, type GhostbuildToolResult } from '../../ghostbuild-agent/tool-result';
 import { applyAtomicWorkspaceChanges } from './atomic-workspace-changes';
+import { ComputerAdmissionControl } from './computer-admission';
 import { isComputerContainerCallback } from './container-fetch-routing';
 import { COMPUTERD_BINARY, computerdBootstrapCommand, containerToolchainBootstrapCommand } from './container-toolchain';
 import { routeUserWorkspaceRuntimeControlPlaneRequest } from './readiness-route';
@@ -405,6 +406,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   readonly #toolOperations: ToolOperationJournal;
   readonly #operationLane: WorkspaceOperationLane;
   readonly #syncRetries: DurableWorkspaceSyncRetryScheduler;
+  readonly #admission: ComputerAdmissionControl;
   readonly #activeOperationOwners = new Set<string>();
   #activeValidation: ActiveValidation | null = null;
   readonly #activeSyncRecoveries = new Map<string, Promise<boolean>>();
@@ -440,6 +442,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         .reconcile()
         .catch((error) => console.error('Unable to reconcile persisted Computer sync retries', error)),
     );
+    this.#admission = new ComputerAdmissionControl(env.DB);
     this.#workspace = new Workspace(computerWorkspaceOptions(this, this.#syncRetries));
     this.#toolOperations = new ToolOperationJournal(ctx.storage);
     this.#toolOperations.initialize();
@@ -687,6 +690,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   }
 
   async beginToolOperation(value: unknown): Promise<ToolOperationStartResult> {
+    await this.#admission.admitNewOperation();
     this.requireCompletedComputerSync();
     const input = record(value);
     const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
@@ -880,6 +884,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   }
 
   async beginSeed(seedIdValue: unknown) {
+    await this.#admission.admitNewOperation();
     const seedId = requireString(seedIdValue, 'seedId', 256);
     return this.withStatefulOperation('seed', `seed:begin:${seedId}`, async () => {
       const row = this.workspaceRow();
@@ -1898,6 +1903,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   }
 
   async createPreview(value: unknown) {
+    await this.#admission.admitNewOperation();
     const input = record(value);
     const previewId = requirePreviewId(input.previewId);
     const expectedWorkspaceRevision = requireInteger(
@@ -2722,12 +2728,24 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   ): Promise<T> {
     this.requireCompletedComputerSync();
     const owner = crypto.randomUUID();
-    const lease = this.#operationLane.acquire({
-      owner,
-      idempotencyKey,
-      kind,
-      leaseMs: OPERATION_LEASE_MS[kind],
-    });
+    let lease: WorkspaceOperationLease;
+    try {
+      lease = this.#operationLane.acquire({
+        owner,
+        idempotencyKey,
+        kind,
+        leaseMs: OPERATION_LEASE_MS[kind],
+      });
+    } catch (error) {
+      if (error instanceof WorkspaceOperationConflictError) {
+        console.info('ProjectWorkspace operation lane conflict', {
+          kind,
+          activeKind: error.activeKind,
+          retryAfterMs: error.retryAfterMs,
+        });
+      }
+      throw error;
+    }
     this.#activeOperationOwners.add(owner);
     if (lease.recoveredOwner) {
       console.info('ProjectWorkspace operation lease recovered', {

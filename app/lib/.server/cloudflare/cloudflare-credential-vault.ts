@@ -1,6 +1,9 @@
 const AES_GCM_IV_BYTES = 12;
 const AES_256_KEY_BYTES = 32;
-const OAUTH_REFRESH_TIMEOUT_MS = 30_000;
+/** Bounds both client-authenticated OAuth calls: the refresh and the revocation. */
+const OAUTH_REQUEST_TIMEOUT_MS = 30_000;
+const OAUTH_TOKEN_URL = 'https://dash.cloudflare.com/oauth2/token';
+const OAUTH_REVOKE_URL = 'https://dash.cloudflare.com/oauth2/revoke';
 
 type CredentialRow = {
   ciphertext_base64: string;
@@ -83,6 +86,40 @@ export class D1CloudflareCredentialVault {
     return this.refreshOAuthCredential(credentialHandle, oauthCredential, row);
   }
 
+  /**
+   * Ask Cloudflare to revoke the stored grant so erasing the ciphertext also ends
+   * Ghostbuild's access. Returns false when there is nothing to revoke or the
+   * provider declined; callers treat that as an outcome to report, not a failure.
+   */
+  async revokeOAuthCredential(credentialHandle: string): Promise<boolean> {
+    if (!this.oauth) {
+      return false;
+    }
+    const row = await this.readCredentialRow(credentialHandle);
+    if (!row) {
+      return false;
+    }
+    const credential = parseStoredOAuthCredential(await this.decryptCredentialRow(row));
+    if (!credential) {
+      return false;
+    }
+    const execute = this.oauth.request ?? fetch;
+    const response = await execute(OAUTH_REVOKE_URL, {
+      method: 'POST',
+      headers: {
+        authorization: `Basic ${btoa(`${this.oauth.clientId}:${this.oauth.clientSecret}`)}`,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: this.oauth.clientId,
+        token_type_hint: 'refresh_token',
+        token: credential.refreshToken,
+      }),
+      signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
+    });
+    return response.ok;
+  }
+
   async deleteIfUnreferenced(credentialHandle: string): Promise<boolean> {
     const result = await this.db
       .prepare(
@@ -109,7 +146,7 @@ export class D1CloudflareCredentialVault {
     const execute = this.oauth.request ?? fetch;
     let response: Response;
     try {
-      response = await execute('https://dash.cloudflare.com/oauth2/token', {
+      response = await execute(OAUTH_TOKEN_URL, {
         method: 'POST',
         headers: {
           authorization: `Basic ${btoa(`${this.oauth.clientId}:${this.oauth.clientSecret}`)}`,
@@ -120,7 +157,7 @@ export class D1CloudflareCredentialVault {
           client_id: this.oauth.clientId,
           refresh_token: credential.refreshToken,
         }),
-        signal: AbortSignal.timeout(OAUTH_REFRESH_TIMEOUT_MS),
+        signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
       });
     } catch (error) {
       const concurrent = await this.readConcurrentRefreshSafely(credentialHandle, stored);

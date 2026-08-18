@@ -89,9 +89,10 @@ Do not edit generated route trees, Worker binding types, `app/generated/user-wor
 generated Builder template module directly.
 
 `template/scripts/lib/project-policy/generated-project-dependency-policy.json` is the single machine-readable source
-for generated-project pnpm cooling, lifecycle-build approvals, and security overrides. Both the browser write guard and
-the root/template verifiers import it. The repository-only early-release exception for the pinned Computer preview is
-an explicitly named profile difference; generated projects do not inherit it.
+for generated-project pnpm cooling, lifecycle-build approvals, and security overrides. The root and template verifiers
+import it through `template/scripts/lib/project-policy.mjs`, and its contents are pinned by the deployment security
+baseline in `app/lib/.server/cloudflare/deployment-security-baseline.ts`, so any edit must be accompanied by a
+regenerated baseline.
 
 Client source maps are generated for internal diagnosis but excluded from the static upload by
 `dist/client/.assetsignore`, following Cloudflare's

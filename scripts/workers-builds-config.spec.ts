@@ -40,7 +40,8 @@ describe('Workers Builds production configuration', () => {
         config: validConfig,
         packageJson,
         nvmrc: '26.3.0\n',
-        githubWorkflowPaths: ['.github/workflows/runtime-artifacts.yml'],
+        githubWorkflowPaths: ['.github/workflows/browser-gate.yml', '.github/workflows/runtime-artifacts.yml'],
+        browserGateWorkflow: '      - run: pnpm run verify:built-browser\n',
         githubCompositeActionExists: false,
         workerConfig: {},
       }),
@@ -65,11 +66,13 @@ describe('Workers Builds production configuration', () => {
           '.github/workflows/ci.yml',
           '.github/workflows/deploy.yml',
         ],
+        browserGateWorkflow: undefined,
         githubCompositeActionExists: true,
         workerConfig: { containers: [{ class_name: 'DeploymentSandbox', image: './Dockerfile.sandbox' }] },
       }),
     ).toEqual(
       expect.arrayContaining([
+        '.github/workflows/browser-gate.yml must run pnpm run verify:built-browser; the Workers Builds image cannot host the browser gate.',
         'workers-builds.production.json nonProductionBuilds must be true; found false.',
         'workers-builds.production.json nonProductionDeployCommand must be "pnpm run workers-builds:preview"; found "wrangler deploy".',
         'workers-builds.production.json buildTokenName must be "account-workers-builds-production"; found "per-project-token".',

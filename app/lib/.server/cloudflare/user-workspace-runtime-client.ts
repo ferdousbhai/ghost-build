@@ -1,5 +1,10 @@
 import type { GhostbuildToolResult } from 'ghostbuild-agent/tool-result';
-import { computerSyncUnconfirmedError, isComputerSyncUnconfirmedError } from 'ghostbuild-agent/cloudflare-computer';
+import {
+  computerSyncUnconfirmedError,
+  isComputerSyncUnconfirmedError,
+  workspaceOperationConflict,
+  WORKSPACE_OPERATION_CONFLICT_ERROR_CODE,
+} from 'ghostbuild-agent/cloudflare-computer';
 import {
   WorkspaceToolOperationIndeterminateError,
   type BuilderWorkspaceApi,
@@ -780,13 +785,13 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
               if (isDurableObjectTransportReset(error)) {
                 invalidate();
               }
-              throw error;
+              throw workspaceBusyError(error) ?? error;
             });
           } catch (error) {
             if (isDurableObjectTransportReset(error)) {
               invalidate();
             }
-            throw error;
+            throw workspaceBusyError(error) ?? error;
           }
         };
       },
@@ -813,6 +818,31 @@ const ACTIVE_REPLAY_OVERALL_TIMEOUT_MS = 30_000;
 const SETTLEMENT_RPC_ATTEMPT_TIMEOUT_MS = 5_000;
 const SETTLEMENT_OVERALL_TIMEOUT_MS = 30_000;
 const SETTLEMENT_RETRY_DELAY_MS = 1_000;
+
+/**
+ * The durable operation lane never waits inside the Durable Object, so a busy
+ * workspace rejects immediately. Restate the lane's conflict as retryable
+ * guidance instead of an opaque Durable Object failure.
+ */
+class WorkspaceBusyError extends Error {
+  readonly code = WORKSPACE_OPERATION_CONFLICT_ERROR_CODE;
+  readonly retryable = true;
+
+  constructor(
+    readonly activeKind: string,
+    readonly retryAfterMs: number,
+  ) {
+    super(
+      `The project workspace is busy with ${activeKind}. Retry in ${Math.max(1, Math.ceil(retryAfterMs / 1_000))} seconds.`,
+    );
+    this.name = 'WorkspaceBusyError';
+  }
+}
+
+function workspaceBusyError(error: unknown): WorkspaceBusyError | null {
+  const conflict = workspaceOperationConflict(error);
+  return conflict ? new WorkspaceBusyError(conflict.activeKind, conflict.retryAfterMs) : null;
+}
 
 class SettlementAttemptTimeoutError extends Error {
   readonly retryable = true;

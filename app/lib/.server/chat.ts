@@ -11,6 +11,7 @@ import type { BuilderValidationStage } from '~/lib/common/builder-validation-pro
 import { logProviderFailure } from './llm/provider-error-logging';
 import type { WorkersAiModelId } from '~/lib/workers-ai-model';
 import type { PiSteeringQueue } from './llm/pi-steering';
+import type { BuilderTurnBudgetReport } from './llm/builder-turn-budget';
 
 type Messages = GhostbuildMessage[];
 
@@ -58,7 +59,7 @@ export async function createChatResponseFromBody({
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
   skillBucket: R2Bucket;
   steering: PiSteeringQueue;
-  onSettled: () => void;
+  onSettled: (budget: BuilderTurnBudgetReport) => void;
 }) {
   const { messages, modelId } = body;
   const transcriptMessages = messages ?? [];

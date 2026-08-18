@@ -85,6 +85,8 @@ function StructuredResultTool({ invocation }: { invocation: GhostbuildToolInvoca
     if (!complete) {
       return;
     }
+    // Every completed tool card reaches this effect, so the once-per-journey claim
+    // inside `captureProductEvent` is what keeps this a single funnel event.
     void captureProductEvent('first_tool_completed', {
       outcome: succeeded ? 'success' : invocation.state === 'output-denied' ? 'cancelled' : 'failure',
     });

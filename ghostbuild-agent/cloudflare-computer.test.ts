@@ -1,7 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { createAITools, type CreateAIToolsOptions } from '@cloudflare/computer/tools';
+import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { z, type ZodType } from 'zod';
 import {
   CLOUDFLARE_COMPUTER_VERSION,
   GENERATED_PROJECT_PNPM_VERSION,
@@ -11,19 +9,56 @@ import {
   COMPUTER_SHELL_BACKEND_IDS,
   COMPUTER_SHELL_TOOL_OPTIONS,
   COMPUTER_TOOL_LIMITS,
-  COMPUTER_TOOL_NAMES,
   computerSyncUnconfirmedToolResult,
+  workspaceOperationConflict,
+  workspaceOperationConflictMessage,
 } from './cloudflare-computer.js';
 
-const EXPECTED_TOOL_SCHEMA = {
-  edit: { properties: ['edits', 'path'], required: ['path', 'edits'] },
-  exec: { properties: ['backend', 'command', 'cwd'], required: ['command'] },
-  ls: { properties: ['path'], required: ['path'] },
-  read: { properties: ['limit', 'offset', 'path'], required: ['path'] },
-  write: { properties: ['content', 'path'], required: ['path', 'content'] },
-} as const;
+/**
+ * Ghostbuild does not use the published AI SDK tools; the four model tools are
+ * hand written. The upstream blast radius is the durable workspace surface the
+ * ProjectWorkspace runtime calls directly, so that is what the canary pins.
+ */
+const REQUIRED_COMPUTER_DECLARATIONS = [
+  'declare class Workspace {',
+  'get fs(): WorkspaceFilesystem;',
+  'get runtime(): WorkspaceRuntime;',
+  'provider(): SQLiteWorkspaceProvider;',
+  'stub(): WorkspaceStub;',
+  'push(id?: string): Promise<number>;',
+  'pull(id?: string): Promise<ApplyResult>;',
+  'retryPendingSync(id?: string): Promise<WorkspaceRetryPendingSyncResult>;',
+  'close(): Promise<void>;',
+  'declare class WorkspaceFilesystem {',
+  'readFile(path: string, encoding: "utf8"): Promise<string>;',
+  'stat(path: string): Promise<WorkspaceStatResult>;',
+  'readdir(path: string, options?: ReaddirOptions): Promise<WorkspaceDirentResult[]>;',
+  'find(directory: string, pattern?: string): Promise<WorkspaceFoundEntry[]>;',
+  'mkdir(path: string, options?: MkdirOptions): Promise<void>;',
+  'rm(path: string, options?: RmOptions): Promise<void>;',
+  'declare class WorkspaceRuntime {',
+  'exec(source: string, options: WorkspaceRuntimeExecOptions<"utf8">): Promise<WorkspaceRuntimeExecHandle<"utf8">>;',
+  'disposeExec(id: string, options?: WorkspaceRuntimeDisposeOptions): Promise<void>;',
+  'interface SyncRetryScheduler {',
+  'get(backend: string): Promise<SyncRetryIntent | undefined>;',
+  'schedule(intent: SyncRetryIntent): Promise<void>;',
+  'clear(backend: string): Promise<void>;',
+] as const;
 
-type SchemaTool = { inputSchema?: unknown };
+/**
+ * Post-image of patches/@cloudflare__computer@0.1.1.patch. Patching a preview
+ * dependency's published bundle silently stops applying when upstream reflows
+ * the region, so the reviewed bytes are pinned here as well.
+ */
+const PATCHED_PROBE_BATCH_REGION = [
+  '\tfor (const b of bytes) out += b.toString(16).padStart(2, "0");',
+  '\treturn out;',
+  '}',
+  'const PROBE_BATCH = 64;',
+  'function hasObjects(db, hashes) {',
+  '\tif (hashes.length === 0) return [];',
+  '\tconst present = /* @__PURE__ */ new Set();',
+].join('\n');
 
 describe('Cloudflare Computer preview contract', () => {
   it('recognizes both thrown and official wrapped pending-sync failures', () => {
@@ -38,7 +73,20 @@ describe('Cloudflare Computer preview contract', () => {
     });
     expect(computerSyncUnconfirmedToolResult({ error: 'ordinary failure' })).toBeNull();
   });
-  it('pins the reviewed preview package in dependency and release-age configuration', () => {
+
+  it('carries the operation-lane conflict code and retry budget across Workers RPC', () => {
+    const message = workspaceOperationConflictMessage({ activeKind: 'validate', retryAfterMs: 90_000 });
+    expect(message).toBe('[workspace_operation_conflict] validate is running; retry after 90000ms.');
+    expect(workspaceOperationConflict(new Error(message))).toEqual({ activeKind: 'validate', retryAfterMs: 90_000 });
+    expect(workspaceOperationConflict(new Error('ordinary failure'))).toBeNull();
+    expect(
+      workspaceOperationConflict(
+        new Error(workspaceOperationConflictMessage({ activeKind: 'stateful operation', retryAfterMs: 1_000 })),
+      ),
+    ).toEqual({ activeKind: 'stateful operation', retryAfterMs: 1_000 });
+  });
+
+  it('pins the reviewed preview package without a release-age exception', () => {
     const rootPackage = jsonFile<{ dependencies?: Record<string, string>; packageManager?: string }>('../package.json');
     const installedPackage = jsonFile<{ version?: string }>('../node_modules/@cloudflare/computer/package.json');
     const workspaceConfig = textFile('../pnpm-workspace.yaml');
@@ -47,29 +95,30 @@ describe('Cloudflare Computer preview contract', () => {
     expect(rootPackage.dependencies?.['@cloudflare/computer']).toBe(CLOUDFLARE_COMPUTER_VERSION);
     expect(rootPackage.packageManager).toBe(`pnpm@${GENERATED_PROJECT_PNPM_VERSION}`);
     expect(installedPackage.version).toBe(CLOUDFLARE_COMPUTER_VERSION);
-    expect(workspaceConfig).toContain(`'@cloudflare/computer@${CLOUDFLARE_COMPUTER_VERSION}'`);
+    expect(workspaceConfig).not.toContain('minimumReleaseAgeExclude');
     expect(installedReadme).toContain('**PREVIEW ONLY.**');
     expect(installedReadme).toContain('production use at this time.');
   });
 
-  it('canaries the published AI SDK tool names and input schemas', () => {
-    const tools = createAITools({
-      workspace: workspaceStub(),
-      ...COMPUTER_AI_TOOL_OPTIONS,
-    });
-
-    expect(Object.keys(tools).sort()).toEqual([...COMPUTER_TOOL_NAMES].sort());
-    for (const [toolName, expected] of Object.entries(EXPECTED_TOOL_SCHEMA)) {
-      const schema = jsonSchema(requireTool(tools[toolName], toolName));
-      expect(Object.keys(schema.properties ?? {}).sort(), toolName).toEqual([...expected.properties].sort());
-      expect(schema.required, toolName).toEqual(expected.required);
+  it('canaries the durable workspace surfaces the runtime executes', () => {
+    const declarations = computerTypeDeclarations();
+    for (const declaration of REQUIRED_COMPUTER_DECLARATIONS) {
+      expect(declarations, declaration).toContain(declaration);
     }
-
-    const execSchema = jsonSchema(requireTool(tools.exec, 'exec'));
-    expect(execSchema.properties?.backend?.enum).toEqual(COMPUTER_SHELL_BACKEND_IDS);
   });
 
-  it('keeps backend selection explicit and inspection-only mode non-executable', () => {
+  it('canaries the reviewed SQL probe patch against the published bundle', () => {
+    const workspaceConfig = textFile('../pnpm-workspace.yaml');
+    const bundle = textFile('../node_modules/@cloudflare/computer/dist/index.js');
+
+    expect(workspaceConfig).toContain(
+      `'@cloudflare/computer@${CLOUDFLARE_COMPUTER_VERSION}': patches/@cloudflare__computer@${CLOUDFLARE_COMPUTER_VERSION}.patch`,
+    );
+    expect(bundle).toContain(PATCHED_PROBE_BATCH_REGION);
+    expect(bundle).not.toContain('const PROBE_BATCH = 256;');
+  });
+
+  it('keeps backend selection explicit and every tool limit reviewed', () => {
     expect(COMPUTER_AI_TOOL_OPTIONS).toMatchObject({
       assets: false,
       read: {
@@ -89,38 +138,17 @@ describe('Cloudflare Computer preview contract', () => {
     expect(COMPUTER_SHELL_TOOL_OPTIONS.backends['container-shell'].description).toContain('pnpm');
     expect(COMPUTER_EXEC_APPLICATION_POLICY).toContain('do not start development, preview, watch');
     expect(COMPUTER_EXEC_APPLICATION_POLICY).toContain('Ghostbuild manages previews after validation');
-
-    const readonlyTools = createAITools({ workspace: workspaceStub(), readonly: true });
-    expect(Object.keys(readonlyTools).sort()).toEqual(['ls', 'read']);
   });
 });
 
-function workspaceStub(): CreateAIToolsOptions['workspace'] {
-  return {} as CreateAIToolsOptions['workspace'];
-}
-
-function requireTool<T extends SchemaTool>(tool: T | undefined, name: string): T {
-  if (!tool) {
-    throw new Error(`Cloudflare Computer did not expose ${name}.`);
-  }
-  return tool;
-}
-
-function jsonSchema(tool: SchemaTool): {
-  properties?: Record<string, { enum?: string[] }>;
-  required?: string[];
-} {
-  return schemaJson(tool.inputSchema as ZodType);
-}
-
-function schemaJson(schema: ZodType): {
-  properties?: Record<string, { enum?: string[] }>;
-  required?: string[];
-} {
-  return z.toJSONSchema(schema) as {
-    properties?: Record<string, { enum?: string[] }>;
-    required?: string[];
-  };
+/** Shared declaration chunks carry content-hashed names, so read the whole published surface. */
+function computerTypeDeclarations(): string {
+  const directory = new URL('../node_modules/@cloudflare/computer/dist/', import.meta.url);
+  return readdirSync(directory)
+    .filter((name) => name.endsWith('.d.ts'))
+    .sort()
+    .map((name) => readFileSync(new URL(name, directory), 'utf8'))
+    .join('\n');
 }
 
 function jsonFile<T>(path: string): T {

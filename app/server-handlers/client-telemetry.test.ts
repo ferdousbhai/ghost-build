@@ -68,6 +68,22 @@ describe('clientTelemetryAction', () => {
     expect(response.status).toBe(400);
   });
 
+  it('accepts an opaque control-plane correlation ID and rejects a non-opaque one', async () => {
+    vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const submit = (correlationId: string) =>
+      clientTelemetryAction({
+        env,
+        request: new Request('https://ghostbuild.dev/api/client-telemetry', {
+          method: 'POST',
+          headers: { origin: 'https://ghostbuild.dev' },
+          body: JSON.stringify({ ...validTelemetry, correlationId }),
+        }),
+      });
+
+    await expect(submit('00000000-0000-4000-8000-0000000000ab')).resolves.toMatchObject({ status: 202 });
+    await expect(submit('user@example.com')).resolves.toMatchObject({ status: 400 });
+  });
+
   it('rejects cross-origin browser submissions', async () => {
     const response = await clientTelemetryAction({
       env,

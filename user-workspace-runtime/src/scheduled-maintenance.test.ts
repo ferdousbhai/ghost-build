@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { USER_WORKSPACE_RUNTIME_GC_CRON } from '../../app/lib/.server/cloudflare/user-workspace-runtime-policy';
 import { sweepAgentGcCandidatesBestEffort } from '../../app/lib/cloudflare/data/agent-gc.server';
 import { sweepAppResourceGcCandidatesBestEffort } from '../../app/lib/cloudflare/data/app-resource-gc.server';
-import { reconcileAppResourcesBestEffort } from '../../app/lib/cloudflare/data/app-resource-reconcile.server';
 import { scheduleUserWorkspaceRuntimeMaintenance } from './scheduled-maintenance';
 
 vi.mock('../../app/lib/cloudflare/data/agent-gc.server', () => ({
@@ -11,17 +10,10 @@ vi.mock('../../app/lib/cloudflare/data/agent-gc.server', () => ({
 vi.mock('../../app/lib/cloudflare/data/app-resource-gc.server', () => ({
   sweepAppResourceGcCandidatesBestEffort: vi.fn(async () => undefined),
 }));
-vi.mock('../../app/lib/cloudflare/data/app-resource-reconcile.server', () => ({
-  reconcileAppResourcesBestEffort: vi.fn(async () => undefined),
-}));
 
 // Every job the provisioned trigger must register. Listing them here is what
 // keeps the call-count assertions from drifting when a sweep is added.
-const MAINTENANCE_JOBS = [
-  sweepAgentGcCandidatesBestEffort,
-  sweepAppResourceGcCandidatesBestEffort,
-  reconcileAppResourcesBestEffort,
-];
+const MAINTENANCE_JOBS = [sweepAgentGcCandidatesBestEffort, sweepAppResourceGcCandidatesBestEffort];
 
 function maintenanceEnv() {
   return { BuilderAgent: {}, DB: {} } as unknown as Parameters<typeof scheduleUserWorkspaceRuntimeMaintenance>[1];

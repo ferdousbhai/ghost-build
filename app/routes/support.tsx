@@ -1,6 +1,11 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
-import { GHOSTBUILD_SUPPORT_URL, TRUST_CHANNEL_STATUS, createPublicBetaTrustPageHead } from '~/lib/trust';
+import {
+  GHOSTBUILD_SUPPORT_URL,
+  TRUST_CHANNEL_STATUS,
+  TRUST_PAGE_HEADINGS,
+  createPublicBetaTrustPageHead,
+} from '~/lib/trust';
 
 export const Route = createFileRoute('/support')({
   head: () =>
@@ -16,7 +21,7 @@ function SupportPage() {
   return (
     <TrustPage
       eyebrow="Support"
-      title="Get help through the right channel."
+      title={TRUST_PAGE_HEADINGS.support}
       summary="Use the public GitHub form for non-sensitive product, Ghostbuild sign-in, or privacy questions. Never include credentials, account details, or private project data."
     >
       <TrustSection title="Open a support request">
@@ -38,6 +43,22 @@ function SupportPage() {
           information. Ghostbuild does not yet provide a verified confidential support or privacy inbox, so never place
           identity documents, account details, or other private information in the issue. Applicable statutory deadlines
           govern privacy-rights requests regardless of the public-beta target above.
+        </p>
+      </TrustSection>
+      <TrustSection title="Report abuse">
+        <p>
+          Abuse reports use the same public GitHub support form. There is no separate abuse address. Choose the abuse
+          category, describe the prohibited use under the <Link to="/terms">Terms</Link>, and identify the affected
+          Ghostbuild-generated site by its public URL only. Do not attach evidence containing personal data,
+          credentials, or another person’s private content; a maintainer will ask for what is needed if a private method
+          can be arranged.
+        </p>
+        <p>
+          A vulnerability in Ghostbuild is not an abuse report. Use <Link to="/security">Security</Link> for that, so
+          exploit details stay out of a public issue. Ghostbuild can act only on the service it operates: content and
+          behaviour of a deployed application live in the Cloudflare account that owns it, so serious cases may also
+          need <a href="https://developers.cloudflare.com/support/contacting-cloudflare-support/">Cloudflare support</a>{' '}
+          or law enforcement.
         </p>
       </TrustSection>
       <TrustSection title="Availability and urgent situations">

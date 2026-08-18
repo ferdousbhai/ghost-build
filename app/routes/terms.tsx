@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { TrustPage, TrustSection } from '~/components/trust/TrustPage';
-import { GHOSTBUILD_OPERATOR, createPublicBetaTrustPageHead } from '~/lib/trust';
+import { GHOSTBUILD_OPERATOR, TRUST_PAGE_HEADINGS, createPublicBetaTrustPageHead } from '~/lib/trust';
 
 export const Route = createFileRoute('/terms')({
   head: () =>
@@ -16,7 +16,7 @@ function TermsPage() {
   return (
     <TrustPage
       eyebrow="Terms"
-      title="You control the cloud account."
+      title={TRUST_PAGE_HEADINGS.terms}
       summary="These terms govern the Ghostbuild public beta. The service can generate, validate, and deploy project code inside the Cloudflare account you authorize."
     >
       <TrustSection title="Operator, acceptance, and eligibility">
@@ -78,6 +78,11 @@ function TermsPage() {
           systems without authorization; evade safeguards or rate limits; expose credentials or personal data you are
           not authorized to process; or abuse Cloudflare or GitHub services. Do not use it to build systems whose
           purpose is fraud, impersonation, harassment, exploitation, or facilitating physical harm.
+        </p>
+        <p>
+          Report prohibited use through the public <Link to="/support">Support</Link> form, which is also the abuse
+          channel; there is no separate abuse address. Report a vulnerability in Ghostbuild through{' '}
+          <Link to="/security">Security</Link> instead, so exploit details stay private.
         </p>
       </TrustSection>
       <TrustSection title="Suspension, termination, and data">

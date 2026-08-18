@@ -1,6 +1,6 @@
 import { BUILDER_TEMPLATE_SOURCE_SHA256 } from '~/agents/builder-template.generated';
 
-export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 34 as const;
+export const DEPLOYMENT_SECURITY_BASELINE_VERSION = 35 as const;
 export {
   DEPLOYMENT_SECURITY_BASELINE_BINDING,
   DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
@@ -31,11 +31,11 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'scripts/lib/project-policy/dependency-policy.mjs':
     '9335f533a868ffa2e72e3e552d9f3d4e86d69c099d242aed12c3f2f65a3691a5',
   'scripts/lib/project-policy/generated-project-dependency-policy.json':
-    'd3fe82524093febd3f2fdcc57a5c596fb12cf9e73db0d32a1403c11c48a2a466',
+    '5af3732485a3aa12c15fc8e8835ac32ffc06f159ae96de07b580d319d56207fa',
   'scripts/lib/project-policy/source-policy.mjs': 'deed7d40e7c9c1bca8cfb3dbf46503f9dc89a4004988f8ef55871b7ed0c24f86',
   'scripts/lib/project-policy/worker-policy.mjs': '9f908807030d1a91c99b442b41488048d2e49b996783a18900b413e046f3edbc',
   'scripts/lib/project-policy/workflow-policy.mjs': 'e4c172b80ffe2f551a4ca25d4f8a4d0ea19195a7cef0ee056536e331d3993fab',
-  'scripts/lib/project-policy/workspace-policy.mjs': '765e1bab8bad64631645513f2f5ac2f66c83fdb52d9bcf60f99e518b06d7ec46',
+  'scripts/lib/project-policy/workspace-policy.mjs': '5c2f4a7e780b0f02762ca46967add61325195400c1eb8f2cea64bbba272bd60b',
   'scripts/provision-cloudflare-production.mjs': '2680b6345c9d9cdc99924fae8b7d1e1379d52a0a436610fbad2fff089733d922',
   'scripts/verify-production-config.mjs': 'c18120967c164c5b570872f2eb020b25062f93fec6a8f2c99ef53124be47902b',
   'scripts/verify-production-licenses.mjs': '22952be32b45c416551ca2681a202b72c616aca61c6643ce946868373320a82d',
@@ -56,7 +56,7 @@ export const APP_AGENT_PROTECTED_FILE_SHA256 = {
   'wrangler.preview.jsonc': '626444c576448d7c8a70572092d7d68ec0d0fb6d577978fed0a146018053fde8',
 } as const;
 
-export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '8453a8766b09c7cd0daf95da0a2be14cfe47f699e0c3e650d961776af62a5e43';
+export const APP_AGENT_SECURITY_BOUNDARY_SHA256 = '4f1c4d96c612aaece5834b1f671da51b9890d5a89c0ce5eef3af02836b2b2010';
 
 export const APP_AGENT_PROTECTED_LOCK_ENTRIES_SHA256 =
   'cb02376e281076140a97e91560fc6780740b1bc94ea9d0457397e01642795a15';

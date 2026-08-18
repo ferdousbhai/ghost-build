@@ -195,6 +195,17 @@ export async function cloudflareRuntimeSessionAction({
     accountId: currentConnection.accountId,
     connectionGeneration: currentConnection.generation,
   });
+  // The control plane owns the browser/server join key. Minting it here and
+  // logging it beside this grant lets an incident responder line up opted-in
+  // browser funnel events with the request that issued the runtime session,
+  // without the browser's journey ID ever reaching the server as an identifier.
+  const correlationId = crypto.randomUUID();
+  console.info({
+    event: 'runtime_session_issued',
+    correlationId,
+    connectionGeneration: currentConnection.generation,
+    runtimeVersion: currentRuntime.runtimeVersion,
+  });
   const [capability, aiGatewayCreditStatus] = await Promise.all([
     mintRuntimeCapability({
       secret,
@@ -209,7 +220,7 @@ export async function cloudflareRuntimeSessionAction({
     ),
   ]);
   return Response.json(
-    { endpoint: currentRuntime.endpoint, ...capability, aiGatewayCreditStatus },
+    { endpoint: currentRuntime.endpoint, ...capability, aiGatewayCreditStatus, correlationId },
     { headers: { 'Cache-Control': 'private, no-store' } },
   );
 }

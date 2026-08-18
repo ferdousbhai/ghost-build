@@ -1,5 +1,6 @@
 import type { ChatRecoveryContext, ChatRecoveryExhaustedContext } from '@cloudflare/ai-chat';
 import { messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import type { BuilderTurnBudgetReport } from '~/lib/.server/llm/builder-turn-budget';
 
 const MAX_PROMPT_PREVIEW_LENGTH = 500;
 const MAX_TURN_ERROR_LENGTH = 2_000;
@@ -18,6 +19,8 @@ export type BuilderTurnState = {
   firstUserMessage: boolean;
   messageCount: number;
   lastUserMessagePreview?: string;
+  /** Content-free execution accounting for the turn, including why it stopped. */
+  budget?: BuilderTurnBudgetReport;
   recovery?: {
     incidentId: string;
     attempt: number;
@@ -65,6 +68,10 @@ export function createRecoveryTurn(context: ChatRecoveryContext, current?: Build
       partialTextLength: context.partialText.length,
     },
   };
+}
+
+export function recordBuilderTurnBudget(turn: BuilderTurnState, budget: BuilderTurnBudgetReport): BuilderTurnState {
+  return { ...turn, budget, updatedAt: new Date().toISOString() };
 }
 
 export function completeBuilderTurn(

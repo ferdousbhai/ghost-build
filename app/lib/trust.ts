@@ -20,6 +20,15 @@ export const TRUST_CHANNEL_STATUS =
 export const HOME_HERO_LEDE =
   'Describe the app. Ghostbuild writes, runs, and deploys your app inside your own Cloudflare account. The code, data, and infrastructure stay yours.';
 
+// The browser gate asserts these exact headings, so the pages and the suite
+// read one definition instead of drifting apart.
+export const TRUST_PAGE_HEADINGS = {
+  privacy: 'How Ghostbuild handles your data.',
+  terms: 'You control the cloud account.',
+  support: 'Get help through the right channel.',
+  security: 'Keep vulnerability details private.',
+} as const;
+
 export const TRUST_LINKS = [
   { href: '/privacy', label: 'Privacy' },
   { href: '/terms', label: 'Terms' },

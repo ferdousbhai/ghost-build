@@ -148,6 +148,25 @@ describe('Cloudflare-only authentication', () => {
     });
   });
 
+  it('mints an opaque correlation ID and logs it beside the grant it issued', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection());
+
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([runtimeRow(), runtimeRow()]),
+      provision: vi.fn(),
+      readAiGatewayCreditStatus: vi.fn().mockResolvedValue('available'),
+    });
+
+    const { correlationId } = (await response.json()) as { correlationId?: string };
+    expect(correlationId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({ event: 'runtime_session_issued', correlationId }));
+    // The join key must never be accompanied by the account it was issued for.
+    expect(JSON.stringify(info.mock.calls)).not.toContain('user-1');
+  });
+
   it.each(['available', 'unavailable'] as const)(
     'returns only the AI Gateway credit availability status when credits are %s',
     async (aiGatewayCreditStatus) => {

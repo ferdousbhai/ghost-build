@@ -17,7 +17,12 @@ export function DeploymentStatus({
   }, [deployment.status]);
 
   return (
-    <section className="mt-3 space-y-3 rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-4 text-sm">
+    <section
+      data-testid="deployment-status"
+      // The browser gate reads this to prove production carries the revision that was saved.
+      data-workspace-revision={deployment.workspaceRevision}
+      className="mt-3 space-y-3 rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-4 text-sm"
+    >
       {deployment.status === 'succeeded' ? (
         <p className="text-bolt-elements-icon-success">
           Deployed.

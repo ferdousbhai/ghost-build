@@ -14,12 +14,15 @@ describe('DeploymentStatus', () => {
     expect(html).not.toContain('billing');
   });
 
-  it('links a successful production deployment', () => {
+  it('links a successful production deployment and names its revision', () => {
     const html = renderToStaticMarkup(
-      <DeploymentStatus deployment={{ status: 'succeeded', productionUrl: 'https://app.example.com' }} />,
+      <DeploymentStatus
+        deployment={{ status: 'succeeded', workspaceRevision: 12, productionUrl: 'https://app.example.com' }}
+      />,
     );
     expect(html).toContain('Deployed');
     expect(html).toContain('https://app.example.com');
+    expect(html).toContain('data-workspace-revision="12"');
   });
 
   it('offers one retry action after failure', () => {

@@ -17,6 +17,24 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     expect(calls.map((request) => request.operation)).toEqual(['initializeProjectIdentity', 'beginToolOperation']);
   });
 
+  it('restates a busy operation lane as retryable guidance', async () => {
+    const { client } = harness((operation) => {
+      if (operation === 'getWorkspaceSnapshot') {
+        throw new Error('[workspace_operation_conflict] validate is running; retry after 12000ms.');
+      }
+      return undefined;
+    });
+
+    await expect(client.refresh()).rejects.toMatchObject({
+      name: 'WorkspaceBusyError',
+      code: 'workspace_operation_conflict',
+      retryable: true,
+      activeKind: 'validate',
+      retryAfterMs: 12_000,
+      message: 'The project workspace is busy with validate. Retry in 12 seconds.',
+    });
+  });
+
   it('terminalizes a committed mutation whose display acknowledgement was interrupted', async () => {
     const pending = {
       kind: 'workspace-mutation-receipt',

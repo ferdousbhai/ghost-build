@@ -10,6 +10,10 @@ const clientTelemetrySchema = z
     event: z.enum(ALL_CLIENT_TELEMETRY_EVENTS),
     level: z.enum(['error', 'warning', 'info']),
     journeyId: z.uuid(),
+    // Minted by the control plane and echoed back by the browser, so a funnel
+    // event joins the request that issued it without the browser-owned journey
+    // ID ever becoming a server-side join key.
+    correlationId: z.uuid().optional(),
     errorEventId: z.uuid().optional(),
     occurredAt: z.iso.datetime(),
     page: z.enum(['home', 'settings', 'chat', 'other']),

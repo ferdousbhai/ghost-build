@@ -21,7 +21,6 @@
     "packages",
     "ignoreWorkspaceRootCheck",
     "minimumReleaseAge",
-    "minimumReleaseAgeExclude",
     "minimumReleaseAgeIgnoreMissingTime",
     "minimumReleaseAgeStrict",
     "strictDepBuilds",
@@ -30,15 +29,9 @@
     "allowBuilds",
     "peerDependencyRules"
   ],
-  "forbiddenWorkspaceKeys": ["dangerouslyAllowAllBuilds", "trustLockfile"],
-  "profiles": {
-    "generatedProject": {
-      "packages": ["."],
-      "minimumReleaseAgeExclusions": []
-    },
-    "repository": {
-      "minimumReleaseAgeExclusions": ["@cloudflare/computer@0.1.1"],
-      "minimumReleaseAgeExclusionReason": "Reviewed preview dependency adopted during the Cloudflare Computer cutover before the normal release-age gate."
-    }
-  }
+  "forbiddenWorkspaceKeys": [
+    "dangerouslyAllowAllBuilds",
+    "minimumReleaseAgeExclude",
+    "trustLockfile"
+  ]
 }

@@ -14,9 +14,11 @@ import {
   createBuilderTurn,
   createRecoveryTurn,
   exhaustedBuilderTurnResult,
+  recordBuilderTurnBudget,
   type BuilderTurnState,
   type BuilderTurnStatus,
 } from './builder-turn-state';
+import type { BuilderTurnBudgetReport } from '~/lib/.server/llm/builder-turn-budget';
 import { DurableObjectContextCompactionRepository } from '~/lib/.server/llm/context-compaction-store';
 import { compactContext } from '~/lib/.server/llm/context-compaction';
 import { summarizeBuilderContext } from '~/lib/.server/llm/workers-ai-text';
@@ -395,7 +397,10 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         runWithKeepAlive: (operation) => this.keepAliveWhile(operation),
         skillBucket: this.env.BUILDER_SKILLS,
         steering,
-        onSettled: settleSteering,
+        onSettled: (budget) => {
+          settleSteering();
+          this.recordTurnBudget(turn.id, budget);
+        },
         compaction: {
           current: this.contextCompaction.getCompaction(),
           pending: compactionPending,
@@ -1329,6 +1334,15 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       validationProgress: stage ? { toolCallId, stage, updatedAt } : null,
       updatedAt,
     });
+  }
+
+  private recordTurnBudget(turnId: string, budget: BuilderTurnBudgetReport) {
+    const activeTurn = this.state.activeTurn;
+    if (activeTurn?.id !== turnId) {
+      return;
+    }
+    const updatedTurn = recordBuilderTurnBudget(activeTurn, budget);
+    this.setState({ ...this.state, activeTurn: updatedTurn, updatedAt: updatedTurn.updatedAt });
   }
 
   private finishTurn(

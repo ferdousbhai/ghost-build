@@ -5,6 +5,7 @@ import { UserProvider } from '~/components/UserProvider';
 import { LinkButton } from '~/components/ui/LinkButton';
 import { BrandLink } from '~/components/BrandLink';
 import { CloudflareCard } from '~/components/settings/CloudflareCard.client';
+import { AccountDataCard } from '~/components/settings/AccountDataCard.client';
 import { TrustFooter } from '~/components/trust/TrustLinks';
 
 export function SettingsContent({ authorizationError }: { authorizationError?: string | null }) {
@@ -24,6 +25,7 @@ export function SettingsContent({ authorizationError }: { authorizationError?: s
           <div className="app-page-content !mt-0 grid gap-5">
             <ProfileCard />
             <CloudflareCard initialError={authorizationError} />
+            <AccountDataCard />
           </div>
         </div>
         <TrustFooter className="mt-10" />

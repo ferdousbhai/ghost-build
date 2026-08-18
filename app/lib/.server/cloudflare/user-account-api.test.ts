@@ -285,7 +285,7 @@ describe('UserCloudflareAccountApi', () => {
     });
     expect(request).toHaveBeenNthCalledWith(
       1,
-      'https://api.cloudflare.com/client/v4/accounts/account-1/storage/kv/namespaces?per_page=1000',
+      'https://api.cloudflare.com/client/v4/accounts/account-1/storage/kv/namespaces?page=1&per_page=1000',
       expect.objectContaining({ method: 'GET' }),
     );
     expect(request).toHaveBeenNthCalledWith(
@@ -1321,5 +1321,141 @@ describe('UserCloudflareAccountApi', () => {
       }),
     ).rejects.toThrow('invalid workspace container application');
     expect(request).toHaveBeenCalledOnce();
+  });
+  test('reads every page of the account Worker listing', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ id: 'ghostbuild-app-1' }],
+          result_info: { page: 1, total_pages: 2 },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ id: 'ghostbuild-app-2' }],
+          result_info: { page: 2, total_pages: 2 },
+        }),
+      );
+
+    await expect(new UserCloudflareAccountApi('account-1', 'token', request).listWorkerNames()).resolves.toEqual([
+      'ghostbuild-app-1',
+      'ghostbuild-app-2',
+    ]);
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts?page=1&per_page=1000',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts?page=2&per_page=1000',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  test('reads a D1 listing to its reported total rather than to a full page', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ uuid: 'db-1', name: 'ghostbuild-app-1', created_at: '2026-07-16T00:00:00Z' }],
+          result_info: { page: 1, total_count: 2 },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ uuid: 'db-2', name: 'ghostbuild-app-2', created_at: '2026-07-16T00:00:00Z' }],
+          result_info: { page: 2, total_count: 2 },
+        }),
+      );
+
+    await expect(new UserCloudflareAccountApi('account-1', 'token', request).listD1Databases()).resolves.toEqual([
+      { id: 'db-1', name: 'ghostbuild-app-1', createdAt: Date.parse('2026-07-16T00:00:00Z') },
+      { id: 'db-2', name: 'ghostbuild-app-2', createdAt: Date.parse('2026-07-16T00:00:00Z') },
+    ]);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  test('follows the R2 bucket cursor instead of reading one unbounded page', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: { buckets: [{ name: 'ghostbuild-app-1-storage', creation_date: '2026-07-16T00:00:00Z' }] },
+          result_info: { cursor: 'next-page' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: { buckets: [{ name: 'ghostbuild-app-2-storage', creation_date: '2026-07-16T00:00:00Z' }] },
+          result_info: {},
+        }),
+      );
+
+    await expect(new UserCloudflareAccountApi('account-1', 'token', request).listR2Buckets()).resolves.toEqual([
+      { name: 'ghostbuild-app-1-storage', createdAt: Date.parse('2026-07-16T00:00:00Z') },
+      { name: 'ghostbuild-app-2-storage', createdAt: Date.parse('2026-07-16T00:00:00Z') },
+    ]);
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      'https://api.cloudflare.com/client/v4/accounts/account-1/r2/buckets?per_page=1000',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      'https://api.cloudflare.com/client/v4/accounts/account-1/r2/buckets?per_page=1000&cursor=next-page',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  test('resolves a named KV namespace through the same paged account listing', async () => {
+    const namespaceId = '0123456789abcdef0123456789abcdef';
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ id: 'f'.repeat(32), title: 'ghostbuild-other-cache' }],
+          result_info: { page: 1, total_pages: 2 },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ id: namespaceId, title: 'ghostbuild-deployment-1-cache' }],
+          result_info: { page: 2, total_pages: 2 },
+        }),
+      );
+
+    // A namespace on the second page must be reused, not created a second time.
+    await expect(new UserCloudflareAccountApi('account-1', 'token', request).ensureKvForPlan(plan)).resolves.toEqual({
+      id: namespaceId,
+      name: 'ghostbuild-deployment-1-cache',
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls.every((call) => call[1]?.method === 'GET')).toBe(true);
+  });
+
+  test('refuses to act on an ambiguous KV namespace name', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        success: true,
+        result: [
+          { id: '0'.repeat(32), title: 'ghostbuild-deployment-1-cache' },
+          { id: '1'.repeat(32), title: 'ghostbuild-deployment-1-cache' },
+        ],
+      }),
+    );
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'token', request).deleteKvNamespace('ghostbuild-deployment-1-cache'),
+    ).rejects.toThrow('ambiguous KV namespaces');
   });
 });

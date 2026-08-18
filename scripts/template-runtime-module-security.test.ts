@@ -256,6 +256,16 @@ describe('generated app production module security', () => {
   );
 });
 
+/**
+ * Run Vite through its own binary rather than `pnpm exec`. `pnpm exec` first
+ * reconciles the workspace, and because the temporary project's `node_modules`
+ * is a symlink to the template's, that reconciliation repoints the template's
+ * store into a directory this test is about to delete.
+ */
+function templateViteBin(): string {
+  return resolve('template', 'node_modules', 'vite', 'bin', 'vite.js');
+}
+
 function runAdversarialProductionBuild(untrustedHelperSource: string): string {
   const templateDir = resolve('template');
   const projectDir = mkdtempSync(join(resolve('.'), '.ghostbuild-runtime-security-'));
@@ -272,7 +282,7 @@ function runAdversarialProductionBuild(untrustedHelperSource: string): string {
     const routePath = join(projectDir, 'src/routes/index.tsx');
     writeFileSync(routePath, `import "../untrusted-helper";\n${readFileSync(routePath, 'utf8')}`);
 
-    const result = spawnSync('pnpm', ['exec', 'vite', 'build'], {
+    const result = spawnSync(process.execPath, [templateViteBin(), 'build'], {
       cwd: projectDir,
       encoding: 'utf8',
       env: { ...processEnvironment, GHOSTBUILD_PREVIEW: '0' },
@@ -302,7 +312,7 @@ function runSuccessfulProductionBuild(untrustedHelperSource: string): Array<[str
     const routePath = join(projectDir, 'src/routes/index.tsx');
     writeFileSync(routePath, `import "../untrusted-helper";\n${readFileSync(routePath, 'utf8')}`);
 
-    const result = spawnSync('pnpm', ['exec', 'vite', 'build'], {
+    const result = spawnSync(process.execPath, [templateViteBin(), 'build'], {
       cwd: projectDir,
       encoding: 'utf8',
       env: { ...processEnvironment, GHOSTBUILD_PREVIEW: '0' },

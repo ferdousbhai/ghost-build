@@ -3,10 +3,6 @@ packages:
   - 'template'
 ignoreWorkspaceRootCheck: true
 minimumReleaseAge: 1440
-minimumReleaseAgeExclude:
-  # Reviewed preview dependency. Ghostbuild intentionally adopts this exact
-  # release before the normal age gate as part of the Computer runtime cutover.
-  - '@cloudflare/computer@0.1.1'
 minimumReleaseAgeIgnoreMissingTime: false
 minimumReleaseAgeStrict: true
 strictDepBuilds: true

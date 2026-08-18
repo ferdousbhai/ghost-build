@@ -1,0 +1,145 @@
+// @vitest-environment jsdom
+
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, to }: { children: React.ReactNode; to: string }) => <a href={to}>{children}</a>,
+}));
+
+const mocks = vi.hoisted(() => ({
+  createCloudflareReturnURL: vi.fn(() => 'https://ghostbuild.dev/settings'),
+  signInWithCloudflare: vi.fn(),
+  disposeAccountLocalReplicas: vi.fn(async () => undefined),
+  resetUserRuntimeSession: vi.fn(),
+}));
+
+vi.mock('~/lib/auth-client', () => ({
+  createCloudflareReturnURL: mocks.createCloudflareReturnURL,
+  signInWithCloudflare: mocks.signInWithCloudflare,
+}));
+vi.mock('~/lib/cloudflare/account-local-replica', () => ({
+  disposeAccountLocalReplicas: mocks.disposeAccountLocalReplicas,
+}));
+vi.mock('~/lib/cloudflare/runtime-session', () => ({ resetUserRuntimeSession: mocks.resetUserRuntimeSession }));
+
+import { ACCOUNT_DELETION_CONFIRMATION } from '~/lib/account-data';
+import { AccountDataCard } from './AccountDataCard.client';
+
+let root: Root | undefined;
+const fetchMock = vi.fn();
+
+beforeEach(() => {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  vi.clearAllMocks();
+  vi.stubGlobal('fetch', fetchMock);
+});
+
+afterEach(async () => {
+  if (root) {
+    await act(async () => root?.unmount());
+    root = undefined;
+  }
+  document.body.replaceChildren();
+  vi.unstubAllGlobals();
+});
+
+async function render() {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  await act(async () => root?.render(<AccountDataCard />));
+}
+
+function button(label: string): HTMLButtonElement {
+  const found = [...document.querySelectorAll('button')].find((candidate) => candidate.textContent?.includes(label));
+  if (!found) {
+    throw new Error(`No button labelled ${label}`);
+  }
+  return found;
+}
+
+async function openDeletionPanel() {
+  await act(async () => button('Delete my Ghostbuild account data').click());
+}
+
+async function fillConfirmation() {
+  const checkbox = document.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+  const phrase = document.querySelector<HTMLInputElement>('input[aria-label="Deletion confirmation phrase"]')!;
+  await act(async () => {
+    checkbox.click();
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+      phrase,
+      ACCOUNT_DELETION_CONFIRMATION,
+    );
+    phrase.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+describe('AccountDataCard', () => {
+  it('states what the operator holds, what the user’s Cloudflare account holds, and how to clear the browser', async () => {
+    await render();
+    const text = document.body.textContent ?? '';
+
+    expect(text).toContain('Download code');
+    expect(text).toContain('There is no account-wide export');
+    expect(text).toContain('clear site data');
+    expect(text).toContain('ghostbuild_session');
+    expect(text).toContain('OPFS database');
+    expect(document.querySelector('a[href="/support"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/privacy"]')).not.toBeNull();
+  });
+
+  it('requires the exact phrase and the retained-resources acknowledgement before deleting', async () => {
+    await render();
+
+    await openDeletionPanel();
+    expect(button('Permanently delete').disabled).toBe(true);
+
+    await fillConfirmation();
+    expect(button('Permanently delete').disabled).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('erases the control plane, clears local replicas, and reports an unrevoked grant', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ status: 'deleted', cloudflareAuthorizationRevoked: false }), { status: 200 }),
+    );
+    await render();
+    await openDeletionPanel();
+    await fillConfirmation();
+
+    await act(async () => button('Permanently delete').click());
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/account/delete',
+      expect.objectContaining({ method: 'POST', credentials: 'same-origin' }),
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual({
+      confirmation: ACCOUNT_DELETION_CONFIRMATION,
+      acknowledgeCloudflareResourcesRetained: true,
+    });
+    expect(mocks.disposeAccountLocalReplicas).toHaveBeenCalledOnce();
+    expect(mocks.resetUserRuntimeSession).toHaveBeenCalledOnce();
+    expect(document.body.textContent).toContain('Cloudflare did not confirm the revocation');
+    expect(document.body.textContent).toContain('still in your Cloudflare account');
+  });
+
+  it('offers a Cloudflare reconnect when the session is not freshly re-authenticated', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ code: 'reauthentication_required', error: 'Reconnect Cloudflare.' }), {
+        status: 401,
+      }),
+    );
+    await render();
+    await openDeletionPanel();
+    await fillConfirmation();
+
+    await act(async () => button('Permanently delete').click());
+    expect(document.body.textContent).toContain('Confirm it is you in Cloudflare');
+
+    await act(async () => button('Reconnect Cloudflare').click());
+    expect(mocks.signInWithCloudflare).toHaveBeenCalledOnce();
+  });
+});

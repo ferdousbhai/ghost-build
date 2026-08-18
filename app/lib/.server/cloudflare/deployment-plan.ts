@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { appResourceName } from '~/lib/cloudflare/app-resource-names';
 import type { DeploymentProjectProfile } from './deployment-project-profile';
 import {
   DEPLOYMENT_SECURITY_BASELINE_VERSION,
@@ -48,7 +49,6 @@ export async function buildDeploymentPlanFromSource(args: {
   if (!/^[a-f0-9]{64}$/.test(args.sourceSha256)) {
     throw new Error('Deployment source digest is invalid.');
   }
-  const baseName = `ghostbuild-${args.deploymentId}`;
   const project = deploymentProjectProfileSchema.parse(args.project);
   const plan: DeploymentPlan = {
     version: DEPLOYMENT_PLAN_VERSION,
@@ -59,22 +59,36 @@ export async function buildDeploymentPlanFromSource(args: {
     securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
     project,
     resources: [
-      { type: 'worker', logicalName: 'app', proposedName: baseName },
-      ...(project.bindings.d1 ? [{ type: 'd1' as const, logicalName: 'DB', proposedName: baseName }] : []),
+      { type: 'worker', logicalName: 'app', proposedName: appResourceName(args.deploymentId, 'app') },
+      ...(project.bindings.d1
+        ? [{ type: 'd1' as const, logicalName: 'DB', proposedName: appResourceName(args.deploymentId, 'DB') }]
+        : []),
       ...(project.bindings.appAgent
         ? [
             {
               type: 'd1' as const,
               logicalName: 'AGENT_SECURITY_DB',
-              proposedName: `${baseName}-agent-security`,
+              proposedName: appResourceName(args.deploymentId, 'AGENT_SECURITY_DB'),
             },
           ]
         : []),
       ...(project.bindings.r2
-        ? [{ type: 'r2' as const, logicalName: 'APP_STORAGE', proposedName: `${baseName}-storage` }]
+        ? [
+            {
+              type: 'r2' as const,
+              logicalName: 'APP_STORAGE',
+              proposedName: appResourceName(args.deploymentId, 'APP_STORAGE'),
+            },
+          ]
         : []),
       ...(project.bindings.kv
-        ? [{ type: 'kv' as const, logicalName: 'APP_CACHE', proposedName: `${baseName}-cache` }]
+        ? [
+            {
+              type: 'kv' as const,
+              logicalName: 'APP_CACHE',
+              proposedName: appResourceName(args.deploymentId, 'APP_CACHE'),
+            },
+          ]
         : []),
       ...(project.bindings.appAgent
         ? [{ type: 'durable_object' as const, logicalName: 'AppAgent', proposedName: 'AppAgent' }]

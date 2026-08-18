@@ -11,7 +11,11 @@ const EXPECTED_BUILD_VARIABLES = {
   SKIP_DEPENDENCY_INSTALL: '1',
 };
 const EXPECTED_REQUIRED_BUILD_VARIABLES = ['CLOUDFLARE_OAUTH_CLIENT_ID'];
-const ALLOWED_GITHUB_WORKFLOW_PATHS = ['.github/workflows/runtime-artifacts.yml'];
+// The Workers Builds image cannot install Chromium, so the credential-free
+// browser gate is the one release check GitHub Actions owns. Everything else
+// stays with Cloudflare.
+const REQUIRED_GITHUB_WORKFLOW_PATH = '.github/workflows/browser-gate.yml';
+const ALLOWED_GITHUB_WORKFLOW_PATHS = [REQUIRED_GITHUB_WORKFLOW_PATH, '.github/workflows/runtime-artifacts.yml'];
 
 export function findUnexpectedGithubWorkflowPaths(paths) {
   return Array.isArray(paths) ? paths.filter((path) => !ALLOWED_GITHUB_WORKFLOW_PATHS.includes(path)) : [];
@@ -22,6 +26,7 @@ export function findWorkersBuildsConfigErrors({
   packageJson,
   nvmrc,
   githubWorkflowPaths,
+  browserGateWorkflow,
   githubCompositeActionExists,
   workerConfig,
 }) {
@@ -105,6 +110,14 @@ export function findWorkersBuildsConfigErrors({
   requireEqual(errors, 'package.json packageManager', packageJson?.packageManager, 'pnpm@11.14.0');
   requireEqual(errors, '.nvmrc', nvmrc?.trim(), '26.3.0');
 
+  if (
+    !githubWorkflowPaths?.includes(REQUIRED_GITHUB_WORKFLOW_PATH) ||
+    !browserGateWorkflow?.includes('verify:built-browser')
+  ) {
+    errors.push(
+      `${REQUIRED_GITHUB_WORKFLOW_PATH} must run pnpm run verify:built-browser; the Workers Builds image cannot host the browser gate.`,
+    );
+  }
   const unexpectedGithubWorkflowPaths = findUnexpectedGithubWorkflowPaths(githubWorkflowPaths);
   if (unexpectedGithubWorkflowPaths.length > 0) {
     errors.push(

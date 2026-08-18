@@ -20,8 +20,11 @@ import { GHOSTBUILD_CONTROL_PLANE_ENDPOINT, USER_WORKSPACE_RUNTIME_GC_CRON } fro
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
 const CLOUDFLARE_API_TIMEOUT_MS = 30_000;
 const MAX_CLOUDFLARE_RESPONSE_BYTES = 1024 * 1024;
-/** Page size for whole-account listings. A full page means the answer may be truncated. */
+/** Page size for whole-account listings; providers are free to return fewer. */
 const ACCOUNT_LIST_PAGE_SIZE = 1000;
+/** Refuse rather than walk forever if a listing never signals its end. */
+const MAX_ACCOUNT_LIST_PAGES = 50;
+const ACCOUNT_LIST_TOO_LONG = 'Cloudflare returned more pages than one account listing may read.';
 const MAX_ASSET_UPLOAD_JWT_BYTES = 16 * 1024;
 const ASSET_HASH_PATTERN = /^[a-f0-9]{32}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -73,7 +76,18 @@ export type ActiveWorkerDeploymentReadback = {
 type CloudflareEnvelope<T> = {
   success?: boolean;
   result?: T;
+  result_info?: CloudflareResultInfo;
   errors?: Array<{ code?: number; message?: string }>;
+};
+
+/** The pagination counters Cloudflare returns alongside a listing, none of them guaranteed. */
+type CloudflareResultInfo = {
+  page?: number;
+  per_page?: number;
+  count?: number;
+  total_count?: number;
+  total_pages?: number;
+  cursor?: string;
 };
 
 type D1QueryResult = {
@@ -324,28 +338,21 @@ export class UserCloudflareAccountApi {
     }
   }
 
+  /** Resolve one namespace by name out of the account listing, which is the only KV lookup there is. */
   private async findKvNamespace(resourceName: string): Promise<{ id: string; name: string } | null> {
     requireCloudflareResourceName(resourceName);
-    const namespaces = await this.call<unknown>(`/storage/kv/namespaces?per_page=${ACCOUNT_LIST_PAGE_SIZE}`, {
-      method: 'GET',
-    });
-    if (!Array.isArray(namespaces)) {
-      throw new CloudflareAccountApiError('Cloudflare returned invalid KV namespaces.');
-    }
-    const matches = namespaces.filter(
-      (value) => isRecord(value) && value.title === resourceName && typeof value.id === 'string',
-    );
+    const matches = (await this.listKvNamespaces()).filter((namespace) => namespace.name === resourceName);
     if (matches.length > 1) {
       throw new CloudflareAccountApiError('Cloudflare returned ambiguous KV namespaces.');
     }
-    const id = matches[0]?.id;
-    if (id === undefined) {
+    const match = matches[0];
+    if (!match) {
       return null;
     }
-    if (typeof id !== 'string' || !/^[a-f0-9]{32}$/.test(id)) {
+    if (!/^[a-f0-9]{32}$/.test(match.id)) {
       throw new CloudflareAccountApiError('Cloudflare returned an invalid KV namespace.');
     }
-    return { id, name: resourceName };
+    return { id: match.id, name: resourceName };
   }
 
   /** Remove a Ghostbuild-managed Worker and its script-owned Durable Objects. */
@@ -366,15 +373,16 @@ export class UserCloudflareAccountApi {
   }
 
   /**
-   * Delete by the provider id recorded at provision time. Deleting by name has
-   * to re-resolve the id first, and only works while the name is still derivable.
+   * Delete by an id the caller already holds, from provisioning or from an account listing.
+   * Deleting by name has to re-resolve the id first, and only works while the name is still
+   * derivable.
    */
   async deleteD1DatabaseById(databaseId: string): Promise<void> {
     requireProviderResourceId(databaseId);
     await this.deleteOptional(`/d1/database/${encodeURIComponent(databaseId)}`);
   }
 
-  /** Delete by the provider id recorded at provision time. */
+  /** Delete by an id the caller already holds, from provisioning or from an account listing. */
   async deleteKvNamespaceById(namespaceId: string): Promise<void> {
     requireProviderResourceId(namespaceId);
     await this.deleteOptional(`/storage/kv/namespaces/${encodeURIComponent(namespaceId)}`);
@@ -383,7 +391,7 @@ export class UserCloudflareAccountApi {
   async deleteKvNamespace(resourceName: string): Promise<void> {
     const namespace = await this.findKvNamespace(resourceName);
     if (namespace) {
-      await this.deleteOptional(`/storage/kv/namespaces/${encodeURIComponent(namespace.id)}`);
+      await this.deleteKvNamespaceById(namespace.id);
     }
   }
 
@@ -439,29 +447,20 @@ export class UserCloudflareAccountApi {
   }
 
   /**
-   * List every Worker script name in the connected account.
+   * List every Worker script name in the connected account, following every page.
    *
-   * `complete` is false when the account filled the page, because callers that
-   * treat a Worker's presence as proof of liveness must not read a truncated
-   * list as "these deployments are gone".
+   * Callers treat a Worker's presence as proof that a deployment is live, so a
+   * short answer would read as "these deployments are gone". This one listing
+   * must be complete or fail.
    */
-  async listWorkerNames(): Promise<{ names: string[]; complete: boolean }> {
-    const scripts = await this.call<unknown>(`/workers/scripts?per_page=${ACCOUNT_LIST_PAGE_SIZE}`, { method: 'GET' });
-    if (!Array.isArray(scripts)) {
-      throw new CloudflareAccountApiError('Cloudflare returned invalid Worker scripts.');
-    }
-    return {
-      names: scripts.flatMap((value) => (isRecord(value) && typeof value.id === 'string' ? [value.id] : [])),
-      complete: scripts.length < ACCOUNT_LIST_PAGE_SIZE,
-    };
+  async listWorkerNames(): Promise<string[]> {
+    const scripts = await this.listAllPages('/workers/scripts', 'Cloudflare returned invalid Worker scripts.');
+    return scripts.flatMap((value) => (isRecord(value) && typeof value.id === 'string' ? [value.id] : []));
   }
 
   /** List every D1 database in the connected account, with creation times where provided. */
   async listD1Databases(): Promise<{ id: string; name: string; createdAt: number | null }[]> {
-    const databases = await this.call<unknown>(`/d1/database?per_page=${ACCOUNT_LIST_PAGE_SIZE}`, { method: 'GET' });
-    if (!Array.isArray(databases)) {
-      throw new CloudflareAccountApiError('Cloudflare returned invalid D1 databases.');
-    }
+    const databases = await this.listAllPages('/d1/database', 'Cloudflare returned invalid D1 databases.');
     return databases.flatMap((value) =>
       isRecord(value) && typeof value.uuid === 'string' && typeof value.name === 'string'
         ? [{ id: value.uuid, name: value.name, createdAt: parseCloudflareTimestamp(value.created_at) }]
@@ -471,12 +470,7 @@ export class UserCloudflareAccountApi {
 
   /** List every KV namespace in the connected account. Namespaces carry no creation time. */
   async listKvNamespaces(): Promise<{ id: string; name: string }[]> {
-    const namespaces = await this.call<unknown>(`/storage/kv/namespaces?per_page=${ACCOUNT_LIST_PAGE_SIZE}`, {
-      method: 'GET',
-    });
-    if (!Array.isArray(namespaces)) {
-      throw new CloudflareAccountApiError('Cloudflare returned invalid KV namespaces.');
-    }
+    const namespaces = await this.listAllPages('/storage/kv/namespaces', 'Cloudflare returned invalid KV namespaces.');
     return namespaces.flatMap((value) =>
       isRecord(value) && typeof value.id === 'string' && typeof value.title === 'string'
         ? [{ id: value.id, name: value.title }]
@@ -484,18 +478,67 @@ export class UserCloudflareAccountApi {
     );
   }
 
-  /** List every R2 bucket in the connected account, with creation times where provided. */
+  /**
+   * List every R2 bucket in the connected account, with creation times where provided.
+   *
+   * R2 paginates by cursor rather than page number, and wraps its page in an object.
+   */
   async listR2Buckets(): Promise<{ name: string; createdAt: number | null }[]> {
-    const result = await this.call<unknown>('/r2/buckets', { method: 'GET' });
-    const buckets = isRecord(result) ? result.buckets : null;
-    if (!Array.isArray(buckets)) {
-      throw new CloudflareAccountApiError('Cloudflare returned invalid R2 buckets.');
+    const listed: { name: string; createdAt: number | null }[] = [];
+    let cursor = '';
+    for (let page = 0; page < MAX_ACCOUNT_LIST_PAGES; page += 1) {
+      const query = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+      const { result, resultInfo } = await this.callPage<unknown>(
+        `/r2/buckets?per_page=${ACCOUNT_LIST_PAGE_SIZE}${query}`,
+      );
+      const buckets = isRecord(result) ? result.buckets : null;
+      if (!Array.isArray(buckets)) {
+        throw new CloudflareAccountApiError('Cloudflare returned invalid R2 buckets.');
+      }
+      listed.push(
+        ...buckets.flatMap((value) =>
+          isRecord(value) && typeof value.name === 'string'
+            ? [{ name: value.name, createdAt: parseCloudflareTimestamp(value.creation_date) }]
+            : [],
+        ),
+      );
+      cursor = typeof resultInfo?.cursor === 'string' ? resultInfo.cursor : '';
+      if (cursor.length === 0 || buckets.length === 0) {
+        return listed;
+      }
     }
-    return buckets.flatMap((value) =>
-      isRecord(value) && typeof value.name === 'string'
-        ? [{ name: value.name, createdAt: parseCloudflareTimestamp(value.creation_date) }]
-        : [],
-    );
+    throw new CloudflareAccountApiError(ACCOUNT_LIST_TOO_LONG);
+  }
+
+  /**
+   * Read every page of a page-numbered account listing.
+   *
+   * Cloudflare is inconsistent about `result_info` - D1 reports `total_count` without
+   * `total_pages`, others report both - so whichever total it offers decides, and a full page is
+   * the fallback signal when it offers neither.
+   */
+  private async listAllPages(path: string, invalidMessage: string): Promise<unknown[]> {
+    const listed: unknown[] = [];
+    for (let page = 1; page <= MAX_ACCOUNT_LIST_PAGES; page += 1) {
+      const { result, resultInfo } = await this.callPage<unknown>(
+        `${path}?page=${page}&per_page=${ACCOUNT_LIST_PAGE_SIZE}`,
+      );
+      if (!Array.isArray(result)) {
+        throw new CloudflareAccountApiError(invalidMessage);
+      }
+      listed.push(...result);
+      const more =
+        typeof resultInfo?.total_pages === 'number'
+          ? page < resultInfo.total_pages
+          : typeof resultInfo?.total_count === 'number'
+            ? listed.length < resultInfo.total_count
+            : result.length >= ACCOUNT_LIST_PAGE_SIZE;
+      // An empty page cannot be followed by anything this walk could use.
+      if (!more || result.length === 0) {
+        return listed;
+      }
+    }
+    throw new CloudflareAccountApiError(ACCOUNT_LIST_TOO_LONG);
   }
 
   /** Upload an immutable, server-owned Worker version and promote exactly it to production. */
@@ -1190,11 +1233,16 @@ export class UserCloudflareAccountApi {
     if (response.status === 404) {
       return null;
     }
-    if (!response.ok || payload?.success !== true || payload.result === undefined) {
-      const providerMessage = payload?.errors?.find((error) => error.message)?.message;
-      throw new CloudflareAccountApiError(providerMessage || `Cloudflare API request failed (${response.status}).`);
-    }
-    return payload.result;
+    return requireEnvelopeResult(payload, response).result;
+  }
+
+  /**
+   * Read one listing page whole. `callOptional` returns only `result`, and pagination cannot be
+   * followed without the counters and cursor that sit beside it.
+   */
+  private async callPage<T>(path: string): Promise<{ result: T; resultInfo: CloudflareResultInfo | undefined }> {
+    const response = await this.callRaw(path, { method: 'GET', headers: { 'content-type': 'application/json' } });
+    return requireEnvelopeResult(await readBoundedJson<CloudflareEnvelope<T>>(response), response);
   }
 
   private async callRaw(path: string, init: RequestInit): Promise<Response> {
@@ -1343,13 +1391,20 @@ function cloudflareErrorMessage(value: unknown): string | undefined {
 }
 
 async function parseCloudflareEnvelope<T>(response: Response): Promise<T> {
-  const payload = await readBoundedJson<CloudflareEnvelope<T>>(response);
+  return requireEnvelopeResult(await readBoundedJson<CloudflareEnvelope<T>>(response), response).result;
+}
+
+/** Accept a successful envelope, or raise the provider's own message in preference to a status. */
+function requireEnvelopeResult<T>(
+  payload: CloudflareEnvelope<T> | null,
+  response: Response,
+): { result: T; resultInfo: CloudflareResultInfo | undefined } {
   if (!response.ok || payload?.success !== true || payload.result === undefined) {
     throw new CloudflareAccountApiError(
       payload?.errors?.find((error) => error.message)?.message || `Cloudflare API request failed (${response.status}).`,
     );
   }
-  return payload.result;
+  return { result: payload.result, resultInfo: payload.result_info };
 }
 
 async function readBoundedJson<T>(response: Response): Promise<T | null> {

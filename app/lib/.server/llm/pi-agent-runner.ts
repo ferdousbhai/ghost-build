@@ -20,7 +20,16 @@ import {
   type BuilderWorkspaceApi,
 } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
-import { BUILDER_TURN_BUDGET_ERROR_CODE, BuilderTurnBudgetExceededError } from './builder-turn-budget';
+import {
+  BUILDER_TURN_BUDGET_ERROR_CODE,
+  BUILDER_TURN_INACTIVITY_MS,
+  BUILDER_TURN_MAX_MODEL_STEPS,
+  BUILDER_TURN_WALL_CLOCK_MS,
+  BuilderTurnBudgetExceededError,
+  type BuilderTurnBudgetReason,
+  type BuilderTurnBudgetReport,
+  type BuilderTurnTerminalReason,
+} from './builder-turn-budget';
 import { compactPiContext, estimatePiContextTokens, type ContextCompaction } from './context-compaction';
 import {
   ContextCompactionUnavailableError,
@@ -29,7 +38,7 @@ import {
   prepareModelInput,
 } from './model-input';
 import { modelMessagesToPi } from './pi-message-conversion';
-import { recordPiStage } from './pi-telemetry';
+import { recordPiStage, recordPiTurnBudget } from './pi-telemetry';
 import { getPiProvider, type WorkersAiAccountCredentials } from './provider';
 import { appendDeterministicCompletion, normalizeTextPartBoundaries } from './workers-ai-stream';
 import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
@@ -69,7 +78,7 @@ interface PiAgentOptions {
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
   skillBucket: R2Bucket;
   steering: PiSteeringQueue;
-  onSettled: () => void;
+  onSettled: (budget: BuilderTurnBudgetReport) => void;
 }
 
 type PiPreparationStage = 'tool_setup' | 'model_input' | 'prompt_metrics' | 'message_conversion';
@@ -105,7 +114,25 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   logger.debug('Starting Pi agent runner');
   const startedAt = Date.now();
   const piProvider = getPiProvider(accountCredentials, modelId, { sessionAffinity });
-  const loopSignal = abortSignal;
+  // Real signals, so an in-flight model stream is bounded too — not just the gaps between turns.
+  const wallClockSignal = AbortSignal.timeout(BUILDER_TURN_WALL_CLOCK_MS);
+  const inactivityController = new AbortController();
+  const loopSignal = AbortSignal.any(
+    abortSignal
+      ? [abortSignal, wallClockSignal, inactivityController.signal]
+      : [wallClockSignal, inactivityController.signal],
+  );
+  /** Budget exhaustion stays distinct from an owner cancellation or a durable teardown. */
+  const exhaustedBudgetReason = (): BuilderTurnBudgetReason | undefined => {
+    if (abortSignal?.aborted) {
+      return undefined;
+    }
+    return inactivityController.signal.aborted ? 'inactivity' : wallClockSignal.aborted ? 'wall_clock' : undefined;
+  };
+  const budgetErrorForFailure = (error: unknown): unknown => {
+    const reason = error instanceof BuilderTurnBudgetExceededError ? undefined : exhaustedBudgetReason();
+    return reason ? new BuilderTurnBudgetExceededError(reason) : error;
+  };
   const compactionPolicy = modelCompactionPolicy(piProvider.handle.model.contextWindow);
   const { skillContext, piTools } = await withPreparationStage('tool_setup', async () => {
     const skillContext = await createBuilderSkillContext(skillBucket);
@@ -119,7 +146,13 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   if (validatedBuildCompletion && !steering.hasPending()) {
     logger.info('Returning validated build completion without another model turn (pi)');
     steering.close();
-    onSettled();
+    onSettled({
+      terminalReason: 'completed',
+      stepCount: 0,
+      toolCallCount: 0,
+      elapsedMs: Date.now() - startedAt,
+      lastValidationState: 'validated',
+    });
     return createValidatedBuildCompletionStream(validatedBuildCompletion);
   }
 
@@ -160,12 +193,40 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   let runtimeContextCompacted = false;
   let runtimeCompactionError: ContextCompactionUnavailableError | undefined;
   let toolBudgetError: BuilderTurnBudgetExceededError | undefined;
+  let stepBudgetError: BuilderTurnBudgetExceededError | undefined;
   let toolIndeterminateError: WorkspaceToolOperationIndeterminateError | undefined;
+  let terminalReason: BuilderTurnTerminalReason = 'failed';
+  let stepCount = 0;
+  let toolCallCount = 0;
+  let toolsInFlight = 0;
+  let inactivityTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const clearInactivityWatchdog = () => {
+    clearTimeout(inactivityTimer);
+    inactivityTimer = undefined;
+  };
+  /** Tools already carry their own deadlines, so only watch the gaps between them. */
+  const armInactivityWatchdog = () => {
+    clearInactivityWatchdog();
+    if (toolsInFlight === 0) {
+      inactivityTimer = setTimeout(() => inactivityController.abort(), BUILDER_TURN_INACTIVITY_MS);
+    }
+  };
 
   const { readable, writable } = new TransformStream<UIMessageChunk, UIMessageChunk>();
   const writer = writable.getWriter();
 
   const emit = async (event: AgentEvent) => {
+    if (event.type === 'tool_execution_start') {
+      toolsInFlight += 1;
+    } else if (event.type === 'tool_execution_end') {
+      toolsInFlight = Math.max(0, toolsInFlight - 1);
+      toolCallCount += 1;
+    } else if (event.type === 'turn_end') {
+      toolsInFlight = 0;
+    }
+    armInactivityWatchdog();
+
     if (event.type === 'turn_start') {
       currentTurnStreamedContent = false;
       return;
@@ -285,6 +346,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     }
 
     if (event.type === 'turn_end') {
+      stepCount += 1;
       if (isAssistantMessage(event.message)) {
         terminalAssistant = event.message;
         totalUsage = addUsage(totalUsage, event.message.usage);
@@ -351,17 +413,28 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
           context = compacted;
           return { context: compacted };
         },
-        shouldStopAfterTurn: () =>
-          runtimeCompactionError !== undefined ||
-          toolBudgetError !== undefined ||
-          toolIndeterminateError !== undefined ||
-          (currentValidatedBuildCompletion !== undefined && !steering.hasPending()),
+        shouldStopAfterTurn: () => {
+          if (
+            runtimeCompactionError !== undefined ||
+            toolBudgetError !== undefined ||
+            toolIndeterminateError !== undefined ||
+            (currentValidatedBuildCompletion !== undefined && !steering.hasPending())
+          ) {
+            return true;
+          }
+          if (stepCount >= BUILDER_TURN_MAX_MODEL_STEPS) {
+            stepBudgetError ??= new BuilderTurnBudgetExceededError('max_steps');
+            return true;
+          }
+          return false;
+        },
         afterToolCall: async ({ result, isError }) =>
           !isError && !toolResultSucceeded(result.details) ? { isError: true } : undefined,
         maxTokens: piProvider.maxTokens,
         toolChoice: 'auto',
       };
 
+      armInactivityWatchdog();
       let overflowRecoveryAttempted = false;
       while (true) {
         terminalAssistant = undefined;
@@ -398,6 +471,13 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       if (toolBudgetError) {
         throw toolBudgetError;
       }
+      if (stepBudgetError) {
+        throw stepBudgetError;
+      }
+      const signalBudgetReason = exhaustedBudgetReason();
+      if (signalBudgetReason) {
+        throw new BuilderTurnBudgetExceededError(signalBudgetReason);
+      }
       if (finalAssistant?.stopReason === 'error') {
         throw new Error(finalAssistant.errorMessage || 'The model request failed.');
       }
@@ -418,7 +498,11 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         providerModel: modelId,
         startedAt,
       });
-    } catch (error) {
+      terminalReason = abortSignal?.aborted ? 'cancelled' : 'completed';
+    } catch (cause) {
+      const error = budgetErrorForFailure(cause);
+      terminalReason =
+        error instanceof BuilderTurnBudgetExceededError ? error.reason : abortSignal?.aborted ? 'cancelled' : 'failed';
       recordPiStage('loop_error', modelId);
       logProviderFailure(logger, 'Pi agent runner failed.', error);
       if (
@@ -437,8 +521,17 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         await writer.write({ type: 'error', errorText: 'The model request failed. Please retry.' });
       }
     } finally {
+      clearInactivityWatchdog();
       steering.close();
-      onSettled();
+      const budget: BuilderTurnBudgetReport = {
+        terminalReason,
+        stepCount,
+        toolCallCount,
+        elapsedMs: Date.now() - startedAt,
+        lastValidationState: currentValidatedBuildCompletion === undefined ? 'unvalidated' : 'validated',
+      };
+      recordPiTurnBudget(modelId, budget);
+      onSettled(budget);
       await writer.close().catch(() => undefined);
     }
   })();

@@ -1,3 +1,4 @@
+import { telemetryCorrelationIdStore } from '~/lib/cloudflare/runtime-session';
 import type { ClientTelemetryEvent, ProductTelemetryEvent } from './client-telemetry-events';
 
 type TelemetryContext = {
@@ -12,15 +13,26 @@ type TelemetryContext = {
 const TELEMETRY_ENDPOINT = '/api/client-telemetry';
 const JOURNEY_STORAGE_KEY = 'ghostbuild:telemetry:journey';
 const TELEMETRY_PREFERENCE_STORAGE_KEY = 'ghostbuild:telemetry:preference';
-const ONCE_PER_JOURNEY_EVENTS = new Set<ProductTelemetryEvent>([
-  'landing_viewed',
-  'cloudflare_connect_started',
-  'first_tool_completed',
-  'validation_succeeded',
-  'preview_ready',
-  'deployment_approval_presented',
-  'deployment_succeeded',
-]);
+// Every funnel stage is counted once per journey. Only prompt submission is a
+// repeated action rather than a stage, so it is named as the exception and a new
+// funnel event is claimed once by default.
+const REPEATED_PRODUCT_EVENTS = new Set<ProductTelemetryEvent>(['prompt_submitted']);
+const OPAQUE_ID_PATTERN = /^[0-9a-f-]{36}$/i;
+
+// Stages are claimed in memory as well as in session storage. Emitters such as
+// the per-tool card effect run once per rendered instance, so a claim that only
+// lived in storage re-counted whenever storage was cleared or unavailable.
+const claimedStages = new Set<ProductTelemetryEvent>();
+
+/**
+ * The correlation ID the control plane minted for this browser's runtime session.
+ * Ghostbuild never sends the browser-owned journey ID to the server as a join key;
+ * the server mints its own opaque ID and the browser echoes this one back.
+ */
+function correlationId(): string | null {
+  const value = telemetryCorrelationIdStore.get();
+  return value !== null && OPAQUE_ID_PATTERN.test(value) ? value : null;
+}
 
 export async function captureMessage(event: ClientTelemetryEvent, context?: TelemetryContext): Promise<void> {
   console.warn(event, context);
@@ -40,7 +52,7 @@ export async function captureProductEvent(event: ProductTelemetryEvent, context?
   if (!productTelemetryEnabled()) {
     return;
   }
-  if (ONCE_PER_JOURNEY_EVENTS.has(event) && !claimOncePerJourney(event)) {
+  if (!REPEATED_PRODUCT_EVENTS.has(event) && !claimOncePerJourney(event)) {
     return;
   }
   await emitTelemetry(event, context);
@@ -54,11 +66,13 @@ async function emitTelemetry(
     return;
   }
   const level = context.level ?? 'info';
+  const correlation = correlationId();
   const payload = JSON.stringify({
     schemaVersion: 1,
     event,
     level,
     journeyId: journeyId(),
+    ...(correlation ? { correlationId: correlation } : {}),
     ...(level === 'error' ? { errorEventId: crypto.randomUUID() } : {}),
     occurredAt: new Date().toISOString(),
     page: pageKind(),
@@ -105,7 +119,7 @@ export function setProductTelemetryEnabled(enabled: boolean): void {
 
 function journeyId(): string {
   const existing = safeSessionStorageGet(JOURNEY_STORAGE_KEY);
-  if (existing && /^[0-9a-f-]{36}$/i.test(existing)) {
+  if (existing && OPAQUE_ID_PATTERN.test(existing)) {
     return existing;
   }
   const created = crypto.randomUUID();
@@ -115,9 +129,10 @@ function journeyId(): string {
 
 function claimOncePerJourney(event: ProductTelemetryEvent): boolean {
   const key = `ghostbuild:telemetry:once:${event}`;
-  if (safeSessionStorageGet(key) === 'true') {
+  if (claimedStages.has(event) || safeSessionStorageGet(key) === 'true') {
     return false;
   }
+  claimedStages.add(event);
   safeSessionStorageSet(key, 'true');
   return true;
 }

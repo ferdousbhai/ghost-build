@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import { isAbsolute, relative, resolve } from 'node:path';
 
 const authStatePath = validatedAuthStatePath(process.env.E2E_AUTH_STORAGE_STATE);
@@ -41,8 +41,10 @@ test('authenticated build, edit, preview, approval, and production journey', asy
   await page.getByRole('button', { name: 'Send' }).click();
 
   await expect(page).toHaveURL(/\/chat\//, { timeout: 30_000 });
-  await expect(page.getByText('Project validation passed')).toBeVisible({ timeout: 10 * 60_000 });
-  await expect(page.getByRole('complementary', { name: 'Project workbench' })).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Project workbench' })).toBeVisible({ timeout: 10 * 60_000 });
+  const deploymentStatus = page.getByTestId('deployment-status');
+  await expect(deploymentStatus).toContainText('Deployed.', { timeout: 30 * 60_000 });
+  const builtRevision = await deployedWorkspaceRevision(deploymentStatus);
 
   await page.getByText('Code', { exact: true }).click();
   const editor = page.locator('.cm-content').first();
@@ -51,32 +53,42 @@ test('authenticated build, edit, preview, approval, and production journey', asy
   await editor.pressSequentially('\n// launch-critical browser edit');
   await page.getByRole('button', { name: 'Save' }).first().click();
 
+  // The saved edit is a new durable revision, so production must be asked for it
+  // again: Ghostbuild never deploys a revision it has not validated.
+  await page
+    .getByPlaceholder(/What would you like to do next\?/i)
+    .fill('Deploy the saved editor change to production.');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(deploymentStatus).toContainText('Deployed.', { timeout: 30 * 60_000 });
+  const deployedRevision = await deployedWorkspaceRevision(deploymentStatus);
+  expect(deployedRevision).toBeGreaterThan(builtRevision);
+
   await page.getByText('Preview', { exact: true }).click();
-  const buildPreview = page.getByRole('button', { name: /Build preview|Refresh|Rebuild/ });
+  const buildPreview = page.getByRole('button', { name: /Build preview|Retry/ });
   if (await buildPreview.isVisible()) {
     await buildPreview.click();
   }
   const previewFrame = page.locator('iframe[title^="Remote preview for durable revision"]');
-  await expect(previewFrame).toBeVisible({ timeout: 10 * 60_000 });
-  const previewRevision = Number(/revision (\d+)/.exec((await previewFrame.getAttribute('title')) ?? '')?.[1]);
-  expect(previewRevision).toBeGreaterThan(0);
+  await expect(previewFrame).toHaveAttribute('title', `Remote preview for durable revision ${deployedRevision}`, {
+    timeout: 10 * 60_000,
+  });
 
-  const approval = page.getByRole('heading', { name: 'Approve production deployment' });
-  await expect(approval).toBeVisible({ timeout: 10 * 60_000 });
-  const approvalSection = approval.locator('..').locator('..');
-  await approvalSection.getByRole('checkbox').nth(0).check();
-  await approvalSection.getByRole('checkbox').nth(1).check();
-  await approvalSection.getByRole('button', { name: 'Approve deployment' }).click();
-
-  const productionLink = approvalSection.getByRole('link', { name: 'Open deployment' });
-  await expect(productionLink).toBeVisible({ timeout: 30 * 60_000 });
-  const productionUrl = await productionLink.getAttribute('href');
+  const productionUrl = await deploymentStatus.getByRole('link', { name: 'Open deployment' }).getAttribute('href');
   if (!productionUrl?.startsWith('https://')) {
     throw new Error('The deployment did not return a valid HTTPS production URL.');
   }
   const productionResponse = await page.request.get(productionUrl);
   expect(productionResponse.ok()).toBe(true);
+  expect(productionResponse.headers()['content-type']).toContain('text/html');
 });
+
+async function deployedWorkspaceRevision(deploymentStatus: Locator): Promise<number> {
+  const revision = Number(await deploymentStatus.getAttribute('data-workspace-revision'));
+  if (!Number.isInteger(revision) || revision <= 0) {
+    throw new Error('The deployment did not report the durable revision it published.');
+  }
+  return revision;
+}
 
 function requireCriticalJourneyEnvironment() {
   const missing = [
