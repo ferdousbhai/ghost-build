@@ -91,7 +91,8 @@ describe('app resource reconciliation sweep', () => {
       'account-user-2',
     ]);
     expect(reconcileAppResources.mock.calls.every(([, options]) => options.mode === 'report')).toBe(true);
-    expect(summary).toMatchObject({ users: 2, failures: 0, orphans: 0, deleted: 0, skippedListing: false });
+    expect(summary).toMatchObject({ users: 2, failures: 0, orphans: 0, deleted: 0 });
+    expect(summary.skippedListings.size).toBe(0);
   });
 
   it('records the run so local tooling can read the diff without a dashboard', async () => {
@@ -111,12 +112,24 @@ describe('app resource reconciliation sweep', () => {
 
     expect(db.receipt('INSERT INTO app_resource_reconcile_runs')?.values).toEqual([summary.runId, 'report', NOW]);
     const finished = db.receipt('UPDATE app_resource_reconcile_runs')!;
-    const [status, , usersScanned, usersFailed, resourcesScanned, orphansFound, orphansJson, deleted, listingSkipped] =
-      finished.values;
+    const [
+      status,
+      ,
+      usersScanned,
+      usersFailed,
+      resourcesScanned,
+      orphansFound,
+      orphansJson,
+      deleted,
+      listingSkipped,
+      skippedListingsJson,
+    ] = finished.values;
     expect(status).toBe('ok');
     expect([usersScanned, usersFailed, resourcesScanned, orphansFound, deleted, listingSkipped]).toEqual([
       1, 0, 4, 2, 0, 1,
     ]);
+    // A skip is only actionable when it names the listing that could not be read.
+    expect(JSON.parse(String(skippedListingsJson))).toEqual(['KV namespace']);
     expect(JSON.parse(String(orphansJson))).toEqual([
       { userId: 'user-1', kind: 'd1', name: `ghostbuild-${DEPLOYMENT}` },
       { userId: 'user-1', kind: 'r2', name: `ghostbuild-${DEPLOYMENT}-storage` },

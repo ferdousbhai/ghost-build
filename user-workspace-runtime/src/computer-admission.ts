@@ -14,10 +14,13 @@ export class ComputerOperationsDisabledError extends Error {
 }
 
 /**
- * Operator kill switch for the preview-only Computer runtime. Clearing the D1
- * control row stops new Computer-backed operations within one decision window
- * and without a redeploy; durable project data stays readable through the reads
- * that never admit new work.
+ * Operator kill switch for the preview-only Computer runtime. Setting `enabled`
+ * to 0 on the `computer_operations` row stops new Computer-backed operations
+ * within one decision window and without a redeploy; durable project data stays
+ * readable through the reads that never admit new work.
+ *
+ * Only that value pauses the runtime. Deleting the row admits everything again,
+ * so an operator reaching for the switch has to write to it, not clear it.
  */
 export class ComputerAdmissionControl {
   #nextReadAt = 0;

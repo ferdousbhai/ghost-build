@@ -27,6 +27,27 @@ describe('builder skill mirror', () => {
     );
   });
 
+  it('asks for redirects unfollowed, because the Workers runtime rejects the request otherwise', async () => {
+    const modes: (RequestRedirect | undefined)[] = [];
+    const request = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      modes.push(init?.redirect);
+      return Response.json({ sha: revision, commit: { verification: { verified: true } } });
+    }) as typeof fetch;
+
+    await resolveSourceRevisions(request);
+
+    // `redirect: 'error'` is not implemented at the edge, so every daily sync failed on it.
+    expect(modes.length).toBeGreaterThan(0);
+    expect(modes.every((mode) => mode === 'manual')).toBe(true);
+  });
+
+  it('refuses a redirected upstream response instead of trusting its body', async () => {
+    const request = (async () =>
+      new Response(null, { status: 302, headers: { location: 'https://example.invalid/' } })) as typeof fetch;
+
+    await expect(resolveSourceRevisions(request)).rejects.toThrow(/redirected \(302\)/);
+  });
+
   it('packs unchanged upstream files into the runtime-compatible generation format', async () => {
     const fixture = sourceFixture();
     const packed = await buildBuilderSkillGeneration(fixture.revisions, fixture.request);

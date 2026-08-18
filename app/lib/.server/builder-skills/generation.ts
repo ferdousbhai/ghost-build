@@ -524,6 +524,22 @@ function parseTreeEntry(value: unknown): GitTreeEntry {
   };
 }
 
+/**
+ * Upstream content is fetched from an exact revision, so a redirect means the request
+ * did not land where it was aimed and its body must not be trusted.
+ *
+ * The Workers runtime implements no `'error'` redirect mode — it rejects the request
+ * outright rather than refusing the redirect — so this asks for the redirect unfollowed
+ * and checks the status instead. Every daily sync failed on that until it was corrected.
+ */
+const REFUSE_REDIRECTS = 'manual' as const;
+
+function assertNotRedirected(response: Response, target: string): void {
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error(`Upstream builder skill request was redirected (${response.status}): ${target}`);
+  }
+}
+
 async function readFile(
   request: typeof fetch,
   repository: string,
@@ -535,9 +551,10 @@ async function readFile(
   }
   const encodedPath = entry.path.split('/').map(encodeURIComponent).join('/');
   const response = await request(`https://raw.githubusercontent.com/${repository}/${revision}/${encodedPath}`, {
-    redirect: 'error',
+    redirect: REFUSE_REDIRECTS,
     signal: AbortSignal.timeout(30_000),
   });
+  assertNotRedirected(response, `${repository}/${entry.path}`);
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
     throw new Error(`Upstream builder skill file request failed (${response.status}): ${repository}/${entry.path}`);
@@ -556,9 +573,10 @@ async function fetchBoundedJson<T>(request: typeof fetch, url: string): Promise<
       'user-agent': 'ghostbuild-skill-sync',
       'x-github-api-version': '2022-11-28',
     },
-    redirect: 'error',
+    redirect: REFUSE_REDIRECTS,
     signal: AbortSignal.timeout(30_000),
   });
+  assertNotRedirected(response, url);
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
     throw new Error(`GitHub builder skill request failed (${response.status}).`);

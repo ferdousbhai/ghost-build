@@ -206,8 +206,13 @@ export async function reconcileAppResources(
 async function listedOrSkipped<T>(kind: string, skipped: string[], list: () => Promise<T[]>): Promise<T[]> {
   try {
     return await list();
-  } catch {
-    logger.warn(`Skipped the ${kind} listing: the account could not be read`);
+  } catch (error) {
+    // The skip is recorded either way; the reason is what tells an operator whether this is a
+    // revoked token, a rate limit, or an account too large to page through.
+    logger.warn(
+      `Skipped the ${kind} listing: the account could not be read`,
+      error instanceof Error ? error.message : String(error),
+    );
     skipped.push(kind);
     return [];
   }

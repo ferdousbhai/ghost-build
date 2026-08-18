@@ -455,7 +455,14 @@ export class UserCloudflareAccountApi {
    */
   async listWorkerNames(): Promise<string[]> {
     const scripts = await this.listAllPages('/workers/scripts', 'Cloudflare returned invalid Worker scripts.');
-    return scripts.flatMap((value) => (isRecord(value) && typeof value.id === 'string' ? [value.id] : []));
+    return scripts.map((value) => {
+      // Dropping an unreadable entry would shorten the listing by exactly the amount that
+      // reads as "that deployment is gone", which is what the sweep nominates for deletion.
+      if (!isRecord(value) || typeof value.id !== 'string' || value.id.length === 0) {
+        throw new CloudflareAccountApiError('Cloudflare returned invalid Worker scripts.');
+      }
+      return value.id;
+    });
   }
 
   /** List every D1 database in the connected account, with creation times where provided. */

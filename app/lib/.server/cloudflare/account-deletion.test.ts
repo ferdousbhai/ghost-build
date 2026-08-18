@@ -97,6 +97,30 @@ describe('control-plane account erasure', () => {
     warn.mockRestore();
   });
 
+  it('says the ciphertext survived rather than reporting that there was none to erase', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { database, db } = controlPlaneDatabase();
+    const vault = credentialVault(db);
+    const handle = await vault.storeOAuthCredential({
+      accessToken: 'access',
+      refreshToken: 'refresh',
+      expiresAt: Date.now() + 3_600_000,
+    });
+    seedAccount(database, handle);
+    vi.spyOn(vault, 'deleteIfUnreferenced').mockRejectedValue(new Error('D1_ERROR: database is locked'));
+
+    const erasure = await eraseControlPlaneAccount({ env: { DB: db } as Env, userId: 'user-1', vault });
+
+    // Zero is the honest count, but only the log distinguishes it from "there was nothing here".
+    expect(erasure.credentials).toBe(0);
+    expect(rowCount(database, 'cloudflare_credentials')).toBe(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('the ciphertext remains'),
+      expect.stringContaining('database is locked'),
+    );
+    warn.mockRestore();
+  });
+
   it('leaves an unrelated account untouched', async () => {
     const { database, db } = controlPlaneDatabase();
     seedAccount(database, null, 'user-2');

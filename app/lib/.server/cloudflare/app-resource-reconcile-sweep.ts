@@ -43,7 +43,7 @@ type AppResourceReconcileSweepSummary = {
   scanned: number;
   orphans: number;
   deleted: number;
-  skippedListing: boolean;
+  skippedListings: Set<string>;
 };
 
 export async function runAppResourceReconciliation(
@@ -65,7 +65,7 @@ export async function runAppResourceReconciliation(
     scanned: 0,
     orphans: 0,
     deleted: 0,
-    skippedListing: false,
+    skippedListings: new Set<string>(),
   };
   const recorded: RecordedOrphan[] = [];
 
@@ -93,25 +93,33 @@ export async function runAppResourceReconciliation(
       summary.scanned += report.scanned;
       summary.orphans += report.orphans.length;
       summary.deleted += report.deleted.length;
-      summary.skippedListing = summary.skippedListing || report.skippedListings.length > 0;
+      for (const listing of report.skippedListings) {
+        summary.skippedListings.add(listing);
+      }
       for (const resource of report.orphans.slice(0, RECORDED_ORPHAN_LIMIT - recorded.length)) {
         recorded.push({ userId: account.user_id, kind: resource.kind, name: resource.name });
       }
     }
     await finishRun(env.DB, runId, 'ok', summary, recorded, null);
   } catch (error) {
-    await finishRun(env.DB, runId, 'error', summary, recorded, cleanError(error)).catch(() => {
-      logger.error('Unable to record the app resource reconciliation failure');
+    await finishRun(env.DB, runId, 'error', summary, recorded, cleanError(error)).catch((receiptError) => {
+      // The run receipt is the only record an operator reads. Losing it leaves the row at
+      // `running`, which the ops report shows as a crashed sweep, so name both failures here.
+      logger.error(
+        `Unable to record the failure of app resource reconcile run ${runId}`,
+        receiptError instanceof Error ? receiptError.message : String(receiptError),
+        cleanError(error),
+      );
     });
     throw error;
   }
 
-  if (summary.orphans > 0 || summary.failures > 0 || summary.skippedListing) {
+  if (summary.orphans > 0 || summary.failures > 0 || summary.skippedListings.size > 0) {
     // The diff an operator has to read before enforcement can be turned on.
     logger.warn(
       `Reconcile run ${runId} in ${APP_RESOURCE_RECONCILE_MODE} mode: ${summary.orphans} orphan(s) across ` +
         `${summary.scanned} scanned resource(s) and ${summary.users} account(s), ${summary.failures} unreadable` +
-        `${summary.skippedListing ? ', with at least one incomplete resource listing' : ''}`,
+        `${summary.skippedListings.size > 0 ? `, without reading ${[...summary.skippedListings].join(', ')}` : ''}`,
     );
   }
   return summary;
@@ -143,7 +151,8 @@ async function finishRun(
     .prepare(
       `UPDATE app_resource_reconcile_runs
        SET status = ?, completed_at = ?, users_scanned = ?, users_failed = ?, resources_scanned = ?,
-           orphans_found = ?, orphans_json = ?, deleted_count = ?, listing_skipped = ?, error = ?
+           orphans_found = ?, orphans_json = ?, deleted_count = ?, listing_skipped = ?,
+           skipped_listings_json = ?, error = ?
        WHERE id = ?`,
     )
     .bind(
@@ -155,7 +164,8 @@ async function finishRun(
       summary.orphans,
       JSON.stringify(orphans),
       summary.deleted,
-      summary.skippedListing ? 1 : 0,
+      summary.skippedListings.size > 0 ? 1 : 0,
+      summary.skippedListings.size > 0 ? JSON.stringify([...summary.skippedListings].sort()) : null,
       error,
       runId,
     )

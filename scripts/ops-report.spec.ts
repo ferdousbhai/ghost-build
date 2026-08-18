@@ -203,9 +203,27 @@ describe('skill sync rows', () => {
   });
 
   it('names a missing generation rather than printing an empty hash', () => {
-    expect(describeSkillSyncRun({ status: 'published', completed_at: NOW, generation: null }, NOW).sentence).toContain(
-      'generation unknown',
+    expect(
+      describeSkillSyncRun({ status: 'published', completed_at: NOW, generation: null, file_count: 3 }, NOW).sentence,
+    ).toContain('generation unknown');
+  });
+
+  it('refuses to classify a run whose status is not one the schema allows', () => {
+    expect(() => describeSkillSyncRun({ completed_at: NOW, generation: 'gen' }, NOW)).toThrow(
+      'builder_skill_sync_runs rows have no `status` column',
     );
+    expect(() => describeSkillSyncRun({ status: 'finished', completed_at: NOW }, NOW)).toThrow(
+      'builder_skill_sync_runs.status holds the string "finished"',
+    );
+  });
+
+  it('says a published run recorded no file count rather than reporting zero files', () => {
+    const result = describeSkillSyncRun(
+      { status: 'published', completed_at: NOW, generation: 'gen0123456789', file_count: null },
+      NOW,
+    );
+    expect(result.sentence).toContain('an unrecorded number of files');
+    expect(result.sentence).not.toContain('0 files');
   });
 });
 
@@ -272,8 +290,16 @@ describe('reconciliation sweep rows', () => {
     orphans_json: '[]',
     deleted_count: 0,
     listing_skipped: 0,
+    skipped_listings_json: null,
     error: null,
   };
+
+  /** The clean row with one column dropped, as a result set with drifted schema would arrive. */
+  function rowWithout(column: string): Record<string, unknown> {
+    const row: Record<string, unknown> = { ...clean };
+    delete row[column];
+    return row;
+  }
 
   it('states that a clean sweep was report-only', () => {
     const result = describeReconcileRun(clean, NOW);
@@ -305,9 +331,19 @@ describe('reconciliation sweep rows', () => {
     const result = describeReconcileRun({ ...clean, listing_skipped: 1 }, NOW);
     expect(result.level).toBe('attention');
     expect(result.skippedListing).toBe(true);
-    expect(result.sentence).toContain('at least one resource listing could not be read');
+    expect(result.sentence).toContain('could not read at least one resource listing');
     expect(result.sentence).toContain('under-reports what is there');
     expect(result.sentence).not.toContain('found no orphans');
+  });
+
+  it('names the listings it could not read, because a skip is only actionable when named', () => {
+    const result = describeReconcileRun(
+      { ...clean, listing_skipped: 1, skipped_listings_json: JSON.stringify(['KV namespace', 'R2 bucket']) },
+      NOW,
+    );
+    expect(result.level).toBe('attention');
+    expect(result.sentence).toContain('could not read KV namespace, R2 bucket');
+    expect(result.sentence).not.toContain('at least one resource listing');
   });
 
   it('flags accounts the sweep could not read even when it found nothing', () => {
@@ -344,10 +380,76 @@ describe('reconciliation sweep rows', () => {
     expect(result.sentence).toContain('listing failed');
   });
 
-  it('reads a renamed timestamp column rather than reporting a healthy zero', () => {
-    const { completed_at: _completed, ...withoutCompletedAt } = clean;
-    const result = describeReconcileRun({ ...withoutCompletedAt, finished_at: NOW - 2 * HOUR }, NOW);
-    expect(result.at).toBe(NOW - 2 * HOUR);
+  it('reads a run that is still going, whose completion time is legitimately absent', () => {
+    const result = describeReconcileRun({ ...clean, status: 'running', completed_at: null }, NOW);
+    expect(result.at).toBe(clean.started_at);
+  });
+
+  it('refuses to read a row that is missing a column the schema declares', () => {
+    // Each of these used to be substituted with a value that reads as good news.
+    for (const column of [
+      'status',
+      'mode',
+      'started_at',
+      'completed_at',
+      'users_scanned',
+      'users_failed',
+      'resources_scanned',
+      'orphans_found',
+      'deleted_count',
+      'listing_skipped',
+      'orphans_json',
+      'skipped_listings_json',
+      'error',
+    ]) {
+      expect(() => describeReconcileRun(rowWithout(column), NOW)).toThrow(
+        `app_resource_reconcile_runs rows have no \`${column}\` column`,
+      );
+    }
+  });
+
+  it('never reads a missing status as a healthy run', () => {
+    expect(() => describeReconcileRun(rowWithout('status'), NOW)).toThrow(/`status` column/);
+    expect(() => describeReconcileRun({ ...clean, status: 'finished' }, NOW)).toThrow(
+      'app_resource_reconcile_runs.status holds the string "finished", not one of running, ok, error.',
+    );
+  });
+
+  it('never reads a missing orphan count as the length of the truncated sample', () => {
+    expect(() =>
+      describeReconcileRun(
+        { ...rowWithout('orphans_found'), orphans_json: JSON.stringify([{ userId: 'u1', kind: 'd1', name: 'a' }]) },
+        NOW,
+      ),
+    ).toThrow(/`orphans_found` column/);
+    expect(() => describeReconcileRun({ ...clean, orphans_found: null }, NOW)).toThrow(
+      'app_resource_reconcile_runs.orphans_found holds null, not a number.',
+    );
+  });
+
+  it('never reads an unrecognisable skip flag as a complete listing', () => {
+    expect(() => describeReconcileRun({ ...clean, listing_skipped: 'yes' }, NOW)).toThrow(
+      'app_resource_reconcile_runs.listing_skipped holds the string "yes", not 0 or 1.',
+    );
+    expect(() => describeReconcileRun({ ...clean, listing_skipped: null }, NOW)).toThrow(/not 0 or 1/);
+  });
+
+  it('never reads unparseable JSON as an empty list', () => {
+    expect(() => describeReconcileRun({ ...clean, orphans_json: '[{"kind":' }, NOW)).toThrow(
+      /app_resource_reconcile_runs\.orphans_json is not valid JSON/,
+    );
+    expect(() => describeReconcileRun({ ...clean, orphans_json: '{"kind":"d1"}' }, NOW)).toThrow(/not a JSON array/);
+    expect(() =>
+      describeReconcileRun({ ...clean, listing_skipped: 1, skipped_listings_json: 'KV namespace' }, NOW),
+    ).toThrow(/skipped_listings_json is not valid JSON/);
+  });
+
+  it('carries the named listings into the structured detail, not only into the sentence', () => {
+    const result = describeReconcileRun(
+      { ...clean, listing_skipped: 1, skipped_listings_json: JSON.stringify(['KV namespace']) },
+      NOW,
+    );
+    expect(result.skippedListings).toEqual(['KV namespace']);
   });
 });
 
@@ -482,6 +584,8 @@ function healthyFixture(): Fixture {
           orphans_json: '[]',
           deleted_count: 0,
           listing_skipped: 0,
+          skipped_listings_json: null,
+          error: null,
         },
       ],
     ],
@@ -684,6 +788,63 @@ describe('report shape', () => {
     expect(renderReport(report)).toContain(
       'app-resource-reconcile claimed its slot 30m ago but recorded no run, so it started and died.',
     );
+  });
+
+  it('reports a row it cannot read as unknown, never as a healthy sweep', async () => {
+    // Each of these is a row the previous reader turned into good news: no status meant "ok",
+    // no count meant "no orphans", an unreadable flag meant "the listing was complete".
+    const broken: Record<string, Row> = {
+      'a missing status': { status: undefined },
+      'a missing orphan count': { orphans_found: undefined },
+      'an unparseable orphan sample': { orphans_json: '[{"kind":' },
+      'an unreadable skip flag': { listing_skipped: 'maybe' },
+      'a mode outside the schema': { mode: 'delete-everything' },
+    };
+
+    for (const [what, overrides] of Object.entries(broken)) {
+      const fixture = healthyFixture();
+      const row = { ...(fixture.app_resource_reconcile_runs as Rows)[0][0], ...overrides };
+      for (const [column, value] of Object.entries(overrides)) {
+        if (value === undefined) {
+          delete row[column];
+        }
+      }
+      fixture.app_resource_reconcile_runs = [[row]];
+
+      const report = await collectReport({
+        query: fixtureQuery(fixture),
+        now: NOW,
+        desiredRuntimeVersion: CURRENT_RUNTIME,
+      });
+      const sweep = checkById(report, 'app-resource-sweep');
+      expect(sweep.status, what).toBe('unknown');
+      expect(sweep.detail.schemaMismatch, what).toBe(true);
+      // A parse failure is not a missing table, and must not be reported as one.
+      expect(sweep.detail.missingTable, what).toBeNull();
+      expect(sweep.sentence, what).toContain('app_resource_reconcile_runs');
+      expect(sweep.sentence, what).not.toContain('does not exist in production yet');
+      expect(sweep.detail.orphanCount, what).toBeUndefined();
+      expect(reportOf(report).headline, what).toContain('could not be read');
+      expect(renderReport(report), what).not.toContain('found no orphans');
+    }
+  });
+
+  it('reports an unreadable maintenance or sync row as unknown rather than as a failed run', async () => {
+    const fixture = healthyFixture();
+    fixture.daily_maintenance_jobs = [[{ job: 'builder-skill-sync', last_started_at: null }]];
+    fixture.builder_skill_sync_runs = [[{ id: 'run-1', status: 'shipped', started_at: NOW - HOUR }]];
+
+    const report = await collectReport({
+      query: fixtureQuery(fixture),
+      now: NOW,
+      desiredRuntimeVersion: CURRENT_RUNTIME,
+    });
+    const maintenance = checkById(report, 'daily-maintenance');
+    expect(maintenance.status).toBe('unknown');
+    expect(maintenance.sentence).toContain('daily_maintenance_jobs.last_started_at holds null');
+    const sync = checkById(report, 'builder-skill-sync');
+    expect(sync.status).toBe('unknown');
+    expect(sync.sentence).toContain('builder_skill_sync_runs.status holds the string "shipped"');
   });
 
   it('treats a job that has never run as attention rather than as health', async () => {

@@ -51,7 +51,20 @@ export async function eraseControlPlaneAccount(args: {
   // The credential row is referenced by the connection rather than the account,
   // so it can only be removed once that reference is gone.
   const credentials =
-    vault && credentialHandle && (await vault.deleteIfUnreferenced(credentialHandle).catch(() => false)) ? 1 : 0;
+    vault && credentialHandle
+      ? await vault
+          .deleteIfUnreferenced(credentialHandle)
+          .then((deleted) => (deleted ? 1 : 0))
+          .catch((error: unknown) => {
+            // A count of zero otherwise reads as "there was no ciphertext to erase", which is
+            // the one thing this must never claim: the ciphertext is still there.
+            console.warn(
+              'Unable to erase the stored Cloudflare credential during account erasure; the ciphertext remains',
+              error instanceof Error ? error.message : String(error),
+            );
+            return 0;
+          })
+      : 0;
 
   return {
     oauthStates: results[0].meta.changes,
@@ -67,9 +80,15 @@ export async function eraseControlPlaneAccount(args: {
 function safeCredentialVault(env: Env): D1CloudflareCredentialVault | null {
   try {
     return D1CloudflareCredentialVault.fromEnv(env);
-  } catch {
-    // Erasure must still remove the ciphertext when credential configuration is
-    // unavailable; the grant then has to be revoked from the Cloudflare dashboard.
+  } catch (error) {
+    // Erasure must still remove every row it can when credential configuration is
+    // unavailable, but nothing else would say that the ciphertext survived and the
+    // grant now has to be revoked from the Cloudflare dashboard by hand.
+    console.warn(
+      'Cloudflare credential configuration is unavailable, so account erasure left the stored credential ' +
+        'in place and the grant must be revoked from the Cloudflare dashboard',
+      error instanceof Error ? error.message : String(error),
+    );
     return null;
   }
 }

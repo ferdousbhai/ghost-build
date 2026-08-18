@@ -1356,6 +1356,22 @@ describe('UserCloudflareAccountApi', () => {
     );
   });
 
+  test('fails the Worker listing rather than returning it one name short', async () => {
+    // A dropped name reads as a deployment that no longer exists, and the reconciliation
+    // sweep nominates what no longer exists for deletion.
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      Response.json({
+        success: true,
+        result: [{ id: 'ghostbuild-app-1' }, { name: 'ghostbuild-app-2' }],
+        result_info: { page: 1, total_pages: 1 },
+      }),
+    );
+
+    await expect(new UserCloudflareAccountApi('account-1', 'token', request).listWorkerNames()).rejects.toThrow(
+      'Cloudflare returned invalid Worker scripts.',
+    );
+  });
+
   test('reads a D1 listing to its reported total rather than to a full page', async () => {
     const request = vi
       .fn<typeof fetch>()

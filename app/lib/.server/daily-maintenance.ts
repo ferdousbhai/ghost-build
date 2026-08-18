@@ -58,9 +58,14 @@ async function claimDailyJob(db: D1Database, job: string, now: number): Promise<
       .bind(job, now, now - DAILY_MAINTENANCE_INTERVAL_MS)
       .run();
     return result.meta.changes === 1;
-  } catch {
+  } catch (error) {
     // An unclaimable slot means the job does not run this tick, never that it runs unclaimed.
-    logger.error(`Unable to claim the daily maintenance slot for ${job}`);
+    // The reason travels with it: a missing table and a contended row both stop the job here,
+    // and only the message says which one to go and fix.
+    logger.error(
+      `Unable to claim the daily maintenance slot for ${job}`,
+      error instanceof Error ? error.message : String(error),
+    );
     return false;
   }
 }

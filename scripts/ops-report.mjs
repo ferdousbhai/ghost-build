@@ -163,55 +163,114 @@ function plural(count, singular, pluralForm = `${singular}s`) {
   return count === 1 ? singular : pluralForm;
 }
 
+/** A value, short enough to name inside an error message. */
+function describeValue(value) {
+  if (value === null) {
+    return 'null';
+  }
+  return typeof value === 'string' ? `the string "${bounded(value, 40)}"` : `the ${typeof value} ${bounded(value, 40)}`;
+}
+
 /**
- * First present column from a list of candidates.
+ * Strict typed reads of one result row.
  *
- * The reconciliation table is authored by another change in flight, so its exact column
- * names are not settled. Reading by candidate rather than by one hard-coded name lets this
- * report survive a rename instead of reporting a healthy zero.
+ * This report exists so that "broken" and "cannot tell" never render as "fine", so a column
+ * the schema declares and the row does not carry is a hard error naming the column rather
+ * than a substituted value. The two conditions a lenient reader conflates are kept apart:
+ * a column missing from the result set is schema drift and throws, while a column the schema
+ * declares nullable answers `null` and leaves it to the caller to say so out loud.
+ *
+ * @param {string} table the table the row came from, so the error says where to look
+ * @param {Record<string, unknown>} row
  */
-export function pickColumn(row, names) {
-  for (const name of names) {
-    const value = row?.[name];
-    if (value !== undefined && value !== null) {
+function rowReader(table, row) {
+  const raw = (column) => {
+    if (row === null || typeof row !== 'object' || !(column in row)) {
+      throw new Error(`${table} rows have no \`${column}\` column, so this report cannot read them.`);
+    }
+    return row[column];
+  };
+  const wrong = (column, value, expected) =>
+    new Error(`${table}.${column} holds ${describeValue(value)}, not ${expected}.`);
+  return {
+    /** A `NOT NULL INTEGER`. */
+    integer(column) {
+      const value = raw(column);
+      if (!Number.isFinite(value)) {
+        throw wrong(column, value, 'a number');
+      }
+      return Number(value);
+    },
+    /** An `INTEGER` the schema declares nullable. */
+    nullableInteger(column) {
+      const value = raw(column);
+      if (value === null) {
+        return null;
+      }
+      if (!Number.isFinite(value)) {
+        throw wrong(column, value, 'a number or null');
+      }
+      return Number(value);
+    },
+    /** A `NOT NULL TEXT`, restricted to the values its `CHECK` constraint allows. */
+    text(column, allowed = null) {
+      const value = raw(column);
+      if (typeof value !== 'string' || value === '') {
+        throw wrong(column, value, 'a non-empty string');
+      }
+      if (allowed !== null && !allowed.includes(value)) {
+        throw wrong(column, value, `one of ${allowed.join(', ')}`);
+      }
       return value;
-    }
-  }
-  return null;
-}
-
-/** A column that may hold a JSON array, a count, or nothing. */
-function asList(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-  if (typeof value === 'string' && value.trim().startsWith('[')) {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-/** A column that may hold a boolean, an integer flag, or a JSON array of skipped listings. */
-function asFlag(value) {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  if (Number.isFinite(value)) {
-    return Number(value) > 0;
-  }
-  if (typeof value === 'string') {
-    const list = asList(value);
-    if (list.length > 0) {
-      return true;
-    }
-    return value === 'true' || value === '1';
-  }
-  return false;
+    },
+    /** A `TEXT` column the schema declares nullable. */
+    nullableText(column) {
+      const value = raw(column);
+      if (value === null) {
+        return null;
+      }
+      if (typeof value !== 'string') {
+        throw wrong(column, value, 'a string or null');
+      }
+      return value;
+    },
+    /** An `INTEGER NOT NULL CHECK (column IN (0, 1))`. */
+    flag(column) {
+      const value = raw(column);
+      if (typeof value === 'boolean') {
+        return value;
+      }
+      if (value === 0 || value === 1) {
+        return value === 1;
+      }
+      throw wrong(column, value, '0 or 1');
+    },
+    /** A nullable `TEXT` column holding a JSON array; `null` when the writer recorded none. */
+    nullableJsonList(column) {
+      const value = raw(column);
+      if (value === null) {
+        return null;
+      }
+      if (Array.isArray(value)) {
+        return value;
+      }
+      if (typeof value !== 'string') {
+        throw wrong(column, value, 'a JSON array or null');
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(value);
+      } catch (error) {
+        throw new Error(
+          `${table}.${column} is not valid JSON: ${bounded(error instanceof Error ? error.message : error, 120)}`,
+        );
+      }
+      if (!Array.isArray(parsed)) {
+        throw wrong(column, parsed, 'a JSON array');
+      }
+      return parsed;
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -272,23 +331,35 @@ export function describeWorkspaceRuntime(row, { now, desiredRuntimeVersion }) {
   return { ...base, level: 'ok', sentence: `${who} is on the current workspace runtime (updated ${when}).` };
 }
 
+/** The `status` values `migrations/0009` allows a builder skill sync run to hold. */
+const SKILL_SYNC_STATUSES = ['running', 'unchanged', 'published', 'busy', 'error'];
+
 /**
  * The most recent builder skill sync attempt, as a status and a sentence.
+ *
+ * Throws when `builder_skill_sync_runs` does not hold what `migrations/0009` declares:
+ * a row this reader cannot classify has to reach the operator as unreadable, never as a
+ * sync that merely failed.
+ *
  * @param {Record<string, unknown>} row
  * @param {number} now
  */
 export function describeSkillSyncRun(row, now) {
+  const read = rowReader('builder_skill_sync_runs', row);
   const at = Number.isFinite(row.completed_at) ? Number(row.completed_at) : Number(row.started_at);
   const when = formatRelativeTime(at, now, { missing: 'at an unrecorded time' });
   const generation = shortHash(typeof row.generation === 'string' ? row.generation : null);
-  const files = number(row.file_count);
-  switch (row.status) {
-    case 'published':
+  switch (read.text('status', SKILL_SYNC_STATUSES)) {
+    case 'published': {
+      // `file_count` is only written once a run has something to publish.
+      const files = read.nullableInteger('file_count');
+      const counted = files === null ? 'an unrecorded number of files' : `${files} ${plural(files, 'file')}`;
       return {
         level: 'ok',
         at,
-        sentence: `Builder skills published generation ${generation} with ${files} ${plural(files, 'file')} ${when}.`,
+        sentence: `Builder skills published generation ${generation} with ${counted} ${when}.`,
       };
+    }
     case 'unchanged':
       return {
         level: 'ok',
@@ -316,7 +387,7 @@ export function describeSkillSyncRun(row, now) {
       return {
         level: 'error',
         at,
-        sentence: `The builder skill sync failed ${when}: ${cleanErrorText(row.error) ?? 'no error was recorded'}.`,
+        sentence: `The builder skill sync failed ${when}: ${cleanErrorText(read.nullableText('error')) ?? 'no error was recorded'}.`,
       };
   }
 }
@@ -331,7 +402,12 @@ export function describeSkillSyncRun(row, now) {
  * @param {number} now
  */
 export function describeDailyJobs(rows, now) {
-  const lastStarted = new Map(rows.map((row) => [String(row.job), number(row.last_started_at, 0)]));
+  const lastStarted = new Map(
+    rows.map((row) => {
+      const read = rowReader('daily_maintenance_jobs', row);
+      return [read.text('job'), read.integer('last_started_at')];
+    }),
+  );
   const names = [...new Set([...EXPECTED_DAILY_JOBS, ...lastStarted.keys()])].sort();
   return names.map((job) => {
     const at = lastStarted.get(job) ?? null;
@@ -351,37 +427,52 @@ export function describeDailyJobs(rows, now) {
   });
 }
 
+/** The `status` and `mode` values `migrations/0010` allows a reconciliation run to hold. */
+const RECONCILE_STATUSES = ['running', 'ok', 'error'];
+const RECONCILE_MODES = ['report', 'enforce'];
+
 /**
  * The most recent app-resource reconciliation sweep, as a status and a sentence.
  *
- * Mirrors `app_resource_reconcile_runs` as written by
- * `app/lib/.server/cloudflare/app-resource-reconcile-sweep.ts`, where `orphans_json` is a
- * bounded sample and `orphans_found` is the exact total. A few column names are resolved by
- * candidate so a rename degrades one clause rather than reporting a healthy zero.
+ * Mirrors `app_resource_reconcile_runs` as declared by `migrations/0010` and `migrations/0011`
+ * and written by `app/lib/.server/cloudflare/app-resource-reconcile-sweep.ts`, where
+ * `orphans_json` is a bounded sample and `orphans_found` is the exact total.
+ *
+ * Every column is read strictly, because every lenient reading of this table has a failure
+ * mode that reads as good news: an absent `status` as `ok`, an absent `mode` as report-only
+ * while a sweep deletes, an absent `orphans_found` as the length of a truncated sample, an
+ * unreadable `listing_skipped` as a complete listing. Schema drift throws so the caller can
+ * report the sweep as unreadable instead.
  *
  * @param {Record<string, unknown>} row
  * @param {number} now
  */
 export function describeReconcileRun(row, now) {
-  const startedAt = number(pickColumn(row, ['started_at']), 0);
-  const completedAt = number(pickColumn(row, ['completed_at', 'finished_at']), 0);
-  const at = completedAt || startedAt;
+  const read = rowReader('app_resource_reconcile_runs', row);
+  const startedAt = read.integer('started_at');
+  // A run still in flight has no completion time; that is the only reason for one to be null.
+  const completedAt = read.nullableInteger('completed_at');
+  const at = completedAt ?? startedAt;
   const when = formatRelativeTime(at, now, { missing: 'at an unrecorded time' });
-  const runStatus = String(pickColumn(row, ['status']) ?? 'ok');
-  const mode = String(pickColumn(row, ['mode']) ?? 'report');
-  const users = number(pickColumn(row, ['users_scanned', 'user_count']), 0);
-  const usersFailed = number(pickColumn(row, ['users_failed']), 0);
-  const resources = number(pickColumn(row, ['resources_scanned', 'resource_count']), 0);
-  const sample = asList(pickColumn(row, ['orphans_json', 'orphans']));
-  const orphanCount = number(pickColumn(row, ['orphans_found', 'orphan_count']), sample.length);
-  const deleted = number(pickColumn(row, ['deleted_count']), 0);
-  const skipped = asFlag(pickColumn(row, ['listing_skipped', 'skipped_listings', 'skipped']));
-  const error = cleanErrorText(pickColumn(row, ['error']));
+  const runStatus = read.text('status', RECONCILE_STATUSES);
+  const mode = read.text('mode', RECONCILE_MODES);
+  const users = read.integer('users_scanned');
+  const usersFailed = read.integer('users_failed');
+  const resources = read.integer('resources_scanned');
+  const orphanCount = read.integer('orphans_found');
+  // Both JSON columns stay null until there is something to record, so "none recorded" and
+  // "recorded none" render the same. Neither one is ever allowed to stand in for the count.
+  const sample = read.nullableJsonList('orphans_json') ?? [];
+  const deleted = read.integer('deleted_count');
+  const skipped = read.flag('listing_skipped');
+  const skippedListings = read.nullableJsonList('skipped_listings_json') ?? [];
+  const error = cleanErrorText(read.nullableText('error'));
   const orphans = sample
     .slice(0, ORPHAN_SAMPLE_LIMIT)
     .map((orphan) =>
       typeof orphan === 'string' ? orphan : `${orphan?.kind ?? 'resource'}:${orphan?.name ?? 'unnamed'}`,
     );
+  const named = skippedListings.map((listing) => bounded(listing, 60));
   const detail = {
     at,
     runStatus,
@@ -393,6 +484,7 @@ export function describeReconcileRun(row, now) {
     orphans,
     deletedCount: deleted,
     skippedListing: skipped,
+    skippedListings: named,
     error,
   };
 
@@ -425,7 +517,9 @@ export function describeReconcileRun(row, now) {
     return {
       ...detail,
       level: 'attention',
-      sentence: `The app resource sweep ran ${when} in ${modeClause}, but at least one resource listing could not be read, so its count of ${orphanCount} ${plural(orphanCount, 'orphan')} under-reports what is there.${scanned}`,
+      sentence: `The app resource sweep ran ${when} in ${modeClause}, but could not read ${
+        named.length > 0 ? named.join(', ') : 'at least one resource listing'
+      }, so its count of ${orphanCount} ${plural(orphanCount, 'orphan')} under-reports what is there.${scanned}`,
     };
   }
   if (orphanCount > 0) {
@@ -517,8 +611,9 @@ export function coreStatements(now) {
 
 /**
  * Tables migrated from the operations Worker. Each is read on its own so a table that has
- * not been created yet costs one check, not the whole report. Ordered by `rowid` because the
- * timestamp column of the newest table is not settled yet.
+ * not been created yet costs one check, not the whole report. Ordered by `rowid` so the newest
+ * insert leads even for a run that has not recorded a completion time yet; `describeReconcileRun`
+ * re-sorts on the timestamps it reads.
  */
 export const OPTIONAL_STATEMENTS = {
   skillSyncState: 'SELECT * FROM builder_skill_sync_state LIMIT 1',
@@ -671,18 +766,34 @@ async function attempt(read) {
   }
 }
 
+/**
+ * A row this report cannot read is a third thing: the table is there and the query worked, but
+ * what came back is not what the schema declares. Marked so the check says that rather than
+ * blaming the connection, and so it can never be mistaken for an empty table.
+ */
+function schemaFailure(error) {
+  return {
+    ok: false,
+    schemaMismatch: true,
+    error: error instanceof Error ? error.message : String(error),
+  };
+}
+
 function unknownCheck(id, title, attemptResult, hint) {
   const missingTable = /no such table:\s*([\w.]+)/i.exec(attemptResult.error ?? '')?.[1] ?? null;
+  const schemaMismatch = attemptResult.schemaMismatch === true;
   return {
     id,
     title,
     status: 'unknown',
     sentence: missingTable
       ? `\`${missingTable}\` does not exist in production yet, so this is unknown.`
-      : `This could not be read: ${attemptResult.error}`,
+      : schemaMismatch
+        ? `This could not be read: ${attemptResult.error} The schema this report expects and the one production holds have diverged.`
+        : `This could not be read: ${attemptResult.error}`,
     at: null,
     relative: null,
-    detail: { error: attemptResult.error, missingTable, hint: hint ?? null },
+    detail: { error: attemptResult.error, missingTable, schemaMismatch, hint: hint ?? null },
   };
 }
 
@@ -796,7 +907,17 @@ function buildSkillSyncCheck(stateAttempt, runsAttempt, now) {
       detail: { ...stateDetail, runs: [] },
     });
   }
-  const latest = describeSkillSyncRun(runs[0], now);
+  let latest;
+  try {
+    latest = describeSkillSyncRun(runs[0], now);
+  } catch (error) {
+    return unknownCheck(
+      'builder-skill-sync',
+      'Builder skill sync',
+      schemaFailure(error),
+      'Migrated from ghost-build-ops.',
+    );
+  }
   const watcherAge = ageOf(lastChecked, now);
   const stale = watcherAge !== null && watcherAge > SCHEDULED_JOB_STALE_MS;
   const level = stale && STATUS_RANK[latest.level] < STATUS_RANK.attention ? 'attention' : latest.level;
@@ -822,16 +943,25 @@ function buildSkillSyncCheck(stateAttempt, runsAttempt, now) {
   });
 }
 
-/** The newest `started_at` across a run-receipt table, or `null` when it could not be read. */
+/**
+ * The newest `started_at` across a run-receipt table, or `null` when it could not be read.
+ *
+ * A receipt whose own start time is unreadable makes the whole comparison unreadable: this
+ * number is what decides whether a job "started and died", and reading an unreadable row as
+ * an older run would accuse a healthy job.
+ */
 function newestStart(runsAttempt) {
   if (!runsAttempt?.ok) {
     return null;
   }
-  return (runsAttempt.value[0] ?? []).reduce(
-    (newest, row) =>
-      Number.isFinite(row.started_at) && Number(row.started_at) > newest ? Number(row.started_at) : newest,
-    0,
-  );
+  let newest = 0;
+  for (const row of runsAttempt.value[0] ?? []) {
+    if (!Number.isFinite(row?.started_at)) {
+      return null;
+    }
+    newest = Math.max(newest, Number(row.started_at));
+  }
+  return newest;
 }
 
 function buildDailyMaintenanceCheck(jobsAttempt, { now, lastReceiptAt }) {
@@ -843,7 +973,18 @@ function buildDailyMaintenanceCheck(jobsAttempt, { now, lastReceiptAt }) {
       'Written by app/lib/.server/daily-maintenance.ts.',
     );
   }
-  const entries = describeDailyJobs(jobsAttempt.value[0] ?? [], now).map((entry) => {
+  let described;
+  try {
+    described = describeDailyJobs(jobsAttempt.value[0] ?? [], now);
+  } catch (error) {
+    return unknownCheck(
+      'daily-maintenance',
+      'Daily maintenance',
+      schemaFailure(error),
+      'Written by app/lib/.server/daily-maintenance.ts.',
+    );
+  }
+  const entries = described.map((entry) => {
     const receipt = lastReceiptAt[entry.job];
     // The claim is written before the job runs, so a claim with no receipt behind it is a job
     // that fired and died. Only meaningful once the receipt table itself could be read.
@@ -893,7 +1034,17 @@ function buildReconcileCheck(runsAttempt, now) {
     );
   }
   // The newest row wins even if `rowid` order and timestamp order disagree.
-  const described = runs.map((row) => describeReconcileRun(row, now)).sort((a, b) => b.at - a.at);
+  let described;
+  try {
+    described = runs.map((row) => describeReconcileRun(row, now)).sort((a, b) => b.at - a.at);
+  } catch (error) {
+    return unknownCheck(
+      'app-resource-sweep',
+      'App resource sweep',
+      schemaFailure(error),
+      'Written by app/lib/.server/cloudflare/app-resource-reconcile-sweep.ts.',
+    );
+  }
   const latest = described[0];
   const age = ageOf(latest.at, now);
   const stale = age !== null && age > SCHEDULED_JOB_STALE_MS;
@@ -915,15 +1066,21 @@ function buildReconcileCheck(runsAttempt, now) {
         orphans: latest.orphans,
         deletedCount: latest.deletedCount,
         skippedListing: latest.skippedListing,
+        // `--json` is the mode an agent reasons over, so it gets the listings by name too:
+        // a skip the operator cannot act on is barely better than no skip at all.
+        skippedListings: latest.skippedListings,
         error: latest.error,
-        recentRuns: described.slice(0, 5).map(({ at, runStatus, mode, orphanCount, skippedListing, error }) => ({
-          at,
-          runStatus,
-          mode,
-          orphanCount,
-          skippedListing,
-          error,
-        })),
+        recentRuns: described
+          .slice(0, 5)
+          .map(({ at, runStatus, mode, orphanCount, skippedListing, skippedListings, error }) => ({
+            at,
+            runStatus,
+            mode,
+            orphanCount,
+            skippedListing,
+            skippedListings,
+            error,
+          })),
       },
     },
   );
