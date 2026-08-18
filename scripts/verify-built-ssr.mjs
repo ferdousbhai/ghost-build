@@ -7,25 +7,10 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
  * The built server is a Workers bundle, so it statically imports
  * `cloudflare:workers` for the private operations RPC entrypoint. Node's ESM
  * loader cannot resolve that scheme, and workerd is not what this check is for:
- * it exercises `fetch` route rendering, never RPC. Stub the module so the class
- * declaration evaluates, and leave every route assertion below untouched.
+ * it exercises `fetch` route rendering, never RPC. Stubbing the one binding the
+ * bundle imports is enough — nothing here ever constructs the entrypoint.
  */
-const WORKERS_MODULE_STUB = `
-export class WorkerEntrypoint {
-  constructor(ctx, env) {
-    this.ctx = ctx;
-    this.env = env;
-  }
-}
-export class DurableObject {
-  constructor(ctx, env) {
-    this.ctx = ctx;
-    this.env = env;
-  }
-}
-export class RpcTarget {}
-export const env = {};
-`;
+const WORKERS_MODULE_STUB = 'export class WorkerEntrypoint {}';
 
 registerHooks({
   resolve(specifier, context, nextResolve) {

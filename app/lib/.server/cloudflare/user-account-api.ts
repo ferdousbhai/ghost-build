@@ -419,7 +419,6 @@ export class UserCloudflareAccountApi {
     return true;
   }
 
-  /** Upload an immutable, server-owned Worker version and promote exactly it to production. */
   /** List every Worker script name in the connected account. */
   async listWorkerNames(): Promise<string[]> {
     const scripts = await this.call<unknown>('/workers/scripts', { method: 'GET' });
@@ -469,6 +468,7 @@ export class UserCloudflareAccountApi {
     );
   }
 
+  /** Upload an immutable, server-owned Worker version and promote exactly it to production. */
   async deployManagedWorker(args: {
     workerName: string;
     projectType: 'web_app' | 'worker';
@@ -1629,7 +1629,7 @@ function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
 
 /** Parse a Cloudflare ISO-8601 timestamp into epoch millis, or null when it is absent or invalid. */
 function parseCloudflareTimestamp(value: unknown): number | null {
-  if (typeof value !== 'string' || value.length === 0) {
+  if (typeof value !== 'string') {
     return null;
   }
   const parsed = Date.parse(value);

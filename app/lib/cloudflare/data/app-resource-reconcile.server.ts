@@ -14,7 +14,9 @@ import type { UserCloudflareAccountApi } from '~/lib/.server/cloudflare/user-acc
 
 /** Resources younger than this are assumed to belong to an in-flight deployment. */
 export const APP_RESOURCE_RECONCILE_GRACE_MS = 24 * 60 * 60 * 1000;
-export const APP_RESOURCE_RECONCILE_DELETE_LIMIT = 5;
+
+/** Deleting a bounded batch per sweep keeps one bad scan from emptying an account. */
+const DELETE_LIMIT = 5;
 
 const RESOURCE_PREFIX = 'ghostbuild-';
 
@@ -30,9 +32,9 @@ const APP_RESOURCE_SUFFIX = /-(agent-security|storage|cache)$/;
 
 const logger = createScopedLogger('CloudflareAppResourceReconcile');
 
-export type OrphanedAppResourceKind = 'd1' | 'kv' | 'r2';
+type OrphanedAppResourceKind = 'd1' | 'kv' | 'r2';
 
-export type OrphanedAppResource = {
+type OrphanedAppResource = {
   kind: OrphanedAppResourceKind;
   name: string;
   deploymentId: string;
@@ -49,11 +51,10 @@ export type AppResourceReconcileApi = Pick<
   | 'deleteR2Bucket'
 >;
 
-export type AppResourceReconcileReport = {
+type AppResourceReconcileReport = {
   scanned: number;
   orphans: OrphanedAppResource[];
   deleted: OrphanedAppResource[];
-  undatable: string[];
 };
 
 /**
@@ -74,20 +75,6 @@ type DeploymentGroup = {
   newestCreatedAt: number | null;
 };
 
-function record(
-  groups: Map<string, DeploymentGroup>,
-  deploymentId: string,
-  resource: OrphanedAppResource,
-  createdAt: number | null,
-): void {
-  const group = groups.get(deploymentId) ?? { resources: [], newestCreatedAt: null };
-  group.resources.push(resource);
-  if (createdAt !== null) {
-    group.newestCreatedAt = group.newestCreatedAt === null ? createdAt : Math.max(group.newestCreatedAt, createdAt);
-  }
-  groups.set(deploymentId, group);
-}
-
 /**
  * Find every app resource whose anchoring Worker no longer exists. A deployment is live while
  * `ghostbuild-<id>` is present in the account, regardless of what any registry believes.
@@ -106,24 +93,24 @@ export async function findOrphanedAppResources(
   const liveWorkers = new Set(workerNames);
   const groups = new Map<string, DeploymentGroup>();
 
-  for (const database of databases) {
-    const deploymentId = appDeploymentIdFromResourceName(database.name);
-    if (deploymentId) {
-      record(groups, deploymentId, { kind: 'd1', name: database.name, deploymentId }, database.createdAt);
+  const candidates: Array<{ kind: OrphanedAppResourceKind; name: string; createdAt: number | null }> = [
+    ...databases.map((database) => ({ kind: 'd1' as const, name: database.name, createdAt: database.createdAt })),
+    // KV namespaces carry no creation time; they are dated by their deployment siblings.
+    ...namespaces.map((namespace) => ({ kind: 'kv' as const, name: namespace.name, createdAt: null })),
+    ...buckets.map((bucket) => ({ kind: 'r2' as const, name: bucket.name, createdAt: bucket.createdAt })),
+  ];
+
+  for (const { kind, name, createdAt } of candidates) {
+    const deploymentId = appDeploymentIdFromResourceName(name);
+    if (!deploymentId) {
+      continue;
     }
-  }
-  for (const namespace of namespaces) {
-    const deploymentId = appDeploymentIdFromResourceName(namespace.name);
-    if (deploymentId) {
-      // KV namespaces carry no creation time; they are dated by their deployment siblings.
-      record(groups, deploymentId, { kind: 'kv', name: namespace.name, deploymentId }, null);
+    const group = groups.get(deploymentId) ?? { resources: [], newestCreatedAt: null };
+    group.resources.push({ kind, name, deploymentId });
+    if (createdAt !== null) {
+      group.newestCreatedAt = group.newestCreatedAt === null ? createdAt : Math.max(group.newestCreatedAt, createdAt);
     }
-  }
-  for (const bucket of buckets) {
-    const deploymentId = appDeploymentIdFromResourceName(bucket.name);
-    if (deploymentId) {
-      record(groups, deploymentId, { kind: 'r2', name: bucket.name, deploymentId }, bucket.createdAt);
-    }
+    groups.set(deploymentId, group);
   }
 
   const orphans: OrphanedAppResource[] = [];
@@ -155,25 +142,20 @@ export async function findOrphanedAppResources(
  */
 export async function reconcileAppResources(
   api: AppResourceReconcileApi,
-  options: { now?: number; dryRun?: boolean; limit?: number } = {},
+  options: { now?: number; dryRun?: boolean } = {},
 ): Promise<AppResourceReconcileReport> {
   const now = options.now ?? Date.now();
   const dryRun = options.dryRun ?? true;
-  const limit = Math.max(
-    0,
-    Math.min(options.limit ?? APP_RESOURCE_RECONCILE_DELETE_LIMIT, APP_RESOURCE_RECONCILE_DELETE_LIMIT),
-  );
   const { orphans, scanned, undatable } = await findOrphanedAppResources(api, now);
 
   if (undatable.length > 0) {
     logger.warn(`Skipped ${undatable.length} undatable app deployment(s) with no creation time`);
   }
-  if (orphans.length === 0) {
-    return { scanned, orphans, deleted: [], undatable };
-  }
-  if (dryRun) {
-    logger.info(`Reconcile dry run found ${orphans.length} orphaned app resource(s) across ${scanned} scanned`);
-    return { scanned, orphans, deleted: [], undatable };
+  if (dryRun || orphans.length === 0) {
+    if (dryRun && orphans.length > 0) {
+      logger.info(`Reconcile dry run found ${orphans.length} orphaned app resource(s) across ${scanned} scanned`);
+    }
+    return { scanned, orphans, deleted: [] };
   }
 
   // Databases first, then caches, then buckets: buckets are the slowest and the most restartable.
@@ -181,7 +163,7 @@ export async function reconcileAppResources(
     ...orphans.filter((resource) => resource.kind === 'd1'),
     ...orphans.filter((resource) => resource.kind === 'kv'),
     ...orphans.filter((resource) => resource.kind === 'r2'),
-  ].slice(0, limit);
+  ].slice(0, DELETE_LIMIT);
 
   const deleted: OrphanedAppResource[] = [];
   for (const resource of ordered) {
@@ -202,7 +184,7 @@ export async function reconcileAppResources(
   if (orphans.length > ordered.length) {
     logger.info(`Reconcile deferred ${orphans.length - ordered.length} orphaned resource(s) past the sweep limit`);
   }
-  return { scanned, orphans, deleted, undatable };
+  return { scanned, orphans, deleted };
 }
 
 type ReconcileEnv = Parameters<typeof createUserAccountApi>[0] & {

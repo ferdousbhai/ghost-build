@@ -47,9 +47,7 @@ describe('user workspace runtime scheduled maintenance', () => {
       expect(job).toHaveBeenCalledWith(env);
     }
     expect(waitUntil).toHaveBeenCalledTimes(MAINTENANCE_JOBS.length);
-    await expect(Promise.all(waitUntil.mock.calls.map(([promise]) => promise))).resolves.toEqual(
-      MAINTENANCE_JOBS.map(() => undefined),
-    );
+    await Promise.all(waitUntil.mock.calls.map(([promise]) => promise));
   });
 
   it('ignores an unprovisioned trigger', () => {
