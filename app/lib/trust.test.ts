@@ -45,8 +45,20 @@ describe('public trust contract', () => {
 
     expect(privacy).toContain('erases every record the operator holds');
     expect(privacy).toContain('deployed are retained, keep running, keep billing to your account');
-    expect(privacy).toContain('no machine-readable account export');
     expect(privacy).not.toContain('self-service export or deletion during public beta');
+  });
+
+  it('describes only the export Ghostbuild actually performs', () => {
+    const privacy = readFileSync('app/routes/privacy.tsx', 'utf8');
+
+    expect(privacy).toContain('self-service export of those same operator-held records');
+    expect(privacy).toContain('session token hashes are never exported');
+    expect(privacy).toContain('the account export does not contain them');
+    expect(privacy).toContain('incomplete rather than looking whole');
+    // The export reaches the control plane only, so no page may claim it covers
+    // what lives in the user's own Cloudflare account.
+    expect(privacy).not.toContain('no machine-readable account export');
+    expect(privacy).not.toContain('export includes your chats');
   });
 
   it('keeps public-beta pricing and business terms explicit', () => {

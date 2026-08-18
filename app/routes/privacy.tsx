@@ -182,15 +182,27 @@ function PrivacyPage() {
           Ghostbuild’s authorization you can no longer sign in, so use the request path below instead.
         </p>
         <p>
+          Settings also contains a self-service export of those same operator-held records. It saves a JSON file,
+          carrying a schema version and an export timestamp, containing your identity and profile, your Cloudflare
+          connection metadata and granted scopes, the existence, storage time, and key version of your encrypted
+          credential record, your runtime locator, and your authentication-session and OAuth-state records. Encrypted
+          credential material, initialisation vectors, credential handles, and session token hashes are never exported.
+          Because a single file discloses your whole account record, the export requires the same Cloudflare sign-in
+          completed in the last ten minutes that erasure requires. Each section is bounded at 200 records and reports
+          the untruncated count beside them, and a section that could not be read is named in the file, which reports
+          itself incomplete rather than looking whole.
+        </p>
+        <p>
           That control deliberately deletes nothing inside your own Cloudflare account.{' '}
           <strong>
             Workers, D1 databases, R2 buckets, KV namespaces, Containers, Durable Objects, and Agents that Ghostbuild
             deployed are retained, keep running, keep billing to your account, and are yours to remove.
           </strong>{' '}
-          Chats, transcripts, project files, and deployment records also stay there under that account’s controls. There
-          is no machine-readable account export: download individual project source with Download code in the project
+          Chats, transcripts, project files, and deployment records also stay there under that account’s controls, and
+          the account export does not contain them: download individual project source with Download code in the project
           header, and use your Cloudflare account’s own tools for the rest. Browser copies are not reachable from the
-          server; clear Ghostbuild site data in every browser you use. Settings lists exactly what to clear.
+          server and are in no export; clear Ghostbuild site data in every browser you use. Settings lists exactly what
+          to clear.
         </p>
         <p>
           The operator’s current Cloudflare plan retains sampled control-plane Workers Logs and traces for seven days.
@@ -231,12 +243,12 @@ function PrivacyPage() {
         <p>
           Depending on applicable law, you may request access, correction, portability, restriction, objection, or
           erasure and may complain to the data-protection authority responsible where you live or where an alleged
-          infringement occurred. Erasure of the records the operator holds is self-service in Settings, as described
-          above. For everything else — access, correction, portability, restriction, objection, or a case the Settings
-          control cannot reach — start with the public <Link to="/support">Support</Link> form and include only the
-          request type and your GitHub handle. If a private method can be arranged, a maintainer will identify it in the
-          issue; until then, do not provide sensitive information. Ghostbuild does not yet provide a verified
-          confidential privacy inbox.
+          infringement occurred. Access to the records the operator holds, a machine-readable copy of them, and their
+          erasure are all self-service in Settings, as described above. For everything else — correction, restriction,
+          objection, data the operator does not hold, or a case the Settings controls cannot reach — start with the
+          public <Link to="/support">Support</Link> form and include only the request type and your GitHub handle. If a
+          private method can be arranged, a maintainer will identify it in the issue; until then, do not provide
+          sensitive information. Ghostbuild does not yet provide a verified confidential privacy inbox.
         </p>
         <p>
           Ghostbuild may request proportionate information to verify control of the relevant Cloudflare identity before

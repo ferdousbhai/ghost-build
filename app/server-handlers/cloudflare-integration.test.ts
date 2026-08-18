@@ -4,7 +4,11 @@ import type {
   CloudflareOrchestrator,
 } from '~/lib/.server/cloudflare/cloudflare-orchestrator';
 import { USER_WORKSPACE_RUNTIME_SHA256 } from '~/generated/user-workspace-runtime.generated';
-import { UserWorkspaceRuntimeProvisioningInProgressError } from '~/lib/.server/cloudflare/user-workspace-runtime-provisioner';
+import {
+  UserWorkspaceContainersEligibilityUnknownError,
+  UserWorkspaceContainersPlanRequiredError,
+  UserWorkspaceRuntimeProvisioningInProgressError,
+} from '~/lib/.server/cloudflare/user-workspace-runtime-provisioner';
 const mocks = vi.hoisted(() => ({
   CloudflareConnectionChangedError: class CloudflareConnectionChangedError extends Error {},
   getAuthSession: vi.fn(),
@@ -294,6 +298,50 @@ describe('Cloudflare-only authentication', () => {
       code: 'workspace_plan_required',
       error:
         'Cloudflare Containers requires the Workers Paid plan. Enable Workers Paid in Cloudflare, then return here and try again. Ghostbuild does not change your plan automatically.',
+    });
+  });
+
+  it('links the upgrade destination Cloudflare named when the precondition check refuses the plan', async () => {
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection());
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([null]),
+      provision: vi
+        .fn()
+        .mockRejectedValue(
+          new UserWorkspaceContainersPlanRequiredError(
+            'You do not have access to Cloudflare Containers.',
+            'https://dash.cloudflare.com/?to=/:account/workers/plans',
+          ),
+        ),
+    });
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      code: 'workspace_plan_required',
+      error:
+        'Cloudflare Containers requires the Workers Paid plan. Enable Workers Paid in Cloudflare, then return here and try again. Ghostbuild does not change your plan automatically.',
+      upgradeUrl: 'https://dash.cloudflare.com/?to=/:account/workers/plans',
+    });
+  });
+
+  it('reports an undeterminable plan as its own state rather than as a plan or a fault', async () => {
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection());
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([null]),
+      provision: vi
+        .fn()
+        .mockRejectedValue(new UserWorkspaceContainersEligibilityUnknownError('The connection was reset.')),
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      code: 'workspace_eligibility_unknown',
+      error:
+        'Ghostbuild could not reach Cloudflare to confirm that this account can run Containers, so it did not start creating your workspace. Nothing changed in your Cloudflare account. Try again in a moment.',
     });
   });
 

@@ -35,6 +35,23 @@ export class UserWorkspaceRuntimeProvisioningInProgressError extends Error {
   }
 }
 
+export class UserWorkspaceContainersPlanRequiredError extends Error {
+  constructor(
+    providerMessage: string,
+    readonly upgradeUrl: string | null,
+  ) {
+    super(`Cloudflare Containers requires the Workers Paid plan: ${providerMessage}`);
+    this.name = 'UserWorkspaceContainersPlanRequiredError';
+  }
+}
+
+export class UserWorkspaceContainersEligibilityUnknownError extends Error {
+  constructor(reason: string) {
+    super(`Ghostbuild could not confirm Cloudflare Containers access for this account: ${reason}`);
+    this.name = 'UserWorkspaceContainersEligibilityUnknownError';
+  }
+}
+
 export async function provisionUserWorkspaceRuntime(args: {
   env: Env;
   userId: string;
@@ -81,6 +98,16 @@ export async function provisionUserWorkspaceRuntime(args: {
     throw new UserWorkspaceRuntimeProvisioningInProgressError();
   }
   try {
+    // Containers are the one workspace capability the OAuth grant cannot promise: the scope is
+    // granted, the plan is not. Settle it before anything exists, so an ineligible account is told
+    // what to upgrade instead of being left holding an orphaned database and Worker.
+    const entitlement = await accountApi.readWorkspaceContainersEntitlement();
+    if (entitlement.status === 'plan_required') {
+      throw new UserWorkspaceContainersPlanRequiredError(entitlement.message, entitlement.upgradeUrl);
+    }
+    if (entitlement.status === 'undetermined') {
+      throw new UserWorkspaceContainersEligibilityUnknownError(entitlement.reason);
+    }
     const database = await accountApi.ensureD1Database(databaseName);
     await accountApi.applyD1Migrations(database.id, USER_WORKSPACE_DATA_MIGRATIONS);
     const deployed = await accountApi.deployWorkspaceRuntimeWorker({

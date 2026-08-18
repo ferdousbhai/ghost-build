@@ -72,6 +72,79 @@ describe('UserCloudflareAccountApi', () => {
     );
   });
 
+  test('reads the workspace Containers entitlement from the account capability endpoint', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: { limits: { total_vcpu: 1500 }, locations: [] } }));
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'user-token', request).readWorkspaceContainersEntitlement(),
+    ).resolves.toEqual({ status: 'entitled' });
+    expect(request).toHaveBeenCalledWith(
+      'https://api.cloudflare.com/client/v4/accounts/account-1/containers/me',
+      expect.objectContaining({
+        method: 'GET',
+        redirect: 'manual',
+        headers: expect.objectContaining({ authorization: 'Bearer user-token' }),
+      }),
+    );
+  });
+
+  test('reports the plan requirement and the upgrade destination Cloudflare names', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      Response.json(
+        {
+          error:
+            'Unauthorized: You do not have access to Cloudflare Containers. Deploying containers requires the Workers Paid plan. Upgrade your plan at https://dash.cloudflare.com/?to=/:account/workers/plans',
+        },
+        { status: 401 },
+      ),
+    );
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'user-token', request).readWorkspaceContainersEntitlement(),
+    ).resolves.toEqual({
+      status: 'plan_required',
+      message: expect.stringContaining('Workers Paid plan'),
+      upgradeUrl: 'https://dash.cloudflare.com/?to=/:account/workers/plans',
+    });
+  });
+
+  test('does not read a missing Containers scope as a missing plan', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ error: 'Unauthorized: Account is not authorized' }, { status: 401 }));
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'user-token', request).readWorkspaceContainersEntitlement(),
+    ).resolves.toEqual({
+      status: 'undetermined',
+      reason: 'Cloudflare refused the Containers capability check (401): Unauthorized: Account is not authorized',
+    });
+  });
+
+  test('leaves the Containers entitlement undetermined when Cloudflare cannot be reached', async () => {
+    const request = vi.fn<typeof fetch>().mockRejectedValueOnce(new Error('The connection was reset.'));
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'user-token', request).readWorkspaceContainersEntitlement(),
+    ).resolves.toEqual({
+      status: 'undetermined',
+      reason: 'Cloudflare did not answer the Containers capability check: The connection was reset.',
+    });
+  });
+
+  test('leaves the Containers entitlement undetermined when the account response is unreadable', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ success: true, result: {} }));
+
+    await expect(
+      new UserCloudflareAccountApi('account-1', 'user-token', request).readWorkspaceContainersEntitlement(),
+    ).resolves.toEqual({
+      status: 'undetermined',
+      reason: 'Cloudflare returned an unreadable Containers account response.',
+    });
+  });
+
   test('rejects an invalid AI Gateway credit balance', async () => {
     const request = vi
       .fn<typeof fetch>()

@@ -65,4 +65,15 @@ describe('CloudflareSignInPrompt', () => {
     expect(auth.createCloudflareReturnURL).toHaveBeenCalledOnce();
     expect(auth.signInWithCloudflare).toHaveBeenCalledWith('http://localhost/');
   });
+
+  it('states the Workers Paid requirement before the account is authorized', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root?.render(<CloudflareSignInPrompt title="Connect Cloudflare" />));
+
+    expect(document.querySelector('[data-testid="cloudflare-connect-legal-notice"]')?.textContent).toContain(
+      'Cloudflare Containers, which requires the Workers Paid plan',
+    );
+  });
 });

@@ -10,6 +10,7 @@ import {
 } from './server-handlers/cloudflare-integration';
 import { authSessionAction, signOutAction } from './server-handlers/auth';
 import { deleteAccountAction } from './server-handlers/account-deletion';
+import { exportAccountAction } from './server-handlers/account-export';
 import { runtimeCredentialAction } from './server-handlers/runtime-credential';
 import { clientTelemetryAction } from './server-handlers/client-telemetry';
 import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudflare-auth-retention.server';
@@ -129,6 +130,10 @@ const exactRoutes: Record<string, ServerRoute> = {
   '/api/account/delete': {
     method: 'POST',
     handler: (request, env) => deleteAccountAction({ request, env }),
+  },
+  '/api/account/export': {
+    method: 'POST',
+    handler: (request, env) => exportAccountAction({ request, env }),
   },
   '/api/cloudflare/connection': {
     method: 'GET',

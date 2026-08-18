@@ -63,6 +63,15 @@ type ContainerApplicationRolloutReadback = {
   target_configuration?: unknown;
 };
 
+/**
+ * Whether the connected account may run Cloudflare Containers. `undetermined` is deliberately not a
+ * verdict: an unreachable or unreadable answer must not be spent as eligibility or as refusal.
+ */
+type WorkspaceContainersEntitlement =
+  | { status: 'entitled' }
+  | { status: 'plan_required'; message: string; upgradeUrl: string | null }
+  | { status: 'undetermined'; reason: string };
+
 export type ActiveWorkerDeploymentReadback = {
   providerDeploymentId: string;
   workerVersionId: string;
@@ -825,6 +834,42 @@ export class UserCloudflareAccountApi {
     return listed !== null && requireWorkerDeployments(listed).length > 0;
   }
 
+  /**
+   * Cloudflare gates every `/containers` route on the Workers Paid entitlement and refuses an
+   * ineligible account with its own upgrade instructions, so reading the account's container limits
+   * settles the plan question without creating anything. The verdict is returned instead of thrown
+   * because "Cloudflare did not answer" has to stay distinguishable from "Cloudflare said no".
+   */
+  async readWorkspaceContainersEntitlement(signal?: AbortSignal): Promise<WorkspaceContainersEntitlement> {
+    let response: Response;
+    try {
+      response = await this.callRaw('/containers/me', {
+        method: 'GET',
+        headers: { 'content-type': 'application/json' },
+        signal,
+      });
+    } catch (error) {
+      return {
+        status: 'undetermined',
+        reason: `Cloudflare did not answer the Containers capability check: ${describeUnknownError(error)}`,
+      };
+    }
+    const payload = await readBoundedJson<CloudflareEnvelope<unknown>>(response).catch(() => null);
+    if (response.ok) {
+      return payload?.success === true && isRecord(payload.result) && isRecord(payload.result.limits)
+        ? { status: 'entitled' }
+        : { status: 'undetermined', reason: 'Cloudflare returned an unreadable Containers account response.' };
+    }
+    const message = cloudflareErrorMessage(payload);
+    if (message && isWorkspacePlanRequiredMessage(message)) {
+      return { status: 'plan_required', message, upgradeUrl: workersPlanUpgradeUrl(message) };
+    }
+    return {
+      status: 'undetermined',
+      reason: `Cloudflare refused the Containers capability check (${response.status})${message ? `: ${message}` : '.'}`,
+    };
+  }
+
   async getAiGatewayCreditBalance(signal?: AbortSignal): Promise<number> {
     const result = await this.call<{ balance?: unknown }>('/ai-gateway/billing/credit-balance', {
       method: 'GET',
@@ -1319,6 +1364,34 @@ export class CloudflareAccountApiError extends Error {
 }
 
 class AssetUploadSessionExpiredError extends Error {}
+
+/**
+ * Cloudflare's own wording for an account whose plan excludes Containers. Matched rather than
+ * status-coded because the Containers control plane answers 401 for a missing scope too, and only
+ * the message separates "reauthorize" from "upgrade".
+ */
+export function isWorkspacePlanRequiredMessage(message: string): boolean {
+  return (
+    /cloudflare\s+containers?/i.test(message) && /(workers\s+paid|paid\s+plan|upgrade\s+your\s+plan)/i.test(message)
+  );
+}
+
+/** The upgrade destination Cloudflare names in its own refusal, so the product links where it points. */
+function workersPlanUpgradeUrl(message: string): string | null {
+  const match = /https:\/\/dash\.cloudflare\.com\/[^\s"'<>\\]*workers\/plans[^\s"'<>\\]*/i.exec(message);
+  if (!match) {
+    return null;
+  }
+  try {
+    return new URL(match[0]).origin === 'https://dash.cloudflare.com' ? match[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+function describeUnknownError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 function requirePlanResourceName(plan: DeploymentPlan, type: DeploymentResourceType, logicalName: string): string {
   const name = deploymentPlanResourceName(plan, type, logicalName);

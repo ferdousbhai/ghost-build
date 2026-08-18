@@ -10,12 +10,17 @@ type UserRuntimeSession = {
 };
 
 export type UserRuntimeErrorCode =
-  'cloudflare_reauthorization_required' | 'workspace_plan_required' | 'workspace_preparation_failed';
+  | 'cloudflare_reauthorization_required'
+  | 'workspace_eligibility_unknown'
+  | 'workspace_plan_required'
+  | 'workspace_preparation_failed';
 
 export class UserRuntimeSessionError extends Error {
   constructor(
     message: string,
     readonly code: UserRuntimeErrorCode | null,
+    /** The upgrade destination Cloudflare named, when it named one. */
+    readonly upgradeUrl: string | null = null,
   ) {
     super(message);
     this.name = 'UserRuntimeSessionError';
@@ -116,6 +121,7 @@ async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<User
       expiresAt?: number;
       code?: string;
       error?: string;
+      upgradeUrl?: unknown;
       aiGatewayCreditStatus?: unknown;
       correlationId?: unknown;
     } | null;
@@ -138,6 +144,7 @@ async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<User
       throw new UserRuntimeSessionError(
         payload?.error ?? 'The user-owned Ghostbuild runtime is unavailable.',
         isUserRuntimeErrorCode(payload?.code) ? payload.code : null,
+        cloudflareDashboardUrl(payload?.upgradeUrl),
       );
     }
     const session: UserRuntimeSession = {
@@ -156,9 +163,22 @@ async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<User
 function isUserRuntimeErrorCode(value: unknown): value is UserRuntimeErrorCode {
   return (
     value === 'cloudflare_reauthorization_required' ||
+    value === 'workspace_eligibility_unknown' ||
     value === 'workspace_plan_required' ||
     value === 'workspace_preparation_failed'
   );
+}
+
+/** The link originates with Cloudflare, so only Cloudflare's dashboard may come back out of it. */
+function cloudflareDashboardUrl(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  try {
+    return new URL(value).origin === 'https://dash.cloudflare.com' ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 export function requireUserRuntimeEndpoint(): string {

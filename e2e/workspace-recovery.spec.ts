@@ -45,20 +45,49 @@ test('retries a workspace runtime that failed to prepare', async ({ page }, test
 });
 
 test('explains the Cloudflare action each typed workspace failure needs', async ({ page }, testInfo) => {
-  const assertClean = collectBrowserDiagnostics(page, testInfo, [/user-owned runtime/, /status of 409/]);
+  const assertClean = collectBrowserDiagnostics(page, testInfo, [
+    /user-owned runtime/,
+    /status of 409/,
+    /status of 503/,
+  ]);
   await stubConnectedSession(page);
   await page.route(RUNTIME_SESSION_ROUTE, (route) =>
     route.fulfill({
       status: 409,
-      json: { code: 'workspace_plan_required', error: 'Cloudflare Containers requires the Workers Paid plan.' },
+      json: {
+        code: 'workspace_plan_required',
+        error: 'Cloudflare Containers requires the Workers Paid plan.',
+        upgradeUrl: 'https://dash.cloudflare.com/?to=/:account/workers/plans',
+      },
     }),
   );
 
   await startProject(page);
 
   await expect(page.getByRole('alert')).toContainText('Workers Paid plan');
-  await expect(page.getByRole('link', { name: 'Open Workers plan' })).toBeVisible();
+  // The destination is the one Cloudflare named in its own refusal, not a guess by the product.
+  await expect(page.getByRole('link', { name: 'Open Workers plan' })).toHaveAttribute(
+    'href',
+    'https://dash.cloudflare.com/?to=/:account/workers/plans',
+  );
   await expect(page.getByRole('link', { name: 'Reauthorize Cloudflare' })).toHaveCount(0);
+
+  // An eligibility answer Ghostbuild could not read must not be dressed up as a plan refusal.
+  await page.unroute(RUNTIME_SESSION_ROUTE);
+  await page.route(RUNTIME_SESSION_ROUTE, (route) =>
+    route.fulfill({
+      status: 503,
+      json: {
+        code: 'workspace_eligibility_unknown',
+        error: 'Ghostbuild could not reach Cloudflare to confirm that this account can run Containers.',
+      },
+    }),
+  );
+  await page.getByRole('button', { name: 'Try again' }).click();
+
+  await expect(page.getByRole('alert')).toContainText('could not reach Cloudflare to confirm');
+  await expect(page.getByRole('link', { name: 'Open Workers plan' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
 
   await page.unroute(RUNTIME_SESSION_ROUTE);
   await page.route(RUNTIME_SESSION_ROUTE, (route) =>

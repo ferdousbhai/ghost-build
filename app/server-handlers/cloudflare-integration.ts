@@ -18,6 +18,8 @@ import {
   missingUserWorkspaceRuntimeCapabilities,
   provisionUserWorkspaceRuntime,
   USER_WORKSPACE_REQUIRED_CAPABILITIES,
+  UserWorkspaceContainersEligibilityUnknownError,
+  UserWorkspaceContainersPlanRequiredError,
   UserWorkspaceRuntimeProvisioningInProgressError,
 } from '~/lib/.server/cloudflare/user-workspace-runtime-provisioner';
 import {
@@ -31,7 +33,7 @@ import {
   CLOUDFLARE_AUTHORIZATION_ERROR_PARAM,
   CLOUDFLARE_AUTHORIZATION_ERROR_VALUE,
 } from '~/lib/cloudflare/authorization-recovery';
-import { UserCloudflareAccountApi } from '~/lib/.server/cloudflare/user-account-api';
+import { isWorkspacePlanRequiredMessage, UserCloudflareAccountApi } from '~/lib/.server/cloudflare/user-account-api';
 import type { AiGatewayCreditStatus } from '~/lib/cloudflare/ai-gateway-credit';
 
 const requestedCapabilities = USER_WORKSPACE_REQUIRED_CAPABILITIES;
@@ -47,6 +49,8 @@ const WORKSPACE_PLAN_REQUIRED_MESSAGE =
   'Cloudflare Containers requires the Workers Paid plan. Enable Workers Paid in Cloudflare, then return here and try again. Ghostbuild does not change your plan automatically.';
 const WORKSPACE_PREPARATION_FAILED_MESSAGE =
   'Cloudflare could not create your workspace. Check the Workers settings for this Cloudflare account, then try again.';
+const WORKSPACE_ELIGIBILITY_UNKNOWN_MESSAGE =
+  'Ghostbuild could not reach Cloudflare to confirm that this account can run Containers, so it did not start creating your workspace. Nothing changed in your Cloudflare account. Try again in a moment.';
 const CLOUDFLARE_REAUTHORIZATION_REQUIRED_MESSAGE =
   'Ghostbuild needs updated Cloudflare permissions for this workspace. Reauthorize Cloudflare, approve the requested permissions, then try again.';
 const startPayloadSchema = z.object({ callbackURL: z.string().url().max(2_048).optional() });
@@ -164,12 +168,25 @@ export async function cloudflareRuntimeSessionAction({
           { status: 409, headers: { 'Cache-Control': 'private, no-store' } },
         );
       }
+      // An eligibility answer Ghostbuild could not read is its own outcome. Reporting it as a plan
+      // problem would send the user to buy a plan they may already have; reporting it as a
+      // preparation fault would hide that nothing was even attempted.
+      if (error instanceof UserWorkspaceContainersEligibilityUnknownError) {
+        console.error('Cloudflare Containers eligibility could not be determined');
+        return Response.json(
+          { code: 'workspace_eligibility_unknown', error: WORKSPACE_ELIGIBILITY_UNKNOWN_MESSAGE },
+          { status: 503, headers: { 'Cache-Control': 'private, no-store' } },
+        );
+      }
       console.error('User-owned Cloudflare workspace runtime provisioning failed');
-      const planRequired = isWorkspacePlanRequiredError(error);
+      const planRequired =
+        error instanceof UserWorkspaceContainersPlanRequiredError || isWorkspacePlanRequiredError(error);
+      const upgradeUrl = error instanceof UserWorkspaceContainersPlanRequiredError ? error.upgradeUrl : null;
       return Response.json(
         {
           code: planRequired ? 'workspace_plan_required' : 'workspace_preparation_failed',
           error: planRequired ? WORKSPACE_PLAN_REQUIRED_MESSAGE : WORKSPACE_PREPARATION_FAILED_MESSAGE,
+          ...(planRequired && upgradeUrl ? { upgradeUrl } : {}),
         },
         { status: 502, headers: { 'Cache-Control': 'private, no-store' } },
       );
@@ -269,12 +286,9 @@ type ReadAiGatewayCreditStatus = (args: {
   connection: CloudflareConnection;
 }) => Promise<AiGatewayCreditStatus>;
 
+/** A plan refusal Cloudflare raised somewhere other than the precondition check still has to be named. */
 function isWorkspacePlanRequiredError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return (
-    /cloudflare\s+containers?/i.test(message) &&
-    /(workers\s+paid|paid\s+plan|upgrade\s+your\s+plan|requires?\s+the\s+workers\s+paid)/i.test(message)
-  );
+  return isWorkspacePlanRequiredMessage(error instanceof Error ? error.message : String(error));
 }
 
 function isCurrentWorkspaceRuntime(

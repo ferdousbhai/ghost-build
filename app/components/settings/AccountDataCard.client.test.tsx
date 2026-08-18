@@ -13,7 +13,10 @@ const mocks = vi.hoisted(() => ({
   signInWithCloudflare: vi.fn(),
   disposeAccountLocalReplicas: vi.fn(async () => undefined),
   resetUserRuntimeSession: vi.fn(),
+  saveAs: vi.fn(),
 }));
+
+vi.mock('file-saver', () => ({ default: { saveAs: mocks.saveAs } }));
 
 vi.mock('~/lib/auth-client', () => ({
   createCloudflareReturnURL: mocks.createCloudflareReturnURL,
@@ -60,6 +63,16 @@ function button(label: string): HTMLButtonElement {
   return found;
 }
 
+// jsdom's Blob has no text(), so the saved bytes are read back the way a browser would.
+function readBlob(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  });
+}
+
 async function openDeletionPanel() {
   await act(async () => button('Delete my Ghostbuild account data').click());
 }
@@ -83,12 +96,74 @@ describe('AccountDataCard', () => {
     const text = document.body.textContent ?? '';
 
     expect(text).toContain('Download code');
-    expect(text).toContain('There is no account-wide export');
+    expect(text).toContain('This is per project');
+    expect(text).toContain('session tokens are never included');
+    expect(text).toContain('does not contain your chats, transcripts, project files, or deployment records');
     expect(text).toContain('clear site data');
     expect(text).toContain('ghostbuild_session');
     expect(text).toContain('OPFS database');
     expect(document.querySelector('a[href="/support"]')).not.toBeNull();
     expect(document.querySelector('a[href="/privacy"]')).not.toBeNull();
+  });
+
+  it('saves the export exactly as the server sent it', async () => {
+    const exported = JSON.stringify({ schemaVersion: 1, status: 'complete', unavailableSections: [] });
+    fetchMock.mockResolvedValue(new Response(exported, { status: 200 }));
+    await render();
+
+    await act(async () => button('Download my account data').click());
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/account/export',
+      expect.objectContaining({ method: 'POST', credentials: 'same-origin' }),
+    );
+    const [blob, filename] = mocks.saveAs.mock.calls[0] as [Blob, string];
+    expect(filename).toBe('ghostbuild-account-export.json');
+    expect(blob.type).toBe('application/json');
+    await expect(readBlob(blob)).resolves.toBe(exported);
+    expect(document.body.textContent).toContain('Saved ghostbuild-account-export.json');
+  });
+
+  it('warns that a partial export is not a complete copy and names the section that failed', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ status: 'incomplete', unavailableSections: ['authSessions'] }), { status: 200 }),
+    );
+    await render();
+
+    await act(async () => button('Download my account data').click());
+
+    const alert = document.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('authSessions');
+    expect(alert?.textContent).toContain('not a complete copy');
+    // The partial file is still saved, because it is still the user's data.
+    expect(mocks.saveAs).toHaveBeenCalledOnce();
+    expect(document.body.textContent).not.toContain('Saved ghostbuild-account-export.json.');
+  });
+
+  it('offers a Cloudflare reconnect before exporting when the session is not freshly re-authenticated', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ code: 'reauthentication_required', error: 'Reconnect Cloudflare.' }), {
+        status: 401,
+      }),
+    );
+    await render();
+
+    await act(async () => button('Download my account data').click());
+    expect(mocks.saveAs).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('Confirm it is you in Cloudflare, then download again');
+
+    await act(async () => button('Reconnect Cloudflare').click());
+    expect(mocks.signInWithCloudflare).toHaveBeenCalledOnce();
+  });
+
+  it('reports an unreachable server instead of saving an empty file', async () => {
+    fetchMock.mockRejectedValue(new Error('offline'));
+    await render();
+
+    await act(async () => button('Download my account data').click());
+
+    expect(mocks.saveAs).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Unable to reach Ghostbuild');
   });
 
   it('requires the exact phrase and the retained-resources acknowledgement before deleting', async () => {

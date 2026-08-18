@@ -8,6 +8,10 @@ import { disposeAccountLocalReplicas } from '~/lib/cloudflare/account-local-repl
 import { resetUserRuntimeSession } from '~/lib/cloudflare/runtime-session';
 
 type DeletionPhase = 'idle' | 'confirming' | 'deleting' | 'reauthenticate' | 'deleted';
+type ExportPhase = 'idle' | 'downloading' | 'reauthenticate' | 'downloaded';
+
+/** The file the account export is saved as. */
+const ACCOUNT_EXPORT_FILENAME = 'ghostbuild-account-export.json';
 
 export function AccountDataCard() {
   const [phase, setPhase] = useState<DeletionPhase>('idle');
@@ -15,7 +19,37 @@ export function AccountDataCard() {
   const [acknowledged, setAcknowledged] = useState(false);
   const [revoked, setRevoked] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exportPhase, setExportPhase] = useState<ExportPhase>('idle');
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [unavailableSections, setUnavailableSections] = useState<string[]>([]);
   const confirmed = confirmation.trim() === ACCOUNT_DELETION_CONFIRMATION && acknowledged;
+
+  const downloadAccountData = async () => {
+    setExportPhase('downloading');
+    setExportError(null);
+    setUnavailableSections([]);
+    try {
+      const response = await fetch('/api/account/export', { method: 'POST', credentials: 'same-origin' });
+      // The saved file is the server's own bytes rather than a re-serialization, so
+      // what the user keeps is exactly what Ghostbuild said it held.
+      const exportDocument = await response.text();
+      const payload = parseExportPayload(exportDocument);
+      if (!response.ok) {
+        setExportPhase(payload?.code === 'reauthentication_required' ? 'reauthenticate' : 'idle');
+        setExportError(
+          payload?.code === 'reauthentication_required' ? null : (payload?.error ?? 'Unable to export your data.'),
+        );
+        return;
+      }
+      const { default: fileSaver } = await import('file-saver');
+      fileSaver.saveAs(new Blob([exportDocument], { type: 'application/json' }), ACCOUNT_EXPORT_FILENAME);
+      setUnavailableSections(payload?.unavailableSections ?? []);
+      setExportPhase('downloaded');
+    } catch {
+      setExportPhase('idle');
+      setExportError('Unable to reach Ghostbuild. Check your connection and try again.');
+    }
+  };
 
   const requestDeletion = async () => {
     setPhase('deleting');
@@ -75,9 +109,59 @@ export function AccountDataCard() {
       <h3 className="mt-5 text-sm font-medium text-content-primary">Download your project source</h3>
       <p className="mt-1 max-w-2xl text-sm text-content-secondary">
         Open a project and choose <strong>Download code</strong> in the project header to save a ZIP of its files. Local
-        secret files are excluded. There is no account-wide export, so download each project you want to keep. Chats,
-        deployment history, and generated infrastructure remain readable in your Cloudflare account.
+        secret files are excluded. This is per project, so download each project you want to keep. Chats, deployment
+        history, and generated infrastructure remain readable in your Cloudflare account.
       </p>
+
+      <h3 className="mt-5 text-sm font-medium text-content-primary">Download your account data</h3>
+      <p className="mt-1 max-w-2xl text-sm text-content-secondary">
+        Save a JSON file of everything Ghostbuild’s own database holds for your account: your identity and email, your
+        Cloudflare connection metadata and granted scopes, the fact that an encrypted credential exists and when it was
+        stored, your workspace runtime address, and your sign-in and authorization session records. Encrypted
+        credentials, their initialisation vectors, credential handles, and session tokens are never included.
+      </p>
+      <p className="mt-1 max-w-2xl text-sm text-content-secondary">
+        It does <strong>not</strong> contain your chats, transcripts, project files, or deployment records. Those live
+        in your own Cloudflare account, not in Ghostbuild’s database — use <strong>Download code</strong> above for
+        project source and your Cloudflare account’s own tools for the rest. Ghostbuild asks you to reconnect Cloudflare
+        first, because the file is a complete copy of your account record.
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant="neutral"
+          loading={exportPhase === 'downloading'}
+          disabled={exportPhase === 'downloading'}
+          onClick={() => void downloadAccountData()}
+        >
+          Download my account data
+        </Button>
+        {exportPhase === 'reauthenticate' ? (
+          <Button size="sm" variant="neutral" onClick={() => void reauthenticate()}>
+            Reconnect Cloudflare
+          </Button>
+        ) : null}
+      </div>
+      {exportPhase === 'reauthenticate' ? (
+        <p className="mt-2 max-w-2xl text-sm text-content-secondary" role="status">
+          Confirm it is you in Cloudflare, then download again.
+        </p>
+      ) : null}
+      {unavailableSections.length > 0 ? (
+        <p className="mt-2 max-w-2xl text-sm text-bolt-elements-icon-error" role="alert">
+          Ghostbuild could not read {unavailableSections.join(', ')}, so <code>{ACCOUNT_EXPORT_FILENAME}</code> is not a
+          complete copy and says so inside. Try again, and if it keeps failing use the request path below.
+        </p>
+      ) : exportPhase === 'downloaded' ? (
+        <p className="mt-2 max-w-2xl text-sm text-content-secondary" role="status">
+          Saved <code>{ACCOUNT_EXPORT_FILENAME}</code>.
+        </p>
+      ) : null}
+      {exportError ? (
+        <p className="mt-2 max-w-2xl text-sm text-bolt-elements-icon-error" role="alert">
+          {exportError}
+        </p>
+      ) : null}
 
       <h3 className="mt-5 text-sm font-medium text-content-primary">Clear this browser</h3>
       <p className="mt-1 max-w-2xl text-sm text-content-secondary">
@@ -198,4 +282,14 @@ export function AccountDataCard() {
       ) : null}
     </section>
   );
+}
+
+type AccountExportPayload = { code?: string; error?: string; unavailableSections?: string[] };
+
+function parseExportPayload(exportDocument: string): AccountExportPayload | null {
+  try {
+    return JSON.parse(exportDocument) as AccountExportPayload;
+  } catch {
+    return null;
+  }
 }

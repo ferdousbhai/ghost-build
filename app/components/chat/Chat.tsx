@@ -53,6 +53,7 @@ export const Chat = memo(
     const [runtimeConnectionError, setRuntimeConnectionError] = useState<{
       message: string;
       code: UserRuntimeErrorCode | null;
+      upgradeUrl: string | null;
     } | null>(null);
     const [runtimeConnectionAttempt, setRuntimeConnectionAttempt] = useState(0);
     useEffect(() => {
@@ -67,6 +68,7 @@ export const Chat = memo(
           setRuntimeConnectionError({
             message: error instanceof Error ? error.message : 'Unable to connect to your Cloudflare workspace.',
             code: error instanceof UserRuntimeSessionError ? error.code : null,
+            upgradeUrl: error instanceof UserRuntimeSessionError ? error.upgradeUrl : null,
           });
         }
       });
@@ -84,6 +86,7 @@ export const Chat = memo(
         <WorkspaceRuntimeConnectionError
           message={runtimeConnectionError.message}
           code={runtimeConnectionError.code}
+          upgradeUrl={runtimeConnectionError.upgradeUrl}
           onRetry={() => setRuntimeConnectionAttempt((attempt) => attempt + 1)}
         />
       ) : (
@@ -113,10 +116,12 @@ Chat.displayName = 'Chat';
 function WorkspaceRuntimeConnectionError({
   message,
   code,
+  upgradeUrl,
   onRetry,
 }: {
   message: string;
   code: UserRuntimeErrorCode | null;
+  upgradeUrl: string | null;
   onRetry: () => void;
 }) {
   const planRequired = code === 'workspace_plan_required';
@@ -148,7 +153,7 @@ function WorkspaceRuntimeConnectionError({
           {planRequired ? (
             <a
               className={buttonClassNames({ variant: 'primary', size: 'md' })}
-              href={WORKERS_PAID_URL}
+              href={upgradeUrl ?? WORKERS_PAID_URL}
               target="_blank"
               rel="noopener noreferrer"
             >
