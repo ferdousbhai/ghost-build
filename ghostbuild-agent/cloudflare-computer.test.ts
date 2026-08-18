@@ -60,6 +60,26 @@ const PATCHED_PROBE_BATCH_REGION = [
   '\tconst present = /* @__PURE__ */ new Set();',
 ].join('\n');
 
+/**
+ * Post-image of the nested-transaction hunk in the same patch. Computer's own writeFileSync
+ * opens a transaction inside the one applyAtomicWorkspaceChanges opens, and upstream serves
+ * that nested case with raw SAVEPOINT SQL a Durable Object rejects, so every write failed.
+ * Running the nested closure inline is complete rather than expedient: the outermost
+ * storage.transactionSync already commits or rolls back the whole nesting, and nothing here
+ * catches inside a nested transaction in order to continue, which is the only thing a
+ * savepoint's partial rollback would add.
+ */
+const PATCHED_NESTED_TRANSACTION_REGION = [
+  '\t\t\t\tthis.#txDepth++;',
+  '\t\t\t\ttry {',
+  '\t\t\t\t\treturn closure();',
+  '\t\t\t\t} finally {',
+  '\t\t\t\t\tthis.#txDepth--;',
+  '\t\t\t\t}',
+  '\t\t\t}',
+  '\t\t\tthis.#txDepth++;',
+].join('\n');
+
 describe('Cloudflare Computer preview contract', () => {
   it('recognizes both thrown and official wrapped pending-sync failures', () => {
     const message = '[workspace_sync_pending] Computer synchronization is pending.';
@@ -116,6 +136,14 @@ describe('Cloudflare Computer preview contract', () => {
     );
     expect(bundle).toContain(PATCHED_PROBE_BATCH_REGION);
     expect(bundle).not.toContain('const PROBE_BATCH = 256;');
+  });
+
+  it('canaries the reviewed nested-transaction patch against the published bundle', () => {
+    const bundle = textFile('../node_modules/@cloudflare/computer/dist/index.js');
+
+    expect(bundle).toContain(PATCHED_NESTED_TRANSACTION_REGION);
+    expect(bundle).not.toContain('this.sql.exec(`SAVEPOINT ${sp}`);');
+    expect(bundle).not.toContain('this.sql.exec(`ROLLBACK TO ${sp}`);');
   });
 
   it('keeps backend selection explicit and every tool limit reviewed', () => {

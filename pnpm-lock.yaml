@@ -19,7 +19,7 @@ overrides:
   sharp@<0.35.0: 0.35.3
 
 patchedDependencies:
-  '@cloudflare/computer@0.1.1': 6c624d9140352e368f5ecbdb093e18018aa30e0a62ee54755ea5d404b3ef7c55
+  '@cloudflare/computer@0.1.1': 5cfc8b0bd43c3f727a7b5a8a9fe929dec53e64ab566d57d135e35ce93dc38249
 
 importers:
 
@@ -33,7 +33,7 @@ importers:
         version: 0.10.1(@ai-sdk/react@4.0.51(react@19.2.8)(zod@4.4.3))(agents@0.20.1(@ai-sdk/react@4.0.51(react@19.2.8)(zod@4.4.3))(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/codemode@0.5.1(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(ai@7.0.48(zod@4.4.3))(zod@4.4.3))(@cloudflare/workers-types@5.20260801.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(ai@7.0.48(zod@4.4.3))(just-bash@3.2.0)(react@19.2.8)(rolldown@1.2.1)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(jiti@1.21.7)(sass-embedded@1.83.4)(yaml@2.9.0))(zod@4.4.3))(ai@7.0.48(zod@4.4.3))(react@19.2.8)(zod@4.4.3)
       '@cloudflare/computer':
         specifier: 0.1.1
-        version: 0.1.1(patch_hash=6c624d9140352e368f5ecbdb093e18018aa30e0a62ee54755ea5d404b3ef7c55)(ai@7.0.48(zod@4.4.3))(zod@4.4.3)
+        version: 0.1.1(patch_hash=5cfc8b0bd43c3f727a7b5a8a9fe929dec53e64ab566d57d135e35ce93dc38249)(ai@7.0.48(zod@4.4.3))(zod@4.4.3)
       '@cloudflare/sandbox':
         specifier: 0.13.0-next.724.1
         version: 0.13.0-next.724.1(@xterm/xterm@6.0.0)
@@ -313,7 +313,7 @@ importers:
     dependencies:
       '@cloudflare/computer':
         specifier: 0.1.1
-        version: 0.1.1(patch_hash=6c624d9140352e368f5ecbdb093e18018aa30e0a62ee54755ea5d404b3ef7c55)(ai@7.0.48(zod@4.4.3))(zod@4.4.3)
+        version: 0.1.1(patch_hash=5cfc8b0bd43c3f727a7b5a8a9fe929dec53e64ab566d57d135e35ce93dc38249)(ai@7.0.48(zod@4.4.3))(zod@4.4.3)
       ai:
         specifier: 7.0.48
         version: 7.0.48(zod@4.4.3)
@@ -7079,7 +7079,7 @@ snapshots:
       zod: 4.4.3
     optional: true
 
-  '@cloudflare/computer@0.1.1(patch_hash=6c624d9140352e368f5ecbdb093e18018aa30e0a62ee54755ea5d404b3ef7c55)(ai@7.0.48(zod@4.4.3))(zod@4.4.3)':
+  '@cloudflare/computer@0.1.1(patch_hash=5cfc8b0bd43c3f727a7b5a8a9fe929dec53e64ab566d57d135e35ce93dc38249)(ai@7.0.48(zod@4.4.3))(zod@4.4.3)':
     dependencies:
       acorn: 8.17.0
       capnweb: 0.8.0

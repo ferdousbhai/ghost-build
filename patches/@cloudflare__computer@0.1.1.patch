@@ -1,8 +1,33 @@
 diff --git a/dist/index.js b/dist/index.js
-index d85160c7f7c68a37d9fdace811482657921fd8c6..0af111971715d88f856ee4521500d4b383da4565 100644
+index d85160c7f7c68a37d9fdace811482657921fd8c6..69472def5b8dc06703ee520d1545cd17a0680e38 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -2806,7 +2806,7 @@ function toHex(bytes) {
+@@ -2555,17 +2555,15 @@ var Database = class {
+ 		this.sql = storage.sql;
+ 		this.transactionSync = (closure) => {
+ 			if (this.#txDepth > 0) {
+-				const sp = `_t${this.#txDepth}`;
+-				this.sql.exec(`SAVEPOINT ${sp}`);
++				// Durable Objects reject raw SAVEPOINT/RELEASE/ROLLBACK TO SQL outright, so the
++				// upstream nested branch makes every write inside an outer transactionSync throw.
++				// Running the closure inline loses nothing: the outermost storage.transactionSync
++				// already rolls the whole nesting back on any exception, and no caller resumes
++				// after a failure inside a nested transaction, which is the only thing a savepoint
++				// would add. The depth counter is still kept accurate for `inTransaction`.
+ 				this.#txDepth++;
+ 				try {
+-					const result = closure();
+-					this.sql.exec(`RELEASE ${sp}`);
+-					return result;
+-				} catch (error) {
+-					this.sql.exec(`ROLLBACK TO ${sp}`);
+-					this.sql.exec(`RELEASE ${sp}`);
+-					throw error;
++					return closure();
+ 				} finally {
+ 					this.#txDepth--;
+ 				}
+@@ -2806,7 +2804,7 @@ function toHex(bytes) {
  	for (const b of bytes) out += b.toString(16).padStart(2, "0");
  	return out;
  }

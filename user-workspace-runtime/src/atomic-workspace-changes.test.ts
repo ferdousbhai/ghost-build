@@ -1,4 +1,6 @@
-import type { Workspace } from '@cloudflare/computer';
+import type { DurableObjectStorageLike, Workspace } from '@cloudflare/computer';
+import { Workspace as ComputerWorkspace } from '@cloudflare/computer';
+import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { applyAtomicWorkspaceChanges } from './atomic-workspace-changes';
 
@@ -59,6 +61,97 @@ describe('applyAtomicWorkspaceChanges', () => {
     expect(workspace.files.get('/home/project/b.txt')?.content).toBe('before-b');
   });
 });
+
+/**
+ * The hand-written workspace above cannot model transaction depth, so it stayed green while
+ * every production write failed: Computer's own writeFileSync opens a second transaction
+ * inside the one this module opens, and upstream implemented that nested case with raw
+ * SAVEPOINT SQL that a Durable Object refuses. These cases drive the real published VFS over
+ * node:sqlite through storage that enforces the same refusal.
+ */
+describe('applyAtomicWorkspaceChanges on the real Computer VFS', () => {
+  it('commits writes that open a nested transaction inside the change-set transaction', () => {
+    const workspace = durableObjectLikeWorkspace();
+
+    expect(
+      applyAtomicWorkspaceChanges(workspace, [
+        { kind: 'write', path: '/home/project/src/app.ts', bytes: new TextEncoder().encode('export default 1;') },
+        { kind: 'write', path: '/home/project/README.md', bytes: new TextEncoder().encode('# app'), mode: 0o644 },
+      ]),
+    ).toEqual(['/home/project/src/app.ts', '/home/project/README.md']);
+
+    const provider = workspace.provider();
+    expect(provider.readFileSync('/home/project/src/app.ts', 'utf8')).toBe('export default 1;');
+    expect(provider.readFileSync('/home/project/README.md', 'utf8')).toBe('# app');
+  });
+
+  it('still rolls the whole change set back through the outer transaction alone', () => {
+    const workspace = durableObjectLikeWorkspace();
+    workspace.provider().mkdirSync('/home/project', { recursive: true });
+
+    expect(() =>
+      applyAtomicWorkspaceChanges(
+        workspace,
+        [
+          { kind: 'write', path: '/home/project/a.txt', bytes: new TextEncoder().encode('after-a') },
+          { kind: 'write', path: '/home/project/b.txt', bytes: new TextEncoder().encode('after-b') },
+        ],
+        (_change, index) => {
+          if (index === 1) {
+            throw new Error('cancelled');
+          }
+        },
+      ),
+    ).toThrow('cancelled');
+
+    expect(workspace.provider().readdirSync('/home/project')).toEqual([]);
+  });
+});
+
+function durableObjectLikeWorkspace(): Workspace {
+  return new ComputerWorkspace({ storage: new DurableObjectLikeStorage() });
+}
+
+/**
+ * Durable Object storage: SQL transaction statements are rejected in favour of transactionSync,
+ * which is the only boundary the runtime gets.
+ */
+class DurableObjectLikeStorage implements DurableObjectStorageLike {
+  readonly #database = new DatabaseSync(':memory:');
+  readonly sql = {
+    exec: <Row extends object>(query: string, ...bindings: unknown[]) => {
+      if (/^\s*(?:BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\b/i.test(query)) {
+        throw new Error(
+          'To execute a transaction, please use the state.storage.transaction() or state.storage.transactionSync() APIs instead of the SQL BEGIN TRANSACTION or SAVEPOINT statements.',
+        );
+      }
+      // Only prepared statements return rows, and only one statement at a time; everything else
+      // may be a multi-statement schema migration, which prepare() would silently truncate.
+      if (
+        bindings.length === 0 &&
+        !/^\s*(?:SELECT|WITH|PRAGMA|EXPLAIN)\b/i.test(query) &&
+        !/\bRETURNING\b/i.test(query)
+      ) {
+        this.#database.exec(query);
+        return { toArray: () => [] as Row[] };
+      }
+      const rows = this.#database.prepare(query).all(...(bindings as never[])) as unknown as Row[];
+      return { toArray: () => rows };
+    },
+  };
+
+  transactionSync<T>(closure: () => T): T {
+    this.#database.exec('BEGIN');
+    try {
+      const result = closure();
+      this.#database.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.#database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+}
 
 type TestFile = { content: string; mode: number };
 

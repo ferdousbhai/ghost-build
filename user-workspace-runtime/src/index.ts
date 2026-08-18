@@ -3461,7 +3461,14 @@ function requireProjectPath(value: unknown, allowRoot = false): string {
   if ((allowRoot && path === PROJECT_ROOT) || path.startsWith(`${PROJECT_ROOT}/`)) {
     return path;
   }
-  throw new SyntaxError(`Path must be under ${PROJECT_ROOT}.`);
+  // The root stays rejected where a single file is named — reads want a file, and a change set
+  // naming the root would delete or overwrite the whole project — but say so, rather than
+  // claiming the project root is not under the project root.
+  throw new SyntaxError(
+    path === PROJECT_ROOT
+      ? `${PROJECT_ROOT} is the project directory; name a path inside it.`
+      : `Path must be under ${PROJECT_ROOT}.`,
+  );
 }
 
 function requireAbsolutePath(value: unknown): string {
