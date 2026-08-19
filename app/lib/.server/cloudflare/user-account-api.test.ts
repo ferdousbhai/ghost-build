@@ -1145,13 +1145,33 @@ describe('UserCloudflareAccountApi', () => {
     await expect(deploy(missingCompletion)).rejects.toThrow('invalid asset upload identity');
     expect(missingCompletion).toHaveBeenCalledTimes(2);
 
-    const legacySession = vi
+    // A session identity without the single-asset claim selects the batched multipart
+    // protocol, exactly as wrangler does; the observed 2026-08-19 production outage was this
+    // claim disappearing while only the per-file protocol was implemented.
+    const batchedSession = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
         Response.json({ success: true, result: { jwt: 'e30.e30.signature', buckets: [[assetHash]] } }),
-      );
-    await expect(deploy(legacySession)).rejects.toThrow('did not advertise the current single-asset upload protocol');
-    expect(legacySession).toHaveBeenCalledOnce();
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: {} }, { status: 201 }));
+    await expect(deploy(batchedSession)).rejects.toThrow('invalid asset upload identity');
+    expect(batchedSession).toHaveBeenCalledTimes(2);
+    const [batchUrl, batchInit] = batchedSession.mock.calls[1] ?? [];
+    expect(String(batchUrl)).toBe(
+      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/assets/upload?base64=true',
+    );
+    expect(batchInit?.method).toBe('POST');
+    const form = batchInit?.body;
+    if (!(form instanceof FormData)) {
+      throw new Error('The batched upload must carry a multipart form body.');
+    }
+    const part = form.get(assetHash);
+    if (!(part instanceof File)) {
+      throw new Error('The batched upload must key each file part by its content hash.');
+    }
+    expect(part.name).toBe(assetHash);
+    expect(part.type).toContain('text/html');
+    expect(await part.text()).toBe(btoa('<h1>Ghostbuild</h1>'));
   });
 
   test('forces one credential refresh and retries exactly once on a Cloudflare 401', async () => {

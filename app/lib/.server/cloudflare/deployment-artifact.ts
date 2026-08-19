@@ -163,7 +163,7 @@ async function sha256Bytes(value: Uint8Array): Promise<string> {
   return bytesToHex(new Uint8Array(digest));
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
+export function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   for (let index = 0; index < bytes.length; index += 32_768) {
     binary += String.fromCharCode(...bytes.subarray(index, index + 32_768));
