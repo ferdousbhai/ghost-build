@@ -205,7 +205,10 @@ describe('ProjectWorkspace preview lifecycle', () => {
       source.indexOf('private async cleanupPendingPreviews('),
       source.indexOf('private pendingPreviewRow('),
     );
-    const recovery = cleanup.slice(cleanup.indexOf('private async recoverPreviewContainer('));
+    const recovery = source.slice(
+      source.indexOf('private async recycleWorkspaceContainer('),
+      source.indexOf('private pendingPreviewRow('),
+    );
     const stopActive = source.slice(
       source.indexOf('private async stopActivePreview('),
       source.indexOf('private async cleanupPreviewResources('),
@@ -215,6 +218,7 @@ describe('ProjectWorkspace preview lifecycle', () => {
     expect(cleanup).toContain('await this.cleanupPreviewResourcesOrRecover(row)');
     expect(stopActive).toContain('await this.cleanupPreviewResourcesOrRecover(row)');
     expect(cleanup).toContain('await this.recoverPreviewContainer(row, error)');
+    expect(cleanup).toContain('await this.recycleWorkspaceContainer()');
     expect(recovery).toContain('await this.#workspace.close()');
     expect(recovery.indexOf('this.destroy()')).toBeLessThan(
       recovery.indexOf('DELETE FROM ghostbuild_pending_previews'),

@@ -148,6 +148,31 @@ describe('DurableWorkspaceSyncRetryScheduler', () => {
     expect(recovery).toContain('return false');
   });
 
+  it('recycles the container after consecutive failed recoveries instead of pulling forever', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const start = source.indexOf('private async recoverExhaustedComputerSync(');
+    const recovery = source.slice(start, source.indexOf('\n  private ', start + 1));
+
+    // A recovery pull that keeps failing after Computer exhausted its own retries is the
+    // signature of a container whose control connection never returns; each further pull only
+    // burns the vendor's fixed connect retries. The escalation must reuse the same recycle the
+    // preview path uses, count failures per backend, and reset the count on success.
+    expect(source).toContain('const SYNC_RECOVERY_CONTAINER_RECYCLE_THRESHOLD = 2;');
+    expect(recovery).toContain('SYNC_RECOVERY_CONTAINER_RECYCLE_THRESHOLD');
+    expect(recovery).toContain('await this.recycleWorkspaceContainer()');
+    expect(recovery.indexOf('this.#syncRecoveryFailures.delete(backend)')).toBeGreaterThanOrEqual(0);
+    expect(recovery.indexOf('this.#syncRecoveryFailures.delete(backend)')).toBeLessThan(
+      recovery.indexOf('} catch (error) {'),
+    );
+    expect(recovery.indexOf('await this.#workspace.pull(backend)')).toBeLessThan(
+      recovery.indexOf('await this.recycleWorkspaceContainer()'),
+    );
+    // Recycling still reports the recovery as pending so every caller reschedules it.
+    expect(recovery.lastIndexOf('return false')).toBeGreaterThan(
+      recovery.indexOf('await this.recycleWorkspaceContainer()'),
+    );
+  });
+
   it('keeps exhausted sync recovery armed even when no tool continuation remains', () => {
     const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
     const constructor = source.slice(source.indexOf('constructor(ctx:'), source.indexOf('override fetch('));

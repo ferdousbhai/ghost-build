@@ -212,6 +212,16 @@ const COMPUTERD_ENV = { PORT: '8080', MOUNT_POINT: '/home', FUSE_MOUNT: 'auto' }
 const TRANSIENT_COMMAND_PROCESS_ROLE = 'transient-command';
 const VALIDATION_CANCELLATION_SETTLE_MS = 45_000;
 const PREVIEW_CONTAINER_RECOVERY_TIMEOUT_MS = 60_000;
+
+/**
+ * Consecutive failed exhausted-sync recoveries before the container itself is recycled. A pull
+ * that keeps failing after Computer exhausted its own retry budget and a fresh backend handle
+ * was tried is the signature of a container whose control connection never comes back - each
+ * attempt burns the vendor's connect retries (observed as exactly ~180s per recovery round in
+ * production) and no number of further pulls converges. The preview path already answers this
+ * state by destroying the container; sync recovery escalates to the same answer.
+ */
+const SYNC_RECOVERY_CONTAINER_RECYCLE_THRESHOLD = 2;
 const PREVIEW_BUILD_CLEANUP_DEADLINE_MS = 30 * 60_000;
 
 /** Reported progress is only read by a heartbeat, and lanes nobody renews have none. */
@@ -474,6 +484,8 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   readonly #activeOperationOwners = new Set<string>();
   #activeValidation: ActiveValidation | null = null;
   readonly #activeSyncRecoveries = new Map<string, Promise<boolean>>();
+  /** Consecutive failed exhausted-sync recoveries per backend; in-memory, reset on success. */
+  readonly #syncRecoveryFailures = new Map<string, number>();
   readonly #activeToolOperations = new Set<string>();
   readonly #ownedToolOperations = new Set<string>();
   readonly #confirmedCommandCancellations = new Set<string>();
@@ -2551,15 +2563,24 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       previewId: row.preview_id,
       error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
     });
+    await this.recycleWorkspaceContainer();
+  }
+
+  /**
+   * Destroy the ephemeral container and hand the durable VFS a fresh coordinator. The project
+   * bytes live in this Durable Object's SQLite, so nothing durable is lost; every container-side
+   * process row is invalidated because the processes died with the container.
+   */
+  private async recycleWorkspaceContainer(): Promise<void> {
     await this.#workspace.close().catch((error) =>
-      console.warn('Unable to close the Computer workspace before preview container recovery', {
+      console.warn('Unable to close the Computer workspace before container recovery', {
         error: error instanceof Error ? error.message : String(error),
       }),
     );
     await Promise.race([
       this.destroy(),
       scheduler.wait(PREVIEW_CONTAINER_RECOVERY_TIMEOUT_MS).then(() => {
-        throw new Error('Timed out while recovering the ProjectWorkspace preview container.');
+        throw new Error('Timed out while recovering the ProjectWorkspace container.');
       }),
     ]);
     // Workspace.close() invalidates transport handles but intentionally retains its serialized mutation queues.
@@ -2966,8 +2987,30 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         this.finishPendingCommand(backend);
         await this.#syncRetries.clear(backend);
         await this.cleanupReadinessRoot().catch(() => undefined);
+        this.#syncRecoveryFailures.delete(backend);
         return true;
       } catch (error) {
+        const failures = (this.#syncRecoveryFailures.get(backend) ?? 0) + 1;
+        this.#syncRecoveryFailures.set(backend, failures);
+        if (failures >= SYNC_RECOVERY_CONTAINER_RECYCLE_THRESHOLD) {
+          // A fresh backend handle failed too: the container's control connection is not
+          // coming back on its own. Recycle the container the way preview recovery does;
+          // the durable VFS is untouched and the next recovery round pulls into the
+          // replacement container.
+          this.#syncRecoveryFailures.delete(backend);
+          console.warn('ProjectWorkspace sync recovery is recycling the workspace container', {
+            backend,
+            failures,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          await this.recycleWorkspaceContainer().catch((recycleError) =>
+            console.warn('ProjectWorkspace container recycle failed; recovery will retry', {
+              backend,
+              error: recycleError instanceof Error ? recycleError.message : String(recycleError),
+            }),
+          );
+          return false;
+        }
         // Not a dead end: every caller reschedules this recovery, so the
         // workspace stays blocked only until a fresh pull succeeds (#131).
         console.warn('ProjectWorkspace exhausted Computer sync recovery remains pending; recovery will retry', {
