@@ -80,6 +80,8 @@ import {
   WorkspaceOperationLane,
   type WorkspaceOperationLease,
 } from './workspace-operation-lane';
+import { OperationLeaseHeartbeat, type OperationLiveness } from './operation-lease-heartbeat';
+import { OPERATION_LEASE_MS, operationLeasePlan, type StatefulOperationKind } from './operation-lease-policy';
 import {
   DurableWorkspaceSyncRetryScheduler,
   requireDurableCommandResult,
@@ -159,18 +161,9 @@ const TRANSIENT_COMMAND_PROCESS_ROLE = 'transient-command';
 const VALIDATION_CANCELLATION_SETTLE_MS = 45_000;
 const PREVIEW_CONTAINER_RECOVERY_TIMEOUT_MS = 60_000;
 const PREVIEW_BUILD_CLEANUP_DEADLINE_MS = 30 * 60_000;
-const OPERATION_LEASE_MS = {
-  seed: 10 * 60_000,
-  write: 10 * 60_000,
-  exec: 10 * 60_000,
-  install: 15 * 60_000,
-  validate: 30 * 60_000,
-  preview: 15 * 60_000,
-  deployment: 45 * 60_000,
-  delete: 15 * 60_000,
-} as const;
 
-type StatefulOperationKind = keyof typeof OPERATION_LEASE_MS;
+/** Reported progress is only read by a heartbeat, and lanes nobody renews have none. */
+const UNWATCHED_OPERATION_LIVENESS: OperationLiveness = { observed: () => undefined };
 
 type ActiveValidation = {
   toolCallId: string;
@@ -979,7 +972,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       this.#activeToolOperations.add(toolCallId);
     }
     try {
-      return await this.withStatefulOperation('write', operationKey, async () => {
+      return await this.withStatefulOperation('write', operationKey, async (liveness) => {
         if (this.workspaceRow().seed_id !== null) {
           throw new WorkspaceOperationConflictError('seed', 1_000);
         }
@@ -1018,6 +1011,8 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           throw new Error('The project workspace exceeds its size limit.');
         }
         const assertMutationAllowed = () => {
+          // Each applied change is a step this operation demonstrably reached.
+          liveness.observed();
           if (toolCallId) {
             this.#toolOperations.assertRunning(toolCallId);
           }
@@ -1203,14 +1198,17 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       this.#toolOperations.assertRunning(request.toolCallId);
       this.#activeToolOperations.add(request.toolCallId);
     }
-    const settlement = this.withStatefulOperation('exec', request.operationKey, () =>
+    const settlement = this.withStatefulOperation('exec', request.operationKey, (liveness) =>
       this.withComputer((workspace) =>
         runCommand(workspace, request.command, {
           id: request.operationKey,
           cwd: request.cwd,
           backend: request.backend,
           timeoutMs: 5 * 60_000,
-          beforeExec: () => this.assertToolOperationRunning(request.toolCallId),
+          beforeExec: () => {
+            liveness.observed();
+            this.assertToolOperationRunning(request.toolCallId);
+          },
           onHandle: (kill) => {
             this.#activeCommandKills.set(request.operationKey, kill);
             if (this.#pendingCommandCancellations.delete(request.operationKey)) {
@@ -1251,15 +1249,20 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     this.#activeCommandStreams.add(request.operationKey);
     return new ReadableStream<Uint8Array>({
       start: (controller) => {
-        const settlement = this.withStatefulOperation('exec', request.operationKey, () =>
+        const settlement = this.withStatefulOperation('exec', request.operationKey, (liveness) =>
           this.withComputer((workspace) =>
             streamCommand(workspace, request.command, {
               id: request.operationKey,
               cwd: request.cwd,
               backend: request.backend,
               timeoutMs: 5 * 60_000,
-              beforeExec: () => this.assertToolOperationRunning(request.toolCallId),
+              beforeExec: () => {
+                liveness.observed();
+                this.assertToolOperationRunning(request.toolCallId);
+              },
               emit: (event) => {
+                // Every streamed chunk is first-hand proof the command is running.
+                liveness.observed();
                 if (!cancelled) {
                   controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
                 }
@@ -1470,10 +1473,13 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     }
     return this.runToolOperation(toolCallId, 'npmInstall', { input: input.input, mode, packages }, () => {
       const operationKey = `tool:${toolCallId}`;
-      const settlement = this.withStatefulOperation('install', operationKey, async () => {
+      const settlement = this.withStatefulOperation('install', operationKey, async (liveness) => {
         const startedAt = Date.now();
         return this.withComputer(async (workspace) => {
-          const assertMutationAllowed = () => this.#toolOperations.assertRunning(toolCallId);
+          const assertMutationAllowed = () => {
+            liveness.observed();
+            this.#toolOperations.assertRunning(toolCallId);
+          };
           const packagePath = `${PROJECT_ROOT}/package.json`;
           const lockfilePath = `${PROJECT_ROOT}/pnpm-lock.yaml`;
           const stagingRoot = `${ISOLATED_PROJECT_ROOT}/install-${crypto.randomUUID()}`;
@@ -1615,7 +1621,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     cancellation: ValidationCancellation,
   ): Promise<GhostbuildToolResult> {
     return this.runToolOperation(toolCallId, 'validation', input, () =>
-      this.withStatefulOperation('validate', `tool:${toolCallId}`, async () => {
+      this.withStatefulOperation('validate', `tool:${toolCallId}`, async (liveness) => {
         cancellation.requireActive();
         const before = await this.checkpoint();
         cancellation.requireActive();
@@ -1637,8 +1643,11 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             throw new Error('The project changed while validation was being isolated. Validate the new revision.');
           }
           await this.runTransientCommand(isolatedRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS, cancellation);
+          liveness.observed();
           for (const { command, timeoutMs } of [...REVISION_CHECK_COMMANDS, ...PREVIEW_PREPARATION_COMMANDS]) {
             await this.runTransientCommand(isolatedRoot, command, timeoutMs, cancellation);
+            // Each check that returns is a validation stage this operation completed.
+            liveness.observed();
           }
           cancellation.requireActive();
           const after = await this.checkpoint();
@@ -2724,17 +2733,18 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   private async withStatefulOperation<T>(
     kind: StatefulOperationKind,
     idempotencyKey: string,
-    operation: () => Promise<T>,
+    operation: (liveness: OperationLiveness) => Promise<T>,
   ): Promise<T> {
     this.requireCompletedComputerSync();
     const owner = crypto.randomUUID();
+    const plan = operationLeasePlan(kind);
     let lease: WorkspaceOperationLease;
     try {
       lease = this.#operationLane.acquire({
         owner,
         idempotencyKey,
         kind,
-        leaseMs: OPERATION_LEASE_MS[kind],
+        leaseMs: plan.leaseMs,
       });
     } catch (error) {
       if (error instanceof WorkspaceOperationConflictError) {
@@ -2752,10 +2762,26 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         kind,
       });
     }
+    // Only lanes a model tool can occupy are renewed, and only those report
+    // liveness. Every other lane keeps its lease as its single ceiling.
+    const heartbeat =
+      plan.silenceHorizonMs === null
+        ? null
+        : new OperationLeaseHeartbeat({
+            lane: this.#operationLane,
+            lease,
+            leaseMs: plan.leaseMs,
+            silenceHorizon: lease.acquiredAt + plan.silenceHorizonMs,
+          });
     try {
       this.assertToolOperationRunning(toolCallIdFromOperationKey(idempotencyKey));
-      return await this.withContainerKeepAlive(operation);
+      const result = await this.withContainerKeepAlive(() => operation(heartbeat ?? UNWATCHED_OPERATION_LIVENESS));
+      // The work finishing is not enough: if the lane stopped being ours while it
+      // ran, another request was free to change the workspace underneath it.
+      heartbeat?.requireHeld();
+      return result;
     } finally {
+      heartbeat?.stop();
       this.#operationLane.release(lease);
       this.#activeOperationOwners.delete(owner);
     }

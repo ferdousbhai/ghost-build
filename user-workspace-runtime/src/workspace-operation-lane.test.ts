@@ -4,6 +4,7 @@ import {
   WorkspaceOperationConflictError,
   WorkspaceOperationIndeterminateError,
   WorkspaceOperationLane,
+  WorkspaceOperationLeaseExpiredError,
 } from './workspace-operation-lane';
 
 describe('WorkspaceOperationLane', () => {
@@ -121,6 +122,22 @@ describe('WorkspaceOperationLane', () => {
     const renewed = lane.renew(lease, 5_000, 500);
     expect(renewed.deadline).toBe(5_500);
     expect(lane.find('deploy-a', lease.owner)).toEqual(renewed);
+  });
+
+  it('names a lease that lapsed under its own still-running operation', () => {
+    const lane = createLane();
+    const lease = lane.acquire(operation('exec', 'exec-a', 100, 1_000));
+
+    expect(() => lane.renew(lease, 1_000, 1_101)).toThrow(WorkspaceOperationLeaseExpiredError);
+    expect(() => lane.renew(lease, 1_000, 1_101)).toThrow(/still running when its 1s workspace lease expired/);
+  });
+
+  it('separates a lapsed lease from a lane another operation has taken', () => {
+    const lane = createLane();
+    const lease = lane.acquire(operation('exec', 'exec-a', 100, 1_000));
+    lane.acquire(operation('write', 'write-b', 1_101));
+
+    expect(() => lane.renew(lease, 1_000, 1_102)).toThrow(WorkspaceOperationIndeterminateError);
   });
 });
 

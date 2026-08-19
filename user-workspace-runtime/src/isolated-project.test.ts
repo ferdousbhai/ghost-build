@@ -203,7 +203,7 @@ describe('isolated project command', () => {
     );
 
     expect(deployment).toContain('return await this.withContainerKeepAlive(operation)');
-    expect(statefulOperation).toContain('return await this.withContainerKeepAlive(operation)');
+    expect(statefulOperation).toContain('await this.withContainerKeepAlive(() => operation(');
     expect(keepAlive).toContain('this.#containerKeepAliveOperations += 1');
     expect(keepAlive).toContain('await this.setKeepAlive(true)');
     expect(keepAlive).toContain('this.#containerKeepAliveOperations -= 1');

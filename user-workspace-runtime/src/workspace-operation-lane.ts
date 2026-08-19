@@ -46,6 +46,28 @@ export class WorkspaceOperationIndeterminateError extends Error {
 }
 
 /**
+ * The lease lapsed underneath an operation that was still running. This is not
+ * the same condition as a lost lane: the lane record still names this owner, so
+ * nothing else has taken the workspace, but the window in which another request
+ * was entitled to reclaim it has already opened. Reporting it separately keeps
+ * "the workspace could not be held long enough" from being read as "the outcome
+ * is unknowable".
+ */
+export class WorkspaceOperationLeaseExpiredError extends Error {
+  readonly code = 'workspace_operation_lease_expired';
+
+  constructor(
+    readonly operationKind: string,
+    readonly leaseMs: number,
+  ) {
+    super(
+      `The ${operationKind} operation was still running when its ${Math.round(leaseMs / 1_000)}s workspace lease expired, so the workspace lane became reclaimable by another request. Retry the operation.`,
+    );
+    this.name = 'WorkspaceOperationLeaseExpiredError';
+  }
+}
+
+/**
  * Durable, fail-closed serialization for stateful ProjectWorkspace operations.
  *
  * Calls never wait inside the Durable Object. An occupied lane produces an
@@ -175,10 +197,12 @@ export class WorkspaceOperationLane {
       if (
         current.owner !== lease.owner ||
         current.idempotency_key !== lease.idempotencyKey ||
-        current.deadline === null ||
-        current.deadline <= now
+        current.deadline === null
       ) {
         throw new WorkspaceOperationIndeterminateError(lease.kind);
+      }
+      if (current.deadline <= now) {
+        throw new WorkspaceOperationLeaseExpiredError(lease.kind, leaseMs);
       }
       const renewed = { ...lease, deadline: now + leaseMs };
       this.storage.sql.exec(

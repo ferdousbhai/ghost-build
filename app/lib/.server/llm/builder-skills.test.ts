@@ -10,6 +10,9 @@ describe('builder skills', () => {
     expect(prompt).toContain('/__skills__/frontend-design/SKILL.md — Visual design for new or reworked UI');
     expect(prompt).toContain(PROJECT_SKILL_POINTERS[0].path);
     expect(prompt).toContain('never fetch llms.txt or llms-full.txt');
+    // The node_modules pointer is unreadable until installation finishes, and without
+    // being told so the model hunted for it with find instead of retrying.
+    expect(prompt).toContain('can fail until it finishes; retry it later in the turn');
   });
 
   it('serves the bundled skill through the read tool namespace', async () => {

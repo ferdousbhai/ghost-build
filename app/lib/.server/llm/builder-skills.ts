@@ -76,6 +76,7 @@ function renderPrompt(skills: readonly BundledSkill[]): string {
     ...skills.map(({ name, description }) => `- ${BUILDER_SKILL_ROOT}/${name}/SKILL.md — ${description}`),
     ...PROJECT_SKILL_POINTERS.map(({ path, description }) => `- ${path} — ${description}`),
     '',
+    "The references above under node_modules ship inside the project's own installed packages, so they match the versions it builds against. Dependency installation runs alongside this first turn, so a read of one can fail until it finishes; retry it later in the turn rather than searching for it.",
     'Read a full Cloudflare page with exec by appending /index.md to any developers.cloudflare.com URL; never fetch llms.txt or llms-full.txt, which exceed the turn budget.',
     '</builder_skills>',
   ].join('\n');
