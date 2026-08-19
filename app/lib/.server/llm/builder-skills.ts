@@ -5,25 +5,28 @@ const BUILDER_SKILL_ROOT = '/__skills__';
 const MAX_BUILDER_SKILL_PROMPT_CHARS = 16_000;
 
 /**
- * References that ship with Ghostbuild itself and are reviewed in this repository
- * like any other source. Everything Cloudflare publishes is retrieved live through
- * search_cloudflare_docs instead, and every framework reference is read from the version the
- * project actually installed.
+ * TanStack ships this skill inside @tanstack/react-start, a direct template dependency whose
+ * exact version the seeded lockfile pins. A freshly seeded workspace has no node_modules and
+ * the reviewed installer only rewrites package.json and pnpm-lock.yaml, so a workspace path
+ * under node_modules is unreadable when the catalog reaches the model. Bundling the files
+ * from template/node_modules at build time keeps them byte-identical to the version every
+ * seeded project installs while making them readable from the first turn.
  */
-const BUNDLED_SKILLS = [{ name: 'frontend-design', source: frontendDesignSkill }] as const;
+const reactStartSkillModules = import.meta.glob(
+  '../../../../template/node_modules/@tanstack/react-start/skills/react-start/**/*',
+  { query: '?raw', import: 'default', eager: true },
+);
 
 /**
- * TanStack ships its skills inside the packages the template depends on directly, so the
- * project's own node_modules always matches the version it builds against. Only a direct
- * dependency resolves under pnpm's layout; a transitive one is not hoisted and would leave
- * the catalog advertising a file the model cannot open.
+ * References bundled into this Worker and served read-only under /__skills__/. Everything
+ * Cloudflare publishes is retrieved live through search_cloudflare_docs instead. The catalog
+ * must never point at workspace files: the model reads them through the Computer VFS, which a
+ * fresh seed does not populate beyond the template sources.
  */
-export const PROJECT_SKILL_POINTERS = [
-  {
-    path: '/home/project/node_modules/@tanstack/react-start/skills/react-start/SKILL.md',
-    description: 'TanStack Start: routing, server functions, server routes, and the execution model.',
-  },
-] as const;
+const BUNDLED_SKILLS: readonly BundledSkillSource[] = [
+  { name: 'frontend-design', files: new Map([['SKILL.md', frontendDesignSkill]]) },
+  { name: 'react-start', files: bundledSkillFiles('react-start', reactStartSkillModules) },
+];
 
 export type BuilderSkillReadResult = { kind: 'file' | 'directory'; content: string };
 
@@ -36,17 +39,36 @@ type BuilderSkillContext = {
   reader: BuilderSkillReader;
 };
 
-type BundledSkill = { name: string; description: string; content: string };
+type BundledSkillSource = { name: string; files: ReadonlyMap<string, string> };
+
+type BundledSkill = { name: string; description: string; files: ReadonlyMap<string, string> };
 
 /** Load the references bundled into this Worker. No network, no storage, no generation. */
 export function createBuilderSkillContext(): BuilderSkillContext {
-  const skills = BUNDLED_SKILLS.map(({ name, source }) => parseSkill(name, source));
+  const skills = BUNDLED_SKILLS.map(({ name, files }) => parseSkill(name, files));
   return { prompt: renderPrompt(skills), reader: createReader(skills) };
 }
 
 export function isBuilderSkillPath(path: string): boolean {
   const normalized = normalizeAbsolutePath(path);
   return normalized === BUILDER_SKILL_ROOT || normalized.startsWith(`${BUILDER_SKILL_ROOT}/`);
+}
+
+/** Rekey a bundled skill's build-time modules by their path inside the skill directory. */
+function bundledSkillFiles(name: string, modules: Record<string, unknown>): ReadonlyMap<string, string> {
+  const marker = `/skills/${name}/`;
+  const files = new Map<string, string>();
+  for (const [modulePath, content] of Object.entries(modules)) {
+    const at = modulePath.lastIndexOf(marker);
+    if (at === -1 || typeof content !== 'string') {
+      throw new Error(`Bundled builder skill ${name} has an unreadable file: ${modulePath}`);
+    }
+    files.set(modulePath.slice(at + marker.length), content);
+  }
+  if (!files.get('SKILL.md')) {
+    throw new Error(`Bundled builder skill ${name} is missing SKILL.md.`);
+  }
+  return files;
 }
 
 type DeclaredSkillFrontmatter = { name?: unknown; description?: unknown };
@@ -66,7 +88,8 @@ function declaredSkillFrontmatter(value: unknown): DeclaredSkillFrontmatter {
 }
 
 /** The catalog quotes the skill's own description, so editing the file updates the prompt. */
-function parseSkill(name: string, source: string): BundledSkill {
+function parseSkill(name: string, files: ReadonlyMap<string, string>): BundledSkill {
+  const source = files.get('SKILL.md') ?? '';
   const match = /^---\n([\s\S]*?)\n---\n/.exec(source);
   if (!match) {
     throw new Error(`Bundled builder skill ${name} has no frontmatter.`);
@@ -81,7 +104,7 @@ function parseSkill(name: string, source: string): BundledSkill {
   if (declared.name !== name || typeof declared.description !== 'string' || !declared.description) {
     throw new Error(`Bundled builder skill ${name} does not declare a matching name and description.`);
   }
-  return { name, description: declared.description, content: source };
+  return { name, description: declared.description.trim(), files };
 }
 
 function renderPrompt(skills: readonly BundledSkill[]): string {
@@ -90,9 +113,7 @@ function renderPrompt(skills: readonly BundledSkill[]): string {
     `Before implementation, use read to load the SKILL.md for each relevant reference below, then read only the files it points to. Files under ${BUILDER_SKILL_ROOT}/ are read-only and outside the project workspace.`,
     '',
     ...skills.map(({ name, description }) => `- ${BUILDER_SKILL_ROOT}/${name}/SKILL.md — ${description}`),
-    ...PROJECT_SKILL_POINTERS.map(({ path, description }) => `- ${path} — ${description}`),
     '',
-    "The references above under node_modules ship inside the project's own installed packages, so they match the versions it builds against. Dependency installation runs alongside this first turn, so a read of one can fail until it finishes; retry it later in the turn rather than searching for it.",
     'Read a full Cloudflare page with exec by appending /index.md to any developers.cloudflare.com URL; never fetch llms.txt or llms-full.txt, which exceed the turn budget.',
     '</builder_skills>',
   ].join('\n');
@@ -111,12 +132,29 @@ function createReader(skills: readonly BundledSkill[]): BuilderSkillReader {
       if (!target || !skill) {
         return null;
       }
-      if (!target.path) {
-        return { kind: 'directory', content: 'SKILL.md' };
+      const file = target.path ? skill.files.get(target.path) : undefined;
+      if (file !== undefined) {
+        return { kind: 'file', content: file };
       }
-      return target.path === 'SKILL.md' ? { kind: 'file', content: skill.content } : null;
+      const listing = directoryListing(skill.files, target.path);
+      return listing ? { kind: 'directory', content: listing } : null;
     },
   };
+}
+
+/** Immediate children of a directory inside one bundled skill; subdirectories carry a trailing slash. */
+function directoryListing(files: ReadonlyMap<string, string>, directory: string): string | null {
+  const prefix = directory ? `${directory}/` : '';
+  const entries = new Set<string>();
+  for (const path of files.keys()) {
+    if (!path.startsWith(prefix)) {
+      continue;
+    }
+    const rest = path.slice(prefix.length);
+    const slash = rest.indexOf('/');
+    entries.add(slash === -1 ? rest : rest.slice(0, slash + 1));
+  }
+  return entries.size > 0 ? [...entries].sort().join('\n') : null;
 }
 
 function parseSkillPath(path: string): { name: string; path: string } | null {

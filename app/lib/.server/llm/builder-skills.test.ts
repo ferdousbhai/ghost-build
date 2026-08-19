@@ -1,21 +1,26 @@
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { createBuilderSkillContext, isBuilderSkillPath, PROJECT_SKILL_POINTERS } from './builder-skills';
+import { BUILDER_TEMPLATE_GZIP_BASE64 } from '~/agents/builder-template.generated';
+import { createBuilderSkillContext, isBuilderSkillPath } from './builder-skills';
+
+/** The exact file set a fresh workspace is seeded with, decoded from the shipped seed module. */
+function seededWorkspacePaths(): Set<string> {
+  const entries = JSON.parse(
+    gunzipSync(Buffer.from(BUILDER_TEMPLATE_GZIP_BASE64, 'base64')).toString('utf8'),
+  ) as Array<{ path: string }>;
+  return new Set(entries.map((entry) => entry.path));
+}
 
 describe('builder skills', () => {
-  it('catalogs the bundled skill using its own frontmatter', () => {
+  it('catalogs the bundled skills using their own frontmatter', () => {
     const { prompt } = createBuilderSkillContext();
 
     expect(prompt).toContain('/__skills__/frontend-design/SKILL.md — Visual design for new or reworked UI');
-    expect(prompt).toContain(PROJECT_SKILL_POINTERS[0].path);
+    expect(prompt).toContain('/__skills__/react-start/SKILL.md — React bindings for TanStack Start');
     expect(prompt).toContain('never fetch llms.txt or llms-full.txt');
-    // The node_modules pointer is unreadable until installation finishes, and without
-    // being told so the model hunted for it with find instead of retrying.
-    expect(prompt).toContain('can fail until it finishes; retry it later in the turn');
   });
 
-  it('serves the bundled skill through the read tool namespace', async () => {
+  it('serves the bundled skills through the read tool namespace', async () => {
     const { reader } = createBuilderSkillContext();
 
     await expect(reader.read('/__skills__/frontend-design/SKILL.md')).resolves.toEqual({
@@ -25,6 +30,19 @@ describe('builder skills', () => {
     await expect(reader.read('/__skills__/frontend-design')).resolves.toEqual({
       kind: 'directory',
       content: 'SKILL.md',
+    });
+    await expect(reader.read('/__skills__/react-start/SKILL.md')).resolves.toEqual({
+      kind: 'file',
+      content: expect.stringContaining('name: react-start'),
+    });
+    // The entry skill's own relative reference resolves inside the bundle.
+    await expect(reader.read('/__skills__/react-start/server-components/SKILL.md')).resolves.toEqual({
+      kind: 'file',
+      content: expect.stringContaining('name: server-components'),
+    });
+    await expect(reader.read('/__skills__/react-start')).resolves.toEqual({
+      kind: 'directory',
+      content: expect.stringContaining('SKILL.md'),
     });
     await expect(reader.read('/__skills__/frontend-design/LICENSE.txt')).resolves.toBeNull();
     await expect(reader.read('/__skills__/nothing/SKILL.md')).resolves.toBeNull();
@@ -38,12 +56,25 @@ describe('builder skills', () => {
     expect(isBuilderSkillPath('/home/project/__skills__/SKILL.md')).toBe(false);
   });
 
-  it('points only at framework skills the template actually installs', () => {
-    // These paths are read from the running container, so a package that moves or drops its
-    // skills would leave the catalog advertising a file the model cannot open.
-    for (const { path } of PROJECT_SKILL_POINTERS) {
-      const installed = resolve(process.cwd(), 'template', path.replace('/home/project/', ''));
-      expect(existsSync(installed), `${path} is not installed in template/node_modules`).toBe(true);
+  // Regression for #125: the catalog once advertised /home/project/node_modules/..., which a
+  // freshly seeded workspace cannot serve — node_modules is never part of the seed and the
+  // reviewed installer only rewrites package.json and pnpm-lock.yaml. Every advertised path
+  // must be readable at the moment the catalog is handed to the model: either through the
+  // bundled overlay reader or as a file the seed actually writes.
+  it('advertises only files readable at turn start in a freshly seeded workspace', async () => {
+    const { prompt, reader } = createBuilderSkillContext();
+    const advertised = [...prompt.matchAll(/^- (\/\S+)/gm)].map((match) => match[1]!);
+    expect(advertised.length).toBeGreaterThan(0);
+
+    const seeded = seededWorkspacePaths();
+    for (const path of advertised) {
+      if (isBuilderSkillPath(path)) {
+        await expect(reader.read(path), `${path} is not served by the bundled skill reader`).resolves.toMatchObject({
+          kind: 'file',
+        });
+      } else {
+        expect(seeded.has(path), `${path} is not part of the seeded workspace`).toBe(true);
+      }
     }
   });
 });
