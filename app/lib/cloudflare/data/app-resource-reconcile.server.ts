@@ -57,7 +57,10 @@ type AppResourceReconcileReport = {
   scanned: number;
   orphans: OrphanedAppResource[];
   deleted: OrphanedAppResource[];
-  /** Resource kinds whose account listing could not be read, so their orphans are under-reported. */
+  /**
+   * Listings that could not be read, so their orphans are under-reported. Each entry names the
+   * resource kind and, when one was given, the provider's reason: `R2 bucket (Please enable…)`.
+   */
   skippedListings: string[];
 };
 
@@ -207,13 +210,15 @@ async function listedOrSkipped<T>(kind: string, skipped: string[], list: () => P
   try {
     return await list();
   } catch (error) {
-    // The skip is recorded either way; the reason is what tells an operator whether this is a
-    // revoked token, a rate limit, or an account too large to page through.
-    logger.warn(
-      `Skipped the ${kind} listing: the account could not be read`,
-      error instanceof Error ? error.message : String(error),
-    );
-    skipped.push(kind);
+    // The reason rides along with the kind, because it is what tells an operator whether this
+    // is a revoked token, a rate limit, an account that never enabled the product, or an
+    // account too large to page through. Provider error messages never carry a credential.
+    const reason = (error instanceof Error ? error.message : String(error))
+      .replaceAll(/\s+/g, ' ')
+      .trim()
+      .slice(0, 140);
+    logger.warn(`Skipped the ${kind} listing: the account could not be read`, reason);
+    skipped.push(reason.length > 0 ? `${kind} (${reason})` : kind);
     return [];
   }
 }

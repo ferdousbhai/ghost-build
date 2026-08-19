@@ -427,7 +427,10 @@ export function describeReconcileRun(row, now) {
     .map((orphan) =>
       typeof orphan === 'string' ? orphan : `${orphan?.kind ?? 'resource'}:${orphan?.name ?? 'unnamed'}`,
     );
-  const named = skippedListings.map((listing) => bounded(listing, 60));
+  // Each entry is a resource kind plus the provider's reason for the failure, so the bound
+  // must leave room for the reason: truncating to the kind alone would tell the operator
+  // nothing they could act on.
+  const named = skippedListings.map((listing) => bounded(listing, 160));
   const detail = {
     at,
     runStatus,
