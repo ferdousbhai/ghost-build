@@ -8,6 +8,7 @@ const MAX_CLIENT_ID_LENGTH = 512;
 const COMMIT_SHA_PATTERN = /^[a-f0-9]{40}$/;
 const WORKERS_BUILD_UUID_PATTERN = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const WORKERS_BUILD_GENERATED_OUTPUTS = new Set([
+  'app/generated/builder-skill-assets.generated.ts',
   'app/generated/user-workspace-runtime.generated.ts',
   'app/routeTree.gen.ts',
 ]);

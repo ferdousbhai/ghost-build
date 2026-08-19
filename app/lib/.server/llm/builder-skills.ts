@@ -1,21 +1,18 @@
 import { parse } from 'yaml';
+/**
+ * The react-start skill tree ships inside @tanstack/react-start, a direct template dependency
+ * whose exact version the seeded lockfile pins. A freshly seeded workspace has no node_modules
+ * and the reviewed installer only rewrites package.json and pnpm-lock.yaml, so a workspace
+ * path under node_modules is unreadable when the catalog reaches the model. The tree is
+ * inlined into a generated module by scripts/build-user-workspace-runtime.mjs because this
+ * file is bundled both by Vite and, via BuilderAgent, by esbuild into the user workspace
+ * runtime - and only Vite implements import.meta.glob.
+ */
+import { REACT_START_SKILL_FILES } from '~/generated/builder-skill-assets.generated';
 import frontendDesignSkill from './skills/frontend-design/SKILL.md?raw';
 
 const BUILDER_SKILL_ROOT = '/__skills__';
 const MAX_BUILDER_SKILL_PROMPT_CHARS = 16_000;
-
-/**
- * TanStack ships this skill inside @tanstack/react-start, a direct template dependency whose
- * exact version the seeded lockfile pins. A freshly seeded workspace has no node_modules and
- * the reviewed installer only rewrites package.json and pnpm-lock.yaml, so a workspace path
- * under node_modules is unreadable when the catalog reaches the model. Bundling the files
- * from template/node_modules at build time keeps them byte-identical to the version every
- * seeded project installs while making them readable from the first turn.
- */
-const reactStartSkillModules = import.meta.glob(
-  '../../../../template/node_modules/@tanstack/react-start/skills/react-start/**/*',
-  { query: '?raw', import: 'default', eager: true },
-);
 
 /**
  * References bundled into this Worker and served read-only under /__skills__/. Everything
@@ -25,7 +22,7 @@ const reactStartSkillModules = import.meta.glob(
  */
 const BUNDLED_SKILLS: readonly BundledSkillSource[] = [
   { name: 'frontend-design', files: new Map([['SKILL.md', frontendDesignSkill]]) },
-  { name: 'react-start', files: bundledSkillFiles('react-start', reactStartSkillModules) },
+  { name: 'react-start', files: bundledSkillFiles('react-start', REACT_START_SKILL_FILES) },
 ];
 
 export type BuilderSkillReadResult = { kind: 'file' | 'directory'; content: string };
@@ -54,21 +51,13 @@ export function isBuilderSkillPath(path: string): boolean {
   return normalized === BUILDER_SKILL_ROOT || normalized.startsWith(`${BUILDER_SKILL_ROOT}/`);
 }
 
-/** Rekey a bundled skill's build-time modules by their path inside the skill directory. */
-function bundledSkillFiles(name: string, modules: Record<string, unknown>): ReadonlyMap<string, string> {
-  const marker = `/skills/${name}/`;
-  const files = new Map<string, string>();
-  for (const [modulePath, content] of Object.entries(modules)) {
-    const at = modulePath.lastIndexOf(marker);
-    if (at === -1 || typeof content !== 'string') {
-      throw new Error(`Bundled builder skill ${name} has an unreadable file: ${modulePath}`);
-    }
-    files.set(modulePath.slice(at + marker.length), content);
-  }
-  if (!files.get('SKILL.md')) {
+/** A bundled skill's generated file map, keyed by path inside the skill directory. */
+function bundledSkillFiles(name: string, files: Readonly<Record<string, string>>): ReadonlyMap<string, string> {
+  const map = new Map(Object.entries(files));
+  if (!map.get('SKILL.md')) {
     throw new Error(`Bundled builder skill ${name} is missing SKILL.md.`);
   }
-  return files;
+  return map;
 }
 
 type DeclaredSkillFrontmatter = { name?: unknown; description?: unknown };
