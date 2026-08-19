@@ -85,6 +85,7 @@ const runtime: UserWorkspaceRuntime = {
   lastError: null,
   provisioningAttemptId: 'attempt-1',
   provisioningLeaseExpiresAt: 2,
+  upgradeDeferredSince: null,
   createdAt: 1,
   updatedAt: 1,
 };

@@ -19,6 +19,11 @@ import { createExtensionProcessSandbox } from '@cloudflare/sandbox/extensions';
 import { parse } from 'jsonc-parser';
 import { settleCancelledWorkspaceCommand } from './command-cancellation';
 import { terminateWorkspaceCommand } from './command-termination';
+import {
+  isExecutionReattachable,
+  reattachExecution,
+  WORKSPACE_RESTART_INDETERMINATE_MESSAGE,
+} from './execution-reattach';
 import { BuilderAgent } from '../../app/agents/builder-agent';
 import {
   BUILDER_WORKSPACE_MAX_FILE_BYTES,
@@ -690,7 +695,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     }
   }
 
-  async beginToolOperation(value: unknown): Promise<ToolOperationStartResult> {
+  async beginToolOperation(value: unknown): Promise<ToolOperationStartResult | { status: 'reattach' }> {
     await this.#admission.admitNewOperation();
     this.requireCompletedComputerSync();
     const input = record(value);
@@ -712,6 +717,13 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         this.#toolOperations.pending().some((operation) => operation.toolCallId === toolCallId))
     ) {
       return { status: 'active' };
+    }
+    if (started.status === 'indeterminate' && this.#toolOperations.interrupted(toolCallId)?.toolName === 'exec') {
+      // A command runs in the container, which survives the Durable Object reset a code update
+      // causes. The answer is only lost if the execution itself can no longer be observed.
+      return (await this.canReattachToolExecution(toolCallId))
+        ? { status: 'reattach' }
+        : { status: 'indeterminate', error: WORKSPACE_RESTART_INDETERMINATE_MESSAGE };
     }
     return started;
   }
@@ -772,6 +784,15 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       this.#confirmedCommandCancellations.delete(toolCallId);
     }
     return result;
+  }
+
+  /**
+   * What this workspace is holding, for a control plane deciding whether replacing the Worker
+   * would kill work in flight. Read-only, and it deliberately reports nothing for a lapsed lease:
+   * that lane is already reclaimable and must not pin an old runtime.
+   */
+  readOperationLaneState(): { kind: string; deadline: number } | null {
+    return this.#operationLane.activeLease(Date.now());
   }
 
   async getWorkspaceState(): Promise<WorkspaceState> {
@@ -1203,30 +1224,36 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       this.#toolOperations.assertRunning(request.toolCallId);
       this.#activeToolOperations.add(request.toolCallId);
     }
-    const settlement = this.withStatefulOperation('exec', request.operationKey, (liveness) =>
-      this.withComputer((workspace) =>
-        runCommand(workspace, request.command, {
-          id: request.operationKey,
-          cwd: request.cwd,
-          backend: request.backend,
-          timeoutMs: 5 * 60_000,
-          beforeExec: () => {
-            liveness.observed();
-            this.assertToolOperationRunning(request.toolCallId);
-          },
-          onHandle: (kill) => {
-            this.#activeCommandKills.set(request.operationKey, kill);
-            if (this.#pendingCommandCancellations.delete(request.operationKey)) {
-              void kill().catch(() => undefined);
-            }
-          },
-          onSyncPending: request.toolCallId
-            ? (result) => {
-                this.recordPendingCommand(request, result);
+    const resume = this.resumesInterruptedExecution(request.toolCallId);
+    const settlement = this.withStatefulOperation(
+      'exec',
+      request.operationKey,
+      (liveness) =>
+        this.withComputer((workspace) =>
+          runCommand(workspace, request.command, {
+            id: request.operationKey,
+            resume,
+            cwd: request.cwd,
+            backend: request.backend,
+            timeoutMs: 5 * 60_000,
+            beforeExec: () => {
+              liveness.observed();
+              this.assertToolOperationRunning(request.toolCallId);
+            },
+            onHandle: (kill) => {
+              this.#activeCommandKills.set(request.operationKey, kill);
+              if (this.#pendingCommandCancellations.delete(request.operationKey)) {
+                void kill().catch(() => undefined);
               }
-            : undefined,
-        }),
-      ),
+            },
+            onSyncPending: request.toolCallId
+              ? (result) => {
+                  this.recordPendingCommand(request, result);
+                }
+              : undefined,
+          }),
+        ),
+      { resume },
     );
     this.#activeCommandSettlements.set(request.operationKey, settlement);
     try {
@@ -1249,41 +1276,47 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     const encoder = new TextEncoder();
     let cancelCommand: (() => Promise<void>) | undefined;
     let cancelled = false;
+    const resume = this.resumesInterruptedExecution(request.toolCallId);
     this.#activeCommandStreams.add(request.operationKey);
     return new ReadableStream<Uint8Array>({
       start: (controller) => {
-        const settlement = this.withStatefulOperation('exec', request.operationKey, (liveness) =>
-          this.withComputer((workspace) =>
-            streamCommand(workspace, request.command, {
-              id: request.operationKey,
-              cwd: request.cwd,
-              backend: request.backend,
-              timeoutMs: 5 * 60_000,
-              beforeExec: () => {
-                liveness.observed();
-                this.assertToolOperationRunning(request.toolCallId);
-              },
-              emit: (event) => {
-                // Every streamed chunk is first-hand proof the command is running.
-                liveness.observed();
-                if (!cancelled) {
-                  controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-                }
-              },
-              onHandle: (kill) => {
-                cancelCommand = kill;
-                this.#activeCommandKills.set(request.operationKey, kill);
-                if (cancelled || this.#pendingCommandCancellations.delete(request.operationKey)) {
-                  void kill().catch(() => undefined);
-                }
-              },
-              onSyncPending: request.toolCallId
-                ? (result) => {
-                    this.recordPendingCommand(request, result);
+        const settlement = this.withStatefulOperation(
+          'exec',
+          request.operationKey,
+          (liveness) =>
+            this.withComputer((workspace) =>
+              streamCommand(workspace, request.command, {
+                id: request.operationKey,
+                resume,
+                cwd: request.cwd,
+                backend: request.backend,
+                timeoutMs: 5 * 60_000,
+                beforeExec: () => {
+                  liveness.observed();
+                  this.assertToolOperationRunning(request.toolCallId);
+                },
+                emit: (event) => {
+                  // Every streamed chunk is first-hand proof the command is running.
+                  liveness.observed();
+                  if (!cancelled) {
+                    controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
                   }
-                : undefined,
-            }),
-          ),
+                },
+                onHandle: (kill) => {
+                  cancelCommand = kill;
+                  this.#activeCommandKills.set(request.operationKey, kill);
+                  if (cancelled || this.#pendingCommandCancellations.delete(request.operationKey)) {
+                    void kill().catch(() => undefined);
+                  }
+                },
+                onSyncPending: request.toolCallId
+                  ? (result) => {
+                      this.recordPendingCommand(request, result);
+                    }
+                  : undefined,
+              }),
+            ),
+          { resume },
         );
         this.#activeCommandSettlements.set(request.operationKey, settlement);
         void settlement
@@ -2738,6 +2771,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     kind: StatefulOperationKind,
     idempotencyKey: string,
     operation: (liveness: OperationLiveness) => Promise<T>,
+    options: { resume?: boolean } = {},
   ): Promise<T> {
     this.requireCompletedComputerSync();
     const owner = crypto.randomUUID();
@@ -2749,6 +2783,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         idempotencyKey,
         kind,
         leaseMs: plan.leaseMs,
+        // Re-entering this lane under its own key adopts the effect it already started; the lease
+        // the dead owner still holds is protecting the workspace from a different operation.
+        resume: options.resume,
       });
     } catch (error) {
       if (error instanceof WorkspaceOperationConflictError) {
@@ -2789,6 +2826,31 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       this.#operationLane.release(lease);
       this.#activeOperationOwners.delete(owner);
     }
+  }
+
+  /** Look for the execution a previous instance started, without starting or disturbing anything. */
+  private async canReattachToolExecution(toolCallId: string): Promise<boolean> {
+    try {
+      return await this.withComputer((workspace) =>
+        isExecutionReattachable(workspace.runtime, `tool:${toolCallId}`, 'container-shell'),
+      );
+    } catch (error) {
+      console.info('ProjectWorkspace could not observe an interrupted execution', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  /**
+   * A journal row that is running but was not started by this instance belongs to an execution a
+   * previous instance left behind. Adopting it is the only safe reading of that state: starting a
+   * second command under the same key would repeat whatever the first one already did.
+   */
+  private resumesInterruptedExecution(toolCallId: string | null): boolean {
+    return (
+      toolCallId !== null && this.#toolOperations.isRunning(toolCallId) && !this.#ownedToolOperations.has(toolCallId)
+    );
   }
 
   private assertToolOperationRunning(toolCallId: string | null): void {
@@ -3150,29 +3212,38 @@ type StreamCommandEvent =
   | { type: 'output'; channel: 'stdout' | 'stderr'; chunk: string }
   | { type: 'result'; result: WorkspaceRuntimeResult<'utf8'>; streamTruncated: boolean };
 
-async function streamCommand(
+/**
+ * Obtain the handle a command is observed through. A resumed command adopts the execution its own
+ * key already has in the container and never starts a second one: if that execution cannot be
+ * found the command outcome stays unknown, because repeating it is the one thing that is unsafe.
+ */
+async function openCommandHandle(
   workspace: WorkspaceClient,
   command: string,
   options: {
-    id: string;
+    id?: string;
+    resume?: boolean;
     cwd: string;
     backend: 'container-shell';
     timeoutMs: number;
-    beforeExec?: () => void;
-    emit: (event: StreamCommandEvent) => void;
-    onHandle?: (kill: () => Promise<void>) => void;
+    env?: Record<string, string>;
     onSyncPending?: (result: WorkspaceRuntimeResult<'utf8'>) => void;
   },
-): Promise<WorkspaceRuntimeResult<'utf8'>> {
-  options.beforeExec?.();
-  let handle: WorkspaceRuntimeExecHandle<'utf8'>;
+): Promise<WorkspaceRuntimeExecHandle<'utf8'>> {
+  if (options.resume) {
+    if (!options.id) {
+      throw new Error('A resumed workspace command requires the execution identifier it was started with.');
+    }
+    return reattachExecution<WorkspaceRuntimeExecHandle<'utf8'>>(workspace.runtime, options.id, options.backend);
+  }
   try {
-    handle = await workspace.runtime.exec(command, {
+    return await workspace.runtime.exec(command, {
       id: options.id,
       cwd: options.cwd,
       backend: options.backend,
       encoding: 'utf8',
       timeoutMs: options.timeoutMs,
+      env: options.env,
     });
   } catch (error) {
     if (options.id) {
@@ -3184,6 +3255,25 @@ async function streamCommand(
     }
     throw error;
   }
+}
+
+async function streamCommand(
+  workspace: WorkspaceClient,
+  command: string,
+  options: {
+    id: string;
+    resume?: boolean;
+    cwd: string;
+    backend: 'container-shell';
+    timeoutMs: number;
+    beforeExec?: () => void;
+    emit: (event: StreamCommandEvent) => void;
+    onHandle?: (kill: () => Promise<void>) => void;
+    onSyncPending?: (result: WorkspaceRuntimeResult<'utf8'>) => void;
+  },
+): Promise<WorkspaceRuntimeResult<'utf8'>> {
+  options.beforeExec?.();
+  const handle = await openCommandHandle(workspace, command, options);
   let cancellation: Promise<void> | undefined;
   let terminationObservedPending = false;
   const terminate = () => {
@@ -3323,6 +3413,7 @@ async function runCommand(
   command: string,
   options: {
     id?: string;
+    resume?: boolean;
     cwd: string;
     backend: 'container-shell';
     timeoutMs: number;
@@ -3333,26 +3424,7 @@ async function runCommand(
   },
 ): Promise<WorkspaceRuntimeResult<'utf8'>> {
   options.beforeExec?.();
-  let handle: WorkspaceRuntimeExecHandle<'utf8'>;
-  try {
-    handle = await workspace.runtime.exec(command, {
-      id: options.id,
-      cwd: options.cwd,
-      backend: options.backend,
-      encoding: 'utf8',
-      timeoutMs: options.timeoutMs,
-      env: options.env,
-    });
-  } catch (error) {
-    if (options.id) {
-      const result = await terminateWorkspaceCommand(workspace.runtime, options.id, options.backend);
-      const pending = pendingWorkspaceRuntimeResult(result);
-      if (pending) {
-        options.onSyncPending?.(pending);
-      }
-    }
-    throw error;
-  }
+  const handle = await openCommandHandle(workspace, command, options);
   let cancellation: Promise<void> | undefined;
   const terminate = () => {
     cancellation ??= terminateWorkspaceCommand(workspace.runtime, handle.id, options.backend).then((result) => {

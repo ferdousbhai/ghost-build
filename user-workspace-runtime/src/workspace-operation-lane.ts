@@ -103,6 +103,12 @@ export class WorkspaceOperationLane {
     kind: string;
     now?: number;
     leaseMs?: number;
+    /**
+     * The caller is adopting the external effect this lane's own key already started, not starting
+     * it again. Only that caller may re-enter an occupied lane under its own key, and only while
+     * the owner it is replacing is no longer running here.
+     */
+    resume?: boolean;
   }): WorkspaceOperationLease {
     const result = this.storage.transactionSync<
       WorkspaceOperationLease | { error: WorkspaceOperationConflictError | WorkspaceOperationIndeterminateError }
@@ -115,10 +121,11 @@ export class WorkspaceOperationLane {
       const ownerIsActive = current.owner ? this.isOwnerActive(current.owner) : false;
       const canRecoverBeforeDeadline =
         !ownerIsActive && current.kind !== null && this.canRecoverInterruptedOwner(current.kind);
+      const resuming = args.resume === true && !ownerIsActive && current.idempotency_key === args.idempotencyKey;
       if (
         current.owner &&
         current.deadline !== null &&
-        (ownerIsActive || (current.deadline > now && !canRecoverBeforeDeadline))
+        (ownerIsActive || (current.deadline > now && !canRecoverBeforeDeadline && !resuming))
       ) {
         return {
           error: new WorkspaceOperationConflictError(
@@ -129,7 +136,7 @@ export class WorkspaceOperationLane {
       }
 
       if (current.owner) {
-        if (current.idempotency_key === args.idempotencyKey) {
+        if (current.idempotency_key === args.idempotencyKey && !resuming) {
           return { error: new WorkspaceOperationIndeterminateError(current.kind ?? args.kind) };
         }
         recoveredOwner = current.owner;
@@ -168,6 +175,19 @@ export class WorkspaceOperationLane {
        WHERE singleton = 1 AND owner = ?`,
       lease.owner,
     );
+  }
+
+  /**
+   * What the lane is holding right now, for a caller that only needs to know whether work is in
+   * flight. A lapsed deadline reports nothing: that lane is already reclaimable, so treating it as
+   * busy would let a dead owner hold the workspace against everyone.
+   */
+  activeLease(now: number): { kind: string; deadline: number } | null {
+    const row = this.read();
+    if (row.owner === null || row.kind === null || row.deadline === null || row.deadline <= now) {
+      return null;
+    }
+    return { kind: row.kind, deadline: row.deadline };
   }
 
   find(idempotencyKey: string, owner: string): WorkspaceOperationLease | null {

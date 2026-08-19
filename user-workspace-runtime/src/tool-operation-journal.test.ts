@@ -37,6 +37,32 @@ describe('ToolOperationJournal', () => {
   );
 
   it.each(['write', 'edit', 'exec'])(
+    'names the interrupted %s so a re-attachable execution can still be looked for',
+    (toolName) => {
+      const journal = journalOn(new TestStorage());
+      const input = { ...invocation(), toolName };
+      journal.initialize();
+      journal.begin(input);
+
+      expect(journal.interrupted(input.toolCallId)).toEqual({ toolName });
+
+      journal.complete({ toolCallId: input.toolCallId, result: { ok: true }, now: 2 });
+      expect(journal.interrupted(input.toolCallId)).toBeNull();
+    },
+  );
+
+  it('does not offer a cancelled operation for re-attachment', () => {
+    const journal = journalOn(new TestStorage());
+    const input = { ...invocation(), toolName: 'exec' };
+    journal.initialize();
+    journal.begin(input);
+    journal.cancel({ toolCallId: input.toolCallId, error: 'exec cancelled', active: true, now: 2 });
+
+    expect(journal.isRunning(input.toolCallId)).toBe(true);
+    expect(journal.interrupted(input.toolCallId)).toBeNull();
+  });
+
+  it.each(['write', 'edit', 'exec'])(
     'durably cancels a settled %s and rejects a delayed side-effect entry',
     (toolName) => {
       const journal = journalOn(new TestStorage());

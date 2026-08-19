@@ -189,6 +189,16 @@ export class ToolOperationJournal {
     return this.read(toolCallId)?.status === 'running';
   }
 
+  /**
+   * A row left running by an instance that died, with no cancellation recorded against it. This is
+   * the only interruption whose external effect may still be observable, so it is reported apart
+   * from the rows whose outcome the journal already knows.
+   */
+  interrupted(toolCallId: string): { toolName: string } | null {
+    const row = this.read(toolCallId);
+    return row?.status === 'running' && row.error === null ? { toolName: row.tool_name } : null;
+  }
+
   toolName(toolCallId: string): string {
     return this.require(toolCallId).tool_name;
   }

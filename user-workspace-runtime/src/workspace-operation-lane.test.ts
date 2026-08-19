@@ -104,6 +104,53 @@ describe('WorkspaceOperationLane', () => {
     });
   });
 
+  it('reports work in flight to a control plane, and reports nothing once the lease is reclaimable', () => {
+    const lane = createLane();
+    lane.acquire(operation('exec', 'tool-a', 100, 10 * 60_000));
+
+    expect(lane.activeLease(200)).toEqual({ kind: 'exec', deadline: 100 + 10 * 60_000 });
+    expect(lane.activeLease(100 + 10 * 60_000)).toBeNull();
+    lane.release(lane.find('tool-a', 'owner-exec-tool-a')!);
+    expect(lane.activeLease(200)).toBeNull();
+  });
+
+  it('lets an interrupted operation re-enter its own lane to adopt the effect it already started', () => {
+    const lane = createLane();
+    lane.acquire(operation('exec', 'tool-a', 100, 10 * 60_000));
+
+    // Without the resumption claim the stale key is refused for the whole lease and stays
+    // indeterminate after it, because repeating it would repeat the command. With it the same
+    // operation takes its own lane back and adopts what that command already did.
+    expect(() => lane.acquire(operation('exec', 'tool-a', 200))).toThrow(WorkspaceOperationConflictError);
+    expect(() => lane.acquire(operation('exec', 'tool-a', 100 + 10 * 60_000 + 1))).toThrow(
+      WorkspaceOperationIndeterminateError,
+    );
+    expect(lane.acquire({ ...operation('exec', 'tool-a', 200), owner: 'owner-resumed', resume: true })).toMatchObject({
+      owner: 'owner-resumed',
+      recoveredOwner: 'owner-exec-tool-a',
+    });
+  });
+
+  it('refuses to resume a lane whose owner is still running here', () => {
+    const storage = new TestStorage();
+    const lane = new WorkspaceOperationLane(storage as never, () => true);
+    lane.initialize();
+    lane.acquire(operation('exec', 'tool-a', 100, 10 * 60_000));
+
+    expect(() => lane.acquire({ ...operation('exec', 'tool-a', 200), owner: 'owner-resumed', resume: true })).toThrow(
+      WorkspaceOperationConflictError,
+    );
+  });
+
+  it('never lets a resumption claim take a lane a different operation holds', () => {
+    const lane = createLane();
+    lane.acquire(operation('deployment', 'deploy-a', 100, 45 * 60_000));
+
+    expect(() => lane.acquire({ ...operation('exec', 'tool-b', 200), resume: true })).toThrow(
+      WorkspaceOperationConflictError,
+    );
+  });
+
   it('releases only the current owner and permits the next operation', () => {
     const lane = createLane();
     const first = lane.acquire(operation('preview', 'preview-a', 100));

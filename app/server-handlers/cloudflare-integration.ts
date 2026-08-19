@@ -24,8 +24,10 @@ import {
 } from '~/lib/.server/cloudflare/user-workspace-runtime-provisioner';
 import {
   findUserWorkspaceRuntime,
+  recordUserWorkspaceRuntimeUpgradeDeferral,
   type UserWorkspaceRuntime,
 } from '~/lib/.server/cloudflare/user-workspace-runtime-repository';
+import { readUserWorkspaceRuntimeActivity } from '~/lib/.server/cloudflare/user-workspace-runtime-activity';
 import { USER_WORKSPACE_RUNTIME_SHA256 } from '~/generated/user-workspace-runtime.generated';
 import { deriveUserWorkspaceRuntimeSecret } from '~/lib/.server/cloudflare/user-workspace-runtime-secret';
 import { mintRuntimeCapability } from '~/lib/cloudflare/runtime-capability';
@@ -51,6 +53,14 @@ const MAX_OAUTH_START_REQUEST_BYTES = 4 * 1024;
 const MAX_OAUTH_CALLBACK_CODE_LENGTH = 4_096;
 const MAX_OAUTH_CALLBACK_TEXT_LENGTH = 2_048;
 const AI_GATEWAY_CREDIT_CHECK_TIMEOUT_MS = 5_000;
+/**
+ * How long a busy workspace may keep an old runtime. It exceeds the longest operation lease (the
+ * 45-minute deployment lane), so no single operation that was already running when the drift
+ * appeared is ever cut short by the bound; passing it means the workspace has been continuously
+ * re-proving that work is in flight for over an hour, across several leases, and the upgrade stops
+ * waiting. The interruption then lands on the journal and lane recovery that already name it.
+ */
+const MAX_RUNTIME_UPGRADE_DEFERRAL_MS = 60 * 60_000;
 const WORKSPACE_PLAN_REQUIRED_MESSAGE =
   'Cloudflare Containers requires the Workers Paid plan. Enable Workers Paid in Cloudflare, then return here and try again. Ghostbuild does not change your plan automatically.';
 const WORKSPACE_PREPARATION_FAILED_MESSAGE =
@@ -129,11 +139,13 @@ export async function cloudflareRuntimeSessionAction({
   request,
   env,
   provision = provisionUserWorkspaceRuntime,
+  readWorkspaceActivity = readUserWorkspaceRuntimeActivity,
   readAiGatewayCreditStatus,
 }: {
   request: Request;
   env: Env;
   provision?: typeof provisionUserWorkspaceRuntime;
+  readWorkspaceActivity?: typeof readUserWorkspaceRuntimeActivity;
   readAiGatewayCreditStatus?: ReadAiGatewayCreditStatus;
 }): Promise<Response> {
   if (!hasSameOrigin(request)) {
@@ -160,7 +172,19 @@ export async function cloudflareRuntimeSessionAction({
     );
   }
   const runtime = await findUserWorkspaceRuntime(env.DB, session.user.id);
-  if (!isCurrentWorkspaceRuntime(runtime, connection)) {
+  // Upgrading resets the workspace Durable Objects, so a workspace that is mid-operation keeps the
+  // runtime it is running on until it goes quiet or the deferral bound runs out.
+  const upgradeNeeded = !isCurrentWorkspaceRuntime(runtime, connection);
+  const upgradeDeferred =
+    upgradeNeeded &&
+    (await deferRuntimeUpgradeWhileWorkspaceIsBusy({
+      env,
+      userId: session.user.id,
+      runtime,
+      connection,
+      readWorkspaceActivity,
+    }));
+  if (upgradeNeeded && !upgradeDeferred) {
     try {
       await provision({
         env,
@@ -205,7 +229,7 @@ export async function cloudflareRuntimeSessionAction({
   if (
     !currentConnection ||
     currentConnection.status !== 'active' ||
-    !isCurrentWorkspaceRuntime(currentRuntime, currentConnection)
+    !isUsableWorkspaceRuntime(currentRuntime, currentConnection, upgradeDeferred)
   ) {
     return Response.json(
       { error: 'The Cloudflare account changed while Ghostbuild prepared the workspace. Try again.' },
@@ -301,12 +325,88 @@ function isCurrentWorkspaceRuntime(
   runtime: UserWorkspaceRuntime | null,
   connection: CloudflareConnection,
 ): runtime is UserWorkspaceRuntime {
+  return isUsableWorkspaceRuntime(runtime, connection, false);
+}
+
+/**
+ * A runtime this request may serve. Only the runtime *version* is ever allowed to lag, and only
+ * for a deferred upgrade: a changed connection or generation would mean the workspace no longer
+ * belongs to the Cloudflare account this session is being minted for.
+ */
+function isUsableWorkspaceRuntime(
+  runtime: UserWorkspaceRuntime | null,
+  connection: CloudflareConnection,
+  upgradeDeferred: boolean,
+): runtime is UserWorkspaceRuntime {
   return (
     runtime?.status === 'ready' &&
     runtime.connectionId === connection.id &&
     runtime.connectionGeneration === connection.generation &&
-    runtime.runtimeVersion === USER_WORKSPACE_RUNTIME_SHA256
+    (runtime.runtimeVersion === USER_WORKSPACE_RUNTIME_SHA256 || upgradeDeferred)
   );
+}
+
+/**
+ * Decide whether to leave a stale-but-working runtime alone for now.
+ *
+ * The busy signal comes from the workspace itself, over the control-plane-authenticated channel the
+ * provisioner already uses. That costs one request, and only on the runtime-session requests that
+ * follow a release; nothing cheaper is available, because the lane the answer depends on lives in
+ * the per-project Durable Objects inside the user's own Worker.
+ *
+ * An activity answer that could not be read defers too. Provisioning on an unreadable answer would
+ * turn "could not observe" into "assumed idle", which is exactly the interruption being fixed; the
+ * staleness bound is what keeps that safe. A runtime that cannot be asked at all - one that
+ * predates the route, or refuses the control-plane secret - is a definite "cannot report" and
+ * upgrades immediately, because the upgrade is what makes it answerable.
+ */
+async function deferRuntimeUpgradeWhileWorkspaceIsBusy(args: {
+  env: Env;
+  userId: string;
+  runtime: UserWorkspaceRuntime | null;
+  connection: CloudflareConnection;
+  readWorkspaceActivity: typeof readUserWorkspaceRuntimeActivity;
+}): Promise<boolean> {
+  const { runtime, connection } = args;
+  if (
+    !runtime ||
+    runtime.status !== 'ready' ||
+    runtime.connectionId !== connection.id ||
+    runtime.connectionGeneration !== connection.generation ||
+    !args.env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY
+  ) {
+    return false;
+  }
+  const now = Date.now();
+  const deferredForMs = now - (runtime.upgradeDeferredSince ?? now);
+  if (deferredForMs >= MAX_RUNTIME_UPGRADE_DEFERRAL_MS) {
+    console.info({ event: 'runtime_upgrade_forced', deferredForMs });
+    return false;
+  }
+  const activity = await args.readWorkspaceActivity({
+    endpoint: runtime.endpoint,
+    controlPlaneSecret: await deriveUserWorkspaceRuntimeSecret({
+      encryptionKeyBase64: args.env.CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY,
+      userId: args.userId,
+      accountId: connection.accountId,
+      connectionGeneration: connection.generation,
+    }),
+  });
+  if (activity === 'idle' || activity === 'unreported') {
+    return false;
+  }
+  const deferredSince = await recordUserWorkspaceRuntimeUpgradeDeferral({
+    db: args.env.DB,
+    userId: args.userId,
+    runtimeVersion: runtime.runtimeVersion,
+    now,
+  });
+  console.info({
+    event: 'runtime_upgrade_deferred',
+    reason: activity === 'busy' ? 'workspace_busy' : 'activity_unknown',
+    deferredForMs: now - deferredSince,
+  });
+  return true;
 }
 
 export async function startCloudflareConnectionAction(args: {

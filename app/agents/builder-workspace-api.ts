@@ -26,8 +26,12 @@ export type BuilderWorkspaceCheckpoint = {
   revision: string;
 };
 
+/**
+ * `reattach` is `execute` for an operation that was interrupted after it started: running the tool
+ * again adopts the execution the previous workspace instance left behind instead of repeating it.
+ */
 export type ToolOperationStartResult =
-  | { status: 'execute' | 'active' }
+  | { status: 'execute' | 'active' | 'reattach' }
   | { status: 'completed'; result: unknown }
   | { status: 'failed' | 'indeterminate'; error: string };
 
@@ -177,11 +181,18 @@ export type BuilderWorkspaceDeploymentPlan = BuilderWorkspaceCheckpoint & {
 export const WORKSPACE_TOOL_OPERATION_INDETERMINATE_CODE = 'workspace_tool_operation_indeterminate';
 
 export function isWorkspaceToolOperationIndeterminateError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  if ('code' in error && error.code === WORKSPACE_TOOL_OPERATION_INDETERMINATE_CODE) {
+    return true;
+  }
+  // Workers RPC may preserve only an exception message, so a workspace-raised indeterminate
+  // outcome carries the same code in its message and must not be read as an ordinary failure.
   return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === WORKSPACE_TOOL_OPERATION_INDETERMINATE_CODE
+    'message' in error &&
+    typeof error.message === 'string' &&
+    error.message.startsWith(`[${WORKSPACE_TOOL_OPERATION_INDETERMINATE_CODE}]`)
   );
 }
 

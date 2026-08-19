@@ -5,6 +5,7 @@ import {
   findUserWorkspaceRuntime,
   markUserWorkspaceRuntimeError,
   markUserWorkspaceRuntimeReady,
+  recordUserWorkspaceRuntimeUpgradeDeferral,
 } from './user-workspace-runtime-repository';
 
 describe('workspace runtime provisioning lease', () => {
@@ -52,6 +53,50 @@ describe('workspace runtime provisioning lease', () => {
     });
   });
 
+  it('keeps one deferral clock per pinned runtime and clears it once the upgrade is claimed', async () => {
+    const db = runtimeDatabase();
+    await claim(db, 'attempt-1', 100, 200);
+    await markUserWorkspaceRuntimeReady({
+      db,
+      userId: 'user-1',
+      connectionId: 'connection-1',
+      connectionGeneration: 1,
+      runtimeVersion: 'a'.repeat(64),
+      attemptId: 'attempt-1',
+      now: 101,
+    });
+
+    const defer = (now: number) =>
+      recordUserWorkspaceRuntimeUpgradeDeferral({ db, userId: 'user-1', runtimeVersion: 'a'.repeat(64), now });
+    await expect(defer(1_000)).resolves.toBe(1_000);
+    // A later deferral of the same pinned version measures from the first observation, not this one.
+    await expect(defer(9_000)).resolves.toBe(1_000);
+
+    await claimUserWorkspaceRuntimeProvisioning({
+      db,
+      userId: 'user-1',
+      connectionId: 'connection-1',
+      connectionGeneration: 1,
+      workerName: 'ghostbuild-workspace-test',
+      endpoint: 'https://workspace.example',
+      runtimeVersion: 'b'.repeat(64),
+      attemptId: 'attempt-2',
+      leaseExpiresAt: 20_000,
+      now: 10_000,
+    });
+    await expect(findUserWorkspaceRuntime(db, 'user-1')).resolves.toMatchObject({ upgradeDeferredSince: null });
+  });
+
+  it('leaves the deferral clock alone once the runtime it pinned is gone', async () => {
+    const db = runtimeDatabase();
+    await claim(db, 'attempt-1', 100, 200);
+
+    await expect(
+      recordUserWorkspaceRuntimeUpgradeDeferral({ db, userId: 'user-1', runtimeVersion: 'c'.repeat(64), now: 1_000 }),
+    ).resolves.toBe(1_000);
+    await expect(findUserWorkspaceRuntime(db, 'user-1')).resolves.toMatchObject({ upgradeDeferredSince: null });
+  });
+
   it('adopts an exact claim when D1 commits before acknowledgement fails', async () => {
     const db = runtimeDatabase({ claimErrorAfterCommit: new Error('D1 acknowledgement lost') });
 
@@ -93,7 +138,8 @@ function runtimeDatabase(options: { claimErrorAfterCommit?: Error } = {}): D1Dat
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       provisioning_attempt_id TEXT,
-      provisioning_lease_expires_at INTEGER
+      provisioning_lease_expires_at INTEGER,
+      upgrade_deferred_since INTEGER
     );
   `);
   return {

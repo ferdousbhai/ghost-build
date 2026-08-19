@@ -138,6 +138,7 @@ describe('Cloudflare-only authentication', () => {
       request: runtimeSessionRequest(),
       env: runtimeEnv([initialRuntime, runtimeRow()]),
       provision,
+      readWorkspaceActivity: vi.fn().mockResolvedValue('idle'),
     });
 
     expect(response.status).toBe(200);
@@ -150,6 +151,92 @@ describe('Cloudflare-only authentication', () => {
       userId: 'user-1',
       connectionId: 'connection-1',
     });
+  });
+
+  it.each([
+    ['a lane is held', 'busy', 'workspace_busy'],
+    ['the workspace could not answer', 'unknown', 'activity_unknown'],
+  ])('defers a runtime upgrade while %s and keeps serving the running runtime', async (_case, activity, reason) => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection());
+    const provision = vi.fn();
+    const stale = runtimeRow({ runtimeVersion: '0'.repeat(64) });
+
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([stale, stale]),
+      provision,
+      readWorkspaceActivity: vi.fn().mockResolvedValue(activity),
+    });
+
+    expect(provision).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ endpoint: 'https://workspace.example' });
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({ event: 'runtime_upgrade_deferred', reason }));
+  });
+
+  it('forces the upgrade once the workspace has pinned the old runtime past the deferral bound', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection());
+    const provision = vi.fn().mockResolvedValue(runtimeRecord());
+    const readWorkspaceActivity = vi.fn().mockResolvedValue('busy');
+    const pinned = runtimeRow({
+      runtimeVersion: '0'.repeat(64),
+      upgradeDeferredSince: Date.now() - (60 * 60_000 + 1),
+    });
+
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([pinned, runtimeRow()]),
+      provision,
+      readWorkspaceActivity,
+    });
+
+    expect(response.status).toBe(200);
+    expect(provision).toHaveBeenCalledTimes(1);
+    // Past the bound the workspace is not even asked: the upgrade stops waiting on it.
+    expect(readWorkspaceActivity).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({ event: 'runtime_upgrade_forced' }));
+  });
+
+  it('upgrades immediately when the runtime cannot report activity at all', async () => {
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection());
+    const provision = vi.fn().mockResolvedValue(runtimeRecord());
+
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([runtimeRow({ runtimeVersion: '0'.repeat(64) }), runtimeRow()]),
+      provision,
+      readWorkspaceActivity: vi.fn().mockResolvedValue('unreported'),
+    });
+
+    expect(response.status).toBe(200);
+    expect(provision).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['the Cloudflare connection changed', runtimeRow({ connectionGeneration: 0 })],
+    ['the runtime never became ready', runtimeRow({ status: 'error' })],
+    ['there is no runtime yet', null],
+  ])('never defers an upgrade because %s', async (_case, initialRuntime) => {
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection());
+    const provision = vi.fn().mockResolvedValue(runtimeRecord());
+    const readWorkspaceActivity = vi.fn().mockResolvedValue('busy');
+
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([initialRuntime, runtimeRow()]),
+      provision,
+      readWorkspaceActivity,
+    });
+
+    expect(response.status).toBe(200);
+    expect(provision).toHaveBeenCalledTimes(1);
+    expect(readWorkspaceActivity).not.toHaveBeenCalled();
   });
 
   it('mints an opaque correlation ID and logs it beside the grant it issued', async () => {
@@ -1073,6 +1160,7 @@ function runtimeRow(
     status?: 'provisioning' | 'ready' | 'error';
     connectionGeneration?: number;
     runtimeVersion?: string;
+    upgradeDeferredSince?: number;
   } = {},
 ) {
   return {
@@ -1086,6 +1174,7 @@ function runtimeRow(
     last_error: overrides.status === 'error' ? 'Previous provisioning failed.' : null,
     provisioning_attempt_id: null,
     provisioning_lease_expires_at: null,
+    upgrade_deferred_since: overrides.upgradeDeferredSince ?? null,
     created_at: 100,
     updated_at: 100,
   };
@@ -1103,6 +1192,7 @@ function runtimeRecord(overrides: { connectionGeneration?: number } = {}) {
     lastError: null,
     provisioningAttemptId: null,
     provisioningLeaseExpiresAt: null,
+    upgradeDeferredSince: null,
     createdAt: 100,
     updatedAt: 100,
   };
@@ -1119,6 +1209,11 @@ function runtimeEnv(rows: Array<ReturnType<typeof runtimeRow> | null>): Env {
   const queue = [...rows];
   const db = {
     prepare(sql: string) {
+      if (sql.includes('SET upgrade_deferred_since')) {
+        return {
+          bind: (now: number) => ({ first: async () => ({ upgrade_deferred_since: now }) }),
+        };
+      }
       if (!sql.includes('FROM user_computer_runtimes')) {
         throw new Error(`Unexpected SQL: ${sql}`);
       }

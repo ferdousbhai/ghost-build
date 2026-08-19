@@ -5,6 +5,8 @@ import {
   type UserWorkspaceReadinessCheck,
   type UserWorkspaceReadinessComponent,
 } from '../../app/lib/.server/cloudflare/user-workspace-runtime-health';
+import { USER_WORKSPACE_ACTIVITY_PATH } from '../../app/lib/.server/cloudflare/user-workspace-runtime-activity';
+import { readUserWorkspaceRuntimeActivity } from './workspace-activity-route';
 
 const READINESS_WORKSPACE_NAME = 'ghostbuild-runtime-readiness';
 /** The readiness components the ProjectWorkspace Durable Object probe is responsible for. */
@@ -27,9 +29,13 @@ type RuntimeReadinessEnv = {
   CONTROL_PLANE_SECRET: string;
   GHOSTBUILD_RUNTIME_VERSION: string;
   DB: Pick<D1Database, 'prepare'>;
+  BuilderAgent: Pick<DurableObjectNamespace, 'idFromName'>;
   PROJECT_WORKSPACE: {
     idFromName(name: string): DurableObjectId;
-    get(id: DurableObjectId): { runReadinessProbe(): Promise<WorkspaceReadinessProbe> };
+    get(id: DurableObjectId): {
+      runReadinessProbe(): Promise<WorkspaceReadinessProbe>;
+      readOperationLaneState(): Promise<{ kind: string; deadline: number } | null>;
+    };
   };
 };
 
@@ -39,13 +45,32 @@ export async function routeUserWorkspaceRuntimeControlPlaneRequest(
   env: RuntimeReadinessEnv,
 ): Promise<Response | null> {
   const path = new URL(request.url).pathname;
-  if (request.method !== 'GET' || path !== '/v1/readiness') {
+  if (request.method !== 'GET' || (path !== '/v1/readiness' && path !== USER_WORKSPACE_ACTIVITY_PATH)) {
     return null;
   }
   if (!authorized(request, env.CONTROL_PLANE_SECRET)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401, headers: noStoreHeaders() });
   }
+  if (path === USER_WORKSPACE_ACTIVITY_PATH) {
+    return reportUserWorkspaceRuntimeActivity(env);
+  }
   return readUserWorkspaceRuntimeReadiness(env);
+}
+
+/**
+ * A control plane about to replace this Worker asks what it would interrupt. An activity answer
+ * that could not be assembled is reported as unavailable, never as an idle workspace.
+ */
+async function reportUserWorkspaceRuntimeActivity(env: RuntimeReadinessEnv): Promise<Response> {
+  try {
+    return Response.json(await readUserWorkspaceRuntimeActivity(env), { headers: noStoreHeaders() });
+  } catch (error) {
+    console.warn('Workspace activity could not be determined', error);
+    return Response.json(
+      { error: 'The workspace could not report whether an operation is in flight.' },
+      { status: 503, headers: noStoreHeaders() },
+    );
+  }
 }
 
 async function readUserWorkspaceRuntimeReadiness(env: RuntimeReadinessEnv): Promise<Response> {

@@ -11,6 +11,7 @@ export type UserWorkspaceRuntime = {
   lastError: string | null;
   provisioningAttemptId: string | null;
   provisioningLeaseExpiresAt: number | null;
+  upgradeDeferredSince: number | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -26,6 +27,7 @@ type UserWorkspaceRuntimeRow = {
   last_error: string | null;
   provisioning_attempt_id: string | null;
   provisioning_lease_expires_at: number | null;
+  upgrade_deferred_since: number | null;
   created_at: number;
   updated_at: number;
 };
@@ -35,7 +37,8 @@ export async function findUserWorkspaceRuntime(db: D1Database, userId: string): 
     .prepare(
       `SELECT user_id, connection_id, connection_generation, worker_name,
               endpoint, runtime_version, status, last_error,
-              provisioning_attempt_id, provisioning_lease_expires_at, created_at, updated_at
+              provisioning_attempt_id, provisioning_lease_expires_at, upgrade_deferred_since,
+              created_at, updated_at
        FROM user_computer_runtimes
        WHERE user_id = ?`,
     )
@@ -76,6 +79,7 @@ export async function claimUserWorkspaceRuntimeProvisioning(args: {
          last_error = NULL,
          provisioning_attempt_id = excluded.provisioning_attempt_id,
          provisioning_lease_expires_at = excluded.provisioning_lease_expires_at,
+         upgrade_deferred_since = NULL,
          updated_at = excluded.updated_at
        WHERE user_computer_runtimes.connection_id <> excluded.connection_id
           OR user_computer_runtimes.connection_generation <> excluded.connection_generation
@@ -85,7 +89,8 @@ export async function claimUserWorkspaceRuntimeProvisioning(args: {
               AND COALESCE(user_computer_runtimes.provisioning_lease_expires_at, 0) <= ?)
        RETURNING user_id, connection_id, connection_generation, worker_name,
                  endpoint, runtime_version, status, last_error,
-                 provisioning_attempt_id, provisioning_lease_expires_at, created_at, updated_at`,
+                 provisioning_attempt_id, provisioning_lease_expires_at, upgrade_deferred_since,
+                 created_at, updated_at`,
       )
       .bind(
         args.userId,
@@ -154,6 +159,31 @@ function isExactProvisioningClaim(
   );
 }
 
+/**
+ * Record that this runtime version is being kept in place while the workspace is busy, and answer
+ * with the moment the deferral started. `COALESCE` keeps the first observation: the bound measures
+ * how long the user has been pinned on an old runtime, not how recently it was checked. The stored
+ * version is matched so a runtime that upgraded underneath this request is left alone.
+ */
+export async function recordUserWorkspaceRuntimeUpgradeDeferral(args: {
+  db: D1Database;
+  userId: string;
+  runtimeVersion: string;
+  now?: number;
+}): Promise<number> {
+  const now = args.now ?? Date.now();
+  const row = await args.db
+    .prepare(
+      `UPDATE user_computer_runtimes
+       SET upgrade_deferred_since = COALESCE(upgrade_deferred_since, ?)
+       WHERE user_id = ? AND runtime_version = ?
+       RETURNING upgrade_deferred_since`,
+    )
+    .bind(now, args.userId, args.runtimeVersion)
+    .first<{ upgrade_deferred_since: number | null }>();
+  return row?.upgrade_deferred_since ?? now;
+}
+
 export async function markUserWorkspaceRuntimeReady(args: {
   db: D1Database;
   userId: string;
@@ -201,7 +231,8 @@ async function transitionRuntime(
          AND status = 'provisioning' AND provisioning_attempt_id = ?
        RETURNING user_id, connection_id, connection_generation, worker_name,
                  endpoint, runtime_version, status, last_error,
-                 provisioning_attempt_id, provisioning_lease_expires_at, created_at, updated_at`,
+                 provisioning_attempt_id, provisioning_lease_expires_at, upgrade_deferred_since,
+                 created_at, updated_at`,
     )
     .bind(
       status,
@@ -232,6 +263,7 @@ function runtimeFromRow(row: UserWorkspaceRuntimeRow): UserWorkspaceRuntime {
     lastError: row.last_error,
     provisioningAttemptId: row.provisioning_attempt_id,
     provisioningLeaseExpiresAt: row.provisioning_lease_expires_at,
+    upgradeDeferredSince: row.upgrade_deferred_since,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
