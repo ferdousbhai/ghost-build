@@ -110,7 +110,12 @@ vi.mock('./chat-send-reconciliation', () => ({
   reconcileMessagesForSend: mocks.reconcileMessages,
 }));
 
-import { useBuilderAgentChat } from './useBuilderAgentChat';
+// Pins a browser timeout to the runtime's derived container connect ceiling; the runtime is
+// outside the ~/ alias, and the dependency direction (runtime imports app) forbids exporting
+// the ceiling through app code.
+// eslint-disable-next-line no-restricted-imports -- test-only cross-boundary derivation pin
+import { CONTAINER_CONNECT_TIMEOUT_MS } from '../../../user-workspace-runtime/src/container-toolchain';
+import { useBuilderAgentChat, WORKSPACE_PREPARE_TIMEOUT_MS } from './useBuilderAgentChat';
 
 let root: Root | undefined;
 
@@ -157,6 +162,37 @@ afterEach(async () => {
 });
 
 describe('useBuilderAgentChat workspace preparation', () => {
+  it('gives prepareWorkspace at least the container connect ceiling instead of the SDK default', async () => {
+    // The agents SDK applies a 30-second default RPC timeout. Preparing the workspace can wait
+    // on the full toolchain bootstrap after a container restart, so the explicit budget must
+    // cover the connect ceiling the runtime derives, or a recovering workspace becomes an
+    // unresumable chat (observed in production during the first end-to-end build).
+    expect(WORKSPACE_PREPARE_TIMEOUT_MS).toBeGreaterThanOrEqual(CONTAINER_CONNECT_TIMEOUT_MS);
+    mocks.agent.call.mockImplementation(async (method: string) => {
+      if (method === 'getPreviewState') {
+        return {};
+      }
+      if (method === 'prepareWorkspace') {
+        return { initialized: true };
+      }
+      if (method === 'getTranscriptSnapshot') {
+        return { checkpoint: null, messages: [] };
+      }
+      throw new Error(`Unexpected agent call: ${method}`);
+    });
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    function Harness() {
+      useBuilderAgentChat(chatArgs('workspace-timeout'));
+      return null;
+    }
+    await act(async () => root?.render(<Harness />));
+    await vi.waitFor(() => expect(prepareWorkspaceCalls()).toHaveLength(1));
+    const [, , options] = prepareWorkspaceCalls()[0] as [string, unknown[], { timeout?: number }];
+    expect(options?.timeout).toBe(WORKSPACE_PREPARE_TIMEOUT_MS);
+  });
+
   it('preserves pending send admission when the replica becomes ready for the same presentation', async () => {
     mocks.replica = undefined;
     mocks.agent.call.mockImplementation(async (method: string) => {

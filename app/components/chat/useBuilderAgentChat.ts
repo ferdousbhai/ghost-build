@@ -56,6 +56,16 @@ const messageMetadataSchema = z.looseObject({});
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
 const AGENT_CANCEL_SETTLE_TIMEOUT_MS = 5 * 60 * 1000;
 
+/**
+ * Preparing the durable workspace can legitimately take minutes: after a container restart it
+ * waits on the toolchain bootstrap, whose ceiling is CONTAINER_CONNECT_TIMEOUT_MS in
+ * user-workspace-runtime/src/container-toolchain.ts (bootstrap + computerd download + connect
+ * margin, pinned by test there). The agents SDK otherwise applies a 30-second default RPC
+ * timeout, which turned a recovering workspace into an unresumable chat. Kept above that
+ * ceiling by the pinning test in useBuilderAgentChat.test.tsx.
+ */
+export const WORKSPACE_PREPARE_TIMEOUT_MS = 20 * 60 * 1000;
+
 export function workspacePresentationId(accountId: string, agentName: string): string {
   return `${accountId}:${agentName}`;
 }
@@ -274,7 +284,7 @@ export function useBuilderAgentChat(args: {
         if (!isCurrentPresentation()) {
           return;
         }
-        const state = await builderAgent.call('prepareWorkspace', []);
+        const state = await builderAgent.call('prepareWorkspace', [], { timeout: WORKSPACE_PREPARE_TIMEOUT_MS });
         if (!state.initialized) {
           throw new Error('The durable project workspace was not initialized.');
         }
