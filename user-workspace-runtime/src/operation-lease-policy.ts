@@ -51,6 +51,18 @@ function longestToolBudget(tools: readonly ModelToolName[]): number {
   return Math.max(...tools.map((tool) => BUILDER_TURN_TIMEOUTS.tools[tool]));
 }
 
+/**
+ * Ceiling for one network package installation in the workspace container.
+ *
+ * Declared once and shared by everything that is this class of work: the
+ * project dependency installations and the container toolchain bootstrap that
+ * installs the pinned pnpm before any of them can run (#131). It must stay
+ * inside the install lane's tool budget, so the container cannot kill an
+ * installation the tool layer still allows — the #127 guard shape, pinned by
+ * test.
+ */
+export const CONTAINER_PACKAGE_INSTALL_TIMEOUT_MS = 10 * 60_000;
+
 function isToolGovernedOperation(kind: StatefulOperationKind): kind is ToolGovernedOperationKind {
   return Object.hasOwn(OPERATION_LANE_TOOLS, kind);
 }

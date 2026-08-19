@@ -108,7 +108,7 @@ describe('isolated project command', () => {
     expect(preview).toContain('this.preparePreviewSnapshot({');
     expect(preview).not.toContain('INSTALL_COMMAND');
     expect(preview).not.toContain('pnpm run build:isolated-preview');
-    expect(source).toContain('const INSTALL_TIMEOUT_MS = 10 * 60_000;');
+    expect(source).toContain('const INSTALL_TIMEOUT_MS = CONTAINER_PACKAGE_INSTALL_TIMEOUT_MS;');
     expect(deployment).toContain('rebaseDeploymentConfigPaths');
     expect(deployment).toContain('collectSandboxFiles(this, artifactRoot');
     expect(deployment).toContain('node --input-type=module --eval');

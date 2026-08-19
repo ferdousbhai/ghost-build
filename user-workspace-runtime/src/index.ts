@@ -66,7 +66,15 @@ import {
 import { applyAtomicWorkspaceChanges } from './atomic-workspace-changes';
 import { ComputerAdmissionControl } from './computer-admission';
 import { isComputerContainerCallback } from './container-fetch-routing';
-import { COMPUTERD_BINARY, computerdBootstrapCommand, containerToolchainBootstrapCommand } from './container-toolchain';
+import {
+  COMPUTERD_BINARY,
+  COMPUTERD_BOOTSTRAP_TIMEOUT_MS,
+  CONTAINER_CONNECT_TIMEOUT_MS,
+  CONTAINER_TOOLCHAIN_BOOTSTRAP_TIMEOUT_MS,
+  computerdBootstrapCommand,
+  containerToolchainBootstrapCommand,
+  runIdempotentBootstrapStage,
+} from './container-toolchain';
 import { routeUserWorkspaceRuntimeControlPlaneRequest, WORKSPACE_COMPONENTS } from './readiness-route';
 import { scheduleUserWorkspaceRuntimeMaintenance } from './scheduled-maintenance';
 import {
@@ -91,7 +99,13 @@ import {
   type WorkspaceOperationLease,
 } from './workspace-operation-lane';
 import { OperationLeaseHeartbeat, type OperationLiveness } from './operation-lease-heartbeat';
-import { OPERATION_LEASE_MS, operationLeasePlan, type StatefulOperationKind } from './operation-lease-policy';
+import {
+  CONTAINER_PACKAGE_INSTALL_TIMEOUT_MS,
+  OPERATION_LEASE_MS,
+  OPERATION_TOOL_BUDGET_MS,
+  operationLeasePlan,
+  type StatefulOperationKind,
+} from './operation-lease-policy';
 import {
   DurableWorkspaceSyncRetryScheduler,
   requireDurableCommandResult,
@@ -152,7 +166,7 @@ const SYNC_BATCH_FILES = BUILDER_WORKSPACE_SYNC_BATCH_FILES;
 const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.tanstack', '.wrangler']);
 const INSTALL_COMMAND =
   'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/';
-const INSTALL_TIMEOUT_MS = 10 * 60_000;
+const INSTALL_TIMEOUT_MS = CONTAINER_PACKAGE_INSTALL_TIMEOUT_MS;
 const WEB_APP_BUNDLE_SCRIPT = [
   "import { createRequire } from 'node:module';",
   "const require = createRequire(import.meta.resolve('vite'));",
@@ -160,6 +174,14 @@ const WEB_APP_BUNDLE_SCRIPT = [
   "await build({ entryPoints: [process.argv[1]], bundle: true, minify: true, format: 'esm', platform: 'node', external: ['cloudflare:*'], outfile: process.argv[2] });",
 ].join('');
 const PREPARED_VALIDATION_ROOT = `${ISOLATED_PROJECT_ROOT}/validated-preview`;
+/**
+ * Per-stage validation ceilings. These run through the native Sandbox exec
+ * path (`runTransientCommand`), where `timeout` is a remote process-lifetime
+ * deadline — the container supervisor ends the process and reports
+ * `timedOut: true` — plus a local observation bound in `tracked-command.ts`.
+ * A real total-runtime cap, unlike the container-shell `timeoutMs` hint
+ * documented at `EXEC_COMMAND_TIMEOUT_MS` (#128).
+ */
 const REVISION_CHECK_COMMANDS = [
   { command: 'pnpm run typecheck', timeoutMs: 5 * 60_000 },
   { command: 'pnpm run verify:stack', timeoutMs: 5 * 60_000 },
@@ -172,6 +194,19 @@ const PREVIEW_PREPARATION_COMMANDS = [
   },
   { command: 'pnpm run build:isolated-preview', timeoutMs: 5 * 60_000 },
 ] as const;
+/**
+ * `timeoutMs` for a container-shell exec is a process-lifetime hint shipped to
+ * computerd over Computer's shell RPC. @cloudflare/computer 0.1.1 enforces a
+ * `timeoutMs` timer only in its worker-shell backend; for `container-shell`
+ * it is forwarded with no client-side backstop, and computerd demonstrably
+ * does not enforce it either — a validation command ran 9m23s under a
+ * five-minute value and was ended by its lease, not this (#128). The bounds
+ * that actually govern tool exec are the tool budget above the lane and the
+ * renewed operation lease, so this hint is derived from that same budget: if
+ * a future computerd starts honoring it as the total-runtime deadline its
+ * schema describes, it cannot disagree with the layer above (#127).
+ */
+const EXEC_COMMAND_TIMEOUT_MS = OPERATION_TOOL_BUDGET_MS.exec;
 const COMPUTERD_PROCESS_ROLE = 'computerd';
 const COMPUTERD_ENV = { PORT: '8080', MOUNT_POINT: '/home', FUSE_MOUNT: 'auto' } as const;
 const TRANSIENT_COMMAND_PROCESS_ROLE = 'transient-command';
@@ -251,7 +286,7 @@ class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
     container: () => this,
     workspace: { binding: 'PROJECT_WORKSPACE', id: this.ctx.id.toString() },
     containerEnv: COMPUTERD_ENV,
-    connectTimeoutMs: 2 * 60_000,
+    connectTimeoutMs: CONTAINER_CONNECT_TIMEOUT_MS,
     id: 'container-shell',
   });
 
@@ -262,12 +297,16 @@ class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
   }
 
   async startComputerd(env: Record<string, string>): Promise<void> {
-    await this.runSandboxShellCommand(containerToolchainBootstrapCommand(), 2 * 60_000);
+    await this.runBootstrapStage(
+      'toolchain (pnpm)',
+      CONTAINER_TOOLCHAIN_BOOTSTRAP_TIMEOUT_MS,
+      containerToolchainBootstrapCommand(),
+    );
     const existing = await this.processForRole(COMPUTERD_PROCESS_ROLE);
     if (existing && (await existing.status()).state === 'running') {
       return;
     }
-    await this.runSandboxShellCommand(computerdBootstrapCommand(), 5 * 60_000);
+    await this.runBootstrapStage('computerd', COMPUTERD_BOOTSTRAP_TIMEOUT_MS, computerdBootstrapCommand());
     const process = await this.sandboxProcesses.exec([COMPUTERD_BINARY], {
       env: { ...env, FUSE_MOUNT: 'auto' },
     });
@@ -301,6 +340,21 @@ class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
                 : `computerd error (${status.error.code})`,
           },
     };
+  }
+
+  /**
+   * A bootstrap exec can be aborted mid-launch by @cloudflare/sandbox's
+   * hardcoded 30-second control-connection timeout while the container is
+   * still starting. Both bootstrap commands are idempotent, so the stage
+   * retries inside its budget instead of leaving the workspace behind an
+   * exhausted sync recovery (#131), and an exhausted budget names itself.
+   */
+  private runBootstrapStage(stage: string, budgetMs: number, command: string): Promise<void> {
+    return runIdempotentBootstrapStage({
+      stage,
+      budgetMs,
+      attempt: (remainingMs) => this.runSandboxShellCommand(command, remainingMs),
+    });
   }
 
   private async runSandboxShellCommand(command: string, timeout: number): Promise<void> {
@@ -1235,7 +1289,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             resume,
             cwd: request.cwd,
             backend: request.backend,
-            timeoutMs: 5 * 60_000,
+            // A lifetime hint for computerd, unenforced client-side for
+            // container-shell; the tool budget and lease govern (#128).
+            timeoutMs: EXEC_COMMAND_TIMEOUT_MS,
             beforeExec: () => {
               liveness.observed();
               this.assertToolOperationRunning(request.toolCallId);
@@ -1290,7 +1346,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
                 resume,
                 cwd: request.cwd,
                 backend: request.backend,
-                timeoutMs: 5 * 60_000,
+                // A lifetime hint for computerd, unenforced client-side for
+                // container-shell; the tool budget and lease govern (#128).
+                timeoutMs: EXEC_COMMAND_TIMEOUT_MS,
                 beforeExec: () => {
                   liveness.observed();
                   this.assertToolOperationRunning(request.toolCallId);
@@ -2910,7 +2968,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         await this.cleanupReadinessRoot().catch(() => undefined);
         return true;
       } catch (error) {
-        console.warn('ProjectWorkspace exhausted Computer sync recovery remains pending', {
+        // Not a dead end: every caller reschedules this recovery, so the
+        // workspace stays blocked only until a fresh pull succeeds (#131).
+        console.warn('ProjectWorkspace exhausted Computer sync recovery remains pending; recovery will retry', {
           backend,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -3492,6 +3552,10 @@ function pendingComputerSyncToolResult(error: WorkspaceSyncPendingError): Ghostb
       retryAfterMs: Math.max(0, error.notBefore - Date.now()),
       buildEnvironment: 'cloudflare-computer-container',
       nextAction: 'retry-operation',
+      // The recorded failure names what is actually blocking the workspace —
+      // e.g. an interrupted container toolchain bootstrap — instead of leaving
+      // only an operator-facing log line (#131).
+      ...(error.causeCode ? { cause: error.causeCode } : {}),
     },
   );
 }
