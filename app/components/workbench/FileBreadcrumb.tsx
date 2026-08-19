@@ -54,10 +54,12 @@ export const FileBreadcrumb = memo<FileBreadcrumbProps>(function FileBreadcrumb(
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target;
       if (
         activeIndex !== null &&
-        !contextMenuRef.current?.contains(event.target as Node) &&
-        !segmentRefs.current.some((ref) => ref?.contains(event.target as Node))
+        target instanceof Node &&
+        !contextMenuRef.current?.contains(target) &&
+        !segmentRefs.current.some((ref) => ref?.contains(target))
       ) {
         setActiveIndex(null);
       }

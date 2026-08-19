@@ -5,7 +5,13 @@ import {
   type AgentLoopConfig,
   type AgentMessage,
 } from '@earendil-works/pi-agent-core';
-import { isContextOverflow, type AssistantMessage, type Message, type Usage } from '@earendil-works/pi-ai';
+import {
+  isContextOverflow,
+  type AssistantMessage,
+  type AssistantMessageEvent,
+  type Message,
+  type Usage,
+} from '@earendil-works/pi-ai';
 import type { PiStreamChunk } from './pi-stream';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { calculatePromptCharacterCounts } from 'ghostbuild-agent/context-message-metrics';
@@ -235,22 +241,21 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         recordedFirstResponse = true;
         recordFirstWorkersAiResponse(startedAt);
       }
-      const assistantEvent = event.assistantMessageEvent as unknown as Record<string, unknown>;
-      const type = assistantEvent.type as string | undefined;
+      const assistantEvent = event.assistantMessageEvent;
       currentTurnStreamedContent ||=
-        type === 'text_start' ||
-        type === 'text_delta' ||
-        type === 'toolcall_start' ||
-        type === 'toolcall_delta' ||
-        type === 'toolcall_end';
-      const textPartId = `pi-${event.message.timestamp}-${assistantEvent.contentIndex ?? 0}`;
-      if (type === 'text_start') {
+        assistantEvent.type === 'text_start' ||
+        assistantEvent.type === 'text_delta' ||
+        assistantEvent.type === 'toolcall_start' ||
+        assistantEvent.type === 'toolcall_delta' ||
+        assistantEvent.type === 'toolcall_end';
+      const textPartId = `pi-${event.message.timestamp}-${eventContentIndex(assistantEvent) ?? 0}`;
+      if (assistantEvent.type === 'text_start') {
         await writer.write({ type: 'text-start', id: textPartId });
-      } else if (type === 'text_delta' && typeof assistantEvent.delta === 'string' && assistantEvent.delta) {
+      } else if (assistantEvent.type === 'text_delta' && assistantEvent.delta) {
         await writer.write({ type: 'text-delta', id: textPartId, delta: assistantEvent.delta });
-      } else if (type === 'text_end') {
+      } else if (assistantEvent.type === 'text_end') {
         await writer.write({ type: 'text-end', id: textPartId });
-      } else if (type === 'toolcall_start') {
+      } else if (assistantEvent.type === 'toolcall_start') {
         const streamed = streamedToolCall(assistantEvent);
         if (streamed) {
           streamedToolCalls.set(streamed.contentIndex, streamed);
@@ -261,9 +266,8 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
             dynamic: true,
           });
         }
-      } else if (type === 'toolcall_delta' && typeof assistantEvent.delta === 'string') {
-        const contentIndex = numericContentIndex(assistantEvent);
-        const streamed = contentIndex === undefined ? undefined : streamedToolCalls.get(contentIndex);
+      } else if (assistantEvent.type === 'toolcall_delta') {
+        const streamed = streamedToolCalls.get(assistantEvent.contentIndex);
         if (streamed) {
           await writer.write({
             type: 'tool-input-delta',
@@ -271,16 +275,14 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
             inputTextDelta: assistantEvent.delta,
           });
         }
-      } else if (type === 'toolcall_end') {
-        const toolCall = isRecord(assistantEvent.toolCall) ? assistantEvent.toolCall : undefined;
-        const toolCallId = typeof toolCall?.id === 'string' ? toolCall.id : undefined;
-        const toolName = typeof toolCall?.name === 'string' ? toolCall.name : undefined;
-        if (toolCall && toolCallId && toolName) {
-          completedToolInputs.add(toolCallId);
+      } else if (assistantEvent.type === 'toolcall_end') {
+        const { toolCall } = assistantEvent;
+        if (toolCall.id && toolCall.name) {
+          completedToolInputs.add(toolCall.id);
           await writer.write({
             type: 'tool-input-available',
-            toolCallId,
-            toolName,
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
             input: toolCall.arguments,
             dynamic: true,
           });
@@ -354,7 +356,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
 
   let context: AgentContext = {
     systemPrompt: instructions,
-    messages: piMessages as unknown as AgentMessage[],
+    messages: piMessages,
     tools: piToolsToList(piTools),
   };
 
@@ -391,7 +393,9 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       recordPiStage('loop_start', modelId);
       const loopConfig: AgentLoopConfig & { toolChoice: 'auto' } = {
         model: piProvider.handle.model,
-        convertToLlm: (agentMessages) => agentMessages as unknown as Message[],
+        // SAFETY: every message in this loop's context originates from `modelMessagesToPi`, the Pi
+        // tool adapter, or the Pi stream itself, so the context never holds a custom agent message.
+        convertToLlm: (agentMessages) => agentMessages as Message[],
         getSteeringMessages: async () => {
           const messages = await steering.drain();
           if (messages.length > 0) {
@@ -627,12 +631,18 @@ function toolErrorPayload(result: unknown): { code?: unknown; error?: unknown; r
     return undefined;
   }
   try {
-    return JSON.parse(text) as { code?: unknown; error?: unknown; reason?: unknown };
+    const payload: unknown = JSON.parse(text);
+    return isRecord(payload) ? payload : undefined;
   } catch {
     return undefined;
   }
 }
 
+/**
+ * `terminalAssistant` is only ever assigned from the event handler, so control-flow analysis still
+ * believes it is `undefined` where the loop result is read. Passing it through a declared parameter
+ * restores its declared type without asserting anything.
+ */
 function assistantMessageValue(message: AssistantMessage | undefined): AssistantMessage | undefined {
   return message;
 }
@@ -673,24 +683,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function numericContentIndex(value: Record<string, unknown>): number | undefined {
-  return typeof value.contentIndex === 'number' && Number.isInteger(value.contentIndex)
-    ? value.contentIndex
-    : undefined;
+function eventContentIndex(event: AssistantMessageEvent): number | undefined {
+  return 'contentIndex' in event ? event.contentIndex : undefined;
 }
 
+/** The tool call a `toolcall_start` event opened, taken from the partial message it carries. */
 function streamedToolCall(
-  event: Record<string, unknown>,
+  event: Extract<AssistantMessageEvent, { type: 'toolcall_start' }>,
 ): { contentIndex: number; toolCallId: string; toolName: string } | undefined {
-  const contentIndex = numericContentIndex(event);
-  const partial = isRecord(event.partial) ? event.partial : undefined;
-  const content = Array.isArray(partial?.content) ? partial.content : [];
-  const candidate = contentIndex === undefined ? undefined : content[contentIndex];
-  const call = isRecord(candidate) ? candidate : undefined;
-  if (contentIndex === undefined || typeof call?.id !== 'string' || typeof call.name !== 'string') {
+  const call = event.partial.content[event.contentIndex];
+  if (call?.type !== 'toolCall' || !call.id || !call.name) {
     return undefined;
   }
-  return { contentIndex, toolCallId: call.id, toolName: call.name };
+  return { contentIndex: event.contentIndex, toolCallId: call.id, toolName: call.name };
 }
 
 function withPreparationStage<T>(stage: PiPreparationStage, operation: () => Promise<T>): Promise<T>;

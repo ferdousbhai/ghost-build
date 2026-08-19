@@ -47,7 +47,7 @@ export function maskedChatNavigation(chatId: string) {
  */
 export function useNavigateToChat() {
   const navigate = useNavigate();
-  const params = useParams({ strict: false }) as { id?: string };
+  const params = useParams({ strict: false });
   const currentChatRouteId = params.id;
 
   return useCallback(

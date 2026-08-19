@@ -23,31 +23,38 @@ export function toolFailure<T>(summary: string, data?: T, coverage?: ToolResultC
 }
 
 function toolResult<T>(ok: boolean, summary: string, data?: T, coverage?: ToolResultCoverage): GhostbuildToolResult<T> {
-  return {
-    version: 1,
-    ok,
-    summary,
-    ...(data === undefined ? {} : { data }),
-    ...(coverage ? { coverage } : {}),
-  };
+  const result: GhostbuildToolResult<T> = { version: 1, ok, summary };
+  if (data !== undefined) {
+    result.data = data;
+  }
+  if (coverage) {
+    result.coverage = coverage;
+  }
+  return result;
 }
 
 export function isGhostbuildToolResult(value: unknown): value is GhostbuildToolResult {
   return (
     typeof value === 'object' &&
     value !== null &&
-    (value as { version?: unknown }).version === 1 &&
-    typeof (value as { ok?: unknown }).ok === 'boolean' &&
-    typeof (value as { summary?: unknown }).summary === 'string'
+    'version' in value &&
+    value.version === 1 &&
+    'ok' in value &&
+    typeof value.ok === 'boolean' &&
+    'summary' in value &&
+    typeof value.summary === 'string'
   );
 }
 
 export function toolResultContent(value: unknown): string | undefined {
-  if (!isGhostbuildToolResult(value) || typeof value.data !== 'object' || value.data === null) {
+  if (!isGhostbuildToolResult(value)) {
     return undefined;
   }
-  const content = (value.data as { content?: unknown }).content;
-  return typeof content === 'string' ? content : undefined;
+  const { data } = value;
+  if (typeof data !== 'object' || data === null || !('content' in data)) {
+    return undefined;
+  }
+  return typeof data.content === 'string' ? data.content : undefined;
 }
 
 export function toolResultSummary(value: unknown): string {
@@ -62,12 +69,11 @@ export function toolResultSucceeded(value: unknown): boolean {
     return value.ok;
   }
   if (typeof value === 'object' && value !== null) {
-    const result = value as { error?: unknown; exitCode?: unknown };
-    if (typeof result.error === 'string') {
+    if ('error' in value && typeof value.error === 'string') {
       return false;
     }
-    if (typeof result.exitCode === 'number') {
-      return result.exitCode === 0;
+    if ('exitCode' in value && typeof value.exitCode === 'number') {
+      return value.exitCode === 0;
     }
   }
   return true;

@@ -4,7 +4,7 @@ type Debounced<Args extends unknown[]> = ((...args: Args) => void) & {
   pending: () => boolean;
 };
 
-export function debounce<Args extends unknown[]>(func: (...args: Args) => unknown, wait: number): Debounced<Args> {
+export function debounce<Args extends unknown[]>(func: (...args: Args) => void, wait: number): Debounced<Args> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let pendingArgs: Args | undefined;
 

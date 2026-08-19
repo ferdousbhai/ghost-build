@@ -16,6 +16,7 @@ import {
   PROJECT_WORKSPACE_CONTAINER_MAX_INSTANCES,
 } from './project-workspace-container-policy';
 import { GHOSTBUILD_CONTROL_PLANE_ENDPOINT, USER_WORKSPACE_RUNTIME_GC_CRON } from './user-workspace-runtime-policy';
+import { sha256Hex } from '~/lib/hex-digest';
 
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
 const CLOUDFLARE_API_TIMEOUT_MS = 30_000;
@@ -41,7 +42,7 @@ const PROVIDER_TEXT_LIMIT = 400;
  * Text shapes that must never reach an operator log, whatever Cloudflare put in its refusal.
  * Every one is global, because these are applied with `replaceAll`.
  */
-const CREDENTIAL_SHAPED_TEXT: readonly RegExp[] = [
+const CREDENTIAL_REDACTION_PATTERNS: readonly RegExp[] = [
   /\bbearer\s+\S+/gi,
   /\beyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]+){1,2}/g,
   /[^\s@]+@[^\s@]+\.[A-Za-z]{2,}/g,
@@ -112,6 +113,26 @@ type CloudflareResultInfo = {
   total_count?: number;
   total_pages?: number;
   cursor?: string;
+};
+
+type EnvelopeResult<T> = { result: T; resultInfo: CloudflareResultInfo | undefined };
+
+type WorkspaceContainerConfiguration = {
+  image: string;
+  instance_type: string;
+  observability: { logs: { enabled: boolean } };
+  wrangler_ssh: { enabled: boolean };
+};
+
+type WorkerUploadMetadata = {
+  main_module: string;
+  compatibility_date: string;
+  compatibility_flags: string[];
+  bindings: unknown[];
+  assets?: { jwt: string };
+  exports?: { AppAgent: typeof APP_AGENT_DECLARATIVE_EXPORT };
+  observability: typeof DEPLOYMENT_OBSERVABILITY;
+  annotations: { 'workers/message': string; 'workers/tag': string };
 };
 
 type D1QueryResult = {
@@ -203,7 +224,7 @@ export class UserCloudflareAccountApi {
     ) {
       throw new CloudflareAccountApiError('Cloudflare returned an unsuccessful D1 query result.');
     }
-    return result as D1QueryResult[];
+    return result;
   }
 
   async applyD1Migrations(databaseId: string, migrations: readonly { name: string; sql: string }[]): Promise<void> {
@@ -650,19 +671,23 @@ export class UserCloudflareAccountApi {
       ...(args.kvNamespaceId ? [{ type: 'kv_namespace', name: 'APP_CACHE', namespace_id: args.kvNamespaceId }] : []),
       ...(args.appAgent ? [{ type: 'durable_object_namespace', name: 'AppAgent', class_name: 'AppAgent' }] : []),
     ];
-    const metadata = {
+    const metadata: WorkerUploadMetadata = {
       main_module: expectedMain,
       compatibility_date: DEPLOYMENT_COMPATIBILITY_DATE,
       compatibility_flags: [...DEPLOYMENT_COMPATIBILITY_FLAGS],
       bindings,
-      ...(assetJwt ? { assets: { jwt: assetJwt } } : {}),
-      ...(args.appAgent ? { exports: { AppAgent: APP_AGENT_DECLARATIVE_EXPORT } } : {}),
       observability: DEPLOYMENT_OBSERVABILITY,
       annotations: {
         'workers/message': `Ghostbuild approved revision ${args.sourceSha256.slice(0, 12)}`,
         'workers/tag': args.sourceSha256,
       },
     };
+    if (assetJwt) {
+      metadata.assets = { jwt: assetJwt };
+    }
+    if (args.appAgent) {
+      metadata.exports = { AppAgent: APP_AGENT_DECLARATIVE_EXPORT };
+    }
     const form = new FormData();
     form.set('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
     for (const module of args.modules) {
@@ -1120,7 +1145,7 @@ export class UserCloudflareAccountApi {
   private async createWorkspaceRuntimeContainerRollout(
     applicationId: string,
     applicationName: string,
-    targetConfiguration: object,
+    targetConfiguration: WorkspaceContainerConfiguration,
   ): Promise<string> {
     const rollout = await this.callContainer<{ id?: string }>(
       `/applications/${encodeURIComponent(applicationId)}/rollouts`,
@@ -1509,7 +1534,7 @@ function cloudflareErrorCodes(payload: CloudflareEnvelope<unknown> | null): numb
  */
 function boundedProviderText(text: string): string {
   let redacted = text;
-  for (const pattern of CREDENTIAL_SHAPED_TEXT) {
+  for (const pattern of CREDENTIAL_REDACTION_PATTERNS) {
     redacted = redacted.replaceAll(pattern, '[redacted]');
   }
   return redacted.replaceAll(/\s+/g, ' ').trim().slice(0, PROVIDER_TEXT_LIMIT);
@@ -1572,11 +1597,6 @@ function d1MigrationReceipt(results: D1QueryResult[], name: string): { name: str
   return null;
 }
 
-async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
 function cloudflareErrorMessage(value: unknown): string | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -1601,10 +1621,7 @@ async function parseCloudflareEnvelope<T>(response: Response): Promise<T> {
 }
 
 /** Accept a successful envelope, or raise the provider's own message in preference to a status. */
-function requireEnvelopeResult<T>(
-  payload: CloudflareEnvelope<T> | null,
-  response: Response,
-): { result: T; resultInfo: CloudflareResultInfo | undefined } {
+function requireEnvelopeResult<T>(payload: CloudflareEnvelope<T> | null, response: Response): EnvelopeResult<T> {
   if (!response.ok || payload?.success !== true || payload.result === undefined) {
     throw new CloudflareAccountApiError(
       payload?.errors?.find((error) => error.message)?.message || `Cloudflare API request failed (${response.status}).`,
@@ -1846,7 +1863,12 @@ function latestContainerApplicationRollout(value: unknown): Required<ContainerAp
     ) {
       throw new CloudflareAccountApiError('Cloudflare returned invalid workspace container rollouts.');
     }
-    return rollout as Required<ContainerApplicationRolloutReadback>;
+    return {
+      id: rollout.id,
+      created_at: rollout.created_at,
+      status: rollout.status,
+      target_configuration: rollout.target_configuration,
+    };
   });
   return rollouts.sort((left, right) => right.created_at.localeCompare(left.created_at))[0] ?? null;
 }
@@ -1864,7 +1886,12 @@ function requireContainerApplicationRollout(
   ) {
     throw new CloudflareAccountApiError('Cloudflare returned an invalid workspace container rollout.');
   }
-  return value as Required<ContainerApplicationRolloutReadback>;
+  return {
+    id: rolloutId,
+    created_at: value.created_at,
+    status: value.status,
+    target_configuration: value.target_configuration,
+  };
 }
 
 function matchesWorkspaceContainerConfiguration(value: unknown, image: string): boolean {
@@ -1885,33 +1912,31 @@ function workerModuleContentType(path: string): string {
   return path.endsWith('.wasm') ? 'application/wasm' : 'application/javascript+module';
 }
 
+const STATIC_ASSET_CONTENT_TYPES = new Map<string, string>([
+  ['css', 'text/css'],
+  ['gif', 'image/gif'],
+  ['html', 'text/html'],
+  ['ico', 'image/x-icon'],
+  ['jpeg', 'image/jpeg'],
+  ['jpg', 'image/jpeg'],
+  ['js', 'text/javascript'],
+  ['json', 'application/json'],
+  ['map', 'application/json'],
+  ['mjs', 'text/javascript'],
+  ['png', 'image/png'],
+  ['svg', 'image/svg+xml'],
+  ['txt', 'text/plain'],
+  ['wasm', 'application/wasm'],
+  ['webmanifest', 'application/manifest+json'],
+  ['webp', 'image/webp'],
+  ['woff', 'font/woff'],
+  ['woff2', 'font/woff2'],
+  ['xml', 'application/xml'],
+]);
+
 function staticAssetContentType(path: string): string {
   const extension = path.includes('.') ? path.slice(path.lastIndexOf('.') + 1).toLowerCase() : '';
-  return (
-    (
-      {
-        css: 'text/css',
-        gif: 'image/gif',
-        html: 'text/html',
-        ico: 'image/x-icon',
-        jpeg: 'image/jpeg',
-        jpg: 'image/jpeg',
-        js: 'text/javascript',
-        json: 'application/json',
-        map: 'application/json',
-        mjs: 'text/javascript',
-        png: 'image/png',
-        svg: 'image/svg+xml',
-        txt: 'text/plain',
-        wasm: 'application/wasm',
-        webmanifest: 'application/manifest+json',
-        webp: 'image/webp',
-        woff: 'font/woff',
-        woff2: 'font/woff2',
-        xml: 'application/xml',
-      } as Record<string, string>
-    )[extension] ?? 'application/octet-stream'
-  );
+  return STATIC_ASSET_CONTENT_TYPES.get(extension) ?? 'application/octet-stream';
 }
 
 /** Provider ids are opaque, so only reject shapes that could not have been recorded. */

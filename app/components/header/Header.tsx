@@ -30,7 +30,7 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
   const navigate = useNavigate();
 
   const userId = useUserIdOrNullOrLoading();
-  const isAuthenticated = typeof userId === 'string';
+  const isAuthenticated = userId !== null && userId !== undefined;
   const showSidebarIcon = !hideSidebarIcon && isAuthenticated;
 
   const profile = useStore(profileStore);

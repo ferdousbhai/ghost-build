@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { BuilderAgent } from '~/agents/builder-agent';
 import { readJsonBodyWithLimit } from '~/lib/bounded-body';
 import { MAX_SUBCHAT_INDEX } from './data-pagination';
-import type { DataOperationPath } from './data-api';
+import type { DataOperationPath, DataOperationResult } from './data-api';
 import { dataOperationArgSchemas } from './data-operation-schemas';
 import { getSessionId, UnauthorizedError } from './data/auth.server';
 import { findChat, updateChatCheckpoint } from './data/chat-repository.server';
@@ -31,9 +31,7 @@ import { requireChatTranscript, transcriptIdentity } from './data/transcript-rep
 import { retryDurableObjectRpc } from './durable-object-rpc.server';
 import type { ChatTranscriptRow } from './data/types';
 
-const dataOperationPathSchema = z.enum(
-  Object.keys(dataOperationArgSchemas) as [DataOperationPath, ...DataOperationPath[]],
-);
+const dataOperationPathSchema = z.object(dataOperationArgSchemas).keyof();
 const dataRequestSchema = z.object({ path: dataOperationPathSchema, args: z.unknown() });
 const chatRequestSchema = z.object({
   sessionId: z.string().min(1).max(512),
@@ -168,14 +166,19 @@ export async function userRuntimeInitialMessagesAction(args: {
   }
 }
 
+type TranscriptConflictBody = {
+  error: string;
+  checkpoint?: TranscriptCheckpoint | null;
+};
+
 function transcriptConflictResponse(checkpoint?: TranscriptCheckpoint | null): Response {
-  return Response.json(
-    {
-      error: 'The agent transcript advanced before this checkpoint was saved. Retry with the latest transcript.',
-      ...(checkpoint === undefined ? {} : { checkpoint }),
-    },
-    { status: 409 },
-  );
+  const body: TranscriptConflictBody = {
+    error: 'The agent transcript advanced before this checkpoint was saved. Retry with the latest transcript.',
+  };
+  if (checkpoint !== undefined) {
+    body.checkpoint = checkpoint;
+  }
+  return Response.json(body, { status: 409 });
 }
 
 function getBuilderTranscriptSnapshot(
@@ -183,13 +186,9 @@ function getBuilderTranscriptSnapshot(
   identity: TranscriptIdentity,
   ownerId: string,
 ): ReturnType<BuilderAgent['getTranscriptSnapshot']> {
-  return retryDurableObjectRpc(() => {
-    const stub = env.BuilderAgent.getByName(identity.agentName) as unknown as Pick<
-      BuilderAgent,
-      'getTranscriptSnapshotForOwner'
-    >;
-    return stub.getTranscriptSnapshotForOwner(identity, ownerId);
-  });
+  return retryDurableObjectRpc(() =>
+    env.BuilderAgent.getByName(identity.agentName).getTranscriptSnapshotForOwner(identity, ownerId),
+  );
 }
 
 function transcriptResponseHeaders(transcript: ChatTranscriptRow): Headers {
@@ -200,7 +199,11 @@ function transcriptResponseHeaders(transcript: ChatTranscriptRow): Headers {
   });
 }
 
-function runKnownDataOperation(db: D1Database, path: DataOperationPath, rawArgs: unknown): Promise<unknown> {
+function runKnownDataOperation(
+  db: D1Database,
+  path: DataOperationPath,
+  rawArgs: unknown,
+): Promise<DataOperationResult<DataOperationPath>> {
   switch (path) {
     case 'messages.initializeChat':
       return initializeChat(db, dataOperationArgSchemas[path].parse(rawArgs));

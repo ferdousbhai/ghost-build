@@ -410,12 +410,14 @@ async function readWorkspaceResources(
   return { resources, ...boundsOf(rows.results, resources.length) };
 }
 
+type ExportSectionBounds = { total: number; truncated: boolean };
+
 /**
  * `COUNT(*) OVER ()` counts the matching rows before `LIMIT` applies, so a
  * truncated section reports how many records it left behind rather than implying
  * the page it returned was all of them.
  */
-function boundsOf(rows: { total_rows: number }[], returned: number): { total: number; truncated: boolean } {
+function boundsOf(rows: { total_rows: number }[], returned: number): ExportSectionBounds {
   const total = rows[0]?.total_rows ?? 0;
   return { total, truncated: total > returned };
 }

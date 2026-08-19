@@ -25,6 +25,7 @@ import type { BuilderValidationStage } from '~/lib/common/builder-validation-pro
 import type { Tool } from 'ghostbuild-agent/tool';
 import { type BuilderSkillReader, isBuilderSkillPath } from './builder-skills';
 import { cloudflareDocsSearchTool } from './cloudflare-docs-search';
+import { sha256Hex } from '~/lib/hex-digest';
 
 type BuilderOperationContext = {
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
@@ -76,14 +77,14 @@ function lineAnchoredReadTool(workspace: BuilderWorkspaceApi, skillReader?: Buil
       'Read a UTF-8 project or /__skills__/ reference file as numbered lines. Project reads return a compact base snapshot tag required by edit. Skill files are read-only. Output is bounded; use offset and limit to continue.',
     inputSchema: MODEL_TOOL_INPUT_SCHEMAS.read,
     execute: async (input, options) => {
-      const parsed = input as { path: string; offset?: number; limit?: number };
+      const parsed = MODEL_TOOL_INPUT_SCHEMAS.read.parse(input);
       options.abortSignal?.throwIfAborted();
       const skillResult = isBuilderSkillPath(parsed.path) ? await skillReader?.read(parsed.path) : null;
       if (skillResult) {
         return lineAnchoredRead({
           path: parsed.path,
           content: skillResult.content,
-          sha256: await sha256(skillResult.content),
+          sha256: await sha256Hex(skillResult.content),
           offset: parsed.offset,
           limit: parsed.limit,
           maxLines: COMPUTER_AI_TOOL_OPTIONS.read.maxLines,
@@ -113,7 +114,7 @@ function abortAwareWriteTool(workspace: BuilderWorkspaceApi): Tool {
     description: 'Write content to a file. Overwrites any existing file at the path.',
     inputSchema: MODEL_TOOL_INPUT_SCHEMAS.write,
     execute: async (input, options) => {
-      const parsed = input as { path: string; content: string };
+      const parsed = MODEL_TOOL_INPUT_SCHEMAS.write.parse(input);
       if (isBuilderSkillPath(parsed.path)) {
         throw new Error(`Skill files are read-only: ${parsed.path}`);
       }
@@ -142,12 +143,23 @@ function abortAwareWriteTool(workspace: BuilderWorkspaceApi): Tool {
   };
 }
 
+type ExecToolReport = {
+  command: string;
+  cwd: string | null;
+  backend: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  streamTruncated?: boolean;
+  error?: string;
+};
+
 function streamingExecTool(workspace: BuilderWorkspaceApi): Tool {
   return {
     description: 'Run a shell command in the project workspace using its Cloudflare Container.',
     inputSchema: MODEL_TOOL_INPUT_SCHEMAS.exec,
     execute: async (input, options) => {
-      const parsed = input as { command: string; cwd?: string };
+      const parsed = MODEL_TOOL_INPUT_SCHEMAS.exec.parse(input);
       options.abortSignal?.throwIfAborted();
       const result = await workspace.executeCommand({
         command: parsed.command,
@@ -156,13 +168,16 @@ function streamingExecTool(workspace: BuilderWorkspaceApi): Tool {
         abortSignal: options.abortSignal,
       });
       options.abortSignal?.throwIfAborted();
-      return {
+      const report: ExecToolReport = {
         command: parsed.command,
         cwd: parsed.cwd ?? null,
         backend: COMPUTER_DEFAULT_SHELL_BACKEND,
         ...result,
-        ...(result.exitCode === 0 ? {} : { error: `Command exited with code ${result.exitCode}.` }),
       };
+      if (result.exitCode !== 0) {
+        report.error = `Command exited with code ${result.exitCode}.`;
+      }
+      return report;
     },
   };
 }
@@ -173,7 +188,7 @@ function lineAnchoredEditTool(workspace: BuilderWorkspaceApi): Tool {
       'Edit one existing file by replacing numbered original line ranges or inserting after an original line. The base tag must come from the latest read or successful edit. All operations address the same original snapshot and must not overlap.',
     inputSchema: lineEditToolParameters,
     execute: async (input, options) => {
-      const parsed = lineEditToolParameters.parse(input) as LineEditToolInput;
+      const parsed: LineEditToolInput = lineEditToolParameters.parse(input);
       if (isBuilderSkillPath(parsed.path)) {
         throw new Error(`Skill files are read-only: ${parsed.path}`);
       }
@@ -247,13 +262,16 @@ function computerWorkspaceTool(
             toolName === 'exec' && isExecInput(input) ? parseNpmInstallCommand(input.command) : null;
           if (dependencyCommand) {
             options.abortSignal?.throwIfAborted();
-            result = await workspace.installDependencies({
+            const installRequest: Parameters<BuilderWorkspaceApi['installDependencies']>[0] = {
               toolCallId: options.toolCallId,
               input: { mode: dependencyCommand.mode, packages: dependencyCommand.packages.join(' ') || undefined },
               mode: dependencyCommand.mode,
               packages: dependencyCommand.packages,
-              ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-            });
+            };
+            if (options.abortSignal) {
+              installRequest.abortSignal = options.abortSignal;
+            }
+            result = await workspace.installDependencies(installRequest);
             options.abortSignal?.throwIfAborted();
             result = markDependencyMutation(result);
           } else {
@@ -326,17 +344,11 @@ async function validateWorkspace(
   }
 }
 
-async function sha256(value: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
-  return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
 async function derivedValidationToolCallId(toolCallId: string): Promise<string> {
   if (toolCallId.length <= 501) {
     return `${toolCallId}:validation`;
   }
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(toolCallId)));
-  return `validation:${[...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  return `validation:${await sha256Hex(toolCallId)}`;
 }
 
 function attachValidation(result: unknown, validation: unknown): AutoValidatedResult {
@@ -346,7 +358,7 @@ function attachValidation(result: unknown, validation: unknown): AutoValidatedRe
   return { result, validation };
 }
 
-function markDependencyMutation(result: unknown): unknown {
+function markDependencyMutation(result: unknown): AutoValidatedResult {
   return { ...attachValidationMarker(result), dependencyMutation: true };
 }
 
@@ -367,12 +379,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isMissingFileError(error: unknown): boolean {
-  return (
-    isRecord(error) &&
-    ((error as { code?: unknown }).code === 'ENOENT' ||
-      (typeof (error as { message?: unknown }).message === 'string' &&
-        /ENOENT|no such file/i.test((error as { message: string }).message)))
-  );
+  if (!isRecord(error)) {
+    return false;
+  }
+  if (error.code === 'ENOENT') {
+    return true;
+  }
+  return typeof error.message === 'string' && /ENOENT|no such file/i.test(error.message);
 }
 
 export function createTurnStatefulToolCoordinator(

@@ -109,7 +109,9 @@ No ZIP, `DirectoryBackup`, or project copy passes through Ghostbuild.
 
 Cloudflare Workers Builds validates every push. Non-production branches upload an undeployed Worker version. A push to
 `main` runs the production deploy command only from the exact Workers Builds checkout, applies control-plane D1
-migrations, publishes with the exact 40-character commit ID, and verifies that commit from multiple regions.
+migrations, publishes with the exact 40-character commit ID, and then probes `https://ghostbuild.dev/api/version` until
+five consecutive responses report that commit, a live Worker version ID, configured OAuth bindings, and
+`Cache-Control: no-store`.
 
 Production source deploys are intentionally accepted only from Cloudflare Workers Builds. For an emergency rollback
 from a clean checkout of current `main`, inspect and promote an immutable version:

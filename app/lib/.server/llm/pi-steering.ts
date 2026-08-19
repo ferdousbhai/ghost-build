@@ -59,5 +59,5 @@ function toPiSteeringMessage(message: GhostbuildMessage, turnContext?: ChatTurnC
   if (!converted || converted.role !== 'user') {
     throw new TypeError('Pi steering requires a user message.');
   }
-  return converted as AgentMessage;
+  return converted;
 }

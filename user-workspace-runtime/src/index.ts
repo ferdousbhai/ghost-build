@@ -52,19 +52,24 @@ import {
 import { verifyRuntimeCapability } from '../../app/lib/cloudflare/runtime-capability';
 import { userRuntimeDeploymentAction } from '../../app/server-handlers/deployments';
 import { userRuntimeEnhancePromptAction } from '../../app/server-handlers/enhance-prompt';
-import { toolFailure, toolSuccess, type GhostbuildToolResult } from '../../ghostbuild-agent/tool-result';
+import {
+  isGhostbuildToolResult,
+  toolFailure,
+  toolSuccess,
+  type GhostbuildToolResult,
+} from '../../ghostbuild-agent/tool-result';
 import { applyAtomicWorkspaceChanges } from './atomic-workspace-changes';
 import { ComputerAdmissionControl } from './computer-admission';
 import { isComputerContainerCallback } from './container-fetch-routing';
 import { COMPUTERD_BINARY, computerdBootstrapCommand, containerToolchainBootstrapCommand } from './container-toolchain';
-import { routeUserWorkspaceRuntimeControlPlaneRequest } from './readiness-route';
+import { routeUserWorkspaceRuntimeControlPlaneRequest, WORKSPACE_COMPONENTS } from './readiness-route';
 import { scheduleUserWorkspaceRuntimeMaintenance } from './scheduled-maintenance';
 import {
   ToolOperationJournal,
   type ToolOperationCancellationResult,
   type ToolOperationStartResult,
 } from './tool-operation-journal';
-import { createCommittedMutationReceipt } from './mutation-receipt';
+import { createCommittedMutationReceipt, type MutationReceiptFileInput } from './mutation-receipt';
 import {
   assertPreviewSourceCheckpoint,
   assertPreviewPublicationAllowed,
@@ -122,6 +127,13 @@ interface RuntimeEnv {
   GHOSTBUILD_USER_RUNTIME_ENDPOINT: string;
   GHOSTBUILD_CONTROL_PLANE_ENDPOINT: string;
   GHOSTBUILD_RUNTIME_VERSION: string;
+}
+
+/** Payload carried by the Durable Object alarms this class schedules for itself. */
+interface ScheduledRetryPayload {
+  notBefore: number;
+  backend?: string;
+  attempt?: number;
 }
 
 const PROJECT_ROOT = DEPLOYMENT_PROJECT_ROOT;
@@ -415,18 +427,14 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   constructor(ctx: DurableObjectState<{}>, env: RuntimeEnv) {
     super(ctx, env);
     this.#syncRetries = new DurableWorkspaceSyncRetryScheduler(ctx.storage, async (intent) => {
-      const schedule = this.schedule as unknown as (
-        when: number,
-        callback: string,
-        payload: unknown,
-        options: { idempotent: true },
-      ) => Promise<unknown>;
-      await schedule.call(
-        this,
+      await this.scheduleOnce(
         Math.max(0, Math.ceil((intent.notBefore - Date.now()) / 1_000)),
         'retryPendingComputerSync',
-        { backend: intent.backend, attempt: intent.attempt, notBefore: intent.notBefore },
-        { idempotent: true },
+        {
+          backend: intent.backend,
+          attempt: intent.attempt,
+          notBefore: intent.notBefore,
+        },
       );
     });
     this.#syncRetries.initialize();
@@ -772,7 +780,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   }
 
   async runReadinessProbe() {
-    const components = {} as Partial<Record<UserWorkspaceReadinessComponent, UserWorkspaceReadinessCheck>>;
+    const components: Partial<Record<UserWorkspaceReadinessComponent, UserWorkspaceReadinessCheck>> = {};
     const nonce = crypto.randomUUID();
     const path = `${READINESS_ROOT}/${nonce}.txt`;
     let blocked = false;
@@ -861,9 +869,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       }
     }
     return {
-      ok: ['durableVfs', 'container', 'fuse', 'sync', 'cleanup'].every(
-        (name) => components[name as UserWorkspaceReadinessComponent]?.ok === true,
-      ),
+      ok: WORKSPACE_COMPONENTS.every((name) => components[name]?.ok === true),
       components,
     };
   }
@@ -1041,21 +1047,20 @@ export class ProjectWorkspace extends ComputerSandboxBase {
                 tool: toolName,
                 files: changes.map((change) => {
                   const write = change.kind === 'write' ? decodedWrites.get(change.path)! : null;
-                  return {
+                  const file: MutationReceiptFileInput = {
                     path: change.path,
                     revision: committedRevision,
                     size: write?.bytes.byteLength ?? 0,
                     sha256: write?.sha256 ?? null,
                     deleted: change.kind === 'delete',
-                    ...(write
-                      ? {
-                          changedRange: {
-                            startLine: 1,
-                            endLine: canDecodeUtf8(write.bytes) ? decodeUtf8(write.bytes).split('\n').length : 1,
-                          },
-                        }
-                      : {}),
                   };
+                  if (write) {
+                    file.changedRange = {
+                      startLine: 1,
+                      endLine: canDecodeUtf8(write.bytes) ? decodeUtf8(write.bytes).split('\n').length : 1,
+                    };
+                  }
+                  return file;
                 }),
               }),
             });
@@ -1122,15 +1127,15 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       bytes += file.size;
     }
     const nextIndex = start + page.length;
+    const nextCursor =
+      nextIndex < files.length ? encodeSyncCursor({ revision: targetRevision, index: nextIndex }) : undefined;
     return {
       state,
       fromRevision,
       targetRevision,
       mode: 'snapshot' as const,
       entries: page.map((file) => fileSyncEntry(file, targetRevision)),
-      ...(nextIndex < files.length
-        ? { nextCursor: encodeSyncCursor({ revision: targetRevision, index: nextIndex }) }
-        : {}),
+      nextCursor,
     };
   }
 
@@ -1215,13 +1220,11 @@ export class ProjectWorkspace extends ComputerSandboxBase {
               void kill().catch(() => undefined);
             }
           },
-          ...(request.toolCallId
-            ? {
-                onSyncPending: (result: WorkspaceRuntimeResult<'utf8'>) => {
-                  this.recordPendingCommand(request, result);
-                },
+          onSyncPending: request.toolCallId
+            ? (result) => {
+                this.recordPendingCommand(request, result);
               }
-            : {}),
+            : undefined,
         }),
       ),
     );
@@ -1358,7 +1361,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       const termination = this.withComputer((workspace) =>
         terminateWorkspaceCommand(workspace.runtime, operationKey, 'container-shell'),
       ).then((result) => {
-        if (isPendingWorkspaceRuntimeResult(result)) {
+        if (pendingWorkspaceRuntimeResult(result)) {
           this.registerPendingCommand({
             backend: 'container-shell',
             toolCallId,
@@ -1735,13 +1738,14 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       this.readText(`${PROJECT_ROOT}/package.json`),
       this.readText(`${PROJECT_ROOT}/wrangler.jsonc`),
     ]);
-    const packageJson = JSON.parse(packageFile.content) as { ghostbuild?: { projectType?: unknown } };
-    const configuredType = packageJson.ghostbuild?.projectType;
+    const packageJson: unknown = JSON.parse(packageFile.content);
+    const ghostbuild = isRecord(packageJson) ? packageJson.ghostbuild : undefined;
+    const configuredType = isRecord(ghostbuild) ? ghostbuild.projectType : undefined;
     if (configuredType !== undefined && configuredType !== 'web_app' && configuredType !== 'worker') {
       throw new Error('The generated project type is invalid.');
     }
-    const wrangler = parse(wranglerFile.content) as Record<string, unknown> | undefined;
-    if (!wrangler || wrangler.main !== 'src/server.ts') {
+    const wrangler: unknown = parse(wranglerFile.content);
+    if (!isRecord(wrangler) || wrangler.main !== 'src/server.ts') {
       throw new Error('The generated Worker entrypoint is invalid.');
     }
     return {
@@ -2668,17 +2672,17 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     );
   }
 
-  private async runToolOperation<T>(
+  private async runToolOperation(
     toolCallId: string,
     toolName: string,
     args: unknown,
-    operation: () => Promise<T>,
-  ): Promise<T> {
+    operation: () => Promise<GhostbuildToolResult>,
+  ): Promise<GhostbuildToolResult> {
     try {
       this.requireCompletedComputerSync();
     } catch (error) {
       if (error instanceof WorkspaceSyncPendingError) {
-        return pendingComputerSyncToolResult(error) as T;
+        return pendingComputerSyncToolResult(error);
       }
       throw error;
     }
@@ -2692,7 +2696,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       this.#ownedToolOperations.add(toolCallId);
     }
     if (started.status === 'completed') {
-      return started.result as T;
+      return requireToolResult(started.result);
     }
     if (started.status === 'failed' || started.status === 'indeterminate') {
       throw new Error(started.error);
@@ -2700,7 +2704,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     this.#activeToolOperations.add(toolCallId);
     try {
       const result = await operation();
-      return this.#toolOperations.complete({ toolCallId, result }) as T;
+      return requireToolResult(this.#toolOperations.complete({ toolCallId, result }));
     } catch (error) {
       if (error instanceof WorkspaceSyncPendingError) {
         const result =
@@ -2711,7 +2715,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
               })
             : pendingComputerSyncToolResult(error);
         this.registerPendingCommand({ backend: error.backend, toolCallId, result });
-        return result as T;
+        return result;
       }
       try {
         this.#toolOperations.fail({
@@ -2867,20 +2871,28 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   }
 
   private async schedulePendingCommandRecovery(delayMs: number): Promise<void> {
+    const delaySeconds = Math.max(1, Math.ceil(delayMs / 1_000));
+    await this.scheduleOnce(delaySeconds, 'reconcilePendingCommands', {
+      notBefore: Date.now() + delaySeconds * 1_000,
+    });
+  }
+
+  /**
+   * Deduplicating `schedule()`. The Durable Object runtime accepts an `idempotent` option so a
+   * repeated (callback, payload) pair reuses the existing row instead of stacking duplicates, but
+   * the `Container` base class this Sandbox extends publishes only the three-argument overload.
+   */
+  private scheduleOnce(delaySeconds: number, callback: string, payload: ScheduledRetryPayload): Promise<unknown> {
+    // SAFETY: the fourth argument is the documented `agents` schedule options bag, and both
+    // callbacks named by callers (`retryPendingComputerSync`, `reconcilePendingCommands`) are
+    // methods of this class, which is what the published `callback: keyof this` overload requires.
     const schedule = this.schedule as unknown as (
       when: number,
       callback: string,
-      payload: unknown,
+      payload: ScheduledRetryPayload,
       options: { idempotent: true },
     ) => Promise<unknown>;
-    const delaySeconds = Math.max(1, Math.ceil(delayMs / 1_000));
-    await schedule.call(
-      this,
-      delaySeconds,
-      'reconcilePendingCommands',
-      { notBefore: Date.now() + delaySeconds * 1_000 },
-      { idempotent: true },
-    );
+    return schedule.call(this, delaySeconds, callback, payload, { idempotent: true });
   }
 
   private async cleanupReadinessRoot(): Promise<void> {
@@ -2911,6 +2923,17 @@ export default {
   },
 };
 
+// The handlers below are shared with the control plane Worker, so they are typed against the global
+// `Env`. `RuntimeEnv` is kept as its own explicit list so this file cannot reach for a control-plane
+// binding the user-owned Worker does not have.
+function sharedHandlerEnv(env: RuntimeEnv): Env {
+  // SAFETY: app/user-runtime-env.d.ts declares every RuntimeEnv member on the global `Env`, and
+  // app/lib/.server/cloudflare/user-account-api.ts deploys the user Worker with exactly those
+  // bindings. Only PROJECT_WORKSPACE differs, and only in its Durable Object type parameter
+  // (ProjectWorkspace here vs. the ProjectWorkspaceRpc view the shared handlers call through).
+  return env as unknown as Env;
+}
+
 async function handleUserRequest(
   request: Request,
   env: RuntimeEnv,
@@ -2926,29 +2949,30 @@ async function handleUserRequest(
   if (!capability || capability.subject !== env.GHOSTBUILD_USER_ID) {
     return withCors(Response.json({ error: 'Unauthorized' }, { status: 401 }), origin);
   }
+  const sharedEnv = sharedHandlerEnv(env);
   let response: Response;
-  const agentResponse = await routeUserRuntimeAgentRequest(request, env as unknown as Env, capability.subject);
+  const agentResponse = await routeUserRuntimeAgentRequest(request, sharedEnv, capability.subject);
   if (agentResponse) {
     response = agentResponse;
   } else if (request.method === 'POST' && url.pathname === '/v1/data') {
     response = await userRuntimeDataAction({
       request,
-      env: env as unknown as Env,
+      env: sharedEnv,
       userId: capability.subject,
       executionCtx: ctx,
     });
   } else if (request.method === 'POST' && url.pathname === '/v1/chats/store') {
-    response = await userRuntimeStoreChatAction({ request, env: env as unknown as Env, userId: capability.subject });
+    response = await userRuntimeStoreChatAction({ request, env: sharedEnv, userId: capability.subject });
   } else if (request.method === 'POST' && url.pathname === '/v1/chats/messages') {
     response = await userRuntimeInitialMessagesAction({
       request,
-      env: env as unknown as Env,
+      env: sharedEnv,
       userId: capability.subject,
     });
   } else if (request.method === 'POST' && url.pathname === '/v1/enhance-prompt') {
     response = await userRuntimeEnhancePromptAction({
       request,
-      env: env as unknown as Env,
+      env: sharedEnv,
       userId: capability.subject,
     });
   } else {
@@ -2956,7 +2980,7 @@ async function handleUserRequest(
     if (deployment && (request.method === 'GET' || request.method === 'POST')) {
       const operation = deployment[2] === 'deploy' ? 'deploy' : 'get';
       response = await userRuntimeDeploymentAction({
-        env: env as unknown as Env,
+        env: sharedEnv,
         userId: capability.subject,
         deploymentId: decodeURIComponent(deployment[1]!),
         operation,
@@ -3154,8 +3178,9 @@ async function streamCommand(
   } catch (error) {
     if (options.id) {
       const result = await terminateWorkspaceCommand(workspace.runtime, options.id, options.backend);
-      if (isPendingWorkspaceRuntimeResult(result)) {
-        options.onSyncPending?.(result as WorkspaceRuntimeResult<'utf8'>);
+      const pending = pendingWorkspaceRuntimeResult(result);
+      if (pending) {
+        options.onSyncPending?.(pending);
       }
     }
     throw error;
@@ -3164,9 +3189,10 @@ async function streamCommand(
   let terminationObservedPending = false;
   const terminate = () => {
     cancellation ??= terminateWorkspaceCommand(workspace.runtime, handle.id, options.backend).then((result) => {
-      if (isPendingWorkspaceRuntimeResult(result)) {
+      const pending = pendingWorkspaceRuntimeResult(result);
+      if (pending) {
         terminationObservedPending = true;
-        options.onSyncPending?.(result as WorkspaceRuntimeResult<'utf8'>);
+        options.onSyncPending?.(pending);
       }
     });
     return cancellation;
@@ -3321,8 +3347,9 @@ async function runCommand(
   } catch (error) {
     if (options.id) {
       const result = await terminateWorkspaceCommand(workspace.runtime, options.id, options.backend);
-      if (isPendingWorkspaceRuntimeResult(result)) {
-        options.onSyncPending?.(result as WorkspaceRuntimeResult<'utf8'>);
+      const pending = pendingWorkspaceRuntimeResult(result);
+      if (pending) {
+        options.onSyncPending?.(pending);
       }
     }
     throw error;
@@ -3330,8 +3357,9 @@ async function runCommand(
   let cancellation: Promise<void> | undefined;
   const terminate = () => {
     cancellation ??= terminateWorkspaceCommand(workspace.runtime, handle.id, options.backend).then((result) => {
-      if (isPendingWorkspaceRuntimeResult(result)) {
-        options.onSyncPending?.(result as WorkspaceRuntimeResult<'utf8'>);
+      const pending = pendingWorkspaceRuntimeResult(result);
+      if (pending) {
+        options.onSyncPending?.(pending);
       }
     });
     return cancellation;
@@ -3368,6 +3396,17 @@ function requireCommandSuccess(result: WorkspaceRuntimeResult<'utf8'>): void {
 
 function commandFailureMessage(result: Pick<WorkspaceRuntimeResult<'utf8'>, 'stderr' | 'stdout'>): string {
   return `${result.stderr}\n${result.stdout}`.trim().slice(-4_000) || 'The Computer command failed.';
+}
+
+/**
+ * The tool operation journal stores results as JSON, so a replayed or committed result comes back
+ * untyped. Every value the journal holds for these operations was written by `runToolOperation`.
+ */
+function requireToolResult(value: unknown): GhostbuildToolResult {
+  if (!isGhostbuildToolResult(value)) {
+    throw new Error('The durable workspace tool operation did not record a tool result.');
+  }
+  return value;
 }
 
 function pendingComputerSyncToolResult(error: WorkspaceSyncPendingError): GhostbuildToolResult {
@@ -3454,31 +3493,38 @@ function requireFileInputs(value: unknown): Array<{ path: string; content: strin
   });
 }
 
-function requireChanges(
-  value: unknown,
-): Array<
-  | { kind: 'delete'; path: string }
-  | { kind: 'write'; path: string; content: string; encoding: 'utf8' | 'base64'; mode?: number }
-> {
+type WorkspaceWriteChange = {
+  kind: 'write';
+  path: string;
+  content: string;
+  encoding: 'utf8' | 'base64';
+  mode?: number;
+};
+type WorkspaceChange = { kind: 'delete'; path: string } | WorkspaceWriteChange;
+
+function requireChanges(value: unknown): WorkspaceChange[] {
   if (!Array.isArray(value) || value.length > SYNC_BATCH_FILES) {
     throw new SyntaxError('Invalid workspace changes.');
   }
-  return value.map((changeValue) => {
+  return value.map((changeValue): WorkspaceChange => {
     const change = record(changeValue);
     const path = requireProjectPath(change.path);
     if (change.kind === 'delete') {
-      return { kind: 'delete' as const, path };
+      return { kind: 'delete', path };
     }
     if (change.kind !== 'write' || typeof change.content !== 'string') {
       throw new SyntaxError('Invalid workspace change.');
     }
-    return {
-      kind: 'write' as const,
+    const write: WorkspaceWriteChange = {
+      kind: 'write',
       path,
       content: change.content,
       encoding: requireWorkspaceFileEncoding(change.encoding),
-      ...(change.mode === undefined ? {} : { mode: requireInteger(change.mode, 'mode', 0o7777) }),
     };
+    if (change.mode !== undefined) {
+      write.mode = requireInteger(change.mode, 'mode', 0o7777);
+    }
+    return write;
   });
 }
 
@@ -3514,16 +3560,16 @@ function requireBackend(value: unknown): 'container-shell' {
   throw new SyntaxError('Invalid Computer execution backend.');
 }
 
-function isPendingWorkspaceRuntimeResult(value: unknown): value is { sync: { status: 'pending' } } {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'sync' in value &&
-    typeof value.sync === 'object' &&
-    value.sync !== null &&
-    'status' in value.sync &&
-    value.sync.status === 'pending'
-  );
+/**
+ * `terminateWorkspaceCommand` hands back whatever the Computer runtime recorded for the command it
+ * killed. Only a still-pending filesystem sync is actionable, so recognise that one shape here
+ * rather than at each observation site.
+ */
+function pendingWorkspaceRuntimeResult(value: unknown): WorkspaceRuntimeResult<'utf8'> | null {
+  // SAFETY: `value` is the resolved `WorkspaceRuntimeExecHandle<'utf8'>.result()` of the killed
+  // command; the sync check below rejects anything that does not carry a pending sync record.
+  const result = value as WorkspaceRuntimeResult<'utf8'> | null | undefined;
+  return result?.sync?.status === 'pending' ? result : null;
 }
 
 function toolCallIdFromOperationKey(operationKey: string): string | null {
@@ -3558,11 +3604,16 @@ function relativeProjectPath(path: string): string {
   return path.slice(PROJECT_ROOT.length).replace(/^\/+/, '');
 }
 
-function encodeSyncCursor(cursor: { revision: number; index: number }): string {
+interface SyncCursor {
+  revision: number;
+  index: number;
+}
+
+function encodeSyncCursor(cursor: SyncCursor): string {
   return btoa(JSON.stringify(cursor));
 }
 
-function decodeSyncCursor(value: string): { revision: number; index: number } {
+function decodeSyncCursor(value: string): SyncCursor {
   try {
     const cursor = record(JSON.parse(atob(value)));
     return {
@@ -3626,22 +3677,26 @@ function bearerToken(request: Request): string | null {
   return authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function record(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     throw new SyntaxError('Workspace request must be an object.');
   }
-  return value as Record<string, unknown>;
+  return value;
 }
 
 function stableValue(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(stableValue);
   }
-  if (value && typeof value === 'object') {
+  if (isRecord(value)) {
     return Object.fromEntries(
       Object.keys(value)
         .sort()
-        .map((key) => [key, stableValue((value as Record<string, unknown>)[key])]),
+        .map((key) => [key, stableValue(value[key])]),
     );
   }
   return value;
@@ -3655,10 +3710,14 @@ function requireString(value: unknown, name: string, maxLength: number): string 
 }
 
 function requireStringArray(value: unknown, name: string, maxLength: number): string[] {
-  if (!Array.isArray(value) || value.length > maxLength || value.some((item) => typeof item !== 'string')) {
+  if (
+    !Array.isArray(value) ||
+    value.length > maxLength ||
+    !value.every((item): item is string => typeof item === 'string')
+  ) {
     throw new SyntaxError(`Invalid ${name}.`);
   }
-  return value as string[];
+  return value;
 }
 
 function requireInteger(value: unknown, name: string, max: number): number {
@@ -3730,13 +3789,13 @@ function first<T>(rows: Iterable<T>): T | undefined {
 }
 
 function isMissingPath(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    ((error as { code?: unknown }).code === 'ENOENT' ||
-      (typeof (error as { message?: unknown }).message === 'string' &&
-        /ENOENT|no such path/i.test((error as { message: string }).message)))
-  );
+  if (!isRecord(error)) {
+    return false;
+  }
+  if (error.code === 'ENOENT') {
+    return true;
+  }
+  return typeof error.message === 'string' && /ENOENT|no such path/i.test(error.message);
 }
 
 export { BuilderAgent };

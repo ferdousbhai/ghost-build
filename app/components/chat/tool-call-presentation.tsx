@@ -6,15 +6,19 @@ import { classNames } from '~/utils/classNames';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { getRelativePath } from 'ghostbuild-agent/utils/workDir';
 import { MODEL_TOOL_INPUT_SCHEMAS } from 'ghostbuild-agent/model-tool-inputs';
+import type { ZodType } from 'zod';
 import { toolFailure, toolResultSucceeded } from 'ghostbuild-agent/tool-result';
 
 const MAX_TOOL_TITLE_VALUE_CHARACTERS = 160;
-const STOPPED_TOOL_TITLES: Record<string, string> = {
-  read: 'File read stopped',
-  write: 'File write stopped',
-  edit: 'File edit stopped',
-  exec: 'Command stopped',
-};
+/** Keyed by the model-facing tool name, which arrives as an unconstrained string on the invocation. */
+const STOPPED_TOOL_TITLES = new Map<string, string>([
+  ['read', 'File read stopped'],
+  ['write', 'File write stopped'],
+  ['edit', 'File edit stopped'],
+  ['exec', 'Command stopped'],
+]);
+
+const MODEL_TOOL_INPUT_SCHEMA_BY_NAME = new Map<string, ZodType>(Object.entries(MODEL_TOOL_INPUT_SCHEMAS));
 
 const emptyInvocation: GhostbuildToolInvocation = {
   type: 'dynamic-tool',
@@ -28,7 +32,7 @@ export function normalizeToolInvocation(invocation: GhostbuildToolInvocation | u
   if (!invocation || invocation.state !== 'output-available' || isErrorResult(invocation)) {
     return invocation ?? emptyInvocation;
   }
-  const schema = MODEL_TOOL_INPUT_SCHEMAS[invocation.toolName as keyof typeof MODEL_TOOL_INPUT_SCHEMAS];
+  const schema = MODEL_TOOL_INPUT_SCHEMA_BY_NAME.get(invocation.toolName);
   const parsed = schema?.safeParse(invocation.input);
   return parsed?.success === false
     ? { ...invocation, output: toolFailure(`Could not parse arguments: ${parsed.error.message}`) }
@@ -54,7 +58,7 @@ export function statusIcon(status: ToolActivityStatus, invocation: GhostbuildToo
 
 export function toolTitle(invocation: GhostbuildToolInvocation, status: ToolActivityStatus): ReactNode {
   if (status === 'aborted') {
-    return STOPPED_TOOL_TITLES[invocation.toolName] ?? 'Tool stopped';
+    return STOPPED_TOOL_TITLES.get(invocation.toolName) ?? 'Tool stopped';
   }
   switch (invocation.toolName) {
     case 'read':

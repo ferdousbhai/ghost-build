@@ -35,15 +35,21 @@ export type ModelHandle = {
   lastResponse?: { status: number; aiGatewayLogId?: string };
 };
 
+// SAFETY: `makeHandle` refuses any model whose `api` is not `openai-completions`, so every model this
+// stream ever receives matches the narrower signature the OpenAI Completions adapter declares.
 const WORKERS_AI_STREAM = openaiCompletionsStream as StreamFunction<Api, SimpleStreamOptions>;
 
 const ZERO_COST: ModelCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
-function catalogModel(modelId: string): Model<Api> | undefined {
-  return (CLOUDFLARE_WORKERS_AI_MODELS as Record<string, Model<Api>>)[modelId];
+type WorkersAiCatalogModel = (typeof CLOUDFLARE_WORKERS_AI_MODELS)[keyof typeof CLOUDFLARE_WORKERS_AI_MODELS];
+
+const WORKERS_AI_CATALOG = new Map<string, WorkersAiCatalogModel>(Object.entries(CLOUDFLARE_WORKERS_AI_MODELS));
+
+function catalogModel(modelId: string): WorkersAiCatalogModel | undefined {
+  return WORKERS_AI_CATALOG.get(modelId);
 }
 
-function modelTokenWindow(config: GhostbuildModelConfig, catalog: Model<Api> | undefined) {
+function modelTokenWindow(config: GhostbuildModelConfig, catalog: WorkersAiCatalogModel | undefined) {
   const model = isWorkersAiModelId(config.model) ? getWorkersAiModel(config.model) : undefined;
   return {
     contextWindow: model?.contextTokens ?? catalog?.contextWindow ?? 128_000,
@@ -51,12 +57,12 @@ function modelTokenWindow(config: GhostbuildModelConfig, catalog: Model<Api> | u
   };
 }
 
-function workersAiCompat(catalog: Model<Api> | undefined): OpenAICompletionsCompat {
+function workersAiCompat(catalog: WorkersAiCatalogModel | undefined): OpenAICompletionsCompat {
   return {
     supportsStore: false,
     supportsDeveloperRole: false,
     supportsLongCacheRetention: false,
-    ...(catalog?.compat as OpenAICompletionsCompat | undefined),
+    ...catalog?.compat,
     sendSessionAffinityHeaders: true,
   };
 }
@@ -97,9 +103,6 @@ function makeHandle(args: HandleArgs): ModelHandle {
       const headers: ProviderHeaders = { ...args.headers, ...streamOptions.headers };
       const merged: SimpleStreamOptions = {
         ...streamOptions,
-        ...(args.apiKey !== undefined ? { apiKey: args.apiKey } : {}),
-        ...(args.fetch !== undefined ? { fetch: args.fetch } : {}),
-        ...(Object.keys(headers).length > 0 ? { headers } : {}),
         sessionId: streamOptions.sessionId ?? args.sessionAffinity,
         onResponse: async (response, responseModel) => {
           handle.lastResponse = {
@@ -109,6 +112,15 @@ function makeHandle(args: HandleArgs): ModelHandle {
           await streamOptions.onResponse?.(response, responseModel);
         },
       };
+      if (args.apiKey !== undefined) {
+        merged.apiKey = args.apiKey;
+      }
+      if (args.fetch !== undefined) {
+        merged.fetch = args.fetch;
+      }
+      if (Object.keys(headers).length > 0) {
+        merged.headers = headers;
+      }
       return WORKERS_AI_STREAM(model, context, merged);
     },
   };
@@ -145,36 +157,42 @@ export function getPiModel(
   });
 }
 
+/** The OpenAI-compatible body Pi serialises, forwarded to the binding verbatim apart from `model`. */
+type WorkersAiBindingInputs = Record<string, unknown> & { model?: string };
+
+type WorkersAiRawRunOptions = {
+  returnRawResponse: true;
+  signal: AbortSignal;
+  extraHeaders?: Record<string, string>;
+  gateway?: { id: string; collectLog?: boolean; skipCache?: boolean };
+};
+
+type WorkersAiRawBinding = {
+  run(model: string, inputs: WorkersAiBindingInputs, options: WorkersAiRawRunOptions): Promise<Response>;
+};
+
 function createWorkersAiBindingFetch(binding: Ai, modelId: WorkersAiRuntimeModelId): FetchFunction {
   return async (input, init) => {
     recordPiStage('binding_fetch_enter', modelId);
     const request = new Request(input, init);
     request.signal.throwIfAborted();
-    const payload = (await request.json()) as Record<string, unknown>;
+    const payload = await request.json<WorkersAiBindingInputs>();
     // The model is the first binding argument; keeping it out of inputs matches env.AI.run().
     delete payload.model;
-    const rawBinding = binding as unknown as {
-      run: (
-        model: string,
-        inputs: Record<string, unknown>,
-        options: {
-          returnRawResponse: true;
-          signal: AbortSignal;
-          extraHeaders?: Record<string, string>;
-          gateway?: { id: string; collectLog?: boolean; skipCache?: boolean };
-        },
-      ) => Promise<Response>;
-    };
+    // SAFETY: `Ai.run` is generic over the generated `AiModelList`, which does not enumerate every
+    // Workers AI model Ghostbuild can be pointed at. The binding itself accepts any model id, so the
+    // raw-response entry point is reached through the non-generic contract it actually implements.
+    const rawBinding = binding as WorkersAiRawBinding;
     recordPiStage('binding_run_start', modelId);
     const sessionAffinity = request.headers.get('x-session-affinity');
-    const response = await rawBinding.run(modelId, payload, {
-      returnRawResponse: true,
-      signal: request.signal,
-      ...(isWorkersAiModelId(modelId) && getWorkersAiModel(modelId).availability === 'cloudflare-partner'
-        ? { gateway: { id: 'default', collectLog: false, skipCache: true } }
-        : {}),
-      ...(sessionAffinity ? { extraHeaders: { 'x-session-affinity': sessionAffinity } } : {}),
-    });
+    const options: WorkersAiRawRunOptions = { returnRawResponse: true, signal: request.signal };
+    if (isWorkersAiModelId(modelId) && getWorkersAiModel(modelId).availability === 'cloudflare-partner') {
+      options.gateway = { id: 'default', collectLog: false, skipCache: true };
+    }
+    if (sessionAffinity) {
+      options.extraHeaders = { 'x-session-affinity': sessionAffinity };
+    }
+    const response = await rawBinding.run(modelId, payload, options);
     recordPiStage('binding_run_response', modelId, response.status);
     return response;
   };

@@ -13,7 +13,7 @@ import {
 } from 'ghostbuild-agent/transcript';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { executeDataOperation, UserRuntimeRequestError } from './client';
-import { api } from './data-api';
+import { api, type DataOperationArgs } from './data-api';
 import { queryClient } from '~/lib/stores/reactQueryClient';
 import type { SerializedMessage } from '~/lib/stores/startup/messages';
 import { serializeCompleteMessages } from '~/lib/stores/startup/messages';
@@ -30,7 +30,7 @@ import { useQueryCacheError } from './use-query-cache-error';
 const TRANSCRIPT_QUERY_KEY_PREFIX = ['ghostbuild-local', 'transcripts'] as const;
 const TRANSCRIPT_FETCH_TIMEOUT_MS = 30_000;
 
-const serializedMessageShape = z
+const serializedMessageFields = z
   .object({
     id: z.string().min(1),
     role: z.enum(['system', 'user', 'assistant']),
@@ -40,7 +40,7 @@ const serializedMessageShape = z
   .loose();
 
 const serializedMessageSchema = z.custom<SerializedMessage>(
-  (value) => serializedMessageShape.safeParse(value).success,
+  (value) => serializedMessageFields.safeParse(value).success,
   'Invalid serialized message.',
 );
 
@@ -77,7 +77,7 @@ const cachedChatTranscriptSchema = z.discriminatedUnion('status', [
 type CachedChatTranscript = z.infer<typeof cachedChatTranscriptSchema>;
 type ReadyChatTranscript = z.infer<typeof readyChatTranscriptSchema>;
 
-type TranscriptRequest = {
+export type TranscriptRequest = {
   chatId: string;
   subchatIndex?: number;
 };
@@ -86,33 +86,31 @@ function transcriptRequestKey(request: TranscriptRequest): string {
   return JSON.stringify([request.chatId, request.subchatIndex ?? null]);
 }
 
+const transcriptRequestKeySchema = z.tuple([z.string().min(1), z.number().int().nonnegative().nullable()]);
+
 function parseTranscriptRequestKey(value: string): TranscriptRequest {
-  const parsed: unknown = JSON.parse(value);
-  if (
-    !Array.isArray(parsed) ||
-    parsed.length !== 2 ||
-    typeof parsed[0] !== 'string' ||
-    parsed[0].length === 0 ||
-    (parsed[1] !== null && (!Number.isSafeInteger(parsed[1]) || parsed[1] < 0))
-  ) {
+  const parsed = transcriptRequestKeySchema.safeParse(JSON.parse(value));
+  if (!parsed.success) {
     throw new Error('Invalid persisted transcript request key.');
   }
-  return {
-    chatId: parsed[0],
-    ...(parsed[1] === null ? {} : { subchatIndex: parsed[1] as number }),
-  };
+  const [chatId, subchatIndex] = parsed.data;
+  if (subchatIndex === null) {
+    return { chatId };
+  }
+  return { chatId, subchatIndex };
 }
 
-function requestKeyFromSubsetOptions(options: unknown): string | undefined {
-  const parsed = parseLoadSubsetOptions(options as LoadSubsetOptions | null | undefined);
-  const requestFilter = parsed.filters.find(
-    (filter) =>
-      filter.operator === 'eq' &&
-      filter.field.length === 1 &&
-      filter.field[0] === 'requestKey' &&
-      typeof filter.value === 'string',
-  );
-  return typeof requestFilter?.value === 'string' ? requestFilter.value : undefined;
+function requestKeyFromSubsetOptions(options: LoadSubsetOptions | null | undefined): string | undefined {
+  for (const filter of parseLoadSubsetOptions(options).filters) {
+    if (filter.operator !== 'eq' || filter.field.length !== 1 || filter.field[0] !== 'requestKey') {
+      continue;
+    }
+    const requestKey = z.string().safeParse(filter.value);
+    if (requestKey.success) {
+      return requestKey.data;
+    }
+  }
+  return undefined;
 }
 
 function createTranscriptCollection(sessionId: string, replica: AccountLocalReplica | null) {
@@ -177,15 +175,17 @@ function getTranscriptCollection(sessionId: string, replica: AccountLocalReplica
   return collection;
 }
 
+type CachedChatTranscriptQuery = {
+  transcript: CachedChatTranscript | undefined;
+  isLoading: boolean;
+  error: Error | null | undefined;
+  retry: () => void;
+};
+
 export function useCachedChatTranscript(
   sessionId: string | null | undefined,
   request: TranscriptRequest | undefined,
-): {
-  transcript: CachedChatTranscript | undefined;
-  isLoading: boolean;
-  error: unknown;
-  retry: () => void;
-} {
+): CachedChatTranscriptQuery {
   const replica = useAccountLocalReplica(sessionId);
   const collection = sessionId && replica !== undefined ? getTranscriptCollection(sessionId, replica) : undefined;
   const requestKey = request ? transcriptRequestKey(request) : undefined;
@@ -237,12 +237,14 @@ export function cachePersistedTranscript(args: {
     status: 'ready',
     loadedChatId: existing.loadedChatId,
     initialId: existing.initialId,
-    ...(existing.description === undefined ? {} : { description: existing.description }),
     loadedSubchatIndex: args.subchatIndex,
     transcript: transcriptIdentity(args.checkpoint),
     checkpoint: args.checkpoint,
     messages: serializeCompleteMessages(args.messages, args.lastMessageRank, args.partIndex),
   };
+  if (existing.description !== undefined) {
+    updated.description = existing.description;
+  }
   collection.utils.writeBatch(() => {
     collection.utils.writeUpsert({ ...updated, requestKey: exactRequestKey });
     collection.utils.writeUpsert({ ...updated, requestKey: latestRequestKey });
@@ -256,15 +258,11 @@ async function loadChatTranscript(
   signal: AbortSignal,
 ): Promise<CachedChatTranscript> {
   signal.throwIfAborted();
-  const chatInfo = await executeDataOperation(
-    api.messages.get,
-    {
-      id: request.chatId,
-      sessionId,
-      ...(request.subchatIndex === undefined ? {} : { subchatIndex: request.subchatIndex }),
-    },
-    { signal },
-  );
+  const chatArgs: DataOperationArgs<'messages.get'> = { id: request.chatId, sessionId };
+  if (request.subchatIndex !== undefined) {
+    chatArgs.subchatIndex = request.subchatIndex;
+  }
+  const chatInfo = await executeDataOperation(api.messages.get, chatArgs, { signal });
   signal.throwIfAborted();
   if (chatInfo === null) {
     return { requestKey, status: 'missing' };
@@ -302,13 +300,22 @@ async function loadChatTranscript(
   };
 }
 
+/** Each field falls back independently so a malformed `retryable` cannot hide a usable `error`. */
+const projectMessagesErrorSchema = z
+  .object({
+    error: z.string().optional().catch(undefined),
+    retryable: z.boolean().optional().catch(undefined),
+  })
+  .loose();
+
 export async function projectMessagesRequestError(response: Response): Promise<UserRuntimeRequestError> {
-  const payload = (await response.json().catch(() => null)) as { error?: unknown; retryable?: unknown } | null;
-  const detail = typeof payload?.error === 'string' ? `: ${payload.error}` : '';
+  const payload = projectMessagesErrorSchema.safeParse(await response.json().catch(() => null));
+  const failure = payload.success ? payload.data : undefined;
+  const detail = failure?.error === undefined ? '' : `: ${failure.error}`;
   return new UserRuntimeRequestError(
     `Failed to fetch project messages (${response.status})${detail}`,
     response.status,
-    payload?.retryable,
+    failure?.retryable,
   );
 }
 
@@ -342,10 +349,12 @@ function parseTranscriptHeaderInteger(value: string | null): number {
   return Number.isSafeInteger(parsed) ? parsed : Number.NaN;
 }
 
-export function parseMessageHistory(deserialized: unknown): {
+type TranscriptMessageHistory = {
   messages: SerializedMessage[];
   checkpoint: TranscriptCheckpoint | null;
-} {
+};
+
+export function parseMessageHistory(deserialized: unknown): TranscriptMessageHistory {
   const history = transcriptHistorySchema.parse(deserialized);
   return {
     messages: history.messages,

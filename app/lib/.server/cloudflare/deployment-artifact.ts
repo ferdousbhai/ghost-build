@@ -1,5 +1,6 @@
 import { blake3 } from '@noble/hashes/blake3.js';
 import { extname } from 'node:path';
+import { bytesToHex } from '~/lib/hex-digest';
 
 export const MAX_DEPLOYMENT_ARTIFACT_FILES = 20_000;
 // Stay below Cloudflare's 25 MiB per-asset product limit so multipart overhead
@@ -160,10 +161,6 @@ async function sha256Bytes(value: Uint8Array): Promise<string> {
   const input = new Uint8Array(value).buffer;
   const digest = await crypto.subtle.digest('SHA-256', input);
   return bytesToHex(new Uint8Array(digest));
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function bytesToBase64(bytes: Uint8Array): string {

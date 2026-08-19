@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 const CAPABILITY_VERSION = 1;
 const RUNTIME_CAPABILITY_TTL_MS = 5 * 60_000;
 
@@ -8,6 +10,15 @@ type RuntimeCapability = {
   expiresAt: number;
   nonce: string;
 };
+
+/** Extra members are preserved rather than stripped so an older minting format still round-trips. */
+const runtimeCapabilitySchema = z.looseObject({
+  version: z.literal(CAPABILITY_VERSION),
+  subject: z.string().min(1).max(512),
+  origin: z.string(),
+  expiresAt: z.number().int(),
+  nonce: z.string().regex(/^[0-9a-f-]{36}$/i),
+});
 
 export async function mintRuntimeCapability(args: {
   secret: string;
@@ -44,23 +55,19 @@ export async function verifyRuntimeCapability(
     if (!constantTimeEqual(suppliedSignature, expectedSignature)) {
       return null;
     }
-    const parsed = JSON.parse(new TextDecoder().decode(decodeBase64Url(encoded))) as Partial<RuntimeCapability>;
+    const parsed = runtimeCapabilitySchema.safeParse(JSON.parse(new TextDecoder().decode(decodeBase64Url(encoded))));
+    if (!parsed.success) {
+      return null;
+    }
+    const capability = parsed.data;
     if (
-      parsed.version !== CAPABILITY_VERSION ||
-      typeof parsed.subject !== 'string' ||
-      parsed.subject.length === 0 ||
-      parsed.subject.length > 512 ||
-      typeof parsed.origin !== 'string' ||
-      requireOrigin(parsed.origin) !== parsed.origin ||
-      !Number.isSafeInteger(parsed.expiresAt) ||
-      parsed.expiresAt! <= (options.now ?? Date.now()) ||
-      typeof parsed.nonce !== 'string' ||
-      !/^[0-9a-f-]{36}$/i.test(parsed.nonce) ||
-      (options.origin !== undefined && options.origin !== null && parsed.origin !== options.origin)
+      requireOrigin(capability.origin) !== capability.origin ||
+      capability.expiresAt <= (options.now ?? Date.now()) ||
+      (options.origin !== undefined && options.origin !== null && capability.origin !== options.origin)
     ) {
       return null;
     }
-    return parsed as RuntimeCapability;
+    return capability;
   } catch {
     return null;
   }

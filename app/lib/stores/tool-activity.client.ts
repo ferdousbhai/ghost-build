@@ -82,6 +82,8 @@ export class ToolActivityStore {
     this.#turnActive = false;
     this.#turnHandoffPending = false;
     let changed = false;
+    // SAFETY: every key in this map was written through `setKey(partId, ...)`, so the entries are
+    // PartId-keyed; `Object.entries` only widens the branded key back to `string`.
     for (const [partId, activity] of Object.entries(this.activities.get()) as Array<[PartId, ToolActivity]>) {
       if (!isToolActivityStatusActive(activity.status)) {
         continue;
@@ -112,7 +114,7 @@ export function invocationStatus(invocation: GhostbuildToolInvocation): ToolActi
     case 'output-denied':
       return 'complete';
   }
-  throw new Error(`Unsupported tool invocation state: ${String((invocation as { state?: unknown }).state)}`);
+  throw new Error(`Unsupported tool invocation state: ${invocation.state}`);
 }
 
 export const toolActivityStore = new ToolActivityStore();

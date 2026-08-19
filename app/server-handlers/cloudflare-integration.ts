@@ -36,6 +36,12 @@ import {
 import { isWorkspacePlanRequiredMessage, UserCloudflareAccountApi } from '~/lib/.server/cloudflare/user-account-api';
 import type { AiGatewayCreditStatus } from '~/lib/cloudflare/ai-gateway-credit';
 
+type WorkspacePreparationFailure = {
+  code: 'workspace_plan_required' | 'workspace_preparation_failed';
+  error: string;
+  upgradeUrl?: string;
+};
+
 const requestedCapabilities = USER_WORKSPACE_REQUIRED_CAPABILITIES;
 export const CLOUDFLARE_CONNECTION_CALLBACK_METHOD = 'GET' as const;
 const OAUTH_STATE_COOKIE = 'ghostbuild_oauth_state';
@@ -182,14 +188,14 @@ export async function cloudflareRuntimeSessionAction({
       const planRequired =
         error instanceof UserWorkspaceContainersPlanRequiredError || isWorkspacePlanRequiredError(error);
       const upgradeUrl = error instanceof UserWorkspaceContainersPlanRequiredError ? error.upgradeUrl : null;
-      return Response.json(
-        {
-          code: planRequired ? 'workspace_plan_required' : 'workspace_preparation_failed',
-          error: planRequired ? WORKSPACE_PLAN_REQUIRED_MESSAGE : WORKSPACE_PREPARATION_FAILED_MESSAGE,
-          ...(planRequired && upgradeUrl ? { upgradeUrl } : {}),
-        },
-        { status: 502, headers: { 'Cache-Control': 'private, no-store' } },
-      );
+      const body: WorkspacePreparationFailure = {
+        code: planRequired ? 'workspace_plan_required' : 'workspace_preparation_failed',
+        error: planRequired ? WORKSPACE_PLAN_REQUIRED_MESSAGE : WORKSPACE_PREPARATION_FAILED_MESSAGE,
+      };
+      if (planRequired && upgradeUrl) {
+        body.upgradeUrl = upgradeUrl;
+      }
+      return Response.json(body, { status: 502, headers: { 'Cache-Control': 'private, no-store' } });
     }
   }
   const [currentConnection, currentRuntime] = await Promise.all([

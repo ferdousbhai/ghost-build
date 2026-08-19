@@ -359,10 +359,14 @@ async function readBoundedCredentialResponse(response: Response): Promise<Record
   }
   try {
     const value: unknown = JSON.parse(new TextDecoder().decode(bytes));
-    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+    return isCredentialResponseBody(value) ? value : null;
   } catch {
     return null;
   }
+}
+
+function isCredentialResponseBody(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function containsNoStore(value: string): boolean {

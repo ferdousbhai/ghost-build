@@ -1,6 +1,35 @@
-import { getToolInvocation, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
+import { getToolInvocation, type GhostbuildMessage, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 
-export type ModelMessage = { role: string; content: unknown };
+export type ModelTextPart = { type: 'text'; text: string };
+
+export type ModelToolCallPart = {
+  type: 'tool-call';
+  toolCallId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+};
+
+export type ModelToolOutput = { type: 'json'; value: unknown } | { type: 'error-text'; value: string };
+
+export type ModelToolResultPart = {
+  type: 'tool-result';
+  toolCallId: string;
+  toolName: string;
+  output: ModelToolOutput;
+};
+
+/** Approval decisions the chat UI records alongside a tool result; carried through, never sent to the model. */
+export type ModelToolApprovalResponsePart = {
+  type: 'tool-approval-response';
+  approvalId: string;
+  approved: boolean;
+  reason?: string;
+};
+
+export type ModelMessage =
+  | { role: 'user' | 'system'; content: string }
+  | { role: 'assistant'; content: (ModelTextPart | ModelToolCallPart)[] }
+  | { role: 'tool'; content: (ModelToolResultPart | ModelToolApprovalResponsePart)[] };
 
 /** Convert the authoritative UI transcript into the text/tool protocol consumed by Pi. */
 export function cleanupAssistantMessages(messages: GhostbuildMessage[]): ModelMessage[] {
@@ -15,7 +44,7 @@ function toModelMessages(message: GhostbuildMessage): ModelMessage[] {
 
   const result: ModelMessage[] = [];
   let pendingText = '';
-  const flushText = () => {
+  const flushText = (): ModelTextPart[] => {
     const text = pendingText.trim();
     pendingText = '';
     return text ? [{ type: 'text', text }] : [];
@@ -38,7 +67,7 @@ function toModelMessages(message: GhostbuildMessage): ModelMessage[] {
           type: 'tool-call',
           toolCallId: invocation.toolCallId,
           toolName: invocation.toolName,
-          input: invocation.input ?? {},
+          input: toolCallInput(invocation.input),
         },
       ],
     });
@@ -63,6 +92,15 @@ function toModelMessages(message: GhostbuildMessage): ModelMessage[] {
     result.push({ role: 'assistant', content: finalText });
   }
   return result;
+}
+
+/** Tool-call inputs arrive as decoded JSON from the transcript; anything but an object carries no arguments. */
+function toolCallInput(input: GhostbuildToolInvocation['input']): Record<string, unknown> {
+  return isArgumentObject(input) ? input : {};
+}
+
+function isArgumentObject(value: GhostbuildToolInvocation['input']): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function partText(part: GhostbuildMessage['parts'][number]): string {

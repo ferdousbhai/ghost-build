@@ -1,6 +1,7 @@
 import { atom, computed, map, type MapStore, type WritableAtom } from 'nanostores';
 import type { EditorDocument, ScrollPosition } from 'ghostbuild-agent/types';
 import type { AbsolutePath } from 'ghostbuild-agent/utils/workDir';
+import { getAbsolutePath } from 'ghostbuild-agent/utils/workDir';
 import type { FileMap } from 'ghostbuild-agent/types';
 
 type EditorDocuments = Record<string, EditorDocument>;
@@ -32,12 +33,10 @@ export class EditorStore {
         continue;
       }
 
-      const absolutePath = filePath as AbsolutePath;
-
       documents[filePath] = {
         value: unsavedFiles.has(filePath) ? (previousDocuments?.[filePath]?.value ?? dirent.content) : dirent.content,
         isBinary: dirent.isBinary,
-        filePath: absolutePath,
+        filePath: getAbsolutePath(filePath),
         scroll: previousDocuments?.[filePath]?.scroll,
       };
     }

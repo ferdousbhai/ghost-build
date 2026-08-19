@@ -49,6 +49,22 @@ export function isBuilderSkillPath(path: string): boolean {
   return normalized === BUILDER_SKILL_ROOT || normalized.startsWith(`${BUILDER_SKILL_ROOT}/`);
 }
 
+type DeclaredSkillFrontmatter = { name?: unknown; description?: unknown };
+
+function declaredSkillFrontmatter(value: unknown): DeclaredSkillFrontmatter {
+  if (typeof value !== 'object' || value === null) {
+    return {};
+  }
+  const declared: DeclaredSkillFrontmatter = {};
+  if ('name' in value) {
+    declared.name = value.name;
+  }
+  if ('description' in value) {
+    declared.description = value.description;
+  }
+  return declared;
+}
+
 /** The catalog quotes the skill's own description, so editing the file updates the prompt. */
 function parseSkill(name: string, source: string): BundledSkill {
   const match = /^---\n([\s\S]*?)\n---\n/.exec(source);
@@ -57,12 +73,12 @@ function parseSkill(name: string, source: string): BundledSkill {
   }
   let frontmatter: unknown;
   try {
-    frontmatter = parse(match[1]!) as unknown;
+    frontmatter = parse(match[1]!);
   } catch {
     throw new Error(`Bundled builder skill ${name} has invalid frontmatter.`);
   }
-  const declared = frontmatter as { name?: unknown; description?: unknown } | null;
-  if (declared?.name !== name || typeof declared.description !== 'string' || !declared.description) {
+  const declared = declaredSkillFrontmatter(frontmatter);
+  if (declared.name !== name || typeof declared.description !== 'string' || !declared.description) {
     throw new Error(`Bundled builder skill ${name} does not declare a matching name and description.`);
   }
   return { name, description: declared.description, content: source };

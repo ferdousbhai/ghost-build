@@ -31,7 +31,7 @@ export type BuilderTurnState = {
 };
 
 export function createBuilderTurn(args: {
-  requestId: unknown;
+  requestId: string | undefined;
   chatInitialId: string;
   continuation: boolean;
   firstUserMessage: boolean;
@@ -121,6 +121,6 @@ function truncate(value: string, maxLength: number): string {
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 }
 
-function boundedIdentifier(value: unknown, fallback: string): string {
-  return typeof value === 'string' && value.length > 0 ? truncate(value, MAX_TURN_IDENTIFIER_LENGTH) : fallback;
+function boundedIdentifier(value: string | undefined, fallback: string): string {
+  return value ? truncate(value, MAX_TURN_IDENTIFIER_LENGTH) : fallback;
 }

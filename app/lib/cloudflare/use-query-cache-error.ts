@@ -3,7 +3,7 @@ import { useCallback, useSyncExternalStore } from 'react';
 import { queryClient } from '~/lib/stores/reactQueryClient';
 
 /** Subscribe to one Query Cache entry without adding a second query observer. */
-export function useQueryCacheError(queryKey: QueryKey | undefined): unknown {
+export function useQueryCacheError(queryKey: QueryKey | undefined): Error | null | undefined {
   const queryHash = queryKey ? hashKey(queryKey) : undefined;
   const subscribe = useCallback(
     (onStoreChange: () => void) =>

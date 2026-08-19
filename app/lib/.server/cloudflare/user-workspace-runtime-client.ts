@@ -11,9 +11,18 @@ import {
   type BuilderWorkspaceCheckpoint,
   type BuilderWorkspaceFileMetadata,
   type ProjectWorkspaceRpc,
+  type ToolOperationBeginRequest,
+  type ToolOperationStartResult,
+  type WorkspaceApplyChangesRequest,
+  type WorkspaceCommandProgress,
+  type WorkspaceCommandRequest,
+  type WorkspaceCommandResult,
+  type WorkspaceSeedExpectation,
+  type WorkspaceSyncPageRequest,
 } from '~/agents/builder-workspace-api';
 import type {
   BuilderWorkspaceApplyResult,
+  BuilderWorkspaceFileInput,
   BuilderWorkspaceSeedStartResult,
   BuilderWorkspaceState,
   BuilderWorkspaceSyncPage,
@@ -21,10 +30,14 @@ import type {
 import { isRetryableDurableObjectError } from '~/lib/cloudflare/durable-object-rpc.server';
 type ProjectWorkspaceStub = DurableObjectStub<ProjectWorkspaceRpc>;
 
-type ToolOperationStartResult =
-  | { status: 'execute' | 'active' }
-  | { status: 'completed'; result: unknown }
-  | { status: 'failed' | 'indeterminate'; error: string };
+/** Carries the POSIX `ENOENT` code the Computer filesystem contract expects for a missing path. */
+class WorkspaceFileNotFoundError extends Error {
+  readonly code = 'ENOENT';
+
+  constructor(path: string) {
+    super(`ENOENT: no such file: ${path}`);
+  }
+}
 
 /** Typed in-process facade over the co-deployed ProjectWorkspace Durable Object. */
 export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
@@ -41,9 +54,7 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       stat: async (path) => {
         const file = this.#files.find((candidate) => candidate.path === path);
         if (!file) {
-          const error = new Error(`ENOENT: no such file: ${path}`) as Error & { code: string };
-          error.code = 'ENOENT';
-          throw error;
+          throw new WorkspaceFileNotFoundError(path);
         }
         return {
           size: file.size,
@@ -56,13 +67,12 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       readFile: async (path) => (await this.#stub()).streamWorkspaceFile(path),
       writeFile: async (path, content, options) => {
         const text = new TextDecoder('utf-8', { fatal: true }).decode(content);
-        const result = await this.applyClientChanges({
-          baseRevision: this.getState().revision,
-          changes: [{ kind: 'write', path, content: text, mode: options?.mode }],
-          ...(this.#activeTool
-            ? { operationKey: `tool:${this.#activeTool.toolCallId}`, toolCallId: this.#activeTool.toolCallId }
-            : {}),
-        });
+        const result = await this.applyClientChanges(
+          this.#attributeToActiveTool({
+            baseRevision: this.getState().revision,
+            changes: [{ kind: 'write', path, content: text, mode: options?.mode }],
+          }),
+        );
         if (!result.ok) {
           throw new Error('The project changed while the file was being written. Retry the operation.');
         }
@@ -72,13 +82,12 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
         await this.refresh();
       },
       rm: async (path) => {
-        const result = await this.applyClientChanges({
-          baseRevision: this.getState().revision,
-          changes: [{ kind: 'delete', path }],
-          ...(this.#activeTool
-            ? { operationKey: `tool:${this.#activeTool.toolCallId}`, toolCallId: this.#activeTool.toolCallId }
-            : {}),
-        });
+        const result = await this.applyClientChanges(
+          this.#attributeToActiveTool({
+            baseRevision: this.getState().revision,
+            changes: [{ kind: 'delete', path }],
+          }),
+        );
         if (!result.ok) {
           throw new Error('The project changed while the path was being removed. Retry the operation.');
         }
@@ -87,13 +96,13 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     },
     runtime: {
       exec: async (command, options) => ({
-        result: async () =>
-          (await this.#stub()).execute({
-            command,
-            cwd: options.cwd,
-            backend: options.backend,
-            ...(this.#activeTool ? { operationKey: `tool:${this.#activeTool.toolCallId}` } : {}),
-          }),
+        result: async () => {
+          const request: WorkspaceCommandRequest = { command, cwd: options.cwd, backend: options.backend };
+          if (this.#activeTool) {
+            request.operationKey = `tool:${this.#activeTool.toolCallId}`;
+          }
+          return (await this.#stub()).execute(request);
+        },
       }),
     },
   };
@@ -103,6 +112,18 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     readonly projectId: string,
     private readonly getUserId: () => string | null,
   ) {}
+
+  /** Attribute a mutation to the running tool call so a retry of that call reuses its journal row. */
+  #attributeToActiveTool(request: WorkspaceApplyChangesRequest): WorkspaceApplyChangesRequest {
+    if (!this.#activeTool) {
+      return request;
+    }
+    return {
+      ...request,
+      operationKey: `tool:${this.#activeTool.toolCallId}`,
+      toolCallId: this.#activeTool.toolCallId,
+    };
+  }
 
   async refresh(): Promise<BuilderWorkspaceState> {
     const stub = await this.#stub();
@@ -119,27 +140,27 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     return this.#state;
   }
 
-  async beginSeed(seedId: unknown): Promise<BuilderWorkspaceSeedStartResult> {
+  async beginSeed(seedId: string): Promise<BuilderWorkspaceSeedStartResult> {
     const result = await (await this.#stub()).beginSeed(seedId);
     this.#state = result.state;
     return result;
   }
 
-  async appendSeed(seedId: unknown, entries: unknown): Promise<BuilderWorkspaceState> {
+  async appendSeed(seedId: string, entries: BuilderWorkspaceFileInput[]): Promise<BuilderWorkspaceState> {
     return this.#setState(await (await this.#stub()).appendSeed(seedId, entries));
   }
 
-  async commitSeed(seedId: unknown, expected: unknown): Promise<BuilderWorkspaceState> {
+  async commitSeed(seedId: string, expected: WorkspaceSeedExpectation): Promise<BuilderWorkspaceState> {
     const state = this.#setState(await (await this.#stub()).commitSeed(seedId, expected));
     await this.refresh();
     return state;
   }
 
-  async abortSeed(seedId: unknown): Promise<BuilderWorkspaceState> {
+  async abortSeed(seedId: string): Promise<BuilderWorkspaceState> {
     return this.#setState(await (await this.#stub()).abortSeed(seedId));
   }
 
-  async applyClientChanges(value: unknown): Promise<BuilderWorkspaceApplyResult> {
+  async applyClientChanges(value: WorkspaceApplyChangesRequest): Promise<BuilderWorkspaceApplyResult> {
     const result = await (await this.#stub()).applyChanges(value);
     this.#state = result.state;
     if (result.ok && result.changedPaths.length > 0) {
@@ -148,13 +169,13 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     return result;
   }
 
-  async getSyncPage(value: unknown): Promise<BuilderWorkspaceSyncPage> {
+  async getSyncPage(value: WorkspaceSyncPageRequest): Promise<BuilderWorkspaceSyncPage> {
     const page = await (await this.#stub()).getSyncPage(value);
     this.#state = page.state;
     return page;
   }
 
-  async readText(path: unknown, abortSignal?: AbortSignal) {
+  async readText(path: string, abortSignal?: AbortSignal) {
     abortSignal?.throwIfAborted();
     try {
       return await raceAgainstAbort(
@@ -172,7 +193,7 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     }
   }
 
-  readFile(path: unknown) {
+  readFile(path: string) {
     return this.#stub().then((stub) => stub.readWorkspaceFile(path));
   }
 
@@ -184,13 +205,12 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     return this.#stub().then((stub) => stub.checkpoint());
   }
 
-  async executeCommand(args: {
-    command: string;
-    cwd?: string;
-    backend?: string;
-    onUpdate?: (partialResult: unknown) => void;
-    abortSignal?: AbortSignal;
-  }): Promise<{ exitCode: number; stdout: string; stderr: string; streamTruncated?: boolean }> {
+  async executeCommand(
+    args: WorkspaceCommandRequest & {
+      onUpdate?: (partialResult: WorkspaceCommandProgress) => void;
+      abortSignal?: AbortSignal;
+    },
+  ): Promise<WorkspaceCommandResult & { streamTruncated?: boolean }> {
     args.abortSignal?.throwIfAborted();
     const operationKey = this.#activeTool ? `tool:${this.#activeTool.toolCallId}` : undefined;
     let cancellation: Promise<void> | undefined;
@@ -201,17 +221,14 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       }
     };
     args.abortSignal?.addEventListener('abort', cancel, { once: true });
+    const streamRequest: WorkspaceCommandRequest = { command: args.command, cwd: args.cwd, backend: args.backend };
+    if (operationKey) {
+      streamRequest.operationKey = operationKey;
+    }
     let stream: ReadableStream<Uint8Array>;
     try {
       stream = await raceAgainstAbort(
-        this.#stub().then((stub) =>
-          stub.executeStream({
-            command: args.command,
-            cwd: args.cwd,
-            backend: args.backend,
-            ...(operationKey ? { operationKey } : {}),
-          }),
-        ),
+        this.#stub().then((stub) => stub.executeStream(streamRequest)),
         args.abortSignal,
       );
     } catch (error) {
@@ -272,7 +289,7 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
           const line = buffer.slice(0, newline);
           buffer = buffer.slice(newline + 1);
           if (line) {
-            const event = JSON.parse(line) as unknown;
+            const event: unknown = JSON.parse(line);
             if (isCommandOutputEvent(event)) {
               if (event.channel === 'stdout') {
                 stdout = appendOutputTail(stdout, event.chunk);
@@ -285,8 +302,10 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
                 exitCode: event.result.exitCode,
                 stdout: event.result.stdout,
                 stderr: event.result.stderr,
-                ...(event.streamTruncated ? { streamTruncated: true } : {}),
               };
+              if (event.streamTruncated) {
+                finalResult.streamTruncated = true;
+              }
             }
           }
           newline = buffer.indexOf('\n');
@@ -336,7 +355,7 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       if (existing.toolName !== toolName || existing.argsJson !== argsJson) {
         throw new Error('A workspace tool-call identifier was reused with different arguments.');
       }
-      const result = (await existing.promise) as T;
+      const result = journaledResult<T>(await existing.promise);
       abortSignal?.throwIfAborted();
       return result;
     }
@@ -579,10 +598,7 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     let started: ToolOperationStartResult;
     try {
       stub = await raceAgainstAbort(this.#stub(), abortSignal);
-      started = await raceAgainstAbort(
-        stub.beginToolOperation({ toolCallId, toolName, argsJson }) as Promise<ToolOperationStartResult>,
-        abortSignal,
-      );
+      started = await raceAgainstAbort(beginToolOperation(stub, { toolCallId, toolName, argsJson }), abortSignal);
     } catch (error) {
       if (abortSignal?.aborted) {
         await this.#terminalizeToolOperationAfterExecution(
@@ -608,13 +624,11 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     }
     if (started.status === 'completed') {
       if (isPendingMutationReceipt(started.result)) {
-        const completed = await raceAgainstAbort(
-          stub.completeToolOperation({ toolCallId, result: started.result }) as Promise<T>,
-          abortSignal,
+        return journaledResult<T>(
+          await raceAgainstAbort(stub.completeToolOperation({ toolCallId, result: started.result }), abortSignal),
         );
-        return completed;
       }
-      return started.result as T;
+      return journaledResult<T>(started.result);
     }
     if (started.status === 'failed') {
       throw new Error(started.error);
@@ -657,7 +671,7 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
           (toolName === 'write' || toolName === 'edit') &&
           isComputerToolError(result) &&
           isCompletedMutationReceipt(completed);
-        return (committedFileMutation ? completed : result) as T;
+        return journaledResult<T>(committedFileMutation ? completed : result);
       } catch (error) {
         abortSignal?.throwIfAborted();
         if (toolName !== 'write' && toolName !== 'edit') {
@@ -667,7 +681,7 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
           throw error;
         }
         const replay = await raceAgainstAbort(
-          stub.beginToolOperation({ toolCallId, toolName, argsJson }) as Promise<ToolOperationStartResult>,
+          beginToolOperation(stub, { toolCallId, toolName, argsJson }),
           abortSignal,
         );
         if (replay.status !== 'completed') {
@@ -676,7 +690,9 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
         const completed = isPendingMutationReceipt(replay.result)
           ? await raceAgainstAbort(stub.completeToolOperation({ toolCallId, result }), abortSignal)
           : replay.result;
-        return (isComputerToolError(result) && isCompletedMutationReceipt(completed) ? completed : result) as T;
+        return journaledResult<T>(
+          isComputerToolError(result) && isCompletedMutationReceipt(completed) ? completed : result,
+        );
       }
     } catch (error) {
       if (abortSignal?.aborted) {
@@ -719,11 +735,7 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
       try {
         const replay = await raceAgainstAbort(
           this.#settlementRpcAttempt(
-            () =>
-              this.#stub().then(
-                (stub) =>
-                  stub.beginToolOperation({ toolCallId, toolName, argsJson }) as Promise<ToolOperationStartResult>,
-              ),
+            () => this.#stub().then((stub) => beginToolOperation(stub, { toolCallId, toolName, argsJson })),
             deadline,
             'active workspace tool replay observation',
           ),
@@ -839,6 +851,28 @@ class WorkspaceBusyError extends Error {
   }
 }
 
+/**
+ * `ProjectWorkspaceRpc` declares `beginToolOperation(): Promise<ToolOperationStartResult>`, but the
+ * Durable Object stub type rewrites a union return into one promise per member, which no longer
+ * matches the declared contract at a call site.
+ */
+function beginToolOperation(
+  stub: ProjectWorkspaceStub,
+  request: ToolOperationBeginRequest,
+): Promise<ToolOperationStartResult> {
+  // SAFETY: restates the union `ProjectWorkspaceRpc` already guarantees for this method.
+  return stub.beginToolOperation(request) as Promise<ToolOperationStartResult>;
+}
+
+/**
+ * The workspace journal stores each tool call's result verbatim and hands the same payload back on
+ * replay or acknowledgement, so a value read out of it is the result this call's `execute()` produced.
+ */
+function journaledResult<T>(value: unknown): T {
+  // SAFETY: the journal round-trips this tool call's own result; see above.
+  return value as T;
+}
+
 function workspaceBusyError(error: unknown): WorkspaceBusyError | null {
   const conflict = workspaceOperationConflict(error);
   return conflict ? new WorkspaceBusyError(conflict.activeKind, conflict.retryAfterMs) : null;
@@ -866,30 +900,31 @@ type CommandResultEvent = {
 };
 
 function isCommandOutputEvent(value: unknown): value is CommandOutputEvent {
-  if (!value || typeof value !== 'object') {
+  if (!isObject(value) || !('type' in value) || !('channel' in value) || !('chunk' in value)) {
     return false;
   }
-  const event = value as Record<string, unknown>;
   return (
-    event.type === 'output' &&
-    (event.channel === 'stdout' || event.channel === 'stderr') &&
-    typeof event.chunk === 'string'
+    value.type === 'output' &&
+    (value.channel === 'stdout' || value.channel === 'stderr') &&
+    typeof value.chunk === 'string'
   );
 }
 
 function isCommandResultEvent(value: unknown): value is CommandResultEvent {
-  if (!value || typeof value !== 'object') {
+  if (!isObject(value) || !('type' in value) || !('result' in value) || !('streamTruncated' in value)) {
     return false;
   }
-  const event = value as Record<string, unknown>;
-  if (event.type !== 'result' || !event.result || typeof event.result !== 'object') {
+  const { result } = value;
+  if (value.type !== 'result' || !isObject(result)) {
     return false;
   }
-  const result = event.result as Record<string, unknown>;
   return (
-    typeof event.streamTruncated === 'boolean' &&
+    typeof value.streamTruncated === 'boolean' &&
+    'exitCode' in result &&
     typeof result.exitCode === 'number' &&
+    'stdout' in result &&
     typeof result.stdout === 'string' &&
+    'stderr' in result &&
     typeof result.stderr === 'string'
   );
 }
@@ -899,28 +934,36 @@ function appendOutputTail(current: string, chunk: string): string {
   return next.length <= COMMAND_UPDATE_TAIL_CHARACTERS ? next : next.slice(-COMMAND_UPDATE_TAIL_CHARACTERS);
 }
 
-function isPendingMutationReceipt(value: unknown): boolean {
+/**
+ * A committed workspace mutation the Durable Object acknowledges, either while the journal row is
+ * still being settled (`pending`) or once it has been (`complete`).
+ */
+function isMutationReceipt(value: unknown, acknowledgement: 'pending' | 'complete'): boolean {
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === 'workspace-mutation-receipt' &&
-    (value as { committed?: unknown }).committed === true &&
-    (value as { acknowledgement?: unknown }).acknowledgement === 'pending'
+    isObject(value) &&
+    'kind' in value &&
+    value.kind === 'workspace-mutation-receipt' &&
+    'committed' in value &&
+    value.committed === true &&
+    'acknowledgement' in value &&
+    value.acknowledgement === acknowledgement
   );
+}
+
+function isPendingMutationReceipt(value: unknown): boolean {
+  return isMutationReceipt(value, 'pending');
 }
 
 function isCompletedMutationReceipt(value: unknown): boolean {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === 'workspace-mutation-receipt' &&
-    (value as { committed?: unknown }).committed === true &&
-    (value as { acknowledgement?: unknown }).acknowledgement === 'complete'
-  );
+  return isMutationReceipt(value, 'complete');
 }
 
 function isComputerToolError(value: unknown): boolean {
-  return typeof value === 'object' && value !== null && typeof (value as { error?: unknown }).error === 'string';
+  return isObject(value) && 'error' in value && typeof value.error === 'string';
+}
+
+function isObject(value: unknown): value is object {
+  return typeof value === 'object' && value !== null;
 }
 
 function requireToolCallId(value: unknown): string {
@@ -1001,11 +1044,8 @@ function stableValue(value: unknown): unknown {
     return value.map(stableValue);
   }
   if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [key, stableValue((value as Record<string, unknown>)[key])]),
-    );
+    const fields = new Map(Object.entries(value));
+    return Object.fromEntries([...fields.keys()].sort().map((key) => [key, stableValue(fields.get(key))]));
   }
   return value;
 }

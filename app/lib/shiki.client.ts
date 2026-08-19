@@ -26,27 +26,30 @@ export type CodeLanguage = keyof typeof languages;
 export type CodeTheme = keyof typeof themes;
 export type HighlightLanguage = CodeLanguage | SpecialLanguage;
 
-const languageAliases: Record<string, HighlightLanguage> = {
-  bash: 'bash',
-  css: 'css',
-  html: 'html',
-  js: 'javascript',
-  javascript: 'javascript',
-  json: 'json',
-  jsx: 'jsx',
-  md: 'markdown',
-  markdown: 'markdown',
-  plaintext: 'plaintext',
-  sh: 'bash',
-  shell: 'bash',
-  text: 'plaintext',
-  ts: 'typescript',
-  tsx: 'tsx',
-  typescript: 'typescript',
-  xml: 'xml',
-  yaml: 'yaml',
-  yml: 'yaml',
-};
+/** A Map rather than an object literal so an inherited key such as `constructor` cannot resolve. */
+const languageAliases = new Map<string, HighlightLanguage>(
+  Object.entries({
+    bash: 'bash',
+    css: 'css',
+    html: 'html',
+    js: 'javascript',
+    javascript: 'javascript',
+    json: 'json',
+    jsx: 'jsx',
+    md: 'markdown',
+    markdown: 'markdown',
+    plaintext: 'plaintext',
+    sh: 'bash',
+    shell: 'bash',
+    text: 'plaintext',
+    ts: 'typescript',
+    tsx: 'tsx',
+    typescript: 'typescript',
+    xml: 'xml',
+    yaml: 'yaml',
+    yml: 'yaml',
+  } satisfies Record<string, HighlightLanguage>),
+);
 
 const createCodeHighlighter = createBundledHighlighter({
   langs: languages,
@@ -57,5 +60,5 @@ const createCodeHighlighter = createBundledHighlighter({
 export const getCodeHighlighter = makeSingletonHighlighter(createCodeHighlighter);
 
 export function normalizeCodeLanguage(language: string | undefined): HighlightLanguage {
-  return languageAliases[language?.toLowerCase().replace(/^\./, '') ?? ''] ?? 'plaintext';
+  return languageAliases.get(language?.toLowerCase().replace(/^\./, '') ?? '') ?? 'plaintext';
 }

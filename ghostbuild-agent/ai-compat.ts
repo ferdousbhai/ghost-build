@@ -82,13 +82,7 @@ export type GhostbuildMessage = {
 };
 
 export function messageText(message: Pick<GhostbuildMessage, 'parts'>): string {
-  return message.parts
-    .map((part) =>
-      part.type === 'text' && typeof (part as { text?: string }).text === 'string'
-        ? (part as { text: string }).text
-        : '',
-    )
-    .join('');
+  return message.parts.map((part) => (part.type === 'text' && typeof part.text === 'string' ? part.text : '')).join('');
 }
 
 export function createdAtMillis(message: Pick<GhostbuildMessage, 'createdAt'>): number | undefined {
@@ -114,23 +108,19 @@ export function getToolInvocation(part: GhostbuildPart): GhostbuildToolInvocatio
   if (!isToolPart(part)) {
     return null;
   }
-  const p = part as Record<string, unknown>;
-  const approval = isRecord(p.approval)
-    ? {
-        ...(typeof p.approval.id === 'string' ? { id: p.approval.id } : {}),
-        ...(typeof p.approval.approved === 'boolean' ? { approved: p.approval.approved } : {}),
-        ...(typeof p.approval.reason === 'string' ? { reason: p.approval.reason } : {}),
-      }
-    : undefined;
-  return {
+  const fields: ToolInvocationFields = part;
+  const invocation: GhostbuildToolInvocation = {
     ...part,
     type: 'dynamic-tool',
-    toolName: typeof p.toolName === 'string' ? p.toolName : part.type.replace(/^tool-/, ''),
-    toolCallId: typeof p.toolCallId === 'string' ? p.toolCallId : '',
-    state: typeof p.state === 'string' ? p.state : 'input-streaming',
-    ...(typeof p.errorText === 'string' ? { errorText: p.errorText } : {}),
-    approval,
+    toolName: typeof fields.toolName === 'string' ? fields.toolName : part.type.replace(/^tool-/, ''),
+    toolCallId: typeof fields.toolCallId === 'string' ? fields.toolCallId : '',
+    state: typeof fields.state === 'string' ? fields.state : 'input-streaming',
+    approval: toolApproval(fields.approval),
   };
+  if (typeof fields.errorText === 'string') {
+    invocation.errorText = fields.errorText;
+  }
+  return invocation;
 }
 
 export function isToolResult(part: GhostbuildPart): boolean {
@@ -147,6 +137,35 @@ export function isToolInvocationInProgress(invocation: Pick<GhostbuildToolInvoca
   );
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+/** The tool-carrying fields a part may expose, before any of them are known to be well-formed. */
+type ToolInvocationFields = {
+  type: string;
+  toolName?: unknown;
+  toolCallId?: unknown;
+  state?: unknown;
+  errorText?: unknown;
+  approval?: unknown;
+};
+
+type ToolApproval = NonNullable<GhostbuildToolInvocation['approval']>;
+
+function toolApproval(value: unknown): ToolApproval | undefined {
+  if (!isApprovalFields(value)) {
+    return undefined;
+  }
+  const approval: ToolApproval = {};
+  if (typeof value.id === 'string') {
+    approval.id = value.id;
+  }
+  if (typeof value.approved === 'boolean') {
+    approval.approved = value.approved;
+  }
+  if (typeof value.reason === 'string') {
+    approval.reason = value.reason;
+  }
+  return approval;
+}
+
+function isApprovalFields(value: unknown): value is { id?: unknown; approved?: unknown; reason?: unknown } {
   return typeof value === 'object' && value !== null;
 }

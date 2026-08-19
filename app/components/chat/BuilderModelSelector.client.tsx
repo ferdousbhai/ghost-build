@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { getWorkersAiModel, isWorkersAiModelId, WORKERS_AI_MODELS } from '~/lib/workers-ai-model';
 import {
   builderDefaultModelStore,
+  builderModelDeniedByCreditsStore,
   builderModelStore,
   loadBuilderModelPreference,
   setBuilderModel,
@@ -15,6 +16,7 @@ import { classNames } from '~/utils/classNames';
 export function BuilderModelSelector({ compact = false, disabled = false }: { compact?: boolean; disabled?: boolean }) {
   const modelId = useStore(builderModelStore);
   const defaultModelId = useStore(builderDefaultModelStore);
+  const deniedByCredits = useStore(builderModelDeniedByCreditsStore);
   const model = getWorkersAiModel(modelId);
   const [openRequested, setOpenRequested] = useState(false);
   const open = !disabled && openRequested;
@@ -86,6 +88,12 @@ export function BuilderModelSelector({ compact = false, disabled = false }: { co
               defaultModelId={defaultModelId}
             />
           </DropdownMenu.RadioGroup>
+          {deniedByCredits && (
+            <p role="note" className="mx-2 mb-1 mt-2 text-xs leading-5 text-content-tertiary">
+              Your saved choice needs AI Gateway Unified Billing credits, which this Cloudflare account does not have,
+              so builds are using {getWorkersAiModel(defaultModelId).label}.
+            </p>
+          )}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

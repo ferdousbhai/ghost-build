@@ -17,6 +17,12 @@ vi.mock('~/lib/.server/cloudflare/cloudflare-credential-vault', () => ({
 
 import { runtimeCredentialAction } from './runtime-credential';
 
+function testEnv(encryptionKey: string = encryptionKeyBase64): Env {
+  // SAFETY: `requireActiveCloudflareConnection` and the credential resolver are both mocked here,
+  // so `DB` is only ever compared by identity and no other binding is read.
+  return { DB: {} as D1Database, CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY: encryptionKey } as Env;
+}
+
 const encryptionKeyBase64 = btoa('a'.repeat(32));
 const connection = {
   id: 'connection-1',
@@ -39,10 +45,7 @@ beforeEach(() => {
 describe('runtimeCredentialAction', () => {
   it('returns a freshly resolved token only to the exact runtime generation', async () => {
     const secret = await runtimeSecret();
-    const env = {
-      DB: {} as D1Database,
-      CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY: encryptionKeyBase64,
-    } as Env;
+    const env = testEnv();
 
     const response = await runtimeCredentialAction({ request: request(secret), env });
 
@@ -55,10 +58,7 @@ describe('runtimeCredentialAction', () => {
 
   it('forwards an explicit forced-refresh request only after authenticating the runtime identity', async () => {
     const secret = await runtimeSecret();
-    const env = {
-      DB: {} as D1Database,
-      CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY: encryptionKeyBase64,
-    } as Env;
+    const env = testEnv();
     const response = await runtimeCredentialAction({
       env,
       request: new Request('https://ghostbuild.dev/api/cloudflare/runtime-credential', {
@@ -85,10 +85,7 @@ describe('runtimeCredentialAction', () => {
     const secret = suppliedSecret ?? (await runtimeSecret());
     const response = await runtimeCredentialAction({
       request: request(secret, body),
-      env: {
-        DB: {} as D1Database,
-        CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY: encryptionKeyBase64,
-      } as Env,
+      env: testEnv(),
     });
 
     expect(response.status).toBe(401);
@@ -100,10 +97,7 @@ describe('runtimeCredentialAction', () => {
     mocks.resolve.mockRejectedValueOnce(new Error('refresh token provider detail'));
     const response = await runtimeCredentialAction({
       request: request(await runtimeSecret()),
-      env: {
-        DB: {} as D1Database,
-        CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY: encryptionKeyBase64,
-      } as Env,
+      env: testEnv(),
     });
 
     expect(response.status).toBe(503);
@@ -113,10 +107,7 @@ describe('runtimeCredentialAction', () => {
   it('fails closed when the broker secret cannot be derived', async () => {
     const response = await runtimeCredentialAction({
       request: request(await runtimeSecret()),
-      env: {
-        DB: {} as D1Database,
-        CLOUDFLARE_CREDENTIAL_ENCRYPTION_KEY: 'invalid',
-      } as Env,
+      env: testEnv('invalid'),
     });
 
     expect(response.status).toBe(503);

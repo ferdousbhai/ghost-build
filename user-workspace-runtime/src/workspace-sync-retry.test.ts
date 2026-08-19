@@ -117,7 +117,11 @@ describe('DurableWorkspaceSyncRetryScheduler', () => {
       source.indexOf('this.#syncRetries.initialize()'),
     );
     expect(scheduler).toContain("'retryPendingComputerSync'");
-    expect(scheduler).toContain('{ idempotent: true }');
+    expect(scheduler).toContain('this.scheduleOnce(');
+
+    const scheduleOnceStart = source.indexOf('private scheduleOnce(');
+    const scheduleOnce = source.slice(scheduleOnceStart, source.indexOf('\n  }', scheduleOnceStart));
+    expect(scheduleOnce).toContain('{ idempotent: true }');
   });
 
   it('proves exhausted recovery through a fresh pull before preserving the result and clearing the barrier', () => {
@@ -153,7 +157,7 @@ describe('DurableWorkspaceSyncRetryScheduler', () => {
     const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
     for (const [start, end] of [
       ['async beginToolOperation(', 'completeToolOperation('],
-      ['private async runToolOperation<', 'private async withStatefulOperation<'],
+      ['private async runToolOperation(', 'private async withStatefulOperation<'],
     ]) {
       const method = source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
       expect(method.indexOf('requireCompletedComputerSync()')).toBeGreaterThanOrEqual(0);

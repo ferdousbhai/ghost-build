@@ -24,6 +24,12 @@ export type SerializedMessage = Omit<GhostbuildMessage, 'createdAt'> & {
 
 export const lastCompleteMessageInfoStore = atom<CompleteMessageInfo | null>(null);
 
+type PreparedMessageHistory = {
+  searchParams: URLSearchParams;
+  /** The checkpoint position this request would advance to, or `null` when nothing changed. */
+  update: { messageIndex: number; partIndex: number } | null;
+};
+
 export function prepareMessageHistory(args: {
   chatId: string;
   sessionId: string;
@@ -31,13 +37,7 @@ export function prepareMessageHistory(args: {
   persistedMessageInfo: { messageIndex: number; partIndex: number };
   persistedTranscriptCheckpoint: TranscriptCheckpoint | null;
   subchatIndex: number;
-}): {
-  searchParams: URLSearchParams;
-  update: {
-    messageIndex: number;
-    partIndex: number;
-  } | null;
-} {
+}): PreparedMessageHistory {
   const { chatId, sessionId, completeMessageInfo, persistedMessageInfo } = args;
   const { messageIndex, partIndex } = completeMessageInfo;
   const searchParams = new URLSearchParams();
@@ -61,7 +61,6 @@ export function prepareMessageHistory(args: {
     partIndex === persistedMessageInfo.partIndex &&
     transcriptCheckpointsEqual(checkpoint, args.persistedTranscriptCheckpoint)
   ) {
-    // No changes
     return { searchParams, update: null };
   }
 

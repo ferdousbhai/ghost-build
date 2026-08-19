@@ -6,6 +6,20 @@ import { ACCOUNT_DELETION_CONFIRMATION } from '~/lib/account-data';
 import { createCloudflareReturnURL, signInWithCloudflare } from '~/lib/auth-client';
 import { disposeAccountLocalReplicas } from '~/lib/cloudflare/account-local-replica';
 import { resetUserRuntimeSession } from '~/lib/cloudflare/runtime-session';
+import { z } from 'zod';
+
+/** Failure envelopes returned by the account deletion and export endpoints. */
+const accountDeletionPayloadSchema = z.looseObject({
+  code: z.string().optional().catch(undefined),
+  error: z.string().optional().catch(undefined),
+  cloudflareAuthorizationRevoked: z.boolean().optional().catch(undefined),
+});
+
+type AccountExportPayload = {
+  code?: string;
+  error?: string;
+  unavailableSections?: string[];
+};
 
 type DeletionPhase = 'idle' | 'confirming' | 'deleting' | 'reauthenticate' | 'deleted';
 type ExportPhase = 'idle' | 'downloading' | 'reauthenticate' | 'downloaded';
@@ -64,11 +78,7 @@ export function AccountDataCard() {
           acknowledgeCloudflareResourcesRetained: acknowledged,
         }),
       });
-      const payload = (await response.json().catch(() => null)) as {
-        code?: string;
-        error?: string;
-        cloudflareAuthorizationRevoked?: boolean;
-      } | null;
+      const payload = accountDeletionPayloadSchema.safeParse(await response.json().catch(() => null)).data ?? null;
       if (!response.ok) {
         setPhase(payload?.code === 'reauthentication_required' ? 'reauthenticate' : 'confirming');
         setError(payload?.code === 'reauthentication_required' ? null : (payload?.error ?? 'Unable to delete.'));
@@ -284,11 +294,15 @@ export function AccountDataCard() {
   );
 }
 
-type AccountExportPayload = { code?: string; error?: string; unavailableSections?: string[] };
+const accountExportPayloadSchema = z.looseObject({
+  code: z.string().optional().catch(undefined),
+  error: z.string().optional().catch(undefined),
+  unavailableSections: z.array(z.string()).optional().catch(undefined),
+});
 
 function parseExportPayload(exportDocument: string): AccountExportPayload | null {
   try {
-    return JSON.parse(exportDocument) as AccountExportPayload;
+    return accountExportPayloadSchema.safeParse(JSON.parse(exportDocument)).data ?? null;
   } catch {
     return null;
   }

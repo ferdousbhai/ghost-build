@@ -15,6 +15,7 @@ import { recordUserWorkspaceRuntimeResources } from './user-workspace-runtime-re
 import { deriveUserWorkspaceRuntimeSecret } from './user-workspace-runtime-secret';
 import { UserCloudflareAccountApi } from './user-account-api';
 import { waitForUserWorkspaceRuntimeReadiness } from './user-workspace-runtime-readiness';
+import { sha256Hex } from '~/lib/hex-digest';
 
 const USER_WORKSPACE_SANDBOX_IMAGE =
   'docker.io/cloudflare/sandbox:0.13.0-next.724.1@sha256:d5856e09ccb02c2cd00f73946360369d5655faa9b67b156e0d8627bf143619f1';
@@ -69,7 +70,7 @@ export async function provisionUserWorkspaceRuntime(args: {
   requireRuntimeCapabilities(connection);
   const accessToken = await D1CloudflareCredentialVault.fromEnv(args.env).resolve(connection.credentialHandle);
   const accountApi = new UserCloudflareAccountApi(connection.accountId, accessToken);
-  const suffix = (await sha256(`${connection.accountId}:${args.userId}`)).slice(0, 16);
+  const suffix = (await sha256Hex(`${connection.accountId}:${args.userId}`)).slice(0, 16);
   const workerName = `ghostbuild-workspace-${suffix}`;
   const databaseName = `ghostbuild-data-${suffix}`;
   const workersSubdomain = await accountApi.getWorkersSubdomain();
@@ -188,9 +189,4 @@ function requireRuntimeCapabilities(connection: CloudflareConnection): void {
 
 export function missingUserWorkspaceRuntimeCapabilities(connection: CloudflareConnection): string[] {
   return USER_WORKSPACE_REQUIRED_CAPABILITIES.filter((capability) => !connection.grantedScopes.includes(capability));
-}
-
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }

@@ -85,7 +85,7 @@ export function visibleFileList(nodes: FileTreeNode[], collapsedFolders: Set<str
 
 function isHiddenFile(filePath: string, fileName: string, hiddenFiles: Array<string | RegExp>): boolean {
   return hiddenFiles.some((pathOrRegex) =>
-    typeof pathOrRegex === 'string' ? fileName === pathOrRegex : pathOrRegex.test(filePath),
+    pathOrRegex instanceof RegExp ? pathOrRegex.test(filePath) : fileName === pathOrRegex,
   );
 }
 

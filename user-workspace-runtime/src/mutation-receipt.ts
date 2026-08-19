@@ -25,9 +25,13 @@ export type MutationReceipt = {
   };
 };
 
+export type MutationReceiptFileInput = MutationReceiptFile & {
+  changedRange?: { startLine: number; endLine: number };
+};
+
 export function createCommittedMutationReceipt(args: {
   tool: 'write' | 'edit';
-  files: Array<MutationReceiptFile & { changedRange?: { startLine: number; endLine: number } }>;
+  files: MutationReceiptFileInput[];
 }): MutationReceipt {
   const pathsTruncated = args.files.length > COMPUTER_TOOL_LIMITS.mutationReceiptMaxPaths;
   const boundedFiles = args.files.slice(0, COMPUTER_TOOL_LIMITS.mutationReceiptMaxPaths);
@@ -109,7 +113,9 @@ function changedLineRange(diff: string, firstChangedLine: unknown): { startLine:
   return endLine > 0 ? { startLine, endLine } : { startLine: fallback, endLine: fallback };
 }
 
-function truncateUtf8(value: string, maxBytes: number): { value: string; truncated: boolean } {
+type TruncatedText = { value: string; truncated: boolean };
+
+function truncateUtf8(value: string, maxBytes: number): TruncatedText {
   const bytes = new TextEncoder().encode(value);
   if (bytes.byteLength <= maxBytes) {
     return { value, truncated: false };
@@ -125,7 +131,9 @@ function byteLength(value: string): number {
 }
 
 function recordOrNull(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+  return isRecord(value) ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -1,4 +1,5 @@
 import { memo, useEffect } from 'react';
+import { z } from 'zod';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { isGhostbuildToolResult, toolResultSucceeded, toolResultSummary } from 'ghostbuild-agent/tool-result';
 import { ToolResultFrame } from './ToolResultFrame';
@@ -25,21 +26,22 @@ export const ToolUseContents = memo(function ToolUseContents({
 });
 
 function RunningToolContents({ invocation, progress }: { invocation: GhostbuildToolInvocation; progress?: unknown }) {
-  const input = record(invocation.input);
-  const details = record(record(progress)?.details) ?? record(progress);
-  const path = typeof input?.path === 'string' ? input.path : undefined;
+  const input = runningToolInputSchema.safeParse(invocation.input).data;
+  const progressRecord = runningToolProgressSchema.safeParse(progress).data;
+  const details = runningToolProgressSchema.safeParse(progressRecord?.details).data ?? progressRecord;
+  const path = input?.path;
   let preview = '';
 
   if (invocation.toolName === 'exec') {
-    const command = typeof input?.command === 'string' ? input.command : '';
-    const stdout = typeof details?.stdout === 'string' ? details.stdout : '';
-    const stderr = typeof details?.stderr === 'string' ? details.stderr : '';
+    const command = input?.command ?? '';
+    const stdout = details?.stdout ?? '';
+    const stderr = details?.stderr ?? '';
     preview = [`$ ${command || '…'}`, stdout, stderr].filter(Boolean).join('\n');
   } else if (invocation.toolName === 'write') {
-    const content = typeof input?.content === 'string' ? input.content : '';
+    const content = input?.content ?? '';
     preview = content ? tailLines(content, 12) : path ? `Preparing ${path}` : 'Preparing file content…';
   } else if (invocation.toolName === 'edit') {
-    const edits = Array.isArray(input?.edits) ? input.edits : [];
+    const edits = input?.edits ?? [];
     preview =
       edits.length > 0 ? JSON.stringify(edits, null, 2) : path ? `Preparing edits for ${path}` : 'Preparing edits…';
   } else if (invocation.toolName === 'read') {
@@ -66,19 +68,33 @@ function tailLines(value: string, limit: number): string {
   return lines.length > limit ? `… ${lines.length - limit} earlier lines\n${visible}` : visible;
 }
 
-function record(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
-}
+/**
+ * A streaming tool call carries partially-formed arguments and progress, so every field is read
+ * best-effort: a field with the wrong shape falls back to absent rather than discarding the rest.
+ */
+const optionalText = z.string().optional().catch(undefined);
+
+const runningToolInputSchema = z.looseObject({
+  path: optionalText,
+  command: optionalText,
+  content: optionalText,
+  edits: z.array(z.unknown()).optional().catch(undefined),
+});
+
+const runningToolProgressSchema = z.looseObject({
+  stdout: optionalText,
+  stderr: optionalText,
+  details: z.unknown().optional(),
+});
+
+const validationOutputSchema = z.looseObject({ validation: z.unknown().optional() });
 
 function StructuredResultTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
   const complete = !isToolInvocationInProgress(invocation);
   const succeeded = invocation.state === 'output-available' && toolResultSucceeded(invocation.output);
   const validation =
-    invocation.state === 'output-available' &&
-    typeof invocation.output === 'object' &&
-    invocation.output !== null &&
-    'validation' in invocation.output
-      ? invocation.output.validation
+    invocation.state === 'output-available'
+      ? validationOutputSchema.safeParse(invocation.output).data?.validation
       : undefined;
   const validationSucceeded = isGhostbuildToolResult(validation) && validation.ok;
   useEffect(() => {

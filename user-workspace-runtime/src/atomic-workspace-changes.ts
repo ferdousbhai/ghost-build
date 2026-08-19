@@ -42,7 +42,10 @@ function removePath(provider: WorkspaceProvider, path: string): void {
     provider.unlinkSync(path);
     return;
   }
-  for (const name of provider.readdirSync(path) as string[]) {
+  // SAFETY: `readdirSync` widens to `VirtualDirentLike[]` only for `{ withFileTypes: true }`.
+  // This call passes no options, so the provider returns the plain name list.
+  const names = provider.readdirSync(path) as string[];
+  for (const name of names) {
     removePath(provider, `${path}/${name}`);
   }
   provider.rmdirSync(path);

@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { DataOperationArgs, DataOperationPath, DataOperationResult } from './data-api';
 import {
   fetchWithRuntimeSession,
@@ -14,25 +15,32 @@ import {
  */
 const DATA_OPERATION_TIMEOUT_MS = 15_000;
 
+/**
+ * Only the envelope's diagnostic members are described. `result` is deliberately left to the
+ * loose passthrough so a legitimately `null` result stays distinguishable from an absent one,
+ * and each field falls back on its own so a malformed `retryable` cannot hide the `error`.
+ */
+const dataOperationEnvelopeSchema = z.looseObject({
+  error: z.string().optional().catch(undefined),
+  retryable: z.boolean().optional().catch(undefined),
+});
+
 export class UserRuntimeRequestError extends Error {
   readonly retryable: boolean;
 
   constructor(
     message: string,
     readonly status: number | undefined,
-    retryable?: unknown,
+    retryable?: boolean,
   ) {
     super(message);
     this.name = 'UserRuntimeRequestError';
-    this.retryable =
-      typeof retryable === 'boolean'
-        ? retryable
-        : status === undefined || status === 408 || status === 429 || status >= 500;
+    this.retryable = retryable ?? (status === undefined || status === 408 || status === 429 || status >= 500);
   }
 }
 
 export class DataOperationError extends UserRuntimeRequestError {
-  constructor(message: string, status: number | undefined, retryable?: unknown) {
+  constructor(message: string, status: number | undefined, retryable?: boolean) {
     super(message, status, retryable);
     this.name = 'DataOperationError';
   }
@@ -94,11 +102,8 @@ export async function executeDataOperation<Path extends DataOperationPath>(
     }
     options.signal?.throwIfAborted();
 
-    const body = (await response.json().catch(() => null)) as {
-      result?: DataOperationResult<Path>;
-      error?: string;
-      retryable?: unknown;
-    } | null;
+    const envelope = dataOperationEnvelopeSchema.safeParse(await response.json().catch(() => null));
+    const body = envelope.success ? envelope.data : null;
     if (timedOut) {
       throw dataOperationTimeoutError(path);
     }
@@ -109,6 +114,9 @@ export async function executeDataOperation<Path extends DataOperationPath>(
     if (!body || !Object.hasOwn(body, 'result')) {
       throw new DataOperationError(`Data operation returned a malformed response: ${path}`, response.status, false);
     }
+    // SAFETY: `path` selected the operation on both sides, the envelope was confirmed to carry a
+    // `result` member, and the user runtime answers `/v1/data` from the same DataOperationResults
+    // contract this client is generic over. There is no response schema to narrow it further.
     return body.result as DataOperationResult<Path>;
   } catch (error) {
     if (timedOut) {

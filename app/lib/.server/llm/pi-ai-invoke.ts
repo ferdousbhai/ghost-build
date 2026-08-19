@@ -42,10 +42,7 @@ export async function completeText(
     const errorMessage = message.errorMessage ?? 'The model request failed.';
     throw new AgentTurnError(errorMessage, httpStatusFromError(errorMessage, handle));
   }
-  return message.content
-    .filter((block) => block.type === 'text')
-    .map((block) => (block as { text: string }).text)
-    .join('');
+  return message.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('');
 }
 
 export async function completeToolCall(

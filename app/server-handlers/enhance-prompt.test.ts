@@ -14,6 +14,17 @@ vi.mock('~/lib/.server/llm/pi-ai-invoke', () => ({ completeToolCall: mocks.compl
 
 import { userRuntimeEnhancePromptAction } from './enhance-prompt';
 
+function testEnv(): Env {
+  // SAFETY: this handler reads no binding off `env`; the Workers AI credentials it uses come from
+  // the mocked `getCredentials`, and `DB` is only present so the shape is non-empty.
+  return { DB: {} } as Env;
+}
+
+function testAiBinding(): Ai {
+  // SAFETY: the pi provider is mocked, so the binding is only ever passed through by identity.
+  return {} as Ai;
+}
+
 function request(body: Record<string, unknown> = { prompt: 'Build a calendar' }) {
   return new Request('https://ghostbuild.dev/api/enhance-prompt', {
     method: 'POST',
@@ -25,7 +36,7 @@ function request(body: Record<string, unknown> = { prompt: 'Build a calendar' })
 describe('userRuntimeEnhancePromptAction billing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getCredentials.mockResolvedValue({ binding: {} as Ai });
+    mocks.getCredentials.mockResolvedValue({ binding: testAiBinding() });
     mocks.completeToolCall.mockResolvedValue({ kind: 'complete', enhancedPrompt: 'Build a detailed calendar' });
   });
 
@@ -36,7 +47,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ prompt: 'x'.repeat(70 * 1024) }),
       }),
-      env: { DB: {} } as Env,
+      env: testEnv(),
     });
 
     expect(response.status).toBe(413);
@@ -44,17 +55,17 @@ describe('userRuntimeEnhancePromptAction billing', () => {
   });
 
   it('uses only the user-runtime binding', async () => {
-    const credentials = { binding: {} as Ai };
+    const credentials = { binding: testAiBinding() };
     mocks.getCredentials.mockResolvedValue(credentials);
-    const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
+    const response = await userRuntimeEnhPrompt({ request: request(), env: testEnv() });
     expect(response.status).toBe(200);
     expect(mocks.getPiProvider).toHaveBeenCalledWith(credentials);
   });
 
   it('asks for explicit Workers Paid authorization when the connected free allocation is exhausted', async () => {
-    mocks.getCredentials.mockResolvedValue({ binding: {} as Ai });
+    mocks.getCredentials.mockResolvedValue({ binding: testAiBinding() });
     mocks.completeToolCall.mockRejectedValue(new Error('Workers Paid plan required after free AI allocation'));
-    const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
+    const response = await userRuntimeEnhPrompt({ request: request(), env: testEnv() });
     expect(response.status).toBe(402);
     await expect(response.json()).resolves.toMatchObject({
       code: 'workers_paid_required',
@@ -69,7 +80,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
     });
     mocks.completeToolCall.mockRejectedValue(providerError);
 
-    const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
+    const response = await userRuntimeEnhPrompt({ request: request(), env: testEnv() });
 
     expect(response.status).toBe(500);
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain('SECRET_PROMPT_MARKER');
@@ -80,7 +91,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
   it('rejects an invalid provider result instead of returning the original prompt as a successful enhancement', async () => {
     mocks.completeToolCall.mockResolvedValue({ kind: 'complete', enhancedPrompt: '   ' });
 
-    const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
+    const response = await userRuntimeEnhPrompt({ request: request(), env: testEnv() });
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({ error: 'Error enhancing prompt' });
@@ -114,7 +125,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
       ],
     });
 
-    const response = await userRuntimeEnhPrompt({ request: request(), env: { DB: {} } as Env });
+    const response = await userRuntimeEnhPrompt({ request: request(), env: testEnv() });
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -139,7 +150,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
 
     const response = await userRuntimeEnhPrompt({
       request: request({ prompt: 'Build a calendar', answers }),
-      env: { DB: {} } as Env,
+      env: testEnv(),
     });
 
     expect(response.status).toBe(200);
@@ -175,7 +186,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
 
     const response = await userRuntimeEnhPrompt({
       request: request({ prompt: 'Build a calendar', answers }),
-      env: { DB: {} } as Env,
+      env: testEnv(),
     });
 
     expect(response.status).toBe(200);
@@ -210,7 +221,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
           },
         ],
       }),
-      env: { DB: {} } as Env,
+      env: testEnv(),
     });
 
     expect(response.status).toBe(500);

@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { executeDataOperation } from './client';
 import { api, type ChatHistorySummary, type SubchatSummary } from './data-api';
 import {
@@ -14,11 +15,13 @@ type PageCollectionOptions<Item, Cursor> = {
   signal?: AbortSignal;
   maximumItemsPerPage: number;
   itemKey: (item: Item) => string | number;
-  validateItem: (item: unknown) => item is Item;
-  validateCursor: (cursor: unknown) => cursor is Cursor;
+  itemSchema: z.ZodType;
+  cursorSchema: z.ZodType;
   cursorAdvances: (previous: Cursor, next: Cursor) => boolean;
   validatePageOrder: (items: Item[], previous: Cursor | undefined, next: Cursor | undefined) => boolean;
 };
+
+const pageEnvelopeSchema = z.looseObject({ items: z.array(z.unknown()) });
 
 export async function collectDataPages<Item, Cursor>(
   loadPage: PageLoader<Item, Cursor>,
@@ -33,14 +36,14 @@ export async function collectDataPages<Item, Cursor>(
     options.signal?.throwIfAborted();
     const page = await loadPage(cursor);
     options.signal?.throwIfAborted();
-    if (!isRecord(page) || !Array.isArray(page.items)) {
+    if (!pageEnvelopeSchema.safeParse(page).success) {
       throw new Error('Data pagination returned a malformed page');
     }
     if (page.items.length > options.maximumItemsPerPage) {
       throw new Error('Data pagination returned an oversized page');
     }
     for (const item of page.items) {
-      if (!options.validateItem(item)) {
+      if (!options.itemSchema.safeParse(item).success) {
         throw new Error('Data pagination returned a malformed item');
       }
       const key = options.itemKey(item);
@@ -57,7 +60,7 @@ export async function collectDataPages<Item, Cursor>(
       }
       return items;
     }
-    if (page.items.length === 0 || !options.validateCursor(page.nextCursor)) {
+    if (page.items.length === 0 || !options.cursorSchema.safeParse(page.nextCursor).success) {
       throw new Error('Data pagination returned a malformed cursor');
     }
     if (!options.validatePageOrder(page.items, cursor, page.nextCursor)) {
@@ -92,8 +95,8 @@ export function loadAllChatHistory(sessionId: string, signal?: AbortSignal): Pro
       signal,
       maximumItemsPerPage: DEFAULT_DATA_PAGE_SIZE,
       itemKey: (item) => item.initialId,
-      validateItem: isChatHistorySummary,
-      validateCursor: isChatHistoryCursor,
+      itemSchema: chatHistorySummarySchema,
+      cursorSchema: chatHistoryCursorSchema,
       cursorAdvances: (previous, next) =>
         next.timestamp < previous.timestamp || (next.timestamp === previous.timestamp && next.rowId < previous.rowId),
       validatePageOrder: (items, previous, next) =>
@@ -121,8 +124,8 @@ export function loadAllSubchats(chatId: string, sessionId: string, signal?: Abor
       signal,
       maximumItemsPerPage: DEFAULT_DATA_PAGE_SIZE,
       itemKey: (item) => item.subchatIndex,
-      validateItem: isSubchatSummary,
-      validateCursor: isSubchatCursor,
+      itemSchema: subchatSummarySchema,
+      cursorSchema: subchatCursorSchema,
       cursorAdvances: (previous, next) => next.subchatIndex > previous.subchatIndex,
       validatePageOrder: (items, previous, next) =>
         isStrictlyAscendingBy(items, (item) => item.subchatIndex) &&
@@ -132,80 +135,50 @@ export function loadAllSubchats(chatId: string, sessionId: string, signal?: Abor
   );
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
+const MAX_CURSOR_ROW_ID_LENGTH = 512;
 
-function isChatHistorySummary(value: unknown): value is ChatHistorySummary {
-  return (
-    isRecord(value) &&
-    isNonEmptyString(value.id) &&
-    isNonEmptyString(value.initialId) &&
-    isStoredChatTimestamp(value.timestamp) &&
-    (value.description === undefined || typeof value.description === 'string')
-  );
-}
+/**
+ * Millisecond-precision ISO-8601, round-tripped through `Date` so calendar-invalid inputs the
+ * regex alone accepts — February 30th, for instance — are rejected too.
+ */
+const storedChatTimestampSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+  .refine((value) => {
+    const parsed = new Date(value);
+    return !Number.isNaN(parsed.valueOf()) && parsed.toISOString() === value;
+  });
 
-function isSubchatSummary(value: unknown): value is SubchatSummary {
-  if (
-    !isRecord(value) ||
-    !isSafeNonnegativeInteger(value.subchatIndex) ||
-    value.subchatIndex > MAX_SUBCHAT_INDEX ||
-    !Number.isSafeInteger(value.updatedAt) ||
-    (value.description !== undefined && typeof value.description !== 'string') ||
-    !isRecord(value.transcript)
-  ) {
-    return false;
-  }
-  return (
-    isNonEmptyString(value.transcript.agentName) &&
-    isSafeNonnegativeInteger(value.transcript.generation) &&
-    value.transcript.subchatIndex === value.subchatIndex
-  );
-}
+const subchatIndexSchema = z.number().int().nonnegative().max(MAX_SUBCHAT_INDEX);
 
-function isChatHistoryCursor(value: unknown): value is ChatHistoryCursor {
-  return (
-    hasExactKeys(value, ['rowId', 'timestamp']) &&
-    isNonEmptyString(value.rowId) &&
-    value.rowId.length <= 512 &&
-    isStoredChatTimestamp(value.timestamp)
-  );
-}
+const chatHistorySummarySchema = z.looseObject({
+  id: z.string().min(1),
+  initialId: z.string().min(1),
+  timestamp: storedChatTimestampSchema,
+  description: z.string().optional(),
+});
 
-function isSubchatCursor(value: unknown): value is SubchatCursor {
-  return (
-    hasExactKeys(value, ['subchatIndex']) &&
-    isSafeNonnegativeInteger(value.subchatIndex) &&
-    value.subchatIndex <= MAX_SUBCHAT_INDEX
-  );
-}
+const subchatSummarySchema = z
+  .looseObject({
+    subchatIndex: subchatIndexSchema,
+    updatedAt: z.number().int(),
+    description: z.string().optional(),
+    transcript: z.looseObject({
+      agentName: z.string().min(1),
+      generation: z.number().int().nonnegative(),
+      subchatIndex: z.number(),
+    }),
+  })
+  .refine((value) => value.transcript.subchatIndex === value.subchatIndex);
 
-function hasExactKeys<Key extends string>(value: unknown, keys: readonly Key[]): value is Record<Key, unknown> {
-  if (!isRecord(value)) {
-    return false;
-  }
-  const actualKeys = Object.keys(value).sort();
-  return actualKeys.length === keys.length && keys.every((key, index) => actualKeys[index] === key);
-}
+const chatHistoryCursorSchema = z.strictObject({
+  rowId: z.string().min(1).max(MAX_CURSOR_ROW_ID_LENGTH),
+  timestamp: storedChatTimestampSchema,
+});
 
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
-}
+const subchatCursorSchema = z.strictObject({ subchatIndex: subchatIndexSchema });
 
-function isSafeNonnegativeInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-}
-
-function isStoredChatTimestamp(value: unknown): value is string {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
-    return false;
-  }
-  const parsed = new Date(value);
-  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString() === value;
-}
-
-function stableCursorKey(cursor: unknown): string {
+function stableCursorKey<Cursor>(cursor: Cursor): string {
   try {
     const key = JSON.stringify(cursor);
     if (key === undefined) {

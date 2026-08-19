@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const tanstackFetch = vi.hoisted(() => vi.fn());
+const tanstackFetch = vi.hoisted(() => vi.fn<(request: Request, env: Env) => Promise<Response>>());
 const getAuthSession = vi.hoisted(() => vi.fn());
 const ensureInitialChat = vi.hoisted(() => vi.fn());
 const routeAgentRequest = vi.hoisted(() => vi.fn());
@@ -34,6 +34,18 @@ vi.mock('./lib/.server/daily-maintenance', () => ({ runDailyMaintenance }));
 
 import server from './server';
 
+function testEnv(overrides: Partial<Env> = {}): Env {
+  // SAFETY: every route exercised in this file hands `env` straight to a mocked handler and reads
+  // no binding beyond the overrides a test supplies, so the rest of the environment is unobserved.
+  return { ...overrides } as Env;
+}
+
+function testExecutionContext(waitUntil: (promise: Promise<unknown>) => void): ExecutionContext {
+  // SAFETY: `server.scheduled` only calls `ctx.waitUntil`. The remaining members (`exports`,
+  // `props`, `tracing`) are runtime-provided and never touched on this path.
+  return { waitUntil } as unknown as ExecutionContext;
+}
+
 describe('server Agent routing boundary', () => {
   beforeEach(() => {
     tanstackFetch.mockReset();
@@ -60,7 +72,7 @@ describe('server Agent routing boundary', () => {
 
   it('leaves non-Builder Agent-looking routes to the application router', async () => {
     const pathname = '/agents/unrecognized/private';
-    const response = await server.fetch(new Request(`https://ghostbuild.dev${pathname}`), {} as Env);
+    const response = await server.fetch(new Request(`https://ghostbuild.dev${pathname}`), testEnv());
 
     expect(response.status).toBe(200);
     expect(getAuthSession).not.toHaveBeenCalled();
@@ -69,12 +81,12 @@ describe('server Agent routing boundary', () => {
   });
 
   it('leaves ordinary application routes outside the Agent routing boundary', async () => {
-    const response = await server.fetch(new Request('https://ghostbuild.dev/not-an-agent'), {} as Env);
+    const response = await server.fetch(new Request('https://ghostbuild.dev/not-an-agent'), testEnv());
 
     expect(await response.text()).toBe('application');
     expect(response.headers.has('Cross-Origin-Opener-Policy')).toBe(false);
     expect(response.headers.has('Cross-Origin-Embedder-Policy')).toBe(false);
-    const forwardedRequest = tanstackFetch.mock.calls[0]?.[0] as Request;
+    const forwardedRequest = tanstackFetch.mock.calls[0]?.[0];
     const nonce = forwardedRequest.headers.get('X-Ghostbuild-CSP-Nonce');
     expect(nonce).toMatch(/^[0-9a-f-]{36}$/i);
     expect(response.headers.get('Content-Security-Policy')).toContain(`script-src 'self' 'nonce-${nonce}'`);
@@ -91,7 +103,7 @@ describe('server Agent routing boundary', () => {
     ['HTTP', 'http://ghostbuild.dev/share?from=http', 'https://ghostbuild.dev/share?from=http'],
     ['www', 'https://www.ghostbuild.dev/share?from=www', 'https://ghostbuild.dev/share?from=www'],
   ])('redirects the production %s origin to canonical HTTPS before routing', async (_label, source, destination) => {
-    const response = await server.fetch(new Request(source), {} as Env);
+    const response = await server.fetch(new Request(source), testEnv());
 
     expect(response.status).toBe(308);
     expect(response.headers.get('Location')).toBe(destination);
@@ -106,7 +118,7 @@ describe('server Agent routing boundary', () => {
       }),
     );
 
-    const response = await server.fetch(new Request('https://ghostbuild.dev/chat/project'), {} as Env);
+    const response = await server.fetch(new Request('https://ghostbuild.dev/chat/project'), testEnv());
 
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
@@ -122,8 +134,8 @@ describe('server Agent routing boundary', () => {
       new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }),
     );
 
-    const response = await server.fetch(new Request('https://ghostbuild.dev/stream'), {} as Env);
-    const forwardedRequest = tanstackFetch.mock.calls[0]?.[0] as Request;
+    const response = await server.fetch(new Request('https://ghostbuild.dev/stream'), testEnv());
+    const forwardedRequest = tanstackFetch.mock.calls[0]?.[0];
     const nonce = forwardedRequest.headers.get('X-Ghostbuild-CSP-Nonce');
 
     expect(response.body).toBe(body);
@@ -138,13 +150,13 @@ describe('server Agent routing boundary', () => {
       }),
     );
 
-    const response = await server.fetch(new Request('https://ghostbuild.dev/assets/app-abc123.js'), {} as Env);
+    const response = await server.fetch(new Request('https://ghostbuild.dev/assets/app-abc123.js'), testEnv());
 
     expect(response.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
   });
 
   it('applies the application security policy to exact API responses', async () => {
-    const response = await server.fetch(new Request('https://ghostbuild.dev/api/health'), {} as Env);
+    const response = await server.fetch(new Request('https://ghostbuild.dev/api/health'), testEnv());
 
     expect(response.status).toBe(200);
     expect(response.headers.has('Cross-Origin-Opener-Policy')).toBe(false);
@@ -164,7 +176,7 @@ describe('server Agent routing boundary', () => {
   it('applies the application security policy to router-generated errors', async () => {
     const response = await server.fetch(
       new Request('https://ghostbuild.dev/api/health', { method: 'POST' }),
-      {} as Env,
+      testEnv(),
     );
 
     expect(response.status).toBe(405);
@@ -178,7 +190,7 @@ describe('server Agent routing boundary', () => {
   it('marks OAuth callback redirects no-store without losing either cookie', async () => {
     const response = await server.fetch(
       new Request('https://ghostbuild.dev/connect/return?state=00000000-0000-4000-8000-000000000001&code=code'),
-      {} as Env,
+      testEnv(),
     );
 
     expect(response.status).toBe(303);
@@ -195,13 +207,13 @@ describe('server Agent routing boundary', () => {
     ['connection status', '/api/cloudflare/connection', 'GET'],
     ['OAuth start errors', '/api/cloudflare/connection/start', 'POST'],
   ])('marks Cloudflare %s responses no-store', async (_label, pathname, method) => {
-    const response = await server.fetch(new Request(`https://ghostbuild.dev${pathname}`, { method }), {} as Env);
+    const response = await server.fetch(new Request(`https://ghostbuild.dev${pathname}`, { method }), testEnv());
 
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
 
   it('routes only POST requests to the private runtime credential broker', async () => {
-    const env = {} as Env;
+    const env = testEnv();
     const request = new Request('https://ghostbuild.dev/api/cloudflare/runtime-credential', { method: 'POST' });
 
     const response = await server.fetch(request, env);
@@ -218,11 +230,11 @@ describe('server Agent routing boundary', () => {
   it('routes only POST requests to privacy-safe client telemetry ingestion', async () => {
     const request = new Request('https://ghostbuild.dev/api/client-telemetry', { method: 'POST' });
 
-    const response = await server.fetch(request, {} as Env);
+    const response = await server.fetch(request, testEnv());
 
     expect(response.status).toBe(202);
     expect(clientTelemetryAction).toHaveBeenCalledWith({ request, env: {} });
-    const rejected = await server.fetch(new Request('https://ghostbuild.dev/api/client-telemetry'), {} as Env);
+    const rejected = await server.fetch(new Request('https://ghostbuild.dev/api/client-telemetry'), testEnv());
     expect(rejected.status).toBe(405);
     expect(rejected.headers.get('Allow')).toBe('POST');
     expect(clientTelemetryAction).toHaveBeenCalledOnce();
@@ -233,7 +245,7 @@ describe('server Agent routing boundary', () => {
       Response.json({ status: 'ok' }, { headers: { 'Cache-Control': 'public, max-age=60' } }),
     );
 
-    const response = await server.fetch(new Request('https://ghostbuild.dev/api/health'), {} as Env);
+    const response = await server.fetch(new Request('https://ghostbuild.dev/api/health'), testEnv());
 
     expect(response.headers.get('Cache-Control')).toBe('public, max-age=60');
   });
@@ -248,7 +260,7 @@ describe('server Agent routing boundary', () => {
       }),
     );
 
-    const response = await server.fetch(new Request('https://ghostbuild.dev/strict'), {} as Env);
+    const response = await server.fetch(new Request('https://ghostbuild.dev/strict'), testEnv());
 
     expect(response.headers.get('Content-Security-Policy')).toBe(
       "default-src 'none'; script-src 'self', base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'",
@@ -265,7 +277,7 @@ describe('server Agent routing boundary', () => {
       }),
     );
 
-    const response = await server.fetch(new Request('https://ghostbuild.dev/hsts-floor'), {} as Env);
+    const response = await server.fetch(new Request('https://ghostbuild.dev/hsts-floor'), testEnv());
 
     expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains; future=value');
   });
@@ -279,14 +291,16 @@ describe('server Agent routing boundary', () => {
       }),
     );
 
-    const response = await server.fetch(new Request('https://ghostbuild.dev/duplicate-hsts'), {} as Env);
+    const response = await server.fetch(new Request('https://ghostbuild.dev/duplicate-hsts'), testEnv());
 
     expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains');
   });
 
   it('runs authentication-metadata retention before the daily maintenance jobs', async () => {
     const waitUntil = vi.fn();
-    const env = { DB: {} as D1Database } as Env;
+    // SAFETY: `pruneCloudflareAuthDataBestEffort` is mocked here, so the D1 handle is only ever
+    // compared by identity and never queried.
+    const env = testEnv({ DB: {} as D1Database });
     const calls: string[] = [];
     pruneCloudflareAuthDataBestEffort.mockImplementationOnce(async () => {
       calls.push('auth-retention');
@@ -295,9 +309,13 @@ describe('server Agent routing boundary', () => {
       calls.push('daily-maintenance');
     });
 
-    server.scheduled({ cron: '*/15 * * * *' } as ScheduledController, env, {
-      waitUntil,
-    } as unknown as ExecutionContext);
+    const controller: ScheduledController = {
+      cron: '*/15 * * * *',
+      scheduledTime: Date.now(),
+      noRetry: () => undefined,
+    };
+
+    server.scheduled(controller, env, testExecutionContext(waitUntil));
 
     expect(waitUntil).toHaveBeenCalledOnce();
     await waitUntil.mock.calls[0][0];
@@ -308,7 +326,7 @@ describe('server Agent routing boundary', () => {
   });
 
   it('exposes no HTTP route for private operations', async () => {
-    const env = {} as Env;
+    const env = testEnv();
 
     // Operations are scheduled work inside this Worker, not a surface anyone can
     // reach. Nothing under these paths may resolve to a dedicated handler, so

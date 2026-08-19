@@ -4,7 +4,7 @@ export function appendDeterministicCompletion(
   stream: ReadableStream<PiStreamChunk>,
   completion: () => string | undefined,
 ): ReadableStream<PiStreamChunk> {
-  let finishChunk: PiStreamChunk | undefined;
+  let finishChunk: Extract<PiStreamChunk, { type: 'finish' }> | undefined;
   return stream.pipeThrough(
     new TransformStream<PiStreamChunk, PiStreamChunk>({
       transform(chunk, controller) {
@@ -23,7 +23,7 @@ export function appendDeterministicCompletion(
           controller.enqueue({ type: 'text-end', id });
         }
         if (finishChunk) {
-          const terminalFinish = { ...finishChunk, finishReason: 'stop' } as PiStreamChunk;
+          const terminalFinish: PiStreamChunk = { ...finishChunk, finishReason: 'stop' };
           controller.enqueue(text ? terminalFinish : finishChunk);
         }
       },
@@ -50,13 +50,13 @@ export function normalizeTextPartBoundaries(stream: ReadableStream<PiStreamChunk
           case 'text-delta':
             if (!openTextPartIds.has(chunk.id)) {
               openTextPartIds.add(chunk.id);
-              controller.enqueue({ type: 'text-start', id: chunk.id } as PiStreamChunk);
+              controller.enqueue({ type: 'text-start', id: chunk.id });
             }
             controller.enqueue(chunk);
             return;
           case 'text-end':
             if (!openTextPartIds.has(chunk.id)) {
-              controller.enqueue({ type: 'text-start', id: chunk.id } as PiStreamChunk);
+              controller.enqueue({ type: 'text-start', id: chunk.id });
             }
             controller.enqueue(chunk);
             openTextPartIds.delete(chunk.id);

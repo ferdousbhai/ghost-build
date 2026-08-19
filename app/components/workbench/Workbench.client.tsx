@@ -24,6 +24,11 @@ import { workbenchStore } from '~/lib/stores/workbench.client';
 import { previewPresentation } from '~/lib/common/preview-presentation';
 import { useWorkspaceSwipe } from '~/lib/hooks/useWorkspaceSwipe';
 
+/** `--workbench-width` is a CSS custom property, which `CSSProperties` alone cannot express. */
+const smallViewportWorkbenchStyle: CSSProperties & Record<`--${string}`, string> = {
+  '--workbench-width': '100vw',
+};
+
 interface WorkbenchProps {
   chatStarted?: boolean;
   isStreaming?: boolean;
@@ -215,7 +220,7 @@ function WorkbenchFrame({
       animate={visible ? 'open' : 'closed'}
       variants={workbenchVariants}
       className={classNames('z-workbench', { 'pointer-events-none': !visible })}
-      style={isSmallViewport ? ({ '--workbench-width': '100vw' } as CSSProperties) : undefined}
+      style={isSmallViewport ? smallViewportWorkbenchStyle : undefined}
       role="complementary"
       aria-label="Project workbench"
       aria-hidden={!visible}

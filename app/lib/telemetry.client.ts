@@ -1,6 +1,13 @@
 import { telemetryCorrelationIdStore } from '~/lib/cloudflare/runtime-session';
 import type { ClientTelemetryEvent, ProductTelemetryEvent } from './client-telemetry-events';
 
+declare global {
+  interface Navigator {
+    /** Global Privacy Control: shipped by several browsers but not yet part of lib.dom. */
+    readonly globalPrivacyControl?: boolean;
+  }
+}
+
 type TelemetryContext = {
   level?: 'error' | 'warning' | 'info';
   outcome?: 'success' | 'failure' | 'cancelled';
@@ -8,6 +15,20 @@ type TelemetryContext = {
   durationMs?: number;
   retryCount?: number;
   workspaceRevision?: number;
+};
+
+type SanitizedTelemetryContext = Omit<TelemetryContext, 'level'>;
+
+type TelemetryEnvelope = {
+  schemaVersion: 1;
+  event: ClientTelemetryEvent | ProductTelemetryEvent;
+  level: NonNullable<TelemetryContext['level']>;
+  journeyId: string;
+  correlationId?: string;
+  errorEventId?: string;
+  occurredAt: string;
+  page: PageKind;
+  context: SanitizedTelemetryContext;
 };
 
 const TELEMETRY_ENDPOINT = '/api/client-telemetry';
@@ -67,17 +88,22 @@ async function emitTelemetry(
   }
   const level = context.level ?? 'info';
   const correlation = correlationId();
-  const payload = JSON.stringify({
+  const envelope: TelemetryEnvelope = {
     schemaVersion: 1,
     event,
     level,
     journeyId: journeyId(),
-    ...(correlation ? { correlationId: correlation } : {}),
-    ...(level === 'error' ? { errorEventId: crypto.randomUUID() } : {}),
     occurredAt: new Date().toISOString(),
     page: pageKind(),
     context: sanitizeContext(context),
-  });
+  };
+  if (correlation) {
+    envelope.correlationId = correlation;
+  }
+  if (level === 'error') {
+    envelope.errorEventId = crypto.randomUUID();
+  }
+  const payload = JSON.stringify(envelope);
   try {
     await fetch(TELEMETRY_ENDPOINT, {
       method: 'POST',
@@ -91,23 +117,33 @@ async function emitTelemetry(
   }
 }
 
-function sanitizeContext(context: TelemetryContext) {
-  return {
-    ...(context.outcome ? { outcome: context.outcome } : {}),
-    ...(context.failureReason ? { failureReason: context.failureReason } : {}),
-    ...(validMetric(context.durationMs) ? { durationMs: context.durationMs } : {}),
-    ...(validMetric(context.retryCount) ? { retryCount: context.retryCount } : {}),
-    ...(validMetric(context.workspaceRevision) ? { workspaceRevision: context.workspaceRevision } : {}),
-  };
+/** Only allowlisted, non-identifying fields reach the wire; anything unset stays absent. */
+function sanitizeContext(context: TelemetryContext): SanitizedTelemetryContext {
+  const sanitized: SanitizedTelemetryContext = {};
+  if (context.outcome) {
+    sanitized.outcome = context.outcome;
+  }
+  if (context.failureReason) {
+    sanitized.failureReason = context.failureReason;
+  }
+  if (validMetric(context.durationMs)) {
+    sanitized.durationMs = context.durationMs;
+  }
+  if (validMetric(context.retryCount)) {
+    sanitized.retryCount = context.retryCount;
+  }
+  if (validMetric(context.workspaceRevision)) {
+    sanitized.workspaceRevision = context.workspaceRevision;
+  }
+  return sanitized;
 }
 
 function validMetric(value: number | undefined): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+  return value !== undefined && Number.isSafeInteger(value) && value >= 0;
 }
 
 export function productTelemetryEnabled(): boolean {
-  const privacyNavigator = navigator as Navigator & { globalPrivacyControl?: boolean };
-  if (privacyNavigator.globalPrivacyControl === true || privacyNavigator.doNotTrack === '1') {
+  if (navigator.globalPrivacyControl === true || navigator.doNotTrack === '1') {
     return false;
   }
   return safeLocalStorageGet(TELEMETRY_PREFERENCE_STORAGE_KEY) === 'enabled';
@@ -169,7 +205,9 @@ function safeLocalStorageSet(key: string, value: string): void {
   }
 }
 
-function pageKind(): 'home' | 'settings' | 'chat' | 'other' {
+type PageKind = 'home' | 'settings' | 'chat' | 'other';
+
+function pageKind(): PageKind {
   const pathname = window.location.pathname;
   if (pathname === '/') {
     return 'home';

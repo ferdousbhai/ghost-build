@@ -31,7 +31,7 @@ export function useSearchFilter({
     return items.filter((item) =>
       searchFields.some((field) => {
         const value = item[field];
-        return typeof value === 'string' && value.toLowerCase().includes(query);
+        return value !== undefined && value.toLowerCase().includes(query);
       }),
     );
   }, [items, debouncedSearchQuery, searchFields]);

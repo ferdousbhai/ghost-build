@@ -28,7 +28,7 @@ export function cloudflareDocsSearchTool(request: typeof fetch = fetch): Tool {
       "Search Cloudflare's documentation. Returns ranked excerpts with their source URLs; prefer it to recall for Workers, Wrangler, D1, R2, KV, Durable Objects, Workers AI, and any other Cloudflare question.",
     inputSchema: MODEL_TOOL_INPUT_SCHEMAS.search_cloudflare_docs,
     execute: async (input, options) => {
-      const { query } = input as { query: string };
+      const { query } = MODEL_TOOL_INPUT_SCHEMAS.search_cloudflare_docs.parse(input);
       options.abortSignal?.throwIfAborted();
       const trimmed = query.trim();
       if (!trimmed || trimmed.length > MAX_QUERY_CHARS) {
@@ -135,22 +135,30 @@ function readContentText(body: string): string {
     } catch {
       continue;
     }
-    const envelope = parsed as { error?: { message?: unknown }; result?: { content?: unknown } };
-    if (envelope.error) {
-      const message = envelope.error.message;
+    if (!isRecord(parsed)) {
+      continue;
+    }
+    if (parsed.error) {
+      const message = isRecord(parsed.error) ? parsed.error.message : undefined;
       throw new Error(typeof message === 'string' ? message : 'the service reported an error.');
     }
-    const content = envelope.result?.content;
+    const content = isRecord(parsed.result) ? parsed.result.content : undefined;
     if (Array.isArray(content)) {
       return content
-        .map((block) => block as { type?: unknown; text?: unknown })
-        .filter((block) => block.type === 'text' && typeof block.text === 'string')
-        .map((block) => block.text as string)
+        .filter(
+          (block): block is { type: 'text'; text: string } =>
+            isRecord(block) && block.type === 'text' && typeof block.text === 'string',
+        )
+        .map((block) => block.text)
         .join('\n')
         .trim();
     }
   }
   throw new Error('the service returned an unrecognized response.');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function sseDataLines(body: string): string[] {

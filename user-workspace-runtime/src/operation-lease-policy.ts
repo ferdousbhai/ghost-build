@@ -40,12 +40,16 @@ type ToolGovernedOperationKind = keyof typeof OPERATION_LANE_TOOLS;
  * budgets rather than restated, so the lane below a tool and the tool above it
  * cannot declare different ceilings for the same piece of work.
  */
-export const OPERATION_TOOL_BUDGET_MS = Object.fromEntries(
-  Object.entries(OPERATION_LANE_TOOLS).map(([kind, tools]) => [
-    kind,
-    Math.max(...tools.map((tool) => BUILDER_TURN_TIMEOUTS.tools[tool])),
-  ]),
-) as Record<ToolGovernedOperationKind, number>;
+export const OPERATION_TOOL_BUDGET_MS = {
+  write: longestToolBudget(OPERATION_LANE_TOOLS.write),
+  exec: longestToolBudget(OPERATION_LANE_TOOLS.exec),
+  install: longestToolBudget(OPERATION_LANE_TOOLS.install),
+  validate: longestToolBudget(OPERATION_LANE_TOOLS.validate),
+} satisfies Record<ToolGovernedOperationKind, number>;
+
+function longestToolBudget(tools: readonly ModelToolName[]): number {
+  return Math.max(...tools.map((tool) => BUILDER_TURN_TIMEOUTS.tools[tool]));
+}
 
 function isToolGovernedOperation(kind: StatefulOperationKind): kind is ToolGovernedOperationKind {
   return Object.hasOwn(OPERATION_LANE_TOOLS, kind);

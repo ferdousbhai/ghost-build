@@ -2,6 +2,7 @@ import { transcriptIdentitySchema, type TranscriptIdentity } from 'ghostbuild-ag
 import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import type { UIMessage } from 'ai';
 import { isWorkersAiModelId, type WorkersAiModelId } from '~/lib/workers-ai-model';
+import { z } from 'zod';
 
 const MAX_BUILDER_AGENT_NAME_LENGTH = 512;
 const MAX_BUILDER_SUBCHAT_INDEX = 10_000;
@@ -59,33 +60,46 @@ export async function loadBuilderTranscriptBinding(
     : null;
 }
 
-export function requireBuilderRequestScope(
-  body: Record<string, unknown>,
-  binding: BuilderTranscriptBinding | null,
-): {
+/** The chat request fields the builder scope check reads. Every one arrives unvalidated from the client. */
+type BuilderChatRequestBody = {
+  chatInitialId?: unknown;
+  subchatIndex?: unknown;
+  transcript?: unknown;
+  modelId?: unknown;
+};
+
+type BuilderRequestScope = {
   chatInitialId: string;
   subchatIndex: number;
   transcript: TranscriptIdentity;
   modelId: WorkersAiModelId;
-} {
-  if (
-    typeof body.chatInitialId !== 'string' ||
-    body.chatInitialId.length === 0 ||
-    body.chatInitialId.length > MAX_BUILDER_AGENT_NAME_LENGTH
-  ) {
+};
+
+const chatInitialIdSchema = z.string().min(1).max(MAX_BUILDER_AGENT_NAME_LENGTH);
+const subchatIndexSchema = z.number().int().min(0).max(MAX_BUILDER_SUBCHAT_INDEX);
+
+export function requireBuilderRequestScope(
+  body: BuilderChatRequestBody,
+  binding: BuilderTranscriptBinding | null,
+): BuilderRequestScope {
+  const chatInitialId = chatInitialIdSchema.safeParse(body.chatInitialId);
+  if (!chatInitialId.success) {
     throw new Response('Invalid initial chat identifier', { status: 400 });
   }
-  const subchatIndex = parseBuilderSubchatIndex(body.subchatIndex);
-  const transcript = requireBuilderTranscriptIdentity(body.transcript, binding, subchatIndex);
+  const subchatIndex = subchatIndexSchema.safeParse(body.subchatIndex);
+  if (!subchatIndex.success) {
+    throw new Response('Invalid subchat index', { status: 400 });
+  }
+  const transcript = requireBuilderTranscriptIdentity(body.transcript, binding, subchatIndex.data);
   if (!isWorkersAiModelId(body.modelId)) {
     throw new Response('Invalid builder model', { status: 400 });
   }
-  if (body.chatInitialId !== binding?.chatInitialId) {
+  if (chatInitialId.data !== binding?.chatInitialId) {
     throw new Response('Initial chat identifier does not match this transcript', { status: 409 });
   }
   return {
-    chatInitialId: body.chatInitialId,
-    subchatIndex,
+    chatInitialId: chatInitialId.data,
+    subchatIndex: subchatIndex.data,
     transcript,
     modelId: body.modelId,
   };
@@ -127,11 +141,4 @@ export function boundBuilderMessageForPersistence(message: UIMessage): UIMessage
         : part,
     ),
   };
-}
-
-function parseBuilderSubchatIndex(value: unknown): number {
-  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > MAX_BUILDER_SUBCHAT_INDEX) {
-    throw new Response('Invalid subchat index', { status: 400 });
-  }
-  return value as number;
 }

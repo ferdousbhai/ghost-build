@@ -13,6 +13,13 @@ let currentCreditStatus: AiGatewayCreditStatus = 'unknown';
 export const builderModelStore = atom<WorkersAiModelId>(CLOUDFLARE_WORKERS_AI_MODEL);
 export const builderDefaultModelStore = atom<WorkersAiModelId>(CLOUDFLARE_WORKERS_AI_MODEL);
 
+/**
+ * Set when a stored choice was overridden because the account has no AI Gateway credits.
+ * Only a confirmed absence counts: while credit status is still unknown the preference is
+ * re-evaluated once it resolves, and announcing a denial then would be guessing.
+ */
+export const builderModelDeniedByCreditsStore = atom(false);
+
 export function initializeBuilderModelPreference(
   creditStatus: AiGatewayCreditStatus,
   storage?: Pick<Storage, 'getItem'>,
@@ -22,12 +29,13 @@ export function initializeBuilderModelPreference(
   builderDefaultModelStore.set(defaultModel);
   try {
     const persisted = (storage ?? localStorage).getItem(BUILDER_MODEL_STORAGE_KEY);
+    const needsCredits = persisted === PREFERRED_BUILDER_MODEL;
+    builderModelDeniedByCreditsStore.set(needsCredits && creditStatus === 'unavailable');
     builderModelStore.set(
-      isWorkersAiModelId(persisted) && !(creditStatus !== 'available' && persisted === PREFERRED_BUILDER_MODEL)
-        ? persisted
-        : defaultModel,
+      isWorkersAiModelId(persisted) && !(creditStatus !== 'available' && needsCredits) ? persisted : defaultModel,
     );
   } catch {
+    builderModelDeniedByCreditsStore.set(false);
     builderModelStore.set(defaultModel);
   }
 }

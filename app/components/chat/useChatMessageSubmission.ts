@@ -15,6 +15,16 @@ import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { builderModelStore } from '~/lib/stores/builder-model.client';
 import type { WorkersAiModelId } from '~/lib/workers-ai-model';
 
+/**
+ * Sends one builder turn. The resolved value is the AI SDK's internal send result, which no caller
+ * here consumes; both submission paths only await completion.
+ */
+type SendChatMessage = (
+  message: { text: string },
+  options?: { body?: { turnContext?: ChatTurnContext; modelId?: WorkersAiModelId } },
+  onRequestStart?: () => void,
+) => Promise<unknown>;
+
 const logger = createScopedLogger('ChatMessageSubmission');
 
 export function useChatMessageSubmission(args: {
@@ -23,13 +33,7 @@ export function useChatMessageSubmission(args: {
   streamStatus: StreamStatus;
   initializeChat: () => Promise<{ created: boolean }>;
   discardEmptyChat: () => Promise<void>;
-  sendChatMessage: (
-    message: { text: string },
-    options?: {
-      body?: { turnContext?: ChatTurnContext; modelId?: WorkersAiModelId };
-    },
-    onRequestStart?: () => void,
-  ) => Promise<unknown>;
+  sendChatMessage: SendChatMessage;
   steerChatMessage: (input: { text: string; turnContext: ChatTurnContext }) => Promise<void>;
   enableAutoScroll: () => void;
   onStartChat: () => void | Promise<void>;
@@ -240,13 +244,7 @@ async function submitMessage(
   messageInput: string,
   chatStarted: boolean,
   modelId: WorkersAiModelId,
-  sendChatMessage: (
-    message: { text: string },
-    options?: {
-      body?: { turnContext?: ChatTurnContext; modelId?: WorkersAiModelId };
-    },
-    onRequestStart?: () => void,
-  ) => Promise<unknown>,
+  sendChatMessage: SendChatMessage,
   onRequestStart: () => void,
 ): Promise<void> {
   const { turnContext, modifiedFiles } = await prepareTurnContext(chatStarted);

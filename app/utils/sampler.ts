@@ -13,7 +13,7 @@ type SampledFunction<Args extends unknown[]> = ((...args: Args) => void) & {
 };
 
 export function createSampler<Args extends unknown[]>(
-  fn: (...args: Args) => unknown,
+  fn: (...args: Args) => void,
   sampleInterval: number,
 ): SampledFunction<Args> {
   let lastArgs: Args | null = null;

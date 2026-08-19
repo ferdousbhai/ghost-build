@@ -1,5 +1,6 @@
 import { createClientOnlyFn } from '@tanstack/react-start';
 import { useEffect, useSyncExternalStore } from 'react';
+import { z } from 'zod';
 import type { CloudflareAuthSession } from '~/lib/.server/auth';
 import { disposeAccountLocalReplicas } from '~/lib/cloudflare/account-local-replica';
 import { resetUserRuntimeSession } from '~/lib/cloudflare/runtime-session';
@@ -15,6 +16,29 @@ type AuthState = {
   data: CloudflareAuthSession | null;
   isPending: boolean;
 };
+
+/** Typed against the server contract, so a drift in `CloudflareAuthSession` fails to compile here. */
+const cloudflareAuthSessionSchema: z.ZodType<CloudflareAuthSession> = z.object({
+  session: z.object({
+    id: z.string(),
+    userId: z.string(),
+    expiresAt: z.number(),
+    createdAt: z.number(),
+  }),
+  user: z.object({
+    id: z.string(),
+    name: z.string(),
+    email: z.string(),
+    image: z.string().nullable(),
+  }),
+});
+
+const authorizationStartSchema = z.looseObject({
+  authorizationUrl: z.string().optional().catch(undefined),
+  error: z.string().optional().catch(undefined),
+});
+
+const requestErrorSchema = z.looseObject({ error: z.string().optional().catch(undefined) });
 
 const listeners = new Set<() => void>();
 const serverSnapshot: AuthState = { data: null, isPending: true };
@@ -42,7 +66,8 @@ async function loadSession() {
       if (!response.ok) {
         throw new Error('Unable to load the Cloudflare session.');
       }
-      setState({ data: (await response.json()) as CloudflareAuthSession | null, isPending: false });
+      const session = cloudflareAuthSessionSchema.safeParse(await response.json());
+      setState({ data: session.success ? session.data : null, isPending: false });
     })
     .catch(() => setState({ data: null, isPending: false }))
     .finally(() => {
@@ -87,7 +112,8 @@ export async function signInWithCloudflare(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ callbackURL }),
     });
-    const payload = (await response.json().catch(() => null)) as { authorizationUrl?: string; error?: string } | null;
+    const parsed = authorizationStartSchema.safeParse(await response.json().catch(() => null));
+    const payload = parsed.success ? parsed.data : null;
     if (!response.ok || !payload?.authorizationUrl) {
       throw new Error(payload?.error ?? 'Unable to start Cloudflare authorization.');
     }
@@ -126,8 +152,8 @@ export function createCloudflareReturnURL(returnURL = window.location.href, orig
 export async function signOutOfGhostbuild(callbackURL = window.location.origin) {
   const response = await fetch('/api/auth/sign-out', { method: 'POST', credentials: 'same-origin' });
   if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(payload?.error ?? 'Unable to sign out of Ghostbuild.');
+    const parsed = requestErrorSchema.safeParse(await response.json().catch(() => null));
+    throw new Error((parsed.success ? parsed.data.error : undefined) ?? 'Unable to sign out of Ghostbuild.');
   }
   setState({ data: null, isPending: false });
   await disposeAccountLocalReplicas();

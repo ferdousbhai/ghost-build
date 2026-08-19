@@ -30,12 +30,15 @@ export function workspaceOperationConflict(error: unknown): WorkspaceOperationCo
   return match ? { activeKind: match[1]!, retryAfterMs: Number(match[2]) } : null;
 }
 
+export type ComputerSyncUnconfirmedCode =
+  typeof COMPUTER_SYNC_PENDING_ERROR_CODE | typeof COMPUTER_SYNC_EXHAUSTED_ERROR_CODE;
+
 export type ComputerSyncUnconfirmedToolResult = {
   kind: 'workspace-sync-unconfirmed';
   version: 1;
   acknowledgement: 'pending';
   status: 'pending' | 'exhausted';
-  code: typeof COMPUTER_SYNC_PENDING_ERROR_CODE | typeof COMPUTER_SYNC_EXHAUSTED_ERROR_CODE;
+  code: ComputerSyncUnconfirmedCode;
   error: string;
 };
 
@@ -68,56 +71,40 @@ export function computerSyncUnconfirmedError(value: unknown): Error | null {
   return Object.assign(new Error(result.error), { name: 'WorkspaceSyncPendingError', code: result.code });
 }
 
-function syncUnconfirmedCode(
-  value: unknown,
-): typeof COMPUTER_SYNC_PENDING_ERROR_CODE | typeof COMPUTER_SYNC_EXHAUSTED_ERROR_CODE | null {
-  const candidate =
-    value instanceof Error
-      ? { code: (value as Error & { code?: unknown }).code, message: value.message }
-      : typeof value === 'object' && value !== null
-        ? {
-            code: (value as { code?: unknown }).code,
-            message:
-              typeof (value as { error?: unknown }).error === 'string'
-                ? (value as { error: string }).error
-                : typeof (value as { message?: unknown }).message === 'string'
-                  ? (value as { message: string }).message
-                  : '',
-          }
-        : { code: undefined, message: typeof value === 'string' ? value : '' };
-  if (
-    candidate.code === COMPUTER_SYNC_PENDING_ERROR_CODE ||
-    candidate.message.startsWith(`[${COMPUTER_SYNC_PENDING_ERROR_CODE}]`)
-  ) {
+/** The message a rejection carries, whether it stayed an Error or was flattened to a plain object by RPC. */
+function carriedMessage(value: unknown): string | null {
+  if (value instanceof Error) {
+    return value.message;
+  }
+  if (typeof value === 'object' && value !== null) {
+    if ('error' in value && typeof value.error === 'string') {
+      return value.error;
+    }
+    if ('message' in value && typeof value.message === 'string') {
+      return value.message;
+    }
+  }
+  return null;
+}
+
+function carriedCode(value: unknown): unknown {
+  return typeof value === 'object' && value !== null && 'code' in value ? value.code : undefined;
+}
+
+function syncUnconfirmedCode(value: unknown): ComputerSyncUnconfirmedCode | null {
+  const code = carriedCode(value);
+  const message = carriedMessage(value) ?? (typeof value === 'string' ? value : '');
+  if (code === COMPUTER_SYNC_PENDING_ERROR_CODE || message.startsWith(`[${COMPUTER_SYNC_PENDING_ERROR_CODE}]`)) {
     return COMPUTER_SYNC_PENDING_ERROR_CODE;
   }
-  if (
-    candidate.code === COMPUTER_SYNC_EXHAUSTED_ERROR_CODE ||
-    candidate.message.startsWith(`[${COMPUTER_SYNC_EXHAUSTED_ERROR_CODE}]`)
-  ) {
+  if (code === COMPUTER_SYNC_EXHAUSTED_ERROR_CODE || message.startsWith(`[${COMPUTER_SYNC_EXHAUSTED_ERROR_CODE}]`)) {
     return COMPUTER_SYNC_EXHAUSTED_ERROR_CODE;
   }
   return null;
 }
 
-function syncUnconfirmedMessage(
-  value: unknown,
-  code: typeof COMPUTER_SYNC_PENDING_ERROR_CODE | typeof COMPUTER_SYNC_EXHAUSTED_ERROR_CODE,
-): string {
-  if (value instanceof Error) {
-    return value.message;
-  }
-  if (typeof value === 'object' && value !== null) {
-    const error = (value as { error?: unknown }).error;
-    if (typeof error === 'string') {
-      return error;
-    }
-    const message = (value as { message?: unknown }).message;
-    if (typeof message === 'string') {
-      return message;
-    }
-  }
-  return `[${code}] Computer synchronization is not yet durably acknowledged.`;
+function syncUnconfirmedMessage(value: unknown, code: ComputerSyncUnconfirmedCode): string {
+  return carriedMessage(value) ?? `[${code}] Computer synchronization is not yet durably acknowledged.`;
 }
 
 export const COMPUTER_EXEC_APPLICATION_POLICY =

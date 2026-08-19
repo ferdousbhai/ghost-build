@@ -1,7 +1,7 @@
 import { useStore } from '@nanostores/react';
 import { useMemo } from 'react';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
-import { makePartId, type PartId } from 'ghostbuild-agent/partId';
+import { makePartId } from 'ghostbuild-agent/partId';
 import { isToolActivityStatusActive } from '~/lib/common/types';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { toolProgressStore } from '~/lib/stores/tool-progress.client';
@@ -23,12 +23,12 @@ export function useCurrentToolStatus(messages: GhostbuildMessage[]): {
 }
 
 export function currentToolStatus(messages: GhostbuildMessage[], activities: ToolActivities, activityRevision = 0) {
-  const currentPartIds = new Set<PartId>();
+  const currentPartIds = new Set<string>();
   for (const message of messages) {
     message.parts?.forEach((_part, index) => currentPartIds.add(makePartId(message.id, index)));
   }
   const activeToolNames = new Set<string>();
-  for (const [partId, activity] of Object.entries(activities) as Array<[PartId, ToolActivities[PartId]]>) {
+  for (const [partId, activity] of Object.entries(activities)) {
     if (!currentPartIds.has(partId)) {
       continue;
     }

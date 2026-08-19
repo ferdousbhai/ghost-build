@@ -63,11 +63,12 @@ export function deploymentProjectProfileFromConfig(
   const r2Bindings = requireExactBindings(config.r2_buckets, 'R2', ['APP_STORAGE']);
   const kvBindings = requireExactBindings(config.kv_namespaces, 'KV', ['APP_CACHE']);
   const durableObjects = recordOrNull(config.durable_objects);
+  const durableBindingEntries = Array.isArray(durableObjects?.bindings) ? durableObjects.bindings : [];
   const durableBindings = requireExactBindings(durableObjects?.bindings, 'Durable Object', ['AppAgent'], 'name');
   const appAgent = durableBindings.has('AppAgent');
   if (
     appAgent &&
-    !(durableObjects?.bindings as unknown[]).every(
+    !durableBindingEntries.every(
       (entry) => recordOrNull(entry)?.name === 'AppAgent' && recordOrNull(entry)?.class_name === 'AppAgent',
     )
   ) {

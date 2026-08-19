@@ -4,6 +4,8 @@ import {
   type BuilderWorkspaceFileInput,
 } from './builder-workspace-types';
 import { BUILDER_TEMPLATE_GZIP_BASE64, BUILDER_TEMPLATE_SOURCE_SHA256 } from './builder-template.generated';
+import type { WorkspaceSeedExpectation } from './builder-workspace-api';
+import { z } from 'zod';
 
 let cachedTemplate: Promise<BuilderWorkspaceFileInput[]> | undefined;
 
@@ -48,41 +50,38 @@ function decodedBytes(entry: BuilderWorkspaceFileInput): number {
   return Math.max(0, Math.floor((entry.content.length * 3) / 4) - padding);
 }
 
-export function builderTemplateTotals(entries: BuilderWorkspaceFileInput[]): {
-  fileCount: number;
-  totalBytes: number;
-} {
+export function builderTemplateTotals(entries: BuilderWorkspaceFileInput[]): WorkspaceSeedExpectation {
   return {
     fileCount: entries.length,
     totalBytes: entries.reduce((total, entry) => total + decodedBytes(entry), 0),
   };
 }
 
+const builderTemplateFileSchema = z.object({
+  path: z.string(),
+  content: z.string(),
+  encoding: z.enum(['utf8', 'base64']),
+});
+
 async function decodeBuilderTemplate(): Promise<BuilderWorkspaceFileInput[]> {
   const compressed = decodeBase64(BUILDER_TEMPLATE_GZIP_BASE64);
-  const stream = new Blob([compressed as Uint8Array<ArrayBuffer>])
-    .stream()
-    .pipeThrough(new DecompressionStream('gzip'));
+  const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip'));
   const json = new TextDecoder().decode(await new Response(stream).arrayBuffer());
-  const parsed = JSON.parse(json) as unknown;
+  const parsed: unknown = JSON.parse(json);
   if (!Array.isArray(parsed)) {
     throw new Error('The bundled Builder template is invalid.');
   }
-  return parsed.map((entry) => {
-    if (
-      typeof entry !== 'object' ||
-      entry === null ||
-      typeof (entry as { path?: unknown }).path !== 'string' ||
-      typeof (entry as { content?: unknown }).content !== 'string' ||
-      ((entry as { encoding?: unknown }).encoding !== 'utf8' && (entry as { encoding?: unknown }).encoding !== 'base64')
-    ) {
+  const files: unknown[] = parsed;
+  return files.map((file) => {
+    const entry = builderTemplateFileSchema.safeParse(file);
+    if (!entry.success) {
       throw new Error('The bundled Builder template contains an invalid file.');
     }
-    return entry as BuilderWorkspaceFileInput;
+    return entry.data;
   });
 }
 
-function decodeBase64(value: string): Uint8Array {
+function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
   const binary = atob(value);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {

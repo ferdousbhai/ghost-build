@@ -110,56 +110,58 @@ type ServerRoute = {
   handler: (request: Request, env: Env) => Response | Promise<Response>;
 };
 
-const exactRoutes: Record<string, ServerRoute> = {
-  '/api/health': {
-    method: 'GET',
-    handler: () => healthAction(),
-  },
-  '/api/client-telemetry': {
-    method: 'POST',
-    handler: (request, env) => clientTelemetryAction({ request, env }),
-  },
-  '/api/auth/session': {
-    method: 'GET',
-    handler: (request, env) => authSessionAction({ request, env }),
-  },
-  '/api/auth/sign-out': {
-    method: 'POST',
-    handler: (request, env) => signOutAction({ request, env }),
-  },
-  '/api/account/delete': {
-    method: 'POST',
-    handler: (request, env) => deleteAccountAction({ request, env }),
-  },
-  '/api/account/export': {
-    method: 'POST',
-    handler: (request, env) => exportAccountAction({ request, env }),
-  },
-  '/api/cloudflare/connection': {
-    method: 'GET',
-    handler: (request, env) => cloudflareConnectionStatusAction({ request, env }),
-  },
-  '/api/cloudflare/connection/start': {
-    method: 'POST',
-    handler: (request, env) => startCloudflareConnectionAction({ request, env }),
-  },
-  '/api/cloudflare/runtime-session': {
-    method: 'POST',
-    handler: (request, env) => cloudflareRuntimeSessionAction({ request, env }),
-  },
-  '/api/cloudflare/runtime-credential': {
-    method: 'POST',
-    handler: (request, env) => runtimeCredentialAction({ request, env }),
-  },
-  '/connect/return': {
-    method: CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
-    handler: (request, env) => completeCloudflareConnectionAction({ request, env }),
-  },
-  '/api/version': {
-    method: 'GET',
-    handler: (_request, env) => versionAction({ env }),
-  },
-};
+const exactRoutes = new Map<string, ServerRoute>(
+  Object.entries({
+    '/api/health': {
+      method: 'GET',
+      handler: () => healthAction(),
+    },
+    '/api/client-telemetry': {
+      method: 'POST',
+      handler: (request, env) => clientTelemetryAction({ request, env }),
+    },
+    '/api/auth/session': {
+      method: 'GET',
+      handler: (request, env) => authSessionAction({ request, env }),
+    },
+    '/api/auth/sign-out': {
+      method: 'POST',
+      handler: (request, env) => signOutAction({ request, env }),
+    },
+    '/api/account/delete': {
+      method: 'POST',
+      handler: (request, env) => deleteAccountAction({ request, env }),
+    },
+    '/api/account/export': {
+      method: 'POST',
+      handler: (request, env) => exportAccountAction({ request, env }),
+    },
+    '/api/cloudflare/connection': {
+      method: 'GET',
+      handler: (request, env) => cloudflareConnectionStatusAction({ request, env }),
+    },
+    '/api/cloudflare/connection/start': {
+      method: 'POST',
+      handler: (request, env) => startCloudflareConnectionAction({ request, env }),
+    },
+    '/api/cloudflare/runtime-session': {
+      method: 'POST',
+      handler: (request, env) => cloudflareRuntimeSessionAction({ request, env }),
+    },
+    '/api/cloudflare/runtime-credential': {
+      method: 'POST',
+      handler: (request, env) => runtimeCredentialAction({ request, env }),
+    },
+    '/connect/return': {
+      method: CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
+      handler: (request, env) => completeCloudflareConnectionAction({ request, env }),
+    },
+    '/api/version': {
+      method: 'GET',
+      handler: (_request, env) => versionAction({ env }),
+    },
+  }),
+);
 
 export default {
   async fetch(request: Request, env: Env) {
@@ -191,7 +193,7 @@ async function runScheduledMaintenance(_cron: string, env: Env) {
 async function routeApplicationRequest(request: Request, env: Env, nonce: string): Promise<Response> {
   const url = new URL(request.url);
 
-  const route = exactRoutes[url.pathname];
+  const route = exactRoutes.get(url.pathname);
   if (route) {
     return requireMethod(request, route.method, () => route.handler(request, env));
   }

@@ -1,3 +1,4 @@
+import { sha256Hex } from '~/lib/hex-digest';
 const APP_AGENT_PROTECTED_PACKAGES = [
   '@babel/core',
   '@cloudflare/ai-chat',
@@ -102,7 +103,7 @@ export async function createAppAgentProtectedLockIdentity(lock: JsonRecord): Pro
     visited.add(id);
     closure.push({ id, package: canonicalize(packageEntry), snapshot: canonicalize(snapshot) });
 
-    const snapshotRecord = snapshot as JsonRecord;
+    const snapshotRecord = record(snapshot);
     for (const section of ['dependencies', 'optionalDependencies'] as const) {
       for (const [dependencyName, reference] of Object.entries(record(snapshotRecord[section]))) {
         if (typeof reference !== 'string' || reference.length === 0) {
@@ -170,15 +171,10 @@ function canonicalize(value: unknown): unknown {
   }
   if (value && typeof value === 'object') {
     return Object.fromEntries(
-      Object.entries(value as JsonRecord)
+      Object.entries(value)
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([key, nested]) => [key, canonicalize(nested)]),
     );
   }
   return value;
-}
-
-async function sha256Hex(value: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', value as Uint8Array<ArrayBuffer>);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }

@@ -5,7 +5,7 @@ import { requireWorkspaceSyncBarrier, WorkspaceSyncPendingError } from './worksp
 describe('ToolOperationJournal', () => {
   it('replays the exact completed result without executing the operation again', () => {
     const storage = new TestStorage();
-    const journal = new ToolOperationJournal(storage as never);
+    const journal = journalOn(storage);
     journal.initialize();
 
     expect(journal.begin(invocation())).toEqual({ status: 'execute' });
@@ -24,7 +24,7 @@ describe('ToolOperationJournal', () => {
   it.each(['write', 'edit', 'exec'])(
     'fails closed instead of repeating an interrupted %s operation from real journal state',
     (toolName) => {
-      const journal = new ToolOperationJournal(new TestStorage() as never);
+      const journal = journalOn(new TestStorage());
       const input = { ...invocation(), toolName };
       journal.initialize();
 
@@ -39,7 +39,7 @@ describe('ToolOperationJournal', () => {
   it.each(['write', 'edit', 'exec'])(
     'durably cancels a settled %s and rejects a delayed side-effect entry',
     (toolName) => {
-      const journal = new ToolOperationJournal(new TestStorage() as never);
+      const journal = journalOn(new TestStorage());
       const input = { ...invocation(), toolName };
       journal.initialize();
 
@@ -54,7 +54,7 @@ describe('ToolOperationJournal', () => {
 
   it('persists cancellation before operation start and rejects the delayed side effect', () => {
     const storage = new TestStorage();
-    const journal = new ToolOperationJournal(storage as never);
+    const journal = journalOn(storage);
     journal.initialize();
 
     expect(journal.cancel({ toolCallId: 'call-1', error: 'cancelled before begin', active: false, now: 1 })).toEqual({
@@ -65,7 +65,7 @@ describe('ToolOperationJournal', () => {
 
   it('persists active cancellation and rejects delayed mutation and commit boundaries after restart', () => {
     const storage = new TestStorage();
-    const journal = new ToolOperationJournal(storage as never);
+    const journal = journalOn(storage);
     journal.initialize();
     expect(journal.begin(invocation())).toEqual({ status: 'execute' });
 
@@ -73,7 +73,7 @@ describe('ToolOperationJournal', () => {
       status: 'active',
     });
 
-    const restarted = new ToolOperationJournal(storage as never);
+    const restarted = journalOn(storage);
     expect(() => restarted.assertRunning('call-1')).toThrow('cancelled');
     expect(() => restarted.complete({ toolCallId: 'call-1', result: { mutated: true }, now: 3 })).toThrow('cancelled');
     expect(restarted.begin(invocation())).toEqual({ status: 'indeterminate', error: 'cancelled' });
@@ -90,7 +90,7 @@ describe('ToolOperationJournal', () => {
   });
 
   it('keeps a completed mutation authoritative when cancellation arrives after commit', () => {
-    const journal = new ToolOperationJournal(new TestStorage() as never);
+    const journal = journalOn(new TestStorage());
     journal.initialize();
     journal.begin(invocation());
     const result = { committed: true };
@@ -103,7 +103,7 @@ describe('ToolOperationJournal', () => {
   });
 
   it('terminalizes an active cancellation once observation confirms no mutation completed', () => {
-    const journal = new ToolOperationJournal(new TestStorage() as never);
+    const journal = journalOn(new TestStorage());
     journal.initialize();
     journal.begin(invocation());
 
@@ -118,7 +118,7 @@ describe('ToolOperationJournal', () => {
 
   it('retains only a bounded number of cancellation tombstones', () => {
     const storage = new TestStorage();
-    const journal = new ToolOperationJournal(storage as never);
+    const journal = journalOn(storage);
     journal.initialize();
 
     for (let index = 0; index <= 500; index += 1) {
@@ -132,7 +132,7 @@ describe('ToolOperationJournal', () => {
 
   it('bounds ordinary completed operation rows without requiring another begin', () => {
     const storage = new TestStorage();
-    const journal = new ToolOperationJournal(storage as never);
+    const journal = journalOn(storage);
     journal.initialize();
 
     for (let index = 0; index <= 500; index += 1) {
@@ -148,7 +148,7 @@ describe('ToolOperationJournal', () => {
 
   it('bounds failed rows created when delayed begins consume cancellation tombstones', () => {
     const storage = new TestStorage();
-    const journal = new ToolOperationJournal(storage as never);
+    const journal = journalOn(storage);
     journal.initialize();
 
     for (let index = 0; index <= 500; index += 1) {
@@ -166,7 +166,7 @@ describe('ToolOperationJournal', () => {
   });
 
   it('bounds retained indeterminate operations without making them replayable', () => {
-    const journal = new ToolOperationJournal(new TestStorage() as never);
+    const journal = journalOn(new TestStorage());
     journal.initialize();
 
     for (let index = 0; index < 50; index++) {
@@ -194,7 +194,7 @@ describe('ToolOperationJournal', () => {
   });
 
   it('durably replays failures and rejects tool-call identifier reuse', () => {
-    const journal = new ToolOperationJournal(new TestStorage() as never);
+    const journal = journalOn(new TestStorage());
     journal.initialize();
     journal.begin(invocation());
     journal.fail({ toolCallId: 'call-1', error: 'command failed', now: 2 });
@@ -207,7 +207,7 @@ describe('ToolOperationJournal', () => {
   });
 
   it('replays a bounded committed mutation when its large display acknowledgement is interrupted', () => {
-    const journal = new ToolOperationJournal(new TestStorage() as never);
+    const journal = journalOn(new TestStorage());
     journal.initialize();
     journal.begin(invocation());
     const receipt = {
@@ -247,7 +247,7 @@ describe('ToolOperationJournal', () => {
   });
 
   it('distinguishes a mutation that failed before its first durable write', () => {
-    const journal = new ToolOperationJournal(new TestStorage() as never);
+    const journal = journalOn(new TestStorage());
     journal.initialize();
     journal.begin(invocation());
 
@@ -260,7 +260,7 @@ describe('ToolOperationJournal', () => {
 
   it('terminalizes more than fifty pending commands without consuming the indeterminate-operation budget', () => {
     const storage = new TestStorage();
-    const journal = new ToolOperationJournal(storage as never);
+    const journal = journalOn(storage);
     journal.initialize();
 
     for (let index = 0; index < 60; index += 1) {
@@ -284,7 +284,7 @@ describe('ToolOperationJournal', () => {
 
   it('replays completed and exhausted pending commands after restart without rerunning them', () => {
     const storage = new TestStorage();
-    const beforeRestart = new ToolOperationJournal(storage as never);
+    const beforeRestart = journalOn(storage);
     beforeRestart.initialize();
     beforeRestart.begin({ toolCallId: 'pending-complete', toolName: 'exec', argsSha256: 'complete' });
     beforeRestart.registerPending({
@@ -293,7 +293,7 @@ describe('ToolOperationJournal', () => {
       result: { command: 'touch file', exitCode: 0 },
     });
 
-    const afterRestart = new ToolOperationJournal(storage as never);
+    const afterRestart = journalOn(storage);
     afterRestart.initialize();
     expect(afterRestart.completePending('container-shell')).toBe(true);
     expect(afterRestart.begin({ toolCallId: 'pending-complete', toolName: 'exec', argsSha256: 'complete' })).toEqual({
@@ -317,7 +317,7 @@ describe('ToolOperationJournal', () => {
 
   it('blocks new work after restart when a pending continuation has no Computer retry row', () => {
     const storage = new TestStorage();
-    const beforeRestart = new ToolOperationJournal(storage as never);
+    const beforeRestart = journalOn(storage);
     beforeRestart.initialize();
     beforeRestart.begin({ toolCallId: 'pending-restart', toolName: 'exec', argsSha256: 'restart' });
     beforeRestart.registerPending({
@@ -326,7 +326,7 @@ describe('ToolOperationJournal', () => {
       result: { command: 'touch file', exitCode: 0 },
     });
 
-    const afterRestart = new ToolOperationJournal(storage as never);
+    const afterRestart = journalOn(storage);
     afterRestart.initialize();
     expect(() => requireWorkspaceSyncBarrier(afterRestart.pending(), () => null, 1_000)).toThrow(
       WorkspaceSyncPendingError,
@@ -348,7 +348,7 @@ describe('ToolOperationJournal', () => {
 
   it('rejects corrupted pending recovery state instead of omitting the operation', () => {
     const storage = new TestStorage();
-    const journal = new ToolOperationJournal(storage as never);
+    const journal = journalOn(storage);
     journal.initialize();
     journal.begin({ toolCallId: 'pending-corrupt', toolName: 'exec', argsSha256: 'corrupt' });
     storage.rows.get('pending-corrupt')!.result_json = JSON.stringify({ kind: 'unknown' });
@@ -356,6 +356,16 @@ describe('ToolOperationJournal', () => {
     expect(() => journal.pending()).toThrow('invalid recovery state');
   });
 });
+
+/**
+ * TestStorage implements the two members ToolOperationJournal reaches for, not the rest of
+ * DurableObjectStorage.
+ */
+function journalOn(storage: TestStorage): ToolOperationJournal {
+  // SAFETY: the journal only calls `sql.exec` and `transactionSync`, and TestStorage implements
+  // both with the same signatures.
+  return new ToolOperationJournal(storage as never);
+}
 
 function invocation() {
   return { toolCallId: 'call-1', toolName: 'write', argsSha256: 'a'.repeat(64), now: 1 };

@@ -14,6 +14,9 @@ import { FilesStore } from './files';
 import { PreviewsStore } from './previews';
 import { workbenchCurrentView } from './workbench-ui-state';
 
+/** Editor buffers that differ from what is on disk and are renderable as text. */
+type UnsavedTextFiles = Record<AbsolutePath, File>;
+
 export type { WorkbenchViewType } from './workbench-ui-state';
 
 type WorkspaceChangeListener = (
@@ -174,14 +177,14 @@ export class WorkbenchStore {
     if (this.currentDocument.get() !== undefined) {
       return;
     }
-    const preferredFiles = ['/home/project/src/routes/index.tsx', '/home/project/package.json'];
-    const preferredFile = preferredFiles.find((filePath) => files[filePath as AbsolutePath]?.type === 'file');
+    const preferredFiles = ['/home/project/src/routes/index.tsx', '/home/project/package.json'].map(getAbsolutePath);
+    const preferredFile = preferredFiles.find((filePath) => files[filePath]?.type === 'file');
     if (preferredFile) {
-      this.setSelectedFile(preferredFile as AbsolutePath);
+      this.setSelectedFile(preferredFile);
       return;
     }
     const firstFile = Object.entries(files).find(([, entry]) => entry?.type === 'file');
-    this.setSelectedFile(firstFile?.[0] as AbsolutePath | undefined);
+    this.setSelectedFile(firstFile === undefined ? undefined : getAbsolutePath(firstFile[0]));
   }
 
   setDocumentContent(filePath: AbsolutePath, newContent: string): void {
@@ -296,7 +299,7 @@ export class WorkbenchStore {
   getModifiedFiles(): Record<string, File> | undefined {
     this.flushPendingEditorChange();
     const modifiedFiles = {
-      ...(this.#filesStore.getModifiedFiles() ?? {}),
+      ...this.#filesStore.getModifiedFiles(),
       ...this.#visibleUnsavedTextFiles(),
     };
     return Object.keys(modifiedFiles).length > 0 ? modifiedFiles : undefined;
@@ -311,8 +314,8 @@ export class WorkbenchStore {
     await downloadProject({ ...this.files.get(), ...this.#visibleUnsavedTextFiles() }, description.value ?? 'project');
   }
 
-  #visibleUnsavedTextFiles(): Record<string, File> {
-    const visibleFiles: Record<string, File> = {};
+  #visibleUnsavedTextFiles() {
+    const visibleFiles: UnsavedTextFiles = {};
     for (const filePath of this.unsavedFiles.get()) {
       const document = this.#editorStore.documents.get()[filePath];
       if (document && !document.isBinary) {

@@ -42,19 +42,17 @@ export function rebaseDeploymentConfigPaths<T extends DeploymentConfigPaths>(
     return `${args.isolatedRoot}${suffix}`;
   };
 
-  return {
-    ...config,
-    main: rebase(config.main),
-    ...(config.assets ? { assets: { ...config.assets, directory: rebase(config.assets.directory) } } : {}),
-    ...(config.d1_databases
-      ? {
-          d1_databases: config.d1_databases.map((database) => ({
-            ...database,
-            migrations_dir: rebase(database.migrations_dir),
-          })),
-        }
-      : {}),
-  };
+  const rebased: T = { ...config, main: rebase(config.main) };
+  if (config.assets) {
+    rebased.assets = { ...config.assets, directory: rebase(config.assets.directory) };
+  }
+  if (config.d1_databases) {
+    rebased.d1_databases = config.d1_databases.map((database) => ({
+      ...database,
+      migrations_dir: rebase(database.migrations_dir),
+    }));
+  }
+  return rebased;
 }
 
 export function relativeIsolatedPath(root: string, absolutePath: string): string {

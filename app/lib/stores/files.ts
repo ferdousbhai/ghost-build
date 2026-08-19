@@ -168,7 +168,7 @@ export class FilesStore {
 function ensureParentFolders(files: MapStore<FileMap>, filePath: AbsolutePath): void {
   const segments = filePath.split('/');
   for (let index = 3; index < segments.length; index += 1) {
-    const folder = segments.slice(0, index).join('/') as AbsolutePath;
+    const folder = getAbsolutePath(segments.slice(0, index).join('/'));
     if (!files.get()[folder]) {
       files.setKey(folder, { type: 'folder' });
     }

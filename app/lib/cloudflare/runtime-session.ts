@@ -1,5 +1,6 @@
 import { atom } from 'nanostores';
-import { isAiGatewayCreditStatus, type AiGatewayCreditStatus } from './ai-gateway-credit';
+import { z } from 'zod';
+import { aiGatewayCreditStatusSchema, type AiGatewayCreditStatus } from './ai-gateway-credit';
 
 type UserRuntimeSession = {
   endpoint: string;
@@ -9,13 +10,28 @@ type UserRuntimeSession = {
   correlationId?: string;
 };
 
-export type UserRuntimeErrorCode =
-  | 'cloudflare_reauthorization_required'
-  | 'workspace_eligibility_unknown'
-  | 'workspace_plan_required'
-  | 'workspace_preparation_failed'
-  /** Not a failure: the workspace is being built and has not answered yet. */
-  | 'workspace_preparing';
+/** `workspace_preparing` is not a failure: the workspace is being built and has not answered yet. */
+const userRuntimeErrorCodeSchema = z.enum([
+  'cloudflare_reauthorization_required',
+  'workspace_eligibility_unknown',
+  'workspace_plan_required',
+  'workspace_preparation_failed',
+  'workspace_preparing',
+]);
+
+export type UserRuntimeErrorCode = z.infer<typeof userRuntimeErrorCodeSchema>;
+
+/** Every member falls back on its own so one malformed field cannot discard a usable session. */
+const runtimeSessionPayloadSchema = z.looseObject({
+  endpoint: z.string().optional().catch(undefined),
+  token: z.string().optional().catch(undefined),
+  expiresAt: z.number().int().optional().catch(undefined),
+  code: z.string().optional().catch(undefined),
+  error: z.string().optional().catch(undefined),
+  upgradeUrl: z.string().optional().catch(undefined),
+  aiGatewayCreditStatus: aiGatewayCreditStatusSchema.optional().catch(undefined),
+  correlationId: z.string().optional().catch(undefined),
+});
 
 export class UserRuntimeSessionError extends Error {
   constructor(
@@ -124,16 +140,8 @@ async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<User
       credentials: 'same-origin',
       headers: { Accept: 'application/json' },
     });
-    const payload = (await response.json().catch(() => null)) as {
-      endpoint?: string;
-      token?: string;
-      expiresAt?: number;
-      code?: string;
-      error?: string;
-      upgradeUrl?: unknown;
-      aiGatewayCreditStatus?: unknown;
-      correlationId?: unknown;
-    } | null;
+    const parsed = runtimeSessionPayloadSchema.safeParse(await response.json().catch(() => null));
+    const payload = parsed.success ? parsed.data : null;
     if (response.status === 409 && payload?.code === 'workspace_preparing' && Date.now() < deadline) {
       if (!isCurrent()) {
         throw new Error('The runtime session request was canceled.');
@@ -151,41 +159,30 @@ async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<User
       !response.ok ||
       !payload?.endpoint ||
       !payload.token ||
-      !Number.isSafeInteger(payload.expiresAt) ||
+      payload.expiresAt === undefined ||
       new URL(payload.endpoint).protocol !== 'https:'
     ) {
+      const code = userRuntimeErrorCodeSchema.safeParse(payload?.code);
       throw new UserRuntimeSessionError(
         payload?.error ?? 'The user-owned Ghostbuild runtime is unavailable.',
-        isUserRuntimeErrorCode(payload?.code) ? payload.code : null,
+        code.success ? code.data : null,
         cloudflareDashboardUrl(payload?.upgradeUrl),
       );
     }
     const session: UserRuntimeSession = {
       endpoint: new URL(payload.endpoint).origin,
       token: payload.token,
-      expiresAt: payload.expiresAt!,
-      aiGatewayCreditStatus: isAiGatewayCreditStatus(payload.aiGatewayCreditStatus)
-        ? payload.aiGatewayCreditStatus
-        : 'unknown',
-      correlationId: typeof payload.correlationId === 'string' ? payload.correlationId : undefined,
+      expiresAt: payload.expiresAt,
+      aiGatewayCreditStatus: payload.aiGatewayCreditStatus ?? 'unknown',
+      correlationId: payload.correlationId,
     };
     return session;
   }
 }
 
-function isUserRuntimeErrorCode(value: unknown): value is UserRuntimeErrorCode {
-  return (
-    value === 'cloudflare_reauthorization_required' ||
-    value === 'workspace_eligibility_unknown' ||
-    value === 'workspace_plan_required' ||
-    value === 'workspace_preparation_failed' ||
-    value === 'workspace_preparing'
-  );
-}
-
 /** The link originates with Cloudflare, so only Cloudflare's dashboard may come back out of it. */
-function cloudflareDashboardUrl(value: unknown): string | null {
-  if (typeof value !== 'string') {
+function cloudflareDashboardUrl(value: string | undefined): string | null {
+  if (value === undefined) {
     return null;
   }
   try {

@@ -27,5 +27,6 @@ export async function waitForUserId(caller?: string): Promise<GhostbuildUserId> 
 export const userIdStore = atom<GhostbuildUserId | null | undefined>(undefined);
 
 export function isAuthenticated(): boolean {
-  return typeof userIdStore.get() === 'string';
+  const userId = userIdStore.get();
+  return userId !== null && userId !== undefined;
 }

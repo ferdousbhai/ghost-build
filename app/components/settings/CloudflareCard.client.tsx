@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Button } from '~/components/ui/primitives/Button';
 import { createCloudflareReturnURL, signInWithCloudflare } from '~/lib/auth-client';
+import { z } from 'zod';
 
-type ConnectionStatus = {
-  accountName?: string | null;
-};
+const connectionStatusSchema = z.looseObject({
+  accountName: z.string().nullish(),
+});
+
+type ConnectionStatus = z.infer<typeof connectionStatusSchema>;
 
 export function CloudflareCard({ initialError = null }: { initialError?: string | null }) {
   const [connection, setConnection] = useState<ConnectionStatus | null>(null);
@@ -19,7 +22,11 @@ export function CloudflareCard({ initialError = null }: { initialError?: string 
         if (!response.ok) {
           throw new Error('Unable to load Cloudflare connection status.');
         }
-        return (await response.json()) as ConnectionStatus;
+        const status = connectionStatusSchema.safeParse(await response.json());
+        if (!status.success) {
+          throw new Error('Unable to load Cloudflare connection status.');
+        }
+        return status.data;
       })
       .then((status) => {
         if (!canceled) {

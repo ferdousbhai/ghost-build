@@ -22,6 +22,13 @@ import {
   type PromptRefinementQuestion,
 } from '~/lib/prompt-refinement';
 import { useGhostbuildAuth } from './GhostbuildAuthWrapper';
+import { z } from 'zod';
+
+/** Failure envelope returned by the prompt-enhancement endpoint. */
+const enhanceFailureSchema = z.looseObject({
+  code: z.literal('workers_paid_required').optional().catch(undefined),
+  error: z.string().optional().catch(undefined),
+});
 
 interface MessageInputControllerOptions {
   isStreaming: boolean;
@@ -166,10 +173,7 @@ export function useMessageInputController({
         signal: controller.signal,
       });
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as {
-          code?: 'workers_paid_required';
-          error?: string;
-        } | null;
+        const payload = enhanceFailureSchema.safeParse(await response.json().catch(() => null)).data;
         if (payload?.code === 'workers_paid_required' || payload?.error?.includes(WORKERS_PAID_REQUIRED_MARKER)) {
           showWorkersPaidRequiredToast();
           return;
@@ -323,6 +327,15 @@ export function getMessageInputPrimaryActionLabel(
 ): 'Stop' | 'Connect Cloudflare' | 'Send' {
   const action = getMessageInputPrimaryAction(authKind, isStreaming, hasInput);
   return action === 'stop' ? 'Stop' : action === 'sign-in' ? 'Connect Cloudflare' : 'Send';
+}
+
+/**
+ * The opening turn reads the project and writes most of the application, so the choice
+ * of model has to be available before it, not only once a chat exists. It still belongs
+ * to a connected session: a signed-out visitor has no model to run.
+ */
+export function shouldOfferBuilderModelSelector(authKind: 'loading' | 'unauthenticated' | 'fullyLoggedIn'): boolean {
+  return authKind === 'fullyLoggedIn';
 }
 
 function isPromptUnchanged(sourceInput: string, expectedRevision: number): boolean {

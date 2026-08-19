@@ -1,3 +1,4 @@
+import { z } from 'zod';
 export const USER_WORKSPACE_RUNTIME_SERVICE = 'ghostbuild-user-workspace-runtime';
 
 type RuntimeHealthEnv = {
@@ -48,36 +49,36 @@ export async function readUserWorkspaceRuntimeHealth(env: RuntimeHealthEnv): Pro
   };
 }
 
+const readinessCheckSchema = z.object({
+  ok: z.boolean(),
+  code: z.string().min(1),
+  durationMs: z.number().int().min(0),
+}) satisfies z.ZodType<UserWorkspaceReadinessCheck>;
+
+const readinessComponentsSchema = z.object({
+  runtime: readinessCheckSchema,
+  database: readinessCheckSchema,
+  projectWorkspaceRpc: readinessCheckSchema,
+  durableVfs: readinessCheckSchema,
+  container: readinessCheckSchema,
+  fuse: readinessCheckSchema,
+  sync: readinessCheckSchema,
+  cleanup: readinessCheckSchema,
+}) satisfies z.ZodType<Record<UserWorkspaceReadinessComponent, UserWorkspaceReadinessCheck>>;
+
+const runtimeReadinessSchema = z.looseObject({
+  ok: z.boolean(),
+  service: z.literal(USER_WORKSPACE_RUNTIME_SERVICE),
+  runtimeVersion: z.string().regex(/^[a-f0-9]{64}$/),
+  checkedAt: z.string().refine((value) => Number.isFinite(Date.parse(value))),
+  components: readinessComponentsSchema,
+}) satisfies z.ZodType<UserWorkspaceRuntimeReadiness>;
+
+/** Decode the readiness payload a user-owned runtime reports about itself. */
 export function parseUserWorkspaceRuntimeReadiness(payload: unknown): UserWorkspaceRuntimeReadiness {
-  if (
-    !isRecord(payload) ||
-    typeof payload.ok !== 'boolean' ||
-    payload.service !== USER_WORKSPACE_RUNTIME_SERVICE ||
-    typeof payload.runtimeVersion !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(payload.runtimeVersion) ||
-    typeof payload.checkedAt !== 'string' ||
-    !Number.isFinite(Date.parse(payload.checkedAt)) ||
-    !isRecord(payload.components)
-  ) {
+  const readiness = runtimeReadinessSchema.safeParse(payload);
+  if (!readiness.success) {
     throw new Error('The user-owned workspace runtime did not pass its readiness check.');
   }
-  for (const name of USER_WORKSPACE_READINESS_COMPONENTS) {
-    const component = payload.components[name];
-    if (
-      !isRecord(component) ||
-      typeof component.ok !== 'boolean' ||
-      typeof component.code !== 'string' ||
-      component.code.length === 0 ||
-      typeof component.durationMs !== 'number' ||
-      !Number.isSafeInteger(component.durationMs) ||
-      component.durationMs < 0
-    ) {
-      throw new Error('The user-owned workspace runtime did not pass its readiness check.');
-    }
-  }
-  return payload as UserWorkspaceRuntimeReadiness;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return readiness.data;
 }

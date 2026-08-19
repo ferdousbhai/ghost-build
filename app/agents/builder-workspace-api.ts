@@ -5,6 +5,8 @@ import type { PreparedDeploymentArtifact } from '~/lib/.server/cloudflare/deploy
 import type { BuilderPreviewSuccess } from './builder-preview-types';
 import type {
   BuilderWorkspaceApplyResult,
+  BuilderWorkspaceClientChange,
+  BuilderWorkspaceFileInput,
   BuilderWorkspaceSeedStartResult,
   BuilderWorkspaceState,
   BuilderWorkspaceSyncPage,
@@ -22,6 +24,154 @@ export type BuilderWorkspaceFileMetadata = {
 export type BuilderWorkspaceCheckpoint = {
   workspaceRevision: number;
   revision: string;
+};
+
+export type ToolOperationStartResult =
+  | { status: 'execute' | 'active' }
+  | { status: 'completed'; result: unknown }
+  | { status: 'failed' | 'indeterminate'; error: string };
+
+export type ToolOperationBeginRequest = {
+  toolCallId: string;
+  toolName: string;
+  argsJson: string;
+};
+
+export type ToolOperationCompleteRequest = {
+  toolCallId: string;
+  /** Opaque tool payload: each tool owns its own result shape, so the workspace stores it verbatim. */
+  result: unknown;
+};
+
+export type ToolOperationFailureRequest = {
+  toolCallId: string;
+  error: string;
+};
+
+export type WorkspaceSeedExpectation = {
+  fileCount: number;
+  totalBytes: number;
+};
+
+export type WorkspaceApplyChangesRequest = {
+  baseRevision: number;
+  changes: BuilderWorkspaceClientChange[];
+  toolCallId?: string;
+  operationKey?: string;
+};
+
+export type WorkspaceSyncPageRequest = {
+  fromRevision: number;
+  cursor?: string;
+};
+
+export type WorkspaceCommandRequest = {
+  command: string;
+  /** Absolute or project-relative directory; the workspace root when omitted. */
+  cwd?: string;
+  /** Forwarded from the Computer exec options; the runtime accepts only `container-shell`. */
+  backend?: string;
+  operationKey?: string;
+};
+
+export type WorkspaceCommandResult = {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+};
+
+/** Partial output streamed while a command is still running. */
+export type WorkspaceCommandProgress = {
+  command: string;
+  cwd: string | null;
+  backend: string;
+  stdout: string;
+  stderr: string;
+  running: true;
+};
+
+export type WorkspaceCancelExecutionRequest = {
+  operationKey: string;
+};
+
+export type WorkspaceInstallDependenciesRequest = {
+  toolCallId: string;
+  /** Raw model-supplied tool arguments, echoed back in the tool result for the transcript. */
+  input: unknown;
+  mode: 'add' | 'sync-lockfile';
+  packages: string[];
+};
+
+export type WorkspaceValidateRequest = {
+  toolCallId: string;
+  /** Raw model-supplied tool arguments, echoed back in the tool result for the transcript. */
+  input: unknown;
+};
+
+export type WorkspaceCancelValidationRequest = {
+  toolCallId?: string;
+};
+
+export type WorkspaceDeploymentSessionRequest = {
+  operationId: string;
+  expectedWorkspaceRevision: number;
+  expectedSnapshotRevision: string;
+};
+
+export type WorkspaceDeploymentArtifactRequest = {
+  sessionId: string;
+  revision: string;
+  deploymentId: string;
+  executionGeneration: number;
+  accountId: string;
+  workerName: string;
+  projectType: DeploymentProjectProfile['type'];
+  workersAi: boolean;
+  appAgent: boolean;
+  d1DatabaseId?: string;
+  d1DatabaseName?: string;
+  agentSecurityD1DatabaseId?: string;
+  agentSecurityD1DatabaseName?: string;
+  r2BucketName?: string;
+  kvNamespaceId?: string;
+  securityBaselineVersion: string;
+  securityBoundarySha256: string;
+  templateSourceSha256: string;
+};
+
+export type WorkspacePreviewRequest = {
+  previewId: string;
+  expectedWorkspaceRevision: number;
+  expectedSnapshotRevision: string;
+};
+
+export type BuilderWorkspaceTextFile = {
+  path: string;
+  content: string;
+  encoding: 'utf8';
+  size: number;
+  sha256: string;
+  revision: number;
+};
+
+export type BuilderWorkspaceBinaryFile = {
+  path: string;
+  bytes: Uint8Array;
+  encoding: 'utf8' | 'base64';
+  size: number;
+  mode: number;
+  sha256: string;
+  revision: number;
+};
+
+export type BuilderWorkspaceDirectoryEntry = {
+  name: string;
+  isFile: boolean;
+  isDirectory: boolean;
+};
+
+export type BuilderWorkspaceDeploymentPlan = BuilderWorkspaceCheckpoint & {
+  project: DeploymentProjectProfile;
 };
 
 export const WORKSPACE_TOOL_OPERATION_INDETERMINATE_CODE = 'workspace_tool_operation_indeterminate';
@@ -53,16 +203,10 @@ export class WorkspaceToolOperationIndeterminateError extends Error {
 
 export interface ProjectWorkspaceRpc extends Rpc.DurableObjectBranded {
   initializeProjectIdentity(value: { projectId: string; userId: string }): void | Promise<void>;
-  beginToolOperation(
-    value: unknown,
-  ): Promise<
-    | { status: 'execute' | 'active' }
-    | { status: 'completed'; result: unknown }
-    | { status: 'failed' | 'indeterminate'; error: string }
-  >;
-  completeToolOperation(value: unknown): unknown | Promise<unknown>;
-  failToolOperation(value: unknown): void | Promise<void>;
-  cancelToolOperation(value: unknown): Promise<{ status: 'active' | 'settled' }>;
+  beginToolOperation(value: ToolOperationBeginRequest): Promise<ToolOperationStartResult>;
+  completeToolOperation(value: ToolOperationCompleteRequest): Promise<unknown>;
+  failToolOperation(value: ToolOperationFailureRequest): void | Promise<void>;
+  cancelToolOperation(value: ToolOperationFailureRequest): Promise<{ status: 'active' | 'settled' }>;
   getWorkspaceState(): Promise<BuilderWorkspaceState>;
   getWorkspaceSnapshot(): Promise<{ state: BuilderWorkspaceState; files: BuilderWorkspaceFileMetadata[] }>;
   beginSeed(seedId: unknown): Promise<BuilderWorkspaceSeedStartResult>;
@@ -71,30 +215,24 @@ export interface ProjectWorkspaceRpc extends Rpc.DurableObjectBranded {
   abortSeed(seedId: unknown): Promise<BuilderWorkspaceState>;
   applyChanges(value: unknown): Promise<BuilderWorkspaceApplyResult>;
   getSyncPage(value: unknown): Promise<BuilderWorkspaceSyncPage>;
-  readText(path: unknown): ReturnType<BuilderWorkspaceApi['readText']>;
-  readWorkspaceFile(path: unknown): ReturnType<BuilderWorkspaceApi['readFile']>;
-  streamWorkspaceFile(path: unknown): Promise<ReadableStream<Uint8Array>>;
+  readText(path: unknown): Promise<BuilderWorkspaceTextFile>;
+  readWorkspaceFile(path: unknown): Promise<BuilderWorkspaceBinaryFile>;
+  streamWorkspaceFile(path: string): Promise<ReadableStream<Uint8Array>>;
   listWorkspaceFiles(): Promise<BuilderWorkspaceFileMetadata[]>;
-  readDirectory(path: unknown): Promise<Array<{ name: string; isFile: boolean; isDirectory: boolean }>>;
-  makeDirectory(path: unknown): Promise<void>;
-  execute(value: unknown): Promise<{ exitCode: number; stdout: string; stderr: string }>;
-  executeStream(value: unknown): Promise<ReadableStream<Uint8Array>>;
-  cancelExecution(value: unknown): Promise<void>;
+  readDirectory(path: string): Promise<BuilderWorkspaceDirectoryEntry[]>;
+  makeDirectory(path: string): Promise<void>;
+  execute(value: WorkspaceCommandRequest): Promise<WorkspaceCommandResult>;
+  executeStream(value: WorkspaceCommandRequest): Promise<ReadableStream<Uint8Array>>;
+  cancelExecution(value: WorkspaceCancelExecutionRequest): Promise<void>;
   checkpoint(): Promise<BuilderWorkspaceCheckpoint>;
-  installDependenciesTool(value: unknown): Promise<GhostbuildToolResult>;
-  validateTool(value: unknown): Promise<GhostbuildToolResult>;
-  cancelValidation(value: unknown): Promise<void>;
-  validationStatus(revision: unknown): { valid: boolean } | Promise<{ valid: boolean }>;
-  deploymentPlan(revision: unknown): ReturnType<BuilderWorkspaceApi['prepareDeployment']>;
-  beginDeploymentSession(value: {
-    operationId: string;
-    expectedWorkspaceRevision: number;
-    expectedSnapshotRevision: string;
-  }): Promise<{ sessionId: string }>;
+  installDependenciesTool(value: WorkspaceInstallDependenciesRequest): Promise<GhostbuildToolResult>;
+  validateTool(value: WorkspaceValidateRequest): Promise<GhostbuildToolResult>;
+  cancelValidation(value: WorkspaceCancelValidationRequest): Promise<void>;
+  validationStatus(revision: string): { valid: boolean } | Promise<{ valid: boolean }>;
+  deploymentPlan(revision: string): Promise<BuilderWorkspaceDeploymentPlan>;
+  beginDeploymentSession(value: WorkspaceDeploymentSessionRequest): Promise<{ sessionId: string }>;
   assertDeploymentSession(value: { sessionId: string }): Promise<BuilderWorkspaceCheckpoint>;
-  prepareDeploymentArtifact(
-    value: Record<string, unknown> & { sessionId: string; kvNamespaceId?: string },
-  ): Promise<PreparedDeploymentArtifact>;
+  prepareDeploymentArtifact(value: WorkspaceDeploymentArtifactRequest): Promise<PreparedDeploymentArtifact>;
   finishDeploymentSession(value: {
     sessionId: string;
     status: 'completed' | 'failed';
@@ -102,8 +240,8 @@ export interface ProjectWorkspaceRpc extends Rpc.DurableObjectBranded {
   terminalizeInterruptedDeploymentSession(value: {
     sessionId: string;
   }): Promise<{ status: 'absent' | 'completed' | 'failed' }>;
-  createPreview(value: unknown): Promise<BuilderPreviewSuccess>;
-  stopPreview(previewId: unknown): Promise<void>;
+  createPreview(value: WorkspacePreviewRequest): Promise<BuilderPreviewSuccess>;
+  stopPreview(previewId: string): Promise<void>;
   deleteProject(): Promise<void>;
 }
 
@@ -118,68 +256,37 @@ export interface BuilderWorkspaceApi {
   readonly computer: CreateAIToolsOptions['workspace'];
   refresh(): Promise<BuilderWorkspaceState>;
   getState(): BuilderWorkspaceState;
-  beginSeed(seedId: unknown): Promise<BuilderWorkspaceSeedStartResult>;
-  appendSeed(seedId: unknown, entries: unknown): Promise<BuilderWorkspaceState>;
-  commitSeed(seedId: unknown, expected: unknown): Promise<BuilderWorkspaceState>;
-  abortSeed(seedId: unknown): Promise<BuilderWorkspaceState>;
-  applyClientChanges(value: unknown): Promise<BuilderWorkspaceApplyResult>;
-  getSyncPage(value: unknown): Promise<BuilderWorkspaceSyncPage>;
-  readText(
-    path: unknown,
-    abortSignal?: AbortSignal,
-  ): Promise<{
-    path: string;
-    content: string;
-    encoding: 'utf8';
-    size: number;
-    sha256: string;
-    revision: number;
-  }>;
-  readFile(path: unknown): Promise<{
-    path: string;
-    bytes: Uint8Array;
-    encoding: 'utf8' | 'base64';
-    size: number;
-    mode: number;
-    sha256: string;
-    revision: number;
-  }>;
+  beginSeed(seedId: string): Promise<BuilderWorkspaceSeedStartResult>;
+  appendSeed(seedId: string, entries: BuilderWorkspaceFileInput[]): Promise<BuilderWorkspaceState>;
+  commitSeed(seedId: string, expected: WorkspaceSeedExpectation): Promise<BuilderWorkspaceState>;
+  abortSeed(seedId: string): Promise<BuilderWorkspaceState>;
+  applyClientChanges(value: WorkspaceApplyChangesRequest): Promise<BuilderWorkspaceApplyResult>;
+  getSyncPage(value: WorkspaceSyncPageRequest): Promise<BuilderWorkspaceSyncPage>;
+  readText(path: string, abortSignal?: AbortSignal): Promise<BuilderWorkspaceTextFile>;
+  readFile(path: string): Promise<BuilderWorkspaceBinaryFile>;
   listFiles(): BuilderWorkspaceFileMetadata[];
   checkpoint(): Promise<BuilderWorkspaceCheckpoint>;
-  executeCommand(args: {
-    command: string;
-    cwd?: string;
-    backend?: string;
-    onUpdate?: (partialResult: unknown) => void;
-    abortSignal?: AbortSignal;
-  }): Promise<{ exitCode: number; stdout: string; stderr: string; streamTruncated?: boolean }>;
+  executeCommand(
+    args: WorkspaceCommandRequest & {
+      onUpdate?: (partialResult: WorkspaceCommandProgress) => void;
+      abortSignal?: AbortSignal;
+    },
+  ): Promise<WorkspaceCommandResult & { streamTruncated?: boolean }>;
   executeToolOnce<T>(
-    toolCallId: unknown,
+    toolCallId: string,
     toolName: string,
     args: unknown,
     execute: () => Promise<T>,
     abortSignal?: AbortSignal,
   ): Promise<T>;
-  installDependencies(args: {
-    toolCallId: string;
-    input: unknown;
-    mode: 'add' | 'sync-lockfile';
-    packages: string[];
-    abortSignal?: AbortSignal;
-  }): Promise<GhostbuildToolResult>;
-  validate(args: { toolCallId: string; input: unknown; abortSignal?: AbortSignal }): Promise<GhostbuildToolResult>;
+  installDependencies(
+    args: WorkspaceInstallDependenciesRequest & { abortSignal?: AbortSignal },
+  ): Promise<GhostbuildToolResult>;
+  validate(args: WorkspaceValidateRequest & { abortSignal?: AbortSignal }): Promise<GhostbuildToolResult>;
   cancelActiveValidation(): Promise<void>;
   hasSuccessfulValidation(revision: string): Promise<boolean>;
-  prepareDeployment(revision: string): Promise<{
-    workspaceRevision: number;
-    revision: string;
-    project: DeploymentProjectProfile;
-  }>;
-  createPreview(args: {
-    previewId: string;
-    expectedWorkspaceRevision: number;
-    expectedSnapshotRevision: string;
-  }): Promise<BuilderPreviewSuccess>;
+  prepareDeployment(revision: string): Promise<BuilderWorkspaceDeploymentPlan>;
+  createPreview(args: WorkspacePreviewRequest): Promise<BuilderPreviewSuccess>;
   stopPreview(previewId: string): Promise<void>;
   deleteProject(): Promise<void>;
 }

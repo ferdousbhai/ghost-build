@@ -28,10 +28,10 @@ export async function waitForStoreValue<T, TResult>(
 
   return new Promise<TResult>((resolve, reject) => {
     let settled = false;
-    const subscription: { unlisten?: () => void } = {};
+    let unlisten: (() => void) | undefined = undefined;
 
     const cleanup = () => {
-      subscription.unlisten?.();
+      unlisten?.();
       options.signal?.removeEventListener('abort', handleAbort);
     };
     const handleAbort = () => {
@@ -44,7 +44,7 @@ export async function waitForStoreValue<T, TResult>(
     };
 
     options.signal?.addEventListener('abort', handleAbort, { once: true });
-    subscription.unlisten = store.listen((storeValue) => {
+    unlisten = store.listen((storeValue) => {
       if (settled) {
         return;
       }

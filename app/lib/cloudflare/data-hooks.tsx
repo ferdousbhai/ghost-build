@@ -113,7 +113,7 @@ function getSubchatCollection(args: SubchatQueryArgs, replica: AccountLocalRepli
   subchatCollections.set(key, collection);
   activeSubchatCollections.set(scopeKey, collection);
   if (subchatCollections.size > MAX_SUBCHAT_COLLECTIONS) {
-    const oldestKey = subchatCollections.keys().next().value as string | undefined;
+    const [oldestKey] = subchatCollections.keys();
     if (oldestKey) {
       const oldest = subchatCollections.get(oldestKey);
       subchatCollections.delete(oldestKey);

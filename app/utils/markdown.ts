@@ -15,7 +15,6 @@ function isHtmlNode(node: UnistNode): node is HtmlNode {
   return node.type === 'html';
 }
 
-// Add custom rehype plugin
 function remarkThinkRawContent() {
   return (tree: UnistNode) => {
     visit(tree, (node: UnistNode) => {

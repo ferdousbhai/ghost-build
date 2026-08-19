@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   isForbiddenStackDependencyPackageName,
   isRegistryPackageSpec,
@@ -15,7 +16,23 @@ const forbiddenPackageManagerPolicyFields = ['dependenciesMeta', 'overrides', 'p
 
 type PackageDependencySection = (typeof packageDependencySections)[number];
 
-type PackageManifest = Partial<Record<PackageDependencySection, unknown>> & Record<string, unknown>;
+/**
+ * A dependency map as authored. A version spec the manifest wrote as something other than a
+ * string normalizes to `null` rather than failing the section, so it can still be reported by
+ * name instead of silently skipping every sibling dependency.
+ */
+const dependencySectionSchema = z.record(z.string(), z.string().nullable().catch(null));
+const optionalDependencySectionSchema = dependencySectionSchema.optional().catch(undefined);
+
+/** Unrecognized members are kept so the package-manager policy fields below remain visible. */
+const packageManifestSchema = z.looseObject({
+  dependencies: optionalDependencySectionSchema,
+  devDependencies: optionalDependencySectionSchema,
+  optionalDependencies: optionalDependencySectionSchema,
+  peerDependencies: optionalDependencySectionSchema,
+});
+
+type PackageManifest = z.infer<typeof packageManifestSchema>;
 
 type ForbiddenGeneratedPackageDependency = {
   section: PackageDependencySection;
@@ -25,12 +42,8 @@ type ForbiddenGeneratedPackageDependency = {
 type InvalidGeneratedPackageSource = {
   section: PackageDependencySection;
   packageName: string;
-  versionSpec: unknown;
+  versionSpec: string | null;
 };
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function packageJsonPath(filePath: string) {
   return slashPath(filePath).endsWith('/package.json') || filePath === 'package.json';
@@ -40,18 +53,13 @@ export function findForbiddenGeneratedPackageDependencies(manifest: PackageManif
   const forbiddenDependencies: ForbiddenGeneratedPackageDependency[] = [];
 
   for (const section of packageDependencySections) {
-    const dependencies = manifest[section];
-    if (!isPlainRecord(dependencies)) {
-      continue;
-    }
-
-    for (const [packageName, versionSpec] of Object.entries(dependencies)) {
+    for (const [packageName, versionSpec] of Object.entries(manifest[section] ?? {})) {
       if (isForbiddenStackDependencyPackageName(packageName)) {
         forbiddenDependencies.push({ section, packageName });
         continue;
       }
 
-      if (typeof versionSpec !== 'string' || !versionSpec.includes('npm:')) {
+      if (versionSpec === null || !versionSpec.includes('npm:')) {
         continue;
       }
 
@@ -68,12 +76,8 @@ export function findForbiddenGeneratedPackageDependencies(manifest: PackageManif
 export function findInvalidGeneratedPackageSources(manifest: PackageManifest) {
   const invalidSources: InvalidGeneratedPackageSource[] = [];
   for (const section of packageDependencySections) {
-    const dependencies = manifest[section];
-    if (!isPlainRecord(dependencies)) {
-      continue;
-    }
-    for (const [packageName, versionSpec] of Object.entries(dependencies)) {
-      if (typeof versionSpec !== 'string' || !isRegistryPackageSpec(`${packageName}@${versionSpec}`)) {
+    for (const [packageName, versionSpec] of Object.entries(manifest[section] ?? {})) {
+      if (versionSpec === null || !isRegistryPackageSpec(`${packageName}@${versionSpec}`)) {
         invalidSources.push({ section, packageName, versionSpec });
       }
     }
@@ -90,16 +94,18 @@ export function assertValidGeneratedPackageJson(filePath: string, content: strin
     return;
   }
 
-  let manifest: unknown;
+  let rawManifest: unknown;
   try {
-    manifest = JSON.parse(content);
+    rawManifest = JSON.parse(content);
   } catch {
     return;
   }
 
-  if (!isPlainRecord(manifest)) {
+  const parsed = packageManifestSchema.safeParse(rawManifest);
+  if (!parsed.success) {
     return;
   }
+  const manifest = parsed.data;
 
   const forbiddenDependencies = findForbiddenGeneratedPackageDependencies(manifest);
   if (forbiddenDependencies.length > 0) {

@@ -1,3 +1,4 @@
+import { getOptionalBinding } from '~/lib/.server/env';
 import { buildDeploymentPlanFromSource, isCurrentDeploymentPlan } from '~/lib/.server/cloudflare/deployment-plan';
 import type { DeploymentProjectProfile } from '~/lib/.server/cloudflare/deployment-project-profile';
 import {
@@ -165,21 +166,11 @@ function requireWorkspaceDeploymentArgs(args: {
   workspaceRevision?: number;
   project?: DeploymentProjectProfile;
 }) {
-  if (
-    typeof args.projectId !== 'string' ||
-    typeof args.revision !== 'string' ||
-    typeof args.workspaceRevision !== 'number' ||
-    !args.project
-  ) {
+  const { projectId, revision, workspaceRevision, project } = args;
+  if (projectId === undefined || revision === undefined || workspaceRevision === undefined || !project) {
     throw new Error('The user-owned workspace deployment reference is incomplete.');
   }
-  return {
-    ...args,
-    projectId: args.projectId,
-    revision: args.revision,
-    workspaceRevision: args.workspaceRevision,
-    project: args.project,
-  };
+  return { ...args, projectId, revision, workspaceRevision, project };
 }
 
 function workspaceReference(args: { projectId: string; revision: string; workspaceRevision: number }): string {
@@ -199,24 +190,24 @@ async function requireActiveDeploymentChat(db: D1Database, deployment: Deploymen
   }
 }
 
-function runtimeCloudflareIdentity(env: Env, userId: string): { id: string; generation: number } {
-  const runtime = env as Env & {
-    GHOSTBUILD_USER_RUNTIME?: string;
-    GHOSTBUILD_USER_ID?: string;
-    GHOSTBUILD_CONNECTION_ID?: string;
-    GHOSTBUILD_CONNECTION_GENERATION?: string;
-  };
-  const generation = Number(runtime.GHOSTBUILD_CONNECTION_GENERATION);
+type RuntimeCloudflareIdentity = {
+  id: string;
+  generation: number;
+};
+
+function runtimeCloudflareIdentity(env: Env, userId: string): RuntimeCloudflareIdentity {
+  const connectionId = getOptionalBinding(env, 'GHOSTBUILD_CONNECTION_ID');
+  const generation = Number(getOptionalBinding(env, 'GHOSTBUILD_CONNECTION_GENERATION'));
   if (
-    runtime.GHOSTBUILD_USER_RUNTIME !== '1' ||
-    runtime.GHOSTBUILD_USER_ID !== userId ||
-    !runtime.GHOSTBUILD_CONNECTION_ID ||
+    getOptionalBinding(env, 'GHOSTBUILD_USER_RUNTIME') !== '1' ||
+    getOptionalBinding(env, 'GHOSTBUILD_USER_ID') !== userId ||
+    !connectionId ||
     !Number.isSafeInteger(generation) ||
     generation < 1
   ) {
     throw new DeploymentConnectionRequiredError();
   }
-  return { id: runtime.GHOSTBUILD_CONNECTION_ID, generation };
+  return { id: connectionId, generation };
 }
 
 function publicDeployment(deployment: Deployment) {

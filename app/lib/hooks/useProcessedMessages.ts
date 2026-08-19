@@ -13,17 +13,13 @@ function isPartMaybeEqual(a: Part, b: Part): boolean {
   }
   const aInvocation = getToolInvocation(a);
   const bInvocation = getToolInvocation(b);
-  if (aInvocation && bInvocation) {
-    const aState = (aInvocation as { state?: unknown }).state;
-    const bState = (bInvocation as { state?: unknown }).state;
-    if (
-      typeof aState === 'string' &&
-      typeof bState === 'string' &&
-      aState.startsWith('output-') &&
-      bState.startsWith('output-')
-    ) {
-      return aInvocation.toolCallId === bInvocation.toolCallId && aInvocation.state === bInvocation.state;
-    }
+  if (
+    aInvocation &&
+    bInvocation &&
+    aInvocation.state.startsWith('output-') &&
+    bInvocation.state.startsWith('output-')
+  ) {
+    return aInvocation.toolCallId === bInvocation.toolCallId && aInvocation.state === bInvocation.state;
   }
   return false;
 }
@@ -36,10 +32,13 @@ function recordToolPart(partId: PartId, part: Part): void {
   toolActivityStore.record(partId, toolInvocation);
 }
 
-export function processMessage(
-  message: GhostbuildMessage,
-  previousParts: PartCache,
-): { message: GhostbuildMessage; hitRate: [number, number] } {
+type ProcessedMessage = {
+  message: GhostbuildMessage;
+  /** `[cache hits, parts examined]` for the message just processed. */
+  hitRate: [number, number];
+};
+
+export function processMessage(message: GhostbuildMessage, previousParts: PartCache): ProcessedMessage {
   if (message.role === 'user') {
     return { message, hitRate: [0, 0] };
   }

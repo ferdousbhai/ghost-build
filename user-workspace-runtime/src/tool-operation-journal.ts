@@ -147,7 +147,11 @@ export class ToolOperationJournal {
   }
 
   commitMutation(args: { toolCallId: string; receipt: MutationReceipt; now?: number }): MutationReceipt {
-    return this.complete({ toolCallId: args.toolCallId, result: args.receipt, now: args.now }) as MutationReceipt;
+    const committed = this.complete({ toolCallId: args.toolCallId, result: args.receipt, now: args.now });
+    if (!isMutationReceipt(committed)) {
+      throw new Error('The completed workspace operation is not a mutation receipt.');
+    }
+    return committed;
   }
 
   acknowledgeMutation(args: { toolCallId: string; result: unknown; now?: number }): MutationReceipt {
@@ -420,15 +424,19 @@ function startResult(row: ToolOperationRow): ToolOperationStartResult {
 
 function pendingEnvelope(resultJson: string): PendingCommandEnvelope | null {
   const value: unknown = JSON.parse(resultJson);
-  return typeof value === 'object' &&
+  return isPendingCommandEnvelope(value) ? value : null;
+}
+
+function isPendingCommandEnvelope(value: unknown): value is PendingCommandEnvelope {
+  return (
+    typeof value === 'object' &&
     value !== null &&
     'kind' in value &&
     value.kind === 'workspace-sync-pending' &&
     'backend' in value &&
     typeof value.backend === 'string' &&
     'result' in value
-    ? (value as PendingCommandEnvelope)
-    : null;
+  );
 }
 
 function encodeResult(result: unknown): string {

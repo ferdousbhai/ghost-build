@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLOUDFLARE_WORKERS_AI_MODEL, PREFERRED_BUILDER_MODEL } from '~/lib/workers-ai-model';
 import {
   builderDefaultModelStore,
+  builderModelDeniedByCreditsStore,
   builderModelStore,
   initializeBuilderModelPreference,
   loadBuilderModelPreference,
@@ -62,5 +63,25 @@ describe('builder model preference', () => {
 
     syncBuilderModelPreference({ key: 'ghostbuild_builder_model', newValue: null });
     expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
+  });
+});
+
+describe('credit denial', () => {
+  it('says a saved choice was overridden only when credits are confirmed absent', () => {
+    initializeBuilderModelPreference('unavailable', { getItem: () => PREFERRED_BUILDER_MODEL });
+    expect(builderModelDeniedByCreditsStore.get()).toBe(true);
+  });
+
+  it('stays quiet while credit status is still unknown, because the choice is re-evaluated', () => {
+    // The preference is downgraded here too, but announcing a denial before the runtime
+    // session resolves would be guessing at a reason.
+    initializeBuilderModelPreference('unknown', { getItem: () => PREFERRED_BUILDER_MODEL });
+    expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
+    expect(builderModelDeniedByCreditsStore.get()).toBe(false);
+  });
+
+  it('stays quiet when the saved choice needs no credits', () => {
+    initializeBuilderModelPreference('unavailable', { getItem: () => CLOUDFLARE_WORKERS_AI_MODEL });
+    expect(builderModelDeniedByCreditsStore.get()).toBe(false);
   });
 });

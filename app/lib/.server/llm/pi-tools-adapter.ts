@@ -1,5 +1,5 @@
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
-import { z, type ZodType } from 'zod';
+import { z, ZodType } from 'zod';
 import { MODEL_TOOL_NAMES, type ModelToolName } from 'ghostbuild-agent/model-tool-inputs';
 import type { Tool } from 'ghostbuild-agent/tool';
 import { isWorkspaceToolOperationIndeterminateError, type BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
@@ -13,13 +13,13 @@ type BuilderOperationContext = {
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
 };
 
-const toolLabels: Record<ModelToolName, string> = {
+const toolLabels = {
   read: 'Read file',
   write: 'Write file',
   edit: 'Edit file',
   exec: 'Run command',
   search_cloudflare_docs: 'Search Cloudflare docs',
-};
+} satisfies Record<ModelToolName, string>;
 
 /** Adapt the canonical model tools to Pi's validated tool contract. */
 export function createPiToolBundle(
@@ -39,10 +39,10 @@ export function piToolsToList(tools: Record<string, AgentTool>): AgentTool[] {
 }
 
 function adaptTool(name: ModelToolName, definition: Tool, label: string): AgentTool {
-  if (!definition.inputSchema) {
+  const { inputSchema } = definition;
+  if (!(inputSchema instanceof ZodType)) {
     throw new Error(`${name} does not define an input schema.`);
   }
-  const inputSchema = definition.inputSchema as ZodType;
   return {
     name,
     label,
@@ -51,7 +51,7 @@ function adaptTool(name: ModelToolName, definition: Tool, label: string): AgentT
       io: 'input',
       target: 'draft-07',
       unrepresentable: 'throw',
-    }) as AgentTool['parameters'],
+    }),
     execute: async (toolCallId, rawInput, signal, onUpdate) => {
       signal?.throwIfAborted();
       const parsed = await inputSchema.safeParseAsync(rawInput);
@@ -95,7 +95,7 @@ function adaptTool(name: ModelToolName, definition: Tool, label: string): AgentT
         clearTimeout(timeout);
       }
     },
-  } as AgentTool;
+  };
 }
 
 function toPiToolResult(result: unknown): AgentToolResult<unknown> {

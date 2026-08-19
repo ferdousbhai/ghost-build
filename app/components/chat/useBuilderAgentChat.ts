@@ -1,4 +1,5 @@
 import { useAgentChat } from '@cloudflare/ai-chat/react';
+import { z } from 'zod';
 import { useAgent } from 'agents/react';
 import { useStore } from '@nanostores/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -27,6 +28,7 @@ import {
   type TranscriptIdentity,
 } from 'ghostbuild-agent/transcript';
 import { BuilderWorkspaceSyncController } from '~/lib/stores/builder-workspace-sync.client';
+import type { BuilderWorkspaceAgent } from '~/lib/stores/builder-workspace-collection.client';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { toolProgressStore } from '~/lib/stores/tool-progress.client';
 import { useQueryClient } from '@tanstack/react-query';
@@ -40,6 +42,17 @@ import { loadAuthoritativeTranscriptSnapshot, reconcileMessagesForSend } from '.
 import { BUILDER_AGENT_QUERY_CACHE_TTL_MS, loadBuilderAgentCapability } from './builder-agent-auth';
 
 const logger = createScopedLogger('BuilderAgentChat');
+
+/** Streamed `data-tool-progress` parts arrive as untyped JSON on the agent socket. */
+const toolProgressPartSchema = z.object({
+  toolCallId: z.string(),
+  toolName: z.string(),
+  result: z.unknown(),
+});
+
+/** Message metadata is caller-supplied; only an object can carry the transcript checkpoint. */
+const messageMetadataSchema = z.looseObject({});
+
 const AGENT_SEND_READY_TIMEOUT_MS = 10_000;
 const AGENT_CANCEL_SETTLE_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -119,7 +132,7 @@ export function useBuilderAgentChat(args: {
   const chat = useAgentChat<BuilderAgentState, UIMessage>({
     agent: builderAgent,
     getInitialMessages: null,
-    messages: args.initialMessages as UIMessage[],
+    messages: asUiMessages(args.initialMessages),
     syncMessagesToServer: false,
     experimental_throttle: 100,
     prepareSendMessagesRequest: ({ body }) => {
@@ -137,21 +150,12 @@ export function useBuilderAgentChat(args: {
       };
     },
     onData: (part) => {
-      if (
-        activePresentationRef.current !== args.presentationId ||
-        part.type !== 'data-tool-progress' ||
-        !part.data ||
-        typeof part.data !== 'object'
-      ) {
+      if (activePresentationRef.current !== args.presentationId || part.type !== 'data-tool-progress') {
         return;
       }
-      const progress = part.data as Record<string, unknown>;
-      if (typeof progress.toolCallId === 'string' && typeof progress.toolName === 'string' && 'result' in progress) {
-        toolProgressStore.record({
-          toolCallId: progress.toolCallId,
-          toolName: progress.toolName,
-          result: progress.result,
-        });
+      const progress = toolProgressPartSchema.safeParse(part.data);
+      if (progress.success && 'result' in progress.data) {
+        toolProgressStore.record(progress.data);
       }
     },
     onError: (error: Error) => {
@@ -181,7 +185,7 @@ export function useBuilderAgentChat(args: {
       toolProgressStore.clear();
       // Record final tool outputs before stopping any provider-ended incomplete
       // calls; sampled message processing may not have observed the last chunk yet.
-      toolActivityStore.finishTurn(message as GhostbuildMessage);
+      toolActivityStore.finishTurn(message);
       if (finishReason === 'stop') {
         resetChatRetryState();
       }
@@ -197,43 +201,35 @@ export function useBuilderAgentChat(args: {
     },
   });
   const setMessagesRef = useRef(chat.setMessages);
-  const messagesRef = useRef(chat.messages as GhostbuildMessage[]);
+  const messagesRef = useRef<GhostbuildMessage[]>(chat.messages);
   const chatTerminalStateRef = useRef({ status: chat.status, isRecovering: chat.isRecovering });
   const builderTranscriptRef = useRef(builderAgent.state?.transcript);
   const stopBarrierRef = useRef<Promise<void>>(Promise.resolve());
   const initialMessagesRef = useRef(args.initialMessages);
   useLayoutEffect(() => {
     setMessagesRef.current = chat.setMessages;
-    messagesRef.current = chat.messages as GhostbuildMessage[];
+    messagesRef.current = chat.messages;
     chatTerminalStateRef.current = { status: chat.status, isRecovering: chat.isRecovering };
     builderTranscriptRef.current = builderAgent.state?.transcript;
     initialMessagesRef.current = args.initialMessages;
   });
 
-  const readAuthoritativeTranscript = useCallback(
-    () =>
-      loadAuthoritativeTranscriptSnapshot({
-        expectedIdentity: transcript,
-        read: () =>
-          (
-            builderAgent as unknown as {
-              call(
-                method: 'getTranscriptSnapshot',
-                args: [TranscriptIdentity],
-                options: { timeout: number },
-              ): Promise<unknown>;
-            }
-          ).call('getTranscriptSnapshot', [transcript], { timeout: AGENT_SEND_READY_TIMEOUT_MS }),
-      }),
-    [builderAgent, transcript],
-  );
+  const readAuthoritativeTranscript = useCallback(() => {
+    // `useAgent` only types `call` for the callables whose results are JSON-serializable, and a
+    // transcript message may carry a `Date`. Go through the untyped RPC handle and parse the result.
+    const agentRpc: BuilderWorkspaceAgent = builderAgent;
+    return loadAuthoritativeTranscriptSnapshot({
+      expectedIdentity: transcript,
+      read: () => agentRpc.call('getTranscriptSnapshot', [transcript], { timeout: AGENT_SEND_READY_TIMEOUT_MS }),
+    });
+  }, [builderAgent, transcript]);
 
   useEffect(() => {
     let disposed = false;
     const callPreview = async (method: 'getPreviewState' | 'requestPreview') => {
-      const state = (await builderAgent.call(method, [], {
+      const state = await builderAgent.call(method, [], {
         timeout: method === 'getPreviewState' ? 10_000 : 30_000,
-      })) as NonNullable<BuilderAgentState['preview']>;
+      });
       if (!disposed && activePresentationRef.current === args.presentationId) {
         workbenchStore.updatePreview(state);
       }
@@ -278,7 +274,7 @@ export function useBuilderAgentChat(args: {
         if (!isCurrentPresentation()) {
           return;
         }
-        const state = (await builderAgent.call('prepareWorkspace', [])) as { initialized?: boolean };
+        const state = await builderAgent.call('prepareWorkspace', []);
         if (!state.initialized) {
           throw new Error('The durable project workspace was not initialized.');
         }
@@ -287,7 +283,8 @@ export function useBuilderAgentChat(args: {
         }
         sendGateResolved = true;
         gate.resolve();
-        const controller = await BuilderWorkspaceSyncController.initialize(builderAgent as never, {
+        const agentRpc: BuilderWorkspaceAgent = builderAgent;
+        const controller = await BuilderWorkspaceSyncController.initialize(agentRpc, {
           workspaceId: args.presentationId,
           replica: workspaceReplica,
           isCurrent: isCurrentPresentation,
@@ -359,7 +356,7 @@ export function useBuilderAgentChat(args: {
         throw error;
       }
       assertCurrentPresentation();
-      if (message && typeof message === 'object') {
+      if (message !== undefined) {
         const snapshot = await readAuthoritativeTranscript();
         assertCurrentPresentation();
         const localMessages = messagesRef.current;
@@ -369,15 +366,9 @@ export function useBuilderAgentChat(args: {
         });
         assertCurrentPresentation();
         if (reconciledMessages !== localMessages) {
-          setMessagesRef.current(reconciledMessages as UIMessage[]);
+          setMessagesRef.current(asUiMessages(reconciledMessages));
         }
-        const metadata =
-          'metadata' in message &&
-          message.metadata &&
-          typeof message.metadata === 'object' &&
-          !Array.isArray(message.metadata)
-            ? message.metadata
-            : {};
+        const metadata = ('metadata' in message && messageMetadataSchema.safeParse(message.metadata).data) || {};
         try {
           const request = chat.sendMessage(
             {
@@ -399,11 +390,10 @@ export function useBuilderAgentChat(args: {
     [args.presentationId, builderAgent, chat, readAuthoritativeTranscript, workspaceGateRef],
   );
 
-  const deployValidatedRevision = useCallback(async () => {
-    return (await builderAgent.call('deployValidatedRevision', [], { timeout: 30 * 60_000 })) as NonNullable<
-      BuilderAgentState['deployment']
-    >;
-  }, [builderAgent]);
+  const deployValidatedRevision = useCallback(
+    () => builderAgent.call('deployValidatedRevision', [], { timeout: 30 * 60_000 }),
+    [builderAgent],
+  );
 
   const steerMessage = useCallback(
     async (input: BuilderSteeringInput) => {
@@ -432,7 +422,7 @@ export function useBuilderAgentChat(args: {
     toolProgressStore.clear();
     const cancellation = settleBuilderStop({
       cancel: () => builderAgent.call('cancelActiveTurn', [], { timeout: AGENT_CANCEL_SETTLE_TIMEOUT_MS }),
-      reconcileMessages: (messages) => setMessagesRef.current(messages as UIMessage[]),
+      reconcileMessages: (messages) => setMessagesRef.current(asUiMessages(messages)),
       refreshWorkspace: async () => {
         await workspaceControllerRef.current?.pull();
       },
@@ -452,7 +442,7 @@ export function useBuilderAgentChat(args: {
     previousSubchatIndexRef.current = currentSubchatIndex;
     toolActivityStore.abortActive();
     toolProgressStore.clear();
-    setMessagesRef.current(initialMessagesRef.current as UIMessage[]);
+    setMessagesRef.current(asUiMessages(initialMessagesRef.current));
   }, [currentSubchatIndex]);
 
   useEffect(() => {
@@ -476,7 +466,7 @@ export function useBuilderAgentChat(args: {
         const localMessages = messagesRef.current;
         const reconciledMessages = await reconcileMessagesForSend({ snapshot, localMessages });
         if (isCurrentPresentation() && reconciledMessages !== localMessages) {
-          setMessagesRef.current(reconciledMessages as UIMessage[]);
+          setMessagesRef.current(asUiMessages(reconciledMessages));
         }
       })
       .catch((error) => logger.warn('Unable to reconcile the durable builder transcript', error));
@@ -496,7 +486,7 @@ export function useBuilderAgentChat(args: {
     stop,
     sendMessage,
     steerMessage,
-    messages: chat.messages as GhostbuildMessage[],
+    messages: chat.messages satisfies GhostbuildMessage[],
     streamStatus: chat.isRecovering ? ('submitted' as const) : chat.isStreaming ? ('streaming' as const) : chat.status,
     transcriptCheckpoint:
       builderAgent.state?.transcript && transcriptIdentitiesEqual(builderAgent.state.transcript, transcript)
@@ -533,6 +523,13 @@ function createAsyncGate(key: string | null): AsyncGate {
     resolve = complete;
   });
   return { key, promise, resolve, error: null, started: false };
+}
+
+function asUiMessages(messages: GhostbuildMessage[]): UIMessage[] {
+  // SAFETY: `GhostbuildMessage` is the AI SDK `UIMessage` shape with a deliberately open part union
+  // (see `ghostbuild-agent/ai-compat`). Every message reaching this bridge came out of the AI SDK
+  // chat store, or out of the durable transcript the agent persisted from that same store.
+  return messages as UIMessage[];
 }
 
 async function refreshProjectMetadata(

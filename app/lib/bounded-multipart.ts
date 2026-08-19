@@ -119,10 +119,13 @@ function multipartBoundary(contentType: string | null, label: string): Uint8Arra
   return boundary;
 }
 
-function parsePartHeaders(
-  bytes: Uint8Array,
-  label: string,
-): { name: string; hasFilename: boolean; contentType: string | null } {
+type MultipartPartHeaders = {
+  name: string;
+  hasFilename: boolean;
+  contentType: string | null;
+};
+
+function parsePartHeaders(bytes: Uint8Array, label: string): MultipartPartHeaders {
   if (bytes.some((byte) => byte > 127 || byte === 0)) {
     throw invalidMultipart(label);
   }

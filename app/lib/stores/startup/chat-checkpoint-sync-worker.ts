@@ -8,6 +8,7 @@ import {
 } from 'ghostbuild-agent/transcript';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import { toast } from 'sonner';
+import { z } from 'zod';
 import { cachePersistedTranscript } from '~/lib/cloudflare/chat-transcript-db';
 import { subchatIndexStore, waitForSubchatIndexChanged } from '~/lib/stores/subchats';
 import { waitForStoreValue } from '~/lib/stores/waitForStore';
@@ -80,22 +81,20 @@ export function initializeCheckpointPosition(
     }
     return;
   }
-  chatCheckpointSyncState.set({
+  const nextState: ChatCheckpointSyncState = {
     ...currentState,
     accountId,
     chatId,
-    ...(scopeChanged
-      ? {
-          lastSync: 0,
-          numFailures: 0,
-          started: false,
-          persistedTranscriptCheckpoint: null,
-        }
-      : {}),
     persistedMessageInfo: initialMessageInfo,
     persistedTranscriptCheckpoint: checkpoint,
     subchatIndex: loadedSubchatIndex,
-  });
+  };
+  if (scopeChanged) {
+    nextState.lastSync = 0;
+    nextState.numFailures = 0;
+    nextState.started = false;
+  }
+  chatCheckpointSyncState.set(nextState);
   if (scopeChanged || !isCompleteMessageInfoAtLeast(currentCompleteInfo, initialMessageInfo)) {
     lastCompleteMessageInfoStore.set({
       accountId,
@@ -107,13 +106,6 @@ export function initializeCheckpointPosition(
       transcriptCheckpoint: checkpoint,
     });
   }
-}
-
-export function hasPendingCheckpointWork(
-  currentState: ChatCheckpointSyncState,
-  completeMessageInfo: CompleteMessageInfo | null,
-): boolean {
-  return hasPendingMessageCheckpoint(currentState, completeMessageInfo);
 }
 
 export async function chatSyncWorker(options: ChatSyncWorkerOptions): Promise<void> {
@@ -190,7 +182,7 @@ export async function chatSyncWorker(options: ChatSyncWorkerOptions): Promise<vo
   }
 }
 
-function hasPendingMessageCheckpoint(
+export function hasPendingCheckpointWork(
   currentState: ChatCheckpointSyncState,
   completeMessageInfo: CompleteMessageInfo | null,
 ): boolean {
@@ -251,7 +243,7 @@ async function syncCheckpoint(
     if (signal.aborted) {
       throw error;
     }
-    requestError = error as Error;
+    requestError = error instanceof Error ? error : new Error(String(error));
   }
   if (requestError || (response && !response.ok)) {
     await handleSyncFailure(sessionId, chatId, currentState.subchatIndex, response, requestError, signal);
@@ -279,15 +271,14 @@ async function syncCheckpoint(
       checkpoint: completeMessageInfo.transcriptCheckpoint,
     });
   }
-  chatCheckpointSyncState.set({
-    ...latestState,
-    lastSync: Date.now(),
-    numFailures: 0,
-    ...(update ? { persistedMessageInfo: { messageIndex: update.messageIndex, partIndex: update.partIndex } } : {}),
-    ...(completeMessageInfo.transcriptCheckpoint
-      ? { persistedTranscriptCheckpoint: completeMessageInfo.transcriptCheckpoint }
-      : {}),
-  });
+  const syncedState: ChatCheckpointSyncState = { ...latestState, lastSync: Date.now(), numFailures: 0 };
+  if (update) {
+    syncedState.persistedMessageInfo = { messageIndex: update.messageIndex, partIndex: update.partIndex };
+  }
+  if (completeMessageInfo.transcriptCheckpoint) {
+    syncedState.persistedTranscriptCheckpoint = completeMessageInfo.transcriptCheckpoint;
+  }
+  chatCheckpointSyncState.set(syncedState);
 }
 
 async function handleSyncFailure(
@@ -361,17 +352,15 @@ async function handleSyncFailure(
   await abortableDelay(delay, signal);
 }
 
+const transcriptAdvanceConflictSchema = z.looseObject({ error: z.literal(TRANSCRIPT_ADVANCED_ERROR) });
+const transcriptConflictBodySchema = z.looseObject({ checkpoint: z.unknown() });
+
 export function isTranscriptAdvanceConflict(status: number | undefined, responseBody: string): boolean {
   if (status !== 409) {
     return false;
   }
   try {
-    const value = JSON.parse(responseBody) as unknown;
-    return (
-      typeof value === 'object' &&
-      value !== null &&
-      (value as Record<string, unknown>).error === TRANSCRIPT_ADVANCED_ERROR
-    );
+    return transcriptAdvanceConflictSchema.safeParse(JSON.parse(responseBody)).success;
   } catch {
     return false;
   }
@@ -391,19 +380,11 @@ export async function adoptAdvancedTranscriptCheckpoint(
   attemptedChatId: string,
   attemptedSubchatIndex: number,
 ): Promise<boolean> {
-  let value: unknown;
-  try {
-    value = JSON.parse(responseBody);
-  } catch {
-    return false;
-  }
-  const result = transcriptCheckpointSchema.safeParse(
-    typeof value === 'object' && value !== null ? (value as Record<string, unknown>).checkpoint : undefined,
-  );
+  const advancedCheckpoint = parseTranscriptConflictCheckpoint(responseBody);
   const complete = lastCompleteMessageInfoStore.get();
   const state = chatCheckpointSyncState.get();
   if (
-    !result.success ||
+    advancedCheckpoint === null ||
     complete === null ||
     complete.accountId !== attemptedAccountId ||
     complete.chatId !== attemptedChatId ||
@@ -412,8 +393,8 @@ export async function adoptAdvancedTranscriptCheckpoint(
     state.chatId !== attemptedChatId ||
     state.subchatIndex !== attemptedSubchatIndex ||
     (complete.transcriptCheckpoint !== null &&
-      !transcriptIdentitiesEqual(complete.transcriptCheckpoint, result.data)) ||
-    !(await transcriptCheckpointMatchesMessages(result.data, complete.allMessages))
+      !transcriptIdentitiesEqual(complete.transcriptCheckpoint, advancedCheckpoint)) ||
+    !(await transcriptCheckpointMatchesMessages(advancedCheckpoint, complete.allMessages))
   ) {
     return false;
   }
@@ -427,8 +408,24 @@ export async function adoptAdvancedTranscriptCheckpoint(
   ) {
     return false;
   }
-  lastCompleteMessageInfoStore.set({ ...complete, transcriptCheckpoint: result.data });
+  lastCompleteMessageInfoStore.set({ ...complete, transcriptCheckpoint: advancedCheckpoint });
   return true;
+}
+
+/** The 409 body carries the transcript the durable object already holds; anything else is not adoptable. */
+function parseTranscriptConflictCheckpoint(responseBody: string): TranscriptCheckpoint | null {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(responseBody);
+  } catch {
+    return null;
+  }
+  const body = transcriptConflictBodySchema.safeParse(payload);
+  if (!body.success) {
+    return null;
+  }
+  const checkpoint = transcriptCheckpointSchema.safeParse(body.data.checkpoint);
+  return checkpoint.success ? checkpoint.data : null;
 }
 
 async function waitForNextSyncTrigger(

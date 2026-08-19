@@ -4,13 +4,21 @@ import { toast } from 'sonner';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { TranscriptCheckpoint, TranscriptIdentity } from 'ghostbuild-agent/transcript';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { useCachedChatTranscript } from '~/lib/cloudflare/chat-transcript-db';
+import { useCachedChatTranscript, type TranscriptRequest } from '~/lib/cloudflare/chat-transcript-db';
 import { description } from '~/lib/stores/description';
 import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { subchatIndexStore } from '~/lib/stores/subchats';
 import type { SerializedMessage } from './messages';
 
 const logger = createScopedLogger('InitialMessages');
+
+function transcriptRequest(chatId: string, selection: TranscriptSelection): TranscriptRequest {
+  const request: TranscriptRequest = { chatId };
+  if (selection.subchatIndex !== undefined) {
+    request.subchatIndex = selection.subchatIndex;
+  }
+  return request;
+}
 
 interface InitialMessages {
   loadedChatId: string;
@@ -44,12 +52,7 @@ export function useInitialMessagesState(chatId: string | undefined): InitialMess
   const activeSelection = selection?.scope === scope ? selection : undefined;
   const cached = useCachedChatTranscript(
     userId,
-    chatId && activeSelection
-      ? {
-          chatId,
-          ...(activeSelection.subchatIndex === undefined ? {} : { subchatIndex: activeSelection.subchatIndex }),
-        }
-      : undefined,
+    chatId && activeSelection ? transcriptRequest(chatId, activeSelection) : undefined,
   );
 
   useEffect(() => {

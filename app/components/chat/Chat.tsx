@@ -58,7 +58,7 @@ export const Chat = memo(
     } | null>(null);
     const [runtimeConnectionAttempt, setRuntimeConnectionAttempt] = useState(0);
     useEffect(() => {
-      if (typeof userId !== 'string' || runtimeEndpoint) {
+      if (userId === null || userId === undefined || runtimeEndpoint) {
         return undefined;
       }
       let canceled = false;
@@ -77,7 +77,7 @@ export const Chat = memo(
         canceled = true;
       };
     }, [runtimeConnectionAttempt, runtimeEndpoint, userId]);
-    if (typeof userId !== 'string') {
+    if (userId === null || userId === undefined) {
       return (
         <UnauthenticatedChat initialMessages={initialMessages} subchats={subchats} authLoading={userId === undefined} />
       );

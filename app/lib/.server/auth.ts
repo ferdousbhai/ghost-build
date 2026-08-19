@@ -1,4 +1,5 @@
 const SESSION_COOKIE = 'ghostbuild_session';
+import { sha256Hex } from '~/lib/hex-digest';
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 export type CloudflareAuthUser = {
@@ -53,7 +54,7 @@ export async function getAuthSession(env: Env, request: Request): Promise<Cloudf
   if (!token) {
     return null;
   }
-  const tokenHash = await sha256(token);
+  const tokenHash = await sha256Hex(token);
   const now = Date.now();
   const row = await env.DB.prepare(
     `SELECT auth.id AS session_id, auth.user_id, auth.expires_at, auth.created_at,
@@ -84,7 +85,7 @@ export async function prepareAuthSession(
   return {
     id: crypto.randomUUID(),
     userId,
-    tokenHash: await sha256(token),
+    tokenHash: await sha256Hex(token),
     expiresAt: now + SESSION_MAX_AGE_SECONDS * 1_000,
     createdAt: now,
     cookie: serializeSessionCookie(token, SESSION_MAX_AGE_SECONDS, isHttps(request)),
@@ -117,7 +118,7 @@ export async function deleteAuthSession(env: Env, request: Request): Promise<voi
     return;
   }
   await env.DB.prepare('DELETE FROM cloudflare_auth_sessions WHERE token_hash = ?')
-    .bind(await sha256(token))
+    .bind(await sha256Hex(token))
     .run();
 }
 
@@ -334,11 +335,6 @@ function cookieValue(header: string | null, name: string): string | null {
     }
   }
   return null;
-}
-
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function isExactAuthSessionCommitted(db: D1Database, session: PreparedAuthSession): Promise<boolean> {

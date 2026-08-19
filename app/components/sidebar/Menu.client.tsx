@@ -48,7 +48,7 @@ interface MenuProps {
 export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const userId = useUserIdOrNullOrLoading();
-  const accountUserId = typeof userId === 'string' ? userId : null;
+  const accountUserId = userId ?? null;
   const activeChatId = useChatId();
   const history = useChatHistory(accountUserId);
   const list = history.projects;
@@ -84,14 +84,15 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
       if (deleteTarget) {
         return;
       }
-      const target = event.target as Element;
-
-      // Don't close if clicking on the hamburger icon
-      if (target?.closest('[data-hamburger-menu]')) {
+      const target = event.target;
+      if (!(target instanceof Element)) {
         return;
       }
-
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+      // Don't close if clicking on the hamburger icon
+      if (target.closest('[data-hamburger-menu]')) {
+        return;
+      }
+      if (menuRef.current && !menuRef.current.contains(target)) {
         onClose();
       }
     }

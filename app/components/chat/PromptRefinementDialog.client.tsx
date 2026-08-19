@@ -67,15 +67,20 @@ export function PromptRefinementDialog({
         const answer = drafts[item.id] ?? (item.id === question.id ? draft : { selectedOptionIds: [] });
         const customInput = answer.customInput?.trim();
         const note = answer.note?.trim();
-        return {
+        const refinement: PromptRefinementAnswer = {
           questionId: item.id,
           question: item.question,
           selectedOptions: customInput
             ? []
             : answer.selectedOptionIds.map((id) => item.options.find((option) => option.id === id)!.label),
-          ...(customInput ? { customInput } : {}),
-          ...(note ? { note } : {}),
         };
+        if (customInput) {
+          refinement.customInput = customInput;
+        }
+        if (note) {
+          refinement.note = note;
+        }
+        return refinement;
       }),
     );
   };

@@ -10,6 +10,12 @@ vi.mock('~/lib/.server/auth', () => mocks);
 
 import { authSessionAction, signOutAction } from './auth';
 
+function testEnv(): Env {
+  // SAFETY: the session and sign-out handlers under test read no binding off `env`; every
+  // collaborator they touch is mocked at the module boundary.
+  return {} as Env;
+}
+
 describe('auth handlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -20,7 +26,7 @@ describe('auth handlers', () => {
 
   it('returns session state without allowing it to be cached', async () => {
     const request = new Request('https://ghostbuild.dev/api/auth/session');
-    const env = {} as Env;
+    const env = testEnv();
     const response = await authSessionAction({ request, env });
 
     expect(response.status).toBe(200);
@@ -35,7 +41,7 @@ describe('auth handlers', () => {
         method: 'POST',
         headers: { Origin: 'https://attacker.example' },
       }),
-      env: {} as Env,
+      env: testEnv(),
     });
 
     expect(response.status).toBe(403);
@@ -47,7 +53,7 @@ describe('auth handlers', () => {
       method: 'POST',
       headers: { Origin: 'https://ghostbuild.dev' },
     });
-    const env = {} as Env;
+    const env = testEnv();
     const response = await signOutAction({ request, env });
 
     expect(response.status).toBe(204);

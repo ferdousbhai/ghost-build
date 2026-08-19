@@ -1,13 +1,15 @@
-type PackageManifest = {
-  dependencies?: Record<string, string>;
-  [key: string]: unknown;
-};
+import { z } from 'zod';
+
+/** Unrecognized members pass through untouched so rewriting dependencies preserves the manifest. */
+const packageManifestSchema = z.looseObject({
+  dependencies: z.record(z.string(), z.string()).optional().catch(undefined),
+});
 
 export function addRequestedDependencies(packageJson: string, packageSpecs: string[]): string {
   if (packageSpecs.length === 0) {
     return packageJson;
   }
-  const manifest = JSON.parse(packageJson) as PackageManifest;
+  const manifest = packageManifestSchema.parse(JSON.parse(packageJson));
   const requestedDependencies = Object.fromEntries(packageSpecs.map(splitRegistryPackageSpec));
   return `${JSON.stringify(
     {

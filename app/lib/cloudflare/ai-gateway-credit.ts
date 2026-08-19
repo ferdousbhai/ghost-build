@@ -1,5 +1,5 @@
-export type AiGatewayCreditStatus = 'available' | 'unavailable' | 'unknown';
+import { z } from 'zod';
 
-export function isAiGatewayCreditStatus(value: unknown): value is AiGatewayCreditStatus {
-  return value === 'available' || value === 'unavailable' || value === 'unknown';
-}
+export const aiGatewayCreditStatusSchema = z.enum(['available', 'unavailable', 'unknown']);
+
+export type AiGatewayCreditStatus = z.infer<typeof aiGatewayCreditStatusSchema>;

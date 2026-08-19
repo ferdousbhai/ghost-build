@@ -66,7 +66,8 @@ export async function readJsonBodyWithLimit(
     throw new InvalidJsonBodyError(`${label} must be valid UTF-8 JSON.`);
   }
   try {
-    return JSON.parse(text) as unknown;
+    const parsed: unknown = JSON.parse(text);
+    return parsed;
   } catch {
     throw new InvalidJsonBodyError(`${label} must be valid JSON.`);
   }

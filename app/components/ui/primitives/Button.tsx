@@ -22,21 +22,21 @@ type NativeButtonProps = ButtonVisualProps & Omit<ButtonHTMLAttributes<HTMLButto
 
 type ButtonProps = NativeButtonProps & { ref?: Ref<HTMLButtonElement> };
 
-const variantClasses: Record<ButtonVariant, string> = {
+const variantClasses = {
   primary: 'bg-accent-500 text-white hover:bg-accent-600',
   danger: 'bg-red-600 text-white hover:bg-red-700',
   neutral:
     'border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 text-content-primary hover:bg-bolt-elements-background-depth-3',
   ghost:
     'border border-transparent bg-transparent text-content-secondary hover:bg-bolt-elements-background-depth-2 hover:text-content-primary',
-};
+} satisfies Record<ButtonVariant, string>;
 
-const sizeClasses: Record<ButtonSize, string> = {
+const sizeClasses = {
   xs: 'min-h-7 px-2 py-1 text-xs',
   sm: 'min-h-8 px-2.5 py-1.5 text-sm',
   md: 'min-h-9 px-3 py-2 text-sm',
   lg: 'min-h-10 px-4 py-2 text-base',
-};
+} satisfies Record<ButtonSize, string>;
 
 export function buttonClassNames({
   className,

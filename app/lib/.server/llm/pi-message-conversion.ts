@@ -1,144 +1,95 @@
-import type { Message, TextContent, ToolCall, ToolResultMessage } from '@earendil-works/pi-ai';
-import type { ModelMessage } from './message-conversion';
+import type {
+  AssistantMessage,
+  Message,
+  TextContent,
+  ToolCall,
+  ToolResultMessage,
+  UserMessage,
+} from '@earendil-works/pi-ai';
+import type { ModelMessage, ModelTextPart, ModelToolCallPart, ModelToolOutput } from './message-conversion';
 
-// Converts AI SDK ModelMessage[] (produced by prepareModelInput/pruneMessages) to Pi Message[].
-// Structure is intentionally loose — both use OpenAI-compatible shapes. This preserves text +
-// tool-call/tool-result semantics while staying true to cloudflare-os pi-ai Message types.
+/**
+ * Bridges the transcript protocol produced by `cleanupAssistantMessages` into Pi's `Message` union.
+ * Pi requires provider/usage bookkeeping on assistant turns; replayed history carries none, so the
+ * bridge reports a zero-cost `pi-bridge` origin.
+ */
+
+const BRIDGE_USAGE: AssistantMessage['usage'] = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
 
 export function modelMessagesToPi(messages: ModelMessage[]): Message[] {
-  return messages.map((m) => {
-    const role = (m as unknown as { role: string }).role;
-    const content = (m as unknown as { content: unknown }).content;
-
-    if (role === 'assistant') {
-      // AI SDK assistant content can be string or array with text/tool-call parts
-      if (typeof content === 'string') {
-        return {
-          role: 'assistant',
-          content: [{ type: 'text', text: content }],
-          timestamp: Date.now(),
-          api: 'openai-completions',
-          provider: 'cloudflare-workers-ai',
-          model: 'pi-bridge',
-          usage: {
-            input: 0,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 0,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-          stopReason: 'stop',
-        } as unknown as Message;
-      }
-      if (Array.isArray(content)) {
-        const blocks = (content as unknown[]).map((part) => {
-          const p = part as Record<string, unknown>;
-          if (p.type === 'text' && typeof p.text === 'string') {
-            return { type: 'text', text: p.text } as TextContent;
-          }
-          if (p.type === 'tool-call') {
-            return {
-              type: 'toolCall',
-              id: (p.toolCallId ?? p.id ?? `call_${Math.random().toString(36).slice(2)}`) as string,
-              name: (p.toolName ?? p.name ?? 'unknown') as string,
-              arguments: (p.args ?? p.input ?? {}) as Record<string, unknown>,
-            } as ToolCall;
-          }
-          if (typeof p.text === 'string') {
-            return { type: 'text', text: p.text } as TextContent;
-          }
-          return { type: 'text', text: JSON.stringify(p) } as TextContent;
-        });
-        return {
-          role: 'assistant',
-          content: blocks,
-          timestamp: Date.now(),
-          api: 'openai-completions',
-          provider: 'cloudflare-workers-ai',
-          model: 'pi-bridge',
-          usage: {
-            input: 0,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 0,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-          stopReason: 'stop',
-        } as unknown as Message;
-      }
-    }
-
-    if (role === 'tool') {
-      const toolResults = Array.isArray(content) ? content : [content];
-      const resultPart = toolResults.find(
-        (part) => typeof part === 'object' && part !== null && (part as Record<string, unknown>).type === 'tool-result',
-      ) as Record<string, unknown> | undefined;
-      // AI SDK tool content: [{ type: 'tool-result', toolCallId, toolName, result/output }]
-      if (resultPart) {
-        const r = resultPart as unknown as {
-          toolCallId: string;
-          toolName?: string;
-          result?: unknown;
-          output?: unknown;
-        };
-        const output = r.result ?? unwrapToolOutput(r.output);
-        return {
-          role: 'toolResult',
-          toolCallId: r.toolCallId,
-          toolName: r.toolName ?? 'unknown',
-          content: [
-            {
-              type: 'text',
-              text: typeof output === 'string' ? output : stringify(output),
-            },
-          ],
-          isError: isErrorToolOutput(r.output),
-          timestamp: Date.now(),
-        } as unknown as ToolResultMessage;
-      }
-      return {
-        role: 'user',
-        content: typeof content === 'string' ? content : JSON.stringify(content),
-        timestamp: Date.now(),
-      } as Message;
-    }
-
-    // user / system
-    if (typeof content === 'string') {
-      return { role: role as Message['role'], content, timestamp: Date.now() } as Message;
-    }
-    if (Array.isArray(content)) {
-      const text = (content as unknown[])
-        .map((c) =>
-          typeof (c as Record<string, unknown>).text === 'string'
-            ? ((c as Record<string, unknown>).text as string)
-            : JSON.stringify(c),
-        )
-        .join('');
-      return { role: role as Message['role'], content: text, timestamp: Date.now() } as Message;
-    }
-    return { role: role as Message['role'], content: String(content ?? ''), timestamp: Date.now() } as Message;
-  });
+  return messages.map(toPiMessage);
 }
 
-function unwrapToolOutput(output: unknown): unknown {
-  return isRecord(output) && 'value' in output ? output.value : output;
+function toPiMessage(message: ModelMessage): Message {
+  if (message.role === 'assistant') {
+    return {
+      role: 'assistant',
+      content: message.content.map(toPiAssistantContent),
+      timestamp: Date.now(),
+      api: 'openai-completions',
+      provider: 'cloudflare-workers-ai',
+      model: 'pi-bridge',
+      usage: BRIDGE_USAGE,
+      stopReason: 'stop',
+    };
+  }
+
+  if (message.role === 'tool') {
+    const result = message.content.find((part) => part.type === 'tool-result');
+    if (!result) {
+      return userMessage(JSON.stringify(message.content));
+    }
+    return toPiToolResult(result.toolCallId, result.toolName, result.output);
+  }
+
+  if (message.role === 'user') {
+    return userMessage(message.content);
+  }
+
+  // SAFETY: pi-ai carries the system prompt in `Context.systemPrompt`, so its `Message` union has no
+  // system role, yet the persisted transcript schema still admits one. Such an entry is forwarded
+  // verbatim rather than dropped or rewritten so the payload reaching the provider is unchanged.
+  return { role: message.role, content: message.content, timestamp: Date.now() } as unknown as Message;
 }
 
-function isErrorToolOutput(output: unknown): boolean {
-  return isRecord(output) && typeof output.type === 'string' && output.type.startsWith('error-');
+function toPiAssistantContent(part: ModelTextPart | ModelToolCallPart): TextContent | ToolCall {
+  if (part.type === 'text') {
+    return { type: 'text', text: part.text };
+  }
+  return {
+    type: 'toolCall',
+    id: part.toolCallId,
+    name: part.toolName,
+    arguments: part.input,
+  };
 }
 
-function stringify(value: unknown): string {
+function toPiToolResult(toolCallId: string, toolName: string, output: ModelToolOutput): ToolResultMessage {
+  return {
+    role: 'toolResult',
+    toolCallId,
+    toolName,
+    content: [{ type: 'text', text: typeof output.value === 'string' ? output.value : stringify(output.value) }],
+    isError: output.type === 'error-text',
+    timestamp: Date.now(),
+  };
+}
+
+function userMessage(content: string): UserMessage {
+  return { role: 'user', content, timestamp: Date.now() };
+}
+
+function stringify(value: ModelToolOutput['value']): string {
   try {
     return JSON.stringify(value) ?? String(value ?? '');
   } catch {
     return String(value ?? '');
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }

@@ -3,6 +3,7 @@ import {
   clearPromptIfUnchanged,
   getMessageInputPrimaryAction,
   getMessageInputPrimaryActionLabel,
+  shouldOfferBuilderModelSelector,
   hasFailedCloudflareAuthorization,
   preservePromptForAuthentication,
   shouldContinuePendingSubmit,
@@ -183,5 +184,17 @@ describe('hasFailedCloudflareAuthorization', () => {
     expect(hasFailedCloudflareAuthorization('?cloudflare_authorization=failed')).toBe(true);
     expect(hasFailedCloudflareAuthorization('?prefill=hello')).toBe(false);
     expect(hasFailedCloudflareAuthorization('')).toBe(false);
+  });
+});
+
+describe('shouldOfferBuilderModelSelector', () => {
+  it('offers the choice before the first prompt, not only once a chat exists', () => {
+    // The opening turn writes most of the application, so gating this on a started chat
+    // put the control behind the decision it governs.
+    expect(shouldOfferBuilderModelSelector('fullyLoggedIn')).toBe(true);
+  });
+
+  it.each(['loading', 'unauthenticated'] as const)('offers nothing to a %s visitor', (authKind) => {
+    expect(shouldOfferBuilderModelSelector(authKind)).toBe(false);
   });
 });

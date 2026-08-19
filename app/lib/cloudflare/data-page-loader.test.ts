@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 const executeDataOperation = vi.hoisted(() => vi.fn());
 
@@ -77,8 +78,8 @@ describe('bounded data page loading', () => {
     const options = {
       maximumItemsPerPage: 2,
       itemKey: (item: number) => item,
-      validateItem: (item: unknown): item is number => typeof item === 'number',
-      validateCursor: (cursor: unknown): cursor is number => typeof cursor === 'number',
+      itemSchema: z.number(),
+      cursorSchema: z.number(),
       cursorAdvances: (previous: number, next: number) => next > previous,
       validatePageOrder: () => true,
     };
@@ -156,8 +157,8 @@ describe('bounded data page loading', () => {
       collectDataPages(loadPage, {
         maximumItemsPerPage: 1,
         itemKey: (item) => item,
-        validateItem: (item: unknown): item is number => typeof item === 'number',
-        validateCursor: (cursor: unknown): cursor is number => typeof cursor === 'number',
+        itemSchema: z.number(),
+        cursorSchema: z.number(),
         cursorAdvances: (previous, next) => next > previous,
         validatePageOrder: () => true,
       }),

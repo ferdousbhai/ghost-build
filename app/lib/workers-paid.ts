@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 export const WORKERS_PAID_REQUIRED_MARKER = 'GHOSTBUILD_WORKERS_PAID_REQUIRED:';
 export const CLOUDFLARE_AI_FUNDING_REQUIRED_MARKER = 'GHOSTBUILD_CLOUDFLARE_AI_FUNDING_REQUIRED:';
 
@@ -23,11 +25,21 @@ export function isCloudflareAiFundingError(error: unknown): boolean {
   );
 }
 
+/**
+ * Provider SDKs hang the upstream payload off the thrown error under a couple of names.
+ * Each field falls back independently so an unexpected shape on one cannot hide the other.
+ */
+const providerErrorPayloadSchema = z.looseObject({
+  responseBody: z.string().optional().catch(undefined),
+  data: z.string().optional().catch(undefined),
+});
+
 function providerErrorDetails(error: unknown): string {
-  const record = typeof error === 'object' && error !== null ? (error as Record<string, unknown>) : undefined;
+  const parsed = providerErrorPayloadSchema.safeParse(error);
+  const payload = parsed.success ? parsed.data : undefined;
   return [
     error instanceof Error ? error.message : String(error),
-    typeof record?.responseBody === 'string' ? record.responseBody : '',
-    typeof record?.data === 'string' ? record.data : '',
+    payload?.responseBody ?? '',
+    payload?.data ?? '',
   ].join(' ');
 }

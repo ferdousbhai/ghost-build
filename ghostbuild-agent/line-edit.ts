@@ -127,7 +127,7 @@ export function lineAnchoredRead(options: LineAnchoredReadOptions): LineAnchored
 
   const endLine = offset + selected.length - 1;
   const truncated = endLine < lines.length;
-  return {
+  const result: LineAnchoredReadResult = {
     path: options.path,
     base: lineEditBaseTag(options.sha256),
     content: selected.join('\n'),
@@ -135,8 +135,11 @@ export function lineAnchoredRead(options: LineAnchoredReadOptions): LineAnchored
     endLine,
     totalLines: lines.length,
     truncated,
-    ...(truncated ? { nextOffset: endLine + 1 } : {}),
   };
+  if (truncated) {
+    result.nextOffset = endLine + 1;
+  }
+  return result;
 }
 
 /** Apply every operation to the same original snapshot, never incrementally. */
@@ -172,15 +175,26 @@ export function applyLineEdits(original: string, operations: readonly LineEditOp
   };
 }
 
-type PlannedOperation = {
+type PlannedInsertion = {
+  kind: 'insert';
+  operationIndex: number;
+  index: number;
+  deleteCount: 0;
+  afterLine: number;
+  contentLines: string[];
+};
+
+type PlannedReplacement = {
+  kind: 'replace';
   operationIndex: number;
   index: number;
   deleteCount: number;
-  startLine?: number;
-  endLine?: number;
-  afterLine?: number;
+  startLine: number;
+  endLine: number;
   contentLines: string[];
 };
+
+type PlannedOperation = PlannedInsertion | PlannedReplacement;
 
 function planOperation(operation: LineEditOperation, operationIndex: number, totalLines: number): PlannedOperation {
   if ('afterLine' in operation) {
@@ -199,6 +213,7 @@ function planOperation(operation: LineEditOperation, operationIndex: number, tot
       );
     }
     return {
+      kind: 'insert',
       operationIndex,
       index: operation.afterLine,
       deleteCount: 0,
@@ -220,6 +235,7 @@ function planOperation(operation: LineEditOperation, operationIndex: number, tot
     );
   }
   return {
+    kind: 'replace',
     operationIndex,
     index: operation.startLine - 1,
     deleteCount: operation.endLine - operation.startLine + 1,
@@ -234,31 +250,28 @@ function assertOperationsDoNotOverlap(operations: readonly PlannedOperation[]): 
     const left = operations[leftIndex]!;
     for (let rightIndex = leftIndex + 1; rightIndex < operations.length; rightIndex += 1) {
       const right = operations[rightIndex]!;
-      if (left.afterLine !== undefined && right.afterLine !== undefined) {
-        if (left.afterLine === right.afterLine) {
-          throw new Error(
-            `edits[${left.operationIndex}] and edits[${right.operationIndex}] overlap or share an insertion point.`,
-          );
-        }
-        continue;
-      }
-      const replacement = left.afterLine === undefined ? left : right;
-      const insertion = left.afterLine !== undefined ? left : right.afterLine !== undefined ? right : undefined;
-      if (insertion) {
-        if (insertion.afterLine! >= replacement.startLine! && insertion.afterLine! < replacement.endLine!) {
-          throw new Error(
-            `edits[${left.operationIndex}] and edits[${right.operationIndex}] overlap or share an insertion point.`,
-          );
-        }
-        continue;
-      }
-      if (left.startLine! <= right.endLine! && right.startLine! <= left.endLine!) {
+      if (operationsConflict(left, right)) {
         throw new Error(
           `edits[${left.operationIndex}] and edits[${right.operationIndex}] overlap or share an insertion point.`,
         );
       }
     }
   }
+}
+
+function operationsConflict(left: PlannedOperation, right: PlannedOperation): boolean {
+  if (left.kind === 'insert') {
+    return right.kind === 'insert' ? left.afterLine === right.afterLine : insertionSplitsReplacement(left, right);
+  }
+  if (right.kind === 'insert') {
+    return insertionSplitsReplacement(right, left);
+  }
+  return left.startLine <= right.endLine && right.startLine <= left.endLine;
+}
+
+/** An insertion only conflicts when it lands strictly inside the replaced range, not at its edges. */
+function insertionSplitsReplacement(insertion: PlannedInsertion, replacement: PlannedReplacement): boolean {
+  return insertion.afterLine >= replacement.startLine && insertion.afterLine < replacement.endLine;
 }
 
 function compareForApplication(left: PlannedOperation, right: PlannedOperation): number {
@@ -268,24 +281,42 @@ function compareForApplication(left: PlannedOperation, right: PlannedOperation):
   return right.deleteCount - left.deleteCount;
 }
 
-function parseText(content: string): {
+type LineEnding = '\n' | '\r\n' | '\r';
+
+type ParsedText = {
   bom: string;
   lines: string[];
-  lineEnding: '\n' | '\r\n' | '\r';
+  lineEnding: LineEnding;
   hasFinalNewline: boolean;
-} {
+};
+
+type LogicalText = { lines: string[]; hasFinalNewline: boolean };
+
+function parseText(content: string): ParsedText {
   const bom = content.startsWith('\uFEFF') ? '\uFEFF' : '';
   const body = bom ? content.slice(1) : content;
   const parsed = splitLogicalText(body);
   return {
     bom,
     lines: parsed.lines,
-    lineEnding: (/\r\n|\n|\r/.exec(body)?.[0] as '\n' | '\r\n' | '\r' | undefined) ?? '\n',
+    lineEnding: firstLineEnding(body),
     hasFinalNewline: parsed.hasFinalNewline,
   };
 }
 
-function splitLogicalText(content: string): { lines: string[]; hasFinalNewline: boolean } {
+/** The first line ending in the file decides how edited lines are rejoined; empty files use LF. */
+function firstLineEnding(body: string): LineEnding {
+  switch (/\r\n|\n|\r/.exec(body)?.[0]) {
+    case '\r\n':
+      return '\r\n';
+    case '\r':
+      return '\r';
+    default:
+      return '\n';
+  }
+}
+
+function splitLogicalText(content: string): LogicalText {
   const normalized = content.replace(/\r\n|\r/g, '\n');
   if (normalized.length === 0) {
     return { lines: [], hasFinalNewline: false };

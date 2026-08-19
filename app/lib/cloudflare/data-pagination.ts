@@ -17,8 +17,8 @@ export type SubchatCursor = {
 };
 
 export function boundedDataPageSize(limit: number | undefined): number {
-  if (!Number.isSafeInteger(limit)) {
+  if (limit === undefined || !Number.isSafeInteger(limit)) {
     return DEFAULT_DATA_PAGE_SIZE;
   }
-  return Math.min(MAX_DATA_PAGE_SIZE, Math.max(1, limit as number));
+  return Math.min(MAX_DATA_PAGE_SIZE, Math.max(1, limit));
 }

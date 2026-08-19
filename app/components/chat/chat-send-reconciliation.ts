@@ -16,12 +16,13 @@ const transcriptMessageSchema = z
   })
   .loose();
 
-const transcriptSnapshotSchema = z.object({
+/** Shape every durable-transcript read returns: the agent's checkpoint plus the messages behind it. */
+export const transcriptSnapshotSchema = z.object({
   checkpoint: transcriptCheckpointSchema.nullable(),
   messages: z.array(transcriptMessageSchema),
 });
 
-type AuthoritativeTranscriptSnapshot = {
+export type AuthoritativeTranscriptSnapshot = {
   checkpoint: TranscriptCheckpoint | null;
   messages: GhostbuildMessage[];
 };
@@ -37,7 +38,7 @@ export async function loadAuthoritativeTranscriptSnapshot(args: {
     if (!parsed.success) {
       continue;
     }
-    const snapshot = parsed.data as AuthoritativeTranscriptSnapshot;
+    const snapshot: AuthoritativeTranscriptSnapshot = parsed.data;
     if (
       (snapshot.checkpoint === null
         ? snapshot.messages.length === 0

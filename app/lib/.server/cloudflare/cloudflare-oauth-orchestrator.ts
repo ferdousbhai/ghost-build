@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   CloudflareOAuthError,
   type CloudflareConnectionChallenge,
@@ -31,6 +32,46 @@ type OAuthSession = {
   redirectUri: string;
   capabilities: CloudflareConnectionRequest['requestedCapabilities'];
 };
+
+const oauthSessionSchema = z.object({
+  verifier: z.string(),
+  redirectUri: z.string(),
+  capabilities: z.array(z.enum(['workers', 'containers', 'd1', 'r2', 'kv', 'durable_objects', 'workers_ai'])),
+}) satisfies z.ZodType<OAuthSession>;
+
+/**
+ * Cloudflare's own responses. Every field is optional and self-healing so a payload Cloudflare
+ * changes in a way this code does not model still reaches the explicit checks below, which raise the
+ * message an operator can act on rather than a decoding failure.
+ */
+const optionalText = z.string().optional().catch(undefined);
+
+const tokenExchangeSchema = z.looseObject({
+  access_token: optionalText,
+  refresh_token: optionalText,
+  expires_in: z.number().optional().catch(undefined),
+});
+
+const userDetailsSchema = z.looseObject({
+  success: z.boolean().optional().catch(undefined),
+  result: z
+    .looseObject({
+      id: optionalText,
+      email: optionalText,
+      first_name: optionalText,
+      last_name: optionalText,
+    })
+    .optional()
+    .catch(undefined),
+});
+
+const accountsSchema = z.looseObject({
+  success: z.boolean().optional().catch(undefined),
+  result: z
+    .array(z.looseObject({ id: optionalText, name: optionalText }))
+    .optional()
+    .catch(undefined),
+});
 
 export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
   constructor(
@@ -101,11 +142,7 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
       body: form,
       signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
     });
-    const token = (await tokenResponse.json().catch(() => null)) as {
-      access_token?: string;
-      refresh_token?: string;
-      expires_in?: number;
-    } | null;
+    const token = tokenExchangeSchema.safeParse(await tokenResponse.json().catch(() => null)).data;
     if (!tokenResponse.ok || !token?.access_token) {
       throw new CloudflareOAuthError('Cloudflare token exchange failed.');
     }
@@ -118,15 +155,7 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
       headers: { authorization: `Bearer ${token.access_token}` },
       signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
     });
-    const userDetailsPayload = (await userDetailsResponse.json().catch(() => null)) as {
-      success?: boolean;
-      result?: {
-        id?: string;
-        email?: string;
-        first_name?: string;
-        last_name?: string;
-      };
-    } | null;
+    const userDetailsPayload = userDetailsSchema.safeParse(await userDetailsResponse.json().catch(() => null)).data;
     const userDetails = userDetailsPayload?.result;
     if (!userDetailsResponse.ok || userDetailsPayload?.success !== true || !userDetails?.id) {
       throw new CloudflareOAuthError('Cloudflare did not return an authenticated user identity.');
@@ -135,10 +164,7 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
       headers: { authorization: `Bearer ${token.access_token}` },
       signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
     });
-    const accountsPayload = (await accountsResponse.json().catch(() => null)) as {
-      success?: boolean;
-      result?: Array<{ id?: string; name?: string }>;
-    } | null;
+    const accountsPayload = accountsSchema.safeParse(await accountsResponse.json().catch(() => null)).data;
     const accounts = accountsPayload?.result ?? [];
     if (!accountsResponse.ok || accountsPayload?.success !== true || accounts.length !== 1) {
       throw new CloudflareOAuthError('Select exactly one Cloudflare account when authorizing Ghostbuild.');
@@ -167,15 +193,7 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
 
 function parseSession(value: string): OAuthSession {
   try {
-    const parsed = JSON.parse(value) as Partial<OAuthSession>;
-    if (
-      typeof parsed.verifier !== 'string' ||
-      typeof parsed.redirectUri !== 'string' ||
-      !Array.isArray(parsed.capabilities)
-    ) {
-      throw new Error();
-    }
-    return parsed as OAuthSession;
+    return oauthSessionSchema.parse(JSON.parse(value));
   } catch {
     throw new CloudflareOAuthError('Cloudflare OAuth session is invalid.');
   }

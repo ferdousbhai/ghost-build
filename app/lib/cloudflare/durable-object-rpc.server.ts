@@ -1,11 +1,17 @@
+import { z } from 'zod';
+
 const MAX_RPC_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 100;
 
-type DurableObjectRpcError = {
-  message?: unknown;
-  overloaded?: unknown;
-  retryable?: unknown;
-};
+/**
+ * The runtime surfaces RPC faults as plain objects rather than a shared error class, so each
+ * flag falls back on its own: an unexpected `overloaded` must not hide a usable `message`.
+ */
+const durableObjectRpcErrorSchema = z.looseObject({
+  message: z.string().optional().catch(undefined),
+  overloaded: z.boolean().optional().catch(undefined),
+  retryable: z.boolean().optional().catch(undefined),
+});
 
 /** Retry an idempotent Durable Object RPC with a fresh stub on every attempt. */
 export async function retryDurableObjectRpc<T>(call: () => Promise<T>): Promise<T> {
@@ -23,21 +29,19 @@ export async function retryDurableObjectRpc<T>(call: () => Promise<T>): Promise<
 }
 
 export function isRetryableDurableObjectError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
+  const parsed = durableObjectRpcErrorSchema.safeParse(error);
+  if (!parsed.success || parsed.data.overloaded === true) {
     return false;
   }
-  const candidate = error as DurableObjectRpcError;
-  if (isDurableObjectOverloadedError(error)) {
-    return false;
-  }
+  const { message, retryable } = parsed.data;
   return (
-    candidate.retryable === true ||
-    (typeof candidate.message === 'string' &&
-      (candidate.message.includes('reset because its code was updated') ||
-        candidate.message.includes('Container service disconnected')))
+    retryable === true ||
+    (message !== undefined &&
+      (message.includes('reset because its code was updated') || message.includes('Container service disconnected')))
   );
 }
 
 export function isDurableObjectOverloadedError(error: unknown): boolean {
-  return !!error && typeof error === 'object' && (error as DurableObjectRpcError).overloaded === true;
+  const parsed = durableObjectRpcErrorSchema.safeParse(error);
+  return parsed.success && parsed.data.overloaded === true;
 }

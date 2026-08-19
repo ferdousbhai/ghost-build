@@ -129,7 +129,7 @@ export async function compactPiContext(args: {
     content: formatCompactionSummary(summary),
     timestamp: Date.now(),
   };
-  const messages = [checkpoint as AgentMessage, ...args.messages.slice(tailStart)];
+  const messages: AgentMessage[] = [checkpoint, ...args.messages.slice(tailStart)];
   return {
     messages,
     tokensBefore: estimatePiContextTokens(args.messages),

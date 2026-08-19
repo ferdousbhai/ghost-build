@@ -153,15 +153,18 @@ function disposeCommandObserver(observer: Awaited<ReturnType<CommandTerminationR
 }
 
 function isRetryableCommandTransportError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
+  if (!isCommandTerminationTransportError(error)) {
     return false;
   }
-  const candidate = error as CommandTerminationTransportError;
   return (
-    candidate.retryable === true ||
-    (typeof candidate.message === 'string' &&
-      (candidate.message.includes('reset because its code was updated') ||
-        candidate.message.includes('Container service disconnected') ||
-        candidate.message.includes('disconnected prematurely')))
+    error.retryable === true ||
+    (typeof error.message === 'string' &&
+      (error.message.includes('reset because its code was updated') ||
+        error.message.includes('Container service disconnected') ||
+        error.message.includes('disconnected prematurely')))
   );
+}
+
+function isCommandTerminationTransportError(error: unknown): error is CommandTerminationTransportError {
+  return typeof error === 'object' && error !== null;
 }

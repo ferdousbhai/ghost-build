@@ -1,3 +1,4 @@
+import { z } from 'zod';
 const AES_GCM_IV_BYTES = 12;
 const AES_256_KEY_BYTES = 32;
 /** Bounds both client-authenticated OAuth calls: the refresh and the revocation. */
@@ -166,11 +167,7 @@ export class D1CloudflareCredentialVault {
       }
       throw error;
     }
-    const token = (await response.json().catch(() => null)) as {
-      access_token?: string;
-      refresh_token?: string;
-      expires_in?: number;
-    } | null;
+    const token = refreshedTokenSchema.safeParse(await response.json().catch(() => null)).data;
     if (!response.ok || !token?.access_token) {
       const concurrent = await this.readConcurrentRefreshSafely(credentialHandle, stored);
       if (concurrent) {
@@ -332,28 +329,35 @@ type OAuthCredential = {
   expiresAt: number;
 };
 
+const storedOAuthCredentialSchema = z.object({
+  version: z.literal(1),
+  accessToken: z.string().min(1),
+  refreshToken: z.string().min(1),
+  expiresAt: z.number().finite(),
+}) satisfies z.ZodType<OAuthCredential>;
+
+/** Cloudflare's refresh response: decoded leniently so the explicit checks below own every message. */
+const refreshedTokenSchema = z.looseObject({
+  access_token: z.string().optional().catch(undefined),
+  refresh_token: z.string().optional().catch(undefined),
+  expires_in: z.number().optional().catch(undefined),
+});
+
 export function parseStoredOAuthCredential(value: string): OAuthCredential | null {
   if (!value.trimStart().startsWith('{')) {
     return null;
   }
-  let parsed: Partial<OAuthCredential>;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(value) as Partial<OAuthCredential>;
+    parsed = JSON.parse(value);
   } catch (error) {
     throw new Error('Stored Cloudflare OAuth credential is invalid.', { cause: error });
   }
-  if (
-    parsed.version !== 1 ||
-    typeof parsed.accessToken !== 'string' ||
-    parsed.accessToken.length === 0 ||
-    typeof parsed.refreshToken !== 'string' ||
-    parsed.refreshToken.length === 0 ||
-    typeof parsed.expiresAt !== 'number' ||
-    !Number.isFinite(parsed.expiresAt)
-  ) {
+  const credential = storedOAuthCredentialSchema.safeParse(parsed);
+  if (!credential.success) {
     throw new Error('Stored Cloudflare OAuth credential is invalid.');
   }
-  return parsed as OAuthCredential;
+  return credential.data;
 }
 
 async function importEncryptionKey(value: string, usages: KeyUsage[]): Promise<CryptoKey> {

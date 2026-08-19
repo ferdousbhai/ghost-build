@@ -21,7 +21,9 @@ const PROMPT_REFINEMENT_TOOL_NAME = 'submit_refined_app_plan';
 const promptRefinementTool: Tool = {
   name: PROMPT_REFINEMENT_TOOL_NAME,
   description: 'Submit either the next product decision or the finalized app brief.',
-  parameters: z.toJSONSchema(promptRefinementResultSchema) as unknown as Tool['parameters'],
+  // SAFETY: `z.toJSONSchema` emits the draft-2020-12 JSON Schema object that pi-ai's `TSchema`
+  // describes. The two libraries model the same document with structurally unrelated types.
+  parameters: z.toJSONSchema(promptRefinementResultSchema) as Tool['parameters'],
 };
 
 export async function userRuntimeEnhancePromptAction(args: { request: Request; env: Env; userId: string }) {

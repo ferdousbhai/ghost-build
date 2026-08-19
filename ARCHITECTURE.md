@@ -116,8 +116,8 @@ checkpoints from the same VFS, so deployment cannot proceed after the project ch
 
 The `ProjectWorkspace` container backend builds the dedicated Vite preview for the current content checkpoint, starts
 the preview process, and exposes it through a Cloudflare quick tunnel. The user workspace Worker returns the tunnel URL
-to the authenticated browser and schedules expiry after 15 minutes. Stopping, expiry, or replacement destroys the
-preview process and tunnel.
+to the authenticated browser and schedules expiry after one hour (`PREVIEW_TTL_MS`). Stopping, expiry, or replacement
+destroys the preview process and tunnel.
 
 Preview work and bandwidth remain in the user's Cloudflare account. OAuth credentials and control-plane secrets are
 not passed to generated project processes.

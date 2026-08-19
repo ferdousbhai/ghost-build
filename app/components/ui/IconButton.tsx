@@ -28,13 +28,13 @@ type IconButtonWithChildrenProps = {
 
 type IconButtonProps = IconButtonWithoutChildrenProps | IconButtonWithChildrenProps;
 
-const iconSizeClass: Record<IconSize, string> = {
+const iconSizeClass = {
   sm: 'text-sm',
   md: 'text-md',
   lg: 'text-lg',
   xl: 'text-xl',
   xxl: 'text-2xl',
-};
+} satisfies Record<IconSize, string>;
 
 export const IconButton = memo(
   forwardRef(

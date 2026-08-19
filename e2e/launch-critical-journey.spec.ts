@@ -3,7 +3,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 
 const authStatePath = validatedAuthStatePath(process.env.E2E_AUTH_STORAGE_STATE);
 test.use({
-  ...(authStatePath ? { storageState: authStatePath } : {}),
+  storageState: authStatePath ?? undefined,
   // Authenticated traces, video, and screenshots can contain live cookies,
   // prompts, generated code, preview URLs, and deployment identifiers.
   trace: 'off',

@@ -1,4 +1,9 @@
-import { getToolInvocation, type GhostbuildMessage, type GhostbuildPart } from './ai-compat.js';
+import {
+  getToolInvocation,
+  type GhostbuildMessage,
+  type GhostbuildPart,
+  type GhostbuildToolInvocation,
+} from './ai-compat.js';
 
 export type PromptCharacterCounts = {
   messageHistoryChars: number;
@@ -52,16 +57,22 @@ function partCharacterCount(part: GhostbuildPart): number {
       if (!invocation) {
         return stringifyLength(part);
       }
-      const terminalSize =
-        invocation.state === 'output-available'
-          ? stringifyLength(invocation.output)
-          : invocation.state === 'output-error'
-            ? stringLength(invocation.errorText)
-            : invocation.state === 'output-denied'
-              ? stringifyLength(invocation.approval?.reason)
-              : 0;
-      return stringifyLength(invocation.input) + terminalSize;
+      return stringifyLength(invocation.input) + terminalCharacterCount(invocation);
     }
+  }
+}
+
+/** Only a settled tool call carries a terminal payload; in-progress states contribute nothing. */
+function terminalCharacterCount(invocation: GhostbuildToolInvocation): number {
+  switch (invocation.state) {
+    case 'output-available':
+      return stringifyLength(invocation.output);
+    case 'output-error':
+      return stringLength(invocation.errorText);
+    case 'output-denied':
+      return stringifyLength(invocation.approval?.reason);
+    default:
+      return 0;
   }
 }
 

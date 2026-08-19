@@ -7,7 +7,11 @@ import { CloudflareConnectLegalNotice } from '~/components/CloudflareConnectLega
 import { classNames } from '~/utils/classNames';
 import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import { EnhancePromptButton } from './EnhancePromptButton.client';
-import { getMessageInputPrimaryActionLabel, useMessageInputController } from './useMessageInputController';
+import {
+  getMessageInputPrimaryActionLabel,
+  shouldOfferBuilderModelSelector,
+  useMessageInputController,
+} from './useMessageInputController';
 import { BuilderModelSelector } from './BuilderModelSelector.client';
 import { PromptRefinementDialog } from './PromptRefinementDialog.client';
 
@@ -34,7 +38,7 @@ export const MessageInput = memo(function MessageInput({
   const { authState, input } = controller;
   const primaryActionLabel = getMessageInputPrimaryActionLabel(authState.kind, isStreaming, input.trim().length > 0);
   const hasActiveSession = authState.kind === 'fullyLoggedIn';
-  const modelSelector = chatStarted && hasActiveSession && (
+  const modelSelector = shouldOfferBuilderModelSelector(authState.kind) && (
     <BuilderModelSelector compact disabled={disabled || isStreaming || sendMessageInProgress} />
   );
   const placeholder = chatStarted

@@ -5,7 +5,7 @@ const TRANSCRIPT_IDENTITY_HEADERS = [
 ] as const;
 
 export function withCors(response: Response, origin: string | null): Response {
-  if (!origin || (response as Response & { webSocket?: WebSocket }).webSocket) {
+  if (!origin || response.webSocket) {
     return response;
   }
   const headers = new Headers(response.headers);

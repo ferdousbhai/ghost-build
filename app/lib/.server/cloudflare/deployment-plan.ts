@@ -1,3 +1,4 @@
+import { sha256Hex } from '~/lib/hex-digest';
 import { z } from 'zod';
 import { appResourceName } from '~/lib/cloudflare/app-resource-names';
 import type { DeploymentProjectProfile } from './deployment-project-profile';
@@ -135,10 +136,4 @@ export function deploymentPlanResourceName(
       ? /^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(name)
       : /^[a-z0-9][a-z0-9-]{2,63}$/.test(name);
   return valid ? name : null;
-}
-
-async function sha256Hex(value: ArrayBuffer | Uint8Array): Promise<string> {
-  const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
-  const digest = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }

@@ -32,14 +32,13 @@ export function recordWorkersAiFinish(options: FinishTelemetryOptions): void {
   });
 }
 
-export function workersAiPromptCacheTelemetry(
-  usage: Usage,
-  inputTokens: number,
-): {
+type WorkersAiPromptCacheTelemetry = {
   attempted: true;
   status: 'hit' | 'miss';
   cachedInputTokens: number;
-} {
+};
+
+export function workersAiPromptCacheTelemetry(usage: Usage, inputTokens: number): WorkersAiPromptCacheTelemetry {
   const cachedInputTokens = Math.min(normalizeUsage(inputTokens), normalizeUsage(usage.cacheRead));
   return {
     attempted: true,

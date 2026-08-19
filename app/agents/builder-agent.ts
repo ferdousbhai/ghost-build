@@ -4,6 +4,7 @@ import {
   type ChatRecoveryExhaustedContext,
   type ChatRecoveryOptions,
   type ChatResponseResult,
+  type OnChatMessageOptions,
 } from '@cloudflare/ai-chat';
 import { callable, type FiberRecoveryContext, type FiberRecoveryResult } from 'agents';
 import { canApplyConversationCompaction, conversationCompactionKey } from '~/lib/compaction';
@@ -64,7 +65,12 @@ import {
   builderAgentIdentitiesEqual,
   type BuilderAgentDurableIdentity,
 } from './builder-agent-identity';
-import type { BuilderWorkspaceApi, BuilderWorkspaceCheckpoint } from './builder-workspace-api';
+import type {
+  BuilderWorkspaceApi,
+  BuilderWorkspaceCheckpoint,
+  WorkspaceApplyChangesRequest,
+  WorkspaceSyncPageRequest,
+} from './builder-workspace-api';
 import { UserWorkspaceRuntimeClient } from '~/lib/.server/cloudflare/user-workspace-runtime-client';
 import type {
   BuilderWorkspaceFileInput,
@@ -85,6 +91,7 @@ import type { BuilderValidationStage } from '~/lib/common/builder-validation-pro
 import { waitForCancellationBeforeDeadline } from './builder-cancellation';
 import { PiSteeringQueue } from '~/lib/.server/llm/pi-steering';
 import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
+import { z } from 'zod';
 
 const logger = createScopedLogger('BuilderAgent');
 const CONTEXT_COMPACTION_FIBER = 'background:context_compaction';
@@ -94,22 +101,43 @@ const TITLE_GENERATION_FIBER = 'background:title_generation';
 const TITLE_GENERATION_JOB_MAX_PROMPT_CHARACTERS = 4_000;
 const CHAT_CANCELLATION_SETTLE_TIMEOUT_MS = 4.5 * 60 * 1000;
 
-type PreviewBuildJob = {
-  previewId: string;
-  workspaceRevision: number;
-  snapshotRevision: string;
-  requestedAt: number;
-};
+/** Fiber metadata survives a Durable Object restart, so every job is re-parsed before it is resumed. */
+const previewBuildJobSchema = z.object({
+  previewId: z.string().min(1),
+  workspaceRevision: z.number().int().min(0),
+  snapshotRevision: z.string().min(1),
+  requestedAt: z.number().int().positive(),
+});
+type PreviewBuildJob = z.infer<typeof previewBuildJobSchema>;
 
-type DeploymentJob = BuilderWorkspaceCheckpoint;
+const deploymentJobSchema = z.object({
+  workspaceRevision: z.number().int().min(0),
+  revision: z.string().regex(/^[a-f0-9]{64}$/),
+}) satisfies z.ZodType<BuilderWorkspaceCheckpoint>;
+type DeploymentJob = z.infer<typeof deploymentJobSchema>;
 
-type TitleGenerationJob = {
-  chatInitialId: string;
-  firstPrompt: boolean;
-  prompt: string;
-  promptGeneration: number;
-  subchatIndex: number;
-};
+/** Owner identifiers reach this Durable Object over RPC, so they are re-checked at every entry point. */
+const transcriptOwnerIdSchema = z.string().min(1).max(512);
+
+/** Context compaction fibers carry only the message they were asked to compact through. */
+const contextCompactionJobSchema = z.object({ throughMessageId: z.string().min(1) });
+
+/** A message may carry the transcript checkpoint its sender was working from. */
+const transcriptBaseMetadataSchema = z.object({
+  [TRANSCRIPT_BASE_METADATA_KEY]: transcriptCheckpointSchema.nullable(),
+});
+
+/** Steering text arrives over the agent connection while a turn is already running. */
+const steeringRequestSchema = z.object({ text: z.string() });
+
+const titleGenerationJobSchema = z.object({
+  chatInitialId: z.string().min(1),
+  firstPrompt: z.boolean(),
+  prompt: z.string().min(1).max(TITLE_GENERATION_JOB_MAX_PROMPT_CHARACTERS),
+  promptGeneration: z.number().int().min(1),
+  subchatIndex: z.number().int().min(0),
+});
+type TitleGenerationJob = z.infer<typeof titleGenerationJobSchema>;
 
 export type BuilderAgentState = {
   activeTurn?: BuilderTurnState | null;
@@ -131,12 +159,17 @@ export type BuilderAgentState = {
   contextCompactionRequestedTurnId?: string | null;
 };
 
+/** Durable transcript as the agent currently holds it, returned after a cancel or an explicit reload. */
+export type BuilderTranscriptSnapshot = {
+  checkpoint: TranscriptCheckpoint | null;
+  messages: NonNullable<ChatRequestBody['messages']>;
+};
+
+/** Payload the connected client sends to steer a running turn. */
 export type BuilderSteeringInput = {
   text: string;
   turnContext?: ChatTurnContext;
 };
-
-type ChatBody = Partial<ChatRequestBody> & { transcript?: unknown };
 
 type BuilderAgentProps = {
   ownerId: string;
@@ -214,7 +247,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   private async initializeGcIdentity(ownerId: string): Promise<void> {
-    if (typeof ownerId !== 'string' || ownerId.length === 0 || ownerId.length > 512) {
+    if (!transcriptOwnerIdSchema.safeParse(ownerId).success) {
       throw new Response('Invalid transcript owner', { status: 400 });
     }
     if (this.ownerId && this.ownerId !== ownerId) {
@@ -273,10 +306,10 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     await this.hydrateDurableIdentity({
       required: true,
       reason: 'fiber_recovery',
-      incidentId: typeof ctx.id === 'string' ? ctx.id : undefined,
+      incidentId: ctx.id,
     });
     if (ctx.name === TITLE_GENERATION_FIBER) {
-      const job = parseTitleGenerationJob(ctx.metadata);
+      const job = titleGenerationJobSchema.safeParse(ctx.metadata).data;
       if (!job || !this.userId) {
         return { status: 'error', error: 'missing title generation recovery data' };
       }
@@ -285,7 +318,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       return { status: 'completed', snapshot: ctx.snapshot };
     }
     if (ctx.name === PREVIEW_BUILD_FIBER) {
-      const job = parsePreviewBuildJob(ctx.metadata);
+      const job = previewBuildJobSchema.safeParse(ctx.metadata).data;
       if (!job) {
         return { status: 'error', error: 'missing preview build recovery data' };
       }
@@ -293,7 +326,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       return { status: 'completed', snapshot: ctx.snapshot };
     }
     if (ctx.name === DEPLOYMENT_FIBER) {
-      const job = parseDeploymentJob(ctx.metadata);
+      const job = deploymentJobSchema.safeParse(ctx.metadata).data;
       if (!job || !this.userId || !this.transcriptBinding) {
         return { status: 'error', error: 'missing deployment recovery data' };
       }
@@ -311,25 +344,25 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (ctx.name !== CONTEXT_COMPACTION_FIBER) {
       return super.onFiberRecovered(ctx);
     }
-    const throughMessageId = typeof ctx.metadata?.throughMessageId === 'string' ? ctx.metadata.throughMessageId : null;
-    if (!throughMessageId || !this.userId) {
+    const compaction = contextCompactionJobSchema.safeParse(ctx.metadata);
+    if (!compaction.success || !this.userId) {
       return { status: 'error', error: 'missing context compaction recovery data' };
     }
     const credentials = await getUserWorkersAiCredentials(this.env, this.userId);
-    await this.runContextCompaction(throughMessageId, credentials);
+    await this.runContextCompaction(compaction.data.throughMessageId, credentials);
     return { status: 'completed', snapshot: ctx.snapshot };
   }
 
   override async onChatMessage(
-    _onFinish?: unknown,
-    options?: { requestId?: string; body?: Record<string, unknown>; continuation?: boolean; abortSignal?: AbortSignal },
+    _onFinish?: Parameters<AIChatAgent['onChatMessage']>[0],
+    options?: OnChatMessageOptions,
   ) {
     const durableIdentity = await this.hydrateDurableIdentity({ required: true, reason: 'chat_message' });
     if (!durableIdentity) {
       this.rejectIdentity('chat_message_missing', undefined, 401);
     }
-    const body = (options?.body ?? {}) as ChatBody;
-    const messages = this.messages as NonNullable<ChatRequestBody['messages']>;
+    const body = options?.body ?? {};
+    const messages = this.messages;
     const { chatInitialId, subchatIndex, transcript, modelId } = requireBuilderRequestScope(
       body,
       durableIdentity.transcript,
@@ -463,7 +496,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     throughMessageId: string,
     accountCredentials: Awaited<ReturnType<typeof getUserWorkersAiCredentials>>,
   ): Promise<void> {
-    const currentMessages = this.messages as NonNullable<ChatRequestBody['messages']>;
+    const currentMessages = this.messages;
     const throughIndex = currentMessages.findIndex((message) => message.id === throughMessageId);
     if (throughIndex < 0) {
       return;
@@ -478,7 +511,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (!next) {
       return;
     }
-    const latestIds = (this.messages as NonNullable<ChatRequestBody['messages']>).map((message) => message.id);
+    const latestIds = this.messages.map((message) => message.id);
     if (
       !canApplyConversationCompaction({
         expectedFromId: next.fromMessageId,
@@ -543,12 +576,13 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   @callable()
-  async steerActiveTurn(input: unknown): Promise<{ accepted: true }> {
+  async steerActiveTurn(input: BuilderSteeringInput): Promise<{ accepted: true }> {
     await this.hydrateDurableIdentity({ required: true, reason: 'steer_active_turn' });
-    if (!isRecord(input) || typeof input.text !== 'string') {
+    const steering = steeringRequestSchema.safeParse(input);
+    if (!steering.success) {
       throw new Response('Invalid steering message', { status: 400 });
     }
-    const text = input.text.trim();
+    const text = steering.data.text.trim();
     if (!text || text.length > MAX_USER_MESSAGE_CHARACTERS) {
       throw new Response('Invalid steering message', { status: 400 });
     }
@@ -580,6 +614,8 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   @callable()
+  // The `agents` `call()` client surface only admits JSON-serializable returns, and a transcript
+  // message may carry a `Date`. The caller re-parses this payload in `settleBuilderStop`.
   async cancelActiveTurn(): Promise<unknown> {
     const deadline = Date.now() + CHAT_CANCELLATION_SETTLE_TIMEOUT_MS;
     const activeTurn = this.state.activeTurn;
@@ -603,7 +639,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     const checkpoint = this.state.transcript ? await this.advanceTranscriptCheckpoint(this.state.transcript) : null;
     return {
       checkpoint,
-      messages: this.messages as NonNullable<ChatRequestBody['messages']>,
+      messages: this.messages,
     };
   }
 
@@ -623,12 +659,12 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   @callable()
-  getWorkspaceSyncPage(request: unknown): Promise<BuilderWorkspaceSyncPage> {
+  getWorkspaceSyncPage(request: WorkspaceSyncPageRequest): Promise<BuilderWorkspaceSyncPage> {
     return this.workspace.getSyncPage(request);
   }
 
   @callable()
-  async applyWorkspaceClientChanges(request: unknown): Promise<BuilderWorkspaceApplyResult> {
+  async applyWorkspaceClientChanges(request: WorkspaceApplyChangesRequest): Promise<BuilderWorkspaceApplyResult> {
     const result = await this.workspace.applyClientChanges(request);
     if (result.ok && result.changedPaths.length > 0) {
       this.setState({
@@ -691,14 +727,11 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   @callable()
-  async getTranscriptSnapshot(identityValue: unknown): Promise<{
-    checkpoint: TranscriptCheckpoint | null;
-    messages: NonNullable<ChatRequestBody['messages']>;
-  }> {
+  async getTranscriptSnapshot(identityValue: TranscriptIdentity): Promise<BuilderTranscriptSnapshot> {
     const checkpoint = await this.getTranscriptCheckpoint(identityValue);
     return {
       checkpoint,
-      messages: this.messages as NonNullable<ChatRequestBody['messages']>,
+      messages: this.messages,
     };
   }
 
@@ -708,10 +741,10 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
    * the same owner-scoped context before reading the durable transcript.
    */
   async getTranscriptSnapshotForOwner(
-    identityValue: unknown,
+    identityValue: TranscriptIdentity,
     ownerId: string,
   ): ReturnType<BuilderAgent['getTranscriptSnapshot']> {
-    if (typeof ownerId !== 'string' || ownerId.length === 0 || ownerId.length > 512) {
+    if (!transcriptOwnerIdSchema.safeParse(ownerId).success) {
       throw new Response('Invalid transcript owner', { status: 400 });
     }
     await this.initializeIdentity({ ownerId, userId: ownerId });
@@ -719,7 +752,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   @callable()
-  async getTranscriptCheckpoint(identityValue: unknown): Promise<TranscriptCheckpoint | null> {
+  async getTranscriptCheckpoint(identityValue: TranscriptIdentity): Promise<TranscriptCheckpoint | null> {
     const identity = this.requireTranscriptIdentity(identityValue);
     if (this.messages.length > 0) {
       return this.advanceTranscriptCheckpoint(identity);
@@ -728,34 +761,31 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   protected override sanitizeMessageForPersistence(message: UIMessage): UIMessage {
-    const metadata = isRecord(message.metadata) ? message.metadata : null;
-    if (!metadata || !Object.hasOwn(metadata, TRANSCRIPT_BASE_METADATA_KEY)) {
+    const sanitized = stripTranscriptBaseMetadata(message);
+    if (sanitized === message) {
+      // No transcript checkpoint rode along with this message, so there is nothing to reconcile.
       return boundBuilderMessageForPersistence(message);
     }
-    const sanitized = stripTranscriptBaseMetadata(message);
     const existing = this.messages.find((candidate) => candidate.id === message.id);
     if (existing && transcriptMessagesEqual(existing, message)) {
       return boundBuilderMessageForPersistence(sanitized);
     }
-    const parsed = transcriptCheckpointSchema.nullable().safeParse(metadata[TRANSCRIPT_BASE_METADATA_KEY]);
-    if (!parsed.success || !transcriptCheckpointsEqual(this.state.transcript ?? null, parsed.data)) {
+    const parsed = transcriptBaseMetadataSchema.safeParse(message.metadata);
+    if (
+      !parsed.success ||
+      !transcriptCheckpointsEqual(this.state.transcript ?? null, parsed.data[TRANSCRIPT_BASE_METADATA_KEY])
+    ) {
       throw new Error('This transcript changed in another session. Reload the latest messages before sending.');
     }
     return boundBuilderMessageForPersistence(sanitized);
   }
 
-  private requireTranscriptIdentity(value: unknown, subchatIndex?: number): TranscriptIdentity {
+  private requireTranscriptIdentity(value: TranscriptIdentity, subchatIndex?: number): TranscriptIdentity {
     return requireBuilderTranscriptIdentity(value, this.transcriptBinding, subchatIndex);
   }
 
   private async initializeIdentity(props: BuilderAgentProps): Promise<void> {
-    if (
-      typeof props.ownerId !== 'string' ||
-      !props.ownerId ||
-      props.ownerId.length > 512 ||
-      typeof props.userId !== 'string' ||
-      props.userId !== props.ownerId
-    ) {
+    if (!transcriptOwnerIdSchema.safeParse(props.ownerId).success || props.userId !== props.ownerId) {
       throw new Response('Agent not found.', { status: 404 });
     }
     const transcriptBinding = await loadBuilderTranscriptBinding(this.env.DB, {
@@ -996,30 +1026,25 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   private async loadParentWorkspace(
     parentAgentName: string,
   ): Promise<{ entries: BuilderWorkspaceFileInput[]; targetRevision: number }> {
-    const parent = this.env.BuilderAgent.getByName(parentAgentName) as unknown as Pick<
-      BuilderAgent,
-      'getWorkspaceState' | 'getWorkspaceSyncPage'
-    >;
+    const parent: Pick<BuilderAgent, 'getWorkspaceState' | 'getWorkspaceSyncPage'> =
+      this.env.BuilderAgent.getByName(parentAgentName);
     const parentState = await parent.getWorkspaceState();
     if (!parentState.initialized) {
       throw new Error('The parent durable project workspace is not initialized.');
     }
     const entries: BuilderWorkspaceFileInput[] = [];
     let cursor: string | undefined;
-    let targetRevision: number | undefined;
     while (true) {
-      const page = await parent.getWorkspaceSyncPage({
-        fromRevision: 0,
-        ...(targetRevision !== undefined ? { targetRevision } : {}),
-        ...(cursor ? { cursor } : {}),
-      });
+      const request: WorkspaceSyncPageRequest = { fromRevision: 0 };
+      if (cursor) {
+        request.cursor = cursor;
+      }
+      const page = await parent.getWorkspaceSyncPage(request);
       if (page.restart) {
         entries.length = 0;
         cursor = undefined;
-        targetRevision = undefined;
         continue;
       }
-      targetRevision = page.targetRevision;
       for (const entry of page.entries) {
         if (entry.kind === 'write') {
           entries.push({ path: entry.path, content: entry.content, encoding: entry.encoding });
@@ -1370,59 +1395,6 @@ function parseTurnContext(value: unknown): ChatTurnContext | undefined {
   return result.data;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function parseTitleGenerationJob(value: unknown): TitleGenerationJob | null {
-  if (
-    !isRecord(value) ||
-    typeof value.chatInitialId !== 'string' ||
-    value.chatInitialId.length === 0 ||
-    typeof value.firstPrompt !== 'boolean' ||
-    typeof value.prompt !== 'string' ||
-    value.prompt.length === 0 ||
-    value.prompt.length > TITLE_GENERATION_JOB_MAX_PROMPT_CHARACTERS ||
-    !Number.isSafeInteger(value.promptGeneration) ||
-    (value.promptGeneration as number) < 1 ||
-    !Number.isSafeInteger(value.subchatIndex) ||
-    (value.subchatIndex as number) < 0
-  ) {
-    return null;
-  }
-  return value as TitleGenerationJob;
-}
-
-function parseDeploymentJob(value: unknown): DeploymentJob | null {
-  if (
-    !isRecord(value) ||
-    !Number.isSafeInteger(value.workspaceRevision) ||
-    (value.workspaceRevision as number) < 0 ||
-    typeof value.revision !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(value.revision)
-  ) {
-    return null;
-  }
-  return value as DeploymentJob;
-}
-
 function deploymentErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Deployment failed.';
-}
-
-function parsePreviewBuildJob(value: unknown): PreviewBuildJob | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const stringKeys = ['previewId', 'snapshotRevision'] as const;
-  if (
-    stringKeys.some((key) => typeof value[key] !== 'string' || (value[key] as string).length === 0) ||
-    !Number.isSafeInteger(value.workspaceRevision) ||
-    (value.workspaceRevision as number) < 0 ||
-    !Number.isSafeInteger(value.requestedAt) ||
-    (value.requestedAt as number) <= 0
-  ) {
-    return null;
-  }
-  return value as PreviewBuildJob;
 }

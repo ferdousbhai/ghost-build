@@ -7,7 +7,16 @@ import {
 } from '../../app/lib/.server/cloudflare/user-workspace-runtime-health';
 
 const READINESS_WORKSPACE_NAME = 'ghostbuild-runtime-readiness';
-const WORKSPACE_COMPONENTS = ['durableVfs', 'container', 'fuse', 'sync', 'cleanup'] as const;
+/** The readiness components the ProjectWorkspace Durable Object probe is responsible for. */
+export const WORKSPACE_COMPONENTS = [
+  'durableVfs',
+  'container',
+  'fuse',
+  'sync',
+  'cleanup',
+] as const satisfies readonly UserWorkspaceReadinessComponent[];
+
+type CompleteReadinessComponents = Record<UserWorkspaceReadinessComponent, UserWorkspaceReadinessCheck>;
 
 type WorkspaceReadinessProbe = {
   ok: boolean;
@@ -40,7 +49,7 @@ export async function routeUserWorkspaceRuntimeControlPlaneRequest(
 }
 
 async function readUserWorkspaceRuntimeReadiness(env: RuntimeReadinessEnv): Promise<Response> {
-  const components = {} as Partial<Record<UserWorkspaceReadinessComponent, UserWorkspaceReadinessCheck>>;
+  const components: Partial<Record<UserWorkspaceReadinessComponent, UserWorkspaceReadinessCheck>> = {};
   const runtimeStartedAt = Date.now();
   const runtimeReady = /^[a-f0-9]{64}$/.test(env.GHOSTBUILD_RUNTIME_VERSION);
   components.runtime = check(runtimeReady, runtimeReady ? 'version_ready' : 'invalid_version', runtimeStartedAt);
@@ -76,7 +85,10 @@ async function readUserWorkspaceRuntimeReadiness(env: RuntimeReadinessEnv): Prom
     blockWorkspaceComponents(components);
   }
 
-  const complete = components as Record<UserWorkspaceReadinessComponent, UserWorkspaceReadinessCheck>;
+  // SAFETY: every branch above assigns `runtime`, `database` and `projectWorkspaceRpc`, and each of
+  // the workspace components is written either from the probe result or by blockWorkspaceComponents,
+  // so no member of UserWorkspaceReadinessComponent is left unset by the time this runs.
+  const complete = components as CompleteReadinessComponents;
   const ok = USER_WORKSPACE_READINESS_COMPONENTS.every((name) => complete[name].ok);
   return Response.json(
     {

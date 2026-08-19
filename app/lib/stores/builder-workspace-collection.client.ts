@@ -11,6 +11,7 @@ import {
   type BuilderWorkspaceSyncPage,
 } from '~/agents/builder-workspace-types';
 import type { AccountLocalReplica } from '~/lib/cloudflare/account-local-replica';
+import { sha256Hex } from '~/lib/hex-digest';
 
 const WORKSPACE_REVISION_METADATA_KEY = 'workspaceRevision';
 const WORKSPACE_COLLECTION_SCHEMA_VERSION = 1;
@@ -35,6 +36,8 @@ const HYDRATED_WORKSPACE_KEYS = new Set([
 ]);
 
 const revisionSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+/** Any plain object; the persisted row is keyed against HYDRATED_WORKSPACE_KEYS before it is parsed. */
+const hydratedWorkspaceRecordSchema = z.looseObject({});
 const workspacePathSchema = z
   .string()
   .min(WORKSPACE_ROOT.length + 2)
@@ -116,6 +119,13 @@ const syncCursorSchema = z
     index: z.number().int().nonnegative().max(BUILDER_WORKSPACE_MAX_FILES),
   })
   .strict();
+
+/** The `getWorkspaceSyncPage` argument as this client sends it over the untyped agent RPC. */
+type WorkspaceSyncPageRequest = {
+  fromRevision: number;
+  targetRevision?: number;
+  cursor?: string;
+};
 
 export type BuilderWorkspaceAgent = {
   call(method: string, args: unknown[], options?: { timeout?: number }): Promise<unknown>;
@@ -233,15 +243,14 @@ class BuilderWorkspaceCollectionSource {
       let restart = false;
 
       do {
-        const page = await parseSyncPage(
-          await this.#call('getWorkspaceSyncPage', [
-            {
-              fromRevision,
-              ...(targetRevision !== undefined ? { targetRevision } : {}),
-              ...(cursor ? { cursor } : {}),
-            },
-          ]),
-        );
+        const request: WorkspaceSyncPageRequest = { fromRevision };
+        if (targetRevision !== undefined) {
+          request.targetRevision = targetRevision;
+        }
+        if (cursor) {
+          request.cursor = cursor;
+        }
+        const page = await parseSyncPage(await this.#call('getWorkspaceSyncPage', [request]));
         if (page.fromRevision !== fromRevision) {
           throw syncProtocolError('the response fromRevision does not match the request');
         }
@@ -446,7 +455,7 @@ export function workspaceCollectionSnapshot(collection: BuilderWorkspaceCollecti
 }
 
 function persistedRevision(value: unknown): number {
-  return Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : 0;
+  return revisionSchema.catch(0).parse(value);
 }
 
 function isCanonicalWorkspacePath(path: string): boolean {
@@ -554,20 +563,18 @@ function workspaceFileTotals(
 }
 
 function parseHydratedWorkspaceFile(value: unknown): BuilderWorkspaceFileRecord | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  const record = hydratedWorkspaceRecordSchema.safeParse(value);
+  if (!record.success || Object.keys(record.data).some((key) => !HYDRATED_WORKSPACE_KEYS.has(key))) {
     return null;
   }
-  const record = value as Record<string, unknown>;
-  if (Object.keys(record).some((key) => !HYDRATED_WORKSPACE_KEYS.has(key))) {
-    return null;
-  }
+  // The persistence keys above are dropped rather than carried into the collection record.
   const parsed = workspaceFileSchema.safeParse({
-    path: record.path,
-    content: record.content,
-    encoding: record.encoding,
-    size: record.size,
-    sha256: record.sha256,
-    revision: record.revision,
+    path: record.data.path,
+    content: record.data.content,
+    encoding: record.data.encoding,
+    size: record.data.size,
+    sha256: record.data.sha256,
+    revision: record.data.revision,
   });
   return parsed.success ? parsed.data : null;
 }
@@ -577,8 +584,7 @@ async function sha256FileContent(content: string, encoding: BuilderWorkspaceEnco
     encoding === 'utf8'
       ? new TextEncoder().encode(content)
       : Uint8Array.from(atob(content), (character) => character.charCodeAt(0));
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return sha256Hex(bytes);
 }
 
 function syncProtocolError(message: string): Error {
