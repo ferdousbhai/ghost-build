@@ -39,7 +39,9 @@ const skillAssetsOutputPath = resolve(root, 'app/generated/builder-skill-assets.
 
 async function readSkillTree(directory, prefix = '') {
   const files = {};
-  for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+  for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )) {
     const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
       Object.assign(files, await readSkillTree(resolve(directory, entry.name), relativePath));
