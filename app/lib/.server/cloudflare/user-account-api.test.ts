@@ -1,3 +1,4 @@
+import { PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE } from './project-workspace-container-policy';
 import { describe, expect, test, vi } from 'vitest';
 import type { DeploymentPlan } from './deployment-plan';
 import { deploymentAssetHash, type DeploymentArtifactFile } from './deployment-artifact';
@@ -1354,7 +1355,11 @@ describe('UserCloudflareAccountApi', () => {
     const createPayload = JSON.parse(String(createInit?.body));
     expect(createPayload).toMatchObject({
       name: 'ghostbuild-workspace-user',
-      configuration: { image, instance_type: 'basic', wrangler_ssh: { enabled: false } },
+      configuration: {
+        image,
+        instance_type: PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE,
+        wrangler_ssh: { enabled: false },
+      },
       max_instances: 10,
       durable_objects: { namespace_id: '0123456789abcdef0123456789abcdef' },
     });
@@ -1383,7 +1388,7 @@ describe('UserCloudflareAccountApi', () => {
           status: 'completed',
           target_configuration: {
             image,
-            instance_type: 'basic',
+            instance_type: PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE,
             observability: { logs: { enabled: true } },
             wrangler_ssh: { enabled: false },
           },
@@ -1432,7 +1437,7 @@ describe('UserCloudflareAccountApi', () => {
             status: 'progressing',
             target_configuration: {
               image,
-              instance_type: 'basic',
+              instance_type: PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE,
               observability: { logs: { enabled: true } },
               wrangler_ssh: { enabled: false },
             },
@@ -1446,7 +1451,7 @@ describe('UserCloudflareAccountApi', () => {
           status: 'completed',
           target_configuration: {
             image,
-            instance_type: 'basic',
+            instance_type: PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE,
             observability: { logs: { enabled: true } },
             wrangler_ssh: { enabled: false },
           },
@@ -1470,7 +1475,7 @@ describe('UserCloudflareAccountApi', () => {
     const image = `docker.io/cloudflare/sandbox:0.12.5@sha256:${'b'.repeat(64)}`;
     const targetConfiguration = {
       image,
-      instance_type: 'basic',
+      instance_type: PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE,
       observability: { logs: { enabled: true } },
       wrangler_ssh: { enabled: false },
     };

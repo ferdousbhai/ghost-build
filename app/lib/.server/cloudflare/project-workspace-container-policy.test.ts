@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  PROJECT_WORKSPACE_CONTAINER_DIMENSIONS,
   PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE,
   PROJECT_WORKSPACE_CONTAINER_MAX_INSTANCES,
 } from './project-workspace-container-policy';
@@ -20,5 +21,19 @@ describe('ProjectWorkspace container policy', () => {
     expect(Number.isInteger(PROJECT_WORKSPACE_CONTAINER_MAX_INSTANCES)).toBe(true);
     expect(PROJECT_WORKSPACE_CONTAINER_MAX_INSTANCES).toBeGreaterThan(0);
     expect(PROJECT_WORKSPACE_CONTAINER_MAX_INSTANCES).toBeLessThanOrEqual(10);
+  });
+});
+
+describe('resolved dimensions', () => {
+  // A readback accepts either the tier name or these, so a tier change that left them
+  // behind would keep accepting a container the policy no longer asks for.
+  const BY_TIER = {
+    basic: { vcpu: 0.25, memoryMib: 1_024, diskMb: 4_000 },
+    'standard-1': { vcpu: 0.5, memoryMib: 4_096, diskMb: 8_000 },
+    'standard-2': { vcpu: 1, memoryMib: 6_144, diskMb: 12_000 },
+  } as const;
+
+  it('matches the tier the policy selects', () => {
+    expect(PROJECT_WORKSPACE_CONTAINER_DIMENSIONS).toEqual(BY_TIER[PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE]);
   });
 });

@@ -110,7 +110,7 @@ describe('DurableWorkspaceSyncRetryScheduler', () => {
     expect(restartedWake).not.toHaveBeenCalled();
   });
 
-  it('uses Agents idempotent delayed schedules for duplicate constructor reconciliation and wakes', () => {
+  it('collapses duplicate constructor reconciliation and wake schedules to one pending row', () => {
     const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
     const scheduler = source.slice(
       source.indexOf('this.#syncRetries = new DurableWorkspaceSyncRetryScheduler'),
@@ -119,9 +119,15 @@ describe('DurableWorkspaceSyncRetryScheduler', () => {
     expect(scheduler).toContain("'retryPendingComputerSync'");
     expect(scheduler).toContain('this.scheduleOnce(');
 
-    const scheduleOnceStart = source.indexOf('private scheduleOnce(');
+    const scheduleOnceStart = source.indexOf('private async scheduleOnce(');
     const scheduleOnce = source.slice(scheduleOnceStart, source.indexOf('\n  }', scheduleOnceStart));
-    expect(scheduleOnce).toContain('{ idempotent: true }');
+    // `Container.schedule` mints a fresh row id per call, so dedupe has to be explicit.
+    // An options bag such as `{ idempotent: true }` is dropped by its 3-arg signature.
+    expect(scheduleOnce).toContain('this.deleteSchedules(callback)');
+    expect(scheduleOnce).not.toContain('idempotent');
+    expect(scheduleOnce.indexOf('this.deleteSchedules(callback)')).toBeLessThan(
+      scheduleOnce.indexOf('await this.schedule('),
+    );
   });
 
   it('proves exhausted recovery through a fresh pull before preserving the result and clearing the barrier', () => {

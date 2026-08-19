@@ -2878,21 +2878,20 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   }
 
   /**
-   * Deduplicating `schedule()`. The Durable Object runtime accepts an `idempotent` option so a
-   * repeated (callback, payload) pair reuses the existing row instead of stacking duplicates, but
-   * the `Container` base class this Sandbox extends publishes only the three-argument overload.
+   * Deduplicating `schedule()`. `Container.schedule` mints a fresh row id on every call and then
+   * `INSERT OR REPLACE`s on it, so repeated calls stack alarm rows rather than collapsing; its
+   * published signature also takes no options bag, so the Durable Object runtime's `idempotent`
+   * flag never reaches it. Both callbacks are whole-state sweeps that re-read persisted retry
+   * state and re-derive their own next wake time when they fire, so a single pending row per
+   * callback is sufficient — drop any earlier row before inserting the new one.
    */
-  private scheduleOnce(delaySeconds: number, callback: string, payload: ScheduledRetryPayload): Promise<unknown> {
-    // SAFETY: the fourth argument is the documented `agents` schedule options bag, and both
-    // callbacks named by callers (`retryPendingComputerSync`, `reconcilePendingCommands`) are
-    // methods of this class, which is what the published `callback: keyof this` overload requires.
-    const schedule = this.schedule as unknown as (
-      when: number,
-      callback: string,
-      payload: ScheduledRetryPayload,
-      options: { idempotent: true },
-    ) => Promise<unknown>;
-    return schedule.call(this, delaySeconds, callback, payload, { idempotent: true });
+  private async scheduleOnce(
+    delaySeconds: number,
+    callback: 'retryPendingComputerSync' | 'reconcilePendingCommands',
+    payload: ScheduledRetryPayload,
+  ): Promise<void> {
+    this.deleteSchedules(callback);
+    await this.schedule(delaySeconds, callback, payload);
   }
 
   private async cleanupReadinessRoot(): Promise<void> {

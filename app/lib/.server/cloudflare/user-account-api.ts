@@ -12,6 +12,7 @@ import {
   DEPLOYMENT_VERSION_METADATA_BINDING,
 } from './deployment-runtime-policy';
 import {
+  PROJECT_WORKSPACE_CONTAINER_DIMENSIONS,
   PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE,
   PROJECT_WORKSPACE_CONTAINER_MAX_INSTANCES,
 } from './project-workspace-container-policy';
@@ -1902,10 +1903,15 @@ function matchesWorkspaceContainerConfiguration(value: unknown, image: string): 
   const observability = isRecord(value.observability) ? value.observability : null;
   const logs = observability && isRecord(observability.logs) ? observability.logs : null;
   const disk = isRecord(value.disk) ? value.disk : null;
-  const basicInstance =
+  // Cloudflare echoes either the tier name or the dimensions it resolves to, so both are
+  // accepted - but both come from the policy, so changing the tier cannot leave this
+  // recognising only the previous one.
+  const configuredInstance =
     value.instance_type === PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE ||
-    (value.vcpu === 0.25 && value.memory_mib === 1_024 && disk?.size_mb === 4_000);
-  return ssh?.enabled === false && logs?.enabled === true && basicInstance;
+    (value.vcpu === PROJECT_WORKSPACE_CONTAINER_DIMENSIONS.vcpu &&
+      value.memory_mib === PROJECT_WORKSPACE_CONTAINER_DIMENSIONS.memoryMib &&
+      disk?.size_mb === PROJECT_WORKSPACE_CONTAINER_DIMENSIONS.diskMb);
+  return ssh?.enabled === false && logs?.enabled === true && configuredInstance;
 }
 
 function workerModuleContentType(path: string): string {
