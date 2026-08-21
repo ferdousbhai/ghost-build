@@ -227,13 +227,33 @@ export async function cloudflareRuntimeSessionAction({
     findCloudflareConnectionForUser(env.DB, session.user.id),
     findUserWorkspaceRuntime(env.DB, session.user.id),
   ]);
-  if (
-    !currentConnection ||
-    currentConnection.status !== 'active' ||
-    !isUsableWorkspaceRuntime(currentRuntime, currentConnection, upgradeDeferred)
-  ) {
+  // "The account changed" and "the workspace is not ready yet" are different answers and only one
+  // of them is the user's problem. Collapsing both into the former told a user whose provisioning
+  // attempt was simply still in flight that their Cloudflare account had changed, and the browser
+  // treats that as final — so it stopped polling and sat on a dead end until the lease expired.
+  if (!currentConnection || currentConnection.status !== 'active') {
     return Response.json(
       { error: 'The Cloudflare account changed while Ghostbuild prepared the workspace. Try again.' },
+      { status: 409, headers: { 'Cache-Control': 'private, no-store' } },
+    );
+  }
+  // A runtime belonging to a different connection or generation is the one genuine account change:
+  // the workspace no longer belongs to the account this session would be minted for. Read before
+  // the guard below, whose type predicate narrows the failing branch to `null` even though a
+  // not-yet-ready runtime is a perfectly real row.
+  const runtimeBelongsToAnotherAccount =
+    currentRuntime !== null &&
+    (currentRuntime.connectionId !== currentConnection.id ||
+      currentRuntime.connectionGeneration !== currentConnection.generation);
+  if (!isUsableWorkspaceRuntime(currentRuntime, currentConnection, upgradeDeferred)) {
+    if (runtimeBelongsToAnotherAccount) {
+      return Response.json(
+        { error: 'The Cloudflare account changed while Ghostbuild prepared the workspace. Try again.' },
+        { status: 409, headers: { 'Cache-Control': 'private, no-store' } },
+      );
+    }
+    return Response.json(
+      { code: 'workspace_preparing', error: 'Ghostbuild is still preparing your workspace.' },
       { status: 409, headers: { 'Cache-Control': 'private, no-store' } },
     );
   }

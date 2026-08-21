@@ -489,6 +489,40 @@ describe('Cloudflare-only authentication', () => {
     await expect(response.json()).resolves.not.toHaveProperty('token');
   });
 
+  it('tells the client to keep waiting when the runtime is not ready but the account is unchanged', async () => {
+    // A provisioning attempt that is still in flight is not an account change. Reporting it as one
+    // stopped the browser's retry loop and left the user on a dead-end error until the lease
+    // expired, which is up to forty minutes.
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection());
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([null, runtimeRow({ status: 'provisioning' })]),
+      provision: vi.fn().mockResolvedValue(runtimeRecord()),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      code: 'workspace_preparing',
+      error: 'Ghostbuild is still preparing your workspace.',
+    });
+  });
+
+  it('still reports an account change when the runtime belongs to another connection', async () => {
+    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findConnection.mockResolvedValue(activeConnection(2));
+    const response = await cloudflareRuntimeSessionAction({
+      request: runtimeSessionRequest(),
+      env: runtimeEnv([null, runtimeRow({ connectionGeneration: 1 })]),
+      provision: vi.fn().mockResolvedValue(runtimeRecord({ connectionGeneration: 1 })),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: 'The Cloudflare account changed while Ghostbuild prepared the workspace. Try again.',
+    });
+  });
+
   it('starts OAuth before any local session exists and keeps only a same-origin return path', async () => {
     const database = oauthDatabase();
     const orchestrator = fakeOrchestrator();
