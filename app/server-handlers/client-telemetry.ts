@@ -31,6 +31,7 @@ const clientTelemetrySchema = z
           .optional(),
         retryCount: z.number().int().nonnegative().max(100).optional(),
         workspaceRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+        previewMode: z.enum(['production', 'dev']).optional(),
       })
       .strict(),
   })

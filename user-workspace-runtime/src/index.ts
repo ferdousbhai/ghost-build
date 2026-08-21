@@ -25,6 +25,7 @@ import {
   WORKSPACE_RESTART_INDETERMINATE_MESSAGE,
 } from './execution-reattach';
 import { BuilderAgent } from '../../app/agents/builder-agent';
+import type { BuilderPreviewSuccess } from '../../app/agents/builder-preview-types';
 import {
   BUILDER_WORKSPACE_MAX_FILE_BYTES,
   BUILDER_WORKSPACE_MAX_FILES,
@@ -63,13 +64,14 @@ import {
   toolSuccess,
   type GhostbuildToolResult,
 } from '../../ghostbuild-agent/tool-result';
-import { applyAtomicWorkspaceChanges } from './atomic-workspace-changes';
+import { applyAtomicWorkspaceChanges, type AtomicWorkspaceChange } from './atomic-workspace-changes';
 import { ComputerAdmissionControl } from './computer-admission';
 import { isComputerContainerCallback } from './container-fetch-routing';
 import {
   COMPUTERD_BINARY,
   COMPUTERD_BOOTSTRAP_TIMEOUT_MS,
   CONTAINER_CONNECT_TIMEOUT_MS,
+  CONTAINER_PNPM_STORE_DIR,
   CONTAINER_TOOLCHAIN_BOOTSTRAP_TIMEOUT_MS,
   computerdBootstrapCommand,
   containerToolchainBootstrapCommand,
@@ -93,6 +95,16 @@ import {
   previewPort,
 } from './preview-lifecycle';
 import {
+  containerParentDirectory,
+  devPreviewProjectedPath,
+  devPreviewRemoveCommand,
+  devPreviewRoot,
+  devPreviewServerCommand,
+  type PreviewMode,
+  requirePreviewMode,
+  storedPreviewMode,
+} from './dev-preview';
+import {
   WorkspaceOperationConflictError,
   WorkspaceOperationIndeterminateError,
   WorkspaceOperationLane,
@@ -112,7 +124,27 @@ import {
   requireWorkspaceSyncBarrier,
   WorkspaceSyncPendingError,
 } from './workspace-sync-retry';
+import { WORKSPACE_CONTAINER_SLEEP_AFTER } from '../../app/lib/.server/cloudflare/project-workspace-container-policy';
+import {
+  MATERIALIZATION_CONCURRENCY,
+  forEachConcurrently,
+  isolatedTargetPath,
+  requiredDirectories,
+} from './isolated-materialization';
 import { stableWorkspaceRead } from './stable-workspace-read';
+import {
+  isolatedContentDigestCommand,
+  projectContentDigest,
+  projectContentDigestInput,
+} from './workspace-content-digest';
+import { parallelStagesTimeoutMs, parallelValidationStagesCommand } from './validation-stages';
+import {
+  enumerateProjectEntries,
+  requireProjectListingOptions,
+  requireProjectSearchOptions,
+  scanProjectFiles,
+  type DiscoveryScope,
+} from './workspace-discovery';
 import { requireDeploymentMigrationName, requireWorkspaceFileEncoding } from './workspace-input';
 import { withCors } from './http-cors';
 import {
@@ -124,7 +156,6 @@ import {
 import { ValidationCancellation } from './validation-cancellation';
 import {
   createContainerDirectoryCommand,
-  createIsolatedProjectCommand,
   ISOLATED_PROJECT_ROOT,
   rebaseDeploymentConfigPaths,
   relativeIsolatedPath,
@@ -164,8 +195,15 @@ const MAX_FILES = BUILDER_WORKSPACE_MAX_FILES;
 const SYNC_BATCH_BYTES = BUILDER_WORKSPACE_SYNC_BATCH_BYTES;
 const SYNC_BATCH_FILES = BUILDER_WORKSPACE_SYNC_BATCH_FILES;
 const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.tanstack', '.wrangler']);
+/**
+ * `--store-dir` points every install at the store the workspace image pre-warms, which is what
+ * turns a from-scratch dependency install into a hardlink pass. `--prefer-offline` keeps a warm
+ * store from paying registry round-trips it does not need; anything the store is missing is still
+ * fetched normally, so a project whose lockfile has moved past the image installs correctly.
+ */
 const INSTALL_COMMAND =
-  'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --registry=https://registry.npmjs.org/';
+  'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --prefer-offline ' +
+  `--store-dir ${CONTAINER_PNPM_STORE_DIR} --registry=https://registry.npmjs.org/`;
 const INSTALL_TIMEOUT_MS = CONTAINER_PACKAGE_INSTALL_TIMEOUT_MS;
 const WEB_APP_BUNDLE_SCRIPT = [
   "import { createRequire } from 'node:module';",
@@ -182,18 +220,44 @@ const PREPARED_VALIDATION_ROOT = `${ISOLATED_PROJECT_ROOT}/validated-preview`;
  * A real total-runtime cap, unlike the container-shell `timeoutMs` hint
  * documented at `EXEC_COMMAND_TIMEOUT_MS` (#128).
  */
-const REVISION_CHECK_COMMANDS = [
-  { command: 'pnpm run typecheck', timeoutMs: 5 * 60_000 },
-  { command: 'pnpm run verify:stack', timeoutMs: 5 * 60_000 },
-  { command: 'pnpm run lint', timeoutMs: 5 * 60_000 },
+/**
+ * `pnpm run typecheck` runs `tsr generate` and `wrangler types` before `tsc`, so the route tree
+ * and binding declarations it writes are inputs to lint and to the preview build. It is the one
+ * validation stage that has to finish before the others start.
+ */
+const REVISION_CODEGEN_COMMAND = { command: 'pnpm run typecheck', timeoutMs: 5 * 60_000 } as const;
+/**
+ * The isolated preview's own local D1 schema. `wrangler.preview.jsonc` is what keeps a generated
+ * app's bindings off the user's real resources, so every root that is about to run preview code
+ * applies it — which is why the same command appears in the validation group, the production
+ * preview, and the dev preview rather than in only one of them.
+ */
+const PREVIEW_DATABASE_COMMAND = {
+  command: 'pnpm exec wrangler d1 migrations apply DB --local --config wrangler.preview.jsonc',
+  timeoutMs: 60_000,
+} as const;
+/**
+ * Everything else validation does, with nothing between these stages but the cores to run them.
+ * The preview database migration overlaps the build safely because its consumer is the preview
+ * server, which does not start until the whole group has finished.
+ */
+const PARALLEL_VALIDATION_STAGES = [
+  { name: 'verify_stack', command: 'pnpm run verify:stack', timeoutMs: 5 * 60_000 },
+  { name: 'lint', command: 'pnpm run lint', timeoutMs: 5 * 60_000 },
+  { name: 'preview_database', ...PREVIEW_DATABASE_COMMAND },
+  { name: 'preview_build', command: 'pnpm run build:isolated-preview', timeoutMs: 5 * 60_000 },
 ] as const;
+const VALIDATION_STAGE_LOG_ROOT = `${ISOLATED_PROJECT_ROOT}/validation-stage-logs`;
 const PREVIEW_PREPARATION_COMMANDS = [
-  {
-    command: 'pnpm exec wrangler d1 migrations apply DB --local --config wrangler.preview.jsonc',
-    timeoutMs: 60_000,
-  },
+  PREVIEW_DATABASE_COMMAND,
   { command: 'pnpm run build:isolated-preview', timeoutMs: 5 * 60_000 },
 ] as const;
+/**
+ * The dev preview prepares the same local D1 schema and deliberately stops there. Skipping
+ * `build:isolated-preview` is the whole point: Vite's dev server compiles on demand and
+ * hot-replaces modules, so no production build stands between an edit and the running page.
+ */
+const DEV_PREVIEW_PREPARATION_COMMANDS = [PREVIEW_DATABASE_COMMAND] as const;
 /**
  * `timeoutMs` for a container-shell exec is a process-lifetime hint shipped to
  * computerd over Computer's shell RPC. @cloudflare/computer 0.1.1 enforces a
@@ -208,7 +272,24 @@ const PREVIEW_PREPARATION_COMMANDS = [
  */
 const EXEC_COMMAND_TIMEOUT_MS = OPERATION_TOOL_BUDGET_MS.exec;
 const COMPUTERD_PROCESS_ROLE = 'computerd';
-const COMPUTERD_ENV = { PORT: '8080', MOUNT_POINT: '/home', FUSE_MOUNT: 'auto' } as const;
+const COMPUTERD_ENV = {
+  PORT: '8080',
+  MOUNT_POINT: '/home',
+  FUSE_MOUNT: 'auto',
+  /**
+   * pnpm otherwise runs an implicit "are node_modules in sync with the lockfile" install before
+   * any `pnpm run <script>`. Under /home that mount is the durable VFS, so the implicit install
+   * writes a whole dependency tree through FUSE into Durable Object storage and the workspace
+   * exceeds its isolate memory limit permanently — cleanup itself needs the DO to survive long
+   * enough to run, and it no longer can (#137).
+   *
+   * The workspace image sets this too, but the image is an accelerant a workspace can legitimately
+   * end up without: `resolveWorkspaceSandboxImage` falls back to the stock base image, which has
+   * no such setting. A guard against a Durable-Object-destroying bug must not live only in the
+   * optional half.
+   */
+  npm_config_verify_deps_before_run: 'false',
+} as const;
 const TRANSIENT_COMMAND_PROCESS_ROLE = 'transient-command';
 const VALIDATION_CANCELLATION_SETTLE_MS = 45_000;
 const PREVIEW_CONTAINER_RECOVERY_TIMEOUT_MS = 60_000;
@@ -256,8 +337,14 @@ type ActivePreviewRow = {
   exec_id: string;
   port: number;
   snapshot_root: string;
+  /**
+   * For a `production` preview these two are the checkpoint the preview is bound to and are
+   * asserted against the workspace. For a `dev` preview they are provenance only — the state the
+   * dev server started from — because a dev preview deliberately tracks the project as it moves.
+   */
   snapshot_revision: string;
   workspace_revision: number;
+  mode: PreviewMode;
 };
 
 type PendingPreviewRow = ActivePreviewRow & {
@@ -271,6 +358,7 @@ type PreviewResultRow = {
   workspace_revision: number;
   ready_at: number;
   expires_at: number;
+  mode: PreviewMode;
 };
 
 type PreparedValidationRow = {
@@ -291,6 +379,8 @@ type DeploymentSessionRow = {
 };
 
 class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
+  /** Declared rather than inherited; see WORKSPACE_CONTAINER_SLEEP_AFTER for why this number. */
+  override sleepAfter = WORKSPACE_CONTAINER_SLEEP_AFTER;
   protected readonly sandboxProcesses = createExtensionProcessSandbox(this);
   readonly containerBackend = new CloudflareContainerBackend({
     container: () => this,
@@ -307,16 +397,25 @@ class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
   }
 
   async startComputerd(env: Record<string, string>): Promise<void> {
-    await this.runBootstrapStage(
-      'toolchain (pnpm)',
-      CONTAINER_TOOLCHAIN_BOOTSTRAP_TIMEOUT_MS,
-      containerToolchainBootstrapCommand(),
-    );
+    // A running computerd is proof this container generation already completed both bootstraps:
+    // the process handle is resolved against the live container, so a replaced container cannot
+    // report the stored process as running. Asking first keeps a warm workspace off the network
+    // entirely — the toolchain probe alone is two `pnpm --version` spawns on every reconnect.
     const existing = await this.processForRole(COMPUTERD_PROCESS_ROLE);
     if (existing && (await existing.status()).state === 'running') {
       return;
     }
-    await this.runBootstrapStage('computerd', COMPUTERD_BOOTSTRAP_TIMEOUT_MS, computerdBootstrapCommand());
+    // Independent, idempotent installs of two different things: an npm global package and a GHCR
+    // layer. Serializing them only added the slower one to the wait, and each keeps its own
+    // retry budget, so a concurrent failure is reported exactly as it was when they ran in order.
+    await Promise.all([
+      this.runBootstrapStage(
+        'toolchain (pnpm)',
+        CONTAINER_TOOLCHAIN_BOOTSTRAP_TIMEOUT_MS,
+        containerToolchainBootstrapCommand(),
+      ),
+      this.runBootstrapStage('computerd', COMPUTERD_BOOTSTRAP_TIMEOUT_MS, computerdBootstrapCommand()),
+    ]);
     const process = await this.sandboxProcesses.exec([COMPUTERD_BINARY], {
       env: { ...env, FUSE_MOUNT: 'auto' },
     });
@@ -483,6 +582,11 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   readonly #admission: ComputerAdmissionControl;
   readonly #activeOperationOwners = new Set<string>();
   #activeValidation: ActiveValidation | null = null;
+  /**
+   * The computerd generation whose `/home/project` view has been proved to match durable truth.
+   * In memory on purpose: a Durable Object restart re-verifies, which errs toward checking again.
+   */
+  #verifiedContainerGeneration: string | null = null;
   readonly #activeSyncRecoveries = new Map<string, Promise<boolean>>();
   /** Consecutive failed exhausted-sync recoveries per backend; in-memory, reset on success. */
   readonly #syncRecoveryFailures = new Map<string, number>();
@@ -577,7 +681,8 @@ export class ProjectWorkspace extends ComputerSandboxBase {
          snapshot_root TEXT NOT NULL,
          snapshot_revision TEXT NOT NULL,
          workspace_revision INTEGER NOT NULL,
-         activated_at INTEGER NOT NULL
+         activated_at INTEGER NOT NULL,
+         mode TEXT NOT NULL DEFAULT 'production'
        )`,
     );
     this.ctx.storage.sql.exec(
@@ -588,7 +693,8 @@ export class ProjectWorkspace extends ComputerSandboxBase {
          snapshot_root TEXT NOT NULL,
          snapshot_revision TEXT NOT NULL,
          workspace_revision INTEGER NOT NULL,
-         expires_at INTEGER NOT NULL
+         expires_at INTEGER NOT NULL,
+         mode TEXT NOT NULL DEFAULT 'production'
        )`,
     );
     this.ctx.storage.sql.exec(
@@ -617,9 +723,19 @@ export class ProjectWorkspace extends ComputerSandboxBase {
          snapshot_revision TEXT NOT NULL,
          workspace_revision INTEGER NOT NULL,
          ready_at INTEGER NOT NULL,
-         expires_at INTEGER NOT NULL
+         expires_at INTEGER NOT NULL,
+         mode TEXT NOT NULL DEFAULT 'production'
        )`,
     );
+    // `CREATE TABLE IF NOT EXISTS` is a no-op for a workspace provisioned before dev previews
+    // existed, so its preview tables would still be missing the column every read now selects.
+    // The default reflects the only kind of preview those rows could describe.
+    for (const table of ['ghostbuild_active_preview', 'ghostbuild_pending_previews', 'ghostbuild_preview_results']) {
+      const columns = [...this.ctx.storage.sql.exec<{ name: string }>(`PRAGMA table_info(${table})`)];
+      if (!columns.some((column) => column.name === 'mode')) {
+        this.ctx.storage.sql.exec(`ALTER TABLE ${table} ADD COLUMN mode TEXT NOT NULL DEFAULT 'production'`);
+      }
+    }
   }
 
   override fetch(request: Request): Promise<Response> {
@@ -1110,19 +1226,16 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             this.#toolOperations.assertRunning(toolCallId);
           }
         };
-        const changedPaths = applyAtomicWorkspaceChanges(
-          this.#workspace,
-          changes.map((change) =>
-            change.kind === 'delete'
-              ? change
-              : {
-                  kind: 'write' as const,
-                  path: change.path,
-                  ...decodedWrites.get(change.path)!,
-                },
-          ),
-          assertMutationAllowed,
+        const atomicChanges: AtomicWorkspaceChange[] = changes.map((change) =>
+          change.kind === 'delete'
+            ? change
+            : {
+                kind: 'write' as const,
+                path: change.path,
+                ...decodedWrites.get(change.path)!,
+              },
         );
+        const changedPaths = applyAtomicWorkspaceChanges(this.#workspace, atomicChanges, assertMutationAllowed);
         const committedRevision = this.currentRevision();
         if (toolCallId) {
           this.#toolOperations.assertRunning(toolCallId);
@@ -1153,6 +1266,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             });
           }
         }
+        await this.projectChangesIntoDevPreview(atomicChanges);
         const state = await this.getWorkspaceState();
         return { ok: true as const, state, changedPaths };
       });
@@ -1277,6 +1391,60 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     }));
   }
 
+  /**
+   * Start this workspace's container and computerd ahead of the work that needs them.
+   *
+   * Nothing before the model's first `exec` requires a container: seeding writes into the durable
+   * VFS, and `read`/`ls`/`grep` are served from it. So the entire cold start — container boot,
+   * the toolchain and computerd bootstraps, the FUSE mount — used to land in the middle of the
+   * first turn, while the user watched. Opening a chat is the moment we learn a container will be
+   * wanted, and the user is still typing, so that is when to pay for it.
+   *
+   * Deliberately outside the stateful operation lane: warming is not a mutation, and taking the
+   * lane would make an optimisation block the first write it exists to speed up. Failure is not
+   * an error either — the ordinary lazy path still runs, just cold, so this reports rather than
+   * throws.
+   */
+  async warmContainer(): Promise<void> {
+    try {
+      await this.getWorkspaceContainer().start(COMPUTERD_ENV);
+    } catch (error) {
+      console.info('ProjectWorkspace container warm-up did not complete', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Discovery served from Computer's SQLite VFS alone: no container, no shell process, no
+   * filesystem sync barrier, and never the exclusive stateful operation lane. `stableProjectRead`
+   * is the read seam mutating operations do not share, so a listing or a search answers before
+   * the container is warm and stays available while a build command holds the lane.
+   */
+  async listProjectEntries(value: unknown) {
+    const request = record(value);
+    const options = requireProjectListingOptions(request);
+    const scope = this.discoveryScope(request.path);
+    const snapshot = await this.stableProjectRead((workspace) => enumerateProjectEntries(workspace.fs, scope, options));
+    return { ...snapshot.value, revision: snapshot.revision };
+  }
+
+  async searchProjectFiles(value: unknown) {
+    const request = record(value);
+    const options = requireProjectSearchOptions(request);
+    const scope = this.discoveryScope(request.path);
+    const snapshot = await this.stableProjectRead((workspace) => scanProjectFiles(workspace.fs, scope, options));
+    return { ...snapshot.value, revision: snapshot.revision };
+  }
+
+  private discoveryScope(pathValue: unknown): DiscoveryScope {
+    return {
+      path: pathValue === undefined ? PROJECT_ROOT : requireProjectPath(pathValue, true),
+      root: PROJECT_ROOT,
+      prunedRoots: CHECKPOINT_EXCLUDED_ROOTS,
+    };
+  }
+
   async makeDirectory(pathValue: unknown) {
     const path = requireProjectPath(pathValue, true);
     await this.withStatefulOperation('write', `mkdir:${path}`, () =>
@@ -1294,8 +1462,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     const settlement = this.withStatefulOperation(
       'exec',
       request.operationKey,
-      (liveness) =>
-        this.withComputer((workspace) =>
+      async (liveness) => {
+        await this.assertContainerMatchesDurableProject();
+        return this.withComputer((workspace) =>
           runCommand(workspace, request.command, {
             id: request.operationKey,
             resume,
@@ -1320,7 +1489,8 @@ export class ProjectWorkspace extends ComputerSandboxBase {
                 }
               : undefined,
           }),
-        ),
+        );
+      },
       { resume },
     );
     this.#activeCommandSettlements.set(request.operationKey, settlement);
@@ -1351,8 +1521,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         const settlement = this.withStatefulOperation(
           'exec',
           request.operationKey,
-          (liveness) =>
-            this.withComputer((workspace) =>
+          async (liveness) => {
+            await this.assertContainerMatchesDurableProject();
+            return this.withComputer((workspace) =>
               streamCommand(workspace, request.command, {
                 id: request.operationKey,
                 resume,
@@ -1385,7 +1556,8 @@ export class ProjectWorkspace extends ComputerSandboxBase {
                     }
                   : undefined,
               }),
-            ),
+            );
+          },
           { resume },
         );
         this.#activeCommandSettlements.set(request.operationKey, settlement);
@@ -1737,24 +1909,30 @@ export class ProjectWorkspace extends ComputerSandboxBase {
         let cleanupAllowed = true;
         try {
           await this.discardPreparedValidationSnapshot();
-          await this.pushDurableProjectToContainer();
-          await this.runTransientCommand(
-            PROJECT_ROOT,
-            createIsolatedProjectCommand({ projectRoot: PROJECT_ROOT, isolatedRoot, quote: shellQuote }),
-            2 * 60_000,
-            cancellation,
-          );
+          await this.copyProjectToIsolatedRoot(isolatedRoot, cancellation);
           cancellation.requireActive();
           if ((await this.checkpoint()).revision !== before.revision) {
             throw new Error('The project changed while validation was being isolated. Validate the new revision.');
           }
           await this.runTransientCommand(isolatedRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS, cancellation);
           liveness.observed();
-          for (const { command, timeoutMs } of [...REVISION_CHECK_COMMANDS, ...PREVIEW_PREPARATION_COMMANDS]) {
-            await this.runTransientCommand(isolatedRoot, command, timeoutMs, cancellation);
-            // Each check that returns is a validation stage this operation completed.
-            liveness.observed();
-          }
+          await this.runTransientCommand(
+            isolatedRoot,
+            REVISION_CODEGEN_COMMAND.command,
+            REVISION_CODEGEN_COMMAND.timeoutMs,
+            cancellation,
+          );
+          liveness.observed();
+          await this.runTransientCommand(
+            isolatedRoot,
+            parallelValidationStagesCommand(PARALLEL_VALIDATION_STAGES, {
+              logRoot: VALIDATION_STAGE_LOG_ROOT,
+              quote: shellQuote,
+            }),
+            parallelStagesTimeoutMs(PARALLEL_VALIDATION_STAGES),
+            cancellation,
+          );
+          liveness.observed();
           cancellation.requireActive();
           const after = await this.checkpoint();
           cancellation.requireActive();
@@ -2022,17 +2200,23 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     await this.#admission.admitNewOperation();
     const input = record(value);
     const previewId = requirePreviewId(input.previewId);
-    const expectedWorkspaceRevision = requireInteger(
-      input.expectedWorkspaceRevision,
-      'expectedWorkspaceRevision',
-      Number.MAX_SAFE_INTEGER,
-    );
-    const expectedSnapshotRevision = requireSnapshotRevision(input.expectedSnapshotRevision);
+    const mode = requirePreviewMode(input.mode);
+    // A dev preview is not checkpoint-bound: it tracks the workspace as it changes, so the caller
+    // has no revision to assert and none is accepted. It records the numeric revision it started
+    // from as provenance and no source digest at all, because hashing one would suggest a binding
+    // that the next edit immediately breaks.
+    const expectedWorkspaceRevision =
+      mode === 'dev'
+        ? this.currentRevision()
+        : requireInteger(input.expectedWorkspaceRevision, 'expectedWorkspaceRevision', Number.MAX_SAFE_INTEGER);
+    const expectedSnapshotRevision = mode === 'dev' ? '' : requireSnapshotRevision(input.expectedSnapshotRevision);
     const replay = this.previewResultRow(previewId);
     if (replay) {
       if (
-        replay.snapshot_revision !== expectedSnapshotRevision ||
-        replay.workspace_revision !== expectedWorkspaceRevision
+        replay.mode !== mode ||
+        (mode === 'production' &&
+          (replay.snapshot_revision !== expectedSnapshotRevision ||
+            replay.workspace_revision !== expectedWorkspaceRevision))
       ) {
         throw new WorkspaceOperationIndeterminateError('preview');
       }
@@ -2043,14 +2227,16 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     }
     return this.withStatefulOperation(
       'preview',
-      `preview:${previewId}:${expectedWorkspaceRevision}:${expectedSnapshotRevision}`,
+      `preview:${mode}:${previewId}:${expectedWorkspaceRevision}:${expectedSnapshotRevision}`,
       async () => {
-        await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, true);
+        if (mode === 'production') {
+          await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, true);
+        }
         this.requirePreviewNotCancelled(previewId);
         await this.cleanupPendingPreviews();
         const previous = this.activePreviewRow();
         const port = previewPort(previewId, previous?.port);
-        const snapshotRoot = `${PREVIEW_SNAPSHOT_ROOT}/${previewId}`;
+        const snapshotRoot = mode === 'dev' ? devPreviewRoot(previewId) : `${PREVIEW_SNAPSHOT_ROOT}/${previewId}`;
         const candidate: ActivePreviewRow = {
           preview_id: previewId,
           exec_id: '',
@@ -2058,6 +2244,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           snapshot_root: snapshotRoot,
           snapshot_revision: expectedSnapshotRevision,
           workspace_revision: expectedWorkspaceRevision,
+          mode,
         };
         let published = false;
         let cleanupAllowed = true;
@@ -2066,13 +2253,17 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           this.upsertPendingPreview(candidate, cleanupDeadline);
           await this.schedule(new Date(cleanupDeadline), 'expirePreview', { previewId });
           await this.cleanupPreviewProcess(candidate);
-          await this.preparePreviewSnapshot({
-            previewId,
-            snapshotRoot,
-            expectedWorkspaceRevision,
-            expectedSnapshotRevision,
-          });
-          await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
+          if (mode === 'dev') {
+            await this.prepareDevPreviewRoot({ previewId, devRoot: snapshotRoot });
+          } else {
+            await this.preparePreviewSnapshot({
+              previewId,
+              snapshotRoot,
+              expectedWorkspaceRevision,
+              expectedSnapshotRevision,
+            });
+            await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
+          }
           const expiresAt = Date.now() + PREVIEW_TTL_MS;
           await this.schedule(new Date(expiresAt), 'expirePreview', { previewId });
           this.upsertPendingPreview(candidate, expiresAt);
@@ -2080,7 +2271,10 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             sandboxShellCommand(
               createContainerDirectoryCommand({
                 directory: snapshotRoot,
-                command: `pnpm exec vite preview --mode ghostbuild-isolated-preview --host 0.0.0.0 --port ${port} --strictPort`,
+                command:
+                  mode === 'dev'
+                    ? devPreviewServerCommand(port)
+                    : `pnpm exec vite preview --mode ghostbuild-isolated-preview --host 0.0.0.0 --port ${port} --strictPort`,
                 quote: shellQuote,
               }),
             ),
@@ -2095,7 +2289,9 @@ export class ProjectWorkspace extends ComputerSandboxBase {
           const tunnel = await createReachablePreviewTunnel(this.tunnels, port, {
             assertActive: () => this.requirePreviewNotCancelled(previewId),
           });
-          await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
+          if (mode === 'production') {
+            await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
+          }
           this.requirePreviewNotCancelled(previewId);
           await this.setKeepAlive(true);
           this.requirePreviewNotCancelled(previewId);
@@ -2110,8 +2306,8 @@ export class ProjectWorkspace extends ComputerSandboxBase {
             this.ctx.storage.sql.exec(
               `INSERT INTO ghostbuild_active_preview (
                singleton, preview_id, exec_id, port, snapshot_root, snapshot_revision,
-               workspace_revision, activated_at
-             ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+               workspace_revision, activated_at, mode
+             ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(singleton) DO UPDATE SET
                preview_id = excluded.preview_id,
                exec_id = excluded.exec_id,
@@ -2119,7 +2315,8 @@ export class ProjectWorkspace extends ComputerSandboxBase {
                snapshot_root = excluded.snapshot_root,
                snapshot_revision = excluded.snapshot_revision,
                workspace_revision = excluded.workspace_revision,
-               activated_at = excluded.activated_at`,
+               activated_at = excluded.activated_at,
+               mode = excluded.mode`,
               previewId,
               candidate.exec_id,
               port,
@@ -2127,17 +2324,19 @@ export class ProjectWorkspace extends ComputerSandboxBase {
               expectedSnapshotRevision,
               expectedWorkspaceRevision,
               now,
+              mode,
             );
             this.ctx.storage.sql.exec(
               `INSERT INTO ghostbuild_preview_results (
-                 preview_id, url, snapshot_revision, workspace_revision, ready_at, expires_at
-               ) VALUES (?, ?, ?, ?, ?, ?)`,
+                 preview_id, url, snapshot_revision, workspace_revision, ready_at, expires_at, mode
+               ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
               previewId,
               tunnel.url,
               expectedSnapshotRevision,
               expectedWorkspaceRevision,
               now,
               expiresAt,
+              mode,
             );
             this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?', previewId);
           });
@@ -2163,14 +2362,15 @@ export class ProjectWorkspace extends ComputerSandboxBase {
                 }),
               );
           }
-          return {
-            id: previewId,
+          return previewSuccess({
+            preview_id: previewId,
             url: tunnel.url,
-            workspaceRevision: expectedWorkspaceRevision,
-            snapshotRevision: expectedSnapshotRevision,
-            readyAt: new Date(now).toISOString(),
-            expiresAt: new Date(expiresAt).toISOString(),
-          };
+            snapshot_revision: expectedSnapshotRevision,
+            workspace_revision: expectedWorkspaceRevision,
+            ready_at: now,
+            expires_at: expiresAt,
+            mode,
+          });
         } catch (error) {
           cleanupAllowed = !(error instanceof SandboxProcessTerminationUnconfirmedError);
           throw error;
@@ -2295,12 +2495,10 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       let cleanupAllowed = true;
       try {
         await activity(31, 'Copying validated source');
-        await this.pushDurableProjectToContainer();
-        await this.runTransientCommand(
-          PROJECT_ROOT,
-          createIsolatedProjectCommand({ projectRoot: PROJECT_ROOT, isolatedRoot, quote: shellQuote }),
-          2 * 60_000,
-        );
+        // The copy is verified against the durable VFS before anything is built from it. A
+        // deployment reading stale bytes here is the exact failure that shipped three "succeeded"
+        // deployments of pre-edit code (#139).
+        await this.copyProjectToIsolatedRoot(isolatedRoot);
         await this.assertDeploymentSession({ sessionId });
         await activity(32, 'Installing app dependencies');
         await this.runTransientCommand(isolatedRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
@@ -2439,16 +2637,7 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     }
 
     await this.discardPreparedValidationSnapshot();
-    await this.pushDurableProjectToContainer();
-    await this.runTransientCommand(
-      PROJECT_ROOT,
-      createIsolatedProjectCommand({
-        projectRoot: PROJECT_ROOT,
-        isolatedRoot: args.snapshotRoot,
-        quote: shellQuote,
-      }),
-      2 * 60_000,
-    );
+    await this.copyProjectToIsolatedRoot(args.snapshotRoot);
     await this.assertPreviewCheckpoint(args.expectedWorkspaceRevision, args.expectedSnapshotRevision, false);
     await this.runTransientCommand(args.snapshotRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
     this.requirePreviewNotCancelled(args.previewId);
@@ -2465,15 +2654,221 @@ export class ProjectWorkspace extends ComputerSandboxBase {
     );
   }
 
+  /**
+   * Materialize the container-local root a dev server runs from.
+   *
+   * Paid once per dev preview. Every later edit is projected file by file into this same root by
+   * `projectChangesIntoDevPreview`, so the dependency install below never repeats for a change —
+   * that, and the absent production build, are the whole difference from the preview snapshot path.
+   *
+   * The prepared validation snapshot is intentionally left alone: it belongs to the checkpoint-bound
+   * preview path, and a dev preview must not consume evidence collected for a validated revision.
+   */
+  private async prepareDevPreviewRoot(args: { previewId: string; devRoot: string }): Promise<void> {
+    await this.copyProjectToIsolatedRoot(args.devRoot);
+    this.requirePreviewNotCancelled(args.previewId);
+    await this.runTransientCommand(args.devRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
+    this.requirePreviewNotCancelled(args.previewId);
+    for (const { command, timeoutMs } of DEV_PREVIEW_PREPARATION_COMMANDS) {
+      await this.runTransientCommand(args.devRoot, command, timeoutMs);
+      this.requirePreviewNotCancelled(args.previewId);
+    }
+  }
+
+  /**
+   * Deliver a committed durable change set to a running dev preview.
+   *
+   * Computer projects the durable VFS into the container as a change-log sync into a container-side
+   * store that a FUSE daemon then serves. A durable write therefore never becomes a kernel write
+   * inside the container: the sync RPC has no notify channel, nothing traverses the mount, and no
+   * inotify event is raised — a watcher pointed at `/home/project` would sit silent. Writing the
+   * committed bytes into the dev root instead is a real write through the container's own kernel,
+   * so Vite's watcher fires and hot-replaces the module with no rebuild and no restart.
+   *
+   * Best effort by design: the durable mutation is already committed, and a preview that cannot be
+   * refreshed must not turn a successful write into a failed one. A dependency-manifest change is a
+   * known gap — the dev root installs once, so a new dependency needs a fresh dev preview.
+   */
+  private async projectChangesIntoDevPreview(changes: readonly AtomicWorkspaceChange[]): Promise<void> {
+    const active = this.activePreviewRow();
+    if (active?.mode !== 'dev' || changes.length === 0) {
+      return;
+    }
+    try {
+      const removals: string[] = [];
+      const directories = new Set<string>();
+      const writes: Array<{ path: string; bytes: Uint8Array }> = [];
+      for (const change of changes) {
+        const target = devPreviewProjectedPath({
+          devRoot: active.snapshot_root,
+          projectRoot: PROJECT_ROOT,
+          path: change.path,
+        });
+        if (change.kind === 'delete') {
+          removals.push(target);
+          continue;
+        }
+        directories.add(containerParentDirectory(target));
+        writes.push({ path: target, bytes: change.bytes });
+      }
+      for (const directory of directories) {
+        await this.mkdir(directory, { recursive: true });
+      }
+      for (const write of writes) {
+        if (!(await this.writeContainerFile(write.path, write.bytes)).success) {
+          throw new Error(`The dev preview could not receive ${write.path}.`);
+        }
+      }
+      if (removals.length > 0) {
+        await this.runTransientCommand('/', devPreviewRemoveCommand({ paths: removals, quote: shellQuote }), 30_000);
+      }
+    } catch (error) {
+      console.warn('Unable to deliver a workspace change to the ProjectWorkspace dev preview', {
+        previewId: active.preview_id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   private async cleanupPreviewResources(row: ActivePreviewRow): Promise<void> {
     await this.tunnels.destroy(row.port).catch(() => undefined);
     await this.cleanupPreviewProcess(row);
   }
 
-  private async pushDurableProjectToContainer(): Promise<void> {
+  /**
+   * Copy the project into an isolated build root and prove the copy is the revision it claims.
+   *
+   * The copy reads the container's FUSE mount while every guard around the caller reads the
+   * durable VFS. Those views were observed diverging after a container recycle, and because
+   * nothing compared them, validation passed and three deployments shipped stale bytes while
+   * reporting success (#139). Comparing an aggregate content digest is what turns that silent
+   * wrong answer into a loud one.
+   *
+   * A divergence is recoverable, not fatal: a forced re-push reconnects through a fresh computerd
+   * generation and re-materialises the tree. Only a copy that is still wrong after that is a
+   * failure, and then it fails rather than building something nobody asked for.
+   */
+  private async copyProjectToIsolatedRoot(isolatedRoot: string, cancellation?: ValidationCancellation): Promise<void> {
+    await this.runTransientCommand(
+      '/',
+      ['set -eu', `rm -rf ${shellQuote(isolatedRoot)}`, `mkdir -p ${shellQuote(isolatedRoot)}`].join('\n'),
+      2 * 60_000,
+      cancellation,
+    );
+    cancellation?.requireActive();
+
+    const files = (await this.withComputer(readProjectFilePaths)).map((path) => ({
+      path,
+      target: isolatedTargetPath({ isolatedRoot, projectRoot: PROJECT_ROOT, path }),
+    }));
+    cancellation?.requireActive();
+
+    for (const directory of requiredDirectories(
+      files.map((file) => file.target),
+      isolatedRoot,
+    )) {
+      await this.mkdir(directory, { recursive: true });
+    }
+    cancellation?.requireActive();
+
+    await forEachConcurrently(files, MATERIALIZATION_CONCURRENCY, async (file) => {
+      cancellation?.requireActive();
+      const source = await this.withComputer((workspace) => readWorkspaceFile(workspace, file.path));
+      if (!(await this.writeContainerFile(file.target, source.bytes)).success) {
+        throw new Error(`The isolated build root could not receive ${file.target}.`);
+      }
+    });
+    cancellation?.requireActive();
+
+    // Both sides of this now come from the same VFS, so it should be tautological. It stays as a
+    // permanent assertion because a silently wrong build root is exactly what #139 was, and
+    // because it is the only thing that would notice a partial or dropped write.
+    if (!(await this.containerPathMatchesDurableProject(isolatedRoot))) {
+      throw new Error(
+        'The isolated build root does not match the durable project after being written from it, so this build ' +
+          'would use stale files. Retry; if it persists the workspace container needs replacing.',
+      );
+    }
+  }
+
+  /**
+   * Write durable bytes to a container path.
+   *
+   * The Sandbox write API takes a string, so the encoding has to be chosen from the bytes: text
+   * goes as utf-8, and anything the strict decoder rejects goes base64 rather than being mangled
+   * into replacement characters. Every container materialisation picks the same way, so the choice
+   * lives here instead of at each call site.
+   */
+  private writeContainerFile(path: string, bytes: Uint8Array) {
+    return canDecodeUtf8(bytes)
+      ? this.writeFile(path, decodeUtf8(bytes), { encoding: 'utf-8' })
+      : this.writeFile(path, encodeBase64(bytes), { encoding: 'base64' });
+  }
+
+  /**
+   * Prove the container's own view of `/home/project` matches durable truth, once per container
+   * generation.
+   *
+   * The isolated build roots are verified where they are copied, but the model's `exec` runs
+   * against the mount directly — `cwd` defaults to `PROJECT_ROOT`. A stale mount there is the same
+   * #139 failure wearing different clothes: `read` returns the new file, `pnpm run test` runs the
+   * old one, and the model is told its own fix did not work.
+   *
+   * Keyed on the computerd process, because that is what changes when the container is replaced,
+   * which is the event the divergence was observed after. Verifying per command would read the
+   * whole project on every `exec`; verifying per generation costs that once and is bounded by how
+   * often a container is actually replaced. An evicted Durable Object simply verifies again.
+   */
+  private async assertContainerMatchesDurableProject(): Promise<void> {
+    const generation = (await this.processForRole(COMPUTERD_PROCESS_ROLE))?.id ?? null;
+    if (generation !== null && generation === this.#verifiedContainerGeneration) {
+      return;
+    }
+    for (const forcePush of [false, true]) {
+      await this.pushDurableProjectToContainer(forcePush);
+      if (await this.containerPathMatchesDurableProject(PROJECT_ROOT)) {
+        this.#verifiedContainerGeneration = (await this.processForRole(COMPUTERD_PROCESS_ROLE))?.id ?? generation;
+        return;
+      }
+      console.warn('Container project view does not match the durable project; re-materialising it', {
+        forcedPush: forcePush,
+      });
+    }
+    throw new Error(
+      'The container filesystem does not match the durable project even after a forced re-push, so a command ' +
+        'would run against stale files. Retry; if it persists the workspace container needs replacing.',
+    );
+  }
+
+  /** One digest per side, computed the same way, so any content difference shows up as one bit. */
+  private async containerPathMatchesDurableProject(isolatedRoot: string): Promise<boolean> {
+    const files = await this.withComputer(readProjectFiles);
+    const expected = await projectContentDigest(
+      projectContentDigestInput(files, relativeProjectPath, CHECKPOINT_EXCLUDED_ROOTS),
+    );
+    const observed = await runTrackedSandboxCommand({
+      command: sandboxShellCommand(
+        isolatedContentDigestCommand({
+          root: isolatedRoot,
+          excludedRoots: CHECKPOINT_EXCLUDED_ROOTS,
+          quote: shellQuote,
+        }),
+      ),
+      timeout: 2 * 60_000,
+      exec: (command, options) => this.sandboxProcesses.exec(command, options),
+    });
+    return observed.stdout.trim() === expected;
+  }
+
+  private async pushDurableProjectToContainer(force = false): Promise<void> {
     // Computer owns durable project state and exposes it through the container's mounted /home tree. A completed
-    // sync barrier plus an existing project mount is sufficient; another push can wait indefinitely under load.
-    if ((await this.exists(PROJECT_ROOT)).exists) {
+    // sync barrier plus an existing project mount is normally sufficient; another push can wait indefinitely under
+    // load.
+    //
+    // `force` exists because that "normally" was exactly the #139 defect: after a container recycle the path exists
+    // and the mount serves *stale* content, so presence proves nothing about the bytes. Only a caller that has
+    // observed a divergence asks for this, because it is the expensive path.
+    if (!force && (await this.exists(PROJECT_ROOT)).exists) {
       return;
     }
 
@@ -2595,29 +2990,29 @@ export class ProjectWorkspace extends ComputerSandboxBase {
   }
 
   private pendingPreviewRow(previewId: string): PendingPreviewRow | null {
-    return (
-      first(
-        this.ctx.storage.sql.exec<PendingPreviewRow>(
-          `SELECT preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision, expires_at
+    const row = first(
+      this.ctx.storage.sql.exec<PendingPreviewRow>(
+        `SELECT preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision, expires_at, mode
            FROM ghostbuild_pending_previews WHERE preview_id = ?`,
-          previewId,
-        ),
-      ) ?? null
+        previewId,
+      ),
     );
+    return row ? { ...row, mode: storedPreviewMode(row.mode) } : null;
   }
 
   private upsertPendingPreview(row: ActivePreviewRow, expiresAt: number): void {
     this.ctx.storage.sql.exec(
       `INSERT INTO ghostbuild_pending_previews (
-         preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision, expires_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+         preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision, expires_at, mode
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(preview_id) DO UPDATE SET
          exec_id = excluded.exec_id,
          port = excluded.port,
          snapshot_root = excluded.snapshot_root,
          snapshot_revision = excluded.snapshot_revision,
          workspace_revision = excluded.workspace_revision,
-         expires_at = excluded.expires_at`,
+         expires_at = excluded.expires_at,
+         mode = excluded.mode`,
       row.preview_id,
       row.exec_id,
       row.port,
@@ -2625,39 +3020,38 @@ export class ProjectWorkspace extends ComputerSandboxBase {
       row.snapshot_revision,
       row.workspace_revision,
       expiresAt,
+      row.mode,
     );
   }
 
   private pendingPreviewRows(): PendingPreviewRow[] {
     return [
       ...this.ctx.storage.sql.exec<PendingPreviewRow>(
-        `SELECT preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision, expires_at
+        `SELECT preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision, expires_at, mode
        FROM ghostbuild_pending_previews ORDER BY expires_at`,
       ),
-    ];
+    ].map((row) => ({ ...row, mode: storedPreviewMode(row.mode) }));
   }
 
   private activePreviewRow(): ActivePreviewRow | null {
-    return (
-      first(
-        this.ctx.storage.sql.exec<ActivePreviewRow>(
-          `SELECT preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision
+    const row = first(
+      this.ctx.storage.sql.exec<ActivePreviewRow>(
+        `SELECT preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision, mode
            FROM ghostbuild_active_preview WHERE singleton = 1`,
-        ),
-      ) ?? null
+      ),
     );
+    return row ? { ...row, mode: storedPreviewMode(row.mode) } : null;
   }
 
   private previewResultRow(previewId: string): PreviewResultRow | null {
-    return (
-      first(
-        this.ctx.storage.sql.exec<PreviewResultRow>(
-          `SELECT preview_id, url, snapshot_revision, workspace_revision, ready_at, expires_at
+    const row = first(
+      this.ctx.storage.sql.exec<PreviewResultRow>(
+        `SELECT preview_id, url, snapshot_revision, workspace_revision, ready_at, expires_at, mode
            FROM ghostbuild_preview_results WHERE preview_id = ?`,
-          previewId,
-        ),
-      ) ?? null
+        previewId,
+      ),
     );
+    return row ? { ...row, mode: storedPreviewMode(row.mode) } : null;
   }
 
   private async assertPreviewCheckpoint(
@@ -3156,6 +3550,26 @@ async function handleUserRequest(
   return withCors(response, capability.origin);
 }
 
+/** Paths only. The copy reads one file at a time, so it must not pull every byte up front. */
+async function readProjectFilePaths(workspace: WorkspaceClient): Promise<string[]> {
+  try {
+    await workspace.fs.stat(PROJECT_ROOT);
+  } catch (error) {
+    if (isMissingPath(error)) {
+      return [];
+    }
+    throw error;
+  }
+  const entries = (await workspace.fs.find(PROJECT_ROOT)).filter(
+    (entry) =>
+      entry.type === 'file' && !CHECKPOINT_EXCLUDED_ROOTS.has(relativeProjectPath(entry.path).split('/')[0] ?? ''),
+  );
+  if (entries.length > MAX_FILES) {
+    throw new Error('The project workspace has too many files.');
+  }
+  return entries.map((entry) => entry.path);
+}
+
 async function readProjectFiles(workspace: WorkspaceClient): Promise<WorkspaceFile[]> {
   try {
     await workspace.fs.stat(PROJECT_ROOT);
@@ -3645,15 +4059,27 @@ function workspaceFileMetadata(file: WorkspaceFile, revision: number) {
   };
 }
 
-function previewSuccess(row: PreviewResultRow) {
-  return {
+/**
+ * The two preview modes deliberately report different shapes. A production preview carries the
+ * exact source revision it was built from, because that is its whole guarantee. A dev preview
+ * carries no `snapshotRevision` at all — only where it started — so nothing downstream can read a
+ * bound revision off a preview that tracks live state.
+ */
+function previewSuccess(row: PreviewResultRow): BuilderPreviewSuccess {
+  const common = {
     id: row.preview_id,
     url: row.url,
-    workspaceRevision: row.workspace_revision,
-    snapshotRevision: row.snapshot_revision,
     readyAt: new Date(row.ready_at).toISOString(),
     expiresAt: new Date(row.expires_at).toISOString(),
   };
+  return row.mode === 'dev'
+    ? { ...common, mode: 'dev', startedFromWorkspaceRevision: row.workspace_revision }
+    : {
+        ...common,
+        mode: 'production',
+        workspaceRevision: row.workspace_revision,
+        snapshotRevision: row.snapshot_revision,
+      };
 }
 
 function requireFileInputs(value: unknown): Array<{ path: string; content: string; encoding: 'utf8' | 'base64' }> {

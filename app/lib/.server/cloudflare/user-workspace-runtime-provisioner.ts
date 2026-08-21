@@ -14,11 +14,49 @@ import {
 import { recordUserWorkspaceRuntimeResources } from './user-workspace-runtime-resources';
 import { deriveUserWorkspaceRuntimeSecret } from './user-workspace-runtime-secret';
 import { UserCloudflareAccountApi } from './user-account-api';
+import { cloudflareWorkspaceImageReference } from './workspace-image-reference';
 import { waitForUserWorkspaceRuntimeReadiness } from './user-workspace-runtime-readiness';
 import { sha256Hex } from '~/lib/hex-digest';
 
-const USER_WORKSPACE_SANDBOX_IMAGE =
+/**
+ * The stock Cloudflare Sandbox image the workspace image is built from. Ghostbuild does not
+ * provision this directly — it is the `FROM` line
+ * `scripts/build-user-workspace-image.mjs` renders, and the reference the daily registry drift
+ * check reads. Update it here and republish the workspace image.
+ */
+export const USER_WORKSPACE_SANDBOX_BASE_IMAGE =
   'docker.io/cloudflare/sandbox:0.13.0-next.724.1@sha256:d5856e09ccb02c2cd00f73946360369d5655faa9b67b156e0d8627bf143619f1';
+
+/**
+ * The image a given account's workspace containers run.
+ *
+ * Container disk is ephemeral — Cloudflare gives a woken instance a fresh disk from the image —
+ * so anything not baked in is re-fetched over the network on every cold workspace. The Ghostbuild
+ * workspace image carries the pinned pnpm, computerd, and a pnpm store pre-warmed from the
+ * template lockfile, which is the difference between a cold container installing a dependency
+ * closure from scratch and hardlinking one that is already local.
+ *
+ * It has to live in the account that pulls it. Cloudflare's registry is account-scoped, refuses
+ * anonymous reads, and offers no cross-account or public namespace, so there is no single global
+ * reference to point every user at. An account that has the image gets it; an account that does
+ * not falls back to the stock base image, where the runtime bootstrap installs pnpm and computerd
+ * lazily.
+ *
+ * That fallback keeps a registry outage from blocking provisioning outright, which is why it
+ * exists — but it is degraded, not merely slower. The base image ships Node 22 while generated
+ * projects declare `engines.node >= 26`, so a workspace on the fallback is a workspace on an
+ * unsupported Node: a warning until some dependency needs 26, and a hard failure after that.
+ * Getting the image into the account is the fix; #135 tracks removing the cliff underneath it.
+ */
+async function resolveWorkspaceSandboxImage(
+  accountApi: UserCloudflareAccountApi,
+  accountId: string,
+  blobs: R2Bucket,
+): Promise<string> {
+  return (await accountApi.ensureWorkspaceImage(blobs))
+    ? cloudflareWorkspaceImageReference(accountId)
+    : USER_WORKSPACE_SANDBOX_BASE_IMAGE;
+}
 const PROVISIONING_LEASE_MS = 40 * 60_000;
 export const USER_WORKSPACE_REQUIRED_CAPABILITIES = [
   'workers',
@@ -73,6 +111,13 @@ export async function provisionUserWorkspaceRuntime(args: {
   const suffix = (await sha256Hex(`${connection.accountId}:${args.userId}`)).slice(0, 16);
   const workerName = `ghostbuild-workspace-${suffix}`;
   const databaseName = `ghostbuild-data-${suffix}`;
+  // Two independent account reads. The entitlement answer is not *used* until after the claim,
+  // where it still gates every resource this function creates, but there is no reason for the
+  // user to wait for it and the subdomain lookup end to end.
+  const entitlementRequest = accountApi.readWorkspaceContainersEntitlement();
+  // Handled now so a rejection arriving before the `await` below is not an unhandled one; the
+  // awaiting site still sees the same rejection.
+  void entitlementRequest.catch(() => undefined);
   const workersSubdomain = await accountApi.getWorkersSubdomain();
   const endpoint = `https://${workerName}.${workersSubdomain}.workers.dev`;
   const controlPlaneSecret = await deriveUserWorkspaceRuntimeSecret({
@@ -103,7 +148,7 @@ export async function provisionUserWorkspaceRuntime(args: {
     // Containers are the one workspace capability the OAuth grant cannot promise: the scope is
     // granted, the plan is not. Settle it before anything exists, so an ineligible account is told
     // what to upgrade instead of being left holding an orphaned database and Worker.
-    const entitlement = await accountApi.readWorkspaceContainersEntitlement();
+    const entitlement = await entitlementRequest;
     if (entitlement.status === 'plan_required') {
       throw new UserWorkspaceContainersPlanRequiredError(entitlement.message, entitlement.upgradeUrl);
     }
@@ -124,6 +169,14 @@ export async function provisionUserWorkspaceRuntime(args: {
         { resourceType: 'container', resourceName: workerName },
       ],
     });
+    // Nothing below feeds the image copy, and the copy is the slowest thing here — up to ~400 MB
+    // into a registry. Started now and awaited where it is needed, so it overlaps the D1 and
+    // Worker work instead of following it. `resolveWorkspaceSandboxImage` never rejects.
+    const workspaceImageRequest = resolveWorkspaceSandboxImage(
+      accountApi,
+      connection.accountId,
+      args.env.WORKSPACE_IMAGE_BLOBS,
+    );
     const database = await accountApi.ensureD1Database(databaseName);
     await recordUserWorkspaceRuntimeResources({
       db: args.env.DB,
@@ -143,13 +196,19 @@ export async function provisionUserWorkspaceRuntime(args: {
       connectionGeneration: connection.generation,
       endpoint,
     });
-    await accountApi.ensureWorkspaceRuntimeContainer({
-      applicationName: workerName,
-      namespaceId: deployed.namespaceId,
-      image: USER_WORKSPACE_SANDBOX_IMAGE,
-    });
-    await accountApi.configureWorkspaceRuntimeGcSchedule(workerName);
-    await accountApi.enableWorkerSubdomain(workerName);
+    const workspaceImage = await workspaceImageRequest;
+    // Three configurations of the Worker that now exists, none of which depends on another.
+    // Running them in order meant the cron trigger and the workers.dev subdomain waited behind
+    // the container application's rollout poll, which is the slow one.
+    await Promise.all([
+      accountApi.ensureWorkspaceRuntimeContainer({
+        applicationName: workerName,
+        namespaceId: deployed.namespaceId,
+        image: workspaceImage,
+      }),
+      accountApi.configureWorkspaceRuntimeGcSchedule(workerName),
+      accountApi.enableWorkerSubdomain(workerName),
+    ]);
     await waitForUserWorkspaceRuntimeReadiness({
       endpoint,
       controlPlaneSecret,
@@ -163,6 +222,7 @@ export async function provisionUserWorkspaceRuntime(args: {
       connectionGeneration: connection.generation,
       runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
       attemptId,
+      imageDigest: workspaceImage,
     });
   } catch (error) {
     await markUserWorkspaceRuntimeError({

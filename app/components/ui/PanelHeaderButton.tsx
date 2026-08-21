@@ -5,6 +5,8 @@ interface PanelHeaderButtonProps {
   className?: string;
   disabledClassName?: string;
   disabled?: boolean;
+  /** Hover and assistive-technology explanation for a button whose label alone is ambiguous. */
+  title?: string;
   children: ReactNode;
   onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
 }
@@ -13,6 +15,7 @@ export const PanelHeaderButton = memo(function PanelHeaderButton({
   className,
   disabledClassName,
   disabled = false,
+  title,
   children,
   onClick,
 }: PanelHeaderButtonProps) {
@@ -27,6 +30,7 @@ export const PanelHeaderButton = memo(function PanelHeaderButton({
         className,
       )}
       disabled={disabled}
+      title={title}
       onClick={onClick}
     >
       {children}

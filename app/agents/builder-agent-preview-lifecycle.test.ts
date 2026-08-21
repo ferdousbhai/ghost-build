@@ -69,6 +69,45 @@ describe('BuilderAgent preview lifecycle', () => {
     expect(chatMessage).toContain('runWithKeepAlive: (operation) => this.keepAliveWhile(operation)');
   });
 
+  it('carries the requested preview mode all the way to the workspace', () => {
+    const request = source.slice(
+      source.indexOf('private async requestPreviewInternal('),
+      source.indexOf('private async runPreviewBuild('),
+    );
+    const build = source.slice(
+      source.indexOf('private async runPreviewBuild('),
+      source.indexOf('private async failPreviewJob('),
+    );
+
+    expect(source).toContain('requestPreview(mode?: BuilderPreviewMode): Promise<BuilderPreviewState> {');
+    expect(source).toContain("this.requestPreviewInternal({ mode: mode === 'dev' ? 'dev' : 'production' })");
+    expect(request).toContain("const mode = options.mode ?? 'production'");
+    expect(request).toContain('mode,');
+    // A dev preview request must not carry an expected checkpoint: naming one would promise a
+    // guarantee the running dev server does not have.
+    expect(build).toContain("job.mode === 'dev'\n          ? { previewId: job.previewId, mode: 'dev' }");
+    expect(build).toContain("mode: 'production',\n              expectedWorkspaceRevision: job.workspaceRevision");
+    expect(build).toContain("stale: job.mode === 'production' && currentSnapshot.revision !== job.snapshotRevision");
+  });
+
+  it('keeps the automatic post-deployment preview checkpoint-bound', () => {
+    // The preview the agent queues for itself is evidence about a validated revision, so it stays
+    // the production build even though a dev preview would be faster.
+    expect(source).toContain('this.requestPreviewInternal({ validatedSnapshot: job })');
+    expect(source).not.toContain("requestPreviewInternal({ validatedSnapshot: job, mode: 'dev' })");
+  });
+
+  it('never lets a preview of any mode stand in for deployment evidence', () => {
+    const deploy = source.slice(
+      source.indexOf('async deployValidatedRevision()'),
+      source.indexOf('@callable()\n  requestPreview'),
+    );
+
+    expect(deploy).toContain('await validatedDeploymentCheckpoint(this.workspace)');
+    expect(deploy).not.toContain('preview');
+    expect(deploy).not.toContain('Preview');
+  });
+
   it('cancels active validation before waiting for a stopped turn to settle', () => {
     const cancellation = source.slice(
       source.indexOf('async cancelActiveTurn()'),

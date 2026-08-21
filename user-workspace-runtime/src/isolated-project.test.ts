@@ -1,30 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import {
-  createContainerDirectoryCommand,
-  createIsolatedProjectCommand,
-  rebaseDeploymentConfigPaths,
-  relativeIsolatedPath,
-} from './isolated-project';
+import { createContainerDirectoryCommand, rebaseDeploymentConfigPaths, relativeIsolatedPath } from './isolated-project';
 
 describe('isolated project command', () => {
-  it('copies source without durable dependencies or build output', () => {
-    const command = createIsolatedProjectCommand({
-      projectRoot: '/home/project',
-      isolatedRoot: '/tmp/ghostbuild-projects/validation-id',
-      quote: (value) => `'${value}'`,
-    });
-
-    expect(command).toContain("tar -C '/home/project'");
-    expect(command).toContain("--exclude='./node_modules'");
-    expect(command).toContain("--exclude='./dist'");
-    expect(command).toContain("--exclude='./.wrangler'");
-    expect(command).not.toContain('ln -s');
-    expect(command).toContain("'/tmp/ghostbuild-projects/validation-id'");
-    expect(command).toContain("mkdir -p '/tmp/ghostbuild-projects/validation-id'");
-    expect(command).toContain('Project source cannot contain non-regular files.');
-  });
-
   it('rebases every trusted Wrangler project path into the isolated copy', () => {
     const config = rebaseDeploymentConfigPaths(
       {
@@ -98,8 +76,11 @@ describe('isolated project command', () => {
     );
 
     for (const operation of [validation, deployment]) {
-      expect(operation).toContain('createIsolatedProjectCommand');
-      expect(operation).toContain('pushDurableProjectToContainer');
+      // Both build from an isolated root written out of the durable VFS. Neither reads the
+      // container mount, which is what made #139 possible: a build copying from one source of
+      // truth while its guards checked another.
+      expect(operation).toContain('copyProjectToIsolatedRoot');
+      expect(operation).not.toContain('pushDurableProjectToContainer');
       expect(operation).toContain('runTransientCommand');
       expect(operation).toContain('INSTALL_TIMEOUT_MS');
       expect(operation).not.toContain('workspace.runtime.exec');
@@ -132,15 +113,28 @@ describe('isolated project command', () => {
     expect(validation).toContain('cancellation.requireActive()');
     expect(validation).not.toContain('runValidationCommand');
     expect(validation).toContain('INSTALL_TIMEOUT_MS, cancellation');
-    expect(validation).toContain('PREVIEW_PREPARATION_COMMANDS');
+    // Codegen first and alone, because it writes the route tree and binding types the other
+    // stages read; everything else runs as one concurrent group inside the same isolated root.
+    expect(validation).toContain('REVISION_CODEGEN_COMMAND.command');
+    expect(validation).toContain('parallelValidationStagesCommand(PARALLEL_VALIDATION_STAGES');
+    expect(validation.indexOf('REVISION_CODEGEN_COMMAND.command')).toBeLessThan(
+      validation.indexOf('parallelValidationStagesCommand(PARALLEL_VALIDATION_STAGES'),
+    );
+    // Validation still leaves the preview its prepared build, which is what lets a preview skip
+    // straight to starting a server.
+    expect(source).toContain("{ name: 'preview_build', command: 'pnpm run build:isolated-preview'");
     expect(validation).toContain('ghostbuild_prepared_validation');
     expect(deployment).toContain("await this.runTransientCommand(isolatedRoot, 'pnpm run build', 5 * 60_000)");
     expect(deployment).not.toContain('pnpm run typecheck');
     expect(deployment).not.toContain('pnpm run verify:stack');
     expect(deployment).not.toContain('pnpm run lint');
+    // Cancellation is still observed before the expensive materialisation, which now happens
+    // inside the verified copy rather than at this call site.
     const initialCheckpoint = validation.indexOf('const before = await this.checkpoint()');
-    const durablePush = validation.indexOf('await this.pushDurableProjectToContainer()');
-    expect(validation.indexOf('cancellation.requireActive()', initialCheckpoint)).toBeLessThan(durablePush);
+    const isolationCopy = validation.indexOf('await this.copyProjectToIsolatedRoot(');
+    expect(initialCheckpoint).toBeGreaterThanOrEqual(0);
+    expect(isolationCopy).toBeGreaterThan(initialCheckpoint);
+    expect(validation.indexOf('cancellation.requireActive()', initialCheckpoint)).toBeLessThan(isolationCopy);
     const transientCommand = source.slice(
       source.indexOf('private async runTransientCommand('),
       source.indexOf('private async cleanupPreviewProcess('),
@@ -164,7 +158,7 @@ describe('isolated project command', () => {
       source.indexOf('private async runTransientCommand('),
     );
     expect(materialization.match(/await this\.#workspace\.push\('container-shell'\)/g)).toHaveLength(1);
-    expect(materialization).toContain('if ((await this.exists(PROJECT_ROOT)).exists)');
+    expect(materialization).toContain('if (!force && (await this.exists(PROJECT_ROOT)).exists)');
     expect(materialization).toContain('await this.#workspace.close()');
     expect(materialization).toContain('await this.restartComputerd(COMPUTERD_ENV)');
     expect(materialization).toContain('if (!(await this.exists(PROJECT_ROOT)).exists)');
@@ -258,5 +252,62 @@ describe('isolated project command', () => {
     expect(install.indexOf('applyAtomicWorkspaceChanges(')).toBeLessThan(
       install.indexOf('this.#toolOperations.complete({ toolCallId, result })'),
     );
+  });
+});
+
+describe('#139 stale-bytes guard', () => {
+  const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+
+  it('never builds from the container mount', () => {
+    // The mount is the second source of truth that made #139 possible. Builds are now written out
+    // of the durable VFS, so a `tar` of PROJECT_ROOT reappearing anywhere is the regression.
+    expect(source).not.toContain('createIsolatedProjectCommand');
+    expect(source).not.toMatch(/tar -C \$\{?shellQuote\(PROJECT_ROOT/);
+    expect(source.split('await this.copyProjectToIsolatedRoot(').length - 1).toBe(4);
+  });
+
+  it('writes the isolated root from the durable VFS, one file at a time', () => {
+    const helper = source.slice(
+      source.indexOf('private async copyProjectToIsolatedRoot('),
+      source.indexOf("   * Prove the container's own view"),
+    );
+    expect(helper).toContain('readProjectFilePaths');
+    expect(helper).toContain('readWorkspaceFile(workspace, file.path)');
+    // Bounded concurrency, because each worker holds one file and the isolate has 128 MiB.
+    expect(helper).toContain('forEachConcurrently(files, MATERIALIZATION_CONCURRENCY');
+    expect(helper).toContain('containerPathMatchesDurableProject');
+  });
+
+  it('compares the copy against durable truth and can force a re-materialisation', () => {
+    const helper = source.slice(
+      source.indexOf('private async copyProjectToIsolatedRoot('),
+      source.indexOf('private async pushDurableProjectToContainer('),
+    );
+    expect(helper).toContain('containerPathMatchesDurableProject');
+    // The retry must actually force the push; a second ordinary push would short-circuit on the
+    // very `exists` check that made the stale mount look healthy.
+    expect(helper).toContain('for (const forcePush of [false, true])');
+    expect(helper).toContain('pushDurableProjectToContainer(forcePush)');
+  });
+
+  it("guards the model's own exec against the same stale mount, once per container generation", () => {
+    // The build paths copy from the mount and verify the copy; `exec` runs against the mount
+    // directly with `cwd` defaulting to PROJECT_ROOT. Without this the #139 shape survives there:
+    // `read` returns the new file and `pnpm run test` runs the old one.
+    expect(source.split('await this.assertContainerMatchesDurableProject();').length - 1).toBe(2);
+    const guard = source.slice(
+      source.indexOf('private async assertContainerMatchesDurableProject('),
+      source.indexOf('private async containerPathMatchesDurableProject('),
+    );
+    expect(guard).toContain('this.#verifiedContainerGeneration');
+    expect(guard).toContain('for (const forcePush of [false, true])');
+  });
+
+  it('does not let a present mount stand in for correct content', () => {
+    const push = source.slice(
+      source.indexOf('private async pushDurableProjectToContainer('),
+      source.indexOf('private async runTransientCommand('),
+    );
+    expect(push).toContain('if (!force && (await this.exists(PROJECT_ROOT)).exists)');
   });
 });

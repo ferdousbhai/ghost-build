@@ -30,6 +30,7 @@ import {
 import { readUserWorkspaceRuntimeActivity } from '~/lib/.server/cloudflare/user-workspace-runtime-activity';
 import { USER_WORKSPACE_RUNTIME_SHA256 } from '~/generated/user-workspace-runtime.generated';
 import { deriveUserWorkspaceRuntimeSecret } from '~/lib/.server/cloudflare/user-workspace-runtime-secret';
+import { cloudflareWorkspaceImageReferenceOrNull } from '~/lib/.server/cloudflare/workspace-image-reference';
 import { mintRuntimeCapability } from '~/lib/cloudflare/runtime-capability';
 import {
   CLOUDFLARE_AUTHORIZATION_ERROR_PARAM,
@@ -332,6 +333,13 @@ function isCurrentWorkspaceRuntime(
  * A runtime this request may serve. Only the runtime *version* is ever allowed to lag, and only
  * for a deferred upgrade: a changed connection or generation would mean the workspace no longer
  * belongs to the Cloudflare account this session is being minted for.
+ *
+ * The container image is part of the same staleness answer so it converges the way the runtime
+ * version already does. Without it, an account whose image copy failed once — a registry blip, a
+ * credential mint that did not land — stayed on the stock base image forever, because nothing
+ * downstream ever reconsidered it; and a rebuilt image never reached anyone already provisioned. A
+ * row predating the column reads as `null`, which is correctly unequal and converges on the next
+ * session.
  */
 function isUsableWorkspaceRuntime(
   runtime: UserWorkspaceRuntime | null,
@@ -342,7 +350,9 @@ function isUsableWorkspaceRuntime(
     runtime?.status === 'ready' &&
     runtime.connectionId === connection.id &&
     runtime.connectionGeneration === connection.generation &&
-    (runtime.runtimeVersion === USER_WORKSPACE_RUNTIME_SHA256 || upgradeDeferred)
+    ((runtime.runtimeVersion === USER_WORKSPACE_RUNTIME_SHA256 &&
+      runtime.imageDigest === cloudflareWorkspaceImageReferenceOrNull(connection.accountId)) ||
+      upgradeDeferred)
   );
 }
 

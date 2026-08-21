@@ -17,6 +17,9 @@ import {
   type WorkspaceCommandProgress,
   type WorkspaceCommandRequest,
   type WorkspaceCommandResult,
+  type WorkspaceListingRequest,
+  type WorkspacePreviewRequest,
+  type WorkspaceSearchRequest,
   type WorkspaceSeedExpectation,
   type WorkspaceSyncPageRequest,
 } from '~/agents/builder-workspace-api';
@@ -27,6 +30,7 @@ import type {
   BuilderWorkspaceState,
   BuilderWorkspaceSyncPage,
 } from '~/agents/builder-workspace-types';
+import type { BuilderPreviewSuccess } from '~/agents/builder-preview-types';
 import { isRetryableDurableObjectError } from '~/lib/cloudflare/durable-object-rpc.server';
 type ProjectWorkspaceStub = DurableObjectStub<ProjectWorkspaceRpc>;
 
@@ -125,6 +129,11 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     };
   }
 
+  /** Best-effort container pre-start; a failure here leaves the ordinary lazy path intact. */
+  async warmContainer(): Promise<void> {
+    await (await this.#stub()).warmContainer();
+  }
+
   async refresh(): Promise<BuilderWorkspaceState> {
     const stub = await this.#stub();
     const snapshot = await stub.getWorkspaceSnapshot();
@@ -199,6 +208,25 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
 
   listFiles(): BuilderWorkspaceFileMetadata[] {
     return this.#files.map((file) => ({ ...file }));
+  }
+
+  /**
+   * Discovery goes straight to the workspace and is not registered as the active tool: the
+   * workspace answers it from its SQLite VFS outside the operation lane, so attributing it to a
+   * tool operation would journal work that has nothing to replay and nothing to reattach.
+   */
+  listProjectEntries(request: WorkspaceListingRequest, abortSignal?: AbortSignal) {
+    return raceAgainstAbort(
+      this.#stub().then((stub) => stub.listProjectEntries(request)),
+      abortSignal,
+    );
+  }
+
+  searchProjectFiles(request: WorkspaceSearchRequest, abortSignal?: AbortSignal) {
+    return raceAgainstAbort(
+      this.#stub().then((stub) => stub.searchProjectFiles(request)),
+      abortSignal,
+    );
   }
 
   checkpoint(): Promise<BuilderWorkspaceCheckpoint> {
@@ -568,12 +596,8 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     return this.#stub().then((stub) => stub.deploymentPlan(revision));
   }
 
-  createPreview(args: {
-    previewId: string;
-    expectedWorkspaceRevision: number;
-    expectedSnapshotRevision: string;
-  }): ReturnType<BuilderWorkspaceApi['createPreview']> {
-    return this.#stub().then((stub) => stub.createPreview(args));
+  async createPreview(args: WorkspacePreviewRequest): Promise<BuilderPreviewSuccess> {
+    return await (await this.#stub()).createPreview(args);
   }
 
   async stopPreview(previewId: string): Promise<void> {
@@ -785,25 +809,36 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
   }
 
   #guardStub(stub: ProjectWorkspaceStub, invalidate: () => void): ProjectWorkspaceStub {
+    type StubMethod = (...args: unknown[]) => unknown;
+    const invoke = async (value: StubMethod, target: ProjectWorkspaceStub, args: unknown[]): Promise<unknown> => {
+      try {
+        return await Reflect.apply(value, target, args);
+      } catch (error) {
+        if (isDurableObjectTransportReset(error)) {
+          invalidate();
+        }
+        throw workspaceBusyError(error) ?? error;
+      }
+    };
     return new Proxy(stub, {
       get: (target, property) => {
         const value: unknown = Reflect.get(target, property, target);
         if (typeof value !== 'function') {
           return value;
         }
-        return (...args: unknown[]) => {
-          try {
-            return Promise.resolve(Reflect.apply(value, target, args)).catch((error: unknown) => {
-              if (isDurableObjectTransportReset(error)) {
-                invalidate();
+        return async (...args: unknown[]) => {
+          const deadline = Date.now() + BUSY_RETRY_WINDOW_MS;
+          let backoff = BUSY_RETRY_INITIAL_DELAY_MS;
+          while (true) {
+            try {
+              return await invoke(value as StubMethod, target, args);
+            } catch (error) {
+              if (!shouldRetryWhileWorkspaceIsBusy(error) || Date.now() + backoff >= deadline) {
+                throw error;
               }
-              throw workspaceBusyError(error) ?? error;
-            });
-          } catch (error) {
-            if (isDurableObjectTransportReset(error)) {
-              invalidate();
+              await delay(backoff);
+              backoff = Math.min(backoff * 2, BUSY_RETRY_MAX_DELAY_MS);
             }
-            throw workspaceBusyError(error) ?? error;
           }
         };
       },
@@ -876,6 +911,37 @@ function journaledResult<T>(value: unknown): T {
 function workspaceBusyError(error: unknown): WorkspaceBusyError | null {
   const conflict = workspaceOperationConflict(error);
   return conflict ? new WorkspaceBusyError(conflict.activeKind, conflict.retryAfterMs) : null;
+}
+
+/**
+ * How long a caller waits out a lane held by a fast operation before reporting it as busy.
+ *
+ * The model emits tool calls in batches and the Pi loop executes a batch concurrently, but the
+ * workspace operation lane is an exclusive mutex that rejects rather than queues. Without this,
+ * a single assistant message that writes four files lands one write and turns the other three
+ * into tool errors, so the model spends four model turns — the expensive part — doing one turn's
+ * work. Retrying is safe by construction: the lane rejects in `acquire()`, before the operation
+ * body runs, so a conflicted call has started no effect to repeat.
+ *
+ * `WorkspaceBusyError.retryAfterMs` is deliberately not used as the delay. It reports when the
+ * holder's *lease* lapses (15 minutes, 45 for deployment), not when its work ends, which is the
+ * right answer for "when may another owner reclaim this lane" and the wrong one for "when will
+ * the sibling write in this batch be done".
+ */
+const BUSY_RETRY_WINDOW_MS = 10_000;
+const BUSY_RETRY_INITIAL_DELAY_MS = 25;
+const BUSY_RETRY_MAX_DELAY_MS = 250;
+
+/**
+ * Lane kinds worth waiting on. `write` covers the batched file mutations above and completes in
+ * milliseconds. Every other kind — `exec`, `install`, `validate`, `preview`, `seed`, `delete` —
+ * can legitimately hold the lane for minutes, so a caller that queued behind one would burn its
+ * whole window and still fail. Those keep failing immediately, exactly as before.
+ */
+const BUSY_RETRY_ACTIVE_KINDS = new Set(['write']);
+
+export function shouldRetryWhileWorkspaceIsBusy(error: unknown): boolean {
+  return error instanceof WorkspaceBusyError && BUSY_RETRY_ACTIVE_KINDS.has(error.activeKind);
 }
 
 class SettlementAttemptTimeoutError extends Error {

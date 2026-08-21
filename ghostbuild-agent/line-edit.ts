@@ -79,6 +79,17 @@ export function lineEditBaseTag(sha256: string): string {
   return sha256.slice(0, LINE_EDIT_BASE_TAG_HEX_LENGTH).toUpperCase();
 }
 
+/**
+ * The one line numbering read, edit, and workspace search share.
+ *
+ * A search hit has to name the line an edit would change and a read would print, so the three
+ * cannot each decide what a line is: a stray BOM or CRLF file would otherwise shift a whole
+ * edit by one line against the line the model actually saw.
+ */
+export function logicalLines(content: string): string[] {
+  return splitLogicalText(content.startsWith('\uFEFF') ? content.slice(1) : content).lines;
+}
+
 /** Format a stable file snapshot as numbered lines suitable for line-anchored edits. */
 export function lineAnchoredRead(options: LineAnchoredReadOptions): LineAnchoredReadResult {
   assertPositiveInteger(options.maxLines, 'maxLines');
@@ -89,8 +100,7 @@ export function lineAnchoredRead(options: LineAnchoredReadOptions): LineAnchored
     assertPositiveInteger(options.limit, 'limit');
   }
 
-  const content = options.content.startsWith('\uFEFF') ? options.content.slice(1) : options.content;
-  const lines = splitLogicalText(content).lines;
+  const lines = logicalLines(options.content);
   if (lines.length === 0) {
     if (offset !== 1) {
       throw new Error(`Offset ${offset} is beyond end of content (0 lines).`);

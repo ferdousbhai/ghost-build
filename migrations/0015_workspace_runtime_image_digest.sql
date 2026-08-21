@@ -1,0 +1,11 @@
+-- Which container image a ready workspace runtime actually ended up on.
+--
+-- Provisioning copies the Ghostbuild workspace image into the account's own Cloudflare registry and
+-- falls back to the stock base image when that does not succeed. Without recording which one it
+-- got, an account that fell back stayed on the base image permanently — re-provisioning is gated on
+-- the runtime version alone, so nothing ever reconsidered the image — and a rebuilt image never
+-- reached anyone already provisioned.
+--
+-- Nullable with no backfill: an existing row reads as "unknown image", which the staleness
+-- predicate treats as stale and converges on the next session.
+ALTER TABLE user_computer_runtimes ADD COLUMN image_digest TEXT;

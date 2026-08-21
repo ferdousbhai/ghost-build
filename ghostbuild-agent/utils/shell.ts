@@ -9,7 +9,7 @@ export function cleanTerminalOutput(input: string): string {
     .replace(/\](\d+;[^\n]*|\d+[^\n]*)/g, '');
 
   // Step 2: Remove ANSI escape sequences and any remaining escape characters
-  const removeAnsi = removeOsc.replace(/\x1b\[[\?]?[0-9;]*[a-zA-Z]/g, '').replace(/\x1b/g, '');
+  const removeAnsi = removeOsc.replace(/\x1b\[\??[0-9;]*[a-zA-Z]/g, '').replace(/\x1b/g, '');
 
   // Step 3: Clean up carriage returns and newlines
   const cleanNewlines = removeAnsi
@@ -20,7 +20,7 @@ export function cleanTerminalOutput(input: string): string {
   // Step 4: Add newlines at key breakpoints while preserving paths
   const formatOutput = cleanNewlines
     // Preserve prompt line
-    .replace(/^([~\/][^\n❯]+)❯/m, '$1\n❯')
+    .replace(/^([~/][^\n❯]+)❯/m, '$1\n❯')
     // Add newline before command output indicators
     .replace(/(?<!^|\n)>/g, '\n>')
     // Add newline before error keywords without breaking paths

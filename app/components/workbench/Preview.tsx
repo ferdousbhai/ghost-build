@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Button } from '@ui/Button';
 import { captureProductEvent } from '~/lib/telemetry.client';
 import type { PreviewPresentation } from '~/lib/common/preview-presentation';
+import { previewOriginWorkspaceRevision } from '~/agents/builder-preview-types';
 
 export const PREVIEW_SANDBOX = 'allow-forms allow-modals allow-popups allow-same-origin allow-scripts';
 
@@ -24,13 +25,27 @@ export function Preview({
     if (status === 'ready' && preview) {
       void captureProductEvent('preview_ready', {
         outcome: 'success',
-        workspaceRevision: preview.workspaceRevision,
+        previewMode: preview.mode,
+        workspaceRevision: previewOriginWorkspaceRevision(preview),
       });
     }
   }, [preview, status]);
 
   return (
     <div className="flex size-full min-h-0 flex-col bg-bolt-elements-background-depth-1">
+      {previewUrl && preview?.mode === 'dev' && (
+        // A dev preview reflects unbuilt, unvalidated, live project state. Saying so on the frame
+        // is what stops it being read as the verified build the deployment path requires.
+        <div
+          className="flex items-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs text-content-secondary"
+          role="status"
+        >
+          <span className="font-medium">Live dev preview</span>
+          <span className="min-w-0 flex-1">
+            Hot-reloads every change. Not a production build and not a validated revision.
+          </span>
+        </div>
+      )}
       {previewUrl && preview && status === 'failed' && (
         <div
           className="flex items-center gap-3 border-b border-red-500/20 bg-red-500/10 px-4 py-2 text-xs text-content-error"
@@ -49,7 +64,11 @@ export function Preview({
             key={`${preview.id}:${reloadKey}`}
             className="size-full border-0 bg-white"
             src={previewUrl}
-            title={`Remote preview for durable revision ${preview.workspaceRevision}`}
+            title={
+              preview.mode === 'dev'
+                ? 'Live dev preview tracking the current project'
+                : `Remote preview for durable revision ${preview.workspaceRevision}`
+            }
             sandbox={PREVIEW_SANDBOX}
             referrerPolicy="no-referrer"
           />

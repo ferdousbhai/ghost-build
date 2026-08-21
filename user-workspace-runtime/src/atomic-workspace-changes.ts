@@ -1,7 +1,7 @@
 import type { Workspace } from '@cloudflare/computer';
 import { Buffer } from 'node:buffer';
 
-type AtomicWorkspaceChange =
+export type AtomicWorkspaceChange =
   { kind: 'delete'; path: string } | { kind: 'write'; path: string; bytes: Uint8Array; mode?: number };
 
 /** Apply a complete change set in one durable Computer VFS transaction. */

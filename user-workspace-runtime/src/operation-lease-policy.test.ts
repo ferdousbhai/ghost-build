@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { WORKSPACE_READ_ONLY_TOOL_NAMES } from '../../ghostbuild-agent/model-tool-inputs';
 import { BUILDER_TURN_TIMEOUTS } from '../../app/lib/.server/llm/builder-turn-budget';
 import {
   CONTAINER_PACKAGE_INSTALL_TIMEOUT_MS,
@@ -29,9 +30,11 @@ describe('operation lease policy', () => {
   it('maps every model tool that can hold the workspace to a lane', () => {
     const governed = new Set(Object.values(OPERATION_LANE_TOOLS).flat());
 
-    // read and search_cloudflare_docs never take a lane; everything else must.
-    expect([...Object.keys(BUILDER_TURN_TIMEOUTS.tools)].filter((tool) => !governed.has(tool as never))).toEqual([
-      'read',
+    // The VFS-only workspace tools and the remote docs search never take a lane; everything else
+    // must. A discovery tool that slipped into a lane would wait on the container it exists to
+    // avoid.
+    expect(Object.keys(BUILDER_TURN_TIMEOUTS.tools).filter((tool) => !governed.has(tool as never))).toEqual([
+      ...WORKSPACE_READ_ONLY_TOOL_NAMES,
       'search_cloudflare_docs',
     ]);
   });

@@ -167,19 +167,18 @@ class TestWorkspace {
   }
 
   asWorkspace(): Workspace {
-    const self = this;
     return {
       db: {
-        transactionSync<T>(closure: () => T): T {
-          const files = new Map(self.files);
-          const directories = new Set(self.directories);
+        transactionSync: <T>(closure: () => T): T => {
+          const files = new Map(this.files);
+          const directories = new Set(this.directories);
           try {
             return closure();
           } catch (error) {
-            self.files = files;
-            self.directories.clear();
+            this.files = files;
+            this.directories.clear();
             for (const path of directories) {
-              self.directories.add(path);
+              this.directories.add(path);
             }
             throw error;
           }
@@ -187,30 +186,30 @@ class TestWorkspace {
       },
       provider: () => ({
         lstatSync: (path: string) => {
-          const file = self.files.get(path);
+          const file = this.files.get(path);
           if (file) {
             return stat(false, file.mode);
           }
-          if (self.directories.has(path)) {
+          if (this.directories.has(path)) {
             return stat(true, 0o755);
           }
           throw pathError('ENOENT');
         },
-        readdirSync: (path: string) => self.children(path),
+        readdirSync: (path: string) => this.children(path),
         unlinkSync: (path: string) => {
-          if (!self.files.delete(path)) {
+          if (!this.files.delete(path)) {
             throw pathError('ENOENT');
           }
         },
         rmdirSync: (path: string) => {
-          if (self.children(path).length > 0) {
+          if (this.children(path).length > 0) {
             throw pathError('ENOTEMPTY');
           }
-          self.directories.delete(path);
+          this.directories.delete(path);
         },
-        mkdirSync: (path: string) => self.addDirectory(path),
+        mkdirSync: (path: string) => this.addDirectory(path),
         writeFileSync: (path: string, bytes: Uint8Array, options?: { mode?: number }) => {
-          self.files.set(path, { content: new TextDecoder().decode(bytes), mode: options?.mode ?? 0o644 });
+          this.files.set(path, { content: new TextDecoder().decode(bytes), mode: options?.mode ?? 0o644 });
         },
       }),
     } as unknown as Workspace;

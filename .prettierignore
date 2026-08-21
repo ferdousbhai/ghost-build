@@ -9,3 +9,7 @@ worker-configuration.d.ts
 template/worker-configuration.d.ts
 vite.config.ts.timestamp-*.mjs
 app/generated/builder-skill-assets.generated.ts
+
+# Vendored verbatim from the install-anti-slop skill. Reformatting it would make every
+# future re-copy show as a diff against a source this repository does not own.
+tools/oxlint/anti-slop/

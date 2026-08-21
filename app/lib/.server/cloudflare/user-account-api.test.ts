@@ -699,6 +699,44 @@ describe('UserCloudflareAccountApi', () => {
     expect(batch.batch[1]?.sql).not.toContain('OR IGNORE');
   });
 
+  test('reads every migration receipt in one request', async () => {
+    // This runs on every runtime upgrade for every connected account, and the answer there is
+    // always "already applied". One receipt read per migration turned that no-op into a serial
+    // walk of the Cloudflare D1 API.
+    const migrations = await Promise.all(
+      ['0001_a.sql', '0002_b.sql', '0003_c.sql'].map(async (name) => {
+        const sql = `CREATE TABLE ${name.slice(5, -4)} (id TEXT PRIMARY KEY)`;
+        return { name, sql, digest: await textDigest(sql) };
+      }),
+    );
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: [{ success: true, results: [{ name: 'digest' }] }] }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [
+            {
+              success: true,
+              results: migrations.map(({ name, digest }) => ({ name, digest })),
+            },
+          ],
+        }),
+      );
+
+    await new UserCloudflareAccountApi('account-1', 'token', request).applyD1Migrations(
+      '0123456789abcdef0123456789abcdef',
+      migrations.map(({ name, sql }) => ({ name, sql })),
+    );
+
+    // Create table, digest-column pragma, one receipt read. Nothing per migration.
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(String(request.mock.calls[2]?.[1]?.body)).not.toContain('WHERE name');
+  });
+
   test('resolves an ambiguous D1 batch acknowledgement by reading the transactional marker', async () => {
     const sql = 'ALTER TABLE users ADD COLUMN display_name TEXT';
     const digest = await textDigest(sql);

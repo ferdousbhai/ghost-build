@@ -7,6 +7,8 @@ export type UserWorkspaceRuntime = {
   workerName: string;
   endpoint: string;
   runtimeVersion: string;
+  /** The image this runtime was provisioned onto; null for rows predating the column. */
+  imageDigest: string | null;
   status: UserWorkspaceRuntimeStatus;
   lastError: string | null;
   provisioningAttemptId: string | null;
@@ -23,6 +25,7 @@ type UserWorkspaceRuntimeRow = {
   worker_name: string;
   endpoint: string;
   runtime_version: string;
+  image_digest: string | null;
   status: UserWorkspaceRuntimeStatus;
   last_error: string | null;
   provisioning_attempt_id: string | null;
@@ -36,7 +39,7 @@ export async function findUserWorkspaceRuntime(db: D1Database, userId: string): 
   const row = await db
     .prepare(
       `SELECT user_id, connection_id, connection_generation, worker_name,
-              endpoint, runtime_version, status, last_error,
+              endpoint, runtime_version, image_digest, status, last_error,
               provisioning_attempt_id, provisioning_lease_expires_at, upgrade_deferred_since,
               created_at, updated_at
        FROM user_computer_runtimes
@@ -66,15 +69,16 @@ export async function claimUserWorkspaceRuntimeProvisioning(args: {
       .prepare(
         `INSERT INTO user_computer_runtimes (
          user_id, connection_id, connection_generation, worker_name,
-         endpoint, runtime_version, status, last_error, created_at, updated_at,
+         endpoint, runtime_version, image_digest, status, last_error, created_at, updated_at,
          provisioning_attempt_id, provisioning_lease_expires_at
-       ) VALUES (?, ?, ?, ?, ?, ?, 'provisioning', NULL, ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, NULL, 'provisioning', NULL, ?, ?, ?, ?)
        ON CONFLICT(user_id) DO UPDATE SET
          connection_id = excluded.connection_id,
          connection_generation = excluded.connection_generation,
          worker_name = excluded.worker_name,
          endpoint = excluded.endpoint,
          runtime_version = excluded.runtime_version,
+         image_digest = NULL,
          status = 'provisioning',
          last_error = NULL,
          provisioning_attempt_id = excluded.provisioning_attempt_id,
@@ -88,7 +92,7 @@ export async function claimUserWorkspaceRuntimeProvisioning(args: {
           OR (user_computer_runtimes.status = 'provisioning'
               AND COALESCE(user_computer_runtimes.provisioning_lease_expires_at, 0) <= ?)
        RETURNING user_id, connection_id, connection_generation, worker_name,
-                 endpoint, runtime_version, status, last_error,
+                 endpoint, runtime_version, image_digest, status, last_error,
                  provisioning_attempt_id, provisioning_lease_expires_at, upgrade_deferred_since,
                  created_at, updated_at`,
       )
@@ -191,9 +195,10 @@ export async function markUserWorkspaceRuntimeReady(args: {
   connectionGeneration: number;
   runtimeVersion: string;
   attemptId: string;
+  imageDigest: string;
   now?: number;
 }): Promise<UserWorkspaceRuntime> {
-  return transitionRuntime(args, 'ready', null);
+  return transitionRuntime(args, 'ready', null, args.imageDigest);
 }
 
 export async function markUserWorkspaceRuntimeError(args: {
@@ -221,22 +226,24 @@ async function transitionRuntime(
   },
   status: 'ready' | 'error',
   lastError: string | null,
+  imageDigest: string | null = null,
 ): Promise<UserWorkspaceRuntime> {
   const row = await args.db
     .prepare(
       `UPDATE user_computer_runtimes
-       SET status = ?, last_error = ?, provisioning_attempt_id = NULL,
+       SET status = ?, last_error = ?, image_digest = ?, provisioning_attempt_id = NULL,
            provisioning_lease_expires_at = NULL, updated_at = ?
        WHERE user_id = ? AND connection_id = ? AND connection_generation = ? AND runtime_version = ?
          AND status = 'provisioning' AND provisioning_attempt_id = ?
        RETURNING user_id, connection_id, connection_generation, worker_name,
-                 endpoint, runtime_version, status, last_error,
+                 endpoint, runtime_version, image_digest, status, last_error,
                  provisioning_attempt_id, provisioning_lease_expires_at, upgrade_deferred_since,
                  created_at, updated_at`,
     )
     .bind(
       status,
       lastError,
+      imageDigest,
       args.now ?? Date.now(),
       args.userId,
       args.connectionId,
@@ -259,6 +266,7 @@ function runtimeFromRow(row: UserWorkspaceRuntimeRow): UserWorkspaceRuntime {
     workerName: row.worker_name,
     endpoint: row.endpoint,
     runtimeVersion: row.runtime_version,
+    imageDigest: row.image_digest,
     status: row.status,
     lastError: row.last_error,
     provisioningAttemptId: row.provisioning_attempt_id,

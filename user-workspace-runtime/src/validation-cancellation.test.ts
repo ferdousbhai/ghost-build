@@ -37,7 +37,7 @@ describe('validation cancellation', () => {
 
     await expect(cancellation.attachProcess(validationProcess)).rejects.toBeInstanceOf(ProjectValidationCancelledError);
 
-    expect(validationProcess.kill).toHaveBeenCalledWith(9);
+    expect(validationProcess.kill).toHaveBeenCalledWith(15);
   });
 
   it('kills only the attached validation process', async () => {
@@ -48,7 +48,7 @@ describe('validation cancellation', () => {
 
     await cancellation.cancel();
 
-    expect(validationProcess.kill).toHaveBeenCalledWith(9);
+    expect(validationProcess.kill).toHaveBeenCalledWith(15);
     expect(unrelatedProcess.kill).not.toHaveBeenCalled();
   });
 

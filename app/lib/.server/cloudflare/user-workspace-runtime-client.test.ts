@@ -35,6 +35,46 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     });
   });
 
+  it('waits out a lane held by a sibling write instead of failing the batched tool call', async () => {
+    // The Pi loop runs one assistant message's tool calls concurrently, but the operation lane is
+    // an exclusive mutex. Without the wait, a message that writes several files lands one and
+    // turns the rest into tool errors the model has to spend whole turns retrying.
+    let remainingConflicts = 3;
+    const { client, calls } = harness((operation) => {
+      if (operation === 'getWorkspaceSnapshot') {
+        if (remainingConflicts > 0) {
+          remainingConflicts -= 1;
+          throw new Error('[workspace_operation_conflict] write is running; retry after 900000ms.');
+        }
+        return {
+          state: { initialized: true, revision: 1, resetRevision: 0, fileCount: 0, totalBytes: 0, seeding: false },
+          files: [],
+        };
+      }
+      return undefined;
+    });
+
+    await expect(client.refresh()).resolves.toMatchObject({ initialized: true });
+    expect(remainingConflicts).toBe(0);
+    expect(calls.filter((request) => request.operation === 'getWorkspaceSnapshot')).toHaveLength(4);
+  });
+
+  it('does not queue behind a lane kind that legitimately runs for minutes', async () => {
+    // Waiting on `exec` or `validate` would burn the whole window and still fail, so those stay
+    // immediate. The `retryAfterMs` here is the lease deadline, not a completion estimate.
+    const attempts: string[] = [];
+    const { client } = harness((operation) => {
+      if (operation === 'getWorkspaceSnapshot') {
+        attempts.push(operation);
+        throw new Error('[workspace_operation_conflict] exec is running; retry after 900000ms.');
+      }
+      return undefined;
+    });
+
+    await expect(client.refresh()).rejects.toMatchObject({ name: 'WorkspaceBusyError', activeKind: 'exec' });
+    expect(attempts).toHaveLength(1);
+  });
+
   it('terminalizes a committed mutation whose display acknowledgement was interrupted', async () => {
     const pending = {
       kind: 'workspace-mutation-receipt',

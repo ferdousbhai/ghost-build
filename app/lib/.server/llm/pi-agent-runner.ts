@@ -29,7 +29,6 @@ import type { BuilderValidationStage } from '~/lib/common/builder-validation-pro
 import {
   BUILDER_TURN_BUDGET_ERROR_CODE,
   BUILDER_TURN_INACTIVITY_MS,
-  BUILDER_TURN_MAX_MODEL_STEPS,
   BUILDER_TURN_WALL_CLOCK_MS,
   BuilderTurnBudgetExceededError,
   type BuilderTurnBudgetReason,
@@ -45,6 +44,7 @@ import {
 } from './model-input';
 import { modelMessagesToPi } from './pi-message-conversion';
 import { recordPiStage, recordPiTurnBudget } from './pi-telemetry';
+import { createToolTimeAccounting } from './tool-time-accounting';
 import { getPiProvider, type WorkersAiAccountCredentials } from './provider';
 import { appendDeterministicCompletion, normalizeTextPartBoundaries } from './workers-ai-stream';
 import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
@@ -155,6 +155,8 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       stepCount: 0,
       toolCallCount: 0,
       elapsedMs: Date.now() - startedAt,
+      toolWallClockMs: 0,
+      toolMsByName: {},
       lastValidationState: 'validated',
     });
     return createValidatedBuildCompletionStream(validatedBuildCompletion);
@@ -197,13 +199,13 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   let runtimeContextCompacted = false;
   let runtimeCompactionError: ContextCompactionUnavailableError | undefined;
   let toolBudgetError: BuilderTurnBudgetExceededError | undefined;
-  let stepBudgetError: BuilderTurnBudgetExceededError | undefined;
   let toolIndeterminateError: WorkspaceToolOperationIndeterminateError | undefined;
   let terminalReason: BuilderTurnTerminalReason = 'failed';
   let stepCount = 0;
   let toolCallCount = 0;
   let toolsInFlight = 0;
   let inactivityTimer: ReturnType<typeof setTimeout> | undefined;
+  const toolAccounting = createToolTimeAccounting();
 
   const clearInactivityWatchdog = () => {
     clearTimeout(inactivityTimer);
@@ -223,11 +225,14 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   const emit = async (event: AgentEvent) => {
     if (event.type === 'tool_execution_start') {
       toolsInFlight += 1;
+      toolAccounting.start(event.toolCallId, event.toolName);
     } else if (event.type === 'tool_execution_end') {
       toolsInFlight = Math.max(0, toolsInFlight - 1);
       toolCallCount += 1;
+      toolAccounting.end(event.toolCallId);
     } else if (event.type === 'turn_end') {
       toolsInFlight = 0;
+      toolAccounting.settle();
     }
     armInactivityWatchdog();
 
@@ -415,21 +420,11 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
           context = compacted;
           return { context: compacted };
         },
-        shouldStopAfterTurn: () => {
-          if (
-            runtimeCompactionError !== undefined ||
-            toolBudgetError !== undefined ||
-            toolIndeterminateError !== undefined ||
-            (currentValidatedBuildCompletion !== undefined && !steering.hasPending())
-          ) {
-            return true;
-          }
-          if (stepCount >= BUILDER_TURN_MAX_MODEL_STEPS) {
-            stepBudgetError ??= new BuilderTurnBudgetExceededError('max_steps');
-            return true;
-          }
-          return false;
-        },
+        shouldStopAfterTurn: () =>
+          runtimeCompactionError !== undefined ||
+          toolBudgetError !== undefined ||
+          toolIndeterminateError !== undefined ||
+          (currentValidatedBuildCompletion !== undefined && !steering.hasPending()),
         afterToolCall: async ({ result, isError }) =>
           !isError && !toolResultSucceeded(result.details) ? { isError: true } : undefined,
         maxTokens: piProvider.maxTokens,
@@ -472,9 +467,6 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       }
       if (toolBudgetError) {
         throw toolBudgetError;
-      }
-      if (stepBudgetError) {
-        throw stepBudgetError;
       }
       const signalBudgetReason = exhaustedBudgetReason();
       if (signalBudgetReason) {
@@ -525,11 +517,14 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     } finally {
       clearInactivityWatchdog();
       steering.close();
+      toolAccounting.settle();
       const budget: BuilderTurnBudgetReport = {
         terminalReason,
         stepCount,
         toolCallCount,
         elapsedMs: Date.now() - startedAt,
+        toolWallClockMs: toolAccounting.wallClockMs(),
+        toolMsByName: toolAccounting.byName(),
         lastValidationState: currentValidatedBuildCompletion === undefined ? 'unvalidated' : 'validated',
       };
       recordPiTurnBudget(modelId, budget);

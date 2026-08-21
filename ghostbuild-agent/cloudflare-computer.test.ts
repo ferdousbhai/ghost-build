@@ -15,9 +15,12 @@ import {
 } from './cloudflare-computer.js';
 
 /**
- * Ghostbuild does not use the published AI SDK tools; the four model tools are
- * hand written. The upstream blast radius is the durable workspace surface the
+ * Ghostbuild does not use the published AI SDK tools; every model tool is hand
+ * written. The upstream blast radius is the durable workspace surface the
  * ProjectWorkspace runtime calls directly, so that is what the canary pins.
+ * `readdir`, `stat`, and the utf8 `readFile` carry the VFS-only discovery tools
+ * as well as `read`, so a drift in any of them breaks discovery before it breaks
+ * anything the container could still answer.
  */
 const REQUIRED_COMPUTER_DECLARATIONS = [
   'declare class Workspace {',

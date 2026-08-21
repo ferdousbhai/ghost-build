@@ -1,0 +1,956 @@
+{
+  "total": 1699,
+  "counts": {
+    "app/agents/builder-agent-identity.test.ts": {
+      "anti-slop/no-unsafe-dictionary-type": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 5
+    },
+    "app/agents/builder-agent-schema.test.ts": {
+      "anti-slop/no-unknown-returns": 1,
+      "anti-slop/no-unsafe-dictionary-type": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 8
+    },
+    "app/agents/builder-agent.ts": {
+      "anti-slop/no-unknown-parameters": 3,
+      "anti-slop/no-unknown-returns": 1
+    },
+    "app/agents/builder-deployment-command.test.ts": {
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 7
+    },
+    "app/agents/builder-request-policy.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/agents/builder-request-policy.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/agents/builder-workspace-api.ts": {
+      "anti-slop/no-runtime-typeof": 2,
+      "anti-slop/no-unknown-parameters": 12,
+      "anti-slop/no-unknown-returns": 1
+    },
+    "app/agents/builder-workspace-seed.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/components/ClientRouteComponents.client.test.tsx": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/ClientRouteComponents.test.tsx": {
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/CloudflareSignInPrompt.test.tsx": {
+      "anti-slop/no-module-mocking": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/components/chat/AssistantMessage.tsx": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "app/components/chat/BaseChat.test.tsx": {
+      "anti-slop/no-module-mocking": 16,
+      "anti-slop/require-safety-comment-for-type-assertion": 3
+    },
+    "app/components/chat/BuilderModelSelector.test.tsx": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/chat/DeploymentStatus.client.test.tsx": {
+      "anti-slop/no-module-mocking": 1
+    },
+    "app/components/chat/ExpandableToolCard.test.tsx": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/chat/GhostbuildAuthWrapper.tsx": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "app/components/chat/PromptRefinementDialog.client.test.tsx": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/chat/SubchatBar.test.tsx": {
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/chat/ToolCall.test.tsx": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/chat/builder-agent-auth.test.ts": {
+      "anti-slop/no-module-mocking": 1
+    },
+    "app/components/chat/builder-stop.ts": {
+      "anti-slop/no-unknown-returns": 1
+    },
+    "app/components/chat/chat-send-reconciliation.ts": {
+      "anti-slop/no-unknown-returns": 1
+    },
+    "app/components/chat/useBuildProgress.test.tsx": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/chat/useBuildProgress.ts": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "app/components/chat/useBuilderAgentChat.test.tsx": {
+      "anti-slop/no-known-value-widening": 1,
+      "anti-slop/no-module-mocking": 20,
+      "anti-slop/no-unknown-parameters": 2,
+      "anti-slop/no-unknown-returns": 5,
+      "anti-slop/require-safety-comment-for-type-assertion": 6
+    },
+    "app/components/chat/useChatMessageSubmission.ts": {
+      "anti-slop/no-unknown-returns": 1
+    },
+    "app/components/chat/useMessageInputController.continue.test.tsx": {
+      "anti-slop/no-module-mocking": 5,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/components/chat/useMessageInputController.lifecycle.test.tsx": {
+      "anti-slop/no-module-mocking": 4,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/chat/useMessageInputController.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/components/editor/codemirror/editor-change-buffer.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/header/ChatDescription.test.tsx": {
+      "anti-slop/no-module-mocking": 2
+    },
+    "app/components/header/DownloadButton.test.tsx": {
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/header/HeaderActionButtons.client.test.tsx": {
+      "anti-slop/no-module-mocking": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/launch-route-states.test.tsx": {
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/settings/AccountDataCard.client.test.tsx": {
+      "anti-slop/no-module-mocking": 5,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/components/ui/IconButton.tsx": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "app/components/ui/primitives/Modal.test.tsx": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/ui/primitives/Modal.tsx": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "app/components/workbench/FileBreadcrumb.test.tsx": {
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/components/workbench/file-tree-model.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/components/workbench/useWorkbenchController.test.tsx": {
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/generated/builder-skill-assets.generated.ts": {
+      "anti-slop/no-known-value-widening": 1
+    },
+    "app/lib/.server/agent-request-identity.test.ts": {
+      "anti-slop/no-chained-type-assertions": 4,
+      "anti-slop/no-module-mocking": 3,
+      "anti-slop/require-safety-comment-for-type-assertion": 19
+    },
+    "app/lib/.server/auth.test.ts": {
+      "anti-slop/no-chained-type-assertions": 9,
+      "anti-slop/require-safety-comment-for-type-assertion": 34
+    },
+    "app/lib/.server/chat.test.ts": {
+      "anti-slop/no-module-mocking": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 6
+    },
+    "app/lib/.server/cloudflare/account-deletion.test.ts": {
+      "anti-slop/no-chained-type-assertions": 4,
+      "anti-slop/no-known-value-widening": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 18
+    },
+    "app/lib/.server/cloudflare/account-deletion.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/.server/cloudflare/account-export.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/no-known-value-widening": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 16
+    },
+    "app/lib/.server/cloudflare/app-resource-reconcile-sweep.test.ts": {
+      "anti-slop/no-chained-type-assertions": 2,
+      "anti-slop/no-module-mocking": 3,
+      "anti-slop/no-unsafe-dictionary-type": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 4
+    },
+    "app/lib/.server/cloudflare/app-resource-reconcile-sweep.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/.server/cloudflare/cloudflare-connection-repository.test.ts": {
+      "anti-slop/no-chained-type-assertions": 3,
+      "anti-slop/require-safety-comment-for-type-assertion": 26
+    },
+    "app/lib/.server/cloudflare/cloudflare-connection-repository.ts": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "app/lib/.server/cloudflare/cloudflare-credential-vault.test.ts": {
+      "anti-slop/no-chained-type-assertions": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 16
+    },
+    "app/lib/.server/cloudflare/cloudflare-oauth-orchestrator.ts": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "app/lib/.server/cloudflare/deployment-artifact.ts": {
+      "anti-slop/no-runtime-typeof": 8
+    },
+    "app/lib/.server/cloudflare/deployment-config.ts": {
+      "anti-slop/no-runtime-typeof": 5,
+      "anti-slop/no-unknown-parameters": 3,
+      "anti-slop/no-unsafe-dictionary-type": 1
+    },
+    "app/lib/.server/cloudflare/deployment-plan.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/.server/cloudflare/deployment-plan.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/.server/cloudflare/deployment-project-profile.ts": {
+      "anti-slop/no-runtime-typeof": 4,
+      "anti-slop/no-unknown-parameters": 5,
+      "anti-slop/no-unsafe-dictionary-type": 3,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/.server/cloudflare/deployment-repository.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 4
+    },
+    "app/lib/.server/cloudflare/deployment-security-baseline.test.ts": {
+      "anti-slop/no-unsafe-dictionary-type": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/lib/.server/cloudflare/deployment-security-inventory.ts": {
+      "anti-slop/no-runtime-typeof": 2
+    },
+    "app/lib/.server/cloudflare/deployment-security-lock.ts": {
+      "anti-slop/no-runtime-typeof": 8,
+      "anti-slop/no-unknown-parameters": 3,
+      "anti-slop/no-unknown-returns": 1,
+      "anti-slop/no-unsafe-dictionary-type": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/.server/cloudflare/user-account-api.test.ts": {
+      "anti-slop/no-unsafe-dictionary-type": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 8
+    },
+    "app/lib/.server/cloudflare/user-account-api.ts": {
+      "anti-slop/no-runtime-typeof": 45,
+      "anti-slop/no-unknown-parameters": 13,
+      "anti-slop/no-unsafe-dictionary-type": 4,
+      "anti-slop/require-safety-comment-for-type-assertion": 4
+    },
+    "app/lib/.server/cloudflare/user-workspace-deployment-executor.flow.test.ts": {
+      "anti-slop/no-chained-type-assertions": 3,
+      "anti-slop/no-module-mocking": 4,
+      "anti-slop/no-unsafe-dictionary-type": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 9
+    },
+    "app/lib/.server/cloudflare/user-workspace-deployment-executor.ts": {
+      "anti-slop/no-runtime-typeof": 2,
+      "anti-slop/no-unknown-parameters": 2,
+      "anti-slop/no-unsafe-dictionary-type": 2
+    },
+    "app/lib/.server/cloudflare/user-workspace-runtime-client.test.ts": {
+      "anti-slop/no-chained-type-assertions": 5,
+      "anti-slop/no-runtime-typeof": 1,
+      "anti-slop/no-unknown-parameters": 5,
+      "anti-slop/no-unknown-returns": 1,
+      "anti-slop/no-unsafe-dictionary-type": 3,
+      "anti-slop/require-safety-comment-for-type-assertion": 11
+    },
+    "app/lib/.server/cloudflare/user-workspace-runtime-client.ts": {
+      "anti-slop/no-reflect-apply": 1,
+      "anti-slop/no-reflect-get": 1,
+      "anti-slop/no-runtime-typeof": 12,
+      "anti-slop/no-unknown-parameters": 18,
+      "anti-slop/no-unknown-returns": 3,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/.server/cloudflare/user-workspace-runtime-health.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/lib/.server/cloudflare/user-workspace-runtime-health.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/.server/cloudflare/user-workspace-runtime-provisioner.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/no-module-mocking": 7,
+      "anti-slop/no-unknown-parameters": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 3
+    },
+    "app/lib/.server/cloudflare/user-workspace-runtime-readiness.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/.server/cloudflare/user-workspace-runtime-reclaim.test.ts": {
+      "anti-slop/no-chained-type-assertions": 9,
+      "anti-slop/no-known-value-widening": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 24
+    },
+    "app/lib/.server/cloudflare/user-workspace-runtime-repository.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 3
+    },
+    "app/lib/.server/cloudflare/workers-ai-billing-context.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 5
+    },
+    "app/lib/.server/daily-maintenance.test.ts": {
+      "anti-slop/no-chained-type-assertions": 2,
+      "anti-slop/no-module-mocking": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 5
+    },
+    "app/lib/.server/daily-maintenance.ts": {
+      "anti-slop/no-unknown-returns": 1
+    },
+    "app/lib/.server/env.ts": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "app/lib/.server/llm/builder-skills.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/.server/llm/builder-skills.ts": {
+      "anti-slop/no-runtime-typeof": 2,
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/.server/llm/cloudflare-docs-search.test.ts": {
+      "anti-slop/no-chained-type-assertions": 13,
+      "anti-slop/no-unknown-parameters": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 31
+    },
+    "app/lib/.server/llm/cloudflare-docs-search.ts": {
+      "anti-slop/no-runtime-typeof": 3,
+      "anti-slop/no-unknown-parameters": 3,
+      "anti-slop/no-unsafe-dictionary-type": 1
+    },
+    "app/lib/.server/llm/context-compaction-store.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/.server/llm/context-compaction.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/.server/llm/context-compaction.ts": {
+      "anti-slop/no-runtime-typeof": 5,
+      "anti-slop/no-unknown-parameters": 3,
+      "anti-slop/no-unsafe-dictionary-type": 1
+    },
+    "app/lib/.server/llm/message-conversion.ts": {
+      "anti-slop/no-runtime-typeof": 3,
+      "anti-slop/no-unsafe-dictionary-type": 3
+    },
+    "app/lib/.server/llm/model-input.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/lib/.server/llm/model-input.ts": {
+      "anti-slop/no-unsafe-dictionary-type": 2
+    },
+    "app/lib/.server/llm/pi-agent-runner.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/no-conditional-empty-object-spread": 1,
+      "anti-slop/no-module-mocking": 8,
+      "anti-slop/no-object-parameters": 1,
+      "anti-slop/no-unknown-parameters": 54,
+      "anti-slop/require-safety-comment-for-type-assertion": 7
+    },
+    "app/lib/.server/llm/pi-agent-runner.ts": {
+      "anti-slop/no-runtime-typeof": 5,
+      "anti-slop/no-unknown-parameters": 10,
+      "anti-slop/no-unknown-returns": 2,
+      "anti-slop/no-unsafe-dictionary-type": 1
+    },
+    "app/lib/.server/llm/pi-ai-invoke.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/lib/.server/llm/pi-ai-invoke.ts": {
+      "anti-slop/no-unsafe-dictionary-type": 1
+    },
+    "app/lib/.server/llm/pi-ai-models.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/no-unsafe-dictionary-type": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 3
+    },
+    "app/lib/.server/llm/pi-ai-models.ts": {
+      "anti-slop/no-unsafe-dictionary-type": 1
+    },
+    "app/lib/.server/llm/pi-message-conversion.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "app/lib/.server/llm/pi-steering.ts": {
+      "anti-slop/no-unknown-parameters": 3
+    },
+    "app/lib/.server/llm/pi-tools-adapter.test.ts": {
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 12
+    },
+    "app/lib/.server/llm/pi-tools-adapter.ts": {
+      "anti-slop/no-runtime-typeof": 1,
+      "anti-slop/no-unknown-parameters": 2
+    },
+    "app/lib/.server/llm/provider-error-logging.ts": {
+      "anti-slop/no-runtime-typeof": 2,
+      "anti-slop/no-unknown-parameters": 2
+    },
+    "app/lib/.server/llm/provider.test.ts": {
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/lib/.server/llm/workers-ai-stream.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/lib/.server/llm/workers-ai-text.test.ts": {
+      "anti-slop/no-module-mocking": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/.server/llm/workers-ai-text.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/.server/llm/workers-ai-title.test.ts": {
+      "anti-slop/no-module-mocking": 3,
+      "anti-slop/require-safety-comment-for-type-assertion": 3
+    },
+    "app/lib/.server/llm/workers-ai-tools.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/no-unknown-parameters": 2,
+      "anti-slop/no-unknown-returns": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 5
+    },
+    "app/lib/.server/llm/workers-ai-tools.ts": {
+      "anti-slop/no-runtime-typeof": 4,
+      "anti-slop/no-unknown-parameters": 11,
+      "anti-slop/no-unknown-returns": 2,
+      "anti-slop/no-unsafe-dictionary-type": 2
+    },
+    "app/lib/bounded-body.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/lib/bounded-body.ts": {
+      "anti-slop/no-unknown-returns": 1
+    },
+    "app/lib/bounded-multipart.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/cloudflare/account-local-replica.test.tsx": {
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/lib/cloudflare/account-local-replica.ts": {
+      "anti-slop/no-runtime-typeof": 1,
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/cloudflare/chat-transcript-db.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/cloudflare/client.test.ts": {
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/no-unknown-parameters": 3,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/cloudflare/client.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/cloudflare/data-hooks.test.ts": {
+      "anti-slop/no-module-mocking": 2,
+      "anti-slop/no-unknown-parameters": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/cloudflare/data-page-loader.test.ts": {
+      "anti-slop/no-module-mocking": 1
+    },
+    "app/lib/cloudflare/data.server.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/cloudflare/data/agent-gc.server.test.ts": {
+      "anti-slop/no-chained-type-assertions": 3,
+      "anti-slop/require-safety-comment-for-type-assertion": 13
+    },
+    "app/lib/cloudflare/data/app-resource-gc.server.test.ts": {
+      "anti-slop/no-chained-type-assertions": 3,
+      "anti-slop/require-safety-comment-for-type-assertion": 12
+    },
+    "app/lib/cloudflare/data/app-resource-reconcile.server.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/cloudflare/data/auth.server.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/cloudflare/data/chat-repository.server.test.ts": {
+      "anti-slop/no-chained-type-assertions": 2,
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 7
+    },
+    "app/lib/cloudflare/data/chat-service.server.test.ts": {
+      "anti-slop/no-chained-type-assertions": 13,
+      "anti-slop/no-known-value-widening": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 31
+    },
+    "app/lib/cloudflare/data/cloudflare-auth-retention.server.test.ts": {
+      "anti-slop/no-chained-type-assertions": 2,
+      "anti-slop/no-known-value-widening": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 8
+    },
+    "app/lib/cloudflare/data/http.server.ts": {
+      "anti-slop/no-unknown-parameters": 2
+    },
+    "app/lib/cloudflare/durable-object-rpc.server.ts": {
+      "anti-slop/no-unknown-parameters": 2
+    },
+    "app/lib/cloudflare/runtime-session.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/hex-digest.ts": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "app/lib/hooks/useEditChatDescription.test.tsx": {
+      "anti-slop/no-chained-type-assertions": 13,
+      "anti-slop/no-module-mocking": 5,
+      "anti-slop/require-safety-comment-for-type-assertion": 42
+    },
+    "app/lib/hooks/useEditChatDescription.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/hooks/useProcessedMessages.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/lib/hooks/useViewport.ts": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "app/lib/hooks/useWorkspaceSwipe.test.ts": {
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/stores/builder-workspace-collection.client.ts": {
+      "anti-slop/no-unknown-parameters": 4,
+      "anti-slop/no-unknown-returns": 2
+    },
+    "app/lib/stores/builder-workspace-sync.client.test.ts": {
+      "anti-slop/no-chained-type-assertions": 3,
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/no-unknown-parameters": 1,
+      "anti-slop/no-unknown-returns": 2,
+      "anti-slop/no-unsafe-dictionary-type": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 24
+    },
+    "app/lib/stores/builder-workspace-sync.client.ts": {
+      "anti-slop/no-unknown-parameters": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/stores/reactQueryClient.test.ts": {
+      "anti-slop/no-runtime-typeof": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/stores/startup/chat-checkpoint-sync-worker.test.ts": {
+      "anti-slop/no-module-mocking": 2
+    },
+    "app/lib/stores/startup/messages.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/stores/startup/useInitialMessages.test.tsx": {
+      "anti-slop/no-module-mocking": 3,
+      "anti-slop/no-unknown-parameters": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/lib/stores/startup/useStoreMessageHistory.race.test.tsx": {
+      "anti-slop/no-module-mocking": 5,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/lib/stores/theme.ts": {
+      "anti-slop/no-runtime-typeof": 5
+    },
+    "app/lib/stores/tool-activity.client.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 13
+    },
+    "app/lib/stores/workbench.client.test.ts": {
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/lib/stores/workbench.client.ts": {
+      "unicorn/no-useless-spread": 1
+    },
+    "app/lib/telemetry.client.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/trust.test.ts": {
+      "anti-slop/no-known-value-widening": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 3
+    },
+    "app/lib/workers-ai-model.ts": {
+      "anti-slop/no-runtime-typeof": 1,
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/lib/workers-paid.ts": {
+      "anti-slop/no-unknown-parameters": 3
+    },
+    "app/routes/-index.test.tsx": {
+      "anti-slop/no-module-mocking": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/routes/__root.tsx": {
+      "anti-slop/no-runtime-typeof": 3,
+      "anti-slop/no-unknown-parameters": 2,
+      "anti-slop/no-unsafe-dictionary-type": 1
+    },
+    "app/routes/settings.tsx": {
+      "anti-slop/no-runtime-typeof": 1,
+      "anti-slop/no-unsafe-dictionary-type": 1
+    },
+    "app/server-handlers/account-deletion.test.ts": {
+      "anti-slop/no-module-mocking": 2,
+      "anti-slop/no-unknown-parameters": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/server-handlers/account-export.test.ts": {
+      "anti-slop/no-module-mocking": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "app/server-handlers/auth.test.ts": {
+      "anti-slop/no-module-mocking": 1
+    },
+    "app/server-handlers/client-telemetry.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "app/server-handlers/cloudflare-integration.test.ts": {
+      "anti-slop/no-chained-type-assertions": 4,
+      "anti-slop/no-module-mocking": 3,
+      "anti-slop/require-safety-comment-for-type-assertion": 23
+    },
+    "app/server-handlers/cloudflare-integration.ts": {
+      "anti-slop/no-unknown-parameters": 3
+    },
+    "app/server-handlers/deployments.test.ts": {
+      "anti-slop/no-chained-type-assertions": 2,
+      "anti-slop/no-module-mocking": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 4
+    },
+    "app/server-handlers/deployments.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "app/server-handlers/enhance-prompt.test.ts": {
+      "anti-slop/no-module-mocking": 3,
+      "anti-slop/no-unsafe-dictionary-type": 1
+    },
+    "app/server-handlers/runtime-credential.test.ts": {
+      "anti-slop/no-module-mocking": 2
+    },
+    "app/server-handlers/version.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 3
+    },
+    "app/server.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/no-module-mocking": 13
+    },
+    "app/utils/classNames.ts": {
+      "anti-slop/no-runtime-typeof": 2
+    },
+    "e2e/launch-critical-journey.spec.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "ghostbuild-agent/ai-compat.ts": {
+      "anti-slop/no-runtime-typeof": 12,
+      "anti-slop/no-unknown-parameters": 2,
+      "anti-slop/no-unsafe-dictionary-type": 3
+    },
+    "ghostbuild-agent/cloudflare-computer.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "ghostbuild-agent/cloudflare-computer.ts": {
+      "anti-slop/no-runtime-typeof": 5,
+      "anti-slop/no-unknown-parameters": 8,
+      "anti-slop/no-unknown-returns": 1
+    },
+    "ghostbuild-agent/context-message-metrics.ts": {
+      "anti-slop/no-runtime-typeof": 1,
+      "anti-slop/no-unknown-parameters": 2
+    },
+    "ghostbuild-agent/line-edit.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "ghostbuild-agent/line-edit.ts": {
+      "anti-slop/no-runtime-typeof": 2
+    },
+    "ghostbuild-agent/model-tool-inputs.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "ghostbuild-agent/tool-result.ts": {
+      "anti-slop/no-runtime-typeof": 9,
+      "anti-slop/no-unknown-parameters": 4
+    },
+    "ghostbuild-agent/tool.ts": {
+      "anti-slop/no-unknown-parameters": 2,
+      "anti-slop/no-unknown-returns": 1
+    },
+    "ghostbuild-agent/transcript.ts": {
+      "anti-slop/no-runtime-typeof": 1,
+      "anti-slop/no-unknown-parameters": 1,
+      "anti-slop/no-unsafe-dictionary-type": 1
+    },
+    "ghostbuild-agent/utils/shell.ts": {
+      "eslint/no-control-regex": 4
+    },
+    "ghostbuild-agent/utils/stripIndent.ts": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "ghostbuild-agent/utils/zodUtil.ts": {
+      "anti-slop/no-runtime-typeof": 1,
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "playwright.config.ts": {
+      "anti-slop/no-conditional-empty-object-spread": 1
+    },
+    "scripts/build-embedded-bundle.spec.ts": {
+      "anti-slop/no-known-value-widening": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "scripts/check-oxlint-baseline.mjs": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "scripts/check-runtime-artifacts.mjs": {
+      "anti-slop/no-runtime-typeof": 3
+    },
+    "scripts/check-runtime-artifacts.spec.ts": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "scripts/check-workers-builds-environment.mjs": {
+      "anti-slop/no-runtime-typeof": 2
+    },
+    "scripts/check-workers-builds-environment.spec.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 3
+    },
+    "scripts/deploy-production.mjs": {
+      "anti-slop/no-runtime-typeof": 13,
+      "eslint/no-control-regex": 1
+    },
+    "scripts/deploy-production.spec.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 12
+    },
+    "scripts/ops-report.mjs": {
+      "anti-slop/no-runtime-typeof": 22
+    },
+    "scripts/ops-report.spec.ts": {
+      "anti-slop/no-chained-type-assertions": 2,
+      "anti-slop/no-known-value-widening": 4,
+      "anti-slop/no-unknown-parameters": 4,
+      "anti-slop/no-unsafe-dictionary-type": 5,
+      "anti-slop/require-safety-comment-for-type-assertion": 13
+    },
+    "scripts/record-d1-time-travel-bookmark.mjs": {
+      "anti-slop/no-runtime-typeof": 2
+    },
+    "scripts/report-client-bundle.spec.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "scripts/template-agent-routing.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/no-module-mocking": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "scripts/template-agent-security.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "scripts/template-runtime-module-security.test.ts": {
+      "anti-slop/no-runtime-typeof": 3,
+      "anti-slop/no-unknown-parameters": 2,
+      "anti-slop/no-unknown-returns": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 7
+    },
+    "scripts/upload-workers-builds-preview.mjs": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "scripts/upload-workers-builds-preview.spec.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "scripts/verify-built-ssr.mjs": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "scripts/verify-live-deployment.mjs": {
+      "anti-slop/no-runtime-typeof": 2
+    },
+    "scripts/verify-live-deployment.spec.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "scripts/verify-production-config.mjs": {
+      "anti-slop/no-runtime-typeof": 3
+    },
+    "scripts/verify-production-licenses.mjs": {
+      "anti-slop/no-runtime-typeof": 5,
+      "oxc/only-used-in-recursion": 1
+    },
+    "scripts/verify-static-assets.mjs": {
+      "anti-slop/no-runtime-typeof": 2
+    },
+    "scripts/verify-template.spec.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "scripts/workers-builds-config.mjs": {
+      "anti-slop/no-runtime-typeof": 2
+    },
+    "template/scripts/cf-typegen.mjs": {
+      "anti-slop/no-runtime-typeof": 2
+    },
+    "template/scripts/lib/production-license-artifact.mjs": {
+      "anti-slop/no-runtime-typeof": 2
+    },
+    "template/scripts/lib/project-policy/dependency-policy.mjs": {
+      "anti-slop/no-runtime-typeof": 2
+    },
+    "template/scripts/lib/project-policy/worker-policy.mjs": {
+      "anti-slop/no-runtime-typeof": 2,
+      "anti-slop/no-shape-in-symbol-names": 2
+    },
+    "template/scripts/lib/project-policy/workflow-policy.mjs": {
+      "anti-slop/no-runtime-typeof": 1
+    },
+    "template/scripts/lib/project-policy/workspace-policy.mjs": {
+      "anti-slop/no-runtime-typeof": 5,
+      "eslint/no-control-regex": 1
+    },
+    "template/scripts/lib/runtime-module-security.ts": {
+      "anti-slop/no-runtime-typeof": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "template/scripts/provision-cloudflare-production.mjs": {
+      "anti-slop/no-runtime-typeof": 2
+    },
+    "template/scripts/verify-production-config.mjs": {
+      "anti-slop/no-runtime-typeof": 2
+    },
+    "template/src/agent-routing.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "template/src/agents/anonymous-retention.ts": {
+      "anti-slop/no-runtime-typeof": 1,
+      "anti-slop/no-unknown-parameters": 1,
+      "anti-slop/no-unknown-returns": 1
+    },
+    "template/src/agents/app-agent.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "template/src/agents/chat-policy.ts": {
+      "anti-slop/no-runtime-typeof": 2,
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "template/src/routes/index.tsx": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "template/src/server.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "template/vite.config.ts": {
+      "anti-slop/no-conditional-empty-object-spread": 1,
+      "anti-slop/no-known-value-widening": 1
+    },
+    "tests/workerd/server.integration.ts": {
+      "anti-slop/no-chained-type-assertions": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 4
+    },
+    "user-workspace-runtime/src/atomic-workspace-changes.test.ts": {
+      "anti-slop/no-chained-type-assertions": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 6
+    },
+    "user-workspace-runtime/src/atomic-workspace-changes.ts": {
+      "anti-slop/no-runtime-typeof": 1,
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "user-workspace-runtime/src/command-cancellation.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "user-workspace-runtime/src/command-termination.ts": {
+      "anti-slop/no-runtime-typeof": 2,
+      "anti-slop/no-unknown-parameters": 3,
+      "anti-slop/no-unknown-returns": 2
+    },
+    "user-workspace-runtime/src/computer-admission.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 3
+    },
+    "user-workspace-runtime/src/container-toolchain.test.ts": {
+      "anti-slop/no-unknown-parameters": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "user-workspace-runtime/src/dev-preview.ts": {
+      "anti-slop/no-unknown-parameters": 2
+    },
+    "user-workspace-runtime/src/index.ts": {
+      "anti-slop/no-chained-type-assertions": 5,
+      "anti-slop/no-conditional-empty-object-spread": 1,
+      "anti-slop/no-runtime-typeof": 14,
+      "anti-slop/no-unknown-parameters": 61,
+      "anti-slop/no-unknown-returns": 2,
+      "anti-slop/no-unsafe-dictionary-type": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 8
+    },
+    "user-workspace-runtime/src/mutation-receipt.ts": {
+      "anti-slop/no-runtime-typeof": 3,
+      "anti-slop/no-unknown-parameters": 5,
+      "anti-slop/no-unsafe-dictionary-type": 2
+    },
+    "user-workspace-runtime/src/operation-lease-heartbeat.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "user-workspace-runtime/src/operation-lease-policy.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 5
+    },
+    "user-workspace-runtime/src/readiness-route.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 3
+    },
+    "user-workspace-runtime/src/readiness-route.ts": {
+      "anti-slop/no-known-value-widening": 1,
+      "anti-slop/no-runtime-typeof": 4
+    },
+    "user-workspace-runtime/src/schedule-once-dedupe.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/no-unknown-parameters": 4,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "user-workspace-runtime/src/scheduled-maintenance.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/no-module-mocking": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "user-workspace-runtime/src/tool-operation-journal.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 4
+    },
+    "user-workspace-runtime/src/tool-operation-journal.ts": {
+      "anti-slop/no-runtime-typeof": 2,
+      "anti-slop/no-unknown-parameters": 3,
+      "anti-slop/no-unknown-returns": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "user-workspace-runtime/src/workspace-activity-route.test.ts": {
+      "anti-slop/no-chained-type-assertions": 1,
+      "anti-slop/require-safety-comment-for-type-assertion": 2
+    },
+    "user-workspace-runtime/src/workspace-discovery.ts": {
+      "anti-slop/no-runtime-typeof": 6,
+      "anti-slop/no-unknown-parameters": 6,
+      "anti-slop/no-unsafe-dictionary-type": 2,
+      "anti-slop/require-safety-comment-for-type-assertion": 1
+    },
+    "user-workspace-runtime/src/workspace-input.ts": {
+      "anti-slop/no-unknown-parameters": 1
+    },
+    "user-workspace-runtime/src/workspace-operation-lane.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 8
+    },
+    "user-workspace-runtime/src/workspace-sync-retry.test.ts": {
+      "anti-slop/require-safety-comment-for-type-assertion": 7
+    }
+  }
+}

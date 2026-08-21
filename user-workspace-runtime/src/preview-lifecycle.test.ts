@@ -145,12 +145,14 @@ describe('ProjectWorkspace preview lifecycle', () => {
 
   it('applies the isolated local D1 schema before building Preview', () => {
     const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    expect(source).toContain(
+      "command: 'pnpm exec wrangler d1 migrations apply DB --local --config wrangler.preview.jsonc'",
+    );
     const commands = source.slice(
       source.indexOf('const PREVIEW_PREPARATION_COMMANDS'),
       source.indexOf('const COMPUTERD_PROCESS_ROLE'),
     );
-    expect(commands).toContain('pnpm exec wrangler d1 migrations apply DB --local --config wrangler.preview.jsonc');
-    expect(commands.indexOf('d1 migrations apply DB --local')).toBeLessThan(
+    expect(commands.indexOf('PREVIEW_DATABASE_COMMAND')).toBeLessThan(
       commands.indexOf('pnpm run build:isolated-preview'),
     );
   });

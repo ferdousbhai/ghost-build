@@ -21,7 +21,13 @@ describe('minimal Workers AI tool surface', () => {
   it('keeps the reviewed Computer schemas behind the active model tools', () => {
     const tools = createWorkersAiTools(workspaceStub(), operationContext());
 
-    expect(Object.keys(tools)).toEqual(['read', 'write', 'edit', 'exec', 'search_cloudflare_docs']);
+    expect(Object.keys(tools)).toEqual(['read', 'ls', 'grep', 'write', 'edit', 'exec', 'search_cloudflare_docs']);
+    expect(toolInputSchema(tools.ls).safeParse({}).success).toBe(true);
+    expect(toolInputSchema(tools.ls).safeParse({ path: '/home/project/src', recursive: true, limit: 50 }).success).toBe(
+      true,
+    );
+    expect(toolInputSchema(tools.grep).safeParse({ pattern: 'createRouter' }).success).toBe(true);
+    expect(toolInputSchema(tools.grep).safeParse({ path: '/home/project/src' }).success).toBe(false);
     expect(
       toolInputSchema(tools.read).safeParse({ path: '/home/project/package.json', offset: 1, limit: 20 }).success,
     ).toBe(true);
@@ -45,6 +51,18 @@ describe('minimal Workers AI tool surface', () => {
     expect(tools.exec.description).toContain(COMPUTER_EXEC_APPLICATION_POLICY);
     expect(tools.exec.description).not.toContain('multiple backends');
     expect(tools.exec.description).not.toContain('/home/project/.ghost/docs/');
+  });
+
+  it('points exec away from the discovery work the VFS tools answer without a container', () => {
+    // The VFS tools only pay for themselves if the model actually reaches for them. Left to a bare
+    // "runs a shell command" description it falls back on shell habit, and every `ls`/`find`/`grep`
+    // becomes a container round trip — or a cold container start — for an answer the Durable
+    // Object holds.
+    const { exec } = createWorkersAiTools(workspaceStub(), operationContext());
+
+    expect(exec.description).toMatch(/\bls\b/);
+    expect(exec.description).toMatch(/\bgrep\b/);
+    expect(exec.description).toMatch(/container/i);
   });
 
   it('reads bundled skill references through read without consulting the project workspace', async () => {
@@ -483,7 +501,11 @@ describe('minimal Workers AI tool surface', () => {
       events.push('write-end');
     });
     const edit = coordinate('edit', async () => events.push('edit'));
+    // Every VFS-served tool resolves while the write still holds the queue; a discovery call that
+    // waited here would have re-acquired the container latency it exists to skip.
     await expect(coordinate('read', async () => 'contents')).resolves.toBe('contents');
+    await expect(coordinate('ls', async () => 'entries')).resolves.toBe('entries');
+    await expect(coordinate('grep', async () => 'matches')).resolves.toBe('matches');
 
     await Promise.resolve();
     expect(events).toEqual(['write-start']);
@@ -491,6 +513,42 @@ describe('minimal Workers AI tool surface', () => {
     await Promise.all([write, edit]);
     expect(events).toEqual(['write-start', 'write-end', 'edit']);
     expect(keepAliveCalls).toBe(2);
+  });
+
+  it('serves discovery from the workspace index, outside the container and the tool journal', async () => {
+    const workspace = workspaceStub();
+    const tools = createWorkersAiTools(workspace, operationContext());
+
+    await expect(executeTool(tools.ls, { path: '/home/project/src', recursive: true })).resolves.toMatchObject({
+      path: '/home/project/src',
+      recursive: true,
+    });
+    await expect(executeTool(tools.grep, { pattern: 'createRouter', ignoreCase: true })).resolves.toMatchObject({
+      pattern: 'createRouter',
+    });
+
+    expect(workspace.listProjectEntries).toHaveBeenCalledWith(
+      { path: '/home/project/src', recursive: true },
+      undefined,
+    );
+    expect(workspace.searchProjectFiles).toHaveBeenCalledWith({ pattern: 'createRouter', ignoreCase: true }, undefined);
+    expect(workspace.executeToolOnce).not.toHaveBeenCalled();
+    expect(workspace.executeCommand).not.toHaveBeenCalled();
+    expect(workspace.computer.runtime?.exec).not.toHaveBeenCalled();
+  });
+
+  it('keeps the read-only skill overlay out of project discovery', async () => {
+    const workspace = workspaceStub();
+    const tools = createWorkersAiTools(workspace, operationContext());
+
+    await expect(executeTool(tools.ls, { path: '/__skills__/react-start' })).resolves.toMatchObject({
+      error: expect.stringContaining('not part of the project workspace'),
+    });
+    await expect(
+      executeTool(tools.grep, { pattern: 'design', path: '//__skills__//frontend-design' }),
+    ).resolves.toMatchObject({ error: expect.stringContaining('not part of the project workspace') });
+    expect(workspace.listProjectEntries).not.toHaveBeenCalled();
+    expect(workspace.searchProjectFiles).not.toHaveBeenCalled();
   });
 });
 
@@ -576,6 +634,24 @@ function workspaceStub(
       });
       return handle.result();
     }),
+    listProjectEntries: vi.fn(async (request: { path?: string; recursive?: boolean }) => ({
+      path: request.path ?? '/home/project',
+      recursive: request.recursive ?? false,
+      entries: [],
+      entryCount: 0,
+      truncated: false,
+      revision: revision(),
+    })),
+    searchProjectFiles: vi.fn(async (request: { pattern: string; path?: string }) => ({
+      pattern: request.pattern,
+      path: request.path ?? '/home/project',
+      matches: [],
+      matchCount: 0,
+      filesScanned: 0,
+      filesSkipped: 0,
+      truncated: false,
+      revision: revision(),
+    })),
     executeToolOnce: vi.fn(async (_toolCallId, _toolName, _input, execute) => execute()),
     installDependencies: vi.fn(async () => {
       localRevision += 1;

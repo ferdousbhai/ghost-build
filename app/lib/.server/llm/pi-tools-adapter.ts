@@ -15,6 +15,8 @@ type BuilderOperationContext = {
 
 const toolLabels = {
   read: 'Read file',
+  ls: 'List files',
+  grep: 'Search files',
   write: 'Write file',
   edit: 'Edit file',
   exec: 'Run command',

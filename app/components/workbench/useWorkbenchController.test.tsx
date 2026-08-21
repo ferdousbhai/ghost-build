@@ -154,6 +154,55 @@ describe('useWorkbenchController preview requests', () => {
     expect(workbenchStore.updatePreview).not.toHaveBeenCalled();
   });
 
+  it('does not rebuild anything when a save lands on a live dev preview', async () => {
+    const requestPreview = vi.fn(() => Promise.resolve(idleBuilderPreviewState(1)));
+    workbenchStore.activateWorkspace('account:chat--transcript-0-0');
+    workbenchStore.connectPreview({ request: requestPreview });
+    const live = {
+      mode: 'dev' as const,
+      id: 'preview-dev',
+      url: 'https://random-words.trycloudflare.com',
+      startedFromWorkspaceRevision: 1,
+      readyAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    };
+    workbenchStore.updatePreview({
+      ...idleBuilderPreviewState(1),
+      status: 'ready',
+      mode: 'dev',
+      active: live,
+      lastSuccessful: live,
+    });
+
+    let controller: ReturnType<typeof useWorkbenchController> | undefined;
+    function Harness() {
+      controller = useWorkbenchController();
+      return null;
+    }
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () =>
+      root?.render(
+        <ChatIdProvider chatId="chat">
+          <Harness />
+        </ChatIdProvider>,
+      ),
+    );
+
+    act(() => controller!.onFileSave());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The dev server received the saved file over HMR; asking for a preview would replace a page
+    // that is already showing the change.
+    expect(workbenchStore.saveCurrentDocument).toHaveBeenCalled();
+    expect(requestPreview).not.toHaveBeenCalled();
+  });
+
   it('does not continue a pending save into preview after unmount', async () => {
     const pendingSave = deferred<void>();
     const requestPreview = vi.fn(() => Promise.resolve(idleBuilderPreviewState(1)));

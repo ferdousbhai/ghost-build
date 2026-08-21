@@ -14,6 +14,7 @@ import {
   type LineEditToolInput,
 } from 'ghostbuild-agent/line-edit';
 import {
+  isWorkspaceReadOnlyToolName,
   MODEL_TOOL_INPUT_SCHEMAS,
   WORKSPACE_TOOL_NAMES,
   type WorkspaceToolName,
@@ -52,6 +53,8 @@ export function createWorkersAiTools(
   const coordinateStatefulTool = createTurnStatefulToolCoordinator(operationContext.runWithKeepAlive);
   const tools: GhostbuildToolSet = {
     read: lineAnchoredReadTool(workspace, skillReader),
+    ls: projectListingTool(workspace),
+    grep: projectSearchTool(workspace),
     write: abortAwareWriteTool(workspace),
     edit: lineAnchoredEditTool(workspace),
     exec: streamingExecTool(workspace),
@@ -109,6 +112,48 @@ function lineAnchoredReadTool(workspace: BuilderWorkspaceApi, skillReader?: Buil
   };
 }
 
+function projectListingTool(workspace: BuilderWorkspaceApi): Tool {
+  return {
+    description:
+      'List project files and directories from the durable workspace index. It answers from storage without starting the container, so use it instead of exec to discover what exists. Omit path for the project root; set recursive for the whole tree beneath a directory. A recursive walk shows node_modules and build output as directories but does not descend into them; list one of those directories directly to look inside it. Output is bounded: when truncated is true, narrow path or lower limit.',
+    inputSchema: MODEL_TOOL_INPUT_SCHEMAS.ls,
+    execute: async (input, options) => {
+      const parsed = MODEL_TOOL_INPUT_SCHEMAS.ls.parse(input);
+      rejectSkillNamespacePath(parsed.path);
+      options.abortSignal?.throwIfAborted();
+      return workspace.listProjectEntries(parsed, options.abortSignal);
+    },
+  };
+}
+
+function projectSearchTool(workspace: BuilderWorkspaceApi): Tool {
+  return {
+    description:
+      'Find lines containing literal text across project files, from the durable workspace index and without starting the container. pattern is matched as plain single-line text: it is not a regular expression and not a glob. Each match returns its file path, 1-based line number, and the matching line, so a hit can be read or edited directly. A search does not descend into node_modules or build output unless path names one of them. Output is bounded: when truncated is true, use a more specific pattern or a narrower path.',
+    inputSchema: MODEL_TOOL_INPUT_SCHEMAS.grep,
+    execute: async (input, options) => {
+      const parsed = MODEL_TOOL_INPUT_SCHEMAS.grep.parse(input);
+      rejectSkillNamespacePath(parsed.path);
+      options.abortSignal?.throwIfAborted();
+      return workspace.searchProjectFiles(parsed, options.abortSignal);
+    },
+  };
+}
+
+/**
+ * `/__skills__/` is a read-only control-plane overlay that never enters the project VFS. Deciding
+ * that here, before the workspace sees the path, is the same order `read` uses: the namespace
+ * cannot be shadowed by a project file, and it cannot appear in a listing of the project because
+ * the workspace is never asked about it.
+ */
+function rejectSkillNamespacePath(path: string | undefined): void {
+  if (path !== undefined && isBuilderSkillPath(path)) {
+    throw new Error(
+      `${path} is a bundled skill reference, not part of the project workspace. Use read to open it or list its directory.`,
+    );
+  }
+}
+
 function abortAwareWriteTool(workspace: BuilderWorkspaceApi): Tool {
   return {
     description: 'Write content to a file. Overwrites any existing file at the path.',
@@ -154,9 +199,26 @@ type ExecToolReport = {
   error?: string;
 };
 
+/**
+ * One exec description for both places that build one, because they drift silently otherwise —
+ * the composed Computer tool overrides the streaming tool's description, so guidance added to
+ * only one of them never reaches the model.
+ *
+ * The steer toward `ls`/`grep` is what makes the VFS discovery tools pay for themselves. Left to
+ * a bare "runs a shell command", the model falls back on shell habit and every `ls`/`find`/`grep`
+ * becomes a container round trip — or a cold container start — for an answer the Durable Object
+ * already holds.
+ */
+const EXEC_TOOL_DESCRIPTION =
+  'Run a shell command in the project workspace using its Cloudflare Container. Starting the ' +
+  'container and syncing its filesystem costs far more than a workspace read, so do not shell ' +
+  'out to discover the project: use ls instead of ls/find, and grep instead of grep/rg. Reach ' +
+  'for exec when a command has to actually run — installing, building, testing, or inspecting ' +
+  'anything the durable workspace index does not hold.';
+
 function streamingExecTool(workspace: BuilderWorkspaceApi): Tool {
   return {
-    description: 'Run a shell command in the project workspace using its Cloudflare Container.',
+    description: EXEC_TOOL_DESCRIPTION,
     inputSchema: MODEL_TOOL_INPUT_SCHEMAS.exec,
     execute: async (input, options) => {
       const parsed = MODEL_TOOL_INPUT_SCHEMAS.exec.parse(input);
@@ -239,9 +301,7 @@ function computerWorkspaceTool(
   return {
     ...definition,
     description:
-      toolName === 'exec'
-        ? `Run a shell command in the project workspace using its Cloudflare Container.\n\n${COMPUTER_EXEC_APPLICATION_POLICY}`
-        : definition.description,
+      toolName === 'exec' ? `${EXEC_TOOL_DESCRIPTION}\n\n${COMPUTER_EXEC_APPLICATION_POLICY}` : definition.description,
     execute: async (input, options) => {
       options.abortSignal?.throwIfAborted();
       return coordinateStatefulTool(toolName, async () => {
@@ -275,21 +335,22 @@ function computerWorkspaceTool(
             options.abortSignal?.throwIfAborted();
             result = markDependencyMutation(result);
           } else {
-            result =
-              toolName === 'read'
-                ? await definition.execute(input, options)
-                : await workspace.executeToolOnce(
-                    options.toolCallId,
-                    toolName,
-                    input,
-                    async () => {
-                      options.abortSignal?.throwIfAborted();
-                      const executionResult = await definition.execute!(input, options);
-                      options.abortSignal?.throwIfAborted();
-                      return executionResult;
-                    },
-                    options.abortSignal,
-                  );
+            // A VFS read has nothing to journal: it commits no revision, so there is no
+            // at-most-once outcome for a retry to adopt and no lane for it to wait behind.
+            result = isWorkspaceReadOnlyToolName(toolName)
+              ? await definition.execute(input, options)
+              : await workspace.executeToolOnce(
+                  options.toolCallId,
+                  toolName,
+                  input,
+                  async () => {
+                    options.abortSignal?.throwIfAborted();
+                    const executionResult = await definition.execute!(input, options);
+                    options.abortSignal?.throwIfAborted();
+                    return executionResult;
+                  },
+                  options.abortSignal,
+                );
           }
           options.abortSignal?.throwIfAborted();
         } catch (error) {
@@ -393,7 +454,9 @@ export function createTurnStatefulToolCoordinator(
 ): TurnStatefulToolCoordinator {
   let tail = Promise.resolve();
   return (toolName, operation) => {
-    if (toolName === 'read') {
+    // Read-only workspace tools are served from DO SQLite. Serializing them behind the mutation
+    // queue would make discovery wait on the very container round trip it exists to avoid.
+    if (isWorkspaceReadOnlyToolName(toolName)) {
       return operation();
     }
     const scheduled = tail.then(() => runWithKeepAlive(operation));

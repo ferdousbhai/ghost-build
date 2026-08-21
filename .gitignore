@@ -70,3 +70,6 @@ temp_envars
 
 # The platform-status skill ships with the repository, overriding a global .claude/ ignore.
 !.claude/
+
+# Generated container image build context
+user-workspace-container/.build/

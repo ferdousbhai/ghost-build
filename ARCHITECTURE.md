@@ -20,7 +20,13 @@ Lower layers receive narrow capabilities instead of importing application-wide s
 
 Ghostbuild is a control plane, not the host for customer projects. Its Worker and D1 retain identity, encrypted
 Cloudflare authorization, authentication state, connection metadata, runtime locators, and privacy-filtered operational
-events. The root deployment has no R2 bucket, Container, application Durable Object, or Workflow binding.
+events. The root deployment has no Container, application Durable Object, or Workflow binding.
+
+It holds exactly one R2 bucket, and only for a build artifact Ghostbuild itself publishes: the OCI blobs of the user
+workspace container image. Cloudflare's registry is account-scoped — repository names are `<account_id>/<image>`,
+anonymous reads are refused on every path, and there is no shared namespace or server-side copy API — so the image has
+to be pushed into each user's own registry by a client, and that client needs somewhere to read the bytes from. No
+customer project data enters this bucket, and nothing in it is user-specific.
 
 Connecting Cloudflare provisions a workspace Worker, D1 database, `BuilderAgent` Durable Objects, and a
 `ProjectWorkspace` Durable Object backed by a Cloudflare Container in that user's account. The browser receives a
@@ -79,10 +85,25 @@ stores files directly in the Durable Object's SQLite VFS. Its container backend 
 Container through FUSE and reconciles changes back to the VFS. There is no application-level ZIP archive, R2 backup, or
 duplicate project blob in the control plane.
 
-The model receives four primitives: `read`, `write`, `edit`, and `exec`. `write` and `exec` adapt the reviewed
-`@cloudflare/computer/tools` contracts; Ghostbuild's `read` returns numbered lines with a compact tag bound to the full
-file SHA-256, and `edit` applies non-overlapping line operations only when that exact snapshot is still current.
-Directory discovery goes through `exec`; no `ls` schema is included in model input or prompt accounting.
+The model receives six workspace primitives, split by what they cost. `read`, `ls`, and `grep` are answered from the
+Durable Object's SQLite VFS alone; `write`, `edit`, and `exec` change the project or run in its Container. `write` and
+`exec` adapt the reviewed `@cloudflare/computer/tools` contracts; Ghostbuild's `read` returns numbered lines with a
+compact tag bound to the full file SHA-256, and `edit` applies non-overlapping line operations only when that exact
+snapshot is still current.
+
+Discovery used to go through `exec`, and the cost of that decision was paid on every question about the project's
+shape: a container wake or wait, a shell process launch, and a durable filesystem sync barrier, to answer something the
+Durable Object holds in SQLite. `ls` enumerates a directory or the tree beneath it and `grep` returns path, 1-based
+line, and matching line for a literal pattern, both directly from the VFS — no container, no sync barrier, and never
+the exclusive workspace operation lane, so discovery answers before the container is warm and stays available while a
+build command holds the lane. Line numbers come from the same splitter `read` and `edit` use, so a search hit names the
+line an edit would change. `grep` matches literal single-line text and never compiles the model's pattern into a
+regular expression or a shell command: an untrusted pattern must not be able to backtrack the Durable Object into a
+stall or inject into the container. Both tools are bounded in the spirit of Computer's reviewed read and exec limits —
+`user-workspace-runtime/src/workspace-discovery.ts` names every ceiling and the failure it prevents — and both report
+`truncated` so the model narrows the path or the pattern instead of paging blindly. A recursive walk shows
+`node_modules` and build output but does not descend into them, unless one of them is the requested path; that is how
+the model still reads the framework version the project installed.
 Reference guidance is retrieved rather than mirrored. Cloudflare's own documentation is searched live through the
 `search_cloudflare_docs` tool, one stateless request to the public `docs.mcp.cloudflare.com` endpoint that returns
 ranked excerpts with their source URLs; a full page is read by appending `/index.md` to any documentation URL.
@@ -90,7 +111,8 @@ Framework references are read from the packages the project itself installed, so
 builds against. The one skill Ghostbuild maintains ships in this repository and is bundled into the Worker, exposed
 through the existing `read` tool under `/__skills__/<skill>/`; no activation or separate resource-reader tool is
 added. That namespace is a read-only control-plane overlay: it never enters the project VFS, revision, or deployment
-artifact, and project files cannot shadow it. The evergreen system prompt establishes only authority, safety, and
+artifact, project files cannot shadow it, and it never appears in `ls` or `grep`, which are asked only about the
+project. The evergreen system prompt establishes only authority, safety, and
 workflow precedence; concrete product and API guidance comes from retrieval, while code and deployment boundaries
 remain enforced by project validation. A documentation search that fails returns a failed tool result the model can
 act on, rather than ending the turn.
@@ -102,8 +124,8 @@ persistence layer. That local data is a performance and offline-start replica, n
 
 Tool-call arguments stream to the browser as the model produces them. `exec` additionally streams bounded transient
 stdout/stderr updates while retaining only a bounded final tail for the model; completion still waits for the Container's
-filesystem pull to become durable. The Pi loop enforces a total turn limit, model-stream inactivity limit, model-step
-ceiling, and per-tool limits. A cancellation requested before a Container process handle exists is retained and applied
+filesystem pull to become durable. The Pi loop enforces a total turn limit, model-stream inactivity limit, and per-tool
+limits; there is no model-step ceiling. A cancellation requested before a Container process handle exists is retained and applied
 as soon as that handle becomes available. Approved `pnpm add <packages>` and `pnpm install --lockfile-only` commands route to
 the reviewed dependency installer rather than an unrestricted package-manager shell. After related mutations are complete,
 the model requests one full validation and receives its revision-bound receipt. Production deployment
@@ -114,10 +136,33 @@ checkpoints from the same VFS, so deployment cannot proceed after the project ch
 
 ## Preview Boundary
 
-The `ProjectWorkspace` container backend builds the dedicated Vite preview for the current content checkpoint, starts
-the preview process, and exposes it through a Cloudflare quick tunnel. The user workspace Worker returns the tunnel URL
-to the authenticated browser and schedules expiry after one hour (`PREVIEW_TTL_MS`). Stopping, expiry, or replacement
-destroys the preview process and tunnel.
+A preview has one of two modes, and they carry different guarantees.
+
+A **production** preview is checkpoint-bound. The `ProjectWorkspace` container backend copies the project into an
+isolated root, installs dependencies, applies the isolated local D1 schema, builds the dedicated Vite preview for one
+exact content checkpoint, starts `vite preview` on that output, and exposes it through a Cloudflare quick tunnel. The
+content revision is asserted on entry, after the build, and again before publication, so the reviewed bytes are the
+bytes deployment would publish.
+
+A **dev** preview is not bound to any revision; it tracks live workspace state. It prepares the same isolated root and
+installs dependencies once, applies the same local D1 schema, and then runs `vite dev`. It performs no production
+build, asserts no checkpoint, is never evidence that a revision builds, and satisfies nothing deployment depends on —
+deployment reads validation receipts and the current checkpoint, never a preview. The distinction is a discriminant on
+`BuilderPreviewSuccess`: only the production shape carries a `snapshotRevision`.
+
+The dev server runs from a container-local root rather than `/home/project`, because `/home` is Computer's projection
+of the durable VFS and a dependency tree installed there would be reconciled into DO SQLite. Computer's container sync
+is a change-log push into a container-side store served over FUSE, with no notify channel, so a durable write raises no
+inotify event inside the container and a watcher pointed at `/home/project` would never fire. Instead, each committed
+change set from `applyChanges` — the single path used by both the model's `write`/`edit` tools and browser editor saves
+— is written into the dev root as a real container write, which is what Vite's watcher observes. Delivery is
+best-effort: a preview that cannot be refreshed never fails a durable mutation that already committed. A dependency
+manifest change is not absorbed by a running dev preview, which installs once by design.
+
+Both modes share one lifecycle: one active preview row, one pending-preview cleanup path, one expiry alarm at
+`PREVIEW_TTL_MS`, one cancellation table, and one container keep-alive. Requesting either mode replaces the other. The
+user workspace Worker returns the tunnel URL to the authenticated browser. Stopping, expiry, replacement, or the start
+of a deployment session destroys the preview process and tunnel regardless of mode.
 
 Preview work and bandwidth remain in the user's Cloudflare account. OAuth credentials and control-plane secrets are
 not passed to generated project processes.
@@ -176,7 +221,9 @@ summarizes old turns into a branch-anchored checkpoint, retains about 20K recent
 transcript unchanged. Long tool loops can also compact their in-memory Pi context before another model step; an invisible
 provider context-overflow response is compacted and retried once. After the response is durably persisted, the existing
 recoverable fiber records an equivalent transcript checkpoint. The model reacquires authoritative facts on demand through
-Computer's paged `read` tool and bounded `exec` searches. Retrieved source remains untrusted project data.
+Computer's paged `read` tool and the bounded VFS-served `ls` and `grep` tools, which is why compaction can discard file
+context cheaply: recovering it no longer costs a container round trip. Retrieved source remains untrusted project data,
+and so is every path and matching line a discovery tool returns.
 
 Workers AI prefix caching is automatic for supported models. Ghostbuild sends an opaque, stable session-affinity value
 per transcript generation through either the REST header or binding `extraHeaders`, keeps system instructions at the

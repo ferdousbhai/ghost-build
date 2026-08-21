@@ -27,7 +27,10 @@ type RunTrackedSandboxCommandOptions = {
   onProcess?: (process: TrackedSandboxProcess) => void | Promise<void>;
 };
 
-export async function runTrackedSandboxCommand(options: RunTrackedSandboxCommandOptions): Promise<void> {
+/** Resolves with the completed output, so a caller that needs stdout does not have to re-run the command. */
+export async function runTrackedSandboxCommand(
+  options: RunTrackedSandboxCommandOptions,
+): Promise<ProcessOutput<string>> {
   // @next exec resolves on launch, so the remote timeout belongs on exec and completion is observed through the handle.
   const process = await options.exec(options.command, { timeout: options.timeout });
   await options.onProcess?.(process);
@@ -67,9 +70,29 @@ export async function runTrackedSandboxCommand(options: RunTrackedSandboxCommand
       }),
     );
   }
+  return result;
 }
 
+/**
+ * How long a terminated command gets to run its own cleanup before it is killed outright.
+ *
+ * SIGKILL cannot be trapped, so going straight to it orphans whatever the command started. The
+ * parallel validation stages are the case that made this matter: they run four builds as
+ * background jobs under a `trap ... TERM INT` that reaps them, and that trap can only fire if the
+ * shell is asked to stop rather than shot. Without this the stages kept burning all four cores
+ * after their validation was cancelled.
+ */
+const TERMINATION_GRACE_MS = 5_000;
+
 export async function terminateTrackedSandboxProcess(process: TrackedSandboxProcess): Promise<void> {
+  await process.kill(15).catch(() => undefined);
+  try {
+    await process.waitForExit({ timeout: TERMINATION_GRACE_MS });
+    return;
+  } catch {
+    // The command did not stop when asked. Everything below is the same confirmation path a
+    // straight kill always used.
+  }
   await process.kill(9).catch(() => undefined);
   try {
     await process.waitForExit({ timeout: 10_000 });

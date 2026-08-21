@@ -76,7 +76,7 @@ describe('Pi Workers AI model binding', () => {
       }),
     );
     expect(run.mock.calls[0]?.[2]).toEqual(
-      expect.objectContaining({ ...(expectedGateway ? { gateway: expectedGateway } : {}) }),
+      expect.objectContaining(expectedGateway ? { gateway: expectedGateway } : {}),
     );
     if (!expectedGateway) {
       expect(run.mock.calls[0]?.[2]).not.toHaveProperty('gateway');

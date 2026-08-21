@@ -125,6 +125,18 @@ function ReadyWorkbench({ isStreaming }: Pick<WorkbenchProps, 'isStreaming'>) {
                 Update
               </PanelHeaderButton>
             )}
+            <PanelHeaderButton
+              className="mr-1 text-sm"
+              disabled={controller.previewRequesting}
+              title={
+                presentation.mode === 'dev'
+                  ? 'Rebuild this preview as a production build of the current checkpoint.'
+                  : 'Switch to a live dev server that hot-reloads every change without rebuilding.'
+              }
+              onClick={() => void controller.onPreviewRequest(presentation.mode === 'dev' ? 'production' : 'dev')}
+            >
+              {presentation.mode === 'dev' ? 'Verified build' : 'Live preview'}
+            </PanelHeaderButton>
             <IconButton
               icon={<ReloadIcon />}
               size="xl"

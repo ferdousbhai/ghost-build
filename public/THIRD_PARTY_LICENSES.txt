@@ -8,7 +8,7 @@ This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-08-09
 Production packages: 704
-Inventory SHA-256: 01f589cdc4748784b507ad4db53cb32ded715e579ca50ef04bf4cce9d78dfa7a
+Inventory SHA-256: 03c50e03fb62e51e40330b7b8bf5d9baf2af02cf35762de35fad0d30eb9ff2f9
 
 PACKAGE INVENTORY
 =================

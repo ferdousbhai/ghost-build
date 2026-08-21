@@ -9,6 +9,11 @@ import {
   UserWorkspaceContainersPlanRequiredError,
   UserWorkspaceRuntimeProvisioningInProgressError,
 } from '~/lib/.server/cloudflare/user-workspace-runtime-provisioner';
+import { cloudflareWorkspaceImageReference } from '~/lib/.server/cloudflare/workspace-image-reference';
+
+/** Shaped like a real Cloudflare account id; a registry namespace is derived from it. */
+const ACCOUNT_ID = '0af9e0921b880657d84a6c07307f8aef';
+
 const mocks = vi.hoisted(() => ({
   CloudflareConnectionChangedError: class CloudflareConnectionChangedError extends Error {},
   getAuthSession: vi.fn(),
@@ -74,7 +79,7 @@ describe('Cloudflare-only authentication', () => {
     mocks.activateConnection.mockResolvedValue({
       id: 'connection-1',
       userId: 'user-1',
-      accountId: 'account-1',
+      accountId: ACCOUNT_ID,
       accountName: 'User Cloudflare',
       status: 'active',
       credentialHandle: 'credential-1',
@@ -120,7 +125,7 @@ describe('Cloudflare-only authentication', () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      accountId: 'account-1',
+      accountId: ACCOUNT_ID,
       accountName: 'User Cloudflare',
     });
   });
@@ -130,6 +135,14 @@ describe('Cloudflare-only authentication', () => {
     ['failed', runtimeRow({ status: 'error' })],
     ['stale connection', runtimeRow({ connectionGeneration: 0 })],
     ['stale version', runtimeRow({ runtimeVersion: '0'.repeat(64) })],
+    // Without these two, an account whose image copy failed once stayed on the stock base image
+    // forever — nothing downstream reconsidered it — and a rebuilt image never reached anyone
+    // already provisioned.
+    [
+      'fell back to the base image',
+      runtimeRow({ imageDigest: `docker.io/cloudflare/sandbox:x@sha256:${'a'.repeat(64)}` }),
+    ],
+    ['provisioned before the image was recorded', runtimeRow({ imageDigest: null })],
   ])('automatically provisions an %s runtime before minting a capability', async (_case, initialRuntime) => {
     mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
     mocks.findConnection.mockResolvedValue(activeConnection());
@@ -654,7 +667,7 @@ describe('Cloudflare-only authentication', () => {
     expect(mocks.activateConnection).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user-1',
-        accountId: 'account-1',
+        accountId: ACCOUNT_ID,
         credentialHandle: 'credential-1',
         expectedGeneration: null,
       }),
@@ -924,7 +937,7 @@ describe('Cloudflare-only authentication', () => {
     mocks.findConnection.mockResolvedValueOnce(null).mockResolvedValueOnce({
       id: 'connection-1',
       userId: 'user-1',
-      accountId: 'account-1',
+      accountId: ACCOUNT_ID,
       accountName: 'User Cloudflare',
       status: 'active',
       credentialHandle: 'credential-1',
@@ -1065,7 +1078,7 @@ describe('Cloudflare-only authentication', () => {
     mocks.findConnection.mockResolvedValueOnce(null).mockResolvedValueOnce({
       id: 'connection-winner',
       userId: 'user-1',
-      accountId: 'account-1',
+      accountId: ACCOUNT_ID,
       accountName: 'User Cloudflare',
       status: 'active',
       credentialHandle: 'credential-winner',
@@ -1108,7 +1121,7 @@ describe('Cloudflare-only authentication', () => {
     mocks.activateConnection.mockResolvedValueOnce({
       id: 'connection-1',
       userId: 'user-1',
-      accountId: 'account-1',
+      accountId: ACCOUNT_ID,
       accountName: 'User Cloudflare',
       status: 'active',
       credentialHandle: 'credential-1',
@@ -1143,7 +1156,7 @@ function activeConnection(
   return {
     id: 'connection-1',
     userId: 'user-1',
-    accountId: 'account-1',
+    accountId: ACCOUNT_ID,
     accountName: 'User Cloudflare',
     status: 'active' as const,
     credentialHandle: 'credential-1',
@@ -1160,6 +1173,7 @@ function runtimeRow(
     status?: 'provisioning' | 'ready' | 'error';
     connectionGeneration?: number;
     runtimeVersion?: string;
+    imageDigest?: string | null;
     upgradeDeferredSince?: number;
   } = {},
 ) {
@@ -1170,6 +1184,8 @@ function runtimeRow(
     worker_name: 'ghostbuild-workspace-test',
     endpoint: 'https://workspace.example',
     runtime_version: overrides.runtimeVersion ?? USER_WORKSPACE_RUNTIME_SHA256,
+    image_digest:
+      overrides.imageDigest === undefined ? cloudflareWorkspaceImageReference(ACCOUNT_ID) : overrides.imageDigest,
     status: overrides.status ?? ('ready' as const),
     last_error: overrides.status === 'error' ? 'Previous provisioning failed.' : null,
     provisioning_attempt_id: null,
@@ -1180,7 +1196,7 @@ function runtimeRow(
   };
 }
 
-function runtimeRecord(overrides: { connectionGeneration?: number } = {}) {
+function runtimeRecord(overrides: { connectionGeneration?: number; imageDigest?: string | null } = {}) {
   return {
     userId: 'user-1',
     connectionId: 'connection-1',
@@ -1188,6 +1204,10 @@ function runtimeRecord(overrides: { connectionGeneration?: number } = {}) {
     workerName: 'ghostbuild-workspace-test',
     endpoint: 'https://workspace.example',
     runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
+    // A runtime is only current when it is on the expected image too, so the default fixture is a
+    // fully current one; a test wanting drift passes an older digest.
+    imageDigest:
+      overrides.imageDigest === undefined ? cloudflareWorkspaceImageReference(ACCOUNT_ID) : overrides.imageDigest,
     status: 'ready' as const,
     lastError: null,
     provisioningAttemptId: null,
@@ -1242,7 +1262,7 @@ function fakeOrchestrator(): CloudflareOrchestrator {
         name: 'Person',
         picture: null,
       },
-      accountId: 'account-1',
+      accountId: ACCOUNT_ID,
       accountName: 'User Cloudflare',
       accessToken: 'access-token',
       refreshToken: 'refresh-token',

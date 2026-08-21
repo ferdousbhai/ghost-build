@@ -31,6 +31,7 @@ describe('workspace runtime provisioning lease', () => {
       connectionGeneration: 1,
       runtimeVersion: 'a'.repeat(64),
       attemptId: 'attempt-new',
+      imageDigest: 'docker.io/base@sha256:test',
       now: 202,
     });
     await expect(
@@ -63,6 +64,7 @@ describe('workspace runtime provisioning lease', () => {
       connectionGeneration: 1,
       runtimeVersion: 'a'.repeat(64),
       attemptId: 'attempt-1',
+      imageDigest: 'docker.io/base@sha256:test',
       now: 101,
     });
 
@@ -139,7 +141,8 @@ function runtimeDatabase(options: { claimErrorAfterCommit?: Error } = {}): D1Dat
       updated_at INTEGER NOT NULL,
       provisioning_attempt_id TEXT,
       provisioning_lease_expires_at INTEGER,
-      upgrade_deferred_since INTEGER
+      upgrade_deferred_since INTEGER,
+      image_digest TEXT
     );
   `);
   return {

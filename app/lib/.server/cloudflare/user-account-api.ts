@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { deploymentPlanResourceName, type DeploymentPlan, type DeploymentResourceType } from './deployment-plan';
 import {
   bytesToBase64,
@@ -16,6 +17,15 @@ import {
   DEPLOYMENT_TEMPLATE_SOURCE_BINDING,
   DEPLOYMENT_VERSION_METADATA_BINDING,
 } from './deployment-runtime-policy';
+import { copyImageToRegistry } from './registry-image-copy';
+import {
+  CLOUDFLARE_REGISTRY_HOST,
+  GHOSTBUILD_WORKSPACE_IMAGE_DIGEST,
+  GHOSTBUILD_WORKSPACE_IMAGE_REPOSITORY,
+  WORKSPACE_IMAGE_MANIFEST_KEY,
+  workspaceImageAdmissionError,
+  workspaceImageBlobKey,
+} from './workspace-image-reference';
 import {
   PROJECT_WORKSPACE_CONTAINER_DIMENSIONS,
   PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE,
@@ -146,6 +156,17 @@ type D1QueryResult = {
   results?: unknown[];
 };
 
+/** Cloudflare's minted registry credential, parsed at the boundary rather than trusted by shape. */
+const registryCredentialSchema = z.object({ username: z.string().min(1), password: z.string().min(1) });
+
+/** The mirrored manifest, parsed before any of it is used to address a registry. */
+const imageDescriptorSchema = z.object({ digest: z.string(), size: z.number().int().nonnegative() });
+const workspaceImageManifestSchema = z.object({
+  mediaType: z.string().min(1),
+  config: imageDescriptorSchema,
+  layers: z.array(imageDescriptorSchema).min(1),
+});
+
 export class UserCloudflareAccountApi {
   constructor(
     private readonly accountId: string,
@@ -243,17 +264,17 @@ export class UserCloudflareAccountApi {
        )`,
     );
     await this.ensureD1MigrationDigestColumn(databaseId);
+    // One receipt read for the whole set rather than one per migration. Applying migration N
+    // cannot change migration N+1's receipt, so the extra round trips bought nothing — and this
+    // path runs on every runtime upgrade for every existing account, where the answer is always
+    // "all of them are already applied" and the reads were the entire cost.
+    const receipts = await this.executeD1(databaseId, 'SELECT name, digest FROM ghostbuild_runtime_migrations');
     for (const migration of migrations) {
       if (!/^\d{4}_.+\.sql$/.test(migration.name) || !migration.sql.trim()) {
         throw new CloudflareAccountApiError('Invalid user-runtime D1 migration.');
       }
       const digest = await sha256Hex(migration.sql);
-      const read = await this.executeD1(
-        databaseId,
-        'SELECT name, digest FROM ghostbuild_runtime_migrations WHERE name = ?',
-        [migration.name],
-      );
-      const receipt = d1MigrationReceipt(read, migration.name);
+      const receipt = d1MigrationReceipt(receipts, migration.name);
       if (receipt?.digest === digest) {
         continue;
       }
@@ -1101,8 +1122,9 @@ export class UserCloudflareAccountApi {
     if (!/^[0-9a-f-]{32,64}$/i.test(args.namespaceId)) {
       throw new CloudflareAccountApiError('The workspace Sandbox namespace is invalid.');
     }
-    if (!/^docker\.io\/[a-z0-9._/-]+:[a-zA-Z0-9._-]+@sha256:[a-f0-9]{64}$/.test(args.image)) {
-      throw new CloudflareAccountApiError('The workspace Sandbox image is not immutable.');
+    const inadmissibleImage = workspaceImageAdmissionError(args.image, this.accountId);
+    if (inadmissibleImage) {
+      throw new CloudflareAccountApiError(inadmissibleImage);
     }
     const applications = await this.callContainer<unknown>('/applications', {
       method: 'GET',
@@ -1469,6 +1491,86 @@ export class UserCloudflareAccountApi {
       throw new CloudflareAccountApiError('Cloudflare API request redirected unexpectedly.');
     }
     return response;
+  }
+
+  /**
+   * Make sure this account's own Cloudflare registry holds the pinned workspace image, pushing it
+   * there if it does not.
+   *
+   * Cloudflare's registry is account-scoped and has no shared namespace or server-side copy API,
+   * so every account needs its own copy and only a client can put it there. The blobs come from
+   * Ghostbuild's own R2 mirror, so provisioning never depends on a third-party registry or its
+   * rate limits.
+   *
+   * Reports rather than throws. The image is an accelerant: an account that ends up without it
+   * runs the public base image and installs its toolchain lazily, which is exactly the behaviour
+   * that predates this image. Failing provisioning over it would trade a slower workspace for no
+   * workspace.
+   */
+  async ensureWorkspaceImage(blobs: R2Bucket): Promise<boolean> {
+    try {
+      const credentialResponse = await this.callContainer<unknown>(
+        `/registries/${CLOUDFLARE_REGISTRY_HOST}/credentials`,
+        { method: 'POST', body: JSON.stringify({ expiration_minutes: 30, permissions: ['push', 'pull'] }) },
+      );
+      const minted = registryCredentialSchema.safeParse(credentialResponse);
+      if (!minted.success) {
+        return false;
+      }
+      const authorization = `Basic ${btoa(`${minted.data.username}:${minted.data.password}`)}`;
+      const repository = `${this.accountId.toLowerCase()}/${GHOSTBUILD_WORKSPACE_IMAGE_REPOSITORY}`;
+
+      // The steady state is "this account already has it", and a present manifest implies every
+      // blob it references. Answering that in one request keeps re-provisioning from re-reading
+      // R2 and re-probing twenty blobs to conclude there is nothing to do.
+      const present = await this.request(
+        `https://${CLOUDFLARE_REGISTRY_HOST}/v2/${repository}/manifests/${GHOSTBUILD_WORKSPACE_IMAGE_DIGEST}`,
+        {
+          method: 'HEAD',
+          headers: {
+            authorization,
+            accept: 'application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json',
+          },
+        },
+      );
+      if (present.status === 200) {
+        return true;
+      }
+
+      const manifestObject = await blobs.get(WORKSPACE_IMAGE_MANIFEST_KEY);
+      if (!manifestObject) {
+        console.warn('The workspace image mirror has no manifest; provisioning on the base image.');
+        return false;
+      }
+      const manifestBytes = new Uint8Array(await manifestObject.arrayBuffer());
+      const manifest = workspaceImageManifestSchema.parse(JSON.parse(new TextDecoder().decode(manifestBytes)));
+
+      const result = await copyImageToRegistry({
+        manifestBytes,
+        manifestMediaType: manifest.mediaType,
+        manifestDigest: GHOSTBUILD_WORKSPACE_IMAGE_DIGEST,
+        blobs: [manifest.config, ...manifest.layers],
+        source: {
+          slice: async (digest, start, end) => {
+            const object = await blobs.get(workspaceImageBlobKey(digest), {
+              range: { offset: start, length: end - start },
+            });
+            if (!object) {
+              throw new Error(`The workspace image mirror is missing blob ${digest}.`);
+            }
+            return object.arrayBuffer();
+          },
+        },
+        target: { baseUrl: `https://${CLOUDFLARE_REGISTRY_HOST}`, repository, authorization, fetch: this.request },
+      });
+      console.info('Workspace image is present in the account registry', result);
+      return true;
+    } catch (error) {
+      console.warn('Could not place the workspace image in the account registry', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
   }
 
   private async callContainer<T>(path: string, init: RequestInit): Promise<T> {

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CloudflareConnection } from './cloudflare-connection-repository';
 import type { UserWorkspaceRuntime } from './user-workspace-runtime-repository';
+import { cloudflareWorkspaceImageReference } from './workspace-image-reference';
 
 const mocks = vi.hoisted(() => ({
   requireActiveConnection: vi.fn(),
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => ({
     ensureWorkspaceRuntimeContainer: vi.fn(),
     configureWorkspaceRuntimeGcSchedule: vi.fn(),
     enableWorkerSubdomain: vi.fn(),
+    ensureWorkspaceImage: vi.fn(),
   },
 }));
 
@@ -60,10 +62,13 @@ import {
   USER_WORKSPACE_REQUIRED_CAPABILITIES,
 } from './user-workspace-runtime-provisioner';
 
+/** Shaped like a real Cloudflare account id, because a registry namespace is derived from it. */
+const ACCOUNT_ID = '0af9e0921b880657d84a6c07307f8aef';
+
 const connection: CloudflareConnection = {
   id: 'connection-1',
   userId: 'user-1',
-  accountId: 'account-1',
+  accountId: ACCOUNT_ID,
   accountName: 'Account',
   status: 'active',
   credentialHandle: 'handle-1',
@@ -81,6 +86,7 @@ const runtime: UserWorkspaceRuntime = {
   workerName: 'ghostbuild-workspace-1',
   endpoint: 'https://ghostbuild-workspace-1.user.workers.dev',
   runtimeVersion: 'a'.repeat(64),
+  imageDigest: null,
   status: 'provisioning',
   lastError: null,
   provisioningAttemptId: 'attempt-1',
@@ -114,6 +120,36 @@ describe('provisionUserWorkspaceRuntime', () => {
       workerVersionId: 'version-1',
       namespaceId: 'namespace-1',
     });
+    mocks.accountApi.ensureWorkspaceImage.mockResolvedValue(false);
+  });
+
+  it("runs the account's own registry image once the copy into it succeeds", async () => {
+    mocks.accountApi.readWorkspaceContainersEntitlement.mockResolvedValue({ status: 'entitled' });
+    mocks.accountApi.ensureWorkspaceImage.mockResolvedValue(true);
+
+    await provision();
+
+    expect(mocks.accountApi.ensureWorkspaceRuntimeContainer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        image: cloudflareWorkspaceImageReference(connection.accountId),
+      }),
+    );
+  });
+
+  it('falls back to the public base image rather than failing when the copy does not succeed', async () => {
+    // The image is an accelerant. An account that ends up without it runs the base image and
+    // installs its toolchain lazily — the behaviour that predates the image. Failing provisioning
+    // over it would trade a slower workspace for no workspace.
+    mocks.accountApi.readWorkspaceContainersEntitlement.mockResolvedValue({ status: 'entitled' });
+    mocks.accountApi.ensureWorkspaceImage.mockResolvedValue(false);
+
+    await provision();
+
+    expect(mocks.accountApi.ensureWorkspaceRuntimeContainer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        image: expect.stringMatching(/^docker\.io\/cloudflare\/sandbox:.+@sha256:[a-f0-9]{64}$/),
+      }),
+    );
   });
 
   it('creates nothing in an account whose plan excludes Cloudflare Containers', async () => {
@@ -179,7 +215,7 @@ describe('provisionUserWorkspaceRuntime', () => {
       1,
       expect.objectContaining({
         userId: 'user-1',
-        accountId: 'account-1',
+        accountId: ACCOUNT_ID,
         resources: [
           { resourceType: 'd1', resourceName: expect.stringMatching(/^ghostbuild-data-[0-9a-f]{16}$/) },
           { resourceType: 'worker', resourceName: expect.stringMatching(/^ghostbuild-workspace-[0-9a-f]{16}$/) },

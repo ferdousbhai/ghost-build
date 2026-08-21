@@ -10,7 +10,7 @@ import {
  * outside this set has never been sized against Ghostbuild's install, typecheck,
  * build, validation, and preview workloads and must not reach an account.
  */
-const REVIEWED_INSTANCE_TYPES = ['basic', 'standard-1', 'standard-2'] as const;
+const REVIEWED_INSTANCE_TYPES = ['basic', 'standard-1', 'standard-2', 'standard-3', 'standard-4'] as const;
 
 describe('ProjectWorkspace container policy', () => {
   it('selects one reviewed Cloudflare instance type', () => {
@@ -31,6 +31,8 @@ describe('resolved dimensions', () => {
     basic: { vcpu: 0.25, memoryMib: 1_024, diskMb: 4_000 },
     'standard-1': { vcpu: 0.5, memoryMib: 4_096, diskMb: 8_000 },
     'standard-2': { vcpu: 1, memoryMib: 6_144, diskMb: 12_000 },
+    'standard-3': { vcpu: 2, memoryMib: 8_192, diskMb: 16_000 },
+    'standard-4': { vcpu: 4, memoryMib: 12_288, diskMb: 20_000 },
   } as const;
 
   it('matches the tier the policy selects', () => {

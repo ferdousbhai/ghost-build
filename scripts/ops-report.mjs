@@ -31,8 +31,6 @@ const WEEK = 7 * DAY;
 const SCHEDULED_JOB_STALE_MS = 2 * DAY;
 /** `daily-maintenance.ts` claims a slot every 23h, so a job unseen for longer than this is late. */
 const DAILY_JOB_LATE_MS = 26 * HOUR;
-/** A sync that claims to still be running after this long is wedged, not busy. */
-const SYNC_RUN_STUCK_MS = 30 * MINUTE;
 /** A sweep reads whole Cloudflare accounts, so it gets far longer before it counts as wedged. */
 const RECONCILE_RUN_STUCK_MS = 6 * HOUR;
 /** A maintenance claim this much newer than its own run receipt means the job never got started. */

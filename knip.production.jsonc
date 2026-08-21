@@ -11,10 +11,14 @@
         "!**/*.spec.{ts,tsx}",
         "!tests/**",
         "!e2e/**",
+        // Development tooling, not production source: the vendored anti-slop Oxlint plugin.
+        "!tools/**",
         "!.ghostbuild-runtime-security-*/**",
       ],
       "ignore": ["template/**", "app/test/cloudflare-workers-shim.ts"],
     },
   },
-  "ignoreDependencies": ["@babel/core", "@babel/plugin-proposal-decorators", "cloudflare"],
+  // `@oxlint/plugins` is imported only by the vendored plugin under tools/, which this
+  // production view excludes by design.
+  "ignoreDependencies": ["@babel/core", "@babel/plugin-proposal-decorators", "cloudflare", "@oxlint/plugins"],
 }

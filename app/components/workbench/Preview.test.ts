@@ -58,6 +58,7 @@ describe('previewFrameUrl', () => {
 describe('previewPresentation', () => {
   const now = Date.parse('2026-08-06T20:00:00.000Z');
   const success = {
+    mode: 'production' as const,
     id: 'preview-1',
     url: 'https://random-words.trycloudflare.com',
     workspaceRevision: 1,
@@ -93,6 +94,46 @@ describe('previewPresentation', () => {
     );
 
     expect(presentation.canUpdate).toBe(true);
+    expect(presentation.canReload).toBe(true);
+  });
+
+  it('reports which guarantee the visible preview carries', () => {
+    const live = {
+      mode: 'dev' as const,
+      id: 'preview-dev',
+      url: 'https://random-words.trycloudflare.com',
+      startedFromWorkspaceRevision: 1,
+      readyAt: '2026-08-06T19:00:00.000Z',
+      expiresAt: '2026-08-06T21:00:00.000Z',
+    };
+
+    expect(
+      previewPresentation({ ...idleBuilderPreviewState(2), status: 'ready', mode: 'dev', active: live }, now).mode,
+    ).toBe('dev');
+    expect(previewPresentation({ ...idleBuilderPreviewState(2), status: 'ready', active: success }, now).mode).toBe(
+      'production',
+    );
+    // Before anything is visible, the mode being built is what the frame should describe.
+    expect(previewPresentation({ ...idleBuilderPreviewState(2), status: 'building', mode: 'dev' }, now).mode).toBe(
+      'dev',
+    );
+  });
+
+  it('never offers Update for a live dev preview, which already carries the change', () => {
+    const live = {
+      mode: 'dev' as const,
+      id: 'preview-dev',
+      url: 'https://random-words.trycloudflare.com',
+      startedFromWorkspaceRevision: 1,
+      readyAt: '2026-08-06T19:00:00.000Z',
+      expiresAt: '2026-08-06T21:00:00.000Z',
+    };
+    const presentation = previewPresentation(
+      { ...idleBuilderPreviewState(9), status: 'ready', mode: 'dev', active: live, lastSuccessful: live },
+      now,
+    );
+
+    expect(presentation.canUpdate).toBe(false);
     expect(presentation.canReload).toBe(true);
   });
 

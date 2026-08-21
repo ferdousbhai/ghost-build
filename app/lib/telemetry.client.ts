@@ -15,6 +15,8 @@ type TelemetryContext = {
   durationMs?: number;
   retryCount?: number;
   workspaceRevision?: number;
+  /** Which preview guarantee an event is about: a checkpoint-bound build, or a live dev server. */
+  previewMode?: 'production' | 'dev';
 };
 
 type SanitizedTelemetryContext = Omit<TelemetryContext, 'level'>;
@@ -134,6 +136,9 @@ function sanitizeContext(context: TelemetryContext): SanitizedTelemetryContext {
   }
   if (validMetric(context.workspaceRevision)) {
     sanitized.workspaceRevision = context.workspaceRevision;
+  }
+  if (context.previewMode) {
+    sanitized.previewMode = context.previewMode;
   }
   return sanitized;
 }

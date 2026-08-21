@@ -58,7 +58,7 @@ vi.mock('./workers-ai-telemetry', () => ({
 }));
 import { piAgentRunner } from './pi-agent-runner';
 import { PiSteeringQueue } from './pi-steering';
-import { BUILDER_TURN_INACTIVITY_MS, BUILDER_TURN_MAX_MODEL_STEPS } from './builder-turn-budget';
+import { BUILDER_TURN_INACTIVITY_MS } from './builder-turn-budget';
 
 describe('piAgentRunner', () => {
   beforeEach(() => {
@@ -592,43 +592,10 @@ describe('piAgentRunner', () => {
     expect(chunks).toContainEqual({ type: 'error', errorText: 'The model request failed. Please retry.' });
   });
 
-  it('stops a model that calls tools forever at the model step ceiling', async () => {
-    const onSettled = vi.fn();
-    mocks.piRun.mockImplementation(
-      fakeModelLoop((step, emit) => emitToolRound(step, emit, { isError: false, details: { summary: 'wrote' } })),
-    );
-
-    const chunks = await collectChunks(await createAgentStream('@cf/zai-org/glm-5.2', {}, undefined, { onSettled }));
-
-    expect(chunks).toContainEqual({ type: 'error', errorText: budgetErrorText('max_steps') });
-    expect(onSettled).toHaveBeenCalledWith({
-      terminalReason: 'max_steps',
-      stepCount: BUILDER_TURN_MAX_MODEL_STEPS,
-      toolCallCount: BUILDER_TURN_MAX_MODEL_STEPS,
-      elapsedMs: expect.any(Number),
-      lastValidationState: 'unvalidated',
-    });
-  });
-
-  it('cannot claim success, finish telemetry, or a validated completion once the budget is exhausted', async () => {
-    mocks.getValidatedBuildCompletion.mockImplementation(() => undefined);
-    mocks.piRun.mockImplementation(
-      fakeModelLoop((step, emit) =>
-        emitToolRound(step, emit, { isError: true, details: { summary: 'validation failed' } }),
-      ),
-    );
-
-    const chunks = await collectChunks(await createAgentStream());
-
-    expect(chunks).toContainEqual({ type: 'error', errorText: budgetErrorText('max_steps') });
-    expect(mocks.recordFinish).not.toHaveBeenCalled();
-    expect(chunks.some((chunk) => chunk.type === 'text-delta')).toBe(false);
-  });
-
-  it('keeps a validated completion reached on the final allowed step', async () => {
+  it('stops the loop once a validated completion is reached', async () => {
     const onSettled = vi.fn();
     mocks.getValidatedBuildCompletion.mockImplementation((_messages: unknown, results: unknown[] = []) =>
-      results.length >= BUILDER_TURN_MAX_MODEL_STEPS ? 'Project validation passed.' : undefined,
+      results.length >= 3 ? 'Project validation passed.' : undefined,
     );
     mocks.piRun.mockImplementation(
       fakeModelLoop((step, emit) => emitToolRound(step, emit, { isError: false, details: { summary: 'wrote' } })),
@@ -639,7 +606,7 @@ describe('piAgentRunner', () => {
     expect(onSettled).toHaveBeenCalledWith(
       expect.objectContaining({
         terminalReason: 'completed',
-        stepCount: BUILDER_TURN_MAX_MODEL_STEPS,
+        stepCount: 3,
         lastValidationState: 'validated',
       }),
     );
@@ -761,7 +728,9 @@ function fakeModelLoop(turn: (step: number, emit: (event: unknown) => Promise<vo
     config: { shouldStopAfterTurn?: (value: unknown) => boolean | Promise<boolean> },
     emit: (event: unknown) => Promise<void>,
   ) => {
-    for (let step = 1; step <= BUILDER_TURN_MAX_MODEL_STEPS + 10; step += 1) {
+    // Fixed safety bound: the production loop has no step ceiling, so a test
+    // whose stop condition never fires must fail instead of spinning forever.
+    for (let step = 1; step <= 200; step += 1) {
       await turn(step, emit);
       const message = assistantMessage([{ type: 'toolCall', id: `call-${step}`, name: 'write', arguments: {} }]);
       await emit({ type: 'turn_end', message, toolResults: [] });

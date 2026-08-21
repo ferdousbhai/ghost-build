@@ -1,8 +1,12 @@
 import { atom } from 'nanostores';
-import { idleBuilderPreviewState, type BuilderPreviewState } from '~/agents/builder-preview-types';
+import {
+  idleBuilderPreviewState,
+  type BuilderPreviewMode,
+  type BuilderPreviewState,
+} from '~/agents/builder-preview-types';
 
 type PreviewActions = {
-  request(): Promise<BuilderPreviewState>;
+  request(mode: BuilderPreviewMode): Promise<BuilderPreviewState>;
 };
 
 export class PreviewsStore {
@@ -27,8 +31,8 @@ export class PreviewsStore {
     this.state.set(idleBuilderPreviewState(0));
   }
 
-  request(): Promise<BuilderPreviewState> {
-    return this.#requireActions().request();
+  request(mode: BuilderPreviewMode = 'production'): Promise<BuilderPreviewState> {
+    return this.#requireActions().request(mode);
   }
 
   #requireActions(): PreviewActions {

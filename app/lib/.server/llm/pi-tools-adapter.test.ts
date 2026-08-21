@@ -5,11 +5,13 @@ import type { Tool } from 'ghostbuild-agent/tool';
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
   createWorkersAiTools: vi.fn(),
+  /** The mocked module's tool list and the stub tools it returns have to name the same tools. */
+  toolNames: ['read', 'ls', 'grep', 'write', 'edit', 'exec', 'search_cloudflare_docs'] as const,
 }));
 
 vi.mock('./workers-ai-tools', () => ({
   createWorkersAiTools: mocks.createWorkersAiTools,
-  MODEL_TOOL_NAMES: ['read', 'write', 'edit', 'exec', 'search_cloudflare_docs'],
+  MODEL_TOOL_NAMES: mocks.toolNames,
 }));
 
 import { BUILDER_TURN_TIMEOUTS, BuilderTurnBudgetExceededError } from './builder-turn-budget';
@@ -21,7 +23,7 @@ describe('Pi tool adapter', () => {
     mocks.execute.mockResolvedValue({ ok: true, summary: 'done' });
     mocks.createWorkersAiTools.mockReturnValue(
       Object.fromEntries(
-        (['read', 'write', 'edit', 'exec', 'search_cloudflare_docs'] as const).map((name) => [
+        mocks.toolNames.map((name) => [
           name,
           {
             description: `${name} description`,
@@ -47,6 +49,8 @@ describe('Pi tool adapter', () => {
 
   it.each([
     ['read', { path: '/home/project/src/app.ts' }],
+    ['ls', { recursive: true }],
+    ['grep', { pattern: 'createRouter' }],
     ['write', { path: '/home/project/src/app.ts', content: 'export {};' }],
     [
       'edit',
@@ -145,6 +149,8 @@ describe('Pi tool adapter', () => {
 
     expect(piToolsToList(tools).map(({ name, label }) => ({ name, label }))).toEqual([
       { name: 'read', label: 'Read file' },
+      { name: 'ls', label: 'List files' },
+      { name: 'grep', label: 'Search files' },
       { name: 'write', label: 'Write file' },
       { name: 'edit', label: 'Edit file' },
       { name: 'exec', label: 'Run command' },
@@ -156,6 +162,21 @@ describe('Pi tool adapter', () => {
       'edits',
     ]);
     expect(Object.keys((tools.exec.parameters as { properties: object }).properties)).toEqual(['command', 'cwd']);
+    expect(Object.keys((tools.ls.parameters as { properties: object }).properties)).toEqual([
+      'path',
+      'recursive',
+      'limit',
+    ]);
+    expect(Object.keys((tools.grep.parameters as { properties: object }).properties)).toEqual([
+      'pattern',
+      'path',
+      'ignoreCase',
+      'limit',
+    ]);
+    // The discovery tools take no required path, so the model can ask about the whole project
+    // in one call without first learning that the root is /home/project.
+    expect((tools.ls.parameters as { required?: string[] }).required).toBeUndefined();
+    expect((tools.grep.parameters as { required?: string[] }).required).toEqual(['pattern']);
   });
 });
 

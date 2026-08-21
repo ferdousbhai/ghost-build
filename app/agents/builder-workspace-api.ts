@@ -143,11 +143,22 @@ export type WorkspaceDeploymentArtifactRequest = {
   templateSourceSha256: string;
 };
 
-export type WorkspacePreviewRequest = {
-  previewId: string;
-  expectedWorkspaceRevision: number;
-  expectedSnapshotRevision: string;
-};
+/**
+ * A production preview names the exact checkpoint it must be built from and asserts it. A dev
+ * preview names none, because it tracks the workspace as it changes; the union makes passing an
+ * expected revision to a dev preview a type error rather than a silently ignored promise.
+ */
+export type WorkspacePreviewRequest =
+  | {
+      previewId: string;
+      mode?: 'production';
+      expectedWorkspaceRevision: number;
+      expectedSnapshotRevision: string;
+    }
+  | {
+      previewId: string;
+      mode: 'dev';
+    };
 
 export type BuilderWorkspaceTextFile = {
   path: string;
@@ -172,6 +183,50 @@ export type BuilderWorkspaceDirectoryEntry = {
   name: string;
   isFile: boolean;
   isDirectory: boolean;
+};
+
+/**
+ * Read-only discovery over the workspace VFS. These carry no operation key: the workspace serves
+ * them outside the exclusive operation lane and without waking the Container, so they are never
+ * journalled as tool operations and never need reattaching.
+ */
+export type WorkspaceListingRequest = {
+  /** Absolute project directory; the project root when omitted. */
+  path?: string;
+  recursive?: boolean;
+  limit?: number;
+};
+
+export type WorkspaceSearchRequest = {
+  /** Literal, single-line text. Never a regular expression and never a shell argument. */
+  pattern: string;
+  path?: string;
+  ignoreCase?: boolean;
+  limit?: number;
+};
+
+type BuilderWorkspaceProjectEntry = { path: string; type: 'file' | 'dir' };
+
+export type BuilderWorkspaceListing = {
+  path: string;
+  recursive: boolean;
+  entries: BuilderWorkspaceProjectEntry[];
+  entryCount: number;
+  truncated: boolean;
+  revision: number;
+};
+
+type BuilderWorkspaceSearchMatch = { path: string; line: number; text: string };
+
+export type BuilderWorkspaceSearchResult = {
+  pattern: string;
+  path: string;
+  matches: BuilderWorkspaceSearchMatch[];
+  matchCount: number;
+  filesScanned: number;
+  filesSkipped: number;
+  truncated: boolean;
+  revision: number;
 };
 
 export type BuilderWorkspaceDeploymentPlan = BuilderWorkspaceCheckpoint & {
@@ -231,7 +286,10 @@ export interface ProjectWorkspaceRpc extends Rpc.DurableObjectBranded {
   streamWorkspaceFile(path: string): Promise<ReadableStream<Uint8Array>>;
   listWorkspaceFiles(): Promise<BuilderWorkspaceFileMetadata[]>;
   readDirectory(path: string): Promise<BuilderWorkspaceDirectoryEntry[]>;
+  listProjectEntries(value: WorkspaceListingRequest): Promise<BuilderWorkspaceListing>;
+  searchProjectFiles(value: WorkspaceSearchRequest): Promise<BuilderWorkspaceSearchResult>;
   makeDirectory(path: string): Promise<void>;
+  warmContainer(): Promise<void>;
   execute(value: WorkspaceCommandRequest): Promise<WorkspaceCommandResult>;
   executeStream(value: WorkspaceCommandRequest): Promise<ReadableStream<Uint8Array>>;
   cancelExecution(value: WorkspaceCancelExecutionRequest): Promise<void>;
@@ -272,10 +330,14 @@ export interface BuilderWorkspaceApi {
   commitSeed(seedId: string, expected: WorkspaceSeedExpectation): Promise<BuilderWorkspaceState>;
   abortSeed(seedId: string): Promise<BuilderWorkspaceState>;
   applyClientChanges(value: WorkspaceApplyChangesRequest): Promise<BuilderWorkspaceApplyResult>;
+  /** Best-effort container pre-start. Never throws; a cold container is still a working one. */
+  warmContainer(): Promise<void>;
   getSyncPage(value: WorkspaceSyncPageRequest): Promise<BuilderWorkspaceSyncPage>;
   readText(path: string, abortSignal?: AbortSignal): Promise<BuilderWorkspaceTextFile>;
   readFile(path: string): Promise<BuilderWorkspaceBinaryFile>;
   listFiles(): BuilderWorkspaceFileMetadata[];
+  listProjectEntries(request: WorkspaceListingRequest, abortSignal?: AbortSignal): Promise<BuilderWorkspaceListing>;
+  searchProjectFiles(request: WorkspaceSearchRequest, abortSignal?: AbortSignal): Promise<BuilderWorkspaceSearchResult>;
   checkpoint(): Promise<BuilderWorkspaceCheckpoint>;
   executeCommand(
     args: WorkspaceCommandRequest & {

@@ -11,6 +11,7 @@ import type {
 import useViewport from '~/lib/hooks/useViewport';
 import { workbenchStore, type WorkbenchViewType } from '~/lib/stores/workbench.client';
 import { chatStore, useChatId } from '~/lib/stores/chatId';
+import type { BuilderPreviewMode } from '~/agents/builder-preview-types';
 
 const logger = createScopedLogger('WorkbenchController');
 
@@ -104,6 +105,12 @@ export function useWorkbenchController(isStreaming?: boolean) {
       if (!isCurrentRequest()) {
         return;
       }
+      // A live dev preview already received this save over HMR, so asking for a preview would
+      // only replace a page that is already showing the change. Only the checkpoint-bound
+      // production preview has to be rebuilt for the new revision.
+      if (workbenchStore.previewState.get().active?.mode === 'dev') {
+        return;
+      }
       try {
         const preview = await workbenchStore.requestPreview();
         if (isCurrentRequest()) {
@@ -118,32 +125,35 @@ export function useWorkbenchController(isStreaming?: boolean) {
     })();
   }, []);
 
-  const onPreviewRequest = useCallback(async () => {
-    const workspaceId = workbenchStore.getActiveWorkspaceId();
-    const requestVersion = ++previewRequestVersionRef.current;
-    const manualRequest = Symbol('manual-preview-request');
-    const isCurrentRequest = () =>
-      workspaceId !== null &&
-      workbenchStore.isWorkspaceActive(workspaceId) &&
-      previewRequestVersionRef.current === requestVersion;
-    manualPreviewRequestRef.current = manualRequest;
-    setPreviewRequestState({ projectId, workspaceId, requesting: true });
-    try {
-      const preview = await workbenchStore.requestPreview();
-      if (isCurrentRequest()) {
-        workbenchStore.updatePreview(preview);
+  const onPreviewRequest = useCallback(
+    async (mode: BuilderPreviewMode = 'production') => {
+      const workspaceId = workbenchStore.getActiveWorkspaceId();
+      const requestVersion = ++previewRequestVersionRef.current;
+      const manualRequest = Symbol('manual-preview-request');
+      const isCurrentRequest = () =>
+        workspaceId !== null &&
+        workbenchStore.isWorkspaceActive(workspaceId) &&
+        previewRequestVersionRef.current === requestVersion;
+      manualPreviewRequestRef.current = manualRequest;
+      setPreviewRequestState({ projectId, workspaceId, requesting: true });
+      try {
+        const preview = await workbenchStore.requestPreview(mode);
+        if (isCurrentRequest()) {
+          workbenchStore.updatePreview(preview);
+        }
+      } catch (error) {
+        if (isCurrentRequest()) {
+          toast.error(error instanceof Error ? error.message : 'Unable to queue a remote preview.');
+        }
+      } finally {
+        if (manualPreviewRequestRef.current === manualRequest) {
+          manualPreviewRequestRef.current = null;
+          setPreviewRequestState({ projectId, workspaceId, requesting: false });
+        }
       }
-    } catch (error) {
-      if (isCurrentRequest()) {
-        toast.error(error instanceof Error ? error.message : 'Unable to queue a remote preview.');
-      }
-    } finally {
-      if (manualPreviewRequestRef.current === manualRequest) {
-        manualPreviewRequestRef.current = null;
-        setPreviewRequestState({ projectId, workspaceId, requesting: false });
-      }
-    }
-  }, [projectId]);
+    },
+    [projectId],
+  );
 
   return {
     close: () => {

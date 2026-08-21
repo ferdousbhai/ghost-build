@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { CheckIcon, CircleIcon, Cross2Icon, FileIcon, Pencil1Icon } from '@radix-ui/react-icons';
+import { CheckIcon, CircleIcon, Cross2Icon, FileIcon, MagnifyingGlassIcon, Pencil1Icon } from '@radix-ui/react-icons';
 import { Spinner } from '@ui/Spinner';
 import type { ToolActivityStatus } from '~/lib/common/types';
 import { classNames } from '~/utils/classNames';
@@ -13,6 +13,8 @@ const MAX_TOOL_TITLE_VALUE_CHARACTERS = 160;
 /** Keyed by the model-facing tool name, which arrives as an unconstrained string on the invocation. */
 const STOPPED_TOOL_TITLES = new Map<string, string>([
   ['read', 'File read stopped'],
+  ['ls', 'File listing stopped'],
+  ['grep', 'File search stopped'],
   ['write', 'File write stopped'],
   ['edit', 'File edit stopped'],
   ['exec', 'Command stopped'],
@@ -63,6 +65,10 @@ export function toolTitle(invocation: GhostbuildToolInvocation, status: ToolActi
   switch (invocation.toolName) {
     case 'read':
       return readTitle(invocation, status);
+    case 'ls':
+      return listTitle(invocation, status);
+    case 'grep':
+      return searchTitle(invocation, status);
     case 'write':
       return writeTitle(invocation);
     case 'edit':
@@ -111,6 +117,25 @@ function readTitle(invocation: GhostbuildToolInvocation, status: ToolActivitySta
   return titleRow(
     `${status === 'running' ? 'Reading' : 'Read'} ${renderedPath}${extra}`,
     <FileIcon className="text-content-secondary" />,
+  );
+}
+
+function listTitle(invocation: GhostbuildToolInvocation, status: ToolActivityStatus): ReactNode {
+  const args = MODEL_TOOL_INPUT_SCHEMAS.ls.safeParse(invocation.input);
+  const target = args.success && args.data.path ? getRelativePath(args.data.path) || args.data.path : 'the project';
+  return titleRow(
+    `${status === 'running' ? 'Listing' : 'Listed'} ${compactToolLabel(target)}`,
+    <FileIcon className="text-content-secondary" />,
+  );
+}
+
+function searchTitle(invocation: GhostbuildToolInvocation, status: ToolActivityStatus): ReactNode {
+  const args = MODEL_TOOL_INPUT_SCHEMAS.grep.safeParse(invocation.input);
+  return titleRow(
+    args.success
+      ? `${status === 'running' ? 'Searching' : 'Searched'} for ${compactToolLabel(args.data.pattern)}`
+      : `${status === 'running' ? 'Searching' : 'Searched'} the project`,
+    <MagnifyingGlassIcon className="text-content-secondary" />,
   );
 }
 

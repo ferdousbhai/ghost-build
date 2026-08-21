@@ -1,12 +1,27 @@
 import { GENERATED_PROJECT_PNPM_VERSION } from '../../ghostbuild-agent/cloudflare-computer';
 import { CONTAINER_PACKAGE_INSTALL_TIMEOUT_MS } from './operation-lease-policy';
 
-const COMPUTERD_ROOT = '/tmp/ghostbuild-computer';
+/**
+ * Where the workspace image bakes computerd, and where the bootstrap installs it when it is not
+ * already there. `/opt` rather than `/tmp` so image content cannot be shadowed by a tmpfs mount.
+ * `scripts/build-user-workspace-image.mjs` reads this path out of this file, so the image and the
+ * bootstrap cannot disagree about it.
+ */
+export const COMPUTERD_ROOT = '/opt/ghostbuild/computer';
 // Immutable linux/amd64 layer published by
 // ghcr.io/cloudflare/computer-computerd-linux-x64:0.1.1.
 const COMPUTERD_LAYER_DIGEST = 'sha256:7d54afd24f340c562357091403ee2dca004c0ce99d3970f32a03300602e19c47';
 
 export const COMPUTERD_BINARY = `${COMPUTERD_ROOT}/usr/local/bin/computerd`;
+
+/**
+ * One content-addressed pnpm store for every install this container runs, pre-warmed from the
+ * template lockfile at image build time. Container disk is wiped on every sleep, so without a
+ * baked store each cold workspace re-downloads the project's whole dependency closure before it
+ * can typecheck anything. Passed explicitly on the install command rather than left to config
+ * discovery, because the store only helps if every install actually lands on it.
+ */
+export const CONTAINER_PNPM_STORE_DIR = '/opt/ghostbuild/pnpm-store';
 
 /**
  * The toolchain bootstrap is a network package installation into the same

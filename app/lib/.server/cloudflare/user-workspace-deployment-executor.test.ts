@@ -101,7 +101,9 @@ describe('deployment credential boundary', () => {
     expect(methodEnd).toBeGreaterThan(methodStart);
     const preparation = runtimeSource.slice(methodStart, methodEnd);
     expect(preparation).toContain('wrangler deploy --dry-run');
-    expect(preparation).toContain('await this.pushDurableProjectToContainer()');
+    // Materialisation now goes through the verified copy, which pushes and then proves the
+    // isolated root matches the durable VFS before anything is built from it (#139).
+    expect(preparation).toContain('await this.copyProjectToIsolatedRoot(isolatedRoot)');
     expect(preparation).toContain('await this.runTransientCommand(');
     expect(preparation).not.toMatch(/apiToken|CLOUDFLARE_API_TOKEN|authorization|env\s*:/i);
 

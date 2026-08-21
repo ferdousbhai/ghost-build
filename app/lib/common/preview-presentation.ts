@@ -1,10 +1,17 @@
-import type { BuilderPreviewState, BuilderPreviewStatus, BuilderPreviewSuccess } from '~/agents/builder-preview-types';
+import type {
+  BuilderPreviewMode,
+  BuilderPreviewState,
+  BuilderPreviewStatus,
+  BuilderPreviewSuccess,
+} from '~/agents/builder-preview-types';
 import { previewQuickTunnelUrl } from './preview-url';
 
 export type PreviewPresentation = {
   preview: BuilderPreviewSuccess | null;
   previewUrl: string | null;
   status: BuilderPreviewStatus;
+  /** The guarantee the visible preview carries, or the one being built when none is visible yet. */
+  mode: BuilderPreviewMode;
   canReload: boolean;
   canUpdate: boolean;
   isUpdatingVisible: boolean;
@@ -22,6 +29,7 @@ export function previewPresentation(state: BuilderPreviewState, now = Date.now()
     preview,
     previewUrl,
     status,
+    mode: preview?.mode ?? state.mode,
     canReload: previewUrl !== null,
     canUpdate: state.stale && previewUrl !== null && !updating && status !== 'failed',
     isUpdatingVisible: previewUrl !== null && updating,

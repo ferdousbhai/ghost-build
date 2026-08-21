@@ -85,6 +85,7 @@ import {
   failedBuilderPreviewState,
   idleBuilderPreviewState,
   previewStateForWorkspace,
+  type BuilderPreviewMode,
   type BuilderPreviewState,
 } from './builder-preview-types';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
@@ -104,6 +105,10 @@ const CHAT_CANCELLATION_SETTLE_TIMEOUT_MS = 4.5 * 60 * 1000;
 /** Fiber metadata survives a Durable Object restart, so every job is re-parsed before it is resumed. */
 const previewBuildJobSchema = z.object({
   previewId: z.string().min(1),
+  // A recovered dev-preview job must resume as a dev preview: replaying it as a production build
+  // would silently promise a checkpoint guarantee the request never asked for. An older job has no
+  // mode recorded, and every preview that existed before dev previews was checkpoint-bound.
+  mode: z.enum(['production', 'dev']).default('production'),
   workspaceRevision: z.number().int().min(0),
   snapshotRevision: z.string().min(1),
   requestedAt: z.number().int().positive(),
@@ -654,6 +659,10 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       throw new Response('Agent authentication is required.', { status: 401 });
     }
     const state = await this.initializeWorkspace(this.transcriptBinding);
+    // Not awaited. The browser blocks its send gate on this call, and the point of warming is to
+    // overlap the container's cold start with the user composing their first message — awaiting it
+    // here would just move the wait rather than remove it. `warmContainer` never rejects.
+    this.ctx.waitUntil(this.workspace.warmContainer());
     await this.refreshDeploymentReadiness();
     return state;
   }
@@ -701,8 +710,8 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   @callable()
-  requestPreview(): Promise<BuilderPreviewState> {
-    return this.requestPreviewInternal();
+  requestPreview(mode?: BuilderPreviewMode): Promise<BuilderPreviewState> {
+    return this.requestPreviewInternal({ mode: mode === 'dev' ? 'dev' : 'production' });
   }
 
   @callable()
@@ -1160,24 +1169,31 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   private async requestPreviewInternal(
-    options: { validatedSnapshot?: BuilderWorkspaceCheckpoint } = {},
+    options: { validatedSnapshot?: BuilderWorkspaceCheckpoint; mode?: BuilderPreviewMode } = {},
   ): Promise<BuilderPreviewState> {
     if (!this.ownerId || !this.userId || !this.transcriptBinding) {
       throw new Response('Agent authentication is required.', { status: 401 });
     }
+    const mode = options.mode ?? 'production';
     const workspace = await this.initializeWorkspace(this.transcriptBinding);
     const current = this.currentPreviewState();
     const snapshot = options.validatedSnapshot ?? (await this.workspace.checkpoint());
     if (
+      current.mode === mode &&
       current.workspaceRevision === workspace.revision &&
       (current.status === 'queued' || current.status === 'building')
     ) {
       return current;
     }
+    // A live dev preview already carries every later change, so re-requesting one is satisfied by
+    // the running server. A production preview is only reusable for the exact revision it captured.
+    const active = current.active;
     if (
       current.status === 'ready' &&
-      current.active?.snapshotRevision === snapshot.revision &&
-      Date.parse(current.active.expiresAt) > Date.now()
+      active !== null &&
+      active.mode === mode &&
+      Date.parse(active.expiresAt) > Date.now() &&
+      (active.mode === 'dev' || active.snapshotRevision === snapshot.revision)
     ) {
       return current;
     }
@@ -1189,16 +1205,18 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     const requestedAt = Date.now();
     const job: PreviewBuildJob = {
       previewId,
+      mode,
       workspaceRevision: snapshot.workspaceRevision,
       snapshotRevision: snapshot.revision,
       requestedAt,
     };
     const queued: BuilderPreviewState = {
       status: 'queued',
+      mode,
       pendingId: previewId,
       workspaceRevision: snapshot.workspaceRevision,
       currentWorkspaceRevision: workspace.revision,
-      stale: snapshot.workspaceRevision !== workspace.revision,
+      stale: mode === 'production' && snapshot.workspaceRevision !== workspace.revision,
       attempt: 0,
       requestedAt: new Date(requestedAt).toISOString(),
       startedAt: null,
@@ -1242,11 +1260,16 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         startedAt: new Date(startedAt).toISOString(),
         updatedAt: new Date(startedAt).toISOString(),
       });
-      const success = await this.workspace.createPreview({
-        previewId: job.previewId,
-        expectedWorkspaceRevision: job.workspaceRevision,
-        expectedSnapshotRevision: job.snapshotRevision,
-      });
+      const success = await this.workspace.createPreview(
+        job.mode === 'dev'
+          ? { previewId: job.previewId, mode: 'dev' }
+          : {
+              previewId: job.previewId,
+              mode: 'production',
+              expectedWorkspaceRevision: job.workspaceRevision,
+              expectedSnapshotRevision: job.snapshotRevision,
+            },
+      );
       if (!this.isCurrentPreviewJob(job.previewId)) {
         await this.workspace.stopPreview(job.previewId).catch(() => undefined);
         return;
@@ -1256,10 +1279,13 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       const currentSnapshot = await this.workspace.checkpoint();
       this.setPreviewState({
         status: 'ready',
+        mode: job.mode,
         pendingId: null,
         workspaceRevision: job.workspaceRevision,
         currentWorkspaceRevision: currentSnapshot.workspaceRevision,
-        stale: currentSnapshot.revision !== job.snapshotRevision,
+        // A dev preview receives the change instead of being invalidated by it, so a project that
+        // moved while it started is exactly what it is for, not a reason to rebuild it.
+        stale: job.mode === 'production' && currentSnapshot.revision !== job.snapshotRevision,
         attempt: this.currentPreviewState().attempt,
         requestedAt: new Date(job.requestedAt).toISOString(),
         startedAt: new Date(startedAt).toISOString(),

@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  SandboxProcessTerminationUnconfirmedError,
   runTrackedSandboxCommand,
   sandboxCommandFailureMessage,
-  SandboxProcessTerminationUnconfirmedError,
+  terminateTrackedSandboxProcess,
 } from './tracked-command';
 
 const command = ['/bin/bash', '-lc', 'pnpm run build'] as const;
@@ -107,8 +108,31 @@ describe('tracked Sandbox commands', () => {
     await expect(runTrackedSandboxCommand({ command, timeout: 30_000, exec: async () => process })).rejects.toThrow(
       'Sandbox command could not be observed for 30000ms and was terminated.',
     );
-    expect(events).toEqual(['output', 'kill', 'wait', 'status']);
-    expect(process.kill).toHaveBeenCalledWith(9);
+    expect(events).toEqual(['output', 'kill', 'wait', 'kill', 'wait', 'status']);
+    expect(process.kill).toHaveBeenCalledWith(15);
+  });
+
+  it('escalates to an untrappable kill when the command ignores the request to stop', async () => {
+    let exits = 0;
+    const process = {
+      id: 'process-1',
+      output: vi.fn(async () => output({})),
+      kill: vi.fn(async (_signal?: number) => undefined),
+      // Refuse the graceful stop once, then exit under SIGKILL.
+      waitForExit: vi.fn(async () => {
+        exits += 1;
+        if (exits === 1) {
+          throw new Error('still running');
+        }
+        return { code: 137, timedOut: false };
+      }),
+      status: vi.fn(async () => exitedStatus(137)),
+    };
+
+    await terminateTrackedSandboxProcess(process);
+
+    expect(process.kill.mock.calls.map((call) => call[0])).toEqual([15, 9]);
+    expect(process.waitForExit).toHaveBeenLastCalledWith({ timeout: 10_000 });
   });
 
   it('kills a process when the output observer never settles', async () => {
@@ -117,7 +141,7 @@ describe('tracked Sandbox commands', () => {
       const process = {
         id: 'process-1',
         output: vi.fn(() => new Promise<ReturnType<typeof output>>(() => undefined)),
-        kill: vi.fn(async () => undefined),
+        kill: vi.fn(async (_signal?: number) => undefined),
         waitForExit: vi.fn(async () => ({ code: 137, timedOut: false })),
         status: vi.fn(async () => exitedStatus(137)),
       };
@@ -129,8 +153,9 @@ describe('tracked Sandbox commands', () => {
 
       await vi.advanceTimersByTimeAsync(60_000);
       await expectation;
-      expect(process.kill).toHaveBeenCalledWith(9);
-      expect(process.waitForExit).toHaveBeenCalledWith({ timeout: 10_000 });
+      // The command stops when asked, so escalation never happens — which is the point: SIGKILL
+      // cannot be trapped, and a command that traps SIGTERM is how background stages get reaped.
+      expect(process.kill.mock.calls.map((call) => call[0])).toEqual([15]);
     } finally {
       vi.useRealTimers();
     }

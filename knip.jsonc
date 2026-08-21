@@ -16,7 +16,14 @@
         "user-workspace-runtime/src/index.ts",
       ],
       "project": ["**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!", "!.ghostbuild-runtime-security-*/**"],
-      "ignore": ["template/**", "app/test/cloudflare-workers-shim.ts"],
+      "ignore": [
+        "template/**",
+        "app/test/cloudflare-workers-shim.ts",
+        // Vendored verbatim from the install-anti-slop skill and loaded by Oxlint through
+        // `jsPlugins`, which knip does not read. Analysing it would report unused exports
+        // against source this repository does not own and must not prune.
+        "tools/oxlint/anti-slop/**",
+      ],
     },
     "ghostbuild-agent": {
       "entry": ["**/*.test.ts"],
@@ -35,5 +42,8 @@
 
     // virtual module provided by the Cloudflare Workers runtime
     "cloudflare",
+
+    // imported by the vendored anti-slop plugin, which knip is told to ignore above
+    "@oxlint/plugins",
   ],
 }

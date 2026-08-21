@@ -6,22 +6,6 @@ type DeploymentConfigPaths = {
   d1_databases?: Array<{ migrations_dir: string }>;
 };
 
-export function createIsolatedProjectCommand(args: {
-  projectRoot: string;
-  isolatedRoot: string;
-  quote: (value: string) => string;
-}): string {
-  const source = args.quote(args.projectRoot);
-  const destination = args.quote(args.isolatedRoot);
-  return [
-    'set -eu',
-    `rm -rf ${destination}`,
-    `mkdir -p ${destination}`,
-    `tar -C ${source} --exclude='./node_modules' --exclude='./dist' --exclude='./.output' --exclude='./.tanstack' --exclude='./.wrangler' -cf - . | tar -C ${destination} -xf -`,
-    `if find ${destination} ! -type d ! -type f -print -quit | grep -q .; then printf '%s\n' 'Project source cannot contain non-regular files.' >&2; rm -rf ${destination}; exit 1; fi`,
-  ].join('\n');
-}
-
 export function createContainerDirectoryCommand(args: {
   directory: string;
   command: string;

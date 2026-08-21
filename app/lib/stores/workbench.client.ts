@@ -64,8 +64,8 @@ export class WorkbenchStore {
     return this.#previewsStore.update(...args);
   }
 
-  requestPreview() {
-    return this.#previewsStore.request();
+  requestPreview(...args: Parameters<PreviewsStore['request']>) {
+    return this.#previewsStore.request(...args);
   }
 
   get files() {

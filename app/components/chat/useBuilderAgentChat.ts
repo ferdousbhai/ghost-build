@@ -4,6 +4,7 @@ import { useAgent } from 'agents/react';
 import { useStore } from '@nanostores/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BuilderAgent, BuilderAgentState, BuilderSteeringInput } from '~/agents/builder-agent';
+import type { BuilderPreviewMode } from '~/agents/builder-preview-types';
 import { workbenchStore } from '~/lib/stores/workbench.client';
 import { isAuthenticated } from '~/lib/stores/userId';
 import { captureMessage } from '~/lib/telemetry.client';
@@ -236,8 +237,8 @@ export function useBuilderAgentChat(args: {
 
   useEffect(() => {
     let disposed = false;
-    const callPreview = async (method: 'getPreviewState' | 'requestPreview') => {
-      const state = await builderAgent.call(method, [], {
+    const callPreview = async (method: 'getPreviewState' | 'requestPreview', mode?: BuilderPreviewMode) => {
+      const state = await builderAgent.call(method, mode ? [mode] : [], {
         timeout: method === 'getPreviewState' ? 10_000 : 30_000,
       });
       if (!disposed && activePresentationRef.current === args.presentationId) {
@@ -246,7 +247,7 @@ export function useBuilderAgentChat(args: {
       return state;
     };
     const disconnect = workbenchStore.connectPreview({
-      request: () => callPreview('requestPreview'),
+      request: (mode) => callPreview('requestPreview', mode),
     });
     void callPreview('getPreviewState').catch((error) => logger.warn('Unable to load remote preview state', error));
     return () => {
