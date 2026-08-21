@@ -12,4 +12,11 @@ describe('generated project release guidance', () => {
     expect(content).toContain('build');
     expect(content).toContain('deploy');
   });
+
+  test('Cursor rules embed the stack-selection skill body without its frontmatter', () => {
+    expect(cursorRulesContent).toContain('ghostbuild.projectType to "worker"');
+    expect(cursorRulesContent).toContain('TanStack Query or TanStack DB only when');
+    expect(cursorRulesContent).not.toContain('name: project-stack');
+    expect(cursorRulesContent).not.toContain('---');
+  });
 });

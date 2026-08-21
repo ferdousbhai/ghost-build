@@ -16,10 +16,17 @@ const pathBrowserifyEntry = createRequire(resolve(root, 'ghostbuild-agent/packag
 const rawTextPlugin = {
   name: 'ghostbuild-raw-text',
   setup(pluginBuild) {
-    pluginBuild.onResolve({ filter: /\?raw$/ }, (args) => ({
-      path: resolve(args.resolveDir, args.path.slice(0, -'?raw'.length)),
-      namespace: 'ghostbuild-raw-text',
-    }));
+    pluginBuild.onResolve({ filter: /\?raw$/ }, (args) => {
+      const specifier = args.path.slice(0, -'?raw'.length);
+      // Plugin resolution runs before esbuild's tsconfig handling, so the app's `~/` alias
+      // has to be applied here for raw imports.
+      return {
+        path: specifier.startsWith('~/')
+          ? resolve(root, 'app', specifier.slice('~/'.length))
+          : resolve(args.resolveDir, specifier),
+        namespace: 'ghostbuild-raw-text',
+      };
+    });
     pluginBuild.onLoad({ filter: /.*/, namespace: 'ghostbuild-raw-text' }, async (args) => ({
       contents: await readFile(args.path, 'utf8'),
       loader: 'text',

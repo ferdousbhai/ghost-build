@@ -15,6 +15,7 @@ describe('builder skills', () => {
   it('catalogs the bundled skills using their own frontmatter', () => {
     const { prompt } = createBuilderSkillContext();
 
+    expect(prompt).toContain('/__skills__/project-stack/SKILL.md — Project shape selection');
     expect(prompt).toContain('/__skills__/frontend-design/SKILL.md — Visual design for new or reworked UI');
     expect(prompt).toContain('/__skills__/react-start/SKILL.md — React bindings for TanStack Start');
     expect(prompt).toContain('never fetch llms.txt or llms-full.txt');
@@ -23,6 +24,10 @@ describe('builder skills', () => {
   it('serves the bundled skills through the read tool namespace', async () => {
     const { reader } = createBuilderSkillContext();
 
+    await expect(reader.read('/__skills__/project-stack/SKILL.md')).resolves.toEqual({
+      kind: 'file',
+      content: expect.stringContaining('ghostbuild.projectType to "worker"'),
+    });
     await expect(reader.read('/__skills__/frontend-design/SKILL.md')).resolves.toEqual({
       kind: 'file',
       content: expect.stringContaining('name: frontend-design'),

@@ -10,6 +10,11 @@ import { parse } from 'yaml';
  */
 import { REACT_START_SKILL_FILES } from '~/generated/builder-skill-assets.generated';
 import frontendDesignSkill from './skills/frontend-design/SKILL.md?raw';
+/*
+ * Lives outside .server/ because the exported project's Cursor rules embed the same stack-selection
+ * text, and that module is bundled for the browser.
+ */
+import projectStackSkill from '~/lib/guidance/project-stack/SKILL.md?raw';
 
 const BUILDER_SKILL_ROOT = '/__skills__';
 const MAX_BUILDER_SKILL_PROMPT_CHARS = 16_000;
@@ -21,6 +26,7 @@ const MAX_BUILDER_SKILL_PROMPT_CHARS = 16_000;
  * fresh seed does not populate beyond the template sources.
  */
 const BUNDLED_SKILLS: readonly BundledSkillSource[] = [
+  { name: 'project-stack', files: new Map([['SKILL.md', projectStackSkill]]) },
   { name: 'frontend-design', files: new Map([['SKILL.md', frontendDesignSkill]]) },
   { name: 'react-start', files: bundledSkillFiles('react-start', REACT_START_SKILL_FILES) },
 ];
