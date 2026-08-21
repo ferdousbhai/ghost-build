@@ -137,6 +137,9 @@ export async function provisionUserWorkspaceRuntime(args: {
     runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
     attemptId,
     leaseExpiresAt: Date.now() + PROVISIONING_LEASE_MS,
+    // Pure function of the account, so this costs nothing here and lets the claim treat an image
+    // mismatch as a reason to re-provision — otherwise the staleness check and the claim disagree.
+    expectedImageDigest: cloudflareWorkspaceImageReference(connection.accountId),
   });
   if (!claim.claimed) {
     if (claim.runtime.status === 'ready') {

@@ -8,6 +8,9 @@ import {
   recordUserWorkspaceRuntimeUpgradeDeferral,
 } from './user-workspace-runtime-repository';
 
+/** Any stable value: the claim only compares it against the recorded digest. */
+const EXPECTED_IMAGE = 'registry.cloudflare.com/acct/ghostbuild-workspace@sha256:expected';
+
 describe('workspace runtime provisioning lease', () => {
   it('allows only one live provisioning attempt', async () => {
     const db = runtimeDatabase();
@@ -84,6 +87,7 @@ describe('workspace runtime provisioning lease', () => {
       runtimeVersion: 'b'.repeat(64),
       attemptId: 'attempt-2',
       leaseExpiresAt: 20_000,
+      expectedImageDigest: EXPECTED_IMAGE,
       now: 10_000,
     });
     await expect(findUserWorkspaceRuntime(db, 'user-1')).resolves.toMatchObject({ upgradeDeferredSince: null });
@@ -99,6 +103,43 @@ describe('workspace runtime provisioning lease', () => {
     await expect(findUserWorkspaceRuntime(db, 'user-1')).resolves.toMatchObject({ upgradeDeferredSince: null });
   });
 
+  it('re-claims a ready runtime whose image is not the one it should be on', async () => {
+    // The staleness check treats an image mismatch as "upgrade needed". If the claim disagrees,
+    // provisioning hands back the same unusable runtime and the session fails on every request —
+    // which is exactly what shipped before this condition existed.
+    const db = runtimeDatabase();
+    await claim(db, 'attempt-1', 100, 200);
+    await markUserWorkspaceRuntimeReady({
+      db,
+      userId: 'user-1',
+      connectionId: 'connection-1',
+      connectionGeneration: 1,
+      runtimeVersion: 'a'.repeat(64),
+      attemptId: 'attempt-1',
+      imageDigest: 'docker.io/cloudflare/sandbox@sha256:fallback',
+      now: 150,
+    });
+
+    await expect(claim(db, 'attempt-2', 300, 400)).resolves.toMatchObject({ claimed: true });
+  });
+
+  it('leaves a ready runtime alone once it is on the expected image', async () => {
+    const db = runtimeDatabase();
+    await claim(db, 'attempt-1', 100, 200);
+    await markUserWorkspaceRuntimeReady({
+      db,
+      userId: 'user-1',
+      connectionId: 'connection-1',
+      connectionGeneration: 1,
+      runtimeVersion: 'a'.repeat(64),
+      attemptId: 'attempt-1',
+      imageDigest: EXPECTED_IMAGE,
+      now: 150,
+    });
+
+    await expect(claim(db, 'attempt-2', 300, 400)).resolves.toMatchObject({ claimed: false });
+  });
+
   it('adopts an exact claim when D1 commits before acknowledgement fails', async () => {
     const db = runtimeDatabase({ claimErrorAfterCommit: new Error('D1 acknowledgement lost') });
 
@@ -109,9 +150,16 @@ describe('workspace runtime provisioning lease', () => {
   });
 });
 
-function claim(db: D1Database, attemptId: string, now: number, leaseExpiresAt: number) {
+function claim(
+  db: D1Database,
+  attemptId: string,
+  now: number,
+  leaseExpiresAt: number,
+  expectedImageDigest = EXPECTED_IMAGE,
+) {
   return claimUserWorkspaceRuntimeProvisioning({
     db,
+    expectedImageDigest,
     userId: 'user-1',
     connectionId: 'connection-1',
     connectionGeneration: 1,

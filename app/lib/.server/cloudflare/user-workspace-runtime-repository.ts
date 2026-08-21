@@ -60,6 +60,8 @@ export async function claimUserWorkspaceRuntimeProvisioning(args: {
   runtimeVersion: string;
   attemptId: string;
   leaseExpiresAt: number;
+  /** The image a current runtime for this account would be on; a mismatch makes it re-claimable. */
+  expectedImageDigest: string;
   now?: number;
 }): Promise<{ runtime: UserWorkspaceRuntime; claimed: boolean }> {
   const now = args.now ?? Date.now();
@@ -88,6 +90,16 @@ export async function claimUserWorkspaceRuntimeProvisioning(args: {
        WHERE user_computer_runtimes.connection_id <> excluded.connection_id
           OR user_computer_runtimes.connection_generation <> excluded.connection_generation
           OR user_computer_runtimes.runtime_version <> excluded.runtime_version
+          -- The image is part of what makes a runtime current, so it has to be part of what makes
+          -- one re-claimable. Without this the staleness predicate says "upgrade needed" on an
+          -- image mismatch while the claim refuses to act on it: provisioning returns the same
+          -- unusable runtime, the caller rejects it, and the session fails on every request.
+          --
+          -- Only for a settled row. A provisioning in flight has no image recorded yet, so an
+          -- unscoped comparison would call every live attempt re-claimable and hand the lease to
+          -- whoever asked last.
+          OR (user_computer_runtimes.status = 'ready'
+              AND COALESCE(user_computer_runtimes.image_digest, '') <> ?)
           OR user_computer_runtimes.status = 'error'
           OR (user_computer_runtimes.status = 'provisioning'
               AND COALESCE(user_computer_runtimes.provisioning_lease_expires_at, 0) <= ?)
@@ -107,6 +119,7 @@ export async function claimUserWorkspaceRuntimeProvisioning(args: {
         now,
         args.attemptId,
         args.leaseExpiresAt,
+        args.expectedImageDigest,
         now,
       )
       .first<UserWorkspaceRuntimeRow>();
