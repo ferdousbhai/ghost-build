@@ -17,7 +17,7 @@ import {
   DEPLOYMENT_TEMPLATE_SOURCE_BINDING,
   DEPLOYMENT_VERSION_METADATA_BINDING,
 } from './deployment-runtime-policy';
-import { copyImageToRegistry } from './registry-image-copy';
+import { copyImageToRegistry, responseDiagnostics } from './registry-image-copy';
 import {
   CLOUDFLARE_REGISTRY_HOST,
   GHOSTBUILD_WORKSPACE_IMAGE_DIGEST,
@@ -1541,6 +1541,14 @@ export class UserCloudflareAccountApi {
       if (present.status === 200) {
         return true;
       }
+      // A non-200 here is the decision to copy several hundred megabytes, so it is worth saying
+      // why. Reading only `=== 200` meant "already present" and "the registry refused us" were
+      // indistinguishable, and the copy that followed reported its own failure with no hint that
+      // this probe had already seen the same problem.
+      console.info('Workspace image is not present in the account registry; copying it', {
+        repository,
+        ...responseDiagnostics(present),
+      });
 
       const manifestObject = await blobs.get(WORKSPACE_IMAGE_MANIFEST_KEY);
       if (!manifestObject) {

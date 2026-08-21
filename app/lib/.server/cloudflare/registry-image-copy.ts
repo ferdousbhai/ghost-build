@@ -87,18 +87,60 @@ async function detail(response: Response): Promise<string> {
   }
 }
 
+/**
+ * Everything about a response worth knowing when it was not the status we expected.
+ *
+ * A `HEAD` carries no body, so an unexpected status is otherwise a bare number with nothing to
+ * diagnose from — which is exactly how an HTTP 500 here cost a full deploy cycle and taught us
+ * nothing. These headers say who answered: `cf-ray` and `server` separate an edge error page from
+ * the registry itself, `www-authenticate` identifies a credential problem, and `location` plus
+ * `redirected` reveal a hop to backing storage.
+ */
+export function responseDiagnostics(response: Response) {
+  const header = (name: string) => response.headers.get(name) ?? '';
+  return {
+    status: response.status,
+    statusText: response.statusText,
+    url: response.url,
+    redirected: response.redirected,
+    cfRay: header('cf-ray'),
+    server: header('server'),
+    contentType: header('content-type'),
+    wwwAuthenticate: header('www-authenticate'),
+    dockerDistributionApi: header('docker-distribution-api-version'),
+    location: header('location'),
+  };
+}
+
+/**
+ * Whether the registry already holds this blob.
+ *
+ * Advisory, never fatal. This is a skip-work check: uploading a blob the registry already has is
+ * harmless because registries deduplicate by digest, so an unreadable answer costs bandwidth and
+ * nothing else. Throwing here instead made an optimization load-bearing and abandoned the whole
+ * copy over it. An unexpected status therefore reports "absent" and lets the upload proceed —
+ * and the upload's failure, unlike a `HEAD`'s, carries a v2 error body worth reading.
+ *
+ * Redirects are not followed. A registry that answers a blob request with a hop to backing
+ * storage is asserting the blob is there, and following it would replay the `HEAD` against a URL
+ * signed for a different method, with the `Authorization` header stripped on the cross-origin hop.
+ */
 async function blobExists(target: RegistryTarget, digest: string): Promise<boolean> {
   const response = await callFetch(target)(`${target.baseUrl}/v2/${target.repository}/blobs/${digest}`, {
     method: 'HEAD',
     headers: { authorization: target.authorization },
+    redirect: 'manual',
   });
-  if (response.status === 200) {
+  if (response.status === 200 || (response.status >= 300 && response.status < 400)) {
     return true;
   }
-  if (response.status === 404) {
-    return false;
+  if (response.status !== 404) {
+    console.warn('Registry blob presence check was inconclusive; uploading the blob anyway', {
+      digest,
+      ...responseDiagnostics(response),
+    });
   }
-  throw new RegistryCopyError('blob HEAD', response.status, await detail(response));
+  return false;
 }
 
 async function uploadBlob(

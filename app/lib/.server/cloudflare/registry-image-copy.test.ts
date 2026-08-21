@@ -11,6 +11,7 @@ import {
 const DIGEST_A = `sha256:${'a'.repeat(64)}`;
 const DIGEST_M = `sha256:${'e'.repeat(64)}`;
 const MANIFEST_BYTES = new Uint8Array([1, 2, 3]);
+const ONE_BYTE = new Uint8Array(1);
 
 /** Copy into a fresh ArrayBuffer so the source contract is satisfied without asserting a type. */
 function toArrayBuffer(view: Uint8Array): ArrayBuffer {
@@ -220,6 +221,58 @@ describe('registry image copy', () => {
     await expect(
       copyToFakeRegistry(fetchImpl, [{ digest: DIGEST_A, size: 1 }], bytesSource({ [DIGEST_A]: new Uint8Array(1) })),
     ).rejects.toBeInstanceOf(RegistryCopyError);
+  });
+
+  it('uploads the blob anyway when the presence check answers with an unexpected status', async () => {
+    // The presence check is an optimization: uploading a blob the registry already has is
+    // harmless. Aborting the copy over an unreadable answer made it load-bearing, which is how a
+    // single HTTP 500 on a HEAD stopped several hundred megabytes from ever being copied.
+    const { fetchImpl, stored, requests } = fakeRegistry();
+    const blobHeadFails = vi.fn<typeof fetch>(async (input, init) => {
+      const url = requestUrl(input);
+      if ((init?.method ?? 'GET') === 'HEAD' && url.pathname.includes('/blobs/')) {
+        return new Response(null, { status: 500 });
+      }
+      return fetchImpl(input, init);
+    });
+
+    await copyToFakeRegistry(blobHeadFails, [{ digest: DIGEST_A, size: 1 }], bytesSource({ [DIGEST_A]: ONE_BYTE }));
+
+    expect(stored.has(DIGEST_A)).toBe(true);
+    expect(requests).toContain('POST /v2/acct/image/blobs/uploads/');
+  });
+
+  it('treats a redirected blob presence check as present', async () => {
+    // A registry that answers a blob request with a hop to backing storage is asserting the blob
+    // is there. Following that hop would replay the HEAD against a URL signed for another method.
+    const { fetchImpl, requests } = fakeRegistry();
+    const blobHeadRedirects = vi.fn<typeof fetch>(async (input, init) => {
+      const url = requestUrl(input);
+      if ((init?.method ?? 'GET') === 'HEAD' && url.pathname.includes('/blobs/')) {
+        return new Response(null, { status: 307, headers: { location: 'https://storage.example/blob' } });
+      }
+      return fetchImpl(input, init);
+    });
+
+    await copyToFakeRegistry(blobHeadRedirects, [{ digest: DIGEST_A, size: 1 }], bytesSource({ [DIGEST_A]: ONE_BYTE }));
+
+    expect(requests).not.toContain('POST /v2/acct/image/blobs/uploads/');
+  });
+
+  it('does not follow redirects on the presence check', async () => {
+    const { fetchImpl } = fakeRegistry();
+    const seen: Array<RequestRedirect | undefined> = [];
+    const record = vi.fn<typeof fetch>(async (input, init) => {
+      const url = requestUrl(input);
+      if ((init?.method ?? 'GET') === 'HEAD' && url.pathname.includes('/blobs/')) {
+        seen.push(init?.redirect);
+      }
+      return fetchImpl(input, init);
+    });
+
+    await copyToFakeRegistry(record, [{ digest: DIGEST_A, size: 1 }], bytesSource({ [DIGEST_A]: ONE_BYTE }));
+
+    expect(seen).toEqual(['manual']);
   });
 
   it('rejects a source that returns the wrong number of bytes for a range', async () => {
