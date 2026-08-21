@@ -50,6 +50,18 @@ export class RegistryCopyError extends Error {
   }
 }
 
+/**
+ * Take the injected fetch as a bare function, never as a method on the target.
+ *
+ * `target.fetch(url)` invokes it with `target` as its `this`, and the Workers runtime rejects the
+ * global fetch called with a foreign receiver — "Illegal invocation", which surfaced only in
+ * production because Node's fetch does not care what it is called on.
+ */
+function callFetch(target: RegistryTarget): typeof fetch {
+  const { fetch: fetchImpl } = target;
+  return (input, init) => fetchImpl(input, init);
+}
+
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 
 function requireDigest(digest: string): string {
@@ -76,7 +88,7 @@ async function detail(response: Response): Promise<string> {
 }
 
 async function blobExists(target: RegistryTarget, digest: string): Promise<boolean> {
-  const response = await target.fetch(`${target.baseUrl}/v2/${target.repository}/blobs/${digest}`, {
+  const response = await callFetch(target)(`${target.baseUrl}/v2/${target.repository}/blobs/${digest}`, {
     method: 'HEAD',
     headers: { authorization: target.authorization },
   });
@@ -95,7 +107,7 @@ async function uploadBlob(
   source: ImageBlobSource,
   chunkBytes: number,
 ): Promise<void> {
-  const started = await target.fetch(`${target.baseUrl}/v2/${target.repository}/blobs/uploads/`, {
+  const started = await callFetch(target)(`${target.baseUrl}/v2/${target.repository}/blobs/uploads/`, {
     method: 'POST',
     headers: { authorization: target.authorization, 'content-length': '0' },
   });
@@ -110,7 +122,7 @@ async function uploadBlob(
     if (chunk.byteLength !== end - offset) {
       throw new Error(`Blob source returned ${chunk.byteLength} bytes for a ${end - offset} byte range.`);
     }
-    const response = await target.fetch(location, {
+    const response = await callFetch(target)(location, {
       method: 'PATCH',
       headers: {
         authorization: target.authorization,
@@ -130,7 +142,7 @@ async function uploadBlob(
   // The registry assigns the upload's query string, so the digest has to be appended to it rather
   // than replace it.
   location.searchParams.set('digest', blob.digest);
-  const finished = await target.fetch(location, {
+  const finished = await callFetch(target)(location, {
     method: 'PUT',
     headers: { authorization: target.authorization, 'content-length': '0' },
   });
@@ -170,7 +182,7 @@ export async function copyImageToRegistry(args: {
     uploaded += 1;
   }
 
-  const response = await args.target.fetch(
+  const response = await callFetch(args.target)(
     `${args.target.baseUrl}/v2/${args.target.repository}/manifests/${args.manifestDigest}`,
     {
       method: 'PUT',

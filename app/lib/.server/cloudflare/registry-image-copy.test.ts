@@ -175,6 +175,39 @@ describe('registry image copy', () => {
     expect(requested.reduce((a, b) => a + b, 0)).toBe(size);
   });
 
+  it('never invokes the injected fetch as a method on the target', async () => {
+    // `target.fetch(url)` passes `target` as `this`, and the Workers runtime rejects the global
+    // fetch called with a foreign receiver — "Illegal invocation". Node's fetch does not care, so
+    // this shipped and only failed in production. Asserting the receiver is what pins it.
+    // Whatever the runtime binds as the receiver: `undefined` when called as a plain function,
+    // the target object when called as a method.
+    type FetchReceiver = object | undefined;
+    const receivers: FetchReceiver[] = [];
+    const { fetchImpl, stored } = fakeRegistry();
+    function recordingFetch(this: FetchReceiver, input: RequestInfo | URL, init?: RequestInit) {
+      receivers.push(this);
+      return fetchImpl(input, init);
+    }
+
+    await copyImageToRegistry({
+      manifestBytes: new Uint8Array([1]),
+      manifestMediaType: 'application/vnd.oci.image.manifest.v1+json',
+      manifestDigest: DIGEST_M,
+      blobs: [{ digest: DIGEST_A, size: 4 }],
+      source: bytesSource({ [DIGEST_A]: new Uint8Array([1, 2, 3, 4]) }),
+      target: {
+        baseUrl: 'https://registry.test',
+        repository: 'acct/image',
+        authorization: 'Basic dGVzdA==',
+        fetch: recordingFetch,
+      },
+    });
+
+    expect(receivers.length).toBeGreaterThan(0);
+    expect(receivers.every((receiver) => receiver === undefined)).toBe(true);
+    expect(stored.has(DIGEST_M)).toBe(true);
+  });
+
   it('refuses to address a blob by anything but a sha256 digest', async () => {
     const { fetchImpl } = fakeRegistry();
     await expect(copyToFakeRegistry(fetchImpl, [{ digest: 'latest', size: 1 }], bytesSource({}))).rejects.toThrow(
