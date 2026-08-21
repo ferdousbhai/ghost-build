@@ -1523,7 +1523,12 @@ export class UserCloudflareAccountApi {
       // The steady state is "this account already has it", and a present manifest implies every
       // blob it references. Answering that in one request keeps re-provisioning from re-reading
       // R2 and re-probing twenty blobs to conclude there is nothing to do.
-      const present = await this.request(
+      // Destructured, never `this.request(...)`: calling it as a method passes this instance as the
+      // receiver and the Workers runtime rejects the global fetch on a foreign `this`. Every other
+      // call site in this class already does it this way; this one did not, and the whole image
+      // copy failed on its first request in production.
+      const execute = this.request;
+      const present = await execute(
         `https://${CLOUDFLARE_REGISTRY_HOST}/v2/${repository}/manifests/${GHOSTBUILD_WORKSPACE_IMAGE_DIGEST}`,
         {
           method: 'HEAD',

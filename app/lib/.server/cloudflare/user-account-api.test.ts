@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE } from './project-workspace-container-policy';
-import { describe, expect, test, vi } from 'vitest';
+import { describe, expect, it, test, vi } from 'vitest';
 import type { DeploymentPlan } from './deployment-plan';
 import { deploymentAssetHash, type DeploymentArtifactFile } from './deployment-artifact';
 import { CloudflareAccountApiError, UserCloudflareAccountApi } from './user-account-api';
@@ -1772,5 +1773,20 @@ describe('UserCloudflareAccountApi', () => {
     await expect(
       new UserCloudflareAccountApi('account-1', 'token', request).deleteKvNamespace('ghostbuild-deployment-1-cache'),
     ).rejects.toThrow('ambiguous KV namespaces');
+  });
+});
+
+describe('injected fetch receiver', () => {
+  it('is never called as a method on the instance', () => {
+    // `this.request(url)` passes the instance as the receiver, and the Workers runtime rejects the
+    // global fetch called on a foreign `this` with "Illegal invocation". Node's fetch does not
+    // care, so this passes every unit test and fails on the first production request — which is
+    // exactly how the workspace image copy shipped broken. Every call site destructures first.
+    const source = readFileSync(new URL('./user-account-api.ts', import.meta.url), 'utf8');
+    // Comments name the broken form in order to warn about it, so they must not count as uses.
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    const invocations = code.match(/this\.request\s*\(/g) ?? [];
+
+    expect(invocations).toEqual([]);
   });
 });
