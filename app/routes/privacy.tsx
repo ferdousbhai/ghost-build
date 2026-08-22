@@ -18,7 +18,7 @@ function PrivacyPage() {
     <TrustPage
       eyebrow="Privacy"
       title={TRUST_PAGE_HEADINGS.privacy}
-      summary="Ghostbuild’s own account stores only the records needed to authenticate you, connect Cloudflare, locate your user-owned runtime, and operate the service, plus narrow product telemetry if you opt in. Project and conversation data stays in the Cloudflare account you connect; your browser may keep an account-local replica."
+      summary="Ghostbuild’s own account stores only the records needed to authenticate you, connect Cloudflare, locate your user-owned runtime, and operate the service, plus narrow product telemetry if you opt in. Project and conversation data stays in the Cloudflare account you connect; the browser keeps only rebuildable in-memory views."
     >
       <TrustSection title="What Ghostbuild stores in its own account">
         <p>
@@ -116,10 +116,10 @@ function PrivacyPage() {
 
       <TrustSection title="Browser storage and telemetry choice">
         <p>
-          Essential browser storage includes a 30-day authentication cookie, short-lived OAuth and recovery state,
-          account-local project replicas, theme and builder-model preferences, and a pending prompt in tab-scoped
-          session storage. Cached chat catalogs and transcripts become eligible for local cleanup after 30 days of
-          inactivity. Workspace-file replicas and preferences may remain until replaced or cleared in your browser.
+          Essential browser storage includes a 30-day authentication cookie, short-lived OAuth and recovery state, theme
+          and builder-model preferences, and a pending prompt in tab-scoped session storage. Chat, transcript, and
+          workspace presentation caches remain only in memory and are rebuilt from your Cloudflare account after a
+          reload. Preferences remain until replaced or cleared in your browser.
         </p>
         <p>
           Optional product telemetry is off until you allow it. Your choice is stored locally. Ghostbuild also honors
@@ -200,9 +200,9 @@ function PrivacyPage() {
           </strong>{' '}
           Chats, transcripts, project files, and deployment records also stay there under that account’s controls, and
           the account export does not contain them: download individual project source with Download code in the project
-          header, and use your Cloudflare account’s own tools for the rest. Browser copies are not reachable from the
-          server and are in no export; clear Ghostbuild site data in every browser you use. Settings lists exactly what
-          to clear.
+          header, and use your Cloudflare account’s own tools for the rest. The browser holds no persistent chat,
+          transcript, or project replica. Its theme, model, telemetry, cookie, and tab-session data are not reachable
+          from the server and are in no export; Settings lists exactly what to clear.
         </p>
         <p>
           The operator’s current Cloudflare plan retains sampled control-plane Workers Logs and traces for seven days.

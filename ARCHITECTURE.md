@@ -43,7 +43,7 @@ plan requires them. Cloudflare meters those resources to the user's account.
 | Agent messages, turn state, compaction, and resumable execution                                   | User-owned `BuilderAgent` DO SQLite                  |
 | Project bytes, numeric revision, change index, tool journal, and validation receipts              | User-owned `ProjectWorkspace` Computer VFS/DO SQLite |
 | Dependency installation, validation, preview, and deployment processes                            | User-owned `ProjectWorkspace` Container backend      |
-| Collection replicas and editor files                                                              | Rebuildable browser SQLite/cache                     |
+| Query collections and editor files                                                                | Rebuildable in-memory browser presentation cache     |
 | Generated application's Worker, D1, R2, Agent, and related resources                              | User's Cloudflare account                            |
 
 Do not create a second authoritative store for the same state. Browser and process-local materializations must be
@@ -52,26 +52,25 @@ files; the browser editor and container mount are replicas of that state.
 
 ## Transcript Reconciliation
 
-`BuilderAgent` DO SQLite is the only authoritative message transcript. Generation, reload, interrupted-turn recovery,
-and context compaction all read that transcript. User workspace D1 stores only the chat catalog and the active
-transcript identity: Agent name, generation, subchat index, monotonic head revision, message count, and SHA-256 digest.
-The browser's TanStack collection is a rebuildable reload cache. There is no separate sharing transcript, server-side
-rewind snapshot, R2 message backup, or WebContainer snapshot in the current architecture.
+`BuilderAgent` DO SQLite is the only authoritative message transcript and checkpoint store. Generation, reload,
+interrupted-turn recovery, and context compaction all read that Agent. User workspace D1 stores only routing and catalog
+facts: the Agent name, generation, subchat index, branch ancestry, and whether the chat has accepted content. It stores
+no message positions, counts, digests, or browser-authored checkpoint. The browser's TanStack collection is a
+rebuildable in-memory view. There is no sharing transcript, server-side rewind snapshot, R2 message backup, or
+WebContainer snapshot.
 
 Reconciliation is deterministic:
 
-1. Reload resolves the owner-scoped transcript identity from D1 and reads messages from that exact `BuilderAgent`. A
-   mismatched Agent identity or generation is a conflict, never a fallback to another history.
-2. Before send, the browser asks the Agent for its current checkpoint and hashes its local messages. A mismatch blocks
-   the send and requires a reload. The checkpoint is also attached as transient base metadata, so an Agent rejects a
-   stale client that races after the preflight.
-3. Catalog checkpointing re-reads the Agent and accepts only an exact checkpoint. D1 updates require the same identity,
-   never decrease revision or message/part position, and require an equal digest at an equal revision. A stale write
-   receives `409` with the durable checkpoint and cannot overwrite newer history.
-4. A browser may adopt that returned checkpoint only when it has the same identity and its complete local messages hash
-   to the returned digest. Divergent local messages are not merged or uploaded; reload restores the Agent transcript.
-5. A subchat records its parent subchat, parent generation, and parent revision. Creation conditionally advances the
-   active pointer and uses a unique transition token to recognize an exact commit whose acknowledgement was lost.
+1. Reload resolves the owner-scoped transcript identity from D1 and asks that exact `BuilderAgent` for its checkpoint
+   and messages. A mismatched Agent identity or generation is a conflict, never a fallback to another history.
+2. Before send, the browser asks the Agent for its current checkpoint and compares it with the complete local view. A
+   mismatch blocks the send and requires a reload. The checkpoint rides with the message only as transient base
+   metadata, so the Agent rejects a stale client that races after the preflight; it is stripped before persistence.
+3. Once the Agent accepts the first user content, it marks the chat visible in D1 using its bound identity. This writes
+   one catalog boolean, not a transcript projection. D1 never receives the message body or checkpoint hash.
+4. A subchat records its parent subchat, generation, and revision. The runtime reads that revision directly from the
+   parent Agent before the D1 transition, then uses a unique token to recognize an exact commit whose acknowledgement
+   was lost.
 
 The open issue that introduced this contract referred to R2 transcript objects, browser-produced compressed history,
 WebContainer snapshots, and preserving legacy rewind behavior. Those storage planes were retired by the intentional
@@ -119,8 +118,14 @@ act on, rather than ending the turn.
 
 Model tools and editor reads use the same workspace API. Browser saves use
 compare-and-swap against the numeric revision the browser loaded; a conflict refreshes from the user runtime and never
-overwrites newer state. TanStack DB collections combine the server query collection with a per-account browser SQLite
-persistence layer. That local data is a performance and offline-start replica, not an authority.
+overwrites newer state. TanStack DB collections are in-memory presentation caches rebuilt from the user runtime. The
+browser has no second SQLite or OPFS copy of chats, transcripts, or workspace files.
+
+The user workspace is a separate workspace package, `@ghostbuild/user-workspace-runtime`. Its `./protocol` export is
+the only shared source for sync limits, request/result types, preview modes, and readiness contracts. The runtime owns
+the `ProjectWorkspace` implementation; `computer-sandbox.ts` contains the Cloudflare Computer/Sandbox adapter and
+container-process lifecycle. Browser, control-plane, and Agent code import the protocol instead of reaching into that
+implementation.
 
 Tool-call arguments stream to the browser as the model produces them. `exec` additionally streams bounded transient
 stdout/stderr updates while retaining only a bounded final tail for the model; completion still waits for the Container's
@@ -188,14 +193,19 @@ intentionally unsupported because it would disclose the runtime secret.
 
 ## Generated-Application Boundary
 
-`template/` is an independent application with its own Worker, Agent, migrations, dependencies, and Wrangler
-configuration. Generated applications keep user application data in `DB` and Agent sessions, retention state, and
-inference accounting in the separately provisioned `AGENT_SECURITY_DB`. Only the AppAgent runtime may import the
-security binding; the protected build policy checks the resolved module graph so aliases and dependencies cannot widen
-that capability boundary.
+`template/` is an independent application. Its default is a plain TanStack Worker entrypoint with no Workers AI
+binding, Agent Durable Object, Agent security D1, cleanup cron, or Agent/AI packages. A project that needs durable AI
+runs `pnpm run agent:enable`; the idempotent command applies the reviewed capability manifest, exact dependency pins,
+protected `src/server.ts` entrypoint, Agent security database, Durable Object export, and cleanup schedule together.
+Partial Agent configuration fails validation. When enabled, application data stays in `DB`, while Agent sessions,
+retention state, and inference accounting stay in separately provisioned `AGENT_SECURITY_DB`. Only the AppAgent
+runtime may import that binding; the protected build policy checks the resolved module graph so aliases and
+dependencies cannot widen the capability boundary.
 
-Root dependencies do not implicitly apply to the template. A template change is complete only when the bundled
-Builder workspace module has been regenerated and standalone verification passes.
+Root dependencies do not implicitly apply to the template. Generated bundle source is deliberately ignored rather
+than reviewed as source: `pnpm run generate:artifacts` rebuilds both the template snapshot and the user-workspace Worker
+bundle, while `pnpm run generate` also refreshes route and binding types. Build, typecheck, and validation each enter
+through that generation path once. A template change is complete only when standalone verification passes.
 Generated-project package-manager constraints live in
 `template/scripts/lib/project-policy/generated-project-dependency-policy.json`; browser admission and repository/template
 verification consume that same data rather than maintaining separate security override lists.
@@ -224,6 +234,11 @@ recoverable fiber records an equivalent transcript checkpoint. The model reacqui
 Computer's paged `read` tool and the bounded VFS-served `ls` and `grep` tools, which is why compaction can discard file
 context cheaply: recovering it no longer costs a container round trip. Retrieved source remains untrusted project data,
 and so is every path and matching line a discovery tool returns.
+
+The installed AI SDK `ToolLoopAgent` remains useful for generated applications, but it does not expose an equivalent to
+Pi's one-at-a-time, persistence-before-delivery steering queue or a continuation after a nominally final model response
+when steering is pending. Replacing Pi would therefore remove a tested runtime behavior or require another custom loop,
+which would not simplify this architecture. The parity review is recorded in `scripts/evaluations/DECISIONS.md`.
 
 Workers AI prefix caching is automatic for supported models. Ghostbuild sends an opaque, stable session-affinity value
 per transcript generation through either the REST header or binding `extraHeaders`, keeps system instructions at the

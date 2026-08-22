@@ -272,6 +272,22 @@ export async function verifyWorkerTemplateProfile() {
   }
 }
 
+export async function verifyAgentCapabilityTemplate() {
+  const tempDir = await mkdtemp(join(tmpdir(), 'ghostbuild-agent-template-'));
+  try {
+    await copyCanonicalTemplateSource(tempDir);
+    run(tempDir, ['install', '--frozen-lockfile']);
+    run(tempDir, ['run', 'agent:enable']);
+    run(tempDir, ['run', 'typecheck']);
+    run(tempDir, ['run', 'verify:stack']);
+    run(tempDir, ['run', 'verify:production-config', '--', '--allow-unprovisioned']);
+    run(tempDir, ['run', 'lint']);
+    run(tempDir, ['run', 'build']);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
 export async function copyCanonicalTemplateSource(targetDir) {
   for (const sourcePath of listTemplateSourceFiles(rootDir)) {
     const relativePath = relative(sourceDir, sourcePath);
@@ -369,6 +385,7 @@ if (isMainModule()) {
     await verifyWorkerTemplateProfile();
   } else {
     await verifyTemplate();
+    await verifyAgentCapabilityTemplate();
     await verifyWorkerTemplateProfile();
   }
 }

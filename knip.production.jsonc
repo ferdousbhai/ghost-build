@@ -4,7 +4,7 @@
   },
   "workspaces": {
     ".": {
-      "entry": ["app/router.tsx", "user-workspace-runtime/src/index.ts"],
+      "entry": ["app/router.tsx", "make-bootstrap-snapshot.js", "scripts/build-user-workspace-runtime.mjs"],
       "project": [
         "**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!",
         "!**/*.test.{ts,tsx}",
@@ -16,6 +16,10 @@
         "!.ghostbuild-runtime-security-*/**",
       ],
       "ignore": ["template/**", "app/test/cloudflare-workers-shim.ts"],
+    },
+    "user-workspace-runtime": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts!", "!src/**/*.test.ts"],
     },
   },
   // `@oxlint/plugins` is imported only by the vendored plugin under tools/, which this

@@ -27,7 +27,7 @@ describe('app resource garbage collection receipts', () => {
       requireEmpty: true,
     });
 
-    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('chat_transcripts.head_revision > 0'));
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('chats.has_messages = 0'));
   });
 });
 

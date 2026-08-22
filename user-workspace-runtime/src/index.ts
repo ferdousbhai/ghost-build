@@ -1,21 +1,12 @@
 import type { WorkspaceRuntimeExecHandle } from '@cloudflare/computer';
 import {
-  type DurableObjectStorageLike,
   getWorkspace,
-  type SyncRetryScheduler,
   type WorkspaceClient,
-  type WorkspaceOptions,
   type WorkspaceRuntimeResult,
   Workspace,
   WorkspaceProxy,
 } from '@cloudflare/computer';
-import {
-  CloudflareContainerBackend,
-  type IWorkspaceContainerAPI,
-  type WorkspaceRef,
-} from '@cloudflare/computer/backends/container';
-import { Sandbox, type SandboxCommand } from '@cloudflare/sandbox';
-import { createExtensionProcessSandbox } from '@cloudflare/sandbox/extensions';
+import { type SandboxCommand } from '@cloudflare/sandbox';
 import { parse } from 'jsonc-parser';
 import { settleCancelledWorkspaceCommand } from './command-cancellation';
 import { terminateWorkspaceCommand } from './command-termination';
@@ -25,22 +16,20 @@ import {
   WORKSPACE_RESTART_INDETERMINATE_MESSAGE,
 } from './execution-reattach';
 import { BuilderAgent } from '../../app/agents/builder-agent';
-import type { BuilderPreviewSuccess } from '../../app/agents/builder-preview-types';
 import {
   BUILDER_WORKSPACE_MAX_FILE_BYTES,
   BUILDER_WORKSPACE_MAX_FILES,
   BUILDER_WORKSPACE_MAX_TOTAL_BYTES,
   BUILDER_WORKSPACE_SYNC_BATCH_BYTES,
   BUILDER_WORKSPACE_SYNC_BATCH_FILES,
-} from '../../app/agents/builder-workspace-types';
+  type BuilderPreviewSuccess,
+  type UserWorkspaceReadinessCheck,
+  type UserWorkspaceReadinessComponent,
+} from './protocol';
 import { routeUserRuntimeAgentRequest } from '../../app/lib/.server/agent-request-identity';
 import { createTrustedDeploymentConfig } from '../../app/lib/.server/cloudflare/deployment-config';
 import { recordDeploymentActivity } from '../../app/lib/.server/cloudflare/deployment-repository';
 import { deploymentProjectProfileFromConfig } from '../../app/lib/.server/cloudflare/deployment-project-profile';
-import {
-  type UserWorkspaceReadinessCheck,
-  type UserWorkspaceReadinessComponent,
-} from '../../app/lib/.server/cloudflare/user-workspace-runtime-health';
 import { DEPLOYMENT_PROJECT_ROOT } from '../../app/lib/.server/cloudflare/deployment-runtime-policy';
 import {
   MAX_DEPLOYMENT_ARTIFACT_BYTES,
@@ -50,11 +39,7 @@ import {
   validatePreparedDeploymentArtifact,
 } from '../../app/lib/.server/cloudflare/deployment-artifact';
 import { addRequestedDependencies } from '../../app/lib/runtime/action-runner/dependency-manifest';
-import {
-  userRuntimeDataAction,
-  userRuntimeInitialMessagesAction,
-  userRuntimeStoreChatAction,
-} from '../../app/lib/cloudflare/data.server';
+import { userRuntimeDataAction, userRuntimeInitialMessagesAction } from '../../app/lib/cloudflare/data.server';
 import { verifyRuntimeCapability } from '../../app/lib/cloudflare/runtime-capability';
 import { userRuntimeDeploymentAction } from '../../app/server-handlers/deployments';
 import { userRuntimeEnhancePromptAction } from '../../app/server-handlers/enhance-prompt';
@@ -67,16 +52,7 @@ import {
 import { applyAtomicWorkspaceChanges, type AtomicWorkspaceChange } from './atomic-workspace-changes';
 import { ComputerAdmissionControl } from './computer-admission';
 import { isComputerContainerCallback } from './container-fetch-routing';
-import {
-  COMPUTERD_BINARY,
-  COMPUTERD_BOOTSTRAP_TIMEOUT_MS,
-  CONTAINER_CONNECT_TIMEOUT_MS,
-  CONTAINER_PNPM_STORE_DIR,
-  CONTAINER_TOOLCHAIN_BOOTSTRAP_TIMEOUT_MS,
-  computerdBootstrapCommand,
-  containerToolchainBootstrapCommand,
-  runIdempotentBootstrapStage,
-} from './container-toolchain';
+import { CONTAINER_PNPM_STORE_DIR } from './container-toolchain';
 import { routeUserWorkspaceRuntimeControlPlaneRequest, WORKSPACE_COMPONENTS } from './readiness-route';
 import { scheduleUserWorkspaceRuntimeMaintenance } from './scheduled-maintenance';
 import {
@@ -124,7 +100,6 @@ import {
   requireWorkspaceSyncBarrier,
   WorkspaceSyncPendingError,
 } from './workspace-sync-retry';
-import { WORKSPACE_CONTAINER_SLEEP_AFTER } from '../../app/lib/.server/cloudflare/project-workspace-container-policy';
 import {
   MATERIALIZATION_CONCURRENCY,
   forEachConcurrently,
@@ -154,6 +129,12 @@ import {
   type TrackedSandboxProcess,
 } from './tracked-command';
 import { ValidationCancellation } from './validation-cancellation';
+import {
+  COMPUTERD_ENV,
+  COMPUTERD_PROCESS_ROLE,
+  ComputerSandboxBase,
+  computerWorkspaceOptions,
+} from './computer-sandbox';
 import {
   createContainerDirectoryCommand,
   ISOLATED_PROJECT_ROOT,
@@ -271,25 +252,6 @@ const DEV_PREVIEW_PREPARATION_COMMANDS = [PREVIEW_DATABASE_COMMAND] as const;
  * schema describes, it cannot disagree with the layer above (#127).
  */
 const EXEC_COMMAND_TIMEOUT_MS = OPERATION_TOOL_BUDGET_MS.exec;
-const COMPUTERD_PROCESS_ROLE = 'computerd';
-const COMPUTERD_ENV = {
-  PORT: '8080',
-  MOUNT_POINT: '/home',
-  FUSE_MOUNT: 'auto',
-  /**
-   * pnpm otherwise runs an implicit "are node_modules in sync with the lockfile" install before
-   * any `pnpm run <script>`. Under /home that mount is the durable VFS, so the implicit install
-   * writes a whole dependency tree through FUSE into Durable Object storage and the workspace
-   * exceeds its isolate memory limit permanently — cleanup itself needs the DO to survive long
-   * enough to run, and it no longer can (#137).
-   *
-   * The workspace image sets this too, but the image is an accelerant a workspace can legitimately
-   * end up without: `resolveWorkspaceSandboxImage` falls back to the stock base image, which has
-   * no such setting. A guard against a Durable-Object-destroying bug must not live only in the
-   * optional half.
-   */
-  npm_config_verify_deps_before_run: 'false',
-} as const;
 const TRANSIENT_COMMAND_PROCESS_ROLE = 'transient-command';
 const VALIDATION_CANCELLATION_SETTLE_MS = 45_000;
 const PREVIEW_CONTAINER_RECOVERY_TIMEOUT_MS = 60_000;
@@ -378,203 +340,7 @@ type DeploymentSessionRow = {
   status: 'active' | 'completed' | 'failed' | 'indeterminate';
 };
 
-class ComputerSandboxBase extends Sandbox<RuntimeEnv> {
-  /** Declared rather than inherited; see WORKSPACE_CONTAINER_SLEEP_AFTER for why this number. */
-  override sleepAfter = WORKSPACE_CONTAINER_SLEEP_AFTER;
-  protected readonly sandboxProcesses = createExtensionProcessSandbox(this);
-  readonly containerBackend = new CloudflareContainerBackend({
-    container: () => this,
-    workspace: { binding: 'PROJECT_WORKSPACE', id: this.ctx.id.toString() },
-    containerEnv: COMPUTERD_ENV,
-    connectTimeoutMs: CONTAINER_CONNECT_TIMEOUT_MS,
-    id: 'container-shell',
-  });
-
-  readonly #computerHost = new SandboxComputerHost(this);
-
-  getWorkspaceContainer(): IWorkspaceContainerAPI {
-    return this.#computerHost;
-  }
-
-  async startComputerd(env: Record<string, string>): Promise<void> {
-    // A running computerd is proof this container generation already completed both bootstraps:
-    // the process handle is resolved against the live container, so a replaced container cannot
-    // report the stored process as running. Asking first keeps a warm workspace off the network
-    // entirely — the toolchain probe alone is two `pnpm --version` spawns on every reconnect.
-    const existing = await this.processForRole(COMPUTERD_PROCESS_ROLE);
-    if (existing && (await existing.status()).state === 'running') {
-      return;
-    }
-    // Independent, idempotent installs of two different things: an npm global package and a GHCR
-    // layer. Serializing them only added the slower one to the wait, and each keeps its own
-    // retry budget, so a concurrent failure is reported exactly as it was when they ran in order.
-    await Promise.all([
-      this.runBootstrapStage(
-        'toolchain (pnpm)',
-        CONTAINER_TOOLCHAIN_BOOTSTRAP_TIMEOUT_MS,
-        containerToolchainBootstrapCommand(),
-      ),
-      this.runBootstrapStage('computerd', COMPUTERD_BOOTSTRAP_TIMEOUT_MS, computerdBootstrapCommand()),
-    ]);
-    const process = await this.sandboxProcesses.exec([COMPUTERD_BINARY], {
-      env: { ...env, FUSE_MOUNT: 'auto' },
-    });
-    this.setProcessForRole(COMPUTERD_PROCESS_ROLE, process.id);
-  }
-
-  async restartComputerd(env: Record<string, string>): Promise<void> {
-    const existing = await this.processForRole(COMPUTERD_PROCESS_ROLE);
-    await existing?.kill(9).catch(() => undefined);
-    this.clearProcessForRole(COMPUTERD_PROCESS_ROLE);
-    await this.runSandboxShellCommand('fusermount3 -uz /home >/dev/null 2>&1 || true', 30_000).catch(() => undefined);
-    await this.startComputerd(env);
-  }
-
-  async computerdStatus(): Promise<{ running: boolean; exit: { exitedAt: number; reason: string } | null }> {
-    const process = await this.processForRole(COMPUTERD_PROCESS_ROLE);
-    if (!process) {
-      return { running: false, exit: null };
-    }
-    const status = await process.status();
-    const running = status.state === 'running';
-    return {
-      running,
-      exit: running
-        ? null
-        : {
-            exitedAt: Date.parse(status.endedAt),
-            reason:
-              status.state === 'exited'
-                ? `computerd exited (${status.exit.code})`
-                : `computerd error (${status.error.code})`,
-          },
-    };
-  }
-
-  /**
-   * A bootstrap exec can be aborted mid-launch by @cloudflare/sandbox's
-   * hardcoded 30-second control-connection timeout while the container is
-   * still starting. Both bootstrap commands are idempotent, so the stage
-   * retries inside its budget instead of leaving the workspace behind an
-   * exhausted sync recovery (#131), and an exhausted budget names itself.
-   */
-  private runBootstrapStage(stage: string, budgetMs: number, command: string): Promise<void> {
-    return runIdempotentBootstrapStage({
-      stage,
-      budgetMs,
-      attempt: (remainingMs) => this.runSandboxShellCommand(command, remainingMs),
-    });
-  }
-
-  private async runSandboxShellCommand(command: string, timeout: number): Promise<void> {
-    await runTrackedSandboxCommand({
-      command: sandboxShellCommand(command),
-      timeout,
-      exec: (argv, options) => this.sandboxProcesses.exec(argv, options),
-    });
-  }
-
-  protected async processForRole(role: string) {
-    const row = first(
-      this.ctx.storage.sql.exec<{ process_id: string }>(
-        'SELECT process_id FROM ghostbuild_sandbox_processes WHERE role = ?',
-        role,
-      ),
-    );
-    if (!row) {
-      return null;
-    }
-    const process = await this.sandboxProcesses.getProcess(row.process_id).catch(() => null);
-    if (!process) {
-      this.clearProcessForRole(role);
-    }
-    return process;
-  }
-
-  protected setProcessForRole(role: string, processId: string): void {
-    this.ctx.storage.sql.exec(
-      `INSERT INTO ghostbuild_sandbox_processes (role, process_id) VALUES (?, ?)
-       ON CONFLICT(role) DO UPDATE SET process_id = excluded.process_id`,
-      role,
-      processId,
-    );
-  }
-
-  protected clearProcessForRole(role: string, processId?: string): void {
-    if (processId) {
-      this.ctx.storage.sql.exec(
-        'DELETE FROM ghostbuild_sandbox_processes WHERE role = ? AND process_id = ?',
-        role,
-        processId,
-      );
-      return;
-    }
-    this.ctx.storage.sql.exec('DELETE FROM ghostbuild_sandbox_processes WHERE role = ?', role);
-  }
-
-  interceptWorkspaceOutbound(host: string, ref: WorkspaceRef): Promise<void> {
-    const exports = this.ctx.exports as unknown as {
-      WorkspaceProxy(options: { props: WorkspaceRef }): Fetcher;
-    };
-    return this.ctx.container!.interceptOutboundHttp(host, exports.WorkspaceProxy({ props: ref }));
-  }
-
-  fetchComputerPort(port: number, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    return this.ctx.container!.getTcpPort(port).fetch(input, init);
-  }
-
-  computerPort(port: number): Fetcher {
-    return this.ctx.container!.getTcpPort(port);
-  }
-}
-
-class SandboxComputerHost implements IWorkspaceContainerAPI {
-  constructor(private readonly sandbox: ComputerSandboxBase) {}
-
-  start(env: Record<string, string>): Promise<void> {
-    return this.sandbox.startComputerd(env);
-  }
-
-  restart(env: Record<string, string>): Promise<void> {
-    return this.sandbox.restartComputerd(env);
-  }
-
-  interceptOutboundHttp(host: string, workspace: WorkspaceRef): Promise<void> {
-    return this.sandbox.interceptWorkspaceOutbound(host, workspace);
-  }
-
-  fetchPort(port: number, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    return this.sandbox.fetchComputerPort(port, input, init);
-  }
-
-  port(port: number): Fetcher {
-    return this.sandbox.computerPort(port);
-  }
-
-  status() {
-    return this.sandbox.computerdStatus();
-  }
-
-  async exitInfo() {
-    return (await this.sandbox.computerdStatus()).exit;
-  }
-}
-
-function computerWorkspaceOptions(
-  self: InstanceType<typeof ComputerSandboxBase>,
-  retryScheduler: SyncRetryScheduler,
-): WorkspaceOptions {
-  const { ctx } = self as unknown as { ctx: DurableObjectState };
-  return {
-    storage: ctx.storage as unknown as DurableObjectStorageLike,
-    backends: [self.containerBackend],
-    waitUntil: (promise) => ctx.waitUntil(promise),
-    retryScheduler,
-    retry: { initialDelayMs: 1_000, maxDelayMs: 60_000, maxAttempts: 5 },
-  };
-}
-
-export class ProjectWorkspace extends ComputerSandboxBase {
+export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
   #workspace: Workspace;
   readonly #toolOperations: ToolOperationJournal;
   readonly #operationLane: WorkspaceOperationLane;
@@ -3519,8 +3285,6 @@ async function handleUserRequest(
       userId: capability.subject,
       executionCtx: ctx,
     });
-  } else if (request.method === 'POST' && url.pathname === '/v1/chats/store') {
-    response = await userRuntimeStoreChatAction({ request, env: sharedEnv, userId: capability.subject });
   } else if (request.method === 'POST' && url.pathname === '/v1/chats/messages') {
     response = await userRuntimeInitialMessagesAction({
       request,

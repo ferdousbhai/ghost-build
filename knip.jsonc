@@ -12,8 +12,9 @@
         "**/*.spec.{ts,tsx}",
         "tests/workerd/**/*.integration.ts",
         "tests/workerd/server-dependencies.stub.ts",
-        // Bundled and deployed into each user's Cloudflare account.
-        "user-workspace-runtime/src/index.ts",
+        // Child processes invoked by the canonical generated-artifact command.
+        "make-bootstrap-snapshot.js",
+        "scripts/build-user-workspace-runtime.mjs",
       ],
       "project": ["**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!", "!.ghostbuild-runtime-security-*/**"],
       "ignore": [
@@ -28,6 +29,10 @@
     "ghostbuild-agent": {
       "entry": ["**/*.test.ts"],
       "project": ["**/*.{ts,mts}"],
+    },
+    "user-workspace-runtime": {
+      "entry": ["src/index.ts", "src/**/*.test.ts"],
+      "project": ["src/**/*.ts"],
     },
     "template": {
       "entry": ["src/router.tsx"],

@@ -15,13 +15,7 @@ import {
 } from './data-api';
 import { loadAllSubchats } from './data-page-loader';
 import { queryClient } from '~/lib/stores/reactQueryClient';
-import {
-  ACCOUNT_LOCAL_REPLICA_SCHEMA_VERSION,
-  ACCOUNT_LOCAL_REPLICA_GC_TIME,
-  registerAccountCollectionDisposer,
-  type AccountLocalReplica,
-  useAccountLocalReplica,
-} from './account-local-replica';
+import { registerClientCollectionDisposer } from './client-collections';
 import { useQueryCacheError } from './use-query-cache-error';
 
 type SubchatQueryArgs = { chatId: string; sessionId: string };
@@ -63,27 +57,17 @@ export function subchatQueryKey(args: SubchatQueryArgs | 'skip') {
   return ['ghostbuild-data', api.subchats.get, args] as const;
 }
 
-function createSubchatCollection(args: SubchatQueryArgs, replica: AccountLocalReplica | null) {
-  const queryOptions = queryCollectionOptions({
-    id: `subchats:${args.chatId}`,
-    schema: subchatSummarySchema,
-    queryKey: subchatQueryKey(args),
-    queryFn: ({ signal }) => loadAllSubchats(args.chatId, args.sessionId, signal),
-    queryClient,
-    getKey: (item) => item.subchatIndex,
-    persistedGcTime: ACCOUNT_LOCAL_REPLICA_GC_TIME,
-  });
-  if (!replica) {
-    return createCollection(queryOptions);
-  }
-  return createCollection({
-    ...replica.persistedCollectionOptions({
-      ...queryOptions,
-      persistence: replica.persistence,
-      schemaVersion: ACCOUNT_LOCAL_REPLICA_SCHEMA_VERSION,
+function createSubchatCollection(args: SubchatQueryArgs) {
+  return createCollection(
+    queryCollectionOptions({
+      id: `subchats:${args.chatId}`,
+      schema: subchatSummarySchema,
+      queryKey: subchatQueryKey(args),
+      queryFn: ({ signal }) => loadAllSubchats(args.chatId, args.sessionId, signal),
+      queryClient,
+      getKey: (item) => item.subchatIndex,
     }),
-    schema: subchatSummarySchema,
-  });
+  );
 }
 
 type SubchatCollection = ReturnType<typeof createSubchatCollection>;
@@ -92,16 +76,16 @@ const subchatCollections = new Map<string, SubchatCollection>();
 const activeSubchatCollections = new Map<string, SubchatCollection>();
 const MAX_SUBCHAT_COLLECTIONS = 32;
 
-registerAccountCollectionDisposer(async () => {
+registerClientCollectionDisposer(async () => {
   const collections = new Set(subchatCollections.values());
   subchatCollections.clear();
   activeSubchatCollections.clear();
   await Promise.allSettled([...collections].map((collection) => collection.cleanup()));
 });
 
-function getSubchatCollection(args: SubchatQueryArgs, replica: AccountLocalReplica | null) {
+function getSubchatCollection(args: SubchatQueryArgs) {
   const scopeKey = `${args.sessionId}:${args.chatId}`;
-  const key = `${args.sessionId}:${args.chatId}:${replica ? 'persisted' : 'memory'}`;
+  const key = scopeKey;
   const existing = subchatCollections.get(key);
   if (existing) {
     subchatCollections.delete(key);
@@ -109,7 +93,7 @@ function getSubchatCollection(args: SubchatQueryArgs, replica: AccountLocalRepli
     activeSubchatCollections.set(scopeKey, existing);
     return existing;
   }
-  const collection = createSubchatCollection(args, replica);
+  const collection = createSubchatCollection(args);
   subchatCollections.set(key, collection);
   activeSubchatCollections.set(scopeKey, collection);
   if (subchatCollections.size > MAX_SUBCHAT_COLLECTIONS) {
@@ -138,9 +122,7 @@ export async function refreshSubchats(args: SubchatQueryArgs): Promise<void> {
 }
 
 export function useAllSubchatsState(args: SubchatQueryArgs | 'skip') {
-  const sessionId = args === 'skip' ? undefined : args.sessionId;
-  const replica = useAccountLocalReplica(sessionId);
-  const collection = args !== 'skip' && replica !== undefined ? getSubchatCollection(args, replica) : undefined;
+  const collection = args !== 'skip' ? getSubchatCollection(args) : undefined;
   const query = useLiveQuery(() => collection, [collection]);
   const error = useQueryCacheError(args === 'skip' ? undefined : subchatQueryKey(args));
   const retry = useCallback(() => {

@@ -51,18 +51,6 @@ export function assetsOverRawLimit(assets, maxRawKilobytes) {
   return assets.filter((asset) => asset.rawBytes > maxRawBytes);
 }
 
-export function partitionBundleAssets(assets, isolatedAssetPrefixes) {
-  const isolatedAssets = [];
-  const primaryAssets = [];
-  for (const asset of assets) {
-    const target = isolatedAssetPrefixes.some((prefix) => asset.file.startsWith(prefix))
-      ? isolatedAssets
-      : primaryAssets;
-    target.push(asset);
-  }
-  return { isolatedAssets, primaryAssets };
-}
-
 /**
  * @param {{ brotliBytes: number, gzipBytes: number }} totals
  * @param {{ maxTotalBrotliKilobytes?: number | null, maxTotalGzipKilobytes?: number | null }} limits
@@ -90,11 +78,7 @@ function parseArguments(args) {
   const options = {
     directory: DEFAULT_ASSET_DIRECTORY,
     json: false,
-    isolatedAssetPrefixes: [],
     limit: 20,
-    maxIsolatedBrotliKilobytes: null,
-    maxIsolatedGzipKilobytes: null,
-    maxIsolatedRawKilobytes: null,
     maxRawKilobytes: null,
     maxTotalBrotliKilobytes: null,
     maxTotalGzipKilobytes: null,
@@ -103,20 +87,12 @@ function parseArguments(args) {
   for (const argument of args) {
     if (argument === '--json') {
       options.json = true;
-    } else if (argument.startsWith('--isolated-asset-prefix=')) {
-      options.isolatedAssetPrefixes.push(argument.slice('--isolated-asset-prefix='.length));
     } else if (argument.startsWith('--directory=')) {
       options.directory = fileURLToPath(new URL(argument.slice('--directory='.length), `file://${process.cwd()}/`));
     } else if (argument.startsWith('--limit=')) {
       options.limit = Number.parseInt(argument.slice('--limit='.length), 10);
     } else if (argument.startsWith('--max-raw-kb=')) {
       options.maxRawKilobytes = Number.parseFloat(argument.slice('--max-raw-kb='.length));
-    } else if (argument.startsWith('--max-isolated-raw-kb=')) {
-      options.maxIsolatedRawKilobytes = Number.parseFloat(argument.slice('--max-isolated-raw-kb='.length));
-    } else if (argument.startsWith('--max-isolated-gzip-kb=')) {
-      options.maxIsolatedGzipKilobytes = Number.parseFloat(argument.slice('--max-isolated-gzip-kb='.length));
-    } else if (argument.startsWith('--max-isolated-brotli-kb=')) {
-      options.maxIsolatedBrotliKilobytes = Number.parseFloat(argument.slice('--max-isolated-brotli-kb='.length));
     } else if (argument.startsWith('--max-total-gzip-kb=')) {
       options.maxTotalGzipKilobytes = Number.parseFloat(argument.slice('--max-total-gzip-kb='.length));
     } else if (argument.startsWith('--max-total-brotli-kb=')) {
@@ -133,18 +109,6 @@ function parseArguments(args) {
   if (options.maxRawKilobytes !== null && !(options.maxRawKilobytes > 0)) {
     throw new Error('--max-raw-kb must be a positive number.');
   }
-  if (options.isolatedAssetPrefixes.some((prefix) => prefix.length === 0)) {
-    throw new Error('--isolated-asset-prefix must not be empty.');
-  }
-  if (options.maxIsolatedRawKilobytes !== null && !(options.maxIsolatedRawKilobytes > 0)) {
-    throw new Error('--max-isolated-raw-kb must be a positive number.');
-  }
-  if (options.maxIsolatedGzipKilobytes !== null && !(options.maxIsolatedGzipKilobytes > 0)) {
-    throw new Error('--max-isolated-gzip-kb must be a positive number.');
-  }
-  if (options.maxIsolatedBrotliKilobytes !== null && !(options.maxIsolatedBrotliKilobytes > 0)) {
-    throw new Error('--max-isolated-brotli-kb must be a positive number.');
-  }
   if (options.maxTotalGzipKilobytes !== null && !(options.maxTotalGzipKilobytes > 0)) {
     throw new Error('--max-total-gzip-kb must be a positive number.');
   }
@@ -160,18 +124,9 @@ function formatKilobytes(bytes) {
 }
 
 function printReport(assets, excludedSourceMaps, options) {
-  const { isolatedAssets, primaryAssets } = partitionBundleAssets(assets, options.isolatedAssetPrefixes);
-  const totals = summarizeBundleAssets(primaryAssets);
-  const isolatedTotals = summarizeBundleAssets(isolatedAssets);
-  const oversizedAssets =
-    options.maxRawKilobytes === null ? [] : assetsOverRawLimit(primaryAssets, options.maxRawKilobytes);
-  const oversizedIsolatedAssets =
-    options.maxIsolatedRawKilobytes === null ? [] : assetsOverRawLimit(isolatedAssets, options.maxIsolatedRawKilobytes);
+  const totals = summarizeBundleAssets(assets);
+  const oversizedAssets = options.maxRawKilobytes === null ? [] : assetsOverRawLimit(assets, options.maxRawKilobytes);
   const totalLimitErrors = totalSizeLimitErrors(totals, options);
-  const isolatedLimitErrors = totalSizeLimitErrors(isolatedTotals, {
-    maxTotalBrotliKilobytes: options.maxIsolatedBrotliKilobytes,
-    maxTotalGzipKilobytes: options.maxIsolatedGzipKilobytes,
-  }).map((error) => `isolated asset ${error}`);
 
   if (options.json) {
     console.log(
@@ -179,12 +134,7 @@ function printReport(assets, excludedSourceMaps, options) {
         {
           assets,
           excludedSourceMaps,
-          isolatedAssets,
-          isolatedLimitErrors,
-          isolatedTotals,
           oversizedAssets,
-          oversizedIsolatedAssets,
-          primaryAssets,
           totalLimitErrors,
           totals,
         },
@@ -202,13 +152,8 @@ function printReport(assets, excludedSourceMaps, options) {
     }
 
     console.log(
-      `\n${primaryAssets.length} primary assets total: ${formatKilobytes(totals.rawBytes)} raw / ${formatKilobytes(totals.gzipBytes)} gzip / ${formatKilobytes(totals.brotliBytes)} brotli`,
+      `\n${assets.length} assets total: ${formatKilobytes(totals.rawBytes)} raw / ${formatKilobytes(totals.gzipBytes)} gzip / ${formatKilobytes(totals.brotliBytes)} brotli`,
     );
-    if (isolatedAssets.length > 0) {
-      console.log(
-        `${isolatedAssets.length} isolated asset(s) total: ${formatKilobytes(isolatedTotals.rawBytes)} raw / ${formatKilobytes(isolatedTotals.gzipBytes)} gzip / ${formatKilobytes(isolatedTotals.brotliBytes)} brotli`,
-      );
-    }
     console.log(`${excludedSourceMaps.length} client source map(s) excluded from deployment and bundle accounting.`);
 
     if (oversizedAssets.length > 0) {
@@ -216,25 +161,12 @@ function printReport(assets, excludedSourceMaps, options) {
         `\n${oversizedAssets.length} asset(s) exceed the ${options.maxRawKilobytes} kB raw limit: ${oversizedAssets.map((asset) => asset.file).join(', ')}`,
       );
     }
-    if (oversizedIsolatedAssets.length > 0) {
-      console.error(
-        `\n${oversizedIsolatedAssets.length} isolated asset(s) exceed the ${options.maxIsolatedRawKilobytes} kB raw limit: ${oversizedIsolatedAssets.map((asset) => asset.file).join(', ')}`,
-      );
-    }
     for (const error of totalLimitErrors) {
-      console.error(`\n${error}.`);
-    }
-    for (const error of isolatedLimitErrors) {
       console.error(`\n${error}.`);
     }
   }
 
-  return (
-    oversizedAssets.length === 0 &&
-    oversizedIsolatedAssets.length === 0 &&
-    totalLimitErrors.length === 0 &&
-    isolatedLimitErrors.length === 0
-  );
+  return oversizedAssets.length === 0 && totalLimitErrors.length === 0;
 }
 
 function main() {

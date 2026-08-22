@@ -39,7 +39,6 @@ export const Chat = memo(
   ({
     initialMessages,
     partCache,
-    storeMessageHistory,
     initializeChat,
     discardEmptyChat,
     onBuilderRequestStart,
@@ -100,7 +99,6 @@ export const Chat = memo(
         accountId={userId}
         initialMessages={initialMessages}
         partCache={partCache}
-        storeMessageHistory={storeMessageHistory}
         initializeChat={initializeChat}
         discardEmptyChat={discardEmptyChat}
         onBuilderRequestStart={onBuilderRequestStart}
@@ -186,7 +184,6 @@ const AuthenticatedChat = memo(
     accountId,
     initialMessages,
     partCache,
-    storeMessageHistory,
     initializeChat,
     discardEmptyChat,
     onBuilderRequestStart,
@@ -236,7 +233,6 @@ const AuthenticatedChat = memo(
       error,
       isRecovering,
       streamStatus,
-      transcriptCheckpoint,
       validationStage,
       deployment,
       deployValidatedRevision,
@@ -254,8 +250,6 @@ const AuthenticatedChat = memo(
       initialMessages,
       partCache,
       streamStatus,
-      storeMessageHistory,
-      transcriptCheckpoint,
     });
 
     useEffect(() => {

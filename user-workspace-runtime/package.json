@@ -1,0 +1,14 @@
+{
+  "name": "@ghostbuild/user-workspace-runtime",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    "./protocol": "./src/protocol.ts"
+  },
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "packageManager": "pnpm@11.14.0"
+}

@@ -12,8 +12,8 @@
  *
  * What does get more expensive is idling: a warm container holds 12 GiB instead of 4, roughly
  * $0.11 per idle hour, and the workspace is now warmed when a chat opens rather than when the
- * first command runs — so a chat nobody sends a message in still pays. That is what
- * `WORKSPACE_CONTAINER_SLEEP_AFTER` bounds.
+ * first command runs — so a chat nobody sends a message in still pays. The workspace runtime's
+ * ten-minute idle window bounds that cost.
  */
 export const PROJECT_WORKSPACE_CONTAINER_INSTANCE_TYPE = 'standard-4';
 export const PROJECT_WORKSPACE_CONTAINER_MAX_INSTANCES = 10;
@@ -28,17 +28,3 @@ export const PROJECT_WORKSPACE_CONTAINER_DIMENSIONS = {
   memoryMib: 12_288,
   diskMb: 20_000,
 } as const;
-
-/**
- * How long an idle workspace container stays warm.
- *
- * Ten minutes matches the SDK default, but it is set here so it is a decision rather than an
- * inherited one — the previous comment claimed it was deliberate while nothing in the repository
- * configured it at all.
- *
- * The number is affordable because of the image, not in spite of it: a cold start no longer means
- * installing pnpm from npm, pulling computerd from GHCR, and filling an empty pnpm store, so
- * losing a warm container costs seconds rather than minutes. That is what makes a bounded idle
- * window a real choice instead of something to avoid at any price.
- */
-export const WORKSPACE_CONTAINER_SLEEP_AFTER = '10m';

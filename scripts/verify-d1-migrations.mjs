@@ -52,10 +52,14 @@ const migrationPolicies = [
       '0004_chat_title_sources.sql': '0b0d6c74cc07870155320d75f2be2d10d8aac09090db0fbcefcfd84fe19b1af9',
       '0005_deployment_activity.sql': 'a092ceefd76d8e0af1afd73e2d11e03ddcae1e9694fc5673a55f985d65854cbd',
       '0006_runtime_controls.sql': '952b8c35936e312b128eda8aaaf45453a312aef4333f9812a293ef4cc79294e6',
+      '0007_builder_agent_transcript_authority.sql': 'ab725f59263f1c754bbef8b3a930bc00bcc63c2978e597b3e169a0d4c84ec616',
     },
     contractAllowlist: {
       // Chat identity has one immutable key; remove the unused alternate URL column and index.
       '0002_remove_chat_url_id.sql': '0f09b6846af83b969db428ee1177d5b17fbf0210cc1c53368167d65dfb4004f1',
+      // BuilderAgent now owns transcript content and revisions. Rebuild the D1
+      // catalog table once to remove checkpoint columns that no runtime reads.
+      '0007_builder_agent_transcript_authority.sql': 'ab725f59263f1c754bbef8b3a930bc00bcc63c2978e597b3e169a0d4c84ec616',
     },
   },
   {

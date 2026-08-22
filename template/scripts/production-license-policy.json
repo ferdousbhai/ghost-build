@@ -17,12 +17,8 @@
     "Unlicense"
   ],
   "metadataOnlyPackageAllowlist": [
-    "@ai-sdk/provider-utils@5.0.18",
-    "@cfworker/json-schema@4.1.1",
-    "@cloudflare/workers-types@5.20260801.1",
     "@napi-rs/wasm-runtime@1.2.2",
     "@rolldown/binding-wasm32-wasi@1.2.1",
-    "@tybys/wasm-util@0.10.3",
-    "partyserver@0.5.9"
+    "@tybys/wasm-util@0.10.3"
   ]
 }

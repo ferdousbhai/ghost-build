@@ -10,11 +10,8 @@ import {
   type BuilderWorkspaceSyncEntry,
   type BuilderWorkspaceSyncPage,
 } from '~/agents/builder-workspace-types';
-import type { AccountLocalReplica } from '~/lib/cloudflare/account-local-replica';
 import { sha256Hex } from '~/lib/hex-digest';
 
-const WORKSPACE_REVISION_METADATA_KEY = 'workspaceRevision';
-const WORKSPACE_COLLECTION_SCHEMA_VERSION = 1;
 const WORKSPACE_RPC_TIMEOUT_MS = 30_000;
 const WORKSPACE_ROOT = '/home/project';
 const MAX_SYNC_CURSOR_CHARS = 256;
@@ -22,22 +19,8 @@ const MAX_SYNC_RESTARTS = 3;
 const MAX_BASE64_CONTENT_CHARS = Math.ceil(BUILDER_WORKSPACE_MAX_FILE_BYTES / 3) * 4;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
-const HYDRATED_WORKSPACE_KEYS = new Set([
-  'path',
-  'content',
-  'encoding',
-  'size',
-  'sha256',
-  'revision',
-  '$synced',
-  '$origin',
-  '$key',
-  '$collectionId',
-]);
 
 const revisionSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
-/** Any plain object; the persisted row is keyed against HYDRATED_WORKSPACE_KEYS before it is parsed. */
-const hydratedWorkspaceRecordSchema = z.looseObject({});
 const workspacePathSchema = z
   .string()
   .min(WORKSPACE_ROOT.length + 2)
@@ -52,7 +35,7 @@ const workspaceFileFields = {
   revision: revisionSchema,
 };
 
-export type BuilderWorkspaceFileRecord = {
+type BuilderWorkspaceFileRecord = {
   path: string;
   content: string;
   encoding: BuilderWorkspaceEncoding;
@@ -140,17 +123,14 @@ export type BuilderWorkspacePullResult = {
 };
 
 /**
- * Bridges the BuilderAgent revision protocol into a TanStack DB sync source.
- * The persistence wrapper hydrates committed rows and collection metadata from
- * browser SQLite before this source requests server changes.
+ * Bridges the authoritative BuilderAgent revision protocol into an in-memory
+ * TanStack DB presentation collection.
  */
 class BuilderWorkspaceCollectionSource {
   #params: WorkspaceSyncParams | null = null;
   #disposed = false;
   #revision = 0;
-  #collectionPreload: (() => Promise<void>) | null = null;
   readonly #started = deferred<void>();
-  readonly #hydrationReady = deferred<void>();
   readonly #initialPull = deferred<BuilderWorkspacePullResult>();
 
   constructor(private readonly agent: BuilderWorkspaceAgent) {}
@@ -159,13 +139,10 @@ class BuilderWorkspaceCollectionSource {
     rowUpdateMode: 'full',
     sync: (params) => {
       this.#params = params;
-      this.#revision = persistedRevision(params.metadata?.collection.get(WORKSPACE_REVISION_METADATA_KEY));
+      this.#revision = 0;
       this.#started.resolve();
-
-      // The persistence wrapper delays this mark until OPFS hydration and any
-      // sync transactions buffered behind it have completed.
       params.markReady();
-      void this.#initialize(params).then(this.#initialPull.resolve, this.#initialPull.reject);
+      void this.#pullFromRevision(0, true).then(this.#initialPull.resolve, this.#initialPull.reject);
 
       return () => {
         this.#disposed = true;
@@ -182,18 +159,6 @@ class BuilderWorkspaceCollectionSource {
     return this.#initialPull.promise;
   }
 
-  setCollectionPreload(preload: () => Promise<void>): void {
-    this.#collectionPreload = preload;
-  }
-
-  async preload(): Promise<void> {
-    if (!this.#collectionPreload) {
-      throw new Error('The durable workspace collection is not configured.');
-    }
-    await this.#collectionPreload();
-    await this.#hydrationReady.promise;
-  }
-
   async pull(): Promise<BuilderWorkspacePullResult> {
     await this.#started.promise;
     return this.#pullFromRevision(this.#revision);
@@ -202,29 +167,6 @@ class BuilderWorkspaceCollectionSource {
   async replaceFromSnapshot(): Promise<BuilderWorkspacePullResult> {
     await this.#started.promise;
     return this.#pullFromRevision(0, true);
-  }
-
-  async #initialize(params: WorkspaceSyncParams): Promise<BuilderWorkspacePullResult> {
-    try {
-      if (!this.#collectionPreload) {
-        throw new Error('The durable workspace collection is not configured.');
-      }
-      await this.#collectionPreload();
-      if (this.#disposed || this.#params !== params) {
-        throw new Error('The durable workspace connection was closed.');
-      }
-      if (!(await isValidHydratedWorkspace(params.collection.toArray, this.#revision))) {
-        this.#commit(params, 'snapshot', [], 0);
-        this.#revision = 0;
-        this.#hydrationReady.resolve();
-        return this.#pullFromRevision(0, true);
-      }
-      this.#hydrationReady.resolve();
-      return this.#pullFromRevision(this.#revision);
-    } catch (error) {
-      this.#hydrationReady.reject(error);
-      throw error;
-    }
   }
 
   async #pullFromRevision(initialFromRevision: number, requireSnapshot = false): Promise<BuilderWorkspacePullResult> {
@@ -366,7 +308,7 @@ class BuilderWorkspaceCollectionSource {
       }
 
       const committedMode = requireSnapshot ? 'snapshot' : mode;
-      this.#commit(this.#params, committedMode, entries, targetRevision);
+      this.#commit(this.#params, committedMode, entries);
       this.#revision = targetRevision;
       return { mode: committedMode, entries, revision: targetRevision };
     }
@@ -376,7 +318,6 @@ class BuilderWorkspaceCollectionSource {
     params: WorkspaceSyncParams,
     mode: BuilderWorkspacePullResult['mode'],
     entries: BuilderWorkspaceSyncEntry[],
-    revision: number,
   ): void {
     params.begin({ immediate: true });
     if (mode === 'snapshot') {
@@ -399,7 +340,6 @@ class BuilderWorkspaceCollectionSource {
         });
       }
     }
-    params.metadata?.collection.set(WORKSPACE_REVISION_METADATA_KEY, revision);
     params.commit();
   }
 
@@ -410,11 +350,7 @@ class BuilderWorkspaceCollectionSource {
 
 export type BuilderWorkspaceCollection = ReturnType<typeof createBuilderWorkspaceCollection>['collection'];
 
-export function createBuilderWorkspaceCollection(args: {
-  agent: BuilderWorkspaceAgent;
-  workspaceId: string;
-  replica: AccountLocalReplica | null;
-}) {
+export function createBuilderWorkspaceCollection(args: { agent: BuilderWorkspaceAgent; workspaceId: string }) {
   const source = new BuilderWorkspaceCollectionSource(args.agent);
   const options = {
     id: `builder-workspace:${args.workspaceId}`,
@@ -422,21 +358,7 @@ export function createBuilderWorkspaceCollection(args: {
     getKey: (file: BuilderWorkspaceFileRecord) => file.path,
     sync: source.sync,
   };
-  const collection = createCollection(
-    args.replica
-      ? {
-          ...args.replica.persistedCollectionOptions({
-            ...options,
-            persistence: args.replica.persistence,
-            schemaVersion: WORKSPACE_COLLECTION_SCHEMA_VERSION,
-          }),
-          schema: workspaceFileSchema,
-        }
-      : options,
-  );
-  const collectionPreload = collection.preload.bind(collection);
-  source.setCollectionPreload(collectionPreload);
-  collection.preload = () => source.preload();
+  const collection = createCollection(options);
   return { collection, source };
 }
 
@@ -452,10 +374,6 @@ export function workspaceCollectionSnapshot(collection: BuilderWorkspaceCollecti
       revision: file.revision,
     }))
     .sort((left, right) => left.path.localeCompare(right.path));
-}
-
-function persistedRevision(value: unknown): number {
-  return revisionSchema.catch(0).parse(value);
 }
 
 function isCanonicalWorkspacePath(path: string): boolean {
@@ -527,20 +445,6 @@ function sameWorkspaceState(
   );
 }
 
-async function isValidHydratedWorkspace(files: readonly unknown[], revision: number): Promise<boolean> {
-  const totals = workspaceFileTotals(files, revision);
-  if (!totals) {
-    return false;
-  }
-  for (const file of files) {
-    const parsed = parseHydratedWorkspaceFile(file);
-    if (!parsed || (await sha256FileContent(parsed.content, parsed.encoding)) !== parsed.sha256) {
-      return false;
-    }
-  }
-  return true;
-}
-
 function workspaceFileTotals(
   files: readonly unknown[],
   revision: number,
@@ -550,33 +454,16 @@ function workspaceFileTotals(
   }
   let totalBytes = 0;
   for (const file of files) {
-    const parsed = parseHydratedWorkspaceFile(file);
-    if (!parsed || parsed.revision !== revision) {
+    const parsed = workspaceFileSchema.safeParse(file);
+    if (!parsed.success || parsed.data.revision !== revision) {
       return null;
     }
-    totalBytes += parsed.size;
+    totalBytes += parsed.data.size;
     if (totalBytes > BUILDER_WORKSPACE_MAX_TOTAL_BYTES) {
       return null;
     }
   }
   return { fileCount: files.length, totalBytes };
-}
-
-function parseHydratedWorkspaceFile(value: unknown): BuilderWorkspaceFileRecord | null {
-  const record = hydratedWorkspaceRecordSchema.safeParse(value);
-  if (!record.success || Object.keys(record.data).some((key) => !HYDRATED_WORKSPACE_KEYS.has(key))) {
-    return null;
-  }
-  // The persistence keys above are dropped rather than carried into the collection record.
-  const parsed = workspaceFileSchema.safeParse({
-    path: record.data.path,
-    content: record.data.content,
-    encoding: record.data.encoding,
-    size: record.data.size,
-    sha256: record.data.sha256,
-    revision: record.data.revision,
-  });
-  return parsed.success ? parsed.data : null;
 }
 
 async function sha256FileContent(content: string, encoding: BuilderWorkspaceEncoding): Promise<string> {

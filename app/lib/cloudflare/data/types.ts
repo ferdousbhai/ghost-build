@@ -5,6 +5,7 @@ export type ChatRow = {
   description: string | null;
   timestamp: string;
   last_subchat_index: number;
+  has_messages: number;
   is_deleted: number;
 };
 
@@ -13,11 +14,6 @@ export type ChatTranscriptRow = {
   subchat_index: number;
   generation: number;
   agent_name: string;
-  head_revision: number;
-  head_digest: string | null;
-  head_message_count: number;
-  last_message_rank: number;
-  part_index: number;
   description: string | null;
   parent_subchat_index: number | null;
   parent_generation: number | null;

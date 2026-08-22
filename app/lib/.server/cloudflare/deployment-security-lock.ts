@@ -1,7 +1,6 @@
 import { sha256Hex } from '~/lib/hex-digest';
 const APP_AGENT_PROTECTED_PACKAGES = [
   '@babel/core',
-  '@cloudflare/ai-chat',
   '@cloudflare/vite-plugin',
   '@cloudflare/workers-types',
   '@eslint/js',
@@ -12,8 +11,6 @@ const APP_AGENT_PROTECTED_PACKAGES = [
   '@types/react',
   '@types/react-dom',
   '@vitejs/plugin-react',
-  'agents',
-  'ai',
   'autoprefixer',
   'eslint',
   'eslint-plugin-react-hooks',
@@ -25,10 +22,8 @@ const APP_AGENT_PROTECTED_PACKAGES = [
   'typescript',
   'typescript-eslint',
   'vite',
-  'workers-ai-provider',
   'wrangler',
   'yaml',
-  'zod',
 ] as const;
 
 type JsonRecord = Record<string, unknown>;

@@ -31,12 +31,7 @@ export function prepareAppResourceGcCandidateStatement(
   args: { initialId: string; ownerId: string; now?: number; requireEmpty?: boolean },
 ): D1PreparedStatement {
   const now = args.now ?? Date.now();
-  const emptyClause = args.requireEmpty
-    ? `AND NOT EXISTS (
-         SELECT 1 FROM chat_transcripts
-         WHERE chat_transcripts.chat_id = chats.id AND chat_transcripts.head_revision > 0
-       )`
-    : '';
+  const emptyClause = args.requireEmpty ? 'AND chats.has_messages = 0' : '';
   return db
     .prepare(
       `INSERT INTO app_resource_gc_candidates (chat_id, not_before, created_at, attempts)

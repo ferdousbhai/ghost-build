@@ -7,11 +7,7 @@ const CLIENT_ID_ENV = 'CLOUDFLARE_OAUTH_CLIENT_ID';
 const MAX_CLIENT_ID_LENGTH = 512;
 const COMMIT_SHA_PATTERN = /^[a-f0-9]{40}$/;
 const WORKERS_BUILD_UUID_PATTERN = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
-const WORKERS_BUILD_GENERATED_OUTPUTS = new Set([
-  'app/generated/builder-skill-assets.generated.ts',
-  'app/generated/user-workspace-runtime.generated.ts',
-  'app/routeTree.gen.ts',
-]);
+const WORKERS_BUILD_GENERATED_OUTPUTS = new Set(['app/routeTree.gen.ts']);
 
 /**
  * @typedef {(command: string, args: readonly string[], options: {stdio: 'inherit'}) => {
@@ -107,8 +103,8 @@ export function validateWorkersBuildMetadata({ env = process.env, spawn = spawnS
 }
 
 /**
- * Validation regenerates these two checked-in build artifacts using the pinned
- * Linux toolchain. Permit only ordinary modifications to those exact paths;
+ * Validation regenerates the checked-in route tree using the pinned toolchain.
+ * Permit only ordinary modifications to that exact path;
  * every other tracked or untracked change still fails closed.
  */
 export function findUnexpectedDeployChanges(status, { workersBuild = false } = {}) {

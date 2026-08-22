@@ -1,9 +1,18 @@
 import { defineConfig, type PluginOption } from "vite";
+import { readFileSync } from "node:fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const projectDir = path.dirname(fileURLToPath(import.meta.url));
-const baseAlias: Record<string, string> = {
+const packageJson = JSON.parse(
+  readFileSync(path.resolve(projectDir, "package.json"), "utf8"),
+);
+const agentCapabilityEnabled = Object.hasOwn(
+  packageJson.dependencies ?? {},
+  "agents",
+);
+const agentsViteModule = "agents/vite";
+const baseAlias = {
   "@": path.resolve(projectDir, "./src"),
   "#": path.resolve(projectDir, "./src"),
 };
@@ -13,26 +22,31 @@ async function productionPlugins(
   const [
     { tanstackStart },
     { cloudflare },
-    { default: agents },
     { default: react },
     { productionModuleSecurityPlugin },
   ] = await Promise.all([
     import("@tanstack/react-start/plugin/vite"),
     import("@cloudflare/vite-plugin"),
-    import("agents/vite"),
     import("@vitejs/plugin-react"),
     import("./scripts/lib/runtime-module-security.ts"),
   ]);
+  const agentPlugins: PluginOption[] = [];
+  if (agentCapabilityEnabled) {
+    const { default: agents } = await import(agentsViteModule);
+    agentPlugins.push(agents());
+  }
+  const cloudflareOptions = isolatedPreview
+    ? {
+        viteEnvironment: { name: "ssr" },
+        configPath: "./wrangler.preview.jsonc",
+        remoteBindings: false,
+      }
+    : { viteEnvironment: { name: "ssr" } };
 
   return [
     productionModuleSecurityPlugin(projectDir),
-    agents(),
-    cloudflare({
-      viteEnvironment: { name: "ssr" },
-      ...(isolatedPreview
-        ? { configPath: "./wrangler.preview.jsonc", remoteBindings: false }
-        : {}),
-    }),
+    ...agentPlugins,
+    cloudflare(cloudflareOptions),
     tanstackStart(),
     react(),
   ];

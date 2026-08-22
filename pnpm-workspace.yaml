@@ -1,6 +1,7 @@
 packages:
   - 'ghostbuild-agent'
   - 'template'
+  - 'user-workspace-runtime'
 ignoreWorkspaceRootCheck: true
 minimumReleaseAge: 1440
 minimumReleaseAgeIgnoreMissingTime: false
@@ -25,10 +26,7 @@ overrides:
   # current Cloudflare tooling.
   'sharp@<0.35.0': '0.35.3'
 allowBuilds:
-  # The OPFS adapter uses wa-sqlite's published dist artifacts. Its postinstall
-  # only downloads the unrelated optional PowerSync core.
   '@google/genai': false
-  '@journeyapps/wa-sqlite': false
   # Computer's shell emulation treats these native compression bindings as
   # optional. Keep their install scripts disabled in the Worker build.
   '@mongodb-js/zstd': false

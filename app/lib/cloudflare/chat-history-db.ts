@@ -7,13 +7,7 @@ import { executeDataOperation } from './client';
 import { api, type ChatHistorySummary } from './data-api';
 import { queryClient } from '~/lib/stores/reactQueryClient';
 import { loadAllChatHistory } from './data-page-loader';
-import {
-  ACCOUNT_LOCAL_REPLICA_SCHEMA_VERSION,
-  ACCOUNT_LOCAL_REPLICA_GC_TIME,
-  registerAccountCollectionDisposer,
-  type AccountLocalReplica,
-  useAccountLocalReplica,
-} from './account-local-replica';
+import { registerClientCollectionDisposer } from './client-collections';
 import { useQueryCacheError } from './use-query-cache-error';
 
 const chatHistorySummarySchema = z.object({
@@ -27,36 +21,24 @@ function chatHistoryQueryKey(sessionId: string) {
   return ['ghostbuild-data', api.messages.getAll, { sessionId }] as const;
 }
 
-function createChatHistoryCollection(sessionId: string, replica: AccountLocalReplica | null) {
-  const queryOptions = queryCollectionOptions({
-    id: `projects`,
-    schema: chatHistorySummarySchema,
-    queryKey: chatHistoryQueryKey(sessionId),
-    queryClient,
-    queryFn: ({ signal }) => loadAllChatHistory(sessionId, signal),
-    getKey: (item) => item.initialId,
-    persistedGcTime: ACCOUNT_LOCAL_REPLICA_GC_TIME,
-    onDelete: async ({ transaction }) => {
-      await Promise.all(
-        transaction.mutations.map((mutation) =>
-          executeDataOperation(api.messages.remove, { id: mutation.key, sessionId }),
-        ),
-      );
-    },
-  });
-  if (!replica) {
-    return createCollection(queryOptions);
-  }
-  return createCollection({
-    ...replica.persistedCollectionOptions({
-      ...queryOptions,
-      persistence: replica.persistence,
-      schemaVersion: ACCOUNT_LOCAL_REPLICA_SCHEMA_VERSION,
+function createChatHistoryCollection(sessionId: string) {
+  return createCollection(
+    queryCollectionOptions({
+      id: `projects`,
+      schema: chatHistorySummarySchema,
+      queryKey: chatHistoryQueryKey(sessionId),
+      queryClient,
+      queryFn: ({ signal }) => loadAllChatHistory(sessionId, signal),
+      getKey: (item) => item.initialId,
+      onDelete: async ({ transaction }) => {
+        await Promise.all(
+          transaction.mutations.map((mutation) =>
+            executeDataOperation(api.messages.remove, { id: mutation.key, sessionId }),
+          ),
+        );
+      },
     }),
-    // Preserve required-schema inference across the persistence wrapper's
-    // currently optional CollectionConfig schema declaration.
-    schema: chatHistorySummarySchema,
-  });
+  );
 }
 
 type ChatHistoryCollection = ReturnType<typeof createChatHistoryCollection>;
@@ -64,30 +46,28 @@ type ChatHistoryCollection = ReturnType<typeof createChatHistoryCollection>;
 const chatHistoryCollections = new Map<string, ChatHistoryCollection>();
 const activeChatHistoryCollections = new Map<string, ChatHistoryCollection>();
 
-registerAccountCollectionDisposer(async () => {
+registerClientCollectionDisposer(async () => {
   const collections = new Set(chatHistoryCollections.values());
   chatHistoryCollections.clear();
   activeChatHistoryCollections.clear();
   await Promise.allSettled([...collections].map((collection) => collection.cleanup()));
 });
 
-function getChatHistoryCollection(sessionId: string, replica: AccountLocalReplica | null) {
-  const cacheKey = `${sessionId}:${replica ? 'persisted' : 'memory'}`;
-  const existing = chatHistoryCollections.get(cacheKey);
+function getChatHistoryCollection(sessionId: string) {
+  const existing = chatHistoryCollections.get(sessionId);
   if (existing) {
     activeChatHistoryCollections.set(sessionId, existing);
     return existing;
   }
 
-  const collection = createChatHistoryCollection(sessionId, replica);
-  chatHistoryCollections.set(cacheKey, collection);
+  const collection = createChatHistoryCollection(sessionId);
+  chatHistoryCollections.set(sessionId, collection);
   activeChatHistoryCollections.set(sessionId, collection);
   return collection;
 }
 
 export function useChatHistory(sessionId: string | null | undefined) {
-  const replica = useAccountLocalReplica(sessionId);
-  const collection = sessionId && replica !== undefined ? getChatHistoryCollection(sessionId, replica) : undefined;
+  const collection = sessionId ? getChatHistoryCollection(sessionId) : undefined;
   const query = useLiveQuery(() => collection, [collection]);
   const error = useQueryCacheError(sessionId ? chatHistoryQueryKey(sessionId) : undefined);
   const retry = useCallback(() => {
@@ -95,14 +75,14 @@ export function useChatHistory(sessionId: string | null | undefined) {
   }, [collection]);
   return {
     projects: query.data ?? [],
-    isLoading: replica === undefined || query.isLoading,
+    isLoading: query.isLoading,
     error,
     retry,
   };
 }
 
 export async function removeChatHistoryItem(sessionId: string, initialId: string) {
-  const collection = activeChatHistoryCollections.get(sessionId) ?? getChatHistoryCollection(sessionId, null);
+  const collection = activeChatHistoryCollections.get(sessionId) ?? getChatHistoryCollection(sessionId);
   const tx = collection.delete(initialId, {
     metadata: { source: 'sidebar' },
   });

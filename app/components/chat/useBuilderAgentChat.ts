@@ -23,7 +23,6 @@ import { api } from '~/lib/cloudflare/data-api';
 import { description as descriptionStore } from '~/lib/stores/description';
 import {
   transcriptCheckpointsEqual,
-  transcriptIdentitiesEqual,
   stripTranscriptBaseMetadata,
   TRANSCRIPT_BASE_METADATA_KEY,
   type TranscriptIdentity,
@@ -35,7 +34,6 @@ import { toolProgressStore } from '~/lib/stores/tool-progress.client';
 import { useQueryClient } from '@tanstack/react-query';
 import { subchatQueryKey } from '~/lib/cloudflare/data-hooks';
 import { settleBuilderStop } from './builder-stop';
-import { useAccountLocalReplica } from '~/lib/cloudflare/account-local-replica';
 import { requireUserRuntimeEndpoint } from '~/lib/cloudflare/runtime-session';
 import { builderModelStore } from '~/lib/stores/builder-model.client';
 import { isWorkersAiModelId } from '~/lib/workers-ai-model';
@@ -98,7 +96,6 @@ export function useBuilderAgentChat(args: {
   );
   const currentSubchatIndex = useStore(subchatIndexStore) ?? 0;
   const previousSubchatIndexRef = useRef(currentSubchatIndex);
-  const workspaceReplica = useAccountLocalReplica(args.accountId);
   const [workspacePresentation, setWorkspacePresentation] = useState<{
     gate: AsyncGate;
     state: 'ready' | 'presentation-error';
@@ -265,13 +262,6 @@ export function useBuilderAgentChat(args: {
       gate.error ??= new Error('The durable workspace initialization was superseded.');
       gate.resolve();
     };
-    if (workspaceReplica === undefined) {
-      return () => {
-        if (activePresentationRef.current !== args.presentationId) {
-          settleSupersededGate();
-        }
-      };
-    }
     gate.started = true;
     gate.error = null;
     let disposed = false;
@@ -297,7 +287,6 @@ export function useBuilderAgentChat(args: {
         const agentRpc: BuilderWorkspaceAgent = builderAgent;
         const controller = await BuilderWorkspaceSyncController.initialize(agentRpc, {
           workspaceId: args.presentationId,
-          replica: workspaceReplica,
           isCurrent: isCurrentPresentation,
         });
         if (!isCurrentPresentation()) {
@@ -337,7 +326,7 @@ export function useBuilderAgentChat(args: {
         workspaceControllerRef.current = null;
       }
     };
-  }, [args.presentationId, builderAgent, workspaceGateRef, workspaceReplica]);
+  }, [args.presentationId, builderAgent, workspaceGateRef]);
 
   const sendMessage = useCallback(
     async (
@@ -499,10 +488,6 @@ export function useBuilderAgentChat(args: {
     steerMessage,
     messages: chat.messages satisfies GhostbuildMessage[],
     streamStatus: chat.isRecovering ? ('submitted' as const) : chat.isStreaming ? ('streaming' as const) : chat.status,
-    transcriptCheckpoint:
-      builderAgent.state?.transcript && transcriptIdentitiesEqual(builderAgent.state.transcript, transcript)
-        ? builderAgent.state.transcript
-        : null,
     validationStage: builderAgent.state?.validationProgress?.stage ?? null,
     deployment: builderAgent.state?.deployment ?? null,
     deployValidatedRevision,

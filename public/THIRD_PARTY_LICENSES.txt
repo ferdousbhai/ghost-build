@@ -7,8 +7,8 @@ A package whose package-level evidence is <not published> remains exact-version 
 This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-08-09
-Production packages: 703
-Inventory SHA-256: d0a3487aba6860db3cfb46666fc5895378f437fe53250a4a6a743672c8006b35
+Production packages: 698
+Inventory SHA-256: efb2dd7c9fd6f94825bb7029c26cfed878a75b941de5656f6937451433f2f3c1
 
 PACKAGE INVENTORY
 =================
@@ -1084,15 +1084,6 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 446a69ae534aa8612d8b16d3bfc670c5a5050597dca3ce9820441a60d5d04fbb)
 
-@journeyapps/wa-sqlite@1.7.2
-Declared license: MIT
-Author: <not published>
-Repository: {"type":"git","url":"git+https://github.com/powersync-ja/wa-sqlite.git"}
-Homepage: <not published>
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 547f9e97e461bd369cc64b6fc12d724e8b02764b8db7812691f29f0ec572be79)
-
 @jridgewell/gen-mapping@0.3.13
 Declared license: MIT
 Author: Justin Ridgewell <justin@ridgewell.name>
@@ -1945,15 +1936,6 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 653b779005a3a4d64a7288c940f7b9a0e8f0b1e0375f6aa6af9473caf131e564)
 
-@tanstack/browser-db-sqlite-persistence@0.2.9
-Declared license: MIT
-Author: TanStack Team
-Repository: {"type":"git","url":"git+https://github.com/TanStack/db.git","directory":"packages/browser-db-sqlite-persistence"}
-Homepage: https://tanstack.com/db
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 dd5fd3a2e8ca256521b80e46d7fb0aa953c842ef1420fb31f4b1f08ae31d82e7)
-
 @tanstack/db@0.6.17
 Declared license: MIT
 Author: Kyle Mathews
@@ -1967,15 +1949,6 @@ Published license/notice files:
 Declared license: MIT
 Author: Sam Willis
 Repository: {"type":"git","url":"git+https://github.com/TanStack/db.git","directory":"packages/db-ivm"}
-Homepage: https://tanstack.com/db
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 dd5fd3a2e8ca256521b80e46d7fb0aa953c842ef1420fb31f4b1f08ae31d82e7)
-
-@tanstack/db-sqlite-persistence-core@0.2.9
-Declared license: MIT
-Author: TanStack Team
-Repository: {"type":"git","url":"git+https://github.com/TanStack/db.git","directory":"packages/db-sqlite-persistence-core"}
 Homepage: https://tanstack.com/db
 Package-level license evidence: published
 Published license/notice files:
@@ -4130,15 +4103,6 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b)
 
-lucide-react@1.28.0
-Declared license: ISC
-Author: Eric Fennis
-Repository: {"type":"git","url":"https://github.com/lucide-icons/lucide.git","directory":"packages/lucide-react"}
-Homepage: https://lucide.dev
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57)
-
 magic-string@0.30.21
 Declared license: MIT
 Author: Rich Harris
@@ -6202,15 +6166,6 @@ Homepage: <not published>
 Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b)
-
-workers-ai-provider@4.0.0
-Declared license: MIT
-Author: <not published>
-Repository: {"type":"git","url":"git://github.com/cloudflare/ai.git"}
-Homepage: <not published>
-Package-level license evidence: published
-Published license/notice files:
-- LICENSE (SHA-256 5514f48637fa1d8fed2256d12d322009a75962e6111370755fc5b20773db67ad)
 
 wrap-ansi@9.0.2
 Declared license: MIT
@@ -13113,34 +13068,6 @@ SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
-SHA-256 547f9e97e461bd369cc64b6fc12d724e8b02764b8db7812691f29f0ec572be79
-Used by:
-- @journeyapps/wa-sqlite@1.7.2:LICENSE
------ BEGIN VERBATIM CONTENT -----
-MIT License
-
-Copyright (c) 2023 Roy T. Hashimoto
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
------ END VERBATIM CONTENT -----
-
 SHA-256 54b32293ea560d22cd9b62af9b2cda1a030d910a48c6601d227c5ff2338d95f8
 Used by:
 - detect-node-es@1.1.0:LICENSE
@@ -13202,7 +13129,6 @@ THE SOFTWARE.
 SHA-256 5514f48637fa1d8fed2256d12d322009a75962e6111370755fc5b20773db67ad
 Used by:
 - capnweb@0.8.0:LICENSE.txt
-- workers-ai-provider@4.0.0:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 MIT License
 
@@ -19610,56 +19536,6 @@ SOFTWARE.
 
 ----- END VERBATIM CONTENT -----
 
-SHA-256 b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57
-Used by:
-- lucide-react@1.28.0:LICENSE
------ BEGIN VERBATIM CONTENT -----
-ISC License
-
-Copyright (c) 2026 Lucide Icons and Contributors
-
-Permission to use, copy, modify, and/or distribute this software for any
-purpose with or without fee is hereby granted, provided that the above
-copyright notice and this permission notice appear in all copies.
-
-THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
-ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
-OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-
----
-
-The following Lucide icons are derived from the Feather project:
-
-airplay, alert-circle, alert-octagon, alert-triangle, aperture, arrow-down-circle, arrow-down-left, arrow-down-right, arrow-down, arrow-left-circle, arrow-left, arrow-right-circle, arrow-right, arrow-up-circle, arrow-up-left, arrow-up-right, arrow-up, at-sign, calendar, cast, check, chevron-down, chevron-left, chevron-right, chevron-up, chevrons-down, chevrons-left, chevrons-right, chevrons-up, circle, clipboard, clock, code, columns, command, compass, corner-down-left, corner-down-right, corner-left-down, corner-left-up, corner-right-down, corner-right-up, corner-up-left, corner-up-right, crosshair, database, divide-circle, divide-square, dollar-sign, download, external-link, feather, frown, hash, headphones, help-circle, info, italic, key, layout, life-buoy, link-2, link, loader, lock, log-in, log-out, maximize, meh, minimize, minimize-2, minus-circle, minus-square, minus, monitor, moon, more-horizontal, more-vertical, move, music, navigation-2, navigation, octagon, pause-circle, percent, plus-circle, plus-square, plus, power, radio, rss, search, server, share, shopping-bag, sidebar, smartphone, smile, square, table-2, tablet, target, terminal, trash-2, trash, triangle, tv, type, upload, x-circle, x-octagon, x-square, x, zoom-in, zoom-out
-
-The MIT License (MIT) (for the icons listed above)
-
-Copyright (c) 2013-present Cole Bemis
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
------ END VERBATIM CONTENT -----
-
 SHA-256 b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529
 Used by:
 - @ai-sdk/gateway@4.0.37:LICENSE
@@ -22023,9 +21899,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 SHA-256 dd5fd3a2e8ca256521b80e46d7fb0aa953c842ef1420fb31f4b1f08ae31d82e7
 Used by:
-- @tanstack/browser-db-sqlite-persistence@0.2.9:LICENSE
 - @tanstack/db-ivm@0.1.18:LICENSE
-- @tanstack/db-sqlite-persistence-core@0.2.9:LICENSE
 - @tanstack/db@0.6.17:LICENSE
 - @tanstack/query-db-collection@1.2.1:LICENSE
 - @tanstack/react-db@0.1.95:LICENSE

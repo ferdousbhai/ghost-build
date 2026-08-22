@@ -1,5 +1,9 @@
 import { z } from 'zod';
-export const USER_WORKSPACE_RUNTIME_SERVICE = 'ghostbuild-user-workspace-runtime';
+import {
+  USER_WORKSPACE_RUNTIME_SERVICE,
+  type UserWorkspaceReadinessCheck,
+  type UserWorkspaceReadinessComponent,
+} from '@ghostbuild/user-workspace-runtime/protocol';
 
 type RuntimeHealthEnv = {
   DB: Pick<D1Database, 'prepare'>;
@@ -12,19 +16,6 @@ type UserWorkspaceRuntimeHealth = {
   runtimeVersion: string;
 };
 
-export const USER_WORKSPACE_READINESS_COMPONENTS = [
-  'runtime',
-  'database',
-  'projectWorkspaceRpc',
-  'durableVfs',
-  'container',
-  'fuse',
-  'sync',
-  'cleanup',
-] as const;
-
-export type UserWorkspaceReadinessComponent = (typeof USER_WORKSPACE_READINESS_COMPONENTS)[number];
-export type UserWorkspaceReadinessCheck = { ok: boolean; code: string; durationMs: number };
 type UserWorkspaceRuntimeReadiness = {
   ok: boolean;
   service: typeof USER_WORKSPACE_RUNTIME_SERVICE;

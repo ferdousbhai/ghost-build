@@ -60,7 +60,7 @@ anything, and holds no credential of its own. If Wrangler is authenticated again
 
 Runtime staleness is measured against `app/generated/user-workspace-runtime.generated.ts`, the workspace runtime build
 of the current checkout. If that generated file is absent the report says staleness is unknown rather than guessing;
-`pnpm run generate:user-workspace-runtime` restores it.
+`pnpm run generate:artifacts` restores it.
 
 ## When it is not the right tool
 

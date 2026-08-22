@@ -1,0 +1,123 @@
+/**
+ * The stable boundary shared by the browser, BuilderAgent, control plane, and
+ * user-owned workspace runtime. Runtime implementation details stay out of
+ * this module so consumers cannot reach through the Worker boundary.
+ */
+
+export const BUILDER_WORKSPACE_MAX_FILE_BYTES = 16 * 1024 * 1024;
+export const BUILDER_WORKSPACE_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
+export const BUILDER_WORKSPACE_MAX_FILES = 10_000;
+export const BUILDER_WORKSPACE_SYNC_BATCH_BYTES = 4 * 1024 * 1024;
+export const BUILDER_WORKSPACE_SYNC_BATCH_FILES = 100;
+
+export type BuilderWorkspaceEncoding = 'utf8' | 'base64';
+
+export type BuilderWorkspaceFileInput = {
+  path: string;
+  content: string;
+  encoding?: BuilderWorkspaceEncoding;
+};
+
+export type BuilderWorkspaceClientChange =
+  | {
+      kind: 'write';
+      path: string;
+      content: string;
+      encoding?: BuilderWorkspaceEncoding;
+      mode?: number;
+    }
+  | {
+      kind: 'delete';
+      path: string;
+    };
+
+export type BuilderWorkspaceState = {
+  initialized: boolean;
+  revision: number;
+  resetRevision: number;
+  fileCount: number;
+  totalBytes: number;
+  seeding: boolean;
+};
+
+export type BuilderWorkspaceSyncEntry =
+  | {
+      kind: 'write';
+      path: string;
+      content: string;
+      encoding: BuilderWorkspaceEncoding;
+      size: number;
+      sha256: string;
+      revision: number;
+    }
+  | {
+      kind: 'delete';
+      path: string;
+      revision: number;
+    };
+
+export type BuilderWorkspaceSyncPage = {
+  state: BuilderWorkspaceState;
+  fromRevision: number;
+  targetRevision: number;
+  mode: 'current' | 'snapshot' | 'delta';
+  entries: BuilderWorkspaceSyncEntry[];
+  nextCursor?: string;
+  restart?: boolean;
+};
+
+export type BuilderWorkspaceSeedStartResult =
+  | { status: 'initialized'; state: BuilderWorkspaceState }
+  | { status: 'seeding'; state: BuilderWorkspaceState }
+  | { status: 'started'; seedId: string; state: BuilderWorkspaceState };
+
+export type BuilderWorkspaceApplyResult =
+  | {
+      ok: true;
+      state: BuilderWorkspaceState;
+      changedPaths: string[];
+    }
+  | {
+      ok: false;
+      conflict: true;
+      state: BuilderWorkspaceState;
+    };
+
+export type BuilderPreviewMode = 'production' | 'dev';
+
+export type BuilderProductionPreview = {
+  mode: 'production';
+  id: string;
+  url: string;
+  workspaceRevision: number;
+  snapshotRevision: string;
+  readyAt: string;
+  expiresAt: string;
+};
+
+export type BuilderDevPreview = {
+  mode: 'dev';
+  id: string;
+  url: string;
+  startedFromWorkspaceRevision: number;
+  readyAt: string;
+  expiresAt: string;
+};
+
+export type BuilderPreviewSuccess = BuilderProductionPreview | BuilderDevPreview;
+
+export const USER_WORKSPACE_RUNTIME_SERVICE = 'ghostbuild-user-workspace-runtime';
+
+export const USER_WORKSPACE_READINESS_COMPONENTS = [
+  'runtime',
+  'database',
+  'projectWorkspaceRpc',
+  'durableVfs',
+  'container',
+  'fuse',
+  'sync',
+  'cleanup',
+] as const;
+
+export type UserWorkspaceReadinessComponent = (typeof USER_WORKSPACE_READINESS_COMPONENTS)[number];
+export type UserWorkspaceReadinessCheck = { ok: boolean; code: string; durationMs: number };

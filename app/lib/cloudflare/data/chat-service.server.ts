@@ -82,10 +82,7 @@ export async function getAllChats(
          chats.timestamp
        FROM chats
        WHERE chats.creator_id = ? AND chats.is_deleted = 0
-         AND EXISTS (
-           SELECT 1 FROM chat_transcripts
-           WHERE chat_transcripts.chat_id = chats.id AND chat_transcripts.head_revision > 0
-         )
+         AND chats.has_messages = 1
          ${cursorClause}
        ORDER BY chats.timestamp DESC, chats.id DESC
        LIMIT ?`,
@@ -299,7 +296,10 @@ export async function getSubchats(
   };
 }
 
-export async function createSubchat(db: D1Database, args: { sessionId: string; chatId: string }) {
+export async function createSubchat(
+  db: D1Database,
+  args: { sessionId: string; chatId: string; parentRevision: number },
+) {
   const chat = await requireChat(db, { id: args.chatId, sessionId: args.sessionId });
   if (chat.last_subchat_index >= MAX_SUBCHAT_INDEX) {
     throw new SubchatLimitError();
@@ -311,7 +311,7 @@ export async function createSubchat(db: D1Database, args: { sessionId: string; c
   });
   const now = Date.now();
   const transitionToken = crypto.randomUUID();
-  const parentRevision = parentTranscript.head_revision;
+  const parentRevision = args.parentRevision;
   const agentName = transcriptAgentName(chat.initial_id, newSubchatIndex, 0);
   let results: D1Result[];
   try {
@@ -351,8 +351,6 @@ export async function createSubchat(db: D1Database, args: { sessionId: string; c
              AND chats.last_subchat_index = ?
              AND transcripts.subchat_index = ? AND transcripts.generation = 0
              AND transcripts.agent_name = ? AND transcripts.transition_token = ?
-             AND transcripts.head_revision = 0 AND transcripts.head_digest IS NULL
-             AND transcripts.head_message_count = 0
              AND transcripts.parent_subchat_index = ? AND transcripts.parent_generation = ?
              AND transcripts.parent_revision = ?
            LIMIT 1`,

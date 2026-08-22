@@ -30,15 +30,17 @@ describe('standalone template verification source', () => {
   test('uses the canonical Cloudflare Vite plugin with a minimal isolated Preview entrypoint', () => {
     const viteConfig = readFileSync('template/vite.config.ts', 'utf8');
     const server = readFileSync('template/src/server.ts', 'utf8');
+    const plainServer = readFileSync('template/src/plain-server.ts', 'utf8');
     const previewServer = readFileSync('template/src/preview-server.ts', 'utf8');
     const previewConfig = readFileSync('template/wrangler.preview.jsonc', 'utf8');
     const pkg = JSON.parse(readFileSync('template/package.json', 'utf8')) as { scripts: Record<string, string> };
 
     expect(server).toContain('handler.fetch(request)');
     expect(server).toContain('routeAppAgentRequest');
+    expect(plainServer).toContain('handler.fetch(request)');
     expect(server).not.toContain('GHOSTBUILD_ISOLATED_PREVIEW');
     expect(server).not.toContain('isAgentRoute');
-    expect(viteConfig).toContain('cloudflare({');
+    expect(viteConfig).toContain('cloudflare(cloudflareOptions)');
     expect(viteConfig).toContain('tanstackStart()');
     expect(previewServer).toContain('handler.fetch(request)');
     expect(previewServer).toContain('isolatedPreview: true');

@@ -51,7 +51,14 @@ function verifyWorker(errors, config) {
     config?.name,
     "ghostbuild-cloudflare-app",
   );
-  requireEqual(errors, "wrangler.jsonc main", config?.main, "src/server.ts");
+  if (
+    config?.main !== "src/plain-server.ts" &&
+    config?.main !== "src/server.ts"
+  ) {
+    errors.push(
+      'wrangler.jsonc main must be "src/plain-server.ts" or the protected Agent entrypoint "src/server.ts".',
+    );
+  }
   requireEqual(
     errors,
     "wrangler.jsonc compatibility_date",
@@ -64,7 +71,6 @@ function verifyWorker(errors, config) {
     config?.upload_source_maps,
     true,
   );
-  requireEqual(errors, "wrangler.jsonc ai.binding", config?.ai?.binding, "AI");
   if (!config?.compatibility_flags?.includes("nodejs_compat")) {
     errors.push(
       'wrangler.jsonc compatibility_flags must include "nodejs_compat".',
@@ -106,11 +112,22 @@ function verifyWorker(errors, config) {
   const agentSecurityD1 = config?.d1_databases?.find(
     (item) => item?.binding === "AGENT_SECURITY_DB",
   );
-  if (!agentSecurityD1) {
+  const appAgentBinding = config?.durable_objects?.bindings?.find(
+    (item) => item?.class_name === "AppAgent",
+  );
+  const appAgentExport = config?.exports?.AppAgent;
+  const appAgentEnabled = Boolean(
+    config?.ai ||
+    agentSecurityD1 ||
+    appAgentBinding ||
+    appAgentExport ||
+    config?.triggers,
+  );
+  if (appAgentEnabled && !agentSecurityD1) {
     errors.push(
-      "wrangler.jsonc must bind protected agent security D1 as AGENT_SECURITY_DB.",
+      "AppAgent requires protected agent security D1 as AGENT_SECURITY_DB.",
     );
-  } else {
+  } else if (agentSecurityD1) {
     requireEqual(
       errors,
       "wrangler.jsonc AGENT_SECURITY_DB database_name",
@@ -133,6 +150,31 @@ function verifyWorker(errors, config) {
       );
     }
   }
+  if (appAgentEnabled) {
+    requireEqual(
+      errors,
+      "wrangler.jsonc ai.binding",
+      config?.ai?.binding,
+      "AI",
+    );
+    requireEqual(errors, "wrangler.jsonc main", config?.main, "src/server.ts");
+    if (!appAgentBinding) {
+      errors.push("AppAgent requires its Durable Object binding.");
+    }
+    if (
+      appAgentExport?.type !== "durable-object" ||
+      appAgentExport?.storage !== "sqlite"
+    ) {
+      errors.push("AppAgent requires its SQLite Durable Object export.");
+    }
+    if (
+      !Array.isArray(config?.triggers?.crons) ||
+      config.triggers.crons.length !== 1 ||
+      config.triggers.crons[0] !== "0 3 * * *"
+    ) {
+      errors.push("AppAgent requires its daily security cleanup schedule.");
+    }
+  }
   if (
     d1?.database_id &&
     d1.database_id !== placeholderDatabaseId &&
@@ -145,15 +187,18 @@ function verifyWorker(errors, config) {
   const d1Bindings = config?.d1_databases;
   if (
     !Array.isArray(d1Bindings) ||
-    d1Bindings.length !== 2 ||
-    new Set(d1Bindings.map((binding) => binding?.binding)).size !== 2 ||
+    d1Bindings.length !== (appAgentEnabled ? 2 : 1) ||
+    new Set(d1Bindings.map((binding) => binding?.binding)).size !==
+      d1Bindings.length ||
     d1Bindings.some(
       (binding) =>
         binding?.binding !== "DB" && binding?.binding !== "AGENT_SECURITY_DB",
     )
   ) {
     errors.push(
-      "wrangler.jsonc must contain exactly the separate DB and AGENT_SECURITY_DB D1 bindings.",
+      appAgentEnabled
+        ? "AppAgent requires exactly the separate DB and AGENT_SECURITY_DB D1 bindings."
+        : "wrangler.jsonc must contain exactly the application DB binding.",
     );
   }
 
@@ -176,22 +221,6 @@ function verifyWorker(errors, config) {
   ) {
     errors.push(
       "wrangler.jsonc must contain a provisioned APP_CACHE KV namespace id.",
-    );
-  }
-  if (
-    !config?.durable_objects?.bindings?.some(
-      (item) => item?.class_name === "AppAgent",
-    )
-  ) {
-    errors.push("wrangler.jsonc must bind the AppAgent Durable Object.");
-  }
-  const appAgentExport = config?.exports?.AppAgent;
-  if (
-    appAgentExport?.type !== "durable-object" ||
-    appAgentExport?.storage !== "sqlite"
-  ) {
-    errors.push(
-      "wrangler.jsonc must declare AppAgent as a SQLite Durable Object export.",
     );
   }
   if (config?.migrations !== undefined) {

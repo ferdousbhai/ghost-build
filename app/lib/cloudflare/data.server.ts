@@ -1,6 +1,5 @@
 import {
   TRANSCRIPT_HISTORY_FORMAT_VERSION,
-  transcriptCheckpointsEqual,
   transcriptIdentitiesEqual,
   type TranscriptCheckpoint,
   type TranscriptIdentity,
@@ -12,7 +11,7 @@ import { MAX_SUBCHAT_INDEX } from './data-pagination';
 import type { DataOperationPath, DataOperationResult } from './data-api';
 import { dataOperationArgSchemas } from './data-operation-schemas';
 import { getSessionId, UnauthorizedError } from './data/auth.server';
-import { findChat, updateChatCheckpoint } from './data/chat-repository.server';
+import { findChat, requireChat } from './data/chat-repository.server';
 import {
   createSubchat,
   discardEmptyChat,
@@ -26,7 +25,7 @@ import {
 } from './data/chat-service.server';
 import { sweepAgentGcCandidatesBestEffort } from './data/agent-gc.server';
 import { sweepAppResourceGcCandidatesBestEffort } from './data/app-resource-gc.server';
-import { ensureDataBindings, internalErrorResponse, parseRequestQuery } from './data/http.server';
+import { ensureDataBindings, internalErrorResponse } from './data/http.server';
 import { requireChatTranscript, transcriptIdentity } from './data/transcript-repository.server';
 import { retryDurableObjectRpc } from './durable-object-rpc.server';
 import type { ChatTranscriptRow } from './data/types';
@@ -36,16 +35,6 @@ const dataRequestSchema = z.object({ path: dataOperationPathSchema, args: z.unkn
 const chatRequestSchema = z.object({
   sessionId: z.string().min(1).max(512),
   chatId: z.string().min(1).max(512),
-});
-const storeChatRequestSchema = chatRequestSchema.extend({
-  lastMessageRank: z.coerce.number().int().nonnegative(),
-  lastSubchatIndex: z.coerce.number().int().nonnegative().max(MAX_SUBCHAT_INDEX).default(0),
-  partIndex: z.coerce.number().int().nonnegative(),
-  transcriptAgentName: z.string().min(1).max(512),
-  transcriptGeneration: z.coerce.number().int().nonnegative(),
-  transcriptRevision: z.coerce.number().int().nonnegative(),
-  transcriptDigest: z.string().regex(/^[a-f0-9]{64}$/),
-  transcriptMessageCount: z.coerce.number().int().nonnegative(),
 });
 const initialMessagesRequestSchema = chatRequestSchema.extend({
   subchatIndex: z.number().int().nonnegative().max(MAX_SUBCHAT_INDEX).optional(),
@@ -67,65 +56,12 @@ export async function userRuntimeDataAction(args: {
     if (getSessionId(body.args) !== args.userId) {
       throw new UnauthorizedError();
     }
-    const result = runKnownDataOperation(args.env.DB, body.path, body.args);
+    const result = runKnownDataOperation(args.env, body.path, body.args);
     args.executionCtx?.waitUntil(sweepAgentGcCandidatesBestEffort(args.env));
     args.executionCtx?.waitUntil(sweepAppResourceGcCandidatesBestEffort(args.env));
     return Response.json({ result: await result });
   } catch (error) {
     return internalErrorResponse(error, 'Unknown data error');
-  }
-}
-
-export async function userRuntimeStoreChatAction(args: {
-  request: Request;
-  env: Env;
-  userId: string;
-}): Promise<Response> {
-  try {
-    ensureDataBindings(args.env);
-    const {
-      sessionId,
-      chatId,
-      lastMessageRank,
-      lastSubchatIndex: subchatIndex,
-      partIndex,
-      transcriptAgentName,
-      transcriptGeneration,
-      transcriptRevision,
-      transcriptDigest,
-      transcriptMessageCount,
-    } = parseRequestQuery(args.request, storeChatRequestSchema);
-    if (sessionId !== args.userId) {
-      throw new UnauthorizedError();
-    }
-    const checkpoint: TranscriptCheckpoint = {
-      agentName: transcriptAgentName,
-      generation: transcriptGeneration,
-      revision: transcriptRevision,
-      digest: transcriptDigest,
-      messageCount: transcriptMessageCount,
-      subchatIndex,
-    };
-    const chat = await findChat(args.env.DB, { id: chatId, sessionId });
-    if (!chat) {
-      return Response.json({ error: 'Chat not found' }, { status: 404 });
-    }
-    const transcript = await requireChatTranscript(args.env.DB, { chatId: chat.id, subchatIndex });
-    const durable = await getBuilderTranscriptSnapshot(args.env, transcriptIdentity(transcript), sessionId);
-    if (!transcriptCheckpointsEqual(checkpoint, durable.checkpoint)) {
-      return transcriptConflictResponse(durable.checkpoint);
-    }
-    const update = await updateChatCheckpoint(args.env.DB, {
-      sessionId,
-      chatId,
-      lastMessageRank,
-      subchatIndex,
-      partIndex,
-      checkpoint,
-    });
-    return update.accepted ? new Response(null, { status: 200 }) : transcriptConflictResponse();
-  } catch (error) {
-    return internalErrorResponse(error, 'Unknown chat storage error');
   }
 }
 
@@ -173,7 +109,7 @@ type TranscriptConflictBody = {
 
 function transcriptConflictResponse(checkpoint?: TranscriptCheckpoint | null): Response {
   const body: TranscriptConflictBody = {
-    error: 'The agent transcript advanced before this checkpoint was saved. Retry with the latest transcript.',
+    error: 'The Agent transcript identity no longer matches this catalog entry. Reload the latest transcript.',
   };
   if (checkpoint !== undefined) {
     body.checkpoint = checkpoint;
@@ -200,31 +136,48 @@ function transcriptResponseHeaders(transcript: ChatTranscriptRow): Headers {
 }
 
 function runKnownDataOperation(
-  db: D1Database,
+  env: Env,
   path: DataOperationPath,
   rawArgs: unknown,
 ): Promise<DataOperationResult<DataOperationPath>> {
   switch (path) {
     case 'messages.initializeChat':
-      return initializeChat(db, dataOperationArgSchemas[path].parse(rawArgs));
+      return initializeChat(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'messages.discardEmptyChat':
-      return discardEmptyChat(db, dataOperationArgSchemas[path].parse(rawArgs));
+      return discardEmptyChat(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'messages.get':
-      return getChat(db, dataOperationArgSchemas[path].parse(rawArgs));
+      return getChat(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'messages.getAll':
-      return getAllChats(db, dataOperationArgSchemas[path].parse(rawArgs));
+      return getAllChats(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'messages.setDescription':
-      return setDescription(db, dataOperationArgSchemas[path].parse(rawArgs));
+      return setDescription(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'messages.remove':
-      return removeChat(db, dataOperationArgSchemas[path].parse(rawArgs));
+      return removeChat(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'subchats.get':
-      return getSubchats(db, dataOperationArgSchemas[path].parse(rawArgs));
+      return getSubchats(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     case 'subchats.create':
-      return createSubchat(db, dataOperationArgSchemas[path].parse(rawArgs));
+      return createSubchatFromAgent(env, dataOperationArgSchemas[path].parse(rawArgs));
     case 'subchats.setDescription':
-      return setSubchatDescription(db, dataOperationArgSchemas[path].parse(rawArgs));
+      return setSubchatDescription(env.DB, dataOperationArgSchemas[path].parse(rawArgs));
     default:
       path satisfies never;
       throw new Error(`Unsupported data operation: ${path}`);
   }
+}
+
+async function createSubchatFromAgent(env: Env, args: { sessionId: string; chatId: string }): Promise<number> {
+  const chat = await requireChat(env.DB, { id: args.chatId, sessionId: args.sessionId });
+  const parent = await requireChatTranscript(env.DB, {
+    chatId: chat.id,
+    subchatIndex: chat.last_subchat_index,
+  });
+  const identity = transcriptIdentity(parent);
+  const durable = await getBuilderTranscriptSnapshot(env, identity, args.sessionId);
+  if (durable.checkpoint && !transcriptIdentitiesEqual(durable.checkpoint, identity)) {
+    throw new Error('Parent transcript identity changed while creating a subchat.');
+  }
+  return createSubchat(env.DB, {
+    ...args,
+    parentRevision: durable.checkpoint?.revision ?? 0,
+  });
 }

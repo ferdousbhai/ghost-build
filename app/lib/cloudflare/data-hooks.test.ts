@@ -30,13 +30,6 @@ vi.mock('./client', () => {
   };
 });
 
-vi.mock('./account-local-replica', () => ({
-  ACCOUNT_LOCAL_REPLICA_GC_TIME: 30 * 24 * 60 * 60 * 1_000,
-  ACCOUNT_LOCAL_REPLICA_SCHEMA_VERSION: 1,
-  registerAccountCollectionDisposer: () => () => undefined,
-  useAccountLocalReplica: () => null,
-}));
-
 function useProjectHistoryError() {
   return useChatHistory('error-user').error;
 }

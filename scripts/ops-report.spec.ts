@@ -889,7 +889,7 @@ describe('report shape', () => {
     });
     const runtimes = checkById(report, 'workspace-runtimes');
     expect(runtimes.status).toBe('unknown');
-    expect(runtimes.sentence).toContain('pnpm run generate:user-workspace-runtime');
+    expect(runtimes.sentence).toContain('pnpm run generate:artifacts');
     expect(reportOf(report).status).toBe('unknown');
   });
 

@@ -31,21 +31,16 @@ const REQUIRED_AI_SDK_VERSIONS = {
 };
 
 export const APP_REQUIRED_PACKAGES = [
-  "@ai-sdk/react",
-  "@cloudflare/ai-chat",
   "@cloudflare/vite-plugin",
   "@tanstack/react-router",
   "@tanstack/react-start",
   "@tanstack/router-cli",
   "@vitejs/plugin-react",
-  "agents",
-  "ai",
   "react",
   "react-dom",
   "typescript",
   "vite",
   "wrangler",
-  "zod",
 ];
 
 export const WORKER_REQUIRED_PACKAGES = ["typescript", "wrangler"];
@@ -131,6 +126,25 @@ export function findCloudflareAiPeerCompatibilityErrors(pkg, label) {
         : [];
     },
   );
+}
+
+export function findAgentCapabilityDependencyErrors(
+  pkg,
+  label,
+  expectedDependencies,
+  enabled,
+) {
+  if (!enabled) {
+    return [];
+  }
+  return Object.entries(expectedDependencies).flatMap(([name, expected]) => {
+    const actual = packageDependencyVersion(pkg, name);
+    return actual === expected
+      ? []
+      : [
+          `${label} must pin enabled Agent capability dependency ${name}@${expected}; found ${actual ?? "missing"}.`,
+        ];
+  });
 }
 
 export function findRuntimePinErrors(pkg, label) {

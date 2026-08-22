@@ -51,7 +51,3 @@ export function ensureDataBindings(env: Env): void {
     throw new Error('Cloudflare D1 binding DB is not configured');
   }
 }
-
-export function parseRequestQuery<Schema extends z.ZodType>(request: Request, schema: Schema): z.output<Schema> {
-  return schema.parse(Object.fromEntries(new URL(request.url).searchParams));
-}

@@ -5,22 +5,18 @@ export type BuilderPreviewStatus = 'idle' | 'queued' | 'building' | 'ready' | 'f
  * cannot be confused: only `production` has a bound source revision, because only `production` is
  * built from one and asserts it. See `user-workspace-runtime/src/dev-preview.ts`.
  */
-export type BuilderPreviewMode = 'production' | 'dev';
+export type {
+  BuilderDevPreview,
+  BuilderPreviewMode,
+  BuilderPreviewSuccess,
+} from '@ghostbuild/user-workspace-runtime/protocol';
+import type { BuilderPreviewMode, BuilderPreviewSuccess } from '@ghostbuild/user-workspace-runtime/protocol';
 
 /**
  * A preview of one exact content revision. The workspace revision and the source digest are the
  * checkpoint the container built from and re-asserted before publishing, so this is the shape that
  * may be reasoned about as "what deployment would publish".
  */
-export type BuilderProductionPreview = {
-  mode: 'production';
-  id: string;
-  url: string;
-  workspaceRevision: number;
-  snapshotRevision: string;
-  readyAt: string;
-  expiresAt: string;
-};
 
 /**
  * A Vite dev server tracking live workspace state over HMR.
@@ -30,16 +26,6 @@ export type BuilderProductionPreview = {
  * depends on — deployment reads validation receipts and the current checkpoint, never a preview.
  * `startedFromWorkspaceRevision` is provenance for the operator, not a binding.
  */
-export type BuilderDevPreview = {
-  mode: 'dev';
-  id: string;
-  url: string;
-  startedFromWorkspaceRevision: number;
-  readyAt: string;
-  expiresAt: string;
-};
-
-export type BuilderPreviewSuccess = BuilderProductionPreview | BuilderDevPreview;
 
 export type BuilderPreviewState = {
   status: BuilderPreviewStatus;

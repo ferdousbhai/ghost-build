@@ -1,5 +1,5 @@
 {
-  "total": 1699,
+  "total": 1651,
   "counts": {
     "app/agents/builder-agent-identity.test.ts": {
       "anti-slop/no-unsafe-dictionary-type": 1,
@@ -91,10 +91,10 @@
     },
     "app/components/chat/useBuilderAgentChat.test.tsx": {
       "anti-slop/no-known-value-widening": 1,
-      "anti-slop/no-module-mocking": 20,
+      "anti-slop/no-module-mocking": 19,
       "anti-slop/no-unknown-parameters": 2,
       "anti-slop/no-unknown-returns": 5,
-      "anti-slop/require-safety-comment-for-type-assertion": 6
+      "anti-slop/require-safety-comment-for-type-assertion": 5
     },
     "app/components/chat/useChatMessageSubmission.ts": {
       "anti-slop/no-unknown-returns": 1
@@ -150,9 +150,6 @@
     "app/components/workbench/useWorkbenchController.test.tsx": {
       "anti-slop/no-module-mocking": 1,
       "anti-slop/require-safety-comment-for-type-assertion": 1
-    },
-    "app/generated/builder-skill-assets.generated.ts": {
-      "anti-slop/no-known-value-widening": 1
     },
     "app/lib/.server/agent-request-identity.test.ts": {
       "anti-slop/no-chained-type-assertions": 4,
@@ -442,14 +439,6 @@
     "app/lib/bounded-multipart.test.ts": {
       "anti-slop/require-safety-comment-for-type-assertion": 1
     },
-    "app/lib/cloudflare/account-local-replica.test.tsx": {
-      "anti-slop/no-module-mocking": 1,
-      "anti-slop/require-safety-comment-for-type-assertion": 2
-    },
-    "app/lib/cloudflare/account-local-replica.ts": {
-      "anti-slop/no-runtime-typeof": 1,
-      "anti-slop/no-unknown-parameters": 1
-    },
     "app/lib/cloudflare/chat-transcript-db.ts": {
       "anti-slop/no-unknown-parameters": 1
     },
@@ -462,7 +451,7 @@
       "anti-slop/no-unknown-parameters": 1
     },
     "app/lib/cloudflare/data-hooks.test.ts": {
-      "anti-slop/no-module-mocking": 2,
+      "anti-slop/no-module-mocking": 1,
       "anti-slop/no-unknown-parameters": 2,
       "anti-slop/require-safety-comment-for-type-assertion": 1
     },
@@ -488,7 +477,6 @@
     },
     "app/lib/cloudflare/data/chat-repository.server.test.ts": {
       "anti-slop/no-chained-type-assertions": 2,
-      "anti-slop/no-module-mocking": 1,
       "anti-slop/require-safety-comment-for-type-assertion": 7
     },
     "app/lib/cloudflare/data/chat-service.server.test.ts": {
@@ -532,16 +520,14 @@
       "anti-slop/require-safety-comment-for-type-assertion": 1
     },
     "app/lib/stores/builder-workspace-collection.client.ts": {
-      "anti-slop/no-unknown-parameters": 4,
+      "anti-slop/no-unknown-parameters": 2,
       "anti-slop/no-unknown-returns": 2
     },
     "app/lib/stores/builder-workspace-sync.client.test.ts": {
-      "anti-slop/no-chained-type-assertions": 3,
       "anti-slop/no-module-mocking": 1,
       "anti-slop/no-unknown-parameters": 1,
       "anti-slop/no-unknown-returns": 2,
-      "anti-slop/no-unsafe-dictionary-type": 1,
-      "anti-slop/require-safety-comment-for-type-assertion": 24
+      "anti-slop/require-safety-comment-for-type-assertion": 14
     },
     "app/lib/stores/builder-workspace-sync.client.ts": {
       "anti-slop/no-unknown-parameters": 2,
@@ -551,20 +537,10 @@
       "anti-slop/no-runtime-typeof": 1,
       "anti-slop/require-safety-comment-for-type-assertion": 1
     },
-    "app/lib/stores/startup/chat-checkpoint-sync-worker.test.ts": {
-      "anti-slop/no-module-mocking": 2
-    },
-    "app/lib/stores/startup/messages.test.ts": {
-      "anti-slop/require-safety-comment-for-type-assertion": 1
-    },
     "app/lib/stores/startup/useInitialMessages.test.tsx": {
-      "anti-slop/no-module-mocking": 3,
+      "anti-slop/no-module-mocking": 2,
       "anti-slop/no-unknown-parameters": 2,
       "anti-slop/require-safety-comment-for-type-assertion": 2
-    },
-    "app/lib/stores/startup/useStoreMessageHistory.race.test.tsx": {
-      "anti-slop/no-module-mocking": 5,
-      "anti-slop/require-safety-comment-for-type-assertion": 1
     },
     "app/lib/stores/theme.ts": {
       "anti-slop/no-runtime-typeof": 5
@@ -845,16 +821,9 @@
       "anti-slop/no-runtime-typeof": 2,
       "anti-slop/no-unknown-parameters": 1
     },
-    "template/src/routes/index.tsx": {
-      "anti-slop/no-unknown-parameters": 1
-    },
     "template/src/server.ts": {
       "anti-slop/no-chained-type-assertions": 1,
       "anti-slop/require-safety-comment-for-type-assertion": 2
-    },
-    "template/vite.config.ts": {
-      "anti-slop/no-conditional-empty-object-spread": 1,
-      "anti-slop/no-known-value-widening": 1
     },
     "tests/workerd/server.integration.ts": {
       "anti-slop/no-chained-type-assertions": 2,
@@ -888,13 +857,13 @@
       "anti-slop/no-unknown-parameters": 2
     },
     "user-workspace-runtime/src/index.ts": {
-      "anti-slop/no-chained-type-assertions": 5,
+      "anti-slop/no-chained-type-assertions": 2,
       "anti-slop/no-conditional-empty-object-spread": 1,
       "anti-slop/no-runtime-typeof": 14,
       "anti-slop/no-unknown-parameters": 61,
       "anti-slop/no-unknown-returns": 2,
       "anti-slop/no-unsafe-dictionary-type": 2,
-      "anti-slop/require-safety-comment-for-type-assertion": 8
+      "anti-slop/require-safety-comment-for-type-assertion": 2
     },
     "user-workspace-runtime/src/mutation-receipt.ts": {
       "anti-slop/no-runtime-typeof": 3,

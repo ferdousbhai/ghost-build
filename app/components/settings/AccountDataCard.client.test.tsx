@@ -11,7 +11,7 @@ vi.mock('@tanstack/react-router', () => ({
 const mocks = vi.hoisted(() => ({
   createCloudflareReturnURL: vi.fn(() => 'https://ghostbuild.dev/settings'),
   signInWithCloudflare: vi.fn(),
-  disposeAccountLocalReplicas: vi.fn(async () => undefined),
+  disposeClientCollections: vi.fn(async () => undefined),
   resetUserRuntimeSession: vi.fn(),
   saveAs: vi.fn(),
 }));
@@ -22,8 +22,8 @@ vi.mock('~/lib/auth-client', () => ({
   createCloudflareReturnURL: mocks.createCloudflareReturnURL,
   signInWithCloudflare: mocks.signInWithCloudflare,
 }));
-vi.mock('~/lib/cloudflare/account-local-replica', () => ({
-  disposeAccountLocalReplicas: mocks.disposeAccountLocalReplicas,
+vi.mock('~/lib/cloudflare/client-collections', () => ({
+  disposeClientCollections: mocks.disposeClientCollections,
 }));
 vi.mock('~/lib/cloudflare/runtime-session', () => ({ resetUserRuntimeSession: mocks.resetUserRuntimeSession }));
 
@@ -101,7 +101,7 @@ describe('AccountDataCard', () => {
     expect(text).toContain('does not contain your chats, transcripts, project files, or deployment records');
     expect(text).toContain('clear site data');
     expect(text).toContain('ghostbuild_session');
-    expect(text).toContain('OPFS database');
+    expect(text).toContain('in-memory project cache');
     expect(document.querySelector('a[href="/support"]')).not.toBeNull();
     expect(document.querySelector('a[href="/privacy"]')).not.toBeNull();
   });
@@ -177,7 +177,7 @@ describe('AccountDataCard', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('erases the control plane, clears local replicas, and reports an unrevoked grant', async () => {
+  it('erases the control plane, clears local caches, and reports an unrevoked grant', async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ status: 'deleted', cloudflareAuthorizationRevoked: false }), { status: 200 }),
     );
@@ -195,7 +195,7 @@ describe('AccountDataCard', () => {
       confirmation: ACCOUNT_DELETION_CONFIRMATION,
       acknowledgeCloudflareResourcesRetained: true,
     });
-    expect(mocks.disposeAccountLocalReplicas).toHaveBeenCalledOnce();
+    expect(mocks.disposeClientCollections).toHaveBeenCalledOnce();
     expect(mocks.resetUserRuntimeSession).toHaveBeenCalledOnce();
     expect(document.body.textContent).toContain('Cloudflare did not confirm the revocation');
     expect(document.body.textContent).toContain('still in your Cloudflare account');

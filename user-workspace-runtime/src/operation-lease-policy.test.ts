@@ -75,6 +75,7 @@ describe('operation lease policy', () => {
 
   it('derives every container exec ceiling the ProjectWorkspace declares instead of restating it', () => {
     const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const sandboxAdapter = readFileSync(new URL('./computer-sandbox.ts', import.meta.url), 'utf8');
 
     // The exec tool's container-shell timeoutMs is a lifetime hint computerd
     // 0.1.1 does not enforce (#128); it is derived from the exec tool budget
@@ -86,8 +87,8 @@ describe('operation lease policy', () => {
     // declaration, and the vendor connect deadline is derived from the stages
     // it must contain rather than declared beside them (#131).
     expect(source).toContain('const INSTALL_TIMEOUT_MS = CONTAINER_PACKAGE_INSTALL_TIMEOUT_MS;');
-    expect(source).toContain('connectTimeoutMs: CONTAINER_CONNECT_TIMEOUT_MS');
-    expect(source).not.toMatch(/connectTimeoutMs:\s*\d/);
+    expect(sandboxAdapter).toContain('connectTimeoutMs: CONTAINER_CONNECT_TIMEOUT_MS');
+    expect(sandboxAdapter).not.toMatch(/connectTimeoutMs:\s*\d/);
   });
 
   it('renews exactly the lanes whose lease is shorter than their governing budget', () => {

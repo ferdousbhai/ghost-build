@@ -40,7 +40,6 @@ const agentRequiredPackages = ['ai', 'zod'];
 const forbiddenLockfiles = ['package-lock.json'];
 const blockedRootBuildEntries = new Map([
   ['@google/genai', "  '@google/genai': false"],
-  ['@journeyapps/wa-sqlite', "  '@journeyapps/wa-sqlite': false"],
   ['@mongodb-js/zstd', "  '@mongodb-js/zstd': false"],
   ['node-liblzma', '  node-liblzma: false'],
   ['protobufjs', '  protobufjs: false'],
@@ -170,7 +169,7 @@ export function findSandboxRuntimePinErrors(packageSpec, installedVersion, provi
 export function findBuilderTemplateModuleErrors(content, sourceSha256) {
   return content.includes(`export const BUILDER_TEMPLATE_SOURCE_SHA256 = '${sourceSha256}';`)
     ? []
-    : ['app/agents/builder-template.generated.ts is stale; run pnpm run rebuild-template.'];
+    : ['app/agents/builder-template.generated.ts is stale; run pnpm run generate:artifacts.'];
 }
 
 export function findDeploymentRuntimePolicyErrors(templateConfigSource, runtimePolicySource) {
@@ -323,6 +322,7 @@ export function verifyStackAlignment() {
       'typecheck',
     ]),
     ...findMissingCommandSteps(rootPackage.scripts?.['validate:root'], 'package.json scripts.validate:root', [
+      'generate',
       'verify:stack',
       'verify:production-config',
       'verify:licenses',

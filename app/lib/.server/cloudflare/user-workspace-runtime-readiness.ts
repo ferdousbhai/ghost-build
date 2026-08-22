@@ -1,9 +1,9 @@
 import { readJsonBodyWithLimit } from '~/lib/bounded-body';
 import {
-  parseUserWorkspaceRuntimeReadiness,
   USER_WORKSPACE_READINESS_COMPONENTS,
   type UserWorkspaceReadinessComponent,
-} from './user-workspace-runtime-health';
+} from '@ghostbuild/user-workspace-runtime/protocol';
+import { parseUserWorkspaceRuntimeReadiness } from './user-workspace-runtime-health';
 
 const READINESS_DEADLINE_MS = 10 * 60_000;
 const READINESS_REQUEST_TIMEOUT_MS = 8 * 60_000;

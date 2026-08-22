@@ -2,7 +2,7 @@ import { createClientOnlyFn } from '@tanstack/react-start';
 import { useEffect, useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import type { CloudflareAuthSession } from '~/lib/.server/auth';
-import { disposeAccountLocalReplicas } from '~/lib/cloudflare/account-local-replica';
+import { disposeClientCollections } from '~/lib/cloudflare/client-collections';
 import { resetUserRuntimeSession } from '~/lib/cloudflare/runtime-session';
 import { captureProductEvent } from '~/lib/telemetry.client';
 import { CLOUDFLARE_AUTHORIZATION_ERROR_PARAM } from '~/lib/cloudflare/authorization-recovery';
@@ -156,7 +156,7 @@ export async function signOutOfGhostbuild(callbackURL = window.location.origin) 
     throw new Error((parsed.success ? parsed.data.error : undefined) ?? 'Unable to sign out of Ghostbuild.');
   }
   setState({ data: null, isPending: false });
-  await disposeAccountLocalReplicas();
+  await disposeClientCollections();
   resetUserRuntimeSession();
   clearPendingSubmit();
   window.location.assign(callbackURL);

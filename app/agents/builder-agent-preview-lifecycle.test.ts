@@ -10,7 +10,11 @@ describe('BuilderAgent preview lifecycle', () => {
       source.indexOf('private async runContextCompaction('),
     );
 
-    expect(chatMessage).toContain('if (!options?.continuation) {\n      await this.cancelPreview();\n    }');
+    const foregroundGuard = chatMessage.indexOf('if (!options?.continuation) {');
+    const previewCancellation = chatMessage.indexOf('await this.cancelPreview()');
+    expect(foregroundGuard).toBeGreaterThanOrEqual(0);
+    expect(previewCancellation).toBeGreaterThan(foregroundGuard);
+    expect(previewCancellation).toBeLessThan(chatMessage.indexOf('const turn = createBuilderTurn'));
   });
 
   it('automatically deploys then previews only an exactly validated durable revision', () => {

@@ -33,6 +33,7 @@ import {
   type BuilderDeploymentState,
 } from './builder-deployment-command';
 import { generateConversationTitle, generateProjectTitle } from '~/lib/.server/llm/workers-ai-title';
+import { markChatStarted } from '~/lib/cloudflare/data/chat-repository.server';
 import {
   setGeneratedProjectDescription,
   setGeneratedSubchatDescription,
@@ -374,6 +375,11 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     );
     if (!options?.continuation) {
       await this.cancelPreview();
+      await markChatStarted(this.env.DB, {
+        sessionId: durableIdentity.ownerId,
+        chatId: chatInitialId,
+        agentName: transcript.agentName,
+      });
     }
     await this.advanceTranscriptCheckpoint(transcript);
     this.contextCompaction.migrateLegacySubchat(subchatIndex);

@@ -6,6 +6,7 @@ import {
   APP_REQUIRED_PACKAGES,
   WORKER_REQUIRED_PACKAGES,
   collectSourceEntries,
+  findAgentCapabilityDependencyErrors,
   findCloudflareAiPeerCompatibilityErrors,
   findForbiddenDependencies,
   findForbiddenImports,
@@ -24,7 +25,9 @@ const baseRequiredPaths = [
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
   "public/THIRD_PARTY_LICENSES.txt",
+  "agent-capability.json",
   "scripts/production-license-policy.json",
+  "scripts/enable-agent-capability.mjs",
   "scripts/lib/production-license-artifact.mjs",
   "scripts/verify-production-licenses.mjs",
   "src/server.ts",
@@ -37,6 +40,7 @@ const webAppRequiredPaths = [
   "migrations",
   "scripts/lib/runtime-module-security.ts",
   "src/agents/app-agent.ts",
+  "src/plain-server.ts",
   "src/routeTree.gen.ts",
   "src/router.tsx",
   "src/routes/__root.tsx",
@@ -51,6 +55,12 @@ function readJson(path) {
 export function verifyStackAlignment() {
   const errors = [];
   const packageJson = readJson("package.json");
+  const capability = readJson("agent-capability.json");
+  const wranglerConfig = parse(
+    readFileSync(resolve(rootDir, "wrangler.jsonc"), "utf8"),
+  );
+  const agentCapabilityEnabled =
+    wranglerConfig?.main === capability?.wrangler?.main;
   const type = projectType(packageJson);
   if (existsSync(resolve(rootDir, "package-lock.json"))) {
     errors.push(
@@ -65,6 +75,12 @@ export function verifyStackAlignment() {
       type === "worker" ? WORKER_REQUIRED_PACKAGES : APP_REQUIRED_PACKAGES,
     ),
     ...findCloudflareAiPeerCompatibilityErrors(packageJson, "package.json"),
+    ...findAgentCapabilityDependencyErrors(
+      packageJson,
+      "package.json",
+      capability.dependencies,
+      agentCapabilityEnabled,
+    ),
     ...findRuntimePinErrors(packageJson, "package.json"),
     ...findMissingPaths(rootDir, [
       ...baseRequiredPaths,
@@ -134,9 +150,6 @@ export function verifyStackAlignment() {
   const tsconfig = parse(
     readFileSync(resolve(rootDir, "tsconfig.json"), "utf8"),
   );
-  if (type === "web_app" && tsconfig?.extends !== "agents/tsconfig") {
-    errors.push('tsconfig.json must extend "agents/tsconfig".');
-  }
   if (tsconfig?.compilerOptions?.noUnusedLocals === false) {
     errors.push("tsconfig.json must not disable noUnusedLocals.");
   }

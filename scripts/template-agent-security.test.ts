@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { parse } from 'jsonc-parser';
 import { describe, expect, test } from 'vitest';
 import {
@@ -9,21 +11,87 @@ import {
   handleAgentSessionBootstrap,
   resolveAgentSession,
 } from '../template/src/agent-security';
+import { enableAgentCapability } from '../template/scripts/enable-agent-capability.mjs';
 
 describe('generated app agent security', () => {
-  test('schedules bounded D1 security-state cleanup every day', () => {
+  test('keeps the protected Agent capability available but disabled by default', () => {
     const config = parse(readFileSync('template/wrangler.jsonc', 'utf8'));
+    const capability = JSON.parse(readFileSync('template/agent-capability.json', 'utf8'));
 
-    expect(config.triggers?.crons).toContain('0 3 * * *');
-    expect(config.d1_databases).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ binding: 'DB', migrations_dir: 'migrations' }),
-        expect.objectContaining({
+    expect(config.main).toBe('src/plain-server.ts');
+    expect(config.ai).toBeUndefined();
+    expect(config.durable_objects).toBeUndefined();
+    expect(config.triggers).toBeUndefined();
+    expect(config.d1_databases).toEqual([expect.objectContaining({ binding: 'DB', migrations_dir: 'migrations' })]);
+    expect(capability).toMatchObject({
+      wrangler: {
+        main: 'src/server.ts',
+        ai: { binding: 'AI' },
+        agentSecurityDatabase: {
           binding: 'AGENT_SECURITY_DB',
           migrations_dir: 'agent-security-migrations',
-        }),
-      ]),
-    );
+        },
+        durable_objects: { bindings: [{ name: 'AppAgent', class_name: 'AppAgent' }] },
+        triggers: { crons: ['0 3 * * *'] },
+      },
+    });
+  });
+
+  test('enables the complete Agent capability idempotently', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ghostbuild-agent-capability-'));
+    try {
+      for (const path of [
+        'package.json',
+        'wrangler.jsonc',
+        'tsconfig.json',
+        'agent-capability.json',
+        'scripts/production-license-policy.json',
+      ]) {
+        mkdirSync(dirname(join(root, path)), { recursive: true });
+        cpSync(join('template', path), join(root, path));
+      }
+
+      await enableAgentCapability(root);
+      const first = {
+        package: readFileSync(join(root, 'package.json'), 'utf8'),
+        licensePolicy: readFileSync(join(root, 'scripts/production-license-policy.json'), 'utf8'),
+        wrangler: readFileSync(join(root, 'wrangler.jsonc'), 'utf8'),
+        tsconfig: readFileSync(join(root, 'tsconfig.json'), 'utf8'),
+      };
+      await enableAgentCapability(root);
+      expect({
+        package: readFileSync(join(root, 'package.json'), 'utf8'),
+        licensePolicy: readFileSync(join(root, 'scripts/production-license-policy.json'), 'utf8'),
+        wrangler: readFileSync(join(root, 'wrangler.jsonc'), 'utf8'),
+        tsconfig: readFileSync(join(root, 'tsconfig.json'), 'utf8'),
+      }).toEqual(first);
+
+      const pkg = JSON.parse(first.package);
+      const licensePolicy = JSON.parse(first.licensePolicy);
+      const config = parse(first.wrangler);
+      const tsconfig = JSON.parse(first.tsconfig);
+      expect(pkg.dependencies).toMatchObject({
+        agents: '0.20.1',
+        ai: '7.0.48',
+        'core-js-pure': '3.49.0',
+        partyserver: '0.5.9',
+      });
+      expect(licensePolicy.metadataOnlyPackageAllowlist).toEqual(
+        expect.arrayContaining(['@ai-sdk/provider-utils@5.0.18', 'partyserver@0.5.9']),
+      );
+      expect(config).toMatchObject({
+        main: 'src/server.ts',
+        ai: { binding: 'AI' },
+        durable_objects: { bindings: [{ name: 'AppAgent', class_name: 'AppAgent' }] },
+        exports: { AppAgent: { type: 'durable-object', storage: 'sqlite' } },
+        triggers: { crons: ['0 3 * * *'] },
+      });
+      expect(config.d1_databases).toHaveLength(2);
+      expect(config.d1_databases).toContainEqual(expect.objectContaining({ binding: 'AGENT_SECURITY_DB' }));
+      expect(tsconfig.exclude).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('creates an opaque HttpOnly session only for same-origin requests', async () => {

@@ -91,12 +91,12 @@ importers:
       '@earendil-works/pi-ai':
         specifier: 0.83.0
         version: 0.83.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
+      '@ghostbuild/user-workspace-runtime':
+        specifier: workspace:*
+        version: link:user-workspace-runtime
       '@heroicons/react':
         specifier: ^2.2.0
         version: 2.2.0(react@19.2.8)
-      '@journeyapps/wa-sqlite':
-        specifier: 1.7.2
-        version: 1.7.2
       '@nanostores/react':
         specifier: ^0.8.4
         version: 0.8.4(nanostores@0.11.4)(react@19.2.8)
@@ -115,9 +115,6 @@ importers:
       '@radix-ui/react-icons':
         specifier: ^1.3.2
         version: 1.3.2(react@19.2.8)
-      '@tanstack/browser-db-sqlite-persistence':
-        specifier: 0.2.9
-        version: 0.2.9(@journeyapps/wa-sqlite@1.7.2)(typescript@6.0.3)
       '@tanstack/db':
         specifier: ^0.6.17
         version: 0.6.17(typescript@6.0.3)
@@ -345,42 +342,18 @@ importers:
 
   template:
     dependencies:
-      '@ai-sdk/provider':
-        specifier: 4.0.4
-        version: 4.0.4
-      '@ai-sdk/react':
-        specifier: 4.0.51
-        version: 4.0.51(react@19.2.8)(zod@4.4.3)
-      '@cloudflare/ai-chat':
-        specifier: ^0.10.1
-        version: 0.10.1(@ai-sdk/react@4.0.51(react@19.2.8)(zod@4.4.3))(agents@0.20.1(@ai-sdk/react@4.0.51(react@19.2.8)(zod@4.4.3))(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/codemode@0.5.1(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(ai@7.0.48(zod@4.4.3))(zod@4.4.3))(@cloudflare/workers-types@5.20260801.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(ai@7.0.48(zod@4.4.3))(just-bash@3.2.0)(react@19.2.8)(rolldown@1.2.1)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(sass-embedded@1.83.4)(yaml@2.9.0))(zod@4.4.3))(ai@7.0.48(zod@4.4.3))(react@19.2.8)(zod@4.4.3)
       '@tanstack/react-router':
         specifier: ^1.170.19
         version: 1.170.19(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@tanstack/react-start':
         specifier: ^1.168.36
         version: 1.168.36(esbuild@0.28.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rolldown@1.2.1)(rollup@4.62.2)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(sass-embedded@1.83.4)(yaml@2.9.0))
-      agents:
-        specifier: ^0.20.1
-        version: 0.20.1(@ai-sdk/react@4.0.51(react@19.2.8)(zod@4.4.3))(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/codemode@0.5.1(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(ai@7.0.48(zod@4.4.3))(zod@4.4.3))(@cloudflare/workers-types@5.20260801.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(ai@7.0.48(zod@4.4.3))(just-bash@3.2.0)(react@19.2.8)(rolldown@1.2.1)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(sass-embedded@1.83.4)(yaml@2.9.0))(zod@4.4.3)
-      ai:
-        specifier: 7.0.48
-        version: 7.0.48(zod@4.4.3)
-      lucide-react:
-        specifier: 1.28.0
-        version: 1.28.0(react@19.2.8)
       react:
         specifier: ^19.2.8
         version: 19.2.8
       react-dom:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
-      workers-ai-provider:
-        specifier: 4.0.0
-        version: 4.0.0(@ai-sdk/provider@4.0.4)(ai@7.0.48(zod@4.4.3))
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
     devDependencies:
       '@babel/core':
         specifier: ^8.0.1
@@ -448,6 +421,8 @@ importers:
       yaml:
         specifier: 2.9.0
         version: 2.9.0
+
+  user-workspace-runtime: {}
 
 packages:
 
@@ -1508,9 +1483,6 @@ packages:
 
   '@jitl/quickjs-wasmfile-release-sync@0.32.0':
     resolution: {integrity: sha512-BKNDI/TPBfGlLNGYpLrhcDGXmIk4xHm4MRAisOBnOzpXVn9HZWsfmMAc9WMBrAHjvvds6HOikKeaOBKdPdpVrg==}
-
-  '@journeyapps/wa-sqlite@1.7.2':
-    resolution: {integrity: sha512-EVRMzqHtHgJBFcTGOgQ5/YlxrYFSXLFFztC5yo6+jQx2mqFR+a1kkLV4IirquiBzIonjmYXfBtvZ26fmI8r9Nw==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -2584,19 +2556,8 @@ packages:
     peerDependencies:
       eslint: '>=8.40.0'
 
-  '@tanstack/browser-db-sqlite-persistence@0.2.9':
-    resolution: {integrity: sha512-HQEpNdbBrnFL8OT+nUonNC6IWXsne6uGE+vIHddZ0ZNHOzhIR+T5+XeBXztlFrxwpAUNXF8kdA7iNdkVFSeb4A==}
-    peerDependencies:
-      '@journeyapps/wa-sqlite': ^1.4.1
-      typescript: '>=4.7'
-
   '@tanstack/db-ivm@0.1.18':
     resolution: {integrity: sha512-+pZJiRKdoKRM5Epq9T7otD9ZJl82pRFauo7LKuJGrarjVKQ7r+QQlPe3kGdN9LEKSnuNGIWjX9OOY4M8kH4eLw==}
-    peerDependencies:
-      typescript: '>=4.7'
-
-  '@tanstack/db-sqlite-persistence-core@0.2.9':
-    resolution: {integrity: sha512-yp0dpWAf5lK5RgnoKL9Bv5+e+TGzHnlHjkNt6YqhITPlymWgjcibjlj8pqx/iAowPY7kQZoMuiBFhxbPGmf3Zg==}
     peerDependencies:
       typescript: '>=4.7'
 
@@ -4713,11 +4674,6 @@ packages:
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
 
-  lucide-react@1.28.0:
-    resolution: {integrity: sha512-fARAFJULsGuDDydjp6+6blekG/sBIM29TerzLjc9bQUKAcEfrSc4ZQKb25KRz4OMKd87cZTb5dgq0w/T6KufVg==}
-    peerDependencies:
-      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
-
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
@@ -6470,22 +6426,6 @@ packages:
     engines: {node: '>=16'}
     hasBin: true
 
-  workers-ai-provider@4.0.0:
-    resolution: {integrity: sha512-FkhwMP1EP/MKXR8Jv1o7wLVKfTqu0h/PUaEmhZ7gyDiioib5Wsh3oPAKhG+7+SWfU3roTDHaEWlJpkJjpXu+fQ==}
-    peerDependencies:
-      '@ai-sdk/anthropic': ^4.0.0
-      '@ai-sdk/google': ^4.0.0
-      '@ai-sdk/openai': ^4.0.0
-      '@ai-sdk/provider': ^4.0.0
-      ai: ^7.0.0
-    peerDependenciesMeta:
-      '@ai-sdk/anthropic':
-        optional: true
-      '@ai-sdk/google':
-        optional: true
-      '@ai-sdk/openai':
-        optional: true
-
   wrangler@4.118.0:
     resolution: {integrity: sha512-9pkBw/b8zWqGx2S+oLhgHMR1M/4VOE8SynUFABnGWiSFGlcOQ4xiI/B71Xf66RYP2xzngU37IQFPtUruij3lYw==}
     engines: {node: '>=22.0.0'}
@@ -7173,15 +7113,6 @@ snapshots:
       react: 19.2.8
       zod: 4.4.3
 
-  '@cloudflare/ai-chat@0.10.1(@ai-sdk/react@4.0.51(react@19.2.8)(zod@4.4.3))(agents@0.20.1(@ai-sdk/react@4.0.51(react@19.2.8)(zod@4.4.3))(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/codemode@0.5.1(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(ai@7.0.48(zod@4.4.3))(zod@4.4.3))(@cloudflare/workers-types@5.20260801.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(ai@7.0.48(zod@4.4.3))(just-bash@3.2.0)(react@19.2.8)(rolldown@1.2.1)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(sass-embedded@1.83.4)(yaml@2.9.0))(zod@4.4.3))(ai@7.0.48(zod@4.4.3))(react@19.2.8)(zod@4.4.3)':
-    dependencies:
-      '@ai-sdk/react': 4.0.51(react@19.2.8)(zod@4.4.3)
-      agents: 0.20.1(@ai-sdk/react@4.0.51(react@19.2.8)(zod@4.4.3))(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/codemode@0.5.1(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(ai@7.0.48(zod@4.4.3))(zod@4.4.3))(@cloudflare/workers-types@5.20260801.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(ai@7.0.48(zod@4.4.3))(just-bash@3.2.0)(react@19.2.8)(rolldown@1.2.1)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(sass-embedded@1.83.4)(yaml@2.9.0))(zod@4.4.3)
-      ai: 7.0.48(zod@4.4.3)
-      nanoid: 5.1.16
-      react: 19.2.8
-      zod: 4.4.3
-
   '@cloudflare/codemode@0.5.1(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(ai@7.0.48(zod@4.4.3))(zod@4.4.3)':
     dependencies:
       '@types/json-schema': 7.0.15
@@ -7854,8 +7785,6 @@ snapshots:
   '@jitl/quickjs-wasmfile-release-sync@0.32.0':
     dependencies:
       '@jitl/quickjs-ffi-types': 0.32.0
-
-  '@journeyapps/wa-sqlite@1.7.2': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -8569,6 +8498,7 @@ snapshots:
     optionalDependencies:
       '@babel/runtime': 7.29.7
       vite: 8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(sass-embedded@1.83.4)(yaml@2.9.0)
+    optional: true
 
   '@rolldown/pluginutils@1.0.1': {}
 
@@ -8756,22 +8686,10 @@ snapshots:
       - supports-color
       - typescript
 
-  '@tanstack/browser-db-sqlite-persistence@0.2.9(@journeyapps/wa-sqlite@1.7.2)(typescript@6.0.3)':
-    dependencies:
-      '@journeyapps/wa-sqlite': 1.7.2
-      '@tanstack/db-sqlite-persistence-core': 0.2.9(typescript@6.0.3)
-      typescript: 6.0.3
-
   '@tanstack/db-ivm@0.1.18(typescript@6.0.3)':
     dependencies:
       fractional-indexing: 3.4.0
       sorted-btree: 1.8.1
-      typescript: 6.0.3
-
-  '@tanstack/db-sqlite-persistence-core@0.2.9(typescript@6.0.3)':
-    dependencies:
-      '@standard-schema/spec': 1.1.0
-      '@tanstack/db': 0.6.17(typescript@6.0.3)
       typescript: 6.0.3
 
   '@tanstack/db@0.6.17(typescript@6.0.3)':
@@ -9574,37 +9492,6 @@ snapshots:
       ai: 7.0.48(zod@4.4.3)
       just-bash: 3.2.0
       vite: 8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(jiti@1.21.7)(sass-embedded@1.83.4)(yaml@2.9.0)
-    transitivePeerDependencies:
-      - '@babel/core'
-      - '@babel/plugin-transform-runtime'
-      - '@babel/runtime'
-      - '@cloudflare/workers-types'
-      - rolldown
-
-  agents@0.20.1(@ai-sdk/react@4.0.51(react@19.2.8)(zod@4.4.3))(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/codemode@0.5.1(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(ai@7.0.48(zod@4.4.3))(zod@4.4.3))(@cloudflare/workers-types@5.20260801.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(ai@7.0.48(zod@4.4.3))(just-bash@3.2.0)(react@19.2.8)(rolldown@1.2.1)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(sass-embedded@1.83.4)(yaml@2.9.0))(zod@4.4.3):
-    dependencies:
-      '@babel/plugin-proposal-decorators': 8.0.2(@babel/core@8.0.1)
-      '@cfworker/json-schema': 4.1.1
-      '@modelcontextprotocol/client': 2.0.0
-      '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3)
-      '@modelcontextprotocol/server': 2.0.0
-      '@rolldown/plugin-babel': 0.2.3(@babel/core@8.0.1)(@babel/runtime@7.29.7)(rolldown@1.2.1)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(sass-embedded@1.83.4)(yaml@2.9.0))
-      cron-schedule: 6.0.0
-      esbuild: 0.28.1
-      mimetext: 3.0.28
-      nanoid: 5.1.16
-      partyserver: 0.5.9(@cloudflare/workers-types@5.20260801.1)
-      partysocket: 1.3.0(react@19.2.8)
-      react: 19.2.8
-      yaml: 2.9.0
-      yargs: 18.1.0
-      zod: 4.4.3
-    optionalDependencies:
-      '@ai-sdk/react': 4.0.51(react@19.2.8)(zod@4.4.3)
-      '@cloudflare/codemode': 0.5.1(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(ai@7.0.48(zod@4.4.3))(zod@4.4.3)
-      ai: 7.0.48(zod@4.4.3)
-      just-bash: 3.2.0
-      vite: 8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(sass-embedded@1.83.4)(yaml@2.9.0)
     transitivePeerDependencies:
       - '@babel/core'
       - '@babel/plugin-transform-runtime'
@@ -11467,10 +11354,6 @@ snapshots:
   lru-cache@5.1.1:
     dependencies:
       yallist: 3.1.1
-
-  lucide-react@1.28.0(react@19.2.8):
-    dependencies:
-      react: 19.2.8
 
   magic-string@0.30.21:
     dependencies:
@@ -13681,11 +13564,6 @@ snapshots:
       '@cloudflare/workerd-linux-64': 1.20260730.1
       '@cloudflare/workerd-linux-arm64': 1.20260730.1
       '@cloudflare/workerd-windows-64': 1.20260730.1
-
-  workers-ai-provider@4.0.0(@ai-sdk/provider@4.0.4)(ai@7.0.48(zod@4.4.3)):
-    dependencies:
-      '@ai-sdk/provider': 4.0.4
-      ai: 7.0.48(zod@4.4.3)
 
   wrangler@4.118.0(@cloudflare/workers-types@5.20260801.1):
     dependencies:

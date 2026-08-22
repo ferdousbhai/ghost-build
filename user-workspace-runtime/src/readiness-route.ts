@@ -1,10 +1,10 @@
+import { readUserWorkspaceRuntimeHealth } from '../../app/lib/.server/cloudflare/user-workspace-runtime-health';
 import {
-  readUserWorkspaceRuntimeHealth,
   USER_WORKSPACE_READINESS_COMPONENTS,
   USER_WORKSPACE_RUNTIME_SERVICE,
   type UserWorkspaceReadinessCheck,
   type UserWorkspaceReadinessComponent,
-} from '../../app/lib/.server/cloudflare/user-workspace-runtime-health';
+} from './protocol';
 import { USER_WORKSPACE_ACTIVITY_PATH } from '../../app/lib/.server/cloudflare/user-workspace-runtime-activity';
 import { readUserWorkspaceRuntimeActivity } from './workspace-activity-route';
 

@@ -35,3 +35,18 @@ Do not add `@cloudflare/think` to this release. Think owns a SQLite workspace an
 which would create a second project filesystem beside the authoritative user-owned Computer workspace. Reconsider only
 if Think can disable all local workspace state or accept the existing remote workspace while preserving Ghostbuild's
 revision, authorization, validation, recovery, and deployment-approval invariants.
+
+## Builder loop: Pi versus AI SDK
+
+Reviewed on 2026-08-22 against the installed `@earendil-works/pi-agent-core` 0.83.0 and AI SDK 7.0.48. Keep Pi for the
+builder loop. AI SDK's `ToolLoopAgent` has step preparation, stop conditions, tool lifecycle callbacks, streaming, and
+abort support, so ordinary tool execution is close. It does not have Pi's `getSteeringMessages` contract: a committed
+message can be delivered one at a time between turns, clear a previously validated completion, and cause continuation
+even after the model's preceding response would otherwise be final. Ghostbuild also has tested Pi adapters for partial
+tool-call argument streaming, transient execution progress, failed-result reclassification, live context compaction,
+one invisible overflow retry, inactivity/wall-clock budgets, and cancellation accounting.
+
+An AI SDK rewrite could recreate much of this around `prepareStep` and stream callbacks, but that would be another
+custom loop and no parity implementation currently passes the existing steering, progress, cancellation, compaction,
+and recovery tests. Removing two dependencies is not worth changing those semantics. Reconsider only when a replacement
+passes those tests without a second orchestration layer or a fixed step ceiling.

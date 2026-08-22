@@ -48,7 +48,6 @@ const mocks = vi.hoisted(() => {
     controller,
     initializeWorkspace: vi.fn(async () => controller),
     previewRequests,
-    replica: {} as object | undefined,
     waitForSocket: vi.fn(async () => undefined),
     workbench,
   };
@@ -64,9 +63,6 @@ vi.mock('agents/react', () => ({ useAgent: () => mocks.agent }));
 vi.mock('@nanostores/react', () => ({ useStore: (store: { get: () => unknown }) => store.get() }));
 vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
-}));
-vi.mock('~/lib/cloudflare/account-local-replica', () => ({
-  useAccountLocalReplica: () => mocks.replica,
 }));
 vi.mock('~/lib/cloudflare/runtime-session', () => ({
   requireUserRuntimeEndpoint: () => 'https://runtime.example.com',
@@ -123,7 +119,6 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.agent.call.mockReset();
   mocks.agent.state = {};
-  mocks.replica = {};
   mocks.initializeWorkspace.mockClear();
   mocks.controller.dispose.mockClear();
   mocks.controller.pull.mockClear();
@@ -191,74 +186,6 @@ describe('useBuilderAgentChat workspace preparation', () => {
     await vi.waitFor(() => expect(prepareWorkspaceCalls()).toHaveLength(1));
     const [, , options] = prepareWorkspaceCalls()[0] as [string, unknown[], { timeout?: number }];
     expect(options?.timeout).toBe(WORKSPACE_PREPARE_TIMEOUT_MS);
-  });
-
-  it('preserves pending send admission when the replica becomes ready for the same presentation', async () => {
-    mocks.replica = undefined;
-    mocks.agent.call.mockImplementation(async (method: string) => {
-      if (method === 'getPreviewState') {
-        return {};
-      }
-      if (method === 'prepareWorkspace') {
-        return { initialized: true };
-      }
-      if (method === 'getTranscriptSnapshot') {
-        return { checkpoint: null, messages: [] };
-      }
-      throw new Error(`Unexpected agent call: ${method}`);
-    });
-
-    let currentChat: ReturnType<typeof useBuilderAgentChat> | undefined;
-    function Harness() {
-      currentChat = useBuilderAgentChat(chatArgs('workspace-1'));
-      return null;
-    }
-
-    const container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-    await act(async () => root?.render(<Harness />));
-    const pendingSend = settle(currentChat!.sendMessage({ role: 'user', parts: [{ type: 'text', text: 'build it' }] }));
-
-    await Promise.resolve();
-    expect(mocks.chat.sendMessage).not.toHaveBeenCalled();
-    expect(prepareWorkspaceCalls()).toHaveLength(0);
-
-    mocks.replica = {};
-    await act(async () => root?.render(<Harness />));
-
-    await expect(pendingSend).resolves.toBeNull();
-    expect(prepareWorkspaceCalls()).toHaveLength(1);
-    expect(mocks.chat.sendMessage).toHaveBeenCalledTimes(1);
-  });
-
-  it('settles the unstarted readiness gate when the presentation switches while the replica opens', async () => {
-    mocks.replica = undefined;
-    mocks.agent.call.mockImplementation(async (method: string) => {
-      if (method === 'getPreviewState') {
-        return {};
-      }
-      throw new Error(`Unexpected agent call: ${method}`);
-    });
-
-    let currentChat: ReturnType<typeof useBuilderAgentChat> | undefined;
-    function Harness({ presentationId }: { presentationId: string }) {
-      currentChat = useBuilderAgentChat(chatArgs(presentationId));
-      return null;
-    }
-
-    const container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-    await act(async () => root?.render(<Harness presentationId="workspace-old" />));
-    const staleSend = settle(currentChat!.sendMessage({ role: 'user', parts: [{ type: 'text', text: 'build it' }] }));
-
-    await act(async () => root?.render(<Harness presentationId="workspace-new" />));
-
-    await expect(staleSend).resolves.toEqual(
-      expect.objectContaining({ message: 'The durable workspace initialization was superseded.' }),
-    );
-    expect(prepareWorkspaceCalls()).toHaveLength(0);
   });
 
   it('settles stale send admission without activating the old workspace when the presentation switches', async () => {

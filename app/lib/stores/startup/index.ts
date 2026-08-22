@@ -1,7 +1,6 @@
-import { useStoreMessageHistory } from './useStoreMessageHistory';
 import { useDiscardEmptyChat, useExistingInitializeChat, useHomepageInitializeChat } from './useInitializeChat';
 import { useInitialMessages, useInitialMessagesState } from './useInitialMessages';
-import { useChatCheckpointSync } from './history';
+import { useChatSelectionSync } from './history';
 import { useCallback, useEffect, useState } from 'react';
 import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import { useAllSubchatsState } from '~/lib/cloudflare/data-hooks';
@@ -19,15 +18,8 @@ export function useChatHomepage(chatId: string) {
   const [chatInitialized, setChatInitialized] = useState(false);
   const initializeChat = useHomepageInitializeChat(chatId, setChatInitialized);
   const discardEmptyChat = useDiscardEmptyChat(chatId);
-  const userId = useUserIdOrNullOrLoading();
-  const storeMessageHistory = useStoreMessageHistory(chatId, userId);
   const loaded = useInitialMessages(chatInitialized ? chatId : undefined);
-  useChatCheckpointSync(
-    chatId,
-    loaded?.loadedSubchatIndex ?? (chatInitialized ? 0 : undefined),
-    loaded?.deserialized ?? (chatInitialized ? EMPTY_INITIAL_MESSAGES : undefined),
-    loaded?.checkpoint,
-  );
+  useChatSelectionSync(chatId, loaded?.loadedSubchatIndex ?? (chatInitialized ? 0 : undefined));
   const subchatState = useSubchats(chatId, chatInitialized);
   const subchats = subchatState.subchats;
   const subchatIndex = useStore(subchatIndexStore) ?? 0;
@@ -45,7 +37,6 @@ export function useChatHomepage(chatId: string) {
     initializeChat,
     discardEmptyChat,
     onBuilderRequestStart,
-    storeMessageHistory,
     initialMessages: loaded?.deserialized ?? EMPTY_INITIAL_MESSAGES,
     subchats,
     transcript,
@@ -63,14 +54,7 @@ export function useExistingChat(chatId: string) {
       void navigateToChat(initialMessages.loadedChatId);
     }
   }, [chatId, initialMessages?.loadedChatId, navigateToChat]);
-  useChatCheckpointSync(
-    chatId,
-    initialMessages?.loadedSubchatIndex,
-    initialMessages?.deserialized,
-    initialMessages?.checkpoint,
-  );
-  const userId = useUserIdOrNullOrLoading();
-  const storeMessageHistory = useStoreMessageHistory(chatId, userId);
+  useChatSelectionSync(chatId, initialMessages?.loadedSubchatIndex);
   const subchatState = useSubchats(chatId);
   const subchats = subchatState.subchats;
   const onBuilderRequestStart = useCallback(() => undefined, []);
@@ -80,7 +64,6 @@ export function useExistingChat(chatId: string) {
     initializeChat,
     discardEmptyChat,
     onBuilderRequestStart,
-    storeMessageHistory,
     subchats,
     transcript: initialMessages?.transcript,
     loadError: initialMessageState.error,

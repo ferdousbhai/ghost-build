@@ -17,12 +17,6 @@ vi.mock('~/lib/cloudflare/client', () => ({
 vi.mock('~/lib/cloudflare/runtime-session', () => ({
   fetchUserRuntime: (path: string, init?: RequestInit) => fetch(path, init),
 }));
-vi.mock('~/lib/cloudflare/account-local-replica', () => ({
-  ACCOUNT_LOCAL_REPLICA_SCHEMA_VERSION: 1,
-  ACCOUNT_LOCAL_REPLICA_GC_TIME: 30 * 24 * 60 * 60 * 1000,
-  registerAccountCollectionDisposer: () => () => undefined,
-  useAccountLocalReplica: () => null,
-}));
 describe('useInitialMessages', () => {
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

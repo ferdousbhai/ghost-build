@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "description": "Opt-in Cloudflare AppAgent and Workers AI capability",
+  "dependencies": {
+    "@ai-sdk/provider": "4.0.4",
+    "@ai-sdk/react": "4.0.51",
+    "@cloudflare/ai-chat": "0.10.1",
+    "agents": "0.20.1",
+    "ai": "7.0.48",
+    "core-js-pure": "3.49.0",
+    "partyserver": "0.5.9",
+    "workers-ai-provider": "4.0.0",
+    "zod": "4.4.3"
+  },
+  "metadataOnlyPackageAllowlist": [
+    "@ai-sdk/provider-utils@5.0.18",
+    "@cfworker/json-schema@4.1.1",
+    "@cloudflare/workers-types@5.20260801.1",
+    "partyserver@0.5.9"
+  ],
+  "wrangler": {
+    "main": "src/server.ts",
+    "ai": { "binding": "AI" },
+    "agentSecurityDatabase": {
+      "binding": "AGENT_SECURITY_DB",
+      "database_name": "ghostbuild-cloudflare-app-agent-security",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "agent-security-migrations"
+    },
+    "durable_objects": {
+      "bindings": [{ "name": "AppAgent", "class_name": "AppAgent" }]
+    },
+    "exports": {
+      "AppAgent": { "type": "durable-object", "storage": "sqlite" }
+    },
+    "triggers": { "crons": ["0 3 * * *"] }
+  },
+  "typescriptExcludesToRemove": [
+    "src/server.ts",
+    "src/agent-routing.ts",
+    "src/agent-security.ts",
+    "src/agents"
+  ]
+}

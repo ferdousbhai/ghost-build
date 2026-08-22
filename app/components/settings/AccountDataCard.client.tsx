@@ -4,7 +4,7 @@ import { Button } from '@ui/Button';
 import { TextInput } from '@ui/TextInput';
 import { ACCOUNT_DELETION_CONFIRMATION } from '~/lib/account-data';
 import { createCloudflareReturnURL, signInWithCloudflare } from '~/lib/auth-client';
-import { disposeAccountLocalReplicas } from '~/lib/cloudflare/account-local-replica';
+import { disposeClientCollections } from '~/lib/cloudflare/client-collections';
 import { resetUserRuntimeSession } from '~/lib/cloudflare/runtime-session';
 import { z } from 'zod';
 
@@ -84,7 +84,7 @@ export function AccountDataCard() {
         setError(payload?.code === 'reauthentication_required' ? null : (payload?.error ?? 'Unable to delete.'));
         return;
       }
-      await disposeAccountLocalReplicas();
+      await disposeClientCollections();
       resetUserRuntimeSession();
       setRevoked(payload?.cloudflareAuthorizationRevoked === true);
       setPhase('deleted');
@@ -175,11 +175,11 @@ export function AccountDataCard() {
 
       <h3 className="mt-5 text-sm font-medium text-content-primary">Clear this browser</h3>
       <p className="mt-1 max-w-2xl text-sm text-content-secondary">
-        Logging out disposes this browser’s account-local project replica. To remove everything Ghostbuild kept on this
+        Logging out disposes this browser’s in-memory project cache. To remove everything Ghostbuild kept on this
         device, clear site data for this site in your browser settings. That removes the <code>ghostbuild_session</code>{' '}
         cookie, the <code>ghostbuild_theme</code> and <code>ghostbuild_builder_model</code> preferences, the telemetry
-        preference, tab-scoped session state, and the OPFS database holding cached chats and workspace files. Repeat
-        this in every browser and profile you have used; no server-side request can reach them.
+        preference and tab-scoped session state. Repeat this in every browser and profile you have used; no server-side
+        request can reach them.
       </p>
 
       <h3 className="mt-5 text-sm font-medium text-content-primary">Ask for a copy or an erasure</h3>
@@ -203,7 +203,7 @@ export function AccountDataCard() {
           </p>
           <p className="mt-2">
             Resources Ghostbuild deployed are still in your Cloudflare account and still billed to it. Clear this
-            browser’s site data to finish removing the local copies.
+            browser’s site data to remove its cookie, preferences, and tab-session state.
           </p>
           <p className="mt-3">
             <a className="underline" href="/">

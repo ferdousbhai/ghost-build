@@ -23,7 +23,7 @@
       "owner": "user Cloudflare account",
       "categories": [
         "chat catalog and subchat metadata",
-        "transcript identities and checkpoints",
+        "transcript identities, branch ancestry, and chat visibility",
         "deployment plans, approvals, status, resources, and errors",
         "agent garbage-collection candidates"
       ],
@@ -80,16 +80,16 @@
       "system": "Browser storage",
       "owner": "user device",
       "categories": [
-        "OPFS account-local chat metadata, full transcripts, and workspace file content",
+        "in-memory chat, transcript, and workspace presentation caches",
         "theme and builder-model preferences",
         "pending prompt in tab-scoped session storage",
         "asset-recovery and telemetry journey session state",
         "optional product-telemetry preference"
       ],
       "secrets": "the pending prompt can contain user content and remains in tab-scoped session storage",
-      "currentRetention": "browser-controlled; pending-prompt and other sessionStorage state lasts until the tab session ends, while OPFS SQLite and localStorage persist until cleared or replaced",
+      "currentRetention": "browser-controlled; in-memory caches end with the page, pending-prompt and other sessionStorage state lasts until the tab session ends, and preferences in localStorage persist until cleared or replaced",
       "currentExport": "no server export includes browser-owned data",
-      "currentDeletion": "users must clear Ghostbuild site data with browser controls; the settings \"Your data\" card names the ghostbuild_session cookie, the ghostbuild_theme and ghostbuild_builder_model preferences, the telemetry preference, tab-scoped session state, and the OPFS database to clear, and warns that this must be repeated in every browser and profile; logging out or completing control-plane erasure disposes the account-local replica in that browser only; no server-side request can enumerate or erase all browser-owned storage"
+      "currentDeletion": "users must clear Ghostbuild site data with browser controls; the settings \"Your data\" card names the ghostbuild_session cookie, the ghostbuild_theme and ghostbuild_builder_model preferences, the telemetry preference, and tab-scoped session state, and warns that this must be repeated in every browser and profile; logging out or completing control-plane erasure disposes in-memory collections in that browser; no server-side request can enumerate or erase all browser-owned storage"
     },
     {
       "system": "User-owned deployed Cloudflare resources",

@@ -66,10 +66,10 @@ connected user's authorization.
 
 ## Generated Artifacts
 
-After editing `template/`:
+After editing `template/` or `user-workspace-runtime/`:
 
 ```bash
-pnpm run rebuild-template
+pnpm run generate:artifacts
 ```
 
 Do not edit generated route trees, Worker binding types, `app/generated/user-workspace-runtime.generated.ts`, or the
@@ -90,7 +90,8 @@ checks both sides of that policy.
 
 ## User Workspace Runtime
 
-`pnpm run generate:user-workspace-runtime` bundles the source in `user-workspace-runtime/` together with its migrations.
+`pnpm run generate:artifacts` bundles `user-workspace-runtime/` together with its migrations and rebuilds the generated
+application template snapshot in one deterministic step.
 The control plane deploys that bundle into each connected user's Cloudflare account and provisions its D1 database,
 `BuilderAgent` Durable Objects, `ProjectWorkspace` Durable Objects, and Container application there. The R2 permission
 is retained for generated applications that request an R2 binding; project workspace bytes do not use an R2 backup
@@ -142,7 +143,7 @@ pnpm run ops:json   # the same report, structured for a coding agent
 your existing Cloudflare authentication. It issues only `SELECT` statements and holds no secret of its own. Problems
 are printed first; a check the tool could not answer is reported as unknown together with the reason, rather than as a
 zero that reads as healthy. Runtime staleness is measured against `app/generated/user-workspace-runtime.generated.ts`,
-so run `pnpm run generate:user-workspace-runtime` first if the report says it has no build to compare against.
+so run `pnpm run generate:artifacts` first if the report says it has no build to compare against.
 
 ## Historical Evaluations
 

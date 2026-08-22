@@ -1,70 +1,22 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ensureInitialChat, updateChatCheckpoint } from './chat-repository.server';
-import type { ChatRow, ChatTranscriptRow } from './types';
+import { describe, expect, it } from 'vitest';
+import { ensureInitialChat, markChatStarted } from './chat-repository.server';
+import type { ChatRow } from './types';
 
-const transcriptMocks = vi.hoisted(() => ({
-  requireChatTranscript: vi.fn(),
-}));
-
-vi.mock('./transcript-repository.server', () => ({
-  checkpointMatchesIdentity: (
-    checkpoint: { agentName: string; generation: number; subchatIndex: number },
-    row: ChatTranscriptRow,
-  ) =>
-    checkpoint.agentName === row.agent_name &&
-    checkpoint.generation === row.generation &&
-    checkpoint.subchatIndex === row.subchat_index,
-  requireChatTranscript: transcriptMocks.requireChatTranscript,
-}));
-
-describe('current chat checkpoint persistence', () => {
-  beforeEach(() => {
-    transcriptMocks.requireChatTranscript.mockReset().mockResolvedValue(transcript());
-  });
-
-  it('updates the transcript catalog projection with one statement', async () => {
+describe('chat catalog visibility', () => {
+  it('records only that an owner-scoped Agent accepted content', async () => {
     const database = new ChatRepositoryDatabase();
 
-    await expect(updateChatCheckpoint(database.db, updateArgs())).resolves.toEqual({ accepted: true });
+    await markChatStarted(database.db, {
+      sessionId: 'session',
+      chatId: 'chat',
+      agentName: 'chat',
+    });
 
     expect(database.runStatements).toHaveLength(1);
-    expect(database.runStatements[0].query).toContain('UPDATE chat_transcripts');
-    expect(database.runStatements[0].query).toContain('last_message_rank = ?');
-    expect(database.runStatements[0].query).toContain('chats.creator_id = ?');
-    expect(database.runStatements[0].query).not.toMatch(/storage_key|snapshot_key|chat_message_states/);
-  });
-
-  it('accepts an exact replay without writing', async () => {
-    transcriptMocks.requireChatTranscript.mockResolvedValue(
-      transcript({
-        head_revision: 1,
-        head_digest: 'a'.repeat(64),
-        head_message_count: 6,
-        last_message_rank: 5,
-        part_index: 2,
-      }),
-    );
-    const database = new ChatRepositoryDatabase();
-
-    await expect(updateChatCheckpoint(database.db, updateArgs())).resolves.toEqual({ accepted: true });
-    expect(database.runStatements).toHaveLength(0);
-  });
-
-  it('rejects a stale transcript checkpoint without writing', async () => {
-    const database = new ChatRepositoryDatabase();
-
-    await expect(
-      updateChatCheckpoint(database.db, updateArgs({ checkpoint: { ...updateArgs().checkpoint, generation: 1 } })),
-    ).resolves.toEqual({ accepted: false });
-    expect(database.runStatements).toHaveLength(0);
-  });
-
-  it('rejects a checkpoint that moves the catalog position backwards', async () => {
-    transcriptMocks.requireChatTranscript.mockResolvedValue(transcript({ last_message_rank: 8, part_index: 3 }));
-    const database = new ChatRepositoryDatabase();
-
-    await expect(updateChatCheckpoint(database.db, updateArgs())).resolves.toEqual({ accepted: false });
-    expect(database.runStatements).toHaveLength(0);
+    expect(database.runStatements[0].query).toContain('SET has_messages = 1');
+    expect(database.runStatements[0].query).toContain('chat_transcripts.agent_name = ?');
+    expect(database.runStatements[0].values).toEqual(['session', 'chat', 'chat']);
+    expect(database.runStatements[0].query).not.toMatch(/head_revision|head_digest|message_rank|part_index/);
   });
 });
 
@@ -79,30 +31,11 @@ describe('ensureInitialChat', () => {
     expect(database.batchStatements).toHaveLength(2);
     expect(database.batchStatements[0].query).toContain('INSERT INTO chats');
     expect(database.batchStatements[1].query).toContain('INSERT INTO chat_transcripts');
-    expect(database.batchStatements.map((statement) => statement.query).join('\n')).not.toContain(
-      'chat_message_states',
+    expect(database.batchStatements.map((statement) => statement.query).join('\n')).not.toMatch(
+      /head_revision|head_digest|message_rank|part_index/,
     );
   });
 });
-
-function updateArgs(overrides: Partial<Parameters<typeof updateChatCheckpoint>[1]> = {}) {
-  return {
-    sessionId: 'session',
-    chatId: 'chat',
-    lastMessageRank: 5,
-    subchatIndex: 0,
-    partIndex: 2,
-    ...overrides,
-    checkpoint: overrides.checkpoint ?? {
-      agentName: 'chat',
-      generation: 0,
-      subchatIndex: 0,
-      revision: 1,
-      digest: 'a'.repeat(64),
-      messageCount: 6,
-    },
-  };
-}
 
 function chat(): ChatRow {
   return {
@@ -112,29 +45,8 @@ function chat(): ChatRow {
     description: null,
     timestamp: '2026-08-01T00:00:00.000Z',
     last_subchat_index: 0,
+    has_messages: 0,
     is_deleted: 0,
-  };
-}
-
-function transcript(overrides: Partial<ChatTranscriptRow> = {}): ChatTranscriptRow {
-  return {
-    chat_id: 'chat-row',
-    subchat_index: 0,
-    generation: 0,
-    agent_name: 'chat',
-    head_revision: 0,
-    head_digest: null,
-    head_message_count: 0,
-    last_message_rank: -1,
-    part_index: -1,
-    description: null,
-    parent_subchat_index: null,
-    parent_generation: null,
-    parent_revision: null,
-    transition_token: 'transition',
-    created_at: 1,
-    updated_at: 1,
-    ...overrides,
   };
 }
 
@@ -168,10 +80,7 @@ class PreparedStatement {
   }
 
   async first<T>(): Promise<T | null> {
-    if (this.query.includes('FROM chats')) {
-      return chat() as T;
-    }
-    return null;
+    return this.query.includes('FROM chats') ? (chat() as T) : null;
   }
 
   async run(): Promise<D1Result> {

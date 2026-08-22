@@ -4,7 +4,6 @@ import type {
   BuilderWorkspaceClientChange,
   BuilderWorkspaceState,
 } from '~/agents/builder-workspace-types';
-import type { AccountLocalReplica } from '~/lib/cloudflare/account-local-replica';
 import {
   createBuilderWorkspaceCollection,
   type BuilderWorkspaceAgent,
@@ -18,7 +17,7 @@ const WORKSPACE_RPC_TIMEOUT_MS = 30_000;
 const logger = createScopedLogger('BuilderWorkspaceSyncController');
 
 /**
- * Keeps the browser presentation and its persisted TanStack DB collection
+ * Keeps the browser presentation and its in-memory TanStack DB collection
  * aligned with the authoritative Durable Object workspace. Browser writes are
  * single-revision CAS operations; conflicts reload server state and never
  * rebase a stale local edit.
@@ -41,7 +40,6 @@ export class BuilderWorkspaceSyncController {
     agent: BuilderWorkspaceAgent,
     options: {
       workspaceId?: string;
-      replica?: AccountLocalReplica | null;
       isCurrent?: () => boolean;
     } = {},
   ): Promise<BuilderWorkspaceSyncController> {
@@ -61,7 +59,6 @@ export class BuilderWorkspaceSyncController {
     const { collection, source } = createBuilderWorkspaceCollection({
       agent,
       workspaceId,
-      replica: options.replica ?? null,
     });
     const controller = new BuilderWorkspaceSyncController(agent, workspaceId, collection, source);
     const initialPullOutcome = source.initialPull.then(
@@ -73,7 +70,6 @@ export class BuilderWorkspaceSyncController {
       if (!isCurrent()) {
         throw new Error('The durable workspace connection was superseded.');
       }
-      controller.#replacePresentationFromCollection();
       const initialPull = await initialPullOutcome;
       if (!initialPull.ok) {
         throw initialPull.error;
@@ -82,7 +78,7 @@ export class BuilderWorkspaceSyncController {
         throw new Error('The durable workspace connection was superseded.');
       }
       controller.#revision = initialPull.pull.revision;
-      controller.#presentPull(initialPull.pull);
+      controller.#replacePresentationFromCollection();
       workbenchStore.setWorkspaceChangeListener(controller.#changeListener);
       return controller;
     } catch (error) {
@@ -132,8 +128,8 @@ export class BuilderWorkspaceSyncController {
             }
           } catch (error) {
             // The edit is already durable. Preserve success and let the next
-            // normal reconciliation retry the browser replica update.
-            logger.warn('Failed to refresh the browser workspace replica after a durable edit', error);
+            // normal reconciliation retry the in-memory workspace refresh.
+            logger.warn('Failed to refresh the browser workspace view after a durable edit', error);
           }
         } else {
           const pull = await this.source.replaceFromSnapshot();

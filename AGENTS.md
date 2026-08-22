@@ -44,6 +44,7 @@ was unreachable.
 - [ghostbuild-agent/](ghostbuild-agent/) — shared prompts, protocol types, parsing, and tool schemas
 - [user-workspace-runtime/src/index.ts](user-workspace-runtime/src/index.ts) — user-owned project storage, Sandboxes,
   previews, validation, and deployment
+- [user-workspace-runtime/src/protocol.ts](user-workspace-runtime/src/protocol.ts) — shared runtime/browser protocol
 - [app/lib/stores/startup/](app/lib/stores/startup/) — workspace bootstrap and restoration
 - [app/components/editor/codemirror/](app/components/editor/codemirror/) — editor integration
 
@@ -71,7 +72,8 @@ Never fall back to Ghostbuild-owned resources or credentials; fail closed when t
 
 ## Generated Applications
 
-- [template/src/server.ts](template/src/server.ts) — generated Worker entrypoint
+- [template/src/plain-server.ts](template/src/plain-server.ts) — default generated Worker entrypoint
+- [template/src/server.ts](template/src/server.ts) — opt-in protected Agent entrypoint
 - [template/src/agents/app-agent.ts](template/src/agents/app-agent.ts) — generated application agent
 - [template/src/app-bindings.ts](template/src/app-bindings.ts) — narrow user-application binding surface
 - [template/agent-security-migrations/](template/agent-security-migrations/) — Agent-only D1 schema, separate from
@@ -80,8 +82,9 @@ Never fall back to Ghostbuild-owned resources or credentials; fail closed when t
 - [make-bootstrap-snapshot.js](make-bootstrap-snapshot.js) — snapshot builder
 - [scripts/verify-template.mjs](scripts/verify-template.mjs) — clean-template verification
 
-After editing `template/`, run `pnpm run rebuild-template`. Do not hand-edit generated route trees, Worker binding types,
-or the generated durable template module.
+After editing `template/` or the user workspace runtime, run `pnpm run generate:artifacts`. Generated template/runtime
+bundle modules are ignored build output. Do not hand-edit generated route trees, Worker binding types, or generated
+bundle modules.
 
 ## Review Rules
 

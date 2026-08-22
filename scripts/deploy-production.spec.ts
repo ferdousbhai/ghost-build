@@ -73,17 +73,15 @@ describe('production deploy wrapper', () => {
   });
 
   it('allows only validation-generated build output changes in Workers Builds', () => {
-    const generatedChanges = [' M app/generated/user-workspace-runtime.generated.ts', ' M app/routeTree.gen.ts'].join(
-      '\n',
-    );
+    const generatedChanges = ' M app/routeTree.gen.ts';
     expect(findUnexpectedDeployChanges(generatedChanges, { workersBuild: true })).toEqual([]);
     expect(findUnexpectedDeployChanges(generatedChanges)).toEqual(generatedChanges.split('\n'));
     expect(
       findUnexpectedDeployChanges(`${generatedChanges}\n M app/server.ts\n?? unexpected.txt`, { workersBuild: true }),
     ).toEqual([' M app/server.ts', '?? unexpected.txt']);
-    expect(
-      findUnexpectedDeployChanges(' D app/generated/user-workspace-runtime.generated.ts', { workersBuild: true }),
-    ).toEqual([' D app/generated/user-workspace-runtime.generated.ts']);
+    expect(findUnexpectedDeployChanges(' D app/routeTree.gen.ts', { workersBuild: true })).toEqual([
+      ' D app/routeTree.gen.ts',
+    ]);
   });
 
   it('exposes only the ordered Workers Builds production path', () => {

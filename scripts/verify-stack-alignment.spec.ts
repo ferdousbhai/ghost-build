@@ -228,7 +228,7 @@ describe('stack alignment verification helpers', () => {
       findBuilderTemplateModuleErrors("export const BUILDER_TEMPLATE_SOURCE_SHA256 = 'source-hash';", 'source-hash'),
     ).toEqual([]);
     expect(findBuilderTemplateModuleErrors('', 'source-hash')).toEqual([
-      'app/agents/builder-template.generated.ts is stale; run pnpm run rebuild-template.',
+      'app/agents/builder-template.generated.ts is stale; run pnpm run generate:artifacts.',
     ]);
   });
 

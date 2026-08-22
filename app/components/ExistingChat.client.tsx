@@ -51,7 +51,6 @@ export function ExistingChatSessionView({ chatId, userId }: { chatId: string; us
 function AuthenticatedExistingChat({ chatId }: { chatId: string }) {
   const {
     initialMessages,
-    storeMessageHistory,
     initializeChat,
     discardEmptyChat,
     onBuilderRequestStart,
@@ -83,7 +82,6 @@ function AuthenticatedExistingChat({ chatId }: { chatId: string }) {
     <Chat
       initialMessages={initialMessages}
       partCache={reloadState.partCache}
-      storeMessageHistory={storeMessageHistory}
       initializeChat={initializeChat}
       discardEmptyChat={discardEmptyChat}
       onBuilderRequestStart={onBuilderRequestStart}

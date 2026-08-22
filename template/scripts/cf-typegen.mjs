@@ -125,6 +125,7 @@ function addBinding(lines, name, type) {
 function renderFallbackTypes(config) {
   const envLines = [];
   const durableNamespaces = [];
+  const mainModule = `./${String(config?.main ?? "src/plain-server.ts").replace(/\.ts$/, "")}`;
 
   for (const binding of config?.d1_databases ?? []) {
     addBinding(envLines, binding?.binding, "D1Database");
@@ -159,7 +160,7 @@ function renderFallbackTypes(config) {
     }
 
     envLines.push(
-      `  ${name}: DurableObjectNamespace<import("./src/server").${className}>;`,
+      `  ${name}: DurableObjectNamespace<import(${JSON.stringify(mainModule)}).${className}>;`,
     );
     durableNamespaces.push(JSON.stringify(name));
   }
@@ -185,7 +186,7 @@ ${envLines.sort().join("\n")}
 
 declare namespace Cloudflare {
   interface GlobalProps {
-    mainModule: typeof import("./src/server");
+    mainModule: typeof import(${JSON.stringify(mainModule)});
     durableNamespaces: ${durableNamespaceType};
   }
   interface Env extends __BaseEnv_Env {}

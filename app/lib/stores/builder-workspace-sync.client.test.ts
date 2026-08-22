@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import type { SyncConfig } from '@tanstack/db';
 import type { BuilderWorkspaceClientChange, BuilderWorkspaceSyncEntry } from '~/agents/builder-workspace-types';
-import type { AccountLocalReplica } from '~/lib/cloudflare/account-local-replica';
-import type { BuilderWorkspaceFileRecord } from './builder-workspace-collection.client';
 
 const workbench = vi.hoisted(() => ({
   activateWorkspace: vi.fn(),
@@ -55,31 +52,10 @@ describe('BuilderWorkspaceSyncController', () => {
   });
 
   test('does not leave a workbench listener when ownership is lost during preload', async () => {
-    let releasePreload: () => void = () => undefined;
-    const preloadBlocked = new Promise<void>((resolve) => {
-      releasePreload = resolve;
+    let releasePull: () => void = () => undefined;
+    const pullBlocked = new Promise<void>((resolve) => {
+      releasePull = resolve;
     });
-    let markPreloadStarted: () => void = () => undefined;
-    const preloadStarted = new Promise<void>((resolve) => {
-      markPreloadStarted = resolve;
-    });
-    const replica = {
-      persistence: {},
-      persistedCollectionOptions: (options: WorkspaceCollectionOptions) => ({
-        ...options,
-        sync: {
-          ...options.sync,
-          sync: (params: WorkspaceSyncParams) =>
-            options.sync.sync({
-              ...params,
-              markReady: () => {
-                markPreloadStarted();
-                void preloadBlocked.then(params.markReady);
-              },
-            }),
-        },
-      }),
-    } as unknown as AccountLocalReplica;
     let current = true;
     const agent = {
       call: vi.fn(async (method: string, args: unknown[]) => {
@@ -87,6 +63,7 @@ describe('BuilderWorkspaceSyncController', () => {
           return workspaceState(0, 0, 0);
         }
         if (method === 'getWorkspaceSyncPage') {
+          await pullBlocked;
           const request = args[0] as { fromRevision: number };
           return syncPage(request.fromRevision, 0, 'current', [], workspaceState(0, 0, 0));
         }
@@ -96,14 +73,15 @@ describe('BuilderWorkspaceSyncController', () => {
 
     const initializing = BuilderWorkspaceSyncController.initialize(agent, {
       workspaceId: 'preloading-workspace',
-      replica,
       isCurrent: () => current,
     });
-    await preloadStarted;
+    await vi.waitFor(() =>
+      expect(agent.call).toHaveBeenCalledWith('getWorkspaceSyncPage', expect.anything(), expect.anything()),
+    );
     current = false;
 
     expect(workbench.setWorkspaceChangeListener).not.toHaveBeenCalled();
-    releasePreload();
+    releasePull();
     await expect(initializing).rejects.toThrow('durable workspace connection was superseded');
     expect(workbench.setWorkspaceChangeListener).not.toHaveBeenCalled();
   });
@@ -174,86 +152,6 @@ describe('BuilderWorkspaceSyncController', () => {
     expect(activeWorkspace).toBe('account-b:shared-agent');
     expect(firstAgent.call).toHaveBeenCalledTimes(1);
     secondController.dispose();
-  });
-
-  test('hydrates persisted rows and resumes server sync from the SQLite revision', async () => {
-    let releaseServerPull: () => void = () => undefined;
-    const serverPullBlocked = new Promise<void>((resolve) => {
-      releaseServerPull = resolve;
-    });
-    const cached = fileRecord('/home/project/src/cached.ts', 'cached', 7);
-    const persistedCollectionOptions = vi.fn((options: WorkspaceCollectionOptions) => ({
-      ...options,
-      sync: {
-        ...options.sync,
-        sync: (params: WorkspaceSyncParams) => {
-          params.begin({ immediate: true });
-          params.write({ type: 'update', value: cached });
-          params.commit();
-          if (!params.metadata) {
-            throw new Error('Expected collection metadata support.');
-          }
-          return options.sync.sync({
-            ...params,
-            metadata: {
-              ...params.metadata,
-              collection: {
-                ...params.metadata.collection,
-                get: () => 7,
-              },
-            },
-          });
-        },
-      },
-    }));
-    const replica = {
-      persistence: {},
-      persistedCollectionOptions,
-    } as unknown as AccountLocalReplica;
-    const agent = {
-      call: vi.fn(async (method: string, args: unknown[]) => {
-        switch (method) {
-          case 'getWorkspaceState':
-            return workspaceState(8);
-          case 'getWorkspaceSyncPage': {
-            await serverPullBlocked;
-            const request = args[0] as { fromRevision: number };
-            return syncPage(request.fromRevision, 8, 'delta', [write('/home/project/src/server.ts', 'server', 8)]);
-          }
-          default:
-            throw new Error(`Unexpected RPC: ${method}`);
-        }
-      }),
-    };
-
-    const initializing = BuilderWorkspaceSyncController.initialize(agent, {
-      workspaceId: 'workspace-1',
-      replica,
-    });
-    await vi.waitFor(() =>
-      expect(workbench.replaceWorkspaceSnapshot).toHaveBeenCalledWith([
-        expect.objectContaining({ path: cached.path, content: cached.content }),
-      ]),
-    );
-    releaseServerPull();
-    const controller = await initializing;
-
-    expect(persistedCollectionOptions).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'builder-workspace:workspace-1',
-        schemaVersion: 1,
-      }),
-    );
-    expect(agent.call).toHaveBeenCalledWith(
-      'getWorkspaceSyncPage',
-      [{ fromRevision: 7 }],
-      expect.objectContaining({ timeout: 30_000 }),
-    );
-    expect(workbench.applyWorkspaceSyncEntries).toHaveBeenCalledWith([
-      expect.objectContaining({ path: '/home/project/src/server.ts', content: 'server' }),
-    ]);
-    expect(controller.revision).toBe(8);
-    controller.dispose();
   });
 
   test('rejects a stale manual edit and replaces the presentation cache from the durable snapshot', async () => {
@@ -637,111 +535,6 @@ describe('BuilderWorkspaceSyncController', () => {
     expect(agent.call.mock.calls.filter(([method]) => method === 'applyWorkspaceClientChanges')).toHaveLength(2);
   });
 
-  test('discards corrupt persisted rows and requests an authoritative snapshot', async () => {
-    const cached = { ...fileRecord('/home/project/src/cached.ts', 'cached', 7), content: 'tamper' };
-    const serverFile = write('/home/project/src/server.ts', 'server', 8);
-    const agent = {
-      call: vi.fn(async (method: string, args: unknown[]) => {
-        switch (method) {
-          case 'getWorkspaceState':
-            return workspaceState(8);
-          case 'getWorkspaceSyncPage': {
-            const request = args[0] as { fromRevision: number };
-            return syncPage(request.fromRevision, 8, 'snapshot', [serverFile]);
-          }
-          default:
-            throw new Error(`Unexpected RPC: ${method}`);
-        }
-      }),
-    };
-
-    const controller = await BuilderWorkspaceSyncController.initialize(agent, {
-      workspaceId: 'workspace-corrupt',
-      replica: replicaWithCachedRecord(cached, 7),
-    });
-
-    expect(agent.call).toHaveBeenCalledWith(
-      'getWorkspaceSyncPage',
-      [{ fromRevision: 0 }],
-      expect.objectContaining({ timeout: 30_000 }),
-    );
-    expect(workbench.replaceWorkspaceSnapshot).toHaveBeenLastCalledWith([
-      expect.objectContaining({ path: '/home/project/src/server.ts', content: 'server' }),
-    ]);
-    expect(
-      workbench.replaceWorkspaceSnapshot.mock.calls
-        .flatMap(([entries]) => entries)
-        .some((entry) => entry.path === cached.path),
-    ).toBe(false);
-    controller.dispose();
-  });
-
-  test('rejects persisted rows from an older revision than the collection metadata', async () => {
-    const cached = fileRecord('/home/project/src/stale.ts', 'stale', 6);
-    const serverFile = write('/home/project/src/current.ts', 'current', 7);
-    const agent = {
-      call: vi.fn(async (method: string, args: unknown[]) => {
-        if (method === 'getWorkspaceState') {
-          return workspaceState(7);
-        }
-        if (method === 'getWorkspaceSyncPage') {
-          const request = args[0] as { fromRevision: number };
-          return syncPage(request.fromRevision, 7, 'snapshot', [serverFile]);
-        }
-        throw new Error(`Unexpected RPC: ${method}`);
-      }),
-    };
-
-    const controller = await BuilderWorkspaceSyncController.initialize(agent, {
-      workspaceId: 'workspace-stale-revision',
-      replica: replicaWithCachedRecord(cached, 7),
-    });
-
-    expect(agent.call).toHaveBeenCalledWith(
-      'getWorkspaceSyncPage',
-      [{ fromRevision: 0 }],
-      expect.objectContaining({ timeout: 30_000 }),
-    );
-    expect(workbench.replaceWorkspaceSnapshot).toHaveBeenLastCalledWith([
-      expect.objectContaining({ path: serverFile.path }),
-    ]);
-    controller.dispose();
-  });
-
-  test('replaces an incomplete persisted snapshot after a server current response', async () => {
-    const cached = fileRecord('/home/project/src/cached.ts', 'cached', 7);
-    const missing = write('/home/project/src/missing.ts', 'new', 7);
-    const agent = {
-      call: vi.fn(async (method: string, args: unknown[]) => {
-        if (method === 'getWorkspaceState') {
-          return workspaceState(7, 2, 9);
-        }
-        if (method === 'getWorkspaceSyncPage') {
-          const request = args[0] as { fromRevision: number };
-          return request.fromRevision === 7
-            ? syncPage(7, 7, 'current', [], workspaceState(7, 2, 9))
-            : syncPage(0, 7, 'snapshot', [write(cached.path, cached.content, cached.revision), missing]);
-        }
-        throw new Error(`Unexpected RPC: ${method}`);
-      }),
-    };
-
-    const controller = await BuilderWorkspaceSyncController.initialize(agent, {
-      workspaceId: 'workspace-incomplete',
-      replica: replicaWithCachedRecord(cached, 7),
-    });
-
-    expect(agent.call.mock.calls.filter(([method]) => method === 'getWorkspaceSyncPage')).toEqual([
-      ['getWorkspaceSyncPage', [{ fromRevision: 7 }], { timeout: 30_000 }],
-      ['getWorkspaceSyncPage', [{ fromRevision: 0 }], { timeout: 30_000 }],
-    ]);
-    expect(workbench.replaceWorkspaceSnapshot).toHaveBeenLastCalledWith([
-      expect.objectContaining({ path: cached.path }),
-      expect.objectContaining({ path: missing.path }),
-    ]);
-    controller.dispose();
-  });
-
   test('rejects a sync cursor that does not advance to the next entry', async () => {
     const agent = {
       call: vi.fn(async (method: string) => {
@@ -807,7 +600,7 @@ describe('BuilderWorkspaceSyncController', () => {
     await expect(BuilderWorkspaceSyncController.initialize(agent)).rejects.toThrow(
       'content hash does not match for /home/project/src/file.ts',
     );
-    expect(workbench.replaceWorkspaceSnapshot).toHaveBeenCalledWith([]);
+    expect(workbench.replaceWorkspaceSnapshot).not.toHaveBeenCalled();
     expect(workbench.applyWorkspaceSyncEntries).not.toHaveBeenCalled();
   });
 
@@ -887,55 +680,6 @@ function syncCursor(revision: number, index: number): string {
   return btoa(JSON.stringify({ revision, index }));
 }
 
-type WorkspaceSyncParams = Parameters<SyncConfig<BuilderWorkspaceFileRecord, string>['sync']>[0];
-type WorkspaceCollectionOptions = {
-  id: string;
-  schemaVersion: number;
-  sync: SyncConfig<BuilderWorkspaceFileRecord, string>;
-  [key: string]: unknown;
-};
-
-function fileRecord(path: string, content: string, revision: number): BuilderWorkspaceFileRecord {
-  return {
-    path,
-    content,
-    encoding: 'utf8',
-    size: content.length,
-    sha256: sha256(content),
-    revision,
-  };
-}
-
 function sha256(content: string): string {
   return createHash('sha256').update(content).digest('hex');
-}
-
-function replicaWithCachedRecord(cached: BuilderWorkspaceFileRecord, revision: number): AccountLocalReplica {
-  return {
-    persistence: {},
-    persistedCollectionOptions: (options: WorkspaceCollectionOptions) => ({
-      ...options,
-      sync: {
-        ...options.sync,
-        sync: (params: WorkspaceSyncParams) => {
-          params.begin({ immediate: true });
-          params.write({ type: 'update', value: cached });
-          params.commit();
-          if (!params.metadata) {
-            throw new Error('Expected collection metadata support.');
-          }
-          return options.sync.sync({
-            ...params,
-            metadata: {
-              ...params.metadata,
-              collection: {
-                ...params.metadata.collection,
-                get: () => revision,
-              },
-            },
-          });
-        },
-      },
-    }),
-  } as unknown as AccountLocalReplica;
 }
