@@ -5,6 +5,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "main": "app/server.ts",
   "workers_dev": false,
+  "preview_urls": true,
   "routes": [
     {
       "pattern": "ghostbuild.dev",
