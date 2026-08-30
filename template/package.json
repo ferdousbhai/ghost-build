@@ -12,7 +12,7 @@
     "generate-routes": "tsr generate",
     "build": "pnpm run verify:licenses && vite build && pnpm run verify:licenses:built",
     "preview": "vite preview --host 0.0.0.0",
-    "agent:enable": "node scripts/enable-agent-capability.mjs && pnpm install && pnpm run licenses:generate",
+    "agent:enable": "node scripts/enable-agent-capability.mjs && pnpm install --no-frozen-lockfile && pnpm run licenses:generate",
     "deploy": "pnpm run typecheck && pnpm run verify:stack && pnpm run provision:production && pnpm run verify:production-config && pnpm run build && pnpm run lint && pnpm run d1:migrations:apply:production && wrangler deploy",
     "d1:migrations:apply:production": "node scripts/apply-d1-migrations.mjs",
     "cf-typegen": "node scripts/cf-typegen.mjs",
