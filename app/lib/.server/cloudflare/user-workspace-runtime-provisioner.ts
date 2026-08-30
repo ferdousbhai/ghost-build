@@ -251,5 +251,7 @@ function requireRuntimeCapabilities(connection: CloudflareConnection): void {
 }
 
 export function missingUserWorkspaceRuntimeCapabilities(connection: CloudflareConnection): string[] {
-  return USER_WORKSPACE_REQUIRED_CAPABILITIES.filter((capability) => !connection.grantedScopes.includes(capability));
+  return USER_WORKSPACE_REQUIRED_CAPABILITIES.filter(
+    (capability) => !connection.grantedCapabilities.includes(capability),
+  );
 }

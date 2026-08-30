@@ -101,6 +101,10 @@ const connectionResultSchema = z.object({
   refreshToken: z.string().min(1).optional(),
   accessTokenExpiresAt: z.number().int().positive().optional(),
   grantedCapabilities: z.array(z.enum(requestedCapabilities)),
+  requestedOAuthScopes: z.array(z.string().min(1)),
+  grantedOAuthScopes: z.array(z.string().min(1)),
+  oauthScopeProfileVersion: z.string().min(1),
+  oauthScopeGrantStatus: z.enum(['unknown', 'core', 'partial', 'full']),
 });
 type PendingOAuthState = {
   provider_session_id: string;
@@ -131,6 +135,7 @@ export async function cloudflareConnectionStatusAction({
     {
       accountId: connection.accountId,
       accountName: connection.accountName,
+      oauthScopeGrantStatus: connection.oauthScopeGrantStatus,
     },
     { headers: { 'Cache-Control': 'private, no-store' } },
   );
@@ -577,7 +582,11 @@ export async function completeCloudflareConnectionAction(args: {
           accountId: result.accountId,
           accountName: result.accountName,
           credentialHandle,
-          grantedScopes: result.grantedCapabilities,
+          grantedCapabilities: result.grantedCapabilities,
+          requestedOAuthScopes: result.requestedOAuthScopes,
+          grantedOAuthScopes: result.grantedOAuthScopes,
+          oauthScopeProfileVersion: result.oauthScopeProfileVersion,
+          oauthScopeGrantStatus: result.oauthScopeGrantStatus,
           aiBillingEnabled: result.grantedCapabilities.includes('workers_ai'),
           expectedGeneration: previous?.generation ?? null,
         });
@@ -644,9 +653,16 @@ function isEquivalentRacedConnection(
     connection.accountName === result.accountName &&
     connection.generation === (expectedGeneration ?? 0) + 1 &&
     connection.aiBillingEnabled === result.grantedCapabilities.includes('workers_ai') &&
-    connection.grantedScopes.length === result.grantedCapabilities.length &&
-    connection.grantedScopes.every((scope, index) => scope === result.grantedCapabilities[index])
+    sameStringArray(connection.grantedCapabilities, result.grantedCapabilities) &&
+    sameStringArray(connection.requestedOAuthScopes, result.requestedOAuthScopes) &&
+    sameStringArray(connection.grantedOAuthScopes, result.grantedOAuthScopes) &&
+    connection.oauthScopeProfileVersion === result.oauthScopeProfileVersion &&
+    connection.oauthScopeGrantStatus === result.oauthScopeGrantStatus
   );
+}
+
+function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 async function checkpointAuthenticatedOAuthUser(args: {

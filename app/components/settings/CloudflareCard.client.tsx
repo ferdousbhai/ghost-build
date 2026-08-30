@@ -5,7 +5,16 @@ import { z } from 'zod';
 
 const connectionStatusSchema = z.looseObject({
   accountName: z.string().nullish(),
+  oauthScopeGrantStatus: z.enum(['unknown', 'core', 'partial', 'full']).nullish(),
 });
+
+const GRANT_STATUS_SENTENCES = {
+  // A legacy or unverifiable grant: the recorded permissions predate provider-confirmed scopes.
+  unknown: 'Reauthorize to record which Cloudflare permissions this connection holds.',
+  core: 'Core build permissions granted.',
+  partial: 'Partial Cloudflare permissions granted. Reauthorize to grant full access.',
+  full: 'Full Cloudflare permissions granted.',
+} as const;
 
 type ConnectionStatus = z.infer<typeof connectionStatusSchema>;
 
@@ -73,6 +82,7 @@ export function CloudflareCard({ initialError = null }: { initialError?: string 
           ) : connection ? (
             <p className="mt-1 text-sm text-content-secondary">
               Connected{connection.accountName ? ` to ${connection.accountName}` : ''}.
+              {connection.oauthScopeGrantStatus ? ` ${GRANT_STATUS_SENTENCES[connection.oauthScopeGrantStatus]}` : ''}
             </p>
           ) : (
             <p className="mt-1 max-w-2xl text-sm text-content-secondary">

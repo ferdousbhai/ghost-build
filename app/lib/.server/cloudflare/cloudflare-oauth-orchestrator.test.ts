@@ -81,7 +81,13 @@ describe('CloudflareOAuthOrchestrator', () => {
       accessToken: 'oauth-access-token',
       refreshToken: 'oauth-refresh-token',
       accessTokenExpiresAt: expect.any(Number),
-      grantedCapabilities: ['workers', 'd1', 'r2', 'durable_objects', 'workers_ai'],
+      // Derived from the confirmed grant, not echoed from the request: the core scopes cover
+      // every product capability.
+      grantedCapabilities: ['workers', 'containers', 'd1', 'r2', 'kv', 'durable_objects', 'workers_ai'],
+      requestedOAuthScopes: [...REQUIRED_CLOUDFLARE_OAUTH_SCOPES],
+      grantedOAuthScopes: [...REQUIRED_CLOUDFLARE_OAUTH_SCOPES],
+      oauthScopeProfileVersion: 'core-v1',
+      oauthScopeGrantStatus: 'core',
     });
     expect(request).toHaveBeenNthCalledWith(
       1,

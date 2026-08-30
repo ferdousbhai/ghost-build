@@ -60,7 +60,9 @@ type ExportedCloudflareConnection = {
   accountId: string;
   accountName: string | null;
   status: string;
-  grantedScopes: string[];
+  grantedCapabilities: string[];
+  grantedOAuthScopes: string[];
+  oauthScopeGrantStatus: string;
   aiBillingEnabled: boolean;
   connectedAt: string | null;
   updatedAt: string;
@@ -222,7 +224,9 @@ async function readCloudflareConnection(
       accountId: connection.accountId,
       accountName: connection.accountName,
       status: connection.status,
-      grantedScopes: connection.grantedScopes,
+      grantedCapabilities: connection.grantedCapabilities,
+      grantedOAuthScopes: connection.grantedOAuthScopes,
+      oauthScopeGrantStatus: connection.oauthScopeGrantStatus,
       aiBillingEnabled: connection.aiBillingEnabled,
       connectedAt: optionalIsoTimestamp(connection.connectedAt),
       updatedAt: isoTimestamp(connection.updatedAt),

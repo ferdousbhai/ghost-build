@@ -1,5 +1,14 @@
 import { z } from 'zod';
 import {
+  BROAD_CLOUDFLARE_OAUTH_SCOPES,
+  capabilitiesFromOAuthScopes,
+  CLOUDFLARE_OAUTH_SCOPE_PROFILE_VERSION,
+  cloudflareOAuthScopeGrantStatus,
+  CORE_CLOUDFLARE_OAUTH_SCOPES,
+  missingCoreOAuthScopes,
+  parseReportedOAuthScopes,
+} from './cloudflare-oauth-scope-manifest';
+import {
   CloudflareOAuthError,
   type CloudflareConnectionChallenge,
   type CloudflareConnectionCompletionRequest,
@@ -16,16 +25,7 @@ const USER_DETAILS_URL = 'https://api.cloudflare.com/client/v4/user';
 const ACCOUNTS_URL = 'https://api.cloudflare.com/client/v4/accounts?per_page=2';
 const SESSION_LIFETIME_MS = 10 * 60 * 1000;
 const OAUTH_REQUEST_TIMEOUT_MS = 30_000;
-export const REQUIRED_CLOUDFLARE_OAUTH_SCOPES = [
-  'account-settings.read',
-  'user-details.read',
-  'workers-scripts.write',
-  'containers.write',
-  'd1.write',
-  'workers-r2.write',
-  'workers-kv-storage.write',
-  'ai.read',
-] as const;
+export const REQUIRED_CLOUDFLARE_OAUTH_SCOPES = CORE_CLOUDFLARE_OAUTH_SCOPES;
 
 type OAuthSession = {
   verifier: string;
@@ -49,6 +49,7 @@ const optionalText = z.string().optional().catch(undefined);
 const tokenExchangeSchema = z.looseObject({
   access_token: optionalText,
   refresh_token: optionalText,
+  scope: optionalText,
   expires_in: z.number().optional().catch(undefined),
 });
 
@@ -151,6 +152,11 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
         'Cloudflare did not issue a refresh token. Reconnect with offline access enabled.',
       );
     }
+    const requestedScopes = [...new Set(this.config.scopes.split(/\s+/).filter(Boolean))];
+    const grantedScopes = resolveGrantedScopes(
+      token.scope ?? callback.searchParams.get('scope') ?? undefined,
+      requestedScopes,
+    );
     const userDetailsResponse = await execute(USER_DETAILS_URL, {
       headers: { authorization: `Bearer ${token.access_token}` },
       signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
@@ -186,9 +192,42 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
       refreshToken: token.refresh_token,
       accessTokenExpiresAt:
         typeof token.expires_in === 'number' ? Date.now() + Math.max(0, token.expires_in) * 1_000 : undefined,
-      grantedCapabilities: session.capabilities,
+      grantedCapabilities: capabilitiesFromOAuthScopes(grantedScopes),
+      requestedOAuthScopes: requestedScopes,
+      grantedOAuthScopes: grantedScopes,
+      oauthScopeProfileVersion: CLOUDFLARE_OAUTH_SCOPE_PROFILE_VERSION,
+      oauthScopeGrantStatus: cloudflareOAuthScopeGrantStatus(grantedScopes),
     };
   }
+}
+
+/**
+ * The scope IDs Cloudflare actually granted. The provider reports them on the callback and in the
+ * token response; when it reports neither, the grant is provable only because the broad optional
+ * profile is empty - every configured scope is then required at the Cloudflare client, so a
+ * completed exchange carries exactly the requested set. Never equate requested optional scopes
+ * with granted ones.
+ */
+function resolveGrantedScopes(reported: string | undefined, requestedScopes: string[]): string[] {
+  if (reported === undefined || reported.trim() === '') {
+    if (BROAD_CLOUDFLARE_OAUTH_SCOPES.length > 0) {
+      throw new CloudflareOAuthError('Cloudflare did not report which optional permissions were granted.');
+    }
+    return requestedScopes;
+  }
+  const parsed = parseReportedOAuthScopes(reported);
+  if ('unknownScopes' in parsed) {
+    throw new CloudflareOAuthError(
+      `Cloudflare granted permissions Ghostbuild does not recognize: ${parsed.unknownScopes.join(', ')}.`,
+    );
+  }
+  const missingCore = missingCoreOAuthScopes(parsed.granted);
+  if (missingCore.length > 0) {
+    throw new CloudflareOAuthError(
+      `Cloudflare authorization is missing required permissions: ${missingCore.join(', ')}. Reconnect and approve every required permission.`,
+    );
+  }
+  return parsed.granted;
 }
 
 function parseSession(value: string): OAuthSession {
