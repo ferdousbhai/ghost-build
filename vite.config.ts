@@ -24,10 +24,8 @@ export default defineConfig((config) => {
 
   return {
     build: {
-      // This enables top-level await.
       target: 'esnext',
-      // Our source isn't very secret, but this makes it very important not to hardcode secrets:
-      // sourcemaps may include backend code!
+      // Source maps can include backend code, so secrets must never be hardcoded.
       sourcemap: true,
       rolldownOptions: {
         output: {

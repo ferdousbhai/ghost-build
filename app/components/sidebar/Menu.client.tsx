@@ -88,8 +88,8 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
       if (!(target instanceof Element)) {
         return;
       }
-      // Don't close if clicking on the hamburger icon
-      if (target.closest('[data-hamburger-menu]')) {
+      const clickedMenuToggle = target.closest('[data-hamburger-menu]');
+      if (clickedMenuToggle) {
         return;
       }
       if (menuRef.current && !menuRef.current.contains(target)) {
@@ -118,7 +118,6 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
     setDeleteTarget(item);
   };
 
-  // Don't show the menu at all when logged out
   if (!accountUserId) {
     return null;
   }

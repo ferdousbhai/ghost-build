@@ -1,49 +1,50 @@
-/**
- * Cleans and formats terminal output while preserving structure and paths
- * Handles ANSI, OSC, and various terminal control sequences
- */
-export function cleanTerminalOutput(input: string): string {
-  // Step 1: Remove OSC sequences (including those with parameters)
-  const removeOsc = input
-    .replace(/\x1b\](\d+;[^\x07\x1b]*|\d+[^\x07\x1b]*)\x07/g, '')
-    .replace(/\](\d+;[^\n]*|\d+[^\n]*)/g, '');
+function stripOscSequences(input: string): string {
+  return input.replace(/\x1b\](\d+;[^\x07\x1b]*|\d+[^\x07\x1b]*)\x07/g, '').replace(/\](\d+;[^\n]*|\d+[^\n]*)/g, '');
+}
 
-  // Step 2: Remove ANSI escape sequences and any remaining escape characters
-  const removeAnsi = removeOsc.replace(/\x1b\[\??[0-9;]*[a-zA-Z]/g, '').replace(/\x1b/g, '');
+function stripAnsiSequences(input: string): string {
+  return input.replace(/\x1b\[\??[0-9;]*[a-zA-Z]/g, '').replace(/\x1b/g, '');
+}
 
-  // Step 3: Clean up carriage returns and newlines
-  const cleanNewlines = removeAnsi
+function normalizeLineEndings(input: string): string {
+  return input
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/\n{3,}/g, '\n\n');
+}
 
-  // Step 4: Add newlines at key breakpoints while preserving paths
-  const formatOutput = cleanNewlines
-    // Preserve prompt line
+function separateTerminalSections(input: string): string {
+  return input
     .replace(/^([~/][^\n❯]+)❯/m, '$1\n❯')
-    // Add newline before command output indicators
     .replace(/(?<!^|\n)>/g, '\n>')
-    // Add newline before error keywords without breaking paths
     .replace(/(?<!^|\n|\w)(error|failed|warning|Error|Failed|Warning):/g, '\n$1:')
-    // Add newline before 'at' in stack traces without breaking paths
     .replace(/(?<!^|\n|\/)(at\s+(?!async|sync))/g, '\nat ')
-    // Ensure 'at async' stays on same line
     .replace(/\bat\s+async/g, 'at async')
-    // Add newline before npm error indicators
     .replace(/(?<!^|\n)(npm ERR!)/g, '\n$1');
+}
 
-  // Step 5: Clean up whitespace while preserving intentional spacing
-  const cleanSpaces = formatOutput
+function trimOutputLines(input: string): string {
+  return input
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .join('\n');
+}
 
-  // Step 6: Final cleanup
-  return cleanSpaces
-    .replace(/\n{3,}/g, '\n\n') // Replace multiple newlines with double newlines
-    .replace(/:\s+/g, ': ') // Normalize spacing after colons
-    .replace(/\s{2,}/g, ' ') // Remove multiple spaces
-    .replace(/^\s+|\s+$/g, '') // Trim start and end
-    .replace(/\u0000/g, ''); // Remove null characters
+function normalizeOutputWhitespace(input: string): string {
+  return input
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/:\s+/g, ': ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^\s+|\s+$/g, '')
+    .replace(/\u0000/g, '');
+}
+
+export function cleanTerminalOutput(input: string): string {
+  const withoutOsc = stripOscSequences(input);
+  const withoutAnsi = stripAnsiSequences(withoutOsc);
+  const normalizedLines = normalizeLineEndings(withoutAnsi);
+  const separatedSections = separateTerminalSections(normalizedLines);
+  const trimmedLines = trimOutputLines(separatedSections);
+  return normalizeOutputWhitespace(trimmedLines);
 }

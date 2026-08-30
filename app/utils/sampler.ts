@@ -1,60 +1,51 @@
-/**
- * Creates a function that samples calls at regular intervals and captures trailing calls.
- * - Drops calls that occur between sampling intervals
- * - Takes one call per sampling interval if available
- * - Captures the last call if no call was made during the interval
- *
- * @param fn The function to sample
- * @param sampleInterval How often to sample calls (in ms)
- * @returns The sampled function
- */
 type SampledFunction<Args extends unknown[]> = ((...args: Args) => void) & {
   cancel(): void;
 };
 
+/** Invoke immediately at most once per interval, then invoke the latest suppressed call at the trailing edge. */
 export function createSampler<Args extends unknown[]>(
   fn: (...args: Args) => void,
-  sampleInterval: number,
+  intervalMs: number,
 ): SampledFunction<Args> {
-  let lastArgs: Args | null = null;
-  let lastTime = Number.NEGATIVE_INFINITY;
-  let timeout: ReturnType<typeof setTimeout> | null = null;
+  let latestArgs: Args | null = null;
+  let lastInvocationTime = Number.NEGATIVE_INFINITY;
+  let trailingTimeout: ReturnType<typeof setTimeout> | null = null;
 
   const sampled = function (...args: Args) {
     const now = Date.now();
-    lastArgs = args;
+    latestArgs = args;
 
-    if (now - lastTime < sampleInterval) {
-      if (!timeout) {
-        timeout = setTimeout(
+    if (now - lastInvocationTime < intervalMs) {
+      if (!trailingTimeout) {
+        trailingTimeout = setTimeout(
           () => {
-            timeout = null;
-            lastTime = Date.now();
+            trailingTimeout = null;
+            lastInvocationTime = Date.now();
 
-            if (lastArgs) {
-              fn(...lastArgs);
-              lastArgs = null;
+            if (latestArgs) {
+              fn(...latestArgs);
+              latestArgs = null;
             }
           },
-          sampleInterval - (now - lastTime),
+          intervalMs - (now - lastInvocationTime),
         );
       }
 
       return;
     }
 
-    lastTime = now;
+    lastInvocationTime = now;
     fn(...args);
-    lastArgs = null;
+    latestArgs = null;
   };
 
   sampled.cancel = () => {
-    if (timeout) {
-      clearTimeout(timeout);
-      timeout = null;
+    if (trailingTimeout) {
+      clearTimeout(trailingTimeout);
+      trailingTimeout = null;
     }
-    lastArgs = null;
-    lastTime = Number.NEGATIVE_INFINITY;
+    latestArgs = null;
+    lastInvocationTime = Number.NEGATIVE_INFINITY;
   };
 
   return sampled;

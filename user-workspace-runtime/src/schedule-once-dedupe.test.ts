@@ -19,8 +19,12 @@ class FakeContainer {
   }
 }
 
-/** The previous implementation: pass an options bag the base class silently drops. */
-async function scheduleOnceOld(container: FakeContainer, when: number, callback: string, payload: unknown) {
+async function scheduleWithDiscardedIdempotentOption(
+  container: FakeContainer,
+  when: number,
+  callback: string,
+  payload: unknown,
+) {
   const schedule = container.schedule as unknown as (
     w: number,
     c: string,
@@ -30,8 +34,7 @@ async function scheduleOnceOld(container: FakeContainer, when: number, callback:
   await schedule.call(container, when, callback, payload, { idempotent: true });
 }
 
-/** The fixed implementation. */
-async function scheduleOnceNew(container: FakeContainer, when: number, callback: string, payload: unknown) {
+async function replaceScheduledCallback(container: FakeContainer, when: number, callback: string, payload: unknown) {
   container.deleteSchedules(callback);
   await container.schedule(when, callback, payload);
 }
@@ -40,7 +43,7 @@ describe('scheduleOnce dedupe', () => {
   it('reproduces the stacking bug in the old implementation', async () => {
     const container = new FakeContainer();
     for (let attempt = 1; attempt <= 5; attempt++) {
-      await scheduleOnceOld(container, attempt * 10, 'retryPendingComputerSync', {
+      await scheduleWithDiscardedIdempotentOption(container, attempt * 10, 'retryPendingComputerSync', {
         backend: 'container-shell',
         attempt,
         notBefore: 1_000 * attempt,
@@ -52,7 +55,7 @@ describe('scheduleOnce dedupe', () => {
   it('keeps exactly one pending row per callback', async () => {
     const container = new FakeContainer();
     for (let attempt = 1; attempt <= 5; attempt++) {
-      await scheduleOnceNew(container, attempt * 10, 'retryPendingComputerSync', {
+      await replaceScheduledCallback(container, attempt * 10, 'retryPendingComputerSync', {
         backend: 'container-shell',
         attempt,
         notBefore: 1_000 * attempt,
@@ -67,9 +70,9 @@ describe('scheduleOnce dedupe', () => {
 
   it('does not let one callback evict the other', async () => {
     const container = new FakeContainer();
-    await scheduleOnceNew(container, 10, 'retryPendingComputerSync', { notBefore: 1 });
-    await scheduleOnceNew(container, 60, 'reconcilePendingCommands', { notBefore: 2 });
-    await scheduleOnceNew(container, 20, 'retryPendingComputerSync', { notBefore: 3 });
+    await replaceScheduledCallback(container, 10, 'retryPendingComputerSync', { notBefore: 1 });
+    await replaceScheduledCallback(container, 60, 'reconcilePendingCommands', { notBefore: 2 });
+    await replaceScheduledCallback(container, 20, 'retryPendingComputerSync', { notBefore: 3 });
 
     expect(container.rows).toHaveLength(2);
     expect(container.rows.map((row) => row.callback).sort()).toEqual([

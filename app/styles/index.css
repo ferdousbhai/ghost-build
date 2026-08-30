@@ -31,7 +31,6 @@ body {
   width: 100%;
 }
 
-/* Temporary fix to make scrollbars look right in the production build */
 * {
   scrollbar-width: thin !important;
 }

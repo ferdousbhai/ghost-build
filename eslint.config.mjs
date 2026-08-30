@@ -85,7 +85,7 @@ export default [
       'linebreak-style': ['error', 'unix'],
       'arrow-spacing': ['error', { before: true, after: true }],
       '@typescript-eslint/no-unused-vars': [
-        'error', // or 'warn' if you prefer
+        'error',
         {
           argsIgnorePattern: '^_',
           varsIgnorePattern: '^_',
@@ -95,8 +95,8 @@ export default [
       '@typescript-eslint/consistent-type-imports': [
         'error',
         {
-          prefer: 'type-imports', // This is the default, enforces 'import type'
-          fixStyle: 'separate-type-imports', // This is also the default, enforces 'import type { Foo }'
+          prefer: 'type-imports',
+          fixStyle: 'separate-type-imports',
         },
       ],
       'prefer-arrow-callback': [
@@ -112,7 +112,6 @@ export default [
           selector: 'Literal[value=/bottom-4(?:\\D|$)/i]',
         },
       ],
-      // Don't allow direct process.env usage
       'local/no-direct-process-env': 'error',
     },
     settings: {

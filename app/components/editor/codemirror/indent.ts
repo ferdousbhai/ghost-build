@@ -35,19 +35,17 @@ function changeBySelectedLine(
   return state.changeByRange((range) => {
     const changes: ChangeSpec[] = [];
 
-    const line = state.doc.lineAt(range.from);
+    const selectionStartLine = state.doc.lineAt(range.from);
+    const isCursor = range.empty;
+    const isSingleLineSelection = !isCursor && range.to <= selectionStartLine.to;
 
-    // just insert single indent unit at the current cursor position
-    if (range.from === range.to) {
-      cb(range.from, undefined, changes, line);
-    }
-    // handle the case when multiple characters are selected in a single line
-    else if (range.from < range.to && range.to <= line.to) {
-      cb(range.from, range.to, changes, line);
+    if (isCursor) {
+      cb(range.from, undefined, changes, selectionStartLine);
+    } else if (isSingleLineSelection) {
+      cb(range.from, range.to, changes, selectionStartLine);
     } else {
       let atLine = -1;
 
-      // handle the case when selection spans multiple lines
       for (let pos = range.from; pos <= range.to;) {
         const line = state.doc.lineAt(pos);
 

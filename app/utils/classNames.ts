@@ -7,13 +7,6 @@
 
 type ClassNamesArg = undefined | string | Record<string, boolean> | ClassNamesArg[];
 
-/**
- * A simple JavaScript utility for conditionally joining classNames together.
- *
- * @param args A series of classes or object with key that are class and values
- * that are interpreted as boolean to decide whether or not the class
- * should be included in the final class.
- */
 export function classNames(...args: ClassNamesArg[]): string {
   return args.map(parseValue).filter(Boolean).join(' ');
 }

@@ -1,7 +1,6 @@
 import { WORK_DIR } from '../constants.js';
 import { path } from './path.js';
 
-// Relative to `WORK_DIR`
 export type RelativePath = string & { __brand: 'RelativePath' };
 export type AbsolutePath = string & { __brand: 'AbsolutePath' };
 

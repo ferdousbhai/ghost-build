@@ -29,20 +29,16 @@ const Workbench = lazy(() =>
   import('~/components/workbench/Workbench.client').then((module) => ({ default: module.Workbench })),
 );
 interface BaseChatProps {
-  // Refs
   messageRef: RefCallback<HTMLDivElement> | undefined;
   scrollRef: RefCallback<HTMLDivElement> | undefined;
 
-  // Top-level chat props
   showChat: boolean;
   chatStarted: boolean;
 
-  // Chat user interactions
   onStop: () => void;
   onSend: (messageInput: string, onAccepted?: () => void) => Promise<boolean>;
   sendMessageInProgress: boolean;
 
-  // Current chat history props
   streamStatus: StreamStatus;
   isRecovering: boolean;
   currentError: Error | undefined;
@@ -53,7 +49,6 @@ interface BaseChatProps {
   deployment?: BuilderDeploymentState | null;
   onDeploy?: () => Promise<BuilderDeploymentState>;
 
-  // Subchat navigation props
   subchats?: SubchatSummary[];
   onSubchatTitleChange?: (subchatIndex: number, title: string) => void;
 }

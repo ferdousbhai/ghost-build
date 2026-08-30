@@ -27,11 +27,9 @@ interface StreamingIndicatorProps {
   resendMessage: () => void;
 }
 
-// Icon components
 const WarningIcon = () => <ExclamationTriangleIcon className="text-[var(--gb-content-warning)]" />;
 const LoadingIcon = () => <Spinner />;
 
-// Status messages
 export const STATUS_MESSAGES = {
   building: 'Building...',
   recovering: 'Recovering interrupted response...',

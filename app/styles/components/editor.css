@@ -2,42 +2,26 @@
   --cm-backgroundColor: var(--bolt-elements-editor-backgroundColor, var(--bolt-elements-bg-depth-1));
   --cm-textColor: var(--bolt-elements-editor-textColor, rgb(var(--content-primary-rgb)));
 
-  /* Gutter */
-
   --cm-gutter-backgroundColor: var(--bolt-elements-editor-gutter-backgroundColor, var(--cm-backgroundColor));
   --cm-gutter-textColor: var(--bolt-elements-editor-gutter-textColor, rgb(var(--content-secondary-rgb)));
   --cm-gutter-activeLineTextColor: var(--bolt-elements-editor-gutter-activeLineTextColor, var(--cm-gutter-textColor));
 
-  /* Fold Gutter */
-
   --cm-foldGutter-textColor: var(--bolt-elements-editor-foldGutter-textColor, var(--cm-gutter-textColor));
   --cm-foldGutter-textColorHover: var(--bolt-elements-editor-foldGutter-textColorHover, var(--cm-gutter-textColor));
 
-  /* Active Line */
-
   --cm-activeLineBackgroundColor: var(--bolt-elements-editor-activeLineBackgroundColor, rgb(224 231 235 / 30%));
-
-  /* Cursor */
 
   --cm-cursor-width: 2px;
   --cm-cursor-backgroundColor: var(--bolt-elements-editor-cursorColor, rgb(var(--content-secondary-rgb)));
 
-  /* Matching Brackets */
-
   --cm-matching-bracket: var(--bolt-elements-editor-matchingBracketBackgroundColor, rgb(50 140 130 / 0.3));
-
-  /* Selection */
 
   --cm-selection-backgroundColorFocused: var(--bolt-elements-editor-selection-backgroundColor, #42b4ff);
   --cm-selection-backgroundOpacityFocused: var(--bolt-elements-editor-selection-backgroundOpacity, 0.3);
   --cm-selection-backgroundColorBlurred: var(--bolt-elements-editor-selection-inactiveBackgroundColor, #c9e9ff);
   --cm-selection-backgroundOpacityBlurred: var(--bolt-elements-editor-selection-inactiveBackgroundOpacity, 0.3);
 
-  /* Panels */
-
   --cm-panels-borderColor: var(--bolt-elements-editor-panels-borderColor, var(--bolt-elements-borderColor));
-
-  /* Search */
 
   --cm-search-backgroundColor: var(--bolt-elements-editor-search-backgroundColor, var(--cm-backgroundColor));
   --cm-search-textColor: var(--bolt-elements-editor-search-textColor, rgb(var(--content-secondary-rgb)));
@@ -91,8 +75,6 @@
     --bolt-elements-editor-search-input-borderColorFocused,
     var(--bolt-elements-borderColorActive)
   );
-
-  /* Tooltip */
 
   --cm-tooltip-backgroundColor: var(--bolt-elements-editor-tooltip-backgroundColor, var(--cm-backgroundColor));
   --cm-tooltip-textColor: var(--bolt-elements-editor-tooltip-textColor, rgb(var(--content-primary-rgb)));

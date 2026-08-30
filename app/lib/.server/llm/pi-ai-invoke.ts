@@ -1,8 +1,6 @@
 import type { Message, Tool, ToolCall } from '@earendil-works/pi-ai';
 import type { ModelHandle } from './pi-ai-models';
 
-// Verbatim port of cloudflare-os/packages/workshop-backend/src/ai-invoke.ts
-
 export class AgentTurnError extends Error {
   readonly statusCode?: number;
   constructor(message: string, statusCode?: number) {

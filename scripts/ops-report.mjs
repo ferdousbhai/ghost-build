@@ -80,10 +80,6 @@ const CHECK_ORDER = [
   { id: 'sessions', title: 'Sign-in sessions' },
 ];
 
-// ---------------------------------------------------------------------------
-// Time
-// ---------------------------------------------------------------------------
-
 /**
  * Render a timestamp as prose relative to `now`.
  *
@@ -137,10 +133,6 @@ export function formatDuration(ms) {
 function ageOf(value, now) {
   return Number.isFinite(value) && value > 0 ? Math.max(0, now - value) : null;
 }
-
-// ---------------------------------------------------------------------------
-// Row helpers
-// ---------------------------------------------------------------------------
 
 /** Collapse whitespace and bound a provider string before it reaches a terminal. */
 export function bounded(value, limit = 240) {
@@ -286,10 +278,6 @@ function rowReader(table, row) {
     },
   };
 }
-
-// ---------------------------------------------------------------------------
-// Row-to-sentence rendering
-// ---------------------------------------------------------------------------
 
 /**
  * One connected account's workspace runtime, as a status and a sentence.
@@ -628,10 +616,6 @@ export function describeWorkerInvocations(rows, { windowMs = WORKER_INVOCATION_W
   };
 }
 
-// ---------------------------------------------------------------------------
-// Queries
-// ---------------------------------------------------------------------------
-
 /**
  * The statements read in one batch. They target tables that have existed since the first
  * migration, so a failure here means Wrangler or the network, not a schema gap.
@@ -909,10 +893,6 @@ export async function readDesiredRuntimeVersion(readFileImpl = readFile) {
     return null;
   }
 }
-
-// ---------------------------------------------------------------------------
-// Report assembly
-// ---------------------------------------------------------------------------
 
 /**
  * Read the platform and build the report.
@@ -1291,10 +1271,6 @@ function countOfChecks(count) {
   return `${count} ${plural(count, 'check')}`;
 }
 
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
-
 const GROUPS = [
   { status: 'error', heading: 'BROKEN' },
   { status: 'attention', heading: 'NEEDS ATTENTION' },
@@ -1345,10 +1321,6 @@ function expandCheck(item) {
   }
   return item.detail.entries.filter((entry) => entry.level !== 'ok').map((entry) => entry.sentence);
 }
-
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
 
 const USAGE = `Usage: pnpm run ops [-- --json]
 
