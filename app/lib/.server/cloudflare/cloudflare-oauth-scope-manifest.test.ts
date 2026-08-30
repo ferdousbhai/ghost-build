@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import {
   BROAD_CLOUDFLARE_OAUTH_SCOPES,
@@ -57,5 +59,25 @@ describe('cloudflare-oauth-scope-manifest', () => {
       'workers_ai',
     ]);
     expect(capabilitiesFromOAuthScopes([])).toEqual([]);
+  });
+
+  test('every manifest scope exists in the checked-in provider catalog', () => {
+    // The catalog is the reviewed capture of GET /oauth/scopes. A digest change means the
+    // provider catalog was re-fetched; review the diff, then update the recorded digest here.
+    const catalogPath = 'docs/cloudflare-oauth-scope-catalog-2026-08-30.tsv';
+    const catalogBytes = readFileSync(catalogPath);
+    expect(createHash('sha256').update(catalogBytes).digest('hex')).toBe(
+      '63843689e99c1ac765e8ecc28c7054f1d7a4aa47a3dae8f01dae7370bcad2ee5',
+    );
+    const rows = catalogBytes.toString('utf8').trimEnd().split('\n');
+    const ids = new Set(rows.map((row) => row.split('\t')[0]));
+    expect(rows).toHaveLength(383);
+    expect(ids.size).toBe(rows.length);
+    for (const scope of requestedCloudflareOAuthScopes()) {
+      expect(ids.has(scope), scope).toBe(true);
+    }
+    // offline_access is an OAuth protocol scope, not a catalog permission; the manifest and the
+    // orchestrator treat it separately and the catalog proves it never collides with an ID.
+    expect(ids.has('offline_access')).toBe(false);
   });
 });
