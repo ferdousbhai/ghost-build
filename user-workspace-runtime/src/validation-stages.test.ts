@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -17,16 +17,21 @@ function run(stages: { name: string; command: string }[]) {
 
 describe('parallel validation stages', () => {
   it('runs stages concurrently rather than end to end', () => {
-    // Three half-second sleeps in series take 1.5s. The whole point is that they do not.
-    const started = Date.now();
-    const result = run([
-      { name: 'a', command: 'sleep 0.5' },
-      { name: 'b', command: 'sleep 0.5' },
-      { name: 'c', command: 'sleep 0.5' },
-    ]);
+    // Each stage announces itself, then exits successfully only once it has seen every other
+    // stage's announcement. Sequential execution can never pass - the first stage would wait
+    // out its bounded loop before the second stage ever started - and there is no wall-clock
+    // assertion for a loaded CI machine to flake.
+    const rendezvous = join(scratch, 'rendezvous');
+    mkdirSync(rendezvous, { recursive: true });
+    const everyMarker = ['a', 'b', 'c'].map((name) => `[ -e ${shellQuote(join(rendezvous, name))} ]`).join(' && ');
+    const stage = (name: string) => ({
+      name,
+      command: `touch ${shellQuote(join(rendezvous, name))}; for i in $(seq 1 200); do if ${everyMarker}; then exit 0; fi; sleep 0.05; done; exit 1`,
+    });
+
+    const result = run([stage('a'), stage('b'), stage('c')]);
 
     expect(result.status).toBe(0);
-    expect(Date.now() - started).toBeLessThan(1_200);
   });
 
   it('fails the group and names every stage that failed', () => {
