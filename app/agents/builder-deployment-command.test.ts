@@ -1,19 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { BuilderWorkspaceDeploymentPlan } from './builder-workspace-api';
 
 const mocks = vi.hoisted(() => ({
   createDeployment: vi.fn(),
   deployForUser: vi.fn(),
+  previewForUser: vi.fn(),
   terminalizeInterrupted: vi.fn(),
 }));
 
 vi.mock('~/server-handlers/deployments', () => ({
   createOrReplayDeploymentPlanForUser: mocks.createDeployment,
   deployForUser: mocks.deployForUser,
+  previewForUser: mocks.previewForUser,
   terminalizeInterruptedDeploymentForUser: mocks.terminalizeInterrupted,
 }));
 
 import {
   deployValidatedRevisionForBuilder,
+  previewValidatedRevisionForBuilder,
   terminalizeInterruptedDeploymentForBuilder,
   validatedDeploymentCheckpoint,
 } from './builder-deployment-command';
@@ -34,13 +38,20 @@ describe('builder deployment command', () => {
       productionUrl: null,
       error: { message: 'Deployment was interrupted.' },
     });
+    mocks.previewForUser.mockResolvedValue({
+      id: '22222222-2222-4222-8222-222222222222',
+      url: 'https://22222222-ghostbuild-app.account.workers.dev',
+      workspaceRevision: 7,
+      snapshotRevision: 'a'.repeat(64),
+      readyAt: '2026-08-30T00:00:00.000Z',
+    });
   });
 
   it('reports readiness only for the exact checkpoint with a durable validation receipt', async () => {
     const workspace = workspaceStub();
-    await expect(validatedDeploymentCheckpoint(workspace as never)).resolves.toBeNull();
+    await expect(validatedDeploymentCheckpoint(workspace)).resolves.toBeNull();
     workspace.hasSuccessfulValidation.mockResolvedValue(true);
-    await expect(validatedDeploymentCheckpoint(workspace as never)).resolves.toEqual({
+    await expect(validatedDeploymentCheckpoint(workspace)).resolves.toEqual({
       workspaceRevision: 7,
       revision: 'a'.repeat(64),
     });
@@ -51,7 +62,7 @@ describe('builder deployment command', () => {
     await expect(
       deployValidatedRevisionForBuilder({
         context: operationContext(),
-        workspace: workspace as never,
+        workspace,
         toolCallId: 'deploy-command',
         validatedRevision: 'c'.repeat(64),
       }),
@@ -63,7 +74,7 @@ describe('builder deployment command', () => {
     const workspace = workspaceStub();
     await terminalizeInterruptedDeploymentForBuilder({
       context: operationContext(),
-      workspace: workspace as never,
+      workspace,
       toolCallId: 'deploy-command:7:revision',
       validatedRevision: 'a'.repeat(64),
     });
@@ -81,7 +92,7 @@ describe('builder deployment command', () => {
     await expect(
       terminalizeInterruptedDeploymentForBuilder({
         context: operationContext(),
-        workspace: workspaceStub() as never,
+        workspace: workspaceStub(),
         toolCallId: 'deploy-command:7:revision',
         validatedRevision: 'a'.repeat(64),
       }),
@@ -94,7 +105,7 @@ describe('builder deployment command', () => {
     await expect(
       deployValidatedRevisionForBuilder({
         context: operationContext(),
-        workspace: workspace as never,
+        workspace,
         toolCallId: 'deploy-command',
         validatedRevision: 'a'.repeat(64),
       }),
@@ -118,6 +129,33 @@ describe('builder deployment command', () => {
       expect.objectContaining({ userId: 'user-1', deploymentId: expect.stringMatching(/^[0-9a-f-]{36}$/) }),
     );
   });
+
+  it('uses the same deterministic plan for preview and production of one validated revision', async () => {
+    const workspace = workspaceStub();
+    workspace.hasSuccessfulValidation.mockResolvedValue(true);
+    const revision = 'a'.repeat(64);
+
+    await previewValidatedRevisionForBuilder({
+      context: operationContext(),
+      workspace,
+      toolCallId: `deploy-command:7:${revision}`,
+      previewId: 'preview-1',
+      validatedRevision: revision,
+    });
+    await deployValidatedRevisionForBuilder({
+      context: operationContext(),
+      workspace,
+      toolCallId: `deploy-command:7:${revision}`,
+      validatedRevision: revision,
+    });
+
+    const previewPlan = mocks.createDeployment.mock.calls[0]?.[0];
+    const productionPlan = mocks.createDeployment.mock.calls[1]?.[0];
+    expect(previewPlan.deploymentId).toBe(productionPlan.deploymentId);
+    expect(mocks.previewForUser).toHaveBeenCalledWith(
+      expect.objectContaining({ deploymentId: previewPlan.deploymentId, previewId: 'preview-1' }),
+    );
+  });
 });
 
 function workspaceStub() {
@@ -128,7 +166,10 @@ function workspaceStub() {
     prepareDeployment: vi.fn(async () => ({
       workspaceRevision: 7,
       revision: 'a'.repeat(64),
-      project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, kv: true, appAgent: true } },
+      project: {
+        type: 'web_app',
+        bindings: { ai: true, d1: true, r2: true, kv: true, appAgent: true },
+      } satisfies BuilderWorkspaceDeploymentPlan['project'],
     })),
   };
 }

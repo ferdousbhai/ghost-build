@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 7,
-  "reviewedAgainstCommit": "working-tree-2026-08-18-account-export",
+  "schemaVersion": 8,
+  "reviewedAgainstCommit": "working-tree-2026-08-30-workers-preview",
   "policyStatus": "engineering inventory; the 2026-08-04 public-beta notice adopts enforced lifetimes and active-account/verified-request retention criteria; control-plane export and erasure are now self-service, while export or deletion of anything outside the control plane, cross-account deletion orchestration, jurisdiction-specific legal holds, and external-resource disposition remain explicit limitations",
   "systems": [
     {
@@ -35,7 +35,13 @@
     {
       "system": "BuilderAgent Durable Objects",
       "owner": "user Cloudflare account",
-      "categories": ["chat transcripts", "turn recovery state", "compaction state", "generated titles"],
+      "categories": [
+        "chat transcripts",
+        "turn recovery state",
+        "compaction state",
+        "generated titles",
+        "current and last-successful preview version state"
+      ],
       "secrets": "credentials and access tokens are not transcript export fields",
       "currentRetention": "deleted project Agents become eligible for bounded user-runtime garbage collection no earlier than 30 minutes after removal; batch limits, backlog, or retries can delay teardown",
       "currentExport": "not implemented; the self-service account export covers the operator control plane only and contains no transcript, turn-recovery, or compaction state",
@@ -44,9 +50,13 @@
     {
       "system": "ProjectWorkspace Durable Objects and Cloudflare Computer",
       "owner": "user Cloudflare account",
-      "categories": ["project files and revisions", "preview state", "validation state", "ephemeral process output"],
+      "categories": [
+        "project files and revisions",
+        "validation state and retained revision-keyed deployment artifact cache",
+        "ephemeral process output"
+      ],
       "secrets": "local secret paths, runtime capabilities, and raw command output must never be included in any future account export",
-      "currentRetention": "workspace files persist in the user-owned Durable Object; preview processes and tunnels are bounded by runtime lifecycle",
+      "currentRetention": "workspace files and validation receipts persist in the user-owned Durable Object; the prepared artifact is a recoverable container cache and may disappear when Computer recycles",
       "currentExport": "project source ZIP only; the self-service account export covers the operator control plane only and contains no workspace files, revisions, or process output",
       "currentDeletion": "project-scoped teardown is not exposed as an account-wide operation"
     },
@@ -95,8 +105,8 @@
       "system": "User-owned deployed Cloudflare resources",
       "owner": "user Cloudflare account",
       "categories": [
-        "Workers",
-        "D1 databases",
+        "Workers and immutable preview versions",
+        "production and per-project preview D1 databases",
         "R2 buckets",
         "KV namespaces",
         "Containers",
@@ -104,9 +114,9 @@
         "Agents"
       ],
       "secrets": "deployed bindings and secrets must never be exported by Ghostbuild",
-      "currentRetention": "generated resources remain in the user's account while the project is active; project deletion queues bounded provider cleanup after a 30-minute grace period, and provider failures or unavailable authorization can delay retries",
+      "currentRetention": "generated resources, unpromoted preview versions, and their separate preview databases remain in the user's account while the project is active; project deletion queues bounded provider cleanup after a 30-minute grace period, and provider failures or unavailable authorization can delay retries",
       "currentExport": "deployment inventory is not available as an account export; the operator control plane does not know which apps a user has, so the self-service account export cannot and does not list them",
-      "currentDeletion": "project deletion durably queues cleanup derived from every deployment plan: Workers are force-deleted with their script-owned Durable Objects, D1 databases and KV namespaces are deleted, and R2 objects are emptied in bounded batches before bucket deletion; missing resources are idempotent success and failed cleanup is retried while authorization remains available; control-plane account erasure deliberately deletes none of these resources and the settings control says so before it is confirmed"
+      "currentDeletion": "project deletion durably queues cleanup derived from every deployment plan: Workers are force-deleted with their immutable versions and script-owned Durable Objects, production and preview D1 databases and KV namespaces are deleted, and R2 objects are emptied in bounded batches before bucket deletion; missing resources are idempotent success and failed cleanup is retried while authorization remains available; control-plane account erasure deliberately deletes none of these resources and the settings control says so before it is confirmed"
     },
     {
       "system": "User-owned generated-application observability",

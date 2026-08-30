@@ -195,8 +195,9 @@ function PrivacyPage() {
         <p>
           That control deliberately deletes nothing inside your own Cloudflare account.{' '}
           <strong>
-            Workers, D1 databases, R2 buckets, KV namespaces, Containers, Durable Objects, and Agents that Ghostbuild
-            deployed are retained, keep running, keep billing to your account, and are yours to remove.
+            Workers and their unpromoted preview versions, production and preview D1 databases, R2 buckets, KV
+            namespaces, Containers, Durable Objects, and Agents that Ghostbuild deployed are retained, keep running,
+            keep billing to your account, and are yours to remove.
           </strong>{' '}
           Chats, transcripts, project files, and deployment records also stay there under that account’s controls, and
           the account export does not contain them: download individual project source with Download code in the project
@@ -225,12 +226,12 @@ function PrivacyPage() {
         <p>
           Removing a project hides it from the active project list and makes its Agent and workspace eligible for
           teardown no earlier than 30 minutes later. Ghostbuild also schedules deletion of the project’s generated
-          Worker and its Durable Objects, D1 databases, KV namespaces, and R2 buckets from your connected Cloudflare
-          account. R2 objects are emptied in bounded batches before the bucket is deleted; provider failures or revoked
-          authorization can delay cleanup and are retried while access remains available. It is not complete erasure:
-          catalog, transcript, deployment, provider-retained observability, and browser records remain under their
-          applicable retention boundaries. You can download individual project source before removal, and browser data
-          remains until you clear it.
+          Worker and all of its versions and Durable Objects, production and preview D1 databases, KV namespaces, and R2
+          buckets from your connected Cloudflare account. R2 objects are emptied in bounded batches before the bucket is
+          deleted; provider failures or revoked authorization can delay cleanup and are retried while access remains
+          available. It is not complete erasure: catalog, transcript, deployment, provider-retained observability, and
+          browser records remain under their applicable retention boundaries. You can download individual project source
+          before removal, and browser data remains until you clear it.
         </p>
         <p>
           GitHub retains public support issues and private security reports according to its policies and repository

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   attestManagedDeploymentSecurity: vi.fn(),
   claimApprovedDeployment: vi.fn(),
+  findDeploymentResource: vi.fn(),
   recordDeploymentActivity: vi.fn(),
   recordDeploymentResource: vi.fn(),
   requireDeployment: vi.fn(),
@@ -10,8 +11,11 @@ const mocks = vi.hoisted(() => ({
   accountApi: {
     ensureD1ForPlan: vi.fn(),
     ensureR2ForPlan: vi.fn(),
+    ensureKvForPlan: vi.fn(),
     applyD1Migrations: vi.fn(),
     deployManagedWorker: vi.fn(),
+    previewManagedWorker: vi.fn(),
+    readManagedWorkerPreviewUrl: vi.fn(),
     configureManagedWorkerSchedule: vi.fn(),
     enableWorkerSubdomain: vi.fn(),
     getWorkersSubdomain: vi.fn(),
@@ -29,6 +33,7 @@ vi.mock('./deployment-plan', () => ({
 }));
 vi.mock('./deployment-repository', () => ({
   claimApprovedDeployment: mocks.claimApprovedDeployment,
+  findDeploymentResource: mocks.findDeploymentResource,
   recordDeploymentActivity: mocks.recordDeploymentActivity,
   recordDeploymentResource: mocks.recordDeploymentResource,
   requireDeployment: mocks.requireDeployment,
@@ -43,6 +48,7 @@ vi.mock('./user-account-api', () => ({
 
 import {
   executeUserOwnedDeployment,
+  executeUserOwnedPreview,
   terminalizeInterruptedUserOwnedDeployment,
 } from './user-workspace-deployment-executor';
 
@@ -58,6 +64,11 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
     mocks.accountApi.deployManagedWorker.mockResolvedValue({
       workerVersionId: '11111111-1111-4111-8111-111111111111',
     });
+    mocks.accountApi.previewManagedWorker.mockResolvedValue({
+      workerVersionId: '22222222-2222-4222-8222-222222222222',
+      previewUrl: 'https://22222222-ghostbuild-deployment-1.user-subdomain.workers.dev',
+    });
+    mocks.findDeploymentResource.mockResolvedValue(null);
     mocks.accountApi.configureManagedWorkerSchedule.mockResolvedValue(undefined);
     mocks.accountApi.enableWorkerSubdomain.mockResolvedValue(undefined);
     mocks.accountApi.getWorkersSubdomain.mockResolvedValue('user-subdomain');
@@ -157,7 +168,7 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
   it('passes no credential to ProjectWorkspace and publishes only through the trusted account API', async () => {
     const revision = 'a'.repeat(64);
     const plan = {
-      version: 4,
+      version: 5,
       deploymentId: 'deployment-1',
       sourceSha256: revision,
       templateSourceSha256: 'b'.repeat(64),
@@ -284,5 +295,158 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
     expect(assertDeploymentSession.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.accountApi.deployManagedWorker.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it('binds and migrates only the preview D1 when uploading an unpromoted version', async () => {
+    const revision = 'd'.repeat(64);
+    const plan = {
+      version: 5,
+      deploymentId: 'deployment-1',
+      sourceSha256: revision,
+      templateSourceSha256: 'b'.repeat(64),
+      securityBaselineVersion: 37,
+      securityBoundarySha256: 'c'.repeat(64),
+      project: {
+        type: 'worker',
+        bindings: { ai: false, d1: true, r2: false, kv: false, appAgent: true },
+      },
+      resources: [
+        { type: 'worker', logicalName: 'app', proposedName: 'ghostbuild-deployment-1' },
+        { type: 'd1', logicalName: 'DB', proposedName: 'ghostbuild-deployment-1' },
+        { type: 'd1', logicalName: 'DB_PREVIEW', proposedName: 'ghostbuild-deployment-1-preview' },
+        {
+          type: 'd1',
+          logicalName: 'AGENT_SECURITY_DB',
+          proposedName: 'ghostbuild-deployment-1-agent-security',
+        },
+        {
+          type: 'd1',
+          logicalName: 'AGENT_SECURITY_DB_PREVIEW',
+          proposedName: 'ghostbuild-deployment-1-preview-agent',
+        },
+        { type: 'durable_object', logicalName: 'AppAgent', proposedName: 'AppAgent' },
+      ],
+    };
+    const deployment = {
+      id: 'deployment-1',
+      chatId: 'chat-1',
+      userId: 'user-1',
+      connectionId: 'connection-1',
+      connectionGeneration: 3,
+      executionGeneration: 4,
+      workspaceReference: `workspace-runtime:project-1:7:${revision}`,
+      status: 'approved',
+      plan,
+      planDigest: 'digest-1',
+      productionUrl: null,
+      errorCode: null,
+      errorMessage: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const moduleBytes = new TextEncoder().encode('export default {}');
+    const moduleDigest = await crypto.subtle.digest('SHA-256', moduleBytes);
+    const prepareDeploymentArtifact = vi.fn(async () => ({
+      revision,
+      mainModule: 'server.js',
+      modules: [
+        {
+          path: 'server.js',
+          bytes: moduleBytes,
+          size: moduleBytes.byteLength,
+          sha256: [...new Uint8Array(moduleDigest)].map((byte) => byte.toString(16).padStart(2, '0')).join(''),
+        },
+      ],
+      assets: [],
+      migrations: {
+        DB: [{ name: '0001_app_data.sql', sql: 'CREATE TABLE app_data (id TEXT);' }],
+        AGENT_SECURITY_DB: [{ name: '0001_agent.sql', sql: 'CREATE TABLE agent_data (id TEXT);' }],
+      },
+    }));
+    const beginDeploymentSession = vi.fn().mockResolvedValue({
+      sessionId: 'preview:deployment-1:4:preview-1',
+    });
+    const assertDeploymentSession = vi.fn().mockResolvedValue({ workspaceRevision: 7, revision });
+    const finishDeploymentSession = vi.fn().mockResolvedValue({ status: 'completed' });
+    const projectNamespace = {
+      idFromName: vi.fn((name: string) => `id:${name}`),
+      get: vi.fn(() => ({
+        beginDeploymentSession,
+        assertDeploymentSession,
+        prepareDeploymentArtifact,
+        finishDeploymentSession,
+      })),
+    };
+    mocks.requireDeployment.mockResolvedValue(deployment);
+    mocks.accountApi.ensureD1ForPlan.mockImplementation(async (_plan, logicalName) =>
+      logicalName === 'AGENT_SECURITY_DB_PREVIEW'
+        ? { id: 'preview-agent-database-id', name: 'ghostbuild-deployment-1-preview-agent' }
+        : { id: 'preview-database-id', name: 'ghostbuild-deployment-1-preview' },
+    );
+    const request = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () =>
+        Response.json({ accessToken: 'user-oauth-token' }, { headers: { 'Cache-Control': 'no-store' } }),
+      );
+    // SAFETY: this test double supplies every user-runtime binding read by the preview executor.
+    const previewEnv = Object.assign({} as Env, {
+      DB: {},
+      GHOSTBUILD_USER_RUNTIME: '1',
+      GHOSTBUILD_CONTROL_PLANE_ENDPOINT: 'https://ghostbuild.dev',
+      CONTROL_PLANE_SECRET: 'runtime-secret-that-is-long-enough',
+      CLOUDFLARE_ACCOUNT_ID: '0123456789abcdef0123456789abcdef',
+      GHOSTBUILD_USER_ID: 'user-1',
+      GHOSTBUILD_CONNECTION_ID: 'connection-1',
+      GHOSTBUILD_CONNECTION_GENERATION: '3',
+      PROJECT_WORKSPACE: projectNamespace,
+    });
+
+    await expect(
+      executeUserOwnedPreview({
+        env: previewEnv,
+        deploymentId: 'deployment-1',
+        previewId: 'preview-1',
+        userId: 'user-1',
+        connectionId: 'connection-1',
+        executionGeneration: 4,
+        request,
+      }),
+    ).resolves.toMatchObject({
+      id: '22222222-2222-4222-8222-222222222222',
+      workspaceRevision: 7,
+      snapshotRevision: revision,
+    });
+
+    expect(mocks.accountApi.ensureD1ForPlan.mock.calls).toEqual([
+      [plan, 'DB_PREVIEW'],
+      [plan, 'AGENT_SECURITY_DB_PREVIEW'],
+    ]);
+    expect(prepareDeploymentArtifact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operationId: 'preview:deployment-1:4:preview-1',
+        d1DatabaseId: 'preview-database-id',
+        d1DatabaseName: 'ghostbuild-deployment-1-preview',
+        agentSecurityD1DatabaseId: 'preview-agent-database-id',
+        agentSecurityD1DatabaseName: 'ghostbuild-deployment-1-preview-agent',
+      }),
+    );
+    expect(mocks.accountApi.applyD1Migrations).toHaveBeenCalledWith('preview-database-id', [
+      { name: '0001_app_data.sql', sql: 'CREATE TABLE app_data (id TEXT);' },
+    ]);
+    expect(mocks.accountApi.applyD1Migrations).toHaveBeenCalledWith('preview-agent-database-id', [
+      { name: '0001_agent.sql', sql: 'CREATE TABLE agent_data (id TEXT);' },
+    ]);
+    expect(mocks.accountApi.previewManagedWorker).toHaveBeenCalledWith(
+      expect.objectContaining({
+        d1DatabaseId: 'preview-database-id',
+        agentSecurityD1DatabaseId: 'preview-agent-database-id',
+        sourceSha256: revision,
+      }),
+    );
+    expect(mocks.accountApi.deployManagedWorker).not.toHaveBeenCalled();
+    expect(finishDeploymentSession).toHaveBeenCalledWith({
+      sessionId: 'preview:deployment-1:4:preview-1',
+      status: 'completed',
+    });
   });
 });

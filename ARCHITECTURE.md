@@ -42,7 +42,8 @@ plan requires them. Cloudflare meters those resources to the user's account.
 | Chat catalog, transcript identity, deployment plans and resources, Agent garbage-collection queue | User workspace D1                                    |
 | Agent messages, turn state, compaction, and resumable execution                                   | User-owned `BuilderAgent` DO SQLite                  |
 | Project bytes, numeric revision, change index, tool journal, and validation receipts              | User-owned `ProjectWorkspace` Computer VFS/DO SQLite |
-| Dependency installation, validation, preview, and deployment processes                            | User-owned `ProjectWorkspace` Container backend      |
+| Dependency installation, validation, and deployable artifact preparation                          | User-owned `ProjectWorkspace` Container backend      |
+| Preview-version upload and production-version promotion                                           | User's Cloudflare account APIs                       |
 | Query collections and editor files                                                                | Rebuildable in-memory browser presentation cache     |
 | Generated application's Worker, D1, R2, Agent, and related resources                              | User's Cloudflare account                            |
 
@@ -122,7 +123,7 @@ overwrites newer state. TanStack DB collections are in-memory presentation cache
 browser has no second SQLite or OPFS copy of chats, transcripts, or workspace files.
 
 The user workspace is a separate workspace package, `@ghostbuild/user-workspace-runtime`. Its `./protocol` export is
-the only shared source for sync limits, request/result types, preview modes, and readiness contracts. The runtime owns
+the only shared source for sync limits, request/result types, preview results, and readiness contracts. The runtime owns
 the `ProjectWorkspace` implementation; `computer-sandbox.ts` contains the Cloudflare Computer/Sandbox adapter and
 container-process lifecycle. Browser, control-plane, and Agent code import the protocol instead of reaching into that
 implementation.
@@ -141,43 +142,29 @@ checkpoints from the same VFS, so deployment cannot proceed after the project ch
 
 ## Preview Boundary
 
-A preview has one of two modes, and they carry different guarantees.
+A preview is one immutable, checkpoint-bound Worker version in the user's account. Full validation copies the project
+to an isolated root, installs dependencies, runs typecheck/lint/stack verification, performs the production build and
+Wrangler dry-run, and retains the deployable module/asset/migration artifact under the content revision. The exact
+revision is asserted before and after validation and again before publication.
 
-A **production** preview is checkpoint-bound. The `ProjectWorkspace` container backend copies the project into an
-isolated root, installs dependencies, applies the isolated local D1 schema, builds the dedicated Vite preview for one
-exact content checkpoint, starts `vite preview` on that output, and exposes it through a Cloudflare quick tunnel. The
-content revision is asserted on entry, after the build, and again before publication, so the reviewed bytes are the
-bytes deployment would publish.
+Preview publication performs no container work. Through the same generation-checked credential broker used by
+production deployment, it provisions separate deterministic preview D1 databases, applies the artifact's migrations,
+uploads static assets, and posts an unpromoted Worker version with preview bindings. The browser receives that
+version's deterministic `workers.dev` preview URL. There is no dev/HMR mode, local preview database, Vite preview
+process, quick tunnel, preview expiry alarm, or preview-specific container keep-alive.
 
-A **dev** preview is not bound to any revision; it tracks live workspace state. It prepares the same isolated root and
-installs dependencies once, applies the same local D1 schema, and then runs `vite dev`. It performs no production
-build, asserts no checkpoint, is never evidence that a revision builds, and satisfies nothing deployment depends on —
-deployment reads validation receipts and the current checkpoint, never a preview. The distinction is a discriminant on
-`BuilderPreviewSuccess`: only the production shape carries a `snapshotRevision`.
-
-The dev server runs from a container-local root rather than `/home/project`, because `/home` is Computer's projection
-of the durable VFS and a dependency tree installed there would be reconciled into DO SQLite. Computer's container sync
-is a change-log push into a container-side store served over FUSE, with no notify channel, so a durable write raises no
-inotify event inside the container and a watcher pointed at `/home/project` would never fire. Instead, each committed
-change set from `applyChanges` — the single path used by both the model's `write`/`edit` tools and browser editor saves
-— is written into the dev root as a real container write, which is what Vite's watcher observes. Delivery is
-best-effort: a preview that cannot be refreshed never fails a durable mutation that already committed. A dependency
-manifest change is not absorbed by a running dev preview, which installs once by design.
-
-Both modes share one lifecycle: one active preview row, one pending-preview cleanup path, one expiry alarm at
-`PREVIEW_TTL_MS`, one cancellation table, and one container keep-alive. Requesting either mode replaces the other. The
-user workspace Worker returns the tunnel URL to the authenticated browser. Stopping, expiry, replacement, or the start
-of a deployment session destroys the preview process and tunnel regardless of mode.
-
-Preview work and bandwidth remain in the user's Cloudflare account. OAuth credentials and control-plane secrets are
-not passed to generated project processes.
+Production consumes the same retained artifact for the same source digest, substitutes production bindings, uploads a
+second immutable version, and promotes that exact version. If Computer recycled after validation, artifact preparation
+may rebuild from the retained source checkpoint, but its byte inventory must match the durable validation digest.
+OAuth credentials and control-plane secrets never enter generated project processes.
 
 ## Deployment Boundary
 
 Deployment state and resource intent are recorded in the user workspace D1. Execution verifies that Computer's current
-content checkpoint still matches the validated revision, repeats the production checks through the container backend,
-provisions the requested resources through the user's Cloudflare API authorization, applies migrations, and publishes
-with Wrangler. Ghostbuild stores no deployment archive.
+content checkpoint still matches the validated revision, reuses the revision-keyed validation artifact, provisions the
+requested resources through the user's Cloudflare API authorization, applies migrations, uploads an immutable Worker
+version, and promotes that exact version. Ghostbuild stores no deployment archive outside the user-owned runtime's
+recoverable artifact cache.
 
 The deployment executor derives resource names and security-sensitive configuration on the server. It records managed
 Worker intent before publishing, then reads back the deployed version, script etag, bindings, variables, and schedules.

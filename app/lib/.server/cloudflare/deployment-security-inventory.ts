@@ -2,6 +2,7 @@ import {
   DEPLOYMENT_SECURITY_BASELINE_BINDING,
   DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
   DEPLOYMENT_SECURITY_CLEANUP_CRON,
+  DEPLOYMENT_PREVIEW_URLS_ENABLED,
   DEPLOYMENT_TEMPLATE_SOURCE_BINDING,
   DEPLOYMENT_VERSION_METADATA_BINDING,
 } from './deployment-security-baseline';
@@ -68,6 +69,11 @@ export function evaluateDeploymentSecurityAttestation(args: {
     (kvBindings.length === 1 &&
       kvBindings[0]?.type === 'kv_namespace' &&
       kvBindings[0].namespace_id === args.expectedKvNamespaceId);
+  // Preview URLs are a deliberate part of the managed publication boundary: every unpromoted
+  // version is public on its versioned workers.dev hostname, while the production hostname stays
+  // enabled for the version that is promoted.
+  const hasManagedWorkerSubdomain =
+    args.readback.workersDevEnabled && args.readback.previewUrlsEnabled === DEPLOYMENT_PREVIEW_URLS_ENABLED;
   const current =
     observedTemplateSourceSha256 === args.expectedTemplateSourceSha256 &&
     observedSecurityBaselineVersion === args.expectedSecurityBaselineVersion &&
@@ -76,6 +82,7 @@ export function evaluateDeploymentSecurityAttestation(args: {
     hasCleanup &&
     hasAgentSecurityDb &&
     hasExpectedKvNamespace &&
+    hasManagedWorkerSubdomain &&
     (!args.expectedBindings || exactBindingInventory(args.readback.bindings, args.expectedBindings)) &&
     (args.expectedCompatibilityDate === undefined ||
       args.readback.compatibilityDate === args.expectedCompatibilityDate) &&

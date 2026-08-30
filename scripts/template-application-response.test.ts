@@ -31,8 +31,8 @@ describe('generated application response boundary', () => {
     expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=63072000; includeSubDomains; preload');
   });
 
-  test('allows only Ghostbuild to frame an isolated preview', () => {
-    const response = withApplicationSecurityHeaders(new Response('preview'), { isolatedPreview: true });
+  test('allows only Ghostbuild to frame a Workers version preview', () => {
+    const response = withApplicationSecurityHeaders(new Response('preview'), { workersPreview: true });
 
     expect(response.headers.get('Content-Security-Policy')).toBe(
       "base-uri 'self'; frame-ancestors https://ghostbuild.dev; object-src 'none'; form-action 'self'",
@@ -89,5 +89,23 @@ describe('generated application response boundary', () => {
     expect(result).toBe(agentResponse);
     expect(result.headers.get('Upgrade')).toBe('websocket');
     expect(fetchApplication).not.toHaveBeenCalled();
+  });
+
+  test('derives the frame policy from the exact Workers version hostname', async () => {
+    const preview = await finalizeApplicationResponse(
+      new Request('https://12345678-ghostbuild-app.account-subdomain.workers.dev/'),
+      null,
+      () => new Response('preview'),
+    );
+    const production = await finalizeApplicationResponse(
+      new Request('https://ghostbuild-app.account-subdomain.workers.dev/'),
+      null,
+      () => new Response('production'),
+    );
+
+    expect(preview.headers.get('Content-Security-Policy')).toContain('frame-ancestors https://ghostbuild.dev');
+    expect(preview.headers.get('X-Frame-Options')).toBeNull();
+    expect(production.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
+    expect(production.headers.get('X-Frame-Options')).toBe('DENY');
   });
 });

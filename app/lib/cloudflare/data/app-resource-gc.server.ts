@@ -221,7 +221,7 @@ async function cleanupDeploymentPlan(
   }
   await accountApi.deleteManagedWorker(workerName);
 
-  for (const logicalName of ['DB', 'AGENT_SECURITY_DB'] as const) {
+  for (const logicalName of ['DB', 'DB_PREVIEW', 'AGENT_SECURITY_DB', 'AGENT_SECURITY_DB_PREVIEW'] as const) {
     const name = deploymentPlanResourceName(plan, 'd1', logicalName);
     if (name) {
       await accountApi.deleteD1Database(name);

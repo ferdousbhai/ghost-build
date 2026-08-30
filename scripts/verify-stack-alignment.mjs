@@ -85,13 +85,11 @@ const requiredPaths = [
   'scripts/check-runtime-artifacts.mjs',
   'template/package.json',
   'template/pnpm-lock.yaml',
-  'template/src/preview-server.ts',
   'template/src/server.ts',
   'template/src/agents/app-agent.ts',
   'template/src/agents/anonymous-retention.ts',
   'template/vite.config.ts',
   'template/wrangler.jsonc',
-  'template/wrangler.preview.jsonc',
 ];
 const requiredMigrationTables = [
   'user',

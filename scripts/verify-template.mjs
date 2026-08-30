@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -66,150 +66,8 @@ export async function verifyTemplate() {
     run(tempDir, ['run', 'verify:licenses:built']);
     await verifyResolvedProductionModulePolicy(tempDir);
     run(tempDir, ['exec', 'wrangler', 'deploy', '--dry-run']);
-    run(
-      tempDir,
-      ['exec', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--local', '--config', 'wrangler.preview.jsonc'],
-      { ...process.env, CI: 'true' },
-    );
-    await installIsolatedPreviewBindingProbe(tempDir);
-    run(tempDir, ['run', 'build:isolated-preview']);
-    await verifyIsolatedPreview(tempDir);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
-  }
-}
-
-async function verifyIsolatedPreview(tempDir) {
-  const port = 41_000 + Math.floor(Math.random() * 10_000);
-  const output = [];
-  const child = spawn(
-    'pnpm',
-    [
-      'exec',
-      'vite',
-      'preview',
-      '--mode',
-      'ghostbuild-isolated-preview',
-      '--host',
-      '127.0.0.1',
-      '--port',
-      String(port),
-      '--strictPort',
-    ],
-    {
-      cwd: tempDir,
-      env: process.env,
-      detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
-  const exited = new Promise((resolve) => child.once('exit', resolve));
-  let spawnError;
-  const capture = (chunk) => {
-    output.push(String(chunk));
-    if (output.length > 100) {
-      output.shift();
-    }
-  };
-  child.stdout.on('data', capture);
-  child.stderr.on('data', capture);
-  child.on('error', (error) => {
-    spawnError = error;
-  });
-  try {
-    const deadline = Date.now() + 45_000;
-    let lastError = 'Preview did not start.';
-    while (Date.now() < deadline) {
-      if (spawnError) {
-        throw spawnError;
-      }
-      if (child.exitCode !== null) {
-        throw new Error(`Isolated Preview exited before becoming ready.\n${output.join('').slice(-8_000)}`);
-      }
-      try {
-        const response = await fetch(`http://127.0.0.1:${port}/`);
-        if (response.ok) {
-          const csp = response.headers.get('content-security-policy') ?? '';
-          if (!csp.includes('frame-ancestors https://ghostbuild.dev')) {
-            throw new Error(`Isolated Preview returned an unexpected CSP: ${csp}`);
-          }
-          if (response.headers.has('x-frame-options')) {
-            throw new Error('Isolated Preview must not emit X-Frame-Options.');
-          }
-          await verifyIsolatedPreviewBindings(port);
-          return;
-        }
-        lastError = `HTTP ${response.status}`;
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-    throw new Error(`Isolated Preview did not become ready: ${lastError}\n${output.join('').slice(-8_000)}`);
-  } finally {
-    await terminateProcessGroup(child, exited);
-  }
-}
-
-async function installIsolatedPreviewBindingProbe(tempDir) {
-  const entryPath = join(tempDir, 'src', 'preview-server.ts');
-  const entry = await readFile(entryPath, 'utf8');
-  const fetchSignature = 'async fetch(request: Request) {';
-  if (!entry.includes(fetchSignature)) {
-    throw new Error('The isolated Preview entrypoint no longer has the expected fetch signature.');
-  }
-  const bindingProbe = `async fetch(request: Request, env: Env) {
-    if (new URL(request.url).pathname === "/__ghostbuild_verify_bindings") {
-      const row = await env.DB.prepare("SELECT 1 AS ok").first<{ ok: number }>();
-      const key = \`ghostbuild-preview-\${crypto.randomUUID()}\`;
-      await env.APP_STORAGE.put(key, "r2-ok");
-      const object = await env.APP_STORAGE.get(key);
-      const value = object ? await object.text() : null;
-      await env.APP_STORAGE.delete(key);
-      return Response.json({ d1: row?.ok === 1, r2: value === "r2-ok" });
-    }`;
-  await writeFile(entryPath, entry.replace(fetchSignature, bindingProbe));
-}
-
-async function verifyIsolatedPreviewBindings(port) {
-  const response = await fetch(`http://127.0.0.1:${port}/__ghostbuild_verify_bindings`);
-  if (!response.ok) {
-    throw new Error(`Isolated Preview binding probe returned HTTP ${response.status}.`);
-  }
-  const result = await response.json();
-  if (result?.d1 !== true || result?.r2 !== true) {
-    throw new Error(`Isolated Preview binding probe failed: ${JSON.stringify(result)}`);
-  }
-}
-
-async function terminateProcessGroup(child, exited) {
-  if (child.exitCode !== null) {
-    return;
-  }
-  const signal = (signalName) => {
-    if (process.platform !== 'win32') {
-      try {
-        process.kill(-child.pid, signalName);
-        return;
-      } catch (error) {
-        if (error?.code !== 'EPERM' && error?.code !== 'ESRCH') {
-          throw error;
-        }
-      }
-    }
-    try {
-      child.kill(signalName);
-    } catch (error) {
-      if (error?.code !== 'ESRCH') {
-        throw error;
-      }
-    }
-  };
-  signal('SIGTERM');
-  await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000))]);
-  if (child.exitCode === null) {
-    signal('SIGKILL');
-    await exited;
   }
 }
 
@@ -288,8 +146,8 @@ export async function verifyAgentCapabilityTemplate() {
   }
 }
 
-export async function copyCanonicalTemplateSource(targetDir) {
-  for (const sourcePath of listTemplateSourceFiles(rootDir)) {
+export async function copyCanonicalTemplateSource(targetDir, sourceFiles = listTemplateSourceFiles(rootDir)) {
+  for (const sourcePath of sourceFiles) {
     const relativePath = relative(sourceDir, sourcePath);
     if (relativePath === '..' || relativePath.startsWith(`..${sep}`)) {
       throw new Error(`Template source escaped its root: ${sourcePath}`);

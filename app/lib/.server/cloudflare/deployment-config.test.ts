@@ -48,6 +48,8 @@ describe('trusted deployment config', () => {
       scriptEtag: 'etag-1',
       compatibilityDate: '2026-07-21',
       compatibilityFlags: ['nodejs_compat'],
+      workersDevEnabled: true,
+      previewUrlsEnabled: true,
       bindings: [
         ...Object.entries(config.vars).map(([name, text]) => ({ name, type: 'plain_text' as const, text })),
         { name: config.version_metadata.binding, type: 'version_metadata' },

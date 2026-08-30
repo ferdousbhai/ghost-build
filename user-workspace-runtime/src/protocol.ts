@@ -83,28 +83,14 @@ export type BuilderWorkspaceApplyResult =
       state: BuilderWorkspaceState;
     };
 
-export type BuilderPreviewMode = 'production' | 'dev';
-
-export type BuilderProductionPreview = {
-  mode: 'production';
+/** One unpromoted Worker version, bound to the exact checkpoint validation built it from. */
+export type BuilderPreviewSuccess = {
   id: string;
   url: string;
   workspaceRevision: number;
   snapshotRevision: string;
   readyAt: string;
-  expiresAt: string;
 };
-
-export type BuilderDevPreview = {
-  mode: 'dev';
-  id: string;
-  url: string;
-  startedFromWorkspaceRevision: number;
-  readyAt: string;
-  expiresAt: string;
-};
-
-export type BuilderPreviewSuccess = BuilderProductionPreview | BuilderDevPreview;
 
 export const USER_WORKSPACE_RUNTIME_SERVICE = 'ghostbuild-user-workspace-runtime';
 

@@ -21,13 +21,15 @@ describe('buildDeploymentPlanFromSource', () => {
 
     expect(result.digest).toMatch(/^[a-f0-9]{64}$/);
     expect(result.plan).toMatchObject({
-      version: 4,
+      version: 5,
       sourceSha256: SOURCE_ONE,
       templateSourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
       securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
     });
     expect(result.plan.resources.map(({ type }) => type)).toEqual([
       'worker',
+      'd1',
+      'd1',
       'd1',
       'd1',
       'r2',
@@ -68,7 +70,11 @@ describe('buildDeploymentPlanFromSource', () => {
       project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, kv: true, appAgent: true } },
     });
     expect(deploymentPlanResourceName(plan, 'worker', 'app')).toBe('ghostbuild-deployment-2');
+    expect(deploymentPlanResourceName(plan, 'd1', 'DB_PREVIEW')).toBe('ghostbuild-deployment-2-preview');
     expect(deploymentPlanResourceName(plan, 'd1', 'AGENT_SECURITY_DB')).toBe('ghostbuild-deployment-2-agent-security');
+    expect(deploymentPlanResourceName(plan, 'd1', 'AGENT_SECURITY_DB_PREVIEW')).toBe(
+      'ghostbuild-deployment-2-preview-agent',
+    );
     expect(deploymentPlanResourceName(plan, 'workers_ai', 'AI')).toBe('AI');
     expect(deploymentPlanResourceName(plan, 'durable_object', 'AppAgent')).toBe('AppAgent');
     expect(

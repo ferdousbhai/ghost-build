@@ -114,6 +114,21 @@ export async function deploymentAssetHash(file: Pick<DeploymentArtifactFile, 'pa
   return bytesToHex(blake3(input)).slice(0, 32);
 }
 
+/** Durable identity for the exact module, asset, and migration bytes produced by validation. */
+export async function preparedDeploymentArtifactDigest(value: PreparedDeploymentArtifact): Promise<string> {
+  const inventory = {
+    revision: value.revision,
+    mainModule: value.mainModule,
+    modules: value.modules.map((file) => [file.path, file.size, file.sha256]),
+    assets: value.assets.map((file) => [file.path, file.size, file.sha256]),
+    migrations: {
+      DB: await migrationInventory(value.migrations.DB),
+      AGENT_SECURITY_DB: await migrationInventory(value.migrations.AGENT_SECURITY_DB),
+    },
+  };
+  return sha256Bytes(new TextEncoder().encode(JSON.stringify(inventory)));
+}
+
 export function deploymentAssetExtension(path: string): string {
   return extname(path).slice(1);
 }
@@ -161,6 +176,17 @@ async function sha256Bytes(value: Uint8Array): Promise<string> {
   const input = new Uint8Array(value).buffer;
   const digest = await crypto.subtle.digest('SHA-256', input);
   return bytesToHex(new Uint8Array(digest));
+}
+
+async function migrationInventory(
+  migrations: readonly { name: string; sql: string }[],
+): Promise<Array<[string, string]>> {
+  return Promise.all(
+    migrations.map(async (migration): Promise<[string, string]> => [
+      migration.name,
+      await sha256Bytes(new TextEncoder().encode(migration.sql)),
+    ]),
+  );
 }
 
 export function bytesToBase64(bytes: Uint8Array): string {

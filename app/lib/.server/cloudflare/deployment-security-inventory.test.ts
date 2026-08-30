@@ -45,6 +45,7 @@ describe('deployment security attestation', () => {
         value.bindings.push({ name: 'APP_CACHE', type: 'kv_namespace', namespace_id: 'wrong-kv' });
       },
     ],
+    ['disabled version preview URLs', (value: ReturnType<typeof readback>) => (value.previewUrlsEnabled = false)],
   ])('rejects %s as drift', (_name, mutate) => {
     const value = readback();
     mutate(value);
@@ -121,6 +122,8 @@ function readback(): ActiveWorkerDeploymentReadback {
     scriptEtag: 'etag-1',
     compatibilityDate: '2026-07-21',
     compatibilityFlags: ['nodejs_compat'],
+    workersDevEnabled: true,
+    previewUrlsEnabled: true,
     bindings: [
       { name: 'GHOSTBUILD_TEMPLATE_SOURCE_SHA256', type: 'plain_text', text: TEMPLATE_SOURCE_SHA256 },
       {
@@ -155,7 +158,7 @@ function deployment(): Deployment {
     workspaceReference: `workspace-runtime:project:1:${'a'.repeat(64)}`,
     status: 'deploying',
     plan: {
-      version: 4,
+      version: 5,
       deploymentId: 'deployment-1',
       sourceSha256: 'a'.repeat(64),
       templateSourceSha256: TEMPLATE_SOURCE_SHA256,

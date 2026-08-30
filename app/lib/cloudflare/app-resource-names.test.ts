@@ -7,7 +7,9 @@ describe('app resource naming', () => {
   it('composes every logical binding onto the deployment id', () => {
     expect(appResourceName(DEPLOYMENT, 'app')).toBe(`ghostbuild-${DEPLOYMENT}`);
     expect(appResourceName(DEPLOYMENT, 'DB')).toBe(`ghostbuild-${DEPLOYMENT}`);
+    expect(appResourceName(DEPLOYMENT, 'DB_PREVIEW')).toBe(`ghostbuild-${DEPLOYMENT}-preview`);
     expect(appResourceName(DEPLOYMENT, 'AGENT_SECURITY_DB')).toBe(`ghostbuild-${DEPLOYMENT}-agent-security`);
+    expect(appResourceName(DEPLOYMENT, 'AGENT_SECURITY_DB_PREVIEW')).toBe(`ghostbuild-${DEPLOYMENT}-preview-agent`);
     expect(appResourceName(DEPLOYMENT, 'APP_STORAGE')).toBe(`ghostbuild-${DEPLOYMENT}-storage`);
     expect(appResourceName(DEPLOYMENT, 'APP_CACHE')).toBe(`ghostbuild-${DEPLOYMENT}-cache`);
   });
@@ -16,7 +18,9 @@ describe('app resource naming', () => {
 describe('app deployment id recovery', () => {
   it('recovers the deployment id from every app resource suffix', () => {
     expect(appDeploymentIdFromResourceName(`ghostbuild-${DEPLOYMENT}`)).toBe(DEPLOYMENT);
+    expect(appDeploymentIdFromResourceName(`ghostbuild-${DEPLOYMENT}-preview`)).toBe(DEPLOYMENT);
     expect(appDeploymentIdFromResourceName(`ghostbuild-${DEPLOYMENT}-agent-security`)).toBe(DEPLOYMENT);
+    expect(appDeploymentIdFromResourceName(`ghostbuild-${DEPLOYMENT}-preview-agent`)).toBe(DEPLOYMENT);
     expect(appDeploymentIdFromResourceName(`ghostbuild-${DEPLOYMENT}-storage`)).toBe(DEPLOYMENT);
     expect(appDeploymentIdFromResourceName(`ghostbuild-${DEPLOYMENT}-cache`)).toBe(DEPLOYMENT);
   });

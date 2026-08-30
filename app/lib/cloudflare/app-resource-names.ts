@@ -18,7 +18,9 @@ const APP_RESOURCE_PREFIX = 'ghostbuild-';
 const APP_RESOURCE_SUFFIXES = {
   app: '',
   DB: '',
+  DB_PREVIEW: '-preview',
   AGENT_SECURITY_DB: '-agent-security',
+  AGENT_SECURITY_DB_PREVIEW: '-preview-agent',
   APP_STORAGE: '-storage',
   APP_CACHE: '-cache',
 } as const;

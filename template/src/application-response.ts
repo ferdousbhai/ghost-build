@@ -1,23 +1,24 @@
 const APPLICATION_CSP_BASELINE =
   "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
-const ISOLATED_PREVIEW_CSP_BASELINE =
+const WORKERS_PREVIEW_CSP_BASELINE =
   "base-uri 'self'; frame-ancestors https://ghostbuild.dev; object-src 'none'; form-action 'self'";
 const HSTS_MIN_AGE_SECONDS = "31536000";
 
 type ApplicationSecurityOptions = {
-  isolatedPreview?: boolean;
+  workersPreview?: boolean;
 };
 
 export async function finalizeApplicationResponse(
-  _request: Request,
+  request: Request,
   agentResponse: Response | null,
   fetchApplication: () => Response | Promise<Response>,
-  options: ApplicationSecurityOptions = {},
 ): Promise<Response> {
   if (agentResponse) {
     return agentResponse;
   }
-  return withApplicationSecurityHeaders(await fetchApplication(), options);
+  return withApplicationSecurityHeaders(await fetchApplication(), {
+    workersPreview: isVersionedWorkersPreviewRequest(request),
+  });
 }
 
 export function withApplicationSecurityHeaders(
@@ -29,12 +30,12 @@ export function withApplicationSecurityHeaders(
   headers.set("X-Content-Type-Options", "nosniff");
   applyContentSecurityPolicyBaseline(
     headers,
-    options.isolatedPreview
-      ? ISOLATED_PREVIEW_CSP_BASELINE
+    options.workersPreview
+      ? WORKERS_PREVIEW_CSP_BASELINE
       : APPLICATION_CSP_BASELINE,
   );
   applyHstsFloor(headers);
-  if (options.isolatedPreview) {
+  if (options.workersPreview) {
     headers.delete("X-Frame-Options");
   } else {
     headers.set("X-Frame-Options", "DENY");
@@ -45,6 +46,15 @@ export function withApplicationSecurityHeaders(
     statusText: response.statusText,
     headers,
   });
+}
+
+function isVersionedWorkersPreviewRequest(request: Request): boolean {
+  const hostname = new URL(request.url).hostname;
+  const workerLabel = "[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?";
+  const accountLabel = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
+  return new RegExp(
+    `^[0-9a-f]{8}-${workerLabel}\\.${accountLabel}\\.workers\\.dev$`,
+  ).test(hostname);
 }
 
 function applyContentSecurityPolicyBaseline(

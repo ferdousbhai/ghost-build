@@ -39,7 +39,7 @@ const EXPORT_COVERS =
 
 const EXPORT_OMITS = [
   'Chats, transcripts, project files, and deployment records. These live in the connected Cloudflare account, not in the control plane. Download individual project source with Download code in the project header.',
-  'Workers, D1 databases, R2 buckets, KV namespaces, Containers, Durable Objects, and Agents that Ghostbuild deployed, and the logs and traces they produce. These live in the connected Cloudflare account and are readable with that account’s own tools. Their names are exported, so you can find them there after erasing this account.',
+  'Workers and their unpromoted preview versions, production and preview D1 databases, R2 buckets, KV namespaces, Containers, Durable Objects, and Agents that Ghostbuild deployed, and the logs and traces they produce. These live in the connected Cloudflare account and are readable with that account’s own tools. The workspace-runtime resource names Ghostbuild keeps in its control plane are exported; generated-application deployment records remain in the user-owned runtime.',
   'Copies held by the browser. No server request can reach them; clear Ghostbuild site data in every browser and profile you have used.',
   'Encrypted credential material, initialisation vectors, credential handles, and session tokens. These are never exported.',
 ];

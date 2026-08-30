@@ -21,6 +21,8 @@ type ControlPlaneErasure = {
  * reaches the user's Cloudflare resources. Deployed Workers, D1, R2, Containers,
  * Durable Objects, Agents, and browser replicas are the user's to remove.
  *
+ * This also deliberately retains unpromoted Worker preview versions and their separate preview
+ * D1 databases, exactly as it retains the production resources owned by the user's account.
  * Safe to repeat: a second call deletes nothing and reports zero counts.
  */
 export async function eraseControlPlaneAccount(args: {

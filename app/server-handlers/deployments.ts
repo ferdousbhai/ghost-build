@@ -15,6 +15,7 @@ import {
 import { findChat } from '~/lib/cloudflare/data/chat-repository.server';
 import {
   executeUserOwnedDeployment,
+  executeUserOwnedPreview,
   terminalizeInterruptedUserOwnedDeployment,
 } from '~/lib/.server/cloudflare/user-workspace-deployment-executor';
 
@@ -136,6 +137,30 @@ export async function deployForUser(args: {
       executionGeneration: deployment.executionGeneration,
     }),
   );
+}
+
+/** Create an unpromoted preview version under the same plan and credential boundary as deployment. */
+export async function previewForUser(args: { env: Env; deploymentId: string; previewId: string; userId: string }) {
+  const connection = runtimeCloudflareIdentity(args.env, args.userId);
+  const deployment = await requireDeploymentForUser(args.env.DB, args.deploymentId, args.userId);
+  await requireActiveDeploymentChat(args.env.DB, deployment);
+  if (!isCurrentDeploymentPlan(deployment.plan)) {
+    throw new DeploymentStateConflictError(deployment.status);
+  }
+  if (deployment.connectionId !== connection.id || deployment.connectionGeneration !== connection.generation) {
+    throw new DeploymentConnectionChangedError();
+  }
+  if (deployment.status === 'provisioning' || deployment.status === 'deploying') {
+    throw new DeploymentStateConflictError(deployment.status);
+  }
+  return executeUserOwnedPreview({
+    env: args.env,
+    deploymentId: deployment.id,
+    previewId: args.previewId,
+    userId: args.userId,
+    connectionId: connection.id,
+    executionGeneration: deployment.executionGeneration,
+  });
 }
 
 export async function userRuntimeDeploymentAction(args: {

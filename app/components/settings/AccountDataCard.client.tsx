@@ -219,10 +219,11 @@ export function AccountDataCard() {
             Ghostbuild’s authorization. It cannot be undone.
           </p>
           <p className="mt-2 max-w-2xl text-sm text-content-secondary">
-            It does <strong>not</strong> delete anything inside your Cloudflare account. Workers, D1 databases, R2
-            buckets, KV namespaces, Containers, Durable Objects, and Agents that Ghostbuild deployed stay exactly where
-            they are, keep serving traffic, keep costing money, and remain yours to remove. It does not clear this
-            browser, and signing in again creates a new, empty Ghostbuild account.
+            It does <strong>not</strong> delete anything inside your Cloudflare account. Workers and their unpromoted
+            preview versions, production and preview D1 databases, R2 buckets, KV namespaces, Containers, Durable
+            Objects, and Agents that Ghostbuild deployed stay exactly where they are, keep serving traffic, keep costing
+            money, and remain yours to remove. It does not clear this browser, and signing in again creates a new, empty
+            Ghostbuild account.
           </p>
           <p className="mt-2 max-w-2xl text-sm text-content-secondary">
             To remove a deployed app, delete its project first. Deleting a project reclaims the Cloudflare resources

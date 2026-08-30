@@ -18,7 +18,6 @@ import {
   type WorkspaceCommandRequest,
   type WorkspaceCommandResult,
   type WorkspaceListingRequest,
-  type WorkspacePreviewRequest,
   type WorkspaceSearchRequest,
   type WorkspaceSeedExpectation,
   type WorkspaceSyncPageRequest,
@@ -30,7 +29,6 @@ import type {
   BuilderWorkspaceState,
   BuilderWorkspaceSyncPage,
 } from '~/agents/builder-workspace-types';
-import type { BuilderPreviewSuccess } from '~/agents/builder-preview-types';
 import { isRetryableDurableObjectError } from '~/lib/cloudflare/durable-object-rpc.server';
 type ProjectWorkspaceStub = DurableObjectStub<ProjectWorkspaceRpc>;
 
@@ -594,14 +592,6 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
 
   prepareDeployment(revision: string): ReturnType<BuilderWorkspaceApi['prepareDeployment']> {
     return this.#stub().then((stub) => stub.deploymentPlan(revision));
-  }
-
-  async createPreview(args: WorkspacePreviewRequest): Promise<BuilderPreviewSuccess> {
-    return await (await this.#stub()).createPreview(args);
-  }
-
-  async stopPreview(previewId: string): Promise<void> {
-    await (await this.#stub()).stopPreview(previewId);
   }
 
   async deleteProject(): Promise<void> {

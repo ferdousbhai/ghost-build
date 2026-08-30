@@ -1,6 +1,7 @@
 import {
   createOrReplayDeploymentPlanForUser,
   deployForUser,
+  previewForUser,
   terminalizeInterruptedDeploymentForUser,
 } from '~/server-handlers/deployments';
 import type { BuilderWorkspaceApi, BuilderWorkspaceCheckpoint } from './builder-workspace-api';
@@ -10,6 +11,11 @@ type BuilderDeploymentContext = {
   userId: string;
   chatInitialId: string;
 };
+
+type BuilderDeploymentWorkspace = Pick<
+  BuilderWorkspaceApi,
+  'projectId' | 'checkpoint' | 'hasSuccessfulValidation' | 'prepareDeployment'
+>;
 
 export type BuilderDeploymentState = {
   status: 'ready' | 'deploying' | 'succeeded' | 'failed';
@@ -21,7 +27,7 @@ export type BuilderDeploymentState = {
 };
 
 export async function validatedDeploymentCheckpoint(
-  workspace: BuilderWorkspaceApi,
+  workspace: Pick<BuilderWorkspaceApi, 'checkpoint' | 'hasSuccessfulValidation'>,
 ): Promise<BuilderWorkspaceCheckpoint | null> {
   const snapshot = await workspace.checkpoint();
   return (await workspace.hasSuccessfulValidation(snapshot.revision)) ? snapshot : null;
@@ -33,8 +39,7 @@ export async function terminalizeInterruptedDeploymentForBuilder(args: {
   toolCallId: string;
   validatedRevision: string;
 }): Promise<BuilderDeploymentState> {
-  const operationId = `deployment:${args.workspace.projectId}:${args.toolCallId}`;
-  const deploymentId = await deterministicDeploymentId(`${operationId}:${args.validatedRevision}`);
+  const deploymentId = await publicationDeploymentId(args.workspace.projectId, args.toolCallId, args.validatedRevision);
   const deployment = await terminalizeInterruptedDeploymentForUser({
     env: args.context.env,
     userId: args.context.userId,
@@ -57,32 +62,12 @@ export async function terminalizeInterruptedDeploymentForBuilder(args: {
 /** Deploy the exact durably validated revision as one idempotent server operation. */
 export async function deployValidatedRevisionForBuilder(args: {
   context: BuilderDeploymentContext;
-  workspace: BuilderWorkspaceApi;
+  workspace: BuilderDeploymentWorkspace;
   toolCallId: string;
   validatedRevision: string;
   abortSignal?: AbortSignal;
 }): Promise<BuilderDeploymentState> {
-  const snapshot = await args.workspace.checkpoint();
-  const operationId = `deployment:${args.workspace.projectId}:${args.toolCallId}`;
-  if (snapshot.revision !== args.validatedRevision) {
-    throw new Error('The durable project changed after validation. Run validation again.');
-  }
-  if (!(await args.workspace.hasSuccessfulValidation(snapshot.revision))) {
-    throw new Error('Deployment requires full validation for this exact revision.');
-  }
-  args.abortSignal?.throwIfAborted();
-  const source = await args.workspace.prepareDeployment(snapshot.revision);
-  const deploymentId = await deterministicDeploymentId(`${operationId}:${snapshot.revision}`);
-  await createOrReplayDeploymentPlanForUser({
-    env: args.context.env,
-    userId: args.context.userId,
-    chatId: args.context.chatInitialId,
-    deploymentId,
-    projectId: args.workspace.projectId,
-    revision: source.revision,
-    workspaceRevision: source.workspaceRevision,
-    project: source.project,
-  });
+  const deploymentId = await planValidatedRevision({ ...args, publication: 'Deployment' });
   const deployment = await deployForUser({
     env: args.context.env,
     userId: args.context.userId,
@@ -94,6 +79,63 @@ export async function deployValidatedRevisionForBuilder(args: {
     productionUrl: deployment.productionUrl,
     error: deployment.error?.message ?? null,
   };
+}
+
+/**
+ * Preview the same validated revision under the same deployment plan. Passing the deployment's own
+ * tool-call identity is what makes the preview an unpromoted version of that exact deployment
+ * rather than a second publication with resources of its own.
+ */
+export async function previewValidatedRevisionForBuilder(args: {
+  context: BuilderDeploymentContext;
+  workspace: BuilderDeploymentWorkspace;
+  toolCallId: string;
+  previewId: string;
+  validatedRevision: string;
+}) {
+  const deploymentId = await planValidatedRevision({ ...args, publication: 'Preview' });
+  return previewForUser({
+    env: args.context.env,
+    userId: args.context.userId,
+    deploymentId,
+    previewId: args.previewId,
+  });
+}
+
+/** Create or replay the one deployment plan for this exact revision and return its identity. */
+async function planValidatedRevision(args: {
+  context: BuilderDeploymentContext;
+  workspace: BuilderDeploymentWorkspace;
+  toolCallId: string;
+  validatedRevision: string;
+  publication: 'Deployment' | 'Preview';
+  abortSignal?: AbortSignal;
+}): Promise<string> {
+  const snapshot = await args.workspace.checkpoint();
+  if (snapshot.revision !== args.validatedRevision) {
+    throw new Error('The durable project changed after validation. Run validation again.');
+  }
+  if (!(await args.workspace.hasSuccessfulValidation(snapshot.revision))) {
+    throw new Error(`${args.publication} requires full validation for this exact revision.`);
+  }
+  args.abortSignal?.throwIfAborted();
+  const source = await args.workspace.prepareDeployment(snapshot.revision);
+  const deploymentId = await publicationDeploymentId(args.workspace.projectId, args.toolCallId, snapshot.revision);
+  await createOrReplayDeploymentPlanForUser({
+    env: args.context.env,
+    userId: args.context.userId,
+    chatId: args.context.chatInitialId,
+    deploymentId,
+    projectId: args.workspace.projectId,
+    revision: source.revision,
+    workspaceRevision: source.workspaceRevision,
+    project: source.project,
+  });
+  return deploymentId;
+}
+
+function publicationDeploymentId(projectId: string, toolCallId: string, revision: string): Promise<string> {
+  return deterministicDeploymentId(`deployment:${projectId}:${toolCallId}:${revision}`);
 }
 
 async function deterministicDeploymentId(value: string): Promise<string> {

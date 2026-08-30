@@ -24,15 +24,14 @@ describe('BuilderAgent preview lifecycle', () => {
     );
     const preview = source.slice(
       source.indexOf('private async requestPreviewInternal('),
-      source.indexOf('private async runPreviewBuild('),
+      source.indexOf('private async runPreviewPublication('),
     );
 
     expect(response).toContain('const validatedSnapshot = await this.refreshDeploymentReadiness()');
     expect(response).toContain('this.scheduleDeployment(validatedSnapshot)');
     expect(response).not.toContain('this.requestPreviewInternal({ validatedSnapshot })');
     expect(source).toContain('this.requestPreviewInternal({ validatedSnapshot: job })');
-    expect(preview).toContain('options.validatedSnapshot ?? (await this.workspace.checkpoint())');
-    expect(preview).not.toContain('hasSuccessfulValidation');
+    expect(preview).toContain('options.validatedSnapshot ?? (await validatedDeploymentCheckpoint(this.workspace))');
   });
 
   it('persists requested runtime compaction only after the completed response', () => {
@@ -73,35 +72,22 @@ describe('BuilderAgent preview lifecycle', () => {
     expect(chatMessage).toContain('runWithKeepAlive: (operation) => this.keepAliveWhile(operation)');
   });
 
-  it('carries the requested preview mode all the way to the workspace', () => {
-    const request = source.slice(
-      source.indexOf('private async requestPreviewInternal('),
-      source.indexOf('private async runPreviewBuild('),
-    );
-    const build = source.slice(
-      source.indexOf('private async runPreviewBuild('),
-      source.indexOf('private async failPreviewJob('),
+  it('publishes the validated revision through the shared account deployment path', () => {
+    const publication = source.slice(
+      source.indexOf('private async runPreviewPublication('),
+      source.indexOf('private async failPreviewPublication('),
     );
 
-    expect(source).toContain('requestPreview(mode?: BuilderPreviewMode): Promise<BuilderPreviewState> {');
-    expect(source).toContain("this.requestPreviewInternal({ mode: mode === 'dev' ? 'dev' : 'production' })");
-    expect(request).toContain("const mode = options.mode ?? 'production'");
-    expect(request).toContain('mode,');
-    // A dev preview request must not carry an expected checkpoint: naming one would promise a
-    // guarantee the running dev server does not have.
-    expect(build).toContain("job.mode === 'dev'\n          ? { previewId: job.previewId, mode: 'dev' }");
-    expect(build).toContain("mode: 'production',\n              expectedWorkspaceRevision: job.workspaceRevision");
-    expect(build).toContain("stale: job.mode === 'production' && currentSnapshot.revision !== job.snapshotRevision");
+    expect(publication).toContain('previewValidatedRevisionForBuilder({');
+    expect(publication).toContain('validatedRevision: job.snapshotRevision');
+    expect(publication).not.toContain('this.workspace.createPreview');
+    // The preview names the deployment's own tool-call identity, so both resolve to one plan and
+    // one Worker rather than the preview publishing resources of its own.
+    expect(publication).toContain('toolCallId: deploymentToolCallId(job.workspaceRevision, job.snapshotRevision)');
+    expect(source).toContain('toolCallId: deploymentToolCallId(job.workspaceRevision, job.revision)');
   });
 
-  it('keeps the automatic post-deployment preview checkpoint-bound', () => {
-    // The preview the agent queues for itself is evidence about a validated revision, so it stays
-    // the production build even though a dev preview would be faster.
-    expect(source).toContain('this.requestPreviewInternal({ validatedSnapshot: job })');
-    expect(source).not.toContain("requestPreviewInternal({ validatedSnapshot: job, mode: 'dev' })");
-  });
-
-  it('never lets a preview of any mode stand in for deployment evidence', () => {
+  it('never lets a preview stand in for deployment evidence', () => {
     const deploy = source.slice(
       source.indexOf('async deployValidatedRevision()'),
       source.indexOf('@callable()\n  requestPreview'),

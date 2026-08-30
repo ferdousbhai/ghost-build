@@ -11,10 +11,21 @@ import {
   DEPLOYMENT_VERSION_METADATA_BINDING,
 } from './deployment-runtime-policy';
 
-type DeploymentConfigInput = Record<string, unknown> & {
+export type DeploymentConfigInput = {
   accountId: string;
   workerName: string;
   projectType: 'web_app' | 'worker';
+  workersAi: boolean;
+  appAgent: boolean;
+  d1DatabaseId?: string;
+  d1DatabaseName?: string;
+  agentSecurityD1DatabaseId?: string;
+  agentSecurityD1DatabaseName?: string;
+  r2BucketName?: string;
+  kvNamespaceId?: string;
+  securityBaselineVersion: string;
+  securityBoundarySha256: string;
+  templateSourceSha256: string;
 };
 
 type TrustedDeploymentConfig = {
@@ -73,11 +84,11 @@ export function createTrustedDeploymentConfig(args: DeploymentConfigInput): Trus
   if (args.projectType === 'web_app') {
     config.assets = { directory: `${DEPLOYMENT_PROJECT_ROOT}/dist/client` };
   }
-  if (args.workersAi === true) {
+  if (args.workersAi) {
     config.ai = { binding: 'AI' };
   }
   const d1Databases: NonNullable<TrustedDeploymentConfig['d1_databases']> = [];
-  if (typeof args.d1DatabaseId === 'string') {
+  if (args.d1DatabaseId !== undefined) {
     d1Databases.push({
       binding: 'DB',
       database_name: requireCloudflareName(args.d1DatabaseName, 'd1DatabaseName'),
@@ -85,7 +96,7 @@ export function createTrustedDeploymentConfig(args: DeploymentConfigInput): Trus
       migrations_dir: `${DEPLOYMENT_PROJECT_ROOT}/migrations`,
     });
   }
-  if (typeof args.agentSecurityD1DatabaseId === 'string') {
+  if (args.agentSecurityD1DatabaseId !== undefined) {
     d1Databases.push({
       binding: 'AGENT_SECURITY_DB',
       database_name: requireCloudflareName(args.agentSecurityD1DatabaseName, 'agentSecurityD1DatabaseName'),
@@ -96,15 +107,15 @@ export function createTrustedDeploymentConfig(args: DeploymentConfigInput): Trus
   if (d1Databases.length > 0) {
     config.d1_databases = d1Databases;
   }
-  if (typeof args.r2BucketName === 'string') {
+  if (args.r2BucketName !== undefined) {
     config.r2_buckets = [
       { binding: 'APP_STORAGE', bucket_name: requireCloudflareName(args.r2BucketName, 'r2BucketName') },
     ];
   }
-  if (typeof args.kvNamespaceId === 'string') {
+  if (args.kvNamespaceId !== undefined) {
     config.kv_namespaces = [{ binding: 'APP_CACHE', id: requireHexId(args.kvNamespaceId, 'kvNamespaceId') }];
   }
-  if (args.appAgent === true) {
+  if (args.appAgent) {
     config.durable_objects = { bindings: [{ name: 'AppAgent', class_name: 'AppAgent' }] };
     config.exports = { AppAgent: APP_AGENT_DECLARATIVE_EXPORT };
     config.triggers = { crons: [DEPLOYMENT_SECURITY_CLEANUP_CRON] };

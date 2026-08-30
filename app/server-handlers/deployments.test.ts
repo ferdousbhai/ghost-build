@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   createDeployment: vi.fn(),
   requireDeployment: vi.fn(),
   executeUserOwnedDeployment: vi.fn(),
+  executeUserOwnedPreview: vi.fn(),
 }));
 
 vi.mock('~/lib/.server/cloudflare/deployment-repository', async (importOriginal) => ({
@@ -13,6 +14,7 @@ vi.mock('~/lib/.server/cloudflare/deployment-repository', async (importOriginal)
 }));
 vi.mock('~/lib/.server/cloudflare/user-workspace-deployment-executor', () => ({
   executeUserOwnedDeployment: mocks.executeUserOwnedDeployment,
+  executeUserOwnedPreview: mocks.executeUserOwnedPreview,
 }));
 
 import {
@@ -20,7 +22,7 @@ import {
   DEPLOYMENT_SECURITY_BASELINE_VERSION,
   TEMPLATE_SOURCE_SHA256,
 } from '~/lib/.server/cloudflare/deployment-security-baseline';
-import { createOrReplayDeploymentPlanForUser, deployForUser } from './deployments';
+import { createOrReplayDeploymentPlanForUser, deployForUser, previewForUser } from './deployments';
 
 const project = { type: 'worker' as const, bindings: { ai: false, d1: false, r2: false, kv: false, appAgent: false } };
 const revision = 'a'.repeat(64);
@@ -36,7 +38,7 @@ function deployment(status: 'approved' | 'succeeded' = 'approved') {
     workspaceReference: `workspace-runtime:agent-1:7:${revision}`,
     status,
     plan: {
-      version: 4 as const,
+      version: 5 as const,
       deploymentId: 'deployment-1',
       sourceSha256: revision,
       templateSourceSha256: TEMPLATE_SOURCE_SHA256,
@@ -60,6 +62,13 @@ describe('deployment handlers', () => {
     mocks.requireDeployment.mockRejectedValue(new Error('not configured'));
     mocks.createDeployment.mockResolvedValue(deployment());
     mocks.executeUserOwnedDeployment.mockResolvedValue(deployment('succeeded'));
+    mocks.executeUserOwnedPreview.mockResolvedValue({
+      id: 'version-1',
+      url: 'https://12345678-ghostbuild-app.account.workers.dev',
+      workspaceRevision: 7,
+      snapshotRevision: revision,
+      readyAt: '2026-08-30T00:00:00.000Z',
+    });
   });
 
   it('stores only an opaque reference to the exact user-owned workspace revision', async () => {
@@ -93,6 +102,23 @@ describe('deployment handlers', () => {
     expect(mocks.executeUserOwnedDeployment).toHaveBeenCalledWith({
       env,
       deploymentId: 'deployment-1',
+      userId: 'user-1',
+      connectionId: 'connection-1',
+      executionGeneration: 1,
+    });
+  });
+
+  it('executes preview as an unpromoted sibling of the authenticated deployment', async () => {
+    mocks.requireDeployment.mockResolvedValue(deployment());
+    const env = runtimeEnv(activeChatDb());
+
+    await expect(
+      previewForUser({ env, deploymentId: 'deployment-1', previewId: 'preview-1', userId: 'user-1' }),
+    ).resolves.toMatchObject({ id: 'version-1', workspaceRevision: 7 });
+    expect(mocks.executeUserOwnedPreview).toHaveBeenCalledWith({
+      env,
+      deploymentId: 'deployment-1',
+      previewId: 'preview-1',
       userId: 'user-1',
       connectionId: 'connection-1',
       executionGeneration: 1,

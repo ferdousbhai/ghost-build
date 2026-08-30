@@ -63,122 +63,57 @@ describe('isolated project command', () => {
     ).toThrow(/outside its expected root/i);
   });
 
-  it('runs validation, preview, and deployment builds outside the durable project', () => {
+  it('builds one isolated artifact during validation and never hosts a preview process', () => {
     const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
-    const validation = source.slice(
-      source.indexOf('async validateTool('),
-      source.indexOf('async beginDeploymentSession('),
-    );
-    const preview = source.slice(source.indexOf('async createPreview('), source.indexOf('async stopPreview('));
-    const deployment = source.slice(
+    const validation = source.slice(source.indexOf('async validateTool('), source.indexOf('validationStatus('));
+
+    expect(validation).toContain('copyProjectToIsolatedRoot(isolatedRoot, cancellation)');
+    expect(validation).toContain('this.buildDeploymentArtifact({');
+    expect(validation).toContain('preparedDeploymentArtifactDigest(artifact)');
+    expect(validation).toContain('REVISION_CODEGEN_COMMAND.command');
+    expect(validation).toContain('parallelValidationStagesCommand(PARALLEL_VALIDATION_STAGES');
+    expect(validation).not.toContain('workspace.runtime.exec');
+    expect(source).not.toContain('async createPreview(');
+    expect(source).not.toContain('async stopPreview(');
+    expect(source).not.toContain('vite preview');
+    expect(source).not.toContain('trycloudflare.com');
+  });
+
+  it('drops the preview tables left behind by a workspace provisioned before this runtime', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+
+    for (const table of [
+      'ghostbuild_active_preview',
+      'ghostbuild_pending_previews',
+      'ghostbuild_preview_results',
+      'ghostbuild_preview_cancellations',
+    ]) {
+      expect(source).toContain(`'${table}'`);
+    }
+    expect(source).toContain('DROP TABLE IF EXISTS ${table}');
+  });
+
+  it('reuses the validated artifact and rebuilds only after container loss', () => {
+    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const prepare = source.slice(
       source.indexOf('async prepareDeploymentArtifact('),
       source.indexOf('async deleteProject('),
     );
 
-    for (const operation of [validation, deployment]) {
-      // Both build from an isolated root written out of the durable VFS. Neither reads the
-      // container mount, which is what made #139 possible: a build copying from one source of
-      // truth while its guards checked another.
-      expect(operation).toContain('copyProjectToIsolatedRoot');
-      expect(operation).not.toContain('pushDurableProjectToContainer');
-      expect(operation).toContain('runTransientCommand');
-      expect(operation).toContain('INSTALL_TIMEOUT_MS');
-      expect(operation).not.toContain('workspace.runtime.exec');
-      expect(operation).not.toContain('removeDerivedFiles');
-    }
-    expect(preview).toContain('this.preparePreviewSnapshot({');
-    expect(preview).not.toContain('INSTALL_COMMAND');
-    expect(preview).not.toContain('pnpm run build:isolated-preview');
-    expect(source).toContain('const INSTALL_TIMEOUT_MS = CONTAINER_PACKAGE_INSTALL_TIMEOUT_MS;');
-    expect(deployment).toContain('rebaseDeploymentConfigPaths');
-    expect(deployment).toContain('collectSandboxFiles(this, artifactRoot');
-    expect(deployment).toContain('node --input-type=module --eval');
-    expect(deployment).toContain('`${isolatedRoot}/dist/server/index.js`');
-    expect(source).toContain("createRequire(import.meta.resolve('vite'))");
-    expect(source).toContain('cloudflare:*');
-    expect(deployment).not.toContain('pnpm exec esbuild');
-    expect(deployment).toContain('collectSandboxMigrations(this, `${isolatedRoot}/migrations`)');
-    expect(preview).toContain("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: '.trycloudflare.com,container'");
-    expect(preview).toContain('const previewProcess = await this.sandboxProcesses.exec(');
-    expect(preview).toContain('assertActive: () => this.requirePreviewNotCancelled(previewId)');
-    expect(source).toContain("await this.#workspace.push('container-shell')");
-    expect(source).toContain("const TRANSIENT_COMMAND_PROCESS_ROLE = 'transient-command'");
-    expect(validation).toContain('async cancelValidation(');
-    expect(validation).toContain('active.cancellation.cancel()');
-    expect(validation).toContain(
-      "input.toolCallId === undefined ? null : requireString(input.toolCallId, 'toolCallId', 512)",
-    );
-    expect(validation).toContain('toolCallId !== null && active.toolCallId !== toolCallId');
-    expect(validation).toContain('this.#activeValidation.inputJson !== inputJson');
-    expect(validation).toContain('cancellation.requireActive()');
-    expect(validation).not.toContain('runValidationCommand');
-    expect(validation).toContain('INSTALL_TIMEOUT_MS, cancellation');
-    // Codegen first and alone, because it writes the route tree and binding types the other
-    // stages read; everything else runs as one concurrent group inside the same isolated root.
-    expect(validation).toContain('REVISION_CODEGEN_COMMAND.command');
-    expect(validation).toContain('parallelValidationStagesCommand(PARALLEL_VALIDATION_STAGES');
-    expect(validation.indexOf('REVISION_CODEGEN_COMMAND.command')).toBeLessThan(
-      validation.indexOf('parallelValidationStagesCommand(PARALLEL_VALIDATION_STAGES'),
-    );
-    // Validation still leaves the preview its prepared build, which is what lets a preview skip
-    // straight to starting a server.
-    expect(source).toContain("{ name: 'preview_build', command: 'pnpm run build:isolated-preview'");
-    expect(validation).toContain('ghostbuild_prepared_validation');
-    expect(deployment).toContain("await this.runTransientCommand(isolatedRoot, 'pnpm run build', 5 * 60_000)");
-    expect(deployment).not.toContain('pnpm run typecheck');
-    expect(deployment).not.toContain('pnpm run verify:stack');
-    expect(deployment).not.toContain('pnpm run lint');
-    // Cancellation is still observed before the expensive materialisation, which now happens
-    // inside the verified copy rather than at this call site.
-    const initialCheckpoint = validation.indexOf('const before = await this.checkpoint()');
-    const isolationCopy = validation.indexOf('await this.copyProjectToIsolatedRoot(');
-    expect(initialCheckpoint).toBeGreaterThanOrEqual(0);
-    expect(isolationCopy).toBeGreaterThan(initialCheckpoint);
-    expect(validation.indexOf('cancellation.requireActive()', initialCheckpoint)).toBeLessThan(isolationCopy);
-    const transientCommand = source.slice(
-      source.indexOf('private async runTransientCommand('),
-      source.indexOf('private async cleanupPreviewProcess('),
-    );
-    expect(transientCommand).toContain('this.setProcessForRole(TRANSIENT_COMMAND_PROCESS_ROLE, startedProcess.id)');
-    expect(transientCommand).not.toContain('crypto.randomUUID()');
-    expect(source).toContain("(kind) => kind === 'validate' || kind === 'preview'");
-    expect(source).not.toContain("cwd: '/tmp'");
-    expect(source).not.toContain('cwd: isolatedRoot');
-    expect(source).not.toContain('cwd: snapshotRoot');
+    expect(prepare).toContain("await activity(31, 'Reusing validated build artifact')");
+    expect(prepare).toContain('(await this.exists(PREPARED_VALIDATION_ARTIFACT_ROOT)).exists');
+    expect(prepare).toContain('await this.copyProjectToIsolatedRoot(PREPARED_VALIDATION_ROOT)');
+    expect(prepare).toContain('expectedDigest !== observedDigest');
+    expect(prepare).not.toContain('pnpm run typecheck');
+    expect(prepare).not.toContain('pnpm run lint');
 
-    const previewCleanup = source.slice(
-      source.indexOf('private async cleanupPreviewProcess('),
-      source.indexOf('private async cleanupPendingPreviews('),
+    // Discarding the container's copy must not discard validation's durable digest: an interrupted
+    // rebuild still has to prove its bytes equal the ones validation produced.
+    const discard = source.slice(
+      source.indexOf('private async discardPreparedValidationArtifact('),
+      source.indexOf('private async copyProjectToIsolatedRoot('),
     );
-    expect(previewCleanup).toContain("await this.runTransientCommand('/', `rm -rf");
-    expect(previewCleanup).not.toContain('this.runTransientCommand(PROJECT_ROOT');
-
-    const materialization = source.slice(
-      source.indexOf('private async pushDurableProjectToContainer('),
-      source.indexOf('private async runTransientCommand('),
-    );
-    expect(materialization.match(/await this\.#workspace\.push\('container-shell'\)/g)).toHaveLength(1);
-    expect(materialization).toContain('if (!force && (await this.exists(PROJECT_ROOT)).exists)');
-    expect(materialization).toContain('await this.#workspace.close()');
-    expect(materialization).toContain('await this.restartComputerd(COMPUTERD_ENV)');
-    expect(materialization).toContain('if (!(await this.exists(PROJECT_ROOT)).exists)');
-  });
-
-  it('reuses the validated snapshot for Preview and rebuilds only after container loss', () => {
-    const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
-    const prepare = source.slice(
-      source.indexOf('private async preparePreviewSnapshot('),
-      source.indexOf('private async discardPreparedValidationSnapshot('),
-    );
-    const reusable = prepare.indexOf('prepared?.revision === args.expectedSnapshotRevision');
-    const move = prepare.indexOf('mv -- ${shellQuote(PREPARED_VALIDATION_ROOT)}');
-    const fallbackInstall = prepare.indexOf('INSTALL_COMMAND, INSTALL_TIMEOUT_MS');
-
-    expect(reusable).toBeGreaterThan(0);
-    expect(move).toBeGreaterThan(reusable);
-    expect(fallbackInstall).toBeGreaterThan(move);
-    expect(prepare).toContain('PREVIEW_PREPARATION_COMMANDS');
-    expect(prepare).toContain('DELETE FROM ghostbuild_prepared_validation WHERE singleton = 1');
+    expect(discard).not.toContain('DELETE FROM ghostbuild_prepared_validation');
   });
 
   it('keeps the Computer container alive for stateful and deployment operations', () => {
@@ -202,28 +137,21 @@ describe('isolated project command', () => {
     expect(keepAlive).toContain('await this.setKeepAlive(true)');
     expect(keepAlive).toContain('this.#containerKeepAliveOperations -= 1');
     expect(keepAlive).toContain("ghostbuild_deployment_sessions WHERE status = 'active'");
-    expect(keepAlive).toContain(
-      'this.#containerKeepAliveOperations === 0 && !this.activePreviewRow() && !deploymentActive',
-    );
+    expect(keepAlive).toContain('this.#containerKeepAliveOperations === 0 && !deploymentActive');
+    expect(keepAlive).not.toContain('activePreviewRow');
     expect(keepAlive).toContain('await this.setKeepAlive(false)');
   });
 
-  it('retires the active preview before an immutable deployment session starts', () => {
+  it('starts immutable publication sessions without a container preview cleanup path', () => {
     const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
     const session = source.slice(
       source.indexOf('async beginDeploymentSession('),
-      source.indexOf('async createPreview('),
+      source.indexOf('async assertDeploymentSession('),
     );
-    expect(session.match(/await this\.setKeepAlive\(true\)/g)).toHaveLength(2);
-    const retain = session.indexOf('await this.setKeepAlive(true)');
-    const cleanup = session.indexOf('await this.cleanupPendingPreviews()');
-    const stop = session.indexOf('await this.stopActivePreview()');
-    const assertion = session.lastIndexOf('await this.assertDeploymentSession({ sessionId: operationId })');
-
-    expect(retain).toBeGreaterThan(0);
-    expect(cleanup).toBeGreaterThan(retain);
-    expect(stop).toBeGreaterThan(cleanup);
-    expect(assertion).toBeGreaterThan(stop);
+    expect(session).toContain('await this.setKeepAlive(true)');
+    expect(session).toContain('await this.assertDeploymentSession({ sessionId: operationId })');
+    expect(session).not.toContain('cleanupPendingPreviews');
+    expect(session).not.toContain('stopActivePreview');
   });
 
   it('publishes each durable workspace change set through one atomic VFS batch', () => {
@@ -263,7 +191,7 @@ describe('#139 stale-bytes guard', () => {
     // of the durable VFS, so a `tar` of PROJECT_ROOT reappearing anywhere is the regression.
     expect(source).not.toContain('createIsolatedProjectCommand');
     expect(source).not.toMatch(/tar -C \$\{?shellQuote\(PROJECT_ROOT/);
-    expect(source.split('await this.copyProjectToIsolatedRoot(').length - 1).toBe(4);
+    expect(source.split('await this.copyProjectToIsolatedRoot(').length - 1).toBe(2);
   });
 
   it('writes the isolated root from the durable VFS, one file at a time', () => {

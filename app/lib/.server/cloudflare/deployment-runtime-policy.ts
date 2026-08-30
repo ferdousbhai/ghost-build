@@ -22,3 +22,9 @@ export const DEPLOYMENT_SECURITY_BASELINE_BINDING = 'GHOSTBUILD_SECURITY_BASELIN
 export const DEPLOYMENT_TEMPLATE_SOURCE_BINDING = 'GHOSTBUILD_TEMPLATE_SOURCE_SHA256';
 export const DEPLOYMENT_SECURITY_BOUNDARY_BINDING = 'GHOSTBUILD_SECURITY_BOUNDARY_SHA256';
 export const DEPLOYMENT_SECURITY_CLEANUP_CRON = '0 3 * * *';
+/**
+ * Managed applications intentionally expose unpromoted Worker versions through
+ * versioned workers.dev preview URLs. Production workers.dev routing remains
+ * enabled as well; the security inventory attests both switches after publish.
+ */
+export const DEPLOYMENT_PREVIEW_URLS_ENABLED = true as const;

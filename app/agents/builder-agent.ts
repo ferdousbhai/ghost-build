@@ -28,6 +28,7 @@ import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai
 import type { UIMessage } from 'ai';
 import {
   deployValidatedRevisionForBuilder,
+  previewValidatedRevisionForBuilder,
   terminalizeInterruptedDeploymentForBuilder,
   validatedDeploymentCheckpoint,
   type BuilderDeploymentState,
@@ -86,7 +87,6 @@ import {
   failedBuilderPreviewState,
   idleBuilderPreviewState,
   previewStateForWorkspace,
-  type BuilderPreviewMode,
   type BuilderPreviewState,
 } from './builder-preview-types';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
@@ -96,25 +96,31 @@ import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import { z } from 'zod';
 
 const logger = createScopedLogger('BuilderAgent');
+
+/**
+ * The tool-call identity every publication of one validated revision shares. Deployment, its
+ * recovery, and its previews resolve to the same deterministic deployment plan because they name
+ * the same checkpoint here.
+ */
+function deploymentToolCallId(workspaceRevision: number, revision: string): string {
+  return `deploy-command:${workspaceRevision}:${revision}`;
+}
+
 const CONTEXT_COMPACTION_FIBER = 'background:context_compaction';
-const PREVIEW_BUILD_FIBER = 'background:builder_preview';
+const PREVIEW_PUBLICATION_FIBER = 'background:builder_preview';
 const DEPLOYMENT_FIBER = 'background:builder_deployment';
 const TITLE_GENERATION_FIBER = 'background:title_generation';
 const TITLE_GENERATION_JOB_MAX_PROMPT_CHARACTERS = 4_000;
 const CHAT_CANCELLATION_SETTLE_TIMEOUT_MS = 4.5 * 60 * 1000;
 
 /** Fiber metadata survives a Durable Object restart, so every job is re-parsed before it is resumed. */
-const previewBuildJobSchema = z.object({
+const previewPublicationJobSchema = z.object({
   previewId: z.string().min(1),
-  // A recovered dev-preview job must resume as a dev preview: replaying it as a production build
-  // would silently promise a checkpoint guarantee the request never asked for. An older job has no
-  // mode recorded, and every preview that existed before dev previews was checkpoint-bound.
-  mode: z.enum(['production', 'dev']).default('production'),
   workspaceRevision: z.number().int().min(0),
   snapshotRevision: z.string().min(1),
   requestedAt: z.number().int().positive(),
 });
-type PreviewBuildJob = z.infer<typeof previewBuildJobSchema>;
+type PreviewPublicationJob = z.infer<typeof previewPublicationJobSchema>;
 
 const deploymentJobSchema = z.object({
   workspaceRevision: z.number().int().min(0),
@@ -192,7 +198,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     generatedSubchatTitle: null,
     lastCompletedTurn: null,
     transcript: null,
-    preview: idleBuilderPreviewState(0),
+    preview: idleBuilderPreviewState(),
     validationProgress: null,
     deployment: null,
     contextCompactionRequestedTurnId: null,
@@ -243,10 +249,9 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
    */
   async scheduleDestroyForGc(ownerId: string): Promise<void> {
     await this.initializeGcIdentity(ownerId);
-    const previewId = this.state.preview?.pendingId ?? this.state.preview?.active?.id;
-    if (previewId) {
-      await this.cancelFiberByKey(this.previewFiberKey(previewId), 'Project deletion').catch(() => undefined);
-      await this.workspace.stopPreview(previewId).catch(() => undefined);
+    const pendingPreviewId = this.state.preview?.pendingId;
+    if (pendingPreviewId) {
+      await this.cancelFiberByKey(this.previewFiberKey(pendingPreviewId), 'Project deletion').catch(() => undefined);
     }
     await this.workspace.deleteProject();
     await this._cf_scheduleDestroy();
@@ -323,12 +328,12 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       await this.generateTitlesForPrompt({ ...job, accountCredentials: credentials });
       return { status: 'completed', snapshot: ctx.snapshot };
     }
-    if (ctx.name === PREVIEW_BUILD_FIBER) {
-      const job = previewBuildJobSchema.safeParse(ctx.metadata).data;
+    if (ctx.name === PREVIEW_PUBLICATION_FIBER) {
+      const job = previewPublicationJobSchema.safeParse(ctx.metadata).data;
       if (!job) {
-        return { status: 'error', error: 'missing preview build recovery data' };
+        return { status: 'error', error: 'missing preview publication recovery data' };
       }
-      await this.runPreviewBuild(job);
+      await this.runPreviewPublication(job);
       return { status: 'completed', snapshot: ctx.snapshot };
     }
     if (ctx.name === DEPLOYMENT_FIBER) {
@@ -716,8 +721,8 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   @callable()
-  requestPreview(mode?: BuilderPreviewMode): Promise<BuilderPreviewState> {
-    return this.requestPreviewInternal({ mode: mode === 'dev' ? 'dev' : 'production' });
+  requestPreview(): Promise<BuilderPreviewState> {
+    return this.requestPreviewInternal();
   }
 
   @callable()
@@ -727,15 +732,12 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       return preview;
     }
     await this.cancelFiberByKey(this.previewFiberKey(preview.pendingId), 'Cancelled by the project owner');
-    await this.workspace.stopPreview(preview.pendingId).catch(() => undefined);
     const next: BuilderPreviewState = {
       ...preview,
       status: 'cancelled',
       pendingId: null,
-      startedAt: null,
       updatedAt: new Date().toISOString(),
       error: null,
-      active: null,
     };
     this.setPreviewState(next);
     return next;
@@ -1089,7 +1091,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         chatInitialId: transcriptBinding.chatInitialId,
       },
       workspace: this.workspace,
-      toolCallId: `deploy-command:${job.workspaceRevision}:${job.revision}`,
+      toolCallId: deploymentToolCallId(job.workspaceRevision, job.revision),
       validatedRevision: job.revision,
     });
   }
@@ -1152,7 +1154,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
           chatInitialId: transcriptBinding.chatInitialId,
         },
         workspace: this.workspace,
-        toolCallId: `deploy-command:${job.workspaceRevision}:${job.revision}`,
+        toolCallId: deploymentToolCallId(job.workspaceRevision, job.revision),
         validatedRevision: job.revision,
       }),
     );
@@ -1175,69 +1177,51 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   private async requestPreviewInternal(
-    options: { validatedSnapshot?: BuilderWorkspaceCheckpoint; mode?: BuilderPreviewMode } = {},
+    options: { validatedSnapshot?: BuilderWorkspaceCheckpoint } = {},
   ): Promise<BuilderPreviewState> {
     if (!this.ownerId || !this.userId || !this.transcriptBinding) {
       throw new Response('Agent authentication is required.', { status: 401 });
     }
-    const mode = options.mode ?? 'production';
     const workspace = await this.initializeWorkspace(this.transcriptBinding);
     const current = this.currentPreviewState();
-    const snapshot = options.validatedSnapshot ?? (await this.workspace.checkpoint());
-    if (
-      current.mode === mode &&
-      current.workspaceRevision === workspace.revision &&
-      (current.status === 'queued' || current.status === 'building')
-    ) {
+    const snapshot = options.validatedSnapshot ?? (await validatedDeploymentCheckpoint(this.workspace));
+    if (!snapshot) {
+      throw new Error('The current project revision must pass validation before preview.');
+    }
+    const publishing = current.status === 'queued' || current.status === 'building';
+    if (publishing && current.workspaceRevision === workspace.revision) {
       return current;
     }
-    // A live dev preview already carries every later change, so re-requesting one is satisfied by
-    // the running server. A production preview is only reusable for the exact revision it captured.
-    const active = current.active;
-    if (
-      current.status === 'ready' &&
-      active !== null &&
-      active.mode === mode &&
-      Date.parse(active.expiresAt) > Date.now() &&
-      (active.mode === 'dev' || active.snapshotRevision === snapshot.revision)
-    ) {
+    if (current.status === 'ready' && current.published?.snapshotRevision === snapshot.revision) {
       return current;
     }
-    if (current.pendingId && (current.status === 'queued' || current.status === 'building')) {
+    if (publishing && current.pendingId) {
       await this.cancelPreview();
     }
 
     const previewId = crypto.randomUUID();
-    const requestedAt = Date.now();
-    const job: PreviewBuildJob = {
+    const job: PreviewPublicationJob = {
       previewId,
-      mode,
       workspaceRevision: snapshot.workspaceRevision,
       snapshotRevision: snapshot.revision,
-      requestedAt,
+      requestedAt: Date.now(),
     };
-    const queued: BuilderPreviewState = {
+    this.setPreviewState({
       status: 'queued',
-      mode,
       pendingId: previewId,
       workspaceRevision: snapshot.workspaceRevision,
-      currentWorkspaceRevision: workspace.revision,
-      stale: mode === 'production' && snapshot.workspaceRevision !== workspace.revision,
-      attempt: 0,
-      requestedAt: new Date(requestedAt).toISOString(),
-      startedAt: null,
+      stale: snapshot.workspaceRevision !== workspace.revision,
       updatedAt: new Date().toISOString(),
       error: null,
-      active: null,
-      lastSuccessful: current.lastSuccessful ?? current.active,
-    };
-    this.setPreviewState(queued);
+      // The version already serving stays visible until its replacement publishes.
+      published: current.published,
+    });
     try {
       await this.startFiber(
-        PREVIEW_BUILD_FIBER,
+        PREVIEW_PUBLICATION_FIBER,
         async (fiber) => {
           fiber.stash(job);
-          await this.runPreviewBuild(job);
+          await this.runPreviewPublication(job);
         },
         {
           idempotencyKey: this.previewFiberKey(previewId),
@@ -1245,7 +1229,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         },
       );
     } catch (error) {
-      await this.failPreviewJob(
+      await this.failPreviewPublication(
         job,
         error instanceof Error ? error.message : 'The durable preview job could not be started.',
       );
@@ -1254,78 +1238,65 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     return this.currentPreviewState();
   }
 
-  private async runPreviewBuild(job: PreviewBuildJob): Promise<void> {
+  private async runPreviewPublication(job: PreviewPublicationJob): Promise<void> {
     if (!this.isCurrentPreviewJob(job.previewId)) {
       return;
     }
-    const startedAt = Date.now();
     try {
       this.setPreviewState({
         ...this.currentPreviewState(),
         status: 'building',
-        startedAt: new Date(startedAt).toISOString(),
-        updatedAt: new Date(startedAt).toISOString(),
+        updatedAt: new Date().toISOString(),
       });
-      const success = await this.workspace.createPreview(
-        job.mode === 'dev'
-          ? { previewId: job.previewId, mode: 'dev' }
-          : {
-              previewId: job.previewId,
-              mode: 'production',
-              expectedWorkspaceRevision: job.workspaceRevision,
-              expectedSnapshotRevision: job.snapshotRevision,
-            },
+      const userId = this.userId;
+      const transcriptBinding = this.transcriptBinding;
+      if (!userId || !transcriptBinding) {
+        throw new Response('Agent authentication is required.', { status: 401 });
+      }
+      const success = await this.keepAliveWhile(() =>
+        previewValidatedRevisionForBuilder({
+          context: {
+            env: this.env,
+            userId,
+            chatInitialId: transcriptBinding.chatInitialId,
+          },
+          workspace: this.workspace,
+          toolCallId: deploymentToolCallId(job.workspaceRevision, job.snapshotRevision),
+          previewId: job.previewId,
+          validatedRevision: job.snapshotRevision,
+        }),
       );
       if (!this.isCurrentPreviewJob(job.previewId)) {
-        await this.workspace.stopPreview(job.previewId).catch(() => undefined);
         return;
       }
-      const readyAt = Date.parse(success.readyAt);
-      const previous = this.currentPreviewState().lastSuccessful;
       const currentSnapshot = await this.workspace.checkpoint();
       this.setPreviewState({
         status: 'ready',
-        mode: job.mode,
         pendingId: null,
         workspaceRevision: job.workspaceRevision,
-        currentWorkspaceRevision: currentSnapshot.workspaceRevision,
-        // A dev preview receives the change instead of being invalidated by it, so a project that
-        // moved while it started is exactly what it is for, not a reason to rebuild it.
-        stale: job.mode === 'production' && currentSnapshot.revision !== job.snapshotRevision,
-        attempt: this.currentPreviewState().attempt,
-        requestedAt: new Date(job.requestedAt).toISOString(),
-        startedAt: new Date(startedAt).toISOString(),
-        updatedAt: new Date(readyAt).toISOString(),
+        stale: currentSnapshot.revision !== job.snapshotRevision,
+        updatedAt: new Date(Date.parse(success.readyAt)).toISOString(),
         error: null,
-        active: success,
-        lastSuccessful: success,
+        published: success,
       });
-      if (previous && previous.id !== success.id) {
-        await this.workspace
-          .stopPreview(previous.id)
-          .catch(() => logger.warn('Unable to retire the superseded remote preview'));
-      }
     } catch (error) {
-      await this.failPreviewJob(
+      await this.failPreviewPublication(
         job,
-        (error instanceof Error ? error.message : 'The isolated remote preview build failed.').slice(-4_000),
+        (error instanceof Error ? error.message : 'The Workers preview publication failed.').slice(-4_000),
       );
     }
   }
 
-  private async failPreviewJob(job: PreviewBuildJob, error: string): Promise<void> {
+  private async failPreviewPublication(job: PreviewPublicationJob, error: string): Promise<void> {
     if (!this.isCurrentPreviewJob(job.previewId)) {
       return;
     }
-    const current = this.currentPreviewState();
-    const revision =
-      (
-        await this.workspace.refresh().catch((refreshError) => {
-          logger.warn('Unable to refresh workspace revision for preview failure', refreshError);
-          return null;
-        })
-      )?.revision ?? current.currentWorkspaceRevision;
-    this.setPreviewState(failedBuilderPreviewState(current, revision, error));
+    const refreshed = await this.workspace.refresh().catch((refreshError) => {
+      logger.warn('Unable to refresh workspace revision for preview failure', refreshError);
+      return null;
+    });
+    const revision = refreshed?.revision ?? this.workspace.getState().revision;
+    this.setPreviewState(failedBuilderPreviewState(this.currentPreviewState(), revision, error));
   }
 
   private previewFiberKey(previewId: string): string {
@@ -1333,26 +1304,15 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   private isCurrentPreviewJob(previewId: string): boolean {
-    return this.state.preview?.pendingId === previewId;
+    return this.currentPreviewState().pendingId === previewId;
   }
 
   private currentPreviewState(): BuilderPreviewState {
-    const revision = this.workspace.getState().revision;
-    const stored = this.state.preview ?? idleBuilderPreviewState(revision);
-    const successful = stored.active ?? stored.lastSuccessful;
-    const expired = successful ? Date.parse(successful.expiresAt) <= Date.now() : false;
-    return {
-      ...stored,
-      status: expired && stored.status === 'ready' ? 'expired' : stored.status,
-      currentWorkspaceRevision: revision,
-      stale: stored.stale,
-      active: expired ? null : stored.active,
-    };
+    return this.state.preview ?? idleBuilderPreviewState();
   }
 
   private updatePreviewForWorkspace(revision: number): void {
-    const preview = this.state.preview ?? idleBuilderPreviewState(revision);
-    this.setPreviewState(previewStateForWorkspace(preview, revision));
+    this.setPreviewState(previewStateForWorkspace(this.currentPreviewState(), revision));
   }
 
   private setPreviewState(preview: BuilderPreviewState): void {

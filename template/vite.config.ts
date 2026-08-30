@@ -16,9 +16,7 @@ const baseAlias = {
   "@": path.resolve(projectDir, "./src"),
   "#": path.resolve(projectDir, "./src"),
 };
-async function productionPlugins(
-  isolatedPreview: boolean,
-): Promise<PluginOption[]> {
+async function productionPlugins(): Promise<PluginOption[]> {
   const [
     { tanstackStart },
     { cloudflare },
@@ -35,14 +33,7 @@ async function productionPlugins(
     const { default: agents } = await import(agentsViteModule);
     agentPlugins.push(agents());
   }
-  const cloudflareOptions = isolatedPreview
-    ? {
-        viteEnvironment: { name: "ssr" },
-        configPath: "./wrangler.preview.jsonc",
-        remoteBindings: false,
-      }
-    : { viteEnvironment: { name: "ssr" } };
-
+  const cloudflareOptions = { viteEnvironment: { name: "ssr" } };
   return [
     productionModuleSecurityPlugin(projectDir),
     ...agentPlugins,
@@ -52,8 +43,8 @@ async function productionPlugins(
   ];
 }
 
-export default defineConfig(async ({ mode }) => ({
-  plugins: await productionPlugins(mode === "ghostbuild-isolated-preview"),
+export default defineConfig(async () => ({
+  plugins: await productionPlugins(),
   resolve: {
     alias: baseAlias,
   },

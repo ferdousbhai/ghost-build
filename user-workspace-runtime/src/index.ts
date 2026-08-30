@@ -22,18 +22,27 @@ import {
   BUILDER_WORKSPACE_MAX_TOTAL_BYTES,
   BUILDER_WORKSPACE_SYNC_BATCH_BYTES,
   BUILDER_WORKSPACE_SYNC_BATCH_FILES,
-  type BuilderPreviewSuccess,
   type UserWorkspaceReadinessCheck,
   type UserWorkspaceReadinessComponent,
 } from './protocol';
 import { routeUserRuntimeAgentRequest } from '../../app/lib/.server/agent-request-identity';
-import { createTrustedDeploymentConfig } from '../../app/lib/.server/cloudflare/deployment-config';
+import {
+  createTrustedDeploymentConfig,
+  type DeploymentConfigInput,
+} from '../../app/lib/.server/cloudflare/deployment-config';
 import { recordDeploymentActivity } from '../../app/lib/.server/cloudflare/deployment-repository';
 import { deploymentProjectProfileFromConfig } from '../../app/lib/.server/cloudflare/deployment-project-profile';
+import type { DeploymentProjectProfile } from '../../app/lib/.server/cloudflare/deployment-project-profile';
 import { DEPLOYMENT_PROJECT_ROOT } from '../../app/lib/.server/cloudflare/deployment-runtime-policy';
+import {
+  APP_AGENT_SECURITY_BOUNDARY_SHA256,
+  DEPLOYMENT_SECURITY_BASELINE_VERSION,
+  TEMPLATE_SOURCE_SHA256,
+} from '../../app/lib/.server/cloudflare/deployment-security-baseline';
 import {
   MAX_DEPLOYMENT_ARTIFACT_BYTES,
   MAX_DEPLOYMENT_ARTIFACT_FILES,
+  preparedDeploymentArtifactDigest,
   type DeploymentArtifactFile,
   type PreparedDeploymentArtifact,
   validatePreparedDeploymentArtifact,
@@ -61,25 +70,6 @@ import {
   type ToolOperationStartResult,
 } from './tool-operation-journal';
 import { createCommittedMutationReceipt, type MutationReceiptFileInput } from './mutation-receipt';
-import {
-  assertPreviewSourceCheckpoint,
-  assertPreviewPublicationAllowed,
-  createReachablePreviewTunnel,
-  previewExpirationAction,
-  PREVIEW_SNAPSHOT_ROOT,
-  PREVIEW_TTL_MS,
-  previewPort,
-} from './preview-lifecycle';
-import {
-  containerParentDirectory,
-  devPreviewProjectedPath,
-  devPreviewRemoveCommand,
-  devPreviewRoot,
-  devPreviewServerCommand,
-  type PreviewMode,
-  requirePreviewMode,
-  storedPreviewMode,
-} from './dev-preview';
 import {
   WorkspaceOperationConflictError,
   WorkspaceOperationIndeterminateError,
@@ -192,7 +182,9 @@ const WEB_APP_BUNDLE_SCRIPT = [
   "const { build } = require('esbuild');",
   "await build({ entryPoints: [process.argv[1]], bundle: true, minify: true, format: 'esm', platform: 'node', external: ['cloudflare:*'], outfile: process.argv[2] });",
 ].join('');
-const PREPARED_VALIDATION_ROOT = `${ISOLATED_PROJECT_ROOT}/validated-preview`;
+const PREPARED_VALIDATION_ROOT = `${ISOLATED_PROJECT_ROOT}/validated-artifact`;
+const PREPARED_VALIDATION_CONFIG = `${PREPARED_VALIDATION_ROOT}/.ghostbuild-deploy.json`;
+const PREPARED_VALIDATION_ARTIFACT_ROOT = `${PREPARED_VALIDATION_ROOT}/.ghostbuild-artifact`;
 /**
  * Per-stage validation ceilings. These run through the native Sandbox exec
  * path (`runTransientCommand`), where `timeout` is a remote process-lifetime
@@ -203,42 +195,15 @@ const PREPARED_VALIDATION_ROOT = `${ISOLATED_PROJECT_ROOT}/validated-preview`;
  */
 /**
  * `pnpm run typecheck` runs `tsr generate` and `wrangler types` before `tsc`, so the route tree
- * and binding declarations it writes are inputs to lint and to the preview build. It is the one
+ * and binding declarations it writes are inputs to lint and to the production build. It is the one
  * validation stage that has to finish before the others start.
  */
 const REVISION_CODEGEN_COMMAND = { command: 'pnpm run typecheck', timeoutMs: 5 * 60_000 } as const;
-/**
- * The isolated preview's own local D1 schema. `wrangler.preview.jsonc` is what keeps a generated
- * app's bindings off the user's real resources, so every root that is about to run preview code
- * applies it — which is why the same command appears in the validation group, the production
- * preview, and the dev preview rather than in only one of them.
- */
-const PREVIEW_DATABASE_COMMAND = {
-  command: 'pnpm exec wrangler d1 migrations apply DB --local --config wrangler.preview.jsonc',
-  timeoutMs: 60_000,
-} as const;
-/**
- * Everything else validation does, with nothing between these stages but the cores to run them.
- * The preview database migration overlaps the build safely because its consumer is the preview
- * server, which does not start until the whole group has finished.
- */
 const PARALLEL_VALIDATION_STAGES = [
   { name: 'verify_stack', command: 'pnpm run verify:stack', timeoutMs: 5 * 60_000 },
   { name: 'lint', command: 'pnpm run lint', timeoutMs: 5 * 60_000 },
-  { name: 'preview_database', ...PREVIEW_DATABASE_COMMAND },
-  { name: 'preview_build', command: 'pnpm run build:isolated-preview', timeoutMs: 5 * 60_000 },
 ] as const;
 const VALIDATION_STAGE_LOG_ROOT = `${ISOLATED_PROJECT_ROOT}/validation-stage-logs`;
-const PREVIEW_PREPARATION_COMMANDS = [
-  PREVIEW_DATABASE_COMMAND,
-  { command: 'pnpm run build:isolated-preview', timeoutMs: 5 * 60_000 },
-] as const;
-/**
- * The dev preview prepares the same local D1 schema and deliberately stops there. Skipping
- * `build:isolated-preview` is the whole point: Vite's dev server compiles on demand and
- * hot-replaces modules, so no production build stands between an edit and the running page.
- */
-const DEV_PREVIEW_PREPARATION_COMMANDS = [PREVIEW_DATABASE_COMMAND] as const;
 /**
  * `timeoutMs` for a container-shell exec is a process-lifetime hint shipped to
  * computerd over Computer's shell RPC. @cloudflare/computer 0.1.1 enforces a
@@ -254,18 +219,17 @@ const DEV_PREVIEW_PREPARATION_COMMANDS = [PREVIEW_DATABASE_COMMAND] as const;
 const EXEC_COMMAND_TIMEOUT_MS = OPERATION_TOOL_BUDGET_MS.exec;
 const TRANSIENT_COMMAND_PROCESS_ROLE = 'transient-command';
 const VALIDATION_CANCELLATION_SETTLE_MS = 45_000;
-const PREVIEW_CONTAINER_RECOVERY_TIMEOUT_MS = 60_000;
+const CONTAINER_RECOVERY_TIMEOUT_MS = 60_000;
 
 /**
  * Consecutive failed exhausted-sync recoveries before the container itself is recycled. A pull
  * that keeps failing after Computer exhausted its own retry budget and a fresh backend handle
  * was tried is the signature of a container whose control connection never comes back - each
  * attempt burns the vendor's connect retries (observed as exactly ~180s per recovery round in
- * production) and no number of further pulls converges. The preview path already answers this
- * state by destroying the container; sync recovery escalates to the same answer.
+ * production) and no number of further pulls converges. Sync recovery escalates by replacing the
+ * ephemeral container while preserving the durable workspace.
  */
 const SYNC_RECOVERY_CONTAINER_RECYCLE_THRESHOLD = 2;
-const PREVIEW_BUILD_CLEANUP_DEADLINE_MS = 30 * 60_000;
 
 /** Reported progress is only read by a heartbeat, and lanes nobody renews have none. */
 const UNWATCHED_OPERATION_LIVENESS: OperationLiveness = { observed: () => undefined };
@@ -294,39 +258,11 @@ type WorkspaceState = {
   seeding: boolean;
 };
 
-type ActivePreviewRow = {
-  preview_id: string;
-  exec_id: string;
-  port: number;
-  snapshot_root: string;
-  /**
-   * For a `production` preview these two are the checkpoint the preview is bound to and are
-   * asserted against the workspace. For a `dev` preview they are provenance only — the state the
-   * dev server started from — because a dev preview deliberately tracks the project as it moves.
-   */
-  snapshot_revision: string;
-  workspace_revision: number;
-  mode: PreviewMode;
-};
-
-type PendingPreviewRow = ActivePreviewRow & {
-  expires_at: number;
-};
-
-type PreviewResultRow = {
-  preview_id: string;
-  url: string;
-  snapshot_revision: string;
-  workspace_revision: number;
-  ready_at: number;
-  expires_at: number;
-  mode: PreviewMode;
-};
-
 type PreparedValidationRow = {
   revision: string;
   workspace_revision: number;
   snapshot_root: string;
+  artifact_digest: string | null;
 };
 
 type DeploymentSessionRow = {
@@ -394,7 +330,7 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
     this.#operationLane = new WorkspaceOperationLane(
       ctx.storage,
       (owner) => this.#activeOperationOwners.has(owner),
-      (kind) => kind === 'validate' || kind === 'preview',
+      (kind) => kind === 'validate',
     );
     this.#operationLane.initialize();
     this.ctx.storage.sql.exec(
@@ -427,40 +363,22 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
          revision TEXT NOT NULL,
          workspace_revision INTEGER NOT NULL,
-         snapshot_root TEXT NOT NULL
+         snapshot_root TEXT NOT NULL,
+         artifact_digest TEXT
        )`,
     );
+    const preparedColumns = [
+      ...this.ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(ghostbuild_prepared_validation)'),
+    ];
+    if (!preparedColumns.some((column) => column.name === 'artifact_digest')) {
+      this.ctx.storage.sql.exec('ALTER TABLE ghostbuild_prepared_validation ADD COLUMN artifact_digest TEXT');
+    }
     this.ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS ghostbuild_workspace_identity (
          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
          project_id TEXT NOT NULL,
          user_id TEXT NOT NULL,
          initialized_at INTEGER NOT NULL
-       )`,
-    );
-    this.ctx.storage.sql.exec(
-      `CREATE TABLE IF NOT EXISTS ghostbuild_active_preview (
-         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-         preview_id TEXT NOT NULL UNIQUE,
-         exec_id TEXT NOT NULL,
-         port INTEGER NOT NULL,
-         snapshot_root TEXT NOT NULL,
-         snapshot_revision TEXT NOT NULL,
-         workspace_revision INTEGER NOT NULL,
-         activated_at INTEGER NOT NULL,
-         mode TEXT NOT NULL DEFAULT 'production'
-       )`,
-    );
-    this.ctx.storage.sql.exec(
-      `CREATE TABLE IF NOT EXISTS ghostbuild_pending_previews (
-         preview_id TEXT PRIMARY KEY,
-         exec_id TEXT NOT NULL,
-         port INTEGER NOT NULL,
-         snapshot_root TEXT NOT NULL,
-         snapshot_revision TEXT NOT NULL,
-         workspace_revision INTEGER NOT NULL,
-         expires_at INTEGER NOT NULL,
-         mode TEXT NOT NULL DEFAULT 'production'
        )`,
     );
     this.ctx.storage.sql.exec(
@@ -476,31 +394,15 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
          updated_at INTEGER NOT NULL
        )`,
     );
-    this.ctx.storage.sql.exec(
-      `CREATE TABLE IF NOT EXISTS ghostbuild_preview_cancellations (
-         preview_id TEXT PRIMARY KEY,
-         cancelled_at INTEGER NOT NULL
-       )`,
-    );
-    this.ctx.storage.sql.exec(
-      `CREATE TABLE IF NOT EXISTS ghostbuild_preview_results (
-         preview_id TEXT PRIMARY KEY,
-         url TEXT NOT NULL,
-         snapshot_revision TEXT NOT NULL,
-         workspace_revision INTEGER NOT NULL,
-         ready_at INTEGER NOT NULL,
-         expires_at INTEGER NOT NULL,
-         mode TEXT NOT NULL DEFAULT 'production'
-       )`,
-    );
-    // `CREATE TABLE IF NOT EXISTS` is a no-op for a workspace provisioned before dev previews
-    // existed, so its preview tables would still be missing the column every read now selects.
-    // The default reflects the only kind of preview those rows could describe.
-    for (const table of ['ghostbuild_active_preview', 'ghostbuild_pending_previews', 'ghostbuild_preview_results']) {
-      const columns = [...this.ctx.storage.sql.exec<{ name: string }>(`PRAGMA table_info(${table})`)];
-      if (!columns.some((column) => column.name === 'mode')) {
-        this.ctx.storage.sql.exec(`ALTER TABLE ${table} ADD COLUMN mode TEXT NOT NULL DEFAULT 'production'`);
-      }
+    // Runtime schema migration: previews are now immutable Worker versions in the user's account,
+    // so no process, tunnel, cancellation, or expiry state belongs in this container Durable Object.
+    for (const table of [
+      'ghostbuild_active_preview',
+      'ghostbuild_pending_previews',
+      'ghostbuild_preview_results',
+      'ghostbuild_preview_cancellations',
+    ]) {
+      this.ctx.storage.sql.exec(`DROP TABLE IF EXISTS ${table}`);
     }
   }
 
@@ -1032,7 +934,6 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
             });
           }
         }
-        await this.projectChangesIntoDevPreview(atomicChanges);
         const state = await this.getWorkspaceState();
         return { ok: true as const, state, changedPaths };
       });
@@ -1671,10 +1572,10 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
         cancellation.requireActive();
         const startedAt = Date.now();
         const isolatedRoot = PREPARED_VALIDATION_ROOT;
-        let preparedForPreview = false;
+        let artifactPrepared = false;
         let cleanupAllowed = true;
         try {
-          await this.discardPreparedValidationSnapshot();
+          await this.discardPreparedValidationArtifact();
           await this.copyProjectToIsolatedRoot(isolatedRoot, cancellation);
           cancellation.requireActive();
           if ((await this.checkpoint()).revision !== before.revision) {
@@ -1699,6 +1600,18 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
             cancellation,
           );
           liveness.observed();
+          const project = await this.readDeploymentProjectProfile();
+          const artifact = await this.buildDeploymentArtifact({
+            revision: before.revision,
+            isolatedRoot,
+            artifactRoot: PREPARED_VALIDATION_ARTIFACT_ROOT,
+            wranglerConfigPath: PREPARED_VALIDATION_CONFIG,
+            project,
+            deploymentConfig: validationDeploymentConfig(project),
+            cancellation,
+            liveness,
+          });
+          const artifactDigest = await preparedDeploymentArtifactDigest(artifact);
           cancellation.requireActive();
           const after = await this.checkpoint();
           cancellation.requireActive();
@@ -1715,18 +1628,9 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
               after.workspaceRevision,
               Date.now(),
             );
-            this.ctx.storage.sql.exec(
-              `INSERT INTO ghostbuild_prepared_validation (singleton, revision, workspace_revision, snapshot_root)
-               VALUES (1, ?, ?, ?)
-               ON CONFLICT(singleton) DO UPDATE SET revision = excluded.revision,
-                 workspace_revision = excluded.workspace_revision,
-                 snapshot_root = excluded.snapshot_root`,
-              after.revision,
-              after.workspaceRevision,
-              isolatedRoot,
-            );
+            this.storePreparedValidationArtifact(after, artifactDigest);
           });
-          preparedForPreview = true;
+          artifactPrepared = true;
           return toolSuccess(`Project validation passed at durable source revision ${after.revision}.`, {
             level: 'full',
             revision: after.revision,
@@ -1738,8 +1642,10 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
               'typecheck',
               'stack-verification',
               'lint',
-              'preview-database',
-              'preview-build',
+              'license-verification',
+              'production-build',
+              'worker-dry-run',
+              ...(project.type === 'web_app' ? ['worker-bundle'] : []),
             ].map((name) => ({ name, status: 'passed' as const })),
             durationMs: Date.now() - startedAt,
             nextAction: 'prepare-deployment',
@@ -1758,7 +1664,7 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
             checks: [{ name: 'revision-finalization', status: 'failed' as const }],
           });
         } finally {
-          if (!preparedForPreview && cleanupAllowed) {
+          if (!artifactPrepared && cleanupAllowed) {
             await this.runTransientCommand(PROJECT_ROOT, `rm -rf ${shellQuote(isolatedRoot)}`, 30_000).catch(
               () => undefined,
             );
@@ -1781,23 +1687,9 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
     if (checkpoint.revision !== revision) {
       throw new Error('The durable project changed after validation. Run full validation again.');
     }
-    const [packageFile, wranglerFile] = await Promise.all([
-      this.readText(`${PROJECT_ROOT}/package.json`),
-      this.readText(`${PROJECT_ROOT}/wrangler.jsonc`),
-    ]);
-    const packageJson: unknown = JSON.parse(packageFile.content);
-    const ghostbuild = isRecord(packageJson) ? packageJson.ghostbuild : undefined;
-    const configuredType = isRecord(ghostbuild) ? ghostbuild.projectType : undefined;
-    if (configuredType !== undefined && configuredType !== 'web_app' && configuredType !== 'worker') {
-      throw new Error('The generated project type is invalid.');
-    }
-    const wrangler: unknown = parse(wranglerFile.content);
-    if (!isRecord(wrangler) || wrangler.main !== 'src/server.ts') {
-      throw new Error('The generated Worker entrypoint is invalid.');
-    }
     return {
       ...checkpoint,
-      project: deploymentProjectProfileFromConfig(wrangler, configuredType === 'worker' ? 'worker' : 'web_app'),
+      project: await this.readDeploymentProjectProfile(),
     };
   }
 
@@ -1855,11 +1747,9 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
       lease.acquiredAt,
     );
     try {
-      // Deployment owns the container from this point forward. Retire the long-lived preview first so its
-      // server cannot compete with artifact preparation or survive across an immutable publication session.
+      // A publication session keeps the validation artifact's container alive while the control
+      // plane performs migrations and version upload through the user's account API.
       await this.setKeepAlive(true);
-      await this.cleanupPendingPreviews();
-      await this.stopActivePreview();
       await this.assertDeploymentSession({ sessionId: operationId });
       return { sessionId: operationId };
     } catch (error) {
@@ -1962,270 +1852,76 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
     return { status };
   }
 
-  async createPreview(value: unknown) {
-    await this.#admission.admitNewOperation();
-    const input = record(value);
-    const previewId = requirePreviewId(input.previewId);
-    const mode = requirePreviewMode(input.mode);
-    // A dev preview is not checkpoint-bound: it tracks the workspace as it changes, so the caller
-    // has no revision to assert and none is accepted. It records the numeric revision it started
-    // from as provenance and no source digest at all, because hashing one would suggest a binding
-    // that the next edit immediately breaks.
-    const expectedWorkspaceRevision =
-      mode === 'dev'
-        ? this.currentRevision()
-        : requireInteger(input.expectedWorkspaceRevision, 'expectedWorkspaceRevision', Number.MAX_SAFE_INTEGER);
-    const expectedSnapshotRevision = mode === 'dev' ? '' : requireSnapshotRevision(input.expectedSnapshotRevision);
-    const replay = this.previewResultRow(previewId);
-    if (replay) {
-      if (
-        replay.mode !== mode ||
-        (mode === 'production' &&
-          (replay.snapshot_revision !== expectedSnapshotRevision ||
-            replay.workspace_revision !== expectedWorkspaceRevision))
-      ) {
-        throw new WorkspaceOperationIndeterminateError('preview');
-      }
-      if (replay.expires_at > Date.now() && this.activePreviewRow()?.preview_id === previewId) {
-        return previewSuccess(replay);
-      }
-      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_preview_results WHERE preview_id = ?', previewId);
-    }
-    return this.withStatefulOperation(
-      'preview',
-      `preview:${mode}:${previewId}:${expectedWorkspaceRevision}:${expectedSnapshotRevision}`,
-      async () => {
-        if (mode === 'production') {
-          await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, true);
-        }
-        this.requirePreviewNotCancelled(previewId);
-        await this.cleanupPendingPreviews();
-        const previous = this.activePreviewRow();
-        const port = previewPort(previewId, previous?.port);
-        const snapshotRoot = mode === 'dev' ? devPreviewRoot(previewId) : `${PREVIEW_SNAPSHOT_ROOT}/${previewId}`;
-        const candidate: ActivePreviewRow = {
-          preview_id: previewId,
-          exec_id: '',
-          port,
-          snapshot_root: snapshotRoot,
-          snapshot_revision: expectedSnapshotRevision,
-          workspace_revision: expectedWorkspaceRevision,
-          mode,
-        };
-        let published = false;
-        let cleanupAllowed = true;
-        try {
-          const cleanupDeadline = Date.now() + PREVIEW_BUILD_CLEANUP_DEADLINE_MS;
-          this.upsertPendingPreview(candidate, cleanupDeadline);
-          await this.schedule(new Date(cleanupDeadline), 'expirePreview', { previewId });
-          await this.cleanupPreviewProcess(candidate);
-          if (mode === 'dev') {
-            await this.prepareDevPreviewRoot({ previewId, devRoot: snapshotRoot });
-          } else {
-            await this.preparePreviewSnapshot({
-              previewId,
-              snapshotRoot,
-              expectedWorkspaceRevision,
-              expectedSnapshotRevision,
-            });
-            await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
-          }
-          const expiresAt = Date.now() + PREVIEW_TTL_MS;
-          await this.schedule(new Date(expiresAt), 'expirePreview', { previewId });
-          this.upsertPendingPreview(candidate, expiresAt);
-          const previewProcess = await this.sandboxProcesses.exec(
-            sandboxShellCommand(
-              createContainerDirectoryCommand({
-                directory: snapshotRoot,
-                command:
-                  mode === 'dev'
-                    ? devPreviewServerCommand(port)
-                    : `pnpm exec vite preview --mode ghostbuild-isolated-preview --host 0.0.0.0 --port ${port} --strictPort`,
-                quote: shellQuote,
-              }),
-            ),
-            {
-              timeout: PREVIEW_TTL_MS,
-              env: { __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: '.trycloudflare.com,container' },
-            },
-          );
-          candidate.exec_id = previewProcess.id;
-          this.upsertPendingPreview(candidate, expiresAt);
-          await waitForHttpPort(this.ctx.container!.getTcpPort(port));
-          const tunnel = await createReachablePreviewTunnel(this.tunnels, port, {
-            assertActive: () => this.requirePreviewNotCancelled(previewId),
-          });
-          if (mode === 'production') {
-            await this.assertPreviewCheckpoint(expectedWorkspaceRevision, expectedSnapshotRevision, false);
-          }
-          this.requirePreviewNotCancelled(previewId);
-          await this.setKeepAlive(true);
-          this.requirePreviewNotCancelled(previewId);
-          const now = Date.now();
-          const previousExpiresAt = previous
-            ? (this.previewResultRow(previous.preview_id)?.expires_at ?? now + PREVIEW_TTL_MS)
-            : null;
-          this.ctx.storage.transactionSync(() => {
-            if (previous && previous.preview_id !== previewId) {
-              this.upsertPendingPreview(previous, previousExpiresAt!);
-            }
-            this.ctx.storage.sql.exec(
-              `INSERT INTO ghostbuild_active_preview (
-               singleton, preview_id, exec_id, port, snapshot_root, snapshot_revision,
-               workspace_revision, activated_at, mode
-             ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(singleton) DO UPDATE SET
-               preview_id = excluded.preview_id,
-               exec_id = excluded.exec_id,
-               port = excluded.port,
-               snapshot_root = excluded.snapshot_root,
-               snapshot_revision = excluded.snapshot_revision,
-               workspace_revision = excluded.workspace_revision,
-               activated_at = excluded.activated_at,
-               mode = excluded.mode`,
-              previewId,
-              candidate.exec_id,
-              port,
-              snapshotRoot,
-              expectedSnapshotRevision,
-              expectedWorkspaceRevision,
-              now,
-              mode,
-            );
-            this.ctx.storage.sql.exec(
-              `INSERT INTO ghostbuild_preview_results (
-                 preview_id, url, snapshot_revision, workspace_revision, ready_at, expires_at, mode
-               ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-              previewId,
-              tunnel.url,
-              expectedSnapshotRevision,
-              expectedWorkspaceRevision,
-              now,
-              expiresAt,
-              mode,
-            );
-            this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?', previewId);
-          });
-          published = true;
-          if (previous && previous.preview_id !== previewId) {
-            await this.cleanupPreviewResources(previous)
-              .then(() => {
-                this.ctx.storage.transactionSync(() => {
-                  this.ctx.storage.sql.exec(
-                    'DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?',
-                    previous.preview_id,
-                  );
-                  this.ctx.storage.sql.exec(
-                    'DELETE FROM ghostbuild_preview_results WHERE preview_id = ?',
-                    previous.preview_id,
-                  );
-                });
-              })
-              .catch((error) =>
-                console.warn('Unable to retire the superseded ProjectWorkspace preview', {
-                  previewId: previous.preview_id,
-                  error: error instanceof Error ? error.message : String(error),
-                }),
-              );
-          }
-          return previewSuccess({
-            preview_id: previewId,
-            url: tunnel.url,
-            snapshot_revision: expectedSnapshotRevision,
-            workspace_revision: expectedWorkspaceRevision,
-            ready_at: now,
-            expires_at: expiresAt,
-            mode,
-          });
-        } catch (error) {
-          cleanupAllowed = !(error instanceof SandboxProcessTerminationUnconfirmedError);
-          throw error;
-        } finally {
-          if (!published && cleanupAllowed) {
-            try {
-              await this.cleanupPreviewResources(candidate);
-              this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?', previewId);
-              if (!previous) {
-                await this.setKeepAlive(false).catch(() => undefined);
-              }
-            } catch {
-              // Preserve pending state and its expiry schedule for a later cleanup attempt.
-            }
-          }
-        }
-      },
-    );
-  }
-
-  async stopPreview(previewIdValue: unknown) {
-    const previewId = requirePreviewId(previewIdValue);
-    this.ctx.storage.sql.exec(
-      `INSERT INTO ghostbuild_preview_cancellations (preview_id, cancelled_at) VALUES (?, ?)
-       ON CONFLICT(preview_id) DO UPDATE SET cancelled_at = excluded.cancelled_at`,
-      previewId,
-      Date.now(),
-    );
-    this.ctx.storage.sql.exec('DELETE FROM ghostbuild_preview_results WHERE preview_id = ?', previewId);
-    this.ctx.storage.sql.exec(
-      `DELETE FROM ghostbuild_preview_cancellations WHERE preview_id IN (
-         SELECT preview_id FROM ghostbuild_preview_cancellations
-         ORDER BY cancelled_at DESC LIMIT -1 OFFSET 500
-       )`,
-    );
-    await this.withStatefulOperation('preview', `preview:stop:${previewId}`, async () => {
-      const pending = this.pendingPreviewRow(previewId);
-      if (pending) {
-        if (!(await this.cleanupPreviewResourcesOrRecover(pending))) {
-          return;
-        }
-        this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?', previewId);
-      }
-      const row = this.activePreviewRow();
-      if (row?.preview_id === previewId) {
-        await this.stopActivePreview();
-      } else if (pending && !this.activePreviewRow()) {
-        await this.setKeepAlive(false).catch(() => undefined);
-      }
-    });
-  }
-
-  async expirePreview(value: unknown) {
-    const previewId = requirePreviewId(record(value).previewId);
-    const pendingExpiresAt = this.pendingPreviewRow(previewId)?.expires_at ?? null;
-    const resultExpiresAt = this.previewResultRow(previewId)?.expires_at ?? null;
-    const expiresAt =
-      pendingExpiresAt === null
-        ? resultExpiresAt
-        : resultExpiresAt === null
-          ? pendingExpiresAt
-          : Math.max(pendingExpiresAt, resultExpiresAt);
-    const expiration = previewExpirationAction(expiresAt);
-    if (expiration.action === 'reschedule') {
-      await this.schedule(new Date(expiration.at), 'expirePreview', { previewId });
-      return;
-    }
-    try {
-      await this.stopPreview(previewId);
-    } catch (error) {
-      await this.schedule(30, 'expirePreview', { previewId });
-      throw error;
-    }
-  }
-
   async prepareDeploymentArtifact(value: unknown): Promise<PreparedDeploymentArtifact> {
     this.requireCompletedComputerSync();
     const input = record(value);
     const sessionId = requireString(input.sessionId, 'sessionId', 256);
+    const operationId = requireString(input.operationId, 'operationId', 256);
     const revision = requireString(input.revision, 'revision', 64);
-    const session = this.requireActiveDeploymentSession(sessionId);
     const deploymentId = requireString(input.deploymentId, 'deploymentId', 128);
     const executionGeneration = requireInteger(
       input.executionGeneration,
       'executionGeneration',
       Number.MAX_SAFE_INTEGER,
     );
-    if (session.operation_id !== `${deploymentId}:${executionGeneration}`) {
+    const session = this.requireActiveDeploymentSession(sessionId);
+    if (session.operation_id !== operationId || sessionId !== operationId) {
       throw new Error('The deployment activity identity does not match its active deployment session.');
+    }
+    if (revision !== session.expected_snapshot_revision) {
+      throw new Error('The deployment artifact revision does not match its active deployment session.');
+    }
+    const projectType = input.projectType === 'worker' ? 'worker' : input.projectType === 'web_app' ? 'web_app' : null;
+    if (!projectType) {
+      throw new SyntaxError('Invalid deployment project type.');
+    }
+    const d1DatabaseId = requireOptionalString(input.d1DatabaseId, 'd1DatabaseId', 64);
+    const agentSecurityD1DatabaseId = requireOptionalString(
+      input.agentSecurityD1DatabaseId,
+      'agentSecurityD1DatabaseId',
+      64,
+    );
+    const r2BucketName = requireOptionalString(input.r2BucketName, 'r2BucketName', 64);
+    const kvNamespaceId = requireOptionalString(input.kvNamespaceId, 'kvNamespaceId', 64);
+    const project: DeploymentProjectProfile = {
+      type: projectType,
+      bindings: {
+        ai: input.workersAi === true,
+        d1: d1DatabaseId !== undefined,
+        r2: r2BucketName !== undefined,
+        kv: kvNamespaceId !== undefined,
+        appAgent: input.appAgent === true,
+      },
+    };
+    if (project.bindings.appAgent !== (agentSecurityD1DatabaseId !== undefined)) {
+      throw new Error('The deployment artifact bindings do not match the AppAgent security profile.');
+    }
+    const deploymentConfig: DeploymentConfigInput = {
+      accountId: requireString(input.accountId, 'accountId', 64),
+      workerName: requireCloudflareName(input.workerName, 'workerName'),
+      projectType,
+      workersAi: project.bindings.ai,
+      appAgent: project.bindings.appAgent,
+      securityBaselineVersion: requireString(input.securityBaselineVersion, 'securityBaselineVersion', 32),
+      securityBoundarySha256: requireString(input.securityBoundarySha256, 'securityBoundarySha256', 64),
+      templateSourceSha256: requireString(input.templateSourceSha256, 'templateSourceSha256', 64),
+    };
+    if (d1DatabaseId !== undefined) {
+      deploymentConfig.d1DatabaseId = d1DatabaseId;
+      deploymentConfig.d1DatabaseName = requireCloudflareName(input.d1DatabaseName, 'd1DatabaseName');
+    }
+    if (agentSecurityD1DatabaseId !== undefined) {
+      deploymentConfig.agentSecurityD1DatabaseId = agentSecurityD1DatabaseId;
+      deploymentConfig.agentSecurityD1DatabaseName = requireCloudflareName(
+        input.agentSecurityD1DatabaseName,
+        'agentSecurityD1DatabaseName',
+      );
+    }
+    if (r2BucketName !== undefined) {
+      deploymentConfig.r2BucketName = requireCloudflareName(r2BucketName, 'r2BucketName');
+    }
+    if (kvNamespaceId !== undefined) {
+      deploymentConfig.kvNamespaceId = kvNamespaceId;
     }
     const activity = (sequence: number, message: string) =>
       recordDeploymentActivity({
@@ -2235,117 +1931,81 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
         sequence,
         message,
       });
-    if (revision !== session.expected_snapshot_revision) {
-      throw new Error('The deployment artifact revision does not match its active deployment session.');
-    }
+
     this.#activeOperationOwners.add(session.owner);
     const operation = async () => {
       await this.assertDeploymentSession({ sessionId });
       if (!/^[a-f0-9]{64}$/.test(revision) || !this.hasSuccessfulValidation(revision)) {
         throw new Error('Deployment requires successful validation of this exact revision.');
       }
-      if ((await this.checkpoint()).revision !== revision) {
+      const checkpoint = await this.checkpoint();
+      if (checkpoint.revision !== revision || checkpoint.workspaceRevision !== session.expected_workspace_revision) {
         throw new Error('The durable project changed after validation. Run full validation again.');
       }
-      const accountId = requireString(input.accountId, 'accountId', 64);
-      const workerName = requireCloudflareName(input.workerName, 'workerName');
-      const projectType =
-        input.projectType === 'worker' ? 'worker' : input.projectType === 'web_app' ? 'web_app' : null;
-      if (!projectType) {
-        throw new SyntaxError('Invalid deployment project type.');
-      }
-      const isolatedRoot = `${ISOLATED_PROJECT_ROOT}/deployment-${crypto.randomUUID()}`;
-      const wranglerConfigPath = `${isolatedRoot}/.ghostbuild-deploy.json`;
-      const artifactRoot = `${isolatedRoot}/.ghostbuild-artifact`;
+
+      const prepared = this.preparedValidationArtifact();
+      const preparedMatchesRevision =
+        prepared?.revision === revision && prepared.workspace_revision === checkpoint.workspaceRevision;
+      const canReuse =
+        preparedMatchesRevision &&
+        prepared.snapshot_root === PREPARED_VALIDATION_ROOT &&
+        (await this.exists(PREPARED_VALIDATION_ARTIFACT_ROOT)).exists;
       let artifact: PreparedDeploymentArtifact;
-      let cleanupAllowed = true;
-      try {
-        await activity(31, 'Copying validated source');
-        // The copy is verified against the durable VFS before anything is built from it. A
-        // deployment reading stale bytes here is the exact failure that shipped three "succeeded"
-        // deployments of pre-edit code (#139).
-        await this.copyProjectToIsolatedRoot(isolatedRoot);
-        await this.assertDeploymentSession({ sessionId });
-        await activity(32, 'Installing app dependencies');
-        await this.runTransientCommand(isolatedRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
-        await activity(33, 'Building production app');
-        await this.runTransientCommand(isolatedRoot, 'pnpm run build', 5 * 60_000);
-        const configWrite = await this.writeFile(
-          wranglerConfigPath,
-          JSON.stringify(
-            rebaseDeploymentConfigPaths(
-              createTrustedDeploymentConfig({ ...input, accountId, workerName, projectType }),
-              { projectRoot: PROJECT_ROOT, isolatedRoot },
-            ),
-          ),
-          { encoding: 'utf-8' },
-        );
-        if (!configWrite.success) {
-          throw new Error('The isolated deployment configuration could not be written.');
-        }
-        await activity(34, 'Checking Cloudflare deployment package');
-        await this.runTransientCommand(
-          isolatedRoot,
-          `pnpm exec wrangler deploy --dry-run --outdir ${shellQuote(artifactRoot)} --config ${shellQuote(wranglerConfigPath)}`,
-          10 * 60_000,
-        );
-        if (projectType === 'web_app') {
-          // Cloudflare's direct script upload can acknowledge a multipart request while omitting an additional
-          // generated module. Collapse Wrangler's verified output to one module so publication is atomic.
-          const builtMainPath = `${isolatedRoot}/dist/server/index.js`;
-          const mainPath = `${artifactRoot}/index.js`;
-          const bundledPath = `${isolatedRoot}/.ghostbuild-worker.js`;
-          await activity(35, 'Bundling Worker modules');
-          await this.runTransientCommand(
-            isolatedRoot,
-            [
-              `node --input-type=module --eval ${shellQuote(WEB_APP_BUNDLE_SCRIPT)} ${shellQuote(builtMainPath)} ${shellQuote(bundledPath)}`,
-              `rm -rf ${shellQuote(artifactRoot)}`,
-              `mkdir -p ${shellQuote(artifactRoot)}`,
-              `mv ${shellQuote(bundledPath)} ${shellQuote(mainPath)}`,
-            ].join(' && '),
-            2 * 60_000,
-          );
-        }
-        await activity(36, 'Build artifact ready');
-        artifact = {
+      if (canReuse) {
+        await activity(31, 'Reusing validated build artifact');
+        artifact = await this.collectDeploymentArtifact({
           revision,
-          mainModule: projectType === 'worker' ? 'server.js' : 'index.js',
-          modules: await collectSandboxFiles(this, artifactRoot, (path) => /\.(?:js|mjs|wasm)$/.test(path)),
-          assets:
-            projectType === 'web_app'
-              ? await collectSandboxFiles(
-                  this,
-                  `${isolatedRoot}/dist/client`,
-                  (path) => path !== '.assetsignore' && !path.endsWith('.map'),
-                )
-              : [],
-          migrations: {
-            DB:
-              typeof input.d1DatabaseId === 'string'
-                ? await collectSandboxMigrations(this, `${isolatedRoot}/migrations`)
-                : [],
-            AGENT_SECURITY_DB:
-              typeof input.agentSecurityD1DatabaseId === 'string'
-                ? await collectSandboxMigrations(this, `${isolatedRoot}/agent-security-migrations`)
-                : [],
-          },
-        };
-      } catch (error) {
-        cleanupAllowed = !(error instanceof SandboxProcessTerminationUnconfirmedError);
-        throw error;
-      } finally {
-        if (cleanupAllowed) {
-          await this.runTransientCommand(PROJECT_ROOT, `rm -rf ${shellQuote(isolatedRoot)}`, 30_000).catch(
-            () => undefined,
-          );
+          isolatedRoot: PREPARED_VALIDATION_ROOT,
+          artifactRoot: PREPARED_VALIDATION_ARTIFACT_ROOT,
+          project,
+        });
+        const observedDigest = await preparedDeploymentArtifactDigest(artifact);
+        if (prepared.artifact_digest === null) {
+          this.storePreparedValidationArtifact(checkpoint, observedDigest);
+        } else if (prepared.artifact_digest !== observedDigest) {
+          throw new Error('The retained deployment artifact no longer matches the bytes produced by validation.');
+        }
+      } else {
+        const expectedDigest = preparedMatchesRevision ? prepared.artifact_digest : null;
+        let cleanupAllowed = true;
+        try {
+          await activity(31, 'Restoring validated source artifact');
+          await this.discardPreparedValidationArtifact();
+          // A recycled container loses only this cache. Rebuilding is allowed, but the resulting
+          // inventory must equal validation's durable digest when one survived the recycle.
+          await this.copyProjectToIsolatedRoot(PREPARED_VALIDATION_ROOT);
+          await this.assertDeploymentSession({ sessionId });
+          await activity(32, 'Installing app dependencies');
+          await this.runTransientCommand(PREPARED_VALIDATION_ROOT, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
+          artifact = await this.buildDeploymentArtifact({
+            revision,
+            isolatedRoot: PREPARED_VALIDATION_ROOT,
+            artifactRoot: PREPARED_VALIDATION_ARTIFACT_ROOT,
+            wranglerConfigPath: PREPARED_VALIDATION_CONFIG,
+            project,
+            deploymentConfig,
+            activity,
+          });
+          const observedDigest = await preparedDeploymentArtifactDigest(artifact);
+          if (expectedDigest !== null && expectedDigest !== observedDigest) {
+            throw new Error('The rebuilt deployment artifact differs from the bytes produced by validation.');
+          }
+          this.storePreparedValidationArtifact(checkpoint, observedDigest);
+        } catch (error) {
+          cleanupAllowed = !(error instanceof SandboxProcessTerminationUnconfirmedError);
+          throw error;
+        } finally {
+          if (cleanupAllowed && !(await this.exists(PREPARED_VALIDATION_ARTIFACT_ROOT)).exists) {
+            await this.discardPreparedValidationArtifact().catch(() => undefined);
+          }
         }
       }
+
       if ((await this.checkpoint()).revision !== revision) {
         throw new Error('The project changed while its deployment artifact was prepared. Validate the new revision.');
       }
       await this.assertDeploymentSession({ sessionId });
-      return validatePreparedDeploymentArtifact(artifact, { revision, projectType });
+      return artifact;
     };
     try {
       return await this.withContainerKeepAlive(operation);
@@ -2356,8 +2016,6 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
 
   async deleteProject() {
     await this.withStatefulOperation('delete', 'delete:project', async () => {
-      await this.cleanupPendingPreviews();
-      await this.stopActivePreview();
       await this.withComputer((workspace) => workspace.fs.rm(PROJECT_ROOT, { recursive: true, force: true }));
       this.ctx.storage.sql.exec('DELETE FROM ghostbuild_validations');
       this.ctx.storage.sql.exec('DELETE FROM ghostbuild_prepared_validation');
@@ -2371,149 +2029,147 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
     await this.destroy().catch(() => undefined);
   }
 
-  private async stopActivePreview() {
-    const row = this.activePreviewRow();
-    if (row && !(await this.cleanupPreviewResourcesOrRecover(row))) {
-      return;
+  private async readDeploymentProjectProfile(): Promise<DeploymentProjectProfile> {
+    const [packageFile, wranglerFile] = await Promise.all([
+      this.readText(`${PROJECT_ROOT}/package.json`),
+      this.readText(`${PROJECT_ROOT}/wrangler.jsonc`),
+    ]);
+    const packageJson: unknown = JSON.parse(packageFile.content);
+    const ghostbuild = isRecord(packageJson) ? packageJson.ghostbuild : undefined;
+    const configuredType = isRecord(ghostbuild) ? ghostbuild.projectType : undefined;
+    if (configuredType !== undefined && configuredType !== 'web_app' && configuredType !== 'worker') {
+      throw new Error('The generated project type is invalid.');
     }
-    this.ctx.storage.sql.exec('DELETE FROM ghostbuild_active_preview WHERE singleton = 1');
-    await this.releaseContainerKeepAliveIfIdle();
+    const wrangler: unknown = parse(wranglerFile.content);
+    if (!isRecord(wrangler) || wrangler.main !== 'src/server.ts') {
+      throw new Error('The generated Worker entrypoint is invalid.');
+    }
+    return deploymentProjectProfileFromConfig(wrangler, configuredType === 'worker' ? 'worker' : 'web_app');
   }
 
-  private async preparePreviewSnapshot(args: {
-    previewId: string;
-    snapshotRoot: string;
-    expectedWorkspaceRevision: number;
-    expectedSnapshotRevision: string;
-  }): Promise<void> {
-    const prepared = this.preparedValidationSnapshot();
-    if (
-      prepared?.revision === args.expectedSnapshotRevision &&
-      prepared.workspace_revision === args.expectedWorkspaceRevision &&
-      prepared.snapshot_root === PREPARED_VALIDATION_ROOT &&
-      (await this.exists(PREPARED_VALIDATION_ROOT)).exists
-    ) {
+  private async buildDeploymentArtifact(args: {
+    revision: string;
+    isolatedRoot: string;
+    artifactRoot: string;
+    wranglerConfigPath: string;
+    project: DeploymentProjectProfile;
+    deploymentConfig: DeploymentConfigInput;
+    cancellation?: ValidationCancellation;
+    liveness?: OperationLiveness;
+    activity?: (sequence: number, message: string) => Promise<void>;
+  }): Promise<PreparedDeploymentArtifact> {
+    await args.activity?.(33, 'Building production app');
+    await this.runTransientCommand(args.isolatedRoot, 'pnpm run build', 5 * 60_000, args.cancellation);
+    args.liveness?.observed();
+    args.cancellation?.requireActive();
+    const configWrite = await this.writeFile(
+      args.wranglerConfigPath,
+      JSON.stringify(
+        rebaseDeploymentConfigPaths(createTrustedDeploymentConfig(args.deploymentConfig), {
+          projectRoot: PROJECT_ROOT,
+          isolatedRoot: args.isolatedRoot,
+        }),
+      ),
+      { encoding: 'utf-8' },
+    );
+    if (!configWrite.success) {
+      throw new Error('The isolated deployment configuration could not be written.');
+    }
+    await args.activity?.(34, 'Checking Cloudflare deployment package');
+    await this.runTransientCommand(
+      args.isolatedRoot,
+      `pnpm exec wrangler deploy --dry-run --outdir ${shellQuote(args.artifactRoot)} --config ${shellQuote(args.wranglerConfigPath)}`,
+      10 * 60_000,
+      args.cancellation,
+    );
+    args.liveness?.observed();
+    args.cancellation?.requireActive();
+    if (args.project.type === 'web_app') {
+      // Collapse Wrangler's verified web-app output to one module so the later versions API
+      // upload cannot acknowledge a multipart request while omitting a generated module.
+      const builtMainPath = `${args.isolatedRoot}/dist/server/index.js`;
+      const mainPath = `${args.artifactRoot}/index.js`;
+      const bundledPath = `${args.isolatedRoot}/.ghostbuild-worker.js`;
+      await args.activity?.(35, 'Bundling Worker modules');
+      await this.runTransientCommand(
+        args.isolatedRoot,
+        `node --input-type=module --eval ${shellQuote(WEB_APP_BUNDLE_SCRIPT)} ${shellQuote(builtMainPath)} ${shellQuote(bundledPath)}`,
+        2 * 60_000,
+        args.cancellation,
+      );
+      await this.runTransientCommand('/', `rm -rf ${shellQuote(args.artifactRoot)}`, 30_000, args.cancellation);
+      await this.runTransientCommand('/', `mkdir -p ${shellQuote(args.artifactRoot)}`, 30_000, args.cancellation);
       await this.runTransientCommand(
         '/',
-        `mkdir -p ${shellQuote(PREVIEW_SNAPSHOT_ROOT)}\nmv -- ${shellQuote(PREPARED_VALIDATION_ROOT)} ${shellQuote(args.snapshotRoot)}`,
-        2 * 60_000,
+        `mv ${shellQuote(bundledPath)} ${shellQuote(mainPath)}`,
+        30_000,
+        args.cancellation,
       );
-      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_prepared_validation WHERE singleton = 1');
-      return;
+      args.liveness?.observed();
     }
-
-    await this.discardPreparedValidationSnapshot();
-    await this.copyProjectToIsolatedRoot(args.snapshotRoot);
-    await this.assertPreviewCheckpoint(args.expectedWorkspaceRevision, args.expectedSnapshotRevision, false);
-    await this.runTransientCommand(args.snapshotRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
-    this.requirePreviewNotCancelled(args.previewId);
-    for (const { command, timeoutMs } of PREVIEW_PREPARATION_COMMANDS) {
-      await this.runTransientCommand(args.snapshotRoot, command, timeoutMs);
-      this.requirePreviewNotCancelled(args.previewId);
-    }
+    await args.activity?.(36, 'Build artifact ready');
+    return this.collectDeploymentArtifact(args);
   }
 
-  private async discardPreparedValidationSnapshot(): Promise<void> {
-    this.ctx.storage.sql.exec('DELETE FROM ghostbuild_prepared_validation WHERE singleton = 1');
+  private async collectDeploymentArtifact(args: {
+    revision: string;
+    isolatedRoot: string;
+    artifactRoot: string;
+    project: DeploymentProjectProfile;
+  }): Promise<PreparedDeploymentArtifact> {
+    const artifact: PreparedDeploymentArtifact = {
+      revision: args.revision,
+      mainModule: args.project.type === 'worker' ? 'server.js' : 'index.js',
+      modules: await collectSandboxFiles(this, args.artifactRoot, (path) => /\.(?:js|mjs|wasm)$/.test(path)),
+      assets:
+        args.project.type === 'web_app'
+          ? await collectSandboxFiles(
+              this,
+              `${args.isolatedRoot}/dist/client`,
+              (path) => path !== '.assetsignore' && !path.endsWith('.map'),
+            )
+          : [],
+      migrations: {
+        DB: args.project.bindings.d1 ? await collectSandboxMigrations(this, `${args.isolatedRoot}/migrations`) : [],
+        AGENT_SECURITY_DB: args.project.bindings.appAgent
+          ? await collectSandboxMigrations(this, `${args.isolatedRoot}/agent-security-migrations`)
+          : [],
+      },
+    };
+    return validatePreparedDeploymentArtifact(artifact, {
+      revision: args.revision,
+      projectType: args.project.type,
+    });
+  }
+
+  private storePreparedValidationArtifact(
+    checkpoint: { revision: string; workspaceRevision: number },
+    artifactDigest: string,
+  ): void {
+    this.ctx.storage.sql.exec(
+      `INSERT INTO ghostbuild_prepared_validation (
+         singleton, revision, workspace_revision, snapshot_root, artifact_digest
+       ) VALUES (1, ?, ?, ?, ?)
+       ON CONFLICT(singleton) DO UPDATE SET revision = excluded.revision,
+         workspace_revision = excluded.workspace_revision,
+         snapshot_root = excluded.snapshot_root,
+         artifact_digest = excluded.artifact_digest`,
+      checkpoint.revision,
+      checkpoint.workspaceRevision,
+      PREPARED_VALIDATION_ROOT,
+      artifactDigest,
+    );
+  }
+
+  private async discardPreparedValidationArtifact(): Promise<void> {
+    // Keep the durable digest until a replacement artifact is complete. If this cleanup is
+    // followed by an interrupted rebuild, the next fallback must still prove its bytes equal the
+    // last successful validation rather than silently rebuilding without an expected identity.
     await this.runTransientCommand('/', `rm -rf ${shellQuote(PREPARED_VALIDATION_ROOT)}`, 30_000).catch(
       () => undefined,
     );
   }
 
-  /**
-   * Materialize the container-local root a dev server runs from.
-   *
-   * Paid once per dev preview. Every later edit is projected file by file into this same root by
-   * `projectChangesIntoDevPreview`, so the dependency install below never repeats for a change —
-   * that, and the absent production build, are the whole difference from the preview snapshot path.
-   *
-   * The prepared validation snapshot is intentionally left alone: it belongs to the checkpoint-bound
-   * preview path, and a dev preview must not consume evidence collected for a validated revision.
-   */
-  private async prepareDevPreviewRoot(args: { previewId: string; devRoot: string }): Promise<void> {
-    await this.copyProjectToIsolatedRoot(args.devRoot);
-    this.requirePreviewNotCancelled(args.previewId);
-    await this.runTransientCommand(args.devRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS);
-    this.requirePreviewNotCancelled(args.previewId);
-    for (const { command, timeoutMs } of DEV_PREVIEW_PREPARATION_COMMANDS) {
-      await this.runTransientCommand(args.devRoot, command, timeoutMs);
-      this.requirePreviewNotCancelled(args.previewId);
-    }
-  }
-
-  /**
-   * Deliver a committed durable change set to a running dev preview.
-   *
-   * Computer projects the durable VFS into the container as a change-log sync into a container-side
-   * store that a FUSE daemon then serves. A durable write therefore never becomes a kernel write
-   * inside the container: the sync RPC has no notify channel, nothing traverses the mount, and no
-   * inotify event is raised — a watcher pointed at `/home/project` would sit silent. Writing the
-   * committed bytes into the dev root instead is a real write through the container's own kernel,
-   * so Vite's watcher fires and hot-replaces the module with no rebuild and no restart.
-   *
-   * Best effort by design: the durable mutation is already committed, and a preview that cannot be
-   * refreshed must not turn a successful write into a failed one. A dependency-manifest change is a
-   * known gap — the dev root installs once, so a new dependency needs a fresh dev preview.
-   */
-  private async projectChangesIntoDevPreview(changes: readonly AtomicWorkspaceChange[]): Promise<void> {
-    const active = this.activePreviewRow();
-    if (active?.mode !== 'dev' || changes.length === 0) {
-      return;
-    }
-    try {
-      const removals: string[] = [];
-      const directories = new Set<string>();
-      const writes: Array<{ path: string; bytes: Uint8Array }> = [];
-      for (const change of changes) {
-        const target = devPreviewProjectedPath({
-          devRoot: active.snapshot_root,
-          projectRoot: PROJECT_ROOT,
-          path: change.path,
-        });
-        if (change.kind === 'delete') {
-          removals.push(target);
-          continue;
-        }
-        directories.add(containerParentDirectory(target));
-        writes.push({ path: target, bytes: change.bytes });
-      }
-      for (const directory of directories) {
-        await this.mkdir(directory, { recursive: true });
-      }
-      for (const write of writes) {
-        if (!(await this.writeContainerFile(write.path, write.bytes)).success) {
-          throw new Error(`The dev preview could not receive ${write.path}.`);
-        }
-      }
-      if (removals.length > 0) {
-        await this.runTransientCommand('/', devPreviewRemoveCommand({ paths: removals, quote: shellQuote }), 30_000);
-      }
-    } catch (error) {
-      console.warn('Unable to deliver a workspace change to the ProjectWorkspace dev preview', {
-        previewId: active.preview_id,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  private async cleanupPreviewResources(row: ActivePreviewRow): Promise<void> {
-    await this.tunnels.destroy(row.port).catch(() => undefined);
-    await this.cleanupPreviewProcess(row);
-  }
-
-  /**
-   * Copy the project into an isolated build root and prove the copy is the revision it claims.
-   *
-   * The copy reads the container's FUSE mount while every guard around the caller reads the
-   * durable VFS. Those views were observed diverging after a container recycle, and because
-   * nothing compared them, validation passed and three deployments shipped stale bytes while
-   * reporting success (#139). Comparing an aggregate content digest is what turns that silent
-   * wrong answer into a loud one.
-   *
-   * A divergence is recoverable, not fatal: a forced re-push reconnects through a fresh computerd
-   * generation and re-materialises the tree. Only a copy that is still wrong after that is a
-   * failure, and then it fails rather than building something nobody asked for.
-   */
   private async copyProjectToIsolatedRoot(isolatedRoot: string, cancellation?: ValidationCancellation): Promise<void> {
     await this.runTransientCommand(
       '/',
@@ -2689,49 +2345,6 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
     }
   }
 
-  private async cleanupPreviewProcess(row: Pick<ActivePreviewRow, 'exec_id' | 'snapshot_root'>): Promise<void> {
-    const process = row.exec_id ? await this.sandboxProcesses.getProcess(row.exec_id) : null;
-    if (process) {
-      const status = await process.status();
-      if (status.state === 'running') {
-        await terminateTrackedSandboxProcess(process);
-      }
-    }
-    await this.runTransientCommand('/', `rm -rf ${shellQuote(row.snapshot_root)}`, 30_000);
-  }
-
-  private async cleanupPendingPreviews(): Promise<void> {
-    for (const row of this.pendingPreviewRows()) {
-      if (!(await this.cleanupPreviewResourcesOrRecover(row))) {
-        return;
-      }
-      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews WHERE preview_id = ?', row.preview_id);
-    }
-  }
-
-  private async cleanupPreviewResourcesOrRecover(row: ActivePreviewRow): Promise<boolean> {
-    try {
-      await this.cleanupPreviewResources(row);
-      return true;
-    } catch (error) {
-      await this.recoverPreviewContainer(row, error);
-      return false;
-    }
-  }
-
-  private async recoverPreviewContainer(row: ActivePreviewRow, cleanupError: unknown): Promise<void> {
-    console.warn('Recovering ProjectWorkspace preview container after cleanup failed', {
-      previewId: row.preview_id,
-      error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
-    });
-    await this.recycleWorkspaceContainer();
-  }
-
-  /**
-   * Destroy the ephemeral container and hand the durable VFS a fresh coordinator. The project
-   * bytes live in this Durable Object's SQLite, so nothing durable is lost; every container-side
-   * process row is invalidated because the processes died with the container.
-   */
   private async recycleWorkspaceContainer(): Promise<void> {
     await this.#workspace.close().catch((error) =>
       console.warn('Unable to close the Computer workspace before container recovery', {
@@ -2740,7 +2353,7 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
     );
     await Promise.race([
       this.destroy(),
-      scheduler.wait(PREVIEW_CONTAINER_RECOVERY_TIMEOUT_MS).then(() => {
+      scheduler.wait(CONTAINER_RECOVERY_TIMEOUT_MS).then(() => {
         throw new Error('Timed out while recovering the ProjectWorkspace container.');
       }),
     ]);
@@ -2748,102 +2361,8 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
     // A fresh coordinator prevents an interrupted sync from blocking the replacement container indefinitely.
     this.#workspace = new Workspace(computerWorkspaceOptions(this, this.#syncRetries));
     this.ctx.storage.transactionSync(() => {
-      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_pending_previews');
-      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_active_preview');
-      this.ctx.storage.sql.exec('DELETE FROM ghostbuild_preview_results');
       this.ctx.storage.sql.exec('DELETE FROM ghostbuild_sandbox_processes');
     });
-  }
-
-  private pendingPreviewRow(previewId: string): PendingPreviewRow | null {
-    const row = first(
-      this.ctx.storage.sql.exec<PendingPreviewRow>(
-        `SELECT preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision, expires_at, mode
-           FROM ghostbuild_pending_previews WHERE preview_id = ?`,
-        previewId,
-      ),
-    );
-    return row ? { ...row, mode: storedPreviewMode(row.mode) } : null;
-  }
-
-  private upsertPendingPreview(row: ActivePreviewRow, expiresAt: number): void {
-    this.ctx.storage.sql.exec(
-      `INSERT INTO ghostbuild_pending_previews (
-         preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision, expires_at, mode
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(preview_id) DO UPDATE SET
-         exec_id = excluded.exec_id,
-         port = excluded.port,
-         snapshot_root = excluded.snapshot_root,
-         snapshot_revision = excluded.snapshot_revision,
-         workspace_revision = excluded.workspace_revision,
-         expires_at = excluded.expires_at,
-         mode = excluded.mode`,
-      row.preview_id,
-      row.exec_id,
-      row.port,
-      row.snapshot_root,
-      row.snapshot_revision,
-      row.workspace_revision,
-      expiresAt,
-      row.mode,
-    );
-  }
-
-  private pendingPreviewRows(): PendingPreviewRow[] {
-    return [
-      ...this.ctx.storage.sql.exec<PendingPreviewRow>(
-        `SELECT preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision, expires_at, mode
-       FROM ghostbuild_pending_previews ORDER BY expires_at`,
-      ),
-    ].map((row) => ({ ...row, mode: storedPreviewMode(row.mode) }));
-  }
-
-  private activePreviewRow(): ActivePreviewRow | null {
-    const row = first(
-      this.ctx.storage.sql.exec<ActivePreviewRow>(
-        `SELECT preview_id, exec_id, port, snapshot_root, snapshot_revision, workspace_revision, mode
-           FROM ghostbuild_active_preview WHERE singleton = 1`,
-      ),
-    );
-    return row ? { ...row, mode: storedPreviewMode(row.mode) } : null;
-  }
-
-  private previewResultRow(previewId: string): PreviewResultRow | null {
-    const row = first(
-      this.ctx.storage.sql.exec<PreviewResultRow>(
-        `SELECT preview_id, url, snapshot_revision, workspace_revision, ready_at, expires_at, mode
-           FROM ghostbuild_preview_results WHERE preview_id = ?`,
-        previewId,
-      ),
-    );
-    return row ? { ...row, mode: storedPreviewMode(row.mode) } : null;
-  }
-
-  private async assertPreviewCheckpoint(
-    expectedWorkspaceRevision: number,
-    expectedSnapshotRevision: string,
-    requireWorkspaceRevision: boolean,
-  ) {
-    const checkpoint = await this.checkpoint();
-    return assertPreviewSourceCheckpoint(
-      checkpoint,
-      {
-        workspaceRevision: expectedWorkspaceRevision,
-        revision: expectedSnapshotRevision,
-      },
-      requireWorkspaceRevision,
-    );
-  }
-
-  private requirePreviewNotCancelled(previewId: string): void {
-    const cancelled = first(
-      this.ctx.storage.sql.exec<{ found: number }>(
-        'SELECT 1 AS found FROM ghostbuild_preview_cancellations WHERE preview_id = ? LIMIT 1',
-        previewId,
-      ),
-    );
-    assertPreviewPublicationAllowed(Boolean(cancelled));
   }
 
   private hasSuccessfulValidation(revision: string): boolean {
@@ -2857,11 +2376,11 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
     );
   }
 
-  private preparedValidationSnapshot(): PreparedValidationRow | null {
+  private preparedValidationArtifact(): PreparedValidationRow | null {
     return (
       first(
         this.ctx.storage.sql.exec<PreparedValidationRow>(
-          `SELECT revision, workspace_revision, snapshot_root
+          `SELECT revision, workspace_revision, snapshot_root, artifact_digest
            FROM ghostbuild_prepared_validation WHERE singleton = 1`,
         ),
       ) ?? null
@@ -3115,7 +2634,7 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
         `SELECT 1 AS active FROM ghostbuild_deployment_sessions WHERE status = 'active' LIMIT 1`,
       ),
     );
-    if (this.#containerKeepAliveOperations === 0 && !this.activePreviewRow() && !deploymentActive) {
+    if (this.#containerKeepAliveOperations === 0 && !deploymentActive) {
       await this.setKeepAlive(false).catch(() => undefined);
     }
   }
@@ -3154,9 +2673,8 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
         this.#syncRecoveryFailures.set(backend, failures);
         if (failures >= SYNC_RECOVERY_CONTAINER_RECYCLE_THRESHOLD) {
           // A fresh backend handle failed too: the container's control connection is not
-          // coming back on its own. Recycle the container the way preview recovery does;
-          // the durable VFS is untouched and the next recovery round pulls into the
-          // replacement container.
+          // coming back on its own. The durable VFS is untouched and the next recovery round
+          // pulls into the replacement container.
           this.#syncRecoveryFailures.delete(backend);
           console.warn('ProjectWorkspace sync recovery is recycling the workspace container', {
             backend,
@@ -3781,24 +3299,6 @@ function pendingComputerSyncToolResult(error: WorkspaceSyncPendingError): Ghostb
   );
 }
 
-async function waitForHttpPort(port: Fetcher): Promise<void> {
-  const deadline = Date.now() + 45_000;
-  let lastError = 'not ready';
-  while (Date.now() < deadline) {
-    try {
-      const response = await port.fetch('http://container/');
-      if (response.status >= 200 && response.status < 400) {
-        return;
-      }
-      lastError = `HTTP ${response.status}`;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-    }
-    await scheduler.wait(500);
-  }
-  throw new Error(`Preview did not become ready: ${lastError}`);
-}
-
 function fileSyncEntry(file: WorkspaceFile, revision: number) {
   const utf8 = canDecodeUtf8(file.bytes);
   return {
@@ -3823,27 +3323,35 @@ function workspaceFileMetadata(file: WorkspaceFile, revision: number) {
   };
 }
 
-/**
- * The two preview modes deliberately report different shapes. A production preview carries the
- * exact source revision it was built from, because that is its whole guarantee. A dev preview
- * carries no `snapshotRevision` at all — only where it started — so nothing downstream can read a
- * bound revision off a preview that tracks live state.
- */
-function previewSuccess(row: PreviewResultRow): BuilderPreviewSuccess {
-  const common = {
-    id: row.preview_id,
-    url: row.url,
-    readyAt: new Date(row.ready_at).toISOString(),
-    expiresAt: new Date(row.expires_at).toISOString(),
+/** Placeholder identities: validation only proves the artifact builds, it binds nothing real. */
+function validationDeploymentConfig(project: DeploymentProjectProfile): DeploymentConfigInput {
+  const nullUuid = '00000000-0000-0000-0000-000000000000';
+  const nullHexId = '00000000000000000000000000000000';
+  const config: DeploymentConfigInput = {
+    accountId: nullHexId,
+    workerName: 'ghostbuild-validation',
+    projectType: project.type,
+    workersAi: project.bindings.ai,
+    appAgent: project.bindings.appAgent,
+    securityBaselineVersion: String(DEPLOYMENT_SECURITY_BASELINE_VERSION),
+    securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
+    templateSourceSha256: TEMPLATE_SOURCE_SHA256,
   };
-  return row.mode === 'dev'
-    ? { ...common, mode: 'dev', startedFromWorkspaceRevision: row.workspace_revision }
-    : {
-        ...common,
-        mode: 'production',
-        workspaceRevision: row.workspace_revision,
-        snapshotRevision: row.snapshot_revision,
-      };
+  if (project.bindings.d1) {
+    config.d1DatabaseId = nullUuid;
+    config.d1DatabaseName = 'ghostbuild-validation-db';
+  }
+  if (project.bindings.appAgent) {
+    config.agentSecurityD1DatabaseId = nullUuid;
+    config.agentSecurityD1DatabaseName = 'ghostbuild-validation-agent';
+  }
+  if (project.bindings.r2) {
+    config.r2BucketName = 'ghostbuild-validation-storage';
+  }
+  if (project.bindings.kv) {
+    config.kvNamespaceId = nullHexId;
+  }
+  return config;
 }
 
 function requireFileInputs(value: unknown): Array<{ path: string; content: string; encoding: 'utf8' | 'base64' }> {
@@ -4077,6 +3585,10 @@ function requireString(value: unknown, name: string, maxLength: number): string 
   return value;
 }
 
+function requireOptionalString(value: unknown, name: string, maxLength: number): string | undefined {
+  return value === undefined ? undefined : requireString(value, name, maxLength);
+}
+
 function requireStringArray(value: unknown, name: string, maxLength: number): string[] {
   if (
     !Array.isArray(value) ||
@@ -4101,14 +3613,6 @@ function requireCloudflareName(value: unknown, name: string): string {
     throw new SyntaxError(`Invalid ${name}.`);
   }
   return result;
-}
-
-function requirePreviewId(value: unknown): string {
-  const previewId = requireString(value, 'previewId', 128);
-  if (!/^[a-zA-Z0-9_-]+$/.test(previewId)) {
-    throw new SyntaxError('Invalid previewId.');
-  }
-  return previewId;
 }
 
 function requireSnapshotRevision(value: unknown): string {

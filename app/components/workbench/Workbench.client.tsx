@@ -91,8 +91,7 @@ export const Workbench = memo(function Workbench({ chatStarted, isStreaming }: W
 function ReadyWorkbench({ isStreaming }: Pick<WorkbenchProps, 'isStreaming'>) {
   const controller = useWorkbenchController(isStreaming);
   const [previewReloadKey, setPreviewReloadKey] = useState(0);
-  const previewNow = usePreviewClock(controller.previewState.active ?? controller.previewState.lastSuccessful);
-  const presentation = previewPresentation(controller.previewState, previewNow);
+  const presentation = previewPresentation(controller.previewState);
 
   return (
     <WorkbenchFrame
@@ -125,18 +124,6 @@ function ReadyWorkbench({ isStreaming }: Pick<WorkbenchProps, 'isStreaming'>) {
                 Update
               </PanelHeaderButton>
             )}
-            <PanelHeaderButton
-              className="mr-1 text-sm"
-              disabled={controller.previewRequesting}
-              title={
-                presentation.mode === 'dev'
-                  ? 'Rebuild this preview as a production build of the current checkpoint.'
-                  : 'Switch to a live dev server that hot-reloads every change without rebuilding.'
-              }
-              onClick={() => void controller.onPreviewRequest(presentation.mode === 'dev' ? 'production' : 'dev')}
-            >
-              {presentation.mode === 'dev' ? 'Verified build' : 'Live preview'}
-            </PanelHeaderButton>
             <IconButton
               icon={<ReloadIcon />}
               size="xl"
@@ -184,26 +171,6 @@ function ReadyWorkbench({ isStreaming }: Pick<WorkbenchProps, 'isStreaming'>) {
       </>
     </WorkbenchFrame>
   );
-}
-
-function usePreviewClock(candidate: { expiresAt: string } | null): number {
-  const [now, setNow] = useState(Date.now);
-
-  useEffect(() => {
-    const current = Date.now();
-    setNow(current);
-    if (!candidate) {
-      return undefined;
-    }
-    const remaining = Date.parse(candidate.expiresAt) - current;
-    if (remaining <= 0) {
-      return undefined;
-    }
-    const timeout = setTimeout(() => setNow(Date.now()), Math.min(remaining + 10, 2_147_483_647));
-    return () => clearTimeout(timeout);
-  }, [candidate]);
-
-  return now;
 }
 
 function WorkbenchFrame({
@@ -305,7 +272,6 @@ function WorkbenchFrame({
   );
 }
 
-// View component for rendering content with motion transitions
 interface ViewProps extends HTMLMotionProps<'div'> {
   children: ReactElement;
 }

@@ -10,7 +10,7 @@ vi.mock('~/lib/stores/workbench.client', async () => {
   const { idleBuilderPreviewState: idleState } = await import('~/agents/builder-preview-types');
   let workspaceId: string | null = null;
   let previewRequest: (() => Promise<BuilderPreviewState>) | null = null;
-  const previewState = atom(idleState(0));
+  const previewState = atom(idleState());
 
   return {
     workbenchStore: {
@@ -25,7 +25,7 @@ vi.mock('~/lib/stores/workbench.client', async () => {
       activateWorkspace(nextWorkspaceId: string) {
         workspaceId = nextWorkspaceId;
         previewRequest = null;
-        previewState.set(idleState(0));
+        previewState.set(idleState());
       },
       getActiveWorkspaceId: () => workspaceId,
       isWorkspaceActive: (candidate: string) => workspaceId === candidate,
@@ -111,7 +111,7 @@ describe('useWorkbenchController preview requests', () => {
     expect(controller?.previewRequesting).toBe(false);
 
     await act(async () => {
-      oldPreview.resolve(idleBuilderPreviewState(0));
+      oldPreview.resolve(idleBuilderPreviewState());
       await request;
     });
     expect(controller?.previewRequesting).toBe(false);
@@ -147,32 +147,17 @@ describe('useWorkbenchController preview requests', () => {
     root = undefined;
 
     await act(async () => {
-      pendingPreview.resolve(idleBuilderPreviewState(1));
+      pendingPreview.resolve(idleBuilderPreviewState());
       await request;
     });
 
     expect(workbenchStore.updatePreview).not.toHaveBeenCalled();
   });
 
-  it('does not rebuild anything when a save lands on a live dev preview', async () => {
-    const requestPreview = vi.fn(() => Promise.resolve(idleBuilderPreviewState(1)));
+  it('requests a new immutable preview after a saved workspace change', async () => {
+    const requestPreview = vi.fn(() => Promise.resolve(idleBuilderPreviewState()));
     workbenchStore.activateWorkspace('account:chat--transcript-0-0');
     workbenchStore.connectPreview({ request: requestPreview });
-    const live = {
-      mode: 'dev' as const,
-      id: 'preview-dev',
-      url: 'https://random-words.trycloudflare.com',
-      startedFromWorkspaceRevision: 1,
-      readyAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-    };
-    workbenchStore.updatePreview({
-      ...idleBuilderPreviewState(1),
-      status: 'ready',
-      mode: 'dev',
-      active: live,
-      lastSuccessful: live,
-    });
 
     let controller: ReturnType<typeof useWorkbenchController> | undefined;
     function Harness() {
@@ -197,15 +182,13 @@ describe('useWorkbenchController preview requests', () => {
       await Promise.resolve();
     });
 
-    // The dev server received the saved file over HMR; asking for a preview would replace a page
-    // that is already showing the change.
     expect(workbenchStore.saveCurrentDocument).toHaveBeenCalled();
-    expect(requestPreview).not.toHaveBeenCalled();
+    expect(requestPreview).toHaveBeenCalledOnce();
   });
 
   it('does not continue a pending save into preview after unmount', async () => {
     const pendingSave = deferred<void>();
-    const requestPreview = vi.fn(() => Promise.resolve(idleBuilderPreviewState(1)));
+    const requestPreview = vi.fn(() => Promise.resolve(idleBuilderPreviewState()));
     workbenchStore.activateWorkspace('account:chat--transcript-0-0');
     workbenchStore.connectPreview({ request: requestPreview });
     vi.mocked(workbenchStore.saveCurrentDocument).mockReturnValueOnce(pendingSave.promise);

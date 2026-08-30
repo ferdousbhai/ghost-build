@@ -78,6 +78,8 @@ describe('control-plane account export', () => {
       truncated: false,
       states: [{ id: 'state-user-1', status: 'completed', returnTo: '/' }],
     });
+    expect(exported.omits.join('\n')).toContain('unpromoted preview versions');
+    expect(exported.omits.join('\n')).toContain('production and preview D1 databases');
   });
 
   it('never exports encrypted credential material, credential handles, or session tokens', async () => {

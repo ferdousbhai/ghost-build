@@ -73,7 +73,7 @@ describe('injected fetch receiver', () => {
 
     expect(scanned).toContain('app/lib/.server/cloudflare/user-account-api.ts');
     expect(scanned).toContain('app/lib/.server/cloudflare/registry-image-copy.ts');
-    expect(scanned).toContain('user-workspace-runtime/src/preview-lifecycle.ts');
+    expect(scanned).toContain('user-workspace-runtime/src/index.ts');
   });
 
   it('never calls an injected fetch as a method', () => {

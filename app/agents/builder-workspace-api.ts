@@ -2,7 +2,6 @@ import type { GhostbuildToolResult } from 'ghostbuild-agent/tool-result';
 import type { CreateAIToolsOptions } from '@cloudflare/computer/tools';
 import type { DeploymentProjectProfile } from '~/lib/.server/cloudflare/deployment-project-profile';
 import type { PreparedDeploymentArtifact } from '~/lib/.server/cloudflare/deployment-artifact';
-import type { BuilderPreviewSuccess } from './builder-preview-types';
 import type {
   BuilderWorkspaceApplyResult,
   BuilderWorkspaceClientChange,
@@ -124,6 +123,7 @@ export type WorkspaceDeploymentSessionRequest = {
 
 export type WorkspaceDeploymentArtifactRequest = {
   sessionId: string;
+  operationId: string;
   revision: string;
   deploymentId: string;
   executionGeneration: number;
@@ -142,23 +142,6 @@ export type WorkspaceDeploymentArtifactRequest = {
   securityBoundarySha256: string;
   templateSourceSha256: string;
 };
-
-/**
- * A production preview names the exact checkpoint it must be built from and asserts it. A dev
- * preview names none, because it tracks the workspace as it changes; the union makes passing an
- * expected revision to a dev preview a type error rather than a silently ignored promise.
- */
-export type WorkspacePreviewRequest =
-  | {
-      previewId: string;
-      mode?: 'production';
-      expectedWorkspaceRevision: number;
-      expectedSnapshotRevision: string;
-    }
-  | {
-      previewId: string;
-      mode: 'dev';
-    };
 
 export type BuilderWorkspaceTextFile = {
   path: string;
@@ -309,8 +292,6 @@ export interface ProjectWorkspaceRpc extends Rpc.DurableObjectBranded {
   terminalizeInterruptedDeploymentSession(value: {
     sessionId: string;
   }): Promise<{ status: 'absent' | 'completed' | 'failed' }>;
-  createPreview(value: WorkspacePreviewRequest): Promise<BuilderPreviewSuccess>;
-  stopPreview(previewId: string): Promise<void>;
   deleteProject(): Promise<void>;
 }
 
@@ -359,7 +340,5 @@ export interface BuilderWorkspaceApi {
   cancelActiveValidation(): Promise<void>;
   hasSuccessfulValidation(revision: string): Promise<boolean>;
   prepareDeployment(revision: string): Promise<BuilderWorkspaceDeploymentPlan>;
-  createPreview(args: WorkspacePreviewRequest): Promise<BuilderPreviewSuccess>;
-  stopPreview(previewId: string): Promise<void>;
   deleteProject(): Promise<void>;
 }

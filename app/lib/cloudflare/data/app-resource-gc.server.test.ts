@@ -40,9 +40,11 @@ describe('app resource garbage collection', () => {
     await expect(sweepAppResourceGcCandidates(database.env, { now: 100, accountApi })).resolves.toBe(1);
 
     expect(accountApi.deleteManagedWorker).toHaveBeenCalledWith(`ghostbuild-deployment-1`);
-    expect(accountApi.deleteD1Database).toHaveBeenCalledTimes(2);
+    expect(accountApi.deleteD1Database).toHaveBeenCalledTimes(4);
     expect(accountApi.deleteD1Database).toHaveBeenCalledWith(`ghostbuild-deployment-1`);
+    expect(accountApi.deleteD1Database).toHaveBeenCalledWith(`ghostbuild-deployment-1-preview`);
     expect(accountApi.deleteD1Database).toHaveBeenCalledWith(`ghostbuild-deployment-1-agent-security`);
+    expect(accountApi.deleteD1Database).toHaveBeenCalledWith(`ghostbuild-deployment-1-preview-agent`);
     expect(accountApi.deleteKvNamespace).toHaveBeenCalledWith(`ghostbuild-deployment-1-cache`);
     expect(accountApi.deleteR2Bucket).toHaveBeenCalledWith(`ghostbuild-deployment-1-storage`);
     expect(accountApi.deleteManagedWorker.mock.invocationCallOrder[0]).toBeLessThan(

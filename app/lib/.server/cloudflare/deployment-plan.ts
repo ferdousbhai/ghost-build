@@ -9,7 +9,7 @@ import {
   TEMPLATE_SOURCE_SHA256,
 } from './deployment-security-baseline';
 
-const DEPLOYMENT_PLAN_VERSION = 4 as const;
+const DEPLOYMENT_PLAN_VERSION = 5 as const;
 
 export type DeploymentResourceType = 'worker' | 'd1' | 'r2' | 'kv' | 'durable_object' | 'workers_ai';
 
@@ -62,7 +62,14 @@ export async function buildDeploymentPlanFromSource(args: {
     resources: [
       { type: 'worker', logicalName: 'app', proposedName: appResourceName(args.deploymentId, 'app') },
       ...(project.bindings.d1
-        ? [{ type: 'd1' as const, logicalName: 'DB', proposedName: appResourceName(args.deploymentId, 'DB') }]
+        ? [
+            { type: 'd1' as const, logicalName: 'DB', proposedName: appResourceName(args.deploymentId, 'DB') },
+            {
+              type: 'd1' as const,
+              logicalName: 'DB_PREVIEW',
+              proposedName: appResourceName(args.deploymentId, 'DB_PREVIEW'),
+            },
+          ]
         : []),
       ...(project.bindings.appAgent
         ? [
@@ -70,6 +77,11 @@ export async function buildDeploymentPlanFromSource(args: {
               type: 'd1' as const,
               logicalName: 'AGENT_SECURITY_DB',
               proposedName: appResourceName(args.deploymentId, 'AGENT_SECURITY_DB'),
+            },
+            {
+              type: 'd1' as const,
+              logicalName: 'AGENT_SECURITY_DB_PREVIEW',
+              proposedName: appResourceName(args.deploymentId, 'AGENT_SECURITY_DB_PREVIEW'),
             },
           ]
         : []),
@@ -111,13 +123,13 @@ export function isCurrentDeploymentPlan(plan: unknown): plan is DeploymentPlan {
     return false;
   }
   const current = parsed.data;
-  const requiresAgentSecurityDb = current.project.bindings.appAgent;
-  if (!requiresAgentSecurityDb) {
-    return true;
-  }
-  const applicationDatabase = deploymentPlanResourceName(current, 'd1', 'DB');
-  const agentSecurityDatabase = deploymentPlanResourceName(current, 'd1', 'AGENT_SECURITY_DB');
-  return Boolean(applicationDatabase && agentSecurityDatabase && applicationDatabase !== agentSecurityDatabase);
+  // Every database the plan requires must be named, and no two of them may share a name: a
+  // preview that resolved to the production database would write to it.
+  const databaseNames = [
+    ...(current.project.bindings.d1 || current.project.bindings.appAgent ? ['DB', 'DB_PREVIEW'] : []),
+    ...(current.project.bindings.appAgent ? ['AGENT_SECURITY_DB', 'AGENT_SECURITY_DB_PREVIEW'] : []),
+  ].map((logicalName) => deploymentPlanResourceName(current, 'd1', logicalName));
+  return databaseNames.every(Boolean) && new Set(databaseNames).size === databaseNames.length;
 }
 
 export function deploymentProjectProfile(plan: DeploymentPlan): DeploymentProjectProfile {

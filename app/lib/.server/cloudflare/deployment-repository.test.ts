@@ -17,7 +17,7 @@ import { DEPLOYMENT_SECURITY_BASELINE_VERSION } from './deployment-security-base
 const sourceSha256 = 'a'.repeat(64);
 const planDigest = 'b'.repeat(64);
 const plan: DeploymentPlan = {
-  version: 4,
+  version: 5,
   deploymentId: 'deployment-1',
   sourceSha256,
   templateSourceSha256: 'c'.repeat(64),

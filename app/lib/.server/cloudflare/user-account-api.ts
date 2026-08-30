@@ -11,6 +11,7 @@ import {
   DEPLOYMENT_COMPATIBILITY_DATE,
   DEPLOYMENT_COMPATIBILITY_FLAGS,
   DEPLOYMENT_OBSERVABILITY,
+  DEPLOYMENT_PREVIEW_URLS_ENABLED,
   DEPLOYMENT_SECURITY_BASELINE_BINDING,
   DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
   DEPLOYMENT_SECURITY_CLEANUP_CRON,
@@ -112,6 +113,8 @@ export type ActiveWorkerDeploymentReadback = {
   crons: string[];
   compatibilityDate: string;
   compatibilityFlags: string[];
+  workersDevEnabled: boolean;
+  previewUrlsEnabled: boolean;
 };
 
 type CloudflareEnvelope<T> = {
@@ -151,6 +154,25 @@ type WorkerUploadMetadata = {
   annotations: { 'workers/message': string; 'workers/tag': string };
 };
 
+/** One immutable Worker version's bytes and bindings, whether it is promoted or only previewed. */
+export type ManagedWorkerVersionArgs = {
+  workerName: string;
+  projectType: 'web_app' | 'worker';
+  sourceSha256: string;
+  mainModule: string;
+  modules: readonly DeploymentArtifactFile[];
+  assets: readonly DeploymentArtifactFile[];
+  workersAi: boolean;
+  appAgent: boolean;
+  d1DatabaseId?: string;
+  agentSecurityD1DatabaseId?: string;
+  r2BucketName?: string;
+  kvNamespaceId?: string;
+  securityBaselineVersion: string;
+  securityBoundarySha256: string;
+  templateSourceSha256: string;
+};
+
 type D1QueryResult = {
   success?: boolean;
   results?: unknown[];
@@ -182,7 +204,7 @@ export class UserCloudflareAccountApi {
 
   async createD1ForPlan(
     plan: DeploymentPlan,
-    logicalName: 'DB' | 'AGENT_SECURITY_DB' = 'DB',
+    logicalName: 'DB' | 'DB_PREVIEW' | 'AGENT_SECURITY_DB' | 'AGENT_SECURITY_DB_PREVIEW' = 'DB',
   ): Promise<{ id: string; name: string }> {
     const resourceName = requirePlanResourceName(plan, 'd1', logicalName);
     const result = await this.call<{ uuid?: string; name?: string }>('/d1/database', {
@@ -326,7 +348,7 @@ export class UserCloudflareAccountApi {
 
   async ensureD1ForPlan(
     plan: DeploymentPlan,
-    logicalName: 'DB' | 'AGENT_SECURITY_DB' = 'DB',
+    logicalName: 'DB' | 'DB_PREVIEW' | 'AGENT_SECURITY_DB' | 'AGENT_SECURITY_DB_PREVIEW' = 'DB',
   ): Promise<{ id: string; name: string }> {
     const resourceName = requirePlanResourceName(plan, 'd1', logicalName);
     const databases = await this.call<unknown>(`/d1/database?name=${encodeURIComponent(resourceName)}`, {
@@ -652,24 +674,51 @@ export class UserCloudflareAccountApi {
     throw new CloudflareAccountApiError(ACCOUNT_LIST_TOO_LONG);
   }
 
-  /** Upload an immutable, server-owned Worker version and promote exactly it to production. */
-  async deployManagedWorker(args: {
-    workerName: string;
-    projectType: 'web_app' | 'worker';
-    sourceSha256: string;
-    mainModule: string;
-    modules: readonly DeploymentArtifactFile[];
-    assets: readonly DeploymentArtifactFile[];
-    workersAi: boolean;
-    appAgent: boolean;
-    d1DatabaseId?: string;
-    agentSecurityD1DatabaseId?: string;
-    r2BucketName?: string;
-    kvNamespaceId?: string;
-    securityBaselineVersion: string;
-    securityBoundarySha256: string;
-    templateSourceSha256: string;
-  }): Promise<{ workerVersionId: string }> {
+  /** Upload an immutable version, then promote exactly that version to production. */
+  async deployManagedWorker(args: ManagedWorkerVersionArgs): Promise<{ workerVersionId: string }> {
+    const form = await this.managedWorkerUploadForm(args);
+    // Cloudflare rejects a version upload for a Worker that has never been deployed, and applies
+    // Durable Object class lifecycle only through a deployment, so both cases publish directly.
+    if (args.appAgent || !(await this.hasWorkerDeployment(args.workerName))) {
+      return { workerVersionId: await this.uploadWorkerDirectly(args.workerName, form) };
+    }
+    const workerVersionId = await this.uploadWorkerVersion(args.workerName, form);
+    await this.promoteWorkerVersion(args.workerName, workerVersionId, args.sourceSha256);
+    return { workerVersionId };
+  }
+
+  /** Upload an immutable version without creating a deployment and return its versioned preview URL. */
+  async previewManagedWorker(args: ManagedWorkerVersionArgs): Promise<{ workerVersionId: string; previewUrl: string }> {
+    if (!(await this.hasWorkerDeployment(args.workerName))) {
+      throw new CloudflareAccountApiError('A Workers preview needs a deployed Worker. Deploy the project first.');
+    }
+    const workerVersionId = await this.uploadWorkerVersion(args.workerName, await this.managedWorkerUploadForm(args));
+    const previewUrl = await this.readManagedWorkerPreviewUrl(args.workerName, workerVersionId);
+    return { workerVersionId, previewUrl };
+  }
+
+  async readManagedWorkerPreviewUrl(workerName: string, workerVersionId: string): Promise<string> {
+    requireWorkerName(workerName);
+    if (!UUID_PATTERN.test(workerVersionId)) {
+      throw new CloudflareAccountApiError('Cloudflare returned an invalid Worker version identity.');
+    }
+    await this.enableWorkerSubdomain(workerName);
+    const version = await this.call<{ id?: string; metadata?: { has_preview?: boolean } }>(
+      `/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(workerVersionId)}`,
+      { method: 'GET' },
+    );
+    if (version.id !== workerVersionId || version.metadata?.has_preview !== true) {
+      // Cloudflare does not generate preview URLs for every Worker shape (Durable Object Workers
+      // are one documented exclusion), so an unpreviewable version fails here rather than at a 404.
+      throw new CloudflareAccountApiError('Cloudflare did not make the managed Worker version previewable.');
+    }
+    const workersSubdomain = await this.getWorkersSubdomain();
+    // The Versions API exposes the version identity and preview availability, but not the URL.
+    // Cloudflare documents this deterministic hostname for versioned preview URLs.
+    return `https://${workerVersionId.slice(0, 8)}-${workerName}.${workersSubdomain}.workers.dev`;
+  }
+
+  private async managedWorkerUploadForm(args: ManagedWorkerVersionArgs): Promise<FormData> {
     requireWorkerName(args.workerName);
     const expectedMain = args.projectType === 'worker' ? 'server.js' : 'index.js';
     if (
@@ -724,13 +773,27 @@ export class UserCloudflareAccountApi {
         module.path,
       );
     }
-    const workerVersionId = await this.uploadAndDeployWorker({
-      workerName: args.workerName,
-      form,
-      sourceSha256: args.sourceSha256,
-      directUpload: args.appAgent,
+    return form;
+  }
+
+  private async uploadWorkerVersion(workerName: string, form: FormData): Promise<string> {
+    const version = await parseCloudflareEnvelope<{ id?: string }>(
+      await this.callRaw(`/workers/scripts/${encodeURIComponent(workerName)}/versions`, {
+        method: 'POST',
+        body: form,
+      }),
+    );
+    if (!version.id || !UUID_PATTERN.test(version.id)) {
+      throw new CloudflareAccountApiError('Cloudflare returned an invalid Worker version identity.');
+    }
+    return version.id;
+  }
+
+  private async hasWorkerDeployment(workerName: string): Promise<boolean> {
+    const listed = await this.callOptional<unknown>(`/workers/scripts/${encodeURIComponent(workerName)}/deployments`, {
+      method: 'GET',
     });
-    return { workerVersionId };
+    return listed !== null && requireWorkerDeployments(listed).length > 0;
   }
 
   /** Replace every trigger with the one server-owned AppAgent cleanup schedule, or none. */
@@ -752,14 +815,17 @@ export class UserCloudflareAccountApi {
     requireExactSchedules(readback, expected);
   }
 
-  private async readExactWorkerSubdomainState(workerName: string): Promise<void> {
+  private async readExactWorkerSubdomainState(
+    workerName: string,
+  ): Promise<{ enabled: boolean; previewsEnabled: boolean }> {
     const state = await this.call<{ enabled?: boolean; previews_enabled?: boolean }>(
       `/workers/scripts/${encodeURIComponent(workerName)}/subdomain`,
       { method: 'GET' },
     );
-    if (state.enabled !== true || state.previews_enabled !== false) {
+    if (state.enabled !== true || state.previews_enabled !== DEPLOYMENT_PREVIEW_URLS_ENABLED) {
       throw new CloudflareAccountApiError('Cloudflare returned invalid managed Worker subdomain state.');
     }
+    return { enabled: state.enabled, previewsEnabled: state.previews_enabled };
   }
 
   private async uploadStaticAssets(workerName: string, assets: readonly DeploymentArtifactFile[]): Promise<string> {
@@ -909,55 +975,6 @@ export class UserCloudflareAccountApi {
     requireExactDeploymentVersion(readback.versions, workerVersionId);
   }
 
-  private async uploadAndDeployWorker(args: {
-    workerName: string;
-    form: FormData;
-    sourceSha256: string;
-    directUpload: boolean;
-  }): Promise<string> {
-    const directUpload = args.directUpload || !(await this.hasWorkerDeployment(args.workerName));
-    if (!directUpload) {
-      const version = await parseCloudflareEnvelope<{ id?: string }>(
-        await this.callRaw(`/workers/scripts/${encodeURIComponent(args.workerName)}/versions`, {
-          method: 'POST',
-          body: args.form,
-        }),
-      );
-      if (!version.id || !UUID_PATTERN.test(version.id)) {
-        throw new CloudflareAccountApiError('Cloudflare returned an invalid Worker version identity.');
-      }
-      await this.promoteWorkerVersion(args.workerName, version.id, args.sourceSha256);
-      return version.id;
-    }
-
-    const uploaded = await parseCloudflareEnvelope<{ id?: string; etag?: string }>(
-      await this.callRaw(
-        `/workers/scripts/${encodeURIComponent(args.workerName)}?excludeScript=true&bindings_inherit=strict`,
-        { method: 'PUT', body: args.form },
-      ),
-    );
-    if (
-      uploaded.id !== args.workerName ||
-      typeof uploaded.etag !== 'string' ||
-      uploaded.etag.length < 1 ||
-      uploaded.etag.length > 256
-    ) {
-      throw new CloudflareAccountApiError('Cloudflare did not read back the deployed Worker.');
-    }
-    const active = await this.readActiveWorkerDeployment(args.workerName);
-    if (!active || !UUID_PATTERN.test(active.workerVersionId) || active.scriptEtag !== uploaded.etag) {
-      throw new CloudflareAccountApiError('Cloudflare did not read back the deployed Worker.');
-    }
-    return active.workerVersionId;
-  }
-
-  private async hasWorkerDeployment(workerName: string): Promise<boolean> {
-    const listed = await this.callOptional<unknown>(`/workers/scripts/${encodeURIComponent(workerName)}/deployments`, {
-      method: 'GET',
-    });
-    return listed !== null && requireWorkerDeployments(listed).length > 0;
-  }
-
   /**
    * Cloudflare gates every `/containers` route on the Workers Paid entitlement and refuses an
    * ineligible account with its own upgrade instructions, so reading the account's container limits
@@ -1088,12 +1105,7 @@ export class UserCloudflareAccountApi {
       new Blob([args.source], { type: 'application/javascript+module' }),
       'workspace-runtime.mjs',
     );
-    const workerVersionId = await this.uploadAndDeployWorker({
-      workerName: args.workerName,
-      form,
-      sourceSha256: args.runtimeVersion,
-      directUpload: true,
-    });
+    const workerVersionId = await this.uploadWorkerDirectly(args.workerName, form);
     const namespaces = await this.call<DurableObjectNamespaceReadback[]>(
       '/workers/durable_objects/namespaces?per_page=1000',
       { method: 'GET' },
@@ -1109,6 +1121,45 @@ export class UserCloudflareAccountApi {
       throw new CloudflareAccountApiError('Cloudflare did not provision the Computer workspace namespace.');
     }
     return { workerVersionId, namespaceId: namespace.id };
+  }
+
+  /** Upload and deploy in one request; the only path that creates a Worker or applies DO lifecycle. */
+  private async uploadWorkerDirectly(workerName: string, form: FormData): Promise<string> {
+    const uploaded = await parseCloudflareEnvelope<{ id?: string; etag?: string }>(
+      await this.callRaw(
+        `/workers/scripts/${encodeURIComponent(workerName)}?excludeScript=true&bindings_inherit=strict`,
+        {
+          method: 'PUT',
+          body: form,
+        },
+      ),
+    );
+    if (
+      uploaded.id !== workerName ||
+      typeof uploaded.etag !== 'string' ||
+      uploaded.etag.length < 1 ||
+      uploaded.etag.length > 256
+    ) {
+      throw new CloudflareAccountApiError('Cloudflare did not read back the deployed Worker.');
+    }
+    const { fullyRoutedVersions } = newestWorkerDeployment(
+      requireWorkerDeployments(
+        await this.call<unknown>(`/workers/scripts/${encodeURIComponent(workerName)}/deployments`, { method: 'GET' }),
+      ),
+    );
+    if (fullyRoutedVersions.length !== 1 || !UUID_PATTERN.test(fullyRoutedVersions[0]!.version_id)) {
+      throw new CloudflareAccountApiError('Cloudflare returned an ambiguous Worker deployment.');
+    }
+    const workerVersionId = fullyRoutedVersions[0]!.version_id;
+    // Prove the active deployment serves the bytes this request uploaded, not a concurrent write.
+    const version = await this.call<{ id?: string; resources?: { script?: { etag?: string } } }>(
+      `/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(workerVersionId)}`,
+      { method: 'GET' },
+    );
+    if (version.id !== workerVersionId || version.resources?.script?.etag !== uploaded.etag) {
+      throw new CloudflareAccountApiError('Cloudflare did not read back the deployed Worker.');
+    }
+    return workerVersionId;
   }
 
   async ensureWorkspaceRuntimeContainer(args: {
@@ -1286,10 +1337,10 @@ export class UserCloudflareAccountApi {
       `/workers/scripts/${encodeURIComponent(workerName)}/subdomain`,
       {
         method: 'POST',
-        body: JSON.stringify({ enabled: true, previews_enabled: false }),
+        body: JSON.stringify({ enabled: true, previews_enabled: DEPLOYMENT_PREVIEW_URLS_ENABLED }),
       },
     );
-    if (state.enabled !== true || state.previews_enabled !== false) {
+    if (state.enabled !== true || state.previews_enabled !== DEPLOYMENT_PREVIEW_URLS_ENABLED) {
       throw new CloudflareAccountApiError('Cloudflare returned invalid managed Worker subdomain state.');
     }
     await this.readExactWorkerSubdomainState(workerName);
@@ -1327,15 +1378,12 @@ export class UserCloudflareAccountApi {
     if (listed === null) {
       return null;
     }
-    const active = requireWorkerDeployments(listed).sort((left, right) =>
-      right.created_on.localeCompare(left.created_on),
-    )[0];
-    const activeVersions = active?.versions.filter((version) => version.percentage === 100) ?? [];
-    if (!active?.id || activeVersions.length !== 1 || !activeVersions[0]?.version_id) {
+    const { deployment: active, fullyRoutedVersions } = newestWorkerDeployment(requireWorkerDeployments(listed));
+    if (!active?.id || fullyRoutedVersions.length !== 1 || !fullyRoutedVersions[0]?.version_id) {
       throw new CloudflareAccountApiError('Cloudflare returned an ambiguous active Worker deployment.');
     }
-    const workerVersionId = activeVersions[0].version_id;
-    const [version, schedules] = await Promise.all([
+    const workerVersionId = fullyRoutedVersions[0].version_id;
+    const [version, schedules, subdomainState] = await Promise.all([
       this.call<{
         id?: string;
         resources?: {
@@ -1347,6 +1395,7 @@ export class UserCloudflareAccountApi {
         method: 'GET',
       }),
       this.call<unknown>(`/workers/scripts/${encodeURIComponent(workerName)}/schedules`, { method: 'GET' }),
+      this.readExactWorkerSubdomainState(workerName),
     ]);
     if (
       version.id !== workerVersionId ||
@@ -1370,6 +1419,8 @@ export class UserCloudflareAccountApi {
       crons,
       compatibilityDate: version.resources.script_runtime.compatibility_date,
       compatibilityFlags: version.resources.script_runtime.compatibility_flags,
+      workersDevEnabled: subdomainState.enabled,
+      previewUrlsEnabled: subdomainState.previewsEnabled,
     };
   }
 
@@ -1909,11 +1960,22 @@ function existingD1DatabaseId(value: unknown, resourceName: string): string | nu
   return existing.uuid;
 }
 
-function requireWorkerDeployments(value: unknown): Array<{
+/** The newest deployment Cloudflare lists, and the versions it routes all production traffic to. */
+function newestWorkerDeployment(deployments: WorkerDeploymentRow[]) {
+  const deployment = deployments.sort((left, right) => right.created_on.localeCompare(left.created_on))[0];
+  return {
+    deployment,
+    fullyRoutedVersions: deployment?.versions.filter((version) => version.percentage === 100) ?? [],
+  };
+}
+
+type WorkerDeploymentRow = {
   id: string;
   created_on: string;
   versions: Array<{ percentage: number; version_id: string }>;
-}> {
+};
+
+function requireWorkerDeployments(value: unknown): WorkerDeploymentRow[] {
   if (!isRecord(value) || !Array.isArray(value.deployments)) {
     throw new CloudflareAccountApiError('Cloudflare returned invalid Worker deployments.');
   }

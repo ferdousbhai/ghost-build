@@ -44,7 +44,10 @@ describe('public trust contract', () => {
     const privacy = readFileSync('app/routes/privacy.tsx', 'utf8');
 
     expect(privacy).toContain('erases every record the operator holds');
-    expect(privacy).toContain('deployed are retained, keep running, keep billing to your account');
+    expect(privacy).toContain('deployed are retained, keep running');
+    expect(privacy).toContain('keep billing to your account');
+    expect(privacy).toContain('unpromoted preview versions');
+    expect(privacy).toContain('production and preview D1 databases');
     expect(privacy).not.toContain('self-service export or deletion during public beta');
   });
 

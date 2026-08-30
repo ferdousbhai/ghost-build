@@ -336,6 +336,23 @@ export async function recordDeploymentResource(args: {
     .run();
 }
 
+export async function findDeploymentResource(
+  db: D1Database,
+  deploymentId: string,
+  resourceType: string,
+  logicalName: string,
+): Promise<{ providerResourceId: string; createdAt: number } | null> {
+  const row = await db
+    .prepare(
+      `SELECT provider_resource_id, created_at
+       FROM deployment_resources
+       WHERE deployment_id = ? AND resource_type = ? AND logical_name = ?`,
+    )
+    .bind(deploymentId, resourceType, logicalName)
+    .first<{ provider_resource_id: string; created_at: number }>();
+  return row ? { providerResourceId: row.provider_resource_id, createdAt: row.created_at } : null;
+}
+
 export async function transitionDeployment(args: {
   db: D1Database;
   deploymentId: string;

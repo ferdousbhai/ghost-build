@@ -74,6 +74,8 @@ describe('orphaned app resource discovery', () => {
         listD1Databases: vi.fn(async () => [
           { id: 'a', name: `ghostbuild-${DEPLOYMENT}`, createdAt: STALE },
           { id: 'b', name: `ghostbuild-${DEPLOYMENT}-agent-security`, createdAt: STALE },
+          { id: 'preview', name: `ghostbuild-${DEPLOYMENT}-preview`, createdAt: STALE },
+          { id: 'preview-agent', name: `ghostbuild-${DEPLOYMENT}-preview-agent`, createdAt: STALE },
         ]),
         listKvNamespaces: vi.fn(async () => [{ id: 'c', name: `ghostbuild-${DEPLOYMENT}-cache` }]),
         listR2Buckets: vi.fn(async () => [{ name: `ghostbuild-${DEPLOYMENT}-storage`, createdAt: STALE }]),
@@ -85,6 +87,8 @@ describe('orphaned app resource discovery', () => {
       `ghostbuild-${DEPLOYMENT}`,
       `ghostbuild-${DEPLOYMENT}-agent-security`,
       `ghostbuild-${DEPLOYMENT}-cache`,
+      `ghostbuild-${DEPLOYMENT}-preview`,
+      `ghostbuild-${DEPLOYMENT}-preview-agent`,
       `ghostbuild-${DEPLOYMENT}-storage`,
     ]);
   });
