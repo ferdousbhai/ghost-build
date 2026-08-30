@@ -57,16 +57,35 @@ plan's later phases:
   exist as expected for the broad profile.
 - Rough scale: ~200 permission groups across ~13 categories, i.e. several hundred scope IDs.
 
-## Still unverified (needs an API credential or a staging consent run)
+## Scope catalog fetched (same day, authorized cloudflare-api MCP)
 
-1. Exact scope IDs for the broad profile: the dashboard shows display names, not IDs.
-   The authoritative list is `GET https://api.cloudflare.com/client/v4/oauth/scopes`
-   (Bearer token). The checked-in manifest must be generated from that response with a
-   recorded digest.
-2. Whether the token response or callback carries the granted `scope` string once optional
-   scopes exist, and its exact contents in Full access / Read only / custom-partial consent
-   modes (staging consent runs).
-3. Authorize-URL size with the full catalog requested.
-4. A Ghostbuild-issued access token as direct bearer auth against
-   `https://mcp.cloudflare.com/mcp` (tool discovery + harmless read).
-5. Refresh behaviour and `insufficient_scope` reporting for partial grants.
+With the operator's explicit approval, the official Cloudflare API MCP server was authorized
+(its own OAuth flow, consent screen observed live) and `GET /oauth/scopes` was fetched through
+it - no token ever reached this repository or the session transcript.
+
+- Catalog: **383 scope IDs**, checked in verbatim as
+  `docs/cloudflare-oauth-scope-catalog-2026-08-30.tsv` (id, category, display name; sorted).
+- SHA-256 of the checked-in TSV: `63843689e99c1ac765e8ecc28c7054f1d7a4aa47a3dae8f01dae7370bcad2ee5`.
+- All 8 core manifest IDs are present verbatim. `offline_access` is not in the catalog - it is
+  an OAuth protocol scope, not a permission, confirming the manifest's treatment.
+- Registrar registration authority is `registrar-domains.admin` (plus `.read`, and sandbox
+  variants) - an Admin access level, matching the plan's approval-gating for purchases.
+- Access levels observed beyond read/write: admin, bind, edit, evaluate, index, metadata_read,
+  monitoring, purge, report, revoke, run, send, shield, location - the broad-profile generator
+  must not assume a read/write dichotomy.
+
+The MCP server's own consent screen (a live example of a broad-grant consent) showed 194
+requested permissions across 13 categories with a REQUIRED section (User Read, Background
+Access) and an ADDITIONAL ACCESS section with per-category expansion and an Edit Permissions
+control - the consent UX the plan's Phase 3 copy must anticipate.
+
+## Still unverified (needs a staging consent run with the Ghostbuild client)
+
+1. Whether Ghostbuild's token response or callback carries the granted `scope` string once
+   optional scopes exist, and its exact contents in Full access / Read only / custom-partial
+   consent modes.
+2. Authorize-URL size with the full catalog requested.
+3. A Ghostbuild-issued access token as direct bearer auth against
+   `https://mcp.cloudflare.com/mcp` (the Claude Code MCP client authenticated successfully with
+   the server's own client, which proves the endpoint and flow but not Ghostbuild's token).
+4. Refresh behaviour and `insufficient_scope` reporting for partial grants.

@@ -1,0 +1,383 @@
+access-acct.read	cloudflare_one_and_zero_trust	Access: Organizations, Identity Providers, and Groups Read
+access-acct.revoke	cloudflare_one_and_zero_trust	Access: Organizations, Identity Providers, and Groups Revoke
+access-acct.write	cloudflare_one_and_zero_trust	Access: Organizations, Identity Providers, and Groups Write
+access-app.read	cloudflare_one_and_zero_trust	Access: Apps Read
+access-app.revoke	cloudflare_one_and_zero_trust	Access: Apps Revoke
+access-app.write	cloudflare_one_and_zero_trust	Access: Apps Write
+access-audit-log.read	cloudflare_one_and_zero_trust	Access: Audit Logs Read
+access-certificate.read	cloudflare_one_and_zero_trust	Access: Mutual TLS Certificates Read
+access-certificate.write	cloudflare_one_and_zero_trust	Access: Mutual TLS Certificates Write
+access-custom-page.read	cloudflare_one_and_zero_trust	Access: Custom Pages Read
+access-custom-page.write	cloudflare_one_and_zero_trust	Access: Custom Pages Write
+access-device-posture.read	cloudflare_one_and_zero_trust	Access: Device Posture Read
+access-device-posture.write	cloudflare_one_and_zero_trust	Access: Device Posture Write
+access-group.read	cloudflare_one_and_zero_trust	Access: Groups Read
+access-group.write	cloudflare_one_and_zero_trust	Access: Groups Write
+access-idp.read	cloudflare_one_and_zero_trust	Access: Identity Providers Read
+access-idp.write	cloudflare_one_and_zero_trust	Access: Identity Providers Write
+access-key.read	cloudflare_one_and_zero_trust	Access: Keys Read
+access-key.write	cloudflare_one_and_zero_trust	Access: Keys Write
+access-org.read	cloudflare_one_and_zero_trust	Access: Organizations Read
+access-org.revoke	cloudflare_one_and_zero_trust	Access: Organizations Revoke
+access-org.write	cloudflare_one_and_zero_trust	Access: Organizations Write
+access-policy-test.read	cloudflare_one_and_zero_trust	Access: Policy Test Read
+access-policy-test.write	cloudflare_one_and_zero_trust	Access: Policy Test Write
+access-policy.read	cloudflare_one_and_zero_trust	Access: Policies Read
+access-policy.write	cloudflare_one_and_zero_trust	Access: Policies Write
+access-population.read	cloudflare_one_and_zero_trust	Access: Population Read
+access-population.write	cloudflare_one_and_zero_trust	Access: Population Write
+access-saml-certificate.read	cloudflare_one_and_zero_trust	Access: SAML Certificates Read
+access-saml-certificate.write	cloudflare_one_and_zero_trust	Access: SAML Certificates Write
+access-scim-log.read	cloudflare_one_and_zero_trust	Access: SCIM Logs Read
+access-seats.write	cloudflare_one_and_zero_trust	Zero Trust: Seats Write
+access-service-token.read	cloudflare_one_and_zero_trust	Access: Service Tokens Read
+access-service-token.write	cloudflare_one_and_zero_trust	Access: Service Tokens Write
+access-ssh-auditing.read	cloudflare_one_and_zero_trust	Access: SSH Auditing Read
+access-ssh-auditing.write	cloudflare_one_and_zero_trust	Access: SSH Auditing Write
+access-tag.read	cloudflare_one_and_zero_trust	Access: Tags Read
+access-tag.write	cloudflare_one_and_zero_trust	Access: Tags Write
+access-users.read	cloudflare_one_and_zero_trust	Access: Users Read
+access-users.write	cloudflare_one_and_zero_trust	Access: Users Write
+access.read	cloudflare_one_and_zero_trust	Access: Apps and Policies Read
+access.revoke	cloudflare_one_and_zero_trust	Access: Apps and Policies Revoke
+access.write	cloudflare_one_and_zero_trust	Access: Apps and Policies Write
+account-analytics.read	analytics_and_logs	Account Analytics Read
+account-api-gateway.read	account_and_billing	Account API Gateway Read
+account-api-gateway.write	account_and_billing	Account API Gateway
+account-custom-asset.read	account_and_billing	Account Custom Asset Read
+account-custom-asset.write	account_and_billing	Account Custom Asset Write
+account-custom-error-rules.read	rules_and_configuration	Account Custom Error Rules Read
+account-custom-error-rules.write	rules_and_configuration	Account Custom Error Rules Write
+account-custom-pages.read	rules_and_configuration	Account Custom Pages Read
+account-custom-pages.write	rules_and_configuration	Account Custom Pages Write
+account-disable-esc.read	cache_and_performance	Disable ESC Read
+account-disable-esc.write	cache_and_performance	Disable ESC Write
+account-dns-settings.read	dns_and_zones	Account DNS Settings Read
+account-dns-settings.write	dns_and_zones	Account DNS Settings Write
+account-firewall-access-rules.read	app_security	Account Firewall Access Rules Read
+account-firewall-access-rules.write	app_security	Account Firewall Access Rules Write
+account-logs.read	analytics_and_logs	Logs Read
+account-logs.write	analytics_and_logs	Logs Write
+account-rule-lists.read	rules_and_configuration	Account Rule Lists Read
+account-rule-lists.write	rules_and_configuration	Account Rule Lists Write
+account-rulesets.read	rules_and_configuration	Account Rulesets Read
+account-rulesets.write	rules_and_configuration	Account Rulesets Write
+account-security-center-insights.read	app_security	Account Security Center Insights Read
+account-security-center-insights.write	app_security	Account Security Center Insights Write
+account-settings.read	account_and_billing	Account Settings Read
+account-settings.write	account_and_billing	Account Settings Write
+account-ssl-and-certificates.read	cache_and_performance	Account: SSL and Certificates Read
+account-ssl-and-certificates.write	cache_and_performance	Account: SSL and Certificates Write
+account-waf.read	app_security	Account WAF Read
+account-waf.write	app_security	Account WAF Write
+account-waiting-rooms.read	network_services	Account Waiting Rooms Read
+address-maps.read	network_services	Address Maps Read
+address-maps.write	network_services	Address Maps Write
+agent-memory.write	developer_platform	Agent Memory Write
+agw.read	ai_and_machine_learning	Agents Gateway Read
+agw.run	ai_and_machine_learning	Agents Gateway Run
+agw.write	ai_and_machine_learning	Agents Gateway Write
+ai-search.index	ai_and_machine_learning	AI Search Index Engine
+ai-search.metadata_read	ai_and_machine_learning	AI Search Metadata Read
+ai-search.read	ai_and_machine_learning	AI Search Read
+ai-search.run	ai_and_machine_learning	AI Search Run
+ai-search.write	ai_and_machine_learning	AI Search Write
+ai.read	ai_and_machine_learning	Workers AI Read
+ai.write	ai_and_machine_learning	Workers AI Write
+aiaudit.read	ai_and_machine_learning	AI Audit Read
+aiaudit.write	ai_and_machine_learning	AI Audit Write
+aig.metadata_read	ai_and_machine_learning	AI Gateway Metadata Read
+aig.read	ai_and_machine_learning	AI Gateway Read
+aig.run	ai_and_machine_learning	AI Gateway Run
+aig.write	ai_and_machine_learning	AI Gateway Write
+analytics.read	analytics_and_logs	Analytics Read
+api-gateway.read	app_security	Domain API Gateway Read
+api-gateway.write	app_security	Domain API Gateway
+apps.write	account_and_billing	Apps Write
+argotunnel.read	cloudflare_one_and_zero_trust	Cloudflare Tunnel Read
+argotunnel.write	cloudflare_one_and_zero_trust	Cloudflare Tunnel Write
+artifacts.read	other	Artifacts Read
+artifacts.write	other	Artifacts Write
+bot-management-feedback.read	app_security	Bot Management Feedback Report Read
+bot-management-feedback.write	app_security	Bot Management Feedback Report Write
+bot-management.read	app_security	Bot Management Read
+bot-management.write	app_security	Bot Management Write
+browser-rendering.read	developer_platform	Browser Run Read
+browser-rendering.write	developer_platform	Browser Run Write
+cache-settings.read	cache_and_performance	Cache Settings Read
+cache-settings.write	cache_and_performance	Cache Settings Write
+cache.purge	cache_and_performance	Cache Purge
+calls.read	media	Calls Read
+calls.write	media	Calls Write
+casb.read	cloudflare_one_and_zero_trust	CASB Read
+casb.write	cloudflare_one_and_zero_trust	CASB Write
+cf-agents.read	developer_platform	CF Agents Read
+cf-agents.write	developer_platform	CF Agents Write
+challenge-widgets.read	app_security	Turnstile Sites Read
+challenge-widgets.write	app_security	Turnstile Sites Write
+chinanetwork-steering.read	network_services	China Network Steering Read
+chinanetwork-steering.write	network_services	China Network Steering Write
+cloud-connector.read	developer_platform	Cloud Connector Read
+cloud-connector.write	developer_platform	Cloud Connector Write
+cloud-email-security.read	email_and_messaging	Cloud Email Security: Read
+cloud-email-security.write	email_and_messaging	Cloud Email Security: Write
+cloudchamber.read	developer_platform	Cloudchamber Read
+cloudchamber.write	developer_platform	Cloudchamber Write
+cloudforce-one.read	app_security	Cloudforce One Read
+cloudforce-one.write	app_security	Cloudforce One Write
+config-settings.read	rules_and_configuration	Config Settings Read
+config-settings.write	rules_and_configuration	Config Settings Write
+connectivity-directory.admin	network_services	Connectivity Directory Admin
+connectivity-directory.bind	network_services	Connectivity Directory Bind
+connectivity-directory.read	network_services	Connectivity Directory Read
+constellation.read	developer_platform	Constellation Read
+constellation.write	developer_platform	Constellation Write
+containers.read	developer_platform	Workers Containers Read
+containers.write	developer_platform	Workers Containers Write
+custom-errors.read	rules_and_configuration	Custom Errors Read
+custom-errors.write	rules_and_configuration	Custom Errors Write
+custom-pages.read	rules_and_configuration	Custom Pages Read
+custom-pages.write	rules_and_configuration	Custom Pages Write
+d1.metadata_read	developer_platform	D1 Metadata Read
+d1.read	developer_platform	D1 Read
+d1.write	developer_platform	D1 Write
+ddos-botnet-feed.read	app_security	DDoS Botnet Feed Read
+ddos-botnet-feed.write	app_security	DDoS Botnet Feed Write
+ddos-protection.read	app_security	DDoS Protection Read
+ddos-protection.write	app_security	DDoS Protection Write
+dls.read	cloudflare_one_and_zero_trust	DLS: Read
+dls.write	cloudflare_one_and_zero_trust	DLS: Write
+dns-firewall.read	dns_and_zones	DNS Firewall Read
+dns-firewall.write	dns_and_zones	DNS Firewall Write
+dns-view.read	dns_and_zones	DNS View Read
+dns-view.write	dns_and_zones	DNS View Write
+dns.read	dns_and_zones	DNS Read
+dns.write	dns_and_zones	DNS Write
+domain-page-shield.read	app_security	Domain Page Shield Read
+domain-page.shield	app_security	Domain Page Shield
+dynamic-redirect.read	rules_and_configuration	Dynamic URL Redirects Read
+dynamic-redirect.write	rules_and_configuration	Dynamic URL Redirects Write
+email-routing-account-rule.read	email_and_messaging	Email Routing Account Rules Read
+email-routing-address.read	email_and_messaging	Email Routing Addresses Read
+email-routing-address.write	email_and_messaging	Email Routing Addresses Write
+email-routing-rule.read	email_and_messaging	Email Routing Rules Read
+email-routing-rule.write	email_and_messaging	Email Routing Rules Write
+email-routing-suppression.read	email_and_messaging	Email Routing Suppressions Read
+email-routing-suppression.write	email_and_messaging	Email Routing Suppressions Write
+email-security-dmarcreports.read	email_and_messaging	Email Security DMARC Reports Read
+email-security-dmarcreports.write	email_and_messaging	Email Security DMARC Reports Write
+email-sending.read	email_and_messaging	Email Sending Read
+email-sending.write	email_and_messaging	Email Sending Write
+fbm.admin	network_services	Magic Network Monitoring Admin
+fbm.read	network_services	Magic Network Monitoring Config Read
+fbm.write	network_services	Magic Network Monitoring Config Write
+field-extractor.read	app_security	Field Extractors Read
+field-extractor.write	app_security	Field Extractors Write
+firewall-for-ai.read	ai_and_machine_learning	Firewall for AI Read
+firewall-for-ai.write	ai_and_machine_learning	Firewall for AI Write
+firewall-services.read	app_security	Firewall Services Read
+firewall-services.write	app_security	Firewall Services Write
+flagship.evaluate	developer_platform	Flagship Evaluate
+flagship.read	developer_platform	Flagship Read
+flagship.write	developer_platform	Flagship Write
+fraud-detection-pii.read	app_security	Account Abuse Protection PII Read
+fraud-detection.read	app_security	Fraud Detection Read
+fraud-detection.write	app_security	Fraud Detection Write
+fraud-events.write	app_security	Fraud Events Write
+fraud-feedback.read	app_security	Fraud Feedback Read
+fraud-feedback.write	app_security	Fraud Feedback Write
+healthcheck.read	network_services	Health Checks Read
+healthcheck.write	network_services	Health Checks Write
+http-applications.read	app_security	HTTP Applications Read
+http-applications.write	app_security	HTTP Applications Write
+http-ddos-managed-ruleset.read	app_security	HTTP DDoS Managed Ruleset Read
+http-ddos-managed-ruleset.write	app_security	HTTP DDoS Managed Ruleset Write
+images.metadata_read	media	Images Metadata Read
+images.read	media	Images Read
+images.write	media	Images Write
+integration.write	account_and_billing	Integration Write
+intel.read	analytics_and_logs	Intel Read
+intel.write	analytics_and_logs	Intel Write
+iot.read	app_security	IOT Read
+iot.write	app_security	IOT Write
+ip-prefix-bgp-on-demand.read	network_services	IP Prefixes: BGP On Demand Read
+ip-prefix-bgp-on-demand.write	network_services	IP Prefixes: BGP On Demand Write
+ip-prefix.read	network_services	IP Prefixes: Read
+ip-prefix.write	network_services	IP Prefixes: Write
+l4-ddos-managed-ruleset.read	app_security	L4 DDoS Managed Ruleset Read
+l4-ddos-managed-ruleset.write	app_security	L4 DDoS Managed Ruleset Write
+load-balancers-account.read	network_services	Load Balancers Account Read
+load-balancers-account.write	network_services	Load Balancers Account Write
+load-balancers.read	network_services	Load Balancers Read
+load-balancers.write	network_services	Load Balancers Write
+load-balancing-monitors-and-pools.read	network_services	Load Balancing: Monitors and Pools Read
+load-balancing-monitors-and-pools.write	network_services	Load Balancing: Monitors and Pools Write
+logs.read	analytics_and_logs	Logs Read
+logs.write	analytics_and_logs	Logs Write
+magic-firewall.read	network_services	Magic Firewall Read
+magic-firewall.write	network_services	Magic Firewall Write
+magic-transit.read	network_services	Magic Transit Read
+magic-transit.write	network_services	Magic Transit Write
+magic-wan.read	network_services	Magic WAN Read
+magic-wan.write	network_services	Magic WAN Write
+managed-headers.read	rules_and_configuration	Managed headers Read
+managed-headers.write	rules_and_configuration	Managed headers Write
+mass-url-redirects.read	rules_and_configuration	Mass URL Redirects Read
+mass-url-redirects.write	rules_and_configuration	Mass URL Redirects Write
+mcp-portals.read	developer_platform	MCP Portals Read
+mcp-portals.write	developer_platform	MCP Portals Write
+memberships.read	account_and_billing	Memberships Read
+memberships.write	account_and_billing	Memberships Write
+messaging.edit	developer_platform	Messaging Edit
+messaging.metadata_read	developer_platform	Messaging Metadata Read
+messaging.read	developer_platform	Messaging Read
+moq.read	media	MoQ Read
+moq.write	media	MoQ Write
+notifications.read	account_and_billing	Notifications Read
+notifications.write	account_and_billing	Notifications Write
+origin.read	rules_and_configuration	Origin Read
+origin.write	rules_and_configuration	Origin Write
+page-rules.read	app_security	Page Rules Read
+page-rules.write	app_security	Page Rules Write
+page-shield.read	app_security	Page Shield Read
+page.read	developer_platform	Pages Read
+page.shield	app_security	Page Shield
+page.write	developer_platform	Pages Write
+pages.metadata_read	developer_platform	Pages Metadata Read
+payments-gateway.read	rules_and_configuration	Payments Gateway Read
+payments-gateway.write	rules_and_configuration	Payments Gateway Write
+pcaps-api.read	network_services	Magic Firewall Packet Captures - Read PCAPs API
+pcaps-api.write	network_services	Magic Firewall Packet Captures - Write PCAPs API
+pipelines.read	developer_platform	Pipelines Read
+pipelines.send	developer_platform	Pipelines Send
+pipelines.write	developer_platform	Pipelines Write
+precursor.read	app_security	Precursor Read
+precursor.write	app_security	Precursor Write
+pubsub.read	developer_platform	Pubsub Configuration Read
+pubsub.write	developer_platform	Pubsub Configuration Write
+query-cache.read	developer_platform	Hyperdrive Read
+query-cache.write	developer_platform	Hyperdrive Write
+queues.metadata_read	developer_platform	Queues Metadata Read
+queues.read	developer_platform	Queues Read
+queues.write	developer_platform	Queues Write
+r2-catalog-sql.read	developer_platform	Workers R2 SQL Read
+r2-catalog.read	developer_platform	Workers R2 Data Catalog Read
+r2-catalog.write	developer_platform	Workers R2 Data Catalog Write
+radar.read	analytics_and_logs	Radar Read
+rag.read	ai_and_machine_learning	Auto Rag Read
+rag.run	ai_and_machine_learning	Auto Rag Write Run Engine
+rag.write	ai_and_machine_learning	Auto Rag Write
+realtime.admin	developer_platform	Realtime Admin
+realtime.read	developer_platform	Realtime Read
+realtime.write	developer_platform	Realtime
+registrar-domains.admin	dns_and_zones	Registrar Domains Admin
+registrar-domains.read	dns_and_zones	Registrar Domains Read
+registrar-sandbox-domains.admin	dns_and_zones	Registrar Sandbox Domains Admin
+registrar-sandbox-domains.read	dns_and_zones	Registrar Sandbox Domains Read
+reports-application-security-report.read	app_security	Application Security Reports Read
+request-tracer.read	app_security	Allow Request Tracer Read
+resource-library.read	other	Resource Library Read
+resource-library.write	other	Resource Library Write
+resource-sharing.read	other	Resource Sharing Read
+response-compression.read	rules_and_configuration	Response Compression Read
+response-compression.write	rules_and_configuration	Response Compression Write
+sanitize.read	app_security	Sanitize Read
+sanitize.write	app_security	Sanitize Write
+scim-provisioning.write	account_and_billing	SCIM Provisioning
+secrets-store.read	developer_platform	Secrets Store Read
+secrets-store.write	developer_platform	Secrets Store Write
+select-configuration.read	rules_and_configuration	Select Configuration Read
+select-configuration.write	rules_and_configuration	Select Configuration Write
+snippets.read	rules_and_configuration	Snippets Read
+snippets.write	rules_and_configuration	Snippets Write
+ssl-and-certificates.read	cache_and_performance	SSL and Certificates Read
+ssl-and-certificates.write	cache_and_performance	SSL and Certificates Write
+stream.metadata_read	media	Stream Metadata Read
+stream.read	media	Stream Read
+stream.write	media	Stream Write
+tag.read	app_security	Tag Read
+tag.write	app_security	Tag Write
+teams-cds-compute-account.read	cloudflare_one_and_zero_trust	Cloudflare CDS Compute Account Read
+teams-cds-compute-account.write	cloudflare_one_and_zero_trust	Cloudflare CDS Compute Account Write
+teams-connector-cloudflared.monitoring	cloudflare_one_and_zero_trust	Cloudflare One Connector Monitoring: cloudflared
+teams-connector-cloudflared.read	cloudflare_one_and_zero_trust	Cloudflare One Connector: cloudflared Read
+teams-connector-cloudflared.write	cloudflare_one_and_zero_trust	Cloudflare One Connector: cloudflared Write
+teams-connector-warp.read	cloudflare_one_and_zero_trust	Cloudflare One Connector: WARP Read
+teams-connector-warp.write	cloudflare_one_and_zero_trust	Cloudflare One Connector: WARP Write
+teams-connectors.read	cloudflare_one_and_zero_trust	Cloudflare One Connectors Read
+teams-connectors.write	cloudflare_one_and_zero_trust	Cloudflare One Connectors Write
+teams-dex.read	cloudflare_one_and_zero_trust	Cloudflare DEX Read
+teams-dex.write	cloudflare_one_and_zero_trust	Cloudflare DEX Write
+teams-networks.read	cloudflare_one_and_zero_trust	Cloudflare One Networks Read
+teams-networks.write	cloudflare_one_and_zero_trust	Cloudflare One Networks Write
+teams-pii.read	cloudflare_one_and_zero_trust	Zero Trust: PII Read
+teams-resilience.read	cloudflare_one_and_zero_trust	Zero Trust Resilience Read
+teams-resilience.write	cloudflare_one_and_zero_trust	Zero Trust Resilience Write
+teams-secure.location	cloudflare_one_and_zero_trust	Cloudflare Zero Trust Secure DNS Locations Write
+teams.read	cloudflare_one_and_zero_trust	Zero Trust Read
+teams.report	cloudflare_one_and_zero_trust	Zero Trust Report
+teams.write	cloudflare_one_and_zero_trust	Zero Trust Write
+transform-rules.read	rules_and_configuration	Transform Rules Read
+transform-rules.write	rules_and_configuration	Transform Rules Write
+trust-and-safety.read	app_security	Trust and Safety Read
+trust-and-safety.write	app_security	Trust and Safety Write
+url-scanner.read	app_security	URL Scanner Read
+url-scanner.write	app_security	URL Scanner Write
+user-details.read	account_and_billing	User Details Read
+user-details.write	account_and_billing	User Details Write
+vectorize.read	developer_platform	Vectorize Read
+vectorize.write	developer_platform	Vectorize Write
+waiting-rooms.read	network_services	Waiting Rooms Read
+waiting-rooms.write	network_services	Waiting Rooms Write
+web3-hostnames.read	network_services	Web3 Hostnames Read
+web3-hostnames.write	network_services	Web3 Hostnames Write
+websearch.metadata_read	ai_and_machine_learning	Websearch Metadata Read
+websearch.read	ai_and_machine_learning	Websearch Read
+websearch.run	ai_and_machine_learning	Websearch Run
+websearch.write	ai_and_machine_learning	Websearch Write
+workers-ci.read	developer_platform	Workers CI Read
+workers-ci.write	developer_platform	Workers CI Write
+workers-kv-storage.metadata_read	developer_platform	Workers KV Storage Metadata Read
+workers-kv-storage.read	developer_platform	Workers KV Storage Read
+workers-kv-storage.write	developer_platform	Workers KV Storage Write
+workers-observability-telemetry.write	developer_platform	Workers Observability Telemetry Write
+workers-observability.read	developer_platform	Workers Observability Read
+workers-observability.write	developer_platform	Workers Observability Write
+workers-r2-bucket-item.read	developer_platform	Workers R2 Storage Bucket Item Read
+workers-r2-bucket-item.write	developer_platform	Workers R2 Storage Bucket Item Write
+workers-r2.metadata_read	developer_platform	Workers R2 Storage Metadata Read
+workers-r2.read	developer_platform	Workers R2 Storage Read
+workers-r2.write	developer_platform	Workers R2 Storage Write
+workers-routes.read	developer_platform	Workers Routes Read
+workers-routes.write	developer_platform	Workers Routes Write
+workers-scripts.bind	developer_platform	Workers Scripts Bind
+workers-scripts.edit	developer_platform	Workers Editor
+workers-scripts.metadata_read	developer_platform	Workers Metadata Read-Only
+workers-scripts.read	developer_platform	Workers Scripts Read
+workers-scripts.write	developer_platform	Workers Scripts Write
+workers-tail.read	developer_platform	Workers Tail Read
+workers_ai.metadata_read	ai_and_machine_learning	Workers AI Metadata Read
+zaraz.edit	app_security	Zaraz Edit
+zaraz.read	app_security	Zaraz Read
+zaraz.write	app_security	Zaraz Admin
+zone-access.read	cloudflare_one_and_zero_trust	Access: Apps and Policies Read
+zone-access.revoke	cloudflare_one_and_zero_trust	Access: Apps and Policies Revoke
+zone-access.write	cloudflare_one_and_zero_trust	Access: Apps and Policies Write
+zone-custom-asset.read	dns_and_zones	Zone Custom Asset Read
+zone-custom-asset.write	dns_and_zones	Zone Custom Asset Write
+zone-disable-esc.read	cache_and_performance	Disable ESC Read
+zone-disable-esc.write	cache_and_performance	Disable ESC Write
+zone-dns-settings.read	dns_and_zones	Zone DNS Settings Read
+zone-dns-settings.write	dns_and_zones	Zone DNS Settings Write
+zone-security-center-insights.read	app_security	Zone Security Center Insights Read
+zone-security-center-insights.write	app_security	Zone Security Center Insights Write
+zone-settings.read	dns_and_zones	Zone Settings Read
+zone-settings.write	dns_and_zones	Zone Settings Write
+zone-transform-rules.read	rules_and_configuration	Zone Transform Rules Read
+zone-transform-rules.write	rules_and_configuration	Zone Transform Rules Write
+zone-versioning.read	dns_and_zones	Zone Versioning Read
+zone-versioning.write	dns_and_zones	Zone Versioning Write
+zone-waf.read	app_security	Zone WAF Read
+zone-waf.write	app_security	Zone WAF Write
+zone.read	dns_and_zones	Zone Read
+zone.write	dns_and_zones	Zone Write
