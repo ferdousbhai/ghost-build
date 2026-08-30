@@ -110,18 +110,16 @@ export async function activateCloudflareConnection(args: {
   const grantedScopesJson = JSON.stringify(args.grantedOAuthScopes);
   let row: CloudflareConnectionRow | null;
   try {
-    // The legacy granted_scopes_json column keeps receiving the capability list so a
-    // still-serving previous deployment reads a coherent connection during rollout.
     row =
       args.expectedGeneration === null
         ? await args.db
             .prepare(
               `INSERT INTO cloudflare_connections (
         id, user_id, account_id, account_name, status, credential_handle,
-        granted_scopes_json, granted_capabilities_json, requested_oauth_scopes_json,
-        granted_oauth_scopes_json, oauth_scope_profile_version, oauth_scope_grant_status,
-        oauth_grant_updated_at, ai_billing_enabled, connected_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        granted_capabilities_json, requested_oauth_scopes_json, granted_oauth_scopes_json,
+        oauth_scope_profile_version, oauth_scope_grant_status, oauth_grant_updated_at,
+        ai_billing_enabled, connected_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id) DO NOTHING
       RETURNING ${CONNECTION_COLUMNS}`,
             )
@@ -131,7 +129,6 @@ export async function activateCloudflareConnection(args: {
               args.accountId,
               args.accountName,
               args.credentialHandle,
-              capabilitiesJson,
               capabilitiesJson,
               requestedScopesJson,
               grantedScopesJson,
@@ -148,7 +145,7 @@ export async function activateCloudflareConnection(args: {
             .prepare(
               `UPDATE cloudflare_connections
              SET account_id = ?, account_name = ?, status = 'active', credential_handle = ?,
-                 granted_scopes_json = ?, granted_capabilities_json = ?, requested_oauth_scopes_json = ?,
+                 granted_capabilities_json = ?, requested_oauth_scopes_json = ?,
                  granted_oauth_scopes_json = ?, oauth_scope_profile_version = ?, oauth_scope_grant_status = ?,
                  oauth_grant_updated_at = ?, ai_billing_enabled = ?, connected_at = ?,
                  connection_generation = connection_generation + 1, updated_at = ?
@@ -159,7 +156,6 @@ export async function activateCloudflareConnection(args: {
               args.accountId,
               args.accountName,
               args.credentialHandle,
-              capabilitiesJson,
               capabilitiesJson,
               requestedScopesJson,
               grantedScopesJson,

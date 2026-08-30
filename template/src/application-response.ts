@@ -48,13 +48,14 @@ export function withApplicationSecurityHeaders(
   });
 }
 
+const WORKER_LABEL = "[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?";
+const ACCOUNT_LABEL = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
+const VERSIONED_WORKERS_PREVIEW_HOSTNAME = new RegExp(
+  `^[0-9a-f]{8}-${WORKER_LABEL}\\.${ACCOUNT_LABEL}\\.workers\\.dev$`,
+);
+
 function isVersionedWorkersPreviewRequest(request: Request): boolean {
-  const hostname = new URL(request.url).hostname;
-  const workerLabel = "[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?";
-  const accountLabel = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
-  return new RegExp(
-    `^[0-9a-f]{8}-${workerLabel}\\.${accountLabel}\\.workers\\.dev$`,
-  ).test(hostname);
+  return VERSIONED_WORKERS_PREVIEW_HOSTNAME.test(new URL(request.url).hostname);
 }
 
 function applyContentSecurityPolicyBaseline(

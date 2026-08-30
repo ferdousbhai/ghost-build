@@ -38,8 +38,7 @@ describe('standalone template verification source', () => {
     expect(plainServer).toContain('handler.fetch(request)');
     expect(server).not.toContain('GHOSTBUILD_ISOLATED_PREVIEW');
     expect(server).not.toContain('isAgentRoute');
-    expect(viteConfig).toContain('const cloudflareOptions = { viteEnvironment: { name: "ssr" } };');
-    expect(viteConfig).toContain('cloudflare(cloudflareOptions)');
+    expect(viteConfig).toContain('cloudflare({ viteEnvironment: { name: "ssr" } })');
     expect(viteConfig).toContain('tanstackStart()');
     expect(existsSync('template/src/preview-server.ts')).toBe(false);
     expect(existsSync('template/wrangler.preview.jsonc')).toBe(false);

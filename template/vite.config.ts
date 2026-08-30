@@ -33,11 +33,10 @@ async function productionPlugins(): Promise<PluginOption[]> {
     const { default: agents } = await import(agentsViteModule);
     agentPlugins.push(agents());
   }
-  const cloudflareOptions = { viteEnvironment: { name: "ssr" } };
   return [
     productionModuleSecurityPlugin(projectDir),
     ...agentPlugins,
-    cloudflare(cloudflareOptions),
+    cloudflare({ viteEnvironment: { name: "ssr" } }),
     tanstackStart(),
     react(),
   ];
