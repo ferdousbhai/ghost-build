@@ -107,7 +107,7 @@ function withApplicationSecurityHeaders(response: Response, pathname: string, no
 
 type ServerRoute = {
   method: 'GET' | 'POST';
-  handler: (request: Request, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
+  handler: (request: Request, env: Env) => Response | Promise<Response>;
 };
 
 const exactRoutes = new Map<string, ServerRoute>(
@@ -146,7 +146,7 @@ const exactRoutes = new Map<string, ServerRoute>(
     },
     '/api/cloudflare/runtime-session': {
       method: 'POST',
-      handler: (request, env, ctx) => cloudflareRuntimeSessionAction({ request, env, ctx }),
+      handler: (request, env) => cloudflareRuntimeSessionAction({ request, env }),
     },
     '/api/cloudflare/runtime-credential': {
       method: 'POST',
@@ -164,7 +164,7 @@ const exactRoutes = new Map<string, ServerRoute>(
 );
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+  async fetch(request: Request, env: Env) {
     const url = new URL(request.url);
     if (
       (url.hostname === PRODUCTION_HOSTNAME || url.hostname === `www.${PRODUCTION_HOSTNAME}`) &&
@@ -176,7 +176,7 @@ export default {
     }
     const pathname = url.pathname;
     const nonce = crypto.randomUUID();
-    return withApplicationSecurityHeaders(await routeApplicationRequest(request, env, nonce, ctx), pathname, nonce);
+    return withApplicationSecurityHeaders(await routeApplicationRequest(request, env, nonce), pathname, nonce);
   },
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(runScheduledMaintenance(controller.cron, env));
@@ -190,17 +190,12 @@ async function runScheduledMaintenance(_cron: string, env: Env) {
   await runDailyMaintenance(env);
 }
 
-async function routeApplicationRequest(
-  request: Request,
-  env: Env,
-  nonce: string,
-  ctx: ExecutionContext,
-): Promise<Response> {
+async function routeApplicationRequest(request: Request, env: Env, nonce: string): Promise<Response> {
   const url = new URL(request.url);
 
   const route = exactRoutes.get(url.pathname);
   if (route) {
-    return requireMethod(request, route.method, () => route.handler(request, env, ctx));
+    return requireMethod(request, route.method, () => route.handler(request, env));
   }
 
   const headers = new Headers(request.headers);

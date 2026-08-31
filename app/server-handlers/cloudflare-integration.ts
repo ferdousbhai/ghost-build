@@ -141,46 +141,15 @@ export async function cloudflareConnectionStatusAction({
   );
 }
 
-// Long enough for the claim, entitlement probe, and any fast rejection to settle on the request;
-// short enough that the multi-minute image copy is never awaited inline. Overshooting only costs an
-// extra poll, so it is set generously rather than tuned.
-const PROVISIONING_SYNC_BUDGET_MS = 8_000;
-
-type ProvisioningSettlement = { status: 'fulfilled' } | { status: 'rejected'; reason: unknown } | { status: 'pending' };
-
-/**
- * Await a provisioning run only up to the sync budget. A fast success or failure is returned so the
- * caller can answer synchronously; if the run is still going when the budget elapses it is reported
- * pending and left to finish under `waitUntil`. Both settlement outcomes are folded into the
- * returned value, so the underlying promise never rejects here regardless of which side of the race
- * wins.
- */
-async function settleWithinProvisioningSyncBudget(provisioning: Promise<unknown>): Promise<ProvisioningSettlement> {
-  const pending = Symbol('pending');
-  const settled = provisioning.then<ProvisioningSettlement, ProvisioningSettlement>(
-    () => ({ status: 'fulfilled' }),
-    (reason) => ({ status: 'rejected', reason }),
-  );
-  const timeout = new Promise<typeof pending>((resolve) => {
-    setTimeout(resolve, PROVISIONING_SYNC_BUDGET_MS, pending);
-  });
-  const raced = await Promise.race([settled, timeout]);
-  return raced === pending ? { status: 'pending' } : raced;
-}
-
 export async function cloudflareRuntimeSessionAction({
   request,
   env,
-  ctx,
   provision = provisionUserWorkspaceRuntime,
   readWorkspaceActivity = readUserWorkspaceRuntimeActivity,
   readAiGatewayCreditStatus,
 }: {
   request: Request;
   env: Env;
-  // The action only ever needs to detach provisioning from the request lifecycle, so it depends on
-  // `waitUntil` alone rather than the full context.
-  ctx?: Pick<ExecutionContext, 'waitUntil'>;
   provision?: typeof provisionUserWorkspaceRuntime;
   readWorkspaceActivity?: typeof readUserWorkspaceRuntimeActivity;
   readAiGatewayCreditStatus?: ReadAiGatewayCreditStatus;
@@ -222,31 +191,13 @@ export async function cloudflareRuntimeSessionAction({
       readWorkspaceActivity,
     }));
   if (upgradeNeeded && !upgradeDeferred) {
-    const provisioning = provision({
-      env,
-      userId: session.user.id,
-      connectionId: connection.id,
-    });
-    // Provisioning is a single multi-minute call that converges the runtime row to `ready` or
-    // `error` only if it runs to completion. Riding the client request used to strand it: a browser
-    // that navigated away mid-copy killed the fiber with the row still holding a 40-minute lease, so
-    // every later poll saw `workspace_preparing` until the lease expired. `waitUntil` detaches the
-    // work from the connection so it always reaches a terminal state. Provision persists its own
-    // failures, so the rejection is swallowed here only to keep it from surfacing as unhandled.
-    ctx?.waitUntil(provisioning.catch(() => undefined));
-    // The cheap, early outcomes — in-progress, plan-required, eligibility-unknown — all settle
-    // before the image copy, so a short budget still answers them on this request. Past it the copy
-    // owns the wall clock: hand the client `workspace_preparing` and let it poll while waitUntil
-    // carries the copy to completion.
-    const settlement = await settleWithinProvisioningSyncBudget(provisioning);
-    if (settlement.status === 'pending') {
-      return Response.json(
-        { code: 'workspace_preparing', error: 'Ghostbuild is preparing your workspace.' },
-        { status: 409, headers: { 'Cache-Control': 'private, no-store' } },
-      );
-    }
-    if (settlement.status === 'rejected') {
-      const error = settlement.reason;
+    try {
+      await provision({
+        env,
+        userId: session.user.id,
+        connectionId: connection.id,
+      });
+    } catch (error) {
       if (error instanceof UserWorkspaceRuntimeProvisioningInProgressError) {
         return Response.json(
           { code: 'workspace_preparing', error: error.message },

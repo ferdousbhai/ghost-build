@@ -467,51 +467,6 @@ describe('Cloudflare-only authentication', () => {
     });
   });
 
-  it('detaches a slow provision from the request so a client disconnect cannot strand it', async () => {
-    // Provisioning is a single multi-minute call — the image copy dominates — and it converges the
-    // runtime row only if it runs to completion. Awaiting it on the client request used to let a
-    // browser that navigated away mid-copy kill the fiber with the lease still held, so it must ride
-    // waitUntil and the request must answer `workspace_preparing` without waiting for the copy.
-    vi.useFakeTimers();
-    try {
-      mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-      mocks.findConnection.mockResolvedValue(activeConnection());
-      let finishProvision: (value: ReturnType<typeof runtimeRecord>) => void = () => undefined;
-      const provisioning = new Promise<ReturnType<typeof runtimeRecord>>((resolve) => {
-        finishProvision = resolve;
-      });
-      const provision = vi.fn().mockReturnValue(provisioning);
-      const waitUntil = vi.fn();
-
-      const pending = cloudflareRuntimeSessionAction({
-        request: runtimeSessionRequest(),
-        env: runtimeEnv([null]),
-        ctx: { waitUntil },
-        provision,
-        readWorkspaceActivity: vi.fn().mockResolvedValue('idle'),
-      });
-      // The image copy never settles within the request; the sync budget elapses and the request
-      // answers on its own.
-      await vi.advanceTimersByTimeAsync(8_000);
-      const response = await pending;
-
-      expect(response.status).toBe(409);
-      await expect(response.json()).resolves.toEqual({
-        code: 'workspace_preparing',
-        error: 'Ghostbuild is preparing your workspace.',
-      });
-      // The still-running provision is handed to waitUntil, so it reaches a terminal state even
-      // after the response is sent and the client is gone.
-      expect(waitUntil).toHaveBeenCalledTimes(1);
-      expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
-
-      finishProvision(runtimeRecord());
-      await provisioning;
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it('does not mint an old-generation capability when the connection changes during provisioning', async () => {
     mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
     mocks.findConnection.mockResolvedValueOnce(activeConnection(1)).mockResolvedValueOnce(activeConnection(2));
