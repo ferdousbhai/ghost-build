@@ -1197,13 +1197,32 @@ describe('UserCloudflareAccountApi', () => {
     ]);
   });
 
-  test('refuses to preview a Worker that has never been deployed', async () => {
+  test('creates an empty Worker resource before the first unpromoted preview version', async () => {
     const module = await artifactFile('server.js', 'export default {}');
+    const workerVersionId = '12345678-1234-4234-8234-123456789abc';
+    const subdomain = { enabled: false, previews_enabled: true };
     const request = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ success: false, errors: [{ code: 10007 }] }), { status: 404 }),
-      );
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: false, errors: [{ code: 10007 }] }), { status: 404 }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: { id: 'a'.repeat(32), name: 'ghostbuild-worker', deployed_on: null },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: { id: workerVersionId } }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: subdomain }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: subdomain }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: subdomain }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, result: { id: workerVersionId, metadata: { has_preview: true } } }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, result: { subdomain: 'account-subdomain' } }));
 
     await expect(
       new UserCloudflareAccountApi('account-1', 'token', request).previewManagedWorker({
@@ -1219,8 +1238,25 @@ describe('UserCloudflareAccountApi', () => {
         securityBoundarySha256: 'b'.repeat(64),
         templateSourceSha256: 'c'.repeat(64),
       }),
-    ).rejects.toThrow('Deploy the project first');
-    expect(request).toHaveBeenCalledOnce();
+    ).resolves.toEqual({
+      workerVersionId,
+      previewUrl: 'https://12345678-ghostbuild-worker.account-subdomain.workers.dev',
+    });
+    expect(request.mock.calls.map(([url, init]) => `${init?.method} ${String(url)}`)).toEqual([
+      'GET https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/deployments',
+      'GET https://api.cloudflare.com/client/v4/accounts/account-1/workers/workers/ghostbuild-worker',
+      'POST https://api.cloudflare.com/client/v4/accounts/account-1/workers/workers',
+      'POST https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/versions',
+      'GET https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/subdomain',
+      'POST https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/subdomain',
+      'GET https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/subdomain',
+      `GET https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/versions/${workerVersionId}`,
+      'GET https://api.cloudflare.com/client/v4/accounts/account-1/workers/subdomain',
+    ]);
+    expect(JSON.parse(String(request.mock.calls[2]?.[1]?.body))).toMatchObject({
+      name: 'ghostbuild-worker',
+      subdomain: { enabled: false, previews_enabled: true },
+    });
   });
 
   test('uploads an unpromoted Worker version and derives its preview URL', async () => {
@@ -1243,6 +1279,7 @@ describe('UserCloudflareAccountApi', () => {
         }),
       )
       .mockResolvedValueOnce(Response.json({ success: true, result: { id: workerVersionId } }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: { enabled: true, previews_enabled: true } }))
       .mockResolvedValueOnce(Response.json({ success: true, result: { enabled: true, previews_enabled: true } }))
       .mockResolvedValueOnce(Response.json({ success: true, result: { enabled: true, previews_enabled: true } }))
       .mockResolvedValueOnce(
@@ -1272,6 +1309,7 @@ describe('UserCloudflareAccountApi', () => {
     expect(request.mock.calls.map(([url, init]) => `${init?.method} ${String(url)}`)).toEqual([
       'GET https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/deployments',
       'POST https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/versions',
+      'GET https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/subdomain',
       'POST https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/subdomain',
       'GET https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/subdomain',
       `GET https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/versions/${workerVersionId}`,
