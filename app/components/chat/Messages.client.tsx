@@ -7,15 +7,21 @@ import { profileStore } from '~/lib/stores/profile';
 import { ChatBubbleIcon, PersonIcon } from '@radix-ui/react-icons';
 import { messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import styles from './BaseChat.module.css';
+import type {
+  CloudflareExecutionDecisionHandler,
+  CloudflareExecutionPublicState,
+} from 'ghostbuild-agent/cloudflare-mcp';
 
 interface MessagesProps {
   id?: string;
   className?: string;
   messages?: GhostbuildMessage[];
+  cloudflareExecutions?: readonly CloudflareExecutionPublicState[];
+  onCloudflareExecutionDecision?: CloudflareExecutionDecisionHandler;
 }
 
 export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messages(
-  { id, messages = [], className }: MessagesProps,
+  { id, messages = [], className, cloudflareExecutions, onCloudflareExecutionDecision }: MessagesProps,
   ref: ForwardedRef<HTMLDivElement> | undefined,
 ) {
   const profile = useStore(profileStore);
@@ -50,7 +56,15 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messa
                   )}
                 </div>
               )}
-              {isUserMessage ? <UserMessage content={messageText(message)} /> : <AssistantMessage message={message} />}
+              {isUserMessage ? (
+                <UserMessage content={messageText(message)} />
+              ) : (
+                <AssistantMessage
+                  message={message}
+                  cloudflareExecutions={cloudflareExecutions}
+                  onCloudflareExecutionDecision={onCloudflareExecutionDecision}
+                />
+              )}
             </div>
           );
         })

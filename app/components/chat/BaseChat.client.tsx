@@ -24,6 +24,10 @@ import type { BuildProgress } from './build-progress';
 import type { SubchatSummary } from './subchat-model';
 import type { BuilderDeploymentState } from '~/agents/builder-deployment-command';
 import { DeploymentStatus } from './DeploymentStatus.client';
+import type {
+  CloudflareExecutionDecisionHandler,
+  CloudflareExecutionPublicState,
+} from 'ghostbuild-agent/cloudflare-mcp';
 
 const Workbench = lazy(() =>
   import('~/components/workbench/Workbench.client').then((module) => ({ default: module.Workbench })),
@@ -48,6 +52,8 @@ interface BaseChatProps {
   runtimeNotice: ReactNode;
   deployment?: BuilderDeploymentState | null;
   onDeploy?: () => Promise<BuilderDeploymentState>;
+  cloudflareExecutions?: readonly CloudflareExecutionPublicState[];
+  onCloudflareExecutionDecision?: CloudflareExecutionDecisionHandler;
 
   subchats?: SubchatSummary[];
   onSubchatTitleChange?: (subchatIndex: number, title: string) => void;
@@ -72,6 +78,8 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       runtimeNotice,
       deployment,
       onDeploy,
+      cloudflareExecutions,
+      onCloudflareExecutionDecision,
       subchats,
       onSubchatTitleChange,
     },
@@ -255,6 +263,8 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                             ref={messageRef}
                             className="z-[1] mx-auto flex w-full max-w-chat flex-1 flex-col gap-3 px-3 pb-8 sm:px-0"
                             messages={messages}
+                            cloudflareExecutions={cloudflareExecutions}
+                            onCloudflareExecutionDecision={onCloudflareExecutionDecision}
                           />
                         </motion.div>
                       </AnimatePresence>

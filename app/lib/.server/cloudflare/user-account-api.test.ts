@@ -1445,6 +1445,7 @@ describe('UserCloudflareAccountApi', () => {
         userId: 'user-1',
         connectionId: 'connection-1',
         connectionGeneration: 1,
+        oauthScopeGrantStatus: 'full',
         endpoint: 'https://ghostbuild-workspace-user.example.workers.dev',
       }),
     ).resolves.toEqual({

@@ -27,6 +27,7 @@ import type { Tool } from 'ghostbuild-agent/tool';
 import { type BuilderSkillReader, isBuilderSkillPath } from './builder-skills';
 import { cloudflareDocsSearchTool } from './cloudflare-docs-search';
 import { sha256Hex } from '~/lib/hex-digest';
+import type { CloudflareMcpModelToolContext } from './cloudflare-mcp-model-tools';
 
 type BuilderOperationContext = {
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
@@ -49,6 +50,7 @@ export function createWorkersAiTools(
   workspace: BuilderWorkspaceApi,
   operationContext: BuilderOperationContext,
   skillReader?: BuilderSkillReader,
+  cloudflareMcp?: CloudflareMcpModelToolContext,
 ): GhostbuildToolSet {
   const coordinateStatefulTool = createTurnStatefulToolCoordinator(operationContext.runWithKeepAlive);
   const tools: GhostbuildToolSet = {
@@ -61,6 +63,32 @@ export function createWorkersAiTools(
     // Stateless and remote: it must not take the workspace operation lane.
     search_cloudflare_docs: cloudflareDocsSearchTool(),
   };
+
+  if (cloudflareMcp) {
+    tools.cloudflare_docs = {
+      description:
+        'Search the official Cloudflare MCP documentation. Use this before generating API code. The authenticated account is fixed by Ghostbuild and cannot be supplied by the model.',
+      inputSchema: MODEL_TOOL_INPUT_SCHEMAS.cloudflare_docs,
+      execute: async (input, options) =>
+        cloudflareMcp.docs(MODEL_TOOL_INPUT_SCHEMAS.cloudflare_docs.parse(input), options),
+    };
+    tools.cloudflare_search = {
+      description:
+        'Search the authenticated Cloudflare account with read-only API code. Use it to inspect current state and reconcile mutations. Missing OAuth scopes are reported as tool results.',
+      inputSchema: MODEL_TOOL_INPUT_SCHEMAS.cloudflare_search,
+      execute: async (input, options) =>
+        cloudflareMcp.search(MODEL_TOOL_INPUT_SCHEMAS.cloudflare_search.parse(input), options),
+    };
+    if (cloudflareMcp.executeEnabled) {
+      tools.cloudflare_execute = {
+        description:
+          'Propose exact Cloudflare API code for explicit user approval. This call never executes the code; it creates a durable, expiring approval bound to this account, connection, transcript, and exact digest. Use the specialized deployment flow for application deployment.',
+        inputSchema: MODEL_TOOL_INPUT_SCHEMAS.cloudflare_execute,
+        execute: async (input, options) =>
+          cloudflareMcp.proposeExecute(MODEL_TOOL_INPUT_SCHEMAS.cloudflare_execute.parse(input), options),
+      };
+    }
+  }
 
   for (const toolName of WORKSPACE_TOOL_NAMES) {
     tools[toolName] = computerWorkspaceTool(

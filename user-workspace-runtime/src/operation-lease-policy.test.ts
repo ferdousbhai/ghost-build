@@ -36,6 +36,11 @@ describe('operation lease policy', () => {
     expect(Object.keys(BUILDER_TURN_TIMEOUTS.tools).filter((tool) => !governed.has(tool as never))).toEqual([
       ...WORKSPACE_READ_ONLY_TOOL_NAMES,
       'search_cloudflare_docs',
+      // The official Cloudflare MCP tools reach the provider directly and must never take a
+      // workspace lane, so they belong with the other ungoverned tools.
+      'cloudflare_docs',
+      'cloudflare_search',
+      'cloudflare_execute',
     ]);
   });
 

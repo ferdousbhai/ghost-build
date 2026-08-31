@@ -15,10 +15,12 @@ describe('Ghostbuild system prompt', () => {
     expect(prompt).toContain('read each relevant SKILL.md');
     expect(prompt).toContain('pnpm run validate');
     expect(prompt).toContain('/__skills__/cloudflare/SKILL.md');
+    expect(prompt).toContain('cloudflare_search before cloudflare_execute');
+    expect(prompt).toContain('pauses the turn');
     expect(prompt).not.toContain('activate_skill');
     expect(prompt).not.toContain('getAppBindings');
     expect(prompt).not.toContain('compatibility_date');
     expect(prompt).not.toContain('AGENT_SECURITY_DB');
-    expect(prompt.length).toBeLessThan(1_000);
+    expect(prompt.length).toBeLessThan(1_200);
   });
 });

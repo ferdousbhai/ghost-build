@@ -13,6 +13,7 @@ declare global {
     CLOUDFLARE_ACCOUNT_ID: string;
     GHOSTBUILD_CONNECTION_ID: string;
     GHOSTBUILD_CONNECTION_GENERATION: string;
+    GHOSTBUILD_OAUTH_SCOPE_GRANT_STATUS: string;
   }
 }
 

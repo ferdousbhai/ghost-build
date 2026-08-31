@@ -197,6 +197,7 @@ export async function provisionUserWorkspaceRuntime(args: {
       userId: args.userId,
       connectionId: connection.id,
       connectionGeneration: connection.generation,
+      oauthScopeGrantStatus: connection.oauthScopeGrantStatus,
       endpoint,
     });
     const workspaceImage = await workspaceImageRequest;

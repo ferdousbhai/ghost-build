@@ -7,6 +7,7 @@ import type { BuilderValidationStage } from '~/lib/common/builder-validation-pro
 import type { BuilderSkillReader } from './builder-skills';
 import { BUILDER_TURN_TIMEOUTS, BuilderTurnBudgetExceededError } from './builder-turn-budget';
 import { createWorkersAiTools } from './workers-ai-tools';
+import type { CloudflareMcpModelToolContext } from './cloudflare-mcp-model-tools';
 
 type BuilderOperationContext = {
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
@@ -21,6 +22,9 @@ const toolLabels = {
   edit: 'Edit file',
   exec: 'Run command',
   search_cloudflare_docs: 'Search Cloudflare docs',
+  cloudflare_docs: 'Search Cloudflare MCP docs',
+  cloudflare_search: 'Search Cloudflare account',
+  cloudflare_execute: 'Propose Cloudflare change',
 } satisfies Record<ModelToolName, string>;
 
 /** Adapt the canonical model tools to Pi's validated tool contract. */
@@ -28,10 +32,14 @@ export function createPiToolBundle(
   workspace: BuilderWorkspaceApi,
   operationContext: BuilderOperationContext,
   skillReader?: BuilderSkillReader,
+  cloudflareMcp?: CloudflareMcpModelToolContext,
 ): Record<string, AgentTool> {
-  const canonicalTools = createWorkersAiTools(workspace, operationContext, skillReader);
+  const canonicalTools = createWorkersAiTools(workspace, operationContext, skillReader, cloudflareMcp);
   const tools: Record<string, AgentTool> = Object.fromEntries(
-    MODEL_TOOL_NAMES.map((name) => [name, adaptTool(name, canonicalTools[name], toolLabels[name])]),
+    MODEL_TOOL_NAMES.flatMap((name) => {
+      const definition = canonicalTools[name];
+      return definition ? [[name, adaptTool(name, definition, toolLabels[name])]] : [];
+    }),
   );
   return tools;
 }

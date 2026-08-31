@@ -59,9 +59,17 @@ import {
 } from '~/lib/workers-paid';
 import { logProviderFailure } from './provider-error-logging';
 import type { PiSteeringQueue } from './pi-steering';
+import type { CloudflareMcpModelToolContext } from './cloudflare-mcp-model-tools';
+import { isCloudflareExecuteProposal } from 'ghostbuild-agent/cloudflare-mcp';
+import type { CloudflareMcpResultCandidate } from 'ghostbuild-agent/cloudflare-mcp';
+import { z } from 'zod';
 
 type Messages = GhostbuildMessage[];
 type UIMessageChunk = PiStreamChunk;
+
+const cloudflareExecuteProposalCandidateSchema = z
+  .object({ kind: z.literal('cloudflare_execute_proposal') })
+  .passthrough();
 
 interface PiAgentOptions {
   abortSignal?: AbortSignal;
@@ -80,6 +88,7 @@ interface PiAgentOptions {
   accountCredentials: WorkersAiAccountCredentials;
   sessionAffinity: string;
   workspace: BuilderWorkspaceApi;
+  cloudflareMcp?: CloudflareMcpModelToolContext;
   onValidationStage?: (toolCallId: string, stage: BuilderValidationStage | null) => void;
   runWithKeepAlive: <T>(operation: () => Promise<T>) => Promise<T>;
   steering: PiSteeringQueue;
@@ -109,6 +118,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     accountCredentials,
     sessionAffinity,
     workspace,
+    cloudflareMcp,
     onValidationStage,
     runWithKeepAlive,
     steering,
@@ -142,7 +152,12 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     const skillContext = createBuilderSkillContext();
     return {
       skillContext,
-      piTools: createPiToolBundle(workspace, { onValidationStage, runWithKeepAlive }, skillContext.reader),
+      piTools: createPiToolBundle(
+        workspace,
+        { onValidationStage, runWithKeepAlive },
+        skillContext.reader,
+        cloudflareMcp,
+      ),
     };
   });
 
@@ -200,6 +215,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   let runtimeCompactionError: ContextCompactionUnavailableError | undefined;
   let toolBudgetError: BuilderTurnBudgetExceededError | undefined;
   let toolIndeterminateError: WorkspaceToolOperationIndeterminateError | undefined;
+  let cloudflareApprovalPending = false;
   let terminalReason: BuilderTurnTerminalReason = 'failed';
   let stepCount = 0;
   let toolCallCount = 0;
@@ -331,6 +347,10 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       toolBudgetError ??= event.isError ? toolBudgetErrorFromResult(event.result) : undefined;
       toolIndeterminateError ??= event.isError ? toolIndeterminateErrorFromResult(event.result) : undefined;
       currentRunToolResults.push({ toolName: event.toolName, result });
+      cloudflareApprovalPending ||= cloudflareExecutePausesTurn(
+        event.toolName,
+        cloudflareExecuteProposalCandidateSchema.safeParse(result).data ?? null,
+      );
       if (event.isError && !hasStructuredToolResult(event.result)) {
         await writer.write({
           type: 'tool-output-error',
@@ -424,6 +444,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
           runtimeCompactionError !== undefined ||
           toolBudgetError !== undefined ||
           toolIndeterminateError !== undefined ||
+          cloudflareApprovalPending ||
           (currentValidatedBuildCompletion !== undefined && !steering.hasPending()),
         afterToolCall: async ({ result, isError }) =>
           !isError && !toolResultSucceeded(result.details) ? { isError: true } : undefined,
@@ -561,6 +582,11 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   return normalizeTextPartBoundaries(
     appendDeterministicCompletion(framedStream, () => currentValidatedBuildCompletion),
   );
+}
+
+/** A proposal is a completed tool result, but it deliberately ends this Pi run before another model step. */
+export function cloudflareExecutePausesTurn(toolName: string, result: CloudflareMcpResultCandidate | null): boolean {
+  return toolName === 'cloudflare_execute' && isCloudflareExecuteProposal(result);
 }
 
 function createValidatedBuildCompletionStream(text: string): ReadableStream<UIMessageChunk> {

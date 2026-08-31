@@ -236,6 +236,8 @@ const AuthenticatedChat = memo(
       validationStage,
       deployment,
       deployValidatedRevision,
+      cloudflareExecutions,
+      decideCloudflareExecution,
       workspacePresentationState,
     } = useBuilderAgentChat({
       accountId,
@@ -329,6 +331,8 @@ const AuthenticatedChat = memo(
         disabledReason={disabledReason}
         deployment={deployment}
         onDeploy={deployValidatedRevision}
+        cloudflareExecutions={cloudflareExecutions}
+        onCloudflareExecutionDecision={decideCloudflareExecution}
         runtimeNotice={
           workspacePresentationState === 'presentation-error'
             ? 'Editor unavailable. Chat, builds, and previews still work.'

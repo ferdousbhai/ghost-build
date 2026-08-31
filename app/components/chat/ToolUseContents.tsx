@@ -1,17 +1,39 @@
-import { memo, useEffect } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { z } from 'zod';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { isGhostbuildToolResult, toolResultSucceeded, toolResultSummary } from 'ghostbuild-agent/tool-result';
 import { ToolResultFrame } from './ToolResultFrame';
 import { captureProductEvent } from '~/lib/telemetry.client';
+import type {
+  CloudflareExecutionDecisionHandler,
+  CloudflareExecutionPublicState,
+} from 'ghostbuild-agent/cloudflare-mcp';
+import { Button } from '~/components/ui/primitives/Button';
 
 export const ToolUseContents = memo(function ToolUseContents({
   invocation,
   progress,
+  cloudflareExecution,
+  onCloudflareExecutionDecision,
 }: {
   invocation: GhostbuildToolInvocation;
   progress?: unknown;
+  cloudflareExecution?: CloudflareExecutionPublicState;
+  onCloudflareExecutionDecision?: CloudflareExecutionDecisionHandler;
 }) {
+  if (
+    invocation.toolName === 'cloudflare_docs' ||
+    invocation.toolName === 'cloudflare_search' ||
+    invocation.toolName === 'cloudflare_execute'
+  ) {
+    return (
+      <CloudflareMcpToolContents
+        invocation={invocation}
+        execution={cloudflareExecution}
+        onDecision={onCloudflareExecutionDecision}
+      />
+    );
+  }
   if (isToolInvocationInProgress(invocation)) {
     return <RunningToolContents invocation={invocation} progress={progress} />;
   }
@@ -59,6 +81,244 @@ function RunningToolContents({ invocation, progress }: { invocation: GhostbuildT
         {preview}
       </pre>
     </ToolResultFrame>
+  );
+}
+
+const cloudflareExecuteProposalSchema = z.object({
+  kind: z.literal('cloudflare_execute_proposal'),
+  status: z.literal('awaiting_approval'),
+  executionId: z.string(),
+  toolCallId: z.string(),
+  accountId: z.string(),
+  code: z.string(),
+  proposalSha256: z.string(),
+  riskNote: z.string(),
+  expiresAt: z.number(),
+});
+
+const cloudflareMcpResultSchema = z.object({
+  kind: z.literal('cloudflare_mcp_result'),
+  operation: z.enum(['docs', 'search']),
+  status: z.enum(['success', 'failure', 'insufficient_scope']),
+  accountId: z.string(),
+  content: z.string().optional(),
+  requestId: z.string().nullable(),
+  httpStatus: z.number().nullable(),
+  truncated: z.boolean(),
+});
+
+const cloudflareToolInputSchema = z.looseObject({
+  query: z.string().optional(),
+  code: z.string().optional(),
+});
+
+function CloudflareMcpToolContents({
+  invocation,
+  execution,
+  onDecision,
+}: {
+  invocation: GhostbuildToolInvocation;
+  execution?: CloudflareExecutionPublicState;
+  onDecision?: CloudflareExecutionDecisionHandler;
+}) {
+  if (invocation.toolName === 'cloudflare_execute') {
+    return <CloudflareExecuteContents invocation={invocation} execution={execution} onDecision={onDecision} />;
+  }
+  const input = cloudflareToolInputSchema.safeParse(invocation.input).data;
+  if (isToolInvocationInProgress(invocation)) {
+    const activity = invocation.toolName === 'cloudflare_docs' ? input?.query : input?.code;
+    return (
+      <ToolResultFrame>
+        <div className="space-y-2">
+          <div className="text-content-secondary">
+            {invocation.toolName === 'cloudflare_docs'
+              ? 'Searching Cloudflare documentation…'
+              : 'Searching the authenticated Cloudflare account…'}
+          </div>
+          {activity ? <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words">{activity}</pre> : null}
+        </div>
+      </ToolResultFrame>
+    );
+  }
+  if (invocation.state === 'output-error') {
+    return <ToolResultFrame>{invocation.errorText ?? 'Cloudflare MCP failed.'}</ToolResultFrame>;
+  }
+  const result =
+    invocation.state === 'output-available' ? cloudflareMcpResultSchema.safeParse(invocation.output).data : null;
+  if (!result) {
+    return <ToolResultFrame>Cloudflare MCP returned an invalid result.</ToolResultFrame>;
+  }
+  return (
+    <ToolResultFrame>
+      <div className="space-y-2">
+        <div className={result.status === 'success' ? 'text-content-primary' : 'text-bolt-elements-icon-error'}>
+          {result.status === 'success'
+            ? 'Cloudflare MCP completed.'
+            : result.status === 'insufficient_scope'
+              ? 'The connected Cloudflare grant does not include the required scope.'
+              : 'Cloudflare MCP failed.'}
+        </div>
+        <div className="text-xs text-content-tertiary">Account: {result.accountId}</div>
+        {result.content ? (
+          <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-content-secondary">
+            {result.content}
+          </pre>
+        ) : null}
+        {result.truncated ? <div className="text-xs text-content-tertiary">Result was truncated.</div> : null}
+      </div>
+    </ToolResultFrame>
+  );
+}
+
+function CloudflareExecuteContents({
+  invocation,
+  execution,
+  onDecision,
+}: {
+  invocation: GhostbuildToolInvocation;
+  execution?: CloudflareExecutionPublicState;
+  onDecision?: CloudflareExecutionDecisionHandler;
+}) {
+  const proposal =
+    invocation.state === 'output-available'
+      ? cloudflareExecuteProposalSchema.safeParse(invocation.output).data
+      : undefined;
+  const input = cloudflareToolInputSchema.safeParse(invocation.input).data;
+  const [pendingDecision, setPendingDecision] = useState<'approve' | 'reject' | null>(null);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [expired, setExpired] = useState(() => (proposal?.expiresAt ?? execution?.expiresAt ?? Infinity) <= Date.now());
+  const expiresAt = proposal?.expiresAt ?? execution?.expiresAt;
+  useEffect(() => {
+    if (!expiresAt || expiresAt <= Date.now()) {
+      setExpired(Boolean(expiresAt));
+      return undefined;
+    }
+    const timeout = window.setTimeout(() => setExpired(true), expiresAt - Date.now());
+    return () => window.clearTimeout(timeout);
+  }, [expiresAt]);
+
+  if (isToolInvocationInProgress(invocation)) {
+    return (
+      <ToolResultFrame>
+        <div className="space-y-2">
+          <div className="text-content-secondary">Preparing an approval-bound Cloudflare execution…</div>
+          {input?.code ? (
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs">{input.code}</pre>
+          ) : null}
+        </div>
+      </ToolResultFrame>
+    );
+  }
+  if (invocation.state === 'output-error') {
+    return <ToolResultFrame>{invocation.errorText ?? 'The Cloudflare execution proposal failed.'}</ToolResultFrame>;
+  }
+  if (!proposal && !execution) {
+    return <ToolResultFrame>The Cloudflare execution proposal is unavailable.</ToolResultFrame>;
+  }
+
+  const executionId = proposal?.executionId ?? execution?.executionId ?? '';
+  const code = proposal?.code ?? input?.code ?? '';
+  const accountId = proposal?.accountId ?? execution?.accountId ?? '';
+  const digest = proposal?.proposalSha256 ?? execution?.proposalSha256 ?? '';
+  const status = execution?.status ?? (expired ? 'expired' : 'awaiting_approval');
+  const effectiveStatus = status === 'awaiting_approval' && expired ? 'expired' : status;
+  const canDecide = effectiveStatus === 'awaiting_approval' && Boolean(onDecision) && pendingDecision === null;
+
+  const decide = async (decision: 'approve' | 'reject') => {
+    if (!onDecision || !canDecide) {
+      return;
+    }
+    setPendingDecision(decision);
+    setDecisionError(null);
+    try {
+      await onDecision(executionId, decision);
+    } catch (error) {
+      setDecisionError(error instanceof Error ? error.message : 'The Cloudflare execution decision failed.');
+    } finally {
+      setPendingDecision(null);
+    }
+  };
+
+  return (
+    <ToolResultFrame>
+      <div className="space-y-3" data-testid="cloudflare-execute-approval">
+        <div className="grid gap-1 text-xs text-content-tertiary">
+          <div>Account: {accountId}</div>
+          <div>Digest: {digest.slice(0, 12)}</div>
+        </div>
+        <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md border border-bolt-elements-borderColor p-3 text-xs leading-5 text-content-secondary">
+          {code}
+        </pre>
+        <p className="text-xs leading-5 text-content-secondary">
+          {proposal?.riskNote ??
+            'This exact generated code may make destructive, irreversible, or billable Cloudflare API changes.'}
+        </p>
+        <CloudflareExecutionStatus status={effectiveStatus} outcome={execution?.outcome ?? null} />
+        {effectiveStatus === 'awaiting_approval' ? (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={!canDecide}
+              loading={pendingDecision === 'approve'}
+              aria-busy={pendingDecision === 'approve'}
+              onClick={() => void decide('approve')}
+            >
+              Approve
+            </Button>
+            <Button
+              size="sm"
+              variant="neutral"
+              disabled={!canDecide}
+              loading={pendingDecision === 'reject'}
+              aria-busy={pendingDecision === 'reject'}
+              onClick={() => void decide('reject')}
+            >
+              Reject
+            </Button>
+          </div>
+        ) : null}
+        {decisionError ? <p className="text-xs text-bolt-elements-icon-error">{decisionError}</p> : null}
+      </div>
+    </ToolResultFrame>
+  );
+}
+
+function CloudflareExecutionStatus({
+  status,
+  outcome,
+}: {
+  status: CloudflareExecutionPublicState['status'];
+  outcome: CloudflareExecutionPublicState['outcome'];
+}) {
+  const label =
+    status === 'awaiting_approval'
+      ? 'Waiting for approval.'
+      : status === 'approved' || status === 'executing'
+        ? 'Approved. Executing the exact digest…'
+        : status === 'rejected'
+          ? 'Rejected. No Cloudflare execution was performed.'
+          : status === 'expired'
+            ? 'Approval expired. Propose the operation again to continue.'
+            : status === 'succeeded'
+              ? 'Cloudflare execution succeeded.'
+              : status === 'indeterminate'
+                ? 'Outcome indeterminate. Reconcile current state before proposing another mutation.'
+                : 'Cloudflare execution failed.';
+  const error = status === 'failed' || status === 'indeterminate' || status === 'expired';
+  return (
+    <div className="space-y-2" role="status">
+      <p className={error ? 'text-bolt-elements-icon-error' : 'text-content-primary'}>{label}</p>
+      {outcome?.summary ? <p className="text-xs text-content-secondary">{outcome.summary}</p> : null}
+      {outcome?.content ? (
+        <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-content-secondary">
+          {outcome.content}
+        </pre>
+      ) : null}
+      {outcome?.sensitiveContentWithheld ? (
+        <p className="text-xs text-bolt-elements-icon-error">Sensitive-looking response content was withheld.</p>
+      ) : null}
+    </div>
   );
 }
 

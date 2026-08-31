@@ -102,6 +102,45 @@ const migrations: readonly SchemaMigration[] = [
       sql.exec('DROP TABLE IF EXISTS builder_turns');
     },
   },
+  {
+    version: 7,
+    name: 'create_cloudflare_execution_approvals',
+    apply(sql) {
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS builder_cloudflare_executions (
+          execution_id TEXT PRIMARY KEY,
+          tool_call_id TEXT NOT NULL UNIQUE,
+          user_id TEXT NOT NULL,
+          account_id TEXT NOT NULL,
+          connection_id TEXT NOT NULL,
+          connection_generation INTEGER NOT NULL,
+          oauth_scope_grant_status TEXT NOT NULL CHECK (oauth_scope_grant_status IN ('core', 'partial', 'full')),
+          transcript_agent_name TEXT NOT NULL,
+          transcript_chat_initial_id TEXT NOT NULL,
+          transcript_generation INTEGER NOT NULL,
+          transcript_subchat_index INTEGER NOT NULL,
+          transcript_parent_agent_name TEXT,
+          execute_input_json TEXT NOT NULL,
+          proposal_sha256 TEXT NOT NULL CHECK (length(proposal_sha256) = 64),
+          risk_reasons_json TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN (
+            'awaiting_approval', 'approved', 'rejected', 'executing',
+            'succeeded', 'failed', 'indeterminate', 'expired'
+          )),
+          created_at INTEGER NOT NULL,
+          decided_at INTEGER,
+          started_at INTEGER,
+          completed_at INTEGER,
+          expires_at INTEGER NOT NULL,
+          outcome_json TEXT
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS builder_cloudflare_executions_status_expiry
+        ON builder_cloudflare_executions (status, expires_at)
+      `);
+    },
+  },
 ];
 
 type AppliedMigration = {

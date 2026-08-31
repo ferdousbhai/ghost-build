@@ -34,6 +34,7 @@ import {
 } from './project-workspace-container-policy';
 import { GHOSTBUILD_CONTROL_PLANE_ENDPOINT, USER_WORKSPACE_RUNTIME_GC_CRON } from './user-workspace-runtime-policy';
 import { sha256Hex } from '~/lib/hex-digest';
+import type { CloudflareOAuthScopeGrantStatus } from './cloudflare-oauth-scope-manifest';
 
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
 const CLOUDFLARE_API_TIMEOUT_MS = 30_000;
@@ -1049,6 +1050,7 @@ export class UserCloudflareAccountApi {
     userId: string;
     connectionId: string;
     connectionGeneration: number;
+    oauthScopeGrantStatus: CloudflareOAuthScopeGrantStatus;
     endpoint: string;
   }): Promise<{ workerVersionId: string; namespaceId: string }> {
     requireWorkerName(args.workerName);
@@ -1076,6 +1078,11 @@ export class UserCloudflareAccountApi {
           type: 'plain_text',
           name: 'GHOSTBUILD_CONNECTION_GENERATION',
           text: String(args.connectionGeneration),
+        },
+        {
+          type: 'plain_text',
+          name: 'GHOSTBUILD_OAUTH_SCOPE_GRANT_STATUS',
+          text: args.oauthScopeGrantStatus,
         },
         { type: 'plain_text', name: 'GHOSTBUILD_USER_RUNTIME_ENDPOINT', text: args.endpoint },
         { type: 'plain_text', name: 'GHOSTBUILD_CONTROL_PLANE_ENDPOINT', text: GHOSTBUILD_CONTROL_PLANE_ENDPOINT },

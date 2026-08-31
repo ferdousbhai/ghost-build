@@ -41,8 +41,9 @@ describe('BuilderAgent schema migrations', () => {
       { version: 4, name: 'remove_builder_tool_replays' },
       { version: 5, name: 'persist_builder_identity' },
       { version: 6, name: 'remove_builder_turns' },
+      { version: 7, name: 'create_cloudflare_execution_approvals' },
     ]);
-    expect(storage.transactionCount).toBe(6);
+    expect(storage.transactionCount).toBe(7);
     expect(storage.statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS builder_turns'))).toBe(
       true,
     );
@@ -56,6 +57,11 @@ describe('BuilderAgent schema migrations', () => {
       storage.statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS builder_identity')),
     ).toBe(true);
     expect(storage.statements).toContain('DROP TABLE IF EXISTS builder_turns');
+    expect(
+      storage.statements.some((statement) =>
+        statement.includes('CREATE TABLE IF NOT EXISTS builder_cloudflare_executions'),
+      ),
+    ).toBe(true);
   });
 
   it('is idempotent after the current schema has been recorded', () => {
@@ -80,12 +86,13 @@ describe('BuilderAgent schema migrations', () => {
 
     runBuilderAgentSchemaMigrations(storage as never);
 
-    expect(storage.applied.slice(-3)).toEqual([
+    expect(storage.applied.slice(-4)).toEqual([
       { version: 4, name: 'remove_builder_tool_replays' },
       { version: 5, name: 'persist_builder_identity' },
       { version: 6, name: 'remove_builder_turns' },
+      { version: 7, name: 'create_cloudflare_execution_approvals' },
     ]);
-    expect(storage.transactionCount).toBe(3);
+    expect(storage.transactionCount).toBe(4);
     expect(storage.statements).toContain('DROP TABLE IF EXISTS builder_workspace_tool_results');
   });
 
@@ -110,6 +117,6 @@ describe('BuilderAgent schema migrations', () => {
 
     expect(blockConcurrencyWhile).toHaveBeenCalledOnce();
     await expect(initialization).resolves.toBeUndefined();
-    expect(storage.applied).toHaveLength(6);
+    expect(storage.applied).toHaveLength(7);
   });
 });

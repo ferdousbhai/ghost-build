@@ -1,7 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AgentContext } from '@earendil-works/pi-agent-core';
 import type { PiStreamChunk } from './pi-stream';
 
 type UIMessageChunk = PiStreamChunk;
+type RunnerEvent = RunnerToolExecutionEndEvent | RunnerTurnEndEvent;
+type RunnerEventSink = (event: RunnerEvent) => Promise<void>;
+
+interface RunnerToolExecutionEndEvent {
+  type: 'tool_execution_end';
+  toolCallId: string;
+  toolName: string;
+  result: object;
+  isError: boolean;
+}
+
+interface RunnerTurnEndEvent {
+  type: 'turn_end';
+  message: ReturnType<typeof assistantMessage>;
+  toolResults: object[];
+}
+
+interface StopAwareLoopConfig {
+  shouldStopAfterTurn(): boolean;
+}
 
 const mocks = vi.hoisted(() => ({
   completion: undefined as string | undefined,
@@ -353,6 +374,49 @@ describe('piAgentRunner', () => {
     const chunks = await collectChunks(await createAgentStream());
 
     expect(chunks).toContainEqual({ type: 'error', errorText: timeoutPayload });
+  });
+
+  it('ends the current run after cloudflare_execute stores an approval proposal', async () => {
+    const proposal = {
+      kind: 'cloudflare_execute_proposal',
+      status: 'awaiting_approval',
+      executionId: 'execution-1',
+      toolCallId: 'cloudflare-execute-1',
+      accountId: 'account-1',
+      code: 'return mutate()',
+      proposalSha256: 'a'.repeat(64),
+      riskNote: 'This exact digest requires approval.',
+      expiresAt: Date.now() + 60_000,
+    };
+    mocks.piRun.mockImplementation(
+      async (_context: AgentContext, config: StopAwareLoopConfig, emit: RunnerEventSink) => {
+        await emit({
+          type: 'tool_execution_end',
+          toolCallId: proposal.toolCallId,
+          toolName: 'cloudflare_execute',
+          result: { details: proposal },
+          isError: false,
+        });
+        expect(config.shouldStopAfterTurn()).toBe(true);
+        await emit({
+          type: 'turn_end',
+          message: assistantMessage([
+            { type: 'toolCall', id: proposal.toolCallId, name: 'cloudflare_execute', arguments: {} },
+          ]),
+          toolResults: [],
+        });
+      },
+    );
+
+    const chunks = await collectChunks(await createAgentStream());
+
+    expect(chunks).toContainEqual({
+      type: 'tool-output-available',
+      toolCallId: proposal.toolCallId,
+      output: proposal,
+      dynamic: true,
+    });
+    expect(chunks.some((chunk) => chunk.type === 'error')).toBe(false);
   });
 
   it('stops before another model turn after an indeterminate tool settlement', async () => {

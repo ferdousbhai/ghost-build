@@ -17,6 +17,9 @@ describe('builder tool budgets', () => {
       edit: BUILDER_MUTATION_TOOL_TIMEOUT_MS,
       exec: BUILDER_MUTATION_TOOL_TIMEOUT_MS,
       search_cloudflare_docs: 60_000,
+      cloudflare_docs: 90_000,
+      cloudflare_search: 90_000,
+      cloudflare_execute: 30_000,
     });
     expect(BUILDER_MUTATION_TOOL_TIMEOUT_MS).toBe(35 * 60_000);
   });

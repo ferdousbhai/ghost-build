@@ -27,6 +27,11 @@ export const BUILDER_TURN_TIMEOUTS = {
     edit: BUILDER_MUTATION_TOOL_TIMEOUT_MS,
     exec: BUILDER_MUTATION_TOOL_TIMEOUT_MS,
     search_cloudflare_docs: 60_000,
+    cloudflare_docs: 90_000,
+    cloudflare_search: 90_000,
+    // Initial calls only persist an approval proposal. Approved execution runs later in its own
+    // durable fiber under the gateway's independent overall deadline.
+    cloudflare_execute: 30_000,
   } satisfies Record<ModelToolName, number>,
 } as const;
 

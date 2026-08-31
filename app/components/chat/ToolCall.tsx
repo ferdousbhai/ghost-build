@@ -8,13 +8,21 @@ import { normalizeToolInvocation, statusIcon, toolTitle } from './tool-call-pres
 import { ExpandableToolCard } from './ExpandableToolCard';
 import { invocationStatus, toolActivityStore } from '~/lib/stores/tool-activity.client';
 import { toolProgressStore } from '~/lib/stores/tool-progress.client';
+import type {
+  CloudflareExecutionDecisionHandler,
+  CloudflareExecutionPublicState,
+} from 'ghostbuild-agent/cloudflare-mcp';
 
 export const ToolCall = memo(function ToolCall({
   partId,
   invocation: rawInvocation,
+  cloudflareExecutions,
+  onCloudflareExecutionDecision,
 }: {
   partId: PartId;
   invocation: GhostbuildToolInvocation;
+  cloudflareExecutions?: readonly CloudflareExecutionPublicState[];
+  onCloudflareExecutionDecision?: CloudflareExecutionDecisionHandler;
 }) {
   const activities = useStore(toolActivityStore.activities);
   const progress = useStore(toolProgressStore.progress)[rawInvocation.toolCallId]?.result;
@@ -26,6 +34,7 @@ export const ToolCall = memo(function ToolCall({
   );
   const status = activity?.status ?? invocationStatus(invocation);
   const expanded = showAction || status === 'pending' || status === 'running';
+  const cloudflareExecution = cloudflareExecutions?.find((execution) => execution.toolCallId === invocation.toolCallId);
 
   const toggleAction = () => {
     setShowAction((visible) => !visible);
@@ -47,7 +56,12 @@ export const ToolCall = memo(function ToolCall({
       body={
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           <div className="space-y-2.5">
-            <ToolUseContents invocation={invocation} progress={progress} />
+            <ToolUseContents
+              invocation={invocation}
+              progress={progress}
+              cloudflareExecution={cloudflareExecution}
+              onCloudflareExecutionDecision={onCloudflareExecutionDecision}
+            />
           </div>
         </motion.div>
       }

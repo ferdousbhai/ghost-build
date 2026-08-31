@@ -19,8 +19,17 @@ export const WORKSPACE_TOOL_NAMES = [...WORKSPACE_READ_ONLY_TOOL_NAMES, ...WORKS
 export type WorkspaceToolName = (typeof WORKSPACE_TOOL_NAMES)[number];
 export type WorkspaceReadOnlyToolName = (typeof WORKSPACE_READ_ONLY_TOOL_NAMES)[number];
 
-export const MODEL_TOOL_NAMES = [...WORKSPACE_TOOL_NAMES, 'search_cloudflare_docs'] as const;
+/** Official Cloudflare MCP tools. These never enter the durable workspace operation lane. */
+export const CLOUDFLARE_MCP_MODEL_TOOL_NAMES = ['cloudflare_docs', 'cloudflare_search', 'cloudflare_execute'] as const;
+export type CloudflareMcpModelToolName = (typeof CLOUDFLARE_MCP_MODEL_TOOL_NAMES)[number];
+
+export const MODEL_TOOL_NAMES = [
+  ...WORKSPACE_TOOL_NAMES,
+  'search_cloudflare_docs',
+  ...CLOUDFLARE_MCP_MODEL_TOOL_NAMES,
+] as const;
 export type ModelToolName = (typeof MODEL_TOOL_NAMES)[number];
+export type AlwaysAvailableModelToolName = Exclude<ModelToolName, CloudflareMcpModelToolName>;
 
 export function isWorkspaceReadOnlyToolName(name: string): name is WorkspaceReadOnlyToolName {
   return (WORKSPACE_READ_ONLY_TOOL_NAMES as readonly string[]).includes(name);
@@ -50,4 +59,30 @@ export const MODEL_TOOL_INPUT_SCHEMAS = {
     cwd: z.string().optional(),
   }),
   search_cloudflare_docs: z.object({ query: z.string() }),
+  cloudflare_docs: z
+    .object({
+      query: z
+        .string()
+        .min(1)
+        .max(16 * 1024),
+    })
+    .strict(),
+  cloudflare_search: z
+    .object({
+      code: z
+        .string()
+        .min(1)
+        .max(60 * 1024),
+    })
+    .strict(),
+  // The account is supplied from the authenticated connection. A strict code-only schema rejects
+  // account_id (or any other model-supplied account reference) before the gateway is reached.
+  cloudflare_execute: z
+    .object({
+      code: z
+        .string()
+        .min(1)
+        .max(60 * 1024),
+    })
+    .strict(),
 } as const satisfies Record<ModelToolName, ZodType>;

@@ -37,6 +37,15 @@ export type GhostbuildPart =
       output?: unknown;
       errorText?: string;
     }
+  | {
+      type: 'tool-cloudflare_docs' | 'tool-cloudflare_search' | 'tool-cloudflare_execute';
+      toolCallId: string;
+      toolName: 'cloudflare_docs' | 'cloudflare_search' | 'cloudflare_execute';
+      state: string;
+      input?: unknown;
+      output?: unknown;
+      errorText?: string;
+    }
   | ({
       type: 'dynamic-tool';
       toolName: string;

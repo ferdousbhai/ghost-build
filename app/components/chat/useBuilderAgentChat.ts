@@ -38,6 +38,7 @@ import { builderModelStore } from '~/lib/stores/builder-model.client';
 import { isWorkersAiModelId } from '~/lib/workers-ai-model';
 import { loadAuthoritativeTranscriptSnapshot, reconcileMessagesForSend } from './chat-send-reconciliation';
 import { BUILDER_AGENT_QUERY_CACHE_TTL_MS, loadBuilderAgentCapability } from './builder-agent-auth';
+import type { CloudflareExecutionDecisionHandler } from 'ghostbuild-agent/cloudflare-mcp';
 
 const logger = createScopedLogger('BuilderAgentChat');
 
@@ -394,6 +395,31 @@ export function useBuilderAgentChat(args: {
     [builderAgent],
   );
 
+  const decideCloudflareExecution = useCallback<CloudflareExecutionDecisionHandler>(
+    async (executionId, decision) => {
+      const method = decision === 'approve' ? 'approveCloudflareExecution' : 'rejectCloudflareExecution';
+      const result = await builderAgent.call(method, [{ executionId }], { timeout: 2 * 60_000 });
+      if (result.resumeTurn) {
+        const status = result.execution.status;
+        await sendMessage({
+          id: `cloudflare-execution-decision-${crypto.randomUUID()}`,
+          role: 'user',
+          parts: [
+            {
+              type: 'text',
+              text:
+                decision === 'approve'
+                  ? `I approved Cloudflare execution ${executionId}. Its durable result status is ${status}. Continue from that result; reconcile before retrying if it is indeterminate.`
+                  : `I rejected Cloudflare execution ${executionId}. Continue without performing that proposed change.`,
+            },
+          ],
+        });
+      }
+      return result;
+    },
+    [builderAgent, sendMessage],
+  );
+
   const steerMessage = useCallback(
     async (input: BuilderSteeringInput) => {
       const workspaceGate = workspaceGateRef.current;
@@ -490,6 +516,8 @@ export function useBuilderAgentChat(args: {
     validationStage: builderAgent.state?.validationProgress?.stage ?? null,
     deployment: builderAgent.state?.deployment ?? null,
     deployValidatedRevision,
+    cloudflareExecutions: builderAgent.state?.cloudflareExecutions ?? [],
+    decideCloudflareExecution,
     workspacePresentationState:
       workspacePresentation?.gate === workspaceGateRef.current ? workspacePresentation.state : 'connecting',
   };

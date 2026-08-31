@@ -41,7 +41,7 @@ import {
   setHeuristicProjectDescriptionIfMissing,
   setHeuristicSubchatDescriptionIfMissing,
 } from '~/lib/cloudflare/data/chat-service.server';
-import { messageText } from 'ghostbuild-agent/ai-compat';
+import { getToolInvocation, messageText, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import {
   transcriptCheckpointSchema,
   transcriptCheckpointsEqual,
@@ -94,6 +94,38 @@ import { waitForCancellationBeforeDeadline } from './builder-cancellation';
 import { PiSteeringQueue } from '~/lib/.server/llm/pi-steering';
 import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import { z } from 'zod';
+import {
+  BuilderCloudflareExecutionRepository,
+  CLOUDFLARE_EXECUTION_RISK_NOTE,
+  containsCredentialishCloudflareContent,
+  publicExecutionState,
+  type CloudflareExecutionBinding,
+  type CloudflareExecutionRecord,
+} from './builder-cloudflare-execution';
+import {
+  type CloudflareExecuteFinalResult,
+  type CloudflareExecuteProposal,
+  type CloudflareExecutionDecisionResult,
+  type CloudflareExecutionPublicState,
+  type CloudflareExecutionSafeOutcome,
+  type CloudflareExecutionStatus,
+  type CloudflareMcpImmediateResult,
+} from 'ghostbuild-agent/cloudflare-mcp';
+import {
+  cloudflareMcpExecuteEnabled,
+  readCloudflareMcpRuntimeAdmission,
+  type CloudflareMcpRuntimeControls,
+  type CloudflareMcpRuntimeIdentity,
+} from '~/lib/.server/cloudflare/cloudflare-mcp-runtime-controls';
+import { CloudflareMcpClient, type CloudflareMcpOutcome } from '~/lib/.server/cloudflare/cloudflare-mcp-client';
+import { resolveUserWorkspaceCloudflareAccessToken } from '~/lib/.server/cloudflare/user-workspace-cloudflare-credential';
+import type {
+  CloudflareDocsModelInput,
+  CloudflareExecuteModelInput,
+  CloudflareMcpModelToolContext,
+  CloudflareSearchModelInput,
+  ModelToolExecutionOptions,
+} from '~/lib/.server/llm/cloudflare-mcp-model-tools';
 
 const logger = createScopedLogger('BuilderAgent');
 
@@ -110,6 +142,7 @@ const CONTEXT_COMPACTION_FIBER = 'background:context_compaction';
 const PREVIEW_PUBLICATION_FIBER = 'background:builder_preview';
 const DEPLOYMENT_FIBER = 'background:builder_deployment';
 const TITLE_GENERATION_FIBER = 'background:title_generation';
+const CLOUDFLARE_EXECUTION_FIBER = 'background:cloudflare_execution';
 const TITLE_GENERATION_JOB_MAX_PROMPT_CHARACTERS = 4_000;
 const CHAT_CANCELLATION_SETTLE_TIMEOUT_MS = 4.5 * 60 * 1000;
 
@@ -133,6 +166,12 @@ const transcriptOwnerIdSchema = z.string().min(1).max(512);
 
 /** Context compaction fibers carry only the message they were asked to compact through. */
 const contextCompactionJobSchema = z.object({ throughMessageId: z.string().min(1) });
+
+const cloudflareExecutionDecisionSchema = z.object({ executionId: z.string().uuid() }).strict();
+const cloudflareExecutionFiberSchema = z
+  .object({ executionId: z.string().uuid(), proposalSha256: z.string().regex(/^[a-f0-9]{64}$/) })
+  .strict();
+type CloudflareExecutionFiberJob = z.infer<typeof cloudflareExecutionFiberSchema>;
 
 /** A message may carry the transcript checkpoint its sender was working from. */
 const transcriptBaseMetadataSchema = z.object({
@@ -169,6 +208,7 @@ export type BuilderAgentState = {
   } | null;
   deployment?: BuilderDeploymentState | null;
   contextCompactionRequestedTurnId?: string | null;
+  cloudflareExecutions?: CloudflareExecutionPublicState[];
 };
 
 /** Durable transcript as the agent currently holds it, returned after a cancel or an explicit reload. */
@@ -202,6 +242,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     validationProgress: null,
     deployment: null,
     contextCompactionRequestedTurnId: null,
+    cloudflareExecutions: [],
   };
 
   override chatRecovery = {
@@ -220,6 +261,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
 
   private readonly contextCompaction = new DurableObjectContextCompactionRepository(this);
   private readonly identityRepository: BuilderAgentIdentityRepository;
+  private readonly cloudflareExecutions: BuilderCloudflareExecutionRepository;
   private readonly workspace: BuilderWorkspaceApi;
   private ownerId: string | null = null;
   private userId: string | null = null;
@@ -230,15 +272,18 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     super(ctx, env);
     initializeBuilderAgentSchema(ctx);
     this.identityRepository = new BuilderAgentIdentityRepository(ctx.storage);
+    this.cloudflareExecutions = new BuilderCloudflareExecutionRepository(ctx.storage);
     this.workspace = new UserWorkspaceRuntimeClient(env, ctx.id.toString(), () => this.userId);
   }
 
   async onStart(props?: BuilderAgentProps) {
     if (props) {
       await this.initializeIdentity(props);
+      this.refreshCloudflareExecutionState();
       return;
     }
     await this.hydrateDurableIdentity({ required: false, reason: 'agent_start' });
+    this.refreshCloudflareExecutionState();
   }
 
   /**
@@ -352,6 +397,19 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       this.failDeployment(job, error);
       return { status: 'error', error: error.message };
     }
+    if (ctx.name === CLOUDFLARE_EXECUTION_FIBER) {
+      const job = cloudflareExecutionFiberSchema.safeParse(ctx.metadata).data;
+      if (!job) {
+        return { status: 'error', error: 'missing Cloudflare execution recovery data' };
+      }
+      const execution = this.cloudflareExecutions.recoverIndeterminate(job.executionId, job.proposalSha256);
+      this.refreshCloudflareExecutionState();
+      await this.persistCloudflareExecutionResult(execution);
+      return {
+        status: 'error',
+        error: 'The approved Cloudflare execution was interrupted and will not be replayed.',
+      };
+    }
     if (ctx.name !== CONTEXT_COMPACTION_FIBER) {
       return super.onFiberRecovered(ctx);
     }
@@ -420,6 +478,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
 
     try {
       const accountCredentials = await getUserWorkersAiCredentials(this.env, durableIdentity.userId);
+      const cloudflareMcp = await this.createCloudflareMcpToolContext(durableIdentity.transcript);
       if (shouldGenerateTitle) {
         await this.scheduleTitleGeneration(
           {
@@ -441,6 +500,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         accountCredentials,
         sessionAffinity: await createWorkersAiSessionAffinity(transcript, modelId),
         workspace: this.workspace,
+        cloudflareMcp,
         onValidationStage: (toolCallId, stage) => this.setValidationProgress(toolCallId, stage),
         runWithKeepAlive: (operation) => this.keepAliveWhile(operation),
         steering,
@@ -626,6 +686,64 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       reservation.reject(error);
       throw error;
     }
+  }
+
+  @callable()
+  async approveCloudflareExecution(input: { executionId: string }): Promise<CloudflareExecutionDecisionResult> {
+    const parsed = cloudflareExecutionDecisionSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new Response('Invalid Cloudflare execution decision.', { status: 400 });
+    }
+    await this.waitForCloudflareDecisionBoundary();
+    const binding = await this.requireCurrentCloudflareExecutionBinding('approve_cloudflare_execution');
+    const proposal = await this.cloudflareExecutions.verify(parsed.data.executionId, binding);
+    if (
+      proposal.status === 'rejected' ||
+      proposal.status === 'expired' ||
+      proposal.status === 'failed' ||
+      proposal.status === 'indeterminate'
+    ) {
+      throw new Response('This Cloudflare execution can no longer be approved.', { status: 409 });
+    }
+    const job: CloudflareExecutionFiberJob = {
+      executionId: proposal.executionId,
+      proposalSha256: proposal.proposalSha256,
+    };
+    const fiber = await this.startFiber(
+      CLOUDFLARE_EXECUTION_FIBER,
+      async (context) => {
+        context.stash(job);
+        await this.runApprovedCloudflareExecution(job, binding);
+      },
+      {
+        idempotencyKey: `cloudflare-execution:${proposal.executionId}`,
+        metadata: job,
+        waitForCompletion: true,
+      },
+    );
+    const execution = this.cloudflareExecutions.get(proposal.executionId);
+    if (!execution) {
+      throw new Error('The Cloudflare execution disappeared after its durable fiber completed.');
+    }
+    this.refreshCloudflareExecutionState();
+    return {
+      execution: publicExecutionState(execution),
+      resumeTurn: fiber.accepted && execution.status !== 'rejected' && execution.status !== 'expired',
+    };
+  }
+
+  @callable()
+  async rejectCloudflareExecution(input: { executionId: string }): Promise<CloudflareExecutionDecisionResult> {
+    const parsed = cloudflareExecutionDecisionSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new Response('Invalid Cloudflare execution decision.', { status: 400 });
+    }
+    await this.waitForCloudflareDecisionBoundary();
+    const binding = await this.requireCurrentCloudflareExecutionBinding('reject_cloudflare_execution');
+    const { record, transitioned } = await this.cloudflareExecutions.reject(parsed.data.executionId, binding);
+    this.refreshCloudflareExecutionState();
+    await this.persistCloudflareExecutionResult(record);
+    return { execution: publicExecutionState(record), resumeTurn: transitioned };
   }
 
   @callable()
@@ -1039,6 +1157,260 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     return this.seedWorkspace(builderTemplateSeedId(), template);
   }
 
+  private async createCloudflareMcpToolContext(
+    transcript: BuilderTranscriptBinding,
+  ): Promise<CloudflareMcpModelToolContext | undefined> {
+    const admission = await readCloudflareMcpRuntimeAdmission(this.env);
+    if (
+      !admission?.controls.cloudflare_mcp ||
+      !this.userId ||
+      admission.identity.userId !== this.userId ||
+      !this.transcriptBinding ||
+      !builderTranscriptBindingsEqual(this.transcriptBinding, transcript)
+    ) {
+      return undefined;
+    }
+    const expectedIdentity = admission.identity;
+    const executeEnabled = cloudflareMcpExecuteEnabled(admission.controls);
+    return {
+      accountId: expectedIdentity.accountId,
+      executeEnabled,
+      docs: (input, options) => this.invokeCloudflareReadOnly('docs', input, options, expectedIdentity),
+      search: (input, options) => this.invokeCloudflareReadOnly('search', input, options, expectedIdentity),
+      proposeExecute: (input, options) => this.proposeCloudflareExecution(input, options, expectedIdentity, transcript),
+    };
+  }
+
+  private async waitForCloudflareDecisionBoundary(): Promise<void> {
+    const stable = await this.waitUntilStable({ timeout: 30_000, pendingInteraction: () => false });
+    if (!stable) {
+      throw new Response('The builder turn has not finished storing this proposal.', { status: 409 });
+    }
+  }
+
+  private async invokeCloudflareReadOnly(
+    toolName: 'docs',
+    input: CloudflareDocsModelInput,
+    options: ModelToolExecutionOptions,
+    expectedIdentity: CloudflareMcpRuntimeIdentity,
+  ): Promise<CloudflareMcpImmediateResult>;
+  private async invokeCloudflareReadOnly(
+    toolName: 'search',
+    input: CloudflareSearchModelInput,
+    options: ModelToolExecutionOptions,
+    expectedIdentity: CloudflareMcpRuntimeIdentity,
+  ): Promise<CloudflareMcpImmediateResult>;
+  private async invokeCloudflareReadOnly(
+    toolName: 'docs' | 'search',
+    input: CloudflareDocsModelInput | CloudflareSearchModelInput,
+    options: ModelToolExecutionOptions,
+    expectedIdentity: CloudflareMcpRuntimeIdentity,
+  ): Promise<CloudflareMcpImmediateResult> {
+    const admission = await this.requireCloudflareMcpAdmission(expectedIdentity, false);
+    const client = this.createCloudflareMcpClient(admission.identity);
+    const signal = options.abortSignal ?? new AbortController().signal;
+    try {
+      const outcome = await client.invoke(
+        toolName === 'docs'
+          ? {
+              ...admission.identity,
+              toolName,
+              toolInput: { query: 'query' in input ? input.query : '' },
+              signal,
+              invocationId: options.toolCallId,
+            }
+          : {
+              ...admission.identity,
+              toolName,
+              toolInput: { code: 'code' in input ? input.code : '' },
+              signal,
+              invocationId: options.toolCallId,
+            },
+      );
+      return cloudflareImmediateResult(toolName, admission.identity.accountId, outcome);
+    } catch {
+      signal.throwIfAborted();
+      return {
+        kind: 'cloudflare_mcp_result',
+        operation: toolName,
+        status: 'failure',
+        accountId: admission.identity.accountId,
+        content: 'The official Cloudflare MCP tool contract is currently unavailable.',
+        requestId: null,
+        httpStatus: null,
+        truncated: false,
+      };
+    }
+  }
+
+  private async proposeCloudflareExecution(
+    input: CloudflareExecuteModelInput,
+    options: ModelToolExecutionOptions,
+    expectedIdentity: CloudflareMcpRuntimeIdentity,
+    transcript: BuilderTranscriptBinding,
+  ): Promise<CloudflareExecuteProposal> {
+    options.abortSignal?.throwIfAborted();
+    const admission = await this.requireCloudflareMcpAdmission(expectedIdentity, true);
+    if (!this.transcriptBinding || !builderTranscriptBindingsEqual(this.transcriptBinding, transcript)) {
+      throw new Error('The transcript changed before the Cloudflare execution proposal was stored.');
+    }
+    const record = await this.cloudflareExecutions.createProposal({
+      toolCallId: options.toolCallId,
+      binding: { ...admission.identity, transcript },
+      code: input.code,
+    });
+    this.refreshCloudflareExecutionState();
+    return {
+      kind: 'cloudflare_execute_proposal',
+      status: 'awaiting_approval',
+      executionId: record.executionId,
+      toolCallId: record.toolCallId,
+      accountId: record.accountId,
+      code: record.code,
+      proposalSha256: record.proposalSha256,
+      riskNote: CLOUDFLARE_EXECUTION_RISK_NOTE,
+      expiresAt: record.expiresAt,
+    };
+  }
+
+  private async requireCloudflareMcpAdmission(
+    expectedIdentity: CloudflareMcpRuntimeIdentity,
+    execute: boolean,
+  ): Promise<{ identity: CloudflareMcpRuntimeIdentity; controls: CloudflareMcpRuntimeControls }> {
+    const admission = await readCloudflareMcpRuntimeAdmission(this.env);
+    if (
+      !admission ||
+      !cloudflareRuntimeIdentitiesEqual(admission.identity, expectedIdentity) ||
+      !admission.controls.cloudflare_mcp ||
+      (execute && !cloudflareMcpExecuteEnabled(admission.controls))
+    ) {
+      throw new Error('Cloudflare MCP is disabled or the authenticated connection changed.');
+    }
+    return admission;
+  }
+
+  private createCloudflareMcpClient(identity: CloudflareMcpRuntimeIdentity): CloudflareMcpClient {
+    return new CloudflareMcpClient({
+      resolveAccessToken: (options) => resolveUserWorkspaceCloudflareAccessToken(this.env, identity, options),
+    });
+  }
+
+  private async requireCurrentCloudflareExecutionBinding(reason: string): Promise<CloudflareExecutionBinding> {
+    const durableIdentity = await this.hydrateDurableIdentity({ required: true, reason });
+    const transcript = this.transcriptBinding;
+    const admission = await readCloudflareMcpRuntimeAdmission(this.env);
+    if (!durableIdentity || !transcript || !admission || admission.identity.userId !== durableIdentity.userId) {
+      throw new Response('The Cloudflare execution identity is unavailable.', { status: 409 });
+    }
+    return { ...admission.identity, transcript };
+  }
+
+  private async runApprovedCloudflareExecution(
+    job: CloudflareExecutionFiberJob,
+    binding: CloudflareExecutionBinding,
+  ): Promise<void> {
+    try {
+      const { record } = await this.cloudflareExecutions.approve(job.executionId, binding);
+      if (record.proposalSha256 !== job.proposalSha256) {
+        throw new Error('The approved Cloudflare execution digest changed.');
+      }
+      this.refreshCloudflareExecutionState();
+      await this.requireCloudflareMcpAdmission(binding, true);
+      const executing = await this.cloudflareExecutions.beginExecution(job.executionId, binding);
+      if (!executing) {
+        const settled = this.cloudflareExecutions.get(job.executionId);
+        if (settled && isCloudflareExecutionTerminal(settled.status)) {
+          await this.persistCloudflareExecutionResult(settled);
+        }
+        return;
+      }
+      this.refreshCloudflareExecutionState();
+      const client = this.createCloudflareMcpClient(binding);
+      const outcome = await client.invoke({
+        ...binding,
+        toolName: 'execute',
+        toolInput: { code: executing.code },
+        signal: new AbortController().signal,
+        invocationId: executing.executionId,
+      });
+      const safeOutcome = safeCloudflareExecutionOutcome(outcome);
+      const status = cloudflareExecutionStatusForOutcome(outcome);
+      const completed = this.cloudflareExecutions.complete(job.executionId, status, safeOutcome);
+      this.refreshCloudflareExecutionState();
+      await this.persistCloudflareExecutionResult(completed);
+    } catch {
+      const current = this.cloudflareExecutions.get(job.executionId);
+      if (!current || isCloudflareExecutionTerminal(current.status)) {
+        if (current) {
+          await this.persistCloudflareExecutionResult(current);
+        }
+        return;
+      }
+      const failure: CloudflareExecutionSafeOutcome = {
+        status: 'failure',
+        summary: 'The approved Cloudflare execution could not be started safely.',
+      };
+      const failed =
+        current.status === 'approved'
+          ? this.cloudflareExecutions.failApproved(job.executionId, failure)
+          : current.status === 'executing'
+            ? this.cloudflareExecutions.complete(job.executionId, 'failed', failure)
+            : this.cloudflareExecutions.recoverIndeterminate(job.executionId, job.proposalSha256);
+      // The raw error text stays out of the log by policy (runtime-log-privacy); the durable
+      // outcome record carries what happened, keyed by executionId.
+      logger.warn('Cloudflare execution fiber settled without a provider success', {
+        executionId: job.executionId,
+      });
+      this.refreshCloudflareExecutionState();
+      await this.persistCloudflareExecutionResult(failed);
+    }
+  }
+
+  private async persistCloudflareExecutionResult(record: CloudflareExecutionRecord): Promise<void> {
+    if (!isCloudflareExecutionTerminal(record.status) || !record.outcome) {
+      return;
+    }
+    const output: CloudflareExecuteFinalResult = {
+      kind: 'cloudflare_execute_result',
+      executionId: record.executionId,
+      accountId: record.accountId,
+      proposalSha256: record.proposalSha256,
+      status: record.status,
+      outcome: record.outcome,
+    };
+    let replaced = false;
+    const messages: GhostbuildMessage[] = this.messages.map((message) => ({
+      ...message,
+      parts: message.parts.map((part) => {
+        const invocation = getToolInvocation(part);
+        if (
+          invocation?.toolName !== 'cloudflare_execute' ||
+          invocation.toolCallId !== record.toolCallId ||
+          invocation.state !== 'output-available'
+        ) {
+          return part;
+        }
+        replaced = true;
+        return { ...part, output };
+      }),
+    }));
+    if (!replaced) {
+      return;
+    }
+    // SAFETY: these are the agent's existing AI SDK messages with only one already-terminal tool
+    // output replaced by another JSON-serializable output; no part discriminant or state changes.
+    await this.persistMessages(messages as UIMessage[]);
+    if (this.state.transcript) {
+      await this.advanceTranscriptCheckpoint(this.state.transcript);
+    }
+  }
+
+  private refreshCloudflareExecutionState(): void {
+    this.cloudflareExecutions.expireAwaiting();
+    const cloudflareExecutions = this.cloudflareExecutions.listRecent();
+    this.setState({ ...this.state, cloudflareExecutions, updatedAt: new Date().toISOString() });
+  }
+
   private async loadParentWorkspace(
     parentAgentName: string,
   ): Promise<{ entries: BuilderWorkspaceFileInput[]; targetRevision: number }> {
@@ -1388,4 +1760,126 @@ function parseTurnContext(value: unknown): ChatTurnContext | undefined {
 
 function deploymentErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Deployment failed.';
+}
+
+function builderTranscriptBindingsEqual(left: BuilderTranscriptBinding, right: BuilderTranscriptBinding): boolean {
+  return (
+    left.agentName === right.agentName &&
+    left.chatInitialId === right.chatInitialId &&
+    left.generation === right.generation &&
+    left.subchatIndex === right.subchatIndex &&
+    left.parentAgentName === right.parentAgentName
+  );
+}
+
+function cloudflareRuntimeIdentitiesEqual(
+  left: CloudflareMcpRuntimeIdentity,
+  right: CloudflareMcpRuntimeIdentity,
+): boolean {
+  return (
+    left.userId === right.userId &&
+    left.accountId === right.accountId &&
+    left.connectionId === right.connectionId &&
+    left.connectionGeneration === right.connectionGeneration &&
+    left.oauthScopeGrantStatus === right.oauthScopeGrantStatus
+  );
+}
+
+function cloudflareImmediateResult(
+  operation: 'docs' | 'search',
+  accountId: string,
+  outcome: CloudflareMcpOutcome,
+): CloudflareMcpImmediateResult {
+  if (outcome.status === 'success') {
+    return {
+      kind: 'cloudflare_mcp_result',
+      operation,
+      status: 'success',
+      accountId,
+      content: outcome.content.map((part) => part.text).join('\n'),
+      requestId: outcome.metadata.requestId,
+      httpStatus: outcome.metadata.httpStatus,
+      truncated: outcome.metadata.truncated,
+    };
+  }
+  if (outcome.status === 'insufficient_scope') {
+    return {
+      kind: 'cloudflare_mcp_result',
+      operation,
+      status: 'insufficient_scope',
+      accountId,
+      content: outcome.message,
+      requestId: outcome.metadata.requestId,
+      httpStatus: outcome.metadata.httpStatus,
+      truncated: outcome.metadata.truncated,
+    };
+  }
+  return {
+    kind: 'cloudflare_mcp_result',
+    operation,
+    status: 'failure',
+    accountId,
+    content: outcome.error.message,
+    requestId: outcome.metadata.requestId,
+    httpStatus: outcome.metadata.httpStatus,
+    truncated: outcome.metadata.truncated,
+  };
+}
+
+function safeCloudflareExecutionOutcome(outcome: CloudflareMcpOutcome): CloudflareExecutionSafeOutcome {
+  if (outcome.status === 'success') {
+    const content = outcome.content.map((part) => part.text).join('\n');
+    if (containsCredentialishCloudflareContent(content)) {
+      return {
+        status: 'success',
+        summary: 'Cloudflare completed the approved execution, but sensitive-looking response content was withheld.',
+        requestId: outcome.metadata.requestId,
+        httpStatus: outcome.metadata.httpStatus,
+        truncated: outcome.metadata.truncated,
+        sensitiveContentWithheld: true,
+      };
+    }
+    return {
+      status: 'success',
+      summary: 'Cloudflare completed the approved execution.',
+      content,
+      requestId: outcome.metadata.requestId,
+      httpStatus: outcome.metadata.httpStatus,
+      truncated: outcome.metadata.truncated,
+    };
+  }
+  if (outcome.status === 'insufficient_scope') {
+    return {
+      status: 'insufficient_scope',
+      summary: outcome.message,
+      requestId: outcome.metadata.requestId,
+      httpStatus: outcome.metadata.httpStatus,
+      truncated: outcome.metadata.truncated,
+    };
+  }
+  return {
+    status: outcome.status,
+    summary: outcome.error.message,
+    requestId: outcome.metadata.requestId,
+    httpStatus: outcome.metadata.httpStatus,
+    truncated: outcome.metadata.truncated,
+  };
+}
+
+function cloudflareExecutionStatusForOutcome(
+  outcome: CloudflareMcpOutcome,
+): Extract<CloudflareExecutionStatus, 'succeeded' | 'failed' | 'indeterminate'> {
+  return outcome.status === 'success' ? 'succeeded' : outcome.status === 'indeterminate' ? 'indeterminate' : 'failed';
+}
+
+function isCloudflareExecutionTerminal(
+  status: CloudflareExecutionStatus,
+): status is Exclude<CloudflareExecutionStatus, 'awaiting_approval' | 'approved' | 'executing'> {
+  return (
+    status === 'rejected' ||
+    status === 'succeeded' ||
+    status === 'failed' ||
+    status === 'indeterminate' ||
+    status === 'expired'
+  );
 }

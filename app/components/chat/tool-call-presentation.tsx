@@ -18,6 +18,9 @@ const STOPPED_TOOL_TITLES = new Map<string, string>([
   ['write', 'File write stopped'],
   ['edit', 'File edit stopped'],
   ['exec', 'Command stopped'],
+  ['cloudflare_docs', 'Cloudflare docs search stopped'],
+  ['cloudflare_search', 'Cloudflare account search stopped'],
+  ['cloudflare_execute', 'Cloudflare proposal stopped'],
 ]);
 
 const MODEL_TOOL_INPUT_SCHEMA_BY_NAME = new Map<string, ZodType>(Object.entries(MODEL_TOOL_INPUT_SCHEMAS));
@@ -84,6 +87,21 @@ export function toolTitle(invocation: GhostbuildToolInvocation, status: ToolActi
         <FileIcon />,
       );
     }
+    case 'cloudflare_docs':
+      return titleRow(
+        status === 'running' ? 'Searching Cloudflare MCP docs' : 'Searched Cloudflare MCP docs',
+        <MagnifyingGlassIcon className="text-content-secondary" />,
+      );
+    case 'cloudflare_search':
+      return titleRow(
+        status === 'running' ? 'Searching Cloudflare account' : 'Searched Cloudflare account',
+        <MagnifyingGlassIcon className="text-content-secondary" />,
+      );
+    case 'cloudflare_execute':
+      return titleRow(
+        status === 'running' ? 'Preparing Cloudflare proposal' : 'Cloudflare execution proposal',
+        <Pencil1Icon className="text-content-secondary" />,
+      );
     default:
       return invocation.toolName;
   }

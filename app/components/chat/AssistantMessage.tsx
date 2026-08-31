@@ -8,14 +8,24 @@ import {
   type GhostbuildPart,
 } from 'ghostbuild-agent/ai-compat';
 import { captureMessage } from '~/lib/telemetry.client';
+import type {
+  CloudflareExecutionDecisionHandler,
+  CloudflareExecutionPublicState,
+} from 'ghostbuild-agent/cloudflare-mcp';
 
 const Markdown = lazy(() => import('./Markdown').then((module) => ({ default: module.Markdown })));
 
 interface AssistantMessageProps {
   message: GhostbuildMessage;
+  cloudflareExecutions?: readonly CloudflareExecutionPublicState[];
+  onCloudflareExecutionDecision?: CloudflareExecutionDecisionHandler;
 }
 
-export const AssistantMessage = memo(function AssistantMessage({ message }: AssistantMessageProps) {
+export const AssistantMessage = memo(function AssistantMessage({
+  message,
+  cloudflareExecutions,
+  onCloudflareExecutionDecision,
+}: AssistantMessageProps) {
   if (!message.parts) {
     return (
       <div className="w-full overflow-hidden">
@@ -30,17 +40,40 @@ export const AssistantMessage = memo(function AssistantMessage({ message }: Assi
     <div className="w-full overflow-hidden text-sm">
       <div className="flex flex-col gap-2">
         {message.parts.map((part, index) => (
-          <AssistantMessagePart key={index} part={part} partId={makePartId(message.id, index)} />
+          <AssistantMessagePart
+            key={index}
+            part={part}
+            partId={makePartId(message.id, index)}
+            cloudflareExecutions={cloudflareExecutions}
+            onCloudflareExecutionDecision={onCloudflareExecutionDecision}
+          />
         ))}
       </div>
     </div>
   );
 });
 
-function AssistantMessagePart({ part, partId }: { part: GhostbuildPart; partId: PartId }) {
+function AssistantMessagePart({
+  part,
+  partId,
+  cloudflareExecutions,
+  onCloudflareExecutionDecision,
+}: {
+  part: GhostbuildPart;
+  partId: PartId;
+  cloudflareExecutions?: readonly CloudflareExecutionPublicState[];
+  onCloudflareExecutionDecision?: CloudflareExecutionDecisionHandler;
+}) {
   const toolInvocation = getToolInvocation(part);
   if (toolInvocation) {
-    return <ToolCall partId={partId} invocation={toolInvocation} />;
+    return (
+      <ToolCall
+        partId={partId}
+        invocation={toolInvocation}
+        cloudflareExecutions={cloudflareExecutions}
+        onCloudflareExecutionDecision={onCloudflareExecutionDecision}
+      />
+    );
   }
 
   if (part.type === 'text') {
