@@ -89,3 +89,40 @@ control - the consent UX the plan's Phase 3 copy must anticipate.
    `https://mcp.cloudflare.com/mcp` (the Claude Code MCP client authenticated successfully with
    the server's own client, which proves the endpoint and flow but not Ghostbuild's token).
 4. Refresh behaviour and `insufficient_scope` reporting for partial grants.
+
+## Staging consent runs (2026-08-31, ephemeral PKCE client, now deleted)
+
+Created a throwaway public PKCE-only OAuth client (token auth method "None", so no secret was ever
+issued), configured with the two identity-read scopes required and workers-scripts.read as a single
+optional scope. Ran the authorization-code + PKCE flow three times against a localhost callback
+listener, then revoked every grant and deleted the client. Findings:
+
+1. **The provider reports granted scopes, distinct from requested.** Both the callback query and the
+   token response carry a `scope` field. Run 3 (fresh grant, optional scope declined via the consent
+   screen's per-category toggle) returned `scope=account-settings.read user-details.read` with
+   `workers-scripts.read` ABSENT - the declined optional scope is not in the granted set. The
+   dashboard confirmed it: that grant showed "2 permissions" versus 3 for the full grants.
+   → The orchestrator's primary path (parse the reported `scope`; never equate requested with
+   granted) is correct and becomes load-bearing the moment the broad optional profile is non-empty.
+
+2. **A re-authorization while a prior grant is active returns the union with previously-granted
+   scopes.** Run 2 declined the optional scope but the token still came back with all three, because
+   run 1's grant was still active; only after revoking (run 3) did the decline take effect. →
+   Narrowing a grant requires revoking the old one (or the plan's reauthorization path bumping
+   connection_generation to force a fresh consent), not merely re-running authorize. The existing
+   generation mechanism already does this.
+
+3. **offline_access must be a configured scope on the client**, not just appended at authorize time:
+   requesting it on a client not configured for it returned `error=invalid_scope ... not allowed to
+request scope 'offline_access'`. The production client already lists it (part 1), so the
+   scope-manifest ↔ OAuth-client sync must keep offline_access in the client's allowed scopes.
+
+4. **token_type is `bearer`, access-token lifetime ~3599s.** The PKCE public client without
+   offline_access granted returned no refresh_token; the production confidential client does (part 1
+   requires it). Nothing contradicts the manifest.
+
+Every Phase 0 open item from the 2026-08-30 report is now closed except one: a Ghostbuild-issued
+token used as bearer against mcp.cloudflare.com/mcp under the real grant. The Phase 4 gateway targets
+that endpoint and the MCP server's own client authenticated there fine (proving endpoint + transport),
+but Ghostbuild's own token as bearer is currently validated only by the gateway's tests against a
+mock, not yet against the live server - that verification belongs to Phase 5 integration.
