@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentContext } from '@earendil-works/pi-agent-core';
 import type { PiStreamChunk } from './pi-stream';
+import { CLOUDFLARE_WORKERS_AI_MODEL, DEFAULT_WORKERS_AI_MODEL, type WorkersAiModelId } from '~/lib/workers-ai-model';
 
 type UIMessageChunk = PiStreamChunk;
 type RunnerEvent = RunnerToolExecutionEndEvent | RunnerTurnEndEvent;
@@ -136,12 +137,15 @@ describe('piAgentRunner', () => {
   });
 
   it('routes the validated model selection to the Pi provider', async () => {
-    await collectChunks(await createAgentStream('deepseek/deepseek-v4-pro'));
+    await collectChunks(await createAgentStream('@cf/openai/gpt-oss-120b'));
 
     expect(mocks.getPiProvider).toHaveBeenCalledWith(
       expect.anything(),
-      'deepseek/deepseek-v4-pro',
-      expect.objectContaining({ sessionAffinity: expect.any(String) }),
+      '@cf/openai/gpt-oss-120b',
+      expect.objectContaining({
+        model: expect.objectContaining({ id: '@cf/openai/gpt-oss-120b' }),
+        sessionAffinity: expect.any(String),
+      }),
     );
   });
 
@@ -339,7 +343,7 @@ describe('piAgentRunner', () => {
       },
     );
 
-    await collectChunks(await createAgentStream('@cf/zai-org/glm-5.2', {}, steering));
+    await collectChunks(await createAgentStream(CLOUDFLARE_WORKERS_AI_MODEL, {}, steering));
   });
 
   it('stops before another model turn after a typed tool timeout', async () => {
@@ -589,7 +593,7 @@ describe('piAgentRunner', () => {
     );
 
     const chunks = await collectChunks(
-      await createAgentStream('@cf/zai-org/glm-5.2', { summarize, requestDurableCompaction }),
+      await createAgentStream(CLOUDFLARE_WORKERS_AI_MODEL, { summarize, requestDurableCompaction }),
     );
 
     expect(chunks.some((chunk) => chunk.type === 'error')).toBe(false);
@@ -624,7 +628,7 @@ describe('piAgentRunner', () => {
       );
 
     const chunks = await collectChunks(
-      await createAgentStream('@cf/zai-org/glm-5.2', { summarize, requestDurableCompaction }),
+      await createAgentStream(CLOUDFLARE_WORKERS_AI_MODEL, { summarize, requestDurableCompaction }),
     );
 
     expect(mocks.piRun).toHaveBeenCalledTimes(2);
@@ -649,7 +653,7 @@ describe('piAgentRunner', () => {
     mocks.piRun.mockImplementation(overflowRun);
 
     const chunks = await collectChunks(
-      await createAgentStream('@cf/zai-org/glm-5.2', { summarize: async () => 'Checkpoint' }),
+      await createAgentStream(CLOUDFLARE_WORKERS_AI_MODEL, { summarize: async () => 'Checkpoint' }),
     );
 
     expect(mocks.piRun).toHaveBeenCalledTimes(2);
@@ -665,7 +669,9 @@ describe('piAgentRunner', () => {
       fakeModelLoop((step, emit) => emitToolRound(step, emit, { isError: false, details: { summary: 'wrote' } })),
     );
 
-    const chunks = await collectChunks(await createAgentStream('@cf/zai-org/glm-5.2', {}, undefined, { onSettled }));
+    const chunks = await collectChunks(
+      await createAgentStream(CLOUDFLARE_WORKERS_AI_MODEL, {}, undefined, { onSettled }),
+    );
 
     expect(onSettled).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -694,7 +700,9 @@ describe('piAgentRunner', () => {
     );
 
     try {
-      const collected = collectChunks(await createAgentStream('@cf/zai-org/glm-5.2', {}, undefined, { onSettled }));
+      const collected = collectChunks(
+        await createAgentStream(CLOUDFLARE_WORKERS_AI_MODEL, {}, undefined, { onSettled }),
+      );
       await vi.advanceTimersByTimeAsync(BUILDER_TURN_INACTIVITY_MS);
       const chunks = await collected;
 
@@ -717,7 +725,7 @@ describe('piAgentRunner', () => {
     });
 
     const chunks = await collectChunks(
-      await createAgentStream('@cf/zai-org/glm-5.2', {}, undefined, { abortSignal, onSettled }),
+      await createAgentStream(CLOUDFLARE_WORKERS_AI_MODEL, {}, undefined, { abortSignal, onSettled }),
     );
 
     expect(chunks.some((chunk) => chunk.type === 'error')).toBe(false);
@@ -750,7 +758,7 @@ describe('piAgentRunner', () => {
 });
 
 function createAgentStream(
-  modelId: Parameters<typeof piAgentRunner>[0]['modelId'] = '@cf/zai-org/glm-5.2',
+  modelId: WorkersAiModelId = CLOUDFLARE_WORKERS_AI_MODEL,
   compactionOverrides: Partial<Parameters<typeof piAgentRunner>[0]['compaction']> = {},
   steering = new PiSteeringQueue(),
   overrides: Partial<Parameters<typeof piAgentRunner>[0]> = {},
@@ -758,7 +766,11 @@ function createAgentStream(
   return piAgentRunner({
     firstUserMessage: false,
     messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'Build it' }] }],
-    modelId,
+    model: {
+      ...DEFAULT_WORKERS_AI_MODEL,
+      id: modelId,
+      label: modelId,
+    },
     compaction: {
       current: null,
       pending: false,

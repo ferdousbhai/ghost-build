@@ -21,7 +21,7 @@ export function ChatDescription() {
   }
 
   return (
-    <div className="flex items-center justify-center">
+    <div className="flex min-w-0 w-full items-center justify-center">
       {editing ? (
         <form onSubmit={handleSubmit} className="flex items-center justify-center">
           <TextInput

@@ -9,6 +9,7 @@ vi.mock('~/lib/.server/llm/pi-agent-runner', () => ({ piAgentRunner }));
 import { createChatResponseFromBody } from './chat';
 import { ContextCompactionUnavailableError, ModelInputBudgetExceededError } from './llm/model-input';
 import { PiSteeringQueue } from './llm/pi-steering';
+import { DEFAULT_WORKERS_AI_MODEL, type WorkersAiModel } from '~/lib/workers-ai-model';
 
 describe('chat provider error boundary', () => {
   beforeEach(() => {
@@ -26,7 +27,8 @@ describe('chat provider error boundary', () => {
 
     await expect(
       createChatResponseFromBody({
-        body: { messages: [], modelId: '@cf/zai-org/glm-5.2' },
+        body: { messages: [], modelId: DEFAULT_WORKERS_AI_MODEL.id },
+        model: DEFAULT_WORKERS_AI_MODEL,
         compaction: {
           current: null,
           pending: false,
@@ -56,11 +58,13 @@ describe('chat provider error boundary', () => {
     await expect(createResponse()).rejects.toMatchObject({ status });
   });
 
-  it('forwards the selected allowlisted model to the builder agent', async () => {
+  it('forwards the selected catalog model to the builder agent', async () => {
     piAgentRunner.mockResolvedValueOnce(new ReadableStream());
+    const model = testModel('@cf/openai/gpt-oss-120b');
 
     await createChatResponseFromBody({
-      body: { messages: [], modelId: 'deepseek/deepseek-v4-pro' },
+      body: { messages: [], modelId: model.id },
+      model,
       compaction: {
         current: null,
         pending: false,
@@ -75,13 +79,14 @@ describe('chat provider error boundary', () => {
       ...steering(),
     });
 
-    expect(piAgentRunner).toHaveBeenCalledWith(expect.objectContaining({ modelId: 'deepseek/deepseek-v4-pro' }));
+    expect(piAgentRunner).toHaveBeenCalledWith(expect.objectContaining({ model }));
   });
 });
 
 function createResponse() {
   return createChatResponseFromBody({
-    body: { messages: [], modelId: '@cf/zai-org/glm-5.2' },
+    body: { messages: [], modelId: DEFAULT_WORKERS_AI_MODEL.id },
+    model: DEFAULT_WORKERS_AI_MODEL,
     compaction: { current: null, pending: false, summarize: vi.fn(), save: vi.fn() },
     firstUserMessage: true,
     accountCredentials: { binding: {} as Ai },
@@ -94,4 +99,8 @@ function createResponse() {
 
 function steering() {
   return { steering: new PiSteeringQueue(), onSettled: vi.fn() };
+}
+
+function testModel(id: WorkersAiModel['id']): WorkersAiModel {
+  return { ...DEFAULT_WORKERS_AI_MODEL, id, label: id };
 }

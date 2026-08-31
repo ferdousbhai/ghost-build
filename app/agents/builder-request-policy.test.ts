@@ -44,7 +44,7 @@ describe('BuilderAgent request policy', () => {
         {
           chatInitialId: 'chat',
           subchatIndex: 2,
-          modelId: '@cf/zai-org/glm-5.2',
+          modelId: '@cf/zai-org/glm-5.3-flash',
           transcript: { agentName: binding.agentName, generation: 3, subchatIndex: 2 },
         },
         binding,
@@ -52,7 +52,7 @@ describe('BuilderAgent request policy', () => {
     ).toEqual({
       chatInitialId: 'chat',
       subchatIndex: 2,
-      modelId: '@cf/zai-org/glm-5.2',
+      modelId: '@cf/zai-org/glm-5.3-flash',
       transcript: { agentName: binding.agentName, generation: 3, subchatIndex: 2 },
     });
   });
@@ -61,7 +61,7 @@ describe('BuilderAgent request policy', () => {
     [{ chatInitialId: 'other-chat' }, 409],
     [{ subchatIndex: 10_001 }, 400],
     [{ modelId: undefined }, 400],
-    [{ modelId: '@cf/example/arbitrary' }, 400],
+    [{ modelId: 'deepseek/deepseek-v4-pro' }, 400],
     [{ transcript: { agentName: binding.agentName, generation: 4, subchatIndex: 2 } }, 409],
     [{ transcript: { agentName: binding.agentName, generation: 3, subchatIndex: 1 } }, 409],
   ])('rejects mismatched or malformed scope fields: %o', (override, status) => {
@@ -70,7 +70,7 @@ describe('BuilderAgent request policy', () => {
         {
           chatInitialId: 'chat',
           subchatIndex: 2,
-          modelId: '@cf/zai-org/glm-5.2',
+          modelId: '@cf/zai-org/glm-5.3-flash',
           transcript: { agentName: binding.agentName, generation: 3, subchatIndex: 2 },
           ...override,
         },

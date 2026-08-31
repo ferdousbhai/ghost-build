@@ -1,7 +1,7 @@
 import { transcriptIdentitySchema, type TranscriptIdentity } from 'ghostbuild-agent/transcript';
 import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import type { UIMessage } from 'ai';
-import { isWorkersAiModelId, type WorkersAiModelId } from '~/lib/workers-ai-model';
+import { workersAiModelIdSchema, type WorkersAiModelId } from '~/lib/workers-ai-model';
 import { z } from 'zod';
 
 const MAX_BUILDER_AGENT_NAME_LENGTH = 512;
@@ -91,7 +91,8 @@ export function requireBuilderRequestScope(
     throw new Response('Invalid subchat index', { status: 400 });
   }
   const transcript = requireBuilderTranscriptIdentity(body.transcript, binding, subchatIndex.data);
-  if (!isWorkersAiModelId(body.modelId)) {
+  const modelId = workersAiModelIdSchema.safeParse(body.modelId);
+  if (!modelId.success) {
     throw new Response('Invalid builder model', { status: 400 });
   }
   if (chatInitialId.data !== binding?.chatInitialId) {
@@ -101,7 +102,7 @@ export function requireBuilderRequestScope(
     chatInitialId: chatInitialId.data,
     subchatIndex: subchatIndex.data,
     transcript,
-    modelId: body.modelId,
+    modelId: modelId.data,
   };
 }
 

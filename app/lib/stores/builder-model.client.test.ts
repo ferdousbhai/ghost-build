@@ -1,87 +1,101 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CLOUDFLARE_WORKERS_AI_MODEL, PREFERRED_BUILDER_MODEL } from '~/lib/workers-ai-model';
+import {
+  CLOUDFLARE_WORKERS_AI_MODEL,
+  DEFAULT_WORKERS_AI_MODEL,
+  type WorkersAiModel,
+  type WorkersAiModelCatalogPayload,
+} from '~/lib/workers-ai-model';
 import {
   builderDefaultModelStore,
-  builderModelDeniedByCreditsStore,
+  builderModelCatalogStatusStore,
+  builderModelsStore,
   builderModelStore,
   initializeBuilderModelPreference,
+  installBuilderModelCatalog,
+  loadBuilderModelCatalog,
   loadBuilderModelPreference,
   setBuilderModel,
   syncBuilderModelPreference,
 } from './builder-model.client';
 
-describe('builder model preference', () => {
-  beforeEach(() => initializeBuilderModelPreference('unknown', { getItem: () => null }));
+const alternativeModel: WorkersAiModel = {
+  ...DEFAULT_WORKERS_AI_MODEL,
+  id: '@cf/openai/gpt-oss-120b',
+  label: 'GPT OSS 120B',
+  vision: false,
+};
+const catalog: WorkersAiModelCatalogPayload = {
+  defaultModelId: CLOUDFLARE_WORKERS_AI_MODEL,
+  models: [DEFAULT_WORKERS_AI_MODEL, alternativeModel],
+};
 
-  it('loads an allowlisted preference and defaults invalid values', () => {
-    loadBuilderModelPreference({ getItem: () => '@cf/zai-org/glm-5.2' });
-    expect(builderModelStore.get()).toBe('@cf/zai-org/glm-5.2');
+describe('builder model preference', () => {
+  beforeEach(() => {
+    installBuilderModelCatalog(
+      { defaultModelId: CLOUDFLARE_WORKERS_AI_MODEL, models: [DEFAULT_WORKERS_AI_MODEL] },
+      { getItem: () => null },
+    );
+    builderModelCatalogStatusStore.set('idle');
+  });
+
+  it('uses the pinned GLM 5.3 Flash default before discovery', () => {
+    initializeBuilderModelPreference({ getItem: () => null });
+
+    expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
+    expect(builderDefaultModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
+    expect(builderModelsStore.get()).toEqual([DEFAULT_WORKERS_AI_MODEL]);
+  });
+
+  it('installs the live catalog and restores only a current member', () => {
+    installBuilderModelCatalog(catalog, { getItem: () => alternativeModel.id });
+    expect(builderModelStore.get()).toBe(alternativeModel.id);
 
     loadBuilderModelPreference({ getItem: () => '@cf/example/retired' });
     expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
   });
 
-  it('uses DeepSeek by default when AI Gateway Unified Billing credits are available', () => {
-    initializeBuilderModelPreference('available', { getItem: () => null });
+  it('loads and validates the authenticated runtime catalog', async () => {
+    const request = vi.fn(async () => Response.json(catalog));
 
-    expect(builderModelStore.get()).toBe(PREFERRED_BUILDER_MODEL);
-    expect(builderDefaultModelStore.get()).toBe(PREFERRED_BUILDER_MODEL);
+    await loadBuilderModelCatalog(request, { getItem: () => alternativeModel.id });
+
+    expect(request).toHaveBeenCalledWith('/v1/models', { headers: { Accept: 'application/json' } });
+    expect(builderModelCatalogStatusStore.get()).toBe('ready');
+    expect(builderModelsStore.get()).toEqual(catalog.models);
+    expect(builderModelStore.get()).toBe(alternativeModel.id);
   });
 
-  it.each(['unavailable', 'unknown'] as const)('uses the hosted fallback when credit status is %s', (creditStatus) => {
-    initializeBuilderModelPreference(creditStatus, { getItem: () => PREFERRED_BUILDER_MODEL });
+  it('keeps the safe fallback when discovery fails', async () => {
+    await loadBuilderModelCatalog(async () => new Response(null, { status: 503 }));
 
-    expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
-    expect(builderDefaultModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
-  });
-
-  it('preserves an explicit hosted-model preference when credits are available', () => {
-    initializeBuilderModelPreference('available', { getItem: () => '@cf/zai-org/glm-5.2' });
-
-    expect(builderModelStore.get()).toBe('@cf/zai-org/glm-5.2');
+    expect(builderModelCatalogStatusStore.get()).toBe('error');
+    expect(builderModelsStore.get()).toEqual([DEFAULT_WORKERS_AI_MODEL]);
   });
 
   it('keeps the in-memory choice when local storage is unavailable', () => {
+    installBuilderModelCatalog(catalog, { getItem: () => null });
     const setItem = vi.fn(() => {
       throw new DOMException('Blocked');
     });
 
-    setBuilderModel('@cf/zai-org/glm-5.2', { setItem });
+    setBuilderModel(alternativeModel.id, { setItem });
 
-    expect(builderModelStore.get()).toBe('@cf/zai-org/glm-5.2');
+    expect(builderModelStore.get()).toBe(alternativeModel.id);
     expect(setItem).toHaveBeenCalledOnce();
   });
 
-  it('synchronizes valid cross-tab changes and ignores unrelated keys', () => {
-    syncBuilderModelPreference({ key: 'other', newValue: '@cf/openai/gpt-oss-120b' });
+  it('synchronizes current cross-tab choices on the versioned key', () => {
+    installBuilderModelCatalog(catalog, { getItem: () => null });
+
+    syncBuilderModelPreference({ key: 'ghostbuild_builder_model', newValue: alternativeModel.id });
     expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
 
-    syncBuilderModelPreference({ key: 'ghostbuild_builder_model', newValue: 'deepseek/deepseek-v4-pro' });
-    expect(builderModelStore.get()).toBe('deepseek/deepseek-v4-pro');
+    syncBuilderModelPreference({ key: 'ghostbuild_builder_model_v2', newValue: alternativeModel.id });
+    expect(builderModelStore.get()).toBe(alternativeModel.id);
 
-    syncBuilderModelPreference({ key: 'ghostbuild_builder_model', newValue: null });
+    syncBuilderModelPreference({ key: 'ghostbuild_builder_model_v2', newValue: null });
     expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
-  });
-});
-
-describe('credit denial', () => {
-  it('says a saved choice was overridden only when credits are confirmed absent', () => {
-    initializeBuilderModelPreference('unavailable', { getItem: () => PREFERRED_BUILDER_MODEL });
-    expect(builderModelDeniedByCreditsStore.get()).toBe(true);
-  });
-
-  it('stays quiet while credit status is still unknown, because the choice is re-evaluated', () => {
-    // The preference is downgraded here too, but announcing a denial before the runtime
-    // session resolves would be guessing at a reason.
-    initializeBuilderModelPreference('unknown', { getItem: () => PREFERRED_BUILDER_MODEL });
-    expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
-    expect(builderModelDeniedByCreditsStore.get()).toBe(false);
-  });
-
-  it('stays quiet when the saved choice needs no credits', () => {
-    initializeBuilderModelPreference('unavailable', { getItem: () => CLOUDFLARE_WORKERS_AI_MODEL });
-    expect(builderModelDeniedByCreditsStore.get()).toBe(false);
   });
 });

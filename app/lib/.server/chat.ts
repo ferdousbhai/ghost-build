@@ -9,7 +9,7 @@ import type { ContextCompaction } from './llm/context-compaction';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 import { logProviderFailure } from './llm/provider-error-logging';
-import type { WorkersAiModelId } from '~/lib/workers-ai-model';
+import type { WorkersAiModel, WorkersAiModelId } from '~/lib/workers-ai-model';
 import type { PiSteeringQueue } from './llm/pi-steering';
 import type { BuilderTurnBudgetReport } from './llm/builder-turn-budget';
 import type { CloudflareMcpModelToolContext } from './llm/cloudflare-mcp-model-tools';
@@ -29,6 +29,7 @@ export type ChatRequestBody = {
 export async function createChatResponseFromBody({
   abortSignal,
   body,
+  model,
   compaction,
   firstUserMessage,
   turnContext,
@@ -43,6 +44,7 @@ export async function createChatResponseFromBody({
 }: {
   abortSignal?: AbortSignal;
   body: Pick<ChatRequestBody, 'messages' | 'modelId'>;
+  model: WorkersAiModel;
   compaction: {
     current: ContextCompaction | null;
     pending: boolean;
@@ -64,6 +66,9 @@ export async function createChatResponseFromBody({
 }) {
   const { messages, modelId } = body;
   const transcriptMessages = messages ?? [];
+  if (model.id !== modelId) {
+    throw new Response('The selected Workers AI model changed while the request was being prepared.', { status: 409 });
+  }
 
   logger.info('Using Cloudflare AI');
 
@@ -72,7 +77,7 @@ export async function createChatResponseFromBody({
       abortSignal,
       firstUserMessage,
       messages: transcriptMessages,
-      modelId,
+      model,
       turnContext,
       compaction,
       accountCredentials,

@@ -27,8 +27,13 @@ describe('ChatDescription', () => {
     const renameButton = document.querySelector<HTMLButtonElement>(
       'button[aria-label="Rename project: Car Racing Game"]',
     );
+    const layoutRoot = renameButton?.parentElement;
 
+    expect(layoutRoot?.classList).toContain('min-w-0');
+    expect(layoutRoot?.classList).toContain('w-full');
     expect(renameButton?.classList).toContain('bg-transparent');
+    expect(renameButton?.classList).toContain('min-w-0');
+    expect(renameButton?.classList).toContain('max-w-full');
     expect(renameButton?.classList).toContain('text-content-primary');
     expect(renameButton?.textContent).toContain('Car Racing Game');
     const title = renameButton?.querySelector('span');

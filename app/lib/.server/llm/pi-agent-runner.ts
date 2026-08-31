@@ -19,7 +19,7 @@ import { systemPrompt } from 'ghostbuild-agent/prompts/system';
 import { toolResultSucceeded } from 'ghostbuild-agent/tool-result';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import { logger } from 'ghostbuild-agent/utils/logger';
-import type { WorkersAiModelId } from '~/lib/workers-ai-model';
+import type { WorkersAiModel } from '~/lib/workers-ai-model';
 import {
   WORKSPACE_TOOL_OPERATION_INDETERMINATE_CODE,
   WorkspaceToolOperationIndeterminateError,
@@ -75,7 +75,7 @@ interface PiAgentOptions {
   abortSignal?: AbortSignal;
   firstUserMessage: boolean;
   messages: Messages;
-  modelId: WorkersAiModelId;
+  model: WorkersAiModel;
   turnContext?: ChatTurnContext;
   compaction: {
     current: ContextCompaction | null;
@@ -112,7 +112,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     abortSignal,
     firstUserMessage,
     messages,
-    modelId,
+    model,
     turnContext,
     compaction,
     accountCredentials,
@@ -127,7 +127,8 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
 
   logger.debug('Starting Pi agent runner');
   const startedAt = Date.now();
-  const piProvider = getPiProvider(accountCredentials, modelId, { sessionAffinity });
+  const modelId = model.id;
+  const piProvider = getPiProvider(accountCredentials, modelId, { model, sessionAffinity });
   // Real signals, so an in-flight model stream is bounded too — not just the gaps between turns.
   const wallClockSignal = AbortSignal.timeout(BUILDER_TURN_WALL_CLOCK_MS);
   const inactivityController = new AbortController();

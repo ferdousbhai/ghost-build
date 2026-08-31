@@ -98,17 +98,11 @@ function PrivacyPage() {
         <p>
           The user-owned workspace runtime sends the prompt, conversation context, and project files needed for a
           request to the configured builder model through Cloudflare AI in the connected account. The in-chat model
-          selector distinguishes Cloudflare-hosted models from partner models. If you select DeepSeek V4 Pro, Cloudflare
-          lists it as a{' '}
-          <a href="https://developers.cloudflare.com/ai/models/deepseek/deepseek-v4-pro/">
-            third-party model served by Fireworks
-          </a>
-          , so Fireworks also processes the request content needed for inference. Ghostbuild does not place prompt or
-          source payloads in optional product telemetry. For partner-model calls, Ghostbuild uses Cloudflare’s
-          per-request controls to skip AI Gateway caching and log collection. This prevents Ghostbuild’s request from
-          creating an AI Gateway log containing its prompt, response, or request metadata, regardless of the connected
-          account’s gateway default. It does not change the transient processing needed for inference or provider
-          billing. Cloudflare describes its handling of Workers AI content in its{' '}
+          selector loads the current Cloudflare-hosted catalog from that account and offers models compatible with the
+          builder’s function-calling and context requirements. Ghostbuild does not place prompt or source payloads in
+          optional product telemetry. Paid-model calls are routed through the account’s default AI Gateway so accounts
+          configured for Unified Billing can use prepaid credits; per-request controls skip AI Gateway caching and log
+          collection. Cloudflare describes its handling of Workers AI content in its{' '}
           <a href="https://developers.cloudflare.com/workers-ai/platform/data-usage/">Workers AI data-usage notice</a>.
           Ghostbuild does not use AI to make decisions that produce legal or similarly significant effects about you.
         </p>
@@ -141,8 +135,7 @@ function PrivacyPage() {
         </p>
         <p>
           Cloudflare provides authentication integration, Workers, D1, R2, Durable Objects, Containers, Computer,
-          Workers AI, the Cloudflare AI model catalog, observability, and related infrastructure. A model provider
-          listed in the selector also processes the request when you choose its partner-hosted model. GitHub processes
+          Workers AI, the Cloudflare AI model catalog, observability, and related infrastructure. GitHub processes
           information submitted through public support issues or private security reports. Control-plane observability
           is held in the operator’s Cloudflare account; workspace, Computer, and generated-application observability is
           held in your connected Cloudflare account. Ghostbuild does not sell personal data, share it for cross-context

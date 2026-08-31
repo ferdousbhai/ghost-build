@@ -37,7 +37,8 @@ describe('public trust contract', () => {
     expect(privacy).toContain('control-plane database does not store prompt or transcript bodies');
     expect(privacy).toContain('remain in the connected Cloudflare account');
     expect(privacy).toContain('browser may keep account-local');
-    expect(privacy).toContain('skip AI Gateway caching and log collection');
+    expect(privacy).toContain('loads the current Cloudflare-hosted catalog from that account');
+    expect(privacy).toContain('skip AI Gateway caching and log');
   });
 
   it('describes only the deletion Ghostbuild actually performs', () => {

@@ -55,7 +55,7 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
         )}
         data-chat-started={chat.started}
       >
-        <div className="z-40 flex items-center gap-3 text-content-primary">
+        <div className="z-40 flex shrink-0 items-center gap-3 text-content-primary">
           {showSidebarIcon && (
             <button
               type="button"
@@ -86,7 +86,7 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
             <ChatDescription />
           </div>
         )}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           {chat.started && (
             <>
               <Suspense fallback={null}>

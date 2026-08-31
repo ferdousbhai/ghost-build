@@ -1,4 +1,4 @@
-import { CLOUDFLARE_WORKERS_AI_MODEL, type WorkersAiRuntimeModelId } from '~/lib/workers-ai-model';
+import { CLOUDFLARE_WORKERS_AI_MODEL, type WorkersAiModel, type WorkersAiRuntimeModelId } from '~/lib/workers-ai-model';
 import { MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
 import { getPiModel, type ModelHandle } from './pi-ai-models';
 
@@ -14,11 +14,12 @@ type PiProvider = {
 export function getPiProvider(
   accountCredentials: WorkersAiAccountCredentials,
   modelId: WorkersAiRuntimeModelId = CLOUDFLARE_WORKERS_AI_MODEL,
-  settings?: { sessionAffinity?: string },
+  settings?: { model?: WorkersAiModel; sessionAffinity?: string },
 ): PiProvider {
   return {
     handle: getPiModel(accountCredentials, modelId, {
       sessionAffinity: settings?.sessionAffinity,
+      model: settings?.model,
     }),
     maxTokens: MODEL_MAX_OUTPUT_TOKENS,
   };

@@ -13,7 +13,7 @@ import type {
 import { stream as openaiCompletionsStream } from '@earendil-works/pi-ai/api/openai-completions';
 import { CLOUDFLARE_WORKERS_AI_MODELS } from '@earendil-works/pi-ai/providers/cloudflare-workers-ai.models';
 import { MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
-import { getWorkersAiModel, isWorkersAiModelId, type WorkersAiRuntimeModelId } from '~/lib/workers-ai-model';
+import type { WorkersAiModel, WorkersAiRuntimeModelId } from '~/lib/workers-ai-model';
 import { recordPiStage } from './pi-telemetry';
 
 // Keep the runtime on the Workers-AI-only catalog; importing unrelated provider SDKs would
@@ -49,10 +49,13 @@ function catalogModel(modelId: string): WorkersAiCatalogModel | undefined {
   return WORKERS_AI_CATALOG.get(modelId);
 }
 
-function modelTokenWindow(config: GhostbuildModelConfig, catalog: WorkersAiCatalogModel | undefined) {
-  const model = isWorkersAiModelId(config.model) ? getWorkersAiModel(config.model) : undefined;
+function modelTokenWindow(
+  config: GhostbuildModelConfig,
+  catalog: WorkersAiCatalogModel | undefined,
+  selectedModel: WorkersAiModel | undefined,
+) {
   return {
-    contextWindow: model?.contextTokens ?? catalog?.contextWindow ?? 128_000,
+    contextWindow: selectedModel?.contextTokens ?? catalog?.contextWindow ?? 128_000,
     maxTokens: MODEL_MAX_OUTPUT_TOKENS,
   };
 }
@@ -130,19 +133,19 @@ function makeHandle(args: HandleArgs): ModelHandle {
 export function getPiModel(
   accountCredentials: { binding: Ai },
   modelId: WorkersAiRuntimeModelId,
-  settings?: { sessionAffinity?: string },
+  settings?: { model?: WorkersAiModel; sessionAffinity?: string },
 ): ModelHandle {
   const config: GhostbuildModelConfig = { provider: 'cloudflare', model: modelId };
   const catalog = catalogModel(config.model);
-  const win = modelTokenWindow(config, catalog);
+  const win = modelTokenWindow(config, catalog, settings?.model);
   const model: Model<Api> = {
     id: config.model,
     name: catalog?.name ?? config.model,
     api: 'openai-completions',
     provider: 'cloudflare-workers-ai',
     baseUrl: 'https://workers-ai-binding.invalid/v1',
-    reasoning: catalog?.reasoning ?? false,
-    input: catalog?.input ?? ['text'],
+    reasoning: settings?.model?.reasoning ?? catalog?.reasoning ?? false,
+    input: settings?.model?.vision ? ['text', 'image'] : (catalog?.input ?? ['text']),
     cost: catalog?.cost ?? ZERO_COST,
     ...win,
     compat: workersAiCompat(catalog),
@@ -152,7 +155,11 @@ export function getPiModel(
     // Pi's OpenAI-compatible serializer requires a non-empty key before calling custom fetch.
     // The binding adapter forwards only the reviewed session-affinity header.
     apiKey: 'workers-ai-binding',
-    fetch: createWorkersAiBindingFetch(accountCredentials.binding, config.model),
+    fetch: createWorkersAiBindingFetch(
+      accountCredentials.binding,
+      config.model,
+      settings?.model?.requiresPaid === true,
+    ),
     sessionAffinity: settings?.sessionAffinity,
   });
 }
@@ -171,7 +178,11 @@ type WorkersAiRawBinding = {
   run(model: string, inputs: WorkersAiBindingInputs, options: WorkersAiRawRunOptions): Promise<Response>;
 };
 
-function createWorkersAiBindingFetch(binding: Ai, modelId: WorkersAiRuntimeModelId): FetchFunction {
+function createWorkersAiBindingFetch(
+  binding: Ai,
+  modelId: WorkersAiRuntimeModelId,
+  routeThroughDefaultGateway: boolean,
+): FetchFunction {
   return async (input, init) => {
     recordPiStage('binding_fetch_enter', modelId);
     const request = new Request(input, init);
@@ -186,7 +197,7 @@ function createWorkersAiBindingFetch(binding: Ai, modelId: WorkersAiRuntimeModel
     recordPiStage('binding_run_start', modelId);
     const sessionAffinity = request.headers.get('x-session-affinity');
     const options: WorkersAiRawRunOptions = { returnRawResponse: true, signal: request.signal };
-    if (isWorkersAiModelId(modelId) && getWorkersAiModel(modelId).availability === 'cloudflare-partner') {
+    if (routeThroughDefaultGateway) {
       options.gateway = { id: 'default', collectLog: false, skipCache: true };
     }
     if (sessionAffinity) {

@@ -53,6 +53,10 @@ import { verifyRuntimeCapability } from '../../app/lib/cloudflare/runtime-capabi
 import { userRuntimeDeploymentAction } from '../../app/server-handlers/deployments';
 import { userRuntimeEnhancePromptAction } from '../../app/server-handlers/enhance-prompt';
 import {
+  readWorkersAiBuilderModelCatalog,
+  workersAiModelCatalogPayload,
+} from '../../app/lib/.server/llm/workers-ai-model-catalog';
+import {
   isGhostbuildToolResult,
   toolFailure,
   toolSuccess,
@@ -2804,6 +2808,16 @@ async function handleUserRequest(
   const agentResponse = await routeUserRuntimeAgentRequest(request, sharedEnv, capability.subject);
   if (agentResponse) {
     response = agentResponse;
+  } else if (request.method === 'GET' && url.pathname === '/v1/models') {
+    try {
+      const models = await readWorkersAiBuilderModelCatalog(env.AI);
+      response = Response.json(workersAiModelCatalogPayload(models), {
+        headers: { 'Cache-Control': 'private, max-age=300' },
+      });
+    } catch (error) {
+      console.warn('Workers AI model catalog could not be loaded', error);
+      response = Response.json({ error: 'The Workers AI model catalog is temporarily unavailable.' }, { status: 503 });
+    }
   } else if (request.method === 'POST' && url.pathname === '/v1/data') {
     response = await userRuntimeDataAction({
       request,

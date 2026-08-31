@@ -3,20 +3,46 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CLOUDFLARE_WORKERS_AI_MODEL, PREFERRED_BUILDER_MODEL } from '~/lib/workers-ai-model';
-import { builderModelStore, initializeBuilderModelPreference } from '~/lib/stores/builder-model.client';
+import {
+  CLOUDFLARE_WORKERS_AI_MODEL,
+  DEFAULT_WORKERS_AI_MODEL,
+  type WorkersAiModel,
+  type WorkersAiModelCatalogPayload,
+} from '~/lib/workers-ai-model';
+
+import {
+  builderModelStore,
+  initializeBuilderModelPreference,
+  installBuilderModelCatalog,
+} from '~/lib/stores/builder-model.client';
 import { BuilderModelSelector } from './BuilderModelSelector.client';
+
+const alternativeModel: WorkersAiModel = {
+  ...DEFAULT_WORKERS_AI_MODEL,
+  id: '@cf/openai/gpt-oss-120b',
+  label: 'GPT OSS 120B',
+  description: 'Cloudflare-hosted open-weight reasoning model.',
+  vision: false,
+};
+const catalog: WorkersAiModelCatalogPayload = {
+  defaultModelId: CLOUDFLARE_WORKERS_AI_MODEL,
+  models: [DEFAULT_WORKERS_AI_MODEL, alternativeModel],
+};
 
 let root: Root | undefined;
 
 beforeEach(() => {
-  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
   const values = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value),
   });
-  initializeBuilderModelPreference('unknown', { getItem: () => null });
+  installBuilderModelCatalog(
+    { defaultModelId: CLOUDFLARE_WORKERS_AI_MODEL, models: [DEFAULT_WORKERS_AI_MODEL] },
+    { getItem: () => null },
+  );
+  initializeBuilderModelPreference({ getItem: () => null });
 });
 
 afterEach(async () => {
@@ -29,15 +55,11 @@ afterEach(async () => {
 });
 
 describe('BuilderModelSelector', () => {
-  it('groups hosted and partner models and persists a selection', async () => {
-    const container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    await act(async () => root?.render(<BuilderModelSelector />));
+  it('loads the user catalog and persists a compatible selection', async () => {
+    await renderSelector();
 
     const trigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Builder model"]');
-    expect(trigger?.getAttribute('aria-label')).toContain('GLM 5.2');
+    expect(trigger?.getAttribute('aria-label')).toContain('GLM 5.3 Flash');
     expect(trigger?.getAttribute('aria-haspopup')).toBe('menu');
 
     await act(async () => {
@@ -45,39 +67,38 @@ describe('BuilderModelSelector', () => {
     });
 
     const menu = document.querySelector('[role="menu"]');
-    expect(menu?.textContent).toContain('Cloudflare hosted');
-    expect(menu?.textContent).toContain('Third-party via Cloudflare');
+    expect(menu?.textContent).toContain('Cloudflare Workers AI');
+    expect(menu?.textContent).toContain('function calling');
     expect(document.querySelectorAll('[role="menuitemradio"]')).toHaveLength(2);
-    const deepSeek = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
-      item.textContent?.includes('DeepSeek V4 Pro'),
+    const alternative = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
+      item.textContent?.includes('GPT OSS 120B'),
     );
 
-    await act(async () => deepSeek?.click());
+    await act(async () => alternative?.click());
 
-    expect(builderModelStore.get()).toBe('deepseek/deepseek-v4-pro');
-    expect(localStorage.getItem('ghostbuild_builder_model')).toBe('deepseek/deepseek-v4-pro');
+    expect(builderModelStore.get()).toBe(alternativeModel.id);
+    expect(localStorage.getItem('ghostbuild_builder_model_v2')).toBe(alternativeModel.id);
   });
 
-  it('shows DeepSeek as the default when Unified Billing credits are available', async () => {
-    initializeBuilderModelPreference('available', { getItem: () => null });
-    const container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    await act(async () => root?.render(<BuilderModelSelector />));
+  it('marks GLM 5.3 Flash as the deliberate default and paid model', async () => {
+    await renderSelector();
 
     const trigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Builder model"]');
-    expect(trigger?.getAttribute('aria-label')).toContain('DeepSeek V4 Pro');
+    expect(trigger?.getAttribute('aria-label')).toContain('GLM 5.3 Flash');
     expect(trigger?.textContent).toContain('default');
-    expect(builderModelStore.get()).toBe(PREFERRED_BUILDER_MODEL);
+
+    await act(async () => {
+      trigger?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    });
+    const defaultItem = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
+      item.textContent?.includes('GLM 5.3 Flash'),
+    );
+    expect(defaultItem?.textContent).toContain('Default');
+    expect(defaultItem?.textContent).toContain('Paid');
   });
 
   it('closes the menu and prevents changes when a turn becomes active', async () => {
-    const container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    await act(async () => root?.render(<BuilderModelSelector />));
+    await renderSelector();
 
     const enabledTrigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Builder model"]');
     await act(async () => {
@@ -85,7 +106,7 @@ describe('BuilderModelSelector', () => {
     });
     expect(document.querySelector('[role="menu"]')).not.toBeNull();
 
-    await act(async () => root?.render(<BuilderModelSelector disabled />));
+    await act(async () => root?.render(<BuilderModelSelector disabled catalogLoader={installTestCatalog} />));
 
     const trigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Builder model"]');
     expect(trigger?.disabled).toBe(true);
@@ -93,8 +114,19 @@ describe('BuilderModelSelector', () => {
     expect(trigger?.getAttribute('aria-label')).toContain('before switching models');
     expect(document.querySelector('[role="menu"]')).toBeNull();
     expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
-
-    await act(async () => root?.render(<BuilderModelSelector />));
-    expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 });
+
+async function renderSelector() {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  await act(async () => {
+    root?.render(<BuilderModelSelector catalogLoader={installTestCatalog} />);
+    await Promise.resolve();
+  });
+}
+
+function installTestCatalog(): void {
+  installBuilderModelCatalog(catalog);
+}

@@ -1,5 +1,5 @@
 {
-  "total": 1597,
+  "total": 1594,
   "counts": {
     "app/agents/builder-agent-identity.test.ts": {
       "anti-slop/no-unsafe-dictionary-type": 1,
@@ -51,9 +51,6 @@
     "app/components/chat/BaseChat.test.tsx": {
       "anti-slop/no-module-mocking": 16,
       "anti-slop/require-safety-comment-for-type-assertion": 3
-    },
-    "app/components/chat/BuilderModelSelector.test.tsx": {
-      "anti-slop/require-safety-comment-for-type-assertion": 1
     },
     "app/components/chat/DeploymentStatus.client.test.tsx": {
       "anti-slop/no-module-mocking": 1
@@ -552,10 +549,6 @@
     "app/lib/trust.test.ts": {
       "anti-slop/no-known-value-widening": 1,
       "anti-slop/require-safety-comment-for-type-assertion": 3
-    },
-    "app/lib/workers-ai-model.ts": {
-      "anti-slop/no-runtime-typeof": 1,
-      "anti-slop/no-unknown-parameters": 1
     },
     "app/lib/workers-paid.ts": {
       "anti-slop/no-unknown-parameters": 3

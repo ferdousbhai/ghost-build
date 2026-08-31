@@ -120,6 +120,7 @@ import {
 } from '~/lib/.server/cloudflare/cloudflare-mcp-runtime-controls';
 import { CloudflareMcpClient, type CloudflareMcpOutcome } from '~/lib/.server/cloudflare/cloudflare-mcp-client';
 import { resolveUserWorkspaceCloudflareAccessToken } from '~/lib/.server/cloudflare/user-workspace-cloudflare-credential';
+import { requireWorkersAiBuilderModel } from '~/lib/.server/llm/workers-ai-model-catalog';
 import type {
   CloudflareDocsModelInput,
   CloudflareExecuteModelInput,
@@ -437,6 +438,8 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       body,
       durableIdentity.transcript,
     );
+    const accountCredentials = await getUserWorkersAiCredentials(this.env, durableIdentity.userId);
+    const model = await requireWorkersAiBuilderModel(accountCredentials.binding, modelId);
     if (!options?.continuation) {
       await this.cancelPreview();
       await markChatStarted(this.env.DB, {
@@ -478,7 +481,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     };
 
     try {
-      const accountCredentials = await getUserWorkersAiCredentials(this.env, durableIdentity.userId);
       const cloudflareMcp = await this.createCloudflareMcpToolContext(durableIdentity.transcript);
       if (shouldGenerateTitle) {
         await this.scheduleTitleGeneration(
@@ -531,6 +533,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
           },
         },
         body: { messages, modelId },
+        model,
       });
     } catch (error) {
       steering.close();
