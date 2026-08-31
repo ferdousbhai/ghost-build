@@ -4,6 +4,7 @@ import { GENERATED_PROJECT_PNPM_VERSION } from '../../ghostbuild-agent/cloudflar
 import {
   BOOTSTRAP_RETRY_DELAY_MS,
   COMPUTERD_BINARY,
+  COMPUTERD_ROOT,
   COMPUTERD_BOOTSTRAP_TIMEOUT_MS,
   CONTAINER_CONNECT_TIMEOUT_MS,
   CONTAINER_TOOLCHAIN_BOOTSTRAP_TIMEOUT_MS,
@@ -27,11 +28,16 @@ describe('container toolchain bootstrap', () => {
     expect(command).toContain('--registry=https://registry.npmjs.org/');
   });
 
-  it('installs computerd without probing through a failing Sandbox exec', () => {
+  it('reinstalls computerd when the pinned layer digest changes, not only when it is missing', () => {
     const command = computerdBootstrapCommand();
 
     expect(command).toMatch(/^\(\nset -eu\n[\s\S]+\n\)$/);
-    expect(command).toContain(`if [ ! -x '${COMPUTERD_BINARY}' ]; then`);
+    // Existence alone would trust a computerd left by an earlier client version on a warm
+    // container, whose exec protocol no longer matches — so gate on the recorded layer digest.
+    expect(command).toContain(`if [ "$(cat '${COMPUTERD_ROOT}/.layer-digest' 2>/dev/null)" != 'sha256:`);
+    expect(command).toContain(`rm -rf '${COMPUTERD_ROOT}'`);
+    expect(command).toContain(`echo 'sha256:`);
+    expect(command).toContain(`> '${COMPUTERD_ROOT}/.layer-digest'`);
     expect(command).toContain('ghcr.io/v2/cloudflare/computer-computerd-linux-x64/blobs/sha256:');
     expect(command).toContain(`test -x '${COMPUTERD_BINARY}'`);
   });

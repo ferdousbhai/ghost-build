@@ -120,18 +120,30 @@ export function containerToolchainBootstrapCommand(): string {
   ]);
 }
 
+/** Records which computerd layer the container currently holds, so the bootstrap can re-install on
+ * a version change instead of trusting a stale binary. */
+const COMPUTERD_LAYER_MARKER = `${COMPUTERD_ROOT}/.layer-digest`;
+
 export function computerdBootstrapCommand(): string {
   const tokenUrl =
     'https://ghcr.io/token?service=ghcr.io&scope=repository:cloudflare/computer-computerd-linux-x64:pull';
   const blobUrl = `https://ghcr.io/v2/cloudflare/computer-computerd-linux-x64/blobs/${COMPUTERD_LAYER_DIGEST}`;
+  const layerPath = `${COMPUTERD_ROOT}/layer.tgz`;
+  // Gate on the exact layer digest, not mere existence. A warm container survives a control-plane
+  // upgrade, so a computerd from an earlier @cloudflare/computer version would otherwise persist and
+  // talk a stale exec protocol to the new client — the container shell then runs a mangled command.
+  // Re-install whenever the recorded digest does not match the pinned one.
   return strictSubshellCommand([
-    `if [ ! -x ${shellQuote(COMPUTERD_BINARY)} ]; then`,
+    `if [ "$(cat ${shellQuote(COMPUTERD_LAYER_MARKER)} 2>/dev/null)" != ${shellQuote(COMPUTERD_LAYER_DIGEST)} ] || [ ! -x ${shellQuote(COMPUTERD_BINARY)} ]; then`,
+    `  rm -rf ${shellQuote(COMPUTERD_ROOT)}`,
     `  mkdir -p ${shellQuote(COMPUTERD_ROOT)}`,
     `  token="$(curl -fsSL ${shellQuote(tokenUrl)} | jq -er .token)"`,
-    `  curl -fsSL -H "Authorization: Bearer $token" -o ${shellQuote(`${COMPUTERD_ROOT}/layer.tgz`)} ${shellQuote(blobUrl)}`,
-    `  echo ${shellQuote(`${COMPUTERD_LAYER_DIGEST.slice('sha256:'.length)}  ${COMPUTERD_ROOT}/layer.tgz`)} | sha256sum -c -`,
-    `  tar -xzf ${shellQuote(`${COMPUTERD_ROOT}/layer.tgz`)} -C ${shellQuote(COMPUTERD_ROOT)}`,
+    `  curl -fsSL -H "Authorization: Bearer $token" -o ${shellQuote(layerPath)} ${shellQuote(blobUrl)}`,
+    `  echo ${shellQuote(`${COMPUTERD_LAYER_DIGEST.slice('sha256:'.length)}  ${layerPath}`)} | sha256sum -c -`,
+    `  tar -xzf ${shellQuote(layerPath)} -C ${shellQuote(COMPUTERD_ROOT)}`,
     `  chmod 0755 ${shellQuote(COMPUTERD_BINARY)}`,
+    `  rm -f ${shellQuote(layerPath)}`,
+    `  echo ${shellQuote(COMPUTERD_LAYER_DIGEST)} > ${shellQuote(COMPUTERD_LAYER_MARKER)}`,
     'fi',
     `test -x ${shellQuote(COMPUTERD_BINARY)}`,
   ]);
