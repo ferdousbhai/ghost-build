@@ -73,7 +73,7 @@ function PreviewEmpty({
   disabled: boolean;
 }) {
   const updating = status === 'queued' || status === 'building';
-  const title = status === 'failed' ? 'Preview failed' : updating ? 'Updating preview…' : 'No preview yet';
+  const title = status === 'failed' ? 'Preview failed' : updating ? 'Building preview…' : 'No preview yet';
   const message = status === 'failed' ? error : updating ? null : 'Build the current revision.';
   return (
     <div className="flex size-full items-center justify-center p-6 text-center">

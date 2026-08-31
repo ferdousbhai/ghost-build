@@ -17,6 +17,11 @@ type BuilderDeploymentWorkspace = Pick<
   'projectId' | 'checkpoint' | 'hasSuccessfulValidation' | 'prepareDeployment'
 >;
 
+type BuilderPreviewValidationWorkspace = Pick<
+  BuilderWorkspaceApi,
+  'checkpoint' | 'hasSuccessfulValidation' | 'validate'
+>;
+
 export type BuilderDeploymentState = {
   status: 'ready' | 'deploying' | 'succeeded' | 'failed';
   workspaceRevision?: number;
@@ -31,6 +36,41 @@ export async function validatedDeploymentCheckpoint(
 ): Promise<BuilderWorkspaceCheckpoint | null> {
   const snapshot = await workspace.checkpoint();
   return (await workspace.hasSuccessfulValidation(snapshot.revision)) ? snapshot : null;
+}
+
+/** Validate the immutable checkpoint a manual preview request accepted before publishing it. */
+export async function validatePreviewCheckpointForBuilder(args: {
+  workspace: BuilderPreviewValidationWorkspace;
+  requestedSnapshot: BuilderWorkspaceCheckpoint;
+  toolCallId: string;
+  abortSignal?: AbortSignal;
+}): Promise<BuilderWorkspaceCheckpoint> {
+  args.abortSignal?.throwIfAborted();
+  const current = await args.workspace.checkpoint();
+  if (!sameCheckpoint(current, args.requestedSnapshot)) {
+    throw new Error('The project changed after the preview was requested. Build the current revision instead.');
+  }
+
+  if (!(await args.workspace.hasSuccessfulValidation(current.revision))) {
+    const validationRequest: Parameters<BuilderWorkspaceApi['validate']>[0] = {
+      toolCallId: args.toolCallId,
+      input: { source: 'preview' },
+    };
+    if (args.abortSignal) {
+      validationRequest.abortSignal = args.abortSignal;
+    }
+    const validation = await args.workspace.validate(validationRequest);
+    if (!validation.ok) {
+      throw new Error(`Preview validation failed: ${validation.summary}`);
+    }
+  }
+
+  args.abortSignal?.throwIfAborted();
+  const validated = await validatedDeploymentCheckpoint(args.workspace);
+  if (!validated || !sameCheckpoint(validated, args.requestedSnapshot)) {
+    throw new Error('The project changed while the preview was being validated. Build the current revision instead.');
+  }
+  return validated;
 }
 
 export async function terminalizeInterruptedDeploymentForBuilder(args: {
@@ -136,6 +176,10 @@ async function planValidatedRevision(args: {
 
 function publicationDeploymentId(projectId: string, toolCallId: string, revision: string): Promise<string> {
   return deterministicDeploymentId(`deployment:${projectId}:${toolCallId}:${revision}`);
+}
+
+function sameCheckpoint(left: BuilderWorkspaceCheckpoint, right: BuilderWorkspaceCheckpoint): boolean {
+  return left.workspaceRevision === right.workspaceRevision && left.revision === right.revision;
 }
 
 async function deterministicDeploymentId(value: string): Promise<string> {

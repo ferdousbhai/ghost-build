@@ -30,6 +30,7 @@ import {
   deployValidatedRevisionForBuilder,
   previewValidatedRevisionForBuilder,
   terminalizeInterruptedDeploymentForBuilder,
+  validatePreviewCheckpointForBuilder,
   validatedDeploymentCheckpoint,
   type BuilderDeploymentState,
 } from './builder-deployment-command';
@@ -848,7 +849,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (!preview.pendingId || (preview.status !== 'queued' && preview.status !== 'building')) {
       return preview;
     }
-    await this.cancelFiberByKey(this.previewFiberKey(preview.pendingId), 'Cancelled by the project owner');
     const next: BuilderPreviewState = {
       ...preview,
       status: 'cancelled',
@@ -857,6 +857,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       error: null,
     };
     this.setPreviewState(next);
+    await this.cancelFiberByKey(this.previewFiberKey(preview.pendingId), 'Cancelled by the project owner');
     return next;
   }
 
@@ -1555,10 +1556,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     }
     const workspace = await this.initializeWorkspace(this.transcriptBinding);
     const current = this.currentPreviewState();
-    const snapshot = options.validatedSnapshot ?? (await validatedDeploymentCheckpoint(this.workspace));
-    if (!snapshot) {
-      throw new Error('The current project revision must pass validation before preview.');
-    }
+    const snapshot = options.validatedSnapshot ?? (await this.workspace.checkpoint());
     const publishing = current.status === 'queued' || current.status === 'building';
     if (publishing && current.workspaceRevision === workspace.revision) {
       return current;
@@ -1592,7 +1590,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         PREVIEW_PUBLICATION_FIBER,
         async (fiber) => {
           fiber.stash(job);
-          await this.runPreviewPublication(job);
+          await this.runPreviewPublication(job, fiber.signal);
         },
         {
           idempotencyKey: this.previewFiberKey(previewId),
@@ -1609,7 +1607,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     return this.currentPreviewState();
   }
 
-  private async runPreviewPublication(job: PreviewPublicationJob): Promise<void> {
+  private async runPreviewPublication(job: PreviewPublicationJob, abortSignal?: AbortSignal): Promise<void> {
     if (!this.isCurrentPreviewJob(job.previewId)) {
       return;
     }
@@ -1624,6 +1622,34 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       if (!userId || !transcriptBinding) {
         throw new Response('Agent authentication is required.', { status: 401 });
       }
+      const validationToolCallId = `preview:${job.previewId}:validation`;
+      const needsValidation = !(await this.workspace.hasSuccessfulValidation(job.snapshotRevision));
+      if (needsValidation) {
+        this.setValidationProgress(validationToolCallId, 'computer validation');
+      }
+      let validatedSnapshot: BuilderWorkspaceCheckpoint;
+      try {
+        const validationRequest: Parameters<typeof validatePreviewCheckpointForBuilder>[0] = {
+          workspace: this.workspace,
+          requestedSnapshot: {
+            workspaceRevision: job.workspaceRevision,
+            revision: job.snapshotRevision,
+          },
+          toolCallId: validationToolCallId,
+        };
+        if (abortSignal) {
+          validationRequest.abortSignal = abortSignal;
+        }
+        validatedSnapshot = await this.keepAliveWhile(() => validatePreviewCheckpointForBuilder(validationRequest));
+      } finally {
+        if (needsValidation) {
+          this.setValidationProgress(validationToolCallId, null);
+        }
+      }
+      abortSignal?.throwIfAborted();
+      if (!this.isCurrentPreviewJob(job.previewId)) {
+        return;
+      }
       const success = await this.keepAliveWhile(() =>
         previewValidatedRevisionForBuilder({
           context: {
@@ -1634,7 +1660,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
           workspace: this.workspace,
           toolCallId: deploymentToolCallId(job.workspaceRevision, job.snapshotRevision),
           previewId: job.previewId,
-          validatedRevision: job.snapshotRevision,
+          validatedRevision: validatedSnapshot.revision,
         }),
       );
       if (!this.isCurrentPreviewJob(job.previewId)) {

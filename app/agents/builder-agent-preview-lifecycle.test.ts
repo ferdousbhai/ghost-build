@@ -17,7 +17,7 @@ describe('BuilderAgent preview lifecycle', () => {
     expect(previewCancellation).toBeLessThan(chatMessage.indexOf('const turn = createBuilderTurn'));
   });
 
-  it('automatically deploys then previews only an exactly validated durable revision', () => {
+  it('automatically deploys exactly validated work and validates a manual preview in its durable fiber', () => {
     const response = source.slice(
       source.indexOf('protected override async onChatResponse('),
       source.indexOf('@callable()\n  async steerActiveTurn'),
@@ -31,7 +31,20 @@ describe('BuilderAgent preview lifecycle', () => {
     expect(response).toContain('this.scheduleDeployment(validatedSnapshot)');
     expect(response).not.toContain('this.requestPreviewInternal({ validatedSnapshot })');
     expect(source).toContain('this.requestPreviewInternal({ validatedSnapshot: job })');
-    expect(preview).toContain('options.validatedSnapshot ?? (await validatedDeploymentCheckpoint(this.workspace))');
+    expect(preview).toContain('options.validatedSnapshot ?? (await this.workspace.checkpoint())');
+    expect(source).toContain('validatePreviewCheckpointForBuilder(validationRequest)');
+    expect(source).toContain('await this.runPreviewPublication(job, fiber.signal)');
+  });
+
+  it('revokes preview ownership before cancelling a fiber so recovered work cannot publish', () => {
+    const cancellation = source.slice(
+      source.indexOf('async cancelPreview()'),
+      source.indexOf('@callable()\n  async getTranscriptSnapshot'),
+    );
+
+    expect(cancellation.indexOf('this.setPreviewState(next)')).toBeLessThan(
+      cancellation.indexOf('await this.cancelFiberByKey'),
+    );
   });
 
   it('persists requested runtime compaction only after the completed response', () => {
@@ -79,7 +92,8 @@ describe('BuilderAgent preview lifecycle', () => {
     );
 
     expect(publication).toContain('previewValidatedRevisionForBuilder({');
-    expect(publication).toContain('validatedRevision: job.snapshotRevision');
+    expect(publication).toContain('validatedRevision: validatedSnapshot.revision');
+    expect(publication).toContain('if (!this.isCurrentPreviewJob(job.previewId))');
     expect(publication).not.toContain('this.workspace.createPreview');
     // The preview names the deployment's own tool-call identity, so both resolve to one plan and
     // one Worker rather than the preview publishing resources of its own.

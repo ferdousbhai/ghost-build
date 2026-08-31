@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
 import type { BuilderWorkspaceDeploymentPlan } from './builder-workspace-api';
 
 const mocks = vi.hoisted(() => ({
@@ -19,6 +20,7 @@ import {
   deployValidatedRevisionForBuilder,
   previewValidatedRevisionForBuilder,
   terminalizeInterruptedDeploymentForBuilder,
+  validatePreviewCheckpointForBuilder,
   validatedDeploymentCheckpoint,
 } from './builder-deployment-command';
 
@@ -55,6 +57,67 @@ describe('builder deployment command', () => {
       workspaceRevision: 7,
       revision: 'a'.repeat(64),
     });
+  });
+
+  it('validates the exact checkpoint before a manual preview', async () => {
+    const workspace = workspaceStub();
+    workspace.validate.mockImplementationOnce(async () => {
+      workspace.hasSuccessfulValidation.mockResolvedValue(true);
+      return toolSuccess('Project validation passed.');
+    });
+    const requestedSnapshot = { workspaceRevision: 7, revision: 'a'.repeat(64) };
+
+    await expect(
+      validatePreviewCheckpointForBuilder({
+        workspace,
+        requestedSnapshot,
+        toolCallId: 'preview:preview-1:validation',
+      }),
+    ).resolves.toEqual(requestedSnapshot);
+    expect(workspace.validate).toHaveBeenCalledWith({
+      toolCallId: 'preview:preview-1:validation',
+      input: { source: 'preview' },
+    });
+  });
+
+  it('reuses an exact durable validation receipt for preview', async () => {
+    const workspace = workspaceStub();
+    workspace.hasSuccessfulValidation.mockResolvedValue(true);
+
+    await validatePreviewCheckpointForBuilder({
+      workspace,
+      requestedSnapshot: { workspaceRevision: 7, revision: 'a'.repeat(64) },
+      toolCallId: 'preview:preview-1:validation',
+    });
+
+    expect(workspace.validate).not.toHaveBeenCalled();
+  });
+
+  it('surfaces full validation failure instead of attempting preview publication', async () => {
+    const workspace = workspaceStub();
+    workspace.validate.mockResolvedValueOnce(toolFailure('Typecheck failed in src/routes/index.tsx.'));
+
+    await expect(
+      validatePreviewCheckpointForBuilder({
+        workspace,
+        requestedSnapshot: { workspaceRevision: 7, revision: 'a'.repeat(64) },
+        toolCallId: 'preview:preview-1:validation',
+      }),
+    ).rejects.toThrow('Preview validation failed: Typecheck failed in src/routes/index.tsx.');
+    expect(mocks.previewForUser).not.toHaveBeenCalled();
+  });
+
+  it('does not validate a stale preview request against a newer checkpoint', async () => {
+    const workspace = workspaceStub();
+
+    await expect(
+      validatePreviewCheckpointForBuilder({
+        workspace,
+        requestedSnapshot: { workspaceRevision: 6, revision: 'b'.repeat(64) },
+        toolCallId: 'preview:preview-1:validation',
+      }),
+    ).rejects.toThrow('project changed after the preview was requested');
+    expect(workspace.validate).not.toHaveBeenCalled();
   });
 
   it('refuses deployment when the validated revision is stale', async () => {
@@ -163,6 +226,7 @@ function workspaceStub() {
     projectId: 'workspace-1',
     checkpoint: vi.fn(async () => ({ workspaceRevision: 7, revision: 'a'.repeat(64) })),
     hasSuccessfulValidation: vi.fn(async () => false),
+    validate: vi.fn(async () => toolSuccess('Project validation passed.')),
     prepareDeployment: vi.fn(async () => ({
       workspaceRevision: 7,
       revision: 'a'.repeat(64),
