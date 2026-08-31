@@ -193,6 +193,37 @@ describe('user workspace runtime readiness', () => {
     expect(request).toHaveBeenCalledOnce();
     expect(sleep).not.toHaveBeenCalled();
   });
+
+  test('polls until the deadline rather than stopping at the old thirty-attempt cap', async () => {
+    // A container that stays unavailable models a cold first start. The attempt cap used to give up
+    // after thirty polls — about two and a half minutes at the backoff ceiling — long before the
+    // ten-minute deadline, so a container still booting was declared failed. A fresh response per
+    // call is required because the body is read each time.
+    const request = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () =>
+        Response.json(unhealthy(runtimeVersion, 'container', 'unavailable'), { status: 503 }),
+      );
+    const clock = fakeClock();
+
+    await expect(
+      waitForUserWorkspaceRuntimeReadiness({
+        endpoint,
+        controlPlaneSecret,
+        runtimeVersion,
+        request,
+        now: clock.now,
+        sleep: clock.sleep,
+        random: () => 0,
+      }),
+    ).rejects.toThrow('health-check deadline. Readiness checks still failing: container (unavailable)');
+
+    // The deadline is the bound, not the attempt cap: far more than thirty polls, stopping short of
+    // the 200-attempt safety ceiling, with the full ten-minute budget consumed.
+    expect(request.mock.calls.length).toBeGreaterThan(30);
+    expect(request.mock.calls.length).toBeLessThan(200);
+    expect(clock.now()).toBe(10 * 60_000);
+  });
 });
 
 function healthy(version: string) {

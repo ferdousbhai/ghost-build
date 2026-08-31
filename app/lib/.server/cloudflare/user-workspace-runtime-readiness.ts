@@ -7,7 +7,14 @@ import { parseUserWorkspaceRuntimeReadiness } from './user-workspace-runtime-hea
 
 const READINESS_DEADLINE_MS = 10 * 60_000;
 const READINESS_REQUEST_TIMEOUT_MS = 8 * 60_000;
-const READINESS_MAX_ATTEMPTS = 30;
+// The deadline is meant to be the real bound. With the 5s backoff cap, 30 attempts exhaust in
+// roughly two and a half minutes — far short of the ten-minute deadline — which cut short the one
+// slow step provisioning has: the first container an account ever creates has to pull the ~400 MB
+// workspace image and cold-start before `/v1/readiness` reports `container` healthy, and that can
+// take longer than two and a half minutes. Provisioning then marked the runtime failed while the
+// container was still coming up. The cap now sits above what the deadline can consume (~120 polls
+// at the 5s floor), so the deadline governs and a cold first start is given its full budget.
+const READINESS_MAX_ATTEMPTS = 200;
 const READINESS_INITIAL_BACKOFF_MS = 500;
 const READINESS_MAX_BACKOFF_MS = 5_000;
 const MAX_HEALTH_RESPONSE_BYTES = 4 * 1024;
