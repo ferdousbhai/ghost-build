@@ -8,7 +8,7 @@ const computerdDigest = `sha256:${'b'.repeat(64)}`;
 function pins() {
   return parseRuntimeArtifactPins({
     packageJson: JSON.stringify({
-      dependencies: { '@cloudflare/sandbox': '0.12.4', '@cloudflare/computer': '0.1.1' },
+      dependencies: { '@cloudflare/sandbox': '0.12.4', '@cloudflare/computer': '0.2.1' },
     }),
     provisionerSource: `const IMAGE = 'docker.io/cloudflare/sandbox:0.12.4@${sandboxDigest}';`,
     toolchainSource: `const COMPUTERD_LAYER_DIGEST = '${computerdDigest}';`,
@@ -41,7 +41,7 @@ describe('runtime artifact monitoring', () => {
       computerd: {
         name: 'Cloudflare computerd layer',
         repository: 'cloudflare/computer-computerd-linux-x64',
-        tag: '0.1.1',
+        tag: '0.2.1',
         pinnedDigest: computerdDigest,
       },
     });

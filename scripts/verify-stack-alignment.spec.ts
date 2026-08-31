@@ -44,14 +44,14 @@ describe('stack alignment verification helpers', () => {
 
   it('keeps Computer object probes below the Durable Object SQL variable limit', () => {
     const workspace = readFileSync(new URL('../pnpm-workspace.yaml', import.meta.url), 'utf8');
-    const patch = readFileSync(new URL('../patches/@cloudflare__computer@0.1.1.patch', import.meta.url), 'utf8');
+    const patch = readFileSync(new URL('../patches/@cloudflare__computer@0.2.1.patch', import.meta.url), 'utf8');
     const installed = readFileSync(
       new URL('../node_modules/@cloudflare/computer/dist/index.js', import.meta.url),
       'utf8',
     );
 
-    expect(workspace).toContain("'@cloudflare/computer@0.1.1': patches/@cloudflare__computer@0.1.1.patch");
-    expect(patch).toContain('-const PROBE_BATCH = 256;');
+    expect(workspace).toContain("'@cloudflare/computer@0.2.1': patches/@cloudflare__computer@0.2.1.patch");
+    expect(patch).toContain('-const PROBE_BATCH = 100;');
     expect(patch).toContain('+const PROBE_BATCH = 64;');
     expect(installed).toContain('const PROBE_BATCH = 64;');
   });

@@ -49,10 +49,12 @@ export class ComputerSandboxBase<Env = unknown> extends Sandbox<Env> {
     return this.#computerHost;
   }
 
-  async startComputerd(env: Record<string, string>): Promise<void> {
+  // Returns the computerd process id, which Computer's container backend uses as the runtime
+  // identity: a new process id is how it detects that the runtime was replaced and re-connects.
+  async startComputerd(env: Record<string, string>): Promise<string> {
     const existing = await this.processForRole(COMPUTERD_PROCESS_ROLE);
     if (existing && (await existing.status()).state === 'running') {
-      return;
+      return existing.id;
     }
     await Promise.all([
       this.runBootstrapStage(
@@ -66,14 +68,15 @@ export class ComputerSandboxBase<Env = unknown> extends Sandbox<Env> {
       env: { ...env, FUSE_MOUNT: 'auto' },
     });
     this.setProcessForRole(COMPUTERD_PROCESS_ROLE, process.id);
+    return process.id;
   }
 
-  async restartComputerd(env: Record<string, string>): Promise<void> {
+  async restartComputerd(env: Record<string, string>): Promise<string> {
     const existing = await this.processForRole(COMPUTERD_PROCESS_ROLE);
     await existing?.kill(9).catch(() => undefined);
     this.clearProcessForRole(COMPUTERD_PROCESS_ROLE);
     await this.runSandboxShellCommand('fusermount3 -uz /home >/dev/null 2>&1 || true', 30_000).catch(() => undefined);
-    await this.startComputerd(env);
+    return this.startComputerd(env);
   }
 
   async computerdStatus(): Promise<{ running: boolean; exit: { exitedAt: number; reason: string } | null }> {
@@ -171,7 +174,6 @@ export class ComputerSandboxBase<Env = unknown> extends Sandbox<Env> {
     return {
       storage,
       backends: [this.containerBackend],
-      waitUntil: (promise) => this.ctx.waitUntil(promise),
       retryScheduler,
       retry: { initialDelayMs: 1_000, maxDelayMs: 60_000, maxAttempts: 5 },
     };
@@ -194,12 +196,21 @@ function workspaceRuntimeExports(exports: Cloudflare.Exports): WorkspaceRuntimeE
 class SandboxComputerHost implements IWorkspaceContainerAPI {
   constructor(private readonly sandbox: ComputerSandboxBase) {}
 
-  start(env: Record<string, string>): Promise<void> {
-    return this.sandbox.startComputerd(env);
+  // `enableInternet` is only ever false here: the container backend runs with `egress: none`, so it
+  // never asks for direct egress and never calls `interceptAllOutboundHttp`. The sandbox container
+  // has whatever egress the platform grants it; there is no per-start network toggle to honor.
+  async start(_env: Record<string, string>, _enableInternet: boolean): Promise<{ runtimeId: string }> {
+    return { runtimeId: await this.sandbox.startComputerd(_env) };
   }
 
-  restart(env: Record<string, string>): Promise<void> {
-    return this.sandbox.restartComputerd(env);
+  async restart(_env: Record<string, string>, _enableInternet: boolean): Promise<{ runtimeId: string }> {
+    return { runtimeId: await this.sandbox.restartComputerd(_env) };
+  }
+
+  interceptAllOutboundHttp(_workspace: WorkspaceRef, _token: string): Promise<void> {
+    // Only reached under `egress: http-gateway`, which this workspace does not configure. Fail
+    // closed rather than silently leaving the container's outbound traffic un-proxied.
+    throw new Error('Full outbound HTTP interception is not configured for this workspace runtime.');
   }
 
   interceptOutboundHttp(host: string, workspace: WorkspaceRef): Promise<void> {

@@ -69,7 +69,7 @@ const requiredPaths = [
   'CONTRIBUTING.md',
   'LICENSE',
   'NOTICE',
-  'patches/@cloudflare__computer@0.1.1.patch',
+  'patches/@cloudflare__computer@0.2.1.patch',
   'README.md',
   'SECURITY.md',
   'THIRD_PARTY_NOTICES',
@@ -218,10 +218,10 @@ export function findRootWorkspacePolicyErrors(workspace) {
     generatedProjectPolicy = generatedProjectPolicy.replace(pattern, '');
   }
   const computerSqlPatch =
-    /^patchedDependencies:\n  '@cloudflare\/computer@0\.1\.1': patches\/@cloudflare__computer@0\.1\.1\.patch$/gm;
+    /^patchedDependencies:\n  '@cloudflare\/computer@0\.2\.1': patches\/@cloudflare__computer@0\.2\.1\.patch$/gm;
   const computerSqlPatchEntries = workspace.match(computerSqlPatch) ?? [];
   if (computerSqlPatchEntries.length !== 1) {
-    errors.push('pnpm-workspace.yaml must apply the reviewed Computer 0.1.1 SQL probe patch exactly once.');
+    errors.push('pnpm-workspace.yaml must apply the reviewed Computer 0.2.1 SQL probe patch exactly once.');
   }
   errors.push(...findBuildApprovalErrors(generatedProjectPolicy.replace(computerSqlPatch, ''), 'pnpm-workspace.yaml'));
   if (/set this to true or false/i.test(workspace)) {

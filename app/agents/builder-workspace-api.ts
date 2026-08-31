@@ -164,8 +164,11 @@ export type BuilderWorkspaceBinaryFile = {
 
 export type BuilderWorkspaceDirectoryEntry = {
   name: string;
+  size: number;
+  mtime: number;
   isFile: boolean;
   isDirectory: boolean;
+  isSymbolicLink: boolean;
 };
 
 /**

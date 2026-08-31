@@ -8,7 +8,7 @@ This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-08-09
 Production packages: 698
-Inventory SHA-256: efb2dd7c9fd6f94825bb7029c26cfed878a75b941de5656f6937451433f2f3c1
+Inventory SHA-256: e63c9038106c238243953badb4b6cd30e747848a928f9f5d76f04747822fc617
 
 PACKAGE INVENTORY
 =================
@@ -747,7 +747,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 b33ae783f02478cd31787cd07cbf61cd3a6fbee1a50b2baf832b8f0fb7c600f7)
 
-@cloudflare/computer@0.1.1
+@cloudflare/computer@0.2.1
 Declared license: MIT
 Author: <not published>
 Repository: {"directory":"packages/computer","type":"git","url":"git+https://github.com/cloudflare/computer.git"}

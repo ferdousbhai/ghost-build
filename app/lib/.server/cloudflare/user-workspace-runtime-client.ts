@@ -95,6 +95,23 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
         }
       },
       readdir: async (path) => (await this.#stub()).readDirectory(path),
+      // Computer 0.2.x's fs contract added grep/find, which back the model's search tools.
+      // `searchProjectFiles` is a literal content search; regex grep and directory results are not
+      // yet mapped, and `find` filters the known file list rather than walking the tree. Adequate
+      // for the common literal/path case; refine once the exec path is confirmed on 0.2.x.
+      grep: async (pattern, path, options) => {
+        const result = await this.searchProjectFiles({ pattern, path, ignoreCase: options?.ignoreCase });
+        return result.matches.map((match) => ({ path: match.path, line: match.line, text: match.text }));
+      },
+      find: async (directory, pattern, options) => {
+        const prefix = directory === '' || directory.endsWith('/') ? directory : `${directory}/`;
+        const offset = options?.offset ?? 0;
+        return this.#files
+          .filter((file) => prefix === '' || file.path === directory || file.path.startsWith(prefix))
+          .filter((file) => pattern === undefined || file.path.includes(pattern))
+          .slice(offset, options?.limit === undefined ? undefined : offset + options.limit)
+          .map((file) => ({ path: file.path, type: 'file' as const }));
+      },
     },
     runtime: {
       exec: async (command, options) => ({

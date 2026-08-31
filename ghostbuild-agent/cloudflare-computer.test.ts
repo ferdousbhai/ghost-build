@@ -36,7 +36,8 @@ const REQUIRED_COMPUTER_DECLARATIONS = [
   'readFile(path: string, encoding: "utf8"): Promise<string>;',
   'stat(path: string): Promise<WorkspaceStatResult>;',
   'readdir(path: string, options?: ReaddirOptions): Promise<WorkspaceDirentResult[]>;',
-  'find(directory: string, pattern?: string): Promise<WorkspaceFoundEntry[]>;',
+  'find(directory: string, pattern?: string, options?: FindOptions): Promise<WorkspaceFoundEntry[]>;',
+  'grep(pattern: string, path: string, options?: GrepOptions): Promise<WorkspaceGrepMatch[]>;',
   'mkdir(path: string, options?: MkdirOptions): Promise<void>;',
   'rm(path: string, options?: RmOptions): Promise<void>;',
   'declare class WorkspaceRuntime {',
@@ -49,7 +50,7 @@ const REQUIRED_COMPUTER_DECLARATIONS = [
 ] as const;
 
 /**
- * Post-image of patches/@cloudflare__computer@0.1.1.patch. Patching a preview
+ * Post-image of patches/@cloudflare__computer@0.2.1.patch. Patching a preview
  * dependency's published bundle silently stops applying when upstream reflows
  * the region, so the reviewed bytes are pinned here as well.
  */

@@ -9,12 +9,12 @@ describe('ComputerAdmissionControl', () => {
   });
 
   it('fails new operations closed with the operator reason once the switch is thrown', async () => {
-    const db = controlDatabase({ enabled: 0, reason: 'Computer 0.1.1 container startup is failing.' });
+    const db = controlDatabase({ enabled: 0, reason: 'Computer 0.2.1 container startup is failing.' });
     const admission = new ComputerAdmissionControl(db.binding);
 
     await expect(admission.admitNewOperation()).rejects.toMatchObject({
       code: 'computer_operations_disabled',
-      message: '[computer_operations_disabled] Computer 0.1.1 container startup is failing.',
+      message: '[computer_operations_disabled] Computer 0.2.1 container startup is failing.',
     });
     await expect(admission.admitNewOperation()).rejects.toBeInstanceOf(ComputerOperationsDisabledError);
   });

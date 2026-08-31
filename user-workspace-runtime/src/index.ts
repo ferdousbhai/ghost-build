@@ -207,7 +207,7 @@ const PARALLEL_VALIDATION_STAGES = [
 const VALIDATION_STAGE_LOG_ROOT = `${ISOLATED_PROJECT_ROOT}/validation-stage-logs`;
 /**
  * `timeoutMs` for a container-shell exec is a process-lifetime hint shipped to
- * computerd over Computer's shell RPC. @cloudflare/computer 0.1.1 enforces a
+ * computerd over Computer's shell RPC. @cloudflare/computer 0.2.1 enforces a
  * `timeoutMs` timer only in its worker-shell backend; for `container-shell`
  * it is forwarded with no client-side backstop, and computerd demonstrably
  * does not enforce it either — a validation command ran 9m23s under a
@@ -1054,8 +1054,11 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
     const snapshot = await this.stableProjectRead((workspace) => workspace.fs.readdir(path));
     return snapshot.value.map((entry) => ({
       name: entry.name,
+      size: entry.size,
+      mtime: entry.mtime,
       isFile: entry.isFile,
       isDirectory: entry.isDirectory,
+      isSymbolicLink: entry.isSymbolicLink,
     }));
   }
 
@@ -1075,7 +1078,7 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
    */
   async warmContainer(): Promise<void> {
     try {
-      await this.getWorkspaceContainer().start(COMPUTERD_ENV);
+      await this.getWorkspaceContainer().start(COMPUTERD_ENV, false);
     } catch (error) {
       console.info('ProjectWorkspace container warm-up did not complete', {
         error: error instanceof Error ? error.message : String(error),
@@ -3098,7 +3101,7 @@ async function streamCommand(
     try {
       for await (const event of handle) {
         if (event.name === 'exit') {
-          exitCode = event.value;
+          exitCode = event.code;
           continue;
         }
         if (event.name !== 'stdout' && event.name !== 'stderr') {
