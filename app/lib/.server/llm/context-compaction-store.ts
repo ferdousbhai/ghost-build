@@ -13,16 +13,6 @@ type ContextStateRow = {
 export class DurableObjectContextCompactionRepository {
   constructor(private readonly db: SqlProvider) {}
 
-  /** Move a summary written by the former shared-Agent design to this Agent's canonical record. */
-  migrateLegacySubchat(subchatIndex: number): void {
-    const legacyId = `subchat:${subchatIndex}`;
-    const legacy = this.read(legacyId);
-    if (legacy) {
-      this.saveCompaction(legacy);
-      void this.db.sql`DELETE FROM builder_context_state WHERE id = ${legacyId}`;
-    }
-  }
-
   getCompaction(): ContextCompaction | null {
     return this.read(CONTEXT_ID);
   }

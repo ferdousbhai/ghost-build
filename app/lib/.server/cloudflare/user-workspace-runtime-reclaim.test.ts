@@ -306,7 +306,7 @@ function seedAbandonedRuntime(database: DatabaseSyncInstance): void {
   database
     .prepare(
       `INSERT INTO cloudflare_connections
-        (id, user_id, account_id, account_name, status, credential_handle, granted_scopes_json,
+        (id, user_id, account_id, account_name, status, credential_handle, granted_capabilities_json,
          ai_billing_enabled, connected_at, created_at, updated_at)
        VALUES ('connection-1', 'user-1', 'account-1', 'Account', 'active', 'handle-1', '["workers"]', 1, 1, 1, 1)`,
     )

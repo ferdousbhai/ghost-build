@@ -1,11 +1,8 @@
 import { describe, expect, test, vi } from 'vitest';
-import {
-  CloudflareOAuthError,
-  CloudflareOAuthOrchestrator,
-  REQUIRED_CLOUDFLARE_OAUTH_SCOPES,
-} from './cloudflare-oauth-orchestrator';
+import { CORE_CLOUDFLARE_OAUTH_SCOPES } from './cloudflare-oauth-scope-manifest';
+import { CloudflareOAuthError, CloudflareOAuthOrchestrator } from './cloudflare-oauth-orchestrator';
 
-const scopes = REQUIRED_CLOUDFLARE_OAUTH_SCOPES.join(' ');
+const scopes = CORE_CLOUDFLARE_OAUTH_SCOPES.join(' ');
 const config = { clientId: 'client-1', clientSecret: 'client-secret', scopes };
 
 describe('CloudflareOAuthOrchestrator', () => {
@@ -34,7 +31,7 @@ describe('CloudflareOAuthOrchestrator', () => {
   test('fails closed when a required resource scope is not configured', async () => {
     const orchestrator = new CloudflareOAuthOrchestrator({
       ...config,
-      scopes: REQUIRED_CLOUDFLARE_OAUTH_SCOPES.filter((scope) => scope !== 'workers-r2.write').join(' '),
+      scopes: CORE_CLOUDFLARE_OAUTH_SCOPES.filter((scope) => scope !== 'workers-r2.write').join(' '),
     });
     await expect(
       orchestrator.startConnection({
@@ -84,8 +81,8 @@ describe('CloudflareOAuthOrchestrator', () => {
       // Derived from the confirmed grant, not echoed from the request: the core scopes cover
       // every product capability.
       grantedCapabilities: ['workers', 'containers', 'd1', 'r2', 'kv', 'durable_objects', 'workers_ai'],
-      requestedOAuthScopes: [...REQUIRED_CLOUDFLARE_OAUTH_SCOPES],
-      grantedOAuthScopes: [...REQUIRED_CLOUDFLARE_OAUTH_SCOPES],
+      requestedOAuthScopes: [...CORE_CLOUDFLARE_OAUTH_SCOPES],
+      grantedOAuthScopes: [...CORE_CLOUDFLARE_OAUTH_SCOPES],
       oauthScopeProfileVersion: 'core-v1',
       oauthScopeGrantStatus: 'core',
     });

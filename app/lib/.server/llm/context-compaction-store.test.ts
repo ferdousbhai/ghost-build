@@ -96,28 +96,4 @@ describe('DurableObjectContextCompactionRepository', () => {
     ).toBe(false);
     expect(repository.getCompaction()?.summary).toBe('newer');
   });
-
-  test('lazily moves a deployed scoped summary to the canonical Agent record', () => {
-    const db = new TestSqlProvider();
-    db.rows.set('active', {
-      summary: 'older summary',
-      from_message_id: 'm-1',
-      to_message_id: 'm-3',
-    });
-    db.rows.set('subchat:2', {
-      summary: 'legacy summary',
-      from_message_id: 'm-1',
-      to_message_id: 'm-5',
-    });
-    const repository = new DurableObjectContextCompactionRepository(db);
-
-    repository.migrateLegacySubchat(2);
-
-    expect(repository.getCompaction()).toEqual({
-      summary: 'legacy summary',
-      fromMessageId: 'm-1',
-      toMessageId: 'm-5',
-    });
-    expect(db.rows.has('subchat:2')).toBe(false);
-  });
 });

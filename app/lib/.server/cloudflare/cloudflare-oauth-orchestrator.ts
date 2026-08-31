@@ -25,7 +25,6 @@ const USER_DETAILS_URL = 'https://api.cloudflare.com/client/v4/user';
 const ACCOUNTS_URL = 'https://api.cloudflare.com/client/v4/accounts?per_page=2';
 const SESSION_LIFETIME_MS = 10 * 60 * 1000;
 const OAUTH_REQUEST_TIMEOUT_MS = 30_000;
-export const REQUIRED_CLOUDFLARE_OAUTH_SCOPES = CORE_CLOUDFLARE_OAUTH_SCOPES;
 
 type OAuthSession = {
   verifier: string;
@@ -82,7 +81,7 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
 
   async startConnection(request: CloudflareConnectionRequest): Promise<CloudflareConnectionChallenge> {
     const configuredScopes = new Set(this.config.scopes.split(/\s+/).filter(Boolean));
-    const missingScopes = REQUIRED_CLOUDFLARE_OAUTH_SCOPES.filter((scope) => !configuredScopes.has(scope));
+    const missingScopes = CORE_CLOUDFLARE_OAUTH_SCOPES.filter((scope) => !configuredScopes.has(scope));
     if (missingScopes.length > 0) {
       throw new CloudflareOAuthError(`Cloudflare OAuth is missing required scopes: ${missingScopes.join(', ')}.`);
     }

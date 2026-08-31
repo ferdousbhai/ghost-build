@@ -30,6 +30,7 @@ const migrationPolicies = [
       '0014_workspace_runtime_upgrade_deferral.sql': '1a9e1598b98fb487bb065f3b6574a6045ed4e76e9d88089d8a111f91b62311b1',
       '0015_workspace_runtime_image_digest.sql': '215c693d9dfb3c726559a6dc218f0cdf6f22d5eec8788dd376853c4868dc2748',
       '0016_cloudflare_oauth_grants.sql': '6e5ef8504184115c70e344f2fdd86c8adc3dfb78becb50cddfe5bf315ff174f9',
+      '0017_drop_granted_scopes_json.sql': 'afd3fdd37bc396fea58da077118a9da38d99aaab764994910ab1141829f2501f',
     },
     contractAllowlist: {
       // Explicit pre-launch clean break: the Computer locator replaced this
@@ -41,6 +42,9 @@ const migrationPolicies = [
       '0008_remove_upstream_monitor_runs.sql': '1ca903265be41d756da88c11dcebdec0547309bf4f5fc24c82b2fd9b9f295112',
       // No code reads these tables once skills stop being mirrored; the sync that wrote them is gone.
       '0012_remove_builder_skill_sync.sql': '5731448cabed0deec30178e99a87419103d1f9a96ca1ecbc6bdc5d36ecf1a708',
+      // The legacy capability column: 0016 split capabilities from OAuth scopes and the pre-launch
+      // dual-write was removed, so nothing reads or writes it.
+      '0017_drop_granted_scopes_json.sql': 'afd3fdd37bc396fea58da077118a9da38d99aaab764994910ab1141829f2501f',
     },
   },
   {

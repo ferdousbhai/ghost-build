@@ -387,7 +387,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       });
     }
     await this.advanceTranscriptCheckpoint(transcript);
-    this.contextCompaction.migrateLegacySubchat(subchatIndex);
     const turnContext = parseTurnContext(body.turnContext);
     const userMessages = messages.filter((message: { role?: string }) => message.role === 'user');
     const firstUserMessage = !options?.continuation && userMessages.length === 1;
