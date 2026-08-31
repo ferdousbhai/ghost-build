@@ -3050,6 +3050,13 @@ async function openCommandHandle(
     return reattachExecution<WorkspaceRuntimeExecHandle<'utf8'>>(workspace.runtime, options.id, options.backend);
   }
   try {
+    // TEMPORARY (#142 diagnosis): the container shell ran the literal string "undefined". Confirm
+    // exactly what command reaches the exec boundary.
+    console.error('exec_command_debug', {
+      backend: options.backend,
+      cwd: options.cwd,
+      command: command === undefined ? '<undefined>' : String(command).slice(0, 200),
+    });
     return await workspace.runtime.exec(command, {
       id: options.id,
       cwd: options.cwd,
