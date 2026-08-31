@@ -18,6 +18,7 @@ import {
   missingUserWorkspaceRuntimeCapabilities,
   provisionUserWorkspaceRuntime,
   USER_WORKSPACE_REQUIRED_CAPABILITIES,
+  USER_WORKSPACE_SANDBOX_BASE_IMAGE,
   UserWorkspaceContainersEligibilityUnknownError,
   UserWorkspaceContainersPlanRequiredError,
   UserWorkspaceRuntimeProvisioningInProgressError,
@@ -30,7 +31,6 @@ import {
 import { readUserWorkspaceRuntimeActivity } from '~/lib/.server/cloudflare/user-workspace-runtime-activity';
 import { USER_WORKSPACE_RUNTIME_SHA256 } from '~/generated/user-workspace-runtime.generated';
 import { deriveUserWorkspaceRuntimeSecret } from '~/lib/.server/cloudflare/user-workspace-runtime-secret';
-import { cloudflareWorkspaceImageReferenceOrNull } from '~/lib/.server/cloudflare/workspace-image-reference';
 import { mintRuntimeCapability } from '~/lib/cloudflare/runtime-capability';
 import {
   CLOUDFLARE_AUTHORIZATION_ERROR_PARAM,
@@ -376,7 +376,7 @@ function isUsableWorkspaceRuntime(
     runtime.connectionId === connection.id &&
     runtime.connectionGeneration === connection.generation &&
     ((runtime.runtimeVersion === USER_WORKSPACE_RUNTIME_SHA256 &&
-      runtime.imageDigest === cloudflareWorkspaceImageReferenceOrNull(connection.accountId)) ||
+      runtime.imageDigest === USER_WORKSPACE_SANDBOX_BASE_IMAGE) ||
       upgradeDeferred)
   );
 }

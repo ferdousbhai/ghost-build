@@ -5,11 +5,11 @@ import type {
 } from '~/lib/.server/cloudflare/cloudflare-orchestrator';
 import { USER_WORKSPACE_RUNTIME_SHA256 } from '~/generated/user-workspace-runtime.generated';
 import {
+  USER_WORKSPACE_SANDBOX_BASE_IMAGE,
   UserWorkspaceContainersEligibilityUnknownError,
   UserWorkspaceContainersPlanRequiredError,
   UserWorkspaceRuntimeProvisioningInProgressError,
 } from '~/lib/.server/cloudflare/user-workspace-runtime-provisioner';
-import { cloudflareWorkspaceImageReference } from '~/lib/.server/cloudflare/workspace-image-reference';
 
 /** Shaped like a real Cloudflare account id; a registry namespace is derived from it. */
 const ACCOUNT_ID = '0af9e0921b880657d84a6c07307f8aef';
@@ -141,13 +141,9 @@ describe('Cloudflare-only authentication', () => {
     ['failed', runtimeRow({ status: 'error' })],
     ['stale connection', runtimeRow({ connectionGeneration: 0 })],
     ['stale version', runtimeRow({ runtimeVersion: '0'.repeat(64) })],
-    // Without these two, an account whose image copy failed once stayed on the stock base image
-    // forever — nothing downstream reconsidered it — and a rebuilt image never reached anyone
-    // already provisioned.
-    [
-      'fell back to the base image',
-      runtimeRow({ imageDigest: `docker.io/cloudflare/sandbox:x@sha256:${'a'.repeat(64)}` }),
-    ],
+    // A row pinned to a different image than the current one, or one that never recorded an image,
+    // must re-provision so a base-image bump reaches workspaces that were provisioned before it.
+    ['on a superseded image', runtimeRow({ imageDigest: `docker.io/cloudflare/sandbox:x@sha256:${'a'.repeat(64)}` })],
     ['provisioned before the image was recorded', runtimeRow({ imageDigest: null })],
   ])('automatically provisions an %s runtime before minting a capability', async (_case, initialRuntime) => {
     mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
@@ -1249,8 +1245,7 @@ function runtimeRow(
     worker_name: 'ghostbuild-workspace-test',
     endpoint: 'https://workspace.example',
     runtime_version: overrides.runtimeVersion ?? USER_WORKSPACE_RUNTIME_SHA256,
-    image_digest:
-      overrides.imageDigest === undefined ? cloudflareWorkspaceImageReference(ACCOUNT_ID) : overrides.imageDigest,
+    image_digest: overrides.imageDigest === undefined ? USER_WORKSPACE_SANDBOX_BASE_IMAGE : overrides.imageDigest,
     status: overrides.status ?? ('ready' as const),
     last_error: overrides.status === 'error' ? 'Previous provisioning failed.' : null,
     provisioning_attempt_id: null,
@@ -1271,8 +1266,7 @@ function runtimeRecord(overrides: { connectionGeneration?: number; imageDigest?:
     runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
     // A runtime is only current when it is on the expected image too, so the default fixture is a
     // fully current one; a test wanting drift passes an older digest.
-    imageDigest:
-      overrides.imageDigest === undefined ? cloudflareWorkspaceImageReference(ACCOUNT_ID) : overrides.imageDigest,
+    imageDigest: overrides.imageDigest === undefined ? USER_WORKSPACE_SANDBOX_BASE_IMAGE : overrides.imageDigest,
     status: 'ready' as const,
     lastError: null,
     provisioningAttemptId: null,
