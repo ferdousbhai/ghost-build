@@ -72,7 +72,7 @@ describe('injected fetch receiver', () => {
     const scanned = new Set(sources.map((path) => relative(REPOSITORY_ROOT, path)));
 
     expect(scanned).toContain('app/lib/.server/cloudflare/user-account-api.ts');
-    expect(scanned).toContain('app/lib/.server/cloudflare/registry-image-copy.ts');
+    expect(scanned).toContain('app/lib/.server/cloudflare/user-workspace-runtime-provisioner.ts');
     expect(scanned).toContain('user-workspace-runtime/src/index.ts');
   });
 

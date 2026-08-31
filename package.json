@@ -32,8 +32,6 @@
     "generate-routes": "tsr generate",
     "generate": "pnpm run generate-routes && pnpm run cf-typegen && pnpm run generate:artifacts",
     "generate:artifacts": "node scripts/generate-artifacts.mjs",
-    "build:workspace-image": "node scripts/build-user-workspace-image.mjs",
-    "build:workspace-image:oci": "node scripts/build-user-workspace-image.mjs --oci",
     "test": "vitest run",
     "test:workerd": "vitest run --config vitest.workerd.config.ts",
     "test:e2e:install": "playwright install --with-deps chromium",

@@ -58,16 +58,6 @@
   // Configure production secrets in Cloudflare, not local env files.
   // Deployment credentials are supplied by the CI environment, not as Worker runtime secrets.
   // Deploy tooling injects the environment-specific OAuth client id and commit SHA.
-  // Ghostbuild's own workspace container image, mirrored as OCI blobs. Cloudflare's registry is
-  // account-scoped with no shared namespace and no server-side copy API, so provisioning pushes
-  // these bytes into each user's own registry. This holds a build artifact Ghostbuild publishes,
-  // never customer project data.
-  "r2_buckets": [
-    {
-      "binding": "WORKSPACE_IMAGE_BLOBS",
-      "bucket_name": "ghostbuild-workspace-image",
-    },
-  ],
   "d1_databases": [
     {
       "binding": "DB",
