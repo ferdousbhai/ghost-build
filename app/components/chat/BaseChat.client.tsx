@@ -13,6 +13,7 @@ import useViewport from '~/lib/hooks/useViewport';
 import { DisabledChatMessageSheet } from './DisabledChatMessageSheet';
 import { HomeIntro } from './HomeIntro.client';
 import StreamingIndicator from './StreamingIndicator';
+import { ReauthorizeInterstitial } from '~/components/cloudflare/ReauthorizeInterstitial.client';
 import { AnimatePresence, motion, MotionConfig } from 'framer-motion';
 import { useStore } from '@nanostores/react';
 import { toast } from 'sonner';
@@ -323,6 +324,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                 <Workbench chatStarted isStreaming={isStreaming} />
               </Suspense>
             )}
+            {Boolean(userId) && chatStarted && <ReauthorizeInterstitial />}
           </div>
         </div>
       </div>
