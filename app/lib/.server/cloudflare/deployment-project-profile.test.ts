@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { deploymentProjectProfileFromConfig } from './deployment-project-profile';
 
 const supportedConfig = {
+  main: 'src/server.ts',
   ai: { binding: 'AI' },
   d1_databases: [{ binding: 'DB' }, { binding: 'AGENT_SECURITY_DB' }],
   r2_buckets: [{ binding: 'APP_STORAGE' }],
@@ -50,5 +51,22 @@ describe('managed deployment capability boundary', () => {
     expect(() =>
       deploymentProjectProfileFromConfig({ ...supportedConfig, d1_databases: [{ binding: 'DB' }] }, 'web_app'),
     ).toThrow('The AppAgent and AGENT_SECURITY_DB managed deployment capabilities must be configured together.');
+  });
+
+  test('accepts the plain web entrypoint when AppAgent is disabled', () => {
+    expect(deploymentProjectProfileFromConfig({ main: 'src/plain-server.ts' }, 'web_app')).toEqual({
+      type: 'web_app',
+      bindings: { ai: false, d1: false, r2: false, kv: false, appAgent: false },
+    });
+  });
+
+  test.each([
+    ['plain web app', { main: 'src/server.ts' }, 'web_app', 'src/plain-server.ts'],
+    ['AppAgent web app', { ...supportedConfig, main: 'src/plain-server.ts' }, 'web_app', 'src/server.ts'],
+    ['Worker', { main: 'src/plain-server.ts' }, 'worker', 'src/server.ts'],
+  ] as const)('rejects the wrong %s entrypoint', (_label, config, type, expected) => {
+    expect(() => deploymentProjectProfileFromConfig(config, type)).toThrow(
+      `The generated Worker entrypoint must be ${expected} for this project profile.`,
+    );
   });
 });

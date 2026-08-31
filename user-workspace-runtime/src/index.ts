@@ -2045,7 +2045,7 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
       throw new Error('The generated project type is invalid.');
     }
     const wrangler: unknown = parse(wranglerFile.content);
-    if (!isRecord(wrangler) || wrangler.main !== 'src/server.ts') {
+    if (!isRecord(wrangler)) {
       throw new Error('The generated Worker entrypoint is invalid.');
     }
     return deploymentProjectProfileFromConfig(wrangler, configuredType === 'worker' ? 'worker' : 'web_app');

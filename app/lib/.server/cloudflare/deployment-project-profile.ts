@@ -79,6 +79,10 @@ export function deploymentProjectProfileFromConfig(
   }
   assertManagedExports(config.exports, appAgent);
   assertManagedTriggers(config.triggers, appAgent);
+  const expectedEntrypoint = type === 'worker' || appAgent ? 'src/server.ts' : 'src/plain-server.ts';
+  if (config.main !== expectedEntrypoint) {
+    throw new Error(`The generated Worker entrypoint must be ${expectedEntrypoint} for this project profile.`);
+  }
 
   return {
     type,
