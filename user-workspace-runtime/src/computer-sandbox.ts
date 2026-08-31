@@ -184,12 +184,15 @@ function workspaceRuntimeExports(exports: Cloudflare.Exports): WorkspaceRuntimeE
   if (!('WorkspaceProxy' in exports)) {
     throw new Error('The workspace runtime is missing its WorkspaceProxy export.');
   }
-  const workspaceProxy = exports.WorkspaceProxy;
-  if (!(workspaceProxy instanceof Function)) {
-    throw new Error('The workspace runtime WorkspaceProxy export is invalid.');
-  }
+  // `ctx.exports.WorkspaceProxy` is the loopback binding for the WorkspaceProxy WorkerEntrypoint,
+  // which is callable as `WorkspaceProxy({ props })` to mint a Fetcher but is a native binding, not
+  // an `instanceof Function`. An earlier guard rejected it on that basis and failed every container
+  // exec at the egress-interception stage. Trust the binding; a genuinely non-callable export
+  // throws at the call site, which the readiness probe surfaces.
+  // SAFETY: the platform types loopback exports as `unknown`; this one is the WorkspaceProxy
+  // entrypoint binding, whose call signature is exactly WorkspaceRuntimeExports['WorkspaceProxy'].
   return {
-    WorkspaceProxy: (options) => workspaceProxy(options),
+    WorkspaceProxy: exports.WorkspaceProxy as WorkspaceRuntimeExports['WorkspaceProxy'],
   };
 }
 
