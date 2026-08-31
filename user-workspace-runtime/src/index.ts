@@ -172,9 +172,11 @@ const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.
  * turns a from-scratch dependency install into a hardlink pass. `--prefer-offline` keeps a warm
  * store from paying registry round-trips it does not need; anything the store is missing is still
  * fetched normally, so a project whose lockfile has moved past the image installs correctly.
+ * The validator has no TTY, so `CI=true` lets pnpm replace an incompatible modules directory
+ * deterministically instead of aborting for an impossible confirmation prompt.
  */
 const INSTALL_COMMAND =
-  'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --prefer-offline ' +
+  'CI=true pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --prefer-offline ' +
   `--store-dir ${CONTAINER_PNPM_STORE_DIR} --registry=https://registry.npmjs.org/`;
 const INSTALL_TIMEOUT_MS = CONTAINER_PACKAGE_INSTALL_TIMEOUT_MS;
 const WEB_APP_BUNDLE_SCRIPT = [
