@@ -674,6 +674,16 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
       } catch (error) {
         const pendingError = error instanceof WorkspaceSyncPendingError ? error : null;
         syncPending = pendingError !== null;
+        if (!pendingError) {
+          // TEMPORARY (#142 diagnosis): the readiness probe otherwise collapses every failure into
+          // `unavailable`, hiding why the container exec keeps failing. Surface the real error.
+          console.error('readiness_component_failed', {
+            component: name,
+            name: error instanceof Error ? error.name : 'non-error',
+            message: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack?.slice(0, 1500) : undefined,
+          });
+        }
         components[name] = {
           ok: false,
           code: pendingError?.code ?? 'unavailable',
