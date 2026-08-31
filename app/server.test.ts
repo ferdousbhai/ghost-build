@@ -46,6 +46,14 @@ function testExecutionContext(waitUntil: (promise: Promise<unknown>) => void): E
   return { waitUntil } as unknown as ExecutionContext;
 }
 
+function fetchServer(request: Request, env: Env): Promise<Response> {
+  return server.fetch(
+    request,
+    env,
+    testExecutionContext(() => undefined),
+  );
+}
+
 describe('server Agent routing boundary', () => {
   beforeEach(() => {
     tanstackFetch.mockReset();
@@ -72,7 +80,7 @@ describe('server Agent routing boundary', () => {
 
   it('leaves non-Builder Agent-looking routes to the application router', async () => {
     const pathname = '/agents/unrecognized/private';
-    const response = await server.fetch(new Request(`https://ghostbuild.dev${pathname}`), testEnv());
+    const response = await fetchServer(new Request(`https://ghostbuild.dev${pathname}`), testEnv());
 
     expect(response.status).toBe(200);
     expect(getAuthSession).not.toHaveBeenCalled();
@@ -81,7 +89,7 @@ describe('server Agent routing boundary', () => {
   });
 
   it('leaves ordinary application routes outside the Agent routing boundary', async () => {
-    const response = await server.fetch(new Request('https://ghostbuild.dev/not-an-agent'), testEnv());
+    const response = await fetchServer(new Request('https://ghostbuild.dev/not-an-agent'), testEnv());
 
     expect(await response.text()).toBe('application');
     expect(response.headers.has('Cross-Origin-Opener-Policy')).toBe(false);
@@ -103,7 +111,7 @@ describe('server Agent routing boundary', () => {
     ['HTTP', 'http://ghostbuild.dev/share?from=http', 'https://ghostbuild.dev/share?from=http'],
     ['www', 'https://www.ghostbuild.dev/share?from=www', 'https://ghostbuild.dev/share?from=www'],
   ])('redirects the production %s origin to canonical HTTPS before routing', async (_label, source, destination) => {
-    const response = await server.fetch(new Request(source), testEnv());
+    const response = await fetchServer(new Request(source), testEnv());
 
     expect(response.status).toBe(308);
     expect(response.headers.get('Location')).toBe(destination);
@@ -118,7 +126,7 @@ describe('server Agent routing boundary', () => {
       }),
     );
 
-    const response = await server.fetch(new Request('https://ghostbuild.dev/chat/project'), testEnv());
+    const response = await fetchServer(new Request('https://ghostbuild.dev/chat/project'), testEnv());
 
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
@@ -134,7 +142,7 @@ describe('server Agent routing boundary', () => {
       new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }),
     );
 
-    const response = await server.fetch(new Request('https://ghostbuild.dev/stream'), testEnv());
+    const response = await fetchServer(new Request('https://ghostbuild.dev/stream'), testEnv());
     const forwardedRequest = tanstackFetch.mock.calls[0]?.[0];
     const nonce = forwardedRequest.headers.get('X-Ghostbuild-CSP-Nonce');
 
@@ -150,13 +158,13 @@ describe('server Agent routing boundary', () => {
       }),
     );
 
-    const response = await server.fetch(new Request('https://ghostbuild.dev/assets/app-abc123.js'), testEnv());
+    const response = await fetchServer(new Request('https://ghostbuild.dev/assets/app-abc123.js'), testEnv());
 
     expect(response.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
   });
 
   it('applies the application security policy to exact API responses', async () => {
-    const response = await server.fetch(new Request('https://ghostbuild.dev/api/health'), testEnv());
+    const response = await fetchServer(new Request('https://ghostbuild.dev/api/health'), testEnv());
 
     expect(response.status).toBe(200);
     expect(response.headers.has('Cross-Origin-Opener-Policy')).toBe(false);
@@ -174,10 +182,7 @@ describe('server Agent routing boundary', () => {
   });
 
   it('applies the application security policy to router-generated errors', async () => {
-    const response = await server.fetch(
-      new Request('https://ghostbuild.dev/api/health', { method: 'POST' }),
-      testEnv(),
-    );
+    const response = await fetchServer(new Request('https://ghostbuild.dev/api/health', { method: 'POST' }), testEnv());
 
     expect(response.status).toBe(405);
     expect(response.headers.get('Allow')).toBe('GET');
@@ -188,7 +193,7 @@ describe('server Agent routing boundary', () => {
   });
 
   it('marks OAuth callback redirects no-store without losing either cookie', async () => {
-    const response = await server.fetch(
+    const response = await fetchServer(
       new Request('https://ghostbuild.dev/connect/return?state=00000000-0000-4000-8000-000000000001&code=code'),
       testEnv(),
     );
@@ -207,7 +212,7 @@ describe('server Agent routing boundary', () => {
     ['connection status', '/api/cloudflare/connection', 'GET'],
     ['OAuth start errors', '/api/cloudflare/connection/start', 'POST'],
   ])('marks Cloudflare %s responses no-store', async (_label, pathname, method) => {
-    const response = await server.fetch(new Request(`https://ghostbuild.dev${pathname}`, { method }), testEnv());
+    const response = await fetchServer(new Request(`https://ghostbuild.dev${pathname}`, { method }), testEnv());
 
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
@@ -216,12 +221,12 @@ describe('server Agent routing boundary', () => {
     const env = testEnv();
     const request = new Request('https://ghostbuild.dev/api/cloudflare/runtime-credential', { method: 'POST' });
 
-    const response = await server.fetch(request, env);
+    const response = await fetchServer(request, env);
 
     expect(response.status).toBe(200);
     expect(runtimeCredentialAction).toHaveBeenCalledWith({ request, env });
 
-    const rejected = await server.fetch(new Request('https://ghostbuild.dev/api/cloudflare/runtime-credential'), env);
+    const rejected = await fetchServer(new Request('https://ghostbuild.dev/api/cloudflare/runtime-credential'), env);
     expect(rejected.status).toBe(405);
     expect(rejected.headers.get('Allow')).toBe('POST');
     expect(runtimeCredentialAction).toHaveBeenCalledOnce();
@@ -230,11 +235,11 @@ describe('server Agent routing boundary', () => {
   it('routes only POST requests to privacy-safe client telemetry ingestion', async () => {
     const request = new Request('https://ghostbuild.dev/api/client-telemetry', { method: 'POST' });
 
-    const response = await server.fetch(request, testEnv());
+    const response = await fetchServer(request, testEnv());
 
     expect(response.status).toBe(202);
     expect(clientTelemetryAction).toHaveBeenCalledWith({ request, env: {} });
-    const rejected = await server.fetch(new Request('https://ghostbuild.dev/api/client-telemetry'), testEnv());
+    const rejected = await fetchServer(new Request('https://ghostbuild.dev/api/client-telemetry'), testEnv());
     expect(rejected.status).toBe(405);
     expect(rejected.headers.get('Allow')).toBe('POST');
     expect(clientTelemetryAction).toHaveBeenCalledOnce();
@@ -245,7 +250,7 @@ describe('server Agent routing boundary', () => {
       Response.json({ status: 'ok' }, { headers: { 'Cache-Control': 'public, max-age=60' } }),
     );
 
-    const response = await server.fetch(new Request('https://ghostbuild.dev/api/health'), testEnv());
+    const response = await fetchServer(new Request('https://ghostbuild.dev/api/health'), testEnv());
 
     expect(response.headers.get('Cache-Control')).toBe('public, max-age=60');
   });
@@ -260,7 +265,7 @@ describe('server Agent routing boundary', () => {
       }),
     );
 
-    const response = await server.fetch(new Request('https://ghostbuild.dev/strict'), testEnv());
+    const response = await fetchServer(new Request('https://ghostbuild.dev/strict'), testEnv());
 
     expect(response.headers.get('Content-Security-Policy')).toBe(
       "default-src 'none'; script-src 'self', base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'",
@@ -277,7 +282,7 @@ describe('server Agent routing boundary', () => {
       }),
     );
 
-    const response = await server.fetch(new Request('https://ghostbuild.dev/hsts-floor'), testEnv());
+    const response = await fetchServer(new Request('https://ghostbuild.dev/hsts-floor'), testEnv());
 
     expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains; future=value');
   });
@@ -291,7 +296,7 @@ describe('server Agent routing boundary', () => {
       }),
     );
 
-    const response = await server.fetch(new Request('https://ghostbuild.dev/duplicate-hsts'), testEnv());
+    const response = await fetchServer(new Request('https://ghostbuild.dev/duplicate-hsts'), testEnv());
 
     expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains');
   });
@@ -339,7 +344,7 @@ describe('server Agent routing boundary', () => {
       tanstackFetch
         .mockClear()
         .mockResolvedValue(new Response('application', { headers: { 'Content-Type': 'text/html' } }));
-      const response = await server.fetch(request, env);
+      const response = await fetchServer(request, env);
 
       expect(tanstackFetch).toHaveBeenCalledOnce();
       expect(await response.text()).toBe('application');
