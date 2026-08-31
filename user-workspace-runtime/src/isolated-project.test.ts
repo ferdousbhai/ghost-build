@@ -68,7 +68,6 @@ describe('isolated project command', () => {
     const validation = source.slice(source.indexOf('async validateTool('), source.indexOf('validationStatus('));
 
     expect(validation).toContain('copyProjectToIsolatedRoot(isolatedRoot, cancellation)');
-    expect(source).toContain("'CI=true pnpm install --frozen-lockfile");
     expect(validation).toContain('this.buildDeploymentArtifact({');
     expect(validation).toContain('preparedDeploymentArtifactDigest(artifact)');
     expect(validation).toContain('REVISION_CODEGEN_COMMAND.command');
@@ -238,5 +237,14 @@ describe('#139 stale-bytes guard', () => {
       source.indexOf('private async runTransientCommand('),
     );
     expect(push).toContain('if (!force && (await this.exists(PROJECT_ROOT)).exists)');
+  });
+
+  it('runs every headless validation command in CI mode', () => {
+    const transientCommand = source.slice(
+      source.indexOf('private async runTransientCommand('),
+      source.indexOf('private async terminateTransientCommand('),
+    );
+
+    expect(transientCommand).toContain("env: { CI: 'true' }");
   });
 });

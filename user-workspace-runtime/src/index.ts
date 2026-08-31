@@ -172,11 +172,9 @@ const CHECKPOINT_EXCLUDED_ROOTS = new Set(['node_modules', 'dist', '.output', '.
  * turns a from-scratch dependency install into a hardlink pass. `--prefer-offline` keeps a warm
  * store from paying registry round-trips it does not need; anything the store is missing is still
  * fetched normally, so a project whose lockfile has moved past the image installs correctly.
- * The validator has no TTY, so `CI=true` lets pnpm replace an incompatible modules directory
- * deterministically instead of aborting for an impossible confirmation prompt.
  */
 const INSTALL_COMMAND =
-  'CI=true pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --prefer-offline ' +
+  'pnpm install --frozen-lockfile --ignore-scripts=true --ignore-pnpmfile --prefer-offline ' +
   `--store-dir ${CONTAINER_PNPM_STORE_DIR} --registry=https://registry.npmjs.org/`;
 const INSTALL_TIMEOUT_MS = CONTAINER_PACKAGE_INSTALL_TIMEOUT_MS;
 const WEB_APP_BUNDLE_SCRIPT = [
@@ -2325,7 +2323,11 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
       await runTrackedSandboxCommand({
         command: sandboxShellCommand(createContainerDirectoryCommand({ directory, command, quote: shellQuote })),
         timeout,
-        exec: (trackedCommand, options) => this.sandboxProcesses.exec(trackedCommand, options),
+        // Validation has no TTY. Every pnpm invocation, including the dependency-status preflight
+        // that `pnpm run` performs before a script, must inherit CI mode so an incompatible modules
+        // directory is replaced deterministically instead of prompting and aborting.
+        exec: (trackedCommand, options) =>
+          this.sandboxProcesses.exec(trackedCommand, { ...options, env: { CI: 'true' } }),
         onProcess: async (startedProcess) => {
           process = startedProcess;
           this.setProcessForRole(TRANSIENT_COMMAND_PROCESS_ROLE, startedProcess.id);
