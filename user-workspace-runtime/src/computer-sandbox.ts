@@ -12,10 +12,16 @@ import {
   CONTAINER_CONNECT_TIMEOUT_MS,
   CONTAINER_TOOLCHAIN_BOOTSTRAP_TIMEOUT_MS,
   computerdBootstrapCommand,
+  computerdInstallationStateCommand,
   containerToolchainBootstrapCommand,
+  reusableComputerdProcess,
   runIdempotentBootstrapStage,
 } from './container-toolchain';
-import { runTrackedSandboxCommand } from './tracked-command';
+import {
+  runTrackedSandboxCommand,
+  terminateTrackedSandboxProcess,
+  type TrackedSandboxProcess,
+} from './tracked-command';
 
 export const COMPUTERD_PROCESS_ROLE = 'computerd';
 const WORKSPACE_CONTAINER_SLEEP_AFTER = '10m';
@@ -53,8 +59,15 @@ export class ComputerSandboxBase<Env = unknown> extends Sandbox<Env> {
   // identity: a new process id is how it detects that the runtime was replaced and re-connects.
   async startComputerd(env: Record<string, string>): Promise<string> {
     const existing = await this.processForRole(COMPUTERD_PROCESS_ROLE);
-    if (existing && (await existing.status()).state === 'running') {
-      return existing.id;
+    const reusable = await reusableComputerdProcess(existing, async () => {
+      const state = await this.runSandboxShellCommand(computerdInstallationStateCommand(), 30_000);
+      return state.stdout.trim();
+    });
+    if (reusable) {
+      return reusable.id;
+    }
+    if (existing) {
+      await this.discardComputerdProcess(existing);
     }
     await Promise.all([
       this.runBootstrapStage(
@@ -73,10 +86,23 @@ export class ComputerSandboxBase<Env = unknown> extends Sandbox<Env> {
 
   async restartComputerd(env: Record<string, string>): Promise<string> {
     const existing = await this.processForRole(COMPUTERD_PROCESS_ROLE);
-    await existing?.kill(9).catch(() => undefined);
-    this.clearProcessForRole(COMPUTERD_PROCESS_ROLE);
-    await this.runSandboxShellCommand('fusermount3 -uz /home >/dev/null 2>&1 || true', 30_000).catch(() => undefined);
+    if (existing) {
+      await this.discardComputerdProcess(existing);
+    } else {
+      this.clearProcessForRole(COMPUTERD_PROCESS_ROLE);
+      await this.unmountComputerFilesystem();
+    }
     return this.startComputerd(env);
+  }
+
+  private async discardComputerdProcess(process: TrackedSandboxProcess): Promise<void> {
+    await terminateTrackedSandboxProcess(process);
+    this.clearProcessForRole(COMPUTERD_PROCESS_ROLE);
+    await this.unmountComputerFilesystem();
+  }
+
+  private async unmountComputerFilesystem(): Promise<void> {
+    await this.runSandboxShellCommand('fusermount3 -uz /home >/dev/null 2>&1 || true', 30_000).catch(() => undefined);
   }
 
   async computerdStatus(): Promise<{ running: boolean; exit: { exitedAt: number; reason: string } | null }> {
@@ -104,12 +130,14 @@ export class ComputerSandboxBase<Env = unknown> extends Sandbox<Env> {
     return runIdempotentBootstrapStage({
       stage,
       budgetMs,
-      attempt: (remainingMs) => this.runSandboxShellCommand(command, remainingMs),
+      attempt: async (remainingMs) => {
+        await this.runSandboxShellCommand(command, remainingMs);
+      },
     });
   }
 
-  private async runSandboxShellCommand(command: string, timeout: number): Promise<void> {
-    await runTrackedSandboxCommand({
+  private runSandboxShellCommand(command: string, timeout: number) {
+    return runTrackedSandboxCommand({
       command: sandboxShellCommand(command),
       timeout,
       exec: (argv, options) => this.sandboxProcesses.exec(argv, options),

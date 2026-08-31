@@ -13,6 +13,8 @@ export const COMPUTERD_ROOT = '/opt/ghostbuild/computer';
 const COMPUTERD_LAYER_DIGEST = 'sha256:3234a308871d16fb07a28c16ee56454785ef4360ea0a507a2392cb77d881044a';
 
 export const COMPUTERD_BINARY = `${COMPUTERD_ROOT}/usr/local/bin/computerd`;
+export const COMPUTERD_INSTALLATION_CURRENT = 'current';
+const COMPUTERD_INSTALLATION_STALE = 'stale';
 
 /**
  * One content-addressed pnpm store for every install this container runs. Passed explicitly on the
@@ -123,6 +125,32 @@ export function containerToolchainBootstrapCommand(): string {
 /** Records which computerd layer the container currently holds, so the bootstrap can re-install on
  * a version change instead of trusting a stale binary. */
 const COMPUTERD_LAYER_MARKER = `${COMPUTERD_ROOT}/.layer-digest`;
+
+/**
+ * A running process is reusable only when it was launched from the computerd layer paired with
+ * this client. Sandbox processes can outlive a Worker code update while their container remains
+ * warm, so process liveness alone is not a compatibility check.
+ */
+export async function reusableComputerdProcess<T extends { status(): Promise<{ state: string }> }>(
+  process: T | null,
+  readInstallationState: () => Promise<string>,
+): Promise<T | null> {
+  if (!process || (await process.status()).state !== 'running') {
+    return null;
+  }
+  return (await readInstallationState()) === COMPUTERD_INSTALLATION_CURRENT ? process : null;
+}
+
+/** Read through Sandbox's native process API, not computerd, so a stale computerd can be rejected. */
+export function computerdInstallationStateCommand(): string {
+  return strictSubshellCommand([
+    `if [ "$(cat ${shellQuote(COMPUTERD_LAYER_MARKER)} 2>/dev/null)" = ${shellQuote(COMPUTERD_LAYER_DIGEST)} ] && [ -x ${shellQuote(COMPUTERD_BINARY)} ]; then`,
+    `  printf %s ${shellQuote(COMPUTERD_INSTALLATION_CURRENT)}`,
+    'else',
+    `  printf %s ${shellQuote(COMPUTERD_INSTALLATION_STALE)}`,
+    'fi',
+  ]);
+}
 
 export function computerdBootstrapCommand(): string {
   const tokenUrl =

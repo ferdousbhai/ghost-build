@@ -4,13 +4,16 @@ import { GENERATED_PROJECT_PNPM_VERSION } from '../../ghostbuild-agent/cloudflar
 import {
   BOOTSTRAP_RETRY_DELAY_MS,
   COMPUTERD_BINARY,
+  COMPUTERD_INSTALLATION_CURRENT,
   COMPUTERD_ROOT,
   COMPUTERD_BOOTSTRAP_TIMEOUT_MS,
   CONTAINER_CONNECT_TIMEOUT_MS,
   CONTAINER_TOOLCHAIN_BOOTSTRAP_TIMEOUT_MS,
   ContainerToolchainBootstrapError,
   computerdBootstrapCommand,
+  computerdInstallationStateCommand,
   containerToolchainBootstrapCommand,
+  reusableComputerdProcess,
   runIdempotentBootstrapStage,
   strictSubshellCommand,
 } from './container-toolchain';
@@ -40,6 +43,32 @@ describe('container toolchain bootstrap', () => {
     expect(command).toContain(`> '${COMPUTERD_ROOT}/.layer-digest'`);
     expect(command).toContain('ghcr.io/v2/cloudflare/computer-computerd-linux-x64/blobs/sha256:');
     expect(command).toContain(`test -x '${COMPUTERD_BINARY}'`);
+  });
+
+  it('checks the installed layer before reusing a live computerd process', async () => {
+    const command = computerdInstallationStateCommand();
+    const running = { status: async () => ({ state: 'running' }) };
+    const exited = { status: async () => ({ state: 'exited' }) };
+    let reads = 0;
+
+    expect(command).toContain(`cat '${COMPUTERD_ROOT}/.layer-digest'`);
+    expect(command).toContain(`-x '${COMPUTERD_BINARY}'`);
+    expect(command).toContain(`printf %s '${COMPUTERD_INSTALLATION_CURRENT}'`);
+    await expect(
+      reusableComputerdProcess(running, async () => {
+        reads += 1;
+        return COMPUTERD_INSTALLATION_CURRENT;
+      }),
+    ).resolves.toBe(running);
+    await expect(reusableComputerdProcess(running, async () => 'stale')).resolves.toBeNull();
+    await expect(
+      reusableComputerdProcess(exited, async () => {
+        reads += 1;
+        return COMPUTERD_INSTALLATION_CURRENT;
+      }),
+    ).resolves.toBeNull();
+    await expect(reusableComputerdProcess(null, async () => COMPUTERD_INSTALLATION_CURRENT)).resolves.toBeNull();
+    expect(reads).toBe(1);
   });
 
   it('derives the toolchain bootstrap bound from the shared package-install ceiling', () => {
