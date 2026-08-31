@@ -1,5 +1,5 @@
 {
-  "total": 1614,
+  "total": 1597,
   "counts": {
     "app/agents/builder-agent-identity.test.ts": {
       "anti-slop/no-unsafe-dictionary-type": 1,
@@ -226,19 +226,8 @@
       "anti-slop/no-chained-type-assertions": 1,
       "anti-slop/require-safety-comment-for-type-assertion": 4
     },
-    "app/lib/.server/cloudflare/deployment-security-baseline.test.ts": {
-      "anti-slop/no-unsafe-dictionary-type": 1,
-      "anti-slop/require-safety-comment-for-type-assertion": 2
-    },
     "app/lib/.server/cloudflare/deployment-security-inventory.ts": {
       "anti-slop/no-runtime-typeof": 2
-    },
-    "app/lib/.server/cloudflare/deployment-security-lock.ts": {
-      "anti-slop/no-runtime-typeof": 8,
-      "anti-slop/no-unknown-parameters": 3,
-      "anti-slop/no-unknown-returns": 1,
-      "anti-slop/no-unsafe-dictionary-type": 1,
-      "anti-slop/require-safety-comment-for-type-assertion": 1
     },
     "app/lib/.server/cloudflare/user-account-api.test.ts": {
       "anti-slop/no-unsafe-dictionary-type": 2,
