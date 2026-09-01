@@ -1,127 +1,92 @@
+/*
+ * Ghostbuild retro terminal palette.
+ *
+ * Ramps below are the Tokyo Night family: a low-chroma slate ground with
+ * saturated terminal accents. Dark is Tokyo Night Storm, light is Tokyo Night
+ * Day. Token names are unchanged so every component inherits the new theme.
+ */
 :root {
-  --gb-red-100: rgb(252, 215, 203);
-  --gb-red-200: rgb(255, 202, 193);
-  --gb-red-300: rgb(252, 165, 165);
-  --gb-red-400: rgb(253, 76, 65);
-  --gb-red-500: rgb(238, 52, 47);
-  --gb-red-700: rgb(168, 21, 21);
-  --gb-red-900: rgb(107, 33, 31);
-  --gb-purple-100: rgb(241, 200, 233);
-  --gb-purple-200: rgb(232, 180, 220);
-  --gb-purple-500: rgb(141, 38, 118);
-  --gb-purple-700: rgb(86, 0, 83);
-  --gb-purple-900: rgb(113, 36, 96);
-  --gb-blue-100: rgb(204, 222, 250);
-  --gb-blue-200: rgb(177, 202, 240);
-  --gb-blue-500: rgb(7, 78, 232);
-  --gb-blue-700: rgb(33, 34, 181);
-  --gb-blue-900: rgb(0, 43, 153);
-  --gb-cyan-200: rgb(170, 227, 239);
-  --gb-cyan-500: rgb(7, 192, 232);
-  --gb-cyan-700: rgb(0, 155, 221);
-  --gb-cyan-900: rgb(15, 89, 105);
-  --gb-green-100: rgb(203, 237, 182);
-  --gb-green-200: rgb(180, 236, 146);
-  --gb-green-500: rgb(79, 176, 20);
-  --gb-green-700: rgb(34, 137, 9);
-  --gb-green-900: rgb(44, 83, 20);
-  --gb-yellow-50: rgb(254, 252, 232);
-  --gb-yellow-100: rgb(250, 228, 171);
-  --gb-yellow-200: rgb(230, 226, 168);
-  --gb-yellow-500: rgb(243, 176, 28);
-  --gb-yellow-700: rgb(213, 113, 21);
-  --gb-yellow-900: rgb(109, 82, 23);
-  --gb-neutral-1: rgb(222, 226, 234);
-  --gb-neutral-2: rgb(204, 206, 211);
-  --gb-neutral-3: rgb(174, 177, 184);
-  --gb-neutral-4: rgb(151, 154, 164);
-  --gb-neutral-5: rgb(133, 136, 147);
-  --gb-neutral-6: rgb(118, 121, 131);
-  --gb-neutral-7: rgb(103, 106, 116);
-  --gb-neutral-8: rgb(88, 92, 101);
-  --gb-neutral-9: rgb(73, 76, 84);
-  --gb-neutral-10: rgb(57, 60, 66);
-  --gb-neutral-11: rgb(41, 43, 48);
-  --gb-neutral-12: rgb(24, 25, 28);
-  --gb-accent: rgb(188, 65, 142);
-  --gb-info: rgb(7, 191, 232);
-  --gb-util-accent: rgb(38, 135, 246);
-  --gb-util-info: rgb(7, 191, 232);
-  --gb-util-success: rgb(79, 176, 20);
-  --gb-util-danger: rgb(238, 52, 47);
-  --gb-util-warning: rgb(243, 176, 28);
+  /* Only the greys the --bolt-elements-* layer actually reads. Semantic colour
+     lives in the light/dark blocks below, not in ramps. */
+  --gb-neutral-2: rgb(192, 202, 245);
+  --gb-neutral-9: rgb(65, 72, 104);
+  --gb-neutral-10: rgb(41, 46, 66);
+  --gb-neutral-11: rgb(36, 40, 59);
+  --gb-neutral-12: rgb(22, 22, 30);
 }
 
 :root,
 html.light {
-  --gb-background-brand: rgb(255, 249, 252);
-  --gb-background-primary: rgb(250, 246, 252);
-  --gb-background-secondary: rgb(255, 255, 255);
-  --gb-background-tertiary: rgb(245, 237, 249);
-  --gb-background-highlight: rgb(255, 242, 248);
-  --gb-background-success: rgb(203, 237, 182);
-  --gb-background-warning: rgb(250, 228, 171);
-  --gb-background-error: rgb(252, 215, 203);
-  --gb-background-error-secondary: rgb(255, 202, 193);
-  --gb-content-primary: rgb(35, 24, 43);
-  --gb-content-secondary: rgb(91, 72, 100);
-  --gb-content-tertiary: rgb(126, 104, 136);
-  --gb-content-accent: rgb(156, 47, 125);
-  --gb-content-success: rgb(34, 137, 9);
-  --gb-content-warning: rgb(109, 82, 23);
-  --gb-content-error: rgb(168, 21, 21);
-  --gb-content-error-secondary: rgb(238, 52, 47);
-  --gb-content-link: rgb(137, 42, 126);
-  --gb-border-transparent: rgba(105, 75, 117, 0.16);
-  --gb-border-selected: rgb(156, 47, 125);
+  --gb-accent: rgb(152, 84, 241);
+  --gb-accent-ink: rgb(236, 237, 241);
+  --gb-background-primary: rgb(220, 222, 229);
+  --gb-background-secondary: rgb(236, 237, 241);
+  --gb-background-tertiary: rgb(206, 210, 224);
+  --gb-background-highlight: rgb(194, 199, 218);
+  --gb-background-success: rgb(219, 243, 194);
+  --gb-background-warning: rgb(245, 227, 181);
+  --gb-background-error: rgb(255, 218, 224);
+  --gb-background-error-secondary: rgb(255, 190, 201);
+  --gb-content-primary: rgb(51, 53, 91);
+  --gb-content-secondary: rgb(97, 114, 176);
+  --gb-content-tertiary: rgb(132, 140, 181);
+  --gb-content-accent: rgb(152, 84, 241);
+  --gb-content-success: rgb(88, 117, 57);
+  --gb-content-warning: rgb(177, 92, 0);
+  --gb-content-error: rgb(197, 32, 76);
+  --gb-content-error-secondary: rgb(245, 42, 101);
+  --gb-content-link: rgb(46, 125, 233);
+  --gb-border-transparent: rgba(51, 53, 91, 0.2);
+  --gb-border-selected: rgb(152, 84, 241);
   --background-primary: var(--gb-background-primary);
-  --background-primary-rgb: 250 246 252;
-  --background-secondary-rgb: 255 255 255;
+  --background-primary-rgb: 220 222 229;
+  --background-secondary-rgb: 236 237 241;
   --content-primary: var(--gb-content-primary);
-  --content-primary-rgb: 35 24 43;
+  --content-primary-rgb: 51 53 91;
   --content-secondary: var(--gb-content-secondary);
-  --content-secondary-rgb: 91 72 100;
+  --content-secondary-rgb: 97 114 176;
   --content-tertiary: var(--gb-content-tertiary);
-  --content-tertiary-rgb: 126 104 136;
+  --content-tertiary-rgb: 132 140 181;
   --content-link: var(--gb-content-link);
   --border-transparent: var(--gb-border-transparent);
-  --border-transparent-rgb: 105 75 117 / 0.16;
+  --border-transparent-rgb: 51 53 91 / 0.2;
 }
 
 :root,
 html.dark {
-  --gb-background-brand: rgb(24, 16, 30);
-  --gb-background-primary: rgb(24, 16, 30);
-  --gb-background-secondary: rgb(38, 26, 46);
-  --gb-background-tertiary: rgb(55, 37, 65);
-  --gb-background-highlight: rgb(72, 38, 67);
-  --gb-background-success: rgb(44, 83, 20);
-  --gb-background-warning: rgb(109, 82, 23);
-  --gb-background-error: rgb(107, 33, 31);
-  --gb-background-error-secondary: rgb(168, 21, 21);
-  --gb-content-primary: rgb(255, 247, 252);
-  --gb-content-secondary: rgb(218, 195, 225);
-  --gb-content-tertiary: rgb(177, 146, 187);
-  --gb-content-accent: rgb(255, 132, 181);
-  --gb-content-success: rgb(180, 236, 146);
-  --gb-content-warning: rgb(230, 226, 168);
-  --gb-content-error: rgb(255, 202, 193);
-  --gb-content-error-secondary: rgb(253, 76, 65);
-  --gb-content-link: rgb(244, 157, 217);
-  --gb-border-transparent: rgba(255, 220, 242, 0.16);
-  --gb-border-selected: rgb(255, 132, 181);
+  --gb-accent: rgb(187, 154, 247);
+  --gb-accent-ink: rgb(26, 27, 38);
+  --gb-background-primary: rgb(26, 27, 38);
+  --gb-background-secondary: rgb(36, 40, 59);
+  --gb-background-tertiary: rgb(41, 46, 66);
+  --gb-background-highlight: rgb(52, 58, 82);
+  --gb-background-success: rgb(45, 63, 30);
+  --gb-background-warning: rgb(84, 58, 24);
+  --gb-background-error: rgb(74, 25, 38);
+  --gb-background-error-secondary: rgb(153, 43, 62);
+  --gb-content-primary: rgb(192, 202, 245);
+  --gb-content-secondary: rgb(169, 177, 214);
+  --gb-content-tertiary: rgb(122, 132, 176);
+  --gb-content-accent: rgb(187, 154, 247);
+  --gb-content-success: rgb(158, 206, 106);
+  --gb-content-warning: rgb(224, 175, 104);
+  --gb-content-error: rgb(255, 154, 172);
+  --gb-content-error-secondary: rgb(247, 118, 142);
+  --gb-content-link: rgb(125, 207, 255);
+  --gb-border-transparent: rgba(192, 202, 245, 0.16);
+  --gb-border-selected: rgb(187, 154, 247);
   --background-primary: var(--gb-background-primary);
-  --background-primary-rgb: 24 16 30;
-  --background-secondary-rgb: 38 26 46;
+  --background-primary-rgb: 26 27 38;
+  --background-secondary-rgb: 36 40 59;
   --content-primary: var(--gb-content-primary);
-  --content-primary-rgb: 255 247 252;
+  --content-primary-rgb: 192 202 245;
   --content-secondary: var(--gb-content-secondary);
-  --content-secondary-rgb: 218 195 225;
+  --content-secondary-rgb: 169 177 214;
   --content-tertiary: var(--gb-content-tertiary);
-  --content-tertiary-rgb: 177 146 187;
+  --content-tertiary-rgb: 122 132 176;
   --content-link: var(--gb-content-link);
   --border-transparent: var(--gb-border-transparent);
-  --border-transparent-rgb: 255 220 242 / 0.16;
+  --border-transparent-rgb: 192 202 245 / 0.16;
 }
 
 :root {
@@ -130,7 +95,7 @@ html.dark {
 
   --bolt-elements-button-primary-background: var(--gb-accent);
   --bolt-elements-button-primary-backgroundHover: color-mix(in srgb, var(--gb-accent) 80%, transparent);
-  --bolt-elements-button-primary-text: theme('colors.white');
+  --bolt-elements-button-primary-text: var(--gb-accent-ink);
 
   --bolt-elements-button-secondary-background: var(--gb-background-secondary);
   --bolt-elements-button-secondary-backgroundHover: var(--gb-background-tertiary);
@@ -140,8 +105,8 @@ html.dark {
   --bolt-elements-button-danger-backgroundHover: var(--gb-background-error-secondary);
   --bolt-elements-button-danger-text: var(--gb-content-error);
 
-  --bolt-elements-loader-background: var(--gb-neutral-4);
-  --bolt-elements-loader-progress: var(--gb-content-link);
+  --bolt-elements-loader-background: var(--gb-neutral-9);
+  --bolt-elements-loader-progress: var(--gb-content-accent);
 
   --bolt-elements-messages-background: var(--gb-background-primary);
   --bolt-elements-messages-linkColor: var(--gb-content-link);
@@ -163,65 +128,70 @@ html.dark {
   --bolt-elements-item-backgroundAccent: var(--gb-background-tertiary);
   --bolt-elements-item-contentAccent: var(--gb-content-primary);
 
-  --bolt-elements-actions-code-background: theme('colors.gray.900');
+  --bolt-elements-actions-code-background: var(--gb-neutral-12);
+
+  /* Theme-independent once routed through --gb-*: the light and dark blocks
+     below carry only the values that actually differ. */
+  --bolt-elements-bg-depth-3: var(--gb-background-tertiary);
+  --bolt-elements-bg-depth-4: rgb(var(--content-primary-rgb) / 0.06);
+  --bolt-elements-code-text: var(--gb-content-primary);
+  --bolt-elements-messages-inlineCode-text: var(--gb-content-primary);
+  --bolt-elements-artifacts-inlineCode-text: var(--gb-content-primary);
+  --bolt-elements-item-contentActive: var(--gb-content-primary);
+  --bolt-elements-item-contentDanger: var(--gb-content-error-secondary);
+  --bolt-elements-item-backgroundDanger: color-mix(in srgb, var(--gb-content-error-secondary) 12%, transparent);
+  --bolt-elements-icon-success: var(--gb-content-success);
+  --bolt-elements-icon-error: var(--gb-content-error-secondary);
 }
 
 :root,
 html.light {
-  --bolt-elements-bg-depth-3: theme('colors.gray.200');
-  --bolt-elements-bg-depth-4: theme('colors.gray.900/0.05');
+  --bolt-elements-code-background: var(--gb-background-secondary);
+  --bolt-elements-messages-code-background: var(--gb-neutral-11);
+  --bolt-elements-messages-inlineCode-background: var(--gb-background-tertiary);
+  --bolt-elements-artifacts-inlineCode-background: var(--gb-background-tertiary);
 
-  --bolt-elements-code-background: theme('colors.gray.100');
-  --bolt-elements-code-text: theme('colors.gray.950');
-  --bolt-elements-messages-code-background: theme('colors.gray.800');
-  --bolt-elements-messages-inlineCode-background: theme('colors.gray.200');
-  --bolt-elements-messages-inlineCode-text: theme('colors.gray.800');
-  --bolt-elements-artifacts-inlineCode-background: theme('colors.gray.100');
-  --bolt-elements-artifacts-inlineCode-text: var(--content-primary);
-
-  --bolt-elements-item-contentDefault: theme('colors.gray.900/0.5');
-  --bolt-elements-item-contentActive: theme('colors.gray.950');
-  --bolt-elements-item-contentDanger: theme('colors.red.500');
+  --bolt-elements-item-contentDefault: rgb(var(--content-primary-rgb) / 0.6);
   --bolt-elements-item-backgroundDefault: rgba(0, 0, 0, 0);
-  --bolt-elements-item-backgroundActive: theme('colors.gray.900/0.05');
-  --bolt-elements-item-backgroundDanger: theme('colors.red.500/0.1');
+  --bolt-elements-item-backgroundActive: rgb(var(--content-primary-rgb) / 0.08);
 
-  --bolt-elements-icon-success: theme('colors.green.500');
-  --bolt-elements-icon-error: theme('colors.red.500');
-  --bolt-elements-prompt-background: theme('colors.white/0.8');
+  --bolt-elements-prompt-background: rgb(var(--background-secondary-rgb) / 0.86);
 }
 
 :root,
 html.dark {
-  --bolt-elements-bg-depth-3: theme('colors.gray.800');
-  --bolt-elements-bg-depth-4: theme('colors.white/0.05');
+  --bolt-elements-code-background: var(--gb-neutral-11);
+  --bolt-elements-messages-code-background: var(--gb-neutral-12);
+  --bolt-elements-messages-inlineCode-background: var(--gb-neutral-10);
+  --bolt-elements-artifacts-inlineCode-background: var(--gb-neutral-11);
 
-  --bolt-elements-code-background: theme('colors.gray.800');
-  --bolt-elements-code-text: theme('colors.white');
-  --bolt-elements-messages-code-background: theme('colors.gray.900');
-  --bolt-elements-messages-inlineCode-background: theme('colors.gray.700');
-  --bolt-elements-messages-inlineCode-text: var(--content-primary);
-  --bolt-elements-artifacts-inlineCode-background: theme('colors.gray.800');
-  --bolt-elements-artifacts-inlineCode-text: theme('colors.white');
-
-  --bolt-elements-item-contentDefault: theme('colors.white/0.5');
-  --bolt-elements-item-contentActive: theme('colors.white');
-  --bolt-elements-item-contentDanger: theme('colors.red.500');
+  --bolt-elements-item-contentDefault: rgb(var(--content-primary-rgb) / 0.55);
   --bolt-elements-item-backgroundDefault: rgba(255, 255, 255, 0);
-  --bolt-elements-item-backgroundActive: theme('colors.white/0.1');
-  --bolt-elements-item-backgroundDanger: theme('colors.red.500/0.1');
+  --bolt-elements-item-backgroundActive: rgb(var(--content-primary-rgb) / 0.09);
 
-  --bolt-elements-icon-success: theme('colors.green.400');
-  --bolt-elements-icon-error: theme('colors.red.400');
-
-  --bolt-elements-prompt-background: theme('colors.gray.900/0.8');
+  --bolt-elements-prompt-background: rgb(var(--background-primary-rgb) / 0.86);
 }
 
 :root {
-  --header-height: 64px;
+  --header-height: 56px;
   --chat-max-width: 37rem;
   --chat-min-width: 640px;
   --workbench-width: min(calc(100% - var(--chat-min-width)), 2536px);
   --workbench-inner-width: calc(var(--workbench-width) - 16px);
   --workbench-left: calc(100% - var(--workbench-width));
+
+  /* Retro chrome primitives. Square-ish corners and a stacked drop shadow
+     stand in for the soft blurred surfaces the previous theme used. */
+  --gb-font-mono:
+    'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  --gb-radius-sm: 4px;
+  --gb-radius: 6px;
+  --gb-radius-lg: 8px;
+  --gb-tracking-label: 0.12em;
+  /* Three layers, not six: at -12px spread and tighter the shadow rect is
+     inside the border box, so the extra blurs rasterise under an opaque
+     element. This renders identically for half the blur work. */
+  --gb-shadow-raised:
+    0 1px 0 0 rgba(0, 0, 0, 0.1), 0 3px 18px -6px rgba(0, 0, 0, 0.2), 0 6px 30px -12px rgba(0, 0, 0, 0.3);
+  --gb-shadow-panel: 0 2px 0 0 rgba(0, 0, 0, 0.12), 0 18px 48px -24px rgba(0, 0, 0, 0.55);
 }

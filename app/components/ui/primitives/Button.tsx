@@ -23,7 +23,7 @@ type NativeButtonProps = ButtonVisualProps & Omit<ButtonHTMLAttributes<HTMLButto
 type ButtonProps = NativeButtonProps & { ref?: Ref<HTMLButtonElement> };
 
 const variantClasses = {
-  primary: 'bg-accent-500 text-white hover:bg-accent-600',
+  primary: 'bg-accent-500',
   danger: 'bg-red-600 text-white hover:bg-red-700',
   neutral:
     'border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 text-content-primary hover:bg-bolt-elements-background-depth-3',
@@ -46,7 +46,7 @@ export function buttonClassNames({
   focused,
 }: Pick<ButtonVisualProps, 'className' | 'variant' | 'size' | 'inline' | 'focused'>) {
   return classNames(
-    'gb-button inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:opacity-50',
+    'gb-button inline-flex shrink-0 items-center justify-center gap-1.5 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-not-allowed disabled:opacity-50',
     inline ? 'w-auto' : '',
     variantClasses[variant],
     sizeClasses[size],

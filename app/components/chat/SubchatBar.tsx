@@ -202,7 +202,7 @@ export function SubchatBar({
       />
       <div className="border-content-secondary/15 flex items-center gap-2 border-b px-1 pb-4">
         {hasMultipleSubchats && (
-          <div className="bg-background-secondary flex shrink-0 rounded-xl border border-bolt-elements-borderColor">
+          <div className="bg-background-secondary flex shrink-0 rounded-lg border border-bolt-elements-borderColor">
             <Button
               size="sm"
               variant="neutral"
@@ -235,7 +235,7 @@ export function SubchatBar({
         <div className="min-w-0 grow">
           {hasMultipleSubchats ? (
             <DropdownMenu.Root>
-              <div className="flex min-h-11 w-full min-w-0 items-center gap-3 rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3">
+              <div className="flex min-h-11 w-full min-w-0 items-center gap-3 rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3">
                 <ChatBubbleIcon className="size-4 shrink-0 text-content-secondary" />
                 {chatTitle}
                 <DropdownMenu.Trigger asChild disabled={interactionsDisabled}>
@@ -254,7 +254,7 @@ export function SubchatBar({
                   align="start"
                   sideOffset={8}
                   collisionPadding={12}
-                  className="z-50 max-h-[min(24rem,var(--radix-dropdown-menu-content-available-height))] w-[var(--radix-dropdown-menu-trigger-width)] min-w-72 overflow-y-auto rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-1.5 text-content-primary shadow-[0_18px_50px_rgba(0,0,0,0.28)] outline-none"
+                  className="z-50 max-h-[min(24rem,var(--radix-dropdown-menu-content-available-height))] w-[var(--radix-dropdown-menu-trigger-width)] min-w-72 overflow-y-auto rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-1.5 text-content-primary shadow-panel outline-none"
                   aria-label="Chat history"
                 >
                   <DropdownMenu.Label className="px-3 pb-2 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-content-secondary">
@@ -275,9 +275,9 @@ export function SubchatBar({
                         <DropdownMenu.RadioItem
                           key={String(option.value)}
                           value={String(option.value)}
-                          className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-left outline-none transition-colors hover:bg-bolt-elements-background-depth-2 focus:bg-bolt-elements-background-depth-2 data-[state=checked]:bg-bolt-elements-background-depth-2"
+                          className="flex min-h-12 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left outline-none transition-colors hover:bg-bolt-elements-background-depth-2 focus:bg-bolt-elements-background-depth-2 data-[state=checked]:bg-bolt-elements-background-depth-2"
                         >
-                          <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 text-xs font-semibold text-content-secondary">
+                          <span className="flex size-7 shrink-0 items-center justify-center rounded border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 text-xs font-semibold text-content-secondary">
                             {option.value + 1}
                           </span>
                           <span className="min-w-0 grow">
@@ -311,7 +311,7 @@ export function SubchatBar({
             <Button
               size="sm"
               variant="neutral"
-              className="!min-h-11 rounded-xl !px-3"
+              className="!min-h-11 rounded-lg !px-3"
               icon={<PlusIcon />}
               disabled={chatDisabled || interactionsDisabled}
               inline

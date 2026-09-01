@@ -9,6 +9,7 @@ import { queryClient } from '~/lib/stores/reactQueryClient';
 import { themeStore } from '~/lib/stores/theme';
 import { stripIndents } from 'ghostbuild-agent/utils/stripIndent';
 import globalStyles from '~/styles/index.css?url';
+import latinMonoFont from '@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2?url';
 
 type RootSearch = {
   prefill?: string;
@@ -72,7 +73,7 @@ export const Route = createRootRoute({
       },
       { name: 'application-name', content: 'Ghostbuild' },
       { name: 'color-scheme', content: 'light dark' },
-      { name: 'theme-color', content: '#18101e' },
+      { name: 'theme-color', content: '#1a1b26' },
     ],
     links: [
       {
@@ -81,6 +82,15 @@ export const Route = createRootRoute({
         type: 'image/svg+xml',
       },
       { rel: 'manifest', href: '/site.webmanifest' },
+      // The whole page is set in this face, so discovering it only after the
+      // stylesheet parses costs a round trip of full-page fallback text.
+      {
+        rel: 'preload',
+        as: 'font',
+        type: 'font/woff2',
+        href: latinMonoFont,
+        crossOrigin: 'anonymous',
+      },
       { rel: 'stylesheet', href: globalStyles },
     ],
     scripts: [{ children: inlineBootstrapCode }],

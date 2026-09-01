@@ -120,7 +120,7 @@ export function Header({ hideSidebarIcon = false }: { hideSidebarIcon?: boolean 
                     variant: 'neutral',
                     title: 'User menu',
                     inline: true,
-                    className: '!size-11 !min-h-11 rounded-full !p-1.5',
+                    className: '!size-11 !min-h-11 rounded !p-1.5',
                     icon: <ProfileAvatar avatar={profile.avatar} username={profile.username} />,
                   }}
                 >
@@ -157,11 +157,11 @@ function ProfileAvatar({ avatar, username }: { avatar?: string | null; username?
     <img
       src={avatar}
       alt={username ? `${username} profile` : 'User profile'}
-      className="size-8 min-w-8 rounded-full object-cover"
+      className="size-8 min-w-8 rounded object-cover"
       loading="eager"
       decoding="sync"
     />
   ) : (
-    <PersonIcon className="size-8 min-w-8 rounded-full border text-content-secondary" />
+    <PersonIcon className="size-8 min-w-8 rounded border text-content-secondary" />
   );
 }

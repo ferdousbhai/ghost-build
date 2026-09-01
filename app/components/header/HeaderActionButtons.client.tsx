@@ -64,7 +64,7 @@ function SmallScreenSurfaceSwitcher({ showChat, showWorkbench }: { showChat: boo
 
   return (
     <div
-      className="flex overflow-hidden rounded-full border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2"
+      className="flex overflow-hidden rounded border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2"
       role="group"
       aria-label="Workspace view"
     >

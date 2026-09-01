@@ -49,9 +49,10 @@
   width: min(92%, 34rem);
   padding: 0.875rem 1rem;
   border: 1px solid color-mix(in srgb, var(--gb-content-accent) 22%, var(--gb-border-transparent));
-  border-radius: 1.35rem 1.35rem 0.45rem 1.35rem;
-  background: color-mix(in srgb, var(--gb-background-secondary) 91%, var(--ghost-home-accent));
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--ghost-home-accent-2) 10%, transparent);
+  /* Keeps the tailed-bubble idiom, at the theme's radius scale. */
+  border-radius: var(--gb-radius-lg) var(--gb-radius-lg) var(--gb-radius-sm) var(--gb-radius-lg);
+  background: color-mix(in srgb, var(--gb-background-secondary) 91%, var(--gb-accent));
+  box-shadow: var(--gb-shadow-panel);
 }
 
 .AssistantMessage {

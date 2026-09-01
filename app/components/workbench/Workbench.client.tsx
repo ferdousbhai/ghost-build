@@ -219,8 +219,7 @@ function WorkbenchFrame({
         <div className={classNames('absolute inset-0', { 'px-2 lg:px-6': !isSmallViewport })}>
           <div
             className={classNames('relative flex h-full flex-col overflow-hidden bg-bolt-elements-background-depth-2', {
-              'rounded-2xl border border-border-transparent shadow-[0_20px_60px_color-mix(in_srgb,var(--ghost-home-accent-2)_10%,transparent)]':
-                !isSmallViewport,
+              'rounded-lg border border-border-transparent shadow-panel': !isSmallViewport,
             })}
           >
             <div

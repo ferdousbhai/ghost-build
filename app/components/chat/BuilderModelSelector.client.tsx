@@ -76,7 +76,7 @@ export function BuilderModelSelector({
           sideOffset={10}
           collisionPadding={12}
           aria-label="Builder model"
-          className="z-50 max-h-[min(32rem,var(--radix-dropdown-menu-content-available-height))] w-[min(20rem,calc(100vw-1.5rem))] overflow-y-auto rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-1.5 text-content-primary shadow-[0_24px_64px_rgba(0,0,0,0.42)] outline-none"
+          className="z-50 max-h-[min(32rem,var(--radix-dropdown-menu-content-available-height))] w-[min(20rem,calc(100vw-1.5rem))] overflow-y-auto rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-1.5 text-content-primary shadow-panel outline-none"
         >
           <DropdownMenu.RadioGroup
             value={modelId}

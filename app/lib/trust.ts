@@ -29,6 +29,9 @@ export const TRUST_PAGE_HEADINGS = {
   security: 'Keep vulnerability details private.',
 } as const;
 
+/** Title strip on the landing-page composer, rendered as a decorative label. */
+export const HOME_COMPOSER_TITLE = 'ghostbuild ~ new project';
+
 export const TRUST_LINKS = [
   { href: '/privacy', label: 'Privacy' },
   { href: '/terms', label: 'Terms' },

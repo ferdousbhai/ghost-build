@@ -21,7 +21,7 @@ interface SliderProps<T> {
 
 export const Slider = genericMemo(function Slider<T>({ selected, options, setSelected }: SliderProps<T>) {
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-1 overflow-hidden rounded-full bg-bolt-elements-background-depth-1 p-1">
+    <div className="flex shrink-0 flex-wrap items-center gap-1 overflow-hidden rounded bg-bolt-elements-background-depth-1 p-1">
       {options.options.map((option) => (
         <SliderButton
           key={String(option.value)}
@@ -49,7 +49,7 @@ const SliderButton = memo(function SliderButton({
       aria-pressed={selected}
       onClick={setSelected}
       className={classNames(
-        'bg-transparent text-sm px-2.5 py-0.5 rounded-full relative',
+        'bg-transparent text-sm px-2.5 py-0.5 rounded relative',
         selected
           ? 'text-bolt-elements-item-contentAccent'
           : 'text-bolt-elements-item-contentDefault hover:text-bolt-elements-item-contentActive',
@@ -60,7 +60,7 @@ const SliderButton = memo(function SliderButton({
         <motion.span
           layoutId="pill-tab"
           transition={{ duration: 0.2, ease: cubicEasingFn }}
-          className="absolute inset-0 z-0 rounded-full bg-bolt-elements-item-backgroundAccent"
+          className="absolute inset-0 z-0 rounded bg-bolt-elements-item-backgroundAccent"
         ></motion.span>
       )}
     </button>

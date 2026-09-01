@@ -5,7 +5,7 @@ export function Sheet({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={classNames(
-        'rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 shadow-sm',
+        'rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 shadow-sm',
         className,
       )}
       {...props}

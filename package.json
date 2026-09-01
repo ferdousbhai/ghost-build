@@ -68,7 +68,6 @@
     "node": ">=26.0.0"
   },
   "dependencies": {
-    "@ghostbuild/user-workspace-runtime": "workspace:*",
     "@ai-sdk/react": "4.0.51",
     "@cloudflare/ai-chat": "^0.10.1",
     "@cloudflare/computer": "0.2.1",
@@ -91,6 +90,8 @@
     "@codemirror/view": "^6.43.7",
     "@earendil-works/pi-agent-core": "0.83.0",
     "@earendil-works/pi-ai": "0.83.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@ghostbuild/user-workspace-runtime": "workspace:*",
     "@heroicons/react": "^2.2.0",
     "@nanostores/react": "^0.8.4",
     "@noble/hashes": "2.2.0",

@@ -90,7 +90,7 @@ export function PromptRefinementDialog({
       onClose={onCancel}
       title={
         <div className="flex items-center gap-2">
-          <span className="flex size-8 items-center justify-center rounded-full bg-accent-500/10 text-accent-500">
+          <span className="flex size-8 items-center justify-center rounded bg-accent-500/10 text-accent-500">
             <SparklesIcon className="size-4" aria-hidden="true" />
           </span>
           <div>
@@ -130,7 +130,7 @@ export function PromptRefinementDialog({
                   aria-pressed={selected}
                   onClick={() => selectOption(option.id)}
                   className={classNames(
-                    'group w-full rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-wait disabled:opacity-60',
+                    'group w-full rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 disabled:cursor-wait disabled:opacity-60',
                     selected
                       ? 'border-accent-500 bg-accent-500/10'
                       : 'border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 hover:border-accent-500/60 hover:bg-bolt-elements-background-depth-3',
@@ -139,7 +139,7 @@ export function PromptRefinementDialog({
                   <span className="flex items-start justify-between gap-3">
                     <span className="font-medium text-content-primary">{option.label}</span>
                     {recommended && (
-                      <span className="shrink-0 rounded-full bg-accent-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-500">
+                      <span className="shrink-0 rounded bg-accent-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-500">
                         Recommended
                       </span>
                     )}
@@ -152,7 +152,7 @@ export function PromptRefinementDialog({
             })}
           </div>
 
-          <div className="mt-4 rounded-xl border border-bolt-elements-borderColor p-3">
+          <div className="mt-4 rounded-lg border border-bolt-elements-borderColor p-3">
             <label htmlFor="prompt-refinement-custom-answer" className="text-sm font-medium text-content-primary">
               Or write your own answer
             </label>
@@ -169,7 +169,7 @@ export function PromptRefinementDialog({
           </div>
 
           {draft.note !== undefined ? (
-            <div className="mt-3 rounded-xl border border-bolt-elements-borderColor p-3">
+            <div className="mt-3 rounded-lg border border-bolt-elements-borderColor p-3">
               <label htmlFor="prompt-refinement-note" className="text-sm font-medium text-content-primary">
                 Clarification note <span className="font-normal text-content-tertiary">(optional)</span>
               </label>

@@ -134,9 +134,9 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
       variants={menuVariants}
       style={{ width: 'min(320px, calc(100dvw - 24px))' }}
       className={classNames(
-        'side-menu fixed top-0 flex h-full max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-r-3xl',
+        'side-menu fixed top-0 flex h-full max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-r-lg',
         'bg-[var(--bolt-elements-sidebar-background)] border-r border-border-transparent',
-        'shadow-[12px_0_36px_color-mix(in_srgb,var(--ghost-home-accent-2)_8%,transparent)] text-sm',
+        'shadow-panel text-sm',
         'z-30',
       )}
     >
@@ -144,7 +144,7 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <div className="min-w-0 space-y-3 px-4 pb-5 pt-4">
           <LinkButton
-            className="min-h-11 w-full min-w-0 max-w-full overflow-hidden rounded-xl px-4 no-underline"
+            className="min-h-11 w-full min-w-0 max-w-full overflow-hidden rounded-lg px-4 no-underline"
             to="/"
             reloadDocument
             onClick={onClose}
@@ -172,7 +172,7 @@ export const Menu = memo(({ isOpen, onClose }: MenuProps) => {
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-5">
           {history.error != null && (
             <div
-              className="mb-3 rounded-xl border border-[var(--gb-content-warning)]/40 bg-[var(--gb-background-secondary)] p-3 text-xs text-content-secondary"
+              className="mb-3 rounded-lg border border-[var(--gb-content-warning)]/40 bg-[var(--gb-background-secondary)] p-3 text-xs text-content-secondary"
               role="alert"
             >
               <p>Projects could not be refreshed.</p>

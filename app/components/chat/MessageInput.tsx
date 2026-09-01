@@ -14,6 +14,7 @@ import {
 } from './useMessageInputController';
 import { BuilderModelSelector } from './BuilderModelSelector.client';
 import { PromptRefinementDialog } from './PromptRefinementDialog.client';
+import { HOME_COMPOSER_TITLE } from '~/lib/trust';
 
 interface MessageInputProps {
   chatStarted: boolean;
@@ -70,7 +71,7 @@ export const MessageInput = memo(function MessageInput({
         tip={authState.kind === 'unauthenticated' ? 'Connect Cloudflare to continue' : undefined}
         onClick={controller.handleButtonClick}
         size="xs"
-        className={classNames('ml-1 h-8 min-w-8 rounded-full', !chatStarted ? 'ghost-message-input__send' : '')}
+        className={classNames('ml-1 h-8 min-w-8 rounded', !chatStarted ? 'ghost-message-input__send' : '')}
         aria-label={primaryActionLabel}
         icon={
           sendMessageInProgress ? (
@@ -93,16 +94,20 @@ export const MessageInput = memo(function MessageInput({
           chatStarted ? 'max-w-chat' : 'ghost-message-input--home max-w-none',
         )}
       >
+        {!chatStarted && (
+          <p className="ghost-message-input__titlebar" aria-hidden="true">
+            {HOME_COMPOSER_TITLE}
+          </p>
+        )}
         <div
           className={classNames(
-            'ghost-message-input__surface rounded-2xl bg-bolt-elements-background-depth-1 shadow-[0_12px_36px_color-mix(in_srgb,var(--ghost-home-accent-2)_10%,transparent)]',
+            'ghost-message-input__surface rounded-lg bg-bolt-elements-background-depth-1 shadow-panel',
             !chatStarted ? 'p-2' : '',
           )}
         >
           <div
             className={classNames(
               'ghost-message-input__editor relative border border-bolt-elements-borderColor transition-all has-[textarea:focus]:border-border-selected',
-              chatStarted ? 'rounded-2xl' : 'rounded-xl',
             )}
           >
             <PromptTextarea
@@ -126,7 +131,7 @@ export const MessageInput = memo(function MessageInput({
             )}
           </div>
           {!chatStarted && (
-            <div className="ghost-message-input__footer flex flex-wrap items-center gap-2 rounded-b-xl border border-t-0 border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-1.5 text-sm">
+            <div className="ghost-message-input__footer flex flex-wrap items-center gap-2 rounded-b-lg border border-t-0 border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-1.5 text-sm">
               <div className="ml-auto flex items-center gap-1">{actions}</div>
             </div>
           )}

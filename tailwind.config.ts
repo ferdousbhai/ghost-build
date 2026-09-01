@@ -12,28 +12,30 @@ export default {
         DEFAULT: 'rgb(var(--border-transparent-rgb))',
       },
       fontFamily: {
-        display: [
-          'Inter Variable',
-          'ui-sans-serif',
-          'system-ui',
-          '-apple-system',
-          'BlinkMacSystemFont',
-          'Segoe UI',
-          'Roboto',
-          'Helvetica Neue',
-          'Arial',
-          'Noto Sans',
-          'sans-serif',
-          'Apple Color Emoji',
-          'Segoe UI Emoji',
-          'Segoe UI Symbol',
-          'Noto Color Emoji',
-        ],
+        // The retro theme is mono end to end. All three keys resolve to the
+        // single token in variables.css so the face has one definition.
+        display: ['var(--gb-font-mono)'],
+        sans: ['var(--gb-font-mono)'],
+        mono: ['var(--gb-font-mono)'],
+      },
+      borderRadius: {
+        // Every named step maps to a token, so a component pasted in with a
+        // stock `rounded-2xl` still lands on the theme's geometry.
+        DEFAULT: 'var(--gb-radius)',
+        sm: 'var(--gb-radius-sm)',
+        md: 'var(--gb-radius)',
+        lg: 'var(--gb-radius-lg)',
+        xl: 'var(--gb-radius-lg)',
+        '2xl': 'var(--gb-radius-lg)',
+        '3xl': 'var(--gb-radius-lg)',
+      },
+      boxShadow: {
+        raised: 'var(--gb-shadow-raised)',
+        panel: 'var(--gb-shadow-panel)',
       },
       colors: {
         accent: {
           500: 'var(--gb-accent)',
-          600: 'color-mix(in srgb, var(--gb-accent) 82%, black)',
         },
         background: {
           primary: 'rgb(var(--background-primary-rgb) / <alpha-value>)',
@@ -65,11 +67,11 @@ export default {
           link: 'var(--gb-content-link)',
         },
         util: {
-          accent: 'rgb(38 135 246 / <alpha-value>)',
-          info: 'rgb(7 191 232 / <alpha-value>)',
-          success: 'rgb(79 176 20 / <alpha-value>)',
-          danger: 'rgb(238 52 47 / <alpha-value>)',
-          warning: 'rgb(243 176 28 / <alpha-value>)',
+          accent: 'rgb(122 162 247 / <alpha-value>)',
+          info: 'rgb(125 207 255 / <alpha-value>)',
+          success: 'rgb(158 206 106 / <alpha-value>)',
+          danger: 'rgb(247 118 142 / <alpha-value>)',
+          warning: 'rgb(224 175 104 / <alpha-value>)',
         },
         bolt: {
           elements: {

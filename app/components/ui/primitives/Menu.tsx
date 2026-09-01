@@ -41,7 +41,7 @@ export function Menu({ children, buttonProps }: MenuProps) {
           align="end"
           sideOffset={8}
           aria-label={triggerLabel ?? triggerTitle}
-          className="z-50 min-w-52 overflow-hidden rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-1.5 text-content-primary shadow-[0_18px_50px_rgba(0,0,0,0.28)] outline-none backdrop-blur-xl"
+          className="z-50 min-w-52 overflow-hidden rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-1.5 text-content-primary shadow-panel outline-none backdrop-blur-xl"
         >
           {children}
         </DropdownMenu.Content>
@@ -53,7 +53,7 @@ export function Menu({ children, buttonProps }: MenuProps) {
 export function MenuItem({ children, action }: { children: ReactNode; action?: () => void }) {
   return (
     <DropdownMenu.Item
-      className="flex min-h-10 w-full items-center gap-2.5 rounded-xl border-0 bg-transparent px-3 py-2 text-left text-sm font-medium text-content-primary outline-none transition-colors hover:bg-bolt-elements-background-depth-2 focus-visible:bg-bolt-elements-background-depth-2"
+      className="flex min-h-10 w-full items-center gap-2.5 rounded-lg border-0 bg-transparent px-3 py-2 text-left text-sm font-medium text-content-primary outline-none transition-colors hover:bg-bolt-elements-background-depth-2 focus-visible:bg-bolt-elements-background-depth-2"
       onSelect={action}
     >
       {children}

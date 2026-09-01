@@ -42,7 +42,7 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messa
               })}
             >
               {isUserMessage && (
-                <div className="flex size-8 shrink-0 items-center justify-center self-start overflow-hidden rounded-full border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 text-content-secondary">
+                <div className="flex size-8 shrink-0 items-center justify-center self-start overflow-hidden rounded border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 text-content-secondary">
                   {profile?.avatar ? (
                     <img
                       src={profile.avatar}
@@ -70,7 +70,7 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(function Messa
         })
       ) : (
         <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
-          <div className="mb-6 flex size-[64px] shrink-0 items-center justify-center rounded-full text-gray-600 dark:text-gray-500">
+          <div className="mb-6 flex size-[64px] shrink-0 items-center justify-center text-gray-600 dark:text-gray-500">
             <ChatBubbleIcon className="size-8" />
           </div>
           <h3 className="text-content-primary text-xl font-semibold">What should Ghostbuild change?</h3>
