@@ -9,11 +9,10 @@ export function scheduleUserWorkspaceRuntimeMaintenance(
   controller: Pick<ScheduledController, 'cron'>,
   env: RuntimeMaintenanceEnv,
   ctx: Pick<ExecutionContext, 'waitUntil'>,
-): boolean {
+): void {
   if (controller.cron !== USER_WORKSPACE_RUNTIME_GC_CRON) {
-    return false;
+    return;
   }
   ctx.waitUntil(sweepAgentGcCandidatesBestEffort(env));
   ctx.waitUntil(sweepAppResourceGcCandidatesBestEffort(env));
-  return true;
 }

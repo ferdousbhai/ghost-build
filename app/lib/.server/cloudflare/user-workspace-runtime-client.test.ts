@@ -103,30 +103,6 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
     expect(stub.completeToolOperation).toHaveBeenCalledWith({ toolCallId: 'call-1', result: pending });
   });
 
-  it('returns the native Computer write result after durably acknowledging its mutation', async () => {
-    const result = { path: '/project/a.ts', bytesWritten: 12 };
-    const execute = vi.fn(async () => result);
-    const { client, stub } = harness((operation) => {
-      if (operation === 'beginToolOperation') {
-        return { status: 'execute' };
-      }
-      if (operation === 'completeToolOperation') {
-        return {
-          kind: 'workspace-mutation-receipt',
-          version: 1,
-          committed: true,
-          acknowledgement: 'complete',
-          tool: 'write',
-          files: [{ path: result.path }],
-        };
-      }
-      return undefined;
-    });
-
-    await expect(client.executeToolOnce('call-1', 'write', { path: result.path }, execute)).resolves.toEqual(result);
-    expect(stub.completeToolOperation).toHaveBeenCalledWith({ toolCallId: 'call-1', result });
-  });
-
   it('surfaces a committed mutation when the native tool reports a post-commit failure', async () => {
     const result = { error: 'The workspace refresh failed after the write committed.' };
     const receipt = {
@@ -1003,42 +979,6 @@ describe('UserWorkspaceRuntimeClient direct ProjectWorkspace RPC', () => {
       size: 4,
       sha256: 'a'.repeat(64),
       revision: 1,
-    });
-  });
-
-  it('streams command progress while preserving the bounded final result', async () => {
-    const encoder = new TextEncoder();
-    const events = [
-      { type: 'output', channel: 'stdout', chunk: 'building\n' },
-      { type: 'output', channel: 'stderr', chunk: 'warning\n' },
-      {
-        type: 'result',
-        streamTruncated: false,
-        result: { exitCode: 0, stdout: 'building\n', stderr: 'warning\n' },
-      },
-    ];
-    const onUpdate = vi.fn();
-    const { client, stub } = harness((operation) =>
-      operation === 'executeStream'
-        ? new ReadableStream<Uint8Array>({
-            start(controller) {
-              controller.enqueue(encoder.encode(events.map((event) => JSON.stringify(event)).join('\n') + '\n'));
-              controller.close();
-            },
-          })
-        : undefined,
-    );
-
-    await expect(
-      client.executeCommand({ command: 'pnpm test', backend: 'container-shell', onUpdate }),
-    ).resolves.toEqual({ exitCode: 0, stdout: 'building\n', stderr: 'warning\n' });
-    expect(onUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ command: 'pnpm test', stdout: 'building\n', running: true }),
-    );
-    expect(stub.executeStream).toHaveBeenCalledWith({
-      command: 'pnpm test',
-      cwd: undefined,
-      backend: 'container-shell',
     });
   });
 

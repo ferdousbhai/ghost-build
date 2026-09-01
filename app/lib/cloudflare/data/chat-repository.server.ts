@@ -9,7 +9,6 @@ type ChatInsertArgs = {
   creatorId: string;
   initialId: string;
   description?: string | null;
-  lastSubchatIndex?: number;
 };
 
 export async function ensureInitialChat(
@@ -102,7 +101,7 @@ function prepareInsertChat(db: D1Database, args: ChatInsertArgs, ignoreInitialCo
       args.initialId,
       args.description ?? null,
       new Date().toISOString(),
-      args.lastSubchatIndex ?? 0,
+      0,
       0,
       args.initialId,
     );

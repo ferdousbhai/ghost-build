@@ -1,15 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { CLOUDFLARE_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';
 
 const mocks = vi.hoisted(() => ({
   completeToolCall: vi.fn(),
   getCredentials: vi.fn(),
-  getPiProvider: vi.fn(() => ({ handle: { model: { id: 'test' } } })),
+  getPiModel: vi.fn(() => ({ model: { id: 'test' } })),
 }));
 
 vi.mock('~/lib/.server/cloudflare/workers-ai-billing-context', () => ({
   getUserWorkersAiCredentials: mocks.getCredentials,
 }));
-vi.mock('~/lib/.server/llm/provider', () => ({ getPiProvider: mocks.getPiProvider }));
+vi.mock('~/lib/.server/llm/pi-ai-models', () => ({ getPiModel: mocks.getPiModel }));
 vi.mock('~/lib/.server/llm/pi-ai-invoke', () => ({ completeToolCall: mocks.completeToolCall }));
 
 import { userRuntimeEnhancePromptAction } from './enhance-prompt';
@@ -59,7 +60,7 @@ describe('userRuntimeEnhancePromptAction billing', () => {
     mocks.getCredentials.mockResolvedValue(credentials);
     const response = await userRuntimeEnhPrompt({ request: request(), env: testEnv() });
     expect(response.status).toBe(200);
-    expect(mocks.getPiProvider).toHaveBeenCalledWith(credentials);
+    expect(mocks.getPiModel).toHaveBeenCalledWith(credentials, CLOUDFLARE_WORKERS_AI_MODEL);
   });
 
   it('asks for explicit Workers Paid authorization when the connected free allocation is exhausted', async () => {
@@ -160,37 +161,6 @@ describe('userRuntimeEnhancePromptAction billing', () => {
         prompt: JSON.stringify({ draft: 'Build a calendar', priorDecisions: answers }),
       }),
     );
-  });
-
-  it('allows another adaptive question batch when prior answers reveal a new material decision', async () => {
-    mocks.completeToolCall.mockResolvedValue({
-      kind: 'questions',
-      questions: [
-        {
-          id: 'extra',
-          header: 'Extra',
-          question: 'One more decision?',
-          options: [
-            { id: 'yes', label: 'Yes', description: 'Include it.' },
-            { id: 'no', label: 'No', description: 'Leave it out.' },
-          ],
-          recommendedOptionId: 'no',
-        },
-      ],
-    });
-    const answers = Array.from({ length: 6 }, (_, index) => ({
-      questionId: `question-${index}`,
-      question: `Question ${index}`,
-      selectedOptions: [`Answer ${index}`],
-    }));
-
-    const response = await userRuntimeEnhPrompt({
-      request: request({ prompt: 'Build a calendar', answers }),
-      env: testEnv(),
-    });
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ kind: 'questions', questions: [{ id: 'extra' }] });
   });
 
   it('fails closed if the model repeats an answered question', async () => {

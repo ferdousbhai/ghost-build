@@ -1,5 +1,4 @@
 import { routeAgentRequest } from 'agents';
-import { getAuthSession } from './auth';
 import { ensureInitialChat } from '~/lib/cloudflare/data/chat-repository.server';
 
 type AgentRequestIdentity = {
@@ -41,22 +40,6 @@ function resolveAgentRequestRoute(pathname: string): AgentRequestRoute {
   return { kind: 'builder-agent', canonicalName: encodedName };
 }
 
-export async function routeAuthorizedAgentRequest(request: Request, env: Env): Promise<Response | null> {
-  const route = resolveAgentRequestRoute(new URL(request.url).pathname);
-  if (route.kind === 'not-agent') {
-    return null;
-  }
-  if (route.kind === 'rejected') {
-    return agentNotFoundResponse();
-  }
-
-  const authorization = await authorizeAgentRequest(request, env, route.canonicalName);
-  if ('response' in authorization) {
-    return authorization.response;
-  }
-  return (await routeAgentRequest(request, env, { props: authorization.identity })) ?? agentNotFoundResponse();
-}
-
 export async function routeUserRuntimeAgentRequest(
   request: Request,
   env: Env,
@@ -75,19 +58,6 @@ export async function routeUserRuntimeAgentRequest(
     return authorization.response;
   }
   return (await routeAgentRequest(request, env, { props: identity })) ?? agentNotFoundResponse();
-}
-
-export async function authorizeAgentRequest(
-  request: Request,
-  env: Env,
-  agentName: string,
-): Promise<{ identity: AgentRequestIdentity } | { response: Response }> {
-  const identity = await resolveAgentRequestIdentity(request, env);
-  if (!identity) {
-    return { response: Response.json({ error: 'Agent authentication is required.' }, { status: 401 }) };
-  }
-
-  return authorizeAgentForIdentity(env, agentName, identity);
 }
 
 async function authorizeAgentForIdentity(
@@ -138,17 +108,6 @@ async function authorizeAgentForIdentity(
     return { response: Response.json({ error: 'Agent not found.' }, { status: 404 }) };
   }
   return { identity };
-}
-
-export async function resolveAgentRequestIdentity(request: Request, env: Env): Promise<AgentRequestIdentity | null> {
-  const session = await getAuthSession(env, request);
-  if (!session) {
-    return null;
-  }
-  return {
-    ownerId: session.user.id,
-    userId: session.user.id,
-  };
 }
 
 function agentNotFoundResponse(): Response {

@@ -9,7 +9,6 @@ const completeCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const cloudflareConnectionStatusAction = vi.hoisted(() => vi.fn());
 const startCloudflareConnectionAction = vi.hoisted(() => vi.fn());
 const pruneCloudflareAuthDataBestEffort = vi.hoisted(() => vi.fn());
-const runDailyMaintenance = vi.hoisted(() => vi.fn());
 const runtimeCredentialAction = vi.hoisted(() => vi.fn());
 const clientTelemetryAction = vi.hoisted(() => vi.fn());
 
@@ -30,7 +29,6 @@ vi.mock('./server-handlers/version', () => ({ versionAction: vi.fn() }));
 vi.mock('./server-handlers/runtime-credential', () => ({ runtimeCredentialAction }));
 vi.mock('./server-handlers/client-telemetry', () => ({ clientTelemetryAction }));
 vi.mock('./lib/cloudflare/data/cloudflare-auth-retention.server', () => ({ pruneCloudflareAuthDataBestEffort }));
-vi.mock('./lib/.server/daily-maintenance', () => ({ runDailyMaintenance }));
 
 import server from './server';
 
@@ -65,7 +63,6 @@ describe('server Agent routing boundary', () => {
       .mockReset()
       .mockResolvedValue(Response.json({ error: 'Invalid request.' }, { status: 400 }));
     pruneCloudflareAuthDataBestEffort.mockReset().mockResolvedValue(undefined);
-    runDailyMaintenance.mockReset().mockResolvedValue(undefined);
     runtimeCredentialAction.mockReset().mockResolvedValue(Response.json({ accessToken: 'fresh' }));
     clientTelemetryAction.mockReset().mockResolvedValue(new Response(null, { status: 202 }));
   });
@@ -296,18 +293,9 @@ describe('server Agent routing boundary', () => {
     expect(response.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains');
   });
 
-  it('runs authentication-metadata retention before the daily maintenance jobs', async () => {
+  it('runs authentication-metadata retention on schedule', async () => {
     const waitUntil = vi.fn();
-    // SAFETY: `pruneCloudflareAuthDataBestEffort` is mocked here, so the D1 handle is only ever
-    // compared by identity and never queried.
-    const env = testEnv({ DB: {} as D1Database });
-    const calls: string[] = [];
-    pruneCloudflareAuthDataBestEffort.mockImplementationOnce(async () => {
-      calls.push('auth-retention');
-    });
-    runDailyMaintenance.mockImplementationOnce(async () => {
-      calls.push('daily-maintenance');
-    });
+    const env = testEnv();
 
     const controller: ScheduledController = {
       cron: '*/15 * * * *',
@@ -319,10 +307,7 @@ describe('server Agent routing boundary', () => {
 
     expect(waitUntil).toHaveBeenCalledOnce();
     await waitUntil.mock.calls[0][0];
-    // Every tick prunes; `runDailyMaintenance` decides for itself whether a daily job is due.
-    expect(calls).toEqual(['auth-retention', 'daily-maintenance']);
     expect(pruneCloudflareAuthDataBestEffort).toHaveBeenCalledWith(env.DB);
-    expect(runDailyMaintenance).toHaveBeenCalledWith(env);
   });
 
   it('exposes no HTTP route for private operations', async () => {
@@ -346,12 +331,12 @@ describe('server Agent routing boundary', () => {
     }
   });
 
-  it('exports nothing beyond the Worker handler now that the operations Worker is retired', async () => {
+  it('exports only the Worker handler and its durable provisioning Workflow', async () => {
     // `OperationsService` existed only so a second deployed Worker could reach the control
     // plane's credentials over RPC. Its caller now runs in this Worker, so the entrypoint - and
     // the Service binding that authorized it - are gone rather than left reachable.
     const exported = await import('./server');
 
-    expect(Object.keys(exported)).toEqual(['default']);
+    expect(Object.keys(exported).sort()).toEqual(['UserWorkspaceRuntimeProvisioningWorkflow', 'default']);
   });
 });

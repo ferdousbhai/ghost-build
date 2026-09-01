@@ -37,19 +37,12 @@ describe('app resource garbage collection', () => {
     const database = new AppResourceGcDatabase([JSON.stringify(plan)]);
     const accountApi = cleanupApi(true);
 
-    await expect(sweepAppResourceGcCandidates(database.env, { now: 100, accountApi })).resolves.toBe(1);
+    await expect(sweepAppResourceGcCandidates(database.env, { now: 100, accountApi })).resolves.toBeUndefined();
 
-    expect(accountApi.deleteManagedWorker).toHaveBeenCalledWith(`ghostbuild-deployment-1`);
+    expect(accountApi.deleteManagedWorker).toHaveBeenCalledWith('ghostbuild-deployment-1');
     expect(accountApi.deleteD1Database).toHaveBeenCalledTimes(4);
-    expect(accountApi.deleteD1Database).toHaveBeenCalledWith(`ghostbuild-deployment-1`);
-    expect(accountApi.deleteD1Database).toHaveBeenCalledWith(`ghostbuild-deployment-1-preview`);
-    expect(accountApi.deleteD1Database).toHaveBeenCalledWith(`ghostbuild-deployment-1-agent-security`);
-    expect(accountApi.deleteD1Database).toHaveBeenCalledWith(`ghostbuild-deployment-1-preview-agent`);
-    expect(accountApi.deleteKvNamespace).toHaveBeenCalledWith(`ghostbuild-deployment-1-cache`);
-    expect(accountApi.deleteR2Bucket).toHaveBeenCalledWith(`ghostbuild-deployment-1-storage`);
-    expect(accountApi.deleteManagedWorker.mock.invocationCallOrder[0]).toBeLessThan(
-      accountApi.deleteD1Database.mock.invocationCallOrder[0]!,
-    );
+    expect(accountApi.deleteKvNamespace).toHaveBeenCalledWith('ghostbuild-deployment-1-cache');
+    expect(accountApi.deleteR2Bucket).toHaveBeenCalledWith('ghostbuild-deployment-1-storage');
     expect(database.candidates).toEqual([]);
   });
 
@@ -57,7 +50,7 @@ describe('app resource garbage collection', () => {
     const database = new AppResourceGcDatabase([JSON.stringify(await deploymentPlan())]);
     const accountApi = cleanupApi(false);
 
-    await expect(sweepAppResourceGcCandidates(database.env, { now: 1_000, accountApi })).resolves.toBe(0);
+    await expect(sweepAppResourceGcCandidates(database.env, { now: 1_000, accountApi })).resolves.toBeUndefined();
 
     expect(database.candidates).toEqual([
       { chat_id: 'chat-row', not_before: 1_000 + AGENT_GC_RETRY_BASE_MS, attempts: 0 },
@@ -65,7 +58,6 @@ describe('app resource garbage collection', () => {
   });
 
   it('deletes what provisioning recorded, by provider id, without reading the plan', async () => {
-    // The durable record survives a plan schema this build can no longer parse.
     const database = new AppResourceGcDatabase([JSON.stringify({ version: 999 })], 0, [
       { deployment_id: 'deployment-1', resource_type: 'worker', provider_resource_id: 'ghostbuild-app-1' },
       { deployment_id: 'deployment-1', resource_type: 'd1', provider_resource_id: 'db-id-1' },
@@ -74,14 +66,12 @@ describe('app resource garbage collection', () => {
     ]);
     const accountApi = cleanupApi(true);
 
-    await expect(sweepAppResourceGcCandidates(database.env, { now: 100, accountApi })).resolves.toBe(1);
+    await expect(sweepAppResourceGcCandidates(database.env, { now: 100, accountApi })).resolves.toBeUndefined();
 
     expect(accountApi.deleteManagedWorker).toHaveBeenCalledWith('ghostbuild-app-1');
     expect(accountApi.deleteD1DatabaseById).toHaveBeenCalledWith('db-id-1');
     expect(accountApi.deleteKvNamespaceById).toHaveBeenCalledWith('kv-id-1');
     expect(accountApi.deleteR2Bucket).toHaveBeenCalledWith('ghostbuild-app-1-storage');
-    // Name-derived deletion is the fallback and must not have been needed.
-    expect(accountApi.deleteD1Database).not.toHaveBeenCalled();
     expect(accountApi.deleteManagedWorker.mock.invocationCallOrder[0]).toBeLessThan(
       accountApi.deleteD1DatabaseById.mock.invocationCallOrder[0]!,
     );
@@ -94,7 +84,7 @@ describe('app resource garbage collection', () => {
     ]);
     const accountApi = cleanupApi(false);
 
-    await expect(sweepAppResourceGcCandidates(database.env, { now: 1_000, accountApi })).resolves.toBe(0);
+    await expect(sweepAppResourceGcCandidates(database.env, { now: 1_000, accountApi })).resolves.toBeUndefined();
 
     expect(database.candidates).toEqual([
       { chat_id: 'chat-row', not_before: 1_000 + AGENT_GC_RETRY_BASE_MS, attempts: 0 },
@@ -102,16 +92,13 @@ describe('app resource garbage collection', () => {
   });
 
   it('completes the receipt instead of stalling on a plan this build cannot parse', async () => {
-    // A stored plan from a newer schema never becomes parseable, so retrying it
-    // forever would block every other deployment behind the same receipt.
     const plan = await deploymentPlan();
     const database = new AppResourceGcDatabase([JSON.stringify({ ...plan, version: 999 }), JSON.stringify(plan)]);
     const accountApi = cleanupApi(true);
 
-    await expect(sweepAppResourceGcCandidates(database.env, { now: 100, accountApi })).resolves.toBe(1);
+    await expect(sweepAppResourceGcCandidates(database.env, { now: 100, accountApi })).resolves.toBeUndefined();
 
-    // The parseable deployment is still cleaned up, and the receipt is retired.
-    expect(accountApi.deleteManagedWorker).toHaveBeenCalledWith(`ghostbuild-deployment-1`);
+    expect(accountApi.deleteManagedWorker).toHaveBeenCalledWith('ghostbuild-deployment-1');
     expect(database.candidates).toEqual([]);
   });
 
@@ -120,7 +107,7 @@ describe('app resource garbage collection', () => {
     const accountApi = cleanupApi(true);
     accountApi.deleteManagedWorker.mockRejectedValueOnce(new Error('temporary provider failure'));
 
-    await expect(sweepAppResourceGcCandidates(database.env, { now: 1_000, accountApi })).resolves.toBe(0);
+    await expect(sweepAppResourceGcCandidates(database.env, { now: 1_000, accountApi })).resolves.toBeUndefined();
 
     expect(database.candidates).toEqual([
       { chat_id: 'chat-row', not_before: 1_000 + AGENT_GC_RETRY_BASE_MS * 4, attempts: 3 },

@@ -35,11 +35,7 @@ describe('Cloudflare authorization retention', () => {
       .prepare('INSERT INTO cloudflare_connections (id, credential_handle) VALUES (?, ?)')
       .run('connection-1', 'credential-referenced');
 
-    await expect(pruneCloudflareAuthData({ db, now, limit: 2 })).resolves.toEqual({
-      oauthStates: 2,
-      authSessions: 2,
-      credentials: 2,
-    });
+    await expect(pruneCloudflareAuthData({ db, now, limit: 2 })).resolves.toBeUndefined();
     expect(values(database, 'cloudflare_oauth_states', 'id')).toEqual(['state-3', 'state-live']);
     expect(values(database, 'cloudflare_auth_sessions', 'id')).toEqual(['session-3', 'session-live']);
     expect(values(database, 'cloudflare_credentials', 'handle')).toEqual([
@@ -49,11 +45,7 @@ describe('Cloudflare authorization retention', () => {
       'credential-referenced',
     ]);
 
-    await expect(pruneCloudflareAuthData({ db, now, limit: 2 })).resolves.toEqual({
-      oauthStates: 1,
-      authSessions: 1,
-      credentials: 1,
-    });
+    await expect(pruneCloudflareAuthData({ db, now, limit: 2 })).resolves.toBeUndefined();
     expect(values(database, 'cloudflare_credentials', 'handle')).toContain('credential-referenced');
   });
 

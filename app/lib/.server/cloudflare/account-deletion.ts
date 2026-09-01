@@ -1,94 +1,70 @@
 import { D1CloudflareCredentialVault } from './cloudflare-credential-vault';
-import { findCloudflareConnectionForUser } from './cloudflare-connection-repository';
 
 /**
- * Rows erased from the operator control plane. Everything else Ghostbuild touches
- * lives in the user's own Cloudflare account or in their browser, so this
- * operation deliberately reaches neither.
- */
-type ControlPlaneErasure = {
-  oauthStates: number;
-  runtimeLocators: number;
-  authSessions: number;
-  connections: number;
-  credentials: number;
-  accounts: number;
-  cloudflareAuthorizationRevoked: boolean;
-};
-
-/**
- * Erase every operator-held record for one account and end the OAuth grant that
- * reaches the user's Cloudflare resources. Deployed Workers, D1, R2, Containers,
- * Durable Objects, Agents, and browser replicas are the user's to remove.
- *
- * This also deliberately retains unpromoted Worker preview versions and their separate preview
- * D1 databases, exactly as it retains the production resources owned by the user's account.
- * Safe to repeat: a second call deletes nothing and reports zero counts.
+ * Erase operator-held account data and revoke the OAuth grant. Resources deployed into the user's
+ * Cloudflare account remain theirs. Revoking the connection first also makes any in-flight
+ * provisioning Workflow fail its connection check before its next provider operation.
  */
 export async function eraseControlPlaneAccount(args: {
   env: Env;
   userId: string;
   vault?: D1CloudflareCredentialVault;
-}): Promise<ControlPlaneErasure> {
+}): Promise<{ cloudflareAuthorizationRevoked: boolean }> {
   const db = args.env.DB;
-  const connection = await findCloudflareConnectionForUser(db, args.userId);
-  const credentialHandle = connection?.credentialHandle ?? null;
-  const vault = credentialHandle ? (args.vault ?? safeCredentialVault(args.env)) : null;
+  const credentialHandle = await revokeConnection(db, args.userId);
+  const vault = credentialHandle !== null ? (args.vault ?? safeCredentialVault(args.env)) : null;
   const cloudflareAuthorizationRevoked =
-    vault && credentialHandle
+    vault && credentialHandle !== null
       ? await vault.revokeOAuthCredential(credentialHandle).catch(() => {
           console.warn('Unable to revoke the Cloudflare grant during account erasure');
           return false;
         })
       : false;
 
-  const results = await db.batch([
+  await db.batch([
     db.prepare('DELETE FROM cloudflare_oauth_states WHERE authenticated_user_id = ?').bind(args.userId),
     db.prepare('DELETE FROM user_computer_runtimes WHERE user_id = ?').bind(args.userId),
     db.prepare('DELETE FROM cloudflare_auth_sessions WHERE user_id = ?').bind(args.userId),
     db.prepare('DELETE FROM cloudflare_connections WHERE user_id = ?').bind(args.userId),
+    db
+      .prepare(
+        `DELETE FROM cloudflare_credentials
+         WHERE handle = ? AND NOT EXISTS (
+           SELECT 1 FROM cloudflare_connections WHERE credential_handle = ?
+         )`,
+      )
+      .bind(credentialHandle, credentialHandle),
     db.prepare('DELETE FROM "user" WHERE id = ?').bind(args.userId),
   ]);
 
-  // The credential row is referenced by the connection rather than the account,
-  // so it can only be removed once that reference is gone.
-  const credentials =
-    vault && credentialHandle
-      ? await vault
-          .deleteIfUnreferenced(credentialHandle)
-          .then((deleted) => (deleted ? 1 : 0))
-          .catch((error: unknown) => {
-            // A count of zero otherwise reads as "there was no ciphertext to erase", which is
-            // the one thing this must never claim: the ciphertext is still there.
-            console.warn(
-              'Unable to erase the stored Cloudflare credential during account erasure; the ciphertext remains',
-              error instanceof Error ? error.message : String(error),
-            );
-            return 0;
-          })
-      : 0;
+  return { cloudflareAuthorizationRevoked };
+}
 
-  return {
-    oauthStates: results[0].meta.changes,
-    runtimeLocators: results[1].meta.changes,
-    authSessions: results[2].meta.changes,
-    connections: results[3].meta.changes,
-    credentials,
-    accounts: results[4].meta.changes,
-    cloudflareAuthorizationRevoked,
-  };
+async function revokeConnection(db: D1Database, userId: string): Promise<string | null> {
+  const revoked = await db
+    .prepare(
+      `UPDATE cloudflare_connections SET status = 'revoked', updated_at = ?
+       WHERE user_id = ? AND status = 'active'
+       RETURNING credential_handle`,
+    )
+    .bind(Date.now(), userId)
+    .first<{ credential_handle: string | null }>();
+  const connection =
+    revoked ??
+    (await db
+      .prepare('SELECT credential_handle FROM cloudflare_connections WHERE user_id = ?')
+      .bind(userId)
+      .first<{ credential_handle: string | null }>());
+  return connection?.credential_handle ?? null;
 }
 
 function safeCredentialVault(env: Env): D1CloudflareCredentialVault | null {
   try {
     return D1CloudflareCredentialVault.fromEnv(env);
   } catch (error) {
-    // Erasure must still remove every row it can when credential configuration is
-    // unavailable, but nothing else would say that the ciphertext survived and the
-    // grant now has to be revoked from the Cloudflare dashboard by hand.
     console.warn(
-      'Cloudflare credential configuration is unavailable, so account erasure left the stored credential ' +
-        'in place and the grant must be revoked from the Cloudflare dashboard',
+      'Cloudflare credential configuration is unavailable, so the grant must be revoked from the ' +
+        'Cloudflare dashboard',
       error instanceof Error ? error.message : String(error),
     );
     return null;

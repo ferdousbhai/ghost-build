@@ -94,21 +94,6 @@ export function messageText(message: Pick<GhostbuildMessage, 'parts'>): string {
   return message.parts.map((part) => (part.type === 'text' && typeof part.text === 'string' ? part.text : '')).join('');
 }
 
-export function createdAtMillis(message: Pick<GhostbuildMessage, 'createdAt'>): number | undefined {
-  const { createdAt } = message;
-  if (createdAt instanceof Date) {
-    return createdAt.getTime();
-  }
-  if (typeof createdAt === 'number') {
-    return createdAt;
-  }
-  if (typeof createdAt === 'string') {
-    const timestamp = Date.parse(createdAt);
-    return Number.isNaN(timestamp) ? undefined : timestamp;
-  }
-  return undefined;
-}
-
 export function isToolPart(part: GhostbuildPart): boolean {
   return typeof part.type === 'string' && (part.type.startsWith('tool-') || part.type === 'dynamic-tool');
 }
@@ -130,11 +115,6 @@ export function getToolInvocation(part: GhostbuildPart): GhostbuildToolInvocatio
     invocation.errorText = fields.errorText;
   }
   return invocation;
-}
-
-export function isToolResult(part: GhostbuildPart): boolean {
-  const state = getToolInvocation(part)?.state;
-  return state === 'output-available' || state === 'output-error' || state === 'output-denied';
 }
 
 export function isToolInvocationInProgress(invocation: Pick<GhostbuildToolInvocation, 'state'>): boolean {

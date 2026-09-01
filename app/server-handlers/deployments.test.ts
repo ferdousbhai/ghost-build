@@ -17,11 +17,6 @@ vi.mock('~/lib/.server/cloudflare/user-workspace-deployment-executor', () => ({
   executeUserOwnedPreview: mocks.executeUserOwnedPreview,
 }));
 
-import {
-  APP_AGENT_SECURITY_BOUNDARY_SHA256,
-  DEPLOYMENT_SECURITY_BASELINE_VERSION,
-  TEMPLATE_SOURCE_SHA256,
-} from '~/lib/.server/cloudflare/deployment-security-baseline';
 import { createOrReplayDeploymentPlanForUser, deployForUser, previewForUser } from './deployments';
 
 const project = { type: 'worker' as const, bindings: { ai: false, d1: false, r2: false, kv: false, appAgent: false } };
@@ -41,9 +36,6 @@ function deployment(status: 'approved' | 'succeeded' = 'approved') {
       version: 5 as const,
       deploymentId: 'deployment-1',
       sourceSha256: revision,
-      templateSourceSha256: TEMPLATE_SOURCE_SHA256,
-      securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
-      securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
       project,
       resources: [],
     },

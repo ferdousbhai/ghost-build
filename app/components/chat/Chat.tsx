@@ -54,14 +54,14 @@ export const Chat = memo(
       code: UserRuntimeErrorCode | null;
       upgradeUrl: string | null;
     } | null>(null);
-    const [runtimeConnectionAttempt, setRuntimeConnectionAttempt] = useState(0);
+    const [runtimeConnectionAttempt, setRuntimeConnectionAttempt] = useState({ id: 0, retryProvisioning: false });
     useEffect(() => {
       if (userId === null || userId === undefined || runtimeEndpoint) {
         return undefined;
       }
       let canceled = false;
       setRuntimeConnectionError(null);
-      void getUserRuntimeSession().catch((error) => {
+      void getUserRuntimeSession({ retryProvisioning: runtimeConnectionAttempt.retryProvisioning }).catch((error) => {
         if (!canceled) {
           logger.error('Unable to connect to the user-owned runtime', error);
           setRuntimeConnectionError({
@@ -86,7 +86,9 @@ export const Chat = memo(
           message={runtimeConnectionError.message}
           code={runtimeConnectionError.code}
           upgradeUrl={runtimeConnectionError.upgradeUrl}
-          onRetry={() => setRuntimeConnectionAttempt((attempt) => attempt + 1)}
+          onRetry={() => {
+            setRuntimeConnectionAttempt((attempt) => ({ id: attempt.id + 1, retryProvisioning: true }));
+          }}
         />
       ) : (
         <Loading message={WORKSPACE_PREPARING_MESSAGE} />

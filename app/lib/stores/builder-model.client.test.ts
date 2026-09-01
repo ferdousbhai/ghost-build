@@ -16,8 +16,6 @@ import {
   installBuilderModelCatalog,
   loadBuilderModelCatalog,
   loadBuilderModelPreference,
-  setBuilderModel,
-  syncBuilderModelPreference,
 } from './builder-model.client';
 
 const alternativeModel: WorkersAiModel = {
@@ -72,30 +70,5 @@ describe('builder model preference', () => {
 
     expect(builderModelCatalogStatusStore.get()).toBe('error');
     expect(builderModelsStore.get()).toEqual([DEFAULT_WORKERS_AI_MODEL]);
-  });
-
-  it('keeps the in-memory choice when local storage is unavailable', () => {
-    installBuilderModelCatalog(catalog, { getItem: () => null });
-    const setItem = vi.fn(() => {
-      throw new DOMException('Blocked');
-    });
-
-    setBuilderModel(alternativeModel.id, { setItem });
-
-    expect(builderModelStore.get()).toBe(alternativeModel.id);
-    expect(setItem).toHaveBeenCalledOnce();
-  });
-
-  it('synchronizes current cross-tab choices on the versioned key', () => {
-    installBuilderModelCatalog(catalog, { getItem: () => null });
-
-    syncBuilderModelPreference({ key: 'ghostbuild_builder_model', newValue: alternativeModel.id });
-    expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
-
-    syncBuilderModelPreference({ key: 'ghostbuild_builder_model_v2', newValue: alternativeModel.id });
-    expect(builderModelStore.get()).toBe(alternativeModel.id);
-
-    syncBuilderModelPreference({ key: 'ghostbuild_builder_model_v2', newValue: null });
-    expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
   });
 });

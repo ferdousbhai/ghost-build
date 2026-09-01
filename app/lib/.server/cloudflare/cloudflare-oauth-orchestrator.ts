@@ -29,13 +29,11 @@ const OAUTH_REQUEST_TIMEOUT_MS = 30_000;
 type OAuthSession = {
   verifier: string;
   redirectUri: string;
-  capabilities: CloudflareConnectionRequest['requestedCapabilities'];
 };
 
 const oauthSessionSchema = z.object({
   verifier: z.string(),
   redirectUri: z.string(),
-  capabilities: z.array(z.enum(['workers', 'containers', 'd1', 'r2', 'kv', 'durable_objects', 'workers_ai'])),
 }) satisfies z.ZodType<OAuthSession>;
 
 /**
@@ -107,7 +105,6 @@ export class CloudflareOAuthOrchestrator implements CloudflareOrchestrator {
       sessionId: JSON.stringify({
         verifier,
         redirectUri: returnUrl.toString(),
-        capabilities: request.requestedCapabilities,
       } satisfies OAuthSession),
       authorizationUrl: authorizationUrl.toString(),
       expiresAt: Date.now() + SESSION_LIFETIME_MS,

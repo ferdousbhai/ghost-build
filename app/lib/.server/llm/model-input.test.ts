@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { MAX_ESTIMATED_MODEL_INPUT_TOKENS } from 'ghostbuild-agent/context-limits';
-import { ModelInputBudgetExceededError, modelCompactionPolicy, prepareModelInput } from './model-input';
+import { ModelInputBudgetExceededError, prepareModelInput } from './model-input';
 import type { ContextCompactionUnavailableError } from './model-input';
 
 const tools = [
@@ -35,29 +35,6 @@ function prepare(messages: GhostbuildMessage[], options: Partial<Parameters<type
 }
 
 describe('prepareModelInput', () => {
-  test('derives compaction boundaries from the model window and output reserve', () => {
-    expect(modelCompactionPolicy(128_000)).toEqual({
-      proactiveTokens: 79_328,
-      hardLimitTokens: 99_328,
-    });
-    expect(modelCompactionPolicy(256_000).hardLimitTokens).toBe(MAX_ESTIMATED_MODEL_INPUT_TOKENS);
-  });
-
-  test('builds small provider inputs once with complete history', async () => {
-    const summarize = vi.fn(async () => 'summary');
-    const messages = [message('old-user', 'earlier requirement'), message('current-user', 'Build it')];
-
-    const result = await prepare(messages, { summarize, systemPrompt: 'System' });
-
-    expect(result.contextCompacted).toBe(false);
-    expect(result.nextCompaction).toBeNull();
-    expect(result.promptMessages).toBe(messages);
-    expect(result.messages.map((item) => item.role)).toEqual(['user', 'user']);
-    expect(JSON.stringify(result.messages)).toContain('earlier requirement');
-    expect(JSON.stringify(result.messages)).not.toContain('System');
-    expect(summarize).not.toHaveBeenCalled();
-  });
-
   test('compacts once after the actual provider input reaches the model-safe limit', async () => {
     const result = await prepare(largeHistory());
 

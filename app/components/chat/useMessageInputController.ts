@@ -284,7 +284,7 @@ export function useMessageInputController({
  * prompt in the composer is still the one they submitted. The intent is spent by reading it,
  * so this can only ever say yes once.
  */
-export function shouldContinuePendingSubmit({
+function shouldContinuePendingSubmit({
   authKind,
   pendingSubmit,
   prompt,
@@ -302,11 +302,11 @@ export function shouldContinuePendingSubmit({
   return authKind === 'fullyLoggedIn' && prompt.trim() === pendingSubmit;
 }
 
-export function hasFailedCloudflareAuthorization(search: string): boolean {
+function hasFailedCloudflareAuthorization(search: string): boolean {
   return new URLSearchParams(search).get(CLOUDFLARE_AUTHORIZATION_ERROR_PARAM) === CLOUDFLARE_AUTHORIZATION_ERROR_VALUE;
 }
 
-export function getMessageInputPrimaryAction(
+function getMessageInputPrimaryAction(
   authKind: 'loading' | 'unauthenticated' | 'fullyLoggedIn',
   isStreaming: boolean,
   hasInput = false,

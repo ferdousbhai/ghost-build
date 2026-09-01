@@ -41,7 +41,7 @@ function SettingsRouteContent() {
   return <SettingsRouteView authKind={auth.kind} authorizationError={authorizationError} />;
 }
 
-export function SettingsRouteView({
+function SettingsRouteView({
   authKind,
   authorizationError = null,
 }: {

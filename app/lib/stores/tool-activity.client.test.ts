@@ -3,31 +3,6 @@ import { makePartId, type PartId } from 'ghostbuild-agent/partId';
 import { ToolActivityStore } from './tool-activity.client';
 
 describe('ToolActivityStore', () => {
-  it('presents SDK tool progress without executing anything in the browser', () => {
-    const store = new ToolActivityStore();
-    const partId = 'message:0' as PartId;
-    store.startTurn();
-
-    store.record(partId, {
-      type: 'dynamic-tool',
-      state: 'input-available',
-      toolCallId: 'tool-1',
-      toolName: 'write',
-      input: { path: 'src/index.ts' },
-    });
-    expect(store.activities.get()[partId]?.status).toBe('running');
-
-    store.record(partId, {
-      type: 'dynamic-tool',
-      state: 'output-available',
-      toolCallId: 'tool-1',
-      toolName: 'write',
-      input: { path: 'src/index.ts' },
-      output: { ok: true },
-    });
-    expect(store.activities.get()[partId]?.status).toBe('complete');
-  });
-
   it('marks incomplete late parts aborted and ignores late results until the next turn', () => {
     const store = new ToolActivityStore();
     const firstPart = 'message:0' as PartId;

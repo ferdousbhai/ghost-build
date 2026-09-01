@@ -4,7 +4,6 @@ import { toolFailure, toolSuccess } from 'ghostbuild-agent/tool-result';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 import { z, type ZodType } from 'zod';
-import { COMPUTER_EXEC_APPLICATION_POLICY } from 'ghostbuild-agent/cloudflare-computer';
 import {
   createTurnStatefulToolCoordinator,
   createWorkersAiTools,
@@ -43,26 +42,6 @@ describe('minimal Workers AI tool surface', () => {
     ).toBe(true);
     expect(toolInputSchema(tools.exec).safeParse({ command: 'rg TODO' }).success).toBe(true);
     expect(Object.keys(z.toJSONSchema(toolInputSchema(tools.exec)).properties ?? {})).toEqual(['command', 'cwd']);
-  });
-
-  it('presents one concrete exec backend plus the mutation policy', () => {
-    const tools = createWorkersAiTools(workspaceStub(), operationContext());
-
-    expect(tools.exec.description).toContain(COMPUTER_EXEC_APPLICATION_POLICY);
-    expect(tools.exec.description).not.toContain('multiple backends');
-    expect(tools.exec.description).not.toContain('/home/project/.ghost/docs/');
-  });
-
-  it('points exec away from the discovery work the VFS tools answer without a container', () => {
-    // The VFS tools only pay for themselves if the model actually reaches for them. Left to a bare
-    // "runs a shell command" description it falls back on shell habit, and every `ls`/`find`/`grep`
-    // becomes a container round trip — or a cold container start — for an answer the Durable
-    // Object holds.
-    const { exec } = createWorkersAiTools(workspaceStub(), operationContext());
-
-    expect(exec.description).toMatch(/\bls\b/);
-    expect(exec.description).toMatch(/\bgrep\b/);
-    expect(exec.description).toMatch(/container/i);
   });
 
   it('reads bundled skill references through read without consulting the project workspace', async () => {

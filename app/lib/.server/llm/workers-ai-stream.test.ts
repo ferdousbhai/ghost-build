@@ -27,12 +27,6 @@ describe('appendDeterministicCompletion', () => {
       { type: 'finish', finishReason: 'stop' },
     ]);
   });
-
-  it('preserves the stream unchanged when there is no deterministic completion', async () => {
-    const input = [{ type: 'start' }, { type: 'finish', finishReason: 'stop' }] as UIMessageChunk[];
-
-    await expect(readChunks(appendDeterministicCompletion(chunks(input), () => undefined))).resolves.toEqual(input);
-  });
 });
 
 describe('normalizeTextPartBoundaries', () => {

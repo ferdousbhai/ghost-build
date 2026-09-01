@@ -1,24 +1,14 @@
 const CLOUDFLARE_AUTH_RETENTION_SWEEP_LIMIT = 100;
 export const UNREFERENCED_CREDENTIAL_RETENTION_MS = 24 * 60 * 60 * 1000;
 
-type CloudflareAuthRetentionResult = {
-  oauthStates: number;
-  authSessions: number;
-  credentials: number;
-};
-
-export async function pruneCloudflareAuthData(args: {
-  db: D1Database;
-  now?: number;
-  limit?: number;
-}): Promise<CloudflareAuthRetentionResult> {
+export async function pruneCloudflareAuthData(args: { db: D1Database; now?: number; limit?: number }): Promise<void> {
   const now = args.now ?? Date.now();
   const limit = args.limit ?? CLOUDFLARE_AUTH_RETENTION_SWEEP_LIMIT;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > CLOUDFLARE_AUTH_RETENTION_SWEEP_LIMIT) {
     throw new Error('Cloudflare auth retention sweep limit is invalid.');
   }
   const credentialCreatedBefore = now - UNREFERENCED_CREDENTIAL_RETENTION_MS;
-  const results = await args.db.batch([
+  await args.db.batch([
     args.db
       .prepare(
         `DELETE FROM cloudflare_oauth_states
@@ -64,11 +54,6 @@ export async function pruneCloudflareAuthData(args: {
       )
       .bind(credentialCreatedBefore, credentialCreatedBefore, limit),
   ]);
-  return {
-    oauthStates: results[0].meta.changes,
-    authSessions: results[1].meta.changes,
-    credentials: results[2].meta.changes,
-  };
 }
 
 export async function pruneCloudflareAuthDataBestEffort(db: D1Database): Promise<void> {

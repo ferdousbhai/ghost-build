@@ -2,12 +2,12 @@ import { z } from 'zod';
 
 export const CLOUDFLARE_MCP_ENDPOINT = 'https://mcp.cloudflare.com/mcp';
 export const CLOUDFLARE_MCP_PROTOCOL_VERSION = '2025-11-25';
-export const CLOUDFLARE_MCP_CONNECT_TIMEOUT_MS = 10_000;
-export const CLOUDFLARE_MCP_LIST_TIMEOUT_MS = 10_000;
-export const CLOUDFLARE_MCP_CALL_TIMEOUT_MS = 60_000;
-export const CLOUDFLARE_MCP_OVERALL_TIMEOUT_MS = 75_000;
+const CLOUDFLARE_MCP_CONNECT_TIMEOUT_MS = 10_000;
+const CLOUDFLARE_MCP_LIST_TIMEOUT_MS = 10_000;
+const CLOUDFLARE_MCP_CALL_TIMEOUT_MS = 60_000;
+const CLOUDFLARE_MCP_OVERALL_TIMEOUT_MS = 75_000;
 export const CLOUDFLARE_MCP_MAX_TOOL_INPUT_BYTES = 64 * 1024;
-export const CLOUDFLARE_MCP_MAX_REQUEST_BYTES = 68 * 1024;
+const CLOUDFLARE_MCP_MAX_REQUEST_BYTES = 68 * 1024;
 export const CLOUDFLARE_MCP_MAX_RESPONSE_BYTES = 64 * 1024;
 export const CLOUDFLARE_MCP_MAX_NORMALIZED_CONTENT_BYTES = 48 * 1024;
 export const CLOUDFLARE_MCP_PROVIDER_TRUNCATION_MARKER = '--- TRUNCATED ---';
@@ -18,8 +18,7 @@ export const CLOUDFLARE_MCP_EXPECTED_TOOL_CONTRACT = [
   { name: 'execute', requiredInputProperties: ['code'], optionalInputProperties: ['account_id'] },
 ] as const;
 
-export type CloudflareMcpToolName = (typeof CLOUDFLARE_MCP_EXPECTED_TOOL_CONTRACT)[number]['name'];
-export type CloudflareMcpStatusClass = '2xx' | '3xx' | '4xx' | '5xx' | 'transport';
+type CloudflareMcpToolName = (typeof CLOUDFLARE_MCP_EXPECTED_TOOL_CONTRACT)[number]['name'];
 export type CloudflareMcpFailureCode =
   | 'aborted'
   | 'authentication_failed'
@@ -38,15 +37,9 @@ export interface CloudflareMcpAccessTokenResolution {
   forceRefresh?: boolean;
 }
 
-export interface CloudflareMcpCompatibilityMetric {
-  provider: 'cloudflare-official-mcp';
-  status: 'compatible' | 'incompatible';
-}
-
 export interface CloudflareMcpClientDependencies {
   resolveAccessToken(options?: CloudflareMcpAccessTokenResolution): Promise<string>;
   request?: typeof fetch;
-  recordCompatibilityMetric?(metric: CloudflareMcpCompatibilityMetric): void;
 }
 
 export interface CloudflareMcpIdentity {
@@ -96,39 +89,22 @@ export interface CloudflareMcpNormalizedContent {
   text: string;
 }
 
-export interface CloudflareMcpProviderMetadata {
-  provider: 'cloudflare-official-mcp';
-  endpoint: typeof CLOUDFLARE_MCP_ENDPOINT;
-  operation: 'discovery' | CloudflareMcpToolName;
-  invocationId: string;
-  userId: string;
-  connectionId: string;
-  connectionGeneration: number;
-  accountId: string;
+export interface CloudflareMcpMetadata {
   requestId: string | null;
   httpStatus: number | null;
-  statusClass: CloudflareMcpStatusClass;
   truncated: boolean;
-  providerTruncated: boolean;
-  clientTruncated: boolean;
-}
-
-export interface CloudflareMcpDiscoveryResult {
-  status: 'compatible';
-  tools: readonly CloudflareMcpToolName[];
-  metadata: CloudflareMcpProviderMetadata;
 }
 
 export interface CloudflareMcpSuccessOutcome {
   status: 'success';
   content: readonly CloudflareMcpNormalizedContent[];
-  metadata: CloudflareMcpProviderMetadata;
+  metadata: CloudflareMcpMetadata;
 }
 
 export interface CloudflareMcpInsufficientScopeOutcome {
   status: 'insufficient_scope';
   message: string;
-  metadata: CloudflareMcpProviderMetadata;
+  metadata: CloudflareMcpMetadata;
 }
 
 export interface CloudflareMcpFailureOutcome {
@@ -137,7 +113,7 @@ export interface CloudflareMcpFailureOutcome {
     code: CloudflareMcpFailureCode;
     message: string;
   };
-  metadata: CloudflareMcpProviderMetadata;
+  metadata: CloudflareMcpMetadata;
 }
 
 export interface CloudflareMcpIndeterminateOutcome {
@@ -145,9 +121,8 @@ export interface CloudflareMcpIndeterminateOutcome {
   error: {
     code: CloudflareMcpFailureCode;
     message: string;
-    reconcileBeforeRetry: true;
   };
-  metadata: CloudflareMcpProviderMetadata;
+  metadata: CloudflareMcpMetadata;
 }
 
 export type CloudflareMcpOutcome =
@@ -156,7 +131,7 @@ export type CloudflareMcpOutcome =
   | CloudflareMcpFailureOutcome
   | CloudflareMcpIndeterminateOutcome;
 
-export class CloudflareMcpError extends Error {
+class CloudflareMcpError extends Error {
   constructor(
     readonly code: CloudflareMcpFailureCode,
     message: string,
@@ -242,7 +217,6 @@ type RequestFailureReason =
 interface ExchangeMetadata {
   requestId: string | null;
   httpStatus: number | null;
-  statusClass: CloudflareMcpStatusClass;
 }
 
 interface HttpExchange extends ExchangeMetadata {
@@ -266,8 +240,7 @@ interface JsonRpcRequestDetails {
 
 interface NormalizedToolResult {
   content: readonly CloudflareMcpNormalizedContent[];
-  providerTruncated: boolean;
-  clientTruncated: boolean;
+  truncated: boolean;
 }
 
 interface AuthenticatedOperation<T> {
@@ -279,7 +252,6 @@ class CloudflareMcpRequestError extends CloudflareMcpError {
   readonly reason: RequestFailureReason;
   readonly requestId: string | null;
   readonly httpStatus: number | null;
-  readonly statusClass: CloudflareMcpStatusClass;
 
   constructor(details: RequestFailureDetails) {
     super(failureCode(details.reason), requestFailureMessage(details.reason));
@@ -288,7 +260,6 @@ class CloudflareMcpRequestError extends CloudflareMcpError {
     this.reason = details.reason;
     this.requestId = details.requestId;
     this.httpStatus = details.httpStatus;
-    this.statusClass = details.statusClass;
   }
 }
 
@@ -307,36 +278,10 @@ class CloudflareMcpInsufficientScopeError extends CloudflareMcpRequestError {
 export class CloudflareMcpClient {
   readonly #resolveAccessToken: CloudflareMcpClientDependencies['resolveAccessToken'];
   readonly #request: typeof fetch;
-  readonly #recordCompatibilityMetric: CloudflareMcpClientDependencies['recordCompatibilityMetric'];
 
   constructor(dependencies: CloudflareMcpClientDependencies) {
     this.#resolveAccessToken = dependencies.resolveAccessToken;
     this.#request = dependencies.request ?? fetch;
-    this.#recordCompatibilityMetric = dependencies.recordCompatibilityMetric;
-  }
-
-  async discover(context: CloudflareMcpOperationContext): Promise<CloudflareMcpDiscoveryResult> {
-    validateContext(context);
-    const overallSignal = AbortSignal.any([context.signal, AbortSignal.timeout(CLOUDFLARE_MCP_OVERALL_TIMEOUT_MS)]);
-    try {
-      return await this.#withFreshAccessToken(overallSignal, async (accessToken, signal) => {
-        const exchange = await discoverExpectedTools(this.#request, context, accessToken, signal);
-        this.#emitCompatibilityMetric('compatible');
-        return {
-          status: 'compatible',
-          tools: [...expectedToolNames],
-          metadata: providerMetadata(context, 'discovery', exchange, false, false),
-        };
-      });
-    } catch (cause) {
-      if (cause instanceof CloudflareMcpCompatibilityError) {
-        this.#emitCompatibilityMetric('incompatible');
-      }
-      if (cause instanceof CloudflareMcpError) {
-        throw cause;
-      }
-      throw new CloudflareMcpError('transport_failure', 'The official Cloudflare MCP discovery failed.');
-    }
   }
 
   async invoke(invocation: CloudflareMcpInvocation): Promise<CloudflareMcpOutcome> {
@@ -347,12 +292,10 @@ export class CloudflareMcpClient {
     try {
       return await this.#withFreshAccessToken(overallSignal, async (accessToken, signal) => {
         await discoverExpectedTools(this.#request, invocation, accessToken, signal);
-        this.#emitCompatibilityMetric('compatible');
         return callTool(this.#request, invocation, argumentsJson, accessToken, signal);
       });
     } catch (cause) {
       if (cause instanceof CloudflareMcpCompatibilityError) {
-        this.#emitCompatibilityMetric('incompatible');
         throw cause;
       }
       return failureOutcome(invocation, cause);
@@ -392,14 +335,6 @@ export class CloudflareMcpClient {
       authenticationRejection ??
       new CloudflareMcpError('authentication_failed', 'Cloudflare rejected the refreshed credential.')
     );
-  }
-
-  #emitCompatibilityMetric(status: CloudflareMcpCompatibilityMetric['status']): void {
-    try {
-      this.#recordCompatibilityMetric?.({ provider: 'cloudflare-official-mcp', status });
-    } catch {
-      // Metrics are intentionally coarse and best effort; observation cannot change the MCP result.
-    }
   }
 }
 
@@ -507,13 +442,7 @@ async function callTool(
     throw requestError('malformed_response', 'call', exchange);
   }
   const normalized = normalizeToolResult(parsedResult.data, accessToken);
-  const metadata = providerMetadata(
-    invocation,
-    invocation.toolName,
-    exchange,
-    normalized.providerTruncated,
-    normalized.clientTruncated,
-  );
+  const metadata = outcomeMetadata(exchange, normalized.truncated);
   if (parsedResult.data.isError) {
     const providerText = parsedResult.data.content.map((item) => item.text).join('\n');
     if (containsInsufficientScope(providerText)) {
@@ -535,7 +464,6 @@ async function postJsonRpc(request: typeof fetch, details: JsonRpcRequestDetails
       reason: 'request_too_large',
       requestId: null,
       httpStatus: null,
-      statusClass: 'transport',
     });
   }
   const phaseSignal = AbortSignal.any([details.signal, AbortSignal.timeout(details.timeoutMs)]);
@@ -568,7 +496,6 @@ async function postJsonRpc(request: typeof fetch, details: JsonRpcRequestDetails
       reason,
       requestId: null,
       httpStatus: null,
-      statusClass: 'transport',
     });
   }
   const exchange = exchangeMetadata(response);
@@ -786,7 +713,7 @@ function normalizeToolResult(result: z.infer<typeof callToolResultSchema>, acces
   const providerTruncated = redacted.includes(CLOUDFLARE_MCP_PROVIDER_TRUNCATION_MARKER);
   const encoded = textEncoder.encode(redacted);
   if (encoded.byteLength <= CLOUDFLARE_MCP_MAX_NORMALIZED_CONTENT_BYTES) {
-    return { content: [{ type: 'text', text: redacted }], providerTruncated, clientTruncated: false };
+    return { content: [{ type: 'text', text: redacted }], truncated: providerTruncated };
   }
   const suffix = providerTruncated
     ? `\n\n${CLOUDFLARE_MCP_PROVIDER_TRUNCATION_MARKER}`
@@ -794,7 +721,7 @@ function normalizeToolResult(result: z.infer<typeof callToolResultSchema>, acces
   const suffixBytes = textEncoder.encode(suffix).byteLength;
   const prefix = utf8Prefix(redacted, CLOUDFLARE_MCP_MAX_NORMALIZED_CONTENT_BYTES - suffixBytes);
   const text = prefix.includes(CLOUDFLARE_MCP_PROVIDER_TRUNCATION_MARKER) ? prefix : `${prefix}${suffix}`;
-  return { content: [{ type: 'text', text }], providerTruncated, clientTruncated: true };
+  return { content: [{ type: 'text', text }], truncated: true };
 }
 
 function redactBearerTokens(value: string, accessToken: string): string {
@@ -819,28 +746,11 @@ function containsInsufficientScope(value: string): boolean {
   return normalized.includes('insufficient_scope') || normalized.includes('insufficient scope');
 }
 
-function providerMetadata(
-  context: CloudflareMcpOperationContext,
-  operation: 'discovery' | CloudflareMcpToolName,
-  exchange: ExchangeMetadata,
-  providerTruncated: boolean,
-  clientTruncated: boolean,
-): CloudflareMcpProviderMetadata {
+function outcomeMetadata(exchange: ExchangeMetadata, truncated: boolean): CloudflareMcpMetadata {
   return {
-    provider: 'cloudflare-official-mcp',
-    endpoint: CLOUDFLARE_MCP_ENDPOINT,
-    operation,
-    invocationId: context.invocationId,
-    userId: context.userId,
-    connectionId: context.connectionId,
-    connectionGeneration: context.connectionGeneration,
-    accountId: context.accountId,
     requestId: exchange.requestId,
     httpStatus: exchange.httpStatus,
-    statusClass: exchange.statusClass,
-    truncated: providerTruncated || clientTruncated,
-    providerTruncated,
-    clientTruncated,
+    truncated,
   };
 }
 
@@ -849,24 +759,11 @@ function exchangeMetadata(response: Response): ExchangeMetadata {
     requestIdSchema.safeParse(response.headers.get('cf-ray')).data ??
     requestIdSchema.safeParse(response.headers.get('x-request-id')).data ??
     null;
-  return { requestId, httpStatus: response.status, statusClass: statusClass(response.status) };
+  return { requestId, httpStatus: response.status };
 }
 
 function emptyExchange(): ExchangeMetadata {
-  return { requestId: null, httpStatus: null, statusClass: 'transport' };
-}
-
-function statusClass(status: number): CloudflareMcpStatusClass {
-  if (status >= 200 && status < 300) {
-    return '2xx';
-  }
-  if (status >= 300 && status < 400) {
-    return '3xx';
-  }
-  if (status >= 400 && status < 500) {
-    return '4xx';
-  }
-  return '5xx';
+  return { requestId: null, httpStatus: null };
 }
 
 function requestError(
@@ -890,7 +787,7 @@ function failureOutcome(invocation: CloudflareMcpInvocation, cause: unknown): Cl
     ['aborted', 'malformed_response', 'provider_5xx', 'response_too_large', 'timeout', 'transport_failure'].includes(
       cause.reason,
     );
-  const metadata = providerMetadata(invocation, invocation.toolName, exchange, false, false);
+  const metadata = outcomeMetadata(exchange, false);
   if (ambiguousExecute) {
     return {
       status: 'indeterminate',
@@ -898,7 +795,6 @@ function failureOutcome(invocation: CloudflareMcpInvocation, cause: unknown): Cl
         code,
         message:
           'Cloudflare may have executed this operation, but Ghostbuild could not confirm the result. Reconcile with a read before retrying.',
-        reconcileBeforeRetry: true,
       },
       metadata,
     };
@@ -917,7 +813,7 @@ function insufficientScopeOutcome(
   return {
     status: 'insufficient_scope',
     message: 'Cloudflare denied this operation because the current grant has insufficient scope.',
-    metadata: providerMetadata(invocation, invocation.toolName, exchange, false, false),
+    metadata: outcomeMetadata(exchange, false),
   };
 }
 

@@ -12,15 +12,6 @@ function seededWorkspacePaths(): Set<string> {
 }
 
 describe('builder skills', () => {
-  it('catalogs the bundled skills using their own frontmatter', () => {
-    const { prompt } = createBuilderSkillContext();
-
-    expect(prompt).toContain('/__skills__/project-stack/SKILL.md — Project shape selection');
-    expect(prompt).toContain('/__skills__/frontend-design/SKILL.md — Visual design for new or reworked UI');
-    expect(prompt).toContain('/__skills__/react-start/SKILL.md — React bindings for TanStack Start');
-    expect(prompt).toContain('never fetch llms.txt or llms-full.txt');
-  });
-
   it('serves the bundled skills through the read tool namespace', async () => {
     const { reader } = createBuilderSkillContext();
 
@@ -53,12 +44,6 @@ describe('builder skills', () => {
     await expect(reader.read('/__skills__/nothing/SKILL.md')).resolves.toBeNull();
     // The overlay is not a traversal into the project workspace.
     await expect(reader.read('/__skills__/../home/project/package.json')).resolves.toBeNull();
-  });
-
-  it('recognises the overlay namespace and nothing outside it', () => {
-    expect(isBuilderSkillPath('/__skills__')).toBe(true);
-    expect(isBuilderSkillPath('/__skills__/frontend-design/SKILL.md')).toBe(true);
-    expect(isBuilderSkillPath('/home/project/__skills__/SKILL.md')).toBe(false);
   });
 
   // Regression for #125: the catalog once advertised /home/project/node_modules/..., which a

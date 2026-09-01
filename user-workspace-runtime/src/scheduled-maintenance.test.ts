@@ -30,9 +30,7 @@ describe('user workspace runtime scheduled maintenance', () => {
     const waitUntil = vi.fn();
     const env = maintenanceEnv();
 
-    expect(scheduleUserWorkspaceRuntimeMaintenance({ cron: USER_WORKSPACE_RUNTIME_GC_CRON }, env, { waitUntil })).toBe(
-      true,
-    );
+    scheduleUserWorkspaceRuntimeMaintenance({ cron: USER_WORKSPACE_RUNTIME_GC_CRON }, env, { waitUntil });
 
     for (const job of MAINTENANCE_JOBS) {
       expect(job).toHaveBeenCalledOnce();
@@ -45,7 +43,7 @@ describe('user workspace runtime scheduled maintenance', () => {
   it('ignores an unprovisioned trigger', () => {
     const waitUntil = vi.fn();
 
-    expect(scheduleUserWorkspaceRuntimeMaintenance({ cron: '0 0 * * *' }, maintenanceEnv(), { waitUntil })).toBe(false);
+    scheduleUserWorkspaceRuntimeMaintenance({ cron: '0 0 * * *' }, maintenanceEnv(), { waitUntil });
 
     for (const job of MAINTENANCE_JOBS) {
       expect(job).not.toHaveBeenCalled();

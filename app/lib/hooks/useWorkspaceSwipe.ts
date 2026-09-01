@@ -77,7 +77,7 @@ export function useWorkspaceSwipe(enabled: boolean) {
   return { onClickCapture, onPointerCancel, onPointerDown, onPointerUp: finishSwipe };
 }
 
-export function resolveWorkspaceSwipe({
+function resolveWorkspaceSwipe({
   surface,
   deltaX,
   deltaY,

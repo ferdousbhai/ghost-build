@@ -104,16 +104,6 @@ describe('WorkspaceOperationLane', () => {
     });
   });
 
-  it('reports work in flight to a control plane, and reports nothing once the lease is reclaimable', () => {
-    const lane = createLane();
-    lane.acquire(operation('exec', 'tool-a', 100, 10 * 60_000));
-
-    expect(lane.activeLease(200)).toEqual({ kind: 'exec', deadline: 100 + 10 * 60_000 });
-    expect(lane.activeLease(100 + 10 * 60_000)).toBeNull();
-    lane.release(lane.find('tool-a', 'owner-exec-tool-a')!);
-    expect(lane.activeLease(200)).toBeNull();
-  });
-
   it('lets an interrupted operation re-enter its own lane to adopt the effect it already started', () => {
     const lane = createLane();
     lane.acquire(operation('exec', 'tool-a', 100, 10 * 60_000));

@@ -20,7 +20,8 @@ Lower layers receive narrow capabilities instead of importing application-wide s
 
 Ghostbuild is a control plane, not the host for customer projects. Its Worker and D1 retain identity, encrypted
 Cloudflare authorization, authentication state, connection metadata, runtime locators, and privacy-filtered operational
-events. The root deployment has no Container, application Durable Object, or Workflow binding.
+events. The root deployment has no Container or application Durable Object binding. Its one Workflow binding durably
+provisions user-owned workspace runtimes without holding the browser's runtime-session request open.
 
 It holds exactly one R2 bucket, and only for a build artifact Ghostbuild itself publishes: the OCI blobs of the user
 workspace container image. Cloudflare's registry is account-scoped — repository names are `<account_id>/<image>`,
@@ -28,11 +29,13 @@ anonymous reads are refused on every path, and there is no shared namespace or s
 to be pushed into each user's own registry by a client, and that client needs somewhere to read the bytes from. No
 customer project data enters this bucket, and nothing in it is user-specific.
 
-Connecting Cloudflare provisions a workspace Worker, D1 database, `BuilderAgent` Durable Objects, and a
-`ProjectWorkspace` Durable Object backed by a Cloudflare Container in that user's account. The browser receives a
-short-lived, origin-bound capability and communicates directly with that Worker for chat, project, preview, and
-deployment operations. Generated-application D1 and R2 resources are created later only when the validated deployment
-plan requires them. Cloudflare meters those resources to the user's account.
+Opening a project after Cloudflare is connected queues a durable control-plane Workflow that provisions a workspace Worker, D1 database,
+`BuilderAgent` Durable Objects, and a `ProjectWorkspace` Durable Object backed by a Cloudflare Container in that user's
+account. Runtime-session requests return `workspace_preparing` while that Workflow runs, and the browser polls with
+bounded backoff instead of holding the provisioning request open. Once ready, the browser receives a short-lived,
+origin-bound capability and communicates directly with that Worker for chat, project, preview, and deployment
+operations. Generated-application D1 and R2 resources are created later only when the validated deployment plan
+requires them. Cloudflare meters those resources to the user's account.
 
 ## State Ownership
 

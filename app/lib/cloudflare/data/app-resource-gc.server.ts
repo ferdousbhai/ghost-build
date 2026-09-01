@@ -57,7 +57,7 @@ export async function sweepAppResourceGcCandidates(
     | 'CLOUDFLARE_ACCOUNT_ID'
   >,
   options: { limit?: number; now?: number; accountApi?: AppResourceCleanupApi } = {},
-): Promise<number> {
+): Promise<void> {
   const limit = Math.max(1, Math.min(options.limit ?? APP_RESOURCE_GC_SWEEP_LIMIT, APP_RESOURCE_GC_SWEEP_LIMIT));
   const now = options.now ?? Date.now();
   const result = await env.DB.prepare(
@@ -71,15 +71,13 @@ export async function sweepAppResourceGcCandidates(
     .bind(now, limit)
     .all<AppResourceGcCandidateRow>();
   if (result.results.length === 0) {
-    return 0;
+    return;
   }
 
   const accountApi = options.accountApi ?? (await createUserAccountApi(env, fetch));
-  let completed = 0;
   for (const candidate of result.results) {
-    completed += await cleanupCandidate(env.DB, accountApi, candidate, now);
+    await cleanupCandidate(env.DB, accountApi, candidate, now);
   }
-  return completed;
 }
 
 export async function sweepAppResourceGcCandidatesBestEffort(
@@ -107,7 +105,7 @@ async function cleanupCandidate(
   accountApi: AppResourceCleanupApi,
   candidate: AppResourceGcCandidateRow,
   now: number,
-): Promise<number> {
+): Promise<void> {
   try {
     const [plans, resources] = await Promise.all([
       db
@@ -135,41 +133,34 @@ async function cleanupCandidate(
     }
 
     for (const row of plans.results) {
-      // What was provisioned is recorded durably; the plan is only a fallback for
-      // deployments that predate that record.
       const owned = recorded.get(row.id);
       if (owned && owned.length > 0) {
         if (!(await cleanupRecordedResources(accountApi, owned))) {
           await rescheduleCandidate(db, candidate, now, false);
-          return 0;
+          return;
         }
         continue;
       }
       const plan = parsePlanForCleanup(row.plan_json);
       if (!plan) {
-        // A plan this build cannot parse will never become parseable, so retrying
-        // would stall the candidate forever and block the deployments behind it.
-        // Leave the provider resources for the reconciliation sweep to report.
         logger.warn('Skipped a deployment whose stored plan this build cannot parse');
         continue;
       }
       if (!(await cleanupDeploymentPlan(accountApi, plan))) {
         await rescheduleCandidate(db, candidate, now, false);
-        return 0;
+        return;
       }
     }
-    const result = await db
+    await db
       .prepare(
         `DELETE FROM app_resource_gc_candidates
          WHERE chat_id = ? AND not_before = ?`,
       )
       .bind(candidate.chat_id, candidate.not_before)
       .run();
-    return result.meta.changes > 0 ? 1 : 0;
   } catch {
     await rescheduleCandidate(db, candidate, now, true);
     logger.warn('Unable to remove deferred app Cloudflare resources');
-    return 0;
   }
 }
 
@@ -202,7 +193,6 @@ async function cleanupRecordedResources(
   return drained;
 }
 
-/** Parse a stored plan, or null when this build's schema no longer accepts it. */
 function parsePlanForCleanup(planJson: string): ReturnType<typeof parseDeploymentPlanJson> | null {
   try {
     return parseDeploymentPlanJson(planJson);
@@ -211,6 +201,7 @@ function parsePlanForCleanup(planJson: string): ReturnType<typeof parseDeploymen
   }
 }
 
+/** Clean up resources created before their provider ids could be recorded durably. */
 async function cleanupDeploymentPlan(
   accountApi: AppResourceCleanupApi,
   plan: ReturnType<typeof parseDeploymentPlanJson>,

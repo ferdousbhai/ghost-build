@@ -5,6 +5,7 @@ Cloudflare control plane, builder agent, user-owned workspace runtime, and gener
 ## Code index
 
 - `app/server.ts` — control-plane Worker dispatch and scheduled maintenance
+- `app/workflows/user-workspace-runtime-provisioning.ts` — durable background provisioning of user workspace runtimes
 - `app/agents/builder-agent.ts` — builder lifecycle and recovery
 - `app/lib/.server/chat.ts` and `app/lib/.server/llm/` — model and tool orchestration
 - `app/components/chat/Chat.tsx` — chat surface
@@ -12,7 +13,7 @@ Cloudflare control plane, builder agent, user-owned workspace runtime, and gener
 - `app/lib/cloudflare/data.server.ts`, `app/lib/cloudflare/data/`, and `app/lib/cloudflare/data-api.ts` — authenticated persistence boundary
 - `app/agents/builder-deployment-command.ts` — exact-revision deployment command
 - `app/lib/.server/cloudflare/user-workspace-deployment-executor.ts` — user-owned deployment execution
-- `app/lib/.server/cloudflare/deployment-security-baseline.ts` and `app/lib/.server/cloudflare/deployment-security-inventory.ts` — deployment attestation
+- `app/lib/.server/cloudflare/deployment-config.ts` — trusted generated-app deployment configuration
 - `ghostbuild-agent/` — shared prompts, protocol types, parsers, and tool schemas
 - `user-workspace-runtime/src/index.ts` and `user-workspace-runtime/src/protocol.ts` — project storage, previews, validation, deployment, and browser protocol
 - `template/` — generated application source and security migrations

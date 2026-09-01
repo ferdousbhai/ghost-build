@@ -1,31 +1,8 @@
 import { describe, expect, test, vi } from 'vitest';
 import type { Usage } from '@earendil-works/pi-ai';
-import {
-  recordFirstWorkersAiResponse,
-  recordWorkersAiFinish,
-  workersAiPromptCacheTelemetry,
-} from './workers-ai-telemetry';
+import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
 
 describe('Workers AI prompt-cache telemetry', () => {
-  test('distinguishes cache hits and misses', () => {
-    expect(workersAiPromptCacheTelemetry(usage({ cacheRead: 800 }), 1_000)).toEqual({
-      attempted: true,
-      status: 'hit',
-      cachedInputTokens: 800,
-    });
-    expect(workersAiPromptCacheTelemetry(usage({ cacheRead: 0 }), 1_000)).toMatchObject({
-      status: 'miss',
-      cachedInputTokens: 0,
-    });
-  });
-
-  test('clamps cache reads to normalized input usage', () => {
-    expect(workersAiPromptCacheTelemetry(usage({ cacheRead: 120 }), 0)).toMatchObject({
-      status: 'miss',
-      cachedInputTokens: 0,
-    });
-  });
-
   test('records the native Pi usage produced by the agent loop', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     recordWorkersAiFinish({

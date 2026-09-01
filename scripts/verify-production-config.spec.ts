@@ -258,6 +258,7 @@ overrides:
   'brace-expansion@>=2.0.0 <2.1.4': '2.1.4'
   'brace-expansion@>=4.0.0 <5.0.9': '5.0.9'
   '@hono/node-server@<2.0.10': '2.0.10'
+  'browserslist@<=4.28.6': '4.28.8'
   'fast-uri@>=3.0.0 <3.1.5': '3.1.5'
   'hono@<4.12.34': '4.12.34'
   'ip-address@<=10.3.0': '10.3.1'
@@ -282,6 +283,7 @@ overrides:
         'pnpm-workspace.yaml overrides must pin brace-expansion@>=2.0.0 <2.1.4 to 2.1.4.',
         'pnpm-workspace.yaml overrides must pin brace-expansion@>=4.0.0 <5.0.9 to 5.0.9.',
         'pnpm-workspace.yaml overrides must pin @hono/node-server@<2.0.10 to 2.0.10.',
+        'pnpm-workspace.yaml overrides must pin browserslist@<=4.28.6 to 4.28.8.',
         'pnpm-workspace.yaml overrides must pin fast-uri@>=3.0.0 <3.1.5 to 3.1.5.',
         'pnpm-workspace.yaml overrides must pin hono@<4.12.34 to 4.12.34.',
         'pnpm-workspace.yaml overrides must pin ip-address@<=10.3.0 to 10.3.1.',

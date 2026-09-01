@@ -93,17 +93,3 @@ export type BuilderPreviewSuccess = {
 };
 
 export const USER_WORKSPACE_RUNTIME_SERVICE = 'ghostbuild-user-workspace-runtime';
-
-export const USER_WORKSPACE_READINESS_COMPONENTS = [
-  'runtime',
-  'database',
-  'projectWorkspaceRpc',
-  'durableVfs',
-  'container',
-  'fuse',
-  'sync',
-  'cleanup',
-] as const;
-
-export type UserWorkspaceReadinessComponent = (typeof USER_WORKSPACE_READINESS_COMPONENTS)[number];
-export type UserWorkspaceReadinessCheck = { ok: boolean; code: string; durationMs: number };

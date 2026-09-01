@@ -22,12 +22,6 @@ describe('injectTurnContext', () => {
     expect(messages[0].parts).toEqual([{ type: 'text', text: 'Build it' }]);
   });
 
-  test('returns the original messages when no context is present', () => {
-    const messages: GhostbuildMessage[] = [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'Build it' }] }];
-
-    expect(injectTurnContext(messages, { version: 1, content: '' })).toBe(messages);
-  });
-
   test('rejects an oversized client context payload', () => {
     expect(
       chatTurnContextSchema.safeParse({

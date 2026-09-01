@@ -193,7 +193,7 @@ function renderMarkdown(status, results) {
     '| --- | --- | --- | --- | --- |',
     rows,
     '',
-    '- Sandbox image: `app/lib/.server/cloudflare/user-workspace-runtime-provisioner.ts`',
+    '- Sandbox image: `app/workflows/user-workspace-runtime-provisioning.ts`',
     '- computerd layer: `user-workspace-runtime/src/container-toolchain.ts`',
     '',
     'Keep the immutable digest pin, then run `pnpm run validate`.',
@@ -206,7 +206,7 @@ async function main() {
   try {
     const [packageJson, provisionerSource, toolchainSource] = await Promise.all([
       readFile(new URL('../package.json', import.meta.url), 'utf8'),
-      readFile(new URL('../app/lib/.server/cloudflare/user-workspace-runtime-provisioner.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../app/workflows/user-workspace-runtime-provisioning.ts', import.meta.url), 'utf8'),
       readFile(new URL('../user-workspace-runtime/src/container-toolchain.ts', import.meta.url), 'utf8'),
     ]);
     result = await checkRuntimeArtifacts(parseRuntimeArtifactPins({ packageJson, provisionerSource, toolchainSource }));

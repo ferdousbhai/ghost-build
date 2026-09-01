@@ -302,7 +302,7 @@ export function verifyStackAlignment() {
     ...findSandboxRuntimePinErrors(
       rootPackage.dependencies?.['@cloudflare/sandbox'],
       sandboxPackage.version,
-      readFileSync(resolve(rootDir, 'app/lib/.server/cloudflare/user-workspace-runtime-provisioner.ts'), 'utf8'),
+      readFileSync(resolve(rootDir, 'app/workflows/user-workspace-runtime-provisioning.ts'), 'utf8'),
     ),
   );
 

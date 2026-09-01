@@ -1,9 +1,8 @@
 /** @vitest-environment jsdom */
 
 import { describe, expect, it } from 'vitest';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { createMemoryHistory, createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
-import { ChatIdProvider, chatUrlMask, maskedChatNavigation, useChatId } from './chatId';
+import { chatUrlMask, maskedChatNavigation } from './chatId';
 
 describe('chat URL lifecycle', () => {
   it('builds a reload-safe mask for the resumable chat URL', () => {
@@ -12,20 +11,6 @@ describe('chat URL lifecycle', () => {
       params: { id: 'initial-chat-id' },
       unmaskOnReload: true,
     });
-  });
-
-  it('scopes immutable chat identity to its route subtree', () => {
-    function Consumer() {
-      return <span>{useChatId()}</span>;
-    }
-
-    expect(
-      renderToStaticMarkup(
-        <ChatIdProvider chatId="initial-chat-id">
-          <Consumer />
-        </ChatIdProvider>,
-      ),
-    ).toContain('initial-chat-id');
   });
 
   it('publishes a masked chat URL while keeping the live homepage route active', async () => {

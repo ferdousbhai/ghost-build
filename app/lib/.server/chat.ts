@@ -4,7 +4,7 @@ import { createPiStreamResponse } from './llm/pi-stream';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import { ContextCompactionUnavailableError, ModelInputBudgetExceededError } from './llm/model-input';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
-import type { WorkersAiAccountCredentials } from './llm/provider';
+import type { WorkersAiAccountCredentials } from './llm/pi-ai-models';
 import type { ContextCompaction } from './llm/context-compaction';
 import type { BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';

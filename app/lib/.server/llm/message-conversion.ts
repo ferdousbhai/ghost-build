@@ -18,18 +18,10 @@ export type ModelToolResultPart = {
   output: ModelToolOutput;
 };
 
-/** Approval decisions the chat UI records alongside a tool result; carried through, never sent to the model. */
-export type ModelToolApprovalResponsePart = {
-  type: 'tool-approval-response';
-  approvalId: string;
-  approved: boolean;
-  reason?: string;
-};
-
 export type ModelMessage =
   | { role: 'user' | 'system'; content: string }
   | { role: 'assistant'; content: (ModelTextPart | ModelToolCallPart)[] }
-  | { role: 'tool'; content: (ModelToolResultPart | ModelToolApprovalResponsePart)[] };
+  | { role: 'tool'; content: ModelToolResultPart[] };
 
 /** Convert the authoritative UI transcript into the text/tool protocol consumed by Pi. */
 export function cleanupAssistantMessages(messages: GhostbuildMessage[]): ModelMessage[] {

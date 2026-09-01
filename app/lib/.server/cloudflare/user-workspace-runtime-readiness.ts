@@ -1,209 +1,35 @@
 import { readJsonBodyWithLimit } from '~/lib/bounded-body';
-import {
-  USER_WORKSPACE_READINESS_COMPONENTS,
-  type UserWorkspaceReadinessComponent,
-} from '@ghostbuild/user-workspace-runtime/protocol';
-import { parseUserWorkspaceRuntimeReadiness } from './user-workspace-runtime-health';
+import { USER_WORKSPACE_RUNTIME_SERVICE } from '@ghostbuild/user-workspace-runtime/protocol';
+import { z } from 'zod';
 
-const READINESS_DEADLINE_MS = 10 * 60_000;
-const READINESS_REQUEST_TIMEOUT_MS = 8 * 60_000;
-// The deadline is meant to be the real bound. With the 5s backoff cap, 30 attempts exhaust in
-// roughly two and a half minutes — far short of the ten-minute deadline — which cut short the one
-// slow step provisioning has: the first container an account ever creates has to pull the ~400 MB
-// workspace image and cold-start before `/v1/readiness` reports `container` healthy, and that can
-// take longer than two and a half minutes. Provisioning then marked the runtime failed while the
-// container was still coming up. The cap now sits above what the deadline can consume (~120 polls
-// at the 5s floor), so the deadline governs and a cold first start is given its full budget.
-const READINESS_MAX_ATTEMPTS = 200;
-const READINESS_INITIAL_BACKOFF_MS = 500;
-const READINESS_MAX_BACKOFF_MS = 5_000;
-const MAX_HEALTH_RESPONSE_BYTES = 4 * 1024;
-const ACTIONABLE_FAILURE_CODES = new Set([
-  'cleanup_failed',
-  'invalid_version',
-  'query_failed',
-  'rpc_failed',
-  'unavailable',
-  'workspace_sync_pending',
-]);
+const MAX_HEALTH_RESPONSE_BYTES = 1_024;
+const readinessResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    service: z.literal(USER_WORKSPACE_RUNTIME_SERVICE),
+    runtimeVersion: z.string(),
+  })
+  .strict();
 
-type ReadinessFailure = {
-  component: UserWorkspaceReadinessComponent;
-  code: string;
-};
-
-type ReadinessDependencies = {
+/** One readiness attempt; the surrounding Workflow step supplies durable retries. */
+export async function waitForUserWorkspaceRuntimeReadiness(args: {
+  endpoint: string;
+  controlPlaneSecret: string;
+  runtimeVersion: string;
   request?: typeof fetch;
-  now?: () => number;
-  sleep?: (milliseconds: number) => Promise<void>;
-  random?: () => number;
-  deadlineMs?: number;
-  requestTimeoutMs?: number;
-};
-
-export async function waitForUserWorkspaceRuntimeReadiness(
-  args: {
-    endpoint: string;
-    controlPlaneSecret: string;
-    runtimeVersion: string;
-  } & ReadinessDependencies,
-): Promise<void> {
-  const healthUrl = runtimeHealthUrl(args.endpoint);
-  if (args.controlPlaneSecret.length < 32 || !/^[a-f0-9]{64}$/.test(args.runtimeVersion)) {
-    throw new UserWorkspaceRuntimeReadinessError('The workspace runtime health-check identity is invalid.');
-  }
-  const request = args.request ?? fetch;
-  const now = args.now ?? Date.now;
-  const sleep = args.sleep ?? ((milliseconds: number) => scheduler.wait(milliseconds));
-  const random = args.random ?? Math.random;
-  const deadlineMs = requirePositiveDuration(args.deadlineMs ?? READINESS_DEADLINE_MS, 'readiness deadline');
-  const requestTimeoutMs = requirePositiveDuration(
-    args.requestTimeoutMs ?? READINESS_REQUEST_TIMEOUT_MS,
-    'readiness request timeout',
-  );
-  const deadline = now() + deadlineMs;
-  let lastReadinessFailures: ReadinessFailure[] = [];
-
-  for (let attempt = 1; attempt <= READINESS_MAX_ATTEMPTS; attempt += 1) {
-    const remainingBeforeRequest = deadline - now();
-    if (remainingBeforeRequest <= 0) {
-      break;
-    }
-    let retryAfterMs = 0;
-    try {
-      const response = await request(healthUrl, {
-        headers: { authorization: `Bearer ${args.controlPlaneSecret}` },
-        signal: AbortSignal.timeout(Math.max(1, Math.min(requestTimeoutMs, remainingBeforeRequest))),
-      });
-      if (!response.ok) {
-        retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'), now());
-        if (!isTransientReadinessStatus(response.status)) {
-          await response.body?.cancel().catch(() => undefined);
-          throw new UserWorkspaceRuntimeReadinessError(
-            `The user-owned workspace runtime rejected its health check (HTTP ${response.status}).`,
-          );
-        }
-        const health = await readTransientReadiness(response);
-        if (health?.runtimeVersion === args.runtimeVersion) {
-          lastReadinessFailures = actionableReadinessFailures(health);
-        }
-      } else {
-        const payload = await readJsonBodyWithLimit(response, MAX_HEALTH_RESPONSE_BYTES, 'Workspace runtime health');
-        const health = parseUserWorkspaceRuntimeReadiness(payload);
-        if (health.ok && health.runtimeVersion === args.runtimeVersion) {
-          return;
-        }
-        // A well-formed response from the previous source digest can be served
-        // briefly while the new 100%-traffic deployment propagates.
-      }
-    } catch (error) {
-      if (error instanceof UserWorkspaceRuntimeReadinessError) {
-        throw error;
-      }
-      if (!isTransientFetchFailure(error)) {
-        throw new UserWorkspaceRuntimeReadinessError(
-          'The user-owned workspace runtime returned an invalid health response.',
-          { cause: error },
-        );
-      }
-    }
-
-    if (attempt === READINESS_MAX_ATTEMPTS) {
-      break;
-    }
-    const remainingBeforeBackoff = deadline - now();
-    if (remainingBeforeBackoff <= 0) {
-      break;
-    }
-    const backoffMs = exponentialBackoffWithJitter(attempt, random);
-    await sleep(Math.min(remainingBeforeBackoff, Math.max(backoffMs, retryAfterMs)));
-  }
-
-  throw new UserWorkspaceRuntimeReadinessError(
-    `The user-owned workspace runtime was not ready before the health-check deadline.${formatReadinessFailures(lastReadinessFailures)}`,
-  );
-}
-
-export class UserWorkspaceRuntimeReadinessError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'UserWorkspaceRuntimeReadinessError';
-  }
-}
-
-function runtimeHealthUrl(endpoint: string): string {
-  let url: URL;
-  try {
-    url = new URL('/v1/readiness', endpoint.endsWith('/') ? endpoint : `${endpoint}/`);
-  } catch {
-    throw new UserWorkspaceRuntimeReadinessError('The workspace runtime endpoint is invalid.');
-  }
-  if (url.protocol !== 'https:' || url.username || url.password) {
-    throw new UserWorkspaceRuntimeReadinessError('The workspace runtime endpoint is invalid.');
-  }
-  return url.toString();
-}
-
-function isTransientReadinessStatus(status: number): boolean {
-  return status === 404 || status === 408 || status === 425 || status === 429 || (status >= 500 && status <= 599);
-}
-
-function isTransientFetchFailure(error: unknown): boolean {
-  return (
-    error instanceof TypeError ||
-    (error instanceof DOMException && ['AbortError', 'NetworkError', 'TimeoutError'].includes(error.name))
-  );
-}
-
-async function readTransientReadiness(response: Response) {
-  try {
-    const payload = await readJsonBodyWithLimit(response, MAX_HEALTH_RESPONSE_BYTES, 'Workspace runtime health');
-    return parseUserWorkspaceRuntimeReadiness(payload);
-  } catch {
-    await response.body?.cancel().catch(() => undefined);
-    return null;
-  }
-}
-
-function actionableReadinessFailures(
-  health: ReturnType<typeof parseUserWorkspaceRuntimeReadiness>,
-): ReadinessFailure[] {
-  return USER_WORKSPACE_READINESS_COMPONENTS.flatMap((component) => {
-    const result = health.components[component];
-    return !result.ok && ACTIONABLE_FAILURE_CODES.has(result.code) ? [{ component, code: result.code }] : [];
+}): Promise<void> {
+  const response = await (args.request ?? fetch)(new URL('/v1/readiness', args.endpoint), {
+    headers: { authorization: `Bearer ${args.controlPlaneSecret}` },
+    signal: AbortSignal.timeout(8 * 60_000),
   });
-}
-
-function formatReadinessFailures(failures: ReadinessFailure[]): string {
-  if (failures.length === 0) {
-    return '';
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`The user-owned workspace runtime is not ready (HTTP ${response.status}).`);
   }
-  return ` Readiness checks still failing: ${failures
-    .map(({ component, code }) => `${component} (${code})`)
-    .join(', ')}.`;
-}
-
-function exponentialBackoffWithJitter(attempt: number, random: () => number): number {
-  const ceiling = Math.min(READINESS_INITIAL_BACKOFF_MS * 2 ** (attempt - 1), READINESS_MAX_BACKOFF_MS);
-  const sample = Math.min(1, Math.max(0, random()));
-  return Math.ceil(ceiling * 0.75 + ceiling * 0.25 * sample);
-}
-
-function parseRetryAfterMs(value: string | null, now: number): number {
-  if (!value) {
-    return 0;
+  const payload = readinessResponseSchema.safeParse(
+    await readJsonBodyWithLimit(response, MAX_HEALTH_RESPONSE_BYTES, 'Workspace runtime health'),
+  );
+  if (!payload.success || payload.data.runtimeVersion !== args.runtimeVersion) {
+    throw new Error('The user-owned workspace runtime returned an invalid health response.');
   }
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return Math.ceil(seconds * 1_000);
-  }
-  const retryAt = Date.parse(value);
-  return Number.isFinite(retryAt) ? Math.max(0, retryAt - now) : 0;
-}
-
-function requirePositiveDuration(value: number, label: string): number {
-  if (!Number.isSafeInteger(value) || value < 1 || value > 10 * 60_000) {
-    throw new UserWorkspaceRuntimeReadinessError(`The ${label} is invalid.`);
-  }
-  return value;
 }

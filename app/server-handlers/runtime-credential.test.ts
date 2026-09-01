@@ -36,7 +36,6 @@ const connection = {
   grantedOAuthScopes: [],
   oauthScopeProfileVersion: null,
   oauthScopeGrantStatus: 'unknown',
-  oauthGrantUpdatedAt: null,
   aiBillingEnabled: true,
   connectedAt: 1,
   generation: 3,

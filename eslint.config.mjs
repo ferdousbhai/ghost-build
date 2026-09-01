@@ -172,7 +172,7 @@ export default [
     },
   },
   {
-    files: ['app/lib/.server/llm/provider.ts', 'app/lib/.server/chat.ts'],
+    files: ['app/lib/.server/chat.ts'],
     plugins: {
       custom: {
         rules: {

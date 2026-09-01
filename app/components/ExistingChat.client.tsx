@@ -10,7 +10,11 @@ import { CloudflareSignInPrompt } from '~/components/CloudflareSignInPrompt';
 import { Button } from '@ui/Button';
 import { LinkButton } from '~/components/ui/LinkButton';
 import { useStore } from '@nanostores/react';
-import { userWorkspacePreparingStore } from '~/lib/cloudflare/runtime-session';
+import {
+  getUserRuntimeSession,
+  UserRuntimeSessionError,
+  userWorkspacePreparingStore,
+} from '~/lib/cloudflare/runtime-session';
 import { isWorkspacePreparingError } from '~/lib/cloudflare/client';
 import { WORKSPACE_PREPARING_MESSAGE, WorkspacePreparingPanel } from '~/components/WorkspacePreparing';
 
@@ -32,7 +36,7 @@ function ExistingChatWrapper({ chatId }: { chatId: string }) {
   return <ExistingChatSessionView chatId={chatId} userId={userId} />;
 }
 
-export function ExistingChatSessionView({ chatId, userId }: { chatId: string; userId: string | null | undefined }) {
+function ExistingChatSessionView({ chatId, userId }: { chatId: string; userId: string | null | undefined }) {
   if (userId === undefined) {
     return <Loading message="Checking your Cloudflare session…" />;
   }
@@ -99,10 +103,17 @@ function ProjectLoading() {
 
 export function ProjectLoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   const message = error instanceof Error ? error.message : 'The project data could not be loaded.';
+  const retry = () => {
+    if (error instanceof UserRuntimeSessionError) {
+      void getUserRuntimeSession({ retryProvisioning: true }).then(onRetry, onRetry);
+      return;
+    }
+    onRetry();
+  };
   if (isWorkspacePreparingError(error)) {
     return (
       <div className="flex h-full items-center justify-center p-5">
-        <WorkspacePreparingPanel onKeepWaiting={onRetry} />
+        <WorkspacePreparingPanel onKeepWaiting={retry} />
       </div>
     );
   }
@@ -116,7 +127,7 @@ export function ProjectLoadError({ error, onRetry }: { error: unknown; onRetry: 
         <p className="mx-auto mt-4 max-w-md break-words text-content-secondary" role="alert">
           {message}
         </p>
-        <Button className="mt-6" onClick={onRetry}>
+        <Button className="mt-6" onClick={retry}>
           Try again
         </Button>
       </section>

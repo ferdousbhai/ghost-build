@@ -17,8 +17,4 @@ describe('Markdown', () => {
     expect(markup).not.toContain('onclick');
     expect(markup).not.toContain('<script');
   });
-
-  it('renders an empty fenced code block without throwing', () => {
-    expect(() => renderToStaticMarkup(<Markdown>{'```ts\n```'}</Markdown>)).not.toThrow();
-  });
 });

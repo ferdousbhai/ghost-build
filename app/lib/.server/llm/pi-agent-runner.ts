@@ -45,7 +45,7 @@ import {
 import { modelMessagesToPi } from './pi-message-conversion';
 import { recordPiStage, recordPiTurnBudget } from './pi-telemetry';
 import { createToolTimeAccounting } from './tool-time-accounting';
-import { getPiProvider, type WorkersAiAccountCredentials } from './provider';
+import { getPiModel, type WorkersAiAccountCredentials } from './pi-ai-models';
 import { appendDeterministicCompletion, normalizeTextPartBoundaries } from './workers-ai-stream';
 import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
 import { getValidatedBuildCompletion } from './workers-ai-tools';
@@ -128,7 +128,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   logger.debug('Starting Pi agent runner');
   const startedAt = Date.now();
   const modelId = model.id;
-  const piProvider = getPiProvider(accountCredentials, modelId, { model, sessionAffinity });
+  const handle = getPiModel(accountCredentials, modelId, { model, sessionAffinity });
   // Real signals, so an in-flight model stream is bounded too — not just the gaps between turns.
   const wallClockSignal = AbortSignal.timeout(BUILDER_TURN_WALL_CLOCK_MS);
   const inactivityController = new AbortController();
@@ -148,7 +148,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     const reason = error instanceof BuilderTurnBudgetExceededError ? undefined : exhaustedBudgetReason();
     return reason ? new BuilderTurnBudgetExceededError(reason) : error;
   };
-  const compactionPolicy = modelCompactionPolicy(piProvider.handle.model.contextWindow);
+  const compactionPolicy = modelCompactionPolicy(handle.model.contextWindow);
   const { skillContext, piTools } = await withPreparationStage('tool_setup', async () => {
     const skillContext = createBuilderSkillContext();
     return {
@@ -188,7 +188,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       summarize: compaction.summarize,
       scheduleCompaction: compaction.schedule,
       signal: loopSignal,
-      contextWindow: piProvider.handle.model.contextWindow,
+      contextWindow: handle.model.contextWindow,
       systemPrompt: instructions,
       tools: piToolsToList(piTools),
       logger,
@@ -418,7 +418,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     try {
       recordPiStage('loop_start', modelId);
       const loopConfig: AgentLoopConfig & { toolChoice: 'auto' } = {
-        model: piProvider.handle.model,
+        model: handle.model,
         // SAFETY: every message in this loop's context originates from `modelMessagesToPi`, the Pi
         // tool adapter, or the Pi stream itself, so the context never holds a custom agent message.
         convertToLlm: (agentMessages) => agentMessages as Message[],
@@ -449,7 +449,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
           (currentValidatedBuildCompletion !== undefined && !steering.hasPending()),
         afterToolCall: async ({ result, isError }) =>
           !isError && !toolResultSucceeded(result.details) ? { isError: true } : undefined,
-        maxTokens: piProvider.maxTokens,
+        maxTokens: handle.model.maxTokens,
         toolChoice: 'auto',
       };
 
@@ -457,10 +457,10 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       let overflowRecoveryAttempted = false;
       while (true) {
         terminalAssistant = undefined;
-        await runAgentLoopContinue(context, loopConfig, emit, loopSignal, piProvider.handle.stream);
+        await runAgentLoopContinue(context, loopConfig, emit, loopSignal, handle.stream);
         if (
           !terminalAssistant ||
-          !isContextOverflow(terminalAssistant, piProvider.handle.model.contextWindow) ||
+          !isContextOverflow(terminalAssistant, handle.model.contextWindow) ||
           overflowRecoveryAttempted ||
           currentTurnStreamedContent ||
           abortSignal?.aborted
@@ -586,7 +586,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
 }
 
 /** A proposal is a completed tool result, but it deliberately ends this Pi run before another model step. */
-export function cloudflareExecutePausesTurn(toolName: string, result: CloudflareMcpResultCandidate | null): boolean {
+function cloudflareExecutePausesTurn(toolName: string, result: CloudflareMcpResultCandidate | null): boolean {
   return toolName === 'cloudflare_execute' && isCloudflareExecuteProposal(result);
 }
 

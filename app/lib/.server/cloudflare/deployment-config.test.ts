@@ -1,21 +1,7 @@
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
-import {
-  APP_AGENT_SECURITY_BOUNDARY_SHA256,
-  DEPLOYMENT_SECURITY_BASELINE_VERSION,
-  TEMPLATE_SOURCE_SHA256,
-} from './deployment-security-baseline';
 import { createTrustedDeploymentConfig } from './deployment-config';
-import { evaluateDeploymentSecurityAttestation } from './deployment-security-inventory';
-import {
-  DEPLOYMENT_PROJECT_ROOT,
-  DEPLOYMENT_SECURITY_BASELINE_BINDING,
-  DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
-  DEPLOYMENT_TEMPLATE_SOURCE_BINDING,
-  DEPLOYMENT_VERSION_METADATA_BINDING,
-  DEPLOYMENT_WRANGLER_CONFIG_PATH,
-} from './deployment-runtime-policy';
-import type { ActiveWorkerDeploymentReadback } from './user-account-api';
+import { DEPLOYMENT_PROJECT_ROOT, DEPLOYMENT_WRANGLER_CONFIG_PATH } from './deployment-runtime-policy';
 
 describe('trusted deployment config', () => {
   test('resolves every generated-project path beneath the Computer project root', () => {
@@ -39,49 +25,13 @@ describe('trusted deployment config', () => {
     }
   });
 
-  test('emits the exact bindings and cleanup cron accepted by readback attestation', () => {
+  test('emits the managed bindings and cleanup cron', () => {
     const config = createTrustedDeploymentConfig(input());
     const agentSecurityDatabase = config.d1_databases!.find((database) => database.binding === 'AGENT_SECURITY_DB')!;
-    const readback: ActiveWorkerDeploymentReadback = {
-      providerDeploymentId: 'provider-deployment-1',
-      workerVersionId: 'worker-version-1',
-      scriptEtag: 'etag-1',
-      compatibilityDate: '2026-07-21',
-      compatibilityFlags: ['nodejs_compat'],
-      workersDevEnabled: true,
-      previewUrlsEnabled: true,
-      bindings: [
-        ...Object.entries(config.vars).map(([name, text]) => ({ name, type: 'plain_text' as const, text })),
-        { name: config.version_metadata.binding, type: 'version_metadata' },
-        {
-          name: agentSecurityDatabase.binding,
-          type: 'd1',
-          database_id: agentSecurityDatabase.database_id,
-        },
-      ],
-      crons: config.triggers!.crons,
-    };
 
-    expect(Object.keys(config.vars).sort()).toEqual(
-      [
-        DEPLOYMENT_SECURITY_BASELINE_BINDING,
-        DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
-        DEPLOYMENT_TEMPLATE_SOURCE_BINDING,
-      ].sort(),
-    );
-    expect(config.version_metadata.binding).toBe(DEPLOYMENT_VERSION_METADATA_BINDING);
     expect(config.kv_namespaces).toEqual([{ binding: 'APP_CACHE', id: '1'.repeat(32) }]);
-    expect(
-      evaluateDeploymentSecurityAttestation({
-        readback,
-        expectedTemplateSourceSha256: TEMPLATE_SOURCE_SHA256,
-        expectedSecurityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
-        expectedSecurityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
-        expectedAgentSecurityD1DatabaseId: agentSecurityDatabase.database_id,
-        requireExpectedAgentSecurityD1Identity: true,
-        requiresAgentCleanup: true,
-      }).status,
-    ).toBe('current');
+    expect(agentSecurityDatabase.database_id).toBe('agent-security-d1-id');
+    expect(config.triggers?.crons).toHaveLength(1);
   });
 });
 
@@ -98,8 +48,5 @@ function input(overrides: { projectType?: 'web_app' | 'worker' } = {}) {
     agentSecurityD1DatabaseName: 'ghostbuild-deployment-1-agent-security',
     r2BucketName: 'ghostbuild-deployment-1-storage',
     kvNamespaceId: '1'.repeat(32),
-    securityBaselineVersion: String(DEPLOYMENT_SECURITY_BASELINE_VERSION),
-    securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
-    templateSourceSha256: TEMPLATE_SOURCE_SHA256,
   };
 }

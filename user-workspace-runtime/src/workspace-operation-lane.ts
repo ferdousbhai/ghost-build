@@ -177,19 +177,6 @@ export class WorkspaceOperationLane {
     );
   }
 
-  /**
-   * What the lane is holding right now, for a caller that only needs to know whether work is in
-   * flight. A lapsed deadline reports nothing: that lane is already reclaimable, so treating it as
-   * busy would let a dead owner hold the workspace against everyone.
-   */
-  activeLease(now: number): { kind: string; deadline: number } | null {
-    const row = this.read();
-    if (row.owner === null || row.kind === null || row.deadline === null || row.deadline <= now) {
-      return null;
-    }
-    return { kind: row.kind, deadline: row.deadline };
-  }
-
   find(idempotencyKey: string, owner: string): WorkspaceOperationLease | null {
     const row = this.read();
     if (

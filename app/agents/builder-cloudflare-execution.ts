@@ -21,7 +21,6 @@ export type CloudflareExecutionBinding = Pick<
 export type CloudflareExecutionRecord = CloudflareExecutionPublicState & {
   binding: CloudflareExecutionBinding;
   code: string;
-  riskReasons: readonly string[];
 };
 
 type CloudflareExecutionRow = {
@@ -39,7 +38,6 @@ type CloudflareExecutionRow = {
   transcript_parent_agent_name: string | null;
   execute_input_json: string;
   proposal_sha256: string;
-  risk_reasons_json: string;
   status: string;
   created_at: number;
   decided_at: number | null;
@@ -52,7 +50,7 @@ type CloudflareExecutionRow = {
 const EXECUTION_COLUMNS = `execution_id, tool_call_id, user_id, account_id, connection_id,
   connection_generation, oauth_scope_grant_status, transcript_agent_name, transcript_chat_initial_id, transcript_generation,
   transcript_subchat_index, transcript_parent_agent_name, execute_input_json, proposal_sha256,
-  risk_reasons_json, status, created_at, decided_at, started_at, completed_at, expires_at, outcome_json`;
+  status, created_at, decided_at, started_at, completed_at, expires_at, outcome_json`;
 
 export const CLOUDFLARE_EXECUTION_RISK_NOTE =
   'This generated code may make one or more Cloudflare API requests, including mutations, destructive changes, or billable actions. Approval authorizes this exact digest once.';
@@ -82,8 +80,6 @@ const storedExecutionOutcomeSchema = z
     sensitiveContentWithheld: z.boolean().optional(),
   })
   .strict() satisfies z.ZodType<CloudflareExecutionSafeOutcome>;
-const storedRiskReasonsSchema = z.array(z.string());
-
 export class CloudflareExecutionDecisionError extends Error {
   constructor(message: string) {
     super(message);
@@ -323,15 +319,15 @@ export class BuilderCloudflareExecutionRepository {
     });
   }
 
-  expireAwaiting(now = Date.now()): number {
-    return this.storage.sql.exec(
+  expireAwaiting(now = Date.now()): void {
+    this.storage.sql.exec(
       `UPDATE builder_cloudflare_executions
        SET status = 'expired', completed_at = ?, outcome_json = ?
        WHERE status = 'awaiting_approval' AND expires_at <= ?`,
       now,
       JSON.stringify({ status: 'denied', summary: 'This Cloudflare execution approval expired.' }),
       now,
-    ).rowsWritten;
+    );
   }
 
   private async requireBound(
@@ -419,7 +415,6 @@ function recordFromRow(row: CloudflareExecutionRow): CloudflareExecutionRecord {
       },
     },
     code: input.code,
-    riskReasons: parseRiskReasons(row.risk_reasons_json),
   };
 }
 
@@ -438,14 +433,6 @@ function parseOutcome(value: string | null): CloudflareExecutionSafeOutcome | nu
   const parsed = storedExecutionOutcomeSchema.safeParse(JSON.parse(value));
   if (!parsed.success) {
     throw new Error('Stored Cloudflare execution outcome is invalid.');
-  }
-  return parsed.data;
-}
-
-function parseRiskReasons(value: string): readonly string[] {
-  const parsed = storedRiskReasonsSchema.safeParse(JSON.parse(value));
-  if (!parsed.success) {
-    throw new Error('Stored Cloudflare execution risk reasons are invalid.');
   }
   return parsed.data;
 }

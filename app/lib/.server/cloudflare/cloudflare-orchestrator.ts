@@ -1,8 +1,7 @@
-import type { CloudflareOAuthScopeGrantStatus } from './cloudflare-oauth-scope-manifest';
+import type { CloudflareOAuthScopeGrantStatus, GhostbuildCapability } from './cloudflare-oauth-scope-manifest';
 
 export type CloudflareConnectionRequest = {
   returnUrl: string;
-  requestedCapabilities: Array<'workers' | 'containers' | 'd1' | 'r2' | 'kv' | 'durable_objects' | 'workers_ai'>;
 };
 
 export type CloudflareConnectionChallenge = {
@@ -29,7 +28,7 @@ export type CloudflareConnectionResult = {
   refreshToken?: string;
   accessTokenExpiresAt?: number;
   /** Product capabilities the confirmed grant covers, never an echo of what was requested. */
-  grantedCapabilities: CloudflareConnectionRequest['requestedCapabilities'];
+  grantedCapabilities: GhostbuildCapability[];
   /** Exact scope IDs in the authorization request. */
   requestedOAuthScopes: string[];
   /** Exact provider-confirmed scope IDs. */

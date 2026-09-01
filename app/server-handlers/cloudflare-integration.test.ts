@@ -4,12 +4,7 @@ import type {
   CloudflareOrchestrator,
 } from '~/lib/.server/cloudflare/cloudflare-orchestrator';
 import { USER_WORKSPACE_RUNTIME_SHA256 } from '~/generated/user-workspace-runtime.generated';
-import {
-  USER_WORKSPACE_SANDBOX_BASE_IMAGE,
-  UserWorkspaceContainersEligibilityUnknownError,
-  UserWorkspaceContainersPlanRequiredError,
-  UserWorkspaceRuntimeProvisioningInProgressError,
-} from '~/lib/.server/cloudflare/user-workspace-runtime-provisioner';
+import { USER_WORKSPACE_SANDBOX_BASE_IMAGE } from '~/workflows/user-workspace-runtime-provisioning';
 
 /** Shaped like a real Cloudflare account id; a registry namespace is derived from it. */
 const ACCOUNT_ID = '0af9e0921b880657d84a6c07307f8aef';
@@ -21,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   createAuthSession: vi.fn(),
   upsertCloudflareUser: vi.fn(),
   findConnection: vi.fn(),
+  requireActiveConnection: vi.fn(),
   activateConnection: vi.fn(),
   vault: {
     storeOAuthCredential: vi.fn(),
@@ -37,6 +33,7 @@ vi.mock('~/lib/.server/auth', () => ({
 }));
 vi.mock('~/lib/.server/cloudflare/cloudflare-connection-repository', () => ({
   findCloudflareConnectionForUser: mocks.findConnection,
+  requireActiveCloudflareConnection: mocks.requireActiveConnection,
   activateCloudflareConnection: mocks.activateConnection,
   CloudflareConnectionChangedError: mocks.CloudflareConnectionChangedError,
 }));
@@ -48,7 +45,6 @@ vi.mock('~/lib/.server/cloudflare/cloudflare-credential-vault', () => ({
   },
 }));
 import {
-  CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
   cloudflareConnectionStatusAction,
   cloudflareRuntimeSessionAction,
   completeCloudflareConnectionAction,
@@ -74,6 +70,7 @@ describe('Cloudflare-only authentication', () => {
       image: null,
     });
     mocks.findConnection.mockResolvedValue(null);
+    mocks.requireActiveConnection.mockResolvedValue(activeConnection());
     mocks.vault.storeOAuthCredential.mockResolvedValue('credential-1');
     mocks.vault.deleteIfUnreferenced.mockResolvedValue(true);
     mocks.activateConnection.mockResolvedValue({
@@ -88,16 +85,11 @@ describe('Cloudflare-only authentication', () => {
       grantedOAuthScopes: ['workers-scripts.write', 'd1.write'],
       oauthScopeProfileVersion: 'core-v1',
       oauthScopeGrantStatus: 'core' as const,
-      oauthGrantUpdatedAt: 100,
       aiBillingEnabled: true,
       connectedAt: 100,
       updatedAt: 100,
       generation: 1,
     });
-  });
-
-  it('uses the top-level GET callback supported by Cloudflare OAuth', () => {
-    expect(CLOUDFLARE_CONNECTION_CALLBACK_METHOD).toBe('GET');
   });
 
   it('requires Cloudflare authentication for connection status', async () => {
@@ -138,120 +130,56 @@ describe('Cloudflare-only authentication', () => {
 
   it.each([
     ['absent', null],
-    ['failed', runtimeRow({ status: 'error' })],
     ['stale connection', runtimeRow({ connectionGeneration: 0 })],
     ['stale version', runtimeRow({ runtimeVersion: '0'.repeat(64) })],
     // A row pinned to a different image than the current one, or one that never recorded an image,
     // must re-provision so a base-image bump reaches workspaces that were provisioned before it.
     ['on a superseded image', runtimeRow({ imageDigest: `docker.io/cloudflare/sandbox:x@sha256:${'a'.repeat(64)}` })],
     ['provisioned before the image was recorded', runtimeRow({ imageDigest: null })],
-  ])('automatically provisions an %s runtime before minting a capability', async (_case, initialRuntime) => {
+  ])('starts background provisioning for an %s runtime', async (_case, initialRuntime) => {
     mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
     mocks.findConnection.mockResolvedValue(activeConnection());
-    const provision = vi.fn().mockResolvedValue(runtimeRecord());
+    const provision = vi.fn().mockResolvedValue({ status: 'preparing' });
     const response = await cloudflareRuntimeSessionAction({
       request: runtimeSessionRequest(),
-      env: runtimeEnv([initialRuntime, runtimeRow()]),
+      env: runtimeEnv([initialRuntime]),
       provision,
-      readWorkspaceActivity: vi.fn().mockResolvedValue('idle'),
     });
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      endpoint: 'https://workspace.example',
-      token: expect.any(String),
-    });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ code: 'workspace_preparing' });
     expect(provision).toHaveBeenCalledWith({
       env: expect.anything(),
       userId: 'user-1',
       connectionId: 'connection-1',
+      connectionGeneration: 1,
+      retry: false,
     });
   });
 
-  it.each([
-    ['a lane is held', 'busy', 'workspace_busy'],
-    ['the workspace could not answer', 'unknown', 'activity_unknown'],
-  ])('defers a runtime upgrade while %s and keeps serving the running runtime', async (_case, activity, reason) => {
-    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+  it('surfaces a durable asynchronous provisioning failure without exposing its private detail', async () => {
     mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
     mocks.findConnection.mockResolvedValue(activeConnection());
-    const provision = vi.fn();
-    const stale = runtimeRow({ runtimeVersion: '0'.repeat(64) });
-
     const response = await cloudflareRuntimeSessionAction({
       request: runtimeSessionRequest(),
-      env: runtimeEnv([stale, stale]),
-      provision,
-      readWorkspaceActivity: vi.fn().mockResolvedValue(activity),
+      env: runtimeEnv([null]),
+      provision: vi.fn().mockResolvedValue({
+        status: 'error',
+        errorCode: 'workspace_plan_required',
+        errorMessage: 'private provider detail',
+        upgradeUrl: 'https://dash.cloudflare.com/?to=/:account/workers/plans',
+      }),
     });
 
-    expect(provision).not.toHaveBeenCalled();
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ endpoint: 'https://workspace.example' });
-    expect(info).toHaveBeenCalledWith(expect.objectContaining({ event: 'runtime_upgrade_deferred', reason }));
-  });
-
-  it('forces the upgrade once the workspace has pinned the old runtime past the deferral bound', async () => {
-    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue(activeConnection());
-    const provision = vi.fn().mockResolvedValue(runtimeRecord());
-    const readWorkspaceActivity = vi.fn().mockResolvedValue('busy');
-    const pinned = runtimeRow({
-      runtimeVersion: '0'.repeat(64),
-      upgradeDeferredSince: Date.now() - (60 * 60_000 + 1),
+    expect(response.status).toBe(502);
+    const body = await response.json();
+    expect(body).toEqual({
+      code: 'workspace_plan_required',
+      error:
+        'Cloudflare Containers requires the Workers Paid plan. Enable Workers Paid in Cloudflare, then return here and try again. Ghostbuild does not change your plan automatically.',
+      upgradeUrl: 'https://dash.cloudflare.com/?to=/:account/workers/plans',
     });
-
-    const response = await cloudflareRuntimeSessionAction({
-      request: runtimeSessionRequest(),
-      env: runtimeEnv([pinned, runtimeRow()]),
-      provision,
-      readWorkspaceActivity,
-    });
-
-    expect(response.status).toBe(200);
-    expect(provision).toHaveBeenCalledTimes(1);
-    // Past the bound the workspace is not even asked: the upgrade stops waiting on it.
-    expect(readWorkspaceActivity).not.toHaveBeenCalled();
-    expect(info).toHaveBeenCalledWith(expect.objectContaining({ event: 'runtime_upgrade_forced' }));
-  });
-
-  it('upgrades immediately when the runtime cannot report activity at all', async () => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue(activeConnection());
-    const provision = vi.fn().mockResolvedValue(runtimeRecord());
-
-    const response = await cloudflareRuntimeSessionAction({
-      request: runtimeSessionRequest(),
-      env: runtimeEnv([runtimeRow({ runtimeVersion: '0'.repeat(64) }), runtimeRow()]),
-      provision,
-      readWorkspaceActivity: vi.fn().mockResolvedValue('unreported'),
-    });
-
-    expect(response.status).toBe(200);
-    expect(provision).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([
-    ['the Cloudflare connection changed', runtimeRow({ connectionGeneration: 0 })],
-    ['the runtime never became ready', runtimeRow({ status: 'error' })],
-    ['there is no runtime yet', null],
-  ])('never defers an upgrade because %s', async (_case, initialRuntime) => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue(activeConnection());
-    const provision = vi.fn().mockResolvedValue(runtimeRecord());
-    const readWorkspaceActivity = vi.fn().mockResolvedValue('busy');
-
-    const response = await cloudflareRuntimeSessionAction({
-      request: runtimeSessionRequest(),
-      env: runtimeEnv([initialRuntime, runtimeRow()]),
-      provision,
-      readWorkspaceActivity,
-    });
-
-    expect(response.status).toBe(200);
-    expect(provision).toHaveBeenCalledTimes(1);
-    expect(readWorkspaceActivity).not.toHaveBeenCalled();
+    expect(JSON.stringify(body)).not.toContain('private provider detail');
   });
 
   it('mints an opaque correlation ID and logs it beside the grant it issued', async () => {
@@ -272,27 +200,6 @@ describe('Cloudflare-only authentication', () => {
     // The join key must never be accompanied by the account it was issued for.
     expect(JSON.stringify(info.mock.calls)).not.toContain('user-1');
   });
-
-  it.each(['available', 'unavailable'] as const)(
-    'returns only the AI Gateway credit availability status when credits are %s',
-    async (aiGatewayCreditStatus) => {
-      mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-      mocks.findConnection.mockResolvedValue(activeConnection());
-      const readAiGatewayCreditStatus = vi.fn().mockResolvedValue(aiGatewayCreditStatus);
-      const response = await cloudflareRuntimeSessionAction({
-        request: runtimeSessionRequest(),
-        env: runtimeEnv([runtimeRow(), runtimeRow()]),
-        provision: vi.fn(),
-        readAiGatewayCreditStatus,
-      });
-
-      await expect(response.json()).resolves.toMatchObject({ aiGatewayCreditStatus });
-      expect(readAiGatewayCreditStatus).toHaveBeenCalledWith({
-        env: expect.anything(),
-        connection: activeConnection(),
-      });
-    },
-  );
 
   it('falls back to an unknown credit status when the optional check fails', async () => {
     mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
@@ -382,149 +289,6 @@ describe('Cloudflare-only authentication', () => {
     expect(provision).not.toHaveBeenCalled();
   });
 
-  it('gives actionable recovery steps when Cloudflare Containers requires Workers Paid', async () => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue(activeConnection());
-    const response = await cloudflareRuntimeSessionAction({
-      request: runtimeSessionRequest(),
-      env: runtimeEnv([null]),
-      provision: vi
-        .fn()
-        .mockRejectedValue(
-          new Error('Unauthorized: You do not have access to Cloudflare Containers. Workers Paid plan required.'),
-        ),
-    });
-
-    expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toEqual({
-      code: 'workspace_plan_required',
-      error:
-        'Cloudflare Containers requires the Workers Paid plan. Enable Workers Paid in Cloudflare, then return here and try again. Ghostbuild does not change your plan automatically.',
-    });
-  });
-
-  it('links the upgrade destination Cloudflare named when the precondition check refuses the plan', async () => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue(activeConnection());
-    const response = await cloudflareRuntimeSessionAction({
-      request: runtimeSessionRequest(),
-      env: runtimeEnv([null]),
-      provision: vi
-        .fn()
-        .mockRejectedValue(
-          new UserWorkspaceContainersPlanRequiredError(
-            'You do not have access to Cloudflare Containers.',
-            'https://dash.cloudflare.com/?to=/:account/workers/plans',
-          ),
-        ),
-    });
-
-    expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toEqual({
-      code: 'workspace_plan_required',
-      error:
-        'Cloudflare Containers requires the Workers Paid plan. Enable Workers Paid in Cloudflare, then return here and try again. Ghostbuild does not change your plan automatically.',
-      upgradeUrl: 'https://dash.cloudflare.com/?to=/:account/workers/plans',
-    });
-  });
-
-  it('reports an undeterminable plan as its own state rather than as a plan or a fault', async () => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue(activeConnection());
-    const response = await cloudflareRuntimeSessionAction({
-      request: runtimeSessionRequest(),
-      env: runtimeEnv([null]),
-      provision: vi
-        .fn()
-        .mockRejectedValue(new UserWorkspaceContainersEligibilityUnknownError('The connection was reset.')),
-    });
-
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({
-      code: 'workspace_eligibility_unknown',
-      error:
-        'Ghostbuild could not reach Cloudflare to confirm that this account can run Containers, so it did not start creating your workspace. Nothing changed in your Cloudflare account. Try again in a moment.',
-    });
-  });
-
-  it('tells the client to wait when another request owns the provisioning lease', async () => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue(activeConnection());
-    const response = await cloudflareRuntimeSessionAction({
-      request: runtimeSessionRequest(),
-      env: runtimeEnv([null]),
-      provision: vi.fn().mockRejectedValue(new UserWorkspaceRuntimeProvisioningInProgressError()),
-    });
-
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toEqual({
-      code: 'workspace_preparing',
-      error: 'The project workspace is already being prepared.',
-    });
-  });
-
-  it('does not mint an old-generation capability when the connection changes during provisioning', async () => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValueOnce(activeConnection(1)).mockResolvedValueOnce(activeConnection(2));
-    const response = await cloudflareRuntimeSessionAction({
-      request: runtimeSessionRequest(),
-      env: runtimeEnv([null, runtimeRow({ connectionGeneration: 1 })]),
-      provision: vi.fn().mockResolvedValue(runtimeRecord({ connectionGeneration: 1 })),
-    });
-
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toEqual({
-      error: 'The Cloudflare account changed while Ghostbuild prepared the workspace. Try again.',
-    });
-  });
-
-  it('does not mint a capability when provisioning returns before a ready runtime is persisted', async () => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue(activeConnection());
-    const response = await cloudflareRuntimeSessionAction({
-      request: runtimeSessionRequest(),
-      env: runtimeEnv([null, null]),
-      provision: vi.fn().mockResolvedValue(runtimeRecord()),
-    });
-
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.not.toHaveProperty('token');
-  });
-
-  it('tells the client to keep waiting when the runtime is not ready but the account is unchanged', async () => {
-    // A provisioning attempt that is still in flight is not an account change. Reporting it as one
-    // stopped the browser's retry loop and left the user on a dead-end error until the lease
-    // expired, which is up to forty minutes.
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue(activeConnection());
-    const response = await cloudflareRuntimeSessionAction({
-      request: runtimeSessionRequest(),
-      env: runtimeEnv([null, runtimeRow({ status: 'provisioning' })]),
-      provision: vi.fn().mockResolvedValue(runtimeRecord()),
-    });
-
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toEqual({
-      code: 'workspace_preparing',
-      error: 'Ghostbuild is still preparing your workspace.',
-    });
-  });
-
-  it('still reports an account change when the runtime belongs to another connection', async () => {
-    mocks.getAuthSession.mockResolvedValue({ user: { id: 'user-1' } });
-    mocks.findConnection.mockResolvedValue(activeConnection(2));
-    const response = await cloudflareRuntimeSessionAction({
-      request: runtimeSessionRequest(),
-      env: runtimeEnv([null, runtimeRow({ connectionGeneration: 1 })]),
-      provision: vi.fn().mockResolvedValue(runtimeRecord({ connectionGeneration: 1 })),
-    });
-
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toEqual({
-      error: 'The Cloudflare account changed while Ghostbuild prepared the workspace. Try again.',
-    });
-  });
-
   it('starts OAuth before any local session exists and keeps only a same-origin return path', async () => {
     const database = oauthDatabase();
     const orchestrator = fakeOrchestrator();
@@ -549,7 +313,6 @@ describe('Cloudflare-only authentication', () => {
     expect(database.state?.returnTo).toBe('/create/example?tab=code');
     expect(orchestrator.startConnection).toHaveBeenCalledWith({
       returnUrl: expect.stringContaining('/connect/return?state='),
-      requestedCapabilities: ['workers', 'containers', 'd1', 'r2', 'kv', 'durable_objects', 'workers_ai'],
     });
   });
 
@@ -982,7 +745,6 @@ describe('Cloudflare-only authentication', () => {
       grantedOAuthScopes: ['workers-scripts.write', 'd1.write'],
       oauthScopeProfileVersion: 'core-v1',
       oauthScopeGrantStatus: 'core' as const,
-      oauthGrantUpdatedAt: 100,
       aiBillingEnabled: false,
       connectedAt: 100,
       updatedAt: 100,
@@ -1079,7 +841,6 @@ describe('Cloudflare-only authentication', () => {
         grantedOAuthScopes: ['workers-scripts.write', 'd1.write'],
         oauthScopeProfileVersion: 'core-v1',
         oauthScopeGrantStatus: 'core' as const,
-        oauthGrantUpdatedAt: 101,
         aiBillingEnabled: true,
         connectedAt: 101,
         updatedAt: 101,
@@ -1133,7 +894,6 @@ describe('Cloudflare-only authentication', () => {
       grantedOAuthScopes: ['workers-scripts.write', 'd1.write'],
       oauthScopeProfileVersion: 'core-v1',
       oauthScopeGrantStatus: 'core' as const,
-      oauthGrantUpdatedAt: 100,
       aiBillingEnabled: true,
       connectedAt: 101,
       updatedAt: 101,
@@ -1181,7 +941,6 @@ describe('Cloudflare-only authentication', () => {
       grantedOAuthScopes: ['workers-scripts.write', 'd1.write'],
       oauthScopeProfileVersion: 'core-v1',
       oauthScopeGrantStatus: 'core' as const,
-      oauthGrantUpdatedAt: 100,
       aiBillingEnabled: false,
       connectedAt: 100,
       updatedAt: 100,
@@ -1221,7 +980,6 @@ function activeConnection(
     grantedOAuthScopes: ['workers-scripts.write', 'd1.write'],
     oauthScopeProfileVersion: 'core-v1',
     oauthScopeGrantStatus: 'core' as const,
-    oauthGrantUpdatedAt: 100,
     aiBillingEnabled: true,
     connectedAt: 100,
     updatedAt: 100,
@@ -1231,11 +989,9 @@ function activeConnection(
 
 function runtimeRow(
   overrides: {
-    status?: 'provisioning' | 'ready' | 'error';
     connectionGeneration?: number;
     runtimeVersion?: string;
     imageDigest?: string | null;
-    upgradeDeferredSince?: number;
   } = {},
 ) {
   return {
@@ -1246,34 +1002,8 @@ function runtimeRow(
     endpoint: 'https://workspace.example',
     runtime_version: overrides.runtimeVersion ?? USER_WORKSPACE_RUNTIME_SHA256,
     image_digest: overrides.imageDigest === undefined ? USER_WORKSPACE_SANDBOX_BASE_IMAGE : overrides.imageDigest,
-    status: overrides.status ?? ('ready' as const),
-    last_error: overrides.status === 'error' ? 'Previous provisioning failed.' : null,
-    provisioning_attempt_id: null,
-    provisioning_lease_expires_at: null,
-    upgrade_deferred_since: overrides.upgradeDeferredSince ?? null,
     created_at: 100,
     updated_at: 100,
-  };
-}
-
-function runtimeRecord(overrides: { connectionGeneration?: number; imageDigest?: string | null } = {}) {
-  return {
-    userId: 'user-1',
-    connectionId: 'connection-1',
-    connectionGeneration: overrides.connectionGeneration ?? 1,
-    workerName: 'ghostbuild-workspace-test',
-    endpoint: 'https://workspace.example',
-    runtimeVersion: USER_WORKSPACE_RUNTIME_SHA256,
-    // A runtime is only current when it is on the expected image too, so the default fixture is a
-    // fully current one; a test wanting drift passes an older digest.
-    imageDigest: overrides.imageDigest === undefined ? USER_WORKSPACE_SANDBOX_BASE_IMAGE : overrides.imageDigest,
-    status: 'ready' as const,
-    lastError: null,
-    provisioningAttemptId: null,
-    provisioningLeaseExpiresAt: null,
-    upgradeDeferredSince: null,
-    createdAt: 100,
-    updatedAt: 100,
   };
 }
 
@@ -1288,11 +1018,6 @@ function runtimeEnv(rows: Array<ReturnType<typeof runtimeRow> | null>): Env {
   const queue = [...rows];
   const db = {
     prepare(sql: string) {
-      if (sql.includes('SET upgrade_deferred_since')) {
-        return {
-          bind: (now: number) => ({ first: async () => ({ upgrade_deferred_since: now }) }),
-        };
-      }
       if (!sql.includes('FROM user_computer_runtimes')) {
         throw new Error(`Unexpected SQL: ${sql}`);
       }

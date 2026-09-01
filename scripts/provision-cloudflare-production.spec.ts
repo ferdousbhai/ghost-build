@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   d1DatabaseId,
   d1DatabaseName,
-  getBinding,
   parseJsonOutput,
   requireMatchingD1Database,
   r2BucketExists,
@@ -47,12 +46,6 @@ describe('Cloudflare production provisioning helpers', () => {
     expect(parseJsonOutput(output, 'wrangler d1 list --json')).toEqual([{ name: 'ghostbuild', uuid: databaseId }]);
   });
 
-  it('ignores pnpm engine warnings before Wrangler JSON output', () => {
-    const output = `[WARN] Unsupported engine: wanted: {"node":">=26.0.0"} (current: {"node":"v24.14.0"})\n[\n  {"name":"ghostbuild","uuid":"${databaseId}"}\n]\n`;
-
-    expect(parseJsonOutput(output, 'wrangler d1 list --json')).toEqual([{ name: 'ghostbuild', uuid: databaseId }]);
-  });
-
   it('recognizes supported D1 list field variants', () => {
     expect(d1DatabaseId({ uuid: databaseId })).toBe(databaseId);
     expect(d1DatabaseId({ database_id: databaseId })).toBe(databaseId);
@@ -88,17 +81,6 @@ describe('Cloudflare production provisioning helpers', () => {
         'ghostbuild',
       ),
     ).toEqual({ uuid: databaseId, name: 'ghostbuild' });
-  });
-
-  it('finds configured Cloudflare bindings', () => {
-    const config = {
-      d1_databases: [{ binding: 'OTHER' }, { binding: 'DB', database_name: 'ghostbuild' }],
-    };
-
-    expect(getBinding(config, 'd1_databases', 'DB')).toEqual({
-      binding: { binding: 'DB', database_name: 'ghostbuild' },
-      index: 1,
-    });
   });
 
   it('detects R2 buckets from Wrangler list output', () => {

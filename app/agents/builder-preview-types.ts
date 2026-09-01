@@ -10,7 +10,6 @@ export type BuilderPreviewState = {
   workspaceRevision: number | null;
   /** The visible Worker version no longer matches the current durable workspace revision. */
   stale: boolean;
-  updatedAt: string;
   error: string | null;
   /**
    * The last Worker version that published successfully. It stays visible through a later failed
@@ -25,7 +24,6 @@ export function idleBuilderPreviewState(): BuilderPreviewState {
     pendingId: null,
     workspaceRevision: null,
     stale: false,
-    updatedAt: new Date().toISOString(),
     error: null,
     published: null,
   };
@@ -34,12 +32,10 @@ export function idleBuilderPreviewState(): BuilderPreviewState {
 export function previewStateForWorkspace(
   state: BuilderPreviewState,
   currentWorkspaceRevision: number,
-  updatedAt = new Date().toISOString(),
 ): BuilderPreviewState {
   return {
     ...state,
     stale: isPreviewStale(state.published, currentWorkspaceRevision),
-    updatedAt,
   };
 }
 
@@ -51,10 +47,9 @@ export function failedBuilderPreviewState(
   state: BuilderPreviewState,
   currentWorkspaceRevision: number,
   error: string,
-  updatedAt = new Date().toISOString(),
 ): BuilderPreviewState {
   return {
-    ...previewStateForWorkspace(state, currentWorkspaceRevision, updatedAt),
+    ...previewStateForWorkspace(state, currentWorkspaceRevision),
     status: 'failed',
     pendingId: null,
     error,

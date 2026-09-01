@@ -72,9 +72,9 @@ export async function executeDataOperation<Path extends DataOperationPath>(
   options: { signal?: AbortSignal } = {},
 ): Promise<DataOperationResult<Path>> {
   options.signal?.throwIfAborted();
-  // Acquired before the operation clock starts: the session request is what waits out
-  // provisioning, and it carries its own readiness deadline.
-  const session = await getUserRuntimeSession(options.signal);
+  // Acquired before the operation clock starts: the session request waits for durable background
+  // provisioning, while this operation's timeout covers only the operation itself.
+  const session = await getUserRuntimeSession({ signal: options.signal });
   options.signal?.throwIfAborted();
   const controller = new AbortController();
   let timedOut = false;

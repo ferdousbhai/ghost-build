@@ -11,11 +11,7 @@ import {
   DEPLOYMENT_COMPATIBILITY_FLAGS,
   DEPLOYMENT_OBSERVABILITY,
   DEPLOYMENT_PREVIEW_URLS_ENABLED,
-  DEPLOYMENT_SECURITY_BASELINE_BINDING,
-  DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
   DEPLOYMENT_SECURITY_CLEANUP_CRON,
-  DEPLOYMENT_TEMPLATE_SOURCE_BINDING,
-  DEPLOYMENT_VERSION_METADATA_BINDING,
 } from './deployment-runtime-policy';
 import { workspaceImageAdmissionError } from './workspace-image-reference';
 import {
@@ -60,14 +56,6 @@ const CREDENTIAL_REDACTION_PATTERNS: readonly RegExp[] = [
   /[?&](?:key|token|secret|password|api_key|access_token)=[^\s&#]*/gi,
 ];
 
-type WorkerBinding = {
-  name?: string;
-  type?: string;
-  text?: string;
-  database_id?: string;
-  namespace_id?: string;
-};
-
 type WorkerResourceReadback = {
   id?: string;
   name?: string;
@@ -102,18 +90,6 @@ type WorkspaceContainersEntitlement =
   | { status: 'plan_required'; message: string; upgradeUrl: string | null }
   | { status: 'undetermined'; reason: string };
 
-export type ActiveWorkerDeploymentReadback = {
-  providerDeploymentId: string;
-  workerVersionId: string;
-  scriptEtag: string;
-  bindings: WorkerBinding[];
-  crons: string[];
-  compatibilityDate: string;
-  compatibilityFlags: string[];
-  workersDevEnabled: boolean;
-  previewUrlsEnabled: boolean;
-};
-
 type CloudflareEnvelope<T> = {
   success?: boolean;
   result?: T;
@@ -123,12 +99,8 @@ type CloudflareEnvelope<T> = {
 
 /** The pagination counters Cloudflare returns alongside a listing, none of them guaranteed. */
 type CloudflareResultInfo = {
-  page?: number;
-  per_page?: number;
-  count?: number;
   total_count?: number;
   total_pages?: number;
-  cursor?: string;
 };
 
 type EnvelopeResult<T> = { result: T; resultInfo: CloudflareResultInfo | undefined };
@@ -165,9 +137,6 @@ export type ManagedWorkerVersionArgs = {
   agentSecurityD1DatabaseId?: string;
   r2BucketName?: string;
   kvNamespaceId?: string;
-  securityBaselineVersion: string;
-  securityBoundarySha256: string;
-  templateSourceSha256: string;
 };
 
 type D1QueryResult = {
@@ -186,21 +155,6 @@ export class UserCloudflareAccountApi {
     if (!accountId || !accessToken) {
       throw new Error('Cloudflare account credentials are required.');
     }
-  }
-
-  async createD1ForPlan(
-    plan: DeploymentPlan,
-    logicalName: 'DB' | 'DB_PREVIEW' | 'AGENT_SECURITY_DB' | 'AGENT_SECURITY_DB_PREVIEW' = 'DB',
-  ): Promise<{ id: string; name: string }> {
-    const resourceName = requirePlanResourceName(plan, 'd1', logicalName);
-    const result = await this.call<{ uuid?: string; name?: string }>('/d1/database', {
-      method: 'POST',
-      body: JSON.stringify({ name: resourceName }),
-    });
-    if (!result.uuid || result.name !== resourceName) {
-      throw new CloudflareAccountApiError('Cloudflare returned an invalid D1 resource.');
-    }
-    return { id: result.uuid, name: result.name };
   }
 
   async ensureD1Database(resourceName: string): Promise<{ id: string; name: string }> {
@@ -336,12 +290,7 @@ export class UserCloudflareAccountApi {
     plan: DeploymentPlan,
     logicalName: 'DB' | 'DB_PREVIEW' | 'AGENT_SECURITY_DB' | 'AGENT_SECURITY_DB_PREVIEW' = 'DB',
   ): Promise<{ id: string; name: string }> {
-    const resourceName = requirePlanResourceName(plan, 'd1', logicalName);
-    const databases = await this.call<unknown>(`/d1/database?name=${encodeURIComponent(resourceName)}`, {
-      method: 'GET',
-    });
-    const existingId = existingD1DatabaseId(databases, resourceName);
-    return existingId ? { id: existingId, name: resourceName } : this.createD1ForPlan(plan, logicalName);
+    return this.ensureD1Database(requirePlanResourceName(plan, 'd1', logicalName));
   }
 
   private async createR2Bucket(resourceName: string): Promise<{ id: string; name: string }> {
@@ -450,40 +399,6 @@ export class UserCloudflareAccountApi {
     return existingD1DatabaseId(databases, resourceName);
   }
 
-  async deleteD1Database(resourceName: string): Promise<void> {
-    const databaseId = await this.findD1DatabaseId(resourceName);
-    if (databaseId) {
-      await this.deleteOptional(`/d1/database/${encodeURIComponent(databaseId)}`);
-    }
-  }
-
-  /**
-   * Whether a workspace database still holds a workspace.
-   *
-   * Reclamation may only ever delete a database that answers a definite no, so an answer that
-   * cannot be read throws instead of returning false: "could not tell" must never be spent as
-   * "empty". A database whose migrations never ran has no `chats` table at all, which is not an
-   * unreadable answer - it is proof that nothing was ever stored in it.
-   */
-  async workspaceDatabaseHoldsUserData(databaseId: string): Promise<boolean> {
-    const [tables] = await this.executeD1(
-      databaseId,
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chats'",
-    );
-    if (!Array.isArray(tables?.results)) {
-      throw new CloudflareAccountApiError('Cloudflare returned an unreadable workspace database table listing.');
-    }
-    if (tables.results.length === 0) {
-      return false;
-    }
-    const [counted] = await this.executeD1(databaseId, 'SELECT COUNT(*) AS total FROM chats');
-    const row = counted?.results?.[0];
-    if (!isRecord(row) || typeof row.total !== 'number' || !Number.isInteger(row.total) || row.total < 0) {
-      throw new CloudflareAccountApiError('Cloudflare returned an unreadable workspace database row count.');
-    }
-    return row.total > 0;
-  }
-
   /**
    * Delete by an id the caller already holds, from provisioning or from an account listing.
    * Deleting by name has to re-resolve the id first, and only works while the name is still
@@ -492,6 +407,13 @@ export class UserCloudflareAccountApi {
   async deleteD1DatabaseById(databaseId: string): Promise<void> {
     requireProviderResourceId(databaseId);
     await this.deleteOptional(`/d1/database/${encodeURIComponent(databaseId)}`);
+  }
+
+  async deleteD1Database(resourceName: string): Promise<void> {
+    const databaseId = await this.findD1DatabaseId(resourceName);
+    if (databaseId) {
+      await this.deleteD1DatabaseById(databaseId);
+    }
   }
 
   /** Delete by an id the caller already holds, from provisioning or from an account listing. */
@@ -558,35 +480,6 @@ export class UserCloudflareAccountApi {
     return true;
   }
 
-  /**
-   * List every Worker script name in the connected account, following every page.
-   *
-   * Callers treat a Worker's presence as proof that a deployment is live, so a
-   * short answer would read as "these deployments are gone". This one listing
-   * must be complete or fail.
-   */
-  async listWorkerNames(): Promise<string[]> {
-    const scripts = await this.listAllPages('/workers/scripts', 'Cloudflare returned invalid Worker scripts.');
-    return scripts.map((value) => {
-      // Dropping an unreadable entry would shorten the listing by exactly the amount that
-      // reads as "that deployment is gone", which is what the sweep nominates for deletion.
-      if (!isRecord(value) || typeof value.id !== 'string' || value.id.length === 0) {
-        throw new CloudflareAccountApiError('Cloudflare returned invalid Worker scripts.');
-      }
-      return value.id;
-    });
-  }
-
-  /** List every D1 database in the connected account, with creation times where provided. */
-  async listD1Databases(): Promise<{ id: string; name: string; createdAt: number | null }[]> {
-    const databases = await this.listAllPages('/d1/database', 'Cloudflare returned invalid D1 databases.');
-    return databases.flatMap((value) =>
-      isRecord(value) && typeof value.uuid === 'string' && typeof value.name === 'string'
-        ? [{ id: value.uuid, name: value.name, createdAt: parseCloudflareTimestamp(value.created_at) }]
-        : [],
-    );
-  }
-
   /** List every KV namespace in the connected account. Namespaces carry no creation time. */
   async listKvNamespaces(): Promise<{ id: string; name: string }[]> {
     const namespaces = await this.listAllPages('/storage/kv/namespaces', 'Cloudflare returned invalid KV namespaces.');
@@ -595,38 +488,6 @@ export class UserCloudflareAccountApi {
         ? [{ id: value.id, name: value.title }]
         : [],
     );
-  }
-
-  /**
-   * List every R2 bucket in the connected account, with creation times where provided.
-   *
-   * R2 paginates by cursor rather than page number, and wraps its page in an object.
-   */
-  async listR2Buckets(): Promise<{ name: string; createdAt: number | null }[]> {
-    const listed: { name: string; createdAt: number | null }[] = [];
-    let cursor = '';
-    for (let page = 0; page < MAX_ACCOUNT_LIST_PAGES; page += 1) {
-      const query = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
-      const { result, resultInfo } = await this.callPage<unknown>(
-        `/r2/buckets?per_page=${ACCOUNT_LIST_PAGE_SIZE}${query}`,
-      );
-      const buckets = isRecord(result) ? result.buckets : null;
-      if (!Array.isArray(buckets)) {
-        throw new CloudflareAccountApiError('Cloudflare returned invalid R2 buckets.');
-      }
-      listed.push(
-        ...buckets.flatMap((value) =>
-          isRecord(value) && typeof value.name === 'string'
-            ? [{ name: value.name, createdAt: parseCloudflareTimestamp(value.creation_date) }]
-            : [],
-        ),
-      );
-      cursor = typeof resultInfo?.cursor === 'string' ? resultInfo.cursor : '';
-      if (cursor.length === 0 || buckets.length === 0) {
-        return listed;
-      }
-    }
-    throw new CloudflareAccountApiError(ACCOUNT_LIST_TOO_LONG);
   }
 
   /**
@@ -661,16 +522,16 @@ export class UserCloudflareAccountApi {
   }
 
   /** Upload an immutable version, then promote exactly that version to production. */
-  async deployManagedWorker(args: ManagedWorkerVersionArgs): Promise<{ workerVersionId: string }> {
+  async deployManagedWorker(args: ManagedWorkerVersionArgs): Promise<void> {
     const form = await this.managedWorkerUploadForm(args);
     // Cloudflare rejects a version upload for a Worker that has never been deployed, and applies
     // Durable Object class lifecycle only through a deployment, so both cases publish directly.
     if (args.appAgent || !(await this.hasWorkerDeployment(args.workerName))) {
-      return { workerVersionId: await this.uploadWorkerDirectly(args.workerName, form) };
+      await this.uploadWorkerDirectly(args.workerName, form);
+      return;
     }
     const workerVersionId = await this.uploadWorkerVersion(args.workerName, form);
     await this.promoteWorkerVersion(args.workerName, workerVersionId, args.sourceSha256);
-    return { workerVersionId };
   }
 
   /** Upload an immutable version without creating a deployment and return its versioned preview URL. */
@@ -723,10 +584,6 @@ export class UserCloudflareAccountApi {
     const assetJwt =
       args.projectType === 'web_app' ? await this.uploadStaticAssets(args.workerName, args.assets) : undefined;
     const bindings: Array<Record<string, unknown>> = [
-      { type: 'version_metadata', name: DEPLOYMENT_VERSION_METADATA_BINDING },
-      { type: 'plain_text', name: DEPLOYMENT_SECURITY_BASELINE_BINDING, text: args.securityBaselineVersion },
-      { type: 'plain_text', name: DEPLOYMENT_SECURITY_BOUNDARY_BINDING, text: args.securityBoundarySha256 },
-      { type: 'plain_text', name: DEPLOYMENT_TEMPLATE_SOURCE_BINDING, text: args.templateSourceSha256 },
       ...(args.workersAi ? [{ type: 'ai', name: 'AI' }] : []),
       ...(args.d1DatabaseId ? [{ type: 'd1', name: 'DB', id: args.d1DatabaseId }] : []),
       ...(args.agentSecurityD1DatabaseId
@@ -1080,7 +937,7 @@ export class UserCloudflareAccountApi {
     connectionGeneration: number;
     oauthScopeGrantStatus: CloudflareOAuthScopeGrantStatus;
     endpoint: string;
-  }): Promise<{ workerVersionId: string; namespaceId: string }> {
+  }): Promise<{ namespaceId: string }> {
     requireWorkerName(args.workerName);
     if (!/^[a-f0-9]{64}$/.test(args.runtimeVersion) || args.controlPlaneSecret.length < 32) {
       throw new CloudflareAccountApiError('The workspace runtime identity is invalid.');
@@ -1140,7 +997,7 @@ export class UserCloudflareAccountApi {
       new Blob([args.source], { type: 'application/javascript+module' }),
       'workspace-runtime.mjs',
     );
-    const workerVersionId = await this.uploadWorkerDirectly(args.workerName, form);
+    await this.uploadWorkerDirectly(args.workerName, form);
     const namespaces = await this.call<DurableObjectNamespaceReadback[]>(
       '/workers/durable_objects/namespaces?per_page=1000',
       { method: 'GET' },
@@ -1155,11 +1012,11 @@ export class UserCloudflareAccountApi {
     if (!namespace?.id) {
       throw new CloudflareAccountApiError('Cloudflare did not provision the Computer workspace namespace.');
     }
-    return { workerVersionId, namespaceId: namespace.id };
+    return { namespaceId: namespace.id };
   }
 
   /** Upload and deploy in one request; the only path that creates a Worker or applies DO lifecycle. */
-  private async uploadWorkerDirectly(workerName: string, form: FormData): Promise<string> {
+  private async uploadWorkerDirectly(workerName: string, form: FormData): Promise<void> {
     const uploaded = await parseCloudflareEnvelope<{ id?: string; etag?: string }>(
       await this.callRaw(
         `/workers/scripts/${encodeURIComponent(workerName)}?excludeScript=true&bindings_inherit=strict`,
@@ -1194,7 +1051,6 @@ export class UserCloudflareAccountApi {
     if (version.id !== workerVersionId || version.resources?.script?.etag !== uploaded.etag) {
       throw new CloudflareAccountApiError('Cloudflare did not read back the deployed Worker.');
     }
-    return workerVersionId;
   }
 
   async ensureWorkspaceRuntimeContainer(args: {
@@ -1203,7 +1059,7 @@ export class UserCloudflareAccountApi {
     image: string;
     maxInstances?: number;
     sleep?: (milliseconds: number) => Promise<void>;
-  }): Promise<{ id: string; name: string }> {
+  }): Promise<void> {
     requireWorkerName(args.applicationName);
     if (!/^[0-9a-f-]{32,64}$/i.test(args.namespaceId)) {
       throw new CloudflareAccountApiError('The workspace Sandbox namespace is invalid.');
@@ -1260,7 +1116,7 @@ export class UserCloudflareAccountApi {
           ? latestRollout
           : null;
       if (matchingRollout?.status === 'completed') {
-        return { id: result.id, name: result.name };
+        return;
       }
       const rolloutId =
         matchingRollout && ['pending', 'progressing'].includes(matchingRollout.status)
@@ -1278,7 +1134,6 @@ export class UserCloudflareAccountApi {
         sleep: args.sleep,
       });
     }
-    return { id: result.id, name: result.name };
   }
 
   private async createWorkspaceRuntimeContainerRollout(
@@ -1342,30 +1197,6 @@ export class UserCloudflareAccountApi {
     );
   }
 
-  /**
-   * Remove the container application a workspace runtime Worker was given, if one is still there.
-   * Deleting the Worker alone leaves the application behind, and nothing else would ever name it.
-   *
-   * The Containers control plane answers a delete with an envelope, a bare object, or an empty
-   * body depending on the path, so only the status is read.
-   */
-  async deleteWorkspaceRuntimeContainer(applicationName: string): Promise<void> {
-    requireWorkerName(applicationName);
-    const applications = await this.callContainer<unknown>('/applications', { method: 'GET' });
-    const existing = existingContainerApplication(applications, applicationName);
-    if (!existing) {
-      return;
-    }
-    const response = await this.callRaw(`/containers/applications/${encodeURIComponent(existing.id)}`, {
-      method: 'DELETE',
-      headers: { 'content-type': 'application/json' },
-    });
-    await response.body?.cancel().catch(() => undefined);
-    if (!response.ok && response.status !== 404) {
-      throw new CloudflareAccountApiError(`Cloudflare Containers request failed (${response.status}).`);
-    }
-  }
-
   async enableWorkerSubdomain(workerName: string): Promise<void> {
     requireWorkerName(workerName);
     const state = await this.call<{ enabled?: boolean; previews_enabled?: boolean }>(
@@ -1418,63 +1249,6 @@ export class UserCloudflareAccountApi {
     ) {
       throw new CloudflareAccountApiError('Cloudflare returned invalid workspace runtime schedules.');
     }
-  }
-
-  /** Reads the exact version currently receiving 100% of production traffic. */
-  async readActiveWorkerDeployment(workerName: string): Promise<ActiveWorkerDeploymentReadback | null> {
-    if (!/^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/.test(workerName)) {
-      throw new CloudflareAccountApiError('Worker name is invalid.');
-    }
-    const listed = await this.callOptional<unknown>(`/workers/scripts/${encodeURIComponent(workerName)}/deployments`, {
-      method: 'GET',
-    });
-    if (listed === null) {
-      return null;
-    }
-    const { deployment: active, fullyRoutedVersions } = newestWorkerDeployment(requireWorkerDeployments(listed));
-    if (!active?.id || fullyRoutedVersions.length !== 1 || !fullyRoutedVersions[0]?.version_id) {
-      throw new CloudflareAccountApiError('Cloudflare returned an ambiguous active Worker deployment.');
-    }
-    const workerVersionId = fullyRoutedVersions[0].version_id;
-    const [version, schedules, subdomainState] = await Promise.all([
-      this.call<{
-        id?: string;
-        resources?: {
-          bindings?: WorkerBinding[];
-          script?: { etag?: string };
-          script_runtime?: { compatibility_date?: string; compatibility_flags?: string[] };
-        };
-      }>(`/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(workerVersionId)}`, {
-        method: 'GET',
-      }),
-      this.call<unknown>(`/workers/scripts/${encodeURIComponent(workerName)}/schedules`, { method: 'GET' }),
-      this.readExactWorkerSubdomainState(workerName),
-    ]);
-    if (
-      version.id !== workerVersionId ||
-      !Array.isArray(version.resources?.bindings) ||
-      typeof version.resources.script?.etag !== 'string' ||
-      version.resources.script.etag.length < 1 ||
-      version.resources.script.etag.length > 256 ||
-      typeof version.resources.script_runtime?.compatibility_date !== 'string' ||
-      !Array.isArray(version.resources.script_runtime.compatibility_flags) ||
-      version.resources.script_runtime.compatibility_flags.some((flag) => typeof flag !== 'string')
-    ) {
-      throw new CloudflareAccountApiError('Cloudflare returned invalid active Worker version metadata.');
-    }
-    const bindings = requireWorkerBindings(version.resources.bindings);
-    const crons = requireSchedules(schedules);
-    return {
-      providerDeploymentId: active.id,
-      workerVersionId,
-      scriptEtag: version.resources.script.etag,
-      bindings,
-      crons,
-      compatibilityDate: version.resources.script_runtime.compatibility_date,
-      compatibilityFlags: version.resources.script_runtime.compatibility_flags,
-      workersDevEnabled: subdomainState.enabled,
-      previewUrlsEnabled: subdomainState.previewsEnabled,
-    };
   }
 
   private async call<T>(path: string, init: RequestInit): Promise<T> {
@@ -1633,7 +1407,7 @@ class AssetUploadSessionExpiredError extends Error {}
  * status-coded because the Containers control plane answers 401 for a missing scope too, and only
  * the message separates "reauthorize" from "upgrade".
  */
-export function isWorkspacePlanRequiredMessage(message: string): boolean {
+function isWorkspacePlanRequiredMessage(message: string): boolean {
   return (
     /cloudflare\s+containers?/i.test(message) && /(workers\s+paid|paid\s+plan|upgrade\s+your\s+plan)/i.test(message)
   );
@@ -1659,9 +1433,8 @@ function workersPlanUpgradeUrl(message: string): string | null {
  * the same 401, and only the wording separates them, so `isWorkspacePlanRequiredMessage` is a
  * guess until a real Workers Free account refuses one of these checks. There is no such account
  * to test against here, so every unclassified answer records what it actually saw: the status,
- * Cloudflare's own numeric error codes, and its wording. The provisioner turns this into
- * `user_computer_runtimes.last_error`, which `pnpm run ops` already reads, so the real wording
- * gets learned from production rather than guessed at a second time.
+ * Cloudflare's own numeric error codes, and its wording, so Workflow retries and logs preserve the
+ * real answer instead of guessing at a second classification.
  */
 function describeContainersAnswer(status: number, payload: CloudflareEnvelope<unknown> | null): string {
   const codes = cloudflareErrorCodes(payload);
@@ -1972,21 +1745,6 @@ function requireWorkerDeployments(value: unknown): WorkerDeploymentRow[] {
   });
 }
 
-function requireWorkerBindings(value: unknown[]): WorkerBinding[] {
-  return value.map((binding) => {
-    if (
-      !isRecord(binding) ||
-      typeof binding.name !== 'string' ||
-      binding.name.length === 0 ||
-      typeof binding.type !== 'string' ||
-      binding.type.length === 0
-    ) {
-      throw new CloudflareAccountApiError('Cloudflare returned invalid active Worker bindings.');
-    }
-    return binding;
-  });
-}
-
 function existingContainerApplication(
   value: unknown,
   applicationName: string,
@@ -2131,10 +1889,3 @@ function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
 }
 
 /** Parse a Cloudflare ISO-8601 timestamp into epoch millis, or null when it is absent or invalid. */
-function parseCloudflareTimestamp(value: unknown): number | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}

@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  attestManagedDeploymentSecurity: vi.fn(),
   claimApprovedDeployment: vi.fn(),
   findDeploymentResource: vi.fn(),
   recordDeploymentActivity: vi.fn(),
@@ -19,7 +18,6 @@ const mocks = vi.hoisted(() => ({
     configureManagedWorkerSchedule: vi.fn(),
     enableWorkerSubdomain: vi.fn(),
     getWorkersSubdomain: vi.fn(),
-    readActiveWorkerDeployment: vi.fn(),
   },
   UserCloudflareAccountApi: vi.fn(),
 }));
@@ -28,7 +26,6 @@ vi.mock('./deployment-plan', () => ({
   deploymentPlanResourceName: (plan: { resources: Array<Record<string, string>> }, type: string, logicalName: string) =>
     plan.resources.find((resource) => resource.type === type && resource.logicalName === logicalName)?.proposedName ??
     null,
-  deploymentProjectProfile: (plan: { project: unknown }) => plan.project,
   isCurrentDeploymentPlan: () => true,
 }));
 vi.mock('./deployment-repository', () => ({
@@ -38,9 +35,6 @@ vi.mock('./deployment-repository', () => ({
   recordDeploymentResource: mocks.recordDeploymentResource,
   requireDeployment: mocks.requireDeployment,
   transitionDeployment: mocks.transitionDeployment,
-}));
-vi.mock('./deployment-security-inventory', () => ({
-  attestManagedDeploymentSecurity: mocks.attestManagedDeploymentSecurity,
 }));
 vi.mock('./user-account-api', () => ({
   UserCloudflareAccountApi: mocks.UserCloudflareAccountApi,
@@ -72,7 +66,6 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
     mocks.accountApi.configureManagedWorkerSchedule.mockResolvedValue(undefined);
     mocks.accountApi.enableWorkerSubdomain.mockResolvedValue(undefined);
     mocks.accountApi.getWorkersSubdomain.mockResolvedValue('user-subdomain');
-    mocks.attestManagedDeploymentSecurity.mockResolvedValue({ status: 'current' });
     mocks.recordDeploymentResource.mockResolvedValue(undefined);
     mocks.recordDeploymentActivity.mockResolvedValue(undefined);
     mocks.transitionDeployment.mockResolvedValue(undefined);
@@ -97,7 +90,7 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
       createdAt: 1,
       updatedAt: 1,
     };
-    const terminalizeInterruptedDeploymentSession = vi.fn().mockResolvedValue({ status: 'failed' });
+    const terminalizeInterruptedDeploymentSession = vi.fn().mockResolvedValue(undefined);
     const projectNamespace = {
       idFromName: vi.fn((name: string) => `id:${name}`),
       get: vi.fn(() => ({ terminalizeInterruptedDeploymentSession })),
@@ -171,9 +164,6 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
       version: 5,
       deploymentId: 'deployment-1',
       sourceSha256: revision,
-      templateSourceSha256: 'b'.repeat(64),
-      securityBaselineVersion: 24,
-      securityBoundarySha256: 'c'.repeat(64),
       project: {
         type: 'worker',
         bindings: { ai: false, d1: false, r2: false, kv: false, appAgent: false },
@@ -213,9 +203,9 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
       assets: [],
       migrations: { DB: [], AGENT_SECURITY_DB: [] },
     }));
-    const beginDeploymentSession = vi.fn().mockResolvedValue({ sessionId: 'deployment-1:4' });
+    const beginDeploymentSession = vi.fn().mockResolvedValue(undefined);
     const assertDeploymentSession = vi.fn().mockResolvedValue({ workspaceRevision: 7, revision });
-    const finishDeploymentSession = vi.fn().mockResolvedValue({ status: 'completed' });
+    const finishDeploymentSession = vi.fn().mockResolvedValue(undefined);
     const projectNamespace = {
       idFromName: vi.fn((name: string) => `id:${name}`),
       get: vi.fn(() => ({
@@ -274,9 +264,6 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
         modules: expect.any(Array),
       }),
     );
-    expect(mocks.attestManagedDeploymentSecurity).toHaveBeenCalledWith(
-      expect.objectContaining({ expectedPublishedVersionId: '11111111-1111-4111-8111-111111111111' }),
-    );
     expect(request).toHaveBeenCalledTimes(2);
     expect(
       request.mock.calls.every(([url]) => url === 'https://ghostbuild.dev/api/cloudflare/runtime-credential'),
@@ -303,9 +290,6 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
       version: 5,
       deploymentId: 'deployment-1',
       sourceSha256: revision,
-      templateSourceSha256: 'b'.repeat(64),
-      securityBaselineVersion: 37,
-      securityBoundarySha256: 'c'.repeat(64),
       project: {
         type: 'worker',
         bindings: { ai: false, d1: true, r2: false, kv: false, appAgent: true },
@@ -363,11 +347,9 @@ describe('executeUserOwnedDeployment credential-free Computer flow', () => {
         AGENT_SECURITY_DB: [{ name: '0001_agent.sql', sql: 'CREATE TABLE agent_data (id TEXT);' }],
       },
     }));
-    const beginDeploymentSession = vi.fn().mockResolvedValue({
-      sessionId: 'preview:deployment-1:4:preview-1',
-    });
+    const beginDeploymentSession = vi.fn().mockResolvedValue(undefined);
     const assertDeploymentSession = vi.fn().mockResolvedValue({ workspaceRevision: 7, revision });
-    const finishDeploymentSession = vi.fn().mockResolvedValue({ status: 'completed' });
+    const finishDeploymentSession = vi.fn().mockResolvedValue(undefined);
     const projectNamespace = {
       idFromName: vi.fn((name: string) => `id:${name}`),
       get: vi.fn(() => ({

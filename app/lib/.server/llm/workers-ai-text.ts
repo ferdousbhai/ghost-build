@@ -1,5 +1,5 @@
 import { getPiModel } from './pi-ai-models';
-import type { WorkersAiAccountCredentials } from './provider';
+import type { WorkersAiAccountCredentials } from './pi-ai-models';
 import { AgentTurnError, completeText } from './pi-ai-invoke';
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
 import { CLOUDFLARE_WORKERS_AI_MODEL, DEFAULT_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';

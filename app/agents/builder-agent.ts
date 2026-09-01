@@ -15,11 +15,9 @@ import {
   createBuilderTurn,
   createRecoveryTurn,
   exhaustedBuilderTurnResult,
-  recordBuilderTurnBudget,
   type BuilderTurnState,
   type BuilderTurnStatus,
 } from './builder-turn-state';
-import type { BuilderTurnBudgetReport } from '~/lib/.server/llm/builder-turn-budget';
 import { DurableObjectContextCompactionRepository } from '~/lib/.server/llm/context-compaction-store';
 import { compactContext } from '~/lib/.server/llm/context-compaction';
 import { summarizeBuilderContext } from '~/lib/.server/llm/workers-ai-text';
@@ -200,13 +198,11 @@ export type BuilderAgentState = {
     updatedAt: string;
   } | null;
   lastCompletedTurn?: BuilderTurnState | null;
-  updatedAt?: string;
   transcript?: TranscriptCheckpoint | null;
   preview?: BuilderPreviewState | null;
   validationProgress?: {
     toolCallId: string;
     stage: BuilderValidationStage;
-    updatedAt: string;
   } | null;
   deployment?: BuilderDeploymentState | null;
   contextCompactionRequestedTurnId?: string | null;
@@ -347,7 +343,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.setState({
       ...this.state,
       activeTurn: nextTurn,
-      updatedAt: nextTurn.updatedAt,
     });
     logger.warn('Recovering interrupted Ghostbuild chat turn', {
       incidentId: nextTurn.recovery?.incidentId,
@@ -455,13 +450,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     const latestPrompt = !options?.continuation ? userMessages.at(-1) : undefined;
     const latestPromptText = latestPrompt ? messageText(latestPrompt) : '';
     const shouldGenerateTitle = shouldGenerateConversationTitle(latestPromptText, userMessages.length);
-    const turn = createBuilderTurn({
-      requestId: options?.requestId,
-      chatInitialId,
-      continuation: options?.continuation === true,
-      firstUserMessage,
-      messages,
-    });
+    const turn = createBuilderTurn(options?.requestId);
     console.info({
       event: 'builder_chat_turn_started',
       continuation: options?.continuation === true,
@@ -470,7 +459,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.setState({
       ...this.state,
       activeTurn: turn,
-      updatedAt: turn.updatedAt,
     });
     const steering = new PiSteeringQueue();
     this.activeSteering = { turnId: turn.id, queue: steering };
@@ -507,9 +495,8 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         onValidationStage: (toolCallId, stage) => this.setValidationProgress(toolCallId, stage),
         runWithKeepAlive: (operation) => this.keepAliveWhile(operation),
         steering,
-        onSettled: (budget) => {
+        onSettled: () => {
           settleSteering();
-          this.recordTurnBudget(turn.id, budget);
         },
         compaction: {
           current: this.contextCompaction.getCompaction(),
@@ -527,7 +514,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
               this.setState({
                 ...this.state,
                 contextCompactionRequestedTurnId: turn.id,
-                updatedAt: new Date().toISOString(),
               });
             }
           },
@@ -540,7 +526,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       settleSteering();
       this.finishTurn(turn, {
         status: 'error',
-        error: error instanceof Error ? error.message : String(error),
       });
       throw error;
     }
@@ -628,7 +613,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.finishTurn(currentTurn, {
       requestId: result.requestId,
       status,
-      error: result.error,
     });
     if (compactAfterTurn) {
       this.setState({ ...this.state, contextCompactionRequestedTurnId: null });
@@ -761,7 +745,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (activeTurn) {
       this.finishTurn(activeTurn, {
         status: 'aborted',
-        error: 'Cancelled by the project owner',
       });
     }
     await waitForCancellationBeforeDeadline(validationCancellation, deadline);
@@ -811,7 +794,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       this.setState({
         ...this.state,
         deployment: null,
-        updatedAt: new Date().toISOString(),
       });
     }
     this.updatePreviewForWorkspace(result.state.revision);
@@ -856,7 +838,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       ...preview,
       status: 'cancelled',
       pendingId: null,
-      updatedAt: new Date().toISOString(),
       error: null,
     };
     this.setPreviewState(next);
@@ -1016,7 +997,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (checkpoint === previous) {
       return previous;
     }
-    this.setState({ ...this.state, transcript: checkpoint, updatedAt: new Date().toISOString() });
+    this.setState({ ...this.state, transcript: checkpoint });
     return checkpoint;
   }
 
@@ -1092,7 +1073,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
           this.setState({
             ...this.state,
             generatedSubchatTitle: { subchatIndex: args.subchatIndex, title: provisionalTitle, updatedAt },
-            updatedAt,
           });
         }
         logger.info('Saved heuristic titles for first prompt', {
@@ -1123,7 +1103,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
           this.setState({
             ...this.state,
             generatedSubchatTitle: { subchatIndex: args.subchatIndex, title: conversationResult.value, updatedAt },
-            updatedAt,
           });
         }
       } catch {
@@ -1412,7 +1391,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   private refreshCloudflareExecutionState(): void {
     this.cloudflareExecutions.expireAwaiting();
     const cloudflareExecutions = this.cloudflareExecutions.listRecent();
-    this.setState({ ...this.state, cloudflareExecutions, updatedAt: new Date().toISOString() });
+    this.setState({ ...this.state, cloudflareExecutions });
   }
 
   private async loadParentWorkspace(
@@ -1483,7 +1462,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.setState({
       ...this.state,
       deployment: { status: 'deploying', ...job },
-      updatedAt: new Date().toISOString(),
     });
     try {
       await this.startFiber(
@@ -1548,7 +1526,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (this.state.deployment?.revision !== job.revision) {
       return;
     }
-    this.setState({ ...this.state, deployment, updatedAt: new Date().toISOString() });
+    this.setState({ ...this.state, deployment });
   }
 
   private async requestPreviewInternal(
@@ -1583,7 +1561,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       pendingId: previewId,
       workspaceRevision: snapshot.workspaceRevision,
       stale: snapshot.workspaceRevision !== workspace.revision,
-      updatedAt: new Date().toISOString(),
       error: null,
       // The version already serving stays visible until its replacement publishes.
       published: current.published,
@@ -1618,7 +1595,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       this.setPreviewState({
         ...this.currentPreviewState(),
         status: 'building',
-        updatedAt: new Date().toISOString(),
       });
       const userId = this.userId;
       const transcriptBinding = this.transcriptBinding;
@@ -1675,7 +1651,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         pendingId: null,
         workspaceRevision: job.workspaceRevision,
         stale: currentSnapshot.revision !== job.snapshotRevision,
-        updatedAt: new Date(Date.parse(success.readyAt)).toISOString(),
         error: null,
         published: success,
       });
@@ -1716,7 +1691,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
   }
 
   private setPreviewState(preview: BuilderPreviewState): void {
-    this.setState({ ...this.state, preview, updatedAt: preview.updatedAt });
+    this.setState({ ...this.state, preview });
   }
 
   private async refreshDeploymentReadiness(): Promise<BuilderWorkspaceCheckpoint | null> {
@@ -1735,7 +1710,6 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     this.setState({
       ...this.state,
       deployment,
-      updatedAt: new Date().toISOString(),
     });
     return validatedSnapshot;
   }
@@ -1744,34 +1718,19 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (stage === null && this.state.validationProgress?.toolCallId !== toolCallId) {
       return;
     }
-    const updatedAt = new Date().toISOString();
     this.setState({
       ...this.state,
-      validationProgress: stage ? { toolCallId, stage, updatedAt } : null,
-      updatedAt,
+      validationProgress: stage ? { toolCallId, stage } : null,
     });
   }
 
-  private recordTurnBudget(turnId: string, budget: BuilderTurnBudgetReport) {
-    const activeTurn = this.state.activeTurn;
-    if (activeTurn?.id !== turnId) {
-      return;
-    }
-    const updatedTurn = recordBuilderTurnBudget(activeTurn, budget);
-    this.setState({ ...this.state, activeTurn: updatedTurn, updatedAt: updatedTurn.updatedAt });
-  }
-
-  private finishTurn(
-    turn: BuilderTurnState,
-    result: { status: BuilderTurnStatus; requestId?: string; error?: string },
-  ) {
+  private finishTurn(turn: BuilderTurnState, result: { status: BuilderTurnStatus; requestId?: string }) {
     const finishedTurn = completeBuilderTurn(turn, result);
     this.setState({
       ...this.state,
       activeTurn: null,
       lastCompletedTurn: finishedTurn,
       validationProgress: null,
-      updatedAt: finishedTurn.updatedAt,
     });
   }
 }

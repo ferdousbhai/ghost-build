@@ -2,21 +2,15 @@ import { z } from 'zod';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  CLOUDFLARE_MCP_CALL_TIMEOUT_MS,
-  CLOUDFLARE_MCP_CONNECT_TIMEOUT_MS,
   CLOUDFLARE_MCP_ENDPOINT,
   CLOUDFLARE_MCP_EXPECTED_TOOL_CONTRACT,
-  CLOUDFLARE_MCP_LIST_TIMEOUT_MS,
   CLOUDFLARE_MCP_MAX_NORMALIZED_CONTENT_BYTES,
-  CLOUDFLARE_MCP_MAX_REQUEST_BYTES,
   CLOUDFLARE_MCP_MAX_RESPONSE_BYTES,
   CLOUDFLARE_MCP_MAX_TOOL_INPUT_BYTES,
-  CLOUDFLARE_MCP_OVERALL_TIMEOUT_MS,
   CLOUDFLARE_MCP_PROTOCOL_VERSION,
   CLOUDFLARE_MCP_PROVIDER_TRUNCATION_MARKER,
   CloudflareMcpClient,
   CloudflareMcpCompatibilityError,
-  CloudflareMcpError,
   type CloudflareMcpClientDependencies,
   type CloudflareMcpDocsInvocation,
   type CloudflareMcpExecuteInvocation,
@@ -88,21 +82,11 @@ afterEach(() => {
 });
 
 describe('CloudflareMcpClient', () => {
-  it('discovers the fixed contract and calls docs, search, and execute with bounded metadata', async () => {
+  it('validates the fixed contract and calls docs, search, and execute with bounded metadata', async () => {
     const accessToken = 'cloudflare-access-token-value';
     const request = vi.fn<typeof fetch>();
     const resolveAccessToken = vi.fn(async () => accessToken);
-    const recordCompatibilityMetric =
-      vi.fn<NonNullable<CloudflareMcpClientDependencies['recordCompatibilityMetric']>>();
-    const client = new CloudflareMcpClient({ resolveAccessToken, request, recordCompatibilityMetric });
-
-    queueDiscovery(request, 'discover-1');
-    const discovery = await client.discover(operationContext('discover-1'));
-    expect(discovery).toMatchObject({
-      status: 'compatible',
-      tools: ['docs', 'search', 'execute'],
-      metadata: { operation: 'discovery', statusClass: '2xx', requestId: 'list-ray' },
-    });
+    const client = new CloudflareMcpClient({ resolveAccessToken, request });
     expect(CLOUDFLARE_MCP_EXPECTED_TOOL_CONTRACT).toHaveLength(3);
 
     const docs = docsInvocation('docs-1');
@@ -111,7 +95,7 @@ describe('CloudflareMcpClient', () => {
     expect(docsOutcome).toMatchObject({
       status: 'success',
       content: [{ type: 'text', text: 'documentation result' }],
-      metadata: { operation: 'docs', statusClass: '2xx', requestId: 'call-ray' },
+      metadata: { requestId: 'call-ray', httpStatus: 200, truncated: false },
     });
 
     const search = searchInvocation('search-1');
@@ -126,12 +110,7 @@ describe('CloudflareMcpClient', () => {
     expect(outcomeStatus(executeOutcome)).toBe('success');
     expect(invocationToolName(execute)).toBe('execute');
 
-    expect(resolveAccessToken).toHaveBeenCalledTimes(4);
-    expect(recordCompatibilityMetric).toHaveBeenCalledTimes(4);
-    for (const [metric] of recordCompatibilityMetric.mock.calls) {
-      expect(metric).toEqual({ provider: 'cloudflare-official-mcp', status: 'compatible' });
-      expect(Object.keys(metric)).toEqual(['provider', 'status']);
-    }
+    expect(resolveAccessToken).toHaveBeenCalledTimes(3);
     for (const [url, init] of request.mock.calls) {
       expect(String(url)).toBe(CLOUDFLARE_MCP_ENDPOINT);
       expect(init).toMatchObject({ method: 'POST', redirect: 'manual', signal: expect.any(AbortSignal) });
@@ -159,21 +138,14 @@ describe('CloudflareMcpClient', () => {
 
   it('fails closed with a typed compatibility error when the catalog or schema drifts', async () => {
     const missingToolRequest = vi.fn<typeof fetch>();
-    const recordCompatibilityMetric =
-      vi.fn<NonNullable<CloudflareMcpClientDependencies['recordCompatibilityMetric']>>();
     const client = new CloudflareMcpClient({
       resolveAccessToken: async () => 'access-token',
       request: missingToolRequest,
-      recordCompatibilityMetric,
     });
     queueDiscovery(missingToolRequest, 'drift-missing', expectedTools.slice(0, 2));
-    await expect(client.discover(operationContext('drift-missing'))).rejects.toBeInstanceOf(
+    await expect(client.invoke(docsInvocation('drift-missing'))).rejects.toBeInstanceOf(
       CloudflareMcpCompatibilityError,
     );
-    expect(recordCompatibilityMetric).toHaveBeenCalledWith({
-      provider: 'cloudflare-official-mcp',
-      status: 'incompatible',
-    });
 
     const schemaDriftRequest = vi.fn<typeof fetch>();
     const schemaDriftClient = createClient(schemaDriftRequest);
@@ -190,7 +162,7 @@ describe('CloudflareMcpClient', () => {
       },
     ] as const satisfies readonly ToolFixture[];
     queueDiscovery(schemaDriftRequest, 'drift-schema', driftedTools);
-    await expect(schemaDriftClient.discover(operationContext('drift-schema'))).rejects.toBeInstanceOf(
+    await expect(schemaDriftClient.invoke(docsInvocation('drift-schema'))).rejects.toBeInstanceOf(
       CloudflareMcpCompatibilityError,
     );
   });
@@ -210,7 +182,7 @@ describe('CloudflareMcpClient', () => {
         { headers: { 'mcp-session-id': 'unexpected-session' } },
       ),
     );
-    await expect(createClient(sessionRequest).discover(operationContext('session-drift'))).rejects.toBeInstanceOf(
+    await expect(createClient(sessionRequest).invoke(docsInvocation('session-drift'))).rejects.toBeInstanceOf(
       CloudflareMcpCompatibilityError,
     );
 
@@ -250,13 +222,9 @@ describe('CloudflareMcpClient', () => {
       },
       request: vi.fn<typeof fetch>(),
     });
-    try {
-      await rejectedClient.discover(operationContext('redaction-error'));
-      throw new Error('Expected credential resolution to fail.');
-    } catch (cause) {
-      expect(cause).toBeInstanceOf(CloudflareMcpError);
-      expect(String(cause)).not.toContain(accessToken);
-    }
+    const rejected = await rejectedClient.invoke(docsInvocation('redaction-error'));
+    expect(rejected).toMatchObject({ status: 'failure', error: { code: 'credential_unavailable' } });
+    expect(JSON.stringify(rejected)).not.toContain(accessToken);
   });
 
   it('rejects redirects and never follows a provider-supplied URL', async () => {
@@ -267,8 +235,9 @@ describe('CloudflareMcpClient', () => {
       );
     const client = createClient(request);
 
-    await expect(client.discover(operationContext('redirect-1'))).rejects.toMatchObject({
-      code: 'redirect_rejected',
+    await expect(client.invoke(docsInvocation('redirect-1'))).resolves.toMatchObject({
+      status: 'failure',
+      error: { code: 'redirect_rejected' },
     });
     expect(request).toHaveBeenCalledTimes(1);
     expect(String(request.mock.calls[0]?.[0])).toBe(CLOUDFLARE_MCP_ENDPOINT);
@@ -322,7 +291,7 @@ describe('CloudflareMcpClient', () => {
     const outcome = await truncationClient.invoke(truncationInvocation);
     expect(outcome).toMatchObject({
       status: 'success',
-      metadata: { truncated: true, providerTruncated: true, clientTruncated: true },
+      metadata: { truncated: true },
     });
     if (outcome.status !== 'success') {
       throw new Error('Expected a successful truncated response.');
@@ -387,7 +356,7 @@ describe('CloudflareMcpClient', () => {
     await expect(rejectedClient.invoke(docsInvocation('refresh-rejected'))).resolves.toMatchObject({
       status: 'failure',
       error: { code: 'authentication_failed' },
-      metadata: { httpStatus: 401, statusClass: '4xx' },
+      metadata: { httpStatus: 401 },
     });
     expect(rejectedResolver).toHaveBeenCalledTimes(2);
     expect(rejectedRequest).toHaveBeenCalledTimes(2);
@@ -402,7 +371,7 @@ describe('CloudflareMcpClient', () => {
     const timeoutClient = new CloudflareMcpClient({ resolveAccessToken: timeoutResolver, request: timeoutRequest });
     await expect(timeoutClient.invoke(timeoutInvocation)).resolves.toMatchObject({
       status: 'indeterminate',
-      error: { code: 'timeout', reconcileBeforeRetry: true },
+      error: { code: 'timeout' },
     });
     expect(timeoutRequest).toHaveBeenCalledTimes(4);
     expect(timeoutResolver).toHaveBeenCalledTimes(1);
@@ -418,7 +387,7 @@ describe('CloudflareMcpClient', () => {
     });
     await expect(disconnectedClient.invoke(disconnectedInvocation)).resolves.toMatchObject({
       status: 'indeterminate',
-      error: { code: 'transport_failure', reconcileBeforeRetry: true },
+      error: { code: 'transport_failure' },
     });
     expect(disconnectedRequest).toHaveBeenCalledTimes(4);
     expect(disconnectedResolver).toHaveBeenCalledTimes(1);
@@ -434,8 +403,8 @@ describe('CloudflareMcpClient', () => {
     });
     await expect(serverErrorClient.invoke(serverErrorInvocation)).resolves.toMatchObject({
       status: 'indeterminate',
-      error: { code: 'provider_failure', reconcileBeforeRetry: true },
-      metadata: { statusClass: '5xx', httpStatus: 503 },
+      error: { code: 'provider_failure' },
+      metadata: { httpStatus: 503 },
     });
     expect(serverErrorRequest).toHaveBeenCalledTimes(4);
     expect(serverErrorResolver).toHaveBeenCalledTimes(1);
@@ -459,7 +428,7 @@ describe('CloudflareMcpClient', () => {
 
     await expect(client.invoke(invocation)).resolves.toMatchObject({
       status: 'insufficient_scope',
-      metadata: { requestId: 'scope-ray', statusClass: '2xx' },
+      metadata: { requestId: 'scope-ray' },
     });
     expect(request).toHaveBeenCalledTimes(4);
 
@@ -474,7 +443,7 @@ describe('CloudflareMcpClient', () => {
     );
     await expect(createClient(challengeRequest).invoke(challengeInvocation)).resolves.toMatchObject({
       status: 'insufficient_scope',
-      metadata: { requestId: 'challenge-ray', statusClass: '4xx' },
+      metadata: { requestId: 'challenge-ray' },
     });
   });
 
@@ -494,18 +463,6 @@ describe('CloudflareMcpClient', () => {
     });
     expect(request).toHaveBeenCalledTimes(4);
     expect(resolveAccessToken).toHaveBeenCalledTimes(1);
-  });
-
-  it('publishes named phase and aggregate limits', () => {
-    expect(
-      [
-        CLOUDFLARE_MCP_CONNECT_TIMEOUT_MS,
-        CLOUDFLARE_MCP_LIST_TIMEOUT_MS,
-        CLOUDFLARE_MCP_CALL_TIMEOUT_MS,
-        CLOUDFLARE_MCP_OVERALL_TIMEOUT_MS,
-      ].every((timeout) => timeout > 0),
-    ).toBe(true);
-    expect(CLOUDFLARE_MCP_MAX_REQUEST_BYTES).toBeGreaterThan(CLOUDFLARE_MCP_MAX_TOOL_INPUT_BYTES);
   });
 });
 

@@ -16,14 +16,6 @@ describe('previewDisplayStatus', () => {
   it('fails closed when a completed preview has an untrusted URL', () => {
     expect(previewDisplayStatus('ready', success, false)).toBe('failed');
   });
-
-  it.each(['queued', 'building'] as const)('keeps %s visible while a replacement is uploading', (status) => {
-    expect(previewDisplayStatus(status, success, false)).toBe(status);
-  });
-
-  it('preserves an explicit publication failure', () => {
-    expect(previewDisplayStatus('failed', success, false)).toBe('failed');
-  });
 });
 
 describe('previewFrameUrl', () => {
@@ -57,19 +49,6 @@ describe('previewPresentation', () => {
 
     expect(presentation.canUpdate).toBe(true);
     expect(presentation.canReload).toBe(true);
-  });
-
-  it('shows uploading feedback while retaining the prior iframe', () => {
-    const presentation = previewPresentation({
-      ...idleBuilderPreviewState(),
-      status: 'building',
-      stale: true,
-      published: success,
-    });
-
-    expect(presentation.isUpdatingVisible).toBe(true);
-    expect(presentation.previewUrl).toBe(`${success.url}/`);
-    expect(presentation.canUpdate).toBe(false);
   });
 
   it('disables reload for an invalid provider URL', () => {

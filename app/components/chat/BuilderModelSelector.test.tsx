@@ -80,23 +80,6 @@ describe('BuilderModelSelector', () => {
     expect(localStorage.getItem('ghostbuild_builder_model_v2')).toBe(alternativeModel.id);
   });
 
-  it('marks GLM 5.3 Flash as the deliberate default and paid model', async () => {
-    await renderSelector();
-
-    const trigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Builder model"]');
-    expect(trigger?.getAttribute('aria-label')).toContain('GLM 5.3 Flash');
-    expect(trigger?.textContent).toContain('default');
-
-    await act(async () => {
-      trigger?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
-    });
-    const defaultItem = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
-      item.textContent?.includes('GLM 5.3 Flash'),
-    );
-    expect(defaultItem?.textContent).toContain('Default');
-    expect(defaultItem?.textContent).toContain('Paid');
-  });
-
   it('closes the menu and prevents changes when a turn becomes active', async () => {
     await renderSelector();
 

@@ -33,6 +33,6 @@ export async function downloadProject(files: FileMap, description: string): Prom
   fileSaver.saveAs(archive, `${projectFileName(description)}.zip`);
 }
 
-export function projectFileName(description: string): string {
+function projectFileName(description: string): string {
   return (description || 'project').toLocaleLowerCase().split(' ').join('_');
 }

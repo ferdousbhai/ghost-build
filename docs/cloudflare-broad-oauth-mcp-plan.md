@@ -122,7 +122,7 @@ Always require explicit approval for:
 
 ### Preserve specialized build and deployment paths
 
-Do not replace `builder-deployment-command.ts`, the exact-revision user-owned deployment executor, or deployment security attestation with generic MCP calls. Those paths have stronger revision and security guarantees. The prompt/tool policy should direct normal generated-application deployments through the existing specialized command. MCP is for Cloudflare control-plane operations not already covered, and later consolidation requires a separate design review.
+Do not replace `builder-deployment-command.ts` or the exact-revision user-owned deployment executor with generic MCP calls. Those paths have stronger revision guarantees. The prompt/tool policy should direct normal generated-application deployments through the existing specialized command. MCP is for Cloudflare control-plane operations not already covered, and later consolidation requires a separate design review.
 
 ## Target request flow
 
@@ -341,7 +341,7 @@ Because BuilderAgent is bundled into the user-owned workspace runtime, update th
 - `user-workspace-runtime/src/index.ts` and `user-workspace-runtime/src/protocol.ts`;
 - the control-plane runtime credential endpoint and its authentication tests;
 - user-workspace migrations/runtime controls; and
-- deployment security inventory/attestation if the new outbound MCP destination or dependency changes the declared baseline.
+- generated-app deployment policy if the new outbound MCP destination or dependency changes the trusted configuration.
 
 Update privacy policy, terms, onboarding copy, settings copy, data inventory, retention/deletion/export documentation, incident response, and support runbooks. State that prompts may cause calls to Cloudflare's managed MCP service and that broad OAuth permissions remain constrained by explicit operation approvals.
 
@@ -386,7 +386,7 @@ After changing the user workspace runtime, run `pnpm run generate:artifacts`. Do
 - Existing narrow user sees reauthorization-required, reconnects, keeps workspace data, and receives a new runtime generation.
 - Search for an available domain and quote pricing without purchase.
 - Intercept/mock the final Registrar registration request; assert the approval payload and exact API request without incurring a charge.
-- Existing generated-app deployment still uses exact-revision deployment and passes security attestation.
+- Existing generated-app deployment still validates and publishes the exact approved revision.
 
 ### Required commands
 
@@ -449,7 +449,7 @@ The coding agent should expect to touch or add the following areas; exact names 
 - Builder/model tools: `ghostbuild-agent/model-tool-inputs.ts`, `ghostbuild-agent/types.ts`, `app/lib/.server/llm/workers-ai-tools.ts`, `pi-tools-adapter.ts`, `pi-agent-runner.ts`, `pi-message-conversion.ts`, and turn budgets/prompts.
 - Durable approval: `app/agents/builder-agent.ts`, `app/agents/builder-agent-schema.ts`, callable/protocol types, recovery tests.
 - UI: `app/components/chat/ToolUseContents.tsx`, `ToolCall.tsx`, `useBuilderAgentChat.ts`, `app/components/settings/CloudflareCard.client.tsx`, `CloudflareSignInPrompt.tsx`, settings/onboarding surfaces and stores.
-- Runtime/artifacts: `user-workspace-runtime/src/index.ts`, `protocol.ts`, runtime tests, security inventory/attestation, generated artifacts.
+- Runtime/artifacts: `user-workspace-runtime/src/index.ts`, `protocol.ts`, runtime tests, trusted deployment config, generated artifacts.
 - Product/legal/ops: privacy, terms, launch data inventory, incident response, support/runbook, and read-only ops report.
 
 ## Definition of done
@@ -463,7 +463,7 @@ The coding agent should expect to touch or add the following areas; exact names 
 - Every `execute` is durably approval-gated in the first mutation release, exactly-once bound, recoverable, and audited.
 - Domain search/price is supported, while registration cannot occur without fresh quote data and explicit exact approval.
 - Secret-producing operations have a safe non-model output path or remain blocked.
-- Existing workspace, inference, exact-revision deployment, and security-attestation invariants still pass.
+- Existing workspace, inference, and exact-revision deployment invariants still pass.
 - `pnpm run generate:artifacts` and `pnpm run validate` pass; production config and read-only ops verification pass.
 
 ## Primary references checked

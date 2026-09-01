@@ -1,7 +1,7 @@
 import { atom } from 'nanostores';
 
 export const MAX_CHAT_RETRIES = 4;
-export const CHAT_RETRY_EXPIRY_MS = 60_000;
+const CHAT_RETRY_EXPIRY_MS = 60_000;
 
 type ChatRetryState = {
   numFailures: number;
@@ -9,7 +9,7 @@ type ChatRetryState = {
   lastFailureAt: number | null;
 };
 
-export const chatRetryState = atom<ChatRetryState>({
+const chatRetryState = atom<ChatRetryState>({
   numFailures: 0,
   nextRetry: Date.now(),
   lastFailureAt: null,

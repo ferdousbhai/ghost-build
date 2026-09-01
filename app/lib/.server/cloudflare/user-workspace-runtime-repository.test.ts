@@ -1,180 +1,51 @@
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import {
-  claimUserWorkspaceRuntimeProvisioning,
-  findUserWorkspaceRuntime,
-  markUserWorkspaceRuntimeError,
-  markUserWorkspaceRuntimeReady,
-  recordUserWorkspaceRuntimeUpgradeDeferral,
-} from './user-workspace-runtime-repository';
+import { findUserWorkspaceRuntime, upsertUserWorkspaceRuntime } from './user-workspace-runtime-repository';
 
-/** Any stable value: the claim only compares it against the recorded digest. */
-const EXPECTED_IMAGE = 'registry.cloudflare.com/acct/ghostbuild-workspace@sha256:expected';
-
-describe('workspace runtime provisioning lease', () => {
-  it('allows only one live provisioning attempt', async () => {
+describe('workspace runtime locator', () => {
+  it('stores and replaces the ready runtime for a user', async () => {
     const db = runtimeDatabase();
 
-    await expect(claim(db, 'attempt-1', 100, 200)).resolves.toMatchObject({ claimed: true });
-    await expect(claim(db, 'attempt-2', 150, 250)).resolves.toMatchObject({
-      claimed: false,
-      runtime: { status: 'provisioning', provisioningAttemptId: 'attempt-1' },
-    });
-  });
-
-  it('prevents an expired attempt from overwriting its successful replacement', async () => {
-    const db = runtimeDatabase();
-    await claim(db, 'attempt-old', 100, 200);
-    await expect(claim(db, 'attempt-new', 201, 400)).resolves.toMatchObject({ claimed: true });
-
-    await markUserWorkspaceRuntimeReady({
-      db,
-      userId: 'user-1',
-      connectionId: 'connection-1',
-      connectionGeneration: 1,
-      runtimeVersion: 'a'.repeat(64),
-      attemptId: 'attempt-new',
-      imageDigest: 'docker.io/base@sha256:test',
-      now: 202,
-    });
-    await expect(
-      markUserWorkspaceRuntimeError({
-        db,
-        userId: 'user-1',
-        connectionId: 'connection-1',
-        connectionGeneration: 1,
-        runtimeVersion: 'a'.repeat(64),
-        attemptId: 'attempt-old',
-        error: 'late failure',
-        now: 203,
-      }),
-    ).rejects.toThrow('connection changed');
+    await upsertUserWorkspaceRuntime(runtimeArgs(db, { runtimeVersion: 'a'.repeat(64), now: 1 }));
+    await upsertUserWorkspaceRuntime(runtimeArgs(db, { runtimeVersion: 'b'.repeat(64), now: 2 }));
 
     await expect(findUserWorkspaceRuntime(db, 'user-1')).resolves.toMatchObject({
-      status: 'ready',
-      lastError: null,
-      provisioningAttemptId: null,
-    });
-  });
-
-  it('keeps one deferral clock per pinned runtime and clears it once the upgrade is claimed', async () => {
-    const db = runtimeDatabase();
-    await claim(db, 'attempt-1', 100, 200);
-    await markUserWorkspaceRuntimeReady({
-      db,
-      userId: 'user-1',
-      connectionId: 'connection-1',
-      connectionGeneration: 1,
-      runtimeVersion: 'a'.repeat(64),
-      attemptId: 'attempt-1',
-      imageDigest: 'docker.io/base@sha256:test',
-      now: 101,
-    });
-
-    const defer = (now: number) =>
-      recordUserWorkspaceRuntimeUpgradeDeferral({ db, userId: 'user-1', runtimeVersion: 'a'.repeat(64), now });
-    await expect(defer(1_000)).resolves.toBe(1_000);
-    // A later deferral of the same pinned version measures from the first observation, not this one.
-    await expect(defer(9_000)).resolves.toBe(1_000);
-
-    await claimUserWorkspaceRuntimeProvisioning({
-      db,
-      userId: 'user-1',
-      connectionId: 'connection-1',
-      connectionGeneration: 1,
-      workerName: 'ghostbuild-workspace-test',
-      endpoint: 'https://workspace.example',
       runtimeVersion: 'b'.repeat(64),
-      attemptId: 'attempt-2',
-      leaseExpiresAt: 20_000,
-      expectedImageDigest: EXPECTED_IMAGE,
-      now: 10_000,
     });
-    await expect(findUserWorkspaceRuntime(db, 'user-1')).resolves.toMatchObject({ upgradeDeferredSince: null });
   });
 
-  it('leaves the deferral clock alone once the runtime it pinned is gone', async () => {
+  it('does not return an unfinished legacy row', async () => {
     const db = runtimeDatabase();
-    await claim(db, 'attempt-1', 100, 200);
+    await db
+      .prepare(
+        `INSERT INTO user_computer_runtimes
+          (user_id, connection_id, connection_generation, worker_name, endpoint,
+           runtime_version, status, created_at, updated_at)
+         VALUES ('user-1', 'connection-1', 1, 'worker', 'https://workspace.example', 'old',
+                 'provisioning', 1, 1)`,
+      )
+      .run();
 
-    await expect(
-      recordUserWorkspaceRuntimeUpgradeDeferral({ db, userId: 'user-1', runtimeVersion: 'c'.repeat(64), now: 1_000 }),
-    ).resolves.toBe(1_000);
-    await expect(findUserWorkspaceRuntime(db, 'user-1')).resolves.toMatchObject({ upgradeDeferredSince: null });
-  });
-
-  it('re-claims a ready runtime whose image is not the one it should be on', async () => {
-    // The staleness check treats an image mismatch as "upgrade needed". If the claim disagrees,
-    // provisioning hands back the same unusable runtime and the session fails on every request —
-    // which is exactly what shipped before this condition existed.
-    const db = runtimeDatabase();
-    await claim(db, 'attempt-1', 100, 200);
-    await markUserWorkspaceRuntimeReady({
-      db,
-      userId: 'user-1',
-      connectionId: 'connection-1',
-      connectionGeneration: 1,
-      runtimeVersion: 'a'.repeat(64),
-      attemptId: 'attempt-1',
-      imageDigest: 'docker.io/cloudflare/sandbox@sha256:fallback',
-      now: 150,
-    });
-
-    await expect(claim(db, 'attempt-2', 300, 400)).resolves.toMatchObject({ claimed: true });
-  });
-
-  it('leaves a ready runtime alone once it is on the expected image', async () => {
-    const db = runtimeDatabase();
-    await claim(db, 'attempt-1', 100, 200);
-    await markUserWorkspaceRuntimeReady({
-      db,
-      userId: 'user-1',
-      connectionId: 'connection-1',
-      connectionGeneration: 1,
-      runtimeVersion: 'a'.repeat(64),
-      attemptId: 'attempt-1',
-      imageDigest: EXPECTED_IMAGE,
-      now: 150,
-    });
-
-    await expect(claim(db, 'attempt-2', 300, 400)).resolves.toMatchObject({ claimed: false });
-  });
-
-  it('adopts an exact claim when D1 commits before acknowledgement fails', async () => {
-    const db = runtimeDatabase({ claimErrorAfterCommit: new Error('D1 acknowledgement lost') });
-
-    await expect(claim(db, 'attempt-1', 100, 200)).resolves.toMatchObject({
-      claimed: true,
-      runtime: { status: 'provisioning', provisioningAttemptId: 'attempt-1' },
-    });
+    await expect(findUserWorkspaceRuntime(db, 'user-1')).resolves.toBeNull();
   });
 });
 
-function claim(
-  db: D1Database,
-  attemptId: string,
-  now: number,
-  leaseExpiresAt: number,
-  expectedImageDigest = EXPECTED_IMAGE,
-) {
-  return claimUserWorkspaceRuntimeProvisioning({
+function runtimeArgs(db: D1Database, overrides: { runtimeVersion: string; now: number }) {
+  return {
     db,
-    expectedImageDigest,
     userId: 'user-1',
     connectionId: 'connection-1',
     connectionGeneration: 1,
-    workerName: 'ghostbuild-workspace-test',
+    workerName: 'worker',
     endpoint: 'https://workspace.example',
-    runtimeVersion: 'a'.repeat(64),
-    attemptId,
-    leaseExpiresAt,
-    now,
-  });
+    runtimeVersion: overrides.runtimeVersion,
+    imageDigest: 'docker.io/cloudflare/sandbox@sha256:test',
+    now: overrides.now,
+  };
 }
 
-function runtimeDatabase(options: { claimErrorAfterCommit?: Error } = {}): D1Database {
+function runtimeDatabase(): D1Database {
   const database = new DatabaseSync(':memory:');
-  let failClaim = options.claimErrorAfterCommit;
   database.exec(`
     CREATE TABLE user_computer_runtimes (
       user_id TEXT PRIMARY KEY,
@@ -195,18 +66,12 @@ function runtimeDatabase(options: { claimErrorAfterCommit?: Error } = {}): D1Dat
   `);
   return {
     prepare(query: string) {
-      return prepared(database.prepare(query), () => {
-        if (query.includes('INSERT INTO user_computer_runtimes') && failClaim) {
-          const error = failClaim;
-          failClaim = undefined;
-          throw error;
-        }
-      });
+      return prepared(database.prepare(query));
     },
   } as unknown as D1Database;
 }
 
-function prepared(statement: StatementSync, afterFirst: () => void) {
+function prepared(statement: StatementSync) {
   let values: SQLInputValue[] = [];
   return {
     bind(...next: SQLInputValue[]) {
@@ -214,9 +79,11 @@ function prepared(statement: StatementSync, afterFirst: () => void) {
       return this;
     },
     async first<T>() {
-      const row = (statement.get(...values) as T | undefined) ?? null;
-      afterFirst();
-      return row;
+      return (statement.get(...values) as T | undefined) ?? null;
+    },
+    async run() {
+      const result = statement.run(...values);
+      return { success: true, meta: { changes: Number(result.changes) } };
     },
   };
 }

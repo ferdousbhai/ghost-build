@@ -5,18 +5,19 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 
 /**
  * The built server is a Workers bundle, so it statically imports
- * `cloudflare:workers` for the private operations RPC entrypoint. Node's ESM
- * loader cannot resolve that scheme, and workerd is not what this check is for:
- * it exercises `fetch` route rendering, never RPC. Stubbing the one binding the
- * bundle imports is enough — nothing here ever constructs the entrypoint.
+ * `cloudflare:workers` for the durable provisioning entrypoint. Node's ESM loader cannot resolve
+ * that scheme, and workerd is not what this check is for: it exercises `fetch` route rendering,
+ * never a Workflow. Stubbing the runtime base classes is enough — nothing here constructs the
+ * entrypoint.
  */
-const WORKERS_MODULE_STUB = 'export class WorkerEntrypoint {}';
+const WORKERS_MODULE_STUB = 'export class WorkerEntrypoint {}; export class WorkflowEntrypoint {}';
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
-    return specifier === 'cloudflare:workers'
-      ? { url: `data:text/javascript,${encodeURIComponent(WORKERS_MODULE_STUB)}`, shortCircuit: true }
-      : nextResolve(specifier, context);
+    if (specifier === 'cloudflare:workers') {
+      return { url: `data:text/javascript,${encodeURIComponent(WORKERS_MODULE_STUB)}`, shortCircuit: true };
+    }
+    return nextResolve(specifier, context);
   },
 });
 

@@ -46,17 +46,6 @@ export function isGhostbuildToolResult(value: unknown): value is GhostbuildToolR
   );
 }
 
-export function toolResultContent(value: unknown): string | undefined {
-  if (!isGhostbuildToolResult(value)) {
-    return undefined;
-  }
-  const { data } = value;
-  if (typeof data !== 'object' || data === null || !('content' in data)) {
-    return undefined;
-  }
-  return typeof data.content === 'string' ? data.content : undefined;
-}
-
 export function toolResultSummary(value: unknown): string {
   if (isGhostbuildToolResult(value)) {
     return value.summary;

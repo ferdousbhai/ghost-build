@@ -1,26 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { applyLiveSubchatTitle, createSubchatOptions, getSubchatLabel, getSubchatNavigation } from './subchat-model';
+import { applyLiveSubchatTitle } from './subchat-model';
 
 describe('subchat model', () => {
-  it('creates stable fallback labels', () => {
-    expect(
-      createSubchatOptions([
-        { subchatIndex: 0, updatedAt: 1, transcript: transcript(0) },
-        { subchatIndex: 1, updatedAt: 2, description: 'Billing', transcript: transcript(1) },
-      ]).map(({ label }) => label),
-    ).toEqual(['Initial chat', 'Billing']);
-    expect(getSubchatLabel(3, '   ')).toBe('Chat 4');
-  });
-
-  it('derives navigation and creation permissions', () => {
-    expect(getSubchatNavigation(3, 1, true)).toMatchObject({
-      canNavigatePrev: true,
-      canNavigateNext: true,
-      canCreateSubchat: false,
-    });
-    expect(getSubchatNavigation(3, 2, true).canCreateSubchat).toBe(true);
-  });
-
   it('keeps a persisted manual title when a stale generated title is replayed', () => {
     const persisted = [
       {

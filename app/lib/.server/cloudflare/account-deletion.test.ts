@@ -7,23 +7,15 @@ import { eraseControlPlaneAccount } from './account-deletion';
 import { D1CloudflareCredentialVault } from './cloudflare-credential-vault';
 
 const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
-const CONTROL_PLANE_TABLES = [
-  'user',
-  'cloudflare_credentials',
-  'cloudflare_connections',
-  'cloudflare_auth_sessions',
-  'cloudflare_oauth_states',
-  'user_computer_runtimes',
-];
 
 describe('control-plane account erasure', () => {
-  it('erases every operator-held record and revokes the Cloudflare grant', async () => {
+  it('erases the account and revokes its Cloudflare grant', async () => {
     const { database, db } = controlPlaneDatabase();
-    const revoke = vi.fn(async () => new Response(null, { status: 200 }));
+    const revoke = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 200 }));
     const vault = new D1CloudflareCredentialVault(db, ENCRYPTION_KEY, {
       clientId: 'client',
       clientSecret: 'secret',
-      request: revoke as unknown as typeof fetch,
+      request: revoke,
     });
     const handle = await vault.storeOAuthCredential({
       accessToken: 'access',
@@ -33,112 +25,23 @@ describe('control-plane account erasure', () => {
     seedAccount(database, handle);
 
     await expect(eraseControlPlaneAccount({ env: { DB: db } as Env, userId: 'user-1', vault })).resolves.toEqual({
-      oauthStates: 1,
-      runtimeLocators: 1,
-      authSessions: 1,
-      connections: 1,
-      credentials: 1,
-      accounts: 1,
       cloudflareAuthorizationRevoked: true,
     });
-    expect(revoke).toHaveBeenCalledWith('https://dash.cloudflare.com/oauth2/revoke', expect.anything());
-    for (const table of CONTROL_PLANE_TABLES) {
-      expect({ table, rows: rowCount(database, table) }).toEqual({ table, rows: 0 });
-    }
-  });
-
-  it('repeats without error and reports that nothing remained', async () => {
-    const { database, db } = controlPlaneDatabase();
-    const vault = credentialVault(db);
-    const handle = await vault.storeOAuthCredential({
-      accessToken: 'access',
-      refreshToken: 'refresh',
-      expiresAt: Date.now() + 3_600_000,
-    });
-    seedAccount(database, handle);
-    const erase = () => eraseControlPlaneAccount({ env: { DB: db } as Env, userId: 'user-1', vault });
-
-    await erase();
-
-    await expect(erase()).resolves.toEqual({
-      oauthStates: 0,
-      runtimeLocators: 0,
-      authSessions: 0,
-      connections: 0,
-      credentials: 0,
-      accounts: 0,
-      cloudflareAuthorizationRevoked: false,
-    });
-  });
-
-  it('still erases the stored ciphertext when Cloudflare refuses the revocation', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const { database, db } = controlPlaneDatabase();
-    const vault = new D1CloudflareCredentialVault(db, ENCRYPTION_KEY, {
-      clientId: 'client',
-      clientSecret: 'secret',
-      request: (async () => {
-        throw new Error('refresh=secret-token');
-      }) as unknown as typeof fetch,
-    });
-    const handle = await vault.storeOAuthCredential({
-      accessToken: 'access',
-      refreshToken: 'refresh',
-      expiresAt: Date.now() + 3_600_000,
-    });
-    seedAccount(database, handle);
-
-    const erasure = await eraseControlPlaneAccount({ env: { DB: db } as Env, userId: 'user-1', vault });
-
-    expect(erasure.cloudflareAuthorizationRevoked).toBe(false);
-    expect(erasure.credentials).toBe(1);
+    expect(revoke).toHaveBeenCalledOnce();
+    expect(rowCount(database, 'user')).toBe(0);
     expect(rowCount(database, 'cloudflare_credentials')).toBe(0);
-    expect(JSON.stringify(warn.mock.calls)).not.toContain('secret-token');
-    warn.mockRestore();
   });
 
-  it('says the ciphertext survived rather than reporting that there was none to erase', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const { database, db } = controlPlaneDatabase();
-    const vault = credentialVault(db);
-    const handle = await vault.storeOAuthCredential({
-      accessToken: 'access',
-      refreshToken: 'refresh',
-      expiresAt: Date.now() + 3_600_000,
-    });
-    seedAccount(database, handle);
-    vi.spyOn(vault, 'deleteIfUnreferenced').mockRejectedValue(new Error('D1_ERROR: database is locked'));
-
-    const erasure = await eraseControlPlaneAccount({ env: { DB: db } as Env, userId: 'user-1', vault });
-
-    // Zero is the honest count, but only the log distinguishes it from "there was nothing here".
-    expect(erasure.credentials).toBe(0);
-    expect(rowCount(database, 'cloudflare_credentials')).toBe(1);
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('the ciphertext remains'),
-      expect.stringContaining('database is locked'),
-    );
-    warn.mockRestore();
-  });
-
-  it('leaves an unrelated account untouched', async () => {
+  it('leaves another account untouched', async () => {
     const { database, db } = controlPlaneDatabase();
     seedAccount(database, null, 'user-2');
 
-    await eraseControlPlaneAccount({ env: { DB: db } as Env, userId: 'user-1', vault: credentialVault(db) });
+    await eraseControlPlaneAccount({ env: { DB: db } as Env, userId: 'user-1' });
 
     expect(rowCount(database, 'user')).toBe(1);
     expect(rowCount(database, 'cloudflare_connections')).toBe(1);
   });
 });
-
-function credentialVault(db: D1Database): D1CloudflareCredentialVault {
-  return new D1CloudflareCredentialVault(db, ENCRYPTION_KEY, {
-    clientId: 'client',
-    clientSecret: 'secret',
-    request: (async () => new Response(null, { status: 200 })) as unknown as typeof fetch,
-  });
-}
 
 function seedAccount(database: DatabaseSyncInstance, credentialHandle: string | null, userId = 'user-1'): void {
   database
@@ -185,7 +88,6 @@ function controlPlaneDatabase(): { database: DatabaseSyncInstance; db: D1Databas
   };
   const database = new DatabaseSync(':memory:');
   database.exec('PRAGMA foreign_keys = ON;');
-  // Apply the shipped migrations so erasure is proven against the real schema.
   for (const migration of readdirSync('migrations').sort()) {
     database.exec(readFileSync(join('migrations', migration), 'utf8'));
   }

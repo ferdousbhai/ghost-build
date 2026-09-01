@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { STAGE_LOG_TAIL_BYTES, parallelStagesTimeoutMs, parallelValidationStagesCommand } from './validation-stages';
+import { STAGE_LOG_TAIL_BYTES, parallelValidationStagesCommand } from './validation-stages';
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 const scratch = mkdtempSync(join(tmpdir(), 'ghostbuild-stages-'));
@@ -61,13 +61,6 @@ describe('parallel validation stages', () => {
     expect(result.stderr.length).toBeLessThan(STAGE_LOG_TAIL_BYTES + 2_000);
   });
 
-  it('keeps a passing group quiet', () => {
-    const result = run([{ name: 'quiet', command: 'echo lots of build output' }]);
-
-    expect(result.status).toBe(0);
-    expect(result.stderr.trim()).toBe('');
-  });
-
   it('refuses a stage name that would not be a safe log file or shell word', () => {
     for (const name of ['../escape', 'has space', 'Upper', '']) {
       expect(() =>
@@ -89,9 +82,5 @@ describe('parallel validation stages', () => {
         { logRoot: '/tmp/x', quote: shellQuote },
       ),
     ).toThrow(/Duplicate/);
-  });
-
-  it('bounds the group by its slowest stage, not the sum of all of them', () => {
-    expect(parallelStagesTimeoutMs([{ timeoutMs: 60_000 }, { timeoutMs: 5 * 60_000 }])).toBe(5 * 60_000);
   });
 });

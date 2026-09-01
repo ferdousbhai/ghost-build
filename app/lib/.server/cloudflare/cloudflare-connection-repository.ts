@@ -17,7 +17,6 @@ export type CloudflareConnection = {
   grantedOAuthScopes: string[];
   oauthScopeProfileVersion: string | null;
   oauthScopeGrantStatus: CloudflareOAuthScopeGrantStatus;
-  oauthGrantUpdatedAt: number | null;
   aiBillingEnabled: boolean;
   connectedAt: number | null;
   updatedAt: number;
@@ -102,7 +101,7 @@ export async function activateCloudflareConnection(args: {
   aiBillingEnabled: boolean;
   expectedGeneration: number | null;
   now?: number;
-}): Promise<CloudflareConnection> {
+}): Promise<void> {
   const now = args.now ?? Date.now();
   const connectionId = crypto.randomUUID();
   const capabilitiesJson = JSON.stringify(args.grantedCapabilities);
@@ -170,37 +169,36 @@ export async function activateCloudflareConnection(args: {
             )
             .first<CloudflareConnectionRow>();
   } catch (error) {
-    const committed = await findExactActivatedCloudflareConnection({
+    const committed = await isExactActivatedCloudflareConnection({
       ...args,
       connectionId,
       capabilitiesJson,
       requestedScopesJson,
       grantedScopesJson,
       now,
-    }).catch(() => null);
+    }).catch(() => false);
     if (committed) {
-      return committed;
+      return;
     }
     throw error;
   }
   if (!row) {
-    const committed = await findExactActivatedCloudflareConnection({
+    const committed = await isExactActivatedCloudflareConnection({
       ...args,
       connectionId,
       capabilitiesJson,
       requestedScopesJson,
       grantedScopesJson,
       now,
-    }).catch(() => null);
+    }).catch(() => false);
     if (committed) {
-      return committed;
+      return;
     }
     throw new CloudflareConnectionChangedError();
   }
-  return connectionFromRow(row);
 }
 
-async function findExactActivatedCloudflareConnection(
+async function isExactActivatedCloudflareConnection(
   args: Parameters<typeof activateCloudflareConnection>[0] & {
     connectionId: string;
     capabilitiesJson: string;
@@ -208,7 +206,7 @@ async function findExactActivatedCloudflareConnection(
     grantedScopesJson: string;
     now: number;
   },
-): Promise<CloudflareConnection | null> {
+): Promise<boolean> {
   const row = await args.db
     .prepare(
       `SELECT ${CONNECTION_COLUMNS}
@@ -237,9 +235,9 @@ async function findExactActivatedCloudflareConnection(
     row.updated_at !== args.now ||
     row.connection_generation !== intendedGeneration
   ) {
-    return null;
+    return false;
   }
-  return connectionFromRow(row);
+  return true;
 }
 
 function connectionFromRow(row: CloudflareConnectionRow): CloudflareConnection {
@@ -255,7 +253,6 @@ function connectionFromRow(row: CloudflareConnectionRow): CloudflareConnection {
     grantedOAuthScopes: parseStoredStringArray(row.granted_oauth_scopes_json),
     oauthScopeProfileVersion: row.oauth_scope_profile_version,
     oauthScopeGrantStatus: parseStoredGrantStatus(row.oauth_scope_grant_status),
-    oauthGrantUpdatedAt: row.oauth_grant_updated_at,
     aiBillingEnabled: row.ai_billing_enabled === 1,
     connectedAt: row.connected_at,
     updatedAt: row.updated_at,

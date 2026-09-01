@@ -1,4 +1,4 @@
-import type { WorkersAiAccountCredentials } from '~/lib/.server/llm/provider';
+import type { WorkersAiAccountCredentials } from '~/lib/.server/llm/pi-ai-models';
 
 export async function getUserWorkersAiCredentials(env: Env, userId: string): Promise<WorkersAiAccountCredentials> {
   if (!userId) {

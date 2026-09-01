@@ -91,21 +91,6 @@ async function fillConfirmation() {
 }
 
 describe('AccountDataCard', () => {
-  it('states what the operator holds, what the user’s Cloudflare account holds, and how to clear the browser', async () => {
-    await render();
-    const text = document.body.textContent ?? '';
-
-    expect(text).toContain('Download code');
-    expect(text).toContain('This is per project');
-    expect(text).toContain('session tokens are never included');
-    expect(text).toContain('does not contain your chats, transcripts, project files, or deployment records');
-    expect(text).toContain('clear site data');
-    expect(text).toContain('ghostbuild_session');
-    expect(text).toContain('in-memory project cache');
-    expect(document.querySelector('a[href="/support"]')).not.toBeNull();
-    expect(document.querySelector('a[href="/privacy"]')).not.toBeNull();
-  });
-
   it('saves the export exactly as the server sent it', async () => {
     const exported = JSON.stringify({ schemaVersion: 1, status: 'complete', unavailableSections: [] });
     fetchMock.mockResolvedValue(new Response(exported, { status: 200 }));

@@ -33,11 +33,15 @@ describe('user runtime session', () => {
     });
 
     expect(request).toHaveBeenCalledOnce();
-    expect(request).toHaveBeenCalledWith('/api/cloudflare/runtime-session', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { Accept: 'application/json' },
-    });
+    expect(request).toHaveBeenCalledWith(
+      '/api/cloudflare/runtime-session',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: expect.any(Headers),
+      }),
+    );
+    expect(new Headers(request.mock.calls[0]?.[1]?.headers).get('Accept')).toBe('application/json');
     expect(userRuntimeEndpointStore.get()).toBe('https://workspace.example');
     expect(aiGatewayCreditStatusStore.get()).toBe('available');
   });
@@ -89,6 +93,46 @@ describe('user runtime session', () => {
         'workspace_plan_required',
       ),
     );
+  });
+
+  it('marks only an explicit user retry as permission to replace a failed provisioning attempt', async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { code: 'workspace_preparation_failed', error: 'Unable to prepare the workspace.' },
+          { status: 502 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          { code: 'workspace_preparation_failed', error: 'Unable to prepare the workspace.' },
+          { status: 502 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          endpoint: 'https://workspace.example',
+          token: 'capability-token',
+          expiresAt: Date.now() + 60_000,
+        }),
+      );
+    vi.stubGlobal('fetch', request);
+
+    await expect(getUserRuntimeSession()).rejects.toThrow('Unable to prepare the workspace.');
+    await expect(getUserRuntimeSession()).rejects.toThrow('Unable to prepare the workspace.');
+    await expect(getUserRuntimeSession({ retryProvisioning: true })).resolves.toMatchObject({
+      endpoint: 'https://workspace.example',
+    });
+
+    const initialHeaders = new Headers(request.mock.calls[0]?.[1]?.headers);
+    const repeatedHeaders = new Headers(request.mock.calls[1]?.[1]?.headers);
+    const retryHeaders = new Headers(request.mock.calls[2]?.[1]?.headers);
+    expect(initialHeaders.get('Accept')).toBe('application/json');
+    expect(initialHeaders.has('Ghostbuild-Runtime-Provisioning-Retry')).toBe(false);
+    expect(repeatedHeaders.has('Ghostbuild-Runtime-Provisioning-Retry')).toBe(false);
+    expect(retryHeaders.get('Accept')).toBe('application/json');
+    expect(retryHeaders.get('Ghostbuild-Runtime-Provisioning-Retry')).toBe('1');
   });
 
   it('carries the upgrade destination Cloudflare named alongside the plan code', async () => {
@@ -180,13 +224,13 @@ describe('user runtime session', () => {
     );
   });
 
-  it('waits for the request that owns the provisioning lease', async () => {
+  it('polls while durable provisioning remains active', async () => {
     vi.useFakeTimers();
     const request = vi
       .fn()
       .mockResolvedValueOnce(
         Response.json(
-          { code: 'workspace_preparing', error: 'The project workspace is already being prepared.' },
+          { code: 'workspace_preparing', error: 'Ghostbuild is still preparing your workspace.' },
           { status: 409 },
         ),
       )
@@ -200,39 +244,12 @@ describe('user runtime session', () => {
     vi.stubGlobal('fetch', request);
 
     const session = getUserRuntimeSession();
-    await vi.advanceTimersByTimeAsync(0);
-    // Everything that waits on the runtime reads this, so a wait for provisioning is never
-    // mistaken for a runtime that cannot answer.
-    expect(userWorkspacePreparingStore.get()).toBe(true);
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(request).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
 
     await expect(session).resolves.toMatchObject({ endpoint: 'https://workspace.example' });
     expect(request).toHaveBeenCalledTimes(2);
-    expect(userWorkspacePreparingStore.get()).toBe(false);
-  });
-
-  it('reports a preparation that outran the readiness deadline as still preparing', async () => {
-    vi.useFakeTimers();
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () =>
-        Response.json(
-          { code: 'workspace_preparing', error: 'Ghostbuild is still preparing your workspace.' },
-          { status: 409 },
-        ),
-      ),
-    );
-
-    const session = getUserRuntimeSession();
-    const rejected = expect(session).rejects.toEqual(
-      new UserRuntimeSessionError('Ghostbuild is still preparing your workspace.', 'workspace_preparing'),
-    );
-    // Fifteen minutes of polling, walked in steps so each simulated attempt settles.
-    for (let elapsed = 0; elapsed <= 15 * 60_000; elapsed += 30_000) {
-      await vi.advanceTimersByTimeAsync(30_000);
-    }
-
-    await rejected;
     expect(userWorkspacePreparingStore.get()).toBe(false);
   });
 
@@ -266,7 +283,7 @@ describe('user runtime session', () => {
     expect(request).toHaveBeenCalledOnce();
   });
 
-  it('stops lease polling when the account session resets', async () => {
+  it('stops provisioning polling when the account session resets', async () => {
     vi.useFakeTimers();
     const request = vi
       .fn()
@@ -282,7 +299,7 @@ describe('user runtime session', () => {
     const rejected = expect(session).rejects.toThrow('canceled');
     await vi.advanceTimersByTimeAsync(0);
     resetUserRuntimeSession();
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(5_000);
 
     await rejected;
     expect(request).toHaveBeenCalledOnce();

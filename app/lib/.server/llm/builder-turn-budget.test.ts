@@ -8,22 +8,6 @@ import {
 } from './builder-turn-budget';
 
 describe('builder tool budgets', () => {
-  it('keeps short read-only deadlines and a shared long-running mutation deadline', () => {
-    expect(BUILDER_TURN_TIMEOUTS.tools).toEqual({
-      read: 2 * 60_000,
-      ls: 60_000,
-      grep: 60_000,
-      write: BUILDER_MUTATION_TOOL_TIMEOUT_MS,
-      edit: BUILDER_MUTATION_TOOL_TIMEOUT_MS,
-      exec: BUILDER_MUTATION_TOOL_TIMEOUT_MS,
-      search_cloudflare_docs: 60_000,
-      cloudflare_docs: 90_000,
-      cloudflare_search: 90_000,
-      cloudflare_execute: 30_000,
-    });
-    expect(BUILDER_MUTATION_TOOL_TIMEOUT_MS).toBe(35 * 60_000);
-  });
-
   it('never gives a VFS-only tool a container-sized deadline', () => {
     for (const tool of WORKSPACE_READ_ONLY_TOOL_NAMES) {
       expect(BUILDER_TURN_TIMEOUTS.tools[tool]).toBeLessThan(BUILDER_MUTATION_TOOL_TIMEOUT_MS);

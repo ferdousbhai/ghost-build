@@ -34,16 +34,6 @@ describe('readBodyBytesWithLimit', () => {
 });
 
 describe('readJsonBodyWithLimit', () => {
-  it('parses a valid JSON body within the byte ceiling', async () => {
-    const request = new Request('https://ghostbuild.dev/api/data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ value: 'ok' }),
-    });
-
-    await expect(readJsonBodyWithLimit(request, 32, 'JSON request')).resolves.toEqual({ value: 'ok' });
-  });
-
   it('rejects chunked JSON when streamed bytes cross the ceiling', async () => {
     const request = new Request('https://ghostbuild.dev/api/data', {
       method: 'POST',

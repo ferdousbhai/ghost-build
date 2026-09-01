@@ -10,21 +10,12 @@ export const APP_AGENT_DECLARATIVE_EXPORT = {
   storage: 'sqlite',
 } as const;
 
-/**
- * Canonical managed-Worker deployment contract. Both the user-owned publisher
- * and the control-plane readback attestor import these values so a binding or
- * schedule change cannot be accepted on only one side of the boundary.
- */
 export const DEPLOYMENT_PROJECT_ROOT = '/home/project';
 export const DEPLOYMENT_WRANGLER_CONFIG_PATH = '/home/.ghostbuild-deploy.json';
-export const DEPLOYMENT_VERSION_METADATA_BINDING = 'CF_VERSION_METADATA';
-export const DEPLOYMENT_SECURITY_BASELINE_BINDING = 'GHOSTBUILD_SECURITY_BASELINE_VERSION';
-export const DEPLOYMENT_TEMPLATE_SOURCE_BINDING = 'GHOSTBUILD_TEMPLATE_SOURCE_SHA256';
-export const DEPLOYMENT_SECURITY_BOUNDARY_BINDING = 'GHOSTBUILD_SECURITY_BOUNDARY_SHA256';
 export const DEPLOYMENT_SECURITY_CLEANUP_CRON = '0 3 * * *';
 /**
  * Managed applications intentionally expose unpromoted Worker versions through
  * versioned workers.dev preview URLs. Production workers.dev routing remains
- * enabled as well; the security inventory attests both switches after publish.
+ * enabled as well.
  */
 export const DEPLOYMENT_PREVIEW_URLS_ENABLED = true as const;

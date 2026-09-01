@@ -27,7 +27,7 @@ export type CloudflareOAuthScopeGrantStatus = 'unknown' | 'core' | 'partial' | '
 
 const GHOSTBUILD_CAPABILITIES = ['workers', 'containers', 'd1', 'r2', 'kv', 'durable_objects', 'workers_ai'] as const;
 
-type GhostbuildCapability = (typeof GHOSTBUILD_CAPABILITIES)[number];
+export type GhostbuildCapability = (typeof GHOSTBUILD_CAPABILITIES)[number];
 
 /** The scope IDs each Ghostbuild product capability needs before it can be considered granted. */
 const CAPABILITY_SCOPE_REQUIREMENTS = {

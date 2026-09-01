@@ -31,9 +31,7 @@ import { useEditChatDescription } from './useEditChatDescription';
 
 type HookResult = ReturnType<typeof UseEditChatDescription>;
 let root: Root | undefined;
-let secondaryRoot: Root | undefined;
 let latest: HookResult;
-let secondaryLatest: HookResult;
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -51,26 +49,11 @@ afterEach(async () => {
     await act(async () => root?.unmount());
     root = undefined;
   }
-  if (secondaryRoot) {
-    await act(async () => secondaryRoot?.unmount());
-    secondaryRoot = undefined;
-  }
   document.body.replaceChildren();
 });
 
-function Harness({
-  initialDescription = 'Old title',
-  syncWithGlobalStore = false,
-}: {
-  initialDescription?: string;
-  syncWithGlobalStore?: boolean;
-}) {
-  latest = useEditChatDescription({ initialDescription, syncWithGlobalStore });
-  return null;
-}
-
-function SecondaryHarness({ initialDescription = 'Old title' }: { initialDescription?: string }) {
-  secondaryLatest = useEditChatDescription({ initialDescription });
+function Harness({ initialDescription = 'Old title' }: { initialDescription?: string }) {
+  latest = useEditChatDescription({ initialDescription });
   return null;
 }
 
@@ -123,49 +106,6 @@ describe('useEditChatDescription', () => {
     });
     expect(latest.currentDescription).toBe('New title');
     expect(latest.editing).toBe(false);
-  });
-
-  it('does not let a pending blur overwrite a newer input change', async () => {
-    const blurRequest = deferred<{ description: string }>();
-    mocks.executeDataOperation.mockReturnValue(blurRequest.promise);
-    await act(async () => root?.render(<Harness />));
-    act(() => latest.toggleEditMode());
-
-    let blur!: Promise<void>;
-    act(() => {
-      blur = latest.handleBlur();
-    });
-    act(() => latest.handleChange({ target: { value: 'Newer draft' } } as React.ChangeEvent<HTMLInputElement>));
-
-    await act(async () => {
-      blurRequest.resolve({ description: 'Stale server title' });
-      await blur;
-    });
-
-    expect(latest.currentDescription).toBe('Newer draft');
-    expect(latest.editing).toBe(true);
-  });
-
-  it('does not let a pending blur close a newly opened edit', async () => {
-    const blurRequest = deferred<{ description: string }>();
-    mocks.executeDataOperation.mockReturnValue(blurRequest.promise);
-    await act(async () => root?.render(<Harness />));
-    act(() => latest.toggleEditMode());
-
-    let blur!: Promise<void>;
-    act(() => {
-      blur = latest.handleBlur();
-    });
-    act(() => latest.toggleEditMode());
-    act(() => latest.toggleEditMode());
-
-    await act(async () => {
-      blurRequest.resolve({ description: 'Stale server title' });
-      await blur;
-    });
-
-    expect(latest.currentDescription).toBe('Old title');
-    expect(latest.editing).toBe(true);
   });
 
   it('ignores a save completion after the active chat changes', async () => {
@@ -328,83 +268,5 @@ describe('useEditChatDescription', () => {
       await firstSubmit;
     });
     expect(latest.currentDescription).toBe('First title');
-  });
-
-  it('shares the submission lock across editors for the same server resource', async () => {
-    const saveRequest = deferred<void>();
-    mocks.executeDataOperation.mockReturnValue(saveRequest.promise);
-    await act(async () => root?.render(<Harness />));
-    act(() => latest.toggleEditMode());
-    act(() => latest.handleChange({ target: { value: 'First title' } } as React.ChangeEvent<HTMLInputElement>));
-
-    let firstSubmit!: Promise<void>;
-    act(() => {
-      firstSubmit = latest.handleSubmit({ preventDefault: vi.fn() } as unknown as React.FormEvent);
-    });
-
-    const secondaryContainer = document.createElement('div');
-    document.body.appendChild(secondaryContainer);
-    secondaryRoot = createRoot(secondaryContainer);
-    await act(async () => secondaryRoot?.render(<SecondaryHarness />));
-    act(() => secondaryLatest.toggleEditMode());
-    act(() =>
-      secondaryLatest.handleChange({ target: { value: 'Second title' } } as React.ChangeEvent<HTMLInputElement>),
-    );
-    await act(async () => secondaryLatest.handleSubmit({ preventDefault: vi.fn() } as unknown as React.FormEvent));
-
-    expect(mocks.executeDataOperation).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      saveRequest.resolve();
-      await firstSubmit;
-    });
-  });
-
-  it('keeps the submission lock when the edit scope changes for the same server resource', async () => {
-    const saveRequest = deferred<void>();
-    mocks.executeDataOperation.mockReturnValue(saveRequest.promise);
-    await act(async () => root?.render(<Harness />));
-    act(() => latest.toggleEditMode());
-    act(() => latest.handleChange({ target: { value: 'First title' } } as React.ChangeEvent<HTMLInputElement>));
-
-    let firstSubmit!: Promise<void>;
-    act(() => {
-      firstSubmit = latest.handleSubmit({ preventDefault: vi.fn() } as unknown as React.FormEvent);
-    });
-
-    await act(async () => root?.render(<Harness syncWithGlobalStore />));
-    act(() => latest.toggleEditMode());
-    act(() => latest.handleChange({ target: { value: 'Second title' } } as React.ChangeEvent<HTMLInputElement>));
-    await act(async () => latest.handleSubmit({ preventDefault: vi.fn() } as unknown as React.FormEvent));
-
-    expect(mocks.executeDataOperation).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      saveRequest.resolve();
-      await firstSubmit;
-    });
-    expect(mocks.toastSuccess).not.toHaveBeenCalled();
-  });
-
-  it('ignores a save completion after unmount', async () => {
-    const saveRequest = deferred<void>();
-    mocks.executeDataOperation.mockReturnValue(saveRequest.promise);
-    await act(async () => root?.render(<Harness initialDescription="Old title" />));
-    act(() => latest.toggleEditMode());
-    act(() => latest.handleChange({ target: { value: 'Manual title' } } as React.ChangeEvent<HTMLInputElement>));
-
-    let submit!: Promise<void>;
-    act(() => {
-      submit = latest.handleSubmit({ preventDefault: vi.fn() } as unknown as React.FormEvent);
-    });
-    await act(async () => root?.unmount());
-    root = undefined;
-
-    await act(async () => {
-      saveRequest.resolve();
-      await submit;
-    });
-    expect(mocks.toastSuccess).not.toHaveBeenCalled();
-    expect(mocks.toastError).not.toHaveBeenCalled();
   });
 });

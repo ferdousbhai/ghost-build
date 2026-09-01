@@ -65,12 +65,6 @@ afterEach(() => {
 });
 
 describe('ReauthorizeInterstitial', () => {
-  it('prompts when the grant status is unknown', async () => {
-    stageConnection('unknown');
-    await mount();
-    expect(document.body.textContent).toContain('Reauthorize Cloudflare');
-  });
-
   it('stays silent for a provider-confirmed grant', async () => {
     stageConnection('core');
     await mount();

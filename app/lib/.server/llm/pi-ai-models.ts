@@ -19,10 +19,7 @@ import { recordPiStage } from './pi-telemetry';
 // Keep the runtime on the Workers-AI-only catalog; importing unrelated provider SDKs would
 // add Node-only code to every user-owned runtime.
 
-type GhostbuildModelConfig = {
-  provider: 'cloudflare';
-  model: WorkersAiRuntimeModelId;
-};
+export type WorkersAiAccountCredentials = { binding: Ai };
 
 export type ModelStreamOptions = SimpleStreamOptions & {
   thinking?: boolean;
@@ -32,7 +29,7 @@ export type ModelStreamOptions = SimpleStreamOptions & {
 export type ModelHandle = {
   model: Model<Api>;
   stream: (model: Model<Api>, context: Context, options?: ModelStreamOptions) => AssistantMessageEventStream;
-  lastResponse?: { status: number; aiGatewayLogId?: string };
+  lastResponse?: { status: number };
 };
 
 // SAFETY: `makeHandle` refuses any model whose `api` is not `openai-completions`, so every model this
@@ -49,17 +46,6 @@ function catalogModel(modelId: string): WorkersAiCatalogModel | undefined {
   return WORKERS_AI_CATALOG.get(modelId);
 }
 
-function modelTokenWindow(
-  config: GhostbuildModelConfig,
-  catalog: WorkersAiCatalogModel | undefined,
-  selectedModel: WorkersAiModel | undefined,
-) {
-  return {
-    contextWindow: selectedModel?.contextTokens ?? catalog?.contextWindow ?? 128_000,
-    maxTokens: MODEL_MAX_OUTPUT_TOKENS,
-  };
-}
-
 function workersAiCompat(catalog: WorkersAiCatalogModel | undefined): OpenAICompletionsCompat {
   return {
     supportsStore: false,
@@ -68,19 +54,6 @@ function workersAiCompat(catalog: WorkersAiCatalogModel | undefined): OpenAIComp
     ...catalog?.compat,
     sendSessionAffinityHeaders: true,
   };
-}
-
-function getHeader(headers: Record<string, string>, name: string): string | undefined {
-  if (headers[name] !== undefined) {
-    return headers[name];
-  }
-  const lower = name.toLowerCase();
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === lower) {
-      return value;
-    }
-  }
-  return undefined;
 }
 
 type HandleArgs = {
@@ -108,10 +81,7 @@ function makeHandle(args: HandleArgs): ModelHandle {
         ...streamOptions,
         sessionId: streamOptions.sessionId ?? args.sessionAffinity,
         onResponse: async (response, responseModel) => {
-          handle.lastResponse = {
-            status: response.status,
-            aiGatewayLogId: getHeader(response.headers, 'cf-aig-log-id'),
-          };
+          handle.lastResponse = { status: response.status };
           await streamOptions.onResponse?.(response, responseModel);
         },
       };
@@ -131,23 +101,22 @@ function makeHandle(args: HandleArgs): ModelHandle {
 }
 
 export function getPiModel(
-  accountCredentials: { binding: Ai },
+  accountCredentials: WorkersAiAccountCredentials,
   modelId: WorkersAiRuntimeModelId,
   settings?: { model?: WorkersAiModel; sessionAffinity?: string },
 ): ModelHandle {
-  const config: GhostbuildModelConfig = { provider: 'cloudflare', model: modelId };
-  const catalog = catalogModel(config.model);
-  const win = modelTokenWindow(config, catalog, settings?.model);
+  const catalog = catalogModel(modelId);
   const model: Model<Api> = {
-    id: config.model,
-    name: catalog?.name ?? config.model,
+    id: modelId,
+    name: catalog?.name ?? modelId,
     api: 'openai-completions',
     provider: 'cloudflare-workers-ai',
     baseUrl: 'https://workers-ai-binding.invalid/v1',
     reasoning: settings?.model?.reasoning ?? catalog?.reasoning ?? false,
     input: settings?.model?.vision ? ['text', 'image'] : (catalog?.input ?? ['text']),
     cost: catalog?.cost ?? ZERO_COST,
-    ...win,
+    contextWindow: settings?.model?.contextTokens ?? catalog?.contextWindow ?? 128_000,
+    maxTokens: MODEL_MAX_OUTPUT_TOKENS,
     compat: workersAiCompat(catalog),
   };
   return makeHandle({
@@ -155,11 +124,7 @@ export function getPiModel(
     // Pi's OpenAI-compatible serializer requires a non-empty key before calling custom fetch.
     // The binding adapter forwards only the reviewed session-affinity header.
     apiKey: 'workers-ai-binding',
-    fetch: createWorkersAiBindingFetch(
-      accountCredentials.binding,
-      config.model,
-      settings?.model?.requiresPaid === true,
-    ),
+    fetch: createWorkersAiBindingFetch(accountCredentials.binding, modelId, settings?.model?.requiresPaid === true),
     sessionAffinity: settings?.sessionAffinity,
   });
 }

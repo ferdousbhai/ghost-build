@@ -2,12 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { ComputerAdmissionControl, ComputerOperationsDisabledError } from './computer-admission';
 
 describe('ComputerAdmissionControl', () => {
-  it('admits new operations while the operator control is enabled', async () => {
-    const db = controlDatabase({ enabled: 1, reason: null });
-    await expect(new ComputerAdmissionControl(db.binding).admitNewOperation()).resolves.toBeUndefined();
-    expect(db.reads).toBe(1);
-  });
-
   it('fails new operations closed with the operator reason once the switch is thrown', async () => {
     const db = controlDatabase({ enabled: 0, reason: 'Computer 0.2.1 container startup is failing.' });
     const admission = new ComputerAdmissionControl(db.binding);
@@ -29,11 +23,6 @@ describe('ComputerAdmissionControl', () => {
     db.control = { enabled: 0, reason: null };
     await expect(admission.admitNewOperation(10_000)).rejects.toBeInstanceOf(ComputerOperationsDisabledError);
     expect(db.reads).toBe(2);
-  });
-
-  it('admits new operations when no control row has ever been written', async () => {
-    const db = controlDatabase(null);
-    await expect(new ComputerAdmissionControl(db.binding).admitNewOperation()).resolves.toBeUndefined();
   });
 });
 

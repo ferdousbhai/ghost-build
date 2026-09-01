@@ -18,4 +18,14 @@ export class WorkerEntrypoint<Env = unknown> {
   }
 }
 
+export class WorkflowEntrypoint<Env = unknown> {
+  protected readonly ctx: ExecutionContext;
+  protected readonly env: Env;
+
+  constructor(ctx: ExecutionContext, env: Env) {
+    this.ctx = ctx;
+    this.env = env;
+  }
+}
+
 export class RpcTarget {}

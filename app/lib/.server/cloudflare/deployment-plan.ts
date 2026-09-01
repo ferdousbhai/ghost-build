@@ -2,12 +2,6 @@ import { sha256Hex } from '~/lib/hex-digest';
 import { z } from 'zod';
 import { appResourceName } from '~/lib/cloudflare/app-resource-names';
 import type { DeploymentProjectProfile } from './deployment-project-profile';
-import {
-  DEPLOYMENT_SECURITY_BASELINE_VERSION,
-  APP_AGENT_SECURITY_BOUNDARY_SHA256,
-  isCurrentDeploymentSecurityIdentity,
-  TEMPLATE_SOURCE_SHA256,
-} from './deployment-security-baseline';
 
 const DEPLOYMENT_PLAN_VERSION = 5 as const;
 
@@ -33,9 +27,6 @@ const deploymentPlanSchema = z.strictObject({
   version: z.literal(DEPLOYMENT_PLAN_VERSION),
   deploymentId: z.string().min(1),
   sourceSha256: sha256Schema,
-  templateSourceSha256: sha256Schema,
-  securityBaselineVersion: z.number().int().nonnegative(),
-  securityBoundarySha256: sha256Schema,
   project: deploymentProjectProfileSchema,
   resources: z.array(deploymentPlanResourceSchema),
 });
@@ -55,9 +46,6 @@ export async function buildDeploymentPlanFromSource(args: {
     version: DEPLOYMENT_PLAN_VERSION,
     deploymentId: args.deploymentId,
     sourceSha256: args.sourceSha256,
-    templateSourceSha256: TEMPLATE_SOURCE_SHA256,
-    securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
-    securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
     project,
     resources: [
       { type: 'worker', logicalName: 'app', proposedName: appResourceName(args.deploymentId, 'app') },
@@ -119,7 +107,7 @@ export function parseDeploymentPlanJson(value: string): DeploymentPlan {
 
 export function isCurrentDeploymentPlan(plan: unknown): plan is DeploymentPlan {
   const parsed = deploymentPlanSchema.safeParse(plan);
-  if (!parsed.success || !isCurrentDeploymentSecurityIdentity(parsed.data)) {
+  if (!parsed.success) {
     return false;
   }
   const current = parsed.data;
@@ -130,10 +118,6 @@ export function isCurrentDeploymentPlan(plan: unknown): plan is DeploymentPlan {
     ...(current.project.bindings.appAgent ? ['AGENT_SECURITY_DB', 'AGENT_SECURITY_DB_PREVIEW'] : []),
   ].map((logicalName) => deploymentPlanResourceName(current, 'd1', logicalName));
   return databaseNames.every(Boolean) && new Set(databaseNames).size === databaseNames.length;
-}
-
-export function deploymentProjectProfile(plan: DeploymentPlan): DeploymentProjectProfile {
-  return plan.project;
 }
 
 export function deploymentPlanResourceName(

@@ -27,22 +27,12 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const WEEK = 7 * DAY;
 
-/** A scheduled job that has not reported for this long has stopped, whatever its last run said. */
-const SCHEDULED_JOB_STALE_MS = 2 * DAY;
-/** `daily-maintenance.ts` claims a slot every 23h, so a job unseen for longer than this is late. */
-const DAILY_JOB_LATE_MS = 26 * HOUR;
-/** A sweep reads whole Cloudflare accounts, so it gets far longer before it counts as wedged. */
-const RECONCILE_RUN_STUCK_MS = 6 * HOUR;
-/** A maintenance claim this much newer than its own run receipt means the job never got started. */
-const DIED_AFTER_CLAIM_MS = 15 * MINUTE;
 /** How many connected accounts one report inspects. */
 const RUNTIME_ROW_LIMIT = 200;
-/** How many orphaned resources a sentence names before it stops listing them. */
-const ORPHAN_SAMPLE_LIMIT = 8;
 
 /** The control-plane Worker this repository deploys, as named in `wrangler.jsonc`. */
 const WORKER_SCRIPT_NAME = 'ghostbuild';
-/** How far back the invocation read looks. One day, to match the daily-maintenance window. */
+/** How far back the invocation read looks. */
 const WORKER_INVOCATION_WINDOW_MS = DAY;
 /**
  * Invocation outcomes that are not the Worker failing: it answered, or the caller went away.
@@ -55,30 +45,8 @@ const INVOCATION_FAULT_ERROR_RATE = 0.01;
 /** Below this the adaptive dataset counted every invocation, so calling the counts sampled would mislead. */
 const INVOCATION_SAMPLE_NOTE_THRESHOLD = 1.05;
 
-/**
- * The jobs `app/lib/.server/daily-maintenance.ts` claims a slot for. Restated here because
- * `daily_maintenance_jobs` only holds jobs that have run at least once: a job missing from the
- * table has never fired, which is exactly the failure worth reporting.
- */
-export const EXPECTED_DAILY_JOBS = ['app-resource-reconcile', 'workspace-runtime-reclaim'];
-
 /** Worst first. A report whose headline is "healthy" must have nothing above `ok` in it. */
 const STATUS_RANK = { error: 3, attention: 2, unknown: 1, ok: 0 };
-
-/**
- * Every check the report produces, in the order the JSON lists them. The human output
- * regroups them by status; this order only decides ties.
- * @type {ReadonlyArray<{ id: string; title: string }>}
- */
-const CHECK_ORDER = [
-  { id: 'control-plane-worker', title: 'Control-plane Worker' },
-  { id: 'cloudflare-accounts', title: 'Cloudflare accounts' },
-  { id: 'workspace-runtimes', title: 'Workspace runtimes' },
-  { id: 'app-resource-sweep', title: 'App resource sweep' },
-  { id: 'daily-maintenance', title: 'Daily maintenance' },
-  { id: 'users', title: 'Users' },
-  { id: 'sessions', title: 'Sign-in sessions' },
-];
 
 /**
  * Render a timestamp as prose relative to `now`.
@@ -129,31 +97,9 @@ export function formatDuration(ms) {
   return `${Math.floor(ms / DAY)}d`;
 }
 
-/** Age in milliseconds, or `null` when there is no usable timestamp. */
-function ageOf(value, now) {
-  return Number.isFinite(value) && value > 0 ? Math.max(0, now - value) : null;
-}
-
 /** Collapse whitespace and bound a provider string before it reaches a terminal. */
 export function bounded(value, limit = 240) {
   return String(value).replaceAll(/\s+/g, ' ').trim().slice(0, limit);
-}
-
-/** Unwrap the `{"error":"..."}` envelope providers wrap their failures in. */
-export function cleanErrorText(value) {
-  if (value === null || value === undefined || value === '') {
-    return null;
-  }
-  const text = String(value);
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === 'object' && typeof parsed.error === 'string') {
-      return bounded(parsed.error);
-    }
-  } catch {
-    // Not JSON. The plain text is the message.
-  }
-  return bounded(text);
 }
 
 /** A generation or content hash is unreadable in full and unambiguous at twelve characters. */
@@ -169,114 +115,11 @@ function plural(count, singular, pluralForm = `${singular}s`) {
   return count === 1 ? singular : pluralForm;
 }
 
-/** A value, short enough to name inside an error message. */
 function describeValue(value) {
   if (value === null) {
     return 'null';
   }
   return typeof value === 'string' ? `the string "${bounded(value, 40)}"` : `the ${typeof value} ${bounded(value, 40)}`;
-}
-
-/**
- * Strict typed reads of one result row.
- *
- * This report exists so that "broken" and "cannot tell" never render as "fine", so a column
- * the schema declares and the row does not carry is a hard error naming the column rather
- * than a substituted value. The two conditions a lenient reader conflates are kept apart:
- * a column missing from the result set is schema drift and throws, while a column the schema
- * declares nullable answers `null` and leaves it to the caller to say so out loud.
- *
- * @param {string} table the table the row came from, so the error says where to look
- * @param {Record<string, unknown>} row
- */
-function rowReader(table, row) {
-  const raw = (column) => {
-    if (row === null || typeof row !== 'object' || !(column in row)) {
-      throw new Error(`${table} rows have no \`${column}\` column, so this report cannot read them.`);
-    }
-    return row[column];
-  };
-  const wrong = (column, value, expected) =>
-    new Error(`${table}.${column} holds ${describeValue(value)}, not ${expected}.`);
-  return {
-    /** A `NOT NULL INTEGER`. */
-    integer(column) {
-      const value = raw(column);
-      if (!Number.isFinite(value)) {
-        throw wrong(column, value, 'a number');
-      }
-      return Number(value);
-    },
-    /** An `INTEGER` the schema declares nullable. */
-    nullableInteger(column) {
-      const value = raw(column);
-      if (value === null) {
-        return null;
-      }
-      if (!Number.isFinite(value)) {
-        throw wrong(column, value, 'a number or null');
-      }
-      return Number(value);
-    },
-    /** A `NOT NULL TEXT`, restricted to the values its `CHECK` constraint allows. */
-    text(column, allowed = null) {
-      const value = raw(column);
-      if (typeof value !== 'string' || value === '') {
-        throw wrong(column, value, 'a non-empty string');
-      }
-      if (allowed !== null && !allowed.includes(value)) {
-        throw wrong(column, value, `one of ${allowed.join(', ')}`);
-      }
-      return value;
-    },
-    /** A `TEXT` column the schema declares nullable. */
-    nullableText(column) {
-      const value = raw(column);
-      if (value === null) {
-        return null;
-      }
-      if (typeof value !== 'string') {
-        throw wrong(column, value, 'a string or null');
-      }
-      return value;
-    },
-    /** An `INTEGER NOT NULL CHECK (column IN (0, 1))`. */
-    flag(column) {
-      const value = raw(column);
-      if (typeof value === 'boolean') {
-        return value;
-      }
-      if (value === 0 || value === 1) {
-        return value === 1;
-      }
-      throw wrong(column, value, '0 or 1');
-    },
-    /** A nullable `TEXT` column holding a JSON array; `null` when the writer recorded none. */
-    nullableJsonList(column) {
-      const value = raw(column);
-      if (value === null) {
-        return null;
-      }
-      if (Array.isArray(value)) {
-        return value;
-      }
-      if (typeof value !== 'string') {
-        throw wrong(column, value, 'a JSON array or null');
-      }
-      let parsed;
-      try {
-        parsed = JSON.parse(value);
-      } catch (error) {
-        throw new Error(
-          `${table}.${column} is not valid JSON: ${bounded(error instanceof Error ? error.message : error, 120)}`,
-        );
-      }
-      if (!Array.isArray(parsed)) {
-        throw wrong(column, parsed, 'a JSON array');
-      }
-      return parsed;
-    },
-  };
 }
 
 /**
@@ -290,31 +133,10 @@ export function describeWorkspaceRuntime(row, { now, desiredRuntimeVersion }) {
   const at = Number.isFinite(row.updated_at) ? Number(row.updated_at) : null;
   const when = formatRelativeTime(at, now, { missing: 'at an unrecorded time' });
   const version = typeof row.runtime_version === 'string' ? row.runtime_version : null;
-  const reason = cleanErrorText(row.last_error);
-  const leaseExpiry = Number.isFinite(row.provisioning_lease_expires_at)
-    ? Number(row.provisioning_lease_expires_at)
-    : null;
   const base = { email: who, status: row.status ?? null, runtimeVersion: version, at };
 
   if (!row.status) {
     return { ...base, level: 'attention', sentence: `${who} has an active connection but no workspace runtime yet.` };
-  }
-  if (row.status === 'error') {
-    return {
-      ...base,
-      level: 'error',
-      sentence: `${who} failed to provision a workspace runtime ${when}${reason ? `: ${reason}` : '.'}`,
-    };
-  }
-  if (row.status === 'provisioning') {
-    const expired = leaseExpiry !== null && leaseExpiry < now;
-    return {
-      ...base,
-      level: expired ? 'error' : 'attention',
-      sentence: expired
-        ? `${who} is stuck provisioning: the lease expired ${formatRelativeTime(leaseExpiry, now)}.`
-        : `${who} has been provisioning a workspace runtime since ${when}.`,
-    };
   }
   if (desiredRuntimeVersion === null) {
     return {
@@ -331,154 +153,6 @@ export function describeWorkspaceRuntime(row, { now, desiredRuntimeVersion }) {
     };
   }
   return { ...base, level: 'ok', sentence: `${who} is on the current workspace runtime (updated ${when}).` };
-}
-
-/**
- * The daily maintenance slots, as one entry per job.
- *
- * `daily_maintenance_jobs` records when each job last claimed its slot, which is the only
- * evidence that the cron is still firing at all. A job that has never claimed one has no row.
- *
- * @param {ReadonlyArray<Record<string, unknown>>} rows
- * @param {number} now
- */
-export function describeDailyJobs(rows, now) {
-  const lastStarted = new Map(
-    rows.map((row) => {
-      const read = rowReader('daily_maintenance_jobs', row);
-      return [read.text('job'), read.integer('last_started_at')];
-    }),
-  );
-  const names = [...new Set([...EXPECTED_DAILY_JOBS, ...lastStarted.keys()])].sort();
-  return names.map((job) => {
-    const at = lastStarted.get(job) ?? null;
-    if (at === null || at <= 0) {
-      return { job, at: null, level: 'attention', sentence: `${job} has never claimed a maintenance slot.` };
-    }
-    const age = ageOf(at, now);
-    const late = age !== null && age > DAILY_JOB_LATE_MS;
-    return {
-      job,
-      at,
-      level: late ? 'attention' : 'ok',
-      sentence: late
-        ? `${job} last started ${formatRelativeTime(at, now)}, so the daily cron is not reaching it.`
-        : `${job} last started ${formatRelativeTime(at, now)}.`,
-    };
-  });
-}
-
-/** The `status` and `mode` values `migrations/0010` allows a reconciliation run to hold. */
-const RECONCILE_STATUSES = ['running', 'ok', 'error'];
-const RECONCILE_MODES = ['report', 'enforce'];
-
-/**
- * The most recent app-resource reconciliation sweep, as a status and a sentence.
- *
- * Mirrors `app_resource_reconcile_runs` as declared by `migrations/0010` and `migrations/0011`
- * and written by `app/lib/.server/cloudflare/app-resource-reconcile-sweep.ts`, where
- * `orphans_json` is a bounded sample and `orphans_found` is the exact total.
- *
- * Every column is read strictly, because every lenient reading of this table has a failure
- * mode that reads as good news: an absent `status` as `ok`, an absent `mode` as report-only
- * while a sweep deletes, an absent `orphans_found` as the length of a truncated sample, an
- * unreadable `listing_skipped` as a complete listing. Schema drift throws so the caller can
- * report the sweep as unreadable instead.
- *
- * @param {Record<string, unknown>} row
- * @param {number} now
- */
-export function describeReconcileRun(row, now) {
-  const read = rowReader('app_resource_reconcile_runs', row);
-  const startedAt = read.integer('started_at');
-  // A run still in flight has no completion time; that is the only reason for one to be null.
-  const completedAt = read.nullableInteger('completed_at');
-  const at = completedAt ?? startedAt;
-  const when = formatRelativeTime(at, now, { missing: 'at an unrecorded time' });
-  const runStatus = read.text('status', RECONCILE_STATUSES);
-  const mode = read.text('mode', RECONCILE_MODES);
-  const users = read.integer('users_scanned');
-  const usersFailed = read.integer('users_failed');
-  const resources = read.integer('resources_scanned');
-  const orphanCount = read.integer('orphans_found');
-  // Both JSON columns stay null until there is something to record, so "none recorded" and
-  // "recorded none" render the same. Neither one is ever allowed to stand in for the count.
-  const sample = read.nullableJsonList('orphans_json') ?? [];
-  const deleted = read.integer('deleted_count');
-  const skipped = read.flag('listing_skipped');
-  const skippedListings = read.nullableJsonList('skipped_listings_json') ?? [];
-  const error = cleanErrorText(read.nullableText('error'));
-  const orphans = sample
-    .slice(0, ORPHAN_SAMPLE_LIMIT)
-    .map((orphan) =>
-      typeof orphan === 'string' ? orphan : `${orphan?.kind ?? 'resource'}:${orphan?.name ?? 'unnamed'}`,
-    );
-  // Each entry is a resource kind plus the provider's reason for the failure, so the bound
-  // must leave room for the reason: truncating to the kind alone would tell the operator
-  // nothing they could act on.
-  const named = skippedListings.map((listing) => bounded(listing, 160));
-  const detail = {
-    at,
-    runStatus,
-    mode,
-    usersScanned: users,
-    usersFailed,
-    resourcesScanned: resources,
-    orphanCount,
-    orphans,
-    deletedCount: deleted,
-    skippedListing: skipped,
-    skippedListings: named,
-    error,
-  };
-
-  if (runStatus === 'running') {
-    const age = ageOf(startedAt, now);
-    const stuck = age !== null && age > RECONCILE_RUN_STUCK_MS;
-    return {
-      ...detail,
-      at: startedAt,
-      level: stuck ? 'error' : 'attention',
-      sentence: `An app resource sweep started ${formatRelativeTime(startedAt, now)} and has not finished${stuck ? ', long past the point where one should have' : ''}.`,
-    };
-  }
-
-  // The mode is always stated: report-only and enforcing are the same sentence otherwise.
-  const enforcing = mode === 'enforce';
-  const modeClause = enforcing
-    ? `ENFORCE mode, deleting ${deleted} ${plural(deleted, 'resource')}`
-    : 'report-only mode, deleting nothing';
-  const scanned = ` It scanned ${resources} ${plural(resources, 'resource')} across ${users} ${plural(users, 'account')}${usersFailed > 0 ? `, and could not read ${usersFailed}` : ''}.`;
-
-  if (error || runStatus === 'error') {
-    return {
-      ...detail,
-      level: 'error',
-      sentence: `The app resource sweep failed ${when}: ${error ?? 'no error was recorded'}.${scanned}`,
-    };
-  }
-  if (skipped) {
-    return {
-      ...detail,
-      level: 'attention',
-      sentence: `The app resource sweep ran ${when} in ${modeClause}, but could not read ${
-        named.length > 0 ? named.join(', ') : 'at least one resource listing'
-      }, so its count of ${orphanCount} ${plural(orphanCount, 'orphan')} under-reports what is there.${scanned}`,
-    };
-  }
-  if (orphanCount > 0) {
-    const named = orphans.length > 0 ? ` (${orphans.join(', ')}${orphanCount > orphans.length ? ', …' : ''})` : '';
-    return {
-      ...detail,
-      level: 'attention',
-      sentence: `The app resource sweep nominated ${orphanCount} orphaned ${plural(orphanCount, 'resource')}${named} ${when}, running in ${modeClause}.${scanned}`,
-    };
-  }
-  return {
-    ...detail,
-    level: enforcing || usersFailed > 0 ? 'attention' : 'ok',
-    sentence: `The app resource sweep found no orphans ${when}, running in ${modeClause}.${scanned}`,
-  };
 }
 
 /**
@@ -540,7 +214,6 @@ function readInvocationGroup(row) {
   return {
     status,
     requests: Number(requests),
-    errors: Number.isFinite(row?.sum?.errors) ? Number(row.sum.errors) : null,
     sampleInterval: Number.isFinite(sampleInterval) ? Number(sampleInterval) : null,
   };
 }
@@ -632,8 +305,7 @@ export function coreStatements(now) {
       FROM cloudflare_connections GROUP BY status`,
     `SELECT COUNT(*) AS unexpired FROM cloudflare_auth_sessions WHERE expires_at > ${now}`,
     `SELECT users.email AS email, runtimes.status AS status, runtimes.runtime_version AS runtime_version,
-        runtimes.last_error AS last_error, runtimes.updated_at AS updated_at,
-        runtimes.provisioning_lease_expires_at AS provisioning_lease_expires_at
+        runtimes.updated_at AS updated_at
       FROM "user" AS users
       JOIN cloudflare_connections AS connections ON connections.user_id = users.id
       LEFT JOIN user_computer_runtimes AS runtimes ON runtimes.user_id = users.id
@@ -642,17 +314,6 @@ export function coreStatements(now) {
       LIMIT ${RUNTIME_ROW_LIMIT}`,
   ];
 }
-
-/**
- * Tables migrated from the operations Worker. Each is read on its own so a table that has
- * not been created yet costs one check, not the whole report. Ordered by `rowid` so the newest
- * insert leads even for a run that has not recorded a completion time yet; `describeReconcileRun`
- * re-sorts on the timestamps it reads.
- */
-export const OPTIONAL_STATEMENTS = {
-  reconcileRuns: 'SELECT * FROM app_resource_reconcile_runs ORDER BY rowid DESC LIMIT 10',
-  dailyJobs: 'SELECT * FROM daily_maintenance_jobs',
-};
 
 /**
  * Run read-only SQL against production D1 as the authenticated operator.
@@ -693,7 +354,7 @@ export const WORKER_INVOCATIONS_QUERY = `query GhostbuildInvocations($account: s
         filter: { scriptName: $script, datetime_geq: $from, datetime_leq: $to }
       ) {
         dimensions { status }
-        sum { requests errors }
+        sum { requests }
         avg { sampleInterval }
       }
     }
@@ -919,31 +580,15 @@ export async function collectReport({
     attempt(() => query(statements.join(';\n'))),
     attempt(() => readInvocations({ now })),
   ]);
-  const optional = Object.fromEntries(
-    await Promise.all(
-      Object.entries(OPTIONAL_STATEMENTS).map(async ([key, sql]) => [key, await attempt(() => query(sql))]),
-    ),
-  );
-
   const checks = [
     buildWorkerCheck(invocations, now),
-    buildUsersCheck(core),
     buildAccountsCheck(core),
-    buildSessionsCheck(core),
     buildRuntimesCheck(core, { now, desiredRuntimeVersion }),
-    buildReconcileCheck(optional.reconcileRuns, now),
-    buildDailyMaintenanceCheck(optional.dailyJobs, {
-      now,
-      // Each job writes a `running` receipt as its first act, so a claim newer than every
-      // receipt means the job fired and died before it could record anything.
-      lastReceiptAt: {
-        'app-resource-reconcile': newestStart(optional.reconcileRuns),
-      },
-    }),
+    buildUsersCheck(core),
+    buildSessionsCheck(core),
   ];
 
-  const ordered = CHECK_ORDER.map(({ id }) => checks.find((check) => check.id === id)).filter(Boolean);
-  const status = ordered.reduce(
+  const status = checks.reduce(
     (worst, check) => (STATUS_RANK[check.status] > STATUS_RANK[worst] ? check.status : worst),
     'ok',
   );
@@ -955,8 +600,8 @@ export async function collectReport({
     desiredRuntimeVersion,
     controlPlaneReadable: core.ok,
     status,
-    headline: headlineFor(ordered, core),
-    checks: ordered,
+    headline: headlineFor(checks, core),
+    checks,
   };
 }
 
@@ -1106,142 +751,6 @@ function buildRuntimesCheck(core, { now, desiredRuntimeVersion }) {
       })),
     },
   });
-}
-
-function newestStart(runsAttempt) {
-  if (!runsAttempt?.ok) {
-    return null;
-  }
-  let newest = 0;
-  for (const row of runsAttempt.value[0] ?? []) {
-    if (!Number.isFinite(row?.started_at)) {
-      return null;
-    }
-    newest = Math.max(newest, Number(row.started_at));
-  }
-  return newest;
-}
-
-function buildDailyMaintenanceCheck(jobsAttempt, { now, lastReceiptAt }) {
-  if (!jobsAttempt.ok) {
-    return unknownCheck(
-      'daily-maintenance',
-      'Daily maintenance',
-      jobsAttempt,
-      'Written by app/lib/.server/daily-maintenance.ts.',
-    );
-  }
-  let described;
-  try {
-    described = describeDailyJobs(jobsAttempt.value[0] ?? [], now);
-  } catch (error) {
-    return unknownCheck(
-      'daily-maintenance',
-      'Daily maintenance',
-      schemaFailure(error),
-      'Written by app/lib/.server/daily-maintenance.ts.',
-    );
-  }
-  const entries = described.map((entry) => {
-    const receipt = lastReceiptAt[entry.job];
-    // The claim is written before the job runs, so a claim with no receipt behind it is a job
-    // that fired and died. Only meaningful once the receipt table itself could be read.
-    if (entry.level === 'ok' && entry.at !== null && receipt !== null && entry.at - receipt > DIED_AFTER_CLAIM_MS) {
-      return {
-        ...entry,
-        level: 'error',
-        sentence: `${entry.job} claimed its slot ${formatRelativeTime(entry.at, now)} but recorded no run, so it started and died.`,
-      };
-    }
-    return entry;
-  });
-  const level = entries.reduce(
-    (worst, entry) => (STATUS_RANK[entry.level] > STATUS_RANK[worst] ? entry.level : worst),
-    'ok',
-  );
-  const failing = entries.filter((entry) => entry.level !== 'ok').length;
-  const newest = entries.reduce((max, entry) => (entry.at && entry.at > max ? entry.at : max), 0);
-  return check(
-    'daily-maintenance',
-    'Daily maintenance',
-    level,
-    failing === 0
-      ? `All ${entries.length} daily maintenance ${plural(entries.length, 'job')} fired within the last day.`
-      : `${failing} of ${entries.length} daily maintenance ${plural(entries.length, 'job')} did not fire as scheduled.`,
-    { at: newest || null, now, detail: { entries } },
-  );
-}
-
-function buildReconcileCheck(runsAttempt, now) {
-  if (!runsAttempt.ok) {
-    return unknownCheck(
-      'app-resource-sweep',
-      'App resource sweep',
-      runsAttempt,
-      'Written by app/lib/.server/cloudflare/app-resource-reconcile-sweep.ts.',
-    );
-  }
-  const runs = runsAttempt.value[0] ?? [];
-  if (runs.length === 0) {
-    return check(
-      'app-resource-sweep',
-      'App resource sweep',
-      'attention',
-      'No app resource reconciliation sweep has been recorded yet.',
-      { now, detail: { runs: [] } },
-    );
-  }
-  // The newest row wins even if `rowid` order and timestamp order disagree.
-  let described;
-  try {
-    described = runs.map((row) => describeReconcileRun(row, now)).sort((a, b) => b.at - a.at);
-  } catch (error) {
-    return unknownCheck(
-      'app-resource-sweep',
-      'App resource sweep',
-      schemaFailure(error),
-      'Written by app/lib/.server/cloudflare/app-resource-reconcile-sweep.ts.',
-    );
-  }
-  const latest = described[0];
-  const age = ageOf(latest.at, now);
-  const stale = age !== null && age > SCHEDULED_JOB_STALE_MS;
-  return check(
-    'app-resource-sweep',
-    'App resource sweep',
-    stale && STATUS_RANK[latest.level] < STATUS_RANK.attention ? 'attention' : latest.level,
-    stale ? `${latest.sentence} That is its last run, so the daily sweep has stopped.` : latest.sentence,
-    {
-      at: latest.at || null,
-      now,
-      detail: {
-        runStatus: latest.runStatus,
-        mode: latest.mode,
-        usersScanned: latest.usersScanned,
-        usersFailed: latest.usersFailed,
-        resourcesScanned: latest.resourcesScanned,
-        orphanCount: latest.orphanCount,
-        orphans: latest.orphans,
-        deletedCount: latest.deletedCount,
-        skippedListing: latest.skippedListing,
-        // `--json` is the mode an agent reasons over, so it gets the listings by name too:
-        // a skip the operator cannot act on is barely better than no skip at all.
-        skippedListings: latest.skippedListings,
-        error: latest.error,
-        recentRuns: described
-          .slice(0, 5)
-          .map(({ at, runStatus, mode, orphanCount, skippedListing, skippedListings, error }) => ({
-            at,
-            runStatus,
-            mode,
-            orphanCount,
-            skippedListing,
-            skippedListings,
-            error,
-          })),
-      },
-    },
-  );
 }
 
 /** One line that is true whether the platform is fine, broken, or partly unreadable. */

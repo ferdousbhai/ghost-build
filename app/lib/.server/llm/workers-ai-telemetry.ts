@@ -38,7 +38,7 @@ type WorkersAiPromptCacheTelemetry = {
   cachedInputTokens: number;
 };
 
-export function workersAiPromptCacheTelemetry(usage: Usage, inputTokens: number): WorkersAiPromptCacheTelemetry {
+function workersAiPromptCacheTelemetry(usage: Usage, inputTokens: number): WorkersAiPromptCacheTelemetry {
   const cachedInputTokens = Math.min(normalizeUsage(inputTokens), normalizeUsage(usage.cacheRead));
   return {
     attempted: true,

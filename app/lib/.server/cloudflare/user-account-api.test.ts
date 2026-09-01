@@ -3,20 +3,12 @@ import { describe, expect, test, vi } from 'vitest';
 import type { DeploymentPlan } from './deployment-plan';
 import { deploymentAssetHash, type DeploymentArtifactFile } from './deployment-artifact';
 import { CloudflareAccountApiError, UserCloudflareAccountApi } from './user-account-api';
-import {
-  APP_AGENT_SECURITY_BOUNDARY_SHA256,
-  DEPLOYMENT_SECURITY_BASELINE_VERSION,
-  TEMPLATE_SOURCE_SHA256,
-} from './deployment-security-baseline';
 import { USER_WORKSPACE_RUNTIME_GC_CRON } from './user-workspace-runtime-policy';
 
 const plan: DeploymentPlan = {
   version: 5,
   deploymentId: 'deployment-1',
   sourceSha256: 'a'.repeat(64),
-  templateSourceSha256: TEMPLATE_SOURCE_SHA256,
-  securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
-  securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
   project: { type: 'web_app', bindings: { ai: true, d1: true, r2: true, kv: true, appAgent: true } },
   resources: [
     { type: 'd1', logicalName: 'DB', proposedName: 'ghostbuild-deployment-1' },
@@ -127,40 +119,6 @@ describe('UserCloudflareAccountApi', () => {
     });
   });
 
-  test('records the status, error codes and wording of a refusal it cannot classify', async () => {
-    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      Response.json(
-        {
-          success: false,
-          errors: [
-            { code: 10_000, message: 'Authentication error' },
-            { code: 9_109, message: 'Unauthorized to access requested resource' },
-          ],
-        },
-        { status: 403 },
-      ),
-    );
-
-    await expect(
-      new UserCloudflareAccountApi('account-1', 'user-token', request).readWorkspaceContainersEntitlement(),
-    ).resolves.toEqual({
-      status: 'undetermined',
-      reason:
-        'Cloudflare refused the Containers capability check. status=403 codes=10000,9109 wording="Authentication error"',
-    });
-  });
-
-  test('still records the status when Cloudflare answers with something that is not JSON', async () => {
-    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response('<html>gateway</html>', { status: 502 }));
-
-    await expect(
-      new UserCloudflareAccountApi('account-1', 'user-token', request).readWorkspaceContainersEntitlement(),
-    ).resolves.toEqual({
-      status: 'undetermined',
-      reason: 'Cloudflare refused the Containers capability check. status=502 codes=none wording=none',
-    });
-  });
-
   test('keeps credential-shaped text out of the refusal it records', async () => {
     const request = vi.fn<typeof fetch>().mockResolvedValueOnce(
       Response.json(
@@ -232,6 +190,7 @@ describe('UserCloudflareAccountApi', () => {
   test('creates only the D1 name fixed by the approved plan in the connected account', async () => {
     const request = vi
       .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: [] }))
       .mockResolvedValueOnce(
         Response.json({ success: true, result: { uuid: 'd1-id', name: 'ghostbuild-deployment-1' } }),
       )
@@ -239,11 +198,11 @@ describe('UserCloudflareAccountApi', () => {
     const authorizeRequest = vi.fn(async () => undefined);
     const api = new UserCloudflareAccountApi('account-1', 'user-token', request, authorizeRequest);
 
-    await expect(api.createD1ForPlan(plan)).resolves.toEqual({ id: 'd1-id', name: 'ghostbuild-deployment-1' });
+    await expect(api.ensureD1ForPlan(plan)).resolves.toEqual({ id: 'd1-id', name: 'ghostbuild-deployment-1' });
     await expect(api.getWorkersSubdomain()).resolves.toBe('user-subdomain');
 
     expect(request).toHaveBeenNthCalledWith(
-      1,
+      2,
       'https://api.cloudflare.com/client/v4/accounts/account-1/d1/database',
       expect.objectContaining({
         method: 'POST',
@@ -253,8 +212,8 @@ describe('UserCloudflareAccountApi', () => {
         headers: expect.objectContaining({ authorization: 'Bearer user-token' }),
       }),
     );
-    expect(request.mock.contexts).toEqual([undefined, undefined]);
-    expect(authorizeRequest).toHaveBeenCalledTimes(2);
+    expect(request.mock.contexts).toEqual([undefined, undefined, undefined]);
+    expect(authorizeRequest).toHaveBeenCalledTimes(3);
     authorizeRequest.mock.invocationCallOrder.forEach((authorizationOrder, index) => {
       expect(authorizationOrder).toBeLessThan(request.mock.invocationCallOrder[index]);
     });
@@ -269,32 +228,36 @@ describe('UserCloudflareAccountApi', () => {
     );
 
     await expect(
-      new UserCloudflareAccountApi('account-1', 'user-token', request).createD1ForPlan(plan),
+      new UserCloudflareAccountApi('account-1', 'user-token', request).ensureD1ForPlan(plan),
     ).rejects.toThrow('Cloudflare API request redirected unexpectedly.');
     expect(request).toHaveBeenCalledWith(
-      'https://api.cloudflare.com/client/v4/accounts/account-1/d1/database',
+      'https://api.cloudflare.com/client/v4/accounts/account-1/d1/database?name=ghostbuild-deployment-1',
       expect.objectContaining({ redirect: 'manual' }),
     );
   });
 
   test('creates the protected D1 only under its independently approved plan name', async () => {
-    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      Response.json({
-        success: true,
-        result: {
-          uuid: 'agent-security-d1-id',
-          name: 'ghostbuild-deployment-1-agent-security',
-        },
-      }),
-    );
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: [] }))
+      .mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: {
+            uuid: 'agent-security-d1-id',
+            name: 'ghostbuild-deployment-1-agent-security',
+          },
+        }),
+      );
 
     await expect(
-      new UserCloudflareAccountApi('account-1', 'token', request).createD1ForPlan(plan, 'AGENT_SECURITY_DB'),
+      new UserCloudflareAccountApi('account-1', 'token', request).ensureD1ForPlan(plan, 'AGENT_SECURITY_DB'),
     ).resolves.toEqual({
       id: 'agent-security-d1-id',
       name: 'ghostbuild-deployment-1-agent-security',
     });
-    expect(request).toHaveBeenCalledWith(
+    expect(request).toHaveBeenNthCalledWith(
+      2,
       'https://api.cloudflare.com/client/v4/accounts/account-1/d1/database',
       expect.objectContaining({
         method: 'POST',
@@ -306,9 +269,10 @@ describe('UserCloudflareAccountApi', () => {
   test('fails closed when Cloudflare returns a different resource or the plan is malformed', async () => {
     const request = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(Response.json({ success: true, result: { uuid: 'd1-id', name: 'some-other-database' } }));
+      .mockResolvedValueOnce(Response.json({ success: true, result: [] }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: { uuid: 'd1-id', name: 'some-other-database' } }));
     await expect(
-      new UserCloudflareAccountApi('account-1', 'token', request).createD1ForPlan(plan),
+      new UserCloudflareAccountApi('account-1', 'token', request).ensureD1ForPlan(plan),
     ).rejects.toBeInstanceOf(CloudflareAccountApiError);
     await expect(
       new UserCloudflareAccountApi('account-1', 'token', request).ensureR2ForPlan({ ...plan, resources: [] }),
@@ -544,7 +508,7 @@ describe('UserCloudflareAccountApi', () => {
         Response.json({ success: false, errors: [{ message: 'permission denied' }] }, { status: 403 }),
       );
     await expect(
-      new UserCloudflareAccountApi('account-1', 'secret-token', request).createD1ForPlan(plan),
+      new UserCloudflareAccountApi('account-1', 'secret-token', request).ensureD1ForPlan(plan),
     ).rejects.toThrow('permission denied');
   });
 
@@ -576,96 +540,6 @@ describe('UserCloudflareAccountApi', () => {
         'SELECT 1',
       ),
     ).rejects.toThrow('unsuccessful D1 query result');
-  });
-
-  test('reads a workspace database that was never migrated as holding nothing', async () => {
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [] }] }));
-
-    await expect(
-      new UserCloudflareAccountApi('account-1', 'token', request).workspaceDatabaseHoldsUserData(
-        '0123456789abcdef0123456789abcdef',
-      ),
-    ).resolves.toBe(false);
-    // No `chats` table means the migrations never ran, so there is nothing left to count.
-    expect(request).toHaveBeenCalledOnce();
-  });
-
-  test('reads a workspace database with chats in it as holding a workspace', async () => {
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json({ success: true, result: [{ success: true, results: [{ name: 'chats' }] }] }),
-      )
-      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [{ total: 3 }] }] }));
-
-    await expect(
-      new UserCloudflareAccountApi('account-1', 'token', request).workspaceDatabaseHoldsUserData(
-        '0123456789abcdef0123456789abcdef',
-      ),
-    ).resolves.toBe(true);
-  });
-
-  test('reads a migrated but empty workspace database as holding nothing', async () => {
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json({ success: true, result: [{ success: true, results: [{ name: 'chats' }] }] }),
-      )
-      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [{ total: 0 }] }] }));
-
-    await expect(
-      new UserCloudflareAccountApi('account-1', 'token', request).workspaceDatabaseHoldsUserData(
-        '0123456789abcdef0123456789abcdef',
-      ),
-    ).resolves.toBe(false);
-  });
-
-  test('refuses to read an unreadable row count as an empty workspace database', async () => {
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json({ success: true, result: [{ success: true, results: [{ name: 'chats' }] }] }),
-      )
-      .mockResolvedValueOnce(Response.json({ success: true, result: [{ success: true, results: [{}] }] }));
-
-    await expect(
-      new UserCloudflareAccountApi('account-1', 'token', request).workspaceDatabaseHoldsUserData(
-        '0123456789abcdef0123456789abcdef',
-      ),
-    ).rejects.toThrow('unreadable workspace database row count');
-  });
-
-  test('removes the container application attached to a workspace runtime Worker', async () => {
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: [{ id: 'application-1', name: 'ghostbuild-workspace-1', durable_objects: { namespace_id: 'ns-1' } }],
-        }),
-      )
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
-
-    await new UserCloudflareAccountApi('account-1', 'token', request).deleteWorkspaceRuntimeContainer(
-      'ghostbuild-workspace-1',
-    );
-
-    expect(request).toHaveBeenLastCalledWith(
-      'https://api.cloudflare.com/client/v4/accounts/account-1/containers/applications/application-1',
-      expect.objectContaining({ method: 'DELETE' }),
-    );
-  });
-
-  test('leaves a workspace runtime with no container application alone', async () => {
-    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ success: true, result: [] }));
-
-    await new UserCloudflareAccountApi('account-1', 'token', request).deleteWorkspaceRuntimeContainer(
-      'ghostbuild-workspace-1',
-    );
-
-    expect(request).toHaveBeenCalledOnce();
   });
 
   test('applies each migration and its marker in one transactional D1 batch', async () => {
@@ -909,100 +783,6 @@ describe('UserCloudflareAccountApi', () => {
     expect(request).toHaveBeenCalledOnce();
   });
 
-  test('reads the exact active Worker version, its bindings, and cleanup schedules', async () => {
-    const authorizeRequest = vi.fn(async () => undefined);
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: {
-            deployments: [
-              {
-                id: 'provider-deployment-1',
-                created_on: '2026-07-20T10:00:00Z',
-                versions: [{ percentage: 100, version_id: 'worker-version-1' }],
-              },
-            ],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: {
-            id: 'worker-version-1',
-            resources: {
-              bindings: [{ name: 'CF_VERSION_METADATA', type: 'version_metadata' }],
-              script: { etag: 'etag-1' },
-              script_runtime: { compatibility_date: '2026-07-21', compatibility_flags: ['nodejs_compat'] },
-            },
-          },
-        }),
-      )
-      .mockResolvedValueOnce(Response.json({ success: true, result: { schedules: [{ cron: '0 3 * * *' }] } }))
-      .mockResolvedValueOnce(Response.json({ success: true, result: { enabled: true, previews_enabled: true } }));
-
-    await expect(
-      new UserCloudflareAccountApi('account-1', 'token', request, authorizeRequest).readActiveWorkerDeployment(
-        'worker-name',
-      ),
-    ).resolves.toEqual({
-      providerDeploymentId: 'provider-deployment-1',
-      workerVersionId: 'worker-version-1',
-      scriptEtag: 'etag-1',
-      bindings: [{ name: 'CF_VERSION_METADATA', type: 'version_metadata' }],
-      crons: ['0 3 * * *'],
-      compatibilityDate: '2026-07-21',
-      compatibilityFlags: ['nodejs_compat'],
-      workersDevEnabled: true,
-      previewUrlsEnabled: true,
-    });
-    expect(authorizeRequest).toHaveBeenCalledTimes(4);
-    authorizeRequest.mock.invocationCallOrder.forEach((authorizationOrder, index) => {
-      expect(authorizationOrder).toBeLessThan(request.mock.invocationCallOrder[index]);
-    });
-  });
-
-  test('does not fall back to an older full deployment while the newest deployment is gradual', async () => {
-    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      Response.json({
-        success: true,
-        result: {
-          deployments: [
-            {
-              id: 'new-gradual',
-              created_on: '2026-07-20T11:00:00Z',
-              versions: [
-                { percentage: 50, version_id: 'new-a' },
-                { percentage: 50, version_id: 'new-b' },
-              ],
-            },
-            {
-              id: 'old-full',
-              created_on: '2026-07-20T10:00:00Z',
-              versions: [{ percentage: 100, version_id: 'old' }],
-            },
-          ],
-        },
-      }),
-    );
-
-    await expect(
-      new UserCloudflareAccountApi('account-1', 'token', request).readActiveWorkerDeployment('worker-name'),
-    ).rejects.toThrow('ambiguous active Worker deployment');
-    expect(request).toHaveBeenCalledOnce();
-  });
-
-  test('rejects a malformed Worker deployment collection', async () => {
-    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ success: true, result: {} }));
-
-    await expect(
-      new UserCloudflareAccountApi('account-1', 'token', request).readActiveWorkerDeployment('worker-name'),
-    ).rejects.toThrow('invalid Worker deployments');
-    expect(request).toHaveBeenCalledOnce();
-  });
-
   test('creates a Worker with assets and reads back the exact active version', async () => {
     const module = await artifactFile('index.js', 'export default { fetch() { return new Response("ok") } }');
     const asset = await artifactFile('index.html', '<h1>Ghostbuild</h1>');
@@ -1045,11 +825,8 @@ describe('UserCloudflareAccountApi', () => {
         agentSecurityD1DatabaseId: 'abcdef0123456789abcdef0123456789',
         r2BucketName: 'ghostbuild-storage',
         kvNamespaceId: '0123456789abcdef0123456789abcdef',
-        securityBaselineVersion: '24',
-        securityBoundarySha256: 'b'.repeat(64),
-        templateSourceSha256: 'c'.repeat(64),
       }),
-    ).resolves.toEqual({ workerVersionId });
+    ).resolves.toBeUndefined();
 
     expect(request.mock.calls.map(([url]) => String(url))).toEqual([
       'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-app/assets-upload-session',
@@ -1126,11 +903,8 @@ describe('UserCloudflareAccountApi', () => {
         assets: [],
         workersAi: false,
         appAgent: false,
-        securityBaselineVersion: '24',
-        securityBoundarySha256: 'b'.repeat(64),
-        templateSourceSha256: 'c'.repeat(64),
       }),
-    ).resolves.toEqual({ workerVersionId });
+    ).resolves.toBeUndefined();
 
     expect(request.mock.calls.map(([url]) => String(url))).toEqual([
       'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/deployments',
@@ -1183,11 +957,8 @@ describe('UserCloudflareAccountApi', () => {
         assets: [],
         workersAi: false,
         appAgent: false,
-        securityBaselineVersion: '24',
-        securityBoundarySha256: 'b'.repeat(64),
-        templateSourceSha256: 'c'.repeat(64),
       }),
-    ).resolves.toEqual({ workerVersionId });
+    ).resolves.toBeUndefined();
 
     expect(request.mock.calls.map(([url, init]) => `${init?.method} ${String(url)}`)).toEqual([
       'GET https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/ghostbuild-worker/deployments',
@@ -1234,9 +1005,6 @@ describe('UserCloudflareAccountApi', () => {
         assets: [],
         workersAi: false,
         appAgent: false,
-        securityBaselineVersion: '37',
-        securityBoundarySha256: 'b'.repeat(64),
-        templateSourceSha256: 'c'.repeat(64),
       }),
     ).resolves.toEqual({
       workerVersionId,
@@ -1297,9 +1065,6 @@ describe('UserCloudflareAccountApi', () => {
         assets: [],
         workersAi: false,
         appAgent: false,
-        securityBaselineVersion: '37',
-        securityBoundarySha256: 'b'.repeat(64),
-        templateSourceSha256: 'c'.repeat(64),
       }),
     ).resolves.toEqual({
       workerVersionId,
@@ -1330,9 +1095,6 @@ describe('UserCloudflareAccountApi', () => {
         assets: [asset],
         workersAi: false,
         appAgent: false,
-        securityBaselineVersion: '24',
-        securityBoundarySha256: 'b'.repeat(64),
-        templateSourceSha256: 'c'.repeat(64),
       });
     const unknownBucket = vi
       .fn<typeof fetch>()
@@ -1486,10 +1248,7 @@ describe('UserCloudflareAccountApi', () => {
         oauthScopeGrantStatus: 'full',
         endpoint: 'https://ghostbuild-workspace-user.example.workers.dev',
       }),
-    ).resolves.toEqual({
-      workerVersionId,
-      namespaceId: '0123456789abcdef0123456789abcdef',
-    });
+    ).resolves.toEqual({ namespaceId: '0123456789abcdef0123456789abcdef' });
 
     const [scriptUrl, scriptInit] = request.mock.calls[0];
     expect(scriptUrl).toBe(
@@ -1561,7 +1320,7 @@ describe('UserCloudflareAccountApi', () => {
         namespaceId: '0123456789abcdef0123456789abcdef',
         image,
       }),
-    ).resolves.toEqual({ id: 'container-application-1', name: 'ghostbuild-workspace-user' });
+    ).resolves.toBeUndefined();
 
     expect(request).toHaveBeenNthCalledWith(
       1,
@@ -1780,115 +1539,6 @@ describe('UserCloudflareAccountApi', () => {
     ).rejects.toThrow('invalid workspace container application');
     expect(request).toHaveBeenCalledOnce();
   });
-  test('reads every page of the account Worker listing', async () => {
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: [{ id: 'ghostbuild-app-1' }],
-          result_info: { page: 1, total_pages: 2 },
-        }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: [{ id: 'ghostbuild-app-2' }],
-          result_info: { page: 2, total_pages: 2 },
-        }),
-      );
-
-    await expect(new UserCloudflareAccountApi('account-1', 'token', request).listWorkerNames()).resolves.toEqual([
-      'ghostbuild-app-1',
-      'ghostbuild-app-2',
-    ]);
-    expect(request).toHaveBeenNthCalledWith(
-      1,
-      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts?page=1&per_page=1000',
-      expect.objectContaining({ method: 'GET' }),
-    );
-    expect(request).toHaveBeenNthCalledWith(
-      2,
-      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts?page=2&per_page=1000',
-      expect.objectContaining({ method: 'GET' }),
-    );
-  });
-
-  test('fails the Worker listing rather than returning it one name short', async () => {
-    // A dropped name reads as a deployment that no longer exists, and the reconciliation
-    // sweep nominates what no longer exists for deletion.
-    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      Response.json({
-        success: true,
-        result: [{ id: 'ghostbuild-app-1' }, { name: 'ghostbuild-app-2' }],
-        result_info: { page: 1, total_pages: 1 },
-      }),
-    );
-
-    await expect(new UserCloudflareAccountApi('account-1', 'token', request).listWorkerNames()).rejects.toThrow(
-      'Cloudflare returned invalid Worker scripts.',
-    );
-  });
-
-  test('reads a D1 listing to its reported total rather than to a full page', async () => {
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: [{ uuid: 'db-1', name: 'ghostbuild-app-1', created_at: '2026-07-16T00:00:00Z' }],
-          result_info: { page: 1, total_count: 2 },
-        }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: [{ uuid: 'db-2', name: 'ghostbuild-app-2', created_at: '2026-07-16T00:00:00Z' }],
-          result_info: { page: 2, total_count: 2 },
-        }),
-      );
-
-    await expect(new UserCloudflareAccountApi('account-1', 'token', request).listD1Databases()).resolves.toEqual([
-      { id: 'db-1', name: 'ghostbuild-app-1', createdAt: Date.parse('2026-07-16T00:00:00Z') },
-      { id: 'db-2', name: 'ghostbuild-app-2', createdAt: Date.parse('2026-07-16T00:00:00Z') },
-    ]);
-    expect(request).toHaveBeenCalledTimes(2);
-  });
-
-  test('follows the R2 bucket cursor instead of reading one unbounded page', async () => {
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: { buckets: [{ name: 'ghostbuild-app-1-storage', creation_date: '2026-07-16T00:00:00Z' }] },
-          result_info: { cursor: 'next-page' },
-        }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          success: true,
-          result: { buckets: [{ name: 'ghostbuild-app-2-storage', creation_date: '2026-07-16T00:00:00Z' }] },
-          result_info: {},
-        }),
-      );
-
-    await expect(new UserCloudflareAccountApi('account-1', 'token', request).listR2Buckets()).resolves.toEqual([
-      { name: 'ghostbuild-app-1-storage', createdAt: Date.parse('2026-07-16T00:00:00Z') },
-      { name: 'ghostbuild-app-2-storage', createdAt: Date.parse('2026-07-16T00:00:00Z') },
-    ]);
-    expect(request).toHaveBeenNthCalledWith(
-      1,
-      'https://api.cloudflare.com/client/v4/accounts/account-1/r2/buckets?per_page=1000',
-      expect.objectContaining({ method: 'GET' }),
-    );
-    expect(request).toHaveBeenNthCalledWith(
-      2,
-      'https://api.cloudflare.com/client/v4/accounts/account-1/r2/buckets?per_page=1000&cursor=next-page',
-      expect.objectContaining({ method: 'GET' }),
-    );
-  });
-
   test('resolves a named KV namespace through the same paged account listing', async () => {
     const namespaceId = '0123456789abcdef0123456789abcdef';
     const request = vi

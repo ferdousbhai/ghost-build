@@ -34,27 +34,29 @@ describe('activateCloudflareConnection', () => {
   it('advances the generation when the observed connection is still current', async () => {
     const database = connectionDatabase({ generation: 5, credentialHandle: 'credential-old' });
 
-    const connection = await activateCloudflareConnection({
-      db: database.db,
-      userId: 'user-1',
-      accountId: 'account-2',
-      accountName: 'New account',
-      credentialHandle: 'credential-new',
-      grantedCapabilities: ['workers', 'workers_ai'],
-      requestedOAuthScopes: ['workers-scripts.write', 'ai.read'],
-      grantedOAuthScopes: ['workers-scripts.write', 'ai.read'],
-      oauthScopeProfileVersion: 'core-v1',
-      oauthScopeGrantStatus: 'core' as const,
-      aiBillingEnabled: true,
-      expectedGeneration: 5,
-      now: 200,
-    });
+    await expect(
+      activateCloudflareConnection({
+        db: database.db,
+        userId: 'user-1',
+        accountId: 'account-2',
+        accountName: 'New account',
+        credentialHandle: 'credential-new',
+        grantedCapabilities: ['workers', 'workers_ai'],
+        requestedOAuthScopes: ['workers-scripts.write', 'ai.read'],
+        grantedOAuthScopes: ['workers-scripts.write', 'ai.read'],
+        oauthScopeProfileVersion: 'core-v1',
+        oauthScopeGrantStatus: 'core' as const,
+        aiBillingEnabled: true,
+        expectedGeneration: 5,
+        now: 200,
+      }),
+    ).resolves.toBeUndefined();
 
-    expect(connection.credentialHandle).toBe('credential-new');
-    expect(connection.generation).toBe(6);
+    expect(database.credentialHandle).toBe('credential-new');
+    expect(database.generation).toBe(6);
   });
 
-  it('returns the committed CAS row without a fallible follow-up read', async () => {
+  it('commits the CAS update without a fallible follow-up read', async () => {
     const database = connectionDatabase({ generation: 2, credentialHandle: 'credential-old' }, { failSelect: true });
 
     await expect(
@@ -73,7 +75,7 @@ describe('activateCloudflareConnection', () => {
         expectedGeneration: 2,
         now: 300,
       }),
-    ).resolves.toMatchObject({ credentialHandle: 'credential-committed', generation: 3 });
+    ).resolves.toBeUndefined();
 
     expect(database.selects).toBe(0);
     expect(database.credentialHandle).toBe('credential-committed');
@@ -102,7 +104,7 @@ describe('activateCloudflareConnection', () => {
         expectedGeneration: 2,
         now: 300,
       }),
-    ).resolves.toMatchObject({ credentialHandle: 'credential-committed', generation: 3, updatedAt: 300 });
+    ).resolves.toBeUndefined();
 
     expect(database.selects).toBe(1);
   });
@@ -136,7 +138,7 @@ describe('activateCloudflareConnection', () => {
     expect(database.generation).toBe(6);
   });
 
-  it('returns a newly inserted connection from the same atomic statement', async () => {
+  it('inserts a new connection atomically', async () => {
     const db = newConnectionDatabase();
 
     await expect(
@@ -155,11 +157,7 @@ describe('activateCloudflareConnection', () => {
         expectedGeneration: null,
         now: 400,
       }),
-    ).resolves.toMatchObject({
-      userId: 'user-new',
-      credentialHandle: 'credential-new',
-      generation: 1,
-    });
+    ).resolves.toBeUndefined();
   });
 
   it('adopts the exact committed insert when its D1 acknowledgement is lost', async () => {
@@ -182,11 +180,7 @@ describe('activateCloudflareConnection', () => {
         expectedGeneration: null,
         now: 400,
       }),
-    ).resolves.toMatchObject({
-      userId: 'user-new',
-      credentialHandle: 'credential-new',
-      generation: 1,
-    });
+    ).resolves.toBeUndefined();
   });
 
   it('rejects corrupt persisted capability scopes instead of silently removing them', async () => {

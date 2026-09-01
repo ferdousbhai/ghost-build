@@ -4,6 +4,7 @@ import { LinkButton } from '~/components/ui/LinkButton';
 import { BrandLink } from '~/components/BrandLink';
 import { WorkspacePreparingPanel } from '~/components/WorkspacePreparing';
 import { isWorkspacePreparingError } from '~/lib/cloudflare/client';
+import { getUserRuntimeSession, UserRuntimeSessionError } from '~/lib/cloudflare/runtime-session';
 
 interface ErrorDisplayProps {
   error: Error | unknown;
@@ -13,7 +14,14 @@ interface ErrorDisplayProps {
 export function ErrorDisplay({ error, resetErrorBoundary }: ErrorDisplayProps) {
   const isError = error instanceof Error;
   const message = isError ? error.message : String(error);
-  const retry = resetErrorBoundary ?? (() => window.location.reload());
+  const reset = resetErrorBoundary ?? (() => window.location.reload());
+  const retry = () => {
+    if (error instanceof UserRuntimeSessionError) {
+      void getUserRuntimeSession({ retryProvisioning: true }).then(reset, reset);
+      return;
+    }
+    reset();
+  };
 
   // A workspace that has not finished being built is not a page that could not load.
   if (isWorkspacePreparingError(error)) {

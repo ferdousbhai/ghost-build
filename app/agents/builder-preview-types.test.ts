@@ -24,7 +24,7 @@ describe('Builder preview state', () => {
       published: successful,
     };
 
-    expect(previewStateForWorkspace(ready, 5, '2026-07-30T10:01:00.000Z')).toMatchObject({
+    expect(previewStateForWorkspace(ready, 5)).toMatchObject({
       status: 'ready',
       stale: true,
       published: successful,
@@ -40,7 +40,7 @@ describe('Builder preview state', () => {
       published: successful,
     };
 
-    expect(failedBuilderPreviewState(replacement, 5, 'Publication failed', '2026-07-30T10:02:00.000Z')).toMatchObject({
+    expect(failedBuilderPreviewState(replacement, 5, 'Publication failed')).toMatchObject({
       status: 'failed',
       pendingId: null,
       published: successful,

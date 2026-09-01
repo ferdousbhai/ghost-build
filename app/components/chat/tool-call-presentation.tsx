@@ -176,7 +176,7 @@ function writeTitle(invocation: GhostbuildToolInvocation): ReactNode {
   );
 }
 
-export function compactToolLabel(value: string): string {
+function compactToolLabel(value: string): string {
   const singleLine = value.replace(/\s+/g, ' ').trim();
   return singleLine.length <= MAX_TOOL_TITLE_VALUE_CHARACTERS
     ? singleLine

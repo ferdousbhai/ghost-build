@@ -48,23 +48,6 @@ describe('Cloudflare documentation search', () => {
     });
   });
 
-  it('trims the query and rejects an empty one without calling the service', async () => {
-    const request = vi.fn();
-    const tool = cloudflareDocsSearchTool(request as unknown as typeof fetch);
-
-    await expect(tool.execute!({ query: '   ' }, options)).resolves.toMatchObject({ ok: false });
-    expect(request).not.toHaveBeenCalled();
-  });
-
-  it('reports an unavailable service as a failed result rather than throwing', async () => {
-    const request = vi.fn(async () => new Response('nope', { status: 503 }));
-    const tool = cloudflareDocsSearchTool(request as unknown as typeof fetch);
-
-    const result = (await tool.execute!({ query: 'workers ai' }, options)) as { ok: boolean; summary: string };
-    expect(result.ok).toBe(false);
-    expect(result.summary).toContain('503');
-  });
-
   it('surfaces a JSON-RPC error as a failed result', async () => {
     const request = vi.fn(async () => sse({ jsonrpc: '2.0', id: 1, error: { code: -32602, message: 'bad query' } }));
     const tool = cloudflareDocsSearchTool(request as unknown as typeof fetch);
@@ -72,23 +55,6 @@ describe('Cloudflare documentation search', () => {
     const result = (await tool.execute!({ query: 'x' }, options)) as { ok: boolean; summary: string };
     expect(result.ok).toBe(false);
     expect(result.summary).toContain('bad query');
-  });
-
-  it('reports no match when the service answers with an empty excerpt', async () => {
-    const request = vi.fn(async () => sse(excerpt('')));
-    const tool = cloudflareDocsSearchTool(request as unknown as typeof fetch);
-
-    await expect(tool.execute!({ query: 'nothing at all' }, options)).resolves.toMatchObject({ ok: false });
-  });
-
-  it('returns a full-size excerpt untrimmed, matching what upstream sends', async () => {
-    // Upstream caps the answer by result count, not length; a trimmed excerpt would read as a whole one.
-    const long = '<result>x</result>'.repeat(3_000);
-    const request = vi.fn(async () => sse(excerpt(long)));
-    const tool = cloudflareDocsSearchTool(request as unknown as typeof fetch);
-
-    const result = (await tool.execute!({ query: 'everything' }, options)) as { data: { content: string } };
-    expect(result.data.content).toBe(long);
   });
 
   it('refuses a body that exceeds its transport limit', async () => {

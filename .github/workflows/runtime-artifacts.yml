@@ -7,7 +7,7 @@ on:
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
       - patches/**
-      - app/lib/.server/cloudflare/user-workspace-runtime-provisioner.ts
+      - app/workflows/user-workspace-runtime-provisioning.ts
       - user-workspace-runtime/src/container-toolchain.ts
       - scripts/check-runtime-artifacts.mjs
       - .github/workflows/runtime-artifacts.yml

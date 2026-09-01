@@ -138,9 +138,6 @@ export type WorkspaceDeploymentArtifactRequest = {
   agentSecurityD1DatabaseName?: string;
   r2BucketName?: string;
   kvNamespaceId?: string;
-  securityBaselineVersion: string;
-  securityBoundarySha256: string;
-  templateSourceSha256: string;
 };
 
 export type BuilderWorkspaceTextFile = {
@@ -285,16 +282,11 @@ export interface ProjectWorkspaceRpc extends Rpc.DurableObjectBranded {
   cancelValidation(value: WorkspaceCancelValidationRequest): Promise<void>;
   validationStatus(revision: string): { valid: boolean } | Promise<{ valid: boolean }>;
   deploymentPlan(revision: string): Promise<BuilderWorkspaceDeploymentPlan>;
-  beginDeploymentSession(value: WorkspaceDeploymentSessionRequest): Promise<{ sessionId: string }>;
+  beginDeploymentSession(value: WorkspaceDeploymentSessionRequest): Promise<void>;
   assertDeploymentSession(value: { sessionId: string }): Promise<BuilderWorkspaceCheckpoint>;
   prepareDeploymentArtifact(value: WorkspaceDeploymentArtifactRequest): Promise<PreparedDeploymentArtifact>;
-  finishDeploymentSession(value: {
-    sessionId: string;
-    status: 'completed' | 'failed';
-  }): Promise<{ status: 'completed' | 'failed' }>;
-  terminalizeInterruptedDeploymentSession(value: {
-    sessionId: string;
-  }): Promise<{ status: 'absent' | 'completed' | 'failed' }>;
+  finishDeploymentSession(value: { sessionId: string; status: 'completed' | 'failed' }): Promise<void>;
+  terminalizeInterruptedDeploymentSession(value: { sessionId: string }): Promise<void>;
   deleteProject(): Promise<void>;
 }
 

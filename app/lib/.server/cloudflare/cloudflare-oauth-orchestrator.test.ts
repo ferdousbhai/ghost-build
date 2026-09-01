@@ -10,7 +10,6 @@ describe('CloudflareOAuthOrchestrator', () => {
     const orchestrator = new CloudflareOAuthOrchestrator(config);
     const result = await orchestrator.startConnection({
       returnUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001',
-      requestedCapabilities: ['workers', 'd1', 'r2', 'durable_objects', 'workers_ai'],
     });
     const url = new URL(result.authorizationUrl);
     expect(url.origin + url.pathname).toBe('https://dash.cloudflare.com/oauth2/auth');
@@ -37,7 +36,6 @@ describe('CloudflareOAuthOrchestrator', () => {
       orchestrator.startConnection({
         returnUrl:
           'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001',
-        requestedCapabilities: ['workers'],
       }),
     ).rejects.toThrow('workers-r2.write');
   });
@@ -58,7 +56,6 @@ describe('CloudflareOAuthOrchestrator', () => {
     const orchestrator = new CloudflareOAuthOrchestrator(config, request);
     const challenge = await orchestrator.startConnection({
       returnUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001',
-      requestedCapabilities: ['workers', 'd1', 'r2', 'durable_objects', 'workers_ai'],
     });
     await expect(
       orchestrator.completeConnection({
@@ -118,7 +115,6 @@ describe('CloudflareOAuthOrchestrator', () => {
     const orchestrator = new CloudflareOAuthOrchestrator(config, request);
     const challenge = await orchestrator.startConnection({
       returnUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001',
-      requestedCapabilities: ['workers'],
     });
     await expect(
       orchestrator.completeConnection({
@@ -133,7 +129,6 @@ describe('CloudflareOAuthOrchestrator', () => {
     const orchestrator = new CloudflareOAuthOrchestrator(config, request);
     const challenge = await orchestrator.startConnection({
       returnUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001',
-      requestedCapabilities: ['workers'],
     });
     await expect(
       orchestrator.completeConnection({
@@ -141,28 +136,6 @@ describe('CloudflareOAuthOrchestrator', () => {
         callbackUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?code=code-1',
       }),
     ).rejects.toThrow('refresh token');
-  });
-
-  test('does not invent optional profile data when Cloudflare user details are sparse', async () => {
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json({ access_token: 'oauth-access-token', refresh_token: 'oauth-refresh-token' }),
-      )
-      .mockResolvedValueOnce(Response.json({ success: true, result: { id: 'cf-user-1' } }))
-      .mockResolvedValueOnce(Response.json({ success: true, result: [{ id: 'account-1' }] }));
-    const orchestrator = new CloudflareOAuthOrchestrator(config, request);
-    const challenge = await orchestrator.startConnection({
-      returnUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001',
-      requestedCapabilities: ['workers'],
-    });
-
-    await expect(
-      orchestrator.completeConnection({
-        providerSessionId: challenge.sessionId,
-        callbackUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?code=code-1',
-      }),
-    ).resolves.toMatchObject({ user: { email: null, name: null, picture: null } });
   });
 
   test('rejects a failed Cloudflare user details response', async () => {
@@ -175,7 +148,6 @@ describe('CloudflareOAuthOrchestrator', () => {
     const orchestrator = new CloudflareOAuthOrchestrator(config, request);
     const challenge = await orchestrator.startConnection({
       returnUrl: 'https://ghostbuild.dev/api/cloudflare/connection/callback?state=00000000-0000-4000-8000-000000000001',
-      requestedCapabilities: ['workers'],
     });
 
     await expect(

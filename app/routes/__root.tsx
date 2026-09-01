@@ -148,7 +148,7 @@ function Layout({ children }: { children: ReactNode }) {
   );
 }
 
-export function RootNotFoundComponent() {
+function RootNotFoundComponent() {
   return (
     <div className="app-page-shell flex min-h-svh items-center px-4 py-10">
       <section className="app-error-card app-card mx-auto" aria-labelledby="not-found-heading">

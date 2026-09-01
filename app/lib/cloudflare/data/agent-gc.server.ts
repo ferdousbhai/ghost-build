@@ -68,7 +68,7 @@ export function prepareEmptyChatAgentGcCandidatesStatement(
 export async function sweepAgentGcCandidates(
   env: Pick<Env, 'BuilderAgent' | 'DB'>,
   options: { limit?: number; now?: number } = {},
-): Promise<number> {
+): Promise<void> {
   const limit = Math.max(1, Math.min(options.limit ?? AGENT_GC_SWEEP_LIMIT, AGENT_GC_SWEEP_LIMIT));
   const now = options.now ?? Date.now();
   const result = await env.DB.prepare(
@@ -84,10 +84,7 @@ export async function sweepAgentGcCandidates(
     .bind(now, limit)
     .all<AgentGcCandidateRow>();
 
-  const completions = await Promise.all(
-    result.results.map((candidate) => destroyCandidateGeneration(env, candidate, now)),
-  );
-  return completions.reduce((total, completed) => total + completed, 0);
+  await Promise.all(result.results.map((candidate) => destroyCandidateGeneration(env, candidate, now)));
 }
 
 export async function sweepAgentGcCandidatesBestEffort(env: Pick<Env, 'BuilderAgent' | 'DB'>): Promise<void> {
@@ -102,7 +99,7 @@ async function destroyCandidateGeneration(
   env: Pick<Env, 'BuilderAgent' | 'DB'>,
   candidate: AgentGcCandidateRow,
   now: number,
-): Promise<number> {
+): Promise<void> {
   try {
     const name = transcriptAgentName(candidate.initial_id, candidate.subchat_index, candidate.next_generation);
     const agent = env.BuilderAgent.getByName(name);
@@ -110,11 +107,9 @@ async function destroyCandidateGeneration(
     // resolves. Advance the D1 receipt only after that schedule is accepted;
     // the alarm owns the abort-shaped physical teardown and can resume it.
     await agent.scheduleDestroyForGc(candidate.owner_id);
-    const result =
-      candidate.next_generation === candidate.max_generation
-        ? await deleteCompletedCandidate(env.DB, candidate)
-        : await advanceCompletedCandidate(env.DB, candidate, now);
-    return result.meta.changes > 0 ? 1 : 0;
+    await (candidate.next_generation === candidate.max_generation
+      ? deleteCompletedCandidate(env.DB, candidate)
+      : advanceCompletedCandidate(env.DB, candidate, now));
   } catch {
     const retryAt = now + retryDelay(candidate.attempts);
     await env.DB.prepare(
@@ -128,7 +123,6 @@ async function destroyCandidateGeneration(
       subchatIndex: candidate.subchat_index,
       generation: candidate.next_generation,
     });
-    return 0;
   }
 }
 

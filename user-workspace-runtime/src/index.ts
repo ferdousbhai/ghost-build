@@ -22,8 +22,6 @@ import {
   BUILDER_WORKSPACE_MAX_TOTAL_BYTES,
   BUILDER_WORKSPACE_SYNC_BATCH_BYTES,
   BUILDER_WORKSPACE_SYNC_BATCH_FILES,
-  type UserWorkspaceReadinessCheck,
-  type UserWorkspaceReadinessComponent,
 } from './protocol';
 import { routeUserRuntimeAgentRequest } from '../../app/lib/.server/agent-request-identity';
 import {
@@ -34,11 +32,6 @@ import { recordDeploymentActivity } from '../../app/lib/.server/cloudflare/deplo
 import { deploymentProjectProfileFromConfig } from '../../app/lib/.server/cloudflare/deployment-project-profile';
 import type { DeploymentProjectProfile } from '../../app/lib/.server/cloudflare/deployment-project-profile';
 import { DEPLOYMENT_PROJECT_ROOT } from '../../app/lib/.server/cloudflare/deployment-runtime-policy';
-import {
-  APP_AGENT_SECURITY_BOUNDARY_SHA256,
-  DEPLOYMENT_SECURITY_BASELINE_VERSION,
-  TEMPLATE_SOURCE_SHA256,
-} from '../../app/lib/.server/cloudflare/deployment-security-baseline';
 import {
   MAX_DEPLOYMENT_ARTIFACT_BYTES,
   MAX_DEPLOYMENT_ARTIFACT_FILES,
@@ -66,7 +59,7 @@ import { applyAtomicWorkspaceChanges, type AtomicWorkspaceChange } from './atomi
 import { ComputerAdmissionControl } from './computer-admission';
 import { isComputerContainerCallback } from './container-fetch-routing';
 import { CONTAINER_PNPM_STORE_DIR } from './container-toolchain';
-import { routeUserWorkspaceRuntimeControlPlaneRequest, WORKSPACE_COMPONENTS } from './readiness-route';
+import { routeUserWorkspaceRuntimeControlPlaneRequest } from './readiness-route';
 import { scheduleUserWorkspaceRuntimeMaintenance } from './scheduled-maintenance';
 import {
   ToolOperationJournal,
@@ -150,7 +143,6 @@ interface RuntimeEnv {
   GHOSTBUILD_CONNECTION_GENERATION: string;
   GHOSTBUILD_OAUTH_SCOPE_GRANT_STATUS: string;
   GHOSTBUILD_USER_RUNTIME: string;
-  GHOSTBUILD_USER_RUNTIME_ENDPOINT: string;
   GHOSTBUILD_CONTROL_PLANE_ENDPOINT: string;
   GHOSTBUILD_RUNTIME_VERSION: string;
 }
@@ -641,113 +633,37 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
     return result;
   }
 
-  /**
-   * What this workspace is holding, for a control plane deciding whether replacing the Worker
-   * would kill work in flight. Read-only, and it deliberately reports nothing for a lapsed lease:
-   * that lane is already reclaimable and must not pin an old runtime.
-   */
-  readOperationLaneState(): { kind: string; deadline: number } | null {
-    return this.#operationLane.activeLease(Date.now());
-  }
-
   async getWorkspaceState(): Promise<WorkspaceState> {
     const snapshot = await this.stableProjectRead(readProjectFiles);
     return this.stateFromFiles(snapshot.value, snapshot.revision);
   }
 
   async runReadinessProbe() {
-    const components: Partial<Record<UserWorkspaceReadinessComponent, UserWorkspaceReadinessCheck>> = {};
     const nonce = crypto.randomUUID();
     const path = `${READINESS_ROOT}/${nonce}.txt`;
-    let blocked = false;
-    let syncPending = false;
-    const check = async (
-      name: UserWorkspaceReadinessComponent,
-      operation: () => Promise<void>,
-      successCode: string,
-    ): Promise<boolean> => {
-      if (blocked) {
-        components[name] = { ok: false, code: 'blocked_by_dependency', durationMs: 0 };
-        return false;
-      }
-      const startedAt = Date.now();
-      try {
-        await operation();
-        components[name] = { ok: true, code: successCode, durationMs: Date.now() - startedAt };
-        return true;
-      } catch (error) {
-        const pendingError = error instanceof WorkspaceSyncPendingError ? error : null;
-        syncPending = pendingError !== null;
-        components[name] = {
-          ok: false,
-          code: pendingError?.code ?? 'unavailable',
-          durationMs: Date.now() - startedAt,
-        };
-        blocked = true;
-        return false;
-      }
-    };
-
-    await check(
-      'durableVfs',
-      () =>
-        this.withComputer(async (workspace) => {
-          await workspace.fs.rm(READINESS_ROOT, { recursive: true, force: true });
-          await writeWorkspaceFile(workspace, path, new TextEncoder().encode(nonce), false);
-          if (decodeUtf8((await readWorkspaceFile(workspace, path)).bytes) !== nonce) {
-            throw new Error('Durable VFS sentinel mismatch.');
-          }
-        }),
-      'read_write_ready',
-    );
     const containerNonce = `${nonce}-container`;
-    await check(
-      'container',
-      () =>
-        this.withComputer(async (workspace) => {
-          requireCommandSuccess(
-            await runCommand(workspace, `printf %s ${shellQuote(containerNonce)} > ${shellQuote(path)}`, {
-              cwd: '/home',
-              backend: 'container-shell',
-              timeoutMs: 7 * 60_000,
-            }),
-          );
-        }),
-      'computerd_ready',
-    );
-    await check(
-      'fuse',
-      async () => {
-        const snapshot = await this.stableProjectRead((workspace) => readWorkspaceFile(workspace, path));
-        if (decodeUtf8(snapshot.value.bytes) !== containerNonce) {
-          throw new Error('FUSE sentinel mismatch.');
+    try {
+      await this.withComputer(async (workspace) => {
+        await workspace.fs.rm(READINESS_ROOT, { recursive: true, force: true });
+        await writeWorkspaceFile(workspace, path, new TextEncoder().encode(nonce), false);
+        if (decodeUtf8((await readWorkspaceFile(workspace, path)).bytes) !== nonce) {
+          throw new Error('Durable VFS sentinel mismatch.');
         }
-      },
-      'container_write_visible',
-    );
-    components.sync = blocked
-      ? {
-          ok: false,
-          code: syncPending ? 'workspace_sync_pending' : 'dependency_failed',
-          durationMs: 0,
-        }
-      : { ok: true, code: 'completed', durationMs: 0 };
-
-    const cleanupStartedAt = Date.now();
-    if (syncPending) {
-      components.cleanup = { ok: false, code: 'deferred_until_sync_retry', durationMs: 0 };
-    } else {
-      try {
-        await this.cleanupReadinessRoot();
-        components.cleanup = { ok: true, code: 'removed', durationMs: Date.now() - cleanupStartedAt };
-      } catch {
-        components.cleanup = { ok: false, code: 'cleanup_failed', durationMs: Date.now() - cleanupStartedAt };
+        requireCommandSuccess(
+          await runCommand(workspace, `printf %s ${shellQuote(containerNonce)} > ${shellQuote(path)}`, {
+            cwd: '/home',
+            backend: 'container-shell',
+            timeoutMs: 7 * 60_000,
+          }),
+        );
+      });
+      const snapshot = await this.stableProjectRead((workspace) => readWorkspaceFile(workspace, path));
+      if (decodeUtf8(snapshot.value.bytes) !== containerNonce) {
+        throw new Error('FUSE sentinel mismatch.');
       }
+    } finally {
+      await this.cleanupReadinessRoot().catch(() => undefined);
     }
-    return {
-      ok: WORKSPACE_COMPONENTS.every((name) => components[name]?.ok === true),
-      components,
-    };
   }
 
   async getWorkspaceSnapshot() {
@@ -1731,7 +1647,7 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
       }
       await this.setKeepAlive(true);
       await this.assertDeploymentSession({ sessionId: operationId });
-      return { sessionId: operationId };
+      return;
     }
 
     const lease = this.#operationLane.acquire({
@@ -1759,7 +1675,6 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
       // plane performs migrations and version upload through the user's account API.
       await this.setKeepAlive(true);
       await this.assertDeploymentSession({ sessionId: operationId });
-      return { sessionId: operationId };
     } catch (error) {
       await this.finishDeploymentSession({ sessionId: operationId, status: 'failed' }).catch(() => undefined);
       throw error;
@@ -1802,7 +1717,7 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
     const sessionId = requireString(record(value).sessionId, 'sessionId', 256);
     const session = this.deploymentSessionRow(sessionId);
     if (!session) {
-      return { status: 'absent' as const };
+      return;
     }
     const lease = this.#operationLane.find(session.idempotency_key, session.owner);
     if (lease) {
@@ -1818,7 +1733,6 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
       );
     }
     await this.releaseContainerKeepAliveIfIdle();
-    return { status: session.status === 'completed' ? ('completed' as const) : ('failed' as const) };
   }
 
   async finishDeploymentSession(value: unknown) {
@@ -1839,7 +1753,7 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
       }
       this.#activeOperationOwners.delete(session.owner);
       await this.releaseContainerKeepAliveIfIdle();
-      return { status };
+      return;
     }
     if (session.status !== 'active') {
       throw new WorkspaceOperationIndeterminateError('deployment');
@@ -1857,7 +1771,6 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
     );
     this.#activeOperationOwners.delete(session.owner);
     await this.releaseContainerKeepAliveIfIdle();
-    return { status };
   }
 
   async prepareDeploymentArtifact(value: unknown): Promise<PreparedDeploymentArtifact> {
@@ -1910,9 +1823,6 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
       projectType,
       workersAi: project.bindings.ai,
       appAgent: project.bindings.appAgent,
-      securityBaselineVersion: requireString(input.securityBaselineVersion, 'securityBaselineVersion', 32),
-      securityBoundarySha256: requireString(input.securityBoundarySha256, 'securityBoundarySha256', 64),
-      templateSourceSha256: requireString(input.templateSourceSha256, 'templateSourceSha256', 64),
     };
     if (d1DatabaseId !== undefined) {
       deploymentConfig.d1DatabaseId = d1DatabaseId;
@@ -3355,9 +3265,6 @@ function validationDeploymentConfig(project: DeploymentProjectProfile): Deployme
     projectType: project.type,
     workersAi: project.bindings.ai,
     appAgent: project.bindings.appAgent,
-    securityBaselineVersion: String(DEPLOYMENT_SECURITY_BASELINE_VERSION),
-    securityBoundarySha256: APP_AGENT_SECURITY_BOUNDARY_SHA256,
-    templateSourceSha256: TEMPLATE_SOURCE_SHA256,
   };
   if (project.bindings.d1) {
     config.d1DatabaseId = nullUuid;

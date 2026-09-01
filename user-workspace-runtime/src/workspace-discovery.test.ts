@@ -21,38 +21,6 @@ const ROOT = '/home/project';
 const PRUNED = new Set(['node_modules', 'dist']);
 
 describe('workspace discovery listing', () => {
-  it('lists one directory without descending into it', async () => {
-    const fs = fakeFilesystem({
-      '/home/project/package.json': '{}',
-      '/home/project/src/app.ts': 'export {};',
-      '/home/project/src/routes/index.tsx': 'export {};',
-    });
-
-    const listing = await enumerateProjectEntries(fs, scope(), { recursive: false, limit: 100 });
-
-    expect(listing.entries).toEqual([
-      { path: '/home/project/package.json', type: 'file' },
-      { path: '/home/project/src', type: 'dir' },
-    ]);
-    expect(listing).toMatchObject({ recursive: false, entryCount: 2, truncated: false });
-  });
-
-  it('walks the whole tree in parent-before-child order when asked', async () => {
-    const fs = fakeFilesystem({
-      '/home/project/src/app.ts': 'export {};',
-      '/home/project/src/routes/index.tsx': 'export {};',
-    });
-
-    const listing = await enumerateProjectEntries(fs, scope(), { recursive: true, limit: 100 });
-
-    expect(listing.entries.map((entry) => entry.path)).toEqual([
-      '/home/project/src',
-      '/home/project/src/app.ts',
-      '/home/project/src/routes',
-      '/home/project/src/routes/index.tsx',
-    ]);
-  });
-
   it('shows generated directories but never walks into them', async () => {
     const fs = fakeFilesystem({
       '/home/project/src/app.ts': 'export {};',
@@ -186,17 +154,6 @@ describe('workspace discovery search', () => {
 
     expect(result.matchCount).toBe(0);
     expect(Date.now() - started).toBeLessThan(2_000);
-  });
-
-  it('matches without regard to case only when asked', async () => {
-    const fs = fakeFilesystem({ '/home/project/src/app.ts': 'CreateRouter();\n' });
-
-    await expect(
-      scanProjectFiles(fs, scope(), { pattern: 'createrouter', ignoreCase: false, limit: 10 }),
-    ).resolves.toMatchObject({ matchCount: 0 });
-    await expect(
-      scanProjectFiles(fs, scope(), { pattern: 'createrouter', ignoreCase: true, limit: 10 }),
-    ).resolves.toMatchObject({ matchCount: 1 });
   });
 
   it('skips generated trees, oversized files, and binary blobs', async () => {

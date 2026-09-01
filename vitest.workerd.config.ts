@@ -18,7 +18,6 @@ for (const [name, value] of Object.entries(testSecrets)) {
 }
 
 const serverDependencyStubs = new Set([
-  './lib/.server/daily-maintenance',
   './lib/cloudflare/data/cloudflare-auth-retention.server',
   './server-handlers/auth',
   './server-handlers/cloudflare-integration',

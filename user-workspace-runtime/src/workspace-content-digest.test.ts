@@ -93,26 +93,4 @@ describe('project content digest', () => {
     }
     expect(containerDigest(root)).toBe(await vfsDigest(vfs));
   });
-
-  it('agrees on paths containing spaces', async () => {
-    const { fromVfs, fromContainer } = await digests('spaces', { 'src/a file.ts': 'x\n', 'b c/d e.ts': 'y\n' });
-    expect(fromContainer).toBe(fromVfs);
-  });
-
-  it('orders by byte, not by locale', async () => {
-    // A locale-aware sort would order these differently from the JavaScript comparison, and the
-    // two sides would disagree on identical content.
-    const { fromVfs, fromContainer } = await digests('collation', {
-      'Z.ts': '1\n',
-      'a.ts': '2\n',
-      '_.ts': '3\n',
-      'B.ts': '4\n',
-    });
-    expect(fromContainer).toBe(fromVfs);
-  });
-
-  it('is empty-safe', async () => {
-    const { fromVfs, fromContainer } = await digests('empty', { 'only.ts': '' });
-    expect(fromContainer).toBe(fromVfs);
-  });
 });

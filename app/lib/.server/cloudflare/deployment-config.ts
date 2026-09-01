@@ -4,11 +4,7 @@ import {
   DEPLOYMENT_COMPATIBILITY_FLAGS,
   DEPLOYMENT_OBSERVABILITY,
   DEPLOYMENT_PROJECT_ROOT,
-  DEPLOYMENT_SECURITY_BASELINE_BINDING,
-  DEPLOYMENT_SECURITY_BOUNDARY_BINDING,
   DEPLOYMENT_SECURITY_CLEANUP_CRON,
-  DEPLOYMENT_TEMPLATE_SOURCE_BINDING,
-  DEPLOYMENT_VERSION_METADATA_BINDING,
 } from './deployment-runtime-policy';
 
 export type DeploymentConfigInput = {
@@ -23,9 +19,6 @@ export type DeploymentConfigInput = {
   agentSecurityD1DatabaseName?: string;
   r2BucketName?: string;
   kvNamespaceId?: string;
-  securityBaselineVersion: string;
-  securityBoundarySha256: string;
-  templateSourceSha256: string;
 };
 
 type TrustedDeploymentConfig = {
@@ -38,8 +31,6 @@ type TrustedDeploymentConfig = {
   observability: typeof DEPLOYMENT_OBSERVABILITY;
   upload_source_maps: true;
   workers_dev: true;
-  version_metadata: { binding: typeof DEPLOYMENT_VERSION_METADATA_BINDING };
-  vars: Record<string, string>;
   assets?: { directory: string };
   ai?: { binding: 'AI' };
   d1_databases?: Array<{
@@ -70,16 +61,6 @@ export function createTrustedDeploymentConfig(args: DeploymentConfigInput): Trus
     observability: DEPLOYMENT_OBSERVABILITY,
     upload_source_maps: true,
     workers_dev: true,
-    version_metadata: { binding: DEPLOYMENT_VERSION_METADATA_BINDING },
-    vars: {
-      [DEPLOYMENT_SECURITY_BASELINE_BINDING]: requireString(
-        args.securityBaselineVersion,
-        'securityBaselineVersion',
-        32,
-      ),
-      [DEPLOYMENT_SECURITY_BOUNDARY_BINDING]: requireString(args.securityBoundarySha256, 'securityBoundarySha256', 64),
-      [DEPLOYMENT_TEMPLATE_SOURCE_BINDING]: requireString(args.templateSourceSha256, 'templateSourceSha256', 64),
-    },
   };
   if (args.projectType === 'web_app') {
     config.assets = { directory: `${DEPLOYMENT_PROJECT_ROOT}/dist/client` };

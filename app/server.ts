@@ -1,6 +1,8 @@
 import handler from '@tanstack/react-start/server-entry';
 import { healthAction } from './server-handlers/health';
 import { versionAction } from './server-handlers/version';
+
+export { UserWorkspaceRuntimeProvisioningWorkflow } from './workflows/user-workspace-runtime-provisioning';
 import {
   CLOUDFLARE_CONNECTION_CALLBACK_METHOD,
   cloudflareConnectionStatusAction,
@@ -14,7 +16,6 @@ import { exportAccountAction } from './server-handlers/account-export';
 import { runtimeCredentialAction } from './server-handlers/runtime-credential';
 import { clientTelemetryAction } from './server-handlers/client-telemetry';
 import { pruneCloudflareAuthDataBestEffort } from './lib/cloudflare/data/cloudflare-auth-retention.server';
-import { runDailyMaintenance } from './lib/.server/daily-maintenance';
 import { CSP_NONCE_REQUEST_HEADER } from './lib/csp-nonce';
 
 const APPLICATION_CSP_BASELINE = "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'";
@@ -178,17 +179,10 @@ export default {
     const nonce = crypto.randomUUID();
     return withApplicationSecurityHeaders(await routeApplicationRequest(request, env, nonce), pathname, nonce);
   },
-  scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runScheduledMaintenance(controller.cron, env));
+  scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(pruneCloudflareAuthDataBestEffort(env.DB));
   },
 } satisfies ExportedHandler<Env>;
-
-async function runScheduledMaintenance(_cron: string, env: Env) {
-  await pruneCloudflareAuthDataBestEffort(env.DB);
-  // The upstream builder-skill mirror and the account-anchored resource sweep want a day between
-  // runs, not fifteen minutes; each claims its own slot in D1 before it does any work.
-  await runDailyMaintenance(env);
-}
 
 async function routeApplicationRequest(request: Request, env: Env, nonce: string): Promise<Response> {
   const url = new URL(request.url);

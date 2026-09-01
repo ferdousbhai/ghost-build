@@ -1,4 +1,4 @@
-import { deploymentPlanResourceName, deploymentProjectProfile, isCurrentDeploymentPlan } from './deployment-plan';
+import { deploymentPlanResourceName, isCurrentDeploymentPlan } from './deployment-plan';
 import {
   claimApprovedDeployment,
   findDeploymentResource,
@@ -9,7 +9,6 @@ import {
   type Deployment,
   type DeploymentStatus,
 } from './deployment-repository';
-import { attestManagedDeploymentSecurity } from './deployment-security-inventory';
 import { validatePreparedDeploymentArtifact, type PreparedDeploymentArtifact } from './deployment-artifact';
 import type { DeploymentProjectProfile } from './deployment-project-profile';
 import { UserCloudflareAccountApi, type ManagedWorkerVersionArgs } from './user-account-api';
@@ -120,7 +119,7 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
     phase = 'deploying';
     deployment = await requireDeployment(args.env.DB, deployment.id);
     const workerName = requireResourceName(deployment, 'worker', 'app');
-    const profile = deploymentProjectProfile(deployment.plan);
+    const profile = deployment.plan.project;
     const artifact = await prepareValidatedArtifact({
       workspace,
       sessionId: session.sessionId,
@@ -143,21 +142,12 @@ export async function executeUserOwnedDeployment(args: UserOwnedDeploymentArgs):
     await applyArtifactMigrations(publishApi, resources, artifact);
     providerChangesPossible = true;
     await activity(args, 50, 'Uploading assets and publishing Worker');
-    const result = await publishApi.deployManagedWorker(
-      managedWorkerVersionArgs({ deployment, workerName, profile, reference, artifact, resources }),
+    await publishApi.deployManagedWorker(
+      managedWorkerVersionArgs({ workerName, profile, reference, artifact, resources }),
     );
     await activity(args, 60, 'Configuring public Cloudflare route');
     await publishApi.configureManagedWorkerSchedule(workerName, profile.bindings.appAgent);
     await publishApi.enableWorkerSubdomain(workerName);
-    await activity(args, 70, 'Verifying deployed Cloudflare resources');
-    await attestManagedDeploymentSecurity({
-      deployment,
-      workerName,
-      accountApi: publishApi,
-      expectedPublishedVersionId: result.workerVersionId,
-      expectedAgentSecurityD1DatabaseId: resources.agentD1?.id,
-      expectedKvNamespaceId: resources.kv?.id,
-    });
     await recordResource(args.env.DB, deployment.id, 'worker', 'app', workerName);
     const workersSubdomain = await publishApi.getWorkersSubdomain();
     await transitionDeployment({
@@ -241,7 +231,7 @@ export async function executeUserOwnedPreview(
     });
     await activity(args, 2, 'Cloudflare preview resources ready');
 
-    const profile = deploymentProjectProfile(deployment.plan);
+    const profile = deployment.plan.project;
     const artifact = await prepareValidatedArtifact({
       workspace,
       sessionId: session.sessionId,
@@ -261,7 +251,7 @@ export async function executeUserOwnedPreview(
     await applyArtifactMigrations(publishApi, resources, artifact);
     await activity(args, 4, 'Uploading assets and Worker preview version');
     const published = await publishApi.previewManagedWorker(
-      managedWorkerVersionArgs({ deployment, workerName, profile, reference, artifact, resources }),
+      managedWorkerVersionArgs({ workerName, profile, reference, artifact, resources }),
     );
     await recordResource(args.env.DB, deployment.id, 'worker', 'app', workerName);
     await recordResource(
@@ -292,11 +282,12 @@ async function beginPublicationSession(
   operationId: string,
   reference: WorkspaceReference,
 ): Promise<PublicationSession> {
-  const { sessionId } = await workspace.beginDeploymentSession({
+  await workspace.beginDeploymentSession({
     operationId,
     expectedWorkspaceRevision: reference.workspaceRevision,
     expectedSnapshotRevision: reference.revision,
   });
+  const sessionId = operationId;
   let finished = false;
   return {
     sessionId,
@@ -377,9 +368,6 @@ async function prepareValidatedArtifact(args: {
       agentSecurityD1DatabaseName: resources.agentD1?.name,
       r2BucketName: resources.r2?.name,
       kvNamespaceId: resources.kv?.id,
-      securityBaselineVersion: String(deployment.plan.securityBaselineVersion),
-      securityBoundarySha256: deployment.plan.securityBoundarySha256,
-      templateSourceSha256: deployment.plan.templateSourceSha256,
     }),
     { revision: reference.revision, projectType: profile.type },
   );
@@ -399,14 +387,13 @@ async function applyArtifactMigrations(
 }
 
 function managedWorkerVersionArgs(args: {
-  deployment: Deployment;
   workerName: string;
   profile: DeploymentProjectProfile;
   reference: WorkspaceReference;
   artifact: PreparedDeploymentArtifact;
   resources: PublicationResources;
 }): ManagedWorkerVersionArgs {
-  const { deployment, profile, artifact, resources } = args;
+  const { profile, artifact, resources } = args;
   return {
     workerName: args.workerName,
     projectType: profile.type,
@@ -420,9 +407,6 @@ function managedWorkerVersionArgs(args: {
     agentSecurityD1DatabaseId: resources.agentD1?.id,
     r2BucketName: resources.r2?.name,
     kvNamespaceId: resources.kv?.id,
-    securityBaselineVersion: String(deployment.plan.securityBaselineVersion),
-    securityBoundarySha256: deployment.plan.securityBoundarySha256,
-    templateSourceSha256: deployment.plan.templateSourceSha256,
   };
 }
 

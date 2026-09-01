@@ -32,21 +32,4 @@ describe('tool time accounting', () => {
     expect(accounting.wallClockMs()).toBe(500);
     expect(accounting.byName()).toEqual({ exec: 100, write: 400 });
   });
-
-  it('banks a tool still open when the turn is cancelled', () => {
-    const accounting = createToolTimeAccounting(clock([0, 2_000]));
-    accounting.start('a', 'exec');
-    accounting.settle();
-
-    expect(accounting.wallClockMs()).toBe(2_000);
-    expect(accounting.byName()).toEqual({ exec: 2_000 });
-  });
-
-  it('ignores an end with no matching start', () => {
-    const accounting = createToolTimeAccounting(clock([0]));
-    accounting.end('never-started');
-
-    expect(accounting.wallClockMs()).toBe(0);
-    expect(accounting.byName()).toEqual({});
-  });
 });

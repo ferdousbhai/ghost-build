@@ -9,10 +9,10 @@ export type BuildProgress = {
   delayed: boolean;
 };
 
-export const BUILD_PROGRESS_DELAY_MS = 45_000;
+const BUILD_PROGRESS_DELAY_MS = 45_000;
 // Validation is one bounded Computer operation, so these windows cover the full pipeline.
-export const VALIDATION_PROGRESS_DELAY_MS = 2 * 60_000;
-export const RECOVERY_PROGRESS_DELAY_MS = 5 * 60_000;
+const VALIDATION_PROGRESS_DELAY_MS = 2 * 60_000;
+const RECOVERY_PROGRESS_DELAY_MS = 5 * 60_000;
 
 export function getBuildProgress(args: {
   streamStatus: StreamStatus;

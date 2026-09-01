@@ -46,8 +46,7 @@ export class UserRuntimeSessionError extends Error {
 }
 
 const REFRESH_SKEW_MS = 30_000;
-const PREPARATION_RETRY_DEADLINE_MS = 15 * 60_000;
-const PREPARATION_RETRY_MAX_DELAY_MS = 5_000;
+const PREPARATION_RETRY_DELAY_MS = 5_000;
 let pending: Promise<UserRuntimeSession> | null = null;
 export const userRuntimeEndpointStore = atom<string | null>(null);
 export const aiGatewayCreditStatusStore = atom<AiGatewayCreditStatus>('unknown');
@@ -68,7 +67,10 @@ export const telemetryCorrelationIdStore = atom<string | null>(null);
 let current: UserRuntimeSession | null = null;
 let generation = 0;
 
-export async function getUserRuntimeSession(signal?: AbortSignal): Promise<UserRuntimeSession> {
+export async function getUserRuntimeSession(
+  options: { signal?: AbortSignal; retryProvisioning?: boolean } = {},
+): Promise<UserRuntimeSession> {
+  const { signal } = options;
   signal?.throwIfAborted();
   if (current && current.expiresAt - Date.now() > REFRESH_SKEW_MS) {
     return current;
@@ -77,7 +79,7 @@ export async function getUserRuntimeSession(signal?: AbortSignal): Promise<UserR
     return waitForRuntimeSession(pending, signal);
   }
   const requestGeneration = generation;
-  const request = requestUserRuntimeSession(() => generation === requestGeneration)
+  const request = requestUserRuntimeSession(() => generation === requestGeneration, options.retryProvisioning === true)
     .then((session) => {
       if (generation !== requestGeneration) {
         throw new Error('The runtime session request was canceled.');
@@ -128,28 +130,32 @@ function waitForRuntimeSession(
   });
 }
 
-async function requestUserRuntimeSession(isCurrent: () => boolean): Promise<UserRuntimeSession> {
-  const deadline = Date.now() + PREPARATION_RETRY_DEADLINE_MS;
-  let retry = 0;
+async function requestUserRuntimeSession(
+  isCurrent: () => boolean,
+  retryProvisioning: boolean,
+): Promise<UserRuntimeSession> {
   for (;;) {
     if (!isCurrent()) {
       throw new Error('The runtime session request was canceled.');
     }
+    const headers = new Headers({ Accept: 'application/json' });
+    if (retryProvisioning) {
+      headers.set('Ghostbuild-Runtime-Provisioning-Retry', '1');
+    }
+    retryProvisioning = false;
     const response = await fetch('/api/cloudflare/runtime-session', {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { Accept: 'application/json' },
+      headers,
     });
     const parsed = runtimeSessionPayloadSchema.safeParse(await response.json().catch(() => null));
     const payload = parsed.success ? parsed.data : null;
-    if (response.status === 409 && payload?.code === 'workspace_preparing' && Date.now() < deadline) {
+    if (response.status === 409 && payload?.code === 'workspace_preparing') {
       if (!isCurrent()) {
         throw new Error('The runtime session request was canceled.');
       }
       userWorkspacePreparingStore.set(true);
-      await new Promise((resolve) =>
-        setTimeout(resolve, Math.min(1_000 * 2 ** retry++, PREPARATION_RETRY_MAX_DELAY_MS)),
-      );
+      await new Promise((resolve) => setTimeout(resolve, PREPARATION_RETRY_DELAY_MS));
       continue;
     }
     // Every remaining answer is final for this attempt, whether it carries a session or a
@@ -202,7 +208,7 @@ export function requireUserRuntimeEndpoint(): string {
 
 export async function fetchUserRuntime(path: string, init: RequestInit = {}): Promise<Response> {
   const signal = init.signal ?? undefined;
-  const session = await getUserRuntimeSession(signal);
+  const session = await getUserRuntimeSession({ signal });
   signal?.throwIfAborted();
   return fetchWithRuntimeSession(session, path, init);
 }

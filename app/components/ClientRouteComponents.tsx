@@ -8,7 +8,7 @@ import { Loading } from '~/components/Loading';
 type MaybeComponent<TProps> = ComponentType<TProps> | undefined;
 type EmptyProps = Record<string, never>;
 
-export function createClientComponent<TProps extends object>(
+function createClientComponent<TProps extends object>(
   getComponent: () => MaybeComponent<TProps>,
   renderFallback: (props: TProps) => ReactNode = () => null,
 ) {

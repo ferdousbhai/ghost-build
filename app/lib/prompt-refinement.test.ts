@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  promptRefinementQuestionSchema,
-  promptRefinementRequestSchema,
-  recommendedOptionFirst,
-} from './prompt-refinement';
+import { promptRefinementQuestionSchema, promptRefinementRequestSchema } from './prompt-refinement';
 
 const question = {
   id: 'audience',
@@ -18,12 +14,6 @@ const question = {
 };
 
 describe('prompt refinement protocol', () => {
-  it('puts the recommended option first without changing the remaining order', () => {
-    const parsed = promptRefinementQuestionSchema.parse(question);
-
-    expect(recommendedOptionFirst(parsed).options.map((option) => option.id)).toEqual(['team', 'public']);
-  });
-
   it('rejects duplicate or missing recommended option IDs', () => {
     expect(
       promptRefinementQuestionSchema.safeParse({

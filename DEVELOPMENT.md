@@ -77,9 +77,7 @@ generated Builder template module directly.
 
 `template/scripts/lib/project-policy/generated-project-dependency-policy.json` is the single machine-readable source
 for generated-project pnpm cooling, lifecycle-build approvals, and security overrides. The root and template verifiers
-import it through `template/scripts/lib/project-policy.mjs`, and its contents are pinned by the deployment security
-baseline in `app/lib/.server/cloudflare/deployment-security-baseline.ts`, so any edit must be accompanied by a
-regenerated baseline.
+import it through `template/scripts/lib/project-policy.mjs`.
 
 Client source maps are generated for internal diagnosis but excluded from the static upload by
 `dist/client/.assetsignore`, following Cloudflare's
@@ -127,15 +125,15 @@ bookmark recorded by the release pipeline. Run `pnpm run provision:production` s
 control-plane D1 or intentionally reconciling its checked-in identifier.
 
 Generated applications deploy independently inside the user workspace runtime. AppAgent projects provision `DB` for
-application data and `AGENT_SECURITY_DB` for Agent sessions, retention, and inference accounting. Deployment readback
-must attest both databases and the complete server-derived security baseline.
+application data and `AGENT_SECURITY_DB` for Agent sessions, retention, and inference accounting. Ghostbuild validates
+the artifact, supplies the trusted bindings, and promotes the exact uploaded Worker version.
 
 ## Platform Status
 
 There is no deployed admin dashboard. The operational state of production is reported from a terminal:
 
 ```bash
-pnpm run ops        # connected accounts, runtime staleness, resource sweep, daily maintenance
+pnpm run ops        # Worker health, users, sessions, connected accounts, and runtime staleness
 pnpm run ops:json   # the same report, structured for a coding agent
 ```
 

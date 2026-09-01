@@ -1,7 +1,7 @@
 import type { Tool } from '@earendil-works/pi-ai';
 import { z } from 'zod';
 import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
-import { getPiProvider } from '~/lib/.server/llm/provider';
+import { getPiModel } from '~/lib/.server/llm/pi-ai-models';
 import { completeToolCall } from '~/lib/.server/llm/pi-ai-invoke';
 import { PROMPT_REFINEMENT_SYSTEM_PROMPT } from './enhance-prompt-prompt';
 import { getUserWorkersAiCredentials } from '~/lib/.server/cloudflare/workers-ai-billing-context';
@@ -13,6 +13,7 @@ import {
   promptRefinementResultSchema,
   recommendedOptionFirst,
 } from '~/lib/prompt-refinement';
+import { CLOUDFLARE_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';
 
 const logger = createScopedLogger('EnhancePrompt');
 const ENHANCE_PROMPT_MAX_OUTPUT_TOKENS = 2_048;
@@ -40,7 +41,7 @@ async function enhancePromptForUser({ request, env, userId }: { request: Request
     }
     const { prompt, answers } = parsedRequest.data;
     const accountCredentials = await getUserWorkersAiCredentials(env, userId);
-    const handle = getPiProvider(accountCredentials).handle;
+    const handle = getPiModel(accountCredentials, CLOUDFLARE_WORKERS_AI_MODEL);
     const result = promptRefinementResultSchema.safeParse(
       await completeToolCall(handle, {
         systemPrompt: PROMPT_REFINEMENT_SYSTEM_PROMPT,

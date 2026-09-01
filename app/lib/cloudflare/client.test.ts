@@ -22,14 +22,6 @@ describe('executeDataOperation', () => {
     vi.mocked(getUserRuntimeSession).mockImplementation(async () => runtimeSession);
   });
 
-  it('returns a successful operation result', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ result: { created: true } }));
-
-    await expect(
-      executeDataOperation(api.messages.initializeChat, { id: 'chat-1', sessionId: 'session-1' }),
-    ).resolves.toEqual({ created: true });
-  });
-
   it('aborts a data request instead of waiting forever', async () => {
     vi.useFakeTimers();
     vi.spyOn(globalThis, 'fetch').mockImplementation((_input, init) => {

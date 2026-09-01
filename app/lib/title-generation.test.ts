@@ -1,25 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import {
-  MAX_GENERATED_TITLE_CHARACTERS,
-  deriveProvisionalTitle,
-  generateTitle,
-  normalizeGeneratedTitle,
-  shouldGenerateConversationTitle,
-} from './title-generation';
+import { MAX_GENERATED_TITLE_CHARACTERS, generateTitle, normalizeGeneratedTitle } from './title-generation';
 
 describe('title generation', () => {
-  it('derives useful provisional titles', () => {
-    expect(deriveProvisionalTitle('Build a polished app called Pocket Poll, with live voting.')).toBe('Pocket Poll');
-    expect(deriveProvisionalTitle('Can you please get the weather?')).toBe('weather');
-  });
-
-  it('generates on the first prompt and substantial later prompts', () => {
-    expect(shouldGenerateConversationTitle('short prompt', 1)).toBe(true);
-    expect(shouldGenerateConversationTitle('short prompt', 2)).toBe(false);
-    expect(shouldGenerateConversationTitle('a'.repeat(64), 2)).toBe(false);
-    expect(shouldGenerateConversationTitle('a'.repeat(65), 2)).toBe(true);
-  });
-
   it('builds a subject-specific, bounded request', async () => {
     let request: { prompt: string; maxOutputTokens: number; temperature: number } | undefined;
     const generated = await generateTitle({

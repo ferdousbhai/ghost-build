@@ -5,8 +5,6 @@ import {
   isCurrentDeploymentPlan,
   parseDeploymentPlanJson,
 } from './deployment-plan';
-import { DEPLOYMENT_SECURITY_BASELINE_VERSION } from './deployment-security-baseline';
-import { appDeploymentIdFromResourceName } from '~/lib/cloudflare/app-resource-names';
 
 const SOURCE_ONE = '1'.repeat(64);
 const SOURCE_TWO = '2'.repeat(64);
@@ -23,8 +21,6 @@ describe('buildDeploymentPlanFromSource', () => {
     expect(result.plan).toMatchObject({
       version: 5,
       sourceSha256: SOURCE_ONE,
-      templateSourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
-      securityBaselineVersion: DEPLOYMENT_SECURITY_BASELINE_VERSION,
     });
     expect(result.plan.resources.map(({ type }) => type)).toEqual([
       'worker',
@@ -115,30 +111,3 @@ describe('buildDeploymentPlanFromSource', () => {
 });
 
 /** Account resources are named after their deployment; Durable Objects and AI are binding classes. */
-const ACCOUNT_RESOURCE_TYPES = new Set(['worker', 'd1', 'r2', 'kv']);
-const BINDING_FLAGS = ['ai', 'd1', 'r2', 'kv', 'appAgent'] as const;
-
-describe('app resource names round-trip through reconciliation', () => {
-  const DEPLOYMENT = 'd6738251-57e1-4d83-9589-1b6c6d982417';
-
-  it.each(['web_app', 'worker'] as const)(
-    'recovers the deployment id from every %s resource a plan can contain',
-    async (type) => {
-      for (let mask = 0; mask < 1 << BINDING_FLAGS.length; mask += 1) {
-        const bindings = Object.fromEntries(
-          BINDING_FLAGS.map((flag, index) => [flag, Boolean(mask & (1 << index))]),
-        ) as Record<(typeof BINDING_FLAGS)[number], boolean>;
-        const { plan } = await buildDeploymentPlanFromSource({
-          deploymentId: DEPLOYMENT,
-          sourceSha256: SOURCE_ONE,
-          project: { type, bindings },
-        });
-
-        for (const resource of plan.resources.filter((candidate) => ACCOUNT_RESOURCE_TYPES.has(candidate.type))) {
-          // A binding added without teaching the name parser fails here, not in a live sweep.
-          expect(appDeploymentIdFromResourceName(resource.proposedName)).toBe(plan.deploymentId);
-        }
-      }
-    },
-  );
-});

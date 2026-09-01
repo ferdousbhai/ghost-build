@@ -26,12 +26,11 @@ describe('modelMessagesToPi', () => {
     });
   });
 
-  it('finds a denied tool result after its approval response and marks it as an error', () => {
+  it('marks a denied tool result as an error', () => {
     const [message] = modelMessagesToPi([
       {
         role: 'tool',
         content: [
-          { type: 'tool-approval-response', approvalId: 'approval-1', approved: false },
           {
             type: 'tool-result',
             toolCallId: 'exec-1',

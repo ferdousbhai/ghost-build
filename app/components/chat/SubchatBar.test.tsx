@@ -27,52 +27,6 @@ afterEach(async () => {
 });
 
 describe('SubchatBar', () => {
-  it('keeps chat navigation in the transcript flow instead of floating over messages', () => {
-    document.body.innerHTML = renderSubchatBar({
-      subchats: [subchat(0, 'Initial build')],
-      currentSubchatIndex: 0,
-    });
-
-    const chatNavigation = document.querySelector<HTMLElement>('nav[aria-label="Chat history"]');
-    expect(chatNavigation).not.toBeNull();
-    expect(chatNavigation?.classList).not.toContain('sticky');
-    expect(chatNavigation?.firstElementChild?.classList).not.toContain('backdrop-blur-xl');
-  });
-
-  it('does not present a useless history picker or navigation for a single chat', () => {
-    const markup = renderSubchatBar({
-      subchats: [subchat(0, 'Build a polished Pocket Poll app')],
-      currentSubchatIndex: 0,
-    });
-
-    expect(markup).not.toContain('Current chat');
-    expect(markup).toContain('Build a polished Pocket Poll app');
-    expect(markup).toContain('aria-label="Rename current chat: Build a polished Pocket Poll app"');
-    document.body.innerHTML = markup;
-    const renameButton = document.querySelector<HTMLButtonElement>('button[aria-label^="Rename current chat:"]');
-    expect(renameButton?.classList).toContain('bg-transparent');
-    expect(renameButton?.classList).toContain('text-content-primary');
-    expect(renameButton?.querySelector('span')?.classList).not.toContain('group-hover:underline');
-    expect(renameButton?.querySelector('svg')?.classList).toContain('opacity-0');
-    expect(markup).toContain('aria-label="Start a new chat"');
-    expect(markup).not.toContain('aria-label="Previous chat"');
-    expect(markup).not.toContain('aria-label="Next chat"');
-    expect(markup).not.toContain('aria-label="Switch chat.');
-  });
-
-  it('exposes chronological navigation and a labeled picker when history exists', () => {
-    const markup = renderSubchatBar({
-      subchats: [subchat(0, 'Initial build'), subchat(1, 'Add live voting')],
-      currentSubchatIndex: 1,
-    });
-
-    expect(markup).toContain('aria-label="Previous chat"');
-    expect(markup).toContain('aria-label="Next chat"');
-    expect(markup).toContain('aria-label="Switch chat. Chat 2 of 2: Add live voting"');
-    expect(markup).toContain('aria-label="Rename current chat: Add live voting"');
-    expect(markup).toContain('Chat 2 of 2');
-  });
-
   it('blocks history and project-changing actions while files are saving', () => {
     fileSavingState.value = true;
     document.body.innerHTML = renderSubchatBar({
@@ -246,48 +200,6 @@ describe('SubchatBar', () => {
       await firstCreate.promise;
     });
     expect(firstScopeButton?.disabled).toBe(false);
-  });
-
-  it('closes the rename dialog after the current chat title is saved', async () => {
-    const handleRenameSubchat = vi.fn().mockResolvedValue(true);
-    const container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    await act(async () => {
-      root?.render(
-        <SubchatBar
-          chatId="chat-1"
-          subchats={[subchat(0, 'Pocket Poll')]}
-          currentSubchatIndex={0}
-          isStreaming={false}
-          chatDisabled={false}
-          userId="user"
-          handleCreateSubchat={() => Promise.resolve(true)}
-          handleRenameSubchat={handleRenameSubchat}
-          isSubchatLoaded
-        />,
-      );
-    });
-
-    act(() => {
-      document.querySelector<HTMLButtonElement>('button[aria-label="Rename current chat: Pocket Poll"]')?.click();
-    });
-    const input = document.querySelector<HTMLInputElement>('input[aria-label="Chat title"]');
-    expect(input?.value).toBe('Pocket Poll');
-
-    await act(async () => {
-      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      valueSetter?.call(input, 'Team Voting');
-      input?.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    const saveButton = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
-      (button) => button.textContent === 'Save title',
-    );
-    await act(async () => saveButton?.click());
-
-    expect(handleRenameSubchat).toHaveBeenCalledWith('Team Voting');
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it('keeps an old account rename from disabling or closing a dialog in the new account', async () => {

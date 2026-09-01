@@ -21,7 +21,6 @@ const SECTION_NAMES = [
   'computerRuntime',
   'authSessions',
   'oauthStates',
-  'workspaceResources',
 ] as const;
 
 type SectionName = (typeof SECTION_NAMES)[number];
@@ -39,7 +38,7 @@ const EXPORT_COVERS =
 
 const EXPORT_OMITS = [
   'Chats, transcripts, project files, and deployment records. These live in the connected Cloudflare account, not in the control plane. Download individual project source with Download code in the project header.',
-  'Workers and their unpromoted preview versions, production and preview D1 databases, R2 buckets, KV namespaces, Containers, Durable Objects, and Agents that Ghostbuild deployed, and the logs and traces they produce. These live in the connected Cloudflare account and are readable with that account’s own tools. The workspace-runtime resource names Ghostbuild keeps in its control plane are exported; generated-application deployment records remain in the user-owned runtime.',
+  'Workers and their unpromoted preview versions, production and preview D1 databases, R2 buckets, KV namespaces, Containers, Durable Objects, and Agents that Ghostbuild deployed, and the logs and traces they produce. These live in the connected Cloudflare account and are readable with that account’s own tools.',
   'Copies held by the browser. No server request can reach them; clear Ghostbuild site data in every browser and profile you have used.',
   'Encrypted credential material, initialisation vectors, credential handles, and session tokens. These are never exported.',
 ];
@@ -128,7 +127,6 @@ type ControlPlaneExport = {
     computerRuntime: ExportedSection<{ computerRuntime: ExportedComputerRuntime | null }>;
     authSessions: ExportedSection<BoundedList<{ sessions: ExportedAuthSession[] }>>;
     oauthStates: ExportedSection<BoundedList<{ states: ExportedOAuthState[] }>>;
-    workspaceResources: ExportedSection<BoundedList<{ resources: ExportedWorkspaceResource[] }>>;
   };
 };
 
@@ -147,7 +145,6 @@ export async function exportControlPlaneAccount(args: { env: Env; userId: string
     computerRuntime: await exportSection('computerRuntime', () => readComputerRuntime(db, args.userId)),
     authSessions: await exportSection('authSessions', () => readAuthSessions(db, args.userId)),
     oauthStates: await exportSection('oauthStates', () => readOAuthStates(db, args.userId)),
-    workspaceResources: await exportSection('workspaceResources', () => readWorkspaceResources(db, args.userId)),
   };
   const unavailableSections = SECTION_NAMES.filter((name) => sections[name].status === 'unavailable');
 
@@ -361,57 +358,6 @@ async function readOAuthStates(db: D1Database, userId: string): Promise<BoundedL
     updatedAt: isoTimestamp(row.updated_at),
   }));
   return { states, ...boundsOf(rows.results, states.length) };
-}
-
-type WorkspaceResourceRow = {
-  account_id: string;
-  resource_type: string;
-  resource_name: string;
-  provider_resource_id: string | null;
-  created_at: number;
-  updated_at: number;
-  reclaimed_at: number | null;
-  total_rows: number;
-};
-
-type ExportedWorkspaceResource = {
-  accountId: string;
-  resourceType: string;
-  resourceName: string;
-  providerResourceId: string | null;
-  createdAt: string;
-  updatedAt: string;
-  reclaimedAt: string | null;
-};
-
-/**
- * What Ghostbuild created inside the person's own Cloudflare account. These names are the
- * only record naming their workspace database, and erasure removes them with the account,
- * so an export that omitted them would hand back less than it destroys.
- */
-async function readWorkspaceResources(
-  db: D1Database,
-  userId: string,
-): Promise<BoundedList<{ resources: ExportedWorkspaceResource[] }>> {
-  const rows = await db
-    .prepare(
-      `SELECT account_id, resource_type, resource_name, provider_resource_id,
-              created_at, updated_at, reclaimed_at, COUNT(*) OVER () AS total_rows
-       FROM user_workspace_runtime_resources WHERE user_id = ?
-       ORDER BY created_at DESC LIMIT ?`,
-    )
-    .bind(userId, ACCOUNT_EXPORT_ROW_LIMIT)
-    .all<WorkspaceResourceRow>();
-  const resources = rows.results.map((row) => ({
-    accountId: row.account_id,
-    resourceType: row.resource_type,
-    resourceName: row.resource_name,
-    providerResourceId: row.provider_resource_id,
-    createdAt: isoTimestamp(row.created_at),
-    updatedAt: isoTimestamp(row.updated_at),
-    reclaimedAt: optionalIsoTimestamp(row.reclaimed_at),
-  }));
-  return { resources, ...boundsOf(rows.results, resources.length) };
 }
 
 type ExportSectionBounds = { total: number; truncated: boolean };

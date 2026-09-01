@@ -1,7 +1,7 @@
 import { generateTitle, type TitleSubject } from '~/lib/title-generation';
 import { CLOUDFLARE_PROJECT_TITLE_MODEL } from '~/lib/workers-ai-model';
 import { getPiModel } from './pi-ai-models';
-import type { WorkersAiAccountCredentials } from './provider';
+import type { WorkersAiAccountCredentials } from './pi-ai-models';
 import { completeText } from './pi-ai-invoke';
 
 export function generateProjectTitle(

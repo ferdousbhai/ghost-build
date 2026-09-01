@@ -37,9 +37,9 @@ const mocks = vi.hoisted(() => ({
     contextCompacted: false,
     estimatedTokens: 1,
   })),
-  getPiProvider: vi.fn(() => ({
-    handle: { model: { id: 'test-workers-ai', contextWindow: 128_000 }, stream: vi.fn() },
-    maxTokens: 1_000,
+  getPiModel: vi.fn(() => ({
+    model: { id: 'test-workers-ai', contextWindow: 128_000, maxTokens: 1_000 },
+    stream: vi.fn(),
   })),
   recordFinish: vi.fn(),
 }));
@@ -47,8 +47,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@earendil-works/pi-agent-core', () => ({
   runAgentLoopContinue: mocks.piRun,
 }));
-vi.mock('./provider', () => ({
-  getPiProvider: mocks.getPiProvider,
+vi.mock('./pi-ai-models', () => ({
+  getPiModel: mocks.getPiModel,
 }));
 
 vi.mock('./model-input', async (importOriginal) => ({
@@ -93,28 +93,6 @@ describe('piAgentRunner', () => {
     mocks.piRun.mockResolvedValue(undefined);
   });
 
-  it('records native Pi usage without turning successful completion into an error', async () => {
-    mocks.piRun.mockImplementation(async (_ctx: unknown, _cfg: unknown, emit: (event: unknown) => Promise<void>) => {
-      await emit({
-        type: 'turn_end',
-        message: {
-          role: 'assistant',
-          content: [{ type: 'text', text: 'Done' }],
-          usage: piUsage({ input: 40, output: 5, totalTokens: 45 }),
-          stopReason: 'stop',
-        },
-        toolResults: [],
-      });
-    });
-
-    const chunks = await collectChunks(await createAgentStream());
-
-    expect(chunks.some((chunk) => chunk.type === 'error')).toBe(false);
-    expect(mocks.recordFinish).toHaveBeenCalledWith(
-      expect.objectContaining({ usage: expect.objectContaining({ input: 40, output: 5, totalTokens: 45 }) }),
-    );
-  });
-
   it('surfaces provider protocol failures instead of finishing an empty successful turn', async () => {
     mocks.piRun.mockImplementation(async (_ctx: unknown, _cfg: unknown, emit: (event: unknown) => Promise<void>) => {
       await emit({
@@ -139,22 +117,12 @@ describe('piAgentRunner', () => {
   it('routes the validated model selection to the Pi provider', async () => {
     await collectChunks(await createAgentStream('@cf/openai/gpt-oss-120b'));
 
-    expect(mocks.getPiProvider).toHaveBeenCalledWith(
+    expect(mocks.getPiModel).toHaveBeenCalledWith(
       expect.anything(),
       '@cf/openai/gpt-oss-120b',
       expect.objectContaining({
         model: expect.objectContaining({ id: '@cf/openai/gpt-oss-120b' }),
         sessionAffinity: expect.any(String),
-      }),
-    );
-  });
-
-  it('uses the final Pi tool schemas for prompt accounting', async () => {
-    await collectChunks(await createAgentStream());
-
-    expect(mocks.prepareModelInput).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tools: expect.arrayContaining([expect.objectContaining({ name: 'write', parameters: 'canonical-schema' })]),
       }),
     );
   });
@@ -166,27 +134,6 @@ describe('piAgentRunner', () => {
       name: 'PiAgentPreparationError',
       diagnosticCode: 'pi_prepare:model_input',
     });
-  });
-
-  it('preserves validated completion from a tool result', async () => {
-    mocks.completion = 'Validated.';
-    mocks.piRun.mockImplementation(async (_ctx: unknown, _cfg: unknown, emit: (e: unknown) => Promise<void>) => {
-      // Emit a tool result that triggers completion
-      await emit({
-        type: 'tool_execution_end',
-        toolCallId: '1',
-        toolName: 'write',
-        result: { details: { validation: { ok: true } } },
-        isError: false,
-      } as unknown as never);
-    });
-
-    const chunks = await collectChunks(await createAgentStream());
-
-    expect(chunks.some((c) => c.type === 'text-delta' && (c as { delta: string }).delta.includes('Validated'))).toBe(
-      true,
-    );
-    expect(chunks.some((chunk) => chunk.type === 'error')).toBe(false);
   });
 
   it('translates Pi tool events into chat tool chunks with structured details', async () => {
@@ -506,67 +453,6 @@ describe('piAgentRunner', () => {
 
     expect(chunks).toContainEqual({ type: 'error', errorText: indeterminatePayload });
     expect(chunks).not.toContainEqual({ type: 'error', errorText: budgetPayload });
-  });
-
-  it('detects validated completion from a primitive mutation result', async () => {
-    mocks.getValidatedBuildCompletion.mockImplementation(
-      (_messages: unknown, results: Array<{ result?: { validation?: unknown } }> = []) =>
-        results.some(({ result }) => result?.validation) ? 'Project validation passed.' : undefined,
-    );
-    mocks.piRun.mockImplementation(async (_ctx: unknown, _cfg: unknown, emit: (event: unknown) => Promise<void>) => {
-      await emit({
-        type: 'tool_execution_end',
-        toolCallId: 'write-1',
-        toolName: 'write',
-        result: { details: { validation: { ok: true } } },
-        isError: false,
-      });
-    });
-
-    const chunks = await collectChunks(await createAgentStream());
-
-    expect(chunks).toContainEqual({
-      type: 'text-delta',
-      id: 'validated-build-completion',
-      delta: 'Project validation passed.',
-    });
-  });
-
-  it('stops the model loop as soon as the exact revision is validated', async () => {
-    mocks.completion = 'Project validation passed.';
-    mocks.piRun.mockImplementation(
-      async (
-        _context: unknown,
-        config: { shouldStopAfterTurn: (value: { message: ReturnType<typeof assistantMessage> }) => boolean },
-        emit: (event: unknown) => Promise<void>,
-      ) => {
-        await emit({
-          type: 'tool_execution_end',
-          toolCallId: 'validate-1',
-          toolName: 'exec',
-          result: { details: { validation: { ok: true } } },
-          isError: false,
-        });
-        expect(
-          config.shouldStopAfterTurn({
-            message: assistantMessage([{ type: 'toolCall', id: 'validate-1', name: 'exec', arguments: {} }]),
-          }),
-        ).toBe(true);
-        await emit({
-          type: 'turn_end',
-          message: assistantMessage([{ type: 'toolCall', id: 'validate-1', name: 'exec', arguments: {} }]),
-          toolResults: [],
-        });
-      },
-    );
-
-    const chunks = await collectChunks(await createAgentStream());
-
-    expect(chunks).toContainEqual({
-      type: 'text-delta',
-      id: 'validated-build-completion',
-      delta: 'Project validation passed.',
-    });
   });
 
   it('compacts live tool-loop context before another model step', async () => {

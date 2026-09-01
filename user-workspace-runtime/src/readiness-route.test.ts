@@ -7,7 +7,7 @@ const controlPlaneSecret = 's'.repeat(32);
 
 describe('user workspace runtime control-plane readiness route', () => {
   it('accepts the provisioner raw secret and proves the ProjectWorkspace runtime end to end', async () => {
-    const runReadinessProbe = vi.fn(async () => workspaceProbe());
+    const runReadinessProbe = vi.fn(async () => undefined);
     const idFromName = vi.fn(() => 'readiness-id');
     const get = vi.fn(() => ({ runReadinessProbe }));
     const env = runtimeEnv({ idFromName, get });
@@ -65,19 +65,5 @@ function runtimeEnv(projectWorkspace: { idFromName: ReturnType<typeof vi.fn>; ge
       prepare: vi.fn(() => ({ first: vi.fn(async () => ({ ok: 1 })) })),
     },
     PROJECT_WORKSPACE: projectWorkspace,
-  };
-}
-
-function workspaceProbe() {
-  const ready = { ok: true, code: 'ready', durationMs: 1 };
-  return {
-    ok: true,
-    components: {
-      durableVfs: ready,
-      container: ready,
-      fuse: ready,
-      sync: ready,
-      cleanup: ready,
-    },
   };
 }

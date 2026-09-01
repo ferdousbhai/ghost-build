@@ -13,6 +13,7 @@ overrides:
   "brace-expansion@>=4.0.0 <5.0.9": "5.0.9"
   # Reviewed security releases accepted by the existing transitive ranges.
   "@hono/node-server@<2.0.10": "2.0.10"
+  "browserslist@<=4.28.6": "4.28.8"
   "fast-uri@>=3.0.0 <3.1.5": "3.1.5"
   "hono@<4.12.34": "4.12.34"
   "ip-address@<=10.3.0": "10.3.1"
