@@ -32,7 +32,7 @@ export async function completeText(
   const stream = await handle.stream(
     handle.model,
     { systemPrompt: args.systemPrompt, messages },
-    { maxTokens: args.maxTokens, temperature: args.temperature, signal: args.signal, thinking: false },
+    { maxTokens: args.maxTokens, temperature: args.temperature, signal: args.signal },
   );
   const message = await stream.result();
   if (message.stopReason === 'error' || message.stopReason === 'aborted') {
@@ -65,7 +65,6 @@ export async function completeToolCall(
       maxTokens: args.maxTokens,
       temperature: args.temperature,
       signal: args.signal,
-      thinking: false,
       toolChoice: { type: 'function', function: { name: args.tool.name } },
     },
   );

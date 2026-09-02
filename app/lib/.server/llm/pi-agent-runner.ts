@@ -114,6 +114,18 @@ interface PiAgentOptions {
 type PiPreparationStage = 'tool_setup' | 'model_input' | 'prompt_metrics' | 'message_conversion';
 
 /**
+ * The bounded reasoning request for thinking models. Passing a level serializes to
+ * `reasoning_effort` plus the family's thinking parameter, which is what keeps a reasoning model
+ * from spending its whole output budget on hidden chain-of-thought. Verified against production
+ * Workers AI: GLM 5.3 Flash with no directive (or `thinking: disabled`, which it ignores) reasons
+ * until `length` and returns EMPTY content, while `thinking: enabled` + `reasoning_effort`
+ * answers promptly with real content.
+ */
+function builderThinkingLevel(model: { reasoning: boolean }): 'medium' | undefined {
+  return model.reasoning ? 'medium' : undefined;
+}
+
+/**
  * The model spent its entire output budget without streaming any visible text or tool call —
  * reasoning-heavy models do this and would otherwise end the turn silently "completed".
  */
@@ -499,6 +511,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         afterToolCall: async ({ result, isError }) =>
           !isError && !toolResultSucceeded(result.details) ? { isError: true } : undefined,
         maxTokens: handle.model.maxTokens,
+        reasoning: builderThinkingLevel(handle.model),
         toolChoice: 'auto',
       };
 

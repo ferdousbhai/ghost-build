@@ -12,7 +12,7 @@ import type {
 } from '@earendil-works/pi-ai';
 import { stream as openaiCompletionsStream } from '@earendil-works/pi-ai/api/openai-completions';
 import { CLOUDFLARE_WORKERS_AI_MODELS } from '@earendil-works/pi-ai/providers/cloudflare-workers-ai.models';
-import { MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
+import { MAX_ESTIMATED_MODEL_INPUT_TOKENS, MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
 import type { WorkersAiModel, WorkersAiRuntimeModelId } from '~/lib/workers-ai-model';
 import { recordPiStage } from './pi-telemetry';
 
@@ -22,7 +22,6 @@ import { recordPiStage } from './pi-telemetry';
 export type WorkersAiAccountCredentials = { binding: Ai };
 
 export type ModelStreamOptions = SimpleStreamOptions & {
-  thinking?: boolean;
   toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
 };
 
@@ -46,14 +45,47 @@ function catalogModel(modelId: string): WorkersAiCatalogModel | undefined {
   return WORKERS_AI_CATALOG.get(modelId);
 }
 
-function workersAiCompat(catalog: WorkersAiCatalogModel | undefined): OpenAICompletionsCompat {
+function workersAiCompat(modelId: string, catalog: WorkersAiCatalogModel | undefined): OpenAICompletionsCompat {
   return {
     supportsStore: false,
     supportsDeveloperRole: false,
     supportsLongCacheRetention: false,
+    ...familyThinkingCompat(modelId),
     ...catalog?.compat,
     sendSessionAffinityHeaders: true,
   };
+}
+
+/**
+ * Reasoning serialization by model family, for models Pi's Workers AI catalog does not cover
+ * (glm-5.3-flash is absent from it). Without the right `thinkingFormat`, Pi cannot direct a
+ * model's thinking at all: GLM then reasons unboundedly and returns empty content at the token
+ * limit — the failure that produced 8-minute silent builder turns.
+ */
+function familyThinkingCompat(modelId: string): Pick<OpenAICompletionsCompat, 'thinkingFormat'> {
+  if (modelId.startsWith('@cf/zai-org/')) {
+    return { thinkingFormat: 'zai' };
+  }
+  if (modelId.startsWith('@cf/qwen/')) {
+    return { thinkingFormat: 'qwen' };
+  }
+  if (modelId.startsWith('@cf/deepseek-ai/')) {
+    return { thinkingFormat: 'deepseek' };
+  }
+  return {};
+}
+
+/**
+ * Never request more output than the model itself supports, and give reasoning models the output
+ * headroom the input budget leaves free: a global 24,576-token cap starved Kimi K2.7 (262k output
+ * limit) into finishing 10 minutes of hidden reasoning with `length` and no content, while
+ * over-asking gpt-oss (16,384 limit).
+ */
+function boundedOutputTokens(catalogMaxTokens: number | undefined, contextWindow: number): number {
+  return Math.min(
+    catalogMaxTokens ?? MODEL_MAX_OUTPUT_TOKENS,
+    Math.max(MODEL_MAX_OUTPUT_TOKENS, contextWindow - MAX_ESTIMATED_MODEL_INPUT_TOKENS),
+  );
 }
 
 type HandleArgs = {
@@ -75,7 +107,6 @@ function makeHandle(args: HandleArgs): ModelHandle {
       recordPiStage('stream_created', model.id);
       handle.lastResponse = undefined;
       const streamOptions = { ...options };
-      delete streamOptions.thinking;
       const headers: ProviderHeaders = { ...args.headers, ...streamOptions.headers };
       const merged: SimpleStreamOptions = {
         ...streamOptions,
@@ -116,8 +147,11 @@ export function getPiModel(
     input: settings?.model?.vision ? ['text', 'image'] : (catalog?.input ?? ['text']),
     cost: catalog?.cost ?? ZERO_COST,
     contextWindow: settings?.model?.contextTokens ?? catalog?.contextWindow ?? 128_000,
-    maxTokens: MODEL_MAX_OUTPUT_TOKENS,
-    compat: workersAiCompat(catalog),
+    maxTokens: boundedOutputTokens(
+      catalog?.maxTokens,
+      settings?.model?.contextTokens ?? catalog?.contextWindow ?? 128_000,
+    ),
+    compat: workersAiCompat(modelId, catalog),
   };
   return makeHandle({
     model,
