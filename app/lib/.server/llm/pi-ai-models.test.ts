@@ -63,7 +63,7 @@ describe('Pi Workers AI model binding', () => {
               },
             ],
           },
-          { thinking: false, toolChoice: 'required' } as ModelStreamOptions & { toolChoice: 'required' },
+          { toolChoice: 'required' } as ModelStreamOptions & { toolChoice: 'required' },
         )
         .result();
 
@@ -93,7 +93,7 @@ describe('Pi Workers AI model binding', () => {
         id: modelId,
         contextWindow: selectedModel.contextTokens,
         reasoning: selectedModel.reasoning,
-        input: ['text', 'image'],
+        input: selectedModel.vision ? ['text', 'image'] : ['text'],
       });
     },
   );

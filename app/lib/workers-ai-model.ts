@@ -15,8 +15,13 @@ export type WorkersAiModel = {
   vision: boolean;
 };
 
-/** The deliberately pinned default; catalog discovery may add choices but never silently changes it. */
-export const CLOUDFLARE_WORKERS_AI_MODEL = '@cf/zai-org/glm-5.3-flash' satisfies WorkersAiModelId;
+/**
+ * The deliberately pinned default; catalog discovery may add choices but never silently changes
+ * it. Default selection requires a successful end-to-end canary build: gpt-oss-120b completed
+ * prompt→validated→preview→deployed on 2026-09-02, while glm-5.3-flash failed canary in every
+ * tested reasoning configuration (unbounded, medium, and low effort).
+ */
+export const CLOUDFLARE_WORKERS_AI_MODEL = '@cf/openai/gpt-oss-120b' satisfies WorkersAiModelId;
 
 export const CLOUDFLARE_PROJECT_TITLE_MODEL = '@cf/meta/llama-3.2-1b-instruct' satisfies WorkersAiModelId;
 
@@ -32,12 +37,12 @@ export const MINIMUM_BUILDER_MODEL_CONTEXT_TOKENS = MAX_ESTIMATED_MODEL_INPUT_TO
 
 export const DEFAULT_WORKERS_AI_MODEL: WorkersAiModel = {
   id: CLOUDFLARE_WORKERS_AI_MODEL,
-  label: 'GLM 5.3 Flash',
-  description: 'Latest fast GLM model for coding, reasoning, and tool-driven builds.',
-  contextTokens: 1_048_576,
-  requiresPaid: true,
+  label: 'GPT OSS 120B',
+  description: "OpenAI's open-weight model for agentic coding, tool calling, and production builds.",
+  contextTokens: 128_000,
+  requiresPaid: false,
   reasoning: true,
-  vision: true,
+  vision: false,
 };
 
 /** Safe startup fallback while the connected account's live Workers AI catalog is loading. */

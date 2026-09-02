@@ -20,9 +20,11 @@ import {
 
 const alternativeModel: WorkersAiModel = {
   ...DEFAULT_WORKERS_AI_MODEL,
-  id: '@cf/openai/gpt-oss-120b',
-  label: 'GPT OSS 120B',
-  vision: false,
+  id: '@cf/zai-org/glm-5.3-flash',
+  label: 'GLM 5.3 Flash',
+  contextTokens: 1_048_576,
+  requiresPaid: true,
+  vision: true,
 };
 const catalog: WorkersAiModelCatalogPayload = {
   defaultModelId: CLOUDFLARE_WORKERS_AI_MODEL,
@@ -38,7 +40,7 @@ describe('builder model preference', () => {
     builderModelCatalogStatusStore.set('idle');
   });
 
-  it('uses the pinned GLM 5.3 Flash default before discovery', () => {
+  it('uses the pinned GPT OSS 120B default before discovery', () => {
     initializeBuilderModelPreference({ getItem: () => null });
 
     expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);

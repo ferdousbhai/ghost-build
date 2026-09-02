@@ -13,19 +13,21 @@ import {
 
 const alternativeModel: WorkersAiModel = {
   ...DEFAULT_WORKERS_AI_MODEL,
-  id: '@cf/openai/gpt-oss-120b',
-  label: 'GPT OSS 120B',
-  vision: false,
+  id: '@cf/zai-org/glm-5.3-flash',
+  label: 'GLM 5.3 Flash',
+  contextTokens: 1_048_576,
+  requiresPaid: true,
+  vision: true,
 };
 
 describe('Workers AI model catalog', () => {
-  it('pins GLM 5.3 Flash as the safe startup default', () => {
-    expect(CLOUDFLARE_WORKERS_AI_MODEL).toBe('@cf/zai-org/glm-5.3-flash');
+  it('pins the canary-proven GPT OSS 120B as the safe startup default', () => {
+    expect(CLOUDFLARE_WORKERS_AI_MODEL).toBe('@cf/openai/gpt-oss-120b');
     expect(WORKERS_AI_MODELS).toEqual([DEFAULT_WORKERS_AI_MODEL]);
     expect(DEFAULT_WORKERS_AI_MODEL.contextTokens).toBeGreaterThanOrEqual(
       MAX_ESTIMATED_MODEL_INPUT_TOKENS + MODEL_MAX_OUTPUT_TOKENS,
     );
-    expect(DEFAULT_WORKERS_AI_MODEL.contextTokens).toBe(1_048_576);
+    expect(DEFAULT_WORKERS_AI_MODEL.contextTokens).toBe(128_000);
     expect(getWorkersAiModel(CLOUDFLARE_WORKERS_AI_MODEL)).toBe(DEFAULT_WORKERS_AI_MODEL);
   });
 
