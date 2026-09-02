@@ -2,9 +2,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { getToolInvocation, type GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { StreamStatus } from '~/lib/common/types';
 import { getBuildProgress } from './build-progress';
+import { streamedToolInput } from './streaming-tool-input';
+import { reasoningPartView } from './ReasoningPart';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
 const CLOCK_INTERVAL_MS = 1_000;
+
+/** The reasoning part the model is streaming right now, and when this client first saw it. */
+type ReasoningActivity = {
+  key: string;
+  startedAt: number;
+};
 
 export function useBuildProgress(args: {
   streamStatus: StreamStatus;
@@ -31,15 +39,26 @@ export function useBuildProgress(args: {
       args.validationStage,
     ],
   );
+  const reasoningKey = useMemo(() => streamingReasoningKey(args.messages), [args.messages]);
   const [clock, setClock] = useState(() => {
     const timestamp = Date.now();
     return { activityKey, lastActivityAt: timestamp, now: timestamp };
   });
+  const [reasoning, setReasoning] = useState<ReasoningActivity | null>(null);
 
   useEffect(() => {
     const timestamp = Date.now();
     setClock({ activityKey, lastActivityAt: timestamp, now: timestamp });
   }, [activityKey]);
+
+  useEffect(() => {
+    setReasoning((current) => {
+      if (reasoningKey === null) {
+        return null;
+      }
+      return current?.key === reasoningKey ? current : { key: reasoningKey, startedAt: Date.now() };
+    });
+  }, [reasoningKey]);
 
   const active = args.isRecovering || args.streamStatus === 'submitted' || args.streamStatus === 'streaming';
   useEffect(() => {
@@ -59,10 +78,17 @@ export function useBuildProgress(args: {
     isProjectUpdate: args.isProjectUpdate,
     activeToolNames: args.activeToolNames,
     validationStage: args.validationStage,
+    reasoningForMs:
+      reasoning !== null && reasoning.key === reasoningKey ? Math.max(0, clock.now - reasoning.startedAt) : null,
     inactiveForMs: clock.activityKey === activityKey ? Math.max(0, clock.now - clock.lastActivityAt) : 0,
   });
 }
 
+/**
+ * Everything the assistant is producing right now: visible text, the reasoning behind it, and the
+ * arguments of a tool call still being written. Any of them growing means the turn is alive, so the
+ * quiet clock restarts and the user is never told there is "no new update" while tokens arrive.
+ */
 function messageActivityKey(messages: GhostbuildMessage[]): string {
   const lastMessage = messages.at(-1);
   if (!lastMessage) {
@@ -74,9 +100,33 @@ function messageActivityKey(messages: GhostbuildMessage[]): string {
         if (part.type === 'text') {
           return `text:${typeof part.text === 'string' ? part.text.length : 0}`;
         }
+        if (part.type === 'reasoning') {
+          const reasoning = reasoningPartView(part);
+          return `reasoning:${reasoning.text.length}:${reasoning.streaming}`;
+        }
         const invocation = getToolInvocation(part);
-        return invocation ? `tool:${invocation.toolCallId}:${invocation.toolName}:${invocation.state}` : part.type;
+        if (!invocation) {
+          return part.type;
+        }
+        const streamedInput =
+          invocation.state === 'input-streaming' ? `:${streamedToolInput(invocation).characters}` : '';
+        return `tool:${invocation.toolCallId}:${invocation.toolName}:${invocation.state}${streamedInput}`;
       })
       .join(',') ?? '';
   return `${messages.length}:${lastMessage.id}:${partActivity}`;
+}
+
+/** Identity of the reasoning part still streaming in the newest message, if the model is thinking. */
+function streamingReasoningKey(messages: GhostbuildMessage[]): string | null {
+  const lastMessage = messages.at(-1);
+  if (!lastMessage?.parts) {
+    return null;
+  }
+  for (let index = lastMessage.parts.length - 1; index >= 0; index -= 1) {
+    const part = lastMessage.parts[index];
+    if (part?.type === 'reasoning') {
+      return reasoningPartView(part).streaming ? `${lastMessage.id}:${index}` : null;
+    }
+  }
+  return null;
 }

@@ -32,6 +32,12 @@ import {
   validatedDeploymentCheckpoint,
   type BuilderDeploymentState,
 } from './builder-deployment-command';
+import {
+  publicationProgress,
+  type BuilderPublicationLane,
+  type BuilderPublicationState,
+} from './builder-publication-progress';
+import { latestDeploymentActivity } from '~/lib/.server/cloudflare/deployment-repository';
 import { generateConversationTitle, generateProjectTitle } from '~/lib/.server/llm/workers-ai-title';
 import { markChatStarted } from '~/lib/cloudflare/data/chat-repository.server';
 import {
@@ -144,6 +150,11 @@ const DEPLOYMENT_FIBER = 'background:builder_deployment';
 const TITLE_GENERATION_FIBER = 'background:title_generation';
 const CLOUDFLARE_EXECUTION_FIBER = 'background:cloudflare_execution';
 const TITLE_GENERATION_JOB_MAX_PROMPT_CHARACTERS = 4_000;
+/**
+ * How often a running publication re-reads the step it last recorded. Publication steps take tens
+ * of seconds each, so this is a heartbeat against one indexed row, not a poll for a result.
+ */
+const PUBLICATION_ACTIVITY_INTERVAL_MS = 2_000;
 const CHAT_CANCELLATION_SETTLE_TIMEOUT_MS = 4.5 * 60 * 1000;
 
 /** Fiber metadata survives a Durable Object restart, so every job is re-parsed before it is resumed. */
@@ -205,6 +216,8 @@ export type BuilderAgentState = {
     stage: BuilderValidationStage;
   } | null;
   deployment?: BuilderDeploymentState | null;
+  /** The step the running preview or deployment publication last recorded, while it is running. */
+  publication?: BuilderPublicationState | null;
   contextCompactionRequestedTurnId?: string | null;
   cloudflareExecutions?: CloudflareExecutionPublicState[];
 };
@@ -239,6 +252,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     preview: idleBuilderPreviewState(),
     validationProgress: null,
     deployment: null,
+    publication: null,
     contextCompactionRequestedTurnId: null,
     cloudflareExecutions: [],
   };
@@ -1525,17 +1539,20 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       throw new Response('Agent authentication is required.', { status: 401 });
     }
     const startedAt = Date.now();
-    const deployment = await this.keepAliveWhile(() =>
-      deployValidatedRevisionForBuilder({
-        context: {
-          env: this.env,
-          userId,
-          chatInitialId: transcriptBinding.chatInitialId,
-        },
-        workspace: this.workspace,
-        toolCallId: deploymentToolCallId(job.workspaceRevision, job.revision),
-        validatedRevision: job.revision,
-      }),
+    const deployment = await this.withPublicationActivity('deployment', (onPlanned) =>
+      this.keepAliveWhile(() =>
+        deployValidatedRevisionForBuilder({
+          context: {
+            env: this.env,
+            userId,
+            chatInitialId: transcriptBinding.chatInitialId,
+          },
+          workspace: this.workspace,
+          toolCallId: deploymentToolCallId(job.workspaceRevision, job.revision),
+          validatedRevision: job.revision,
+          onPlanned,
+        }),
+      ),
     );
     const revisionBoundDeployment = { ...deployment, ...job };
     this.setDeploymentResult(job, revisionBoundDeployment);
@@ -1646,6 +1663,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
             revision: job.snapshotRevision,
           },
           toolCallId: validationToolCallId,
+          onStage: (stage) => this.setValidationProgress(validationToolCallId, stage),
         };
         if (abortSignal) {
           validationRequest.abortSignal = abortSignal;
@@ -1660,18 +1678,21 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       if (!this.isCurrentPreviewJob(job.previewId)) {
         return;
       }
-      const success = await this.keepAliveWhile(() =>
-        previewValidatedRevisionForBuilder({
-          context: {
-            env: this.env,
-            userId,
-            chatInitialId: transcriptBinding.chatInitialId,
-          },
-          workspace: this.workspace,
-          toolCallId: deploymentToolCallId(job.workspaceRevision, job.snapshotRevision),
-          previewId: job.previewId,
-          validatedRevision: validatedSnapshot.revision,
-        }),
+      const success = await this.withPublicationActivity('preview', (onPlanned) =>
+        this.keepAliveWhile(() =>
+          previewValidatedRevisionForBuilder({
+            context: {
+              env: this.env,
+              userId,
+              chatInitialId: transcriptBinding.chatInitialId,
+            },
+            workspace: this.workspace,
+            toolCallId: deploymentToolCallId(job.workspaceRevision, job.snapshotRevision),
+            previewId: job.previewId,
+            validatedRevision: validatedSnapshot.revision,
+            onPlanned,
+          }),
+        ),
       );
       if (!this.isCurrentPreviewJob(job.previewId)) {
         return;
@@ -1750,6 +1771,52 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
       deployment,
     });
     return validatedSnapshot;
+  }
+
+  /**
+   * Publishing takes minutes of Cloudflare work the user cannot see. Both the deployment executor
+   * and the workspace runtime record each step they enter as durable activity, so following those
+   * rows while the publication runs turns the wait into the list of things actually happening.
+   * The read is one indexed row per interval — a heartbeat, not a busy loop — and it always stops
+   * with the publication that started it.
+   */
+  private async withPublicationActivity<T>(
+    lane: BuilderPublicationLane,
+    run: (onPlanned: (deploymentId: string) => void) => Promise<T>,
+  ): Promise<T> {
+    let deploymentId: string | null = null;
+    let running = true;
+    let stopFollowing: () => void = () => undefined;
+    const stopped = new Promise<void>((resolve) => {
+      stopFollowing = resolve;
+    });
+    const follow = async () => {
+      while (running) {
+        await Promise.race([scheduler.wait(PUBLICATION_ACTIVITY_INTERVAL_MS), stopped]);
+        const id = deploymentId;
+        if (!running || !id) {
+          continue;
+        }
+        const latest = await latestDeploymentActivity(this.env.DB, id).catch(() => null);
+        const progress = latest ? publicationProgress(lane, [latest]) : null;
+        if (running && progress && progress.updatedAt !== this.state.publication?.updatedAt) {
+          this.setState({ ...this.state, publication: progress });
+        }
+      }
+    };
+    const followed = follow();
+    try {
+      return await run((id) => {
+        deploymentId = id;
+      });
+    } finally {
+      running = false;
+      stopFollowing();
+      await followed.catch(() => undefined);
+      if (this.state.publication?.lane === lane) {
+        this.setState({ ...this.state, publication: null });
+      }
+    }
   }
 
   private setValidationProgress(toolCallId: string, stage: BuilderValidationStage | null): void {

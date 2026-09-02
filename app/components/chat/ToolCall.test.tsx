@@ -148,4 +148,45 @@ describe('ToolCall', () => {
       false,
     );
   });
+  it('names the file a streaming write is filling, with how much has arrived', async () => {
+    const invocation: GhostbuildToolInvocation = {
+      type: 'dynamic-tool',
+      state: 'input-streaming',
+      toolCallId: 'write-1',
+      toolName: 'write',
+      input: { path: '/home/project/src/routes/index.tsx', content: 'x'.repeat(3_277) },
+    };
+
+    await act(async () => root.render(<ToolCall partId={makePartId('message-3', 0)} invocation={invocation} />));
+
+    expect(container.textContent).toContain('Writing src/routes/index.tsx… 3.2 KB');
+  });
+
+  it('keeps the established wording until the streamed path is legible', async () => {
+    const invocation: GhostbuildToolInvocation = {
+      type: 'dynamic-tool',
+      state: 'input-streaming',
+      toolCallId: 'write-2',
+      toolName: 'write',
+      input: {},
+    };
+
+    await act(async () => root.render(<ToolCall partId={makePartId('message-4', 0)} invocation={invocation} />));
+
+    expect(container.textContent).toContain('Writing a file…');
+  });
+
+  it("marks the validation the builder runs on the model's behalf as automatic", async () => {
+    const invocation: GhostbuildToolInvocation = {
+      type: 'dynamic-tool',
+      state: 'input-available',
+      toolCallId: 'auto-validate:0f8f0f0f',
+      toolName: 'validate',
+      input: {},
+    };
+
+    await act(async () => root.render(<ToolCall partId={makePartId('message-5', 0)} invocation={invocation} />));
+
+    expect(container.textContent).toContain('Validating the project (automatic)…');
+  });
 });

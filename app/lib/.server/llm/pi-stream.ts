@@ -4,6 +4,9 @@ export type PiStreamChunk =
   | { type: 'text-start'; id: string }
   | { type: 'text-delta'; id: string; delta: string }
   | { type: 'text-end'; id: string }
+  | { type: 'reasoning-start'; id: string }
+  | { type: 'reasoning-delta'; id: string; delta: string }
+  | { type: 'reasoning-end'; id: string }
   | { type: 'tool-input-start'; toolCallId: string; toolName: string; dynamic?: boolean }
   | { type: 'tool-input-delta'; toolCallId: string; inputTextDelta: string }
   | { type: 'tool-input-available'; toolCallId: string; toolName: string; input: unknown; dynamic?: boolean }

@@ -92,6 +92,7 @@ function ReadyWorkbench({ isStreaming }: Pick<WorkbenchProps, 'isStreaming'>) {
   const controller = useWorkbenchController(isStreaming);
   const [previewReloadKey, setPreviewReloadKey] = useState(0);
   const presentation = previewPresentation(controller.previewState);
+  const publication = useStore(workbenchStore.publicationState);
 
   return (
     <WorkbenchFrame
@@ -158,6 +159,7 @@ function ReadyWorkbench({ isStreaming }: Pick<WorkbenchProps, 'isStreaming'>) {
             <Suspense fallback={null}>
               <Preview
                 presentation={presentation}
+                publication={publication}
                 reloadKey={previewReloadKey}
                 requesting={controller.previewRequesting}
                 onRequest={() => void controller.onPreviewRequest()}

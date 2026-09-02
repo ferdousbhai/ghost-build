@@ -6,8 +6,10 @@ import { classNames } from '~/utils/classNames';
 import { isToolInvocationInProgress, type GhostbuildToolInvocation } from 'ghostbuild-agent/ai-compat';
 import { getRelativePath } from 'ghostbuild-agent/utils/workDir';
 import { MODEL_TOOL_INPUT_SCHEMAS } from 'ghostbuild-agent/model-tool-inputs';
+import { formatStreamedSize, streamedToolInput } from './streaming-tool-input';
 import type { ZodType } from 'zod';
 import { toolFailure, toolResultSucceeded } from 'ghostbuild-agent/tool-result';
+import { AUTO_VALIDATION_TOOL_CALL_ID_PREFIX } from '~/lib/common/builder-validation-progress';
 
 const MAX_TOOL_TITLE_VALUE_CHARACTERS = 160;
 /** Keyed by the model-facing tool name, which arrives as an unconstrained string on the invocation. */
@@ -88,11 +90,21 @@ export function toolTitle(invocation: GhostbuildToolInvocation, status: ToolActi
         <FileIcon />,
       );
     }
-    case 'validate':
+    case 'validate': {
+      // The builder runs the canonical validation itself when a turn ends unvalidated. Saying so
+      // keeps the model's own validate calls distinguishable from the ones the server owes the user.
+      const automatic = invocation.toolCallId.startsWith(AUTO_VALIDATION_TOOL_CALL_ID_PREFIX);
       return titleRow(
-        status === 'running' ? 'Validating the project' : 'Validated the project',
+        status === 'running'
+          ? automatic
+            ? 'Validating the project (automatic)…'
+            : 'Validating the project'
+          : automatic
+            ? 'Validated the project (automatic)'
+            : 'Validated the project',
         <CheckIcon className="text-content-secondary" />,
       );
+    }
     case 'cloudflare_docs':
       return titleRow(
         status === 'running' ? 'Searching Cloudflare MCP docs' : 'Searched Cloudflare MCP docs',
@@ -134,7 +146,31 @@ function titleRow(children: ReactNode, iconContent?: ReactNode): ReactNode {
   );
 }
 
+/**
+ * The model writes a tool's arguments a token at a time, so the file it is about to touch is
+ * knowable — and worth showing — long before the call is complete. Until the path is legible the
+ * title stays with the wording it has always used.
+ */
+function streamingFileTitle(invocation: GhostbuildToolInvocation, verb: string, fallback: string): string {
+  const streamed = streamedToolInput(invocation);
+  if (streamed.path === null) {
+    return fallback;
+  }
+  const written = streamed.characters > 0 ? ` ${formatStreamedSize(streamed.characters)}` : '';
+  return `${verb} ${compactToolLabel(getRelativePath(streamed.path) || streamed.path)}…${written}`;
+}
+
+function isStreamingInput(invocation: GhostbuildToolInvocation): boolean {
+  return invocation.state === 'input-streaming';
+}
+
 function readTitle(invocation: GhostbuildToolInvocation, status: ToolActivityStatus): ReactNode {
+  if (isStreamingInput(invocation)) {
+    return titleRow(
+      streamingFileTitle(invocation, 'Reading', 'Reading a file…'),
+      <FileIcon className="text-content-secondary" />,
+    );
+  }
   const args = MODEL_TOOL_INPUT_SCHEMAS.read.safeParse(invocation.input);
   const renderedPath = args.success ? compactToolLabel(getRelativePath(args.data.path) || '/home/project') : 'a file';
   const extra = args.success && args.data.offset ? ` (from line ${args.data.offset})` : '';
@@ -164,6 +200,12 @@ function searchTitle(invocation: GhostbuildToolInvocation, status: ToolActivityS
 }
 
 function editTitle(invocation: GhostbuildToolInvocation, status: ToolActivityStatus): ReactNode {
+  if (isStreamingInput(invocation)) {
+    return titleRow(
+      streamingFileTitle(invocation, 'Editing', 'Editing a file…'),
+      <Pencil1Icon className="text-content-secondary" />,
+    );
+  }
   const args = MODEL_TOOL_INPUT_SCHEMAS.edit.safeParse(invocation.input);
   return titleRow(
     `${status === 'running' ? 'Editing' : 'Edited'} ${args.success ? compactToolLabel(getRelativePath(args.data.path) || args.data.path) : 'a file'}`,
@@ -172,8 +214,20 @@ function editTitle(invocation: GhostbuildToolInvocation, status: ToolActivitySta
 }
 
 function writeTitle(invocation: GhostbuildToolInvocation): ReactNode {
+  if (isStreamingInput(invocation)) {
+    return titleRow(
+      streamingFileTitle(invocation, 'Writing', 'Writing a file…'),
+      <FileIcon className="text-content-secondary" />,
+    );
+  }
   if (isToolInvocationInProgress(invocation)) {
-    return titleRow('Writing a file...', <FileIcon className="text-content-secondary" />);
+    const args = MODEL_TOOL_INPUT_SCHEMAS.write.safeParse(invocation.input);
+    return titleRow(
+      args.success
+        ? `Writing ${compactToolLabel(getRelativePath(args.data.path) || args.data.path)}…`
+        : 'Writing a file…',
+      <FileIcon className="text-content-secondary" />,
+    );
   }
   const args = MODEL_TOOL_INPUT_SCHEMAS.write.safeParse(invocation.input);
   return titleRow(

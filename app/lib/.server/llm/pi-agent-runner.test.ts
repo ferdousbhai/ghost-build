@@ -20,7 +20,7 @@ interface RunnerTurnStartEvent {
 interface RunnerMessageUpdateEvent {
   type: 'message_update';
   message: { timestamp: number };
-  assistantMessageEvent: { type: string; contentIndex: number };
+  assistantMessageEvent: { type: string; contentIndex: number; delta?: string };
 }
 
 interface RunnerToolExecutionStartEvent {
@@ -291,6 +291,64 @@ describe('piAgentRunner', () => {
         { type: 'text-start', id: 'pi-123-0' },
         { type: 'text-delta', id: 'pi-123-0', delta: 'Building' },
         { type: 'text-end', id: 'pi-123-0' },
+      ]),
+    );
+  });
+
+  it('streams the model reasoning as its own part alongside the answer', async () => {
+    mocks.piRun.mockImplementation(async (_ctx: AgentContext, _cfg: StopAwareLoopConfig, emit: RunnerEventSink) => {
+      const message = { timestamp: 123 };
+      await emit({
+        type: 'message_update',
+        message,
+        assistantMessageEvent: { type: 'thinking_start', contentIndex: 0 },
+      });
+      await emit({
+        type: 'message_update',
+        message,
+        assistantMessageEvent: { type: 'thinking_delta', contentIndex: 0, delta: 'Checking the routes' },
+      });
+      await emit({
+        type: 'message_update',
+        message,
+        assistantMessageEvent: { type: 'thinking_end', contentIndex: 0 },
+      });
+      await emit({
+        type: 'message_update',
+        message,
+        assistantMessageEvent: { type: 'text_delta', contentIndex: 1, delta: 'Done' },
+      });
+    });
+
+    const chunks = await collectChunks(await createAgentStream());
+
+    expect(chunks).toEqual(
+      expect.arrayContaining([
+        { type: 'reasoning-start', id: 'pi-123-0' },
+        { type: 'reasoning-delta', id: 'pi-123-0', delta: 'Checking the routes' },
+        { type: 'reasoning-end', id: 'pi-123-0' },
+        { type: 'text-delta', id: 'pi-123-1', delta: 'Done' },
+      ]),
+    );
+  });
+
+  it('closes a reasoning part the model never ended', async () => {
+    mocks.piRun.mockImplementation(async (_ctx: AgentContext, _cfg: StopAwareLoopConfig, emit: RunnerEventSink) => {
+      await emit({
+        type: 'message_update',
+        message: { timestamp: 123 },
+        assistantMessageEvent: { type: 'thinking_delta', contentIndex: 0, delta: 'Half a thought' },
+      });
+    });
+
+    const chunks = await collectChunks(await createAgentStream());
+    const terminal = chunks.findIndex((chunk) => chunk.type === 'finish');
+
+    expect(chunks.slice(0, terminal)).toEqual(
+      expect.arrayContaining([
+        { type: 'reasoning-start', id: 'pi-123-0' },
+        { type: 'reasoning-delta', id: 'pi-123-0', delta: 'Half a thought' },
+        { type: 'reasoning-end', id: 'pi-123-0' },
       ]),
     );
   });

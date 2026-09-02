@@ -158,6 +158,29 @@ export async function listDeploymentActivity(
   return result.results.map((row) => ({ sequence: row.sequence, message: row.message, createdAt: row.created_at }));
 }
 
+/**
+ * The step this deployment recorded most recently, for narrating a publication while it runs. It
+ * resolves the current execution generation in the same statement so a retry never shows a stage
+ * left behind by the attempt before it.
+ */
+export async function latestDeploymentActivity(
+  db: D1Database,
+  deploymentId: string,
+): Promise<DeploymentActivity | null> {
+  const row = await db
+    .prepare(
+      `SELECT sequence, message, created_at
+       FROM deployment_activity
+       WHERE deployment_id = ?1
+         AND execution_generation = (SELECT execution_generation FROM deployments WHERE id = ?1)
+       ORDER BY created_at DESC, sequence DESC
+       LIMIT 1`,
+    )
+    .bind(deploymentId)
+    .first<{ sequence: number; message: string; created_at: number }>();
+  return row ? { sequence: row.sequence, message: row.message, createdAt: row.created_at } : null;
+}
+
 export async function claimApprovedDeployment(args: {
   db: D1Database;
   deploymentId: string;

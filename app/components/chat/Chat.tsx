@@ -230,6 +230,7 @@ const AuthenticatedChat = memo(
       streamStatus,
       validationStage,
       deployment,
+      publication,
       deployValidatedRevision,
       cloudflareExecutions,
       decideCloudflareExecution,
@@ -325,6 +326,7 @@ const AuthenticatedChat = memo(
         messages={visibleMessages}
         disabledReason={disabledReason}
         deployment={deployment}
+        publication={publication}
         onDeploy={deployValidatedRevision}
         cloudflareExecutions={cloudflareExecutions}
         onCloudflareExecutionDecision={decideCloudflareExecution}

@@ -4,7 +4,11 @@ import {
   previewForUser,
   terminalizeInterruptedDeploymentForUser,
 } from '~/server-handlers/deployments';
-import type { BuilderWorkspaceApi, BuilderWorkspaceCheckpoint } from './builder-workspace-api';
+import type {
+  BuilderWorkspaceApi,
+  BuilderWorkspaceCheckpoint,
+  WorkspaceValidationStageReporter,
+} from './builder-workspace-api';
 
 type BuilderDeploymentContext = {
   env: Env;
@@ -44,6 +48,7 @@ export async function validatePreviewCheckpointForBuilder(args: {
   requestedSnapshot: BuilderWorkspaceCheckpoint;
   toolCallId: string;
   abortSignal?: AbortSignal;
+  onStage?: WorkspaceValidationStageReporter;
 }): Promise<BuilderWorkspaceCheckpoint> {
   args.abortSignal?.throwIfAborted();
   const current = await args.workspace.checkpoint();
@@ -56,6 +61,9 @@ export async function validatePreviewCheckpointForBuilder(args: {
       toolCallId: args.toolCallId,
       input: { source: 'preview' },
     };
+    if (args.onStage) {
+      validationRequest.onStage = args.onStage;
+    }
     if (args.abortSignal) {
       validationRequest.abortSignal = args.abortSignal;
     }
@@ -106,8 +114,11 @@ export async function deployValidatedRevisionForBuilder(args: {
   toolCallId: string;
   validatedRevision: string;
   abortSignal?: AbortSignal;
+  /** Called once the plan exists, so the caller can follow the stages it is about to record. */
+  onPlanned?: (deploymentId: string) => void;
 }): Promise<BuilderDeploymentState> {
   const deploymentId = await planValidatedRevision({ ...args, publication: 'Deployment' });
+  args.onPlanned?.(deploymentId);
   const deployment = await deployForUser({
     env: args.context.env,
     userId: args.context.userId,
@@ -132,8 +143,11 @@ export async function previewValidatedRevisionForBuilder(args: {
   toolCallId: string;
   previewId: string;
   validatedRevision: string;
+  /** Called once the plan exists, so the caller can follow the stages it is about to record. */
+  onPlanned?: (deploymentId: string) => void;
 }) {
   const deploymentId = await planValidatedRevision({ ...args, publication: 'Preview' });
+  args.onPlanned?.(deploymentId);
   return previewForUser({
     env: args.context.env,
     userId: args.context.userId,

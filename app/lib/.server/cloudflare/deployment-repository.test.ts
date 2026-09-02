@@ -5,6 +5,7 @@ import {
   claimApprovedDeployment,
   createDeployment,
   DeploymentConcurrencyLimitError,
+  latestDeploymentActivity,
   listDeploymentActivity,
   prepareDeploymentRetry,
   recordDeploymentActivity,
@@ -127,6 +128,41 @@ describe('deployment repository', () => {
       { sequence: 20, message: 'Cloudflare resources ready', createdAt: 22 },
     ]);
     await expect(listDeploymentActivity(db, approved.id, approved.executionGeneration + 1)).resolves.toEqual([]);
+  });
+
+  it('reads back the step the current execution recorded most recently', async () => {
+    const approved = await approvedDeployment(1);
+    await recordDeploymentActivity({
+      db,
+      deploymentId: approved.id,
+      executionGeneration: approved.executionGeneration,
+      sequence: 10,
+      message: 'Preparing Cloudflare resources',
+      now: 21,
+    });
+    await recordDeploymentActivity({
+      db,
+      deploymentId: approved.id,
+      executionGeneration: approved.executionGeneration,
+      sequence: 50,
+      message: 'Uploading assets and publishing Worker',
+      now: 30,
+    });
+    // A step recorded by the attempt before this one must never be shown as this attempt's progress.
+    await recordDeploymentActivity({
+      db,
+      deploymentId: approved.id,
+      executionGeneration: approved.executionGeneration + 1,
+      sequence: 80,
+      message: 'Deployment complete',
+      now: 40,
+    });
+
+    await expect(latestDeploymentActivity(db, approved.id)).resolves.toEqual({
+      sequence: 50,
+      message: 'Uploading assets and publishing Worker',
+      createdAt: 30,
+    });
   });
 
   it('allows only one active deployment per user', async () => {

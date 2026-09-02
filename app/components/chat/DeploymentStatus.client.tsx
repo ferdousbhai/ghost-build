@@ -1,15 +1,19 @@
 import { useEffect } from 'react';
 import type { BuilderDeploymentState } from '~/agents/builder-deployment-command';
+import { publicationStageLabel, type BuilderPublicationState } from '~/agents/builder-publication-progress';
 import { Button } from '~/components/ui/primitives/Button';
 import { captureProductEvent } from '~/lib/telemetry.client';
 
 export function DeploymentStatus({
   deployment,
+  publication,
   onRetry,
 }: {
   deployment: BuilderDeploymentState;
+  publication?: BuilderPublicationState | null;
   onRetry?: () => Promise<BuilderDeploymentState>;
 }) {
+  const stage = publication?.lane === 'deployment' ? publicationStageLabel(publication) : null;
   useEffect(() => {
     if (deployment.status === 'succeeded') {
       void captureProductEvent('deployment_succeeded', { outcome: 'success' });
@@ -43,8 +47,8 @@ export function DeploymentStatus({
           ) : null}
         </>
       ) : (
-        <p className="text-content-secondary" role="status">
-          Deploying…
+        <p className="text-content-secondary" role="status" aria-live="polite">
+          {stage ?? 'Deploying…'}
         </p>
       )}
     </section>

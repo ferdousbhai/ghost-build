@@ -439,11 +439,9 @@ describe('minimal Workers AI tool surface', () => {
     const tools = createWorkersAiTools(workspace, operationContext({ onValidationStage }));
 
     await expect(executeTool(tools.exec, { command })).resolves.toMatchObject({ validation });
-    expect(workspace.validate).toHaveBeenCalledWith({
-      toolCallId: 'tool-call:validation',
-      input: {},
-      abortSignal: undefined,
-    });
+    expect(workspace.validate).toHaveBeenCalledWith(
+      expect.objectContaining({ toolCallId: 'tool-call:validation', input: {}, abortSignal: undefined }),
+    );
     expect(onValidationStage.mock.calls).toEqual([
       ['tool-call', 'computer validation'],
       ['tool-call', null],
@@ -489,6 +487,25 @@ describe('minimal Workers AI tool surface', () => {
       }),
     ).resolves.toMatchObject({ error: expect.stringMatching(/required DB, APP_STORAGE, and APP_CACHE bindings/) });
     expect(workspace.computer.fs.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('publishes every stage the workspace reports while the validation runs', async () => {
+    const workspace = workspaceStub({
+      onValidate: (args) => {
+        args.onStage?.('installing');
+        args.onStage?.('typecheck');
+        args.onStage?.('build');
+      },
+    });
+    const stages: Array<BuilderValidationStage | null> = [];
+    const tools = createWorkersAiTools(
+      workspace,
+      operationContext({ onValidationStage: (_toolCallId, stage) => stages.push(stage) }),
+    );
+
+    await executeTool(tools.validate, {});
+
+    expect(stages).toEqual(['computer validation', 'installing', 'typecheck', 'build', null]);
   });
 
   it('runs the canonical validation through the dedicated validate tool', async () => {
@@ -625,6 +642,7 @@ function workspaceStub(
       options: { cwd?: string; encoding: 'utf8'; backend?: string },
     ) => Promise<{ result(): Promise<{ exitCode: number; stdout: string; stderr: string }> }>;
     validation?: unknown;
+    onValidate?: (args: { onStage?: (stage: BuilderValidationStage) => void }) => void;
     revision?: () => number;
     files?: Record<string, string>;
   } = {},
@@ -704,7 +722,10 @@ function workspaceStub(
       localRevision += 1;
       return toolSuccess('installed');
     }),
-    validate: vi.fn(async () => options.validation ?? validationResult()),
+    validate: vi.fn(async (args: { onStage?: (stage: BuilderValidationStage) => void }) => {
+      options.onValidate?.(args);
+      return options.validation ?? validationResult();
+    }),
   };
   return workspace as unknown as BuilderWorkspaceApi;
 }

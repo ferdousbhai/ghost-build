@@ -49,6 +49,39 @@ describe('normalizeTextPartBoundaries', () => {
       { type: 'finish', finishReason: 'stop' },
     ]);
   });
+
+  it('closes an open reasoning part before the terminal chunk', async () => {
+    const result = await readChunks(
+      normalizeTextPartBoundaries(
+        chunks([
+          { type: 'start' },
+          { type: 'reasoning-start', id: 'think-1' },
+          { type: 'reasoning-delta', id: 'think-1', delta: 'Weighing options' },
+          { type: 'error', errorText: 'The model request failed. Please retry.' },
+        ]),
+      ),
+    );
+
+    expect(result).toEqual([
+      { type: 'start' },
+      { type: 'reasoning-start', id: 'think-1' },
+      { type: 'reasoning-delta', id: 'think-1', delta: 'Weighing options' },
+      { type: 'reasoning-end', id: 'think-1' },
+      { type: 'error', errorText: 'The model request failed. Please retry.' },
+    ]);
+  });
+
+  it('opens a reasoning part for a delta that arrived without its start', async () => {
+    const result = await readChunks(
+      normalizeTextPartBoundaries(chunks([{ type: 'reasoning-delta', id: 'think-1', delta: 'Mid-thought' }])),
+    );
+
+    expect(result).toEqual([
+      { type: 'reasoning-start', id: 'think-1' },
+      { type: 'reasoning-delta', id: 'think-1', delta: 'Mid-thought' },
+      { type: 'reasoning-end', id: 'think-1' },
+    ]);
+  });
 });
 
 function chunks(values: UIMessageChunk[]): ReadableStream<UIMessageChunk> {

@@ -64,6 +64,14 @@ export class WorkbenchStore {
     return this.#previewsStore.update(...args);
   }
 
+  get publicationState() {
+    return this.#previewsStore.publication;
+  }
+
+  updatePublication(...args: Parameters<PreviewsStore['updatePublication']>) {
+    return this.#previewsStore.updatePublication(...args);
+  }
+
   requestPreview(...args: Parameters<PreviewsStore['request']>) {
     return this.#previewsStore.request(...args);
   }

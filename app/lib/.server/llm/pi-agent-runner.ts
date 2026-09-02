@@ -26,7 +26,10 @@ import {
   WorkspaceToolOperationIndeterminateError,
   type BuilderWorkspaceApi,
 } from '~/agents/builder-workspace-api';
-import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
+import {
+  AUTO_VALIDATION_TOOL_CALL_ID_PREFIX,
+  type BuilderValidationStage,
+} from '~/lib/common/builder-validation-progress';
 import {
   BUILDER_TURN_BUDGET_ERROR_CODE,
   BUILDER_TURN_FIRST_PROGRESS_MS,
@@ -343,13 +346,21 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         // keep treating this turn as having produced nothing.
         observeMeaningfulProgress();
       }
-      const textPartId = `pi-${event.message.timestamp}-${eventContentIndex(assistantEvent) ?? 0}`;
+      const streamPartId = `pi-${event.message.timestamp}-${eventContentIndex(assistantEvent) ?? 0}`;
       if (assistantEvent.type === 'text_start') {
-        await writer.write({ type: 'text-start', id: textPartId });
+        await writer.write({ type: 'text-start', id: streamPartId });
       } else if (assistantEvent.type === 'text_delta' && assistantEvent.delta) {
-        await writer.write({ type: 'text-delta', id: textPartId, delta: assistantEvent.delta });
+        await writer.write({ type: 'text-delta', id: streamPartId, delta: assistantEvent.delta });
       } else if (assistantEvent.type === 'text_end') {
-        await writer.write({ type: 'text-end', id: textPartId });
+        await writer.write({ type: 'text-end', id: streamPartId });
+      } else if (assistantEvent.type === 'thinking_start') {
+        // Reasoning is shown live so the wait is legible, and it stays out of the turn's content
+        // accounting: a turn that only thought still counts as having produced nothing.
+        await writer.write({ type: 'reasoning-start', id: streamPartId });
+      } else if (assistantEvent.type === 'thinking_delta' && assistantEvent.delta) {
+        await writer.write({ type: 'reasoning-delta', id: streamPartId, delta: assistantEvent.delta });
+      } else if (assistantEvent.type === 'thinking_end') {
+        await writer.write({ type: 'reasoning-end', id: streamPartId });
       } else if (assistantEvent.type === 'toolcall_start') {
         const streamed = streamedToolCall(assistantEvent);
         if (streamed) {
@@ -554,7 +565,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         if (!validateTool) {
           return;
         }
-        const toolCallId = `auto-validate:${crypto.randomUUID()}`;
+        const toolCallId = `${AUTO_VALIDATION_TOOL_CALL_ID_PREFIX}${crypto.randomUUID()}`;
         await emit({ type: 'tool_execution_start', toolCallId, toolName: 'validate', args: {} });
         let result: AgentToolResult<unknown>;
         try {

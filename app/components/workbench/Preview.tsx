@@ -2,17 +2,20 @@ import { useEffect } from 'react';
 import { Button } from '@ui/Button';
 import { captureProductEvent } from '~/lib/telemetry.client';
 import type { PreviewPresentation } from '~/lib/common/preview-presentation';
+import { publicationStageLabel, type BuilderPublicationState } from '~/agents/builder-publication-progress';
 
 export const PREVIEW_SANDBOX = 'allow-forms allow-modals allow-popups allow-same-origin allow-scripts';
 
 export function Preview({
   presentation,
+  publication,
   reloadKey,
   requesting,
   onRequest,
   error,
 }: {
   presentation: PreviewPresentation;
+  publication: BuilderPublicationState | null;
   reloadKey: number;
   requesting: boolean;
   onRequest: () => void;
@@ -54,7 +57,13 @@ export function Preview({
             referrerPolicy="no-referrer"
           />
         ) : (
-          <PreviewEmpty status={status} error={error} onRequest={onRequest} disabled={requesting} />
+          <PreviewEmpty
+            status={status}
+            error={error}
+            publication={publication}
+            onRequest={onRequest}
+            disabled={requesting}
+          />
         )}
       </div>
     </div>
@@ -64,22 +73,29 @@ export function Preview({
 function PreviewEmpty({
   status,
   error,
+  publication,
   onRequest,
   disabled,
 }: {
   status: string;
   error: string | null;
+  publication: BuilderPublicationState | null;
   onRequest: () => void;
   disabled: boolean;
 }) {
   const updating = status === 'queued' || status === 'building';
   const title = status === 'failed' ? 'Preview failed' : updating ? 'Building preview…' : 'No preview yet';
-  const message = status === 'failed' ? error : updating ? null : 'Build the current revision.';
+  const stage = updating && publication?.lane === 'preview' ? publicationStageLabel(publication) : null;
+  const message = status === 'failed' ? error : updating ? stage : 'Build the current revision.';
   return (
     <div className="flex size-full items-center justify-center p-6 text-center">
       <div className="max-w-sm">
         <p className="font-medium text-content-primary">{title}</p>
-        {message && <p className="mt-2 text-sm text-content-secondary">{message}</p>}
+        {message && (
+          <p className="mt-2 text-sm text-content-secondary" aria-live="polite">
+            {message}
+          </p>
+        )}
         {!updating && (
           <Button className="mt-4" size="sm" disabled={disabled} onClick={onRequest}>
             {status === 'failed' ? 'Retry' : 'Build preview'}

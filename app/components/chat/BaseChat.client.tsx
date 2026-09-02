@@ -24,6 +24,7 @@ import { subchatIndexStore, useIsSubchatLoaded } from '~/lib/stores/subchats';
 import type { BuildProgress } from './build-progress';
 import type { SubchatSummary } from './subchat-model';
 import type { BuilderDeploymentState } from '~/agents/builder-deployment-command';
+import type { BuilderPublicationState } from '~/agents/builder-publication-progress';
 import { DeploymentStatus } from './DeploymentStatus.client';
 import type {
   CloudflareExecutionDecisionHandler,
@@ -52,6 +53,7 @@ interface BaseChatProps {
   disabledReason: ReactNode | null;
   runtimeNotice: ReactNode;
   deployment?: BuilderDeploymentState | null;
+  publication?: BuilderPublicationState | null;
   onDeploy?: () => Promise<BuilderDeploymentState>;
   cloudflareExecutions?: readonly CloudflareExecutionPublicState[];
   onCloudflareExecutionDecision?: CloudflareExecutionDecisionHandler;
@@ -78,6 +80,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       disabledReason,
       runtimeNotice,
       deployment,
+      publication,
       onDeploy,
       cloudflareExecutions,
       onCloudflareExecutionDecision,
@@ -286,7 +289,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                     )}
                     {deployment ? (
                       <div className="mb-3">
-                        <DeploymentStatus deployment={deployment} onRetry={onDeploy} />
+                        <DeploymentStatus deployment={deployment} publication={publication} onRetry={onDeploy} />
                       </div>
                     ) : null}
                     {(!subchats || (currentSubchatIndex >= subchats.length - 1 && isSubchatLoaded)) && (

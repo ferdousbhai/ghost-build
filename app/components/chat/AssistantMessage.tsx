@@ -1,5 +1,6 @@
 import { lazy, memo, Suspense, useEffect, useRef } from 'react';
 import { ToolCall } from './ToolCall';
+import { ReasoningPart } from './ReasoningPart';
 import { makePartId, type PartId } from 'ghostbuild-agent/partId.js';
 import {
   getToolInvocation,
@@ -84,7 +85,11 @@ function AssistantMessagePart({
     ) : null;
   }
 
-  if (part.type === 'step-start' || part.type === 'reasoning' || part.type === 'reasoning-file') {
+  if (part.type === 'reasoning') {
+    return <ReasoningPart part={part} />;
+  }
+
+  if (part.type === 'step-start' || part.type === 'reasoning-file') {
     return null;
   }
 

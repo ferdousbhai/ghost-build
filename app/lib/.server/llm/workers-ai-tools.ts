@@ -461,6 +461,9 @@ async function validateWorkspace(
       toolCallId: validationToolCallId,
       input: {},
       abortSignal,
+      // The workspace refines the stage as it walks the pipeline; until it does, the honest answer
+      // is the one already published above.
+      onStage: (stage) => context.onValidationStage?.(toolCallId, stage),
     });
   } catch (error) {
     if (isWorkspaceToolOperationIndeterminateError(error)) {

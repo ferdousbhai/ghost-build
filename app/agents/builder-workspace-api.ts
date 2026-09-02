@@ -2,6 +2,7 @@ import type { GhostbuildToolResult } from 'ghostbuild-agent/tool-result';
 import type { CreateAIToolsOptions } from '@cloudflare/computer/tools';
 import type { DeploymentProjectProfile } from '~/lib/.server/cloudflare/deployment-project-profile';
 import type { PreparedDeploymentArtifact } from '~/lib/.server/cloudflare/deployment-artifact';
+import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 import type {
   BuilderWorkspaceApplyResult,
   BuilderWorkspaceClientChange,
@@ -110,6 +111,13 @@ export type WorkspaceValidateRequest = {
   /** Raw model-supplied tool arguments, echoed back in the tool result for the transcript. */
   input: unknown;
 };
+
+/**
+ * Reports the stage a running validation just entered. Workers RPC forwards a function parameter as
+ * a callback into the workspace runtime, so the stage the container is actually on reaches the UI
+ * while the operation runs instead of only in its result.
+ */
+export type WorkspaceValidationStageReporter = (stage: BuilderValidationStage) => void;
 
 export type WorkspaceCancelValidationRequest = {
   toolCallId?: string;
@@ -278,7 +286,10 @@ export interface ProjectWorkspaceRpc extends Rpc.DurableObjectBranded {
   cancelExecution(value: WorkspaceCancelExecutionRequest): Promise<void>;
   checkpoint(): Promise<BuilderWorkspaceCheckpoint>;
   installDependenciesTool(value: WorkspaceInstallDependenciesRequest): Promise<GhostbuildToolResult>;
-  validateTool(value: WorkspaceValidateRequest): Promise<GhostbuildToolResult>;
+  validateTool(
+    value: WorkspaceValidateRequest,
+    onStage?: WorkspaceValidationStageReporter,
+  ): Promise<GhostbuildToolResult>;
   cancelValidation(value: WorkspaceCancelValidationRequest): Promise<void>;
   validationStatus(revision: string): { valid: boolean } | Promise<{ valid: boolean }>;
   deploymentPlan(revision: string): Promise<BuilderWorkspaceDeploymentPlan>;
@@ -331,7 +342,9 @@ export interface BuilderWorkspaceApi {
   installDependencies(
     args: WorkspaceInstallDependenciesRequest & { abortSignal?: AbortSignal },
   ): Promise<GhostbuildToolResult>;
-  validate(args: WorkspaceValidateRequest & { abortSignal?: AbortSignal }): Promise<GhostbuildToolResult>;
+  validate(
+    args: WorkspaceValidateRequest & { abortSignal?: AbortSignal; onStage?: WorkspaceValidationStageReporter },
+  ): Promise<GhostbuildToolResult>;
   cancelActiveValidation(): Promise<void>;
   hasSuccessfulValidation(revision: string): Promise<boolean>;
   prepareDeployment(revision: string): Promise<BuilderWorkspaceDeploymentPlan>;

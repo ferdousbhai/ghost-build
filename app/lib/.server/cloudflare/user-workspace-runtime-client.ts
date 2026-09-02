@@ -21,6 +21,7 @@ import {
   type WorkspaceSearchRequest,
   type WorkspaceSeedExpectation,
   type WorkspaceSyncPageRequest,
+  type WorkspaceValidationStageReporter,
 } from '~/agents/builder-workspace-api';
 import type {
   BuilderWorkspaceApplyResult,
@@ -455,6 +456,7 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     toolCallId: string;
     input: unknown;
     abortSignal?: AbortSignal;
+    onStage?: WorkspaceValidationStageReporter;
   }): Promise<GhostbuildToolResult> {
     args.abortSignal?.throwIfAborted();
     if (this.#activeValidationToolCallId && this.#activeValidationToolCallId !== args.toolCallId) {
@@ -469,7 +471,9 @@ export class UserWorkspaceRuntimeClient implements BuilderWorkspaceApi {
     args.abortSignal?.addEventListener('abort', cancel, { once: true });
     try {
       return await raceAgainstAbort(
-        this.#stub().then((stub) => stub.validateTool({ toolCallId: args.toolCallId, input: args.input })),
+        this.#stub().then((stub) =>
+          stub.validateTool({ toolCallId: args.toolCallId, input: args.input }, args.onStage),
+        ),
         args.abortSignal,
       );
     } finally {

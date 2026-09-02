@@ -31,13 +31,24 @@ export function appendDeterministicCompletion(
   );
 }
 
+/**
+ * Text and reasoning both arrive as provider-framed parts, and a provider that ends a turn mid-part
+ * would otherwise leave the client rendering an assistant bubble that never closes. Every open part
+ * is closed before the terminal chunk and again at flush, and a delta that arrives without its start
+ * opens the part it belongs to.
+ */
 export function normalizeTextPartBoundaries(stream: ReadableStream<PiStreamChunk>): ReadableStream<PiStreamChunk> {
   const openTextPartIds = new Set<string>();
-  const closeOpenTextParts = (controller: TransformStreamDefaultController<PiStreamChunk>) => {
+  const openReasoningPartIds = new Set<string>();
+  const closeOpenParts = (controller: TransformStreamDefaultController<PiStreamChunk>) => {
     for (const id of openTextPartIds) {
       controller.enqueue({ type: 'text-end', id });
     }
     openTextPartIds.clear();
+    for (const id of openReasoningPartIds) {
+      controller.enqueue({ type: 'reasoning-end', id });
+    }
+    openReasoningPartIds.clear();
   };
   return stream.pipeThrough(
     new TransformStream<PiStreamChunk, PiStreamChunk>({
@@ -61,15 +72,33 @@ export function normalizeTextPartBoundaries(stream: ReadableStream<PiStreamChunk
             controller.enqueue(chunk);
             openTextPartIds.delete(chunk.id);
             return;
+          case 'reasoning-start':
+            openReasoningPartIds.add(chunk.id);
+            controller.enqueue(chunk);
+            return;
+          case 'reasoning-delta':
+            if (!openReasoningPartIds.has(chunk.id)) {
+              openReasoningPartIds.add(chunk.id);
+              controller.enqueue({ type: 'reasoning-start', id: chunk.id });
+            }
+            controller.enqueue(chunk);
+            return;
+          case 'reasoning-end':
+            if (!openReasoningPartIds.has(chunk.id)) {
+              controller.enqueue({ type: 'reasoning-start', id: chunk.id });
+            }
+            controller.enqueue(chunk);
+            openReasoningPartIds.delete(chunk.id);
+            return;
           default:
             if (chunk.type === 'finish' || chunk.type === 'error') {
-              closeOpenTextParts(controller);
+              closeOpenParts(controller);
             }
             controller.enqueue(chunk);
         }
       },
       flush(controller) {
-        closeOpenTextParts(controller);
+        closeOpenParts(controller);
       },
     }),
   );

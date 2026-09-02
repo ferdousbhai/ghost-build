@@ -121,6 +121,7 @@ export function useBuilderAgentChat(args: {
       if (state.preview) {
         workbenchStore.updatePreview(state.preview);
       }
+      workbenchStore.updatePublication(state.publication ?? null);
       const generatedTitle = state.generatedSubchatTitle;
       if (!generatedTitle || generatedSubchatTitleUpdatedAtRef.current === generatedTitle.updatedAt) {
         return;
@@ -515,6 +516,7 @@ export function useBuilderAgentChat(args: {
     streamStatus: chat.isRecovering ? ('submitted' as const) : chat.isStreaming ? ('streaming' as const) : chat.status,
     validationStage: builderAgent.state?.validationProgress?.stage ?? null,
     deployment: builderAgent.state?.deployment ?? null,
+    publication: builderAgent.state?.publication ?? null,
     deployValidatedRevision,
     cloudflareExecutions: builderAgent.state?.cloudflareExecutions ?? [],
     decideCloudflareExecution,

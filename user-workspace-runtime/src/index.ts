@@ -30,6 +30,8 @@ import {
   type DeploymentConfigInput,
 } from '../../app/lib/.server/cloudflare/deployment-config';
 import { recordDeploymentActivity } from '../../app/lib/.server/cloudflare/deployment-repository';
+import type { BuilderValidationStage } from '../../app/lib/common/builder-validation-progress';
+import type { WorkspaceValidationStageReporter } from '../../app/agents/builder-workspace-api';
 import { deploymentProjectProfileFromConfig } from '../../app/lib/.server/cloudflare/deployment-project-profile';
 import type { DeploymentProjectProfile } from '../../app/lib/.server/cloudflare/deployment-project-profile';
 import { DEPLOYMENT_PROJECT_ROOT } from '../../app/lib/.server/cloudflare/deployment-runtime-policy';
@@ -203,6 +205,16 @@ const PARALLEL_VALIDATION_STAGES = [
   { name: 'lint', command: 'pnpm run lint', timeoutMs: 5 * 60_000 },
 ] as const;
 const VALIDATION_STAGE_LOG_ROOT = `${ISOLATED_PROJECT_ROOT}/validation-stage-logs`;
+/**
+ * Validation and deployment share `buildDeploymentArtifact`, so they share its activity sequence.
+ * Deployment records those numbers durably; validation translates them into the stage the UI shows.
+ */
+const BUILD_ARTIFACT_STAGES = new Map<number, BuilderValidationStage>([
+  [33, 'build'],
+  [34, 'packaging'],
+  [35, 'packaging'],
+  [36, 'finalizing'],
+]);
 /**
  * `timeoutMs` for a container-shell exec is a process-lifetime hint shipped to
  * computerd over Computer's shell RPC. @cloudflare/computer 0.2.1 enforces a
@@ -1451,9 +1463,10 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
     });
   }
 
-  async validateTool(value: unknown): Promise<GhostbuildToolResult> {
+  async validateTool(value: unknown, onStage?: WorkspaceValidationStageReporter): Promise<GhostbuildToolResult> {
     const input = record(value);
     const toolCallId = requireString(input.toolCallId, 'toolCallId', 512);
+    const reportStage = validationStageReporter(onStage);
     const inputJson = JSON.stringify(stableValue(input.input)) ?? 'null';
     if (this.#activeValidation) {
       if (this.#activeValidation.toolCallId === toolCallId) {
@@ -1465,7 +1478,7 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
       throw new Error('ProjectWorkspace validation is already running.');
     }
     const cancellation = new ValidationCancellation();
-    const validation = this.runValidationTool(toolCallId, input.input, cancellation);
+    const validation = this.runValidationTool(toolCallId, input.input, cancellation, reportStage);
     const activeRecord = { toolCallId, inputJson, cancellation, promise: validation };
     this.#activeValidation = activeRecord;
     try {
@@ -1496,6 +1509,7 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
     toolCallId: string,
     input: unknown,
     cancellation: ValidationCancellation,
+    reportStage: (stage: BuilderValidationStage) => void = () => undefined,
   ): Promise<GhostbuildToolResult> {
     return this.runToolOperation(toolCallId, 'validation', input, () =>
       this.withStatefulOperation('validate', `tool:${toolCallId}`, async (liveness) => {
@@ -1507,14 +1521,17 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
         let artifactPrepared = false;
         let cleanupAllowed = true;
         try {
+          reportStage('preparing');
           await this.discardPreparedValidationArtifact();
           await this.copyProjectToIsolatedRoot(isolatedRoot, cancellation);
           cancellation.requireActive();
           if ((await this.checkpoint()).revision !== before.revision) {
             throw new Error('The project changed while validation was being isolated. Validate the new revision.');
           }
+          reportStage('installing');
           await this.runTransientCommand(isolatedRoot, INSTALL_COMMAND, INSTALL_TIMEOUT_MS, cancellation);
           liveness.observed();
+          reportStage('typecheck');
           await this.runTransientCommand(
             isolatedRoot,
             REVISION_CODEGEN_COMMAND.command,
@@ -1522,6 +1539,7 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
             cancellation,
           );
           liveness.observed();
+          reportStage('lint');
           await this.runTransientCommand(
             isolatedRoot,
             parallelValidationStagesCommand(PARALLEL_VALIDATION_STAGES, {
@@ -1542,6 +1560,15 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
             deploymentConfig: validationDeploymentConfig(project),
             cancellation,
             liveness,
+            // The build reports the same stage ladder the deployment records as activity, so the
+            // wait the user watches is the one the container is actually in.
+            activity: (sequence) => {
+              const stage = BUILD_ARTIFACT_STAGES.get(sequence);
+              if (stage) {
+                reportStage(stage);
+              }
+              return Promise.resolve();
+            },
           });
           const artifactDigest = await preparedDeploymentArtifactDigest(artifact);
           cancellation.requireActive();
@@ -3500,6 +3527,24 @@ function record(value: unknown): Record<string, unknown> {
     throw new SyntaxError('Workspace request must be an object.');
   }
   return value;
+}
+
+/**
+ * The caller may pass a stage reporter over Workers RPC, where the call is a promise rather than the
+ * plain `void` its type describes. It is progress reporting for a human, so a caller that has
+ * already disconnected must never fail — or delay — the validation itself.
+ */
+function validationStageReporter(onStage?: WorkspaceValidationStageReporter): (stage: BuilderValidationStage) => void {
+  if (!onStage) {
+    return () => undefined;
+  }
+  return (stage) => {
+    try {
+      void Promise.resolve(onStage(stage)).catch(() => undefined);
+    } catch {
+      // A disconnected caller is not a validation failure.
+    }
+  };
 }
 
 function stableValue(value: unknown): unknown {

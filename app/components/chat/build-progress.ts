@@ -1,7 +1,8 @@
 import type { StreamStatus } from '~/lib/common/types';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 
-export type BuildProgressPhase = 'planning' | 'creating' | 'saving' | 'running' | 'validating' | 'recovering';
+export type BuildProgressPhase =
+  'planning' | 'thinking' | 'creating' | 'saving' | 'running' | 'validating' | 'recovering';
 
 export type BuildProgress = {
   phase: BuildProgressPhase;
@@ -20,6 +21,8 @@ export function getBuildProgress(args: {
   isProjectUpdate?: boolean;
   activeToolNames: string[];
   validationStage?: BuilderValidationStage | null;
+  /** Milliseconds the model has been reasoning in the part it is streaming now, if it is. */
+  reasoningForMs?: number | null;
   inactiveForMs: number;
 }): BuildProgress | null {
   if (args.streamStatus !== 'submitted' && args.streamStatus !== 'streaming' && !args.isRecovering) {
@@ -34,7 +37,12 @@ export function getBuildProgress(args: {
         ? RECOVERY_PROGRESS_DELAY_MS
         : BUILD_PROGRESS_DELAY_MS;
   const delayed = args.inactiveForMs >= delayMs;
-  const normalMessage = phaseMessage(phase, args.isProjectUpdate === true, args.validationStage);
+  const normalMessage = phaseMessage(
+    phase,
+    args.isProjectUpdate === true,
+    args.validationStage,
+    args.reasoningForMs ?? null,
+  );
   const activity = activityLabel(phase, args.isProjectUpdate === true, args.validationStage);
 
   return {
@@ -49,6 +57,7 @@ function buildPhase(args: {
   isRecovering: boolean;
   activeToolNames: string[];
   validationStage?: BuilderValidationStage | null;
+  reasoningForMs?: number | null;
 }): BuildProgressPhase {
   if (args.validationStage) {
     return 'validating';
@@ -62,6 +71,10 @@ function buildPhase(args: {
   if (args.isRecovering) {
     return 'recovering';
   }
+  // Reasoning is real work with no tool behind it, so name it rather than calling the wait planning.
+  if (args.reasoningForMs !== null && args.reasoningForMs !== undefined) {
+    return 'thinking';
+  }
   return args.streamStatus === 'submitted' ? 'planning' : 'creating';
 }
 
@@ -69,10 +82,15 @@ function phaseMessage(
   phase: BuildProgressPhase,
   isProjectUpdate: boolean,
   validationStage?: BuilderValidationStage | null,
+  reasoningForMs?: number | null,
 ): string {
   switch (phase) {
     case 'planning':
       return isProjectUpdate ? 'Planning your changes…' : 'Planning your project…';
+    case 'thinking':
+      return reasoningForMs !== null && reasoningForMs !== undefined && reasoningForMs >= 1_000
+        ? `Thinking… ${formatDuration(reasoningForMs)}`
+        : 'Thinking…';
     case 'creating':
       return isProjectUpdate ? 'Updating your project…' : 'Creating your project…';
     case 'saving':
@@ -95,6 +113,8 @@ function activityLabel(
   switch (phase) {
     case 'planning':
       return isProjectUpdate ? 'planning your changes' : 'planning your project';
+    case 'thinking':
+      return 'thinking';
     case 'creating':
       return isProjectUpdate ? 'updating your project' : 'creating your project';
     case 'saving':
@@ -109,10 +129,27 @@ function activityLabel(
   return 'building your project';
 }
 
+/** Each message names the step the workspace runtime reported entering, not a guess from a clock. */
 function validationStageMessage(stage?: BuilderValidationStage | null): string {
-  return stage === 'computer validation'
-    ? 'Validating your project with Cloudflare Computer…'
-    : 'Validating your project…';
+  switch (stage) {
+    case 'computer validation':
+      return 'Validating your project with Cloudflare Computer…';
+    case 'preparing':
+      return 'Preparing a clean copy of your project…';
+    case 'installing':
+      return 'Installing dependencies…';
+    case 'typecheck':
+      return 'Checking types…';
+    case 'lint':
+      return 'Linting and verifying the stack…';
+    case 'build':
+      return 'Building your project…';
+    case 'packaging':
+      return 'Packaging the Cloudflare Worker…';
+    case 'finalizing':
+      return 'Finishing validation…';
+  }
+  return 'Validating your project…';
 }
 
 function validationStageActivity(stage?: BuilderValidationStage | null): string {
@@ -127,7 +164,7 @@ function quietMessage(phase: BuildProgressPhase, activity: string, inactiveForMs
   return `Still ${activity} — no new update for ${quietFor}`;
 }
 
-function formatDuration(milliseconds: number): string {
+export function formatDuration(milliseconds: number): string {
   const seconds = Math.max(1, Math.floor(milliseconds / 1_000));
   if (seconds < 60) {
     return `${seconds}s`;
