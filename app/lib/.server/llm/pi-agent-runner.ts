@@ -119,10 +119,14 @@ type PiPreparationStage = 'tool_setup' | 'model_input' | 'prompt_metrics' | 'mes
  * from spending its whole output budget on hidden chain-of-thought. Verified against production
  * Workers AI: GLM 5.3 Flash with no directive (or `thinking: disabled`, which it ignores) reasons
  * until `length` and returns EMPTY content, while `thinking: enabled` + `reasoning_effort`
- * answers promptly with real content.
+ * answers promptly with real content. GLM gets `low`: at `medium` it still burned the whole
+ * output budget on reasoning during a real build.
  */
-function builderThinkingLevel(model: { reasoning: boolean }): 'medium' | undefined {
-  return model.reasoning ? 'medium' : undefined;
+function builderThinkingLevel(model: { reasoning: boolean; id: string }): 'low' | 'medium' | undefined {
+  if (!model.reasoning) {
+    return undefined;
+  }
+  return model.id.startsWith('@cf/zai-org/') ? 'low' : 'medium';
 }
 
 /**

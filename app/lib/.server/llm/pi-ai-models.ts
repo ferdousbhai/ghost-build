@@ -79,11 +79,14 @@ function familyThinkingCompat(modelId: string): Pick<OpenAICompletionsCompat, 't
  * Never request more output than the model itself supports, and give reasoning models the output
  * headroom the input budget leaves free: a global 24,576-token cap starved Kimi K2.7 (262k output
  * limit) into finishing 10 minutes of hidden reasoning with `length` and no content, while
- * over-asking gpt-oss (16,384 limit).
+ * over-asking gpt-oss (16,384 limit). A reasoning model missing from Pi's catalog gets four times
+ * the plain fallback, because its hidden chain-of-thought spends the same budget as its answer —
+ * glm-5.3-flash exhausted the plain fallback on reasoning alone mid-build.
  */
-function boundedOutputTokens(catalogMaxTokens: number | undefined, contextWindow: number): number {
+function boundedOutputTokens(catalogMaxTokens: number | undefined, contextWindow: number, reasoning: boolean): number {
+  const fallback = reasoning ? MODEL_MAX_OUTPUT_TOKENS * 4 : MODEL_MAX_OUTPUT_TOKENS;
   return Math.min(
-    catalogMaxTokens ?? MODEL_MAX_OUTPUT_TOKENS,
+    catalogMaxTokens ?? fallback,
     Math.max(MODEL_MAX_OUTPUT_TOKENS, contextWindow - MAX_ESTIMATED_MODEL_INPUT_TOKENS),
   );
 }
@@ -150,6 +153,7 @@ export function getPiModel(
     maxTokens: boundedOutputTokens(
       catalog?.maxTokens,
       settings?.model?.contextTokens ?? catalog?.contextWindow ?? 128_000,
+      settings?.model?.reasoning ?? catalog?.reasoning ?? false,
     ),
     compat: workersAiCompat(modelId, catalog),
   };
