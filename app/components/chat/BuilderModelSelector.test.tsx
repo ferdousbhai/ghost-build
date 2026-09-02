@@ -59,7 +59,7 @@ describe('BuilderModelSelector', () => {
     await renderSelector();
 
     const trigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Builder model"]');
-    expect(trigger?.getAttribute('aria-label')).toContain('GLM 5.3 Flash');
+    expect(trigger?.getAttribute('aria-label')).toContain('GPT OSS 120B');
     expect(trigger?.getAttribute('aria-haspopup')).toBe('menu');
 
     await act(async () => {
