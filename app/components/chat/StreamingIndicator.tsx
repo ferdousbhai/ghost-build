@@ -5,17 +5,10 @@ import { chatStore } from '~/lib/stores/chatId';
 import { Spinner } from '@ui/Spinner';
 import { ExclamationTriangleIcon, ResetIcon } from '@radix-ui/react-icons';
 import { Button } from '@ui/Button';
-import { createScopedLogger } from 'ghostbuild-agent/utils/logger';
 import type { BuildProgress } from './build-progress';
-import { z } from 'zod';
 
-/** Stream failures arrive as a JSON string in the error message; neither field is guaranteed. */
-const streamErrorSchema = z.looseObject({
-  error: z.string().optional().catch(undefined),
-  details: z.unknown().optional(),
-});
-
-const logger = createScopedLogger('StreamingIndicator');
+/** A provider rejection body can run to kilobytes; the chat line shows the start of it. */
+const MAX_ERROR_CHARACTERS = 400;
 
 interface StreamingIndicatorProps {
   streamStatus: StreamStatus;
@@ -37,23 +30,19 @@ export const STATUS_MESSAGES = {
   error: 'The model hit an error. Try sending your message again.',
 } as const;
 
-function streamErrorMessage(currentError: Error | undefined): React.ReactNode {
-  if (!currentError) {
+/**
+ * The stream's `error` chunk carries the reason as plain text, so it is what the reader sees. The
+ * generic label is only for a failure that arrived with nothing to say.
+ */
+function streamErrorMessage(currentError: Error | undefined): string {
+  const reason = currentError?.message.trim() ?? '';
+  if (!reason) {
     return STATUS_MESSAGES.error;
   }
-
-  try {
-    const payload = streamErrorSchema.safeParse(JSON.parse(currentError.message)).data;
-
-    if (payload?.details) {
-      logger.debug('Error details', payload.details);
-    }
-
-    return payload?.error ?? STATUS_MESSAGES.error;
-  } catch {
-    logger.debug('Failed to parse stream error', currentError);
-    return STATUS_MESSAGES.error;
+  if (reason.length > MAX_ERROR_CHARACTERS) {
+    return `${reason.slice(0, MAX_ERROR_CHARACTERS)}…`;
   }
+  return reason;
 }
 
 export default function StreamingIndicator(props: StreamingIndicatorProps) {

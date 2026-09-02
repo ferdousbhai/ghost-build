@@ -1,0 +1,65 @@
+// @vitest-environment jsdom
+
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { chatStore } from '~/lib/stores/chatId';
+import StreamingIndicator, { STATUS_MESSAGES } from './StreamingIndicator';
+
+describe('StreamingIndicator', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    // SAFETY: React reads this act() flag off the global object, which carries no typing for it.
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    chatStore.setKey('aborted', false);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    document.body.replaceChildren();
+  });
+
+  it('shows the reason the stream reported rather than a generic label', async () => {
+    await renderError('The model did not start responding within a minute. Retry, or pick a different model.');
+
+    expect(container.textContent).toContain('The model did not start responding within a minute.');
+    expect(container.textContent).not.toContain(STATUS_MESSAGES.error);
+  });
+
+  it('bounds a long provider rejection body', async () => {
+    const reason = `Provider rejected the request: ${'x'.repeat(1_000)}`;
+
+    await renderError(reason);
+
+    const text = container.textContent ?? '';
+    expect(text).toContain('Provider rejected the request:');
+    expect(text).toContain('…');
+    expect(text.length).toBeLessThan(reason.length);
+  });
+
+  it('falls back to the generic label only when the failure says nothing', async () => {
+    await renderError('   ');
+
+    expect(container.textContent).toContain(STATUS_MESSAGES.error);
+  });
+
+  async function renderError(message: string) {
+    await act(async () =>
+      root.render(
+        <StreamingIndicator
+          streamStatus="error"
+          currentError={new Error(message)}
+          buildProgress={null}
+          isProjectUpdate={false}
+          submissionPending={false}
+          resendMessage={vi.fn()}
+        />,
+      ),
+    );
+  }
+});

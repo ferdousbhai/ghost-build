@@ -68,6 +68,7 @@ import {
   workersPaidRequiredMessage,
 } from '~/lib/workers-paid';
 import { logProviderFailure } from './provider-error-logging';
+import { ProviderStopError, providerStopDiagnosticCode } from './provider-stop-error';
 import type { PiSteeringQueue } from './pi-steering';
 import type { CloudflareMcpModelToolContext } from './cloudflare-mcp-model-tools';
 import { isCloudflareExecuteProposal } from 'ghostbuild-agent/cloudflare-mcp';
@@ -655,10 +656,14 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         throw new BuilderTurnBudgetExceededError(signalBudgetReason);
       }
       if (finalAssistant?.stopReason === 'error') {
-        throw new Error(finalAssistant.errorMessage || 'The model request failed.');
+        const stopText = finalAssistant.errorMessage || 'The model request failed.';
+        throw new ProviderStopError(stopText, providerStopDiagnosticCode(stopText));
       }
       if (finalAssistant?.stopReason === 'aborted' && !abortSignal?.aborted) {
-        throw new Error(finalAssistant.errorMessage || 'The model request was aborted.');
+        throw new ProviderStopError(
+          finalAssistant.errorMessage || 'The model request was aborted.',
+          'provider_aborted',
+        );
       }
       if (finalAssistant?.stopReason === 'length' && !currentTurnStreamedContent) {
         throw new HiddenReasoningExhaustionError();
@@ -700,7 +705,10 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       } else if (isCloudflareAiFundingError(error)) {
         await writer.write({ type: 'error', errorText: cloudflareAiFundingRequiredMessage() });
       } else if (!abortSignal?.aborted) {
-        await writer.write({ type: 'error', errorText: 'The model request failed. Please retry.' });
+        await writer.write({
+          type: 'error',
+          errorText: providerFailureText(error instanceof Error ? error.message : String(error)),
+        });
       }
     } finally {
       clearInactivityWatchdog();
@@ -750,6 +758,26 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   return normalizeTextPartBoundaries(
     appendDeterministicCompletion(framedStream, () => currentValidatedBuildCompletion),
   );
+}
+
+/** A provider rejection body is unbounded; the chat line only needs the head of it. */
+const MAX_PROVIDER_REASON_CHARACTERS = 300;
+
+/**
+ * The `error` chunk reaches only the account owner's own chat, so the provider's own wording is
+ * carried through. Without it every distinct failure — a truncated stream, a rejected request body,
+ * a 400 naming the offending field — renders as one generic sentence and cannot be acted on. The
+ * reason must not additionally be logged.
+ */
+function providerFailureText(reason: string): string {
+  const trimmed = reason.trim().replace(/[.\s]+$/, '');
+  if (!trimmed) {
+    return 'The model request failed. Please retry.';
+  }
+  if (trimmed.length > MAX_PROVIDER_REASON_CHARACTERS) {
+    return `The model request failed: ${trimmed.slice(0, MAX_PROVIDER_REASON_CHARACTERS)}… Retry, or pick a different model.`;
+  }
+  return `The model request failed: ${trimmed}. Retry, or pick a different model.`;
 }
 
 /** A proposal is a completed tool result, but it deliberately ends this Pi run before another model step. */

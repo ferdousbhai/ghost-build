@@ -143,7 +143,10 @@ describe('piAgentRunner', () => {
 
     const chunks = await collectChunks(await createAgentStream());
 
-    expect(chunks).toContainEqual({ type: 'error', errorText: 'The model request failed. Please retry.' });
+    expect(chunks).toContainEqual({
+      type: 'error',
+      errorText: 'The model request failed: upstream failed. Retry, or pick a different model.',
+    });
     expect(mocks.recordFinish).not.toHaveBeenCalled();
   });
 
@@ -634,7 +637,10 @@ describe('piAgentRunner', () => {
     );
 
     expect(mocks.piRun).toHaveBeenCalledTimes(2);
-    expect(chunks).toContainEqual({ type: 'error', errorText: 'The model request failed. Please retry.' });
+    expect(chunks).toContainEqual({
+      type: 'error',
+      errorText: 'The model request failed: The prompt exceeds the context window. Retry, or pick a different model.',
+    });
   });
 
   it('stops the loop once a validated completion is reached', async () => {
@@ -919,7 +925,10 @@ describe('piAgentRunner', () => {
     const chunks = await collectChunks(await createAgentStream());
 
     expect(mocks.piRun).toHaveBeenCalledOnce();
-    expect(chunks).toContainEqual({ type: 'error', errorText: 'The model request failed. Please retry.' });
+    expect(chunks).toContainEqual({
+      type: 'error',
+      errorText: 'The model request failed: The prompt exceeds the context window. Retry, or pick a different model.',
+    });
   });
 });
 

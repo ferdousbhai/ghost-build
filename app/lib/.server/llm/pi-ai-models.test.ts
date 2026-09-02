@@ -152,41 +152,107 @@ describe('Pi Workers AI model binding', () => {
 
     expect(run.mock.calls[0]?.[1].max_completion_tokens).toBe(16_000);
   });
+
+  it('replays the request at the completion cap the provider names in its rejection', async () => {
+    // The catalog window Cloudflare reports for glm-5.3-flash, which the provider does not honour.
+    const model: WorkersAiModel = { ...DEFAULT_WORKERS_AI_MODEL, contextTokens: 1_310_720 };
+    const { binding, run } = cappingBinding(model.id, OUTPUT_CAP_REJECTION, 1);
+    const handle = getPiModel(binding, model.id, { model });
+
+    const result = await handle
+      .stream(handle.model, { messages: [{ role: 'user', content: 'Hi', timestamp: 1 }] })
+      .result();
+
+    expect(result.content).toContainEqual({ type: 'text', text: 'Hello' });
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[0]?.[1].max_completion_tokens ?? 0).toBeGreaterThan(1_048_576);
+    expect(run.mock.calls[1]?.[1].max_completion_tokens).toBe(1_048_576);
+  });
+
+  it('leaves a rejection that names no completion cap alone', async () => {
+    const model: WorkersAiModel = { ...DEFAULT_WORKERS_AI_MODEL, contextTokens: 1_310_720 };
+    const { binding, run } = cappingBinding(model.id, '{"error":"messages: field required"}', 1);
+    const handle = getPiModel(binding, model.id, { model });
+
+    await handle
+      .stream(handle.model, { messages: [{ role: 'user', content: 'Hi', timestamp: 1 }] })
+      .result()
+      .catch(() => undefined);
+
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it('does not replay a request the provider rejects a second time', async () => {
+    const model: WorkersAiModel = { ...DEFAULT_WORKERS_AI_MODEL, contextTokens: 1_310_720 };
+    const { binding, run } = cappingBinding(model.id, OUTPUT_CAP_REJECTION, 2);
+    const handle = getPiModel(binding, model.id, { model });
+
+    await handle
+      .stream(handle.model, { messages: [{ role: 'user', content: 'Hi', timestamp: 1 }] })
+      .result()
+      .catch(() => undefined);
+
+    expect(run).toHaveBeenCalledTimes(2);
+  });
 });
 
+/** Verbatim from a production glm-5.3-flash rejection. */
+const OUTPUT_CAP_REJECTION =
+  'max_completion_tokens is too large: 1200000.This model supports at most 1048576 completion tokens.';
+
 function recordingBinding(modelId: string) {
+  const run = vi.fn(async (_model: string, _inputs: BindingInputs, _options: BindingOptions) =>
+    completionResponse(modelId),
+  );
+  return { binding: bindingFor(run), run };
+}
+
+/** Answers the first `rejections` requests with the provider's own output-cap 400. */
+function cappingBinding(modelId: string, rejectionBody: string, rejections: number) {
+  let remaining = rejections;
   const run = vi.fn(async (_model: string, _inputs: BindingInputs, _options: BindingOptions) => {
-    return new Response(
-      [
-        `data: ${JSON.stringify({
-          id: 'completion-1',
-          object: 'chat.completion.chunk',
-          created: 1,
-          model: modelId,
-          choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }],
-        })}`,
-        `data: ${JSON.stringify({
-          id: 'completion-1',
-          object: 'chat.completion.chunk',
-          created: 1,
-          model: modelId,
-          choices: [{ index: 0, delta: { content: 'Hello' }, finish_reason: null }],
-        })}`,
-        `data: ${JSON.stringify({
-          id: 'completion-1',
-          object: 'chat.completion.chunk',
-          created: 1,
-          model: modelId,
-          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-        })}`,
-        'data: [DONE]',
-        '',
-      ].join('\n\n'),
-      { headers: { 'content-type': 'text/event-stream' } },
-    );
+    if (remaining > 0) {
+      remaining -= 1;
+      return new Response(rejectionBody, { status: 400 });
+    }
+    return completionResponse(modelId);
   });
+  return { binding: bindingFor(run), run };
+}
+
+function bindingFor(run: (model: string, inputs: BindingInputs, options: BindingOptions) => Promise<Response>) {
   // SAFETY: `Ai` declares far more than the raw-run entry point the adapter reaches; this stub
   // implements exactly the `run` overload it calls, which is all the code under test can observe.
-  const binding = { binding: { run } as unknown as Ai };
-  return { binding, run };
+  return { binding: { run } as unknown as Ai };
+}
+
+function completionResponse(modelId: string): Response {
+  return new Response(
+    [
+      `data: ${JSON.stringify({
+        id: 'completion-1',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: modelId,
+        choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }],
+      })}`,
+      `data: ${JSON.stringify({
+        id: 'completion-1',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: modelId,
+        choices: [{ index: 0, delta: { content: 'Hello' }, finish_reason: null }],
+      })}`,
+      `data: ${JSON.stringify({
+        id: 'completion-1',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: modelId,
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      })}`,
+      'data: [DONE]',
+      '',
+    ].join('\n\n'),
+    { headers: { 'content-type': 'text/event-stream' } },
+  );
 }

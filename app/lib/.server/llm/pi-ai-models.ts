@@ -214,7 +214,7 @@ export function getPiModel(
 }
 
 /** The OpenAI-compatible body Pi serialises, forwarded to the binding verbatim apart from `model`. */
-type WorkersAiBindingInputs = Record<string, unknown> & { model?: string };
+type WorkersAiBindingInputs = Record<string, unknown> & { model?: string; max_completion_tokens?: number };
 
 type WorkersAiRawRunOptions = {
   returnRawResponse: true;
@@ -254,6 +254,46 @@ function createWorkersAiBindingFetch(
     }
     const response = await rawBinding.run(modelId, payload, options);
     recordPiStage('binding_run_response', modelId, response.status);
-    return response;
+    if (response.status !== 400) {
+      return response;
+    }
+    const retried = await retryWithinProviderOutputCap(rawBinding, modelId, payload, options, response);
+    if (!retried) {
+      return response;
+    }
+    recordPiStage('binding_run_response', modelId, retried.status);
+    return retried;
   };
+}
+
+/**
+ * Cloudflare's catalog window is not always the provider's completion cap: glm-5.3-flash advertises
+ * a 1,310,720-token window and rejects any `max_completion_tokens` above 1,048,576, so the budget
+ * computed from the window fails every request for that model. The rejection names the real cap, so
+ * the request is replayed once at that number. The replay calls the binding directly, which is what
+ * keeps a second rejection from looping.
+ */
+const PROVIDER_OUTPUT_CAP_PATTERN = /supports at most (\d+) completion tokens/;
+
+async function retryWithinProviderOutputCap(
+  binding: WorkersAiRawBinding,
+  modelId: WorkersAiRuntimeModelId,
+  payload: WorkersAiBindingInputs,
+  options: WorkersAiRawRunOptions,
+  rejection: Response,
+): Promise<Response | undefined> {
+  const requested = payload.max_completion_tokens;
+  if (requested === undefined) {
+    return undefined;
+  }
+  const body = await rejection
+    .clone()
+    .text()
+    .catch(() => '');
+  const cap = Number(PROVIDER_OUTPUT_CAP_PATTERN.exec(body)?.[1]);
+  if (!Number.isFinite(cap) || cap <= 0 || cap >= requested) {
+    return undefined;
+  }
+  recordPiStage('binding_output_cap_retry', modelId);
+  return binding.run(modelId, { ...payload, max_completion_tokens: cap }, options);
 }
