@@ -19,10 +19,11 @@ type ModelOverrides = {
   source?: number;
   properties?: AiModelsSearchObject['properties'];
   taskName?: string;
+  createdAt?: string;
 };
 
 function model(name: string, overrides: ModelOverrides = {}): AiModelsSearchObject {
-  return {
+  const entry = {
     id: name,
     source: overrides.source ?? 1,
     name,
@@ -31,6 +32,8 @@ function model(name: string, overrides: ModelOverrides = {}): AiModelsSearchObje
     tags: [],
     properties: overrides.properties ?? eligibleProperties,
   };
+  // Cloudflare dates every catalog entry; the generated binding type simply does not declare it.
+  return overrides.createdAt === undefined ? entry : Object.assign(entry, { created_at: overrides.createdAt });
 }
 
 describe('Workers AI live model catalog', () => {
@@ -78,6 +81,22 @@ describe('Workers AI live model catalog', () => {
       reasoning: true,
       vision: true,
     });
+  });
+
+  it('carries the catalog publication date through, and omits an unusable one', async () => {
+    const binding = {
+      models: vi.fn(async () => [
+        model('@cf/openai/gpt-oss-120b', { createdAt: '2026-08-26 00:00:00.000' }),
+        model('@cf/example/undated'),
+        model('@cf/example/bad-date', { createdAt: 'sometime last week' }),
+      ]),
+    };
+
+    const models = await readWorkersAiBuilderModelCatalog(binding);
+
+    expect(models[0]?.createdAt).toBe(new Date('2026-08-26 00:00:00.000').toISOString());
+    expect(models[1]).not.toHaveProperty('createdAt');
+    expect(models[2]).not.toHaveProperty('createdAt');
   });
 
   it('pins and includes GLM 5.3 Flash even when discovery omits it', () => {

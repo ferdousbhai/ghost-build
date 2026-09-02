@@ -15,20 +15,33 @@ import {
 
 const alternativeModel: WorkersAiModel = {
   ...DEFAULT_WORKERS_AI_MODEL,
-  id: '@cf/zai-org/glm-5.3-flash',
-  label: 'GLM 5.3 Flash',
-  contextTokens: 1_048_576,
-  requiresPaid: true,
-  vision: true,
+  id: '@cf/openai/gpt-oss-120b',
+  label: 'GPT OSS 120B',
+  contextTokens: 128_000,
+  requiresPaid: false,
+  vision: false,
 };
 
 describe('Workers AI model catalog', () => {
-  it('pins the canary-proven GPT OSS 120B as the safe startup default', () => {
-    expect(CLOUDFLARE_WORKERS_AI_MODEL).toBe('@cf/openai/gpt-oss-120b');
+  it('pins the owner-selected GLM 5.3 Flash as the safe startup default', () => {
+    expect(CLOUDFLARE_WORKERS_AI_MODEL).toBe('@cf/zai-org/glm-5.3-flash');
     expect(WORKERS_AI_MODELS).toEqual([DEFAULT_WORKERS_AI_MODEL]);
     expect(DEFAULT_WORKERS_AI_MODEL.contextTokens).toBeGreaterThanOrEqual(MINIMUM_BUILDER_MODEL_CONTEXT_TOKENS);
-    expect(DEFAULT_WORKERS_AI_MODEL.contextTokens).toBe(128_000);
+    expect(DEFAULT_WORKERS_AI_MODEL.contextTokens).toBe(1_048_576);
+    expect(DEFAULT_WORKERS_AI_MODEL).toMatchObject({ label: 'GLM 5.3 Flash', reasoning: true, vision: true });
     expect(getWorkersAiModel(CLOUDFLARE_WORKERS_AI_MODEL)).toBe(DEFAULT_WORKERS_AI_MODEL);
+  });
+
+  it('accepts a catalog entry with or without the publication date', () => {
+    const dated = { ...alternativeModel, createdAt: '2026-08-26T00:00:00.000Z' };
+
+    expect(workersAiModelCatalogPayloadSchema.parse({ defaultModelId: dated.id, models: [dated] }).models[0]).toEqual(
+      dated,
+    );
+    expect(
+      workersAiModelCatalogPayloadSchema.safeParse({ defaultModelId: alternativeModel.id, models: [alternativeModel] })
+        .success,
+    ).toBe(true);
   });
 
   it('pins the auxiliary models to backends that speak the OpenAI completions response shape', () => {

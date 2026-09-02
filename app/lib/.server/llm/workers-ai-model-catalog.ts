@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   CLOUDFLARE_WORKERS_AI_MODEL,
   DEFAULT_WORKERS_AI_MODEL,
@@ -46,7 +47,7 @@ export async function readWorkersAiBuilderModelCatalog(binding: WorkersAiCatalog
     ) {
       continue;
     }
-    models.set(entry.name, {
+    const model: WorkersAiModel = {
       id: entry.name,
       label: workersAiModelLabel(entry.name),
       description: boundedDescription(entry.description),
@@ -54,7 +55,12 @@ export async function readWorkersAiBuilderModelCatalog(binding: WorkersAiCatalog
       requiresPaid: properties.get('require_workers_paid') === 'true',
       reasoning: properties.get('reasoning') === 'true',
       vision: properties.get('vision') === 'true',
-    });
+    };
+    const createdAt = catalogEntryCreatedAt(entry);
+    if (createdAt !== undefined) {
+      model.createdAt = createdAt;
+    }
+    models.set(entry.name, model);
   }
   return [...models.values()];
 }
@@ -78,10 +84,29 @@ export async function requireWorkersAiBuilderModel(
 }
 
 export function workersAiModelCatalogPayload(models: WorkersAiModel[]): WorkersAiModelCatalogPayload {
+  // The pinned entry's own metadata is reviewed, not discovered, so only the one fact discovery
+  // knows better — when Cloudflare published it — is carried across.
+  const discoveredCreatedAt = models.find(({ id }) => id === CLOUDFLARE_WORKERS_AI_MODEL)?.createdAt;
   return {
     defaultModelId: CLOUDFLARE_WORKERS_AI_MODEL,
-    models: [DEFAULT_WORKERS_AI_MODEL, ...models.filter(({ id }) => id !== CLOUDFLARE_WORKERS_AI_MODEL)],
+    models: [
+      discoveredCreatedAt === undefined
+        ? DEFAULT_WORKERS_AI_MODEL
+        : { ...DEFAULT_WORKERS_AI_MODEL, createdAt: discoveredCreatedAt },
+      ...models.filter(({ id }) => id !== CLOUDFLARE_WORKERS_AI_MODEL),
+    ],
   };
+}
+
+/**
+ * Cloudflare's catalog dates each entry, but `AiModelsSearchObject` does not declare the field, so
+ * it is read as data rather than asserted onto the generated type.
+ */
+const catalogEntryDateSchema = z.looseObject({ created_at: z.string().min(1).max(64).optional().catch(undefined) });
+
+function catalogEntryCreatedAt(entry: AiModelsSearchObject): string | undefined {
+  const parsed = catalogEntryDateSchema.safeParse(entry).data?.created_at;
+  return parsed !== undefined && !Number.isNaN(Date.parse(parsed)) ? new Date(parsed).toISOString() : undefined;
 }
 
 function numericProperty(value: string | undefined): number {

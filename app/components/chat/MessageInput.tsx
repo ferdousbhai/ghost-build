@@ -13,6 +13,7 @@ import {
   useMessageInputController,
 } from './useMessageInputController';
 import { BuilderModelSelector } from './BuilderModelSelector.client';
+import { NewModelsNotice } from './NewModelsNotice.client';
 import { PromptRefinementDialog } from './PromptRefinementDialog.client';
 import { HOME_COMPOSER_TITLE } from '~/lib/trust';
 
@@ -99,6 +100,8 @@ export const MessageInput = memo(function MessageInput({
             {HOME_COMPOSER_TITLE}
           </p>
         )}
+        {/* Only where the picker it points at is actually on screen. */}
+        {chatStarted && modelSelector ? <NewModelsNotice /> : null}
         <div
           className={classNames(
             'ghost-message-input__surface rounded-lg bg-bolt-elements-background-depth-1 shadow-panel',

@@ -12,6 +12,7 @@ import {
 
 import {
   builderModelStore,
+  builderNewModelsStore,
   initializeBuilderModelPreference,
   installBuilderModelCatalog,
 } from '~/lib/stores/builder-model.client';
@@ -59,7 +60,7 @@ describe('BuilderModelSelector', () => {
     await renderSelector();
 
     const trigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Builder model"]');
-    expect(trigger?.getAttribute('aria-label')).toContain('GPT OSS 120B');
+    expect(trigger?.getAttribute('aria-label')).toContain('GLM 5.3 Flash');
     expect(trigger?.getAttribute('aria-haspopup')).toBe('menu');
 
     await act(async () => {
@@ -78,6 +79,30 @@ describe('BuilderModelSelector', () => {
 
     expect(builderModelStore.get()).toBe(alternativeModel.id);
     expect(localStorage.getItem('ghostbuild_builder_model_v2')).toBe(alternativeModel.id);
+  });
+
+  it('badges an unseen model, dates it, and records the sighting when the picker opens', async () => {
+    localStorage.setItem('ghostbuild_seen_builder_models_v1', JSON.stringify([CLOUDFLARE_WORKERS_AI_MODEL]));
+    await renderSelector(installDatedCatalog);
+    expect(builderNewModelsStore.get().map(({ id }) => id)).toEqual([alternativeModel.id]);
+
+    const trigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Builder model"]');
+    await act(async () => {
+      trigger?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    });
+
+    const alternative = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
+      item.textContent?.includes('GPT OSS 120B'),
+    );
+    expect(alternative?.textContent).toContain('New');
+    expect(alternative?.textContent).toContain('added Aug 26');
+    // The pinned default keeps the top row even though the other model is newer.
+    expect(document.querySelectorAll('[role="menuitemradio"]')[0]?.textContent).toContain('GLM 5.3 Flash');
+    expect(builderNewModelsStore.get()).toEqual([]);
+    expect(JSON.parse(localStorage.getItem('ghostbuild_seen_builder_models_v1') ?? 'null')).toEqual([
+      CLOUDFLARE_WORKERS_AI_MODEL,
+      alternativeModel.id,
+    ]);
   });
 
   it('closes the menu and prevents changes when a turn becomes active', async () => {
@@ -100,16 +125,23 @@ describe('BuilderModelSelector', () => {
   });
 });
 
-async function renderSelector() {
+async function renderSelector(catalogLoader: () => void = installTestCatalog) {
   const container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root?.render(<BuilderModelSelector catalogLoader={installTestCatalog} />);
+    root?.render(<BuilderModelSelector catalogLoader={catalogLoader} />);
     await Promise.resolve();
   });
 }
 
 function installTestCatalog(): void {
   installBuilderModelCatalog(catalog);
+}
+
+function installDatedCatalog(): void {
+  installBuilderModelCatalog({
+    ...catalog,
+    models: [DEFAULT_WORKERS_AI_MODEL, { ...alternativeModel, createdAt: '2026-08-26T00:00:00.000Z' }],
+  });
 }

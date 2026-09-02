@@ -12,35 +12,50 @@ import {
   builderModelCatalogStatusStore,
   builderModelsStore,
   builderModelStore,
+  builderNewModelsStore,
   initializeBuilderModelPreference,
   installBuilderModelCatalog,
   loadBuilderModelCatalog,
   loadBuilderModelPreference,
+  markBuilderModelsSeen,
+  orderBuilderModelsForDisplay,
 } from './builder-model.client';
 
 const alternativeModel: WorkersAiModel = {
   ...DEFAULT_WORKERS_AI_MODEL,
-  id: '@cf/zai-org/glm-5.3-flash',
-  label: 'GLM 5.3 Flash',
-  contextTokens: 1_048_576,
-  requiresPaid: true,
-  vision: true,
+  id: '@cf/openai/gpt-oss-120b',
+  label: 'GPT OSS 120B',
+  contextTokens: 128_000,
+  requiresPaid: false,
+  vision: false,
 };
 const catalog: WorkersAiModelCatalogPayload = {
   defaultModelId: CLOUDFLARE_WORKERS_AI_MODEL,
   models: [DEFAULT_WORKERS_AI_MODEL, alternativeModel],
 };
 
+function memoryStorage(entries: Record<string, string> = {}) {
+  const values = new Map(Object.entries(entries));
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => void values.set(key, value),
+    read: (key: string) => values.get(key) ?? null,
+  };
+}
+
+const SEEN_KEY = 'ghostbuild_seen_builder_models_v1';
+
 describe('builder model preference', () => {
   beforeEach(() => {
     installBuilderModelCatalog(
       { defaultModelId: CLOUDFLARE_WORKERS_AI_MODEL, models: [DEFAULT_WORKERS_AI_MODEL] },
-      { getItem: () => null },
+      memoryStorage(),
     );
     builderModelCatalogStatusStore.set('idle');
+    builderNewModelsStore.set([]);
   });
 
-  it('uses the pinned GPT OSS 120B default before discovery', () => {
+  it('uses the pinned GLM 5.3 Flash default before discovery', () => {
     initializeBuilderModelPreference({ getItem: () => null });
 
     expect(builderModelStore.get()).toBe(CLOUDFLARE_WORKERS_AI_MODEL);
@@ -72,5 +87,69 @@ describe('builder model preference', () => {
 
     expect(builderModelCatalogStatusStore.get()).toBe('error');
     expect(builderModelsStore.get()).toEqual([DEFAULT_WORKERS_AI_MODEL]);
+  });
+});
+
+describe('new Workers AI models', () => {
+  beforeEach(() => {
+    builderNewModelsStore.set([]);
+  });
+
+  it('seeds the first ever catalog silently instead of announcing every model', () => {
+    const storage = memoryStorage();
+
+    installBuilderModelCatalog(catalog, storage);
+
+    expect(builderNewModelsStore.get()).toEqual([]);
+    expect(JSON.parse(storage.read(SEEN_KEY) ?? 'null')).toEqual([DEFAULT_WORKERS_AI_MODEL.id, alternativeModel.id]);
+  });
+
+  it('reports only the ids this browser has never seen', () => {
+    const storage = memoryStorage({ [SEEN_KEY]: JSON.stringify([DEFAULT_WORKERS_AI_MODEL.id]) });
+
+    installBuilderModelCatalog(catalog, storage);
+
+    expect(builderNewModelsStore.get()).toEqual([alternativeModel]);
+    // Diffing alone must not record the sighting: the user has not been shown anything yet.
+    expect(JSON.parse(storage.read(SEEN_KEY) ?? 'null')).toEqual([DEFAULT_WORKERS_AI_MODEL.id]);
+  });
+
+  it('clears the notice once the models have been seen, and stays clear on the next load', () => {
+    const storage = memoryStorage({ [SEEN_KEY]: JSON.stringify([DEFAULT_WORKERS_AI_MODEL.id]) });
+    installBuilderModelCatalog(catalog, storage);
+
+    markBuilderModelsSeen(storage);
+
+    expect(builderNewModelsStore.get()).toEqual([]);
+    installBuilderModelCatalog(catalog, storage);
+    expect(builderNewModelsStore.get()).toEqual([]);
+  });
+
+  it('reseeds rather than announcing everything when the stored set is unreadable', () => {
+    const storage = memoryStorage({ [SEEN_KEY]: 'not-json' });
+
+    installBuilderModelCatalog(catalog, storage);
+
+    expect(builderNewModelsStore.get()).toEqual([]);
+    expect(JSON.parse(storage.read(SEEN_KEY) ?? 'null')).toEqual([DEFAULT_WORKERS_AI_MODEL.id, alternativeModel.id]);
+  });
+
+  it('orders the picker newest first while the pinned default stays on top', () => {
+    const older: WorkersAiModel = { ...alternativeModel, id: '@cf/example/older', createdAt: '2026-01-05T00:00:00Z' };
+    const newer: WorkersAiModel = { ...alternativeModel, id: '@cf/example/newer', createdAt: '2026-08-26T00:00:00Z' };
+    const undated: WorkersAiModel = { ...alternativeModel, id: '@cf/example/undated' };
+
+    const ordered = orderBuilderModelsForDisplay(
+      [older, undated, newer, DEFAULT_WORKERS_AI_MODEL],
+      DEFAULT_WORKERS_AI_MODEL.id,
+    );
+
+    expect(ordered.map(({ id }) => id)).toEqual([
+      DEFAULT_WORKERS_AI_MODEL.id,
+      newer.id,
+      older.id,
+      // An unknown publication date is not a claim to be old, so it keeps its catalog position last.
+      undated.id,
+    ]);
   });
 });

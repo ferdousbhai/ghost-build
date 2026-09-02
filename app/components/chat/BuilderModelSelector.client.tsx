@@ -1,19 +1,31 @@
 import { useStore } from '@nanostores/react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { CheckIcon, ChevronDownIcon } from '@radix-ui/react-icons';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getWorkersAiModel, isWorkersAiModelId, type WorkersAiModel } from '~/lib/workers-ai-model';
 import {
   builderDefaultModelStore,
   builderModelCatalogStatusStore,
   builderModelsStore,
   builderModelStore,
+  builderNewModelsStore,
   loadBuilderModelCatalog,
   loadBuilderModelPreference,
+  markBuilderModelsSeen,
+  orderBuilderModelsForDisplay,
   setBuilderModel,
   syncBuilderModelPreference,
 } from '~/lib/stores/builder-model.client';
 import { classNames } from '~/utils/classNames';
+
+/** The catalog dates entries to the day, so the day is all the picker claims. */
+function formatModelAddedDate(createdAt: string | undefined): string | null {
+  const parsed = createdAt === undefined ? Number.NaN : Date.parse(createdAt);
+  if (Number.isNaN(parsed)) {
+    return null;
+  }
+  return new Date(parsed).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
 
 export function BuilderModelSelector({
   compact = false,
@@ -27,10 +39,19 @@ export function BuilderModelSelector({
   const modelId = useStore(builderModelStore);
   const defaultModelId = useStore(builderDefaultModelStore);
   const models = useStore(builderModelsStore);
+  const newModels = useStore(builderNewModelsStore);
   const catalogStatus = useStore(builderModelCatalogStatusStore);
   const model = getWorkersAiModel(modelId, models);
   const [openRequested, setOpenRequested] = useState(false);
   const open = !disabled && openRequested;
+  const orderedModels = useMemo(() => orderBuilderModelsForDisplay(models, defaultModelId), [defaultModelId, models]);
+  // What was new when this picker last opened. Opening records the sighting, but the badge is the
+  // reason the user opened the picker, so it stays legible for the rest of this session.
+  const [openedWithNewIds, setOpenedWithNewIds] = useState<readonly WorkersAiModel['id'][]>([]);
+  const newModelIds = useMemo(
+    () => new Set([...openedWithNewIds, ...newModels.map(({ id }) => id)]),
+    [newModels, openedWithNewIds],
+  );
 
   useEffect(() => {
     loadBuilderModelPreference();
@@ -38,6 +59,16 @@ export function BuilderModelSelector({
     window.addEventListener('storage', syncBuilderModelPreference);
     return () => window.removeEventListener('storage', syncBuilderModelPreference);
   }, [catalogLoader]);
+
+  // Opening the picker is the user seeing the list, so nothing here is new to them any more.
+  useEffect(() => {
+    const unseen = builderNewModelsStore.get();
+    if (!open || unseen.length === 0) {
+      return;
+    }
+    setOpenedWithNewIds(unseen.map(({ id }) => id));
+    markBuilderModelsSeen();
+  }, [open]);
 
   useEffect(() => {
     if (disabled) {
@@ -86,7 +117,12 @@ export function BuilderModelSelector({
               }
             }}
           >
-            <ModelGroup models={models} disabled={disabled} defaultModelId={defaultModelId} />
+            <ModelGroup
+              models={orderedModels}
+              disabled={disabled}
+              defaultModelId={defaultModelId}
+              newModelIds={newModelIds}
+            />
           </DropdownMenu.RadioGroup>
           <p role="note" className="mx-2 mb-1 mt-2 text-xs leading-5 text-content-tertiary">
             {catalogStatus === 'error'
@@ -103,47 +139,60 @@ function ModelGroup({
   models,
   disabled,
   defaultModelId,
+  newModelIds,
 }: {
   models: readonly WorkersAiModel[];
   disabled: boolean;
   defaultModelId: WorkersAiModel['id'];
+  newModelIds: ReadonlySet<WorkersAiModel['id']>;
 }) {
   return (
     <DropdownMenu.Group>
       <DropdownMenu.Label className="px-3 pb-1.5 pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-content-tertiary">
         Cloudflare Workers AI
       </DropdownMenu.Label>
-      {models.map((model) => (
-        <DropdownMenu.RadioItem
-          key={model.id}
-          value={model.id}
-          textValue={model.label}
-          disabled={disabled}
-          className="group/model relative flex min-h-14 cursor-pointer select-none items-center gap-3 rounded-lg px-3 py-2.5 outline-none transition-colors data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[highlighted]:bg-bolt-elements-background-depth-2 data-[state=checked]:bg-bolt-elements-item-backgroundAccent"
-        >
-          <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 group-data-[state=checked]/model:border-accent-500 group-data-[state=checked]/model:bg-accent-500 group-data-[state=checked]/model:text-white">
-            <DropdownMenu.ItemIndicator>
-              <CheckIcon className="size-3.5" />
-            </DropdownMenu.ItemIndicator>
-          </span>
-          <span className="min-w-0 grow">
-            <span className="flex items-center gap-2">
-              <span className="truncate text-sm font-semibold text-content-primary">{model.label}</span>
-              {model.id === defaultModelId && (
-                <span className="shrink-0 rounded border border-accent-500/30 bg-accent-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-content-accent">
-                  Default
-                </span>
-              )}
-              {model.requiresPaid && (
-                <span className="shrink-0 rounded border border-util-warning/30 bg-util-warning/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-content-warning">
-                  Paid
-                </span>
-              )}
+      {models.map((model) => {
+        const addedOn = formatModelAddedDate(model.createdAt);
+        return (
+          <DropdownMenu.RadioItem
+            key={model.id}
+            value={model.id}
+            textValue={model.label}
+            disabled={disabled}
+            className="group/model relative flex min-h-14 cursor-pointer select-none items-center gap-3 rounded-lg px-3 py-2.5 outline-none transition-colors data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[highlighted]:bg-bolt-elements-background-depth-2 data-[state=checked]:bg-bolt-elements-item-backgroundAccent"
+          >
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 group-data-[state=checked]/model:border-accent-500 group-data-[state=checked]/model:bg-accent-500 group-data-[state=checked]/model:text-white">
+              <DropdownMenu.ItemIndicator>
+                <CheckIcon className="size-3.5" />
+              </DropdownMenu.ItemIndicator>
             </span>
-            <span className="mt-0.5 block text-xs leading-4 text-content-secondary">{model.description}</span>
-          </span>
-        </DropdownMenu.RadioItem>
-      ))}
+            <span className="min-w-0 grow">
+              <span className="flex items-center gap-2">
+                <span className="truncate text-sm font-semibold text-content-primary">{model.label}</span>
+                {model.id === defaultModelId && (
+                  <span className="shrink-0 rounded border border-accent-500/30 bg-accent-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-content-accent">
+                    Default
+                  </span>
+                )}
+                {newModelIds.has(model.id) && (
+                  <span className="shrink-0 rounded border border-util-success/30 bg-util-success/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-content-success">
+                    New
+                  </span>
+                )}
+                {model.requiresPaid && (
+                  <span className="shrink-0 rounded border border-util-warning/30 bg-util-warning/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-content-warning">
+                    Paid
+                  </span>
+                )}
+              </span>
+              <span className="mt-0.5 block text-xs leading-4 text-content-secondary">
+                {model.description}
+                {addedOn === null ? null : <span className="text-content-tertiary"> · added {addedOn}</span>}
+              </span>
+            </span>
+          </DropdownMenu.RadioItem>
+        );
+      })}
     </DropdownMenu.Group>
   );
 }

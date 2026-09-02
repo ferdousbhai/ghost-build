@@ -12,15 +12,28 @@ export type WorkersAiModel = {
   requiresPaid: boolean;
   reasoning: boolean;
   vision: boolean;
+  /**
+   * When Cloudflare added this model to the account-visible catalog, as an ISO timestamp. Optional
+   * on purpose: a user-owned runtime built before this field existed still serves a valid catalog,
+   * and Cloudflare itself does not date every entry. Absence means "unknown", never "old".
+   */
+  createdAt?: string;
 };
 
 /**
  * The deliberately pinned default; catalog discovery may add choices but never silently changes
- * it. Default selection requires a successful end-to-end canary build: gpt-oss-120b completed
- * prompt→validated→preview→deployed on 2026-09-02, while glm-5.3-flash failed canary in every
- * tested reasoning configuration (unbounded, medium, and low effort).
+ * it. The owner pins GLM 5.3 Flash: it is the fastest Workers AI model that reasons, reads images,
+ * and holds a million-token window, which is the shape a Ghostbuild build actually needs.
+ *
+ * The earlier canary failures no longer describe the runtime that drives it. Those runs asked for
+ * a fixed 24,576-token output ceiling, and a reasoning model spends that ceiling on hidden
+ * reasoning before it ever writes a tool call. Requests now carry `reasoning_effort: high` with an
+ * uncapped per-request output budget — whatever the window has left once the input is counted —
+ * so reasoning and the answer no longer compete for the same few thousand tokens. See
+ * `builderThinkingLevel` in `.server/llm/pi-agent-runner.ts` and `requestOutputTokens` in
+ * `.server/llm/pi-ai-models.ts`.
  */
-export const CLOUDFLARE_WORKERS_AI_MODEL = '@cf/openai/gpt-oss-120b' satisfies WorkersAiModelId;
+export const CLOUDFLARE_WORKERS_AI_MODEL = '@cf/zai-org/glm-5.3-flash' satisfies WorkersAiModelId;
 
 /**
  * Titles must come from a model that speaks the OpenAI completions response shape, because every
@@ -37,6 +50,9 @@ export const CLOUDFLARE_PROJECT_TITLE_MODEL = '@cf/meta/llama-4-scout-17b-16e-in
  * Context-compaction summaries must come from a fast, large-context model that never spends its
  * output budget on hidden reasoning: GLM 5.3 Flash produced 24s empty "summaries" (all
  * reasoning_content, finish_reason length), and a failed summary aborts the whole builder turn.
+ * Unlike a builder turn, a summary asks for a small explicit output budget rather than the whole
+ * remaining window, so a reasoning model can still exhaust it here even though it no longer can
+ * as the builder. This stays on a non-reasoning, OpenAI-shaped model regardless of the default.
  */
 export const CLOUDFLARE_CONTEXT_SUMMARY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct' satisfies WorkersAiModelId;
 export type WorkersAiRuntimeModelId = WorkersAiModelId;
@@ -51,12 +67,12 @@ export const MINIMUM_BUILDER_MODEL_CONTEXT_TOKENS = 32_768;
 
 export const DEFAULT_WORKERS_AI_MODEL: WorkersAiModel = {
   id: CLOUDFLARE_WORKERS_AI_MODEL,
-  label: 'GPT OSS 120B',
-  description: "OpenAI's open-weight model for agentic coding, tool calling, and production builds.",
-  contextTokens: 128_000,
-  requiresPaid: false,
+  label: 'GLM 5.3 Flash',
+  description: 'Latest fast GLM model for coding, reasoning, and tool-driven builds.',
+  contextTokens: 1_048_576,
+  requiresPaid: true,
   reasoning: true,
-  vision: false,
+  vision: true,
 };
 
 /** Safe startup fallback while the connected account's live Workers AI catalog is loading. */
@@ -74,6 +90,8 @@ const workersAiModelSchema = z.object({
   requiresPaid: z.boolean(),
   reasoning: z.boolean(),
   vision: z.boolean(),
+  // A runtime that predates this field simply omits it, so an absent value must stay valid.
+  createdAt: z.string().min(1).max(64).optional(),
 });
 
 export const workersAiModelCatalogPayloadSchema = z.object({
