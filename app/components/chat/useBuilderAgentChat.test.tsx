@@ -50,6 +50,8 @@ const mocks = vi.hoisted(() => {
     previewRequests,
     waitForSocket: vi.fn(async () => undefined),
     workbench,
+    workspacePreparing: { value: false },
+    refreshRuntimeSession: vi.fn(async () => ({})),
   };
 });
 
@@ -66,6 +68,7 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 vi.mock('~/lib/cloudflare/runtime-session', () => ({
   requireUserRuntimeEndpoint: () => 'https://runtime.example.com',
+  refreshUserRuntimeSession: mocks.refreshRuntimeSession,
 }));
 vi.mock('~/lib/stores/builder-workspace-sync.client', () => ({
   BuilderWorkspaceSyncController: { initialize: mocks.initializeWorkspace },
@@ -111,7 +114,12 @@ vi.mock('./chat-send-reconciliation', () => ({
 // the ceiling through app code.
 // eslint-disable-next-line no-restricted-imports -- test-only cross-boundary derivation pin
 import { CONTAINER_CONNECT_TIMEOUT_MS } from '../../../user-workspace-runtime/src/container-toolchain';
-import { useBuilderAgentChat, WORKSPACE_PREPARE_TIMEOUT_MS } from './useBuilderAgentChat';
+import {
+  useBuilderAgentChat,
+  WORKSPACE_PREPARE_TIMEOUT_MS,
+  WORKSPACE_RECONNECT_ATTEMPTS,
+  WORKSPACE_RECONNECT_DELAYS_MS,
+} from './useBuilderAgentChat';
 
 let root: Root | undefined;
 
@@ -146,6 +154,7 @@ beforeEach(() => {
   mocks.waitForSocket.mockResolvedValue(undefined);
   mocks.workbench.connectPreview.mockClear();
   mocks.workbench.updatePreview.mockClear();
+  mocks.refreshRuntimeSession.mockClear();
 });
 
 afterEach(async () => {
@@ -186,6 +195,96 @@ describe('useBuilderAgentChat workspace preparation', () => {
     await vi.waitFor(() => expect(prepareWorkspaceCalls()).toHaveLength(1));
     const [, , options] = prepareWorkspaceCalls()[0] as [string, unknown[], { timeout?: number }];
     expect(options?.timeout).toBe(WORKSPACE_PREPARE_TIMEOUT_MS);
+  });
+
+  it('recovers an open chat when a release makes the runtime refuse, then answer', async () => {
+    // What a control-plane release looks like from an already-open chat: the runtime session
+    // request answers `409 workspace_preparing` while the new image builds, so the socket and
+    // `prepareWorkspace` both fail — and then, ~40 seconds later, they simply work again.
+    vi.useFakeTimers();
+    try {
+      let preparation = 0;
+      mocks.agent.call.mockImplementation(async (method: string) => {
+        if (method === 'getPreviewState') {
+          return {};
+        }
+        if (method === 'prepareWorkspace') {
+          preparation += 1;
+          if (preparation === 1) {
+            throw new Error('workspace_preparing');
+          }
+          return { initialized: true };
+        }
+        if (method === 'getTranscriptSnapshot') {
+          return { checkpoint: null, messages: [] };
+        }
+        throw new Error(`Unexpected agent call: ${method}`);
+      });
+
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      function Harness() {
+        return <span>{useBuilderAgentChat(chatArgs('workspace-release')).workspacePresentationState}</span>;
+      }
+      await act(async () => root?.render(<Harness />));
+
+      // The refused attempt reports itself instead of holding "Loading project files…" forever.
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(container.textContent).toBe('reconnecting');
+      expect(mocks.refreshRuntimeSession).toHaveBeenCalledTimes(1);
+      expect(mocks.initializeWorkspace).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(WORKSPACE_RECONNECT_DELAYS_MS[0]);
+      });
+
+      expect(prepareWorkspaceCalls()).toHaveLength(2);
+      expect(mocks.initializeWorkspace).toHaveBeenCalledWith(
+        mocks.agent,
+        expect.objectContaining({ workspaceId: 'workspace-release' }),
+      );
+      expect(container.textContent).toBe('ready');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops on a bounded budget instead of retrying a workspace forever', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.agent.call.mockImplementation(async (method: string) => {
+        if (method === 'getPreviewState') {
+          return {};
+        }
+        if (method === 'prepareWorkspace') {
+          throw new Error('workspace_preparing');
+        }
+        if (method === 'getTranscriptSnapshot') {
+          return { checkpoint: null, messages: [] };
+        }
+        throw new Error(`Unexpected agent call: ${method}`);
+      });
+
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      function Harness() {
+        return <span>{useBuilderAgentChat(chatArgs('workspace-down')).workspacePresentationState}</span>;
+      }
+      await act(async () => root?.render(<Harness />));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(WORKSPACE_RECONNECT_ATTEMPTS * 30_000);
+      });
+
+      expect(prepareWorkspaceCalls()).toHaveLength(WORKSPACE_RECONNECT_ATTEMPTS);
+      expect(container.textContent).toBe('unavailable');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('settles stale send admission without activating the old workspace when the presentation switches', async () => {

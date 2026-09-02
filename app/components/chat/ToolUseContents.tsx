@@ -9,18 +9,25 @@ import type {
   CloudflareExecutionPublicState,
 } from 'ghostbuild-agent/cloudflare-mcp';
 import { Button } from '~/components/ui/primitives/Button';
+import { isToolActivityStatusActive, type ToolActivityStatus } from '~/lib/common/types';
 
 export const ToolUseContents = memo(function ToolUseContents({
   invocation,
+  status,
   progress,
   cloudflareExecution,
   onCloudflareExecutionDecision,
 }: {
   invocation: GhostbuildToolInvocation;
+  status: ToolActivityStatus;
   progress?: unknown;
   cloudflareExecution?: CloudflareExecutionPublicState;
   onCloudflareExecutionDecision?: CloudflareExecutionDecisionHandler;
 }) {
+  // A stopped or finished call keeps whatever invocation state the provider last streamed, so the
+  // invocation alone cannot say whether work is still happening. The card's own status can, and a
+  // tool that is no longer running must never show the running placeholder.
+  const running = isToolInvocationInProgress(invocation) && isToolActivityStatusActive(status);
   if (
     invocation.toolName === 'cloudflare_docs' ||
     invocation.toolName === 'cloudflare_search' ||
@@ -29,13 +36,20 @@ export const ToolUseContents = memo(function ToolUseContents({
     return (
       <CloudflareMcpToolContents
         invocation={invocation}
+        running={running}
         execution={cloudflareExecution}
         onDecision={onCloudflareExecutionDecision}
       />
     );
   }
-  if (isToolInvocationInProgress(invocation)) {
+  if (running) {
     return <RunningToolContents invocation={invocation} progress={progress} />;
+  }
+  if (isToolInvocationInProgress(invocation)) {
+    return <ToolResultFrame>{unfinishedToolSummary(status)}</ToolResultFrame>;
+  }
+  if (invocation.toolName === 'validate') {
+    return <ValidationToolContents invocation={invocation} />;
   }
   return invocation.toolName === 'read' ||
     invocation.toolName === 'write' ||
@@ -46,6 +60,12 @@ export const ToolUseContents = memo(function ToolUseContents({
     <pre className="overflow-x-auto whitespace-pre-wrap">{JSON.stringify(invocation, null, 2)}</pre>
   );
 });
+
+function unfinishedToolSummary(status: ToolActivityStatus): string {
+  return status === 'aborted'
+    ? 'Stopped before this tool returned a result.'
+    : 'This tool call ended without a recorded result.';
+}
 
 function RunningToolContents({ invocation, progress }: { invocation: GhostbuildToolInvocation; progress?: unknown }) {
   const input = runningToolInputSchema.safeParse(invocation.input).data;
@@ -114,18 +134,27 @@ const cloudflareToolInputSchema = z.looseObject({
 
 function CloudflareMcpToolContents({
   invocation,
+  running,
   execution,
   onDecision,
 }: {
   invocation: GhostbuildToolInvocation;
+  running: boolean;
   execution?: CloudflareExecutionPublicState;
   onDecision?: CloudflareExecutionDecisionHandler;
 }) {
   if (invocation.toolName === 'cloudflare_execute') {
-    return <CloudflareExecuteContents invocation={invocation} execution={execution} onDecision={onDecision} />;
+    return (
+      <CloudflareExecuteContents
+        invocation={invocation}
+        running={running}
+        execution={execution}
+        onDecision={onDecision}
+      />
+    );
   }
   const input = cloudflareToolInputSchema.safeParse(invocation.input).data;
-  if (isToolInvocationInProgress(invocation)) {
+  if (running) {
     const activity = invocation.toolName === 'cloudflare_docs' ? input?.query : input?.code;
     return (
       <ToolResultFrame>
@@ -142,6 +171,9 @@ function CloudflareMcpToolContents({
   }
   if (invocation.state === 'output-error') {
     return <ToolResultFrame>{invocation.errorText ?? 'Cloudflare MCP failed.'}</ToolResultFrame>;
+  }
+  if (isToolInvocationInProgress(invocation)) {
+    return <ToolResultFrame>{unfinishedToolSummary('aborted')}</ToolResultFrame>;
   }
   const result =
     invocation.state === 'output-available' ? cloudflareMcpResultSchema.safeParse(invocation.output).data : null;
@@ -172,10 +204,12 @@ function CloudflareMcpToolContents({
 
 function CloudflareExecuteContents({
   invocation,
+  running,
   execution,
   onDecision,
 }: {
   invocation: GhostbuildToolInvocation;
+  running: boolean;
   execution?: CloudflareExecutionPublicState;
   onDecision?: CloudflareExecutionDecisionHandler;
 }) {
@@ -197,7 +231,7 @@ function CloudflareExecuteContents({
     return () => window.clearTimeout(timeout);
   }, [expiresAt]);
 
-  if (isToolInvocationInProgress(invocation)) {
+  if (running) {
     return (
       <ToolResultFrame>
         <div className="space-y-2">
@@ -208,6 +242,9 @@ function CloudflareExecuteContents({
         </div>
       </ToolResultFrame>
     );
+  }
+  if (isToolInvocationInProgress(invocation) && !proposal && !execution) {
+    return <ToolResultFrame>{unfinishedToolSummary('aborted')}</ToolResultFrame>;
   }
   if (invocation.state === 'output-error') {
     return <ToolResultFrame>{invocation.errorText ?? 'The Cloudflare execution proposal failed.'}</ToolResultFrame>;
@@ -348,6 +385,74 @@ const runningToolProgressSchema = z.looseObject({
 });
 
 const validationOutputSchema = z.looseObject({ validation: z.unknown().optional() });
+
+/** The canonical validation reports its pipeline; anything it does not report is simply absent. */
+const validationReportSchema = z.looseObject({
+  durationMs: z.number().optional().catch(undefined),
+  checks: z
+    .array(z.looseObject({ name: z.string(), status: z.string() }))
+    .max(64)
+    .optional()
+    .catch(undefined),
+});
+
+/**
+ * A finished validation is a verdict plus the stages behind it, not a JSON dump. The stage list is
+ * what makes a failure actionable, so it is rendered when the result carries one and skipped
+ * silently when it does not.
+ */
+function ValidationToolContents({ invocation }: { invocation: GhostbuildToolInvocation }) {
+  if (invocation.state === 'output-error') {
+    return <ToolResultFrame>{invocation.errorText ?? 'Project validation failed.'}</ToolResultFrame>;
+  }
+  if (invocation.state === 'output-denied') {
+    return <ToolResultFrame>{invocation.approval?.reason ?? 'Project validation was denied.'}</ToolResultFrame>;
+  }
+  const attached = validationOutputSchema.safeParse(invocation.output).data?.validation;
+  const result = isGhostbuildToolResult(attached)
+    ? attached
+    : isGhostbuildToolResult(invocation.output)
+      ? invocation.output
+      : null;
+  if (!result) {
+    return <ToolResultFrame>{toolResultSummary(invocation.output)}</ToolResultFrame>;
+  }
+  const report = validationReportSchema.safeParse(result.data).data;
+  const checks = report?.checks ?? [];
+  return (
+    <ToolResultFrame>
+      <div className="space-y-2">
+        <div className={result.ok ? 'text-content-primary' : 'text-bolt-elements-icon-error'}>
+          {result.ok ? 'Validation passed.' : 'Validation failed.'}
+          {report?.durationMs === undefined ? null : (
+            <span className="ml-2 text-xs text-content-tertiary">{Math.round(report.durationMs / 1_000)}s</span>
+          )}
+        </div>
+        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-content-secondary">
+          {result.summary}
+        </pre>
+        {checks.length > 0 ? (
+          <ul className="grid gap-1 text-xs text-content-secondary">
+            {checks.map((check) => (
+              <li key={check.name} className="flex items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className={
+                    check.status === 'passed' ? 'text-bolt-elements-icon-success' : 'text-bolt-elements-icon-error'
+                  }
+                >
+                  {check.status === 'passed' ? '✓' : '✗'}
+                </span>
+                <span className="truncate">{check.name}</span>
+                <span className="ml-auto shrink-0 text-content-tertiary">{check.status}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </ToolResultFrame>
+  );
+}
 
 function StructuredResultTool({ invocation }: { invocation: GhostbuildToolInvocation }) {
   const complete = !isToolInvocationInProgress(invocation);

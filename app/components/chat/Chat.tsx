@@ -1,5 +1,5 @@
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import { useSnapScroll } from '~/lib/hooks/useSnapScroll';
 import { chatStore } from '~/lib/stores/chatId';
 import { toolActivityStore } from '~/lib/stores/tool-activity.client';
@@ -9,7 +9,7 @@ import { useChatId } from '~/lib/stores/chatId';
 import { useUserIdOrNullOrLoading } from '~/lib/stores/userId';
 import type { ChatProps } from './chat-types';
 import { UnauthenticatedChat } from './UnauthenticatedChat';
-import { workspacePresentationId, useBuilderAgentChat } from './useBuilderAgentChat';
+import { workspacePresentationId, useBuilderAgentChat, type WorkspacePresentationState } from './useBuilderAgentChat';
 import { useChatHistoryProcessing } from './useChatHistoryProcessing';
 import { useCurrentToolStatus } from './useCurrentToolStatus';
 import { useBuildProgress } from './useBuildProgress';
@@ -21,6 +21,7 @@ import {
   getUserRuntimeSession,
   UserRuntimeSessionError,
   userRuntimeEndpointStore,
+  userWorkspacePreparingStore,
   type UserRuntimeErrorCode,
 } from '~/lib/cloudflare/runtime-session';
 import { Loading } from '~/components/Loading';
@@ -180,6 +181,41 @@ function WorkspaceRuntimeConnectionError({
   );
 }
 
+/** Said when a release is re-provisioning the runtime a chat is already sitting in. */
+const WORKSPACE_RELEASE_NOTICE = 'Preparing your workspace — a new release is rolling out.';
+
+/**
+ * What the composer says while the workbench file sync is not yet live. A wait the browser is
+ * still working through reads as a wait; a wait it has given up on says so and offers the retry,
+ * because an unexplained "Loading project files…" is indistinguishable from a hang.
+ */
+function workspaceSyncNotice(
+  state: WorkspacePresentationState,
+  workspacePreparing: boolean,
+  onRetry: () => void,
+): ReactNode {
+  if (state === 'ready') {
+    return null;
+  }
+  if (state === 'presentation-error') {
+    return 'Editor unavailable. Chat, builds, and previews still work.';
+  }
+  if (state === 'unavailable') {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-2">
+        <span>Ghostbuild could not reach your workspace. Chat is paused until it reconnects.</span>
+        <Button variant="neutral" size="xs" onClick={onRetry}>
+          Reconnect
+        </Button>
+      </span>
+    );
+  }
+  if (workspacePreparing) {
+    return WORKSPACE_RELEASE_NOTICE;
+  }
+  return state === 'reconnecting' ? 'Reconnecting to your workspace…' : 'Loading project files…';
+}
+
 const AuthenticatedChat = memo(
   ({
     accountId,
@@ -198,6 +234,7 @@ const AuthenticatedChat = memo(
     clearPendingInitialMessage: () => void;
   }) => {
     const chatInitialId = useChatId();
+    const workspacePreparing = useStore(userWorkspacePreparingStore);
     const presentationId = workspacePresentationId(accountId, transcript.agentName);
     useLayoutEffect(() => {
       initializeBuilderModelPreference();
@@ -235,6 +272,7 @@ const AuthenticatedChat = memo(
       cloudflareExecutions,
       decideCloudflareExecution,
       workspacePresentationState,
+      retryWorkspacePresentation,
     } = useBuilderAgentChat({
       accountId,
       chatInitialId,
@@ -330,13 +368,7 @@ const AuthenticatedChat = memo(
         onDeploy={deployValidatedRevision}
         cloudflareExecutions={cloudflareExecutions}
         onCloudflareExecutionDecision={decideCloudflareExecution}
-        runtimeNotice={
-          workspacePresentationState === 'presentation-error'
-            ? 'Editor unavailable. Chat, builds, and previews still work.'
-            : workspacePresentationState === 'connecting'
-              ? 'Loading project files…'
-              : null
-        }
+        runtimeNotice={workspaceSyncNotice(workspacePresentationState, workspacePreparing, retryWorkspacePresentation)}
         sendMessageInProgress={sendMessageInProgress}
         subchats={visibleSubchats}
         onSubchatTitleChange={handleSubchatTitleChange}

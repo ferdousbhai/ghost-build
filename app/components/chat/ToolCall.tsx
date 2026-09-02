@@ -58,6 +58,7 @@ export const ToolCall = memo(function ToolCall({
           <div className="space-y-2.5">
             <ToolUseContents
               invocation={invocation}
+              status={status}
               progress={progress}
               cloudflareExecution={cloudflareExecution}
               onCloudflareExecutionDecision={onCloudflareExecutionDecision}

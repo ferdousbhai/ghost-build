@@ -33,7 +33,7 @@ import { toolProgressStore } from '~/lib/stores/tool-progress.client';
 import { useQueryClient } from '@tanstack/react-query';
 import { subchatQueryKey } from '~/lib/cloudflare/data-hooks';
 import { settleBuilderStop } from './builder-stop';
-import { requireUserRuntimeEndpoint } from '~/lib/cloudflare/runtime-session';
+import { refreshUserRuntimeSession, requireUserRuntimeEndpoint } from '~/lib/cloudflare/runtime-session';
 import { builderModelStore } from '~/lib/stores/builder-model.client';
 import { workersAiModelIdSchema } from '~/lib/workers-ai-model';
 import { loadAuthoritativeTranscriptSnapshot, reconcileMessagesForSend } from './chat-send-reconciliation';
@@ -64,6 +64,36 @@ const AGENT_CANCEL_SETTLE_TIMEOUT_MS = 5 * 60 * 1000;
  * ceiling by the pinning test in useBuilderAgentChat.test.tsx.
  */
 export const WORKSPACE_PREPARE_TIMEOUT_MS = 20 * 60 * 1000;
+
+/**
+ * How long the browser waits between attempts to re-reach a workspace it could not open. A
+ * control-plane release re-provisions the workspace runtime, and every session request answers
+ * `409 workspace_preparing` for as long as the new image builds — roughly 40 seconds, observed.
+ * A chat that was already open must survive that on its own, so it backs off rather than giving
+ * up on the first refused connection. The last delay repeats until the attempts run out.
+ */
+export const WORKSPACE_RECONNECT_DELAYS_MS = [2_000, 4_000, 8_000, 15_000, 30_000] as const;
+
+/**
+ * The retry budget. Bounded on purpose: an unbounded loop is how a chat ends up sitting on a
+ * spinner forever, which is the failure this exists to remove. Once it is spent the browser says
+ * so and offers the retry, instead of pretending it is still loading.
+ */
+export const WORKSPACE_RECONNECT_ATTEMPTS = 10;
+
+/**
+ * What the workbench file sync is doing, as the chat surface should say it.
+ * - `connecting`: the first attempt is in flight.
+ * - `reconnecting`: an attempt failed and another is scheduled.
+ * - `ready`: files are synced.
+ * - `presentation-error`: the agent is reachable but the browser file cache did not load.
+ * - `unavailable`: the retry budget is spent; only a deliberate retry continues.
+ */
+export type WorkspacePresentationState = 'connecting' | 'reconnecting' | 'ready' | 'presentation-error' | 'unavailable';
+
+function workspaceReconnectDelayMs(attempt: number): number {
+  return WORKSPACE_RECONNECT_DELAYS_MS[Math.min(attempt, WORKSPACE_RECONNECT_DELAYS_MS.length - 1)] ?? 30_000;
+}
 
 export function workspacePresentationId(accountId: string, agentName: string): string {
   return `${accountId}:${agentName}`;
@@ -98,8 +128,10 @@ export function useBuilderAgentChat(args: {
   const previousSubchatIndexRef = useRef(currentSubchatIndex);
   const [workspacePresentation, setWorkspacePresentation] = useState<{
     gate: AsyncGate;
-    state: 'ready' | 'presentation-error';
+    state: Exclude<WorkspacePresentationState, 'connecting'>;
   } | null>(null);
+  /** Bumped by a deliberate retry, which restarts the effect below with a fresh budget. */
+  const [workspaceAttemptId, setWorkspaceAttemptId] = useState(0);
   const queryClient = useQueryClient();
   const generatedSubchatTitleUpdatedAtRef = useRef<string | null>(null);
   const runtimeEndpoint = new URL(requireUserRuntimeEndpoint());
@@ -272,49 +304,75 @@ export function useBuilderAgentChat(args: {
       !disposed && activePresentationRef.current === args.presentationId && workspaceGateRef.current === gate;
     void (async () => {
       try {
-        await waitForAgentSocketOpen(builderAgent, AGENT_SEND_READY_TIMEOUT_MS, { requireIdentity: false });
-        if (!isCurrentPresentation()) {
-          return;
-        }
-        const state = await builderAgent.call('prepareWorkspace', [], { timeout: WORKSPACE_PREPARE_TIMEOUT_MS });
-        if (!state.initialized) {
-          throw new Error('The durable project workspace was not initialized.');
-        }
-        if (!isCurrentPresentation()) {
-          return;
-        }
-        sendGateResolved = true;
-        gate.resolve();
-        const agentRpc: BuilderWorkspaceAgent = builderAgent;
-        const controller = await BuilderWorkspaceSyncController.initialize(agentRpc, {
-          workspaceId: args.presentationId,
-          isCurrent: isCurrentPresentation,
-        });
-        if (!isCurrentPresentation()) {
-          controller.dispose();
-          return;
-        }
-        workspaceControllerRef.current?.dispose();
-        activeController = controller;
-        workspaceControllerRef.current = controller;
-        setWorkspacePresentation({ gate, state: 'ready' });
-      } catch (workspaceError) {
-        if (isCurrentPresentation()) {
-          if (!sendGateResolved) {
-            gate.error = workspaceError;
-          }
-          logger.error(
-            sendGateResolved
-              ? 'Failed to load the durable project workspace into the browser presentation cache'
-              : 'Failed to initialize the durable project workspace',
-            workspaceError,
-          );
-          if (sendGateResolved) {
-            setWorkspacePresentation({ gate, state: 'presentation-error' });
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            await waitForAgentSocketOpen(builderAgent, AGENT_SEND_READY_TIMEOUT_MS, { requireIdentity: false });
+            if (!isCurrentPresentation()) {
+              return;
+            }
+            const state = await builderAgent.call('prepareWorkspace', [], { timeout: WORKSPACE_PREPARE_TIMEOUT_MS });
+            if (!state.initialized) {
+              throw new Error('The durable project workspace was not initialized.');
+            }
+            if (!isCurrentPresentation()) {
+              return;
+            }
+            sendGateResolved = true;
+            gate.resolve();
+            const agentRpc: BuilderWorkspaceAgent = builderAgent;
+            const controller = await BuilderWorkspaceSyncController.initialize(agentRpc, {
+              workspaceId: args.presentationId,
+              isCurrent: isCurrentPresentation,
+            });
+            if (!isCurrentPresentation()) {
+              controller.dispose();
+              return;
+            }
+            workspaceControllerRef.current?.dispose();
+            activeController = controller;
+            workspaceControllerRef.current = controller;
+            setWorkspacePresentation({ gate, state: 'ready' });
+            return;
+          } catch (workspaceError) {
+            if (!isCurrentPresentation()) {
+              return;
+            }
+            logger.error(
+              sendGateResolved
+                ? 'Failed to load the durable project workspace into the browser presentation cache'
+                : 'Failed to initialize the durable project workspace',
+              workspaceError,
+            );
+            // Past the gate the agent is reachable and only the browser file cache failed, so
+            // retrying the connection is not the repair; the existing presentation error is.
+            if (sendGateResolved) {
+              setWorkspacePresentation({ gate, state: 'presentation-error' });
+              return;
+            }
+            if (attempt + 1 >= WORKSPACE_RECONNECT_ATTEMPTS) {
+              gate.error = workspaceError;
+              setWorkspacePresentation({ gate, state: 'unavailable' });
+              return;
+            }
+            setWorkspacePresentation({ gate, state: 'reconnecting' });
+            // Re-admission is what discovers a release in progress: the control plane answers
+            // `409 workspace_preparing` while the new runtime image builds, and this poll is what
+            // publishes that to the browser and hands the agent a usable capability afterwards.
+            await refreshUserRuntimeSession().catch((sessionError) =>
+              logger.warn('Unable to refresh the user-owned runtime session while reconnecting', sessionError),
+            );
+            if (!isCurrentPresentation()) {
+              return;
+            }
+            await delay(workspaceReconnectDelayMs(attempt));
+            if (!isCurrentPresentation()) {
+              return;
+            }
           }
         }
       } finally {
-        if (isCurrentPresentation() && !sendGateResolved) {
+        // A gate that never settles is a chat that can never send, so it settles on every exit.
+        if (!sendGateResolved) {
           gate.resolve();
         }
       }
@@ -327,7 +385,11 @@ export function useBuilderAgentChat(args: {
         workspaceControllerRef.current = null;
       }
     };
-  }, [args.presentationId, builderAgent, workspaceGateRef]);
+  }, [args.presentationId, builderAgent, workspaceAttemptId, workspaceGateRef]);
+
+  const retryWorkspacePresentation = useCallback(() => setWorkspaceAttemptId((id) => id + 1), []);
+  const workspacePresentationState: WorkspacePresentationState =
+    workspacePresentation?.gate === workspaceGateRef.current ? workspacePresentation.state : 'connecting';
 
   const sendMessage = useCallback(
     async (
@@ -520,9 +582,13 @@ export function useBuilderAgentChat(args: {
     deployValidatedRevision,
     cloudflareExecutions: builderAgent.state?.cloudflareExecutions ?? [],
     decideCloudflareExecution,
-    workspacePresentationState:
-      workspacePresentation?.gate === workspaceGateRef.current ? workspacePresentation.state : 'connecting',
+    workspacePresentationState,
+    retryWorkspacePresentation,
   };
+}
+
+function delay(durationMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, durationMs));
 }
 
 type AsyncGate = {

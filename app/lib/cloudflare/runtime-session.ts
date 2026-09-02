@@ -99,6 +99,20 @@ export async function getUserRuntimeSession(
   return waitForRuntimeSession(request, signal);
 }
 
+/**
+ * Ask the control plane again from scratch, polling on `workspace_preparing` exactly as the first
+ * admission does. A release that re-provisions the workspace runtime answers 409 for as long as
+ * the new image builds, and the cached session a long-open tab is still holding says nothing about
+ * that. Unlike `resetUserRuntimeSession`, the published endpoint survives, so an open chat keeps
+ * its mounted workspace and simply reconnects when the runtime answers again.
+ */
+export function refreshUserRuntimeSession(options: { signal?: AbortSignal } = {}): Promise<UserRuntimeSession> {
+  if (!pending) {
+    current = null;
+  }
+  return getUserRuntimeSession(options);
+}
+
 function waitForRuntimeSession(
   request: Promise<UserRuntimeSession>,
   signal: AbortSignal | undefined,

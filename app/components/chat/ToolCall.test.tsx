@@ -189,4 +189,63 @@ describe('ToolCall', () => {
 
     expect(container.textContent).toContain('Validating the project (automatic)…');
   });
+
+  it('reports a finished validation as a verdict and its stages, not raw JSON', async () => {
+    const invocation: GhostbuildToolInvocation = {
+      type: 'dynamic-tool',
+      state: 'output-available',
+      toolCallId: 'validate-1',
+      toolName: 'validate',
+      input: {},
+      output: {
+        validation: {
+          version: 1,
+          ok: false,
+          summary: 'Typecheck failed in src/routes/index.tsx.',
+          data: {
+            level: 'full',
+            durationMs: 42_000,
+            checks: [
+              { name: 'typecheck', status: 'failed' },
+              { name: 'lint', status: 'passed' },
+            ],
+          },
+        },
+      },
+    };
+
+    await act(async () => root.render(<ToolCall partId={makePartId('message-6', 0)} invocation={invocation} />));
+    await act(async () => container.querySelector('button')?.click());
+
+    expect(container.textContent).toContain('Validation failed.');
+    expect(container.textContent).toContain('Typecheck failed in src/routes/index.tsx.');
+    expect(container.textContent).toContain('typecheck');
+    expect(container.textContent).toContain('lint');
+    expect(container.textContent).not.toContain('"version": 1');
+  });
+
+  it('never shows the running placeholder for a tool the turn already stopped', async () => {
+    const invocation: GhostbuildToolInvocation = {
+      type: 'dynamic-tool',
+      state: 'input-available',
+      toolCallId: 'validate-2',
+      toolName: 'validate',
+      input: {},
+    };
+    const partId = makePartId('message-7', 0);
+    toolActivityStore.record(partId, invocation);
+
+    await act(async () => root.render(<ToolCall partId={partId} invocation={invocation} />));
+    expect(container.textContent).toContain('Working…');
+    // Pin the card open, so what is asserted afterwards is the body itself and not a collapse.
+    await act(async () => container.querySelector('button')?.click());
+
+    // The stop path marks the activity terminal while the invocation keeps the last state the
+    // provider streamed, which is exactly how a finished card kept a "Working…" body.
+    await act(async () => toolActivityStore.abortActive());
+
+    expect(container.textContent).not.toContain('Working…');
+    expect(container.textContent).toContain('Stopped before this tool returned a result.');
+    expect(container.textContent).toContain('Validation stopped');
+  });
 });
