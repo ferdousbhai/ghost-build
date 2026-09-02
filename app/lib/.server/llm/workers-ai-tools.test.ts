@@ -20,7 +20,16 @@ describe('minimal Workers AI tool surface', () => {
   it('keeps the reviewed Computer schemas behind the active model tools', () => {
     const tools = createWorkersAiTools(workspaceStub(), operationContext());
 
-    expect(Object.keys(tools)).toEqual(['read', 'ls', 'grep', 'write', 'edit', 'exec', 'search_cloudflare_docs']);
+    expect(Object.keys(tools)).toEqual([
+      'read',
+      'ls',
+      'grep',
+      'write',
+      'edit',
+      'exec',
+      'validate',
+      'search_cloudflare_docs',
+    ]);
     expect(toolInputSchema(tools.ls).safeParse({}).success).toBe(true);
     expect(toolInputSchema(tools.ls).safeParse({ path: '/home/project/src', recursive: true, limit: 50 }).success).toBe(
       true,
@@ -445,13 +454,72 @@ describe('minimal Workers AI tool surface', () => {
     ).toBeUndefined();
   });
 
+  it('rejects long-running server commands before they reach the workspace', async () => {
+    const workspace = workspaceStub();
+    const tools = createWorkersAiTools(workspace, operationContext());
+
+    await expect(executeTool(tools.exec, { command: 'pnpm run dev' })).resolves.toMatchObject({
+      error: expect.stringMatching(/long-running servers/),
+    });
+    expect(workspace.executeCommand).not.toHaveBeenCalled();
+    expect(workspace.executeToolOnce).not.toHaveBeenCalled();
+  });
+
+  it('rejects platform process and runtime-state commands with a concise tool error', async () => {
+    const workspace = workspaceStub();
+    const tools = createWorkersAiTools(workspace, operationContext());
+
+    await expect(executeTool(tools.exec, { command: 'pkill -f workerd' })).resolves.toMatchObject({
+      error: expect.stringMatching(/process management/i),
+    });
+    await expect(executeTool(tools.exec, { command: 'rm -rf .wrangler' })).resolves.toMatchObject({
+      error: expect.stringMatching(/platform runtime state/i),
+    });
+    expect(workspace.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('rejects a wrangler.jsonc write that removes a required template binding', async () => {
+    const workspace = workspaceStub();
+    const tools = createWorkersAiTools(workspace, operationContext());
+
+    await expect(
+      executeTool(tools.write, {
+        path: '/home/project/wrangler.jsonc',
+        content: '{ "name": "app", "d1_databases": [{ "binding": "DB" }] }',
+      }),
+    ).resolves.toMatchObject({ error: expect.stringMatching(/required DB, APP_STORAGE, and APP_CACHE bindings/) });
+    expect(workspace.computer.fs.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('runs the canonical validation through the dedicated validate tool', async () => {
+    const workspace = workspaceStub();
+    const stages: Array<BuilderValidationStage | null> = [];
+    const tools = createWorkersAiTools(
+      workspace,
+      operationContext({ onValidationStage: (_toolCallId, stage) => stages.push(stage) }),
+    );
+
+    const result = await executeTool(tools.validate, {});
+
+    expect(result).toEqual({ validation: validationResult() });
+    expect(workspace.validate).toHaveBeenCalledWith(
+      expect.objectContaining({ toolCallId: 'tool-call:validation', input: {} }),
+    );
+    expect(stages).toEqual(['computer validation', null]);
+    expect(getValidatedBuildCompletion([user('Build it')], [{ toolName: 'validate', result }])).toContain(
+      'validated the app',
+    );
+  });
+
   it('derives completion from the latest explicit validation receipt', () => {
     expect(
       getValidatedBuildCompletion(
         [user('Build it')],
         [{ toolName: 'exec', result: { validation: validationResult() } }],
       ),
-    ).toBe('Done. I built and validated the app. Deployment is starting automatically.');
+    ).toBe(
+      'Done. I built and validated the app. The hosted preview is publishing now, and deployment follows automatically.',
+    );
 
     expect(
       getValidatedBuildCompletion(

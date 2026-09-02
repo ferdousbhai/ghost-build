@@ -15,6 +15,15 @@ export const BUILDER_TURN_WALL_CLOCK_MS = 90 * 60_000;
  */
 export const BUILDER_TURN_INACTIVITY_MS = 5 * 60_000;
 
+/**
+ * A model that has produced no visible text, tool call, or tool execution this
+ * soon after the request started is stalled, not thinking: the benchmark model
+ * burned eight silent minutes before ending with nothing. Transport noise does
+ * not count as progress; the first meaningful event disarms this deadline for
+ * the rest of the turn.
+ */
+export const BUILDER_TURN_FIRST_PROGRESS_MS = 60_000;
+
 /** Product deadlines enforced cooperatively by the shared Pi tool adapter. */
 export const BUILDER_TURN_TIMEOUTS = {
   tools: {
@@ -26,6 +35,7 @@ export const BUILDER_TURN_TIMEOUTS = {
     write: BUILDER_MUTATION_TOOL_TIMEOUT_MS,
     edit: BUILDER_MUTATION_TOOL_TIMEOUT_MS,
     exec: BUILDER_MUTATION_TOOL_TIMEOUT_MS,
+    validate: BUILDER_MUTATION_TOOL_TIMEOUT_MS,
     search_cloudflare_docs: 60_000,
     cloudflare_docs: 90_000,
     cloudflare_search: 90_000,
@@ -37,7 +47,7 @@ export const BUILDER_TURN_TIMEOUTS = {
 
 export const BUILDER_TURN_BUDGET_ERROR_CODE = 'builder_turn_budget_exhausted';
 
-export type BuilderTurnBudgetReason = 'tool_timeout' | 'wall_clock' | 'inactivity';
+export type BuilderTurnBudgetReason = 'tool_timeout' | 'wall_clock' | 'inactivity' | 'no_first_progress';
 
 export type BuilderTurnTerminalReason = BuilderTurnBudgetReason | 'completed' | 'cancelled' | 'failed';
 
@@ -68,7 +78,10 @@ export class BuilderTurnBudgetExceededError extends Error {
     super(
       JSON.stringify({
         code: BUILDER_TURN_BUDGET_ERROR_CODE,
-        error: 'This build reached its safe execution limit before it finished. Send a follow-up to continue.',
+        error:
+          reason === 'no_first_progress'
+            ? 'The model did not start responding within a minute. Retry, or pick a different model.'
+            : 'This build reached its safe execution limit before it finished. Send a follow-up to continue.',
         reason,
         retryable: true,
       }),

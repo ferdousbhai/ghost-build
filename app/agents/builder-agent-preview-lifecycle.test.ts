@@ -17,7 +17,7 @@ describe('BuilderAgent preview lifecycle', () => {
     expect(previewCancellation).toBeLessThan(chatMessage.indexOf('const turn = createBuilderTurn'));
   });
 
-  it('automatically deploys exactly validated work and validates a manual preview in its durable fiber', () => {
+  it('publishes the hosted preview for validated work first and deploys behind it', () => {
     const response = source.slice(
       source.indexOf('protected override async onChatResponse('),
       source.indexOf('@callable()\n  async steerActiveTurn'),
@@ -26,11 +26,21 @@ describe('BuilderAgent preview lifecycle', () => {
       source.indexOf('private async requestPreviewInternal('),
       source.indexOf('private async runPreviewPublication('),
     );
+    const publication = source.slice(
+      source.indexOf('private async runPreviewPublication('),
+      source.indexOf('private async failPreviewPublication('),
+    );
 
     expect(response).toContain('const validatedSnapshot = await this.refreshDeploymentReadiness()');
-    expect(response).toContain('this.scheduleDeployment(validatedSnapshot)');
-    expect(response).not.toContain('this.requestPreviewInternal({ validatedSnapshot })');
-    expect(source).toContain('this.requestPreviewInternal({ validatedSnapshot: job })');
+    expect(response).toContain('await this.publishValidatedRevision(validatedSnapshot)');
+    expect(response).not.toContain('this.scheduleDeployment(validatedSnapshot)');
+    expect(source).toContain('this.requestPreviewInternal({ validatedSnapshot: snapshot })');
+    // Deployment follows the settled preview on both the success and the failure path, so a
+    // broken preview can never cost the user the production deployment.
+    expect(publication.match(/await this\.scheduleDeploymentAfterPreview\(job\)/g)).toHaveLength(2);
+    // And a successful deployment no longer gates the preview: the old post-deployment preview
+    // trigger stays deleted.
+    expect(source).not.toContain('this.requestPreviewInternal({ validatedSnapshot: job })');
     expect(preview).toContain('options.validatedSnapshot ?? (await this.workspace.checkpoint())');
     expect(source).toContain('validatePreviewCheckpointForBuilder(validationRequest)');
     expect(source).toContain('await this.runPreviewPublication(job, fiber.signal)');

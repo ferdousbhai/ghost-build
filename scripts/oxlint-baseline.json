@@ -1,5 +1,5 @@
 {
-  "total": 1308,
+  "total": 1304,
   "counts": {
     "app/agents/builder-agent-identity.test.ts": {
       "anti-slop/no-unsafe-dictionary-type": 1,
@@ -249,7 +249,7 @@
       "anti-slop/no-conditional-empty-object-spread": 1,
       "anti-slop/no-module-mocking": 8,
       "anti-slop/no-object-parameters": 1,
-      "anti-slop/no-unknown-parameters": 42,
+      "anti-slop/no-unknown-parameters": 38,
       "anti-slop/require-safety-comment-for-type-assertion": 4
     },
     "app/lib/.server/llm/pi-agent-runner.ts": {

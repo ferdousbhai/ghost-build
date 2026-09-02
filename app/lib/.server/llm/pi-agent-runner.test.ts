@@ -1,11 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentContext } from '@earendil-works/pi-agent-core';
+import type { AgentContext, AgentMessage } from '@earendil-works/pi-agent-core';
+import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { PiStreamChunk } from './pi-stream';
 import { CLOUDFLARE_WORKERS_AI_MODEL, DEFAULT_WORKERS_AI_MODEL, type WorkersAiModelId } from '~/lib/workers-ai-model';
 
 type UIMessageChunk = PiStreamChunk;
-type RunnerEvent = RunnerToolExecutionEndEvent | RunnerTurnEndEvent;
+type RunnerEvent =
+  | RunnerTurnStartEvent
+  | RunnerMessageUpdateEvent
+  | RunnerToolExecutionStartEvent
+  | RunnerToolExecutionEndEvent
+  | RunnerTurnEndEvent;
 type RunnerEventSink = (event: RunnerEvent) => Promise<void>;
+
+interface RunnerTurnStartEvent {
+  type: 'turn_start';
+}
+
+interface RunnerMessageUpdateEvent {
+  type: 'message_update';
+  message: { timestamp: number };
+  assistantMessageEvent: { type: string; contentIndex: number };
+}
+
+interface RunnerToolExecutionStartEvent {
+  type: 'tool_execution_start';
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, never>;
+}
 
 interface RunnerToolExecutionEndEvent {
   type: 'tool_execution_end';
@@ -27,6 +50,7 @@ interface StopAwareLoopConfig {
 
 const mocks = vi.hoisted(() => ({
   completion: undefined as string | undefined,
+  validateExecute: vi.fn(),
   piMessages: [] as unknown[],
   piRun: vi.fn(),
   getValidatedBuildCompletion: vi.fn(),
@@ -67,6 +91,13 @@ vi.mock('./builder-skills', () => ({
 vi.mock('./pi-tools-adapter', () => ({
   createPiToolBundle: vi.fn(() => ({
     write: { name: 'write', description: 'write', parameters: 'canonical-schema' },
+    validate: {
+      name: 'validate',
+      label: 'Validate project',
+      description: 'validate',
+      parameters: 'canonical-schema',
+      execute: mocks.validateExecute,
+    },
   })),
   piToolsToList: vi.fn((tools: object) => Object.values(tools)),
 }));
@@ -76,11 +107,13 @@ vi.mock('./workers-ai-tools', () => ({
 }));
 vi.mock('./workers-ai-telemetry', () => ({
   recordFirstWorkersAiResponse: vi.fn(),
+  recordFirstMeaningfulWorkersAiProgress: vi.fn(),
+  recordFirstBuilderMutation: vi.fn(),
   recordWorkersAiFinish: mocks.recordFinish,
 }));
 import { piAgentRunner } from './pi-agent-runner';
 import { PiSteeringQueue } from './pi-steering';
-import { BUILDER_TURN_INACTIVITY_MS } from './builder-turn-budget';
+import { BUILDER_TURN_FIRST_PROGRESS_MS, BUILDER_TURN_INACTIVITY_MS } from './builder-turn-budget';
 
 describe('piAgentRunner', () => {
   beforeEach(() => {
@@ -575,15 +608,109 @@ describe('piAgentRunner', () => {
     });
   });
 
-  it('ends a stalled turn on the inactivity budget', async () => {
-    vi.useFakeTimers();
+  it('runs the canonical validation when a mutated turn finishes without one', async () => {
     const onSettled = vi.fn();
-    mocks.piRun.mockImplementation(
-      async (_context: unknown, _config: unknown, emit: (event: unknown) => Promise<void>, signal?: AbortSignal) => {
-        await emit({ type: 'turn_start' });
-        await new Promise((_resolve, reject) => signal?.addEventListener('abort', () => reject(signal.reason)));
+    mocks.getValidatedBuildCompletion.mockImplementation(
+      (_messages: GhostbuildMessage[], results: Array<{ toolName: string }> = []) =>
+        results.some((entry) => entry.toolName === 'validate') ? 'Validated automatically.' : undefined,
+    );
+    mocks.validateExecute.mockResolvedValue({
+      content: [{ type: 'text', text: 'validation passed' }],
+      details: { validation: { version: 1, ok: true, summary: 'ok' } },
+    });
+    mocks.piRun.mockImplementation(async (_ctx: AgentContext, _cfg: StopAwareLoopConfig, emit: RunnerEventSink) => {
+      await emitToolRound(1, emit, { isError: false, details: { ok: true } });
+      await emit({ type: 'turn_end', message: assistantMessage([{ type: 'text', text: 'Done' }]), toolResults: [] });
+    });
+
+    const chunks = await collectChunks(
+      await createAgentStream(CLOUDFLARE_WORKERS_AI_MODEL, {}, undefined, { onSettled }),
+    );
+
+    expect(mocks.piRun).toHaveBeenCalledTimes(1);
+    expect(mocks.validateExecute).toHaveBeenCalledTimes(1);
+    expect(mocks.validateExecute).toHaveBeenCalledWith(
+      expect.stringMatching(/^auto-validate:/),
+      {},
+      expect.anything(),
+      undefined,
+    );
+    expect(chunks).toContainEqual(expect.objectContaining({ type: 'tool-input-start', toolName: 'validate' }));
+    expect(chunks).toContainEqual({
+      type: 'text-delta',
+      id: 'validated-build-completion',
+      delta: 'Validated automatically.',
+    });
+    expect(onSettled).toHaveBeenCalledWith(
+      expect.objectContaining({ terminalReason: 'completed', lastValidationState: 'validated' }),
+    );
+  });
+
+  it('feeds an automatic validation failure back into the same turn for repair', async () => {
+    mocks.getValidatedBuildCompletion.mockImplementation(
+      (
+        _messages: GhostbuildMessage[],
+        results: Array<{ toolName: string; result: { validation?: { ok?: boolean } } }> = [],
+      ) => {
+        const latestValidation = results.findLast((entry) => entry.toolName === 'validate');
+        return latestValidation?.result.validation?.ok ? 'Validated after repair.' : undefined;
       },
     );
+    mocks.validateExecute
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: 'lint failed' }],
+        details: { validation: { version: 1, ok: false, summary: 'lint failed' } },
+      })
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: 'validation passed' }],
+        details: { validation: { version: 1, ok: true, summary: 'ok' } },
+      });
+    const repairContexts: AgentMessage[][] = [];
+    mocks.piRun.mockImplementation(async (ctx: AgentContext, _cfg: StopAwareLoopConfig, emit: RunnerEventSink) => {
+      repairContexts.push([...ctx.messages]);
+      if (repairContexts.length === 1) {
+        await emitToolRound(1, emit, { isError: false, details: { ok: true } });
+      }
+      await emit({ type: 'turn_end', message: assistantMessage([{ type: 'text', text: 'Done' }]), toolResults: [] });
+    });
+
+    const chunks = await collectChunks(await createAgentStream());
+
+    expect(mocks.piRun).toHaveBeenCalledTimes(2);
+    expect(mocks.validateExecute).toHaveBeenCalledTimes(2);
+    // The repair round sees the failed validation as a normal tool call and result in context.
+    const repairMessages = repairContexts.at(1) ?? [];
+    expect(repairMessages.at(-1)).toMatchObject({ role: 'toolResult', toolName: 'validate', isError: true });
+    expect(repairMessages.at(-2)).toMatchObject({ role: 'assistant' });
+    expect(chunks).toContainEqual({
+      type: 'text-delta',
+      id: 'validated-build-completion',
+      delta: 'Validated after repair.',
+    });
+  });
+
+  it('does not auto-validate a turn without durable mutations', async () => {
+    mocks.piRun.mockImplementation(async (_ctx: AgentContext, _cfg: StopAwareLoopConfig, emit: RunnerEventSink) => {
+      await emit({ type: 'tool_execution_start', toolCallId: 'read-1', toolName: 'read', args: {} });
+      await emit({
+        type: 'tool_execution_end',
+        toolCallId: 'read-1',
+        toolName: 'read',
+        result: { details: { ok: true } },
+        isError: false,
+      });
+      await emit({ type: 'turn_end', message: assistantMessage([{ type: 'text', text: 'Done' }]), toolResults: [] });
+    });
+
+    await collectChunks(await createAgentStream());
+
+    expect(mocks.validateExecute).not.toHaveBeenCalled();
+  });
+
+  it('ends a stalled turn on the inactivity budget once meaningful progress was seen', async () => {
+    vi.useFakeTimers();
+    const onSettled = vi.fn();
+    mocks.piRun.mockImplementation(stallAfterAssistantEvent('text_start'));
 
     try {
       const collected = collectChunks(
@@ -594,6 +721,58 @@ describe('piAgentRunner', () => {
 
       expect(chunks).toContainEqual({ type: 'error', errorText: budgetErrorText('inactivity') });
       expect(onSettled).toHaveBeenCalledWith(expect.objectContaining({ terminalReason: 'inactivity', stepCount: 0 }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ends a silent turn on the first-progress deadline with an actionable error', async () => {
+    vi.useFakeTimers();
+    const onSettled = vi.fn();
+    // Transport noise without visible text or tool activity must not count as progress.
+    mocks.piRun.mockImplementation(stallAfterAssistantEvent('start'));
+
+    try {
+      const collected = collectChunks(
+        await createAgentStream(CLOUDFLARE_WORKERS_AI_MODEL, {}, undefined, { onSettled }),
+      );
+      await vi.advanceTimersByTimeAsync(BUILDER_TURN_FIRST_PROGRESS_MS);
+      const chunks = await collected;
+
+      expect(chunks).toContainEqual({ type: 'error', errorText: budgetErrorText('no_first_progress') });
+      expect(onSettled).toHaveBeenCalledWith(
+        expect.objectContaining({ terminalReason: 'no_first_progress', stepCount: 0 }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not trip the first-progress deadline while tool calls stream normally', async () => {
+    vi.useFakeTimers();
+    const onSettled = vi.fn();
+    mocks.piRun.mockImplementation(async (_ctx: AgentContext, _cfg: StopAwareLoopConfig, emit: RunnerEventSink) => {
+      await emit({ type: 'turn_start' });
+      await emit({
+        type: 'message_update',
+        message: { timestamp: 1 },
+        assistantMessageEvent: { type: 'text_start', contentIndex: 0 },
+      });
+      await vi.advanceTimersByTimeAsync(BUILDER_TURN_FIRST_PROGRESS_MS * 2);
+      await emit({
+        type: 'turn_end',
+        message: assistantMessage([{ type: 'text', text: 'done' }]),
+        toolResults: [],
+      });
+    });
+
+    try {
+      const chunks = await collectChunks(
+        await createAgentStream(CLOUDFLARE_WORKERS_AI_MODEL, {}, undefined, { onSettled }),
+      );
+
+      expect(chunks.some((chunk) => chunk.type === 'error')).toBe(false);
+      expect(onSettled).toHaveBeenCalledWith(expect.objectContaining({ terminalReason: 'completed' }));
     } finally {
       vi.useRealTimers();
     }
@@ -677,7 +856,10 @@ function createAgentStream(
 function budgetErrorText(reason: string) {
   return JSON.stringify({
     code: 'builder_turn_budget_exhausted',
-    error: 'This build reached its safe execution limit before it finished. Send a follow-up to continue.',
+    error:
+      reason === 'no_first_progress'
+        ? 'The model did not start responding within a minute. Retry, or pick a different model.'
+        : 'This build reached its safe execution limit before it finished. Send a follow-up to continue.',
     reason,
     retryable: true,
   });
@@ -704,11 +886,20 @@ function fakeModelLoop(turn: (step: number, emit: (event: unknown) => Promise<vo
   };
 }
 
-async function emitToolRound(
-  step: number,
-  emit: (event: unknown) => Promise<void>,
-  result: { isError: boolean; details: unknown },
-) {
+/** A model that streams one assistant event of this type and then never says anything again. */
+function stallAfterAssistantEvent(assistantEventType: string) {
+  return async (_ctx: AgentContext, _cfg: StopAwareLoopConfig, emit: RunnerEventSink, signal?: AbortSignal) => {
+    await emit({ type: 'turn_start' });
+    await emit({
+      type: 'message_update',
+      message: { timestamp: 1 },
+      assistantMessageEvent: { type: assistantEventType, contentIndex: 0 },
+    });
+    await new Promise((_resolve, reject) => signal?.addEventListener('abort', () => reject(signal.reason)));
+  };
+}
+
+async function emitToolRound(step: number, emit: RunnerEventSink, result: { isError: boolean; details: unknown }) {
   await emit({ type: 'tool_execution_start', toolCallId: `call-${step}`, toolName: 'write', args: {} });
   await emit({
     type: 'tool_execution_end',

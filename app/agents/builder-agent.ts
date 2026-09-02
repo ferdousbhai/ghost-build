@@ -631,9 +631,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         }
       }
       if (validatedSnapshot) {
-        await this.scheduleDeployment(validatedSnapshot).catch(() =>
-          logger.warn('Unable to queue the automatic deployment'),
-        );
+        await this.publishValidatedRevision(validatedSnapshot);
       }
     }
   }
@@ -1450,6 +1448,38 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     });
   }
 
+  /**
+   * The user-visible critical path after validation: publish the hosted preview first, then run
+   * the production deployment behind it. The preview fiber schedules the deployment when it
+   * settles; when no publication is pending (the preview is already serving this revision, or it
+   * could not even be queued), the deployment starts directly instead of waiting on anything.
+   */
+  private async publishValidatedRevision(snapshot: BuilderWorkspaceCheckpoint): Promise<void> {
+    const preview = await this.requestPreviewInternal({ validatedSnapshot: snapshot }).catch(() => {
+      logger.warn('Unable to queue the validated preview publication');
+      return null;
+    });
+    if (!preview?.pendingId) {
+      await this.scheduleDeployment(snapshot).catch(() => logger.warn('Unable to queue the automatic deployment'));
+    }
+  }
+
+  /** Deployment follows a settled preview publication, never blocking it — and never skipping it. */
+  private async scheduleDeploymentAfterPreview(job: PreviewPublicationJob): Promise<void> {
+    const checkpoint = deploymentJobSchema.safeParse({
+      workspaceRevision: job.workspaceRevision,
+      revision: job.snapshotRevision,
+    }).data;
+    if (!checkpoint) {
+      return;
+    }
+    const validated = await this.workspace.hasSuccessfulValidation(checkpoint.revision).catch(() => false);
+    if (!validated) {
+      return;
+    }
+    await this.scheduleDeployment(checkpoint).catch(() => logger.warn('Unable to queue the automatic deployment'));
+  }
+
   private async scheduleDeployment(job: DeploymentJob, retryId?: string): Promise<void> {
     const current = this.state.deployment;
     if (
@@ -1469,12 +1499,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         async (fiber) => {
           fiber.stash(job);
           try {
-            const deployment = await this.runDeployment(job);
-            if (deployment.status === 'succeeded') {
-              await this.requestPreviewInternal({ validatedSnapshot: job }).catch(() =>
-                logger.warn('Unable to queue the post-deployment preview'),
-              );
-            }
+            await this.runDeployment(job);
           } catch (error) {
             this.failDeployment(job, error);
             throw error;
@@ -1499,6 +1524,7 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     if (!userId || !transcriptBinding) {
       throw new Response('Agent authentication is required.', { status: 401 });
     }
+    const startedAt = Date.now();
     const deployment = await this.keepAliveWhile(() =>
       deployValidatedRevisionForBuilder({
         context: {
@@ -1513,6 +1539,11 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
     );
     const revisionBoundDeployment = { ...deployment, ...job };
     this.setDeploymentResult(job, revisionBoundDeployment);
+    console.info({
+      event: 'builder_deployment_settled',
+      status: revisionBoundDeployment.status,
+      durationMs: Date.now() - startedAt,
+    });
     return revisionBoundDeployment;
   }
 
@@ -1654,11 +1685,18 @@ export class BuilderAgent extends AIChatAgent<Env, BuilderAgentState, BuilderAge
         error: null,
         published: success,
       });
+      console.info({
+        event: 'builder_preview_published',
+        publicationMs: Date.now() - job.requestedAt,
+      });
+      await this.scheduleDeploymentAfterPreview(job);
     } catch (error) {
       await this.failPreviewPublication(
         job,
         (error instanceof Error ? error.message : 'The Workers preview publication failed.').slice(-4_000),
       );
+      // A failed preview must not also cost the user the production deployment.
+      await this.scheduleDeploymentAfterPreview(job);
     }
   }
 

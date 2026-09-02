@@ -4,6 +4,7 @@ import {
   type AgentEvent,
   type AgentLoopConfig,
   type AgentMessage,
+  type AgentToolResult,
 } from '@earendil-works/pi-agent-core';
 import {
   isContextOverflow,
@@ -28,6 +29,7 @@ import {
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
 import {
   BUILDER_TURN_BUDGET_ERROR_CODE,
+  BUILDER_TURN_FIRST_PROGRESS_MS,
   BUILDER_TURN_INACTIVITY_MS,
   BUILDER_TURN_WALL_CLOCK_MS,
   BuilderTurnBudgetExceededError,
@@ -47,7 +49,12 @@ import { recordPiStage, recordPiTurnBudget } from './pi-telemetry';
 import { createToolTimeAccounting } from './tool-time-accounting';
 import { getPiModel, type WorkersAiAccountCredentials } from './pi-ai-models';
 import { appendDeterministicCompletion, normalizeTextPartBoundaries } from './workers-ai-stream';
-import { recordFirstWorkersAiResponse, recordWorkersAiFinish } from './workers-ai-telemetry';
+import {
+  recordFirstBuilderMutation,
+  recordFirstMeaningfulWorkersAiProgress,
+  recordFirstWorkersAiResponse,
+  recordWorkersAiFinish,
+} from './workers-ai-telemetry';
 import { getValidatedBuildCompletion } from './workers-ai-tools';
 import { createPiToolBundle, piToolsToList } from './pi-tools-adapter';
 import { createBuilderSkillContext } from './builder-skills';
@@ -70,6 +77,15 @@ type UIMessageChunk = PiStreamChunk;
 const cloudflareExecuteProposalCandidateSchema = z
   .object({ kind: z.literal('cloudflare_execute_proposal') })
   .passthrough();
+
+/** Tools whose execution durably changes the project, for telemetry and the end-of-turn validation guarantee. */
+const DURABLE_MUTATION_TOOL_NAMES: ReadonlySet<string> = new Set(['write', 'edit', 'exec']);
+
+/**
+ * How many times one turn may run the canonical validation on the model's behalf. The first run
+ * covers a model that finished without validating; the second covers its repair of that failure.
+ */
+const MAX_AUTO_VALIDATION_ATTEMPTS = 2;
 
 interface PiAgentOptions {
   abortSignal?: AbortSignal;
@@ -132,15 +148,16 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   // Real signals, so an in-flight model stream is bounded too — not just the gaps between turns.
   const wallClockSignal = AbortSignal.timeout(BUILDER_TURN_WALL_CLOCK_MS);
   const inactivityController = new AbortController();
-  const loopSignal = AbortSignal.any(
-    abortSignal
-      ? [abortSignal, wallClockSignal, inactivityController.signal]
-      : [wallClockSignal, inactivityController.signal],
-  );
+  const firstProgressController = new AbortController();
+  const budgetSignals = [wallClockSignal, inactivityController.signal, firstProgressController.signal];
+  const loopSignal = AbortSignal.any(abortSignal ? [abortSignal, ...budgetSignals] : budgetSignals);
   /** Budget exhaustion stays distinct from an owner cancellation or a durable teardown. */
   const exhaustedBudgetReason = (): BuilderTurnBudgetReason | undefined => {
     if (abortSignal?.aborted) {
       return undefined;
+    }
+    if (firstProgressController.signal.aborted) {
+      return 'no_first_progress';
     }
     return inactivityController.signal.aborted ? 'inactivity' : wallClockSignal.aborted ? 'wall_clock' : undefined;
   };
@@ -221,8 +238,20 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
   let stepCount = 0;
   let toolCallCount = 0;
   let toolsInFlight = 0;
+  let durableMutationStarted = false;
   let inactivityTimer: ReturnType<typeof setTimeout> | undefined;
+  let firstProgressTimer: ReturnType<typeof setTimeout> | undefined;
   const toolAccounting = createToolTimeAccounting();
+
+  /**
+   * Reasons the turn must stop that are not the model's own choice: a context it could not compact,
+   * a spent tool budget, an indeterminate workspace operation, or an approval the user still owes.
+   */
+  const turnInterrupted = () =>
+    runtimeCompactionError !== undefined ||
+    toolBudgetError !== undefined ||
+    toolIndeterminateError !== undefined ||
+    cloudflareApprovalPending;
 
   const clearInactivityWatchdog = () => {
     clearTimeout(inactivityTimer);
@@ -235,6 +264,14 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       inactivityTimer = setTimeout(() => inactivityController.abort(), BUILDER_TURN_INACTIVITY_MS);
     }
   };
+  /** Disarms the first-progress deadline for the rest of the turn, the first time it is called. */
+  const observeMeaningfulProgress = () => {
+    if (firstProgressTimer !== undefined) {
+      clearTimeout(firstProgressTimer);
+      firstProgressTimer = undefined;
+      recordFirstMeaningfulWorkersAiProgress(startedAt);
+    }
+  };
 
   const { readable, writable } = new TransformStream<UIMessageChunk, UIMessageChunk>();
   const writer = writable.getWriter();
@@ -243,6 +280,11 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
     if (event.type === 'tool_execution_start') {
       toolsInFlight += 1;
       toolAccounting.start(event.toolCallId, event.toolName);
+      observeMeaningfulProgress();
+      if (!durableMutationStarted && DURABLE_MUTATION_TOOL_NAMES.has(event.toolName)) {
+        durableMutationStarted = true;
+        recordFirstBuilderMutation(startedAt, event.toolName);
+      }
     } else if (event.type === 'tool_execution_end') {
       toolsInFlight = Math.max(0, toolsInFlight - 1);
       toolCallCount += 1;
@@ -264,12 +306,10 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         recordFirstWorkersAiResponse(startedAt);
       }
       const assistantEvent = event.assistantMessageEvent;
-      currentTurnStreamedContent ||=
-        assistantEvent.type === 'text_start' ||
-        assistantEvent.type === 'text_delta' ||
-        assistantEvent.type === 'toolcall_start' ||
-        assistantEvent.type === 'toolcall_delta' ||
-        assistantEvent.type === 'toolcall_end';
+      if (isMeaningfulAssistantEvent(assistantEvent)) {
+        observeMeaningfulProgress();
+        currentTurnStreamedContent = true;
+      }
       const textPartId = `pi-${event.message.timestamp}-${eventContentIndex(assistantEvent) ?? 0}`;
       if (assistantEvent.type === 'text_start') {
         await writer.write({ type: 'text-start', id: textPartId });
@@ -442,41 +482,116 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
           return { context: compacted };
         },
         shouldStopAfterTurn: () =>
-          runtimeCompactionError !== undefined ||
-          toolBudgetError !== undefined ||
-          toolIndeterminateError !== undefined ||
-          cloudflareApprovalPending ||
-          (currentValidatedBuildCompletion !== undefined && !steering.hasPending()),
+          turnInterrupted() || (currentValidatedBuildCompletion !== undefined && !steering.hasPending()),
         afterToolCall: async ({ result, isError }) =>
           !isError && !toolResultSucceeded(result.details) ? { isError: true } : undefined,
         maxTokens: handle.model.maxTokens,
         toolChoice: 'auto',
       };
 
+      /**
+       * Deployment and preview recognize only the canonical validation, so a mutated turn the
+       * model ends without validating is incomplete: run the validation for it, and give the
+       * model the failure to repair inside this same turn while budgets allow.
+       */
+      const turnNeedsAutoValidation = () =>
+        durableMutationStarted &&
+        currentValidatedBuildCompletion === undefined &&
+        !loopSignal.aborted &&
+        !turnInterrupted() &&
+        !steering.hasPending() &&
+        assistantMessageValue(terminalAssistant)?.stopReason === 'stop';
+
+      /**
+       * A durably validated revision needs no transcript receipt: deployment readiness reads the
+       * validation record directly, so re-running validation for it would only add minutes.
+       */
+      const revisionAlreadyValidated = async (): Promise<boolean> => {
+        try {
+          const checkpoint = await workspace.checkpoint();
+          return await workspace.hasSuccessfulValidation(checkpoint.revision);
+        } catch {
+          return false;
+        }
+      };
+
+      const runAutoValidation = async (): Promise<void> => {
+        const validateTool = piTools.validate;
+        if (!validateTool) {
+          return;
+        }
+        const toolCallId = `auto-validate:${crypto.randomUUID()}`;
+        await emit({ type: 'tool_execution_start', toolCallId, toolName: 'validate', args: {} });
+        let result: AgentToolResult<unknown>;
+        try {
+          result = await validateTool.execute(toolCallId, {}, loopSignal, undefined);
+        } catch (caught) {
+          const text = caught instanceof Error ? caught.message : 'The canonical validation could not be run.';
+          result = { content: [{ type: 'text', text }], details: { error: text } };
+        }
+        const details = piToolResultDetails(result);
+        const validation = isRecord(details) ? details.validation : undefined;
+        const isError = !toolResultSucceeded(validation ?? details);
+        await emit({ type: 'tool_execution_end', toolCallId, toolName: 'validate', result, isError });
+        context.messages.push(
+          {
+            role: 'assistant',
+            content: [{ type: 'toolCall', id: toolCallId, name: 'validate', arguments: {} }],
+            timestamp: Date.now(),
+            api: 'openai-completions',
+            provider: 'cloudflare-workers-ai',
+            model: modelId,
+            usage: emptyUsage(),
+            stopReason: 'stop',
+          },
+          {
+            role: 'toolResult',
+            toolCallId,
+            toolName: 'validate',
+            content: result.content,
+            isError,
+            timestamp: Date.now(),
+          },
+        );
+      };
+
       armInactivityWatchdog();
+      // Armed once, when the model request starts: the first meaningful event disarms it for good.
+      firstProgressTimer = setTimeout(() => firstProgressController.abort(), BUILDER_TURN_FIRST_PROGRESS_MS);
       let overflowRecoveryAttempted = false;
+      let autoValidationAttempts = 0;
       while (true) {
         terminalAssistant = undefined;
         await runAgentLoopContinue(context, loopConfig, emit, loopSignal, handle.stream);
         if (
-          !terminalAssistant ||
-          !isContextOverflow(terminalAssistant, handle.model.contextWindow) ||
-          overflowRecoveryAttempted ||
-          currentTurnStreamedContent ||
-          abortSignal?.aborted
+          terminalAssistant &&
+          isContextOverflow(terminalAssistant, handle.model.contextWindow) &&
+          !overflowRecoveryAttempted &&
+          !currentTurnStreamedContent &&
+          !abortSignal?.aborted
         ) {
-          break;
+          overflowRecoveryAttempted = true;
+          if (context.messages.at(-1)?.role === 'assistant') {
+            context = { ...context, messages: context.messages.slice(0, -1) };
+          }
+          const compacted = await compactRuntimeContext(context);
+          if (!compacted) {
+            break;
+          }
+          context = compacted;
+          continue;
         }
 
-        overflowRecoveryAttempted = true;
-        if (context.messages.at(-1)?.role === 'assistant') {
-          context = { ...context, messages: context.messages.slice(0, -1) };
-        }
-        const compacted = await compactRuntimeContext(context);
-        if (!compacted) {
+        if (!turnNeedsAutoValidation() || (await revisionAlreadyValidated())) {
           break;
         }
-        context = compacted;
+        autoValidationAttempts += 1;
+        await runAutoValidation();
+        if (autoValidationAttempts >= MAX_AUTO_VALIDATION_ATTEMPTS || !turnNeedsAutoValidation()) {
+          break;
+        }
+        // Validation failed and a repair round is still allowed: continue the same turn so the
+        // model can fix it against the result now in its context.
       }
 
       recordPiStage('loop_complete', modelId);
@@ -538,6 +653,7 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       }
     } finally {
       clearInactivityWatchdog();
+      clearTimeout(firstProgressTimer);
       steering.close();
       toolAccounting.settle();
       const budget: BuilderTurnBudgetReport = {
@@ -707,6 +823,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function eventContentIndex(event: AssistantMessageEvent): number | undefined {
   return 'contentIndex' in event ? event.contentIndex : undefined;
+}
+
+/**
+ * Visible text or a streamed tool call: the model is producing something the user or the workspace
+ * will act on. Every other event is transport framing, which is not evidence of progress.
+ */
+function isMeaningfulAssistantEvent(event: AssistantMessageEvent): boolean {
+  return (
+    event.type === 'text_start' ||
+    event.type === 'text_delta' ||
+    event.type === 'toolcall_start' ||
+    event.type === 'toolcall_delta' ||
+    event.type === 'toolcall_end'
+  );
 }
 
 /** The tool call a `toolcall_start` event opened, taken from the partial message it carries. */

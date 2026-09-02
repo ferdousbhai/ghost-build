@@ -29,7 +29,7 @@ export const OPERATION_LANE_TOOLS = {
   write: ['write', 'edit'],
   exec: ['exec'],
   install: ['exec'],
-  validate: ['exec'],
+  validate: ['exec', 'validate'],
 } as const satisfies Partial<Record<StatefulOperationKind, readonly ModelToolName[]>>;
 
 type ToolGovernedOperationKind = keyof typeof OPERATION_LANE_TOOLS;

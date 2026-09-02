@@ -12,7 +12,7 @@ const pathSchema = z.object({ path: z.string() });
 export const WORKSPACE_READ_ONLY_TOOL_NAMES = ['read', 'ls', 'grep'] as const;
 
 /** Workspace tools that mutate the project or run in its Container, under the exclusive operation lane. */
-export const WORKSPACE_MUTATING_TOOL_NAMES = ['write', 'edit', 'exec'] as const;
+export const WORKSPACE_MUTATING_TOOL_NAMES = ['write', 'edit', 'exec', 'validate'] as const;
 
 /** Tools executed against the durable project workspace. */
 export const WORKSPACE_TOOL_NAMES = [...WORKSPACE_READ_ONLY_TOOL_NAMES, ...WORKSPACE_MUTATING_TOOL_NAMES] as const;
@@ -58,6 +58,7 @@ export const MODEL_TOOL_INPUT_SCHEMAS = {
     command: z.string(),
     cwd: z.string().optional(),
   }),
+  validate: z.object({}),
   search_cloudflare_docs: z.object({ query: z.string() }),
   cloudflare_docs: z
     .object({

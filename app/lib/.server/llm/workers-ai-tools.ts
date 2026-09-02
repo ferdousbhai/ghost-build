@@ -20,6 +20,7 @@ import {
   type WorkspaceToolName,
 } from 'ghostbuild-agent/model-tool-inputs';
 import { parseNpmInstallCommand } from 'ghostbuild-agent/tools/npmInstall';
+import { rejectedWorkspaceCommand, rejectedWorkspaceFileMutation } from 'ghostbuild-agent/workspace-boundary';
 import { isGhostbuildToolResult, toolFailure } from 'ghostbuild-agent/tool-result';
 import { isWorkspaceToolOperationIndeterminateError, type BuilderWorkspaceApi } from '~/agents/builder-workspace-api';
 import type { BuilderValidationStage } from '~/lib/common/builder-validation-progress';
@@ -60,6 +61,7 @@ export function createWorkersAiTools(
     write: abortAwareWriteTool(workspace),
     edit: lineAnchoredEditTool(workspace),
     exec: streamingExecTool(workspace),
+    validate: canonicalValidationTool(),
     // Stateless and remote: it must not take the workspace operation lane.
     search_cloudflare_docs: cloudflareDocsSearchTool(),
   };
@@ -191,6 +193,10 @@ function abortAwareWriteTool(workspace: BuilderWorkspaceApi): Tool {
       if (isBuilderSkillPath(parsed.path)) {
         throw new Error(`Skill files are read-only: ${parsed.path}`);
       }
+      const mutationRejection = rejectedWorkspaceFileMutation(parsed.path, parsed.content);
+      if (mutationRejection) {
+        return { path: parsed.path, error: mutationRejection };
+      }
       const bytes = new TextEncoder().encode(parsed.content);
       if (bytes.byteLength > COMPUTER_AI_TOOL_OPTIONS.write.maxBytes) {
         return {
@@ -244,6 +250,25 @@ const EXEC_TOOL_DESCRIPTION =
   'for exec when a command has to actually run — installing, building, testing, or inspecting ' +
   'anything the durable workspace index does not hold.';
 
+/**
+ * The one canonical validation entry point. Deployment and preview recognize exactly this
+ * validation, so a dedicated tool keeps the model from approximating it with separate typecheck,
+ * lint, and build commands that leave the revision green but unrecognized.
+ *
+ * Only the model-facing schema and description live here: the composed Computer tool runs the
+ * validation itself, through the workspace coordinator.
+ */
+function canonicalValidationTool(): Tool {
+  return {
+    description:
+      'Run the complete canonical project validation (typecheck, lint, stack verification, and production build). ' +
+      'A passing run marks the exact current revision deployable; Ghostbuild then publishes the hosted preview and ' +
+      'deployment automatically. Call it once after finishing changes instead of running typecheck, lint, or build ' +
+      'individually.',
+    inputSchema: MODEL_TOOL_INPUT_SCHEMAS.validate,
+  };
+}
+
 function streamingExecTool(workspace: BuilderWorkspaceApi): Tool {
   return {
     description: EXEC_TOOL_DESCRIPTION,
@@ -292,6 +317,10 @@ function lineAnchoredEditTool(workspace: BuilderWorkspaceApi): Tool {
         );
       }
       const applied = applyLineEdits(before.content, parsed.edits);
+      const mutationRejection = rejectedWorkspaceFileMutation(parsed.path, applied.content);
+      if (mutationRejection) {
+        return { path: parsed.path, error: mutationRejection };
+      }
       options.abortSignal?.throwIfAborted();
       await workspace.computer.fs.writeFile(parsed.path, new TextEncoder().encode(applied.content));
       options.abortSignal?.throwIfAborted();
@@ -335,9 +364,20 @@ function computerWorkspaceTool(
       return coordinateStatefulTool(toolName, async () => {
         options.abortSignal?.throwIfAborted();
 
-        if (toolName === 'exec' && isExecInput(input) && isFullValidationCommand(input.command)) {
+        if (toolName === 'validate') {
           const validation = await validateWorkspace(workspace, context, options.toolCallId, options.abortSignal);
-          return attachValidation({ command: input.command }, validation);
+          return attachValidation({}, validation);
+        }
+
+        if (toolName === 'exec' && isExecInput(input)) {
+          if (isFullValidationCommand(input.command)) {
+            const validation = await validateWorkspace(workspace, context, options.toolCallId, options.abortSignal);
+            return attachValidation({ command: input.command }, validation);
+          }
+          const rejection = rejectedWorkspaceCommand(input.command);
+          if (rejection) {
+            return { command: input.command, error: rejection };
+          }
         }
 
         let result: unknown;
@@ -514,7 +554,7 @@ export function getValidatedBuildCompletion(
     return undefined;
   }
 
-  return 'Done. I built and validated the app. Deployment is starting automatically.';
+  return 'Done. I built and validated the app. The hosted preview is publishing now, and deployment follows automatically.';
 }
 
 function latestSuccessfulValidation(results: ReadonlyArray<ToolResultEvent>): unknown | undefined {

@@ -55,6 +55,7 @@ import {
   toolSuccess,
   type GhostbuildToolResult,
 } from '../../ghostbuild-agent/tool-result';
+import { rejectedWorkspaceCommand } from '../../ghostbuild-agent/workspace-boundary';
 import { applyAtomicWorkspaceChanges, type AtomicWorkspaceChange } from './atomic-workspace-changes';
 import { ComputerAdmissionControl } from './computer-admission';
 import { isComputerContainerCallback } from './container-fetch-routing';
@@ -1284,6 +1285,12 @@ export class ProjectWorkspace extends ComputerSandboxBase<RuntimeEnv> {
   private async commandRequest(value: unknown) {
     const input = record(value);
     const command = requireString(input.command, 'command', 64 * 1024);
+    // Second enforcement of the builder/platform boundary: the model tool layer already rejects
+    // these, so anything arriving here bypassed it and must still fail closed.
+    const boundaryRejection = rejectedWorkspaceCommand(command);
+    if (boundaryRejection) {
+      throw new SyntaxError(boundaryRejection);
+    }
     const cwd = input.cwd === undefined ? PROJECT_ROOT : requireProjectPath(input.cwd, true);
     const backend = requireBackend(input.backend);
     const operationKey =

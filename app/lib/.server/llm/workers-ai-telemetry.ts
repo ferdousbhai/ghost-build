@@ -55,6 +55,24 @@ export function recordFirstWorkersAiResponse(startedAt: number): void {
   });
 }
 
+/** First visible text or tool activity — the moment the watchdog treats the model as alive. */
+export function recordFirstMeaningfulWorkersAiProgress(startedAt: number): void {
+  console.info({
+    event: 'workers_ai_first_meaningful_progress',
+    timeToFirstMeaningfulProgressMs: Date.now() - startedAt,
+    platform: 'Cloudflare AI',
+  });
+}
+
+/** First workspace-mutating tool execution of the turn. Content-free: only the tool name and timing. */
+export function recordFirstBuilderMutation(startedAt: number, toolName: string): void {
+  console.info({
+    event: 'builder_first_mutation',
+    toolName,
+    timeToFirstMutationMs: Date.now() - startedAt,
+  });
+}
+
 function normalizeUsage(usage: number | undefined): number {
   return usage === undefined || !Number.isFinite(usage) || usage < 0 ? 0 : usage;
 }

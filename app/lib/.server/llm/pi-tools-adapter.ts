@@ -21,6 +21,7 @@ const toolLabels = {
   write: 'Write file',
   edit: 'Edit file',
   exec: 'Run command',
+  validate: 'Validate project',
   search_cloudflare_docs: 'Search Cloudflare docs',
   cloudflare_docs: 'Search Cloudflare MCP docs',
   cloudflare_search: 'Search Cloudflare account',
