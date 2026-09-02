@@ -707,6 +707,25 @@ describe('piAgentRunner', () => {
     expect(mocks.validateExecute).not.toHaveBeenCalled();
   });
 
+  it('surfaces a turn that exhausted its output budget on hidden reasoning', async () => {
+    const onSettled = vi.fn();
+    mocks.piRun.mockImplementation(async (_ctx: AgentContext, _cfg: StopAwareLoopConfig, emit: RunnerEventSink) => {
+      await emit({ type: 'turn_start' });
+      await emit({ type: 'turn_end', message: assistantMessage([], { stopReason: 'length' }), toolResults: [] });
+    });
+
+    const chunks = await collectChunks(
+      await createAgentStream(CLOUDFLARE_WORKERS_AI_MODEL, {}, undefined, { onSettled }),
+    );
+
+    expect(chunks).toContainEqual({
+      type: 'error',
+      errorText:
+        'The model used up its output budget on internal reasoning without producing a result. Retry, or pick a different model.',
+    });
+    expect(onSettled).toHaveBeenCalledWith(expect.objectContaining({ terminalReason: 'failed' }));
+  });
+
   it('ends a stalled turn on the inactivity budget once meaningful progress was seen', async () => {
     vi.useFakeTimers();
     const onSettled = vi.fn();

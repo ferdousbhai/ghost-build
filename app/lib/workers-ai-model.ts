@@ -19,6 +19,13 @@ export type WorkersAiModel = {
 export const CLOUDFLARE_WORKERS_AI_MODEL = '@cf/zai-org/glm-5.3-flash' satisfies WorkersAiModelId;
 
 export const CLOUDFLARE_PROJECT_TITLE_MODEL = '@cf/meta/llama-3.2-1b-instruct' satisfies WorkersAiModelId;
+
+/**
+ * Context-compaction summaries must come from a fast, large-context model that never spends its
+ * output budget on hidden reasoning: GLM 5.3 Flash produced 24s empty "summaries" (all
+ * reasoning_content, finish_reason length), and a failed summary aborts the whole builder turn.
+ */
+export const CLOUDFLARE_CONTEXT_SUMMARY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct' satisfies WorkersAiModelId;
 export type WorkersAiRuntimeModelId = WorkersAiModelId;
 
 export const MINIMUM_BUILDER_MODEL_CONTEXT_TOKENS = MAX_ESTIMATED_MODEL_INPUT_TOKENS + MODEL_MAX_OUTPUT_TOKENS;

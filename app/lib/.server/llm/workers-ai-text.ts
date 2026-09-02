@@ -2,7 +2,7 @@ import { getPiModel } from './pi-ai-models';
 import type { WorkersAiAccountCredentials } from './pi-ai-models';
 import { AgentTurnError, completeText } from './pi-ai-invoke';
 import { isWorkersAiFreeAllocationError, workersPaidRequiredMessage } from '~/lib/workers-paid';
-import { CLOUDFLARE_WORKERS_AI_MODEL, DEFAULT_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';
+import { CLOUDFLARE_CONTEXT_SUMMARY_MODEL } from '~/lib/workers-ai-model';
 
 const CONTEXT_SUMMARY_MAX_TOKENS = 4_000;
 const CONTEXT_SUMMARY_RETRY_DELAY_MS = 250;
@@ -54,7 +54,7 @@ export async function summarizeBuilderContext(
   signal?: AbortSignal,
 ): Promise<string> {
   try {
-    const handle = getPiModel(accountCredentials, CLOUDFLARE_WORKERS_AI_MODEL, { model: DEFAULT_WORKERS_AI_MODEL });
+    const handle = getPiModel(accountCredentials, CLOUDFLARE_CONTEXT_SUMMARY_MODEL);
     const summary = (
       await retryTransientSummary(
         () =>

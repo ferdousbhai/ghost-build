@@ -113,6 +113,19 @@ interface PiAgentOptions {
 
 type PiPreparationStage = 'tool_setup' | 'model_input' | 'prompt_metrics' | 'message_conversion';
 
+/**
+ * The model spent its entire output budget without streaming any visible text or tool call —
+ * reasoning-heavy models do this and would otherwise end the turn silently "completed".
+ */
+class HiddenReasoningExhaustionError extends Error {
+  constructor() {
+    super(
+      'The model used up its output budget on internal reasoning without producing a result. Retry, or pick a different model.',
+    );
+    this.name = 'HiddenReasoningExhaustionError';
+  }
+}
+
 class PiAgentPreparationError extends Error {
   readonly diagnosticCode: string;
 
@@ -615,6 +628,9 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       if (finalAssistant?.stopReason === 'aborted' && !abortSignal?.aborted) {
         throw new Error(finalAssistant.errorMessage || 'The model request was aborted.');
       }
+      if (finalAssistant?.stopReason === 'length' && !currentTurnStreamedContent) {
+        throw new HiddenReasoningExhaustionError();
+      }
       const finalContextTokens = estimatePiContextTokens(context.messages);
       if (finalContextTokens >= compactionPolicy.proactiveTokens) {
         compaction.requestDurableCompaction?.();
@@ -642,7 +658,10 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
         !abortSignal?.aborted
       ) {
         await writer.write({ type: 'error', errorText: error.message });
-      } else if (error instanceof ContextCompactionUnavailableError && !abortSignal?.aborted) {
+      } else if (
+        (error instanceof ContextCompactionUnavailableError || error instanceof HiddenReasoningExhaustionError) &&
+        !abortSignal?.aborted
+      ) {
         await writer.write({ type: 'error', errorText: error.message });
       } else if (isWorkersAiFreeAllocationError(error)) {
         await writer.write({ type: 'error', errorText: workersPaidRequiredMessage() });
