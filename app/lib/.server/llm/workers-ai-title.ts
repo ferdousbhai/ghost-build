@@ -18,6 +18,12 @@ export function generateConversationTitle(
   return generateModelTitle(prompt, 'conversation', accountCredentials);
 }
 
+/**
+ * Resolves to `null` only when there is nothing to name or the model named it badly. A model that
+ * answered with no text at all rejects with `EmptyTitleReplyError` instead, so the builder's title
+ * fiber reports it on its existing warn path rather than leaving the heuristic title in place with
+ * no trace of why.
+ */
 async function generateModelTitle(
   prompt: string,
   subject: TitleSubject,

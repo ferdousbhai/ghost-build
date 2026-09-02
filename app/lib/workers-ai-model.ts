@@ -22,7 +22,16 @@ export type WorkersAiModel = {
  */
 export const CLOUDFLARE_WORKERS_AI_MODEL = '@cf/openai/gpt-oss-120b' satisfies WorkersAiModelId;
 
-export const CLOUDFLARE_PROJECT_TITLE_MODEL = '@cf/meta/llama-3.2-1b-instruct' satisfies WorkersAiModelId;
+/**
+ * Titles must come from a model that speaks the OpenAI completions response shape, because every
+ * Ghostbuild request goes through the Pi `openai-completions` adapter, which reads only
+ * `choices[].delta`. Small Workers AI models such as `@cf/meta/llama-3.2-1b-instruct` answer in
+ * Cloudflare's native `{ response, usage }` shape instead: the adapter parses no text, the title
+ * comes back empty, and every chat silently keeps its heuristic prompt-derived name. Do not move
+ * this to a native-shape model. Llama 4 Scout answers in the OpenAI shape, in about half a second,
+ * and already backs `CLOUDFLARE_CONTEXT_SUMMARY_MODEL`.
+ */
+export const CLOUDFLARE_PROJECT_TITLE_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct' satisfies WorkersAiModelId;
 
 /**
  * Context-compaction summaries must come from a fast, large-context model that never spends its

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_GENERATED_TITLE_CHARACTERS, generateTitle, normalizeGeneratedTitle } from './title-generation';
+import {
+  EmptyTitleReplyError,
+  MAX_GENERATED_TITLE_CHARACTERS,
+  generateTitle,
+  normalizeGeneratedTitle,
+} from './title-generation';
 
 describe('title generation', () => {
   it('builds a subject-specific, bounded request', async () => {
@@ -14,9 +19,30 @@ describe('title generation', () => {
     });
 
     expect(generated?.title).toBe('Feature Launch');
-    expect(request).toMatchObject({ maxOutputTokens: 24, temperature: 0 });
+    expect(request).toMatchObject({ maxOutputTokens: 4_096, temperature: 0 });
     expect(request?.prompt).toContain('title for this conversation');
     expect(request?.prompt).toContain('untrusted data');
+    expect(request?.prompt).toContain('single line');
+  });
+
+  it('fails loudly when the model answers with no text', async () => {
+    await expect(
+      generateTitle({
+        execute: async () => ({ text: '   \n  ' }),
+        prompt: 'Plan the feature launch',
+        subject: 'project',
+      }),
+    ).rejects.toThrow(EmptyTitleReplyError);
+  });
+
+  it('still resolves to a null title when the model answers with a weak one', async () => {
+    const generated = await generateTitle({
+      execute: async () => ({ text: 'New chat' }),
+      prompt: 'Plan the feature launch',
+      subject: 'conversation',
+    });
+
+    expect(generated?.title).toBeNull();
   });
 
   it('normalizes framing and rejects weak output', () => {
