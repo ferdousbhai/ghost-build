@@ -8,7 +8,7 @@ This automated artifact supports diligence but does not replace legal review.
 
 Policy reviewed: 2026-08-09
 Production packages: 699
-Inventory SHA-256: d3b6a2e4638eaf5988c3db11114fc3d65ca0f27362b282cf1b501d0775cf176e
+Inventory SHA-256: f5e30668252b52f9f2aec27c4d3eee44f80fef5c5567fc5237a2e26c9a12dd1e
 
 PACKAGE INVENTORY
 =================
@@ -3274,7 +3274,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a)
 
-fast-uri@3.1.5
+fast-uri@3.1.6
 Declared license: BSD-3-Clause
 Author: Vincent Le Goff <vince.legoff@gmail.com> (https://github.com/zekth)
 Repository: {"type":"git","url":"git+https://github.com/fastify/fast-uri.git"}
@@ -5068,7 +5068,7 @@ Package-level license evidence: published
 Published license/notice files:
 - LICENSE (SHA-256 3fe8d55a98dbf260eace67c00cf9bc53edb46234e840098a0b93df3096b97fb6)
 
-qs@6.15.3
+qs@6.16.0
 Declared license: BSD-3-Clause
 Author: <not published>
 Repository: {"type":"git","url":"https://github.com/ljharb/qs.git"}
@@ -19122,7 +19122,7 @@ Used by:
 
 SHA-256 b010b0dfdfdb23d7396e03b82cd4621fc9bb8f95d6b0aea70b9c24e12074c786
 Used by:
-- fast-uri@3.1.5:LICENSE
+- fast-uri@3.1.6:LICENSE
 ----- BEGIN VERBATIM CONTENT -----
 Copyright (c) 2011-2021, Gary Court until https://github.com/garycourt/uri-js/commit/a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae
 Copyright (c) 2021-present The Fastify team <https://github.com/fastify/fastify#team>
@@ -22798,7 +22798,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 SHA-256 e7dc37bf662d7f786efcb46c545615e70c1daf458a38385521c63cf6607cdfe1
 Used by:
-- qs@6.15.3:LICENSE.md
+- qs@6.16.0:LICENSE.md
 ----- BEGIN VERBATIM CONTENT -----
 BSD 3-Clause License
 

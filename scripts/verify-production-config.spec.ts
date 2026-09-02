@@ -259,12 +259,13 @@ overrides:
   'brace-expansion@>=4.0.0 <5.0.9': '5.0.9'
   '@hono/node-server@<2.0.10': '2.0.10'
   'browserslist@<=4.28.6': '4.28.8'
-  'fast-uri@>=3.0.0 <3.1.5': '3.1.5'
+  'fast-uri@>=3.0.0 <3.1.6': '3.1.6'
   'hono@<4.12.34': '4.12.34'
   'ip-address@<=10.3.0': '10.3.1'
   'js-yaml@>=4.0.0 <4.3.1': '4.3.1'
   'nanoid@<3.3.18': '3.3.18'
   'postcss@<=8.5.22': '8.5.25'
+  'qs@<6.16.0': '6.16.0'
   'sharp@<0.35.0': '0.35.3'
   'undici@>=7.0.0 <7.29.0': '7.29.0'
 `;
@@ -284,12 +285,13 @@ overrides:
         'pnpm-workspace.yaml overrides must pin brace-expansion@>=4.0.0 <5.0.9 to 5.0.9.',
         'pnpm-workspace.yaml overrides must pin @hono/node-server@<2.0.10 to 2.0.10.',
         'pnpm-workspace.yaml overrides must pin browserslist@<=4.28.6 to 4.28.8.',
-        'pnpm-workspace.yaml overrides must pin fast-uri@>=3.0.0 <3.1.5 to 3.1.5.',
+        'pnpm-workspace.yaml overrides must pin fast-uri@>=3.0.0 <3.1.6 to 3.1.6.',
         'pnpm-workspace.yaml overrides must pin hono@<4.12.34 to 4.12.34.',
         'pnpm-workspace.yaml overrides must pin ip-address@<=10.3.0 to 10.3.1.',
         'pnpm-workspace.yaml overrides must pin js-yaml@>=4.0.0 <4.3.1 to 4.3.1.',
         'pnpm-workspace.yaml overrides must pin nanoid@<3.3.18 to 3.3.18.',
         'pnpm-workspace.yaml overrides must pin postcss@<=8.5.22 to 8.5.25.',
+        'pnpm-workspace.yaml overrides must pin qs@<6.16.0 to 6.16.0.',
         'pnpm-workspace.yaml overrides must pin sharp@<0.35.0 to 0.35.3.',
         'pnpm-workspace.yaml overrides must pin undici@>=7.0.0 <7.29.0 to 7.29.0.',
       ]),
