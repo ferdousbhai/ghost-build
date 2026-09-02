@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { UIMessage } from 'ai';
+import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 import {
   boundBuilderMessageForPersistence,
   loadBuilderTranscriptBinding,
@@ -90,7 +91,7 @@ describe('BuilderAgent request policy', () => {
     const user = boundBuilderMessageForPersistence({
       id: 'user',
       role: 'user',
-      parts: [{ type: 'text', text: 'x'.repeat(40_000) }],
+      parts: [{ type: 'text', text: 'x'.repeat(MAX_USER_MESSAGE_CHARACTERS + 8_000) }],
     });
     const assistant = {
       id: 'assistant',
@@ -101,12 +102,12 @@ describe('BuilderAgent request policy', () => {
           toolName: 'write',
           toolCallId: 'call',
           state: 'input-available' as const,
-          input: { content: 'x'.repeat(40_000) },
+          input: { content: 'x'.repeat(MAX_USER_MESSAGE_CHARACTERS + 8_000) },
         },
       ],
     } satisfies UIMessage;
 
-    expect(user.parts[0]).toMatchObject({ type: 'text', text: 'x'.repeat(32_000) });
+    expect(user.parts[0]).toMatchObject({ type: 'text', text: 'x'.repeat(MAX_USER_MESSAGE_CHARACTERS) });
     expect(boundBuilderMessageForPersistence(assistant)).toBe(assistant);
   });
 });

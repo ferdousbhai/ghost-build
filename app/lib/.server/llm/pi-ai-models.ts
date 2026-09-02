@@ -12,7 +12,7 @@ import type {
 } from '@earendil-works/pi-ai';
 import { stream as openaiCompletionsStream } from '@earendil-works/pi-ai/api/openai-completions';
 import { CLOUDFLARE_WORKERS_AI_MODELS } from '@earendil-works/pi-ai/providers/cloudflare-workers-ai.models';
-import { MAX_ESTIMATED_MODEL_INPUT_TOKENS, MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
+import { modelTokenEstimateSafetyTokens } from 'ghostbuild-agent/context-limits';
 import type { WorkersAiModel, WorkersAiRuntimeModelId } from '~/lib/workers-ai-model';
 import { recordPiStage } from './pi-telemetry';
 
@@ -75,20 +75,66 @@ function familyThinkingCompat(modelId: string): Pick<OpenAICompletionsCompat, 't
   return {};
 }
 
+const ESTIMATED_CHARACTERS_PER_TOKEN = 4;
+
 /**
- * Never request more output than the model itself supports, and give reasoning models the output
- * headroom the input budget leaves free: a global 24,576-token cap starved Kimi K2.7 (262k output
- * limit) into finishing 10 minutes of hidden reasoning with `length` and no content, while
- * over-asking gpt-oss (16,384 limit). A reasoning model missing from Pi's catalog gets four times
- * the plain fallback, because its hidden chain-of-thought spends the same budget as its answer —
- * glm-5.3-flash exhausted the plain fallback on reasoning alone mid-build.
+ * Everything this one request puts in front of the model: the system prompt, every message
+ * (thinking blocks included, because a reasoning model's replayed chain-of-thought is real input),
+ * and the tool schemas. Serialized rather than walked, so JSON framing is counted too — the
+ * estimate must lean high, since the budget built on it is what keeps the provider from rejecting
+ * the request outright.
  */
-function boundedOutputTokens(catalogMaxTokens: number | undefined, contextWindow: number, reasoning: boolean): number {
-  const fallback = reasoning ? MODEL_MAX_OUTPUT_TOKENS * 4 : MODEL_MAX_OUTPUT_TOKENS;
-  return Math.min(
-    catalogMaxTokens ?? fallback,
-    Math.max(MODEL_MAX_OUTPUT_TOKENS, contextWindow - MAX_ESTIMATED_MODEL_INPUT_TOKENS),
-  );
+function estimateRequestInputTokens(context: Context): number {
+  let characters = context.systemPrompt?.length ?? 0;
+  for (const tool of context.tools ?? []) {
+    characters += tool.name.length + tool.description.length + serializedLength(tool.parameters);
+  }
+  for (const message of context.messages) {
+    characters += serializedLength(message);
+  }
+  return Math.ceil(characters / ESTIMATED_CHARACTERS_PER_TOKEN);
+}
+
+function serializedLength<T>(value: T): number {
+  try {
+    return JSON.stringify(value)?.length ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * The floor under every request, and the reason `max_completion_tokens` is never omitted: Pi drops
+ * the field for a falsy value, and Workers AI's own default is 256 tokens — measured, gpt-oss-120b
+ * with the field absent finished at `completion_tokens: 256` with `finish_reason: length`. That is
+ * exactly the silent truncation this budget exists to remove, so a request whose input already
+ * fills the window still asks for a real number. The provider then either answers or rejects with
+ * its explicit "exceeds the model's maximum context length" error, which is visible and
+ * actionable; a 256-token stub is neither.
+ */
+const MINIMUM_OUTPUT_TOKENS = 4_096;
+
+/**
+ * How much of the window this one request leaves free. The ceiling cannot be a constant, because
+ * Workers AI rejects any request where input tokens + `max_completion_tokens` exceed the model's
+ * context window. So the honest answer to "how much may this model write?" is "whatever the window
+ * has left once this request's input is counted" — recomputed per request, never a fixed number.
+ * A static cap (Ghostbuild previously asked for 24,576 tokens regardless) only ever truncated a
+ * model that could physically have produced far more.
+ */
+function availableOutputTokens(model: Model<Api>, context: Context): number {
+  const reserved = estimateRequestInputTokens(context) + modelTokenEstimateSafetyTokens(model.contextWindow);
+  return Math.max(0, model.contextWindow - reserved);
+}
+
+/**
+ * A caller that asked for a specific output size (the context summarizer, prompt refinement) keeps
+ * it, clamped to what physically fits. A caller that asked for nothing gets everything left. Both
+ * are then lifted to `MINIMUM_OUTPUT_TOKENS`, which is never omitted and never zero.
+ */
+function requestOutputTokens(model: Model<Api>, context: Context, requested: number | undefined): number {
+  const available = availableOutputTokens(model, context);
+  return Math.max(MINIMUM_OUTPUT_TOKENS, requested === undefined ? available : Math.min(requested, available));
 }
 
 type HandleArgs = {
@@ -113,6 +159,7 @@ function makeHandle(args: HandleArgs): ModelHandle {
       const headers: ProviderHeaders = { ...args.headers, ...streamOptions.headers };
       const merged: SimpleStreamOptions = {
         ...streamOptions,
+        maxTokens: requestOutputTokens(model, context, streamOptions.maxTokens),
         sessionId: streamOptions.sessionId ?? args.sessionAffinity,
         onResponse: async (response, responseModel) => {
           handle.lastResponse = { status: response.status };
@@ -150,11 +197,10 @@ export function getPiModel(
     input: settings?.model?.vision ? ['text', 'image'] : (catalog?.input ?? ['text']),
     cost: catalog?.cost ?? ZERO_COST,
     contextWindow: settings?.model?.contextTokens ?? catalog?.contextWindow ?? 128_000,
-    maxTokens: boundedOutputTokens(
-      catalog?.maxTokens,
-      settings?.model?.contextTokens ?? catalog?.contextWindow ?? 128_000,
-      settings?.model?.reasoning ?? catalog?.reasoning ?? false,
-    ),
+    // Metadata only: the physical ceiling, never an artificial cap. Pi's catalog numbers are not
+    // real provider limits (it lists 16,384 for gpt-oss-120b, which accepted 131,072 in
+    // production), and the request's actual ceiling is computed per request in `makeHandle`.
+    maxTokens: settings?.model?.contextTokens ?? catalog?.contextWindow ?? 128_000,
     compat: workersAiCompat(modelId, catalog),
   };
   return makeHandle({

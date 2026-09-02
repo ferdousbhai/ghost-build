@@ -83,9 +83,9 @@ const DURABLE_MUTATION_TOOL_NAMES: ReadonlySet<string> = new Set(['write', 'edit
 
 /**
  * How many times one turn may run the canonical validation on the model's behalf. The first run
- * covers a model that finished without validating; the second covers its repair of that failure.
+ * covers a model that finished without validating; the rest cover its repairs of those failures.
  */
-const MAX_AUTO_VALIDATION_ATTEMPTS = 2;
+const MAX_AUTO_VALIDATION_ATTEMPTS = 3;
 
 interface PiAgentOptions {
   abortSignal?: AbortSignal;
@@ -114,19 +114,18 @@ interface PiAgentOptions {
 type PiPreparationStage = 'tool_setup' | 'model_input' | 'prompt_metrics' | 'message_conversion';
 
 /**
- * The bounded reasoning request for thinking models. Passing a level serializes to
- * `reasoning_effort` plus the family's thinking parameter, which is what keeps a reasoning model
- * from spending its whole output budget on hidden chain-of-thought. Verified against production
- * Workers AI: GLM 5.3 Flash with no directive (or `thinking: disabled`, which it ignores) reasons
- * until `length` and returns EMPTY content, while `thinking: enabled` + `reasoning_effort`
- * answers promptly with real content. GLM gets `low`: at `medium` it still burned the whole
- * output budget on reasoning during a real build.
+ * Every reasoning model thinks at full effort — Ghostbuild builds software, which is exactly the
+ * work reasoning is for, and no model family is throttled below the others. Passing a level at all
+ * still matters: it serializes to `reasoning_effort` plus the family's thinking parameter, and
+ * verified against production Workers AI, GLM 5.3 Flash with no directive (or `thinking: disabled`,
+ * which it ignores) reasons until `length` and returns EMPTY content, while `thinking: enabled` +
+ * `reasoning_effort` answers with real content. The earlier per-family downgrade to `low` was a
+ * workaround for the 24,576-token output cap that no longer exists: a request now gets the whole
+ * remainder of the context window, so reasoning and the answer no longer compete for a few
+ * thousand tokens.
  */
-function builderThinkingLevel(model: { reasoning: boolean; id: string }): 'low' | 'medium' | undefined {
-  if (!model.reasoning) {
-    return undefined;
-  }
-  return model.id.startsWith('@cf/zai-org/') ? 'low' : 'medium';
+function builderThinkingLevel(model: { reasoning: boolean }): 'high' | undefined {
+  return model.reasoning ? 'high' : undefined;
 }
 
 /**
@@ -338,6 +337,11 @@ export async function piAgentRunner(options: PiAgentOptions): Promise<ReadableSt
       if (isMeaningfulAssistantEvent(assistantEvent)) {
         observeMeaningfulProgress();
         currentTurnStreamedContent = true;
+      } else if (isReasoningProgressEvent(assistantEvent)) {
+        // A model that is reasoning is working, so it must not trip the first-progress deadline.
+        // It has still streamed no content, so hidden-reasoning exhaustion and overflow recovery
+        // keep treating this turn as having produced nothing.
+        observeMeaningfulProgress();
       }
       const textPartId = `pi-${event.message.timestamp}-${eventContentIndex(assistantEvent) ?? 0}`;
       if (assistantEvent.type === 'text_start') {
@@ -863,7 +867,8 @@ function eventContentIndex(event: AssistantMessageEvent): number | undefined {
 
 /**
  * Visible text or a streamed tool call: the model is producing something the user or the workspace
- * will act on. Every other event is transport framing, which is not evidence of progress.
+ * will act on. This is the stricter of the two tests, because it also decides whether the turn
+ * streamed content at all — the signal behind hidden-reasoning exhaustion and overflow recovery.
  */
 function isMeaningfulAssistantEvent(event: AssistantMessageEvent): boolean {
   return (
@@ -873,6 +878,15 @@ function isMeaningfulAssistantEvent(event: AssistantMessageEvent): boolean {
     event.type === 'toolcall_delta' ||
     event.type === 'toolcall_end'
   );
+}
+
+/**
+ * The model is reasoning. Nothing is visible yet and nothing may ever be, so this is not content —
+ * but it is unambiguously work, and killing a high-effort model for thinking is the one thing the
+ * first-progress deadline must never do. Every other event is transport framing.
+ */
+function isReasoningProgressEvent(event: AssistantMessageEvent): boolean {
+  return event.type === 'thinking_start' || event.type === 'thinking_delta';
 }
 
 /** The tool call a `toolcall_start` event opened, taken from the partial message it carries. */

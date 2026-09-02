@@ -111,13 +111,15 @@ export const COMPUTER_EXEC_APPLICATION_POLICY =
   'Run finite commands only; do not start development, preview, watch, or other long-running servers. Ghostbuild manages previews after validation. Dependency changes support pnpm add <packages> and pnpm install --lockfile-only.';
 
 export const COMPUTER_TOOL_LIMITS = {
-  readMaxBytes: 256 * 1024,
-  readMaxLines: 2_000,
+  readMaxBytes: 1024 * 1024,
+  readMaxLines: 10_000,
+  // Not a product choice: 2 MiB is the Durable Object SQLite hard limit for a single stored value,
+  // and a mutation that exceeds it cannot be persisted at all. Raising this would fail at write.
   mutationMaxBytes: 2 * 1024 * 1024,
   mutationReceiptMaxBytes: 64 * 1024,
   mutationDiffSummaryMaxBytes: 16 * 1024,
   mutationReceiptMaxPaths: 100,
-  execMaxBytesPerStream: 64 * 1024,
+  execMaxBytesPerStream: 256 * 1024,
 } as const;
 
 export const COMPUTER_SHELL_TOOL_OPTIONS = {

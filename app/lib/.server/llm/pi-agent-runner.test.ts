@@ -767,6 +767,30 @@ describe('piAgentRunner', () => {
     }
   });
 
+  it('does not trip the first-progress deadline while the model is still reasoning', async () => {
+    vi.useFakeTimers();
+    const onSettled = vi.fn();
+    // A reasoning model streams thinking long before its first visible token: that is work, not a stall.
+    mocks.piRun.mockImplementation(stallAfterAssistantEvent('thinking_delta'));
+
+    try {
+      const collected = collectChunks(
+        await createAgentStream(CLOUDFLARE_WORKERS_AI_MODEL, {}, undefined, { onSettled }),
+      );
+      await vi.advanceTimersByTimeAsync(BUILDER_TURN_FIRST_PROGRESS_MS);
+      expect(onSettled).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(BUILDER_TURN_INACTIVITY_MS);
+      const chunks = await collected;
+
+      expect(chunks).not.toContainEqual({ type: 'error', errorText: budgetErrorText('no_first_progress') });
+      expect(chunks).toContainEqual({ type: 'error', errorText: budgetErrorText('inactivity') });
+      expect(onSettled).toHaveBeenCalledWith(expect.objectContaining({ terminalReason: 'inactivity' }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not trip the first-progress deadline while tool calls stream normally', async () => {
     vi.useFakeTimers();
     const onSettled = vi.fn();

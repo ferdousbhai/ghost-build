@@ -3,7 +3,7 @@ import type { ModelMessage } from './message-conversion';
 import { estimateStringTokens } from 'agents/experimental/memory/utils';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
-import { MAX_ESTIMATED_MODEL_INPUT_TOKENS, MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
+import { modelTokenEstimateSafetyTokens } from 'ghostbuild-agent/context-limits';
 import type { ChatTurnContext } from 'ghostbuild-agent/turn-context';
 import {
   assembleCompactedContext,
@@ -28,12 +28,29 @@ type PreparedModelInput = {
   compactionAction: ConversationCompactionAction;
 };
 
-const COMPACTION_SAFETY_TOKENS = 4_096;
+/**
+ * Output headroom the input budget holds back so a turn that has filled its context can still
+ * answer at length. Proportional to the window rather than a fixed number of tokens: the provider
+ * rejects `input + requested output > contextWindow`, so a flat reserve would hand a million-token
+ * model's entire advantage to input and leave its answers no longer than a 128k model's.
+ */
+const COMPACTION_OUTPUT_RESERVE_FRACTION = 0.125;
+const COMPACTION_OUTPUT_RESERVE_FLOOR_TOKENS = 16_384;
 
+/**
+ * The conversation's input budget, derived from the model's real context window — there is no
+ * fixed ceiling on top of it. A 1M-token model is allowed to use its million tokens; the only
+ * deductions are the output reserve above and the estimator safety margin, both explicit.
+ */
 export function modelCompactionPolicy(contextWindow: number) {
-  const hardLimitTokens = Math.min(
-    MAX_ESTIMATED_MODEL_INPUT_TOKENS,
-    Math.max(1, contextWindow - MODEL_MAX_OUTPUT_TOKENS - COMPACTION_SAFETY_TOKENS),
+  const outputReserveTokens = Math.max(
+    COMPACTION_OUTPUT_RESERVE_FLOOR_TOKENS,
+    Math.ceil(contextWindow * COMPACTION_OUTPUT_RESERVE_FRACTION),
+  );
+  const hardLimitTokens = Math.max(
+    // Compaction always keeps the recent tail, so a limit at or below it could never be satisfied.
+    CONTEXT_COMPACTION_KEEP_RECENT_TOKENS + 1,
+    contextWindow - outputReserveTokens - modelTokenEstimateSafetyTokens(contextWindow),
   );
   return {
     proactiveTokens: Math.max(1, hardLimitTokens - CONTEXT_COMPACTION_KEEP_RECENT_TOKENS),

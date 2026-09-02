@@ -14,10 +14,13 @@ import {
   recommendedOptionFirst,
 } from '~/lib/prompt-refinement';
 import { CLOUDFLARE_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';
+import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 
 const logger = createScopedLogger('EnhancePrompt');
 const ENHANCE_PROMPT_MAX_OUTPUT_TOKENS = 2_048;
-const MAX_ENHANCE_PROMPT_REQUEST_BYTES = 64 * 1024;
+// Derived from the supported prompt size so the transport never rejects a prompt the product
+// accepts: worst-case four UTF-8 bytes per character, plus room for the JSON envelope and answers.
+const MAX_ENHANCE_PROMPT_REQUEST_BYTES = 4 * MAX_USER_MESSAGE_CHARACTERS + 64 * 1024;
 const PROMPT_REFINEMENT_TOOL_NAME = 'submit_refined_app_plan';
 const promptRefinementTool: Tool = {
   name: PROMPT_REFINEMENT_TOOL_NAME,

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLOUDFLARE_WORKERS_AI_MODEL } from '~/lib/workers-ai-model';
+import { MAX_USER_MESSAGE_CHARACTERS } from 'ghostbuild-agent/context-limits';
 
 const mocks = vi.hoisted(() => ({
   completeToolCall: vi.fn(),
@@ -46,7 +47,8 @@ describe('userRuntimeEnhancePromptAction billing', () => {
       request: new Request('https://ghostbuild.dev/api/enhance-prompt', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: 'x'.repeat(70 * 1024) }),
+        // Twice the worst-case byte budget for a supported prompt, so the transport must refuse it.
+        body: JSON.stringify({ prompt: 'x'.repeat(8 * MAX_USER_MESSAGE_CHARACTERS) }),
       }),
       env: testEnv(),
     });

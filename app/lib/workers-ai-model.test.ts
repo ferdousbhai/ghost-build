@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_ESTIMATED_MODEL_INPUT_TOKENS, MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
 import {
   CLOUDFLARE_WORKERS_AI_MODEL,
   DEFAULT_WORKERS_AI_MODEL,
   getWorkersAiModel,
   isWorkersAiModelId,
+  MINIMUM_BUILDER_MODEL_CONTEXT_TOKENS,
   validateWorkersAiModelCatalogPayload,
   WORKERS_AI_MODELS,
   workersAiModelCatalogPayloadSchema,
@@ -24,9 +24,7 @@ describe('Workers AI model catalog', () => {
   it('pins the canary-proven GPT OSS 120B as the safe startup default', () => {
     expect(CLOUDFLARE_WORKERS_AI_MODEL).toBe('@cf/openai/gpt-oss-120b');
     expect(WORKERS_AI_MODELS).toEqual([DEFAULT_WORKERS_AI_MODEL]);
-    expect(DEFAULT_WORKERS_AI_MODEL.contextTokens).toBeGreaterThanOrEqual(
-      MAX_ESTIMATED_MODEL_INPUT_TOKENS + MODEL_MAX_OUTPUT_TOKENS,
-    );
+    expect(DEFAULT_WORKERS_AI_MODEL.contextTokens).toBeGreaterThanOrEqual(MINIMUM_BUILDER_MODEL_CONTEXT_TOKENS);
     expect(DEFAULT_WORKERS_AI_MODEL.contextTokens).toBe(128_000);
     expect(getWorkersAiModel(CLOUDFLARE_WORKERS_AI_MODEL)).toBe(DEFAULT_WORKERS_AI_MODEL);
   });

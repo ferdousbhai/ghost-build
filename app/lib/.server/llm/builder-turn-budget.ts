@@ -3,11 +3,14 @@ import type { ModelToolName } from 'ghostbuild-agent/model-tool-inputs';
 export const BUILDER_MUTATION_TOOL_TIMEOUT_MS = 35 * 60_000;
 
 /**
- * Hard deadline for the whole turn. It has to clear two back-to-back mutation
- * tool deadlines plus the model time around them, and stay far below the
- * multi-hour ceiling the loop previously ran with.
+ * Hard deadline for the whole turn, and a guard rather than a budget: it
+ * surfaces a visible, resumable error instead of silently shortening the work.
+ * It has to clear several back-to-back mutation tool deadlines plus the model
+ * time around them, so a high-effort model building a real application is never
+ * cut off mid-build. Only a genuinely wedged turn should ever reach it — the
+ * inactivity watchdog catches a dead stream long before this.
  */
-export const BUILDER_TURN_WALL_CLOCK_MS = 90 * 60_000;
+export const BUILDER_TURN_WALL_CLOCK_MS = 4 * 60 * 60_000;
 
 /**
  * No model or tool event at all for this long means the turn is wedged. Tools

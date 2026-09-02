@@ -1,8 +1,7 @@
 import { describe, expect, test, vi } from 'vitest';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import type { GhostbuildMessage } from 'ghostbuild-agent/ai-compat';
-import { MAX_ESTIMATED_MODEL_INPUT_TOKENS } from 'ghostbuild-agent/context-limits';
-import { ModelInputBudgetExceededError, prepareModelInput } from './model-input';
+import { ModelInputBudgetExceededError, modelCompactionPolicy, prepareModelInput } from './model-input';
 import type { ContextCompactionUnavailableError } from './model-input';
 
 const tools = [
@@ -14,6 +13,9 @@ const tools = [
     parameters: { type: 'object' },
   },
 ] as unknown as AgentTool[];
+
+const TEST_CONTEXT_WINDOW = 128_000;
+const hardLimitTokens = modelCompactionPolicy(TEST_CONTEXT_WINDOW).hardLimitTokens;
 
 function message(id: string, text: string): GhostbuildMessage {
   return { id, role: 'user', parts: [{ type: 'text', text }] };
@@ -27,7 +29,7 @@ function prepare(messages: GhostbuildMessage[], options: Partial<Parameters<type
   return prepareModelInput({
     messages,
     summarize: async () => '## Current State\nCompacted.',
-    contextWindow: 128_000,
+    contextWindow: TEST_CONTEXT_WINDOW,
     systemPrompt: '',
     tools,
     ...options,
@@ -41,7 +43,7 @@ describe('prepareModelInput', () => {
     expect(result.nextCompaction?.summary).toContain('Compacted');
     expect(result.contextCompacted).toBe(true);
     expect(result.promptMessages.length).toBeLessThan(48);
-    expect(result.estimatedTokens).toBeLessThanOrEqual(MAX_ESTIMATED_MODEL_INPUT_TOKENS);
+    expect(result.estimatedTokens).toBeLessThanOrEqual(hardLimitTokens);
   });
 
   test('compacts a valid transcript larger than four MiB before enforcing the provider limit', async () => {
@@ -52,7 +54,7 @@ describe('prepareModelInput', () => {
 
     expect(result.contextCompacted).toBe(true);
     expect(result.nextCompaction).not.toBeNull();
-    expect(result.estimatedTokens).toBeLessThanOrEqual(MAX_ESTIMATED_MODEL_INPUT_TOKENS);
+    expect(result.estimatedTokens).toBeLessThanOrEqual(hardLimitTokens);
   });
 
   test('accepts proactive compaction without waiting for summary generation', async () => {

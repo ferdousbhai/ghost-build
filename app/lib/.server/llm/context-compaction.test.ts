@@ -154,7 +154,7 @@ describe('Cloudflare-native context compaction', () => {
           toolCallId: 'call-1',
           toolName: 'read',
           input: { path: '/src/app.ts' },
-          output: 'z'.repeat(4_000),
+          output: 'z'.repeat(12_000),
         },
       ],
     };
@@ -171,7 +171,7 @@ describe('Cloudflare-native context compaction', () => {
     const prompt = summarize.mock.calls.map(([value]) => value).join('\n');
     expect(prompt).toContain('[Tool call: read]');
     expect(prompt).toContain('/src/app.ts');
-    expect(prompt).not.toContain('z'.repeat(4_000));
+    expect(prompt).not.toContain('z'.repeat(12_000));
     expect(result?.summary).toContain('<read-files>\n/src/app.ts\n</read-files>');
   });
 });

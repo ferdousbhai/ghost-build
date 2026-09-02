@@ -52,7 +52,9 @@ describe('Workers AI live model catalog', () => {
         }),
         model('@cf/example/small', {
           properties: [
-            { property_id: 'context_window', value: '32768' },
+            // Below MINIMUM_BUILDER_MODEL_CONTEXT_TOKENS: too small to hold the builder's own
+            // system prompt and tool schemas alongside a working transcript.
+            { property_id: 'context_window', value: '16384' },
             { property_id: 'function_calling', value: 'true' },
           ],
         }),

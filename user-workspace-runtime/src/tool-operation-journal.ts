@@ -1,7 +1,13 @@
 const MAX_PERSISTED_TOOL_OPERATIONS = 500;
 const MAX_PERSISTED_TOOL_CANCELLATIONS = 500;
 const MAX_INDETERMINATE_TOOL_OPERATIONS = 50;
-const MAX_TOOL_RESULT_BYTES = 512 * 1024;
+/**
+ * Platform ceiling, not a product choice: a journal row lives in Durable Object SQLite, whose
+ * per-value limit is 2 MiB, and a larger result simply cannot be persisted. It has to stay above
+ * the exec tool's own per-channel caps so a legitimately noisy command is truncated by those
+ * rather than rejected here.
+ */
+const MAX_TOOL_RESULT_BYTES = 2 * 1024 * 1024;
 const MAX_TOOL_ERROR_LENGTH = 4_000;
 
 import { acknowledgeMutationReceipt, isMutationReceipt, type MutationReceipt } from './mutation-receipt';

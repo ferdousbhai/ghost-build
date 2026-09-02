@@ -1,4 +1,3 @@
-import { MAX_ESTIMATED_MODEL_INPUT_TOKENS, MODEL_MAX_OUTPUT_TOKENS } from 'ghostbuild-agent/context-limits';
 import { z } from 'zod';
 
 const WORKERS_AI_MODEL_ID_PATTERN = /^@cf\/[a-z0-9][a-z0-9-]{0,63}\/[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
@@ -33,7 +32,13 @@ export const CLOUDFLARE_PROJECT_TITLE_MODEL = '@cf/meta/llama-3.2-1b-instruct' s
 export const CLOUDFLARE_CONTEXT_SUMMARY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct' satisfies WorkersAiModelId;
 export type WorkersAiRuntimeModelId = WorkersAiModelId;
 
-export const MINIMUM_BUILDER_MODEL_CONTEXT_TOKENS = MAX_ESTIMATED_MODEL_INPUT_TOKENS + MODEL_MAX_OUTPUT_TOKENS;
+/**
+ * The smallest context window Ghostbuild will drive a builder model with. An explicit floor, not a
+ * derived one: the input budget and the per-request output ceiling both scale with whatever window
+ * a model actually has, so this only has to exclude windows too small to hold the system prompt,
+ * the tool schemas, and a working transcript at once.
+ */
+export const MINIMUM_BUILDER_MODEL_CONTEXT_TOKENS = 32_768;
 
 export const DEFAULT_WORKERS_AI_MODEL: WorkersAiModel = {
   id: CLOUDFLARE_WORKERS_AI_MODEL,

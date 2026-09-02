@@ -6,7 +6,13 @@ export const CONTEXT_COMPACTION_KEEP_RECENT_TOKENS = 20_000;
 const MIN_RECENT_MESSAGES = 4;
 const CHARS_PER_TOKEN = 4;
 const SUMMARY_BATCH_MAX_CHARS = 300_000;
-const TOOL_RESULT_MAX_CHARS = 2_000;
+/**
+ * How much of one tool result reaches the summarizer. A tool result is often the only record of
+ * what the build actually found — a failing test's output, a file's contents — so it is cut only
+ * far enough to keep a single result from dominating a batch. The summarizer model's 131k window
+ * is roughly 500,000 characters, so batching, not this, is the real bound.
+ */
+const TOOL_RESULT_MAX_CHARS = 8_000;
 
 const COMPACTION_SUMMARY_PREFIX =
   'The conversation history before this point was compacted into the following summary:\n\n<summary>\n';

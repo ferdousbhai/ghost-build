@@ -25,17 +25,16 @@ export type DiscoveryFilesystem = {
  * Model-visible output ceiling shared by both discovery tools.
  *
  * A listing and a search result are generated streams, not a file the model named, so they are
- * bounded like Computer's reviewed 64 KiB exec output rather than like its 256 KiB read: the
- * model can always narrow the prefix or the pattern and ask again, and no byte is reachable only
- * through these tools.
+ * bounded like exec output rather than like a read: the model can always narrow the prefix or the
+ * pattern and ask again, it is told when the result was cut, and no byte is reachable only through
+ * these tools.
  */
 export const DISCOVERY_MAX_OUTPUT_BYTES = COMPUTER_TOOL_LIMITS.execMaxBytesPerStream;
 
 /**
- * Entries per listing. Half of the reviewed 2,000-line read ceiling, because a listing is
- * navigation rather than content: a directory needing more than a thousand paths to describe
- * itself needs a narrower prefix, and spending the context window on paths starves the reads
- * that have to follow.
+ * Entries per listing. A listing is navigation rather than content: a directory needing more than
+ * a thousand paths to describe itself needs a narrower prefix, and spending the context window on
+ * paths starves the reads that have to follow. The model is told when the listing was cut.
  */
 export const DISCOVERY_MAX_LIST_ENTRIES = 1_000;
 
@@ -46,10 +45,12 @@ export const DISCOVERY_MAX_LIST_ENTRIES = 1_000;
 export const DISCOVERY_MAX_MATCHES = 100;
 
 /**
- * Characters kept from one matching line. Generated and minified sources hold single lines long
- * enough to consume the whole output budget on one hit.
+ * Characters kept from one matching line — enough to read a real statement in context, not just
+ * identify it. It exists only because generated and minified sources hold single lines long enough
+ * to consume the whole output budget on one hit; the shared byte ceiling, not this, is what bounds
+ * a search overall.
  */
-export const DISCOVERY_MAX_MATCH_TEXT_CHARS = 240;
+export const DISCOVERY_MAX_MATCH_TEXT_CHARS = 960;
 
 /**
  * Per-file and whole-call ceilings on bytes decoded during one search.

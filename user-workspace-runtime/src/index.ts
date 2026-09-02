@@ -16,6 +16,7 @@ import {
   WORKSPACE_RESTART_INDETERMINATE_MESSAGE,
 } from './execution-reattach';
 import { BuilderAgent } from '../../app/agents/builder-agent';
+import { COMPUTER_TOOL_LIMITS } from '../../ghostbuild-agent/cloudflare-computer';
 import {
   BUILDER_WORKSPACE_MAX_FILE_BYTES,
   BUILDER_WORKSPACE_MAX_FILES,
@@ -2913,7 +2914,8 @@ async function writeWorkspaceFile(
 }
 
 const EXEC_STREAM_MAX_LIVE_BYTES = 1024 * 1024;
-const EXEC_STREAM_RESULT_BYTES_PER_CHANNEL = 64 * 1024;
+/** The model-facing half of the exec result, so it tracks the shared tool limit exactly. */
+const EXEC_STREAM_RESULT_BYTES_PER_CHANNEL = COMPUTER_TOOL_LIMITS.execMaxBytesPerStream;
 const MAX_CONFIRMED_COMMAND_CANCELLATIONS = 500;
 const COMMAND_CANCELLATION_SETTLEMENT_TIMEOUT_MS = 35_000;
 const COMMAND_CANCELLATION_RPC_TIMEOUT_MS = 5_000;
